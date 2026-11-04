@@ -364,6 +364,218 @@ test('trickle-bound controls: a marker labels 40 min at most; dependency markers
   }
 })
 
+// ---- 1c. a run the last starts held (p28-7) ------------------------------------------------------------------
+
+test('last-start-bound: no-Slot-open time the last starts held scores as hold-last-start and binds (p28-7)', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', trickleHeld({ reason: 'hold-last-start' }))
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+  assert.deepEqual(out.runningTime.excludedHours, { 'hold-last-start': 1 })
+  assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [['hold-last-start', Z(at('02:00')), Z(at('03:00'))]])
+  assert.match(out.runningTime.excluded[0].why, /last starts .*Morning.*not Lachy's/)
+  assert.equal(out.runningTime.hours, 4)
+  assert.equal(out.slots.idleHours['hold-last-start'], 12, '3 free Slots x 4 running h')
+  assert.equal(out.binding.constraint, 'last-start-bound')
+  assert.equal(out.binding.why, 'the last starts kept Slots free 100% of the time (running time plus 1 h with no Slot open; Slot time they held: 16 h)')
+  assert.ok(has(out.flags, /^last-start-bound: no rollout key moves this \(the last starts hold starts that would run past the Morning; the night record, `nights`, reads their fallback\)$/))
+  assert.ok(has(out.flags, /^throughput: read under the last starts \(last-start-bound\): .* not at the ceiling 4$/))
+  assert.ok(!has(out.flags, /^trickle-bound/))
+  assert.deepEqual(out.proposals, [], 'no slot-bound raise')
+  assert.deepEqual(out.withheld, [])
+  assert.equal(out.thresholds.lastStartBound, 0.5)
+})
+
+test('last-start-bound controls: a marker labels 40 min at most; the Trickle outranks it; Heat binds neither', (t) => {
+  const settings = (home, until = '05:00') => ['--until', at(until), '--settings', writeSettings(home, { parallel_ceiling: 4 })]
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'hold-last-start', drop: true }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [
+      ['hold-last-start', Z(at('02:00')), Z(at('02:40'))], ['idle', Z(at('02:40')), Z(at('03:00'))]], 'a silent lead past the span reads idle')
+  }
+  {
+    // the Trickle held a Slot free 00:00-02:00 and the last starts 02:00-04:00: both rules hold at 50%, the Trickle first
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...life('a', { from: at('00:00'), to: at('04:00'), c: 4 }),
+      ...ticks(0, 120, 'hold-trickle', 3, 4), ...ticks(120, 240, 'hold-last-start', 3, 4),
+    ]))
+    const out = scored(home, settings(home, '04:00'))
+    assert.deepEqual(out.slots.idleHours, { 'hold-last-start': 6, 'hold-trickle': 6 })
+    assert.equal(out.binding.constraint, 'trickle-bound')
+    assert.ok(!has(out.flags, /^last-start-bound/))
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'hold-heat' }))
+    const out = scored(home, settings(home))
+    assert.ok(!['trickle-bound', 'last-start-bound'].includes(out.binding.constraint), out.binding.constraint)
+    assert.ok(!has(out.flags, /^last-start-bound/))
+  }
+  {
+    // a run the last starts alone held with no Slot ever open: the trickle-bound path, read as last-start-bound (the
+    // header's Running time)
+    const home = tmpHome(t)
+    emitAll(home, 'demo', ticks(0, 60, 'hold-last-start', 4, 4))
+    const out = scored(home, settings(home, '01:00'))
+    assert.equal(out.runningTime.hours, 0)
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-last-start': 1 })
+    assert.equal(out.throughput, null)
+    assert.equal(out.binding.constraint, 'last-start-bound')
+    assert.ok(!has(out.flags, /^trickle-bound/))
+  }
+})
+
+// ---- 1d. the nights (p28-7) -------------------------------------------------------------------------------------
+
+// Two records, demo (scored) and other, Mon 2026-10-05 and Tue 2026-10-06, the Morning 09:00. Night 1: markers in
+// both (demo's at 05:00, other's at 07:00); c1 (3 runs, 110 min) and c2 (1 run) held; f1 (1 run, taken 06:30) a
+// fallback overrun, u1 (3 runs, 25 min, taken 08:00) an underestimate, x1 (no history, taken 08:00) unchecked, and in
+// other d1 (3 runs, 25 min) taken at 05:00, before other's marker: unchecked. Night 2: demo's marker only. Wed's marker
+// (written Tue 10:00) is outside the window; other's Sunday night (no demo marker) is not demo's.
+const M1 = at('09:00')
+const M2 = D(6, '09:00')
+const ran = (ts, task, S, history, usual, r) => [ts, 'ran-past-morning', task, { morning: M1, slotTakenAt: Z(S), scope: 'single-file', history, ...(usual ? { usualMinutes: usual } : {}) }, r]
+function twoNights(extra = []) {
+  return byTs([
+    [at('05:00'), 'away-night', null, { morning: M1 }],
+    [at('07:00'), 'away-night', null, { morning: M1 }, 'other'],
+    [at('07:30'), 'last-start-held', 'c1', { morning: M1, scope: 'cross-cutting', history: 3, usualMinutes: 110 }],
+    [at('07:30'), 'last-start-held', 'c2', { morning: M1, scope: 'read-only', history: 1 }],
+    ran(at('09:20'), 'f1', at('06:30'), 1),
+    ran(at('09:21'), 'u1', at('08:00'), 3, 25),
+    ran(at('09:22'), 'x1', at('08:00'), 0),
+    ran(at('09:23'), 'd1', at('05:00'), 3, 25, 'other'),
+    [D(6, '05:00'), 'away-night', null, { morning: M2 }],
+    [D(6, '10:00'), 'away-night', null, { morning: D(7, '09:00') }],
+    [D(4, '07:00'), 'away-night', null, { morning: D(4, '09:00') }, 'other'],
+    [D(4, '07:30'), 'last-start-held', 'o1', { morning: D(4, '09:00'), scope: 'cross-cutting', history: 0 }, 'other'],
+    ...extra,
+  ])
+}
+
+test('the nights: per night held and ran past, fallback overruns told from underestimates (p28-7)', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', twoNights())
+  const out = scored(home, ['--since', D(4, '00:00'), '--until', D(6, '12:00')])
+  const n = out.nights
+  assert.deepEqual(n.nights.map((x) => x.morning), [Z(M1), Z(M2)], 'Wed\'s Morning is outside the window, Sunday\'s not demo\'s')
+  const [a, b] = n.nights
+  assert.equal(typeof a.host, 'string')
+  assert.deepEqual([a.marked, a.rollouts, a.held, a.heldBy, a.ranPast, a.ranPastBy],
+    [true, ['demo', 'other'], 2, { fallback: 1, history: 1 }, 4, { fallback: 1, underestimate: 1, unchecked: 2 }])
+  assert.deepEqual(a.heldTasks, [
+    { rollout: 'demo', task: 'c1', scope: 'cross-cutting', history: 3, usualMinutes: 110 },
+    { rollout: 'demo', task: 'c2', scope: 'read-only', history: 1, usualMinutes: null }])
+  assert.deepEqual(a.ranPastTasks.map((e) => [e.rollout, e.task, e.class, e.ranAtLeastMinutes, e.slotTakenAt]), [
+    ['demo', 'f1', 'fallback', 150, Z(at('06:30'))], ['demo', 'u1', 'underestimate', 60, Z(at('08:00'))],
+    ['demo', 'x1', 'unchecked', 60, Z(at('08:00'))], ['other', 'd1', 'unchecked', 240, Z(at('05:00'))]])
+  assert.deepEqual([b.marked, b.rollouts, b.held, b.ranPast], [true, ['demo'], 0, 0], 'night 2: a zero-hold night')
+  assert.deepEqual(n.totals, { nights: 2, zeroHold: 1, held: 2, ranPast: 4, fallback: 1, underestimate: 1, unchecked: 2 })
+  assert.deepEqual(n.suggest, [], 'one fallback overrun, one night above the Trickle: nothing suggested')
+  assert.ok(has(n.flags, /^nights: no slot-taken cap by day in the window: the Trickle is read as the built-in 2$/), JSON.stringify(n.flags))
+  assert.ok(!has(out.flags, /^nights/), 'the nights\' flags stay in their block')
+  assert.ok(!['last-start-bound'].includes(out.binding.constraint))
+})
+
+test('the nights: a second fallback overrun suggests a longer fallback, two nights above the Trickle a higher one', (t) => {
+  const home = tmpHome(t)
+  const cap = (hm, task, away, n) => [at(hm), 'slot-taken', task, { settings: S(4), cap: { away, n, file: 'fresh' } }]
+  emitAll(home, 'demo', twoNights([
+    ran(at('09:24'), 'f2', at('06:45'), 2),
+    ran(D(6, '09:30'), 'g1', D(6, '08:00'), 3, 30), ran(D(6, '09:31'), 'g2', D(6, '08:00'), 3, 30),
+    ran(D(6, '09:32'), 'g3', D(6, '08:00'), 3, 30),
+    ran(at('09:40'), 'f1', at('06:30'), 1, undefined, 'other'), // f1 carried to other: counted once
+    cap('01:00', 's9', false, 3), cap('02:00', 's8', false, 2), cap('03:00', 's7', true, 4),
+  ].map((e) => (e[2] && e[2][0] === 'g' ? [e[0], e[1], e[2], { ...e[3], morning: M2 }, e[4]] : e))))
+  const out = scored(home, ['--since', D(4, '00:00'), '--until', D(6, '12:00')])
+  const n = out.nights
+  assert.deepEqual(n.totals, { nights: 2, zeroHold: 0, held: 2, ranPast: 8, fallback: 2, underestimate: 4, unchecked: 2 })
+  assert.ok(has(n.flags, /^nights: \[\[f1\]\]'s ran-past-morning line for the Morning 2026-10-05T09:00:00\.000Z repeats in \[\[other\]\]: counted once$/), JSON.stringify(n.flags))
+  assert.ok(!has(n.flags, /built-in/), 'the day\'s Trickle is read from slot-taken\'s cap')
+  assert.deepEqual(n.suggest.map((s) => s.rule), ['last-start-fallback-raise', 'trickle-raise'])
+  const [f, tr] = n.suggest
+  assert.deepEqual([f.key, f.fromHours, f.toHours], ['LAST_START_FALLBACK', 2, 3])
+  assert.match(f.where, /reconcile-rollout\.py \(a code change: file a Thread Skill task\)$/)
+  assert.match(f.evidence, /^2 fallback overrun\(s\) .*the longest ran at least 150 min \(\[\[f1\]\], \[\[f2\]\]\)$/)
+  assert.deepEqual([tr.key, tr.from, tr.to], ['trickle', 2, 5], 'the latest by-day cap is 2; night 1 ran 5 past the Morning')
+  assert.match(tr.trade, /Lachy decides \(Chorus ADR 0104 d2\)$/)
+  assert.deepEqual(out.proposals.filter((p) => /trickle|LAST_START/.test(p.key)), [], 'never a tune.py proposal')
+})
+
+test('the nights: a Capacity cap (by: capacity, p36-7) is never read as the Trickle; only one in the window counts', (t) => {
+  const cap = (ts, task, c) => [ts, 'slot-taken', task, { settings: S(4), cap: { file: 'fresh', ...c } }]
+  const above = [ran(at('09:24'), 'f2', at('06:45'), 2), ran(D(6, '09:30'), 'g1', D(6, '08:00'), 3, 30),
+    ran(D(6, '09:31'), 'g2', D(6, '08:00'), 3, 30), ran(D(6, '09:32'), 'g3', D(6, '08:00'), 3, 30)]
+  const nightsOf = (home, extra) => {
+    emitAll(home, 'demo', twoNights([...above, ...extra].map((e) => (e[2] && e[2][0] === 'g' ? [e[0], e[1], e[2], { ...e[3], morning: M2 }, e[4]] : e))))
+    return scored(home, ['--since', D(4, '00:00'), '--until', D(6, '12:00')]).nights
+  }
+  {
+    // the Trickle's caps as before, then a later in-window Capacity cap of 5: N is still the latest Trickle cap, 2
+    const n = nightsOf(tmpHome(t), [cap(at('01:00'), 's9', { away: false, n: 3 }), cap(at('02:00'), 's8', { away: false, n: 2 }),
+      cap(at('04:00'), 's6', { away: false, n: 5, by: 'capacity' })])
+    const tr = n.suggest.find((s) => s.rule === 'trickle-raise')
+    assert.deepEqual([tr.from, tr.to], [2, 5], 'the Capacity\'s 5 is never the day\'s Trickle')
+    assert.ok(!has(n.flags, /Capacity/), JSON.stringify(n.flags))
+  }
+  {
+    // only Capacity caps by day in the window, and a Trickle cap stamped after --until (the window rule): no
+    // trickle-raise, and the flag says why
+    const n = nightsOf(tmpHome(t), [cap(at('01:00'), 's9', { away: false, n: 4, by: 'capacity' }),
+      cap(D(6, '13:00'), 's5', { away: false, n: 1 })])
+    assert.deepEqual(n.suggest.map((s) => s.rule), ['last-start-fallback-raise'], 'no Trickle to raise')
+    assert.ok(has(n.flags, /^nights: the day's cap was the Capacity \(by: capacity\) in the window: no Trickle to raise$/), JSON.stringify(n.flags))
+    assert.ok(!has(n.flags, /built-in/), 'the Trickle cap after --until adds nothing, and the built-in is not read')
+  }
+  for (const [label, ts] of [['after --until', D(6, '13:00')], ['before --since', D(3, '23:00')]]) {
+    // no cap by day in the window, and one Capacity cap stamped outside it (the window rule, CLAUDE.md rule 2): it adds
+    // nothing, so the built-in Trickle is read and the trickle-raise still fires
+    const n = nightsOf(tmpHome(t), [cap(ts, 's4', { away: false, n: 6, by: 'capacity' })])
+    assert.ok(has(n.flags, /^nights: no slot-taken cap by day in the window: the Trickle is read as the built-in 2$/),
+      `${label}: ${JSON.stringify(n.flags)}`)
+    const tr = n.suggest.find((s) => s.rule === 'trickle-raise')
+    assert.ok(tr, `${label}: the trickle-raise still fires`)
+    assert.deepEqual([tr.from, tr.to], [2, 5], `${label}: from the built-in 2`)
+    assert.ok(!has(n.flags, /the day's cap was the Capacity/), `${label}: the out-of-window Capacity cap is never read`)
+  }
+})
+
+test('night_record: unmarked, unreadable, history without usualMinutes and other-host lines; a pure function', (t) => {
+  const home = tmpHome(t)
+  const line = (ts, kind, task, f, host = 'h1') => [ms(ts), 0, { ts: Z(ts), kind, task, host, ...f }]
+  const records = {
+    a: [
+      line(at('07:00'), 'away-night', null, { morning: M1 }),
+      line(at('09:10'), 'ran-past-morning', 'h3', { morning: M1, slotTakenAt: Z(at('08:00')), scope: 'x', history: 3 }),
+      line(at('09:11'), 'ran-past-morning', 'bad', { morning: M1, slotTakenAt: 'never', scope: 'x', history: 0 }),
+      line(at('09:12'), 'last-start-held', 'nm', { morning: M2, scope: 'x', history: 0 }),
+      line(at('07:00'), 'away-night', null, { morning: M1 }, 'h2'),
+    ],
+  }
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("s", sys.argv[1])',
+    's = importlib.util.module_from_spec(spec); spec.loader.exec_module(s)',
+    'recs = {k: [tuple(x) for x in v] for k, v in json.loads(sys.argv[2]).items()}',
+    'a = s.night_record(recs, int(sys.argv[3]), int(sys.argv[4]))',
+    'b = s.night_record(recs, int(sys.argv[3]), int(sys.argv[4]))',
+    'assert a == b',
+    'print(json.dumps(a))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE, JSON.stringify(records), String(ms(D(4, '00:00'))), String(ms(D(6, '12:00')))],
+    { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  const n = JSON.parse(r.stdout)
+  assert.deepEqual(n.nights.map((x) => [x.morning, x.host, x.marked, x.held, x.ranPast]), [
+    [Z(M1), 'h1', true, 0, 1], [Z(M1), 'h2', true, 0, 0], [Z(M2), 'h1', false, 1, 0]], 'a night per (host, morning)')
+  assert.equal(n.nights[0].ranPastTasks[0].class, 'unchecked')
+  assert.ok(has(n.flags, /^nights: \[\[h3\]\]'s ran-past-morning line in \[\[a\]\] reads 3 past runs and no usualMinutes: unchecked$/), JSON.stringify(n.flags))
+  assert.ok(has(n.flags, /^nights: \[\[bad\]\]'s ran-past-morning line in \[\[a\]\] has no readable slotTakenAt: skipped$/))
+  assert.ok(has(n.flags, /^nights: the Morning 2026-10-06T09:00:00\.000Z has held or ran-past lines and no away-night marker$/))
+  assert.deepEqual(n.totals, { nights: 2, zeroHold: 1, held: 1, ranPast: 1, fallback: 0, underestimate: 0, unchecked: 1 })
+  const empty = spawnSync('python3', ['-B', '-c', body, SCORE, '{}', '0', '1'], { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.deepEqual(JSON.parse(empty.stdout), { nights: [], totals: { nights: 0, zeroHold: 0, held: 0, ranPast: 0, fallback: 0, underestimate: 0, unchecked: 0 }, flags: [], suggest: [] })
+})
+
 // ---- 2. a lane-bound run ------------------------------------------------------------------------------------
 
 // Ceiling 4. Six tasks, each holding the lane 1.5 h back to back from 01:00 to 10:00; the ready -> lane waits climb
@@ -1643,6 +1855,43 @@ test('(k) review churn: the breach is decided from the integer sums, not the rou
   // 4-place rounding cannot hide a breach: 40001/100001 rounds to 0.4, yet it is over 40%
   const over = breach(40, 100001, 60000, 40001)
   assert.deepEqual([over.value, over.breached], [0.4, true])
+})
+
+// A reading holds only its window's rows (CLAUDE.md's review rule): each source's sums read the rounds in [--since,
+// --until] alone; rounds per landed task is the one declared wider read, each landed task's rounds over its whole record.
+test('(l) review churn holds only rounds in the window: an engine round before --since and /fresh-review rounds reviewed before --since or after --until add nothing to the sums; rounds per landed task reads the task\'s whole record', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+    rv(at('00:10'), 't1', 1, 'changes', 4, 4, 0), // before --since: out of the sums
+    rv(at('00:30'), 't1', 2, 'changes', 2, 0, 2)]))
+  const c = (findings, original, regression) => ({ findings, original, regression })
+  emitAll(home, 'x', [
+    rr(at('00:05'), { repo: 'o/r', head: 'h1', digest: 'g1', doc: 'docs/reviews/before.md', reviewedAt: Z(at('00:01')), ...c(8, 8, 0) }), // reviewed and recorded before --since
+    rr(at('00:40'), { repo: 'o/r', head: 'h2', digest: 'g2', doc: 'docs/reviews/in.md', ...c(3, 2, 1) }),
+    rr(at('07:00'), { repo: 'o/r', head: 'h3', digest: 'g3', doc: 'docs/reviews/after.md', ...c(9, 0, 9) }), // after --until
+  ])
+  const out = scored(home, ['--since', at('00:20'), '--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.deepEqual(out.reviewChurn.engine, { rounds: 1, findings: 2, original: 0, regression: 2, unclassified: 0, landedTasks: 1, roundsPerLandedTask: 2 },
+    'the 00:10 round is out of the sums, in rounds per landed task')
+  assert.deepEqual(out.reviewChurn.freshReview, { rounds: 1, findings: 3, original: 2, regression: 1, unclassified: 0, unattributed: 0 })
+  assert.deepEqual([out.reviewChurn.rounds, out.reviewChurn.findings, out.reviewChurn.regression, out.reviewChurn.value], [2, 5, 3, 0.6])
+  assert.ok(!has(out.flags, /first recorded in this window/), 'the early round was recorded before the window too: no late round')
+})
+
+// Quality's landed set is the window's: an earlier landing and its fixer are an earlier window's, never this one's.
+test('Quality holds only tasks landed in the window: a task merged before --since is neither landed nor an Escape', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...life('a', { from: at('00:00'), to: at('01:00'), c: 2, lane: [at('01:00'), at('01:10')] }),
+    ...life('b', { from: at('03:00'), to: at('04:00'), c: 2, lane: [at('04:00'), at('04:10')] })]))
+  const tasks = path.join(home, 'vault', 'Work', 'Tasks')
+  fs.mkdirSync(tasks, { recursive: true })
+  const note = (slug, fm) => fs.writeFileSync(path.join(tasks, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', `# ${slug}`, ''].join('\n'))
+  note('a', ['status: done']); note('b', ['status: done'])
+  note('fix-a', ['status: open', 'fixes: "[[a]]"']); note('fix-b', ['status: open', 'fixes: "[[b]]"'])
+  const out = scored(home, ['--since', at('02:00'), '--until', at('06:00'), '--repo-slug', 'o/r', '--tasks-dir', tasks])
+  assert.deepEqual(out.merges.tasks, ['b'])
+  assert.deepEqual([out.escapes.landed, out.escapes.count], [1, 1])
+  assert.deepEqual(out.escapes.tasks.map((x) => [x.task, x.evidence.map((e) => e.note)]), [['b', ['fix-b']]])
 })
 
 // ---- the weekly reading's reads (p21-7, ADR 0037 d5) ----------------------------------------------------------------

@@ -58,7 +58,7 @@ keyed by the record's own values where one fits:
     first match, by score.py's lead-absent and never-finished gaps, then by the idle-slots markers on score.py's rule (the
     first marker in a stretch labels it from its start; a change of reason splits it): hold-trickle and hold-away-cap
     (and a hold-merge, hold-git-env or hold-race marker no hold pairs) are stalls; awaiting-hand-back is classed by the
-    wait's mover; hold-heat is load; the rest are `other`; no marker at all is stalls/unexplained: a live rollout with
+    wait's mover; hold-heat is load; hold-quota (p36-7, the quota hold) is quota-bound; the rest are `other`; no marker at all is stalls/unexplained: a live rollout with
     nothing running and no recorded cause, the audit's first lead, and where a lead's own unrecorded question shows.
 - The wait's mover (run_record's idle-slots rule): the first slot-taken after the wait's start whose start is revise,
   hand-back or resume. A revise ends it as other/revise (the known seeded-revise mislabel). Otherwise its task's latest
@@ -71,7 +71,8 @@ keyed by the record's own values where one fits:
   rollout's latest unmoved set-aside's reasonClass decides, flagged `still waiting`: gate is gate, needs-human question,
   quota quota-bound/cool-down, transient or call-failed stalls/cool-down, anything else hand-back. A wait over set-asides
   of different reasonClasses is classed by the first one moved, flagged.
-- quota-bound: usage-limit stop spans (cause usage-limit) and the quota cool-downs above (cool-down); quota-stall lines are
+- quota-bound: usage-limit stop spans (cause usage-limit), the quota cool-downs above (cool-down) and not-running
+  stretches labelled hold-quota (p36-7: the quota hold, a lead whose Login is inside its line); quota-stall lines are
   counted as events. Here the call-level stalls go: ADR 0051's three missed stops out of nine.
 - load: not-running stretches labelled hold-heat; each suite's verify-slot `waited` (slot-wait: the wait before its
   suite-started, or before a noslot or heat suite-ended that never started); and the run of a suite that ended heat or
@@ -631,6 +632,8 @@ def measure(slug, lines, since, until, is_live):
             m.add("stalls", reason, [(a, b)])
         elif reason == "hold-heat":
             m.add("load", "hold-heat", [(a, b)])
+        elif reason == "hold-quota":
+            m.add("quota-bound", "hold-quota", [(a, b)])
         elif reason == "awaiting-hand-back":
             cls, cause, flag = classify_wait(base, a, b, hi)
             if flag:

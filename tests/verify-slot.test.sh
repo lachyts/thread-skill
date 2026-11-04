@@ -73,6 +73,10 @@ dead() { ! kill -0 "$1" 2>/dev/null; }
 exists() { [ -e "$1" ]; }
 nonempty() { [ -s "$1" ]; }
 grepq() { grep -q -- "$1" "$2"; }
+# waits <file> — the waiting lines in a run's stderr. The start line (verify-slot.py contract item 9) names this
+# script's path and the log's, either of which may hold the word (a worktree named for a waiting lead), so it
+# never counts.
+waits() { grep -v ' started; wait for its verdict with: ' "$1" | grep -c waiting; }
 
 # pool <name>: a fresh arm dir D and its own pool.
 pool() { echo "== $1"; D="$tmp/$1"; mkdir -p "$D"; export THREAD_VERIFY_SLOTS_DIR="$D/slots"; }
@@ -108,7 +112,7 @@ pool v1
 for i in 1 2; do
   out=$(python3 "$VS" run --slots 2 -- sh -c 'echo out; exit 3' 2> "$D/err$i"); rc=$?
   ok "$rc|$out" "3|out" "V1 #$i: the command's rc and stdout pass through"
-  ok "$(grep -c 'waiting' "$D/err$i")" 0 "V1 #$i: a free slot → no waiting line"
+  ok "$(waits "$D/err$i")" 0 "V1 #$i: a free slot → no waiting line"
 done
 
 # ======== V2: the cap ======================================================================================
@@ -145,7 +149,7 @@ pool v4
 python3 "$VS" run --slots 1 -- sh -c "sleep 3191.$u > /dev/null 2>&1 & echo \$! > '$D/sleeper'" > /dev/null 2>&1
 ok "$?" 0 "V4: a command that leaves a background sleeper exits 0"
 python3 "$VS" run --slots 1 -- true 2> "$D/err"
-ok "$(grep -c waiting "$D/err")" 0 "V4: … and frees its slot (the next run has no waiting line)"
+ok "$(waits "$D/err")" 0 "V4: … and frees its slot (the next run has no waiting line)"
 sp=$(cat "$D/sleeper")
 ok "$(alive "$sp" && echo alive || echo gone)" alive "V4: … its leftover is not killed (as before the slot)"
 kill -KILL "$sp" 2>/dev/null
@@ -158,7 +162,7 @@ ok "$rc" 143 "V5: TERM to a holding run → 143"
 within 60 gone "$(cat "$D/t.pid")" && s=gone || s="still alive after 60 s"
 ok "$s" gone "V5: … its command is gone"
 python3 "$VS" run --slots 1 -- true 2> "$D/err"
-ok "$(grep -c waiting "$D/err")" 0 "V5: … and its slot is free"
+ok "$(waits "$D/err")" 0 "V5: … and its slot is free"
 hold t2 1
 python3 "$VS" run --slots 1 --priority -- touch "$D/t3.ran" > /dev/null 2> "$D/t3.err" &
 p=$!; pids+=($p)
@@ -254,7 +258,7 @@ while not os.path.exists(sys.argv[2]): time.sleep(0.1)' "$SL/.waiter-99997-z.tmp
 lk=$!; pids+=($lk)
 within 300 exists "$D/lk.go.ready" || echo "FAIL - V10: the lock helper did not start"
 python3 "$VS" run --slots 1 -- true 2> "$D/err"
-ok "$(grep -c waiting "$D/err")" 0 "V10: a stale .wait (unlocked) holds no agent off: no waiting line"
+ok "$(waits "$D/err")" 0 "V10: a stale .wait (unlocked) holds no agent off: no waiting line"
 ok "$([ -e "$SL/waiter-99999-x.wait" ] && echo left || echo reaped)|$([ -e "$SL/.waiter-99998-y.tmp" ] && echo left || echo reaped)" "reaped|reaped" "V10: … the unlocked .wait and .tmp are reaped"
 ok "$([ -e "$SL/.waiter-99997-z.tmp" ] && echo kept || echo reaped)" kept "V10: … a locked .tmp (its waiter still registering) is kept"
 touch "$D/lk.go"; wait "$lk"
@@ -274,7 +278,7 @@ kill -KILL "$lp"; wait "$lp" 2>/dev/null
 ok "$(nwaiters)|$([ -e "$D/lead.rc" ] && echo rc || echo none)" "1|none" "V11: SIGKILLed while waiting: its .wait is left (stale), no rc"
 touch "$D/k11.go"; wait "$(w k11)"
 python3 "$VS" run --slots 1 -- true 2> "$D/err"
-ok "$(grep -c waiting "$D/err")|$(nwaiters)" "0|0" "V11: the next run reaps it and waits for nothing"
+ok "$(waits "$D/err")|$(nwaiters)" "0|0" "V11: the next run reaps it and waits for nothing"
 
 # ======== V12: a kill of the wrapper's whole process group =================================================
 pool v12
@@ -373,7 +377,7 @@ python3 "$VS" run --slots 1 --slot-wait=1 --priority -- touch "$D/b.ran" > /dev/
 ok "$rc|$([ -e "$D/b.ran" ] && echo ran || echo never)|$(nwaiters)" "76|never|0" "V17: --slot-wait=1 --priority → 76, never ran, no waiter file left"
 has "$(cat "$D/b.err")" "verify-slot: no verdict: no verify slot within 1s; exit 76" "V17: … with its no-verdict line"
 python3 "$VS" run --slots 1 --slot-wait 0 -- touch "$D/c.ran" > /dev/null 2> "$D/c.err"; rc=$?
-ok "$rc|$([ -e "$D/c.ran" ] && echo ran || echo never)|$(grep -c 'waiting' "$D/c.err")" "76|never|0" "V17: --slot-wait 0 behind a held slot → 76 at once, never ran, no waiting line"
+ok "$rc|$([ -e "$D/c.ran" ] && echo ran || echo never)|$(waits "$D/c.err")" "76|never|0" "V17: --slot-wait 0 behind a held slot → 76 at once, never ran, no waiting line"
 has "$(cat "$D/c.err")" "verify-slot: no verdict: no verify slot within 0s; exit 76" "V17: … with its no-verdict line"
 touch "$D/h.go"; wait "$(w h)"
 python3 "$VS" run --slots 1 --slot-wait 0 -- sh -c 'exit 3' 2> "$D/d.err"; rc=$?
@@ -591,6 +595,31 @@ within 30 gone "$(cat "$D/vr9.slow")" && s=gone || s="slowpy alive after 30 s"
 ok "$s" gone "VR9: … the resolver child is gone"
 ok "$(slot_state 0 1)" free "VR9: … the slot is free"
 rm -f "$VH/.config/thread/rollouts.toml"
+
+# ======== V-capacity: a fresh capacity.json lowers the pool to min(N, C), never raises it (p36-7, contract 10) =========
+pool vcap
+CH="$D/home"; mkdir -p "$CH/.config/thread"
+capfile() { printf '%s' "$1" > "$CH/.config/thread/capacity.json"; }
+capfile "{\"capacity\": 1, \"written_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+HOME="$CH" hold a 2
+HOME="$CH" python3 "$VS" run --slots 2 -- sh -c "echo \$\$ > '$D/b.pid'" > "$D/b.out" 2> "$D/b.err" &
+bp=$!; pids+=($bp)
+within 120 grepq 'waiting for one of 2 verify slots' "$D/b.err" && s=waits || s="no waiting line"
+ok "$s" waits "V-capacity: a Capacity of 1 with --slots 2 and one holder: the second run waits"
+has "$(cat "$D/b.err")" "the Capacity allows 1" "V-capacity: … its waiting line names the Capacity"
+ok "$([ -s "$D/b.pid" ] && echo ran || echo not-yet)" not-yet "V-capacity: … and has not run while the first holds"
+touch "$D/a.go"; wait "$(w a)"; wait "$bp"; rc=$?
+ok "$rc|$([ -s "$D/b.pid" ] && echo ran)" "0|ran" "V-capacity: … it runs once the first exits"
+capfile "{\"capacity\": 5, \"written_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+HOME="$CH" hold c 2
+HOME="$CH" python3 "$VS" run --slots 2 -- true 2> "$D/d.err"; rc=$?
+ok "$rc|$(waits "$D/d.err")" "0|0" "V-capacity: a Capacity of 5 still runs 2 at once (it never raises the pool)"
+touch "$D/c.go"; wait "$(w c)"
+capfile 'not json'
+HOME="$CH" hold e 2
+HOME="$CH" python3 "$VS" run --slots 2 -- true 2> "$D/f.err"; rc=$?
+ok "$rc|$(waits "$D/f.err")" "0|0" "V-capacity: an unreadable reading runs 2 (any read failure reads N)"
+touch "$D/e.go"; wait "$(w e)"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"

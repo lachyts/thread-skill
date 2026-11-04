@@ -23,6 +23,8 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
 - **Writes**, only through scripts:
   - `estate-dispatch.py record`, each answer into its task note;
   - `estate-dispatch.py log`, the grades into the Grade log (never on a dry run);
+  - `estate-dispatch.py rank-stamp`, the pass's estate rank on each rollout note it dispatched and on every live one,
+    re-stamped in its current order (never on a dry run; ADR 0067 d9);
   - `estate-rank.py snooze`, `unpark` and `kill`, the Unpark offer's answers;
   - `reconcile-rollout.py approve-gates --tasks`, for a gate Lachy signs in this pass, run from that task's rollout's
     engine root (§ 4's Sign-off);
@@ -232,6 +234,12 @@ can ask (no drain, and no pause but the sign-off pause), even where status gives
 the sign-off pause reads action 8): `/thread:orient` has no sign-off step, and repair § 1 runs `approve-gates`. A
 ticked label opens its own option alone; two projects of one name are each linked by the note's path and numbered.
 
+**The estate rank (ADR 0067 d9).** Before step 1's `sessions`: unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank "$S/rank.json" --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> > "$S/rank-stamp.json"`.
+It stamps this pass's rank on each note the forks wrote and re-stamps every live rollout in its current order (a live
+run keeps its place ahead of this pass's dispatches), so the Legs that start below meet at claim by rank (CONTEXT.md
+**Rank wait**). Exit 1 (`failed`: a note it could not write): run the same line once more. A second exit 1 goes to
+§ 8 as a caveat, and the pass goes on: the notes it never reached keep their old stamps, and the order stands.
+
 1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> [--open <label>]... [--typed <his words>] > "$S/sessions.json"`,
    one `--status` per status agent's action number; an unread one is left out. It returns `items[]`, already in
    start order (execute and Leg items, then repair, then orient last), and `left[]`: every live rollout that gets no
@@ -291,8 +299,9 @@ ticked label opens its own option alone; two projects of one name are each linke
       appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
    6. With `create_thread` but no `list_sessions`, only the items for notes this pass wrote are started; every other
       item becomes a paste-ready prompt.
-5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, `<alias> from <folder>`),
-   then the prompt, labelled `paste-ready prompt (no session started)`.
+5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, its `launch`: `<alias>
+   from <folder>` in place; for a chain in Chain copies, the copy's paste line, never the alias itself, whose `cd`
+   opens the primary), then the prompt, labelled `paste-ready prompt (no session started)`.
 6. A `manual: true` item (a `cx-*` row 1, `skills/execute/legs.md` § Hand over, or no Project root) is always a
    labelled manual hand-over.
 
@@ -317,6 +326,8 @@ One message of statements, no question:
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
 - each schedule's note, or its stop line;
+- the estate rank: `rank-stamp`'s `stamped` count, and after a second exit 1 its `failed` note and `notReached[]` as a
+  caveat ("they keep their old stamps; the order stands");
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;
 - the fit disagreements: the task, the grader's shape, schedule's outcome;
 - the sessions raised (title → task id: the Stage starts it unless its card says why it waits), relayed (title → the
@@ -357,7 +368,7 @@ each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), the De
 plan: each batch's schedule args with the execute or Leg 1 each would start, then each item with its cwd and prompt,
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
-It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `decided-for-you --write`, `approve-gates`,
+It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `approve-gates`,
 `estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, `list_sessions`, `read_session`, `relay_session` or
 `create_thread`.
 

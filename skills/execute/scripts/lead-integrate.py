@@ -2219,7 +2219,8 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
      12. a non-empty `prUrlError` (p17-1) on a way back that launches on the note's PR (resumeAt revise, or at
          Integration): H7 `fix the note's pr: or defer`, handBack false (the fix changes the note first);
      13. prepare's `the PR branch is gone`: H8 `restore, recut or defer`;
-     14. a `--gated` decline; 15. a merge-task exit-1 text outside MERGE_TASK_FIXABLE: H9 or H10 (_raise_field gives none);
+     14. a `--gated` decline; 15. a merge-task exit-1 reason whose own cause (reconcile-rollout.py _merge_task_cause,
+         the reason from its last `ERROR:` line) holds no MERGE_TASK_FIXABLE text: H9 or H10 (_raise_field gives none);
      16. an invalid budget stamp (any of the four keys, re-read live: _retry_budget's error, else
          reconcile-rollout.py _round_budget_error): `autoRetryError`, H12 `fix the round budget`, handBack false; once
          the stamp reads valid it falls through;
@@ -2361,9 +2362,13 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         return no("the PR branch is gone: a human restores or recuts it", fix("restore, recut or defer", first, False))
     if status == "blocked" and rr.DECLINED_MARK in reason:
         return spent("merge declined at the --gated hold: a human's decision")
-    if status == "blocked" and kind == "own" and first.lower().startswith("merge-task") and \
-            not any(f in reason for f in rr.MERGE_TASK_FIXABLE):
-        return spent(f"merge-task needs a human: {first}")
+    if status == "blocked" and kind == "own" and first.lower().startswith("merge-task"):
+        # The reason's own cause (ADR 0068 d4), the same text the Run record's reasonClass reads: a red-check line
+        # printed before an infra rerun that a later `ERROR:` line follows is no fixable text of this stop.
+        cause = rr._merge_task_cause(reason)
+        if not any(f in cause for f in rr.MERGE_TASK_FIXABLE):
+            stop = cause.split("\n", 1)[0].strip()
+            return spent(f"merge-task needs a human: {stop}")
     # Cause 16 (ADR 0048): an invalid round-budget stamp, re-read live on every call, so once Lachy fixes the stamp the
     # verdict falls through to the lead's own retry or to H10. All four keys: the two _retry_budget resolves, then
     # max_iterations and max_plan_rounds (_round_budget_error).

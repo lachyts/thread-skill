@@ -193,9 +193,9 @@ ok "$(q "$J" 'd["start"]')" '[]' "F1: a1 lands; ro-a does not refill the freed p
 ok "$(q "$J" '[d["hold"][0]["slug"], d["hold"][0]["reason"]]')" "[\"a3\",\"trickle: 1/2 $T, 1 kept for [[ro-b]]\"]" \
   "F1: … a3 reads the place kept for ro-b"
 ok "$(q "$J" '[d["trickle"]["kept"], d["slotLimit"]]')" '[{"ro-b":1},1]' "F1: … trickle.kept {ro-b: 1} and slotLimit 1"
-# p28-4's `lapsed` follows `elsewhere`; `kept` stays last.
-ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running","kept"]' \
-  "F1: … kept is the trickle block's last key"
+# p28-4's `lapsed` follows `elsewhere`; `kept` follows `running`, and p36-7's `capacity` (the Capacity reading) is last.
+ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running","kept","capacity"]' \
+  "F1: … kept follows running, and the Capacity reading is the trickle block's last key"
 J=$(nx ro-b --now "$(at 20)")
 ok "$(q "$J" 'd["start"]')" '["b1"]' "F1: ro-b's next tick (+20m) starts b1 into the kept place"
 under "$J" 2 "F1: ro-b's start"
@@ -455,7 +455,7 @@ rawf '{"version": 1, "claims": [{"tasksDir": D, "rollout": "ro-x", "slug": "x1",
 J=$(nx ro-a)
 ok "$(q "$J" '[d["start"], d["trickle"]["elsewhere"]]')" '[[],{"ro-x":1}]' "F7 (p28-3 shape): a file with no waiting list reads fine"
 ok "$(lines)" 0 "F7 (p28-3 shape): … with no WARN"
-ok "$(fshape)" '[["version","claims","waiting"],1]' "F7 (p28-3 shape): … and is rewritten in the new shape at version 1"
+ok "$(fshape)" '[["version","claims","waiting","woken"],1]' "F7 (p28-3 shape): … and is rewritten in the new shape at version 1"
 ok "$(waiting)" '[["ro-a",1,"14:05","13:00"]]' "F7 (p28-3 shape): … holding ro-a's record"
 scen f7-version-2
 mkro ro-a 3; run1 a1 ro-a; run1 a2 ro-a; mkt a3 ro-a open

@@ -169,6 +169,12 @@ Contract.
    suite whose own rc is 75 or 76, or 2). Residuals: a reused pid, and a run its parent has not reaped yet (a zombie),
    read as alive until S, so they give 75, never a wrong verdict; a TERM between the start line and cmd_run's handlers
    ends the run with no exit line, so 76.
+10. The Capacity (p36-7, ADR 0067 d8; execute away.md § Capacity). acquire() takes a slot only while the slots held
+   plus the slots it needs fit in min(N, C): C is a fresh capacity.json's `capacity` (capacity.py beside this script,
+   read per poll, raw: no capacity_max, since it can only lower N), floored at 1, and any read failure (a missing,
+   stale or unreadable file, a capacity.py that will not load) reads N. So it only ever lowers today's pool: every
+   slot is scanned (none taken while held + need passes min(N, C)), a C below the slots already held blocks new
+   acquirers, priority ones included, and never stops a holder. The waiting line then adds `; the Capacity allows C`.
 
 `run [--slots N] [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot, in
 line behind the Integration waiters and the runs that came first (contract 5): `verify-slot: waiting for one of N verify
@@ -736,6 +742,29 @@ def _open_slot(d, k):
         raise SlotDirError(f"{d}: {e.strerror or e}")
 
 
+_CAPACITY_MOD = None
+
+
+def _capacity_slots(slots):
+    """min(slots, C) for a fresh capacity.json (contract 10), else slots: capacity.py read once per call, never
+    raising (any failure reads slots)."""
+    global _CAPACITY_MOD
+    try:
+        if _CAPACITY_MOD is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "thread_capacity", os.path.join(os.path.dirname(SCRIPT), "capacity.py"))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _CAPACITY_MOD = mod
+        reading = _CAPACITY_MOD.read(datetime.now().astimezone())
+        if reading["file"] == "fresh":
+            return min(slots, max(1, int(reading["capacity"])))
+    except Exception:  # noqa: BLE001 — a reading that fails reads the configured slots: it only ever lowers them
+        pass
+    return slots
+
+
 def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None,
             head_age=HEAD_AGE):
     """Wait for one of `slots` verify slots: a Slot, or None when max_wait seconds pass first (0: one try, which takes
@@ -753,7 +782,9 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
     The Heat hold (contract 7): each poll reads heat_level() first; at HEAT_HOLD or worse it tries no slot (a miss),
     and on_wait gets `waiting (heat: <name>)`, said at the first miss, whenever the holding reason changes (another
     heat name, or a switch between heat and slots) and every REMIND_EVERY seconds. `why`, a dict the caller keeps,
-    gets "heat": the level each poll that heat held, else None. max_wait bounds the whole wait, heat included."""
+    gets "heat": the level each poll that heat held, else None. max_wait bounds the whole wait, heat included.
+    The Capacity (contract 10): each poll that is not heat-held reads eff = min(slots, C) (_capacity_slots), scans every
+    slot, and takes one only while eff - (the slots held) >= need."""
     if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:
         raise ValueError(f"slots must be an integer >= 1, got {slots!r}")
     d = where or slots_dir()
@@ -792,7 +823,9 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                 why["heat"] = level if hot else None
             ahead = inline = 0
             got, held = [], []
+            eff = slots
             if not hot:
+                eff = _capacity_slots(slots)
                 live = _scan_waiters(d)
                 if priority:
                     need = 1
@@ -816,14 +849,13 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                         except OSError as e:
                             os.close(fd)
                             raise SlotDirError(f"{d}: {e.strerror or e}")
-                        if took:
+                        if took and len(got) < need:
                             got.append((k, fd))
-                            if len(got) >= need:
-                                break
-                        else:
+                        else:   # past `need` a free slot is only counted (contract 10), never kept
                             os.close(fd)
-                            held.append(k)
-                    if len(got) >= need:
+                            if not took:
+                                held.append(k)
+                    if len(got) >= need and eff - len(held) >= need:
                         k, fd = got.pop(0)
                         os.ftruncate(fd, 0)
                         return Slot(k, fd, time.monotonic() - start, _slot_path(d, k), missed)
@@ -848,6 +880,8 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                         held_why.append(f"{ahead} Integration waiter(s) ahead")
                     if inline:
                         held_why.append(f"{inline} run(s) ahead in line")
+                    if eff < slots:
+                        held_why.append(f"the Capacity allows {eff}")
                     on_wait(f"waiting for one of {slots} verify slots ({'; '.join(held_why) or 'none free'})")
                 told, told_reason = now, reason
             step = base + random.uniform(0, base / 2) if priority or aged else 2 * base + random.uniform(0, base)

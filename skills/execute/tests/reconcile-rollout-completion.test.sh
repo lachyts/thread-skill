@@ -28,14 +28,17 @@
 #   C13 a verify with no --outcome (Integration, RACE) writes no outcome file; its --detach-at tree is pid-locked
 #       like --outcome's, so the daily sweep's reaper never removes a RACE re-verify's tree mid-run, and removed.
 #   C14 reconcile-rollout.py loads where fcntl does not (the Windows machine): a read verb still runs.
-#   C15 a serial chain (ADR 0055), on a checkout with no origin at all: C15a the read (its one repo: surface, the tree
-#       under the state dir, the out under the git dir) and a green run on HEAD, no canary, nothing in the working
-#       tree; the read's refusals (no repo: token, two, a plain directory, a subdirectory of a checkout); C15b where
+#   C15 a serial chain (ADR 0055), on a checkout with no origin at all: C15a the read (its one checkout, from its
+#       repo: surfaces, a file token's included, and its Queue rows' launch folders: serial-chains.py's checkouts_of;
+#       the tree under the state dir, the out under the git dir) and a green run on HEAD, no canary, nothing in the
+#       working tree; the read's refusals (no checkout, two, a plain directory, a subdirectory of a checkout); C15b where
 #       the tree lives, seen from inside the run, and THREAD_COMPLETION_TREE_DIR's rule; C15c the serial fix task's
 #       words; C15d the HEAD guard (a detached HEAD, the leg_base fallback, a foreign checkout, a task that committed
 #       nowhere, a peer's rewritten tip above the task's own commit and its control); C15e --wait (a holder waited
 #       out, the deadline, a real --run, nothing in flight, its refusals, and it writes nothing; (g) a --run that
-#       records and frees its lock between a read's note read and its probe, in-process with scripted probes).
+#       records and frees its lock between a read's note read and its probe, in-process with scripted probes); C15f a
+#       chain in Chain copies (ADR 0067 d2): the read maps its one checkout to its copy, and --run is green on the
+#       copy's HEAD; a missing copy is refused.
 # Temp repos and notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -481,8 +484,9 @@ ok "$rc|$(js state)" "0|run" "C14: with no fcntl, reconcile-rollout.py still loa
 # ── C15 (ADR 0055): a serial chain runs its completion verifier on its checkout's HEAD ──────────────────────────
 # sscen <name> [completion_verifier value | -] [extra frontmatter line…] — a serial chain's in-place checkout with NO
 # origin remote (any origin read would fail) and its note: `shape: serial`, the checkout as its one repo: surface beside
-# the vault (SURF, when set, is the whole surfaces block), and one linked done task a whose trailered commit is HEAD
-# ($SHA), stamped as leg.py done stamps it: leg_base the commit before ($BASE), leg_head its own commit.
+# the vault (SURF, when set, is the whole surfaces block; QUEUE, when set, the whole ## Queue body, else `- [[a]]`), and
+# one linked done task a whose trailered commit is HEAD ($SHA), stamped as leg.py done stamps it: leg_base the commit
+# before ($BASE), leg_head its own commit.
 sscen() {
   D="$TMP/$1"; mkdir -p "$D/tasks"; RO="$D/tasks/ro-rollout-2026-10-24.md"; export THREAD_EVENTS_DIR="$D/events"
   export THREAD_GIT_ENV_DIR="$D/git-env"
@@ -494,8 +498,8 @@ sscen() {
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprojects:\n  - "[[Demo]]"\nprotocol_version: 5\nshape: serial\n'
     [ "$v" = "-" ] || printf 'completion_verifier: %s\n' "$v"
     for l in "$@"; do printf '%s\n' "$l"; done
-    printf 'surfaces:\n%s\n---\n\n## Notes\n\nA serial chain.\n\n## Queue\n\n- [[a]]\n' \
-      "${SURF-$(printf '  - "repo:%s"\n  - "vault"' "$D/repo")}"; } > "$RO"
+    printf 'surfaces:\n%s\n---\n\n## Notes\n\nA serial chain.\n\n## Queue\n\n%s\n' \
+      "${SURF-$(printf '  - "repo:%s"\n  - "vault"' "$D/repo")}" "${QUEUE:-- [[a]]}"; } > "$RO"
   { printf -- '---\ntags: [task]\nstatus: done\nprojects:\n  - "[[Demo]]"\nrollout: "[[ro-rollout-2026-10-24]]"\n'
     printf 'leg_base: ["%s@%s"]\nleg_head: ["%s@%s"]\n' "$D/repo" "$BASE" "$D/repo" "$SHA"
     printf -- '---\n\n## Notes\n\nDo a.\n'; } > "$D/tasks/a.md"
@@ -528,6 +532,24 @@ ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(test -e "$D/repo/.cl
    "1|||0" "C15a: the tree removed; no .claude, nothing in the checkout's porcelain"
 r0=$(cksum < "$RO")
 cv --run; ok "$rc|$(js ran)|$(js result)|$(cksum < "$RO")|$(records)" "0|False|green|$r0|green/1" "C15a: a second --run runs nothing and writes nothing"
+# ADR 0067 d4: the chain's one checkout is checkouts_of its surfaces and its Queue rows' launch folders, so a file token,
+# or a vault-only claim launched in the checkout, still resolves to it; two launch checkouts are refused.
+qrow() { printf '| %s | [[%s\\|%s]] | `cc-x` from `%s` | `vault` |\n' "$1" "$2" "$2" "$3"; }
+QHEAD=$'| # | Task | Launch | Surfaces |\n|---|---|---|---|'
+SURF="  - \"repo:$TMP/c15k/repo//a.txt\"
+  - \"vault\"" sscen c15k; unset SURF
+cv; ok "$rc|$(js state)|$(js repo)" "0|run|$D/repo" "C15a: a file token's checkout resolves to it"
+cv --run; ok "$rc|$(js result)" "0|green" "C15a: … and runs green there"
+SURF='  - "vault"' QUEUE="$QHEAD
+$(qrow 1 a "$TMP/c15q/repo")" sscen c15q; unset SURF
+cv; ok "$rc|$(js state)|$(js repo)" "0|run|$D/repo" "C15a: a vault-only surfaces: with a Queue row launched in the checkout resolves to it"
+mkdir -p "$TMP/c15q2"; g init -q "$TMP/c15q2/other"
+SURF='  - "vault"' QUEUE="$QHEAD
+$(qrow 1 a "$TMP/c15q2/repo")
+$(qrow 2 b "$TMP/c15q2/other")" sscen c15q2; unset SURF
+before=$(cksum < "$RO")
+cv; ok "$rc|$out|$(cksum < "$RO")" "1||$before" "C15a: two Queue launch checkouts → the read refuses (1), the note byte-identical"
+has "$err" "exactly one" "C15a: … saying exactly one"
 mkdir -p "$TMP/c15-plain"
 for c in "c15r1|exactly one|  - \"vault\"" \
          "c15r2|exactly one|  - \"repo:$TMP/c15r2/repo\"
@@ -565,6 +587,20 @@ has "$F" "Each task passed its own Leg verify" "C15c: … each task's own Leg ve
 has "$F" '**Verify:** `false` exits 0 on the chain'"'"'s checkout.' "C15c: … and its Verify line"
 hasnt "$F" "Integration" "C15c: … never an Integration"
 hasnt "$F" "merged main" "C15c: … never merged main"
+
+# C15f (ADR 0067 d2): a chain in Chain copies verifies on its copy's HEAD, where its tasks' leg_head anchors are.
+C="$TMP/c15f-copy"
+sscen c15f '"true"' "chain_copies: [\"$TMP/c15f/repo -> $C\"]"
+g -C "$D/repo" worktree add -q -b chain/ro-rollout-2026-10-24 "$C"; CB=$(git -C "$C" rev-parse HEAD)
+echo c > "$C/c.txt"; g -C "$C" add -A; g -C "$C" commit -q -m "feat: a in the copy" -m "Task: [[a]]"; CSHA=$(git -C "$C" rev-parse HEAD)
+seta "leg_base: [\"$C@$CB\"]" "leg_head: [\"$C@$CSHA\"]"
+cv; ok "$rc|$(js state)|$(js repo)" "0|run|$C" "C15f: a chain with chain_copies: reads its one checkout's Chain copy"
+cv --run; ok "$rc|$(js result)" "0|green" "C15f: … and --run is green there"
+has "$(sed -n '/^## Completion verify log/,$p' "$RO")" "attempt 1 at $CSHA rc 0 -> green" "C15f: … on the copy's HEAD, never the primary's ($SHA)"
+sscen c15f2 '"true"' "chain_copies: [\"$TMP/c15f2/repo -> $TMP/c15f2-gone\"]"
+before=$(cksum < "$RO")
+cv; ok "$rc|$out|$(cksum < "$RO")" "1||$before" "C15f: control: its Chain copy missing → the read refuses (1), the note byte-identical"
+has "$err" "its Chain copy $TMP/c15f2-gone is missing: leg.py begin remakes it" "C15f: … saying so"
 
 sscen c15d
 g -C "$D/repo" checkout -q --detach "$BASE"

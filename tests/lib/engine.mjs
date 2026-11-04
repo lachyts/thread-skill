@@ -1,4 +1,4 @@
-// Loads task.workflow.js for tests. loadEngine() evaluates the pure-function region (everything before
+// Loads task.workflow.js for tests. loadEngine(names, options) evaluates the pure-function region (everything before
 // the orchestration marker, which needs Workflow globals) in a vm sandbox and returns the named
 // functions — the same technique skills/execute/tests/prompt-invariants.test.mjs uses; `agent` and `log`
 // are stubbed. runTask() runs the WHOLE script the way the Workflow runtime does.
@@ -12,10 +12,11 @@ export const enginePath = path.join(root, 'skills', 'execute', 'task.workflow.js
 // The args.verifySlot every engine test passes (required, estate ADR 0009 d4); the path is never run.
 export const VERIFY_SLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 
-export function loadEngine(names) {
-  const src = fs.readFileSync(enginePath, 'utf8')
+// options.source evaluates that engine text instead of the file's (a contract's reworded-variant control, as runTask's).
+export function loadEngine(names, options = {}) {
+  const src = options.source === undefined ? fs.readFileSync(enginePath, 'utf8') : options.source
   const idx = src.indexOf('// ---- Orchestration')
-  if (idx === -1) throw new Error('orchestration marker not found in ' + enginePath)
+  if (idx === -1) throw new Error('orchestration marker not found in ' + (options.source === undefined ? enginePath : enginePath + ' (options.source variant)'))
   const head = src.slice(0, idx).replace('export const meta', 'const meta') + `\nvar __t = { ${names.join(', ')} };\n`
   const ctx = { console, log: () => {}, agent: async () => null }
   vm.createContext(ctx)

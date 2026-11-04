@@ -57,6 +57,13 @@ mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcr
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# A serial chain's Chain copies (leg.py copies, ADR 0067 d2) stay in temp too: each suite that makes one exports its own
+# (tests/leg.test.sh), so this is the backstop that keeps a missed site out of ~/.local/state/thread/chains.
+export THREAD_CHAIN_COPY_DIR="$scratch/chains"
+# The Security check (security-check.py, execute § 3 `security_checks`) never reaches the real OSV under test: a closed port, so
+# a case that forgets its own stub reads `advisories not checked`, never the network; an inherited THREAD_GITLEAKS is unset, so
+# each suite pins its own stub (or finds the real gitleaks itself). Each suite that reaches either sets its own: the backstop.
+export THREAD_OSV_URL=http://127.0.0.1:9; unset THREAD_GITLEAKS
 # The gate and the lead's Integration verify run this whole suite inside a verify slot, whose command sees
 # VERIFY_SLOT_HELD=1 (verify-slot.py, p34-1): unset, so no suite reads its own runs as already inside a slot.
 unset VERIFY_SLOT_HELD
@@ -71,6 +78,9 @@ export THREAD_MACHINE_TIMES='{}'
 export THREAD_HEAT_LEVEL=0
 # The note save lock (reconcile-rollout.py's _note_lock_path): one lock file per note directory, in temp like the rest.
 export THREAD_NOTE_LOCK_DIR="$scratch/note-locks"
+# The Note overlap hook's writer records and default debug log (hooks/vault-note-overlap.py, ADR 0067 d6) stay in temp
+# too: its suite sets its own, so this is the backstop; an inherited debug file is unset, so no call logs outside temp.
+export THREAD_NOTE_OVERLAP_DIR="$scratch/note-writers"; unset THREAD_NOTE_OVERLAP_DEBUG
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
 # A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
 # left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land

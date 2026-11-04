@@ -14,23 +14,33 @@
 //       outside and drift: none), the task stays done, its dependants held through `verifies:`;
 //   e6  the hand-over and status: create_thread's fields (no brief, report_back on), a report per *closed* Leg, the §
 //       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and pushed manual
-//       hand-over;
+//       hand-over; a Chain copy's launch line (ADR 0067 d2) in § Begin 4 and § Hand over, never the alias itself, and §
+//       The task loop's commit in the copy, never in the primary; the land (ADR 0067 d3): § Begin 0's `landFirst` land
+//       before the first claim, § The task loop's **Land** paragraph (never a rebase, --verified, --red, a null line,
+//       `waits: true`) and the slotted Verify rule; the rank (ADR 0067 d9): § The task loop's `wait` action, its six
+//       steps in order (land, `leg.py wait`, the stalled close, landFirst's remedies and stopped close, cleared, next)
+//       and its two Leg log forms;
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
-//       Complete step 4), the lock and exit 5's retry-once, no question tool;
+//       Complete step 4), the lock and exit 5's retry-once, the repo land lock (never nested) and the in-place peer
+//       stand, the rank lock (ADR 0067 d9), no question tool, and the push Don't as the landing route reads it (ADR
+//       0028, ADR 0067 d3);
 //   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries (the completion verify's detached verify tree
 //       among its worktrees), execute § Scope's Legs sentence (that tree under `<state>/thread/completion-trees/`, not
 //       a task worktree), ADR 0040's Decision line, its new bullet and its ADR 0055 amendment, the README row;
 //   e9  close § Under a Leg: each rule (a follow-on after Complete filed with no pointer among them), placed after ##
 //       Edge cases, no fence and no retired close:asks phrase, and the four appended pointers after their pinned
-//       sentences;
+//       sentences; its **The land.** bullet (before the hand-over, a red that files no fix on a closed Leg, land
+//       --retire never -D) and the landing route's push wording;
 //   e10 Complete: legs.md § Complete's five steps in order (phases, items, the score through close-score.py, close
 //       with its --reflection, /thread:close) with the routed land follow-on, and the serial template's Post-rollout in
 //       the same order (its seven steps); the completion verify before step 1 (ADR 0055): the read, `--run` and
 //       `--wait` launches, the in-flight rule, the waiting line, its four halt reasons with the read's exit 1 or 2
 //       mapped to `rollout note unreadable`, no origin read and no git-env canary; step 4's "not decided" refusal and
 //       its summary line; line 7's `completion-verify --run` exception; the template's `completion_verifier:` preface;
-//       execute § 3's row citing ADR 0055; and no product file still saying the serial chain does not run it.
+//       execute § 3's row citing ADR 0055; and no product file still saying the serial chain does not run it; § Complete's
+//       **Land first** before the completion verify, its `land waits:` stop and `land stood:` halt, and the template's
+//       land sentence before its `completion_verifier:` sentence (ADR 0067 d3).
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text. Reads
 // files only.
 import { test } from 'node:test'
@@ -96,6 +106,7 @@ const TABLE = [
   '| Mid-Leg, review in flight | `waiting reason="review in flight: [[t]]"` | *nothing yet* | allow |',
   '| Room stop | `waiting reason="room stop: …"` | *nothing yet* | allow |',
   '| Complete, completion verify running | `waiting reason="completion verify in flight"` | *nothing yet* | allow |',
+  '| Capacity or quota wait | `waiting reason="<why>"` | *nothing yet* | allow |',   // p36-7, ADR 0067 d8
   '| handoff, successor started | `done reason="handed off to Leg <N+1>"` after the banner | *closed*: reports to the origin, archives | allow |',
   '| handoff, manual | `halted reason="manual handoff: Leg <N+1> in <alias> from <folder>"` | demand | allow |',
   '| complete | `done` after the banner | *closed*: the final report | allow |',
@@ -180,6 +191,33 @@ function check(f, product = tree) {
   need('e6', 'legs.md § Hand over', ho, ['call `create_thread`', '`title`', '`prompt`', '`tldr`', '`cwd`', 'Pass no `brief`',
     'leave `report_back` at its default (on)', 'labelled `manual handoff`, and pushes it once', 'leg.py handed --started <id>',
     'leg.py handed --manual "<why>"'])
+  // ADR 0067 d2: a Chain copy's manual line never runs the alias (its `cd` opens the primary), and a task commits in its
+  // copy only.
+  const NEVER_ALIAS = 'never the alias itself, whose `cd` opens the primary'
+  need('e6', 'legs.md § Begin 4', proseUnits(sec(legs, 'Begin')).find((u) => u.startsWith('- **4.**')) ?? '', [NEVER_ALIAS])
+  need('e6', 'legs.md § Hand over', ho, [NEVER_ALIAS])
+  need('e6', 'legs.md § The task loop', loop, ['commit only there, never in the primary', '`--revert`, which reverts it there'])
+  // ADR 0067 d3: begin's landFirst runs a land before the first claim; the task loop's Land paragraph and its slotted Verify.
+  need('e6', 'legs.md § Begin 0', proseUnits(sec(legs, 'Begin')).find((u) => u.startsWith('- **0.**')) ?? '', [
+    '`landFirst` is true', 'before the preflight, the smoke test and the first `claim`'])
+  need('e6', 'legs.md § The task loop', loop, ['**Land (ADR 0067 d3).**', 'never a rebase', '`leg.py land --verified <head>`',
+    '`leg.py land --red "<why>"`', 'whose `line` is null', 'its Acceptance criteria', 'verify-slot.py run -- bash -c',
+    'verify-slot: no verdict', '`waits: true`'])
+  // ADR 0067 d9: the rank's `wait` action and its six steps, in order.
+  const wt = loop.split('\n')
+  const wi = wt.findIndex((l) => l.startsWith('- `wait` (ADR 0067 d9'))
+  const wj = wt.findIndex((l, k) => k > wi && /^- `/.test(l))
+  const waitBlock = wi >= 0 ? wt.slice(wi, wj > wi ? wj : undefined).join('\n') : ''
+  need('e6', 'legs.md § The task loop\'s `wait`', C(waitBlock), ['CONTEXT.md **Rank wait**', 'Nobody is stopped mid-task',
+    '`leg.py wait --task <t>` in the foreground (`timeout: 600000`)', '`Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)`',
+    '`Leg <N> rank retry: [[t]] on [[X]] (<token>; [[X]] ranks above)`',
+    'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, pushed once',
+    'When `landFirst` is non-empty', '§ Close `--outcome stopped --reason "rank wait: own land stood: <why>"`, pushed once',
+    'On `cleared: true`: run `leg.py land` again in a copy chain, then `next`'])
+  const ws = [/^ {2}1\. In a copy chain, run `leg\.py land`/, /^ {2}2\. Run `leg\.py wait --task <t>`/, /^ {2}3\. On `stalled: true`/,
+    /^ {2}4\. When `landFirst` is non-empty/, /^ {2}5\. On `cleared: true`/, /^ {2}6\. Otherwise: `next`/]
+    .map((re) => waitBlock.split('\n').findIndex((l) => re.test(l)))
+  if (ws.some((i, k) => i < 0 || (k > 0 && i <= ws[k - 1]))) flag('e6', `§ The task loop's \`wait\` steps are not the six, in order: ${ws}`)
   const rep = sec(legs, 'Report')
   need('e6', 'legs.md § Report', rep, ['it is never `running`', 'a `waiting` turn end takes `leg.py next --waiting "<reason>"`\'s',
     'Every Leg whose Close reads *closed* reports to the origin when it closes', 'A `halted` or `waiting` Leg never reports'])
@@ -202,7 +240,12 @@ function check(f, product = tree) {
   need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['holds the rollout\'s lock', 'exit 5',
     'retry the verb once', '`halted reason="halt: rollout note locked"`'])
   need('e7', 'legs.md § Don\'ts', sec(legs, "Don'ts"), ['Never call the question tool in a Leg', 'Never make a Workflow call',
-    'Never stamp `paused:` or `pause_requested:` on a serial note'])
+    'Never stamp `paused:` or `pause_requested:` on a serial note', "Never push a chain's own commits yourself",
+    "a swept repo's daily sweep pushes them", "a pushable repo's wait for Lachy in Complete's land follow-on"])
+  need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['`<git common dir>/thread/chain-land.lock`', 'never nested',
+    "never moves a checked-out `<d>` under another chain's live work"])
+  need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['the machine-wide rank lock, `<leg lock dir>/rank-claim.lock`',
+    "inside the rollout's lock and never nested with a land's repo lock", 'two chains never claim one code file at once (ADR 0067 d9)'])
 
   // ---- e8: docs ----
   need('e8', 'CONTEXT **Leg**', entry(f.context, 'Leg'), ['`leg.py begin`', 'the preflight', 'the smoke test',
@@ -231,6 +274,11 @@ function check(f, product = tree) {
     "Rule (3)'s question line never prints", 'runs after sub-step 7 and before step 8', "prints after step 8's landing rows",
     "a Leg's `ROLLOUT-STATUS:` line is a rollout lead's line for rule (2)",
     'After Complete, `leg.py close` has already moved the note to `Archive/Rollouts/`: file-followup reads it there and files the task with no pointer'])
+  // ADR 0067 d3: the close-time land runs before the hand-over; its red files no fix on the closed Leg.
+  need('e9', 'close § Under a Leg', ul, ['**The land.**', '`leg.py land --retire`', 'never `-D`', 'before the hand-over',
+    '`leg.py land --red "<why>"` and a `Left for Lachy:` row', '`file-fix` refuses a closed Leg',
+    "the next Leg's `land` asks again"])
+  need('e9', 'close', close, ["a swept repo's daily sweep pushes them"])
   if (/^\s*(```|~~~)/m.test(ul)) flag('e9', '§ Under a Leg holds a fenced block')
   for (const old of RETIRED_ASKS) if (C(ul).includes(old)) flag('e9', `§ Under a Leg holds ${old}`)
   for (const p of POINTERS) if (!C(close).includes(p)) flag('e9', `close does not hold: ${p}`)
@@ -252,6 +300,16 @@ function check(f, product = tree) {
     '`leg.py next --waiting "completion verify in flight"`\'s `status_line`', 'no origin read and no git-env canary',
     '"completion verify: no verdict in three runs"', '"completion verify failed:', '"completion verify: rollout note unreadable"',
     '"completion verify: in flight past its deadline"', "the read's exit 1 or 2"])
+  // ADR 0067 d3: Land first, before the completion verify, so its --run starts on the landed tip.
+  need('e10', 'legs.md § Complete\'s Land first', pre, ['**Land first (ADR 0067 d3).**', '--outcome halt --reason "land stood:',
+    '--outcome stopped --reason "land waits:'])
+  const iLand = pre.indexOf('**Land first (ADR 0067 d3).**')
+  const iCv = pre.indexOf('**The completion verify (ADR 0055).**')
+  if (iLand < 0 || iCv < 0 || iLand > iCv) flag('e10', `§ Complete's Land first is not before the completion verify: ${iLand}, ${iCv}`)
+  const pr = C(section(f.template, /^## Post-rollout/) ?? '')
+  const tLand = pr.indexOf('`leg.py land`')
+  const tCv = pr.indexOf('When this note declares `completion_verifier:`')
+  if (tLand < 0 || tCv < 0 || tLand > tCv) flag('e10', `the template's land sentence is not before its completion_verifier: one: ${tLand}, ${tCv}`)
   const bullets = proseUnits(pre)
   const inflight = bullets.find((u) => u.startsWith('- `in-flight` →')) ?? ''
   if (!inflight.includes(`${RR} --wait\``)) flag('e10', 'the in-flight bullet does not launch --wait')
@@ -342,6 +400,35 @@ test('control: a chain cause charging the failed task fails e5', () => {
 test('control: a hand-over with a brief fails e6', () => {
   only('legs', 'Pass no `brief`', 'Pass a `brief`', ['e6'], 'brief')
 })
+test('control: a Chain copy hand-over that runs the alias fails e6', () => {
+  const ho = sec(real.legs, 'Hand over')
+  const line = ho.split('\n').find((l) => l.startsWith('- **A manual hand-over**')) ?? ''
+  assert.ok(line.includes('never the alias itself'), 'control setup: § Hand over\'s manual hand-over bullet')
+  const r = check({ ...real, legs: real.legs.replace(line, line.replace(', never the alias itself, whose `cd` opens the primary', '')) })
+  assert.deepEqual(r.fails, ['e6'], r.details.join('\n'))
+})
+
+test('control: § Begin 0 without the landFirst land fails e6', () => {
+  only('legs', 'then run `leg.py land` (§ The task loop\'s **Land**) right after begin, before the preflight, the smoke test and the first `claim`.',
+    'then go on.', ['e6'], 'landFirst')
+})
+test('control: a rank wait whose stall goes on waiting fails e6', () => {
+  only('legs', 'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, pushed once.',
+    'On `stalled: true`: wait again.', ['e6'], 'stalled')
+})
+test('control: the rank wait steps out of order fails e6', () => {
+  const l5 = real.legs.split('\n').find((x) => x.startsWith('  5. On `cleared: true`'))
+  const l6 = real.legs.split('\n').find((x) => x.startsWith('  6. Otherwise: `next`'))
+  assert.ok(l5 && l6, 'control setup: the wait steps 5 and 6')
+  only('legs', `${l5}\n${l6}`, `${l6}\n${l5}`, ['e6'], 'order')
+})
+test('control: § Concurrency without the rank lock fails e7', () => {
+  only('legs', 'the machine-wide rank lock, `<leg lock dir>/rank-claim.lock`', 'a lock', ['e7'], 'rank lock')
+})
+test('control: the task loop without the slotted Verify rule fails e6', () => {
+  only('legs', 'runs through the verify slot, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py run -- bash -c \'<command>\'`,',
+    'runs as it is,', ['e6'], 'slot rule')
+})
 test('control: a status table row that drifts fails e6', () => {
   only('legs', '| stuck | `halted reason="awaiting you: <k> set aside"` | demand | allow |',
     '| stuck | `done` | *closed* | allow |', ['e6'], 'table')
@@ -352,6 +439,15 @@ test('control: create_thread before leg.py close fails e7', () => {
 test('control: § Close step 1 offering a bare complete fails e7', () => {
   only('legs', '1. `leg.py close --outcome handoff|stuck|stopped|halt [--reason <r>]', '1. `leg.py close --outcome handoff|complete|stuck|stopped|halt [--reason <r>]',
     ['e7'], 'complete')
+})
+test('control: the old unattended-push Don\'t restored fails e7', () => {
+  const l = real.legs.split('\n').find((x) => x.startsWith("- Never push a chain's own commits yourself"))
+  assert.ok(l, 'control setup: the push Don\'t')
+  only('legs', l, "- Never push a chain's own commits unattended: Complete's land follow-on is where they wait for Lachy (ADR 0028).", ['e7'], 'push')
+})
+test('control: § Concurrency without the in-place peer sentence fails e7', () => {
+  only('legs', ' A land never moves a checked-out `<d>` under another chain\'s live work: on the in-place fast-forward it stands that copy (`waits: true`) while another serial chain works that checkout in place with a Leg open or a row in progress.',
+    '', ['e7'], 'peer')
 })
 test('control: a Leg that may call the question tool fails e7', () => {
   only('legs', '- Never call the question tool in a Leg:', '- Call the question tool when unsure:', ['e7'], 'question')
@@ -379,12 +475,33 @@ test('control: a pointer written into the archived note fails e9', () => {
 test('control: a retired close:asks phrase in § Under a Leg fails e9', () => {
   only('close', 'and is pushed once (execute § 6.5).', 'and is pushed once (execute § 6.5). Close never asks: it pushes.', ['e9'], 'asks')
 })
+test('control: § Under a Leg without its land bullet fails e9', () => {
+  const l = real.close.split('\n').find((x) => x.startsWith('- **The land.**'))
+  assert.ok(l, 'control setup: the land bullet')
+  only('close', `${l}\n`, '', ['e9'], 'land bullet')
+})
+test('control: a close-time red sent to § Fix tasks fails e9', () => {
+  only('close', 'a red → `leg.py land --red "<why>"` and a `Left for Lachy:` row, then go on. The Leg is closed, so no fix is filed here (`file-fix` refuses a closed Leg)',
+    'a red → `leg.py land --red "<why>"`, then § Fix tasks. The Leg is closed', ['e9'], 'red route')
+})
 test('control: a step 6 pointer that rewords its pinned sentence fails e9', () => {
   only('close', 'whatever its queued or stranded count. Under a Leg', 'whatever its count. Under a Leg', ['e9'], 'pinned')
 })
 test('control: a Complete without the routed land follow-on fails e10', () => {
   only('legs', 'It asks land.sh\'s own route for each chain checkout (`land.sh --route`, read-only).',
     'It pushes each chain checkout.', ['e10'], 'route')
+})
+test('control: § Complete\'s Land first after the completion verify fails e10', () => {
+  const lines = real.legs.split('\n')
+  const i = lines.findIndex((l) => l.startsWith('**Land first (ADR 0067 d3).**'))
+  const j = lines.findIndex((l) => l.startsWith('1. **Phases.**'))
+  assert.ok(i >= 0 && j > i, 'control setup: Land first and step 1')
+  const moved = [...lines.slice(0, i), ...lines.slice(i + 2, j), lines[i], '', ...lines.slice(j)].join('\n')
+  const { fails, details } = check({ ...real, legs: moved })
+  assert.deepEqual(fails, ['e10'], details.join('\n'))
+})
+test('control: a land that waits closed as a halt fails e10', () => {
+  only('legs', '--outcome stopped --reason "land waits: <its why>"', '--outcome halt --reason "land waits: <its why>"', ['e10'], 'waits')
 })
 test('control: a Complete without its score step fails e10', () => {
   const s = real.legs.split('\n').find((l) => l.startsWith('3. **Score.**'))

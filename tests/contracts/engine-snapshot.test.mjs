@@ -1,7 +1,7 @@
 // A rollout runs on its Engine snapshot (ADR 0043, p29-1). Pins the prose an LLM lead follows: the four rollout
 // verbs hand over to the rollout's engine root by a git `ident` prose id (never a disk hash), schedule cuts first
-// and runs a prior's commands from the prior's own root, execute § 1.5 moves a rollout only by `move.due` (a sign-off
-// pause never moves), the completion ceremonies retire snapshots after the commit, a Leg's close re-resolves when its
+// and runs a prior's commands from the prior's own root, execute § 1.5 moves a rollout only by `move.due` (an unstamped
+// note's first stamp included; a sign-off pause never moves), the completion ceremonies retire snapshots after the commit, a Leg's close re-resolves when its
 // snapshot was retired, and the glossary and ADR say the same. The mechanics are pinned by tests/engine-snapshot.test.sh.
 //
 // Same shape as tests/contracts/execute-signed-gate.test.mjs: every rule lives in one function, check(texts), which
@@ -90,10 +90,14 @@ function check(t) {
   if (i15 < 0 || i2 < 0 || i15 > i2) fail('execute')
   if (!s15.includes('`move.due`') || !s15.includes('a hard-paused parallel note') || !s15.includes('a Leg closed `stopped`') ||
     !s15.includes('A launch, a heartbeat, a cold resume, a Stage re-send or a repair hand-off cuts no snapshot')) fail('execute')
+  // an unstamped note's first stamp: § 1.5 stamps it at its moment, the cut a Leg's own; § 4.5 drops handles on it too
+  if (!s15.includes('which the cut and adopt below stamp') ||
+    !s15.includes("that cut is the Leg's, never the launch's or the hand-off's")) fail('execute')
   if (!s15.includes('**Exit 2** (a usage error') || !s15.includes('reason="engine snapshot resolve failed"') ||
     !s15.includes('a lead never goes on to § 2 from the rendered root')) fail('execute')
   const s45 = collapse(section(ex, /^### 4\.5\. /) ?? '')
-  if (!s45.includes("drop this session's runIds and signed-gate handles from the old snapshot's calls")) fail('execute')
+  if (!s45.includes("drop this session's runIds and signed-gate handles from the old snapshot's calls") ||
+    !s45.includes("§ 1.5's adopt printed `changed: true`")) fail('execute')
   if (!before(s45, '**Retire unneeded snapshots**', '**Close out the associated thread, last:**') ||
     !before(s45, 'commit -m <msg> --', '**Retire unneeded snapshots**')) fail('execute')
   const s5 = collapse(section(ex, /^### 5\. /) ?? '')
@@ -174,11 +178,13 @@ function check(t) {
   if (!entry(t.context, 'Engine root').includes('its **Engine snapshot**; for a note that names none, the **Primary checkout**') ||
     !entry(t.context, 'Reinstate').includes('the first Leg begun after a Leg closed `stopped`') ||
     !entry(t.context, 'Reinstate').includes("never a **Sign-off pause**'s reinstate") ||
+    !entry(t.context, 'Reinstate').includes('An unstamped note is stamped at it') ||
     !entry(t.context, 'Sign-off pause').includes('never moves the Engine snapshot') ||
     !entry(t.context, 'Primary checkout').includes("The plugin root counts only as its own work tree's toplevel")) fail('context')
 
-  // adr: the serial, sign-off and grace consequences, and the prose id as the only evidence.
+  // adr: the serial, sign-off and grace consequences, the prose id as the only evidence, and § Decision's unstamped stamp.
   const adr = collapse(t.adr)
+  if (!collapse(section(t.adr, /^## Decision/) ?? '').includes('an unstamped note is stamped at its next Reinstate or Leg begin')) fail('adr')
   if (!adr.includes('its Reinstate is the first Leg begun after a Leg closed `stopped`') ||
     !adr.includes('A sign-off pause (ADR 0034) is the engine\'s own pause') || !adr.includes('its signed-gate handles keep their cache replay') ||
     !adr.includes('Retirement waits a grace (24 h) after the archive') || !adr.includes('a disk hash is never that evidence')) fail('adr')
@@ -289,6 +295,17 @@ test('control: CONTEXT.md\'s Reinstate moving a sign-off pause fails context', (
 
 test('control: ADR 0043 without the grace bullet fails adr', () => {
   only(edit('adr', '- Retirement waits a grace (24 h) after the archive', '- Retirement is immediate after the archive'), 'adr', 'grace bullet')
+})
+
+test('control: ADR 0043 § Decision without the unstamped stamp fails adr', () => {
+  // the Status line's amendment marker says the same words first, so the swap names text only § Decision holds
+  only(edit('adr', 'an unstamped note is stamped at its next Reinstate or Leg begin (a hard-paused',
+    'an unstamped note keeps the Primary (a hard-paused'), 'adr', '§ Decision drops the stamp')
+})
+
+test('control: the handle drop keyed on `from` alone fails execute', () => {
+  only(edit('execute', "§ 1.5's adopt printed `changed: true`", "§ 1.5's adopt printed a non-null `from`"), 'execute',
+    'a first stamp (from null) drops no handle')
 })
 
 test('the rules are all named (14) and each has a control', () => {

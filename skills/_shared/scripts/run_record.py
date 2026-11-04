@@ -14,7 +14,7 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            refuse, and writes nothing: reflect.py checks a whole pass first)
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
     normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG,
-                                           RESERVED
+                                           NOTE_OVERLAPS, RESERVED
     title_key(name) -> str                 (a titled note's Grade-log key, p34-6: estate-dispatch.py `log` keys by it,
                                            and a grade line's `note` is checked against it)
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
@@ -41,8 +41,15 @@ there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the r
 the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
-weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention) to reflections.jsonl, and the
-Grade log's kind (grade) to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
+weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention) to reflections.jsonl, the
+Grade log's kind (grade) to grades.jsonl, and the Note overlap's kind (note-overlap) to overlaps.jsonl. All five names
+are RESERVED: refused as a rollout slug and as a carried `from`.
+
+overlaps.jsonl holds one `note-overlap` line per warned Note overlap (ADR 0067 d6; CONTEXT.md **Note overlap**): a vault
+note one run's task edited while another rollout's live task had written it. hooks/vault-note-overlap.py, the plugin's
+PreToolUse hook, is its one writer (its docstring holds the rules), and skills/reflect/scripts/reflect.py `span` its one
+reader (noteOverlaps). A line's rollout and task are the editing run's, so it names both runs; it sits in its own file
+so no rollout's record, score or ledger reads it.
 
 tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
 its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
@@ -123,22 +130,26 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      max_plan_rounds? (ints >= 1), rung? (str)} (the effective values after per-task
                      overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug);
                      cap? {away (bool), n (int >= 1: the Mac-wide cap in force, the Away cap while Away, else the
-                     Trickle), file (fresh | missing | stale | unreadable: the Away state file's reading)} (exactly
-                     those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
+                     Trickle; the Capacity's C while it is in force), file (fresh | missing | stale | unreadable: the
+                     Away state file's reading), by? (capacity: p36-7, n is the Capacity's, never the Trickle's)}
+                     (exactly those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
                      reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
   ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
-                     merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
-                     plan-rejected | review-rounds | approved-without-pr | integration-conflict |
+                     merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
+                     needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
                      question for a person, never a plan or review round run out, and integration-conflict and
                      integration-red, p27-4, are an integrate set-aside opening the engine's named markers: an
                      Integration conflict, `integration: conflict unresolved in …`, and a verifier red at
-                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate); stamp?;
-                     reconciledAt? (as slot-freed)
+                     Integration, `integration: verifier red: …`, and merge-gate (ADR 0068) is a merge-task stop
+                     whose own cause (the reason from its last `ERROR:` line to the end) is a red required check
+                     after the verifier passed, which reflect traces to schedule step 2.5 when the check runs a
+                     class the verifier never runs); setAsideAt? (run | integration | gate); stamp?; reconciledAt?
+                     (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt | origin: mark-integrating's origin-lane refusal, ADR
                      0064, the lead yielding its lane to another rollout's Integration on the same origin); path?;
@@ -156,7 +167,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
                      hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
                      on a PR's hold_until, vault-grammar § Hold until | hold-heat: a row waits for the Mac to cool,
-                     the Heat hold, execute away.md § Heat); free (int >= 0); settings (as slot-taken)
+                     the Heat hold, execute away.md § Heat | hold-quota: a row waits while the lead's Login is
+                     inside its line, the quota hold, p36-7, execute away.md § Capacity); free (int >= 0); settings
+                     (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -253,7 +266,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
                      agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | trickle-bound (p28-6) |
-                     dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     last-start-bound (p28-7) | dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
@@ -373,6 +386,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      still reads, since its readers, attention.py's trend and reflect.py's attention_record, take
                      reflections.jsonl's lines as they stand and never through this check). No rollout, no task;
                      lands in reflections.jsonl.
+  note-overlap    T  note (at most 400 characters: the vault-relative path), holderRollout, holderTask (slugs, not
+                     reserved: the run already in the note); holderSince? (a UTC Z stamp: the holder's first write),
+                     tool? (Edit | Write | MultiEdit), via? (agent | leg: how the editor was identified). ADR 0067 d6:
+                     one per warning hooks/vault-note-overlap.py gives; its rollout and task are the editing run's;
+                     lands in overlaps.jsonl.
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -594,8 +612,9 @@ REVIEWS = "reviews"
 TUNINGS = "tunings"
 REFLECTIONS = "reflections"
 GRADE_LOG = "grades"
+NOTE_OVERLAPS = "overlaps"
 # record files that are no rollout's: refused as a rollout slug or a carried `from`
-RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG)
+RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG, NOTE_OVERLAPS)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 # title_key's one separator: every run of characters outside a slug's letters, digits, dots and underscores (p34-6)
 TITLE_SEP_RE = re.compile(r"[^a-z0-9._]+")
@@ -661,10 +680,16 @@ SETTINGS = _settings
 CAP_FILES = ("fresh", "missing", "stale", "unreadable")  # reconcile-rollout.py _away_state's readings
 
 
+CAP_BY = ("capacity",)  # p36-7: a cap the Capacity set (reconcile-rollout.py _cap_in_force), never the Trickle's
+
+
 def _cap(v):
-    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else."""
-    if not isinstance(v, dict) or set(v) != {"away", "n", "file"}:
-        return "an object of exactly away, n and file"
+    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else, plus
+    an optional `by` (p36-7: "capacity" when the Capacity's C set n, so a Reflection never reads it as the Trickle)."""
+    if not isinstance(v, dict) or not {"away", "n", "file"} <= set(v) <= {"away", "n", "file", "by"}:
+        return "an object of exactly away, n and file, and an optional by"
+    if "by" in v and v["by"] not in CAP_BY:
+        return "an object with by one of %s" % ", ".join(CAP_BY)
     if _bool(v["away"]):
         return "an object with away true or false"
     if _int(1)(v["n"]):
@@ -685,7 +710,8 @@ APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 # p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
 APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
-BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "dependency-bound", "none-clear")
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "last-start-bound", "dependency-bound",
+            "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
 CLOSES = ("completion", "supersede")
 
@@ -869,7 +895,7 @@ TIME_LOST_CAUSES = {
     "stalls": ("dead-lead", "mac-restart", "mac-sleep", "watchdog", "halt", "gate", "question", "hand-back", "cool-down",
                "hold-git-env", "hold-merge", "hold-race", "hold-trickle", "hold-away-cap", "lead-absent",
                "never-finished", "unexplained"),
-    "quota-bound": ("usage-limit", "cool-down"),
+    "quota-bound": ("usage-limit", "cool-down", "hold-quota"),
     "load": ("hold-heat", "slot-wait", "heat", "timeout"),
     "lane-bound": ("lane",),
     "rework": ("integration", "race"),
@@ -1358,7 +1384,7 @@ KINDS = {
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
                                            "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
-                                           "hold-away-cap", "hold-last-start"),
+                                           "hold-away-cap", "hold-last-start", "hold-quota"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
     "away-night": (False, {"morning": _stampz}, {}),
@@ -1444,6 +1470,9 @@ KINDS = {
                     {"load": _load3, "rc": _int(0, 255), "failing": _names(MAX_FAILING, FAILING_NAME),
                      "timeout": _seconds, "step": _enum(*SUITE_STEPS), "sha": _str, "waited": _seconds,
                      "running": _int(0)}),
+    # ADR 0067 d6: hooks/vault-note-overlap.py, one line per warned Note overlap, in overlaps.jsonl.
+    "note-overlap": (True, {"note": _short(400), "holderRollout": _slug, "holderTask": _slug},
+                     {"holderSince": _stampz, "tool": _enum("Edit", "Write", "MultiEdit"), "via": _enum("agent", "leg")}),
     "base-moved": (True, {"repo": _str, "pr": _pr, "base": _str, "main": _str, "inertOnly": _bool_or_null,
                           "moversTotal": _int(0), "movers": _movers},
                    {"nonInert": _capped(MAX_NON_INERT), "pathsTotal": _int(0), "globs": _capped(MAX_GLOBS),
@@ -1870,7 +1899,7 @@ def _prepare(rollout, kind, task, fields, ts):
     out = []
     for r in targets:
         name = REFLECTIONS if kind in REFLECTION_KINDS else GRADE_LOG if kind == "grade" else REVIEWS if r is None \
-            else TUNINGS if kind == "tuning" else r
+            else TUNINGS if kind == "tuning" else NOTE_OVERLAPS if kind == "note-overlap" else r
         out.append((name, _line(stamp, host, r, task, kind, fields)))
     return out
 

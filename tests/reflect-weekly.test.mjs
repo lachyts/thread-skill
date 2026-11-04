@@ -134,7 +134,10 @@ function span(h, extra = [], { since = SINCE, until = UNTIL } = {}) {
   if (until) args.push('--until', until)
   const r = ok(h, args)
   assert.match(r.stderr, /^reflect: span r-\d{8}T\d{6}Z-[0-9a-f]{6} /, 'one summary line')
-  return JSON.parse(fs.readFileSync(out, 'utf8'))
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  // the window check (reflect.py's header): a `window: ` flag is a reader that read past its window, in any reading
+  assert.ok(!s.flags.some((f) => f.startsWith('window: ')), JSON.stringify(s.flags))
+  return s
 }
 const entryOf = (s, slug) => s.rollouts.find((r) => r.rollout === slug)
 
@@ -177,6 +180,83 @@ test('span: the default since is the last reflection line\'s until, else until -
   assert.match(bad.stderr, /^reflect: --since .* is after --until/)
   const naive = reflect(h, ['span', '--out', path.join(h.out, 'x.json'), '--until', '2026-09-03T00:00'])
   assert.equal(naive.status, 2, naive.stderr)
+})
+
+// ---- the Note overlaps (ADR 0067 d6): overlaps.jsonl, hooks/vault-note-overlap.py its one writer --------------------
+
+const overlapsFile = (h) => path.join(h.ev, 'overlaps.jsonl')
+// One note-overlap line: [ts, editing rollout, editing task, note, holder rollout, holder task]
+const overlap = ([ts, r, task, note, hr, ht]) => [ts, 'note-overlap', task, { note, holderRollout: hr, holderTask: ht, tool: 'Edit', via: 'agent' }, r]
+const DAYN = 'Days/2026/2026-09/2026-W36/2026-09-04 Fri.md'
+const OVERLAP_CANNOT = ["a script's or shell write, or a Codex Leg's, passes no hook: no Note overlap from it is seen",
+  "two tasks of one rollout in one note are not warned (another run is another rollout), nor is an edit by a session that is no run's task (an interactive session, a lead's own thread, a subagent a task agent spawns)"]
+
+test('span: noteOverlaps counts the window\'s warnings by (note, run pair), names the notes and rollouts, and is never a rollout', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [
+    overlap([W(4, '01:00'), 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap([W(4, '03:00'), 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap([W(5, '02:00'), 'ra', 'a1', DAYN, 'rb', 'b1']),   // the same pair, the other way round: one overlap
+    overlap([W(6, '02:00'), 'rc', 'c1', 'Notes/Shared.md', 'ra', 'a2']),
+    overlap(['2026-09-01T00:00:00Z', 'rb', 'b1', 'Notes/Old.md', 'ra', 'a1']),   // before the window
+    overlap(['2026-09-12T00:00:00Z', 'rb', 'b1', 'Notes/Late.md', 'ra', 'a1']),  // after it
+  ])
+  assert.deepEqual(fs.readdirSync(h.ev), ['overlaps.jsonl'], 'the lines sit in the reserved file alone')
+  const s = span(h)
+  const o = s.noteOverlaps
+  assert.equal(o.warnings, 4)
+  assert.equal(o.none, false)
+  assert.deepEqual(o.overlaps.map((x) => [x.note, x.runs.map((r) => `${r.rollout}/${r.task}`), x.warnings, x.first, x.last]), [
+    [DAYN, ['ra/a1', 'rb/b1'], 3, '2026-09-04T01:00:00.000Z', '2026-09-05T02:00:00.000Z'],
+    ['Notes/Shared.md', ['ra/a2', 'rc/c1'], 1, '2026-09-06T02:00:00.000Z', '2026-09-06T02:00:00.000Z'],
+  ])
+  assert.deepEqual(o.notes, [DAYN, 'Notes/Shared.md'])
+  assert.deepEqual(o.rollouts, ['ra', 'rb', 'rc'])
+  assert.equal(o.previous, null, 'no reflection line yet')
+  assert.deepEqual(s.rollouts, [], 'a record of only overlap lines reads no rollout')
+  for (const c of OVERLAP_CANNOT) assert.ok(s.cannotShow.includes(c), `cannotShow: ${c}`)
+})
+
+test('span: an empty week\'s noteOverlaps is none; no overlaps.jsonl reads as 0; both cannot-show lines stand', (t) => {
+  const h = setup(t)
+  let s = span(h)
+  assert.deepEqual(s.noteOverlaps, { warnings: 0, overlaps: [], notes: [], rollouts: [], none: true, previous: null }, 'no file yet')
+  emitAll(h, null, [overlap(['2026-09-01T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1'])])
+  s = span(h)
+  assert.equal(s.noteOverlaps.warnings, 0)
+  assert.equal(s.noteOverlaps.none, true, 'a line outside the window leaves the week none')
+  for (const c of OVERLAP_CANNOT) assert.ok(s.cannotShow.includes(c), `cannotShow: ${c}`)
+  assert.ok(!s.flags.some((f) => f.startsWith('noteOverlaps')), JSON.stringify(s.flags))
+})
+
+test('span: an unreadable overlaps.jsonl makes noteOverlaps a null block and a flag, never none; a torn line is a flag', (t) => {
+  const h = setup(t)
+  fs.mkdirSync(overlapsFile(h))
+  let s = span(h)
+  assert.equal(s.noteOverlaps, null, 'unread, never none')
+  assert.ok(s.flags.some((f) => f.startsWith('noteOverlaps: overlaps.jsonl cannot be read (')), JSON.stringify(s.flags))
+  fs.rmdirSync(overlapsFile(h))
+  emitAll(h, null, [overlap([W(4, '01:00'), 'rb', 'b1', DAYN, 'ra', 'a1'])])
+  fs.appendFileSync(overlapsFile(h), '{"torn')
+  s = span(h)
+  assert.equal(s.noteOverlaps.warnings, 1)
+  assert.ok(s.flags.includes('noteOverlaps: overlaps.jsonl: 1 line(s) did not parse: skipped'), JSON.stringify(s.flags))
+})
+
+test('span: noteOverlaps.previous counts the last reflection line\'s window, so two weeks running can be named', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [
+    overlap(['2026-08-28T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap(['2026-08-30T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap(['2026-08-20T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1']),   // before the previous window too
+    overlap([W(4, '01:00'), 'rc', 'c1', DAYN, 'ra', 'a1']),
+  ])
+  fs.writeFileSync(reflectionsFile(h), [
+    JSON.stringify({ v: 1, ts: '2026-08-27T00:00:00.000Z', kind: 'reflection', id: RID(1), since: '2026-08-20T12:00:00.000Z', until: '2026-08-27T00:00:00.000Z' }),
+    JSON.stringify({ v: 1, ts: '2026-09-03T00:00:00.000Z', kind: 'reflection', id: RID(2), since: '2026-08-27T00:00:00.000Z', until: '2026-09-02T14:00:00.000Z' }), ''].join('\n'))
+  const o = span(h).noteOverlaps
+  assert.deepEqual(o.previous, { since: '2026-08-27T00:00:00.000Z', until: '2026-09-02T14:00:00.000Z', warnings: 2 })
+  assert.equal(o.warnings, 1)
 })
 
 test('span: every friction kind, a Human fix as movedBy unrecorded with its taskNote, and null while still set aside', (t) => {
@@ -369,6 +449,35 @@ test('span: grades carries the Grade log joined to outcomes, readyHandsOff first
   assert.ok(bare.flags.includes('grades: no grade log'), JSON.stringify(bare.flags))
   assert.deepEqual([bare.grades.episodes, bare.grades.window.readyHandsOff.rate], [[], null])
   assert.equal(entryOf(bare, 'demo').friction.find((x) => x.kind === 'ask').grade, null)
+})
+
+// p28-7: span's `nights` (score.py's night_record over every record): two nights, one with holds and ran-past lines and
+// one with only its marker, each ran-past line split fallback / underestimate / unchecked, across two records.
+test('span: nights counts each night\'s held starts and ran-past tasks, a fallback overrun told from an underestimate (p28-7)', (t) => {
+  const h = setup(t)
+  const M1 = W(5, '09:00')
+  const M2 = W(6, '09:00')
+  const ran = (ts, task, S, history, usual) => [ts, 'ran-past-morning', task,
+    { morning: M1, slotTakenAt: new Date(Date.parse(S)).toISOString(), scope: 'single-file', history, ...(usual ? { usualMinutes: usual } : {}) }]
+  emitAll(h, 'night-a', byTs([
+    [W(5, '05:00'), 'away-night', null, { morning: M1 }],
+    [W(5, '07:30'), 'last-start-held', 'c1', { morning: M1, scope: 'cross-cutting', history: 3, usualMinutes: 110 }],
+    [W(5, '07:30'), 'last-start-held', 'c2', { morning: M1, scope: 'read-only', history: 1 }],
+    ran(W(5, '09:20'), 'f1', W(5, '06:30'), 1),
+    ran(W(5, '09:21'), 'u1', W(5, '08:00'), 3, 25),
+    [W(6, '05:00'), 'away-night', null, { morning: M2 }],
+  ]))
+  emitAll(h, 'night-b', [[W(5, '07:00'), 'away-night', null, { morning: M1 }], ran(W(5, '09:22'), 'd1', W(5, '05:00'), 3, 25)])
+  const r = ok(h, ['span', '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', path.join(h.out, 'span.json'),
+    '--since', SINCE, '--until', UNTIL])
+  assert.match(r.stderr, /, 2 night\(s\), /, 'the summary line counts the marked nights')
+  const n = JSON.parse(fs.readFileSync(path.join(h.out, 'span.json'), 'utf8')).nights
+  assert.deepEqual(n.nights.map((x) => [x.morning, x.marked, x.rollouts, x.held, x.heldBy, x.ranPast, x.ranPastBy]), [
+    [new Date(Date.parse(M1)).toISOString(), true, ['night-a', 'night-b'], 2, { fallback: 1, history: 1 }, 3, { fallback: 1, underestimate: 1, unchecked: 1 }],
+    [new Date(Date.parse(M2)).toISOString(), true, ['night-a'], 0, { fallback: 0, history: 0 }, 0, { fallback: 0, underestimate: 0, unchecked: 0 }]])
+  assert.deepEqual(n.nights[0].ranPastTasks.map((e) => [e.task, e.class]), [['f1', 'fallback'], ['u1', 'underestimate'], ['d1', 'unchecked']])
+  assert.deepEqual(n.totals, { nights: 2, zeroHold: 1, held: 2, ranPast: 3, fallback: 1, underestimate: 1, unchecked: 1 })
+  assert.deepEqual(n.suggest, [])
 })
 
 test('span: a missing note is scored by slug and flagged; without --fold the events and tasks dirs are unchanged', (t) => {
@@ -625,6 +734,71 @@ test('span: a clone-rooted record whose in-place twin is fresher reads the twin,
   assert.ok(s.flags.some((f) => f.includes(`ref read from the in-place checkout ${h.repo}: fresher than the Project root's`)), JSON.stringify(s.flags))
 })
 
+// The sweep's escape fixture: one rollout r with four landed tasks, each fixer dated against the default window.
+function escapeFixture(h) {
+  emitAll(h, 'r', byTs([...life('r-a', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'], pr: 7 }),
+    ...life('r-b', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')], pr: 8 }),
+    ...life('r-c', W(5, '00:00'), W(5, '01:00'), { lane: [W(5, '01:00'), W(5, '01:10')], pr: 9 }),
+    ...life('r-d', W(6, '00:00'), W(6, '01:00'), { lane: [W(6, '01:00'), W(6, '01:10')], pr: 10 })]))
+  rolloutNote(h, 'r')
+  taskNote(h, 'fix-r-a', { captured: '2026-08-20', fm: ['fixes: ["[[r-a]]"]'] }) // before since, its task landed by then: an earlier week's
+  taskNote(h, 'fix-r-b', { captured: '2026-09-05', fm: ['fixes: ["[[r-b]]"]'] }) // this week's
+  taskNote(h, 'fix-r-c', { captured: '2026-09-10', fm: ['fixes: ["[[r-c]]"]'] }) // until's Melbourne date: the next reading's
+  taskNote(h, 'fix-r-d', { captured: '2026-08-25', fm: ['fixes: ["[[r-d]]"]'] }) // before since, its task landed in the window: lost
+}
+const LOST = "Escape(s) on a task landed in the window, dated before it or undated: in no week's friction: "
+
+// A reading holds only its window's rows (CLAUDE.md's review rule): the sweep folds a read rollout's landed tasks of any
+// age, so its friction lists only the Escapes dated in the window, and cannotShow names only the ones no week lists.
+test('span: escape friction holds only Escapes dated in the window, on a read rollout too; cannotShow names only the lost ones, never one another week counts', (t) => {
+  const h = setup(t)
+  escapeFixture(h)
+  const esc = (e) => e.friction.filter((x) => x.kind === 'escape').map((x) => [x.task, x.at, x.inWindow])
+  const s = span(h)
+  const r = entryOf(s, 'r')
+  assert.equal(r.mode, 'read')
+  assert.deepEqual(esc(r), [['r-b', '2026-09-05', true]], JSON.stringify([r.friction, s.cannotShow]))
+  const inWindow = (at) => (/^\d{4}-\d\d-\d\d$/.test(at) ? at >= '2026-09-03' && at < '2026-09-10'
+    : Date.parse(at) >= Date.parse(SINCE) && Date.parse(at) <= Date.parse(UNTIL))
+  for (const x of r.friction) assert.ok(typeof x.at === 'string' && inWindow(x.at), `a friction row outside the window: ${JSON.stringify(x)}`)
+  const named = s.cannotShow.filter((c) => c.startsWith('[[r]]: '))
+  assert.deepEqual(named, [`[[r]]: 1 ${LOST}r-d 2026-08-25`], JSON.stringify(s.cannotShow))
+  // r-a's Escape is the earlier week's friction, so this week never re-names it as lost; r-c's is the next week's
+  const early = span(h, [], { since: '2026-08-17T00:00+10:00', until: '2026-08-24T00:00+10:00' })
+  assert.deepEqual([entryOf(early, 'r').mode, esc(entryOf(early, 'r'))], ['escapes-only', [['r-a', '2026-08-20', true]]])
+  assert.ok(!s.cannotShow.some((c) => c.includes('r-a 2026-08-20') || c.includes('r-c 2026-09-10')), JSON.stringify(s.cannotShow))
+  const next = span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })
+  assert.deepEqual([entryOf(next, 'r').mode, esc(entryOf(next, 'r'))], ['escapes-only', [['r-c', '2026-09-10', true]]])
+  assert.ok(!next.cannotShow.some((c) => c.startsWith('[[r]]: ')), JSON.stringify(next.cannotShow))
+})
+
+// The window check lands in span.json: a reader made to read past its window (window_escapes listing every Escape, of
+// any date) is flagged in the flags span writes, not only by window_flags() called alone.
+test('span writes the window check\'s flags to span.json: a friction reader made to read past its window is flagged there', (t) => {
+  const h = setup(t)
+  escapeFixture(h)
+  const out = path.join(h.out, 'span.json')
+  const rc = pyOut(h, ['m.Span.window_escapes = lambda self, slug, items, *rest: items  # a reader that reads past its window',
+    'print(json.dumps(m.main(a)))'].join('\n'),
+  [REFLECT, ['span', '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', out, '--since', SINCE, '--until', UNTIL]])
+  assert.equal(rc, 0)
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  assert.deepEqual(entryOf(s, 'r').friction.filter((x) => x.kind === 'escape').map((x) => x.task), ['r-a', 'r-b', 'r-c', 'r-d'])
+  assert.deepEqual(s.flags.filter((f) => f.startsWith('window: ')),
+    [`window: rollouts[r].friction holds 3 row(s) outside [${s.since}, ${s.until}], the first at 2026-08-20: a reader read past its window`],
+    JSON.stringify(s.flags))
+})
+
+test('span: rollouts holds only records with a line in the window: a record wholly before since or wholly after until is not read', (t) => {
+  const h = setup(t)
+  emitAll(h, 'in-r', byTs(life('in-a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
+  emitAll(h, 'before-r', byTs(life('before-a', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'] })))
+  emitAll(h, 'after-r', byTs(life('after-a', '2026-09-12T00:00:00Z', '2026-09-12T01:00:00Z', { lane: ['2026-09-12T01:00:00Z', '2026-09-12T01:10:00Z'] })))
+  for (const slug of ['in-r', 'before-r', 'after-r']) rolloutNote(h, slug)
+  const s = span(h)
+  assert.deepEqual(s.rollouts.map((e) => e.rollout), ['in-r'], JSON.stringify(s.rollouts.map((e) => [e.rollout, e.mode])))
+})
+
 test('span: two Project roots for one repo: the newest is read, flagged', (t) => {
   const h = setup(t)
   const second = path.join(h.home, 'clone')
@@ -862,6 +1036,73 @@ test('span: freshReview orders a swept landing by reviewedAt, so open and first/
   const [e] = span(h).freshReview
   assert.deepEqual([e.findings, e.blocking, e.open, e.first, e.last],
     [[14, 9], [2, 1], 1, at(W(3, '08:00')), at(W(3, '09:00'))], JSON.stringify(e))
+})
+
+// The window check (reflect.py's header): span flags each reported block holding a row outside its window, each row by
+// its own stamp (an instant parsed, a date-only one by date_in()), and a rollout's score by the score's own window,
+// never by span's since (a rollout is scored whole).
+test('window_flags: one flag per block holding a row outside its window; a score is held to its own window; rows on the boundaries flag nothing', (t) => {
+  const h = setup(t)
+  const S0 = '2026-09-02T14:00:00.000Z'
+  const U0 = '2026-09-09T14:00:00.000Z'
+  const ask = (at) => ({ kind: 'ask', rollout: 'r', task: 'a', at })
+  const esc = (at, inWindow) => ({ kind: 'escape', rollout: 'r', task: 'a', source: 'fixes', at, inWindow })
+  const repair = (at) => ({ kind: 'repair', rollout: 'r', task: 'a', at, date: at })
+  const lane = (startedAt) => ({ integrations: 1, lines: [{ task: 'a', startedAt }] })
+  const acts = (...ats) => ({ tasks: [{ task: 'a', acts: ats.map((at) => ({ kind: 'answer', at, detail: 'x' })) }] })
+  const entry = (rollout, friction = [], laneTime = null) => ({ rollout, friction, laneTime })
+  const doc = (o) => ({ since: S0, until: U0, rollouts: [], freshReview: [], grades: { episodes: [] },
+    attention: { questions: { items: [] } }, nights: { nights: [] }, noteOverlaps: { overlaps: [] }, cannotShow: [], flags: [], ...o })
+  const bad = doc({
+    rollouts: [entry('r', [ask('2026-09-02T13:59:00.000Z'), esc('2026-09-05', false), repair('2026-09-10'), ask(null), ask(S0)],
+      lane('2026-09-09T14:01:00.000Z')), entry('c')],
+    freshReview: [{ repo: 'o/r', branch: 'feat/x', first: '2026-09-01T00:00:00.000Z', last: '2026-09-04T00:00:00.000Z' }],
+    grades: { episodes: [{ task: 'g', inWindow: true, end: { kind: 'landed', at: '2026-09-09T15:00:00.000Z', date: null } }] },
+    attention: { questions: { items: [{ id: 'q#0', at: '2026-09-01T00:00:00.000Z' }] } },
+    nights: { nights: [{ morning: '2026-09-02T00:00:00.000Z' }] },
+    // an overlap is one row: its first in the window, its last a second past until, printed as the one outside
+    noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: '2026-09-05T00:00:00.000Z', last: '2026-09-09T14:00:01.000Z' }] },
+  })
+  const CS = '2026-09-04T00:00:00.000Z' // chain c's Leg 1 began
+  const badScores = {
+    r: { window: { since: '2026-09-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-31T23:00:00.000Z') }, // before the score's own since
+    c: { shape: 'serial', window: { since: CS, until: U0 }, handsOff: acts('2026-09-09T14:01:30.000Z'), // past until's minute
+      merges: { count: 1, tasks: [{ task: 'a', at: '2026-09-09T14:01:00.000Z' }] } },
+  }
+  const good = doc({
+    rollouts: [entry('r', [ask(S0), ask(U0), repair('2026-09-03'), esc('2026-09-03', true), esc('2026-09-09', true)],
+      lane('2026-09-10T00:00+10:00')), entry('c'), entry('n'), entry('w')], // until in another form: compared parsed
+    freshReview: [{ repo: 'o/r', branch: 'feat/y', first: S0, last: U0 }],
+    grades: { episodes: [{ task: 'g', inWindow: true, end: { kind: 'landed', at: U0, date: '2026-09-10' } },
+      { task: 'k', inWindow: true, end: { kind: 'dropped', at: null, date: '2026-09-03' } }] },
+    attention: { questions: { items: [{ id: 'q#0', at: S0 }] } },
+    nights: { nights: [{ morning: U0 }] },
+    noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: S0, last: U0 }] },
+  })
+  const goodScores = {
+    // scored whole: an act weeks before span's since, inside the score's own window, is no flag
+    r: { window: { since: '2026-08-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-02T00:00:00.000Z', U0) },
+    c: { shape: 'serial', window: { since: CS, until: U0 }, handsOff: acts('2026-09-09T14:00:30.000Z'), merges: { count: 1, tasks: [{ task: 'a', at: U0 }] } },
+    w: { window: null, handsOff: acts('2026-01-01T00:00:00.000Z') }, // no window: skipped, as n (no score) is
+  }
+  const [flags, none, unread] = pyOut(h, 'print(json.dumps([m.window_flags(d["doc"], d["scores"]) for d in a]))',
+    [REFLECT, [{ doc: bad, scores: badScores }, { doc: good, scores: goodScores }, { doc: doc({ noteOverlaps: null }), scores: {} }]])
+  const F = (block, k, bounds, first) => `window: ${block} holds ${k} row(s) outside ${bounds}, the first at ${first}: a reader read past its window`
+  const SPAN = `[${S0}, ${U0}]`
+  assert.deepEqual(flags, [
+    F('rollouts[r].friction', 4, SPAN, '2026-09-02T13:59:00.000Z'),
+    F('rollouts[r].laneTime', 1, SPAN, '2026-09-09T14:01:00.000Z'),
+    F('rollouts[r].score.handsOff', 1, `[2026-09-01T00:00:00.000Z, ${U0}]`, '2026-08-31T23:00:00.000Z'),
+    F('rollouts[c].score.handsOff', 1, `[${CS}, ${U0} + 60 s)`, '2026-09-09T14:01:30.000Z'),
+    F('rollouts[c].score.merges', 1, `[${CS}, ${U0}]`, '2026-09-09T14:01:00.000Z'),
+    F('freshReview', 1, SPAN, '2026-09-01T00:00:00.000Z'),
+    F('grades.episodes', 1, SPAN, '2026-09-09T15:00:00.000Z'),
+    F('attention.questions', 1, SPAN, '2026-09-01T00:00:00.000Z'),
+    F('nights.nights', 1, SPAN, '2026-09-02T00:00:00.000Z'),
+    F('noteOverlaps.overlaps', 1, SPAN, '2026-09-09T14:00:01.000Z'),
+  ])
+  assert.deepEqual(none, [], 'rows on the boundaries, a stamp in another form and a score read by its own window flag nothing')
+  assert.deepEqual(unread, [], 'an unread noteOverlaps (a null block) holds no row')
 })
 
 // ---- watch, raised and the Watch reader -----------------------------------------------------------------------------
@@ -1270,7 +1511,7 @@ function twoWatches(h, rid, sp) {
   ok(h, watchArgs(sp, ['a'], { rule: 'grill-fit § How a fork comes back', shape: 'a fork routed no gate' }))
 }
 
-test('decide: no task without a rule item; one task for the next Melbourne morning in task-writer § 5\'s shape; entries checked; a left-out Watch still listed', (t) => {
+test('decide: no task without a rule item; one unscheduled task in task-writer § 5\'s shape; entries checked; a left-out Watch still listed', (t) => {
   const h = setup(t)
   const [wid, one] = ids(h, [['w', RULE, SHAPE], ['w', 'grill-fit § How a fork comes back', 'a fork routed no gate']])
   const sp0 = fakeSpan(h, RID(1), ['a', 'b'])
@@ -1286,12 +1527,15 @@ test('decide: no task without a rule item; one task for the next Melbourne morni
   const dec = path.join(h.home, 'decisions.json')
   fs.writeFileSync(dec, JSON.stringify({}))
   const r = ok(h, ['decide', '--span', sp0, '--decisions', dec, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
-  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-11 (new)\n')
+  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10 (new)\n')
   const text = fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md'), 'utf8')
   const fm = text.split('---')[1]
-  for (const line of ['tags: [task, ai, decisions]', 'status: open', 'priority: high', 'scheduled: 2026-09-11', 'captured: 2026-09-10', 'launch: cc-thread']) assert.ok(fm.includes(`\n${line}\n`), line)
+  for (const line of ['tags: [task, ai, decisions]', 'status: open', 'priority: high', 'captured: 2026-09-10', 'launch: cc-thread']) assert.ok(fm.includes(`\n${line}\n`), line)
+  assert.doesNotMatch(fm, /^scheduled:/m, 'no scheduled: key: the Reflection Routine asks it, never a day page')
   assert.deepEqual(text.split('\n').filter((l) => /^## /.test(l)), ['## Notes', '## Launch', '## Resume prompt', `## Reflection ${RID(1)}`])
   assert.ok(text.includes('Conversation-gated'))
+  const notes = text.slice(text.indexOf('## Notes'), text.indexOf('## Launch'))
+  assert.ok(notes.includes('Reflection Routine'), notes)
   // ADR 0040 retired orient's batches: the decision task's note names only schedule and the reshuffle.
   assert.ok(text.includes('Never schedule or reshuffle it.'))
   assert.doesNotMatch(text, /batch or reshuffle/)
@@ -1303,7 +1547,7 @@ test('decide: no task without a rule item; one task for the next Melbourne morni
   assert.deepEqual(rlines(h).filter((l) => l.kind === 'proposal').map((l) => [l.altitude, l.id, l.vaultTask]), [['rule', wid, 'thread-skill-decisions-2026-09-10']])
 })
 
-test('decide: an open task gets a new section, scheduled: moved; a listed Watch goes under ## Still open dated by until; re-runs after midnight are byte-identical', (t) => {
+test('decide: an open task gets a new section, frontmatter untouched; a listed Watch goes under ## Still open dated by until; re-runs after midnight are byte-identical', (t) => {
   const h = setup(t)
   const sp1 = fakeSpan(h, RID(1), ['a', 'b'])
   twoWatches(h, RID(1), sp1)
@@ -1313,19 +1557,49 @@ test('decide: an open task gets a new section, scheduled: moved; a listed Watch 
   ok(h, ['decide', '--span', sp1, '--tasks-dir', h.tasks, '--now', '2026-09-11T00:10+10:00'])
   assert.equal(fs.readFileSync(p, 'utf8'), first, 'a new task: byte-identical after midnight')
   ok(h, ['close', '--span', sp1])
-  // R2 sees the same Watch again in c: the open task is appended to, its scheduled: moved
+  // R2 sees the same Watch again in c: the open task is appended to, its frontmatter untouched
   const sp2 = fakeSpan(h, RID(2), ['c'], { until: '2026-09-17T14:00:00.000Z' })
   ok(h, watchArgs(sp2, ['c']))
   const r = ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T23:50+10:00'])
-  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-18 (was 2026-09-11) (appended)\n')
+  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10 (appended)\n')
   const second = fs.readFileSync(p, 'utf8')
-  const keep = (s) => s.split('---')[1].split('\n').filter((l) => !l.startsWith('scheduled:'))
-  assert.deepEqual(keep(second), keep(first), 'every frontmatter line but scheduled: is byte-identical')
+  assert.equal(second.split('---')[1], first.split('---')[1], 'the frontmatter is byte-identical')
   const [wid] = ids(h, [['w', RULE, SHAPE]])
   assert.ok(second.includes(`## Reflection ${RID(2)}\n\nNo new rule items; still open: ${wid} (see ## Still open)`), second)
   assert.ok(second.includes(`## Still open\n\n${wid} still open 2026-09-18: Reflection ${RID(2)}, rollouts [[a]], [[b]], [[c]]`), second)
   ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-18T00:10+10:00'])
   assert.equal(fs.readFileSync(p, 'utf8'), second, 'an existing task: byte-identical after midnight')
+})
+
+// A task written before the Reflection Routine took the decision task (2026-11-03) still carries scheduled:, with a line
+// on that day's page: the next fresh section drops the key once and names the date, so the agent removes the line.
+test('decide: a legacy task\'s scheduled: is dropped on its next fresh section and named in the outcome; --dry-run shows it dropped and writes nothing; a re-run is byte-identical', (t) => {
+  const h = setup(t)
+  const sp1 = fakeSpan(h, RID(1), ['a', 'b'])
+  twoWatches(h, RID(1), sp1)
+  ok(h, ['decide', '--span', sp1, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
+  ok(h, ['close', '--span', sp1])
+  const p = path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md')
+  fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('\ncaptured: 2026-09-10\n', '\nscheduled: 2026-09-11\ncaptured: 2026-09-10\n'))
+  const legacy = fs.readFileSync(p, 'utf8')
+  assert.match(legacy.split('---')[1], /^scheduled: 2026-09-11$/m)
+  const sp2 = fakeSpan(h, RID(2), ['c'], { until: '2026-09-17T14:00:00.000Z' })
+  ok(h, watchArgs(sp2, ['c']))
+  const dry = ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00', '--dry-run'])
+  assert.match(dry.stdout, /^would write \S+thread-skill-decisions-2026-09-10\.md:/m)
+  assert.doesNotMatch(dry.stdout, /^scheduled:/m, 'the would-write text has the key dropped')
+  assert.match(dry.stdout, /\(appended; scheduled 2026-09-11 dropped\)\n$/)
+  assert.equal(fs.readFileSync(p, 'utf8'), legacy, '--dry-run leaves the task unchanged')
+  const r = ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00'])
+  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10 (appended; scheduled 2026-09-11 dropped)\n')
+  const second = fs.readFileSync(p, 'utf8')
+  const fmLines = (s) => s.split('---')[1].split('\n')
+  assert.doesNotMatch(second.split('---')[1], /^scheduled:/m)
+  assert.deepEqual(fmLines(second), fmLines(legacy).filter((l) => !l.startsWith('scheduled:')), 'every other frontmatter line unchanged')
+  assert.ok(second.includes(`## Reflection ${RID(2)}\n`), second)
+  assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-18T00:10+10:00']).stdout,
+    'decision task thread-skill-decisions-2026-09-10 (appended)\n')
+  assert.equal(fs.readFileSync(p, 'utf8'), second, 'a re-run is byte-identical')
 })
 
 test('decide: a done task at today\'s path stays byte-identical and the new task is -2; an archived namesake is skipped; --dry-run writes nothing', (t) => {
@@ -1340,7 +1614,7 @@ test('decide: a done task at today\'s path stays byte-identical and the new task
   assert.match(dry.stdout, /^would write \S+thread-skill-decisions-2026-09-10-3\.md:/m)
   assert.deepEqual(listing(h.tasks), files, '--dry-run writes no file')
   assert.equal(rlines(h).filter((l) => l.kind === 'proposal').length, 0, '--dry-run writes no line')
-  assert.equal(ok(h, ['decide', '--span', sp, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00']).stdout, 'decision task thread-skill-decisions-2026-09-10-3: scheduled 2026-09-11 (new)\n')
+  assert.equal(ok(h, ['decide', '--span', sp, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00']).stdout, 'decision task thread-skill-decisions-2026-09-10-3 (new)\n')
   assert.deepEqual(fs.readFileSync(done), before)
 })
 
@@ -1444,7 +1718,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   // R1: the trade alone writes the task
   const sp1 = tradeSpan(h, RID(1), kid, { prop, reason })
   ok(h, ['knobs', '--span', sp1])
-  assert.equal(decide(sp1, '2026-09-10T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-11 (new)\n')
+  assert.equal(decide(sp1, '2026-09-10T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10 (new)\n')
   const p = path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md')
   const first = fs.readFileSync(p, 'utf8')
   assert.ok(first.endsWith(`## Reflection ${RID(1)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`), first)
@@ -1457,7 +1731,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   // R2: still open, listed once, a ## Still open line
   const sp2 = tradeSpan(h, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
   ok(h, ['knobs', '--span', sp2])
-  assert.equal(decide(sp2, '2026-09-17T23:50+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-18 (was 2026-09-11) (appended)\n')
+  assert.equal(decide(sp2, '2026-09-17T23:50+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10 (appended)\n')
   const second = fs.readFileSync(p, 'utf8')
   assert.ok(second.includes(`## Reflection ${RID(2)}\n\nNo new trades; still open: trade ${kid} at 3 (see ## Still open)\n`), second)
   assert.ok(second.includes(`## Still open\n\ntrade ${kid} at 3 still open 2026-09-18: Reflection ${RID(2)}, rollouts [[b]]\n`), second)
@@ -1477,7 +1751,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   // R4: the same knob at a new from is a new item
   const p4 = tradeProp(kid, { from: 4, to: 5, ranAt: 4 })
   const sp4 = tradeSpan(h, RID(4), kid, { prop: p4, reason, until: '2026-09-24T14:00:00.000Z' })
-  assert.equal(decide(sp4, '2026-09-24T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-24: scheduled 2026-09-25 (new)\n')
+  assert.equal(decide(sp4, '2026-09-24T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-24 (new)\n')
   assert.ok(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-24.md'), 'utf8').includes(`${TRADE_LEAD}\n${tradeItem(kid, reason, { from: 4, to: 5 })}\n`))
   // a dropped task decides nothing: the trade is listed anew
   const h2 = setup(t)
@@ -1486,7 +1760,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   setStatus(path.join(h2.tasks, 'thread-skill-decisions-2026-09-10.md'), 'dropped')
   const d2 = tradeSpan(h2, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
   assert.equal(ok(h2, ['decide', '--span', d2, '--tasks-dir', h2.tasks, '--now', '2026-09-17T23:50+10:00']).stdout,
-    'decision task thread-skill-decisions-2026-09-17: scheduled 2026-09-18 (new)\n')
+    'decision task thread-skill-decisions-2026-09-17 (new)\n')
   assert.ok(fs.readFileSync(path.join(h2.tasks, 'thread-skill-decisions-2026-09-17.md'), 'utf8').endsWith(`## Reflection ${RID(2)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`))
 })
 
@@ -1663,7 +1937,7 @@ test('moot: a yes that cannot apply is recorded under its section; the task can 
   setStatus(p, 'done')
   const sp3 = tradeSpan(h, RID(3), kid, { prop, reason, until: '2026-09-24T14:00:00.000Z' })
   assert.equal(ok(h, ['decide', '--span', sp3, '--tasks-dir', h.tasks, '--now', '2026-09-24T09:00+10:00']).stdout,
-    'decision task thread-skill-decisions-2026-09-24: scheduled 2026-09-25 (new)\n', 'offered again at the same from')
+    'decision task thread-skill-decisions-2026-09-24 (new)\n', 'offered again at the same from')
   assert.ok(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-24.md'), 'utf8').includes(tradeItem(kid, reason)))
   const dn = reflect(h, mootArgs())
   assert.equal(dn.status, 2)
@@ -1850,7 +2124,11 @@ test('span scores a serial chain through serial-score.py (no fold, settings or s
 test('span reads a chain\'s friction from leg.py status: set-asides, a halt clear as an ask, a restart, its fixes: Escape', (t) => {
   const h = setup(t)
   chainA(h)
-  const c = entryOf(span(h, [], { since: KSINCE, until: KUNTIL }), 'chain-a')
+  // a fixer of c2 (done at 11:40) captured before the window: serial-score's escapes block holds it, the friction does not
+  fs.writeFileSync(path.join(h.tasks, 'c2-old-fix.md'), ['---', 'tags: [task]', 'status: done', 'captured: 2026-10-05', 'projects:',
+    '  - "[[Demo]]"', 'fixes: "[[c2]]"', '---', '', '## Notes', '', 'Fix c2.', ''].join('\n'))
+  const s = span(h, [], { since: KSINCE, until: KUNTIL })
+  const c = entryOf(s, 'chain-a')
   const by = (k) => c.friction.filter((x) => x.kind === k)
   const asides = Object.fromEntries(by('set-aside').map((x) => [x.task, x]))
   assert.deepEqual(Object.keys(asides).sort(), ['c2', 'c4'])
@@ -1868,6 +2146,8 @@ test('span reads a chain\'s friction from leg.py status: set-asides, a halt clea
   assert.deepEqual(by('restart').map((x) => [x.leg, x.how, x.started, x.manual, x.session, x.began, x.at]),
     [[2, 'started', 's2', null, 'r1', CZ('11:00'), CZ('10:49')]], 'one restart for its pending and started lines, at the pending one')
   assert.deepEqual(by('escape').map((x) => [x.task, x.source, x.at, x.inWindow]), [['c1', 'fixes', '2026-10-12', true]])
+  assert.ok(s.cannotShow.includes("[[chain-a]]: 1 Escape(s) dated outside the window, every one: most are another week's friction, one dated in a week that did not read the chain is in none: c2 2026-10-05"),
+    JSON.stringify(s.cannotShow))
 })
 
 test('span reads a hands-off chain with no Run record through its Leg log; one whose log is outside the window is not read', (t) => {

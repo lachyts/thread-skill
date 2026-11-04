@@ -8,7 +8,9 @@ start and with what (`sessions`), and writes each answer into its task note (`re
 the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. `preflight` is schedule's Pre-flight
 split (ADR 0047): which candidates queue, which leave with their Dependent closure, and the decision round for one
 rollout's tasks. `decided-for-you` writes the calls a grade ruled for Lachy, never asked (ADR 0054), into the tasks a
-schedule run queues. Two callers: skills/orient-all/SKILL.md, and skills/schedule/SKILL.md § 1.5 (and its serial
+schedule run queues. `rank-stamp` stamps the pass's estate rank on each rollout note it dispatches and re-stamps the
+live ones (ADR 0067 d9; CONTEXT.md **Estate rank**). Two callers: skills/orient-all/SKILL.md (§ 7 runs `rank-stamp`
+before its first `sessions`), and skills/schedule/SKILL.md § 1.5 (and its serial
 path's S3.5), which runs `slices`, `log`, `preflight`, `record` (`record --by schedule`) and `decided-for-you --by
 schedule --write`, and under orient-all only `preflight` and `decided-for-you --by orient-all --write`; orient's
 reshuffle R5.2 runs `record --owner --by orient`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
@@ -32,16 +34,21 @@ need none). Called as:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank FILE --scan FILE
         --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank FILE --plan FILE
+        [--wrote NOTE]... [--at ISO] [--vault PATH] [--dry-run]
 
 Defaults: rounds, plan and sessions take the vault from the scan's (or the plan's) `vault`; record takes
-~/repos/obsidian and the local date, decided-for-you ~/repos/obsidian and the rank's `today`. Only `slices` (its own
-files under --dir), `record` (one task note), `decided-for-you --write` (the task notes it names) and `log`
-(grades.jsonl, through run_record) write; rounds, plan, sessions, preflight and decided-for-you without --write
-write nothing and are byte-deterministic for the same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before
+~/repos/obsidian and the local date, decided-for-you ~/repos/obsidian and the rank's `today`, rank-stamp the plan's
+`vault`. Only `slices` (its own files under --dir), `record` (one task note), `decided-for-you --write` (the task notes
+it names), `log` (grades.jsonl, through run_record) and `rank-stamp` (the rollout notes it stamps; never with
+--dry-run) write; rounds, plan, sessions, preflight and decided-for-you without --write write nothing and are
+byte-deterministic for the same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before
 any sibling loads). Exit 0 when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8
-and schedule step 8 report it as a caveat); 2 on a usage error or a refusal (one `estate-dispatch:` stderr line,
+and schedule step 8 report it as a caveat), or `rank-stamp` stops at a note it cannot write (orient-all § 7 re-runs it
+once; § 8 reports a second as a caveat); 2 on a usage error or a refusal (one `estate-dispatch:` stderr line,
 nothing written): an unknown verb or flag, a scan, rank or plan that is not JSON or whose `schema` is not 1, a
-negative budget, a bad --status or --wrote, an --open naming no pick entry, an existing slice file, every record
+negative budget, a bad --status or --wrote, an --open naming no pick entry, an existing slice file, rank-stamp's bad
+--at or an --at earlier than a live stamp, every record
 refusal, an empty decided-for-you --tasks, a grade line whose field
 run_record refuses (a task whose name has no key is skipped, never refused), and preflight's own refusals (an empty
 --tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
@@ -65,8 +72,11 @@ OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live 
 § In flight stated once, and still_to_start, its one exception); `preflight` loads ER alone, for slug_key;
 reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
-rule a rollout row waits on); and, for `sessions` only, leg.py (LEG:
-split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar); and, for `log` only, run_record.py (RRec:
+rule a rollout row waits on); and, for `sessions` and `rank-stamp` only, leg.py (LEG:
+split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar, and launch_line, a Leg's launch line;
+order_key and parse_log, the rank's order, for rank-stamp) and serial-chains.py (SC: read_chain_copies and copy_folder,
+a Chain copy's folder, ADR 0067 d2; read_estate_rank, the stamp's one parser, for rank-stamp); and, for `log` only,
+run_record.py (RRec:
 check, emit, events_dir, normalise_slug, title_key, GRADE_LOG and RESERVED: the Grade log's one writer is run_record
 itself).
 
@@ -217,7 +227,9 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   6 and 13 an execute, 8 a reinstate, 7 and 11 a repair, every other number none (o10 pins the table to the rules).
   --wrote: each note a § 6 schedule fork wrote, directly in the vault's Work/Tasks (else exit 2). A parallel one
   (RR._shape) is an execute item in its Project root (no root: manual); a serial one is a `leg` item for Leg 1, in
-  its `## Queue` row 1's launch folder, manual when its alias starts `cx-` (legs.md § Hand over).
+  its `## Queue` row 1's launch folder (inside its Chain copy when the note carries `chain_copies:`, SC.copy_folder),
+  with its `launch` line (LEG.launch_line: `<alias> from <folder>` in place, a copy's paste line otherwise), manual when
+  its alias starts `cx-` (legs.md § Hand over) or its `chain_copies:` is malformed (the item's why says so).
   --status SLUG=N: SLUG one of plan.rollouts[], N an integer 1 to 13 (else exit 2). An execute item only with
   canExecute, a reinstate only with reinstate and canExecute (so a sign-off pause that every gate signed but another
   hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair (live_item); every live
@@ -239,7 +251,7 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   written-note items (in --wrote order), the live execute items by slug, the repair items by slug, the orient items
   last. A title over TITLE_MAX is cut to TITLE_MAX - 1 chars plus "…".
   Output: {schema, today, items[] {kind (execute | leg | repair | orient), rollout | project, note, title, cwd, alias?,
-  prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
+  launch?, prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
 
 log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), at
   orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
@@ -295,6 +307,33 @@ decided-for-you --rank R --tasks SLUG[,SLUG]... [--by B] [--superseding PRIOR] [
   listed in refused[] and the rest are still written, exit 0; a rerun is all unchanged. Exit 2 on a usage error, a
   rank that is not JSON or not schema 1, or an empty --tasks; 3 when --write finds no vault or no PyYAML.
 
+rank-stamp --rank R --plan P [--wrote NOTE]... [--at ISO] [--vault V] [--dry-run]: the estate rank (ADR 0067 d9;
+  CONTEXT.md **Estate rank**), orient-all § 7's step before its first `sessions`. It stamps `estate_rank: <n>` and
+  `estate_rank_at: "<pass time>"` (serial-chains.py's ESTATE_RANK_KEYS) on every note the pass wrote and re-stamps every
+  live rollout note in its current order, 1..K under one pass time, so a later pass ranks above an earlier one and a
+  full pass never flips a live pair.
+  The live set: each plan.rollouts[] note that still exists, is not dead (NA.DEAD_STATUSES: done, merged or dropped),
+  carries no `superseded` hold
+  (or `superseded_by:`) or `lineage` hold, and is no --wrote note, in leg.py's order_key order (LEG.parse_log's first
+  `began`, SC.read_estate_rank, `captured:`: a chain that has begun before one that has not, then its old stamp, then
+  the first to begin, else the earlier schedule, else slug). The rest go to excluded[] {note, why}. The new set: the
+  --wrote notes (each directly in the vault's Work/Tasks, else exit 2), by the best rank.tasks[].rank among their Queue
+  and linked members (ER.slug_key; RR._scan), a null rank last, then in --wrote order: a live run keeps its place ahead
+  of this pass's dispatches, since a pass cannot grade work in flight.
+  The pass time: --at, else now (local time, second precision, with its offset), moved to one second after the latest
+  live `estate_rank_at` when it is not later, so the pass is always later than every live stamp; an --at earlier than a
+  live stamp is exit 2.
+  The writes, in order (the live notes, then the new ones): each through RR.Note.set (after `shape:`, else
+  `protocol_version:`) and save, which re-applies the edit under the note lock to a fresh read, so an edit made since
+  the read is kept; a note whose stamp already equals (n, at) is left unchanged. The first write that fails (a lock
+  timeout, a read-only note, a note gone) stops the run: that note and every later one keep their old bytes, and the
+  order still stands, since the stamped prefix carries the newest pass and so sorts first within each tier in its old
+  relative order, the untouched suffix keeps its old keys and so its old relative order, and the tier, the key's first
+  component, never crosses. A new note left unstamped ranks below every stamped one in its tier, the safe default.
+  Output: {schema, at, stamped[] {note, rank, was ({n, at} or null)}, unchanged[], excluded[] {note, why}, failed {note,
+  why} | null, notReached[], dryRun}, each note vault-relative. Exit 1 when `failed` is set (orient-all § 7 runs the
+  line once more; a second exit 1 is § 8's caveat); --dry-run writes nothing.
+
 preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...: schedule
   § 1.5's split of its candidates (ADR 0047). It reads only the two files. --tasks is every candidate, deduplicated
   by ER.slug_key in first-seen order (a scan task is shown by its scan slug); --kept, --decided and --dep (each
@@ -347,6 +386,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 ESTATE_RANK_PY = os.path.join(HERE, "estate-rank.py")
 LEG_PY = os.path.join(SKILLS, "execute", "scripts", "leg.py")
+SERIAL_CHAINS_PY = os.path.join(HERE, "serial-chains.py")
 RUN_RECORD_PY = os.path.join(HERE, "run_record.py")
 
 SCHEMA = 1
@@ -487,6 +527,7 @@ class Mods:
         self.NA = self.RT.NA
         self.RR = load("thread_reconcile_rollout", self.ES.RECONCILE_ROLLOUT_PY)
         self.LEG = load("thread_leg", LEG_PY) if leg else None
+        self.SC = load("thread_serial_chains", SERIAL_CHAINS_PY) if leg else None
 
 
 # ---- values ------------------------------------------------------------------------------------------------------
@@ -1739,13 +1780,21 @@ def cmd_sessions(args):
             fail(2, "--wrote %s: %s" % (full, e))
         if RR._shape(note) == "serial":
             alias, folder = queue_row1(M, note)
+            bad = None
+            try:   # ADR 0067 d2: a chain in Chain copies opens Leg 1 in row 1's folder inside its copy
+                pairs = M.SC.read_chain_copies(note)
+            except ValueError as e:
+                pairs, bad = None, "chain_copies: %s: fix the note" % e
+            copy = M.SC.copy_folder(folder, pairs) if pairs and folder else None
             items.append({"kind": "leg", "rollout": slug, "note": rel, "title": titled("Leg 1: %s" % slug),
-                          "cwd": os.path.expanduser(folder) if folder else None, "alias": alias,
+                          "cwd": copy or (os.path.expanduser(folder) if folder else None), "alias": alias,
+                          "launch": M.LEG.launch_line(alias, folder, copy) if alias and folder else None,
                           "prompt": "/thread:execute [[%s]]\nLeg 1 of the serial chain; the brief is the rollout "
                                     "note: %s" % (slug, full),
                           "tldr": "Leg 1 of the serial rollout orient-all scheduled this pass. It works the chain's "
                                   "first tasks and hands the rest on.",
-                          "manual": not alias or alias.startswith("cx-") or not folder, "why": "written this pass"})
+                          "manual": bool(bad) or not alias or alias.startswith("cx-") or not folder,
+                          "why": bad or "written this pass"})
         else:
             m = RR.PROJECT_ROOT_RE.search(note._body)
             cwd = os.path.expanduser(m.group(1).strip()) if m else None
@@ -1815,6 +1864,128 @@ def cmd_sessions(args):
                         "manual": False, "why": "ticked on the pick list"})
     emit({"schema": SCHEMA, "today": today, "items": items + executes + repairs + orients, "left": left,
           "unmatched": unmatched})
+
+
+# ---- rank-stamp (ADR 0067 d9) ---------------------------------------------------------------------------------------
+
+def queue_slugs(M, note):
+    """The slugs the `## Queue` table's rows link, in order, read with leg.py's own row grammar."""
+    LEG, out = M.LEG, []
+    found = note._section_bounds(LEG.QUEUE)
+    if found is None:
+        return out
+    lines, start, end = found
+    for k in range(start + 1, end):
+        cells = LEG.split_cells(lines[k])
+        m = LEG.LINK_RE.search(cells[1]) if len(cells) >= 3 else None
+        if m:
+            out.append(m.group(1).strip())
+    return out
+
+
+def cmd_rank_stamp(args):
+    rank = read_rank(args.rank)
+    plan = read_json(args.plan, "plan", PLAN_SCHEMA)
+    if not isinstance(plan.get("rollouts"), list):
+        fail(2, "the plan %s has no rollouts list" % args.plan)
+    M = Mods(leg=True)
+    RR, LEG, SC, ER = M.RR, M.LEG, M.SC, M.ER
+    LEG.rr, LEG.sc = RR, SC   # order_key and parse_log read through them, as leg.py's main sets them
+    vroot = vault_root(args.vault, plan)
+    tasks_dir = os.path.realpath(os.path.join(vroot, M.NA.TASKS_DIR))
+    rel = lambda full: os.path.relpath(full, vroot).replace(os.sep, "/")  # noqa: E731
+    wrote = []
+    for p in args.wrote or []:
+        full = os.path.realpath(os.path.expanduser(p))
+        if os.path.dirname(full) != tasks_dir or not full.endswith(".md") or not os.path.isfile(full):
+            fail(2, "--wrote %s: not a note directly in %s" % (p, tasks_dir))
+        if full not in wrote:
+            wrote.append(full)
+    at_ts = None
+    if args.at is not None:
+        at_ts = RR._parse_ts(args.at)
+        if at_ts is None or not re.match(r"\d{4}-\d{2}-\d{2}T", args.at.strip()):
+            fail(2, "--at %r is not an ISO time" % args.at)
+    stamp_of = lambda note: SC.read_estate_rank(note, RR._parse_ts)  # noqa: E731
+    live, excluded = [], []
+    for r in plan["rollouts"]:
+        if not isinstance(r, dict) or not isinstance(r.get("note"), str):
+            continue
+        full = os.path.realpath(os.path.join(vroot, *r["note"].split("/")))
+        if full in wrote:
+            continue
+        holds = r.get("holds") if isinstance(r.get("holds"), list) else []
+        why, note = None, None
+        if not os.path.isfile(full):
+            why = "gone"
+        else:
+            try:
+                note = RR.Note(Path(full))
+            except (OSError, ValueError, UnicodeDecodeError) as e:
+                why = "unreadable: %s" % e
+        if why is None and RR._status(note) in M.NA.DEAD_STATUSES:   # the vault grammar's one dead set: done, dropped
+            why = RR._status(note)
+        if why is None and ("superseded" in holds or RR._valued(note.get("superseded_by"))):
+            why = "superseded"
+        if why is None and "lineage" in holds:
+            why = "lineage"
+        if why is not None:
+            excluded.append({"note": rel(full), "why": why})
+            continue
+        began = next((e["stamp"] for e in LEG.parse_log(note) if e["kind"] == "began"), None)
+        live.append((LEG.order_key(os.path.basename(full)[:-3], began, stamp_of(note), note.get("captured")), full,
+                     note))
+    live.sort(key=lambda x: x[0])
+    ranks = {}
+    for t_ in rank["tasks"]:
+        if isinstance(t_, dict) and isinstance(t_.get("slug"), str) and isinstance(t_.get("rank"), int) \
+                and not isinstance(t_.get("rank"), bool):
+            k = ER.slug_key(t_["slug"])
+            ranks[k] = min(ranks.get(k, t_["rank"]), t_["rank"])
+    new = []
+    for i, full in enumerate(wrote):
+        try:
+            note = RR.Note(Path(full))
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            fail(2, "--wrote %s: %s" % (full, e))
+        members = [ER.slug_key(s) for s in queue_slugs(M, note)]
+        members += [p.stem.lower() for p, _n in RR._scan(Path(full), Path(tasks_dir))[0]]
+        best = min((ranks[s] for s in members if s in ranks), default=None)
+        new.append(((best is None, best or 0, i), full, note))
+    new.sort(key=lambda x: x[0])
+    stamps = [s["ts"] for s in (stamp_of(n) for _k, _f, n in live) if s]
+    latest = max(stamps) if stamps else None
+    if at_ts is not None:
+        if latest is not None and at_ts.timestamp() < latest:
+            fail(2, "--at %s is earlier than a live rollout's estate_rank_at: a pass time is never earlier than a live "
+                    "stamp" % args.at)
+        pass_at = at_ts
+    else:
+        pass_at = datetime.datetime.now().astimezone().replace(microsecond=0)
+        if latest is not None and pass_at.timestamp() <= latest:
+            pass_at = datetime.datetime.fromtimestamp(int(latest) + 1).astimezone()
+    at = pass_at.isoformat(timespec="seconds")
+    stamped, unchanged, failed, not_reached = [], [], None, []
+    for n, (_k, full, note) in enumerate(live + new, 1):
+        if failed is not None:
+            not_reached.append(rel(full))
+            continue
+        was = stamp_of(note)
+        if was is not None and was["n"] == n and was["at"] == at:
+            unchanged.append(rel(full))
+            continue
+        if not args.dry_run:
+            try:
+                note.set("estate_rank", str(n), after=("shape", "protocol_version"))
+                note.set("estate_rank_at", '"%s"' % at, after=("estate_rank",))
+                note.save()   # under the note lock, re-applied to a fresh read: an edit made since the read is kept
+            except (OSError, ValueError) as e:
+                failed = {"note": rel(full), "why": "%s: %s" % (type(e).__name__, e)}
+                continue
+        stamped.append({"note": rel(full), "rank": n, "was": {"n": was["n"], "at": was["at"]} if was else None})
+    emit({"schema": SCHEMA, "at": at, "stamped": stamped, "unchanged": unchanged, "excluded": excluded,
+          "failed": failed, "notReached": not_reached, "dryRun": bool(args.dry_run)})
+    return 1 if failed is not None else 0
 
 
 # ---- record ------------------------------------------------------------------------------------------------------
@@ -2445,6 +2616,13 @@ def parse(argv):
     lg.add_argument("--rank", required=True)
     lg.add_argument("--scan", required=True)
     lg.add_argument("--dry-run", action="store_true")
+    rs = sub.add_parser("rank-stamp", allow_abbrev=False)
+    rs.add_argument("--rank", required=True)
+    rs.add_argument("--plan", required=True)
+    rs.add_argument("--wrote", action="append", default=[])
+    rs.add_argument("--at")
+    rs.add_argument("--vault")
+    rs.add_argument("--dry-run", action="store_true")
     pf = sub.add_parser("preflight", allow_abbrev=False)
     pf.add_argument("--rank", required=True)
     pf.add_argument("--scan", required=True)
@@ -2454,7 +2632,8 @@ def parse(argv):
     pf.add_argument("--dep", action="append", default=[])
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: slices | rounds | plan | sessions | record | decided-for-you | log | preflight")
+        fail(2, "a verb is required: slices | rounds | plan | sessions | record | decided-for-you | log | preflight | "
+                "rank-stamp")
     if args.verb == "rounds":
         for flag in ("budget", "top"):
             v = getattr(args, flag)
@@ -2470,13 +2649,12 @@ def parse(argv):
 
 
 VERBS = {"slices": cmd_slices, "rounds": cmd_rounds, "plan": cmd_plan, "sessions": cmd_sessions, "record": cmd_record,
-         "decided-for-you": cmd_decided, "log": cmd_log, "preflight": cmd_preflight}
+         "decided-for-you": cmd_decided, "log": cmd_log, "preflight": cmd_preflight, "rank-stamp": cmd_rank_stamp}
 
 
 def main(argv):
     args = parse(argv)
-    VERBS[args.verb](args)
-    return 0
+    return VERBS[args.verb](args) or 0
 
 
 if __name__ == "__main__":

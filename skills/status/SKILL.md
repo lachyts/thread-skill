@@ -24,7 +24,10 @@ reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, fo
 `parallel_ceiling:`, the operator's rollout settings (`~/.config/thread/rollouts.toml`), and the Away state file
 (`~/.config/thread/away.json`, a read inside `reconcile-rollout.py status`, for § 4's Trickle line and the ETA's
 width; never through `next`), with the leads' leases (`~/.config/thread/leases/*.json`, the same read, p28-4) and,
-only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read-only `sysctl`). Status itself runs
+only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read-only `sysctl`). While Away runs to the
+Morning, the same read also reads the Run record's folded call journals (every `<rollout>.jsonl` in its events dir)
+for the last starts' history (`skills/execute/away.md` § The last starts, p28-7: § 2's `lastStart` and `lastStarts`).
+Status itself runs
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
@@ -134,7 +137,10 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
   hold or none: `_shared/vault-grammar.md` § Approved queue; § 3's Hold until flag), `chainStart` (`{prior, pr}`
   when this note is a chain's new note whose start was never stamped, else null; § 3's **Approved queue,
-  unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `ceilingError` (why `ceiling` is null: an invalid
+  unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `lastStarts` (the last starts as `next`
+  reads them, `{morning, kinds}`: `morning` the Morning they look toward, ISO 8601 at the local offset, or null when
+  they do not apply, and `kinds` each kind the rows' checks read, `{usualMinutes, history}`;
+  `skills/execute/away.md` § The last starts; § 4's Trickle line and the Queued row), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
   `ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise), both for § 3's
   Ceiling unresolved flag;
@@ -142,6 +148,13 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   `waitingOn`, `blockerSummary`, `rung` and `rungDrift`. Each also carries `holdUntil`: the task's own PR hold,
   the same shape as the rollout's, or null, reported whatever the task's state. A set-aside task whose note holds a `## Needs you`
   question (a gate included) also carries `needsHuman`: that question, normalised; the key is absent otherwise.
+  Each also carries `lastStart` (p28-7): on a `queued` row with no `waitingOn`, the `last start: …` reason `next`
+  would hold its start on (its kind's usual length, or the two-hour fallback with no history, would run it past the
+  Morning), else null. It is null on every row while the rollout is paused, a pause is requested, `mainRed` stands
+  or a `gitEnvHold` of scope `rollout` stands (those hold every row themselves), and while the last starts do not
+  apply. It reads the row once a Slot frees: a row whose ceiling or Away cap is also full, or one the Heat hold
+  holds (a hot Mac's `slotLimit` is 0), still shows it, though `next` names `ceiling:`, `away cap:` or `heat:`
+  first. An older engine's output has no `lastStart` or `lastStarts` key: the row then reads as a plain queued row.
   A task set aside at Integration whose latest run opens a named marker also carries `integrationBlock`:
   `conflict` (an **Integration conflict**, `integration: conflict unresolved in …`, its resolution brief beneath)
   or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise. An
@@ -188,9 +201,9 @@ it counts), `none` (no lease file: an older snapshot, still counted) or `unreada
 last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where they do not apply. Status writes no
 lease. `elsewhere` and `running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The
 Trickle, *Trickle claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's
-life): while another lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still
-holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The Trickle, *A fair
-share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
+life): while another lead's starts or seeded revises are claimed but not yet stamped, `status` shows room on the
+Mac that `next` still holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The
+Trickle, *A fair share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
@@ -423,12 +436,18 @@ names, once, then ` — lane only`, or ` — whole rollout` when an entry reads 
 Away state). Not Away: `Trickle: not Away · N <limit> · <running>/<limit> tasks running on this Mac (<here> here[,
 <n> in [[<r>]]…]) · away.json <fresh until <until> | missing: the default | stale: <why>, read as not Away, Trickle
 2 | unreadable: <why>, read as not Away, Trickle 2>`. Away: `Trickle: Away until <until> · the Away cap <awayCap>
-holds (N <limit> by day) · <running>/<awayCap> tasks running on this Mac (…) · away.json fresh`. When `running`
+holds (N <limit> by day) · <running>/<awayCap> tasks running on this Mac (…) · away.json fresh`, then ` · the last
+starts hold toward the Morning at <trickle.morning>` when `lastStarts.morning` is set (p28-7). When `running`
 reaches the cap in force (`limit` not Away, `awayCap` Away) the count adds `: full, new starts wait (a meant wait,
 never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, never a blocker. The lease (p28-4)
 appends, in this order: `· not counted (lease lapsed): <n> in [[<r>]]…` when `lapsed` is non-empty; `· this lead's
 lease lapsed at <lapsesAt>: its in_progress tasks hold no room` when `lease.state` is `lapsed`; `· lease held by the
-room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing.
+room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing. The Capacity (ADR 0067 d8;
+`skills/execute/away.md` § Capacity), from `trickle.capacity`: while it is in force (`inForce`), `limit` and `awayCap`
+are its C, so the line reads `Capacity <limit>` in place of `N <limit>` (and of `the Away cap <awayCap>` Away), its
+count elsewhere naming each serial chain's counted Leg claims too, and appends `· capacity.json fresh (C <limit> of
+max <max>)`; a `stale` or `unreadable` reading, or a fresh one with `maxWhy`, appends `· capacity.json <file>: <why>,
+read as the Trickle`; a missing one adds nothing. Status reads no quota (its session is not the lead's).
 
 **The Moving line**, right under the Trickle line, from § 2's *Moving*: `Moving: <verdict> <cause> (<ageMinutes>m since
 the last life sign)` (no cause for `moving`; `no life sign` when `ageMinutes` is null), then ` · until <until>` when it
@@ -451,7 +470,7 @@ holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
 | `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3); with `originWait`: `waiting on the origin lane (<origin>) since <since>` in place of the time in the lane (another project's Integration holds the origin; ADR 0064) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
-| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
+| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else `lastStart` (`<reason>`: held toward the Morning; it starts once the Morning passes; a shorter row below may start meanwhile) when it is set, else "next free slot" |
 | `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below); a task set aside at Integration names its `integrationBlock`: `Integration conflict → …` in place of `at Integration → …` for `conflict`, `at Integration, verifier red → …` for `red` |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
@@ -786,7 +805,32 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
-  Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
+  A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (by rank: a chain that has
+  begun before one that has not, then its estate rank, then the first to begin, else the earlier schedule or the slug
+  order: ADR 0067 d9) and holds an unlanded row (in Chain copies, a done row it has not yet landed: ADR 0067 d3) on
+  that place, where between two chains in Chain copies a code file counts only as a row in progress or a done row not
+  yet landed, and only while [[<B>]] has no open Leg (with one open, they meet at claim by rank, so the blocker clears
+  once [[<B>]]'s Leg opens: run [[<B>]]); or, when either
+  chain works that checkout in place (no `chain_copies:`), [[<B>]] comes first and still has unlanded rows in a
+  checkout this Leg works, even when the two share no file (the commonest: a never-begun lower-slug chain that nobody
+  starts blocks a higher-slug one this way, so name "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open
+  Leg writes that place or (when either chain works it in place) works that checkout; or [[<B>]] was scheduled on a
+  place this chain released while it was stuck (ADR 0060's yield); or [[<B>]]'s chain is unreadable, so it holds its
+  whole claim (fail closed: `/thread:status [[<B>]]` names why; fix its note). Two chains in their own Chain copies
+  (ADR 0067 d2) never stand at checkout level: they meet only file to file.
+  A `chain copy missing: <C> (…)` blocker reads "its Chain copy <C> is gone: run the command the blocker names (it
+  remakes the copy on its branch, its commits kept), then start Leg <restart.leg>"; a `chain_copies: <why>: fix the
+  note` blocker is shown as it is. In a chain with `chain_copies:`, `restart.cwd` and
+  `restart.launch` are already inside the copy: print the launch line as it is, never the alias itself.
+  Its `prompt` is printed, fenced, only where an action below hands it to Lachy. A restart whose fresh Leg would
+  only wait on another chain's code file (`restart.task` a row `next` reads as a `wait`, ADR 0067 d9) is still a
+  restart: the Leg begins and waits at claim, inside its turn. A serial `next` of action `wait` with kind `capacity` or
+  `quota` (ADR 0067 d8: Capacity is in force and the Mac has no room for one more task, or its Login is inside its
+  line) renders "waits for room on the Mac: <why>" (or "waits on its Login's quota: <why>"): a meant wait, nothing to
+  do; its Leg's turn ends `waiting` and its own background wait wakes it.
+- **Rank** (ADR 0067 d9), from `rank`: `estate rank <stamp.n> (<stamp.at>)`, or `unstamped` (a WARN line when
+  `rank.warn` is set), then, in a chain with `chain_copies:`, its place `pos` among the copied chains and `lifts`, each
+  `standing` line as `<kind> on [[<task>]] since <at>`, and each `contention.held` row with its `why`. No block in place.
 - **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
   with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those
   places now. On resume the chain reclaims them, and waits its turn for any that another rollout took meanwhile. Scope
@@ -818,13 +862,17 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
   this plugin's own checkout (begin refuses it, ADR 0040): a Complete Leg works no row".
 - S10 `stopped` → `/thread:execute [[<rollout>]]` as `restart.launch` when you want it to go on (with no `restart`,
   only set-aside rows are left: S12's repair). A `stall` here is the stopped Leg's claim: that Leg's `begin`
-  inherits it, so its needs-you item's `/thread:repair` would start the same Leg.
+  inherits it, so its needs-you item's `/thread:repair` would start the same Leg. A Leg stopped by a stalled rank
+  wait (`rank wait: …`) whose restart reads `surface held by [[<B>]]`, on a holder with no open Leg, starts once
+  [[<B>]]'s Leg opens.
 - S11 `stalled` → `/thread:repair [[<rollout>]]`.
 - S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
   Meanwhile it holds only the surfaces its Hold block lists (ADR 0060), so other rollouts carry on beside it.
 - S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`; with `restart.blockedBy`
-  `surface held by [[<B>]] (<token>)`, the chain waits its turn: wait for [[<B>]] to land its rows there
-  (`/thread:status [[<B>]]`), then run it.
+  `surface held by [[<B>]] (<token>)`, the chain waits its turn (whichever cause, ADR 0067 d4): wait for [[<B>]] to
+  land its rows there, or for its open Leg to close when the line names one (`/thread:status [[<B>]]`), then run it;
+  on a code file between two chains in Chain copies held by a [[<B>]] with no open Leg, it clears once [[<B>]]'s Leg
+  opens (ADR 0067 d9).
 
 The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
 restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is
@@ -853,7 +901,8 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
   `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
   more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
 - `waiting`, its cause the meant wait: `sign-off`, `paused`, `room-stop`, `not-started`, `merge-hold`,
-  `regenerating`, `cool-down`, `heat`, `away-cap`, `trickle`, `last-start`, `approved-queue`, `pr-hold`, or `you`
+  `regenerating`, `cool-down`, `heat`, `quota` (ADR 0067 d8), `away-cap`, `trickle`, `last-start`, `approved-queue`,
+  `pr-hold`, or `you`
   (Lachy's: a kept whole halt, an end-of-run verdict, `next` refusing the rollout).
 - `skip`: a serial, superseded, done, dropped or archived rollout.
 
@@ -872,9 +921,12 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
   - `regenerating`: 120 min from the last life sign, judged in place of stall-after whatever else runs beside it, so a
     dead lead under a regenerate is caught at 120 min, never 45;
 - judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
-- judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `away-cap`, `trickle` (a
+- judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `quota`, `away-cap`, `trickle` (a
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
-  held joins the reading and silence judges it;
+  held joins the reading and silence judges it. `quota` is the lead's Login, never the reader's: `moving` runs `next`'s
+  dry run with the Login the lead's own lease names (`login`, `skills/execute/away.md` § Capacity), and only while that
+  lease holds (fresh, or a standing room stop); a lapsed, missing or loginless lease reads no quota, so a dead lead's
+  quota-held rows read as work and turn `stalled` past the bound, and the Companion recovers it;
 - never judged by silence, because it is his act or no lead runs:
   - `paused`: a stamped pause, or a soft pause `next` reads as drained (`halt: paused`). A soft pause behind a lane
     verdict is not drained (the note keeps `integrating:`) and reads `you` with the lane's reason, so the ack owed is
@@ -902,6 +954,7 @@ reads beside it:
 |---|---|
 | `<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>` | `waiting cool-down`, `until` the earliest |
 | `heat: the Mac is hot (<heat.name>)` | `waiting heat` |
+| `quota: <login> is inside its line` (the quota hold, ADR 0067 d8: the lead's Login inside its line while Capacity is in force) | `waiting quota`, the Login the lead's lease names while it holds, never the reader's |
 | `trickle: <trickle.running>/<trickle.limit> tasks running on this Mac` | `waiting trickle` |
 | `away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac` | `waiting away-cap` |
 | `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |

@@ -292,6 +292,20 @@ test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refus
   assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'no refused line was written')
 })
 
+test('p36-7: idle-slots hold-quota and a slot-taken cap set by the Capacity (by: capacity) are accepted; by other is refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-quota', free: 3, settings: SETTINGS })], { env: EV(home) })
+  const cap = { away: false, n: 5, file: 'missing', by: 'capacity' }
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'slot-taken', '--json', JSON.stringify({ settings: SETTINGS, start: 'start', cap })], { env: EV(home) })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.kind, a.reason, b.cap], ['idle-slots', 'hold-quota', cap])
+  const r = cli(home, ['emit', '--rollout', 'r', '--task', 't2', '--kind', 'slot-taken', '--json',
+    JSON.stringify({ settings: SETTINGS, cap: { ...cap, by: 'other' } })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*cap.*\n$/)
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'the refused line was not written')
+})
+
 test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })
@@ -709,6 +723,12 @@ test('a tuning with binding trickle-bound (p28-6) is recorded; an unknown bindin
   assert.equal(lines(path.join(ev(home), 'tunings.jsonl'))[0].binding, 'trickle-bound')
 })
 
+test('a tuning with binding last-start-bound (p28-7) is recorded', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ binding: 'last-start-bound' }))], { env: EV(home) })
+  assert.equal(lines(path.join(ev(home), 'tunings.jsonl'))[0].binding, 'last-start-bound')
+})
+
 test('a tuning with a null activeStart and activeEnd (no running time) is recorded', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ window: { since: WINDOW.since, until: WINDOW.until, activeStart: null, activeEnd: null } }))], { env: EV(home) })
@@ -1119,7 +1139,7 @@ print(json.dumps(out))`, { env: EV(home), args: [JSON.stringify([
   assert.ok(!fs.existsSync(ev(path.join(home, 'other'))), 'check never creates the events dir')
 })
 
-test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds all four record files', (t) => {
+test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds all five record files', (t) => {
   const home = tmpHome(t)
   const rs = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
   const r = api(home, `
@@ -1128,8 +1148,58 @@ print(json.dumps([list(m.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED), m.GRADE_
   assert.equal(r.status, 0, r.stderr)
   const [mine, theirs, reserved, gradeLog] = JSON.parse(r.stdout)
   assert.deepEqual(mine, theirs)
-  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades'])
+  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades', 'overlaps'])
   assert.equal(gradeLog, 'grades')
+})
+
+// ---- the Note overlap's kind (ADR 0067 d6; hooks/vault-note-overlap.py) -------------------------------------------
+
+const OVERLAP = { note: 'Days/2026/2026-11/2026-W45/2026-11-03 Tue.md', holderRollout: 'ra', holderTask: 'a1',
+  holderSince: '2026-11-03T10:00:00.123456Z', tool: 'Edit', via: 'agent' }
+
+test('note-overlap (ADR 0067 d6) lands in overlaps.jsonl only, its rollout and task the editing run\'s', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, 'print(m.emit("[[rb]]", "note-overlap", "b1", json.loads(sys.argv[2]), strict=True))', { env: EV(home), args: [JSON.stringify(OVERLAP)] })
+  assert.equal(r.stdout, 'True\n', r.stderr)
+  const { holderSince, tool, via, ...bare } = OVERLAP
+  emitOk(home, ['--rollout', 'rb', '--task', 'b2', '--kind', 'note-overlap', '--json', JSON.stringify(bare)], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['overlaps.jsonl'], 'never rb.jsonl: no rollout\'s record grows a line')
+  const [a, b] = lines(path.join(ev(home), 'overlaps.jsonl'))
+  assert.deepEqual([a.v, a.rollout, a.task, a.kind, a.note, a.holderRollout, a.holderTask, a.holderSince, a.tool, a.via],
+    [1, 'rb', 'b1', 'note-overlap', OVERLAP.note, 'ra', 'a1', OVERLAP.holderSince, 'Edit', 'agent'])
+  assert.deepEqual([b.task, 'holderSince' in b, 'tool' in b, 'via' in b], ['b2', false, false, false])
+})
+
+test('note-overlap refusals: exit 2, one line and nothing written; `overlaps` is no rollout', (t) => {
+  const home = tmpHome(t)
+  const cases = [
+    ['no task', OVERLAP, ['--rollout', 'rb']],
+    ['no rollout', OVERLAP, ['--task', 'b1']],
+    ['a reserved holderRollout', { ...OVERLAP, holderRollout: 'overlaps' }],
+    ['a holderRollout that is no slug', { ...OVERLAP, holderRollout: 'Run A' }],
+    ['a holderTask that is no slug', { ...OVERLAP, holderTask: 'A1' }],
+    ['an empty note', { ...OVERLAP, note: '' }],
+    ['a blank note', { ...OVERLAP, note: '   ' }],
+    ['a note over 400 characters', { ...OVERLAP, note: 'x'.repeat(401) }],
+    ['a tool outside Edit, Write and MultiEdit', { ...OVERLAP, tool: 'Bash' }],
+    ['a via outside agent and leg', { ...OVERLAP, via: 'shell' }],
+    ['a holderSince that is no UTC Z stamp', { ...OVERLAP, holderSince: '2026-11-03T10:00+11:00' }],
+    ['no holderTask', (({ holderTask, ...rest }) => rest)(OVERLAP)],
+  ]
+  for (const [name, fields, extra = ['--rollout', 'rb', '--task', 'b1']] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', 'note-overlap', '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, name)
+    assert.deepEqual(listing(ev(home)), [], name)
+  }
+  for (const args of [['--rollout', 'overlaps', '--kind', 'resumed'], ['--rollout', '[[Overlaps]]', '--task', 't', '--kind', 'ready'],
+    ['--rollout', 'overlaps', '--task', 'b1', '--kind', 'note-overlap', '--json', JSON.stringify(OVERLAP)],
+    ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[overlaps]]"}']]) {
+    const r = cli(home, ['emit', ...args], { env: EV(home) })
+    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`)
+    assert.match(r.stderr, /reserved/)
+    assert.deepEqual(listing(ev(home)), [])
+  }
 })
 
 // ---- the Grade log's kind (p25-4, ADR 0041) ---------------------------------------------------------------------

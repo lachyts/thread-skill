@@ -380,6 +380,14 @@ test('L1 controls: a sign-off pause re-moded hard moves its 2 h to other; a quot
     [0.5, { 'usage-limit': 0.5 }, 0.75, 30.75])
 })
 
+test('L1 controls (p36-7): the hold-heat stretch re-marked hold-quota (the quota hold) moves its 1 h from load to quota-bound', (t) => {
+  const h = setup(t)
+  fixture(h, { 'l-caps': FIXTURE['l-caps'].map((e) => (e[1] === 'idle-slots' && e[3].reason === 'hold-heat' ? [e[0], e[1], e[2], idle('hold-quota')] : e)) })
+  const b = ledgerCli(h, LSINCE, LUNTIL)
+  assert.equal(b.row.byCause['quota-bound']['hold-quota'], 1, 'the quota hold is quota-bound')
+  assert.equal(b.row.byCause.load['hold-heat'] ?? 0, 0, 'and no longer load')
+})
+
 test('L1: a stop open across a window with no line in it is counted on a live rollout, to until; archived, it ends at its last line', (t) => {
   const h = setup(t)
   emitAll(h, 'l-open', [
@@ -443,7 +451,10 @@ function span(h, since, until) {
   const out = path.join(dir, 'span.json')
   // --now (tests only) is until itself: a reading of November runs on any day, never clamped to the clock
   ok(h, ['span', '--since', since, '--until', until, '--now', until, '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', out])
-  return { out, s: JSON.parse(fs.readFileSync(out, 'utf8')), dir }
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  // the window check (reflect.py's header): a `window: ` flag is a reader that read past its window, in any reading
+  assert.ok(!s.flags.some((f) => f.startsWith('window: ')), JSON.stringify(s.flags))
+  return { out, s, dir }
 }
 
 // An archived rollout on `day` with 2 h of nothing running and no marker between two Slots: stalls/unexplained tops it.
@@ -521,7 +532,7 @@ test('L3 and L4: the baseline seeds once; a class topping two readings running o
   assert.deepEqual([closeLine(h, r2.s.reflection).counts.newWatches, closeLine(h, r2.s.reflection).quiet], [1, false])
   // reading 3: it recurs (two readings), and decide writes the rule item
   const r3 = reading(h, 3)
-  assert.match(r3.decide, /^decision task thread-skill-decisions-2026-09-22: /)
+  assert.match(r3.decide, /^decision task thread-skill-decisions-2026-09-22 /)
   const task = path.join(h.tasks, 'thread-skill-decisions-2026-09-22.md')
   assert.match(fs.readFileSync(task, 'utf8'), new RegExp(`^- ${wid}: rule ADR 0051: a class that tops the Time-lost ledger two readings running; shape stalls tops the Time-lost ledger; rollouts \\[\\[w2\\]\\], \\[\\[w3\\]\\]`, 'm'))
   assert.equal(closeLine(h, r3.s.reflection).counts.rules, 1)
@@ -764,7 +775,7 @@ test('L7: an audit with gaps and no rule item writes the decision task with its 
     { what: 'a stale paused: stamp reads as Lachy\'s pause', evidence: '## Pause log, 2026-10-30' }]))])
   refused(h, ['close', '--span', sp.out, '--tasks-dir', h.tasks], /audit gap 1, 2 of 2026-11 have no decision task line from this Reflection: run decide\n$/)
   const d = ok(h, ['decide', '--span', sp.out, '--decisions', writeJson(sp.dir, 'd.json', {}), '--tasks-dir', h.tasks, '--now', '2026-11-05T13:00+11:00'])
-  assert.match(d.stdout, /^decision task thread-skill-decisions-2026-11-05: scheduled \S+ \(new\)\n$/)
+  assert.match(d.stdout, /^decision task thread-skill-decisions-2026-11-05 \(new\)\n$/)
   const task = path.join(h.tasks, 'thread-skill-decisions-2026-11-05.md')
   const text = fs.readFileSync(task, 'utf8')
   const sec = section(text, new RegExp(`^## Reflection ${rid}$`))
