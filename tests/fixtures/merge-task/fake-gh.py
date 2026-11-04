@@ -25,6 +25,16 @@ State (a missing file takes the default in brackets):
                           base.cur records the last one served. err.ref: transient.
   compare [ahead]         compare/A...B status. err.compare: "HTTP 404" in it ⇒ the 404 form, else transient.
   err.commits             transient error for commits/<oid> (unknown oid ⇒ the 404 form).
+  branch                  branches/<b>, merge-task's required-gate read 1 (ADR 0069 d1; <b> must be one path segment that
+                          unquotes to the default branch, else rc 99). Absent ⇒ protected with a required `ci` check;
+                          `unprotected` ⇒ lachyts/chorus's live shape (private, free plan: protected false, enforcement
+                          off); `ruleset` ⇒ lachyts/thread-skill's (protected true by a ruleset, classic protection off);
+                          `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form; `404-branch` ⇒ "Branch
+                          not found"; `403-integration` ⇒ "Resource not accessible by integration"; `403-rate` ⇒ the
+                          primary rate limit. err.branch: its text, rc 1, on every read.
+  rules                   rules/branches/<b>, read 2 (the same segment check). Absent ⇒ []; a JSON array literal ⇒
+                          served as-is; `403-plan` ⇒ chorus's live "Upgrade to GitHub Pro" text; `403-rate` ⇒ the
+                          secondary rate limit; `404` ⇒ the Not Found form. err.rules: its text, rc 1, on every read.
   inflight [0]            actions/runs in-flight count.
   checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
                           sticky; absent ⇒ rc 0 with one passing row.
@@ -51,6 +61,7 @@ import os
 import subprocess
 import sys
 import time
+from urllib.parse import unquote
 
 args = sys.argv[1:]
 ST = os.environ["MT_STATE"]
@@ -396,6 +407,62 @@ if args[:1] == ["api"]:
         sys.exit(0)
     if len(parts) >= 5 and parts[3:5] == ["actions", "runs"]:
         print(rd(p("inflight"), "0"))
+        sys.exit(0)
+    if len(parts) >= 5 and (parts[3] == "branches" or parts[3:5] == ["rules", "branches"]):
+        # merge-task's required-gate reads (ADR 0069 d1): whole objects, the branch one percent-encoded segment.
+        rules = parts[3] == "rules"
+        seg = parts[5:] if rules else parts[4:]
+        guard_jq("api " + ("rules/branches" if rules else "branches"))
+        if len(seg) != 1 or unquote(seg[0]) != DEFAULT:
+            die("fake gh: the branch must be one percent-encoded segment naming %s, got %s" % (DEFAULT, "/".join(seg)),
+                rc=99)
+        if not rules:
+            if has("err.branch"):
+                die(rd(p("err.branch")))
+            mode = rd(p("branch"))
+            off = {"enforcement_level": "off", "contexts": [], "checks": []}
+            if mode is None:
+                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": True, "required_status_checks": {
+                    "enforcement_level": "everyone", "contexts": ["ci"], "checks": [{"context": "ci", "app_id": None}]}}}))
+            elif mode == "unprotected":
+                print(json.dumps({"name": DEFAULT, "protected": False, "protection": {"enabled": False,
+                                                                                     "required_status_checks": off}}))
+            elif mode == "ruleset":
+                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": False,
+                                                                                    "required_status_checks": off}}))
+            elif mode == "noflag":
+                print(json.dumps({"name": DEFAULT}))
+            elif mode == "404-notfound":
+                not_found()
+            elif mode == "404-branch":
+                die("gh: Branch not found (HTTP 404)", out=json.dumps({
+                    "message": "Branch not found", "documentation_url": "https://docs.github.com/rest", "status": "404"}))
+            elif mode == "403-integration":
+                die("gh: Resource not accessible by integration (HTTP 403)", out=json.dumps({
+                    "message": "Resource not accessible by integration", "status": "403"}))
+            elif mode == "403-rate":
+                die("gh: API rate limit exceeded for user ID 1. (HTTP 403)", out=json.dumps({
+                    "message": "API rate limit exceeded for user ID 1.", "status": "403"}))
+            else:
+                die("fake gh: unknown branch state %r" % mode, rc=99)
+            sys.exit(0)
+        if has("err.rules"):
+            die(rd(p("err.rules")))
+        mode = rd(p("rules"))
+        if mode is None:
+            print("[]")
+        elif mode.lstrip().startswith("["):
+            print(json.dumps(json.loads(mode)))
+        elif mode == "403-plan":
+            die("gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)", out=json.dumps({
+                "message": "Upgrade to GitHub Pro or make this repository public to enable this feature.", "status": "403"}))
+        elif mode == "403-rate":
+            die("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)",
+                out=json.dumps({"message": "You have exceeded a secondary rate limit.", "status": "403"}))
+        elif mode == "404":
+            not_found()
+        else:
+            die("fake gh: unknown rules state %r" % mode, rc=99)
         sys.exit(0)
 
 die("fake gh: unhandled call: " + " ".join(args), rc=99)

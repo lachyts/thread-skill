@@ -356,8 +356,8 @@ RED=$'merge-task: ERROR: a REQUIRED check FAILED on PR #5 (Ralph passed locally,
 NEVER="$RED"$'\nERROR: required checks never appeared for PR #5 — no CI runs in flight on its head SHA, nothing is coming'
 GATE="$RED"$'\nERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate is in the way'
 AGAIN="$RED"$'\nERROR: a REQUIRED check FAILED on PR #5 (Ralph passed locally, but remote CI is red):\n  infra-classify: a genuine (non-infra) step failed — HALTING (fail-closed). Failed steps:\n  Diagnose: gh pr checks 5 -R o/r — push a fix to the branch, re-integrate, then re-run merge-task.sh.'
-for c in "never|$NEVER|ERROR: required checks never appeared for PR #5 — no CI runs in flight" \
-         "gate|$GATE|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate"; do
+# (The mark, a rerun, then checks that never appeared is GitHub's stop, no human's: A5c-own reads it infra, ADR 0069.)
+for c in "gate|$GATE|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate"; do
   name=${c%%|*}; rest=${c#*|}; reason=${rest%|*}; stop=${rest##*|}
   scen "a5b-$name"
   mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
@@ -379,6 +379,58 @@ ok "$rc|$(fm "$A" status)" "0|status: in_progress" "A5b again: its own run (in_p
 for frag in "triggered — re-watching required checks" "required checks never appeared for PR #"; do
   ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A5b: \"$frag\" is merge-task.sh's text"
 done
+
+# A5c (ADR 0069 d3): merge-task's GitHub-side exit 1 (required checks that never appeared, no red check in its own cause)
+# is no code fix's and no human's: the lead sets it aside at Integration (`merge-task exit 1, GitHub-side: `), and it
+# retries as infra, after the cool-down, within the budget; never `merge-task needs a human`.
+GH_NEVER="ERROR: required checks never appeared for PR #5 — no CI runs in flight on its head SHA, nothing is coming"
+scen a5c-int
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration "merge-task exit 1, GitHub-side: $GH_NEVER"
+I=$(INOW=2026-10-03T08:05:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" '["infra",false,"2026-10-03T08:15+00:00"]' \
+  "A5c-int: the GitHub-side exit 1 at Integration → infra, cooling 15 minutes"
+ok "$(j "$I" 'd["humanFix"]')" null "A5c-int: no human fix while it cools"
+ANOW=2026-10-03T08:15:00Z ar "$A"
+ok "$rc|$(fm "$A" status)|$(fm "$A" ready)" "0|status: review|ready: 2026-10-03T08:15+00:00" "A5c-int: past the cool-down → review, ready: restamped"
+ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","infra"]' \
+  "A5c-int: stage integrate, setAsideAt integration, retryClass infra"
+scen a5c-int-spent
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration "merge-task exit 1, GitHub-side: $GH_NEVER"
+setfm "$A" auto_retries_used 2
+I=$(INOW=2026-10-03T12:00:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["humanFix"]["act"]]')" '[false,"budget: 2/2 used","hand back or defer"]' \
+  "A5c-int: the budget still bounds it (H10 once spent)"
+# The second control: a `ci<TAB>fail` cell after the never-appeared line, as the flattened one-line reason carries it.
+GH_FAIL="$GH_NEVER ci"$'\t'"fail"$'\t'"1m"$'\t'"https://github.com/o/r/actions/runs/7/job/8"
+for c in "gate|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate is in the way" \
+         "fail|$GH_FAIL"; do
+  name=${c%%|*}; text=${c#*|}
+  scen "a5c-int-$name"
+  mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+  lead "$A" integration "merge-task exit 1, GitHub-side: $text"
+  ok "$(j "$(inp "$A")" 'd["autoRetryClass"]')" agent "A5c-int control ($name): no GitHub-side stop behind the opening → agent"
+done
+# A5c-own: a legacy note set aside at its own run with the GitHub-side text (p96-12's shape) reads infra too, and
+# re-enters at its own run; a red check (a `fail` cell) in its own cause stays a human's.
+i=0
+for reason in "merge-task: $GH_NEVER" "$NEVER"; do
+  i=$((i+1)); scen "a5c-own-$i"
+  mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+  lead "$A" own "$reason"
+  I=$(INOW=2026-10-03T08:05:00Z inp "$A")
+  ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"], d["humanFix"]]')" '["infra",false,"2026-10-03T08:15+00:00",null]' \
+    "A5c-own $i: a legacy own-run GitHub-side stop → infra, cooling 15 minutes"
+  ANOW=2026-10-03T08:15:00Z ar "$A"
+  ok "$rc|$(fm "$A" status)" "0|status: in_progress" "A5c-own $i: past the cool-down → its own run"
+done
+scen a5c-own-fail
+mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" own "$NEVER"$'\nci\tfail\t1m\thttps://github.com/o/r/actions/runs/7/job/8'
+I=$(inp "$A")
+has "$(j "$I" 'd["autoRetryWhy"]')" "merge-task needs a human: ERROR: required checks never appeared" "A5c-own control: a fail cell in its own cause stays a human's"
+ok "$(j "$I" '[d["humanFix"]["act"], d["humanFix"]["handBack"]]')" '["hand back or defer",true]' "A5c-own control: H10"
 
 # ── A6: the budget ───────────────────────────────────────────────────────────────────────────────────────
 scen a6-task-zero
