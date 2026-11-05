@@ -22,6 +22,11 @@
 // test-credential Planner line, and its Under the chain item 7 with orient-all's item 9 (the twin lists that give a
 // credential hit § 3.6 records its Planner line with no ask-ahead); reshuffle R3's recorded clause with the same two
 // sentences and R5.2's record; asking.md's bullet, execution-fit's ruling (a) qualifier, CONTEXT.md's entry, ADR 0008's amendment and the README.
+// p37-4 (ADR 0034's 2026-11-05 amendment): § 3.7's *Cap-only pricing* sentence with what still asks, "cannot be priced
+// even from its cap", ADR 0008's p37-4 line and CONTEXT.md's "even from its cap alone" (cap-only); the declared test
+// Login: § 3.7's "or a declared test Login", *Test credentials*' first sentence, the *A declared test Login* paragraph,
+// § 3's `test_logins` row, execution-fit's "and a declared test Login", engine-snapshot.md's schema-5 sentence,
+// CONTEXT.md's **Test Login** entry and the README (test-login).
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -43,6 +48,7 @@ const real = {
   asking: read('skills/_shared/asking.md'),
   orientAll: read('skills/orient-all/SKILL.md'),
   adr0008: read('docs/adr/0008-a-declared-gate-always-pauses-for-a-human.md'),
+  snapshot: read('skills/_shared/engine-snapshot.md'),
 }
 
 const S0 = /^### 0\. /
@@ -253,6 +259,39 @@ function checkStanding(f) {
     !collapse(f.readme).includes('The class is its own switch, independent of `spend_approval_usd`')) {
     fails.push('test-credential')
   }
+
+  // cap-only (p37-4): a gate the full reading refuses is priced from its readable cap; what still asks is named; the
+  // limit's ask is "cannot be priced even from its cap"; ADR 0008 and CONTEXT.md carry it.
+  if (!standing.includes('**Cap-only pricing** (p37-4, ADR 0034\'s 2026-11-05 amendment: unpriceable never means asked)') ||
+    !standing.includes("when the full reading refuses a gate whose cap reads, its exposure is the cap times the clause's count plus every other USD amount it names, and prose around the cap never asks") ||
+    !standing.includes('Still asking: a non-USD amount, a rate, multiplier, `%` or widening word on the cap itself, a plural Logins/accounts/seats/users, or a per-Login, per-account, per-seat or per-user word anywhere.') ||
+    !standing.includes('or when it cannot be priced even from its cap') || !standing.includes("`gated_inputs.py`'s standing reading") ||
+    !f.adr0008.includes('*(Amended 2026-11-05 by p37-4') ||
+    !collapse(f.context).includes('a shape it cannot price, even from its cap alone, asks')) {
+    fails.push('cap-only')
+  }
+
+  // test-login (p37-4): a credential gate naming only a declared test Login signs itself; machine-wide, operator-only.
+  const tl = labelled(f.execute, S37, "A declared test Login (p37-4, ADR 0034's 2026-11-05 amendment).")
+  const row3 = collapse((section(f.execute, /^### 3\. /) ?? '').split('\n').find((l) => l.startsWith('| `test_logins` |')) ?? '')
+  // § 4.5 step 1.2's Exit 3 and § 6.5 (a) list the same ASK reasons as § 3.7 (review round 1: sibling sites)
+  const askReasons = 'unpriceable even from its cap, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, a key missing from it, or a Login gate that names an undeclared Login or anything beside it'
+  if (collapse(f.execute).split(askReasons).length !== 3 ||
+    !tl.includes('nothing joined beside it (an `@` address, or a conjunction that joins a second thing') ||
+    !standing.includes('or a declared test Login (*A declared test Login* below)') ||
+    !tc.startsWith('**Test credentials (ADR 0063).** A credential gate passes the standing approval only as a declared test credential or a declared test Login (below). A declared test credential is one of') ||
+    !tc.includes('so no class resolves and every class credential there asks') ||
+    !tl.includes('one of the machine\'s declared test Logins') || !tl.includes('`(approved <date> under the standing approval: test Login <name>, from <source>)`') ||
+    !tl.includes('with no limit, no ledger, no month line and no Needs-you line') ||
+    !tl.includes("It is machine-wide, so a Leg's serial note signs one too, and a bounced note signs none") ||
+    !tl.includes('Operator-only: no agent or script writes `test_logins`') ||
+    !row3.includes('one line under `[defaults]` of `~/.config/thread/rollouts.toml`') ||
+    !collapse(f.execfit).includes("and a declared test Login (ADR 0034's 2026-11-05 amendment), a publish never uses") ||
+    !collapse(f.snapshot).includes('`test_logins` (p37-4) is the first schema-5 key: an older snapshot ignores it, so its rollouts ask the Login gate as before.') ||
+    !f.context.includes('- **Test Login** —') || !collapse(f.context).includes('a Leg never signs one (a Test Login is machine-wide)') ||
+    !collapse(f.readme).includes('test_logins = ["dummy"]') || !collapse(f.readme).includes('It is operator-only: no skill or script writes it.')) {
+    fails.push('test-login')
+  }
   return fails
 }
 
@@ -263,7 +302,7 @@ test('execute, schedule, reshuffle, status, README and CONTEXT.md hold every sta
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
 const RULES = ['step12', 'halt-guard', 'form', 'question-tool', 'standing-37', 's7', 'reinstate', 'exclusion-e',
-  'schedule-sweep', 'spend-recorded', 'reshuffle', 'month-line', 'one-unfinished', 'docs', 'test-credential']
+  'schedule-sweep', 'spend-recorded', 'reshuffle', 'month-line', 'one-unfinished', 'docs', 'test-credential', 'cap-only', 'test-login']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -351,8 +390,8 @@ test('control: § 6.5 without the standing lines, or step 1.2 without the month 
   assert.ok(from.length > 1 && from.includes('never a push record'), 'control setup: the standing-lines sentence')
   const sentence = from.slice(0, from.indexOf('never a push record') + from.slice(from.indexOf('never a push record')).indexOf('.') + 1)
   only('execute', sentence, '', 'month-line', 'no standing lines')
-  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, or a key missing from it). Exit 1:",
-    "the item's `→` detail (over the limit, unpriceable, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, or a key missing from it). Exit 1:", 'month-line', 'no month line in step 1.2')
+  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable even from its cap,",
+    "the item's `→` detail (over the limit, unpriceable even from its cap,", 'month-line', 'no month line in step 1.2')
 })
 
 test('control: schedule § 0 without the sign-off sentence fails one-unfinished', () => {
@@ -389,7 +428,42 @@ test('control: each test-credential pin, removed in one place, fails test-creden
   only('readme', 'The class is its own switch, independent of\n`spend_approval_usd`', 'The class needs\n`spend_approval_usd`', TC, 'README: no own switch')
 })
 
-test('the rules are all named (15) and each has a control', () => {
-  assert.equal(RULES.length, 15)
+test('control: each cap-only pin, removed in one place, fails cap-only alone', () => {
+  const C = 'cap-only'
+  only('execute', '**Cap-only pricing** (p37-4,', 'Pricing (p37-4,', C, '§ 3.7: no label')
+  only('execute', ', and prose around the cap never asks (', ', and prose around the cap asks (', C, '§ 3.7: prose asks')
+  only('execute', ' Still asking: a non-USD amount, a rate,', ' Still asking: a rate,', C, '§ 3.7: currency dropped from what asks')
+  only('execute', 'or when it cannot be priced even from its cap.', 'or when it cannot be priced.', C, '§ 3.7: no cap in the limit sentence')
+  only('execute', "with `gated_inputs.py`'s standing reading,", "with `gated_inputs.py`'s exposure reading,", C, '§ 3.7: the exposure reading')
+  only('adr0008', '*(Amended 2026-11-05 by p37-4', '*(Amended 2026-11-05 by a later task', C, 'ADR 0008: no p37-4 line')
+  only('context', 'a shape it cannot price, even from its cap alone,\n  asks', 'a shape it cannot price\n  asks', C, 'CONTEXT.md: no cap alone')
+})
+
+test('control: each test-login pin, removed in one place, fails test-login alone', () => {
+  const L = 'test-login'
+  only('execute', ' or a declared test Login (*A declared test Login* below).', '.', L, '§ 3.7: standing names no test Login')
+  only('execute', 'only as a declared test credential or a declared test Login (below). A declared test credential is one of', 'only as a declared test credential: one of', L, 'Test credentials: old first sentence')
+  only('execute', 'so no class resolves and every class credential there asks', 'so no class resolves and every credential there asks', L, 'Test credentials: every credential asks on a Leg')
+  only('execute', ' It is machine-wide, so a Leg\'s serial note signs one too, and a bounced note signs none.', '', L, 'the paragraph: not machine-wide')
+  only('execute', 'Operator-only: no agent or script writes `test_logins`', 'An agent may write `test_logins`', L, 'the paragraph: not operator-only')
+  only('execute', ', with no limit, no ledger, no month line and no Needs-you line:', ', against the limit:', L, 'the paragraph: a limit')
+  const row = real.execute.split('\n').find((x) => x.startsWith('| `test_logins` |'))
+  only('execute', row + '\n', '', L, '§ 3: no test_logins row')
+  only('execfit', 'and a\n  declared test Login', 'and no\n  test Login', L, 'execution-fit: no test Login')
+  only('snapshot', '`test_logins` (p37-4) is the first schema-5 key', '`test_logins` (p37-4) is a key', L, 'engine-snapshot.md: no schema-5 sentence')
+  only('context', '- **Test Login** —', '- **Dummy Login** —', L, 'CONTEXT.md: no entry')
+  only('context', '(a Test Login is machine-wide)', '(none is)', L, 'CONTEXT.md: Test credential entry')
+  only('readme', 'It is\noperator-only: no skill or script writes it.', 'Any agent may write it.', L, 'README: not operator-only')
+  // review round 1: step 1.2's Exit 3 and § 6.5 (a) name the test-Login asks, and § 3.7 names step 5 (nothing joined)
+  only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*). Exit 1:",
+    'or a key missing from it). Exit 1:', L, 'step 1.2: no test-Login asks')
+  only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*) carries",
+    'or a key missing from it) carries', L, '§ 6.5 (a): no test-Login asks')
+  only('execute', 'nothing joined beside it (an `@` address, or a conjunction that joins a second thing', 'nothing beside it (a second thing', L,
+    'the paragraph: no step 5')
+})
+
+test('the rules are all named (17) and each has a control', () => {
+  assert.equal(RULES.length, 17)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 4                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 5                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -24,6 +24,8 @@ of the file format:
     capacity_max = 6             # machine-wide, schema 4 (p36-7, ADR 0067 d8): the hard maximum of the Mac-wide
                                  # Capacity C that `next` and leg.py read from capacity.json (execute away.md §
                                  # Capacity); [defaults] only
+    test_logins = ["dummy"]      # machine-wide, schema 5 (p37-4): the Claude Logins a credential gate may name and
+                                 # still be signed by the standing approval; ONE line, [defaults] only, operator-only
 
     [guardrails]                 # the Reflection's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -50,9 +52,13 @@ The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `re
 `spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and `capacity_max`, which are
 machine-wide and refused under a `[repo."o/r"]` label), plus
 `inert_paths` and `test_credentials` (REPO_ONLY: each refused under `[defaults]` with `<key> is per repo: set it under
-[repo."owner/name"]`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table
-form, with one exception: `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table (below), because
-inert-paths.py and reflect's tune.py edit this file line by line and treat any other form as a hand edit they refuse.
+[repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
+`[repo."o/r"]` label as MACHINE_ONLY's keys are, and kept out of `settings`). Dotted keys
+(`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table
+form, with two exceptions: `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table, and
+`test_logins` only from a key line whose value closes on that line, never from inside an inline table (both below),
+because inert-paths.py and reflect's tune.py edit this file line by line and treat any other form as a hand edit they
+refuse.
 
 `inert_paths` (p29-3, ADR 0045; schema 2, the first key above schema 1) is the repo's Inert paths: a list of at most 64
 distinct git pathspec globs (matched as `:(glob)<glob>`), empty by default (built-in []), so a repo nobody has checked
@@ -84,6 +90,23 @@ tune.py refuses an edit that changes any repo's `test_credentials`. It is not in
 its own top-level `test_credentials` (Output), null with no class. A schema-2 reader ignores it under a schema-3 file
 (the schema rule below), so that rollout asks every credential gate, as before. It is its own switch, independent of
 `spend_approval_usd`: a declared class signs at the built-in 0 too.
+
+`test_logins` (p37-4, ADR 0034's 2026-11-05 amendment; schema 5, the first schema-5 key) is the operator's declared
+test Logins: the Claude Logins (Lachy's dummy Login) a credential gate may name and still be signed by execute's
+standing approval (gated_inputs.py's test-Login reading, its part 5), with no limit, ledger or month line. It is one
+line under `[defaults]` only, `test_logins = ["<name>", …]`, a trailing comment allowed: a value that spans lines is
+refused at its line (`[defaults] test_logins must be one line: …`), and so is the key in a `[repo."o/r"]` table
+(`… test_logins is machine-wide: set it under [defaults]`). The value (logins_problem(), the first failure wins) is a
+list of 1 to MAX_TEST_LOGINS (16) strings, each a Login name (LOGIN_NAME_RE: a letter or digit, then up to 39 of A-Z,
+a-z, 0-9, `_` and `-`), never `claude`, `login` or `logins` in any case (RESERVED_LOGIN_NAMES: the reading's own
+words), and no name twice ignoring case; an empty list is refused (remove the line to declare none). Built-in []: no
+Login is a test Login, so every Login gate asks. It is operator-only: no automated writer adds or changes it (an
+agent that could would widen its own approval; ADR 0063 d1's rule), tune.py refuses an edit whose result resolves
+another `test_logins`, and inert-paths.py's check refuses an edit that changes `[defaults]`. It is not in `settings`:
+resolve() reports it as its own top-level `test_logins` (Output). Machine-wide, so resolve(repo=None) reads it and a
+serial note (no Project root) signs one too. A schema-4 reader ignores it under a schema-5 file (the schema rule
+below), so that rollout asks every Login gate, as before; a pre-P29 reader refuses the `schema` line itself, so the
+operator installs the release that knows the key first and runs the reader check below.
 
 `[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
 is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
@@ -149,6 +172,7 @@ schema rule above):
   `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
 - a MACHINE_ONLY key (`verify_slots`, `capacity_max`) in a `[repo."o/r"]` table;
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
+- a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a `notify` that is not a table, an unknown key under it, or an `ntfy_topic` that is not an ntfy topic (a string of
@@ -175,6 +199,7 @@ Output. Exit 0 and one JSON line on stdout:
      "test_credentials": {"value": {"file": "<path>", "keys": [{"name": "<NAME>", "prefix": "<p>"}
                                     | {"name": "<NAME>", "supabase_project": "<ref>"}, ...]} | null,
                           "source": "file:repo"|"built-in"},                        # built-in null: no class
+     "test_logins": {"value": ["<name>", ...], "source": "file:defaults"|"built-in"},  # built-in []: none
      "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
      "ignored": ["<scope path of each ignored key>", ...]}     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
 
@@ -195,9 +220,12 @@ and this python has none. On failure stdout is empty and stderr carries one line
 
 Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
-`spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY, MINIMUM,
+`spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY,
+DEFAULTS_ONLY, MINIMUM,
 GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
-MAX_CREDENTIAL_KEYS, glob_problem(glob), credential_problem(value) (why a test_credentials value is refused, or None),
+MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
+credential_problem(value) (why a test_credentials value is refused, or None), logins_problem(value) (the same for
+test_logins),
 near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
 file), raise_schema_lines(lines, need, current) (the top-level `schema` raise both writers share: `lines` with the
 line raised to `need` when it is above `current`, never lowered; an existing top-level line is rewritten in place,
@@ -231,6 +259,12 @@ MACHINE_ONLY = ("verify_slots", "capacity_max")
 # (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045);
 # `test_credentials` its test-credential class (ADR 0063), one line in its table.
 REPO_ONLY = ("inert_paths", "test_credentials")
+# Machine-wide keys kept out of `settings` (p37-4): valid under [defaults] only, refused in a repo table, and reported
+# by resolve() as their own top-level field. `test_logins` is the operator's declared test Logins, one line.
+DEFAULTS_ONLY = ("test_logins",)
+MAX_TEST_LOGINS = 16
+LOGIN_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}\Z")
+RESERVED_LOGIN_NAMES = ("claude", "login", "logins")
 MAX_INERT_GLOBS = 64
 # test_credentials (ADR 0063): at most 32 keys; a name is an upper-snake env name with at least one `_`; a prefix is 3 to
 # 40 word characters; a Supabase project ref is 20 lowercase letters. A name with a LIVE or PROD segment is refused.
@@ -260,7 +294,7 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 4
+SCHEMA = 5
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k != "capacity_max"})
@@ -269,6 +303,7 @@ KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
 KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
 KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0063: the first schema-3 key
 KEY_SCHEMA[("rollout", "capacity_max")] = 4   # p36-7 (ADR 0067 d8): the first schema-4 key
+KEY_SCHEMA[("rollout", "test_logins")] = 5   # p37-4 (ADR 0034's 2026-11-05 amendment): the first schema-5 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -338,7 +373,9 @@ class _Lines:
     strings and comments count for nothing and multi-line strings and arrays carry over to the next line.
     `one_line` maps a key path to its line only for a single-segment key under a two-segment table header
     (`[repo."o/r"]`) whose value closes on that same line (no bracket or multi-line string left open after the
-    scan): the one form `test_credentials` is read in (ADR 0063). `lines` and `line_of` are unchanged by it.
+    scan): the one form `test_credentials` is read in (ADR 0063). `closes` maps a key path to its line for any key
+    whose value closes on the line it opens (under any table header, a dotted key's whole path included): the one-line
+    rule `test_logins` is held to (p37-4). `lines` and `line_of` are unchanged by either.
 
     Why a copy and not a share (unlike read_toml): _Index's value scan carries the ladder's own hooks inside
     its loop (the `rung = [` array and each inline rung's `{` line, which its refusals cite), and its records
@@ -351,6 +388,7 @@ class _Lines:
     def __init__(self, text):
         self.lines = {}
         self.one_line = {}
+        self.closes = {}
         self._table = ()
         self._string = None
         self._brackets = []
@@ -382,6 +420,8 @@ class _Lines:
                 segs = _segments(m.group(1))
                 self._record(self._table + segs, n)
                 self._scan(s[m.end():])
+                if self._string is None and not self._brackets:
+                    self.closes.setdefault(self._table + segs, n)
                 if len(self._table) == 2 and len(segs) == 1 and self._string is None and not self._brackets:
                     self.one_line[self._table + segs] = n
                 return
@@ -576,6 +616,30 @@ def credential_problem(value):
     return None
 
 
+def logins_problem(value):
+    """Why a `test_logins` value is no valid list of test Logins (the header's rules, the first failure wins), or
+    None."""
+    if not isinstance(value, list):
+        return "must be a list of 1 to %d Login names, got %s" % (MAX_TEST_LOGINS, _describe(value))
+    if not value:
+        return "is empty (it lists 1 to %d Login names; remove the line to declare none)" % MAX_TEST_LOGINS
+    if len(value) > MAX_TEST_LOGINS:
+        return "holds %d names (at most %d)" % (len(value), MAX_TEST_LOGINS)
+    seen = set()
+    for name in value:
+        if not isinstance(name, str):
+            return "holds a name that is not a string (got %s)" % _describe(name)
+        if not LOGIN_NAME_RE.match(name):
+            return ("holds %s, which is not a Login name (a letter or digit, then up to 39 of A-Z, a-z, 0-9, _ and -)"
+                    % json.dumps(name))
+        if name.lower() in RESERVED_LOGIN_NAMES:
+            return "holds the reserved name %s (claude, login and logins never name a Login)" % json.dumps(name)
+        if name.lower() in seen:
+            return "lists the name %s twice (ignoring case)" % json.dumps(name)
+        seen.add(name.lower())
+    return None
+
+
 def file_schema(doc):
     """The file's top-level `schema` (1 when absent), or None when it is not an integer >= 1."""
     raw = (doc or {}).get("schema", 1)
@@ -627,14 +691,23 @@ def _validate(text, doc, path):
     def rollout_table(table, label, at):
         kept = {}
         for key, value in table.items():
-            if key not in SETTING_KEYS + REPO_ONLY:
+            if key not in SETTING_KEYS + REPO_ONLY + DEFAULTS_ONLY:
                 unknown("rollout", key, ".".join(json.dumps(a) if "/" in a else a for a in at + (key,)), at + (key,),
-                        "%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key),
-                                                                         ", ".join(SETTING_KEYS + REPO_ONLY)))
+                        "%s: unknown key %s (a rollout table holds %s)" % (
+                            label, json.dumps(key), ", ".join(SETTING_KEYS + REPO_ONLY + DEFAULTS_ONLY)))
                 continue
             newer("rollout", key, at + (key,))
-            if key in MACHINE_ONLY and at[0] == "repo":
+            if key in MACHINE_ONLY + DEFAULTS_ONLY and at[0] == "repo":
                 refuse("%s %s is machine-wide: set it under [defaults]" % (label, key), at + (key,))
+            if key == "test_logins":
+                # p37-4: one line under [defaults], an operator-only list of the declared test Logins.
+                if at + (key,) not in idx.closes:
+                    refuse("%s test_logins must be one line: test_logins = [\"<name>\", …]" % label, at + (key,))
+                why = logins_problem(value)
+                if why:
+                    refuse("%s test_logins %s" % (label, why), at + (key,))
+                kept[key] = list(value)
+                continue
             if key in REPO_ONLY:
                 if at[0] != "repo":
                     refuse("%s is per repo: set it under [repo.\"owner/name\"]" % key, at + (key,))
@@ -872,8 +945,10 @@ def resolve(repo=None, path=None):
     creds = overrides.get("test_credentials")
     creds = ({"value": {"file": creds["file"], "keys": [dict(k) for k in creds["keys"]]}, "source": "file:repo"}
              if creds is not None else {"value": None, "source": "built-in"})
+    logins = ({"value": list(tables["defaults"]["test_logins"]), "source": "file:defaults"}
+              if "test_logins" in tables["defaults"] else {"value": [], "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "notify": notify, "inert_paths": inert, "test_credentials": creds,
+            "notify": notify, "inert_paths": inert, "test_credentials": creds, "test_logins": logins,
             "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"])}
 
 

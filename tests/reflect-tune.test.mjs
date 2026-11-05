@@ -1028,3 +1028,38 @@ test('KT3 (c) the sub-table form is refused with its remedy, nothing written', (
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
   assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
 })
+
+// ---- KT4: a Tuning never touches the declared test Logins (p37-4) ---------------------------------------------------------
+// test_logins (schema 5) is the operator's alone, one line under [defaults]: an edit of another key keeps that line
+// byte-identical, and an edit whose resolved test_logins differs from before is refused with nothing written (the control
+// patches edit_text, as KT2's and KT3's do).
+const KT4_LOGINS = 'test_logins = ["dummy"]   # the dummy Claude Login, probes only'
+
+test('KT4 (a) a pick keeps the test_logins line byte-identical and it resolves as before', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 5\n\n[defaults]\nspend_approval_usd = 200\n${KT4_LOGINS}\n\n[repo."o/r"]\nparallel_ceiling = 4\n`
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config.replace('parallel_ceiling = 4', 'parallel_ceiling = 5'))
+  const after = resolved(home, repo)
+  assert.deepEqual([after.settings.parallel_ceiling, after.test_logins], [{ value: 5, source: 'file:repo' }, { value: ['dummy'], source: 'file:defaults' }])
+})
+
+test('KT4 (b) control: an edit that changes test_logins is refused, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 5\n\n[defaults]\n${KT4_LOGINS}\n\n[repo."o/r"]\nparallel_ceiling = 4\n`
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const harness = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)', 'edit = tune.edit_text',
+    'tune.edit_text = lambda *a: edit(*a).replace(\'["dummy"]\', \'["dummy", "other"]\')', 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.equal(r.stderr, 'tune: the edit changes test_logins: nothing written\n')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})

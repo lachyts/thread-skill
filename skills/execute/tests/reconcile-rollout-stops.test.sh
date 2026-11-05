@@ -10,7 +10,8 @@
 #   owns a later boot   E7b a boot before the pause is written first   E8 an open halt, then a plain entry   E8b the
 #   hook's halt after a boot: both stops   E8c a sleep inside a halt   E9 next's sleep, once   E9b next writes no sleep
 #   with an open stop, a pause or no entry yet   E10 --dry-run   E10b an unwritable record   E11 the guard   E12 the
-#   skips   E13 --by watchdog   E14 another session's entry, then the live lead's heartbeat: one dead-lead, never a
+#   skips   E13 --by watchdog   E13b (p37-5) an open halt, then --by repair or --by watchdog: the halt owns the gap
+#   E14 another session's entry, then the live lead's heartbeat: one dead-lead, never a
 #   second   E14b a heartbeat in a session other than the last entry's infers no dead-lead   E15 (p28-4) record-entry
 #   renews the lead's lease; --dry-run, a skip and the guard write none, and a lease it cannot write only warns
 #   P1 sleep_spans on a pmset-shaped log, and machine_times' kern.sleeptime fallback.
@@ -289,6 +290,23 @@ em e13 lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
 em e13 lane-taken t '{}' 2026-10-26T10:10:00Z
 ent e13 --by watchdog --session A --now 2026-10-26T12:00:00Z >/dev/null
 ok "$(q e13 '[[d["kind"], d.get("cause") or d.get("stop"), d.get("at")] for d in L[2:]]')" '[["stopped","watchdog","2026-10-26T10:10:00.000Z"],["lead-entry","watchdog",null]]' "E13: watchdog at L, then its resume"
+
+echo "== E13b. (p37-5) an Upkeep repair's hand-off: an open halt, then --by repair closes it with one lead-entry"
+mkro e13b
+em e13b lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
+em e13b stopped - '{"cause":"halt","inferred":false,"calls":[],"reason":"ladder file refused"}' 2026-10-26T10:30:00Z
+out=$(ent e13b --by repair --session A --now 2026-10-26T12:00:00Z); rc=$?
+ok "$rc" 0 "E13b: exit 0"
+ok "$out" "e13b: lead-entry by=repair stop=halt" "E13b: one line naming the halt it closes"
+ok "$(seq e13b)" '["lead-entry:-","stopped:halt","lead-entry:halt"]' "E13b: the halt, then one lead-entry, no second stop"
+ok "$(q e13b 'L[-1]["by"]')" '"repair"' "E13b: the entry names repair"
+mkro e13w
+em e13w lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
+em e13w lane-taken t '{}' 2026-10-26T10:10:00Z
+em e13w stopped - '{"cause":"halt","inferred":false,"calls":[]}' 2026-10-26T10:30:00Z
+ent e13w --by watchdog --session A --now 2026-10-26T12:00:00Z >/dev/null
+ok "$(seq e13w)" '["lead-entry:-","lane-taken:-","stopped:halt","lead-entry:halt"]' "E13b: a Watchdog recovery's repair on an open halt: stop: halt, no watchdog stop"
+ok "$(q e13w 'L[-1]["by"]')" '"watchdog"' "E13b: that entry names watchdog"
 
 echo "== E14. another session's entry while lead A lives, then A's heartbeat tick: the tick infers no second dead-lead"
 mkro e14

@@ -132,6 +132,7 @@ for (const [rule, mutate] of controls) {
 // --by and --cause forms are tabled in § 4.5 *Run record*; every heartbeat tick with no pause or room stop runs it as
 // clause (2b), the pinned clause (2) and (3) sentences kept verbatim; the verify and RACE lines carry --rollout and
 // --slug so the lead's suites record themselves.
+const UPKEEP = "a `Chorus: Upkeep repairs a halt` Prompt (its `/thread:repair`'s hand-off)"
 function checkLedger(md) {
   const bad = []
   const need = (name, ok) => { if (!ok) bad.push(name) }
@@ -147,7 +148,15 @@ function checkLedger(md) {
     p.includes("The heartbeat's lapse re-entry (clause (2) exit 4) runs it as the entry's first act; its stall re-entry (clause (7)) does not"))
   need('by-forms', [['his own `/thread:execute` or resume', 'lachy'], ['a `Chorus: ` Prompt (a start, a room resume or a re-send)', 'stage'],
     ['a `Chorus: ` Prompt naming a Watchdog recovery', 'watchdog'], ['a heartbeat tick or its re-entry', 'heartbeat'],
-    ["`/thread:repair`'s hand-off", 'repair']].every(([what, by]) => p.includes(`| ${what} | \`${by}\` |`)))
+    ["`/thread:repair`'s hand-off", 'repair'], [UPKEEP, 'repair']].every(([what, by]) => p.includes(`| ${what} | \`${by}\` |`)) &&
+    p.includes(`| a \`Chorus: \` Prompt naming a Watchdog recovery | \`watchdog\` | | ${UPKEEP} |`))
+  // p37-5: Upkeep's halt-repair Prompt is no entry by itself: it runs /thread:repair, whose § 4 hand-off writes the one
+  // lead-entry (by: repair, after its launch-directory check), and a Watchdog recovery's repair stays watchdog.
+  need('upkeep-entry', p.includes('a `Chorus: Upkeep repairs a halt` Prompt is no entry by itself: it runs `/thread:repair`, and repair\'s § 4 hand-off is the entry') &&
+    p.includes('so the halt is closed by one `lead-entry` `by: repair` (its `stop: halt`), with no `--cause`') &&
+    p.includes('A repair that stops before its hand-off records nothing, and the halt stays open.') &&
+    p.includes('A Watchdog recovery that runs `/thread:repair` (its open-halt route) stays `watchdog`.') &&
+    p.includes("(repair's hand-off runs it after its launch-directory check instead, repair § 4, not before § 2.8)"))
   need('cause-forms', [['a usage-limit re-send', 'usage-limit'], ['a signed-out re-send or a dead session', 'dead-lead'],
     ['the Watchdog stopped the lead', 'watchdog']].every(([what, c]) => p.includes(`| ${what} | \`${c}\` |`)))
   need('no-hand-writes', p.includes('The lead adds nothing for a halt or a room stop: the Stop hook records each halt (§ 8), and `step-boundary.py begin` each room stop'))
@@ -191,6 +200,12 @@ const ledgerControls = [
   ['entry-bullet', (t) => t.replace("It writes only the Run record and the lead's lease (`skills/execute/away.md` § The Trickle), never the vault or git: the stops", 'It writes only the Run record, never the vault or git: the stops')],
   ['by-forms', (t) => t.replace('| a heartbeat tick or its re-entry | `heartbeat` |', '| a heartbeat tick or its re-entry | `stage` |')],
   ['cause-forms', (t) => t.replace('| a usage-limit re-send | `usage-limit` |', '| a usage-limit re-send | `dead-lead` |')],
+  // p37-5: the Upkeep row, its place under the Watchdog row, and the sentence that says which entry it is.
+  ['by-forms', (t) => t.replace(`| ${UPKEEP} | \`repair\` |`, `| ${UPKEEP} | \`stage\` |`)],
+  ['by-forms', (t) => t.replace(`  | ${UPKEEP} | \`repair\` |\n`, '').replace("  | `/thread:repair`'s hand-off | `repair` |\n", `  | \`/thread:repair\`'s hand-off | \`repair\` |\n  | ${UPKEEP} | \`repair\` |\n`)],
+  ['upkeep-entry', (t) => t.replace(/\n  An Upkeep repair writes one entry[^\n]*(\n  [^\n|][^\n]*)*\n/, '\n')],
+  ['upkeep-entry', (t) => t.replace(' A Watchdog recovery that runs `/thread:repair` (its open-halt route) stays `watchdog`.', '')],
+  ['upkeep-entry', (t) => t.replace(" (repair's hand-off runs it after its launch-directory check instead, repair § 4, not before § 2.8)", '')],
   ['no-hand-writes', (t) => t.replace('The lead adds nothing for a halt or a room stop', 'The lead writes a stop for each halt')],
   ['heartbeat-2b', (t) => t.replace(' (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note\'s path> --by heartbeat || true` once (the tick\'s liveness line, execute § 4.5 *Run record*), then go on to the next clause.', '')],
   ['entry-order', (t) => t.replace(", `record-entry` aside (*Run record*),", ',')],

@@ -1157,13 +1157,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `## Needs-you log`, stay at most the operator's limit with it. The limit is
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
   a limit Lachy named; built-in 0, which is off). Exposure counts every USD
-  amount the gate names; a shape it cannot price asks. Such a gate passes
+  amount the gate names; a shape it cannot price, even from its cap alone,
+  asks (p37-4: a readable cap prices a gate the full reading refuses). Such a
+  gate passes
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; irreversible gates
   never pass under it (ADR 0034), and a credential gate only as a declared
-  Test credential (ADR 0063), nor does any gate on a plan the plan judge
-  bounced (ADR 0038).
+  Test credential (ADR 0063) or Test Login (p37-4), nor does any gate on a
+  plan the plan judge bounced (ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
 - **Test credential** — a test-mode, staging or sandbox key a repo declares in
   its test-credential class: the Rollout settings key `test_credentials`, one
@@ -1175,8 +1177,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   and the rollout's `env_bootstrap` copies the file with a plain `cp`
   (ADR 0063); a key missing from it is asked at the stop. The class is its
   own switch, at any spend limit, and only Lachy writes it. Schedule and
-  orient record such a credential, never ask it ahead; a Leg never signs one.
+  orient record such a credential, never ask it ahead; a Leg never signs one
+  (a Test Login is machine-wide).
   _Avoid_: safe key, dev key.
+- **Test Login** — a Claude Login the operator declares a test Login (Lachy's
+  dummy Login): the Rollout settings key `test_logins`, one line under
+  `[defaults]` of `~/.config/thread/rollouts.toml` (schema 5), machine-wide.
+  A credential Gated input that names only such Logins, with no deny word,
+  env key, other credential word, `@` address or conjunction joining a
+  second thing beside them, signs itself under the Standing approval with no
+  limit, ledger or month line (p37-4, ADR 0034's 2026-11-05 amendment); a
+  serial Leg signs one too. A second thing named in plain prose with none of
+  those is not seen, and signs (a residual). Only Lachy writes it.
+  _Avoid_: dummy account, test account.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
   PR), with its detail: `lead-integrate.py inputs`' `humanFix` ({act, detail,
