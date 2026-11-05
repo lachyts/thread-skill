@@ -14,6 +14,8 @@
 #   L9  wait --task kinds capacity and quota
 #   L10 quota on a Leg; status ignores it
 #   L11 an inherited finish is never gated; L12 the gate never overrides a rank wait
+#   L13 the Run record's suite `running` (mac_running, p36-9) counts a live Leg claim while Capacity is in force;
+#       no capacity.json, a stale one, a lapsed Leg lease or none reads today's parallel-only count
 # Temp vaults only; HOME, the lock dirs and the Run record are temp; --now and --session pinned. bash 3.2-compatible.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -321,6 +323,43 @@ out, g = leg.leg_gate(None, None, plan)
 print(out is plan and g is None)
 PY
 )" True "L12: a rank wait passes the gate untouched (only a claim is ever gated)"
+
+# ════ L13: the Run record's suite `running` counts the Legs while Capacity is in force (p36-9) ═════════════════════
+# mac_running reads the real clock, so capacity.json and the Leg lease are stamped off it (ago) just before each call.
+scen l13
+mkro t1 t2; mkpar 1 0; cap 2
+leg begin --cwd "$F"; leg claim --task t1
+ok "$rc|$(fm t1 status)|$(fm t1 owner)" "0|in_progress|leg-1" "L13: (the Leg claims t1)"
+ago() { python3 -c 'import datetime, sys
+t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=int(sys.argv[1]))
+print(t.strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
+# suite <started|ended>: one suite line for par written through reconcile-rollout.py; prints its `running` (or <none>).
+suite() { python3 -B - "$RR" "$T" "$1" <<'PY'
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+sid = rr.new_suite_id()
+if sys.argv[3] == "started":
+    rr.suite_started("par", "p1", sid, "task", "agent", {"sha": "a" * 40}, tasks_dir=sys.argv[2])
+else:
+    rr.suite_ended("par", "p1", sid, "task", "agent", "green", 1.0, tasks_dir=sys.argv[2], scan=True, rc=0)
+lines = open(os.path.join(os.environ["THREAD_EVENTS_DIR"], "par.jsonl")).read().splitlines()
+d = json.loads(lines[-1])
+print(f'{d["kind"]}|{d.get("running", "<none>")}')
+PY
+}
+cap 2 "$(ago 0)"; setlease "$(ago 0)"
+ok "$(suite started)" "suite-started|2" "L13a: Capacity in force and the Leg lease fresh: running counts par's task and the Leg's"
+uncap; setlease "$(ago 0)"
+ok "$(suite started)" "suite-started|1" "L13b: no capacity.json: running is today's parallel-only count"
+cap 2 "$(ago 11)"; setlease "$(ago 0)"
+ok "$(suite started)" "suite-started|1" "L13c: a stale capacity.json (11 minutes old) falls back: the Leg is not counted"
+cap 2 "$(ago 0)"; setlease "$(ago 91)"
+ok "$(suite started)" "suite-started|1" "L13d: Capacity in force, the Leg lease lapsed (91 minutes): the Leg leaves the count"
+cap 2 "$(ago 0)"; rm -f "${HOME:?}/.config/thread/leases/$RO.json"
+ok "$(suite started)" "suite-started|1" "L13e: Capacity in force, no Leg lease: none holds nothing"
+cap 2 "$(ago 0)"; setlease "$(ago 0)"
+ok "$(suite ended)" "suite-ended|2" "L13f: suite-ended (scan) carries the same count while Capacity is in force"
 
 echo
 [ "$fail" -eq 0 ] && echo "leg-capacity.test.sh: ALL PASS" || echo "leg-capacity.test.sh: FAILED"
