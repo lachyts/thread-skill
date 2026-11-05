@@ -1042,3 +1042,35 @@ test('R7. owner and Framing: his decisions asked and counted, the rest ruled int
   assert.deepEqual([t('lab-18').grade, t('lab-18').decidedForYou.map((d) => d.owner)], ['Ready', ['priorities']])
   assert.ok(!j.warnings.some((w) => /^lab-1[78] /.test(w)), j.warnings.join('\n'))
 })
+
+// ---- R8. A task the scan could not read: named, never graded, and it holds its dependants -------------------------------
+test('R8. an unreadTasks row is skipped `unreadable` with its reason and note, holds a task that depends on it, and is never graded', () => {
+  const s = JSON.parse(fs.readFileSync(SCAN_FILE, 'utf8'))
+  s.tasks.find((t) => t.slug === 'dep-same-a').dependsOn = ['dep-unread']
+  const why = 'frontmatter does not parse (line 7, next_action)'
+  s.unreadTasks = [
+    { slug: 'dep-unread', note: 'Work/Tasks/dep-unread.md', why },
+    { slug: 'DEP-CALL', note: 'Work/Tasks/DEP-CALL.md', why: 'frontmatter does not parse' },  // a scan task's slug: ignored
+    'not a row', { slug: 7, why: 'a number for a slug' }, { slug: 'no-why' },  // malformed: ignored, never a crash
+  ]
+  const file = path.join(S, 'scan-unread.json')
+  write(file, JSON.stringify(s))
+  const extra = gradesFile('unread', { project: 'Dep', tasks: [G('dep-unread', 'Ready', 'parallel')] })
+  const j = ok(py(['rank', '--scan', file, '--today', TODAY, ...[...MAIN_FILES, extra].flatMap((f) => ['--grades', f])]))
+  const m = ok(main())
+  assert.deepEqual(j.skipped.filter((x) => x.slug === 'dep-unread'),
+    [{ slug: 'dep-unread', why: 'unreadable', reason: why, note: 'Work/Tasks/dep-unread.md' }])
+  assert.deepEqual(j.skipped.filter((x) => x.slug !== 'dep-unread'), m.skipped, 'the malformed and duplicate rows add nothing')
+  assert.equal(j.counts.skipped, m.counts.skipped + 1)
+  // Unknown is not done: a dependency nobody can read holds, as a skipped one does (readiness-grade.md § Dependencies).
+  assert.deepEqual(row(j, 'dep-same-a').blockedBy, [{ slug: 'dep-unread', why: 'unreadable' }])
+  assert.ok(!j.tasks.some((t) => t.slug === 'dep-unread'), 'never graded')
+  assert.ok(j.warnings.some((w) => /^grade for dep-unread \(.*\): the task is unreadable, never graded; ignored$/.test(w)), j.warnings.join('\n'))
+  // The duplicate leaves its scan task as it was.
+  assert.deepEqual(row(j, 'dep-call'), row(m, 'dep-call'))
+  // A malformed list is no list: ignored.
+  s.unreadTasks = 5
+  write(file, JSON.stringify(s))
+  const k = ok(py(['rank', '--scan', file, '--today', TODAY, ...MAIN_FILES.flatMap((f) => ['--grades', f])]))
+  assert.deepEqual(k.skipped, m.skipped)
+})

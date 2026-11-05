@@ -12,11 +12,12 @@
 // The main vault V1 runs once online and once offline (shared across the cases), plus a second online run for
 // determinism, a GIT_SSH_COMMAND run, a --deadline 0 run behind a `git` shim, and a run behind a shim whose
 // `rev-parse --local-env-vars` fails. V2 holds a chmod-000 note under Work/Tasks/Archive/ (the vault-level case;
-// skipped under root). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT, VI, VL, VJ, VR,
-// VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M), the clone repos (K, whose
-// K-rollout is ahead on its own, and ST, whose ST-rollout is stale) and the phase-membership notes. Case 16 runs
-// pushed-base.sh as schedule § 0 runs it, on copies of A, C, D, Q, M and K and fresh clones under S/parity (it
-// fetches), never on the repos case 9 snapshots.
+// skipped under root), and V2b a dangling symlink and an upper-case `Bar.MD` that does not parse, both directly in
+// Work/Tasks (case 8b's unreadTasks). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT,
+// VI, VL, VJ, VR, VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M), the clone
+// repos (K, whose K-rollout is ahead on its own, and ST, whose ST-rollout is stale) and the phase-membership notes.
+// Case 16 runs pushed-base.sh as schedule § 0 runs it, on copies of A, C, D, Q, M and K and fresh clones under
+// S/parity (it fetches), never on the repos case 9 snapshots.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -261,6 +262,9 @@ T('t-archived-tag.md', task('open', ['Crowned One']).replace('  - task', '  - ta
 T('t-two-projects.md', task('open', ['Crowned One', 'Queued One'], '', '\nNo heading here.\n'))
 T('t-live-and-dead.md', task('open', ['Crowned One', 'Done Flag']))
 T('t-broken.md', '---\ntags: [task\n---\n')
+// A value that scans but will not construct (a ValueError, no YAML mark), and a 0-byte note (Obsidian's empty Untitled.md).
+T('t-bad-date.md', task('open', ['Crowned One'], '\ndue: 2026-02-30'))
+T('empty.md', '')
 const UNHOMED = {
   'u-missing': ['No Such Project', 'missing', 'no note'],
   'u-archived-dir': ['Old Project', 'project archived', 'archived'],
@@ -293,6 +297,14 @@ write(path.join(V2, 'Work', 'Tasks', 'v2-task.md'), task('open', ['V2 Project'],
 write(LOCKED, task('done', ['V2 Project']))
 const ROOT_USER = process.getuid?.() === 0
 if (!ROOT_USER) fs.chmodSync(LOCKED, 0o000)
+
+// ---- Vault V2b: task notes directly in Work/Tasks that cannot be read -----------------------------------------
+// A dangling symlink (unreadable, under root too) and an upper-case `Bar.MD` whose frontmatter does not parse.
+const V2B = path.join(S, 'v2b')
+write(path.join(V2B, 'Work', 'Projects', 'V2b Project.md'), project('queued'))
+write(path.join(V2B, 'Work', 'Tasks', 'v2b-task.md'), task('open', ['V2b Project']))
+write(path.join(V2B, 'Work', 'Tasks', 'Bar.MD'), task('open', ['V2b Project'], '\nnext_action: Ring: the council'))
+fs.symlinkSync(path.join(S, 'nowhere', 'gone.md'), path.join(V2B, 'Work', 'Tasks', 'gone.md'))
 
 // ---- Vault V3: one project whose repo's remote hangs ----------------------------------------------------------
 const V3 = path.join(S, 'v3')
@@ -481,7 +493,9 @@ test('1. projects: done, archived, area and untagged notes are absent; parked is
 test('2. tasks: status classes, homing under every live project, dead links, unhomed reasons, skipped notes, deadlines', () => {
   const j = ok(online())
   assert.deepEqual(j.tasks.map((t) => t.slug), [...j.tasks.map((t) => t.slug)].sort(), 'tasks sorted by slug')
-  for (const gone of ['t-done', 't-archived', 't-archived-tag', 't-broken', R1, R2]) assert.equal(taskRow(j, gone), undefined, `${gone} absent`)
+  for (const gone of ['t-done', 't-archived', 't-archived-tag', 't-broken', 't-bad-date', 'empty', R1, R2]) {
+    assert.equal(taskRow(j, gone), undefined, `${gone} absent`)
+  }
   assert.equal(j.tasks.length, 19)
   assert.equal(taskRow(j, 't-in-progress').statusClass, 'active', 'in-progress reads as in_progress (OPEN_STATUSES)')
   assert.equal(taskRow(j, 't-review').statusClass, 'review')
@@ -524,8 +538,16 @@ test('2. tasks: status classes, homing under every live project, dead links, unh
   assert.deepEqual(j.unhomed, want)
   assert.equal(j.counts.unhomed, 10)
 
-  assert.deepEqual(j.skipped, [{ note: 'Work/Projects/AI/Broken.md', why: 'frontmatter does not parse' },
-    { note: 'Work/Tasks/t-broken.md', why: 'frontmatter does not parse' }])
+  // A broken note's why carries its line and key; one with no frontmatter (the empty note) is out of scope, never skipped.
+  assert.deepEqual(j.skipped, [{ note: 'Work/Projects/AI/Broken.md', why: 'frontmatter does not parse (line 2, tags)' },
+    { note: 'Work/Tasks/t-bad-date.md', why: 'frontmatter does not parse (line 7, due)' },
+    { note: 'Work/Tasks/t-broken.md', why: 'frontmatter does not parse (line 2, tags)' }])
+  assert.equal(j.counts.skipped, 3)
+  // unreadTasks: the skipped notes directly in Work/Tasks, by note, each with its slug; never the project note.
+  assert.deepEqual(j.unreadTasks, [
+    { slug: 't-bad-date', note: 'Work/Tasks/t-bad-date.md', why: 'frontmatter does not parse (line 7, due)' },
+    { slug: 't-broken', note: 'Work/Tasks/t-broken.md', why: 'frontmatter does not parse (line 2, tags)' }])
+  assert.equal(j.counts.unreadTasks, 2)
   assert.deepEqual(j.deadlines, [
     { date: '2026-10-01', kind: 'due', task: 't-open-past', projects: ['Crowned One'] },
     { date: '2026-11-01', kind: 'due', task: 't-open-future', projects: ['Crowned One'] }])
@@ -773,7 +795,7 @@ test('7c. --deadline 0: no subprocess at all, and the vault sections stay comple
     assert.equal(r.error, 'deadline')
   }
   const full = ok(online())
-  for (const k of ['projects', 'tasks', 'unhomed', 'deadlines', 'skipped']) assert.deepEqual(j[k], full[k], k)
+  for (const k of ['projects', 'tasks', 'unhomed', 'deadlines', 'skipped', 'unreadTasks']) assert.deepEqual(j[k], full[k], k)
   assert.deepEqual(j.rollouts.map(({ summary, error, ...rest }) => rest), full.rollouts.map(({ summary, error, ...rest }) => rest))
 })
 
@@ -801,8 +823,25 @@ test('8. an unreadable note under Work/Tasks is reported once, and status and un
   assert.ok(c.unchecked.some((u) => u.check === 'unfinished-rollout' && u.why === 'vault'), JSON.stringify(c.unchecked))
   assert.deepEqual(c.unfinishedRollout, [])
   assert.deepEqual(j.skipped, [{ note: 'Work/Tasks/Archive/locked.md', why: 'unreadable' }])
+  // An Archive/ note is never a task, so an unreadable one there is no unreadTasks row.
+  assert.deepEqual([j.unreadTasks, j.counts.unreadTasks], [[], 0])
   assert.ok(!run.stdout.includes('Traceback'))
   assert.equal(j.tasks.length, 1)
+})
+
+test('8b. a task note directly in Work/Tasks that cannot be read is an unreadTasks row, an upper-case .MD included', () => {
+  const run = scan(V2B)
+  const j = ok(run)
+  // The dangling symlink will not open: the Tasks-dir pre-check names it, and it is skipped as `unreadable`.
+  assert.deepEqual(j.vaultErrors, [{ kind: 'unreadable-tasks-notes', notes: ['Work/Tasks/gone.md'],
+    skips: ['rollout status', 'unfinished-rollout'] }])
+  const bar = { note: 'Work/Tasks/Bar.MD', why: 'frontmatter does not parse (line 7, next_action)' }
+  assert.deepEqual(j.skipped, [bar, { note: 'Work/Tasks/gone.md', why: 'unreadable' }])
+  // Its slug is the basename less its extension, whatever the extension's case.
+  assert.deepEqual(j.unreadTasks, [{ slug: 'Bar', ...bar }, { slug: 'gone', note: 'Work/Tasks/gone.md', why: 'unreadable' }])
+  assert.deepEqual([j.counts.skipped, j.counts.unreadTasks], [2, 2])
+  assert.deepEqual(j.tasks.map((t) => t.slug), ['v2b-task'])
+  assert.ok(!run.stdout.includes('Traceback'))
 })
 
 // ---- 9. Read-only -------------------------------------------------------------------------------------------------

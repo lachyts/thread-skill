@@ -1,25 +1,27 @@
 // Schedule runs a Pre-flight (ADR 0047, p29-5): skills/schedule/SKILL.md § 1.5 grades every task still to start and
 // settles the decisions it hides with Lachy in one round, before anything writes a rollout note, and runs no plan gate.
 // Its script half is tests/estate-dispatch.test.mjs (D17-D21), tests/estate-rank.test.mjs (R6),
-// tests/estate-scan.test.mjs (18) and tests/engine-snapshot.test.sh (G4); this file pins the prose. Twelve rules:
+// tests/estate-scan.test.mjs (18) and tests/engine-snapshot.test.sh (G4); this file pins the prose. Thirteen rules:
 //   p1  § 1.5 sits between steps 1 and 2 and names its commands: estate-scan.py with --deadline 0, `slices --tasks
 //       <graded set>` with `--superseding <prior>`, estate-rank.py rank, readiness-grade.md § The grading agents,
 //       `estate-dispatch.py preflight` and `record ... --by schedule`.
 //   p2  the sets: a carried task that has started is kept (never graded) and passed as --kept; a carried task still
 //       queued is graded; every preflight call passes the same --rank, --scan, --tasks (every candidate) and --kept.
 //   p3  the round: no question for a Ready, Orient or kept task, nor for a task already out through an Orient
-//       dependency; one question per call, its recommendation first; each One call's and Grill's answer recorded
+//       dependency, nor for an `unreadable` one or a task out through one; one question per call, its recommendation first; each One call's and Grill's answer recorded
 //       before step 6; a One call or Grill whose record refuses stays undecided; the ungraded question recommends
 //       `Leave it out`, and its answer is never recorded (`Leave it out` decides nothing; the next schedule asks
 //       again), as ADR 0047 § Build rulings says too.
 //   p4  what leaves: Orient tasks with their Dependent closure; a task left out unstamped, or, carried and queued,
-//       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient.
+//       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient
+//       and names an `unreadable` one with its reason.
 //       Step 5's dependency-cycle leavers go the same way: a carried `queued` one through step 6's `defer`, whose
 //       sentence names them (the carry takes every task still linked to the prior).
 //   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's candidates and --decided
 //       the prompt line's slugs among them, and the fork writes its queue's ruled calls (`decided-for-you`, ADR 0054); orient-all § 6 answers it in item 16 and its prompt carries the line (the
 //       decided slugs among entry.members); orient-all § 8 lists each leaver by its why (waiting on your answer, its
-//       /thread:orient pointer, depends on [[<via>]]); no § 1.5 or S3.5 line names --regenerate.
+//       /thread:orient pointer, depends on [[<via>]], could not be read for an `unreadable` one); no § 1.5 or S3.5 line
+//       names --regenerate.
 //   p6  § 1.5 runs no plan gate (ADR 0030) and names no Workflow and no task.workflow.js.
 //   p7  the Grade log: § 1.5's log runs on every run that grades, all but an orient-all fork, and never says
 //       "standalone"; CONTEXT.md **Grade log** names schedule's Pre-flight; run_record.py's Grade log paragraph names
@@ -37,6 +39,8 @@
 //       resume --rollout, the canary's check-all and retire --rollout, close-score --rollout/--close), each verb seen
 //       with flags at least once; § 0's *The prior's root* says "ten commands" and names `defer`; step 6's defer runs
 //       from "the same prior's root" "before the carry".
+//   p13 § 1.5 step 3 mends a task whose note does not parse through `next-action.py mend <slug>`, the one writer of the
+//       quoting rule, and holds no `as one Edit` (a hand copy of it).
 // One pure function, check(files), returns the failing rules; every control mutates one place and fails exactly its
 // rule. Reads files only.
 import { test } from 'node:test'
@@ -129,7 +133,8 @@ function check(files) {
   // p3: the round and the records.
   need('p3', '§ 1.5 **The round.**', round, ['one question per call', 'its recommendation first',
     'A Ready, Orient or kept task gets no question',
-    'a task already out through an Orient dependency (directly or through others) is never asked'])
+    'a task already out through an Orient dependency (directly or through others) is never asked',
+    'An `unreadable` task, and every task out through one, is never asked either'])
   need('p3', '§ 1.5 **Record each answer at once**', record, ["a One call's or a Grill's, before step 6 writes anything",
     'A One call or Grill whose `record` refuses stays undecided', "An ungraded task's answer is never recorded",
     '`Leave it out` (recommended) decides nothing, so the next schedule asks again'])
@@ -151,7 +156,7 @@ function check(files) {
     ["§ 1.5's final `out[]` (with § 3's re-runs) or step 5's cycle leavers hold a carried `queued` task"])
   const left = C(slice(sec(sch, /^### 8\. /), /^\*\*Pre-flight's left-out tasks\.\*\*/, /^\*\*Checklist — /) ?? '')
   need('p4', "step 8's **Pre-flight's left-out tasks.**", left, ['/thread:orient [[<home>]]', 'depends on [[x]]',
-    'waiting on your answer', 'deferred out of it at step 6'])
+    'waiting on your answer', 'deferred out of it at step 6', 'unreadable ('])
 
   // p5: under orient-all.
   need('p5', '§ 1.5 **The orient-all form.**', form, ['no grading agent', 'no round', 'no `log`',
@@ -165,7 +170,7 @@ function check(files) {
   need('p5', 'orient-all § 6', C(sec(oa, /^### 6\. /)), ['Pre-flight: rank $S/rank.json, scan $S/scan.json',
     'among entry.members'])
   need('p5', 'orient-all § 8', C(sec(oa, /^### 8\. /)), ['waiting on your answer', 'listed by the `why` the fork returns',
-    '`/thread:orient [[<home>]]`', 'depends on [[<via>]]'])
+    '`/thread:orient [[<home>]]`', 'depends on [[<via>]]', '`unreadable` as "could not be read'])
   for (const [name, text] of [['§ 1.5', pfRaw], ['S3.5', s35]]) never('p5', name, text, ['--regenerate'])
 
   // p6: no plan gate.
@@ -228,6 +233,11 @@ function check(files) {
   need('p12', "step 6's defer sentence", deferSentence, ["the same prior's root", 'before the carry'])
   if (!s0) flag('p12', '§ 0 is missing')
 
+  // p13: the mend has one writer, the script; never a hand Edit copying its rule.
+  const step3 = C(slice(pfRaw, /^3\. /, /^4\. /) ?? '')
+  need('p13', '§ 1.5 step 3', step3, ['${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <slug>'])
+  never('p13', '§ 1.5 step 3', step3, ['as one Edit'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -249,7 +259,7 @@ const only = (files, rules, what) => {
 const PF = /^### 1\.5\. Pre-flight/
 const S6 = /^### 6\. /
 
-test('schedule runs a Pre-flight, and orient-all, the grammar, the brief and the glossary agree (p1-p12)', () => {
+test('schedule runs a Pre-flight, and orient-all, the grammar, the brief and the glossary agree (p1-p13)', () => {
   const r = check(FILES)
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
@@ -265,6 +275,8 @@ test('control p2: a started carried task graded fails p2 alone', () => {
 test('control p3: a batched round, an asked closure task or a recorded ungraded answer fails p3 alone', () => {
   only(swap(FILES, SCHEDULE, 'one question per call', 'up to four questions per call', PF), ['p3'], 'batched')
   only(swap(FILES, SCHEDULE, 'is never asked, whatever its grade', 'is asked like any other', PF), ['p3'], 'closure asked')
+  only(swap(FILES, SCHEDULE, 'every task out through one, is never asked either', 'every task out through one, is asked', PF), ['p3'],
+    'unreadable asked')
   only(swap(FILES, SCHEDULE, "An ungraded task's answer is never recorded", "An ungraded task's answer is recorded", PF), ['p3'],
     'ungraded recorded')
   only(swap(FILES, ADR, 'The answer governs this run alone and is never recorded', 'the answer is recorded through `record --by schedule`'),
@@ -286,6 +298,18 @@ test('control p5: the orient-all form passing every decided slug fails p5 alone'
 
 test('control p5: orient-all § 8 listing every leaver as waiting on your answer fails p5 alone', () => {
   only(swap(FILES, ORIENT_ALL, '`dependency` as "depends on [[<via>]], which is left out"; ', '', /^### 8\. /), ['p5'], 'dependency why')
+  only(swap(FILES, ORIENT_ALL, '; `unreadable` as "could not be read (<reason>): fix its\n  frontmatter, and the next pass grades it"', '',
+    /^### 8\. /), ['p5'], 'unreadable why')
+})
+
+test('control p4: a left-out block that no longer names an unreadable task fails p4 alone', () => {
+  only(swap(FILES, SCHEDULE, '  - [[task-n]] — unreadable (frontmatter does not parse (line 9, due)): fix its frontmatter; the next schedule grades it\n',
+    '', /^### 8\. /), ['p4'], 'unreadable leaver')
+})
+
+test('control p13: step 3 mending by hand, or without the script, fails p13 alone', () => {
+  only(swap(FILES, SCHEDULE, 'next-action.py mend <slug>', 'a quoting Edit', PF), ['p13'], 'no script')
+  only(swap(FILES, SCHEDULE, 'never a hand Edit', 'as one Edit to its note', PF), ['p13'], 'hand edit')
 })
 
 test('control p6: a plan gate at schedule fails p6 alone', () => {
