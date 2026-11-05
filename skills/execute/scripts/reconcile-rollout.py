@@ -1283,8 +1283,9 @@ in force, by day and Away alike (_cap_in_force: `n` is C and `by: "capacity"`, s
 the Trickle's machinery stays as it is: the trickle claim lock and the claims, the fair share, the wakes, the leases,
 the prefixes `trickle:` and `away cap:` and the last starts. A missing reading (silent), a stale or unreadable one, or
 a capacity_max that will not resolve (each one CAPACITY_WARN line from `next`) falls back to today's Trickle and Away
-cap exactly, never to open. While in force: the count elsewhere also counts each open serial rollout's Leg claims
-(_leg_tasks: its `status: in_progress` notes owned `leg-<n>`) behind its Leg lease (the same lease file, `by: leg`,
+cap exactly, never to open. While in force: the count elsewhere (and mac_running's, the Run record's suite `running`,
+p36-9) also counts each open serial rollout's Leg claims (_leg_tasks: its `status: in_progress` notes owned
+`leg-<n>`) behind its Leg lease (the same lease file, `by: leg`,
 written by leg.py on its own open Leg; _Leases with `leg`: a lapse of LEG_LEASE_LAPSE, LEG_WAIT_LAPSE after a `waiting:
 true` turn end, from the latest boot or wake if later; fresh and unreadable count, a lapsed one goes to `lapsed`, none
 holds nothing), and a waiting Leg's record keeps its place (_trickle_waiting_judge's `legs`). The quota hold: while in
@@ -4497,14 +4498,21 @@ def _note_index(tasks_dir: Path) -> dict:
 def mac_running(tasks_dir, reraise=()):
     """The Mac-wide count of running Rollout tasks, every rollout included (the Trickle's count, execute away.md: the Run
     record's suite `running`, p29-10), from one walk of `tasks_dir`, each rollout's lease read at the clock's now (a
-    lapsed one leaves the count, p28-4); None when it cannot be walked. An exception in `reraise` (the caller's stop
-    signal, raised by its handler mid-walk, the lease's sysctl read included) propagates: the walk never swallows a
-    stop."""
+    lapsed one leaves the count, p28-4); None when it cannot be walked. While a Capacity reading is in force
+    (_capacity_state at the same now, read silently with no quota and with stops held across it, _signals_held below,
+    since its readers catch any exception), a serial chain's Leg claims count too, behind their Leg lease (p36-9: the
+    count the Capacity bounds); under the fallback the count is unchanged. An exception in `reraise` (the caller's stop
+    signal, raised by its handler mid-walk, the lease's sysctl read included, or as the Capacity read's hold ends)
+    propagates: the count never swallows a stop."""
     try:
         tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
         if not tasks_dir.is_dir():
             return None
-        return sum(_running_by_rollout(tasks_dir, _note_index(tasks_dir)).values())
+        now = datetime.now().astimezone()
+        with _signals_held():
+            capacity = _capacity_state(now, quota=False)
+        return sum(_running_by_rollout(tasks_dir, _note_index(tasks_dir), leases=_Leases(now),
+                                       legs=capacity["inForce"]).values())
     except reraise:
         raise
     except Exception:  # noqa: BLE001 — a count for the record only: never a failure of the suite it describes
@@ -4600,8 +4608,9 @@ def _counted_tasks(note, linked) -> list:
 
 def _counted_running(note, linked) -> int:
     """The number of tasks a rollout note runs as the Mac-wide count reads them (_counted_tasks). Read by `status` for
-    its own rollout (the Trickle line's `here`); every other rollout's n (_elsewhere_running's and mac_running's count)
-    is the same count, through _counted_by_rollout, which also checks the note sits directly in `tasks_dir`. The
+    its own rollout (the Trickle line's `here`); every other rollout's n (_elsewhere_running's and mac_running's count,
+    each with the Legs too while Capacity is in force, p36-7/p36-9) is the same count, through _counted_by_rollout,
+    which also checks the note sits directly in `tasks_dir`. The
     lease is never read here: each caller applies it (p28-4), _running_by_rollout to every rollout with n > 0 and
     `status` to its own `here`."""
     return len(_counted_tasks(note, linked))
