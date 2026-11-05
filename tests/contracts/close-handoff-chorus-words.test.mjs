@@ -3,9 +3,10 @@
 // ENDS on the Agent's closing sentence and asks nothing anywhere reads *closed*, which archives its Session
 // (Chorus ADR 0089 d2); a Response that asks, or a sentence more text follows, goes to the model leg and never
 // archives on its own. A *closed* read is then read for a flag before it is worn (Chorus ADR 0089 § Built
-// (2026-11-04, chorus-p96-3)): close's banners C and D flag by their ", but" wording with no model (a lead's `done`
-// included, which has no other reading), A and B only by the Stage's model flag read. A rollout lead's ROLLOUT-STATUS line is the one thing allowed after the sentence: the
-// Stage takes it out before it reads, and at `state=done` reads *closed* by the same rule. A handoff on the
+// (2026-11-04, chorus-p96-3)): close's banners C and D flag by their ", but" wording with no model (a lead's
+// `done` included, which has no other reading), A and B only by the Stage's model flag read. A rollout lead's
+// ROLLOUT-STATUS line is the one thing allowed after the sentence: the Stage takes it out before it reads, and at
+// `state=done` reads *closed* by the same rule, or *a report · work not landed* on banner C or D. A handoff on the
 // Stage starts its next Session at once (ADR 0089 d1), so its closing words say so and never ask Lachy to
 // start it. A handoff then runs `next` for this session, the parent (handoff § Next for this session), after its
 // closing line, so on the Stage the Turn's last message is next's. The port reads two fixed template lines only:
@@ -50,7 +51,7 @@ import { read, slice, section, lineOf, collapse, fencedBlocks, FENCE } from '../
 //   _CLOSING_FLAGGED (3221)             re.compile(r"(thread closed)\W+(safe to end this session)\W{1,4}but\b", re.I)
 //   closing_flagged (3224), over _closing_block (2730): the last block that declares; the port's declaration is
 //   _CLOSING alone, as its ends_closed is (a handoff's archive sentence is not ported)
-//   wave_close (3390)'s flagged `done` branch: *a report · work not landed* (_FLAG_OBJECT, 3216)
+//   leadClose's flagged `done` branch (Chorus 3390): *a report · work not landed* (_FLAG_OBJECT, 3216)
 //   the lead's line, named here after Chorus's docstrings ("the lead's line"), as the queue-only register keeps
 //   the retired word out: OLD_STATUS, LEAD_REASON, LEAD_HEAD, LEAD_TAIL, LEAD_FENCE, HALTED, WEDGED, REASON_CHARS
 //   are WAVE_STATUS (2131), _WAVE_REASON, _WAVE_LINE_HEAD, _WAVE_LINE_TAIL, _WAVE_FENCE (2139-2142), WAVE_HALTED,
@@ -211,7 +212,7 @@ function leadClose(status, response) {
 // What the Stage reads off one Response; the drift check compares exactly this with the Python.
 const reading = (t) => {
   const s = leadStatus(t)
-  return { endsClosed: endsClosed(t), asks: asks(t), status: s, statusClose: leadClose(s, t) }
+  return { endsClosed: endsClosed(t), asks: asks(t), flagged: closingFlagged(t), status: s, statusClose: leadClose(s, t) }
 }
 
 // ---- The skill text -------------------------------------------------------------------------------------
@@ -336,6 +337,19 @@ test('port: a lead\'s status line after the banner is taken out, in a closing fe
   assert.deepEqual(alone.statusClose, ['work to review', 'the rollout'])
 })
 
+test('port: the flag reads the last declaring block for its ", but", the lead\'s line out first', () => {
+  const flaggedBanner = '**Thread closed. Safe to end this session, but work is NOT queued to land in x: see its landing row.**'
+  assert.equal(R(closing(REPORT, flaggedBanner)).flagged, true)
+  assert.equal(R(closing(REPORT, BANNER)).flagged, false, 'a dash after the sentence flags')
+  assert.equal(R(`${closing(REPORT, flaggedBanner)}\n${STATUS_DONE}`).flagged, true, 'the lead\'s line hides the flag')
+  assert.equal(R(`${closing(REPORT, flaggedBanner)}\n\nWant me to file it?`).flagged, true,
+    'the flag reads the declaring block, wherever the Response ends')
+  assert.equal(R(closing(`Earlier: ${flaggedBanner}`, BANNER)).flagged, false, 'an earlier declaring block flags')
+  assert.equal(R(closing(REPORT, 'Thread closed. Safe to end this session, butter is out.')).flagged, false,
+    '"but" matches inside a word')
+  assert.equal(R('Nothing declared, but work is NOT queued to land.').flagged, false, 'no declaration flags')
+})
+
 // ---- 3. The skill text read through the port ------------------------------------------------------------
 test('close step 9: exactly four banners, each ending its message closed with nothing asked', () => {
   const b = banners(real.close)
@@ -410,7 +424,7 @@ test('close step 9 rule (2): banner then the lead\'s status line archives at don
 test('close step 9: banners C and D flag by their ", but" with no model, A and B never; a lead\'s done reads C and D a report', () => {
   const b = banners(real.close).map(fill)
   assert.equal(b.length, 4, 'step 9 holds four banners')
-  const flagged = b.map((x) => closingFlagged(closing(REPORT, x)))
+  const flagged = b.map((x) => R(closing(REPORT, x)).flagged)
   assert.deepEqual(flagged, [false, false, true, true], 'banners A, B, C, D read flagged as')
   b.forEach((x, i) => {
     const done = R(closing(REPORT, `${x}\n${STATUS_DONE}`))
@@ -423,7 +437,7 @@ test('close step 9 rule (1): a reworded banner C loses its flag, so a lead\'s do
   assert.ok(w, 'rule (1) quotes no reworded "Thread closed. Safe to end this session …" counter-example')
   const t = closing(REPORT, fill(w))
   assert.equal(R(t).endsClosed, true, 'the reworded banner no longer declares the close')
-  assert.equal(closingFlagged(t), false, 'the reworded banner still flags: it is no counter-example')
+  assert.equal(R(t).flagged, false, 'the reworded banner still flags: it is no counter-example')
   assert.deepEqual(R(`${t}\n${STATUS_DONE}`).statusClose, ['closed', ''], 'a lead\'s done does not read it closed')
 })
 
@@ -702,7 +716,8 @@ spec.loader.exec_module(s)
 out = []
 for t in json.load(sys.stdin):
     st = s.wave_status(t); wc = s.wave_close(st, t)
-    out.append({"endsClosed": s.ends_closed(t), "asks": s.asks(t), "status": st, "statusClose": list(wc) if wc else None})
+    out.append({"endsClosed": s.ends_closed(t), "asks": s.asks(t), "flagged": s.closing_flagged(t), "status": st,
+                "statusClose": list(wc) if wc else None})
 print(json.dumps(out))
 `
 
