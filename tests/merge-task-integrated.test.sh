@@ -294,22 +294,25 @@ ok "$rc" 0 "16b. an absent check with CI in flight waits, then merges"
 ok "$(grep -cx 7 "$tmp/sleeps")" 1 "16b. (12a's control) the wait is one CHECK_INTERVAL through the sleep stub"
 has "$out" "CI in flight on head — waiting" "16b. reads the absent check as pending"
 has "$(glog)" "actions/runs?head_sha=$I" "16b. probes runs on the integrated head"
-fresh; pair; mkpr 5 "$I" BLOCKED; seed 5 "$(b 1)"
+# 16c. a gh with --json on pr checks (checks.json): the --json path reads a genuine step and halts. 16e and 16f
+#      read the same verdict from gh 2.43.1's table.
+fresh; pair; mkpr 5 "$I" BLOCKED; seed 5 "$(b 1)"; touch "$MT_STATE/checks.json"
 chk 1 "$(row ci fail)" ""; echo "https://github.com/o/r/actions/runs/7/job/8" > "$MT_STATE/links"; echo "Run tests" > "$MT_STATE/steps"
 run 5 "$I" "$B"
-ok "$rc" 1 "16c. a red required check on a genuine step exits 1"; lacks "$(glog)" "run rerun" "16c. no rerun"
+ok "$rc" 1 "16c. --json gh: a red required check on a genuine step exits 1"; lacks "$(glog)" "run rerun" "16c. no rerun"
+ok "$(grep -cx 'pr checks 5 -R o/r --required' "$MT_STATE/gh.log")" 0 "16c. read --json, never the table"
 fresh; pair; mkpr 5 "$I" BLOCKED; seed 5 "$(b 1)"
 chk 1 "$(row ci pending)" "error connecting to api.github.com"
 run 5 "$I" "$B"
 ok "$rc" 8 "16d. a transient checks error with no red row exits 8"; has "$out" "retryable: gh pr checks failed" "16d. says so"
 lacks "$(glog)" "run rerun" "16d. no rerun"; ok "$(nmerge)" 0 "16d. nothing merged"; ok "$(ctr 5)" "$(b 1)" "16d. the counter is untouched"
 fresh; pair; mkpr 5 "$I" BLOCKED
-chk 1 "$(row integration-timeout fail)" ""; echo "https://github.com/o/r/actions/runs/7/job/8" > "$MT_STATE/links"
+chk 1 "$(row integration-timeout fail)" ""
 echo "Run integration tests" > "$MT_STATE/steps"
 run 5 "$I" "$B"
 ok "$rc" 1 "16e. a red check named integration-timeout exits 1"; lacks "$(glog)" "run rerun" "16e. no rerun"
 fresh; pair; mkpr 5 "$I" BLOCKED
-chk 1 "$(row integration-timeout fail)" "timed out"; echo "https://github.com/o/r/actions/runs/7/job/8" > "$MT_STATE/links"
+chk 1 "$(row integration-timeout fail)" "timed out"
 echo "Run integration tests" > "$MT_STATE/steps"
 run 5 "$I" "$B"
 ok "$rc" 1 "16f. a red row with 'timed out' on stderr still exits 1"
@@ -339,6 +342,29 @@ fresh; pair; mkpr 5 "$I" BLOCKED
 chk 1 "ext-status	fail	0	https://example.com/status	" ""; echo "Set up job" > "$MT_STATE/steps"
 run 5 "$I" "$B"
 ok "$rc" 1 "16i. a red row with no run link exits 1"; lacks "$(glog)" "run rerun" "16i. no rerun"
+# 16j. two failed required runs: run 7 failed on setup, run 9 (cancelled, timed out or errored) holds no failed step.
+#      The per-run guard stops as genuine on run 9 before any re-run, so run 7's setup failure never re-runs
+#      run 9. gh 2.43.1's table (whose `fail` holds CANCELLED too), then a --json gh's buckets: the same verdict.
+for j in table json; do
+  fresh; pair; mkpr 5 "$I" BLOCKED
+  [ "$j" = json ] && { touch "$MT_STATE/checks.json"
+    printf '%s\n' https://github.com/o/r/actions/runs/7/job/8 https://github.com/o/r/actions/runs/9/job/10 > "$MT_STATE/links"; }
+  chk 1 "$(printf '%s\n%s' "$(row ci fail)" "e2e	fail	1m	https://github.com/o/r/actions/runs/9/job/10	")" ""
+  echo "Set up job" > "$MT_STATE/steps.7"; : > "$MT_STATE/steps.9"
+  run 5 "$I" "$B"
+  ok "$rc" 1 "16j ($j). a selected run with no failed step exits 1"; lacks "$(glog)" "run rerun" "16j ($j). no rerun"
+  has "$out" "run 9 has no failed step to classify" "16j ($j). names run 9"
+  if [ "$j" = json ]; then ok "$(grep -cx 'pr checks 5 -R o/r --required' "$MT_STATE/gh.log")" 0 "16j (json). never the table"
+    has "$(glog)" 'select(.bucket=="fail" or .bucket=="cancel")' "16j (json). selects the table's rows: the fail and cancel buckets"
+  else ok "$(grep -cx 'pr checks 5 -R o/r --required' "$MT_STATE/gh.log")" 1 "16j (table). read the plain table once"; fi
+done
+# 16k. gh 2.43.1, a fail row whose description is a URL: column 4 is the link, so run 7 is re-run, never skipped.
+fresh; pair; mkpr 5 "$I" UNSTABLE
+chk 1 "ci	fail	1m	https://github.com/o/r/actions/runs/7/job/8	https://status.example.com/incident" ""
+chk 0 "$(row ci pass)" ""
+echo "Set up job" > "$MT_STATE/steps"
+run 5 "$I" "$B"
+ok "$rc" 0 "16k. a URL description never hides the link: re-run, then merges"; has "$(glog)" "run rerun 7 --failed" "16k. re-ran run 7"
 
 # 17. already merged, verified: no merge call, the anchor ref deleted
 fresh; pair; M=$(mk "$B" squash); git --git-dir "$MT_SRV" update-ref refs/heads/master "$M"

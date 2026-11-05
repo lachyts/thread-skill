@@ -41,7 +41,9 @@ State (a missing file takes the default in brackets):
                           A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
                           checks as they stand. `pr checks --json` is gh 2.43.1's "unknown flag: --json", rc 1,
                           unless checks.json is present (a newer gh), which prints `links`.
-  links, steps            the infra-classify reads; `run rerun` is logged, rc 0.
+  links, steps            the infra-classify reads; `run rerun` is logged, rc 0. `run view <id>` serves
+                          steps.<id> when that file exists (an empty one: a run with no failed step),
+                          else steps.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
   merge.queue             rc 0, autoMergeRequest set, stays OPEN.   merge.noop: rc 0, nothing changed.
@@ -292,7 +294,8 @@ if args[:2] == ["pr", "checks"]:
 
 # ---- run view / run rerun -------------------------------------------------------------------------------
 if args[:2] == ["run", "view"]:
-    print(rd(p("steps"), ""))
+    own = "steps.%s" % args[2] if len(args) > 2 else ""
+    print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:
     sys.exit(0)
