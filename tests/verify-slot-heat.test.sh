@@ -26,7 +26,9 @@
 #   read() and suite_stop(), fail-open)   M1 a fresh stop: never starts; a TERM exits 76   M2 a fresh stop mid-run stops
 #   it, back in line, restart once clear (a fresh green file runs it)   M3 a stale stop stops nothing   M4 a fresh stop
 #   with `--slot-wait 1`: 76, never started   M5 heat first: at trapping the heat lines win   MW the stop's unit harness
-#   on Guarded.watch   MH1 the Run record: a capacity stop ends its suite heat (no rc), the restart a fresh suite
+#   on Guarded.watch   MS a TERM inside the Capacity read (capacity.py's file read or suite_stop()) is held and raised
+#   as the read ends, never swallowed into no reading (`run`'s and lead-integrate.py's handlers alike)
+#   MH1 the Run record: a capacity stop ends its suite heat (no rc), the restart a fresh suite
 #   ML1 lead-integrate verify: a capacity stop during the verifier, back in line, restart green   ML2 … pinned stop with
 #   --slot-wait 1: rc heat, exit 76.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; the stub notifyutil reads the level
@@ -674,6 +676,61 @@ print(ra, a.stops, rb is vs.HEAT_STOPPED, b.stops, repr(b.heat), vs.stop_words(b
 ok "$(mw 2)" "3 0 True 1 'memory: critical' capacity stop (memory: critical) memory: critical" \
   "MW: below trapping a fresh stop stops a guard still there (its label kept), keeps the rc of one that exits in the settle"
 ok "$(mw 3)" "3 0 True 1 3 heat stop (trapping) heat: trapping" "MW: at trapping the heat is read first: a heat stop, its level kept"
+export HOME="$H0"
+
+# MS: a stop that lands inside the Capacity read is held and raised as the read ends, never swallowed: capacity.py's
+# read() and suite_stop() catch any exception, and so do verify-slot's own callers, so a TERM there once read as no
+# reading and the suite ran on holding its slot. Each case sends SIGTERM to this very pid from inside capacity.py
+# (`_load`, as a TERM landing in the file read; then `suite_stop`), with `run`'s own handler installed; one more case
+# installs another Exception (lead-integrate.py verify's own `_Signalled`); after each the caller's mask is restored.
+arm ms
+export HOME="$D/home"; capjson "$HOME" true 4
+cat > "$tmp/ms.py" <<'PY2'
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("vs", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+signal.signal(signal.SIGTERM, vs._on_signal)
+r = vs._capacity_reading()   # loads capacity.py, no signal: the reading itself is unchanged by the hold
+print("plain", r["file"], vs._suite_stop(r), vs._stop_reading())
+cap = vs._CAPACITY_MOD
+real_load, real_stop = cap._load, cap.suite_stop
+def term_load(path):
+    os.kill(os.getpid(), signal.SIGTERM)
+    return real_load(path)
+def term_stop(reading):
+    os.kill(os.getpid(), signal.SIGTERM)
+    return real_stop(reading)
+def held():   # SIGTERM blocked in the caller's mask now: it must be False after every call
+    return signal.SIGTERM in signal.pthread_sigmask(signal.SIG_BLOCK, [])
+def case(name, fn, exc=vs._Signalled):
+    try:
+        out = fn()
+    except exc as e:
+        out = f"raised {type(e).__name__} {e.args[0]}"
+    print(name, out, held())
+cap._load = term_load
+case("reading", vs._capacity_reading)
+case("stop_reading", vs._stop_reading)
+case("capacity_stop", vs.capacity_stop)
+cap._load = real_load
+cap.suite_stop = term_stop
+case("suite_stop", lambda: vs._suite_stop(r))
+cap.suite_stop = real_stop
+class Other(Exception):   # lead-integrate.py verify's own handler raises its own class, never vs._Signalled
+    pass
+def other(signum, _frame):
+    raise Other(signum)
+signal.signal(signal.SIGTERM, other)
+cap._load = term_load
+case("other", vs._capacity_reading, Other)
+PY2
+ms() { THREAD_HEAT_LEVEL=0 "$PY" "$tmp/ms.py" "$VS" 2>&1; }
+MS=$(ms)
+has "$MS" "plain fresh memory: critical memory: critical" "MS: with no signal the held read gives the same reading and stop"
+has "$MS" "reading raised _Signalled 15 False" "MS: a TERM inside capacity.py's file read: _capacity_reading() raises _Signalled, its mask restored"
+has "$MS" "stop_reading raised _Signalled 15 False" "MS: … and so does a running suite's _stop_reading() (Guarded.watch's and _pump's)"
+has "$MS" "capacity_stop raised _Signalled 15 False" "MS: … and capacity_stop()"
+has "$MS" "suite_stop raised _Signalled 15 False" "MS: a TERM inside capacity.py's suite_stop(): _suite_stop() raises _Signalled"
+has "$MS" "other raised Other 15 False" "MS: another handler's Exception (lead-integrate.py verify's) is raised too"
 export HOME="$H0"
 
 # MH1: the Run record on the recorded path (HR1's task tree, its vault under VH): a capacity stop ends its suite heat.

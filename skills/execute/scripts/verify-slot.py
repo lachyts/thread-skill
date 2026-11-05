@@ -135,12 +135,17 @@ Contract.
    trapping notifyutil did not). Its no-verdict lines name it in place of the heat: `verify-slot: no verdict:
    stopped while the Capacity stopped suites (<label>); exit 76` and `… no verify slot within <S>s (<label>); exit
    76`; the Run record ends its suite `heat` and lead-integrate.py's verify reads `heat` (exit 76), so the outcome
-   vocabulary is unchanged. The heat is read first, so at heavy or worse the heat holds and at trapping or worse a
-   stop is a heat stop, its lines unchanged; acquire() reads capacity.json once per poll that the heat does not
+   vocabulary is unchanged. The heat is read first, so at heavy or worse the heat holds the wait and at trapping or
+   worse a stop is a heat stop, its lines unchanged (at heavy, below trapping, a running suite is still stopped by a
+   fresh stop_suites, with the capacity stop's line); acquire() reads capacity.json once per poll that the heat does not
    hold, for both the stop and contract 10's eff. Fails open: a missing, stale or unreadable file, a flag that is
-   anything but JSON true, or a capacity.py that will not load stops nothing. Residuals: the hold and the stop share
+   anything but JSON true, or a capacity.py that will not load stops nothing. Every capacity.json read (acquire()'s
+   per poll, and the watch's) and suite_stop() call runs with TERM, INT and HUP held (_stops_held), since capacity.py
+   and its callers here catch any exception: a stop that lands in it is delivered as it ends, so it still stops the
+   run (contract 4), never swallowed into a None reading. Residuals: the hold and the stop share
    one threshold (no hysteresis, as heat has), so a suite whose own memory tips the Mac critical can cycle stop and
-   restart, each no verdict, bounded by its one slot-wait deadline; and a copy of this script from before p36-10
+   restart, each no verdict, bounded by its one slot-wait deadline (the follow-up task
+   thread-skill-capacity-stop-holds-the-restart-past-warning); and a copy of this script from before p36-10
    shares the pool and never stops for memory.
 8. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
    such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
@@ -279,7 +284,8 @@ HEAT_EXIT = 76             # `run`'s no verdict, never red (75 is lead-integrate
 HEAT_ENV = "THREAD_HEAT_LEVEL"   # an integer 0 to 4 pins the level (the tests' pin); any other value is ignored
 HEAT_POLL_FACTOR = 5       # a running suite's heat is read every HEAT_POLL_FACTOR * the poll base
 HEAT_SETTLE = 2 * GUARD_POLL     # at a stop reading, how long a guard that is already ending gets to exit by itself
-HEAT_STOPPED = object()    # Guarded.watch's result when it stopped the suite for the heat
+HEAT_STOPPED = object()    # Guarded.watch's result when it stopped the suite for the heat, or for the Capacity stop
+                           # (contract 7, p36-10: a fresh capacity.json's signals.stop_suites): `.heat` says which
 NOTIFYUTIL = "/usr/bin/notifyutil"   # the reading's tool when PATH has none
 # `run`'s own bound on its slot wait (p32-1), `--slot-wait`'s default: the lead's `slotWait` at the default
 # `verify_timeout` of 1800 s, max(60, 7200 - 600 - 1800), so an agent's wait, its suite and the margin fit the harness
@@ -805,42 +811,68 @@ def _open_slot(d, k):
 _CAPACITY_MOD = None
 
 
+class _stops_held:
+    """SIGNALS held across a Capacity reading (_capacity_reading, _suite_stop). capacity.py's read() and suite_stop()
+    catch any exception, and so do their callers here, so a stop's handler raising inside one (`run`'s _on_signal, or
+    lead-integrate.py verify's own, both raising an Exception) would be swallowed: the reading would read None and a
+    running suite would run on, holding its slot. A stop that lands meanwhile is held and delivered as the block ends,
+    outside the reading's except, so its handler still raises to the caller (as Guarded's spawn window holds it).
+    Where pthread_sigmask is missing it holds nothing."""
+
+    def __enter__(self):
+        try:
+            self.mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+        except (AttributeError, OSError, ValueError):
+            self.mask = None
+        return self
+
+    def __exit__(self, *_exc):
+        if self.mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, self.mask)   # a held stop is delivered, and raises, here
+        return False
+
+
 def _capacity_reading():
     """capacity.py's read() now (contract 10 and the Capacity stop, contract 7), or None when capacity.py (beside
-    SCRIPT, loaded once) will not load or its read fails. Never raises."""
+    SCRIPT, loaded once) will not load or its read fails. Never raises, but a stop that lands meanwhile is held across
+    the read and raised as it ends (_stops_held), never swallowed."""
     global _CAPACITY_MOD
-    try:
-        if _CAPACITY_MOD is None:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(
-                "thread_capacity", os.path.join(os.path.dirname(SCRIPT), "capacity.py"))
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            _CAPACITY_MOD = mod
-        reading = _CAPACITY_MOD.read(datetime.now().astimezone())
-        return reading if isinstance(reading, dict) else None
-    except Exception:  # noqa: BLE001 — a reading that fails reads as none: no lowering, no stop
-        return None
+    with _stops_held():
+        try:
+            if _CAPACITY_MOD is None:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(
+                    "thread_capacity", os.path.join(os.path.dirname(SCRIPT), "capacity.py"))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _CAPACITY_MOD = mod
+            reading = _CAPACITY_MOD.read(datetime.now().astimezone())
+            return reading if isinstance(reading, dict) else None
+        except Exception:  # noqa: BLE001 — a reading that fails reads as none: no lowering, no stop
+            return None
 
 
 def _capacity_slots(slots, reading):
-    """min(slots, C) for a fresh reading (contract 10), else slots: never raising (any failure reads slots)."""
+    """min(slots, C) for a fresh reading (contract 10), else slots: any ill-shaped reading reads slots. Its except
+    names only what a reading's shape can raise, so a stop's handler raising here passes through."""
     try:
         if reading is not None and reading["file"] == "fresh":
             return min(slots, max(1, int(reading["capacity"])))
-    except Exception:  # noqa: BLE001 — a reading that fails reads the configured slots: it only ever lowers them
+    except (KeyError, TypeError, ValueError, OverflowError):   # it only ever lowers the configured slots
         pass
     return slots
 
 
 def _suite_stop(reading):
-    """capacity.py's suite_stop(reading): the Capacity stop's label (a non-empty str), else None. Never raises."""
+    """capacity.py's suite_stop(reading): the Capacity stop's label (a non-empty str), else None. Never raises, but a
+    stop that lands meanwhile is held across the call and raised as it ends (_stops_held), never swallowed."""
     if reading is None:
         return None
-    try:
-        label = _CAPACITY_MOD.suite_stop(reading)
-    except Exception:  # noqa: BLE001 — a capacity.py with no suite_stop, or one that raises, stops nothing
-        return None
+    with _stops_held():
+        try:
+            label = _CAPACITY_MOD.suite_stop(reading)
+        except Exception:  # noqa: BLE001 — a capacity.py with no suite_stop, or one that raises, stops nothing
+            return None
     return label if isinstance(label, str) and label else None
 
 
