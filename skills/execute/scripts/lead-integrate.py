@@ -172,7 +172,8 @@ Subcommands:
       6. the branch (ls-remote): absent, a commit `Revert "<M's subject>"` whose body says `This reverts commit <M>.`
          and the RACE sentence; present, its commits in origin/B..origin/<branch> must hold one saying `This reverts
          commit <M>` (else exit 1), and origin/B is merged into it (a conflict routes `conflict`);
-      7. a plain push (`HEAD:refs/heads/<branch>`, never --force or a `+`), read back through ls-remote (refused: 8),
+      7. a plain push (`HEAD:refs/heads/<branch>`, never --force or a `+`; a server error retried as push's is), read
+         back through ls-remote (refused: 8),
          skipped when the branch holds the head already; then the open PR on the branch, or `gh pr create
          --body-file` (its body says `This reverts commit <M>` too): route `pr`;
       8. the tree is removed in a `finally`, after `restores` is read.
@@ -194,7 +195,9 @@ Subcommands:
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
-      equal M. Exit 1 when refused.
+      equal M. A push that fails on a server error (a 5xx, a connection reset, a timeout) is tried again after
+      2, 5 and 15 s (PUSH_BACKOFF, p39-1); a genuine rejection (non-fast-forward, a protected branch) fails at
+      once. Prints {pushed, branch, retries}. Exit 1 when refused, the reason git's whole stderr on one line.
 
   undo --repo R --slug S --merge M --to H
       Drop the lead's unpushed merge: only when the tree is on its branch at M, M^1 == H and origin's
@@ -522,7 +525,10 @@ def out_of(p):
 
 
 def why(p):
-    return (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}").splitlines()[-1]
+    """A failed step's reason on one line: its whole stderr (or stdout), each non-blank line kept and joined by ` | `,
+    so a push's `[rejected]` or `HTTP 502` line is not lost behind git's closing `error: failed to push` (p39-1)."""
+    lines = [ln.strip() for ln in (p.stderr.strip() or p.stdout.strip()).splitlines() if ln.strip()]
+    return " | ".join(lines) or f"exit {p.returncode}"
 
 
 def rev(cwd, ref):
@@ -1568,18 +1574,61 @@ def _remote_head(tree, br):
     return (out_of(p).split() or [""])[0]
 
 
+# A push that a server error refused (p39-1, found in chorus-rollout-2026-11-04: GitHub 500/502 on a plain fast-forward,
+# four times) is tried again after each of these waits before it counts as refused. A genuine rejection (non-fast-forward,
+# a protected branch, a declined hook, a denied permission) is read first and fails at once, whatever else its stderr
+# says.
+PUSH_BACKOFF = (2, 5, 15)
+PUSH_BACKOFF_ENV = "THREAD_PUSH_BACKOFF_S"   # tests only: caps each wait (0 for none); it never lengthens one
+_PUSH_REJECTED = re.compile(r"non-fast-forward|fetch first|stale info|protected branch|hook declined|\bGH0\d\d\b|"
+                            r"permission|denied|not allowed|authenticat", re.I)
+_PUSH_SERVER_ERROR = re.compile(r"\b(?:HTTP|error:?)\s*5\d\d\b|internal server error|bad gateway|service unavailable|"
+                                r"gateway time-?out|connection reset|reset by peer|timed out|time-?out|early EOF|"
+                                r"unexpected disconnect|remote end hung up|commit_refs", re.I)
+
+
+def _push_waits():
+    try:
+        cap = float(os.environ.get(PUSH_BACKOFF_ENV, ""))
+    except ValueError:
+        return PUSH_BACKOFF
+    return tuple(min(w, max(cap, 0)) for w in PUSH_BACKOFF)
+
+
+def _server_error(p):
+    """True when a failed push's stderr reads as a server error (a 5xx, a connection reset, a timeout) and as no genuine
+    rejection: the one failure worth trying again."""
+    text = f"{p.stderr}\n{p.stdout}"
+    return not _PUSH_REJECTED.search(text) and bool(_PUSH_SERVER_ERROR.search(text))
+
+
+def _push(tree, refspec):
+    """A plain `git push --quiet origin <refspec>` (never --force, never a `+`), tried again after each PUSH_BACKOFF wait
+    while it fails on a server error: (the last try's process, the retries spent)."""
+    waits = _push_waits()
+    for n in range(len(waits) + 1):
+        p = git(tree, "push", "--quiet", "origin", refspec)
+        if p.returncode == 0 or n == len(waits) or not _server_error(p):
+            return p, n
+        time.sleep(waits[n])
+
+
+def _retried(n):
+    return f" (after {n} retries on a server error)" if n else ""
+
+
 def cmd_push(args):
     br, tree = branch_of(args.slug), worktree_dir(os.path.expanduser(args.repo), args.slug)
     head = rev(tree, "HEAD")
     if head != args.head:
         raise Refused(f"the task tree {tree} is at {head or 'nothing'}, not {args.head}")
-    p = git(tree, "push", "--quiet", "origin", f"{args.head}:refs/heads/{br}")
+    p, retries = _push(tree, f"{args.head}:refs/heads/{br}")
     if p.returncode != 0:
-        raise Refused(f"push of {args.head} to origin/{br} refused: {why(p)}")
+        raise Refused(f"push of {args.head} to origin/{br} refused{_retried(retries)}: {why(p)}")
     got = _remote_head(tree, br)
     if got != args.head:
         raise Refused(f"origin/{br} reads {got or 'nothing'} after the push, not {args.head}")
-    return {"pushed": args.head, "branch": br}
+    return {"pushed": args.head, "branch": br, "retries": retries}
 
 
 def cmd_undo(args):
@@ -1857,9 +1906,9 @@ def cmd_revert(args):
                 return out
         head = rev(tree, "HEAD")
         if remote != head:
-            p = git(tree, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")   # never --force, never a `+`
+            p, retries = _push(tree, f"HEAD:refs/heads/{branch}")   # never --force, never a `+`
             if p.returncode != 0:
-                raise Retryable(f"push of {head[:12]} to origin's {branch} refused: {why(p)}")
+                raise Retryable(f"push of {head[:12]} to origin's {branch} refused{_retried(retries)}: {why(p)}")
             got = (out_of(git(repo, "ls-remote", "origin", f"refs/heads/{branch}")).split() or [""])[0]
             if got != head:
                 raise Retryable(f"origin's {branch} reads {got or 'nothing'} after the push, not {head}")

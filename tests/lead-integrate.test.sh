@@ -8,7 +8,8 @@
 #   C2  main moved: the lead merges, verifies (the SKILL.md verify line), pushes, logs and merges — no agent.
 #   C3  a shared file   C4  a conflict   C5  red, undo   C6  case (ii) from an engine line   C7  the own run merged
 #   main; a stale anchor ref   C8  a missing, detached or unpushed tree (merge while main is unmoved, trouble once
-#   it moved), leftovers, a gone branch   C9  push refused   C10 landed   C11 engine pins   C12 inputs parity (and
+#   it moved), leftovers, a gone branch   C9  push refused (C9b: a server error retried on its backoff, p39-1)
+#   C10 landed   C11 engine pins   C12 inputs parity (and
 #   the rung record from inputs)   C13a exit-4 plumbing   C13b a dead integrate call   C13c lead-written own and
 #   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
@@ -437,6 +438,52 @@ python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
 ok "$?" 1 "C9: a non-fast-forward push is refused (exit 1), never forced"
 python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M" --to "$H0" >/dev/null 2>&1
 ok "$?|$(git -C "$WT" rev-parse HEAD)" "0|$H0" "C9: undo restores H"
+
+# C9b (p39-1): a GitHub 5xx is retried on its backoff before push reports it refused; a genuine rejection fails at once,
+# and the refusal shows git's whole stderr, not only its last line. pushshim <fails> <stderr>: a git whose first <fails>
+# pushes print <stderr> and exit 1 (every push counted in $F/pushes), then the real git. THREAD_PUSH_BACKOFF_S=0 (tests
+# only) shrinks each wait to nothing.
+pushshim() {
+  mkdir -p "$F/pshim"; : > "$F/pushes"; printf '%s\n' "$2" > "$F/pshim.err"
+  printf '#!/bin/sh\ncase " $* " in *" push "*) echo x >> "%s"; n=$(wc -l < "%s")\n  if [ "$n" -le %s ]; then cat "%s" >&2; exit 1; fi ;; esac\nexec "%s" "$@"\n' \
+    "$F/pushes" "$F/pushes" "$1" "$F/pshim.err" "$(command -v git)" > "$F/pshim/git"
+  chmod +x "$F/pshim/git"
+}
+pushes() { wc -l < "$F/pushes" | tr -d ' '; }
+GH502=$(printf "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nsend-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly\nerror: failed to push some refs to 'https://github.com/o/r.git'")
+fx c9b
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 2 "$GH502"
+O=$(PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" 2>"$F/push.err"); rc=$?
+ok "$rc|$(pushes)|$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "0|3|$M" "C9b: two HTTP 502s, then the push lands (exit 0, three pushes, origin at M)"
+ok "$(j "$O" 'd["retries"]')" 2 "C9b: … the verdict counts the two retries"
+fx c9b2
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 99 "$GH502"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)|$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "1|4|$H0" "C9b: a 5xx on every try → refused after three retries (exit 1, four pushes, origin unmoved)"
+E=$(cat "$F/push.err")
+has "$E" "after 3 retries on a server error" "C9b: … the refusal names its retries"
+has "$E" "HTTP 502 curl 22" "C9b: … and shows the whole stderr: its first line"
+has "$E" "error: failed to push some refs" "C9b: … and its last"
+fx c9b3
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 99 "$(printf "remote: Internal Server Error\nTo https://github.com/o/r.git\n ! [remote rejected] %s -> %s (Internal Server Error)\nerror: failed to push some refs to 'https://github.com/o/r.git'" "$M" "$BR")"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; rc=$?
+ok "$rc|$(pushes)" "1|4" "C9b: GitHub's [remote rejected] (Internal Server Error) is a server error: retried"
+pushshim 99 "$(printf "remote: error: GH006: Protected branch update failed for refs/heads/%s.\nTo https://github.com/o/r.git\n ! [remote rejected] %s -> %s (protected branch hook declined)\nerror: failed to push some refs to 'https://github.com/o/r.git'" "$BR" "$M" "$BR")"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)" "1|1" "C9b: a protected-branch rejection fails at once (one push, no retry)"
+has "$(cat "$F/push.err")" "GH006: Protected branch update failed" "C9b: … its refusal shows the whole stderr, not only the last line"
+onbranch commit -q --allow-empty -m "a repair pushed meanwhile"
+pushshim 0 ""
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)" "1|1" "C9b: a real non-fast-forward fails at once (one push, no retry)"
+has "$(cat "$F/push.err")" "[rejected]" "C9b: … its refusal names git's [rejected] line, not only the last line"
+ok "$(python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("li", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m); print(m.PUSH_BACKOFF)' "$LI")" "(2, 5, 15)" "C9b: the backoff is 2, 5, 15 s"
 
 # ======== C10: landed ===============================================================================
 fx c10
