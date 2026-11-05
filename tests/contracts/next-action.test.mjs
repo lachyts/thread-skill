@@ -10,7 +10,7 @@
 // file or section is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readIf, slice, assertHas, textFiles, lineOf } from '../lib/contract-text.mjs'
+import { readIf, slice, assertHas, textFiles, lineOf, collapse } from '../lib/contract-text.mjs'
 
 const WRITER = 'skills/_shared/task-writer.md'
 const CLOSE = 'skills/close/SKILL.md'
@@ -66,6 +66,36 @@ test('task-writer § 4b gives close a no-invention form', () => {
   ])
 })
 
+// Close's Now refresh (p38-1): the agent writes the block from THREAD.md's Where we are, the script places it in each
+// targeted project note's `## Now` that names the closing thread's file (its behaviour is tests/next-action.test.mjs).
+test("task-writer § 4b gives close a Now refresh: the agent writes, the script places, only in this thread's Now", () => {
+  const para = slice(s4b(), /^\*\*Close's Now\.\*\*/, /^This section is the only overwrite/)
+  assertHas(para && collapse(para), `${WRITER} § 4b "Close's Now"`, [
+    `${SCRIPT_CITE} now`,
+    '--thread-file',
+    "--text - <<'EOF'",
+    'As of <today>, from the thread:',
+    /at most five lines/,
+    /Where we are/,
+    // The path: the active thread's resolved file, a rollout clone's in-place twin's, never the clone's copy.
+    /the same path step 5 passes to `captures --thread-file`/,
+    /in-place twin/, /§ Repo-thread lookup/,
+    // The run's anchor: the dated opener, never a hand line that merely opens `As of `.
+    /the one dated opener in the `## Now` section/, /a hand paragraph opening `As of last week` is no run/,
+    // The thread guard reads only the kept lines, never the run it replaces, and its match is recorded once.
+    /the lines the write keeps name that thread file/, /never the old run/, "not this thread's Now",
+    /a substring of the kept lines/, /percent-encoded/, /`THREAD\.md\.bak` never counts/,
+    /a Now with no dated opener is left alone/,
+    /never adds a `## Now`/,
+    /stash and defer leave the Now alone/,
+    'Now not written: <stderr>',
+    /never edit the note by hand/,
+    // The empty-root carve-out: python3's own exit 2 is no refusal, plugin-root.md rule 4's re-run.
+    "can't open file '/skills/…'",
+    /`plugin-root\.md` rule 4/,
+  ])
+})
+
 test('task-writer § 4 leaves next_action to the script; § 2 finds captures through it', () => {
   const s4 = slice(readIf(WRITER), /^## 4\./, /^## 4b\./)
   assert.doesNotMatch(s4 ?? '', /^next_action:/m, `${WRITER} § 4's template must not hand-write next_action`)
@@ -102,6 +132,8 @@ test('stash, defer and close cite task-writer § 4b and its script', () => {
     assertHas(write, `${file} "Write the capture task" step`, [
       'skills/_shared/task-writer.md', /§ 4b\b/, /`next-action\.py set-down`/, /estate ADR 0008/,
     ])
+    // Stash and defer never rewrite Where we are, so they never refresh the Now.
+    assert.doesNotMatch(write, /next-action\.py now/, `${file} must not run the Now refresh`)
   }
   const close = readIf(CLOSE)
   const sub6 = lineOf(close, /^ {3}6\. Approved vault tasks/)
@@ -110,11 +142,15 @@ test('stash, defer and close cite task-writer § 4b and its script', () => {
     /the set-down write for the task step 5 matched/, /with no match, nothing/,
     /Not under `\/thread:open save`/,
     /elsewhere the vault's daily sweep does/,
+    /`next-action\.py now`/, /Close's Now/, /--thread-file/, /step 5 gave `captures --thread-file`/,
   ])
   const step5 = lineOf(close, /^5\. \*\*Compute the full save set silently\*\*/)
   assertHas(step5, `${CLOSE} step 5`, [/its `captures --for-close` run is here, before sub-step 7\.6 creates any task/])
   const step8 = lineOf(close, /^8\. \*\*Print the "What landed" report/)
-  assertHas(step8, `${CLOSE} step 8`, [/`next task: \[\[<task>\]\] on <Project>/, /`next task: none \(no concrete next task/])
+  assertHas(step8, `${CLOSE} step 8`, [
+    /`next task: \[\[<task>\]\] on <Project>/, /`next task: none \(no concrete next task/,
+    /· Now: <Project>/, /`?Now not written: <stderr>/,
+  ])
 })
 
 test('open save is no set-down', () => {
@@ -160,7 +196,13 @@ test('orient reads the slot first, proposes against it, fills only blanks', () =
 test('CONTEXT.md defines the next-action vocabulary', () => {
   const ctx = readIf('CONTEXT.md')
   assertHas(ctx, 'CONTEXT.md', [
-    /^- \*\*Set-down\*\* — /m, /^- \*\*Next action\*\* — /m, /^- \*\*Next task\*\* — /m,
+    /^- \*\*Set-down\*\* — /m, /^- \*\*Next action\*\* — /m, /^- \*\*Next task\*\* — /m, /^- \*\*Now\*\* — /m,
     '~/repos/workspaces/_shared/CONTEXT.md` § Next action',
   ])
+  // Lachy hand-writes Nows too: the refresh is the only agent writer, never the only writer.
+  const now = slice(ctx, /^- \*\*Now\*\* — /, /^(?:- \*\*|## )/)
+  assertHas(now && collapse(now), 'CONTEXT.md **Now**', [
+    /Lachy writes it by hand too/, /its only agent writer/, /dated opener/, /the lines it keeps/,
+  ])
+  assert.doesNotMatch(collapse(now ?? ''), /Only close's Now refresh writes/, 'CONTEXT.md **Now**: not its only writer')
 })
