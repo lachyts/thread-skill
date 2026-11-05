@@ -274,7 +274,11 @@ function checkStanding(f) {
   // test-login (p37-4): a credential gate naming only a declared test Login signs itself; machine-wide, operator-only.
   const tl = labelled(f.execute, S37, "A declared test Login (p37-4, ADR 0034's 2026-11-05 amendment).")
   const row3 = collapse((section(f.execute, /^### 3\. /) ?? '').split('\n').find((l) => l.startsWith('| `test_logins` |')) ?? '')
-  if (!standing.includes('or a declared test Login (*A declared test Login* below)') ||
+  // § 4.5 step 1.2's Exit 3 and § 6.5 (a) list the same ASK reasons as § 3.7 (review round 1: sibling sites)
+  const askReasons = 'unpriceable even from its cap, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, a key missing from it, or a Login gate that names an undeclared Login or anything beside it'
+  if (collapse(f.execute).split(askReasons).length !== 3 ||
+    !tl.includes('nothing joined beside it (an `@` address, or a conjunction that joins a second thing') ||
+    !standing.includes('or a declared test Login (*A declared test Login* below)') ||
     !tc.startsWith('**Test credentials (ADR 0063).** A credential gate passes the standing approval only as a declared test credential or a declared test Login (below). A declared test credential is one of') ||
     !tc.includes('so no class resolves and every class credential there asks') ||
     !tl.includes('one of the machine\'s declared test Logins') || !tl.includes('`(approved <date> under the standing approval: test Login <name>, from <source>)`') ||
@@ -386,8 +390,8 @@ test('control: § 6.5 without the standing lines, or step 1.2 without the month 
   assert.ok(from.length > 1 && from.includes('never a push record'), 'control setup: the standing-lines sentence')
   const sentence = from.slice(0, from.indexOf('never a push record') + from.slice(from.indexOf('never a push record')).indexOf('.') + 1)
   only('execute', sentence, '', 'month-line', 'no standing lines')
-  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, or a key missing from it). Exit 1:",
-    "the item's `→` detail (over the limit, unpriceable, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, or a key missing from it). Exit 1:", 'month-line', 'no month line in step 1.2')
+  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable even from its cap,",
+    "the item's `→` detail (over the limit, unpriceable even from its cap,", 'month-line', 'no month line in step 1.2')
 })
 
 test('control: schedule § 0 without the sign-off sentence fails one-unfinished', () => {
@@ -450,6 +454,13 @@ test('control: each test-login pin, removed in one place, fails test-login alone
   only('context', '- **Test Login** —', '- **Dummy Login** —', L, 'CONTEXT.md: no entry')
   only('context', '(a Test Login is machine-wide)', '(none is)', L, 'CONTEXT.md: Test credential entry')
   only('readme', 'It is\noperator-only: no skill or script writes it.', 'Any agent may write it.', L, 'README: not operator-only')
+  // review round 1: step 1.2's Exit 3 and § 6.5 (a) name the test-Login asks, and § 3.7 names step 5 (nothing joined)
+  only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*). Exit 1:",
+    'or a key missing from it). Exit 1:', L, 'step 1.2: no test-Login asks')
+  only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*) carries",
+    'or a key missing from it) carries', L, '§ 6.5 (a): no test-Login asks')
+  only('execute', 'nothing joined beside it (an `@` address, or a conjunction that joins a second thing', 'nothing beside it (a second thing', L,
+    'the paragraph: no step 5')
 })
 
 test('the rules are all named (17) and each has a control', () => {

@@ -136,8 +136,14 @@ test_logins = ["dummy"]
 
 Then run `python3 skills/_shared/scripts/rollout-settings.py` to check it reads:
 it prints `"test_logins": {"value": ["dummy"], "source": "file:defaults"}`. It is
-operator-only: no skill or script writes it. A gate that names anything beside
-the Login (a token, an API key, another account, a live account) still asks.
+operator-only: no skill or script writes it. The gate still asks when, beside
+the Login, it holds a deny word (such as token, access, secret or a live
+account), an env name, another credential word (account, key, credential,
+API, PAT or `.env`), an `@` address, or a conjunction that joins a second
+thing (and, or, plus, as well as, along with, together with, `&`, `+`, `;`).
+It cannot see a second thing named in plain prose with none of these ("the
+dummy Login, to push to the npm registry"): that signs, the approval names
+only the Login, and any other use is a review failure.
 
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a

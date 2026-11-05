@@ -1177,10 +1177,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Test Login** — a Claude Login the operator declares a test Login (Lachy's
   dummy Login): the Rollout settings key `test_logins`, one line under
   `[defaults]` of `~/.config/thread/rollouts.toml` (schema 5), machine-wide.
-  A credential Gated input that names only such Logins, and nothing beside
-  them (no deny word, env key or other credential), signs itself under the
-  Standing approval with no limit, ledger or month line (p37-4, ADR 0034's
-  2026-11-05 amendment); a serial Leg signs one too. Only Lachy writes it.
+  A credential Gated input that names only such Logins, with no deny word,
+  env key, other credential word, `@` address or conjunction joining a
+  second thing beside them, signs itself under the Standing approval with no
+  limit, ledger or month line (p37-4, ADR 0034's 2026-11-05 amendment); a
+  serial Leg signs one too. A second thing named in plain prose with none of
+  those is not seen, and signs (a residual). Only Lachy writes it.
   _Avoid_: dummy account, test account.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no

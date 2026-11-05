@@ -792,8 +792,10 @@ Subcommands:
               why but NO_LOGINS_WHY is the gate's ASK, and the settings are never resolved for it), then with
               rollouts.toml's `[defaults] test_logins` (read through _resolved_settings once per call, as the class
               is; machine-wide, so a serial note reads it too; a refused file is exit 1 for each slug that needs
-              it). It is covered iff every Login it names is declared and nothing beside it (a deny word, an env
-              key, another credential) is named. It reads no limit and gets no ledger, month line, Needs-you line or
+              it). It is covered iff every Login it names is declared and the reading finds nothing beside it: no
+              deny word, env key, other credential word, `@` address or conjunction joining a second thing (a
+              second thing in plain prose with none of these is not seen: gated_inputs.py's module docstring, 5,
+              names the residual). It reads no limit and gets no ledger, month line, Needs-you line or
               spend lock; its annotation is gated_inputs.login_annotation()'s `(approved <date> under the standing
               approval: test Login <n1, n2>, from <source>)`, and its line prints `<slug>: gate approved under the
               standing approval: <gate> (test Login <n1, n2>, <source>)`. A spend gate is covered iff
@@ -11598,7 +11600,8 @@ def _approve_standing(args) -> int:
     form (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line, no spend lock, and the limit
     is never resolved for it, so the class is its own switch. A credential gate holding a Login word and no env token
     (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered when every Login it names is
-    a declared test Login and nothing else is named beside it, under the same no-limit rules. The limit resolves
+    a declared test Login and the reading finds nothing beside it (gated_inputs.login_reading: no deny word, env key,
+    other credential word, `@` or conjunction), under the same no-limit rules. The limit resolves
     lazily, at a slug's first gate that is not such a credential gate. A slug's new spend signings are logged in the
     rollout note's `## Needs-you log` first, then its task note is written, so a failure between the two over-counts
     (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock included)."""

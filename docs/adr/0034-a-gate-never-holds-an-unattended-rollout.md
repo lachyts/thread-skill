@@ -181,18 +181,21 @@ probes without asking, always.
   `gated_inputs.py`'s standing reading: the full reading (decision 1's, unchanged) when it prices; else the cap-only
   reading. That runs the full reading's rules 1-4 and 6 as ever (no cap, two caps, a malformed, magnitude or range
   amount anywhere, a non-USD or ambiguous currency anywhere still ask), reads the clause with a cap-only reject list
-  (a rate, multiplier, `%`, any `plus` or `+`, widening word, currency or per-unit noun on the cap still asks; a digit,
-  number word or bare unit noun beside it does not), and outside the clause asks only on a plural
-  Logins/accounts/seats/users (7(ii)) or a per-unit word (7(ix)). Its value is the full reading's sum, the cap times
-  the clause's count plus every other USD amount the gate names, so it never reads below what the full reading would:
-  `US$500 per run — cap 1 USD` reads 501 and asks over the line. Only a gate with no readable cap, or one over the
-  line or past the month line, reaches him. A gate signed so is annotated and logged exactly as a fully priced one,
-  and its approval line names the full reading's why.
-- **The per/each reading.** `per` or `each` is a rate only before a unit (a RATE_UNITS noun or a digit, joined by
-  whitespace, `-` or `/`), `each` also before `of`, punctuation or the gate's end, or straight after a digit: never
-  in prose (`per the task note`). A new last rule 7(ix) asks on a per-unit word outside the clause (`per the dummy
-  Login`, `each new Login`, `every Login`, `/Login`), so relaxing per/each never lets a per-Login reading through.
-  `every signed-in Claude Login` (p18-7) still passes.
+  (any `per`, `each` or `every`, a multiplier, `%`, any `plus` or `+`, widening word, currency or per-unit noun on the
+  cap still asks; a digit, number word or bare unit noun beside it does not), and outside the clause asks only on a
+  plural Logins/accounts/seats/users (7(ii)) or a per-unit word (7(ix)). Its value is the full reading's sum, the cap
+  times the clause's count plus every other USD amount the gate names, so it never reads below what the full reading
+  would: `US$500 per run — cap 1 USD` reads 501 and asks over the line. Only a gate with no readable cap, or one over
+  the line or past the month line, reaches him. A gate signed so is annotated and logged exactly as a fully priced
+  one, and its approval line names the full reading's why.
+- **The per/each reading.** Outside the cap clause (rule 7(i)), `per` or `each` is a rate only before a unit (a
+  RATE_UNITS noun or a digit, joined by whitespace, `-` or `/`), `each` also before `of`, punctuation or the gate's
+  end, or straight after a digit: never in prose (`per the task note`). On the cap itself (rule 5), any `per`, `each`
+  or `every` still asks in both readings, whatever follows it, as before: a rate on the cap never prices as a bare
+  total (`cap US$0.10 per GB`, `cap US$5 per developer`, `cap US$5 each for the images`; review round 1 of p37-4's PR,
+  which found the relaxed in-clause reading pricing those at the cap). A new last rule 7(ix) asks on a per-unit word
+  outside the clause (`per the dummy Login`, `each new Login`, `every Login`, `/Login`), so relaxing per/each never
+  lets a per-Login reading through. `every signed-in Claude Login` (p18-7) still passes.
 - **The plan judge.** The CLI prints only the standing reading's {usd, why}, so a gate whose cap reads prints its
   amount, and the judge, which bounces only a null "usd", never bounces it on wording alone. task.workflow.js is
   unchanged, so no prompt bytes change. ADR 0038's bounce stands for a gate neither reading prices, and a bounced
@@ -201,9 +204,11 @@ probes without asking, always.
   names is one of the machine's declared test Logins: `[defaults] test_logins` in `~/.config/thread/rollouts.toml`
   (rollout-settings.py, schema 5), one line, operator-only (ADR 0063 d1's rule: no agent or script writes it, since an
   agent could otherwise widen its own approval; tune.py refuses an edit that changes it). It fails closed: a deny word
-  (a `live` before a probe, run or test excepted), an env name, another credential beside it, a plural `Logins`, a
-  Login it cannot name or one not declared asks. It reads no limit, ledger or month line, is machine-wide (a Leg
-  signs one), and is annotated `(approved <date> under the standing approval: test Login <name>, from <source>)`.
+  (a `live` before a probe, run or test excepted), an env name, another credential word beside it, an `@` address, a
+  conjunction that joins a second thing (`and`, `or`, `plus`, `as well as`, `along with`, `together with`, `&`, `+`,
+  `;`), a plural `Logins`, a Login it cannot name or one not declared asks. It reads no limit, ledger or month line,
+  is machine-wide (a Leg signs one), and is annotated `(approved <date> under the standing approval: test Login
+  <name>, from <source>)`.
   The built-in is [] (off): the plugin is public, so a hard-coded `dummy` was rejected. Lachy adds `test_logins =
   ["dummy"]` (with `schema = 5`) by hand, after installing the release that knows the key and running the reader
   check rollout-settings.py's header names; until then the Login gate asks as before.
@@ -215,13 +220,18 @@ it is a verifier or review failure) and the annotation records the total exposur
   per-unit word and bare numbers are waived (`soft probe`, `3 runs`, `plus 20%`, `×3`, `each night`).
 - (ii) Inside the clause, digits, number words and bare unit nouns that are no per-unit noun are waived: `cap 1 USD
   for 3 runs`, `10k tokens` and `for both probes` read as the cap, a total.
-- (iii) A non-adjacent rate whose unit is not on UNIT_NOUNS (`per generated image`) reads x1 in either clause reading,
-  as `an image` does today.
-- (iv) An `each such call`-style rate outside the clause reads x1 in the full reading, the value the cap-only reading
-  gives anyway.
+- (iii) Outside the clause, a `per` rate whose unit is not straight after it, or not on RATE_UNITS (`per generated
+  image`), reads x1 in the full reading, the value the cap-only reading gives anyway, as `an image` does. On the cap
+  itself it asks in both readings.
+- (iv) Outside the clause, an `each such call`-style rate reads x1 in the full reading, the value the cap-only reading
+  gives anyway; on the cap itself it asks.
 - (v) A judge-less mid-run gate (ADR 0038's second reason) now signs at its cap plus its amounts; the per-Login gate
   behind a comma (its first) still asks, on 7(ix).
 - (vi) The test-Login reading asks falsely, fail closed, on `access` or `token` beside the Login (`access to the dummy
   Claude Login`, `the dummy Claude Login's session token`), on an account, key, API, PAT or `.env` anywhere on the
-  gate's line, and on a `live` before anything but a probe, run or test. Schedule and orient's Planner line (a
-  follow-on) words the gate to avoid them.
+  gate's line, on any conjunction or `+` (two declared Logins joined by `and` ask: a comma or `then` lists them), and
+  on a `live` before anything but a probe, run or test. Schedule and orient's Planner line (a follow-on) words the
+  gate to avoid them. Its deny list and other-credential, `@` and conjunction steps are a reject list, not a
+  whitelist, as ADR 0063 residual (i) is for the class: a second thing named in plain prose with none of them (`the
+  dummy Login, to push to the npm registry`, `the dummy Login, then Lachy's Gmail`) passes, and the annotation names
+  only the Login, so any other use is a review failure.
