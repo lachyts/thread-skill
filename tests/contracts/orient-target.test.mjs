@@ -6,7 +6,8 @@
 // sweep. A project target narrows § 2 to that project and its sub-projects. The one learned write, `--learn`
 // with the held project's vault-relative `note` field, waits for § 4 and never runs on Look only. The held
 // `learn_dir` is the first (directory) answer's and survives a typed or `Other` answer and its re-resolution,
-// whose own `learn_dir` is null, so an undeclared directory named by typing is still learned.
+// whose own `learn_dir` is null, so an undeclared directory named by typing is still learned. § 4 mends an
+// unparseable slot through `next-action.py mend <task>`, never a hand Edit (the quoting rule has one writer).
 //
 // One pure function, check(text), over orient's SKILL.md: the real file and the controls run through it, and
 // each control mutates the real text in one place and must fail with exactly its rule. Reads files only.
@@ -17,6 +18,7 @@ import { read, collapse, section, slice, lineOf } from '../lib/contract-text.mjs
 const ORIENT = 'skills/orient/SKILL.md'
 const real = read(ORIENT)
 const SCRIPT = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py'
+const MEND = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <task>'
 
 function check(text) {
   const fails = []
@@ -53,6 +55,10 @@ function check(text) {
     !/vault-relative `note` field/.test(learn4) || !/re-resolved target's/.test(learn4) || !/never the bare name/.test(learn4) ||
     !/Look only learns nothing/.test(learn4)) fails.push('learn')
   if (!/\*\*Look only\*\*[^.]*no writes of any kind/.test(s4)) fails.push('look')
+  // § 4's unparseable-slot mend: the one writer, never a prose copy of the quoting rule done as a hand Edit.
+  const unparseable = collapse(slice(section(text, /^### 4\./) ?? '', /^\*\*Unparseable slots\.\*\*/, /^$/) ?? '')
+  if (!unparseable.includes(MEND)) fails.push('mend')
+  if (/as one Edit/.test(s4)) fails.push('hand-edit')
 
   if (!collapse(section(text, /^## Don't/) ?? '').includes("**Don't write before the reshuffle's gate**, drift fixes, the unparseable-slot mend, the learned `repos:` entry (§ 4)")) fails.push('dont')
   const forms = section(text, /^## Invocation forms/) ?? ''
@@ -90,6 +96,8 @@ test('each control fails with exactly its rule', () => {
     scope: edit(real, 'link it or any swept sub-project', 'link it'),
     slots: edit(real, '- **Next-action slots, first**', '- **Slots**'),
     look: edit(real, 'no writes of any kind', 'nothing more'),
+    mend: edit(real, 'next-action.py mend <task>', 'a quoting Edit', s4),
+    'hand-edit': edit(real, 'never a hand Edit', 'as one Edit to the task note', s4),
     dont: edit(real, 'drift fixes, the unparseable-slot mend, the learned `repos:` entry (§ 4) and', 'drift fixes (§ 4) and'),
     forms: edit(real, '# resolve the target from the session directory', '# infer the area from CWD'),
   }

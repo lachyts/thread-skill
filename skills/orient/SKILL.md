@@ -324,11 +324,16 @@ never applied. A scoped target applies no drift fixes: it reshapes one note, so 
 is report-only for it. It goes straight to its reshuffle (`--look` still stops it after § 3).
 
 **Unparseable slots.** Mended under the drift fixes' authority: a default run and Steer only, never
-`--look`, a dry run or a scoped target. For each § 2 slot whose why is `frontmatter does not parse`,
-quote the value its YAML error names (a free-text value holding `: `, or a bare `"` inside quotes) as
-one Edit to the task note, list it under Decided for you (Owner *technical*), and read the slot once
-more. That is the only attempt: a slot that still reads `unparseable`, or whose why is anything else
-(nothing to quote), is not edited again, and stays named in § 3's report with its why, for Lachy.
+`--look`, a dry run or a scoped target. For each § 2 slot whose why starts `frontmatter does not parse`
+(it names the line and key, `(line 7, next_action)`), run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <task>` once, `<task>` the
+slot row's task, never a hand Edit: it quotes the plain value the YAML error names (a free-text value
+holding `: `, or a bare `"` inside quotes) and re-parses the note before its one save. A
+`mended:<keys>` row is listed in the report's Decided for you (Owner *technical*), never in the note's
+`## Decided for you` section, and the slot is read once more. That is the only attempt. These stay
+named in § 3's report with their why, for Lachy: an `unmendable:` row; an exit 2 (its `next-action:`
+line: the note is not directly under Work/Tasks, and nothing was written); a slot that still reads
+`unparseable`; and a slot whose why is anything else.
 
 **The learned directory.** A default run and Steer only also run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`

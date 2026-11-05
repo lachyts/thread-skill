@@ -322,7 +322,11 @@ One message of statements, no question:
 - each fork's Pre-flight leavers, listed by the `why` the fork returns, as schedule step 8's left-out block lists
   them: `undecided` as "waiting on your answer, so it reaches the next round"; `orient` with its pointer,
   `/thread:orient [[<home>]]`; `dependency` as "depends on [[<via>]], which is left out"; `ungraded` as "could not be
-  graded (<reason>): the next pass grades it again";
+  graded (<reason>): the next pass grades it again"; `unreadable` as "could not be read (<reason>): fix its
+  frontmatter, and the next pass grades it";
+- each task the rank skipped as `unreadable` (its `skipped[]` row in `$S/rank.json`, a task note whose frontmatter the
+  scan could not read) as "[[<slug>]] could not be read (<reason>): fix its frontmatter (`next-action.py mend <slug>`
+  quotes a plain value), and the next pass grades it". This pass names it and never mends it;
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
 - each schedule's note, or its stop line;
@@ -346,7 +350,8 @@ One message of statements, no question:
   `/thread:repair [[<rollout>]]`);
 - each `skipped[]` small task with an `ownSession`, as "waits on [[<slug>]] in [[<project>]]'s own session";
 - the held and undecided members, each held one with its `blockedBy` whys (a `dependency scheduled late` one goes
-  next pass; a `dependency dropped` or `dependency not found` one goes only once its `depends-on:` link changes);
+  next pass; a `dependency dropped` or `dependency not found` one goes only once its `depends-on:` link changes; an
+  `unreadable` one clears once that note is fixed);
 - the session-lane work, listed and never started;
 - the caveats.
 

@@ -25,6 +25,11 @@ there, whatever else it links. Every other open task is skipped with the first r
   started stays `in flight`;
 - `hold`: any other status.
 
+A fourth reason stands outside that order: `unreadable`, a note directly in Work/Tasks whose frontmatter the scan could
+not read (estate-scan's `unreadTasks[]`), whatever its status, since nobody can read it. The rank's `skipped[]` row
+carries the scan's why as `reason` (`frontmatter does not parse (line 7, next_action)`, say) and the note's path as
+`note`. The note is named, never graded, until its frontmatter is fixed.
+
 ## The grading agents
 
 The lead runs one read-only agent per home project with gradeable tasks, side by side. Each agent gets:
@@ -206,8 +211,9 @@ back in the canonical spelling.
 ## Dependencies
 
 A task's `depends-on:` and `blocked-by:` (the scan's `dependsOn`) are the only holds, as in the queue (schedule § 3).
-Each entry is matched to an open scan task by slug, case-insensitively, a `[[Work/Tasks/x|alias]]` read as `x`. An
-entry that matches no open task is satisfied: it landed, it is archived, or it is no task.
+Each entry is matched to an open scan task, or to an unread note (§ Gradeable tasks, `unreadable`), by slug,
+case-insensitively, a `[[Work/Tasks/x|alias]]` read as `x`. An entry that matches neither is satisfied: it landed, it
+is archived, or it is no task. An entry that matches an unread note holds, since nobody can tell whether it landed.
 
 A matched dependency holds a graded task that is not Orient, unless:
 
@@ -219,7 +225,7 @@ Each holding dependency is listed in the task's `blockedBy[] {slug, why}`, and t
 
 - `One call`, `Grill` or `Orient`: its grade, after the raise;
 - `ungraded` or `invalid`: it has no usable grade;
-- `hold` or `unhomed`: it is skipped for that reason (§ Gradeable tasks);
+- `hold`, `unhomed` or `unreadable`: it is skipped for that reason (§ Gradeable tasks);
 - `parked`: it is Ready, in another project that is parked;
 - `held`: it is Ready but held itself, so holds are transitive;
 - `cycle`: it depends on the task, directly or through others (a task that depends on itself included).

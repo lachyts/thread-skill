@@ -110,7 +110,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
-  stay out with their Dependent closure; it runs no plan gate (ADR 0047). Not
+  and tasks whose note does not parse stay out with their Dependent closure;
+  it runs no plan gate (ADR 0047). Not
   schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
   before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
@@ -332,7 +333,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   fills it only when blank. Area notes carry none. A link to a done, merged,
   dropped, archived or missing task is a **dead link**: read as blank
   everywhere, and no sweep or pickup clears it — it stays until the next
-  set-down, a fill-blank writer or Lachy replaces it. _Avoid_: up next, focus task.
+  set-down, a fill-blank writer or Lachy replaces it. A live link whose task
+  note does not parse reads *unparseable*, with its line and key: it is never
+  filled over, and orient mends it. _Avoid_: up next, focus task.
 
 ## Memory capture (close-side)
 
