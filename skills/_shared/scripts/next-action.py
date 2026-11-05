@@ -654,9 +654,12 @@ def mended_whole(check, original, mended):
     keys = {m.group("key") for m in (TOP_KEY.match(ln) for ln in original) if m}
     if set(check.fm) != keys:
         return False
-    pairs, todo = {}, [yaml.compose(check.body(), Loader=LOADER)]
+    pairs, todo, seen = {}, [yaml.compose(check.body(), Loader=LOADER)], set()
     while todo:
         node = todo.pop()
+        if id(node) in seen:  # an alias shares its anchor's node, and a recursive one would loop
+            continue
+        seen.add(id(node))
         if isinstance(node, yaml.MappingNode):
             for k, v in node.value:
                 pairs.setdefault(k.start_mark.line, (k, v))

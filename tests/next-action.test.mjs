@@ -301,6 +301,24 @@ test('mend quotes a bare-quoted value whole, and mends two broken lines in one c
     task('tags: [task]\nstatus: open\ntitle: "Plan: the first"\nnext_action: "Ring: the council"'))
 })
 
+test('mend reads its result back through compose, nested keys and a recursive alias included', () => {
+  const dir = vault({
+    [`${T}/nested.md`]: task('tags: [task]\nmeta:\n  note: a: b\nstatus: open'),
+    // An anchor holding an alias to itself composes to a node that contains itself: the readback walk never loops.
+    [`${T}/loop.md`]: task('tags: [task]\nloop: &x [*x]\nnext_action: a: b'),
+    // A quoted top-level key is outside TOP_KEY's class, so the key sets differ: refused, never guessed.
+    [`${T}/qkey.md`]: task('tags: [task]\n"quoted key": x\nnext_action: a: b'),
+  })
+  assert.deepEqual(ok(dir, ['mend', 'nested']), [['mend', 'nested', 'mended:note']])
+  assert.equal(read(dir, `${T}/nested.md`), task('tags: [task]\nmeta:\n  note: "a: b"\nstatus: open'))
+  const r = spawnSync('python3', [SCRIPT, '--vault', dir, 'mend', 'loop'], { encoding: 'utf8', timeout: 20000 })
+  assert.deepEqual([r.status, r.stderr, r.stdout], [0, '', 'mend\tloop\tmended:next_action\n'])
+  assert.equal(read(dir, `${T}/loop.md`), task('tags: [task]\nloop: &x [*x]\nnext_action: "a: b"'))
+  const before = read(dir, `${T}/qkey.md`)
+  assert.deepEqual(ok(dir, ['mend', 'qkey']), [['mend', 'qkey', 'unmendable:mending would change other frontmatter']])
+  assert.equal(read(dir, `${T}/qkey.md`), before)
+})
+
 test('mend reports a note that parses, or has no frontmatter, and writes nothing', () => {
   const dir = vault({
     [`${T}/fine.md`]: task('tags: [task]\nstatus: open\nnext_action: Ring the council'),
