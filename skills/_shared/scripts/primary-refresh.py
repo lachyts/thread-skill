@@ -206,8 +206,6 @@ SMOKE_GRACE = 10  # a smoke's candidate, which stops its own child (KILL_GRACE) 
 LOG_MAX = 1 << 20
 TABLE_MAX = 32
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
-STUCK_KINDS = ("not-primary", "busy", "fetch-failed", "broken", "unreadable", "diverged", "held", "refused",
-               "timed-out")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]*$")
 # live-checkout.sh check's one line, form by form (its header is the other half of this contract).
