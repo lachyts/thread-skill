@@ -47,7 +47,9 @@ The inputs:
 
 Gradeable: a scan task with statusClass `active`, inFlight false and a live project. Its home is projects[0], mapped to
 the first scan project row of that name (a second row of the name is warned). The rest are `skipped`, the first reason
-that fits: `unhomed`, `in flight`, `hold`. The one exception, at schedule's Pre-flight on a supersede (schedule § 1.5,
+that fits: `unhomed`, `in flight`, `hold`. So is each scan unreadTasks[] row (a task note whose frontmatter the scan
+could not read; a dict with a str slug and why, its slug held by no scan task): `unreadable`, never graded, never in
+flight, its skipped row carrying the scan's why as `reason` and its `note`. The one exception, at schedule's Pre-flight on a supersede (schedule § 1.5,
 ADR 0047): with --superseding PRIOR, a task the scan marks inFlight is read as not in flight when ES.still_to_start
 holds for it (its status, as NA.status_of reads the row, `open`, and its `rollout:` naming PRIOR under slug_key's
 fold): a carried task still queued is graded, and holds its dependants by its grade; one that has started stays in
@@ -89,10 +91,12 @@ attentionMinutes), sorted exact and printed to 2 places; deadline = the earlier 
 and the grade's `deadline.date`, with its source; dueSoon = deadline <= today + DUE_SOON_DAYS.
 
 Holds (readiness-grade.md § Dependencies): each `dependsOn` entry is cut to its basename (no `.md`) and matched to an
-open scan task by slug, case-insensitively; no match is satisfied. A matched d holds a graded task t that is not
+open scan task or an unreadTasks[] row by slug, case-insensitively; no match is satisfied (an unread note holds: nobody
+can tell whether it landed). A matched d holds a graded task t that is not
 Orient unless d is in flight, or d is graded Ready, is not held itself and is not in a parked project other than t's
 home. The why (HOLD_WHYS): `cycle` when d reaches t through the dependency edges (d == t included), else d's skip
-reason (`hold`, `unhomed`), `invalid`, `ungraded`, d's grade, `parked`, or `held`. Holds never change a rank.
+reason (`hold`, `unhomed`, `unreadable`), `invalid`, `ungraded`, d's grade, `parked`, or `held`. Holds never change a
+rank.
 
 The ranking key (readiness-grade.md § The ranking): parked homes last; dueSoon first, the earliest deadline first;
 crowned homes first; leverage, highest first; ES.STANDING_RANK of the home; home name, home note, slug. `rank` counts
@@ -124,7 +128,8 @@ Output, one JSON object (schema 1; --compact for one line):
                kill; only when offered), snoozeWrite {snoozed_until, snoozed_ready}}: each parked project with a home
                task graded Ready and not held, by name. It is snoozed while today < snoozed_until and the Ready count is
                at most snoozed_ready (a missing snoozed_ready: date only);
-  skipped[]   {slug, why}, ungraded[] {slug, home, why: "no grade"}, invalid[] {slug, home, errors[]}, by slug;
+  skipped[]   {slug, why, reason?, note?} (reason and note on an `unreadable` one: the scan's why and the note's
+               vault path), ungraded[] {slug, home, why: "no grade"}, invalid[] {slug, home, errors[]}, by slug;
   warnings[]  one line each, in the order found.
 
 snooze <project> --ready N: the project by name or vault path (next-action's resolve_project); refused unless it is a
@@ -187,7 +192,8 @@ GATE_KINDS = ("spend", "credential", "irreversible")
 CONFIDENCE = ("high", "medium", "low")
 OWNERS = ("yours", "priorities", "technical", "gate")
 # Every `blockedBy` why, each named in readiness-grade.md § Dependencies.
-HOLD_WHYS = ("One call", "Grill", "Orient", "ungraded", "invalid", "hold", "unhomed", "parked", "held", "cycle")
+HOLD_WHYS = ("One call", "Grill", "Orient", "ungraded", "invalid", "hold", "unhomed", "unreadable", "parked", "held",
+             "cycle")
 UNPARK_OPTIONS = ("unpark", "snooze", "kill")
 KILL_KEYS = ("crowned",)  # mark-project-done.js drops a crowned: stamp with the done write
 ROUNDS = (("one-call", "One call"), ("grill", "Grill"))
@@ -357,6 +363,18 @@ class Ranker:
             # The module docstring's Gradeable exception: a carried task still queued, at schedule's Pre-flight.
             self.inflight[t["slug"]] = bool(t.get("inFlight")) and not ES.still_to_start(
                 self.NA.status_of(t), t.get("rollout"), self.superseding)
+        # A task note the scan could not read (its unreadTasks[]): matched like a scan task, never in flight, never
+        # graded, skipped `unreadable`. Only a list counts; a malformed row, or one whose slug a scan task holds, is
+        # ignored.
+        self.unread = {}
+        rows = self.scan.get("unreadTasks")
+        for u in rows if isinstance(rows, list) else []:
+            if not (isinstance(u, dict) and isinstance(u.get("slug"), str) and isinstance(u.get("why"), str)) or \
+                    not u["slug"] or u["slug"].lower() in self.lower:
+                continue
+            self.lower[u["slug"].lower()] = u["slug"]
+            self.inflight[u["slug"]] = False
+            self.unread[u["slug"]] = {"note": u.get("note") if isinstance(u.get("note"), str) else None, "why": u["why"]}
         self.skip, self.home = {}, {}
         for slug in sorted(self.tasks):
             t = self.tasks[slug]
@@ -369,6 +387,8 @@ class Ranker:
                 self.skip[slug] = "hold"
             else:
                 self.home[slug] = self.projects[projects[0]]
+        for slug in self.unread:
+            self.skip[slug] = "unreadable"
         self.edges = {}
         for slug, t in self.tasks.items():
             out = []
@@ -896,7 +916,15 @@ class Ranker:
         for r in ranked + orient_rows:
             r["leverage"] = round(r["_leverage"], 2)
             tasks.append({k: v for k, v in r.items() if not k.startswith("_")})
-        skipped = [{"slug": s, "why": self.skip[s]} for s in sorted(self.skip)]
+        skipped = []
+        for s in sorted(self.skip):
+            r = {"slug": s, "why": self.skip[s]}
+            u = self.unread.get(s)
+            if u is not None:  # the scan's why, and the note's path, for the reader that names it
+                r["reason"] = u["why"]
+                if u["note"]:
+                    r["note"] = u["note"]
+            skipped.append(r)
         scan = self.scan
         return {
             "schema": SCHEMA, "today": self.today.isoformat(),

@@ -689,6 +689,17 @@ test('learn: every repos: shape becomes a valid list of the old entries plus the
   }
 })
 
+test('learn: an entry YAML would read as anything but itself is JSON-quoted, a constructor error included', () => {
+  // plain_item catches next-action's LOAD_ERRORS: `2026-02-30` scans but will not construct (a ValueError), so it is
+  // quoted like a YAMLError, never a traceback.
+  const code = 'import importlib.util, json, sys\nsys.dont_write_bytecode = True\n' +
+    'spec = importlib.util.spec_from_file_location("rt", sys.argv[1]); m = importlib.util.module_from_spec(spec)\n' +
+    'spec.loader.exec_module(m)\nprint(json.dumps([m.plain_item(x) for x in sys.argv[2:]]))'
+  const r = spawnSync('python3', ['-c', code, SCRIPT, '~/a/b', '2026-02-30', 'a: b', 'yes'], { encoding: 'utf8', env: base })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), ['~/a/b', '"2026-02-30"', '"a: b"', '"yes"'])
+})
+
 test('learn: only a live project note takes a directory', () => {
   const vault = makeVault()
   const dir = '~/Projects/2D/26-09-24_macklemore-mate'
