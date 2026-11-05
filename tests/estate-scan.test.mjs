@@ -261,6 +261,9 @@ T('t-archived-tag.md', task('open', ['Crowned One']).replace('  - task', '  - ta
 T('t-two-projects.md', task('open', ['Crowned One', 'Queued One'], '', '\nNo heading here.\n'))
 T('t-live-and-dead.md', task('open', ['Crowned One', 'Done Flag']))
 T('t-broken.md', '---\ntags: [task\n---\n')
+// A value that scans but will not construct (a ValueError, no YAML mark), and a 0-byte note (Obsidian's empty Untitled.md).
+T('t-bad-date.md', task('open', ['Crowned One'], '\ndue: 2026-02-30'))
+T('empty.md', '')
 const UNHOMED = {
   'u-missing': ['No Such Project', 'missing', 'no note'],
   'u-archived-dir': ['Old Project', 'project archived', 'archived'],
@@ -481,7 +484,9 @@ test('1. projects: done, archived, area and untagged notes are absent; parked is
 test('2. tasks: status classes, homing under every live project, dead links, unhomed reasons, skipped notes, deadlines', () => {
   const j = ok(online())
   assert.deepEqual(j.tasks.map((t) => t.slug), [...j.tasks.map((t) => t.slug)].sort(), 'tasks sorted by slug')
-  for (const gone of ['t-done', 't-archived', 't-archived-tag', 't-broken', R1, R2]) assert.equal(taskRow(j, gone), undefined, `${gone} absent`)
+  for (const gone of ['t-done', 't-archived', 't-archived-tag', 't-broken', 't-bad-date', 'empty', R1, R2]) {
+    assert.equal(taskRow(j, gone), undefined, `${gone} absent`)
+  }
   assert.equal(j.tasks.length, 19)
   assert.equal(taskRow(j, 't-in-progress').statusClass, 'active', 'in-progress reads as in_progress (OPEN_STATUSES)')
   assert.equal(taskRow(j, 't-review').statusClass, 'review')
@@ -524,8 +529,16 @@ test('2. tasks: status classes, homing under every live project, dead links, unh
   assert.deepEqual(j.unhomed, want)
   assert.equal(j.counts.unhomed, 10)
 
-  assert.deepEqual(j.skipped, [{ note: 'Work/Projects/AI/Broken.md', why: 'frontmatter does not parse' },
-    { note: 'Work/Tasks/t-broken.md', why: 'frontmatter does not parse' }])
+  // A broken note's why carries its line and key; one with no frontmatter (the empty note) is out of scope, never skipped.
+  assert.deepEqual(j.skipped, [{ note: 'Work/Projects/AI/Broken.md', why: 'frontmatter does not parse (line 2, tags)' },
+    { note: 'Work/Tasks/t-bad-date.md', why: 'frontmatter does not parse (line 7, due)' },
+    { note: 'Work/Tasks/t-broken.md', why: 'frontmatter does not parse (line 2, tags)' }])
+  assert.equal(j.counts.skipped, 3)
+  // unreadTasks: the skipped notes directly in Work/Tasks, by note, each with its slug; never the project note.
+  assert.deepEqual(j.unreadTasks, [
+    { slug: 't-bad-date', note: 'Work/Tasks/t-bad-date.md', why: 'frontmatter does not parse (line 7, due)' },
+    { slug: 't-broken', note: 'Work/Tasks/t-broken.md', why: 'frontmatter does not parse (line 2, tags)' }])
+  assert.equal(j.counts.unreadTasks, 2)
   assert.deepEqual(j.deadlines, [
     { date: '2026-10-01', kind: 'due', task: 't-open-past', projects: ['Crowned One'] },
     { date: '2026-11-01', kind: 'due', task: 't-open-future', projects: ['Crowned One'] }])
@@ -773,7 +786,7 @@ test('7c. --deadline 0: no subprocess at all, and the vault sections stay comple
     assert.equal(r.error, 'deadline')
   }
   const full = ok(online())
-  for (const k of ['projects', 'tasks', 'unhomed', 'deadlines', 'skipped']) assert.deepEqual(j[k], full[k], k)
+  for (const k of ['projects', 'tasks', 'unhomed', 'deadlines', 'skipped', 'unreadTasks']) assert.deepEqual(j[k], full[k], k)
   assert.deepEqual(j.rollouts.map(({ summary, error, ...rest }) => rest), full.rollouts.map(({ summary, error, ...rest }) => rest))
 })
 
@@ -801,6 +814,8 @@ test('8. an unreadable note under Work/Tasks is reported once, and status and un
   assert.ok(c.unchecked.some((u) => u.check === 'unfinished-rollout' && u.why === 'vault'), JSON.stringify(c.unchecked))
   assert.deepEqual(c.unfinishedRollout, [])
   assert.deepEqual(j.skipped, [{ note: 'Work/Tasks/Archive/locked.md', why: 'unreadable' }])
+  // An Archive/ note is never a task, so an unreadable one there is no unreadTasks row.
+  assert.deepEqual([j.unreadTasks, j.counts.unreadTasks], [[], 0])
   assert.ok(!run.stdout.includes('Traceback'))
   assert.equal(j.tasks.length, 1)
 })

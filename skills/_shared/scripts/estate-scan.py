@@ -43,8 +43,11 @@ The vault (pure Python, never under the deadline):
   open tasks whose filename starts with the phase note's own `<slug>-p<N>-` (the leftmost `-p<PHASE_N>-` in its
   name), as reconcile-project.py reads membership: never a task's `phase:` key, so `-p1-` never reaches `-p10-` and
   `p3.5` and `p3.50` stay apart. A phase note whose name has no such prefix has no members: openTasks is null.
-- A note whose frontmatter is present but broken (does not parse, is not a mapping, never closes, unreadable) is
-  listed in `skipped`; a note with no frontmatter is out of scope.
+- A note whose frontmatter is present but broken (does not parse, is not a mapping, never closes, unreadable; RT.NA's
+  Note.broken) is listed in `skipped` with its why, which for one that does not parse carries where, `frontmatter
+  does not parse (line N, <key>)`; a note with no frontmatter (an empty one included) is out of scope, not broken.
+  Each skipped note directly in Work/Tasks is also an `unreadTasks` row: a task nobody could read, named, never
+  graded.
 - The Tasks-dir pre-check: every *.md under Work/Tasks, Archive/ included (the set reconcile-rollout's _scan reads),
   is opened once. One that will not open (permission, a dangling symlink, a directory) would crash every status
   and unfinished-rollout call, so it is one `vaultErrors` entry, each such note is in `skipped` (`unreadable`), and
@@ -118,10 +121,11 @@ starts no subprocess at all. SIGINT or SIGTERM kills every live probe group, the
 
 Output, one JSON object (schema 1; --compact for one line):
   schema, vault, today, offline, limits {deadline, timeout, jobs}, elapsedMs, deadlineHit,
-  counts {projects, parked, tasks, unhomed, rollouts, repos, deadlines, overdue, skipped},
+  counts {projects, parked, tasks, unhomed, rollouts, repos, deadlines, overdue, skipped, unreadTasks},
   vaultErrors[] {kind: unreadable-tasks-notes | no-tasks-dir, notes[], skips[]},
   projects[]  {name, note, status (raw), standing: crowned|active|queued|parked|other|none, parked, crowned, lane,
-               area[], aliases[], nextTask {result: live|blank|dead:<reason>|unparseable:<why>, task, next_action}, repos[] (as
+               area[], aliases[], nextTask {result: live|blank|dead:<reason>|unparseable:<why>|skip:<reason>, task,
+               next_action}, repos[] (as
                declared), ownSession {own, by: key|design record|null, repo (the first qualifying declared path, as
                written, else null), invalid? (a non-empty `orient:` value that is neither key, as JSON: the derived
                test decides)}, tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as
@@ -156,7 +160,10 @@ Output, one JSON object (schema 1; --compact for one line):
                awaitingIntegration[], pendingSignOffs[] (set aside at `gate`), awaitingSignOff}, or null with error
                the status call's last stderr line, `deadline`, `timeout` or `vault`;
   deadlines[] {date, kind: "due", task, projects[]}, by date then task;
-  skipped[]   {note, why}, by note.
+  skipped[]   {note, why}, by note;
+  unreadTasks[] {slug, note, why}: each `skipped` row whose note sits directly in Work/Tasks (its name ending `.md`,
+               any case; Archive/ never), its slug the file's basename: a task note whose frontmatter nobody could read
+               (estate-rank holds and names it `unreadable`), by note.
 Grading and ranking are the estate pass's next step (skills/_shared/readiness-grade.md, estate-rank.py), never this
 script's.
 """
@@ -619,12 +626,12 @@ class Scan:
         self.skipped.setdefault(slash(rel), why)
 
     def note(self, rel):
-        """The note's parsed frontmatter holder, or None: a broken one is skipped, one with none is out of scope."""
+        """The note's parsed frontmatter holder, or None: a broken one (NA.Note.broken, the one copy of the rule) is
+        skipped with its why, one with none (an empty note included) is out of scope."""
         note = self.vault.note(rel)
         if note.fm is None:
-            opened = bool(note.lines) and note.lines[0].rstrip() == "---"
-            if note.error != "no closed frontmatter" or opened:
-                self.skip(rel, note.error)
+            if note.broken:
+                self.skip(rel, note.why)
             return None
         return note
 
@@ -1250,6 +1257,11 @@ class Scan:
         out_repos = [self.repo_out(r, facts, unfinished, tasks_ok, clones) for r in repos]
         deadlines.sort(key=lambda x: (x["date"], x["task"]))
         skipped = [{"note": k, "why": self.skipped[k]} for k in sorted(self.skipped)]
+        # The skipped notes directly in Work/Tasks (an unreadable one included, never Archive/'s): tasks nobody could
+        # read, so every reader names them for their why (estate-rank, estate-dispatch), never `not in the scan`.
+        tasks_dir = slash(self.NA.TASKS_DIR)
+        unread = [{"slug": slug_of(r["note"]), "note": r["note"], "why": r["why"]} for r in skipped
+                  if r["note"].rpartition("/")[0] == tasks_dir and r["note"].lower().endswith(".md")]
         out = {
             "schema": SCHEMA, "vault": self.root, "today": self.today.isoformat(), "offline": self.args.offline,
             "limits": {"deadline": num(self.args.deadline), "timeout": num(self.args.timeout), "jobs": self.args.jobs},
@@ -1257,10 +1269,10 @@ class Scan:
             "counts": {"projects": len(plist), "parked": sum(1 for p in plist if p["parked"]), "tasks": len(tasks),
                        "unhomed": len(unhomed), "rollouts": len(rollouts), "repos": len(out_repos),
                        "deadlines": len(deadlines), "overdue": sum(1 for d in deadlines if d["date"] < self.today.isoformat()),
-                       "skipped": len(skipped)},
+                       "skipped": len(skipped), "unreadTasks": len(unread)},
             "vaultErrors": self.vault_errors,
             "projects": plist, "tasks": tasks, "unhomed": unhomed, "repos": out_repos, "rollouts": rollouts,
-            "deadlines": deadlines, "skipped": skipped,
+            "deadlines": deadlines, "skipped": skipped, "unreadTasks": unread,
         }
         out["elapsedMs"] = int((time.monotonic() - START) * 1000)
         return out
