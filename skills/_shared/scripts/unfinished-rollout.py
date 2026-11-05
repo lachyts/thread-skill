@@ -26,11 +26,12 @@ row's launch-folder checkout; plus one child,
 <slug>` (`clone`'s rule 3 only), both read-only and memoised (SelfRollout), which run git and land.sh themselves. It
 writes nothing. The surface grammar (parse_token,
 overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check`, `hold` and
-`pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py), with its statement of a
-chain's checkouts (repo_parts, checkout_of, checkouts_of). What a serial chain holds is leg.py's hold_of (ADR 0060),
-loaded as a module (Chain, chain_read, hold_of, write_set, write_rows, Refuse; its rr and sc set to this script's)
-once `check` or `hold` reads the first unfinished serial note (one whose `surfaces:` reads as any included), so a
-parallel-only estate never loads it.
+`pickups`, and by `running` (primary-hold.sh's verb, which otherwise loads only reconcile-rollout.py) only through leg.py,
+for an unstamped serial note, with its statement of a chain's checkouts (repo_parts, checkout_of, checkouts_of). What a
+serial chain holds is leg.py's hold_of (ADR 0060), loaded as a module (Chain, chain_read, hold_of, write_set,
+write_rows, Refuse; its rr and sc set to this script's) once `check` or `hold` reads the first unfinished serial note
+(one whose `surfaces:` reads as any included), or `running` the first unstamped serial one (to read whether its chain is
+stuck), so a parallel-only estate never loads it.
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
 reconcile-project.py and /thread:close read it). An UNFINISHED rollout is narrower: a live rollout that is
@@ -288,7 +289,11 @@ approved_unrun is false: never_started, widened for an approved queue whose only
 and with no `engine_snapshot:` stamp is RUNNING. A stamped note runs on its own Engine
 snapshot, never on the Primary checkout, so it holds nothing (ADR 0043; skills/_shared/engine-snapshot.md); only a
 rollout scheduled before P29 (or on a version-cache install) still does, until its next Reinstate or Leg begin stamps
-it. stdout: `running <slug>` per rollout,
+it. Nor is a serial note whose chain ADR 0060 decision 1 reads as stuck (leg.py's chain_read state `stuck`) with no
+Queue row `running`: it has no Leg open and uses no index or HEAD, so it holds nothing on the Primary checkout (ADR
+0066's 2026-11-05 amendment); a stuck chain with a row in progress, or a stuck parallel rollout, still runs. A chain
+leg.py cannot read (leg.py will not load, or chain_read raises) is counted as running, with `WARN: <slug>: its chain is
+unreadable (<why>): counted as running` on stderr. stdout: `running <slug>` per rollout,
 sorted, or `none` (a missing tasks dir included); exit 0.
 
 Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
@@ -348,7 +353,7 @@ stdout is one JSON line, keys in this order: {"projects": [<normalised>], "order
 repo": n}, "beyond": [<slug>], "warnings": [{"task", "dep", "why"}], "cap": 5}; `needed` is the joined needed slugs,
 `left` is in order. `WARN:` lines go to stderr. Exit 2 prints no stdout and one `unfinished-rollout:` line: a missing
 --repo or tasks dir, a --tasks note not found, a bad --misfit, or reconcile-rollout.py, serial-chains.py or
-gated_inputs.py unloadable (loaded here only, never by `check` or `running`).
+gated_inputs.py unloadable (gated_inputs.py is loaded by pickups only).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py unstarted --rollout <slug>
         [--handoffs <dir>]... [--tasks-dir <dir>]
@@ -441,7 +446,8 @@ def load_rr():
 
 
 def load_sc():
-    """serial-chains.py: the surface grammar and norm_origin (its one copy). `running` never loads it."""
+    """serial-chains.py: the surface grammar and norm_origin (its one copy). `running` loads it only through leg.py, for
+    an unstamped serial note."""
     global SC
     if SC is None:
         SC = load_module("serial_chains", SC_SRC, SC_NAMES, "skills/_shared/scripts/serial-chains.py")
@@ -450,7 +456,8 @@ def load_sc():
 
 def load_leg(rr):
     """leg.py as a module (ADR 0060: a chain's hold is leg.py's hold_of, its one copy), sharing this script's
-    reconcile-rollout.py and serial-chains.py. Loaded only once an unfinished serial note is read."""
+    reconcile-rollout.py and serial-chains.py. Loaded only once an unfinished serial note is read (by `running`, an
+    unstamped one)."""
     global LEG
     if LEG is None:
         LEG = load_module("thread_leg", LEG_SRC, LEG_NAMES, "skills/execute/scripts/leg.py")
@@ -1544,9 +1551,27 @@ def cmd_running(args, rr) -> int:
             continue   # ADR 0043: it runs on its Engine snapshot, so the Primary checkout is free to move
         if rr._valued(note.get("paused")) or rr.approved_unrun(note, rr._scan(path, tasks_dir)[0])[0]:
             continue
+        if rr._shape(note) == "serial" and _stuck_chain(rr, path, tasks_dir):
+            continue   # ADR 0060 d1: no Leg open, no index or HEAD used: it holds nothing on the Primary checkout
         running.append(path.stem)
     print("\n".join(f"running {slug}" for slug in running) or "none")
     return 0
+
+
+def _stuck_chain(rr, path, tasks_dir) -> bool:
+    """Whether an unstamped serial note's chain is stuck by ADR 0060 decision 1's test (leg.py's chain_read reads
+    `stuck`, and no Queue row reads `running`), so `running` leaves it out (ADR 0066's 2026-11-05 amendment). A chain
+    leg.py cannot read is counted as running, with a WARN: the hold fails closed."""
+    ctx = SimpleNamespace(rollout=path, tasks=tasks_dir, vault=tasks_dir.parent.parent, slug=path.stem, archived=False)
+    try:
+        leg = load_leg(rr)
+        chain = leg.Chain(ctx)
+        read = leg.chain_read(ctx, chain)
+        return read["state"] == "stuck" and not any(r.state == "running" for r in chain.rows)
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — any unreadable chain fails closed to running
+        why = f"{type(e).__name__}: {e}" if not isinstance(e, SystemExit) else f"leg.py would not load (exit {e.code})"
+        print(f"WARN: {path.stem}: its chain is unreadable ({why}): counted as running", file=sys.stderr)
+        return False
 
 
 # ---- the pickup sweep (schedule § 1.2, ADR 0057 d1) -----------------------------------------------------------------

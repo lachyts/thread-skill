@@ -482,6 +482,9 @@ stuck0 "ignored path" "stuck: ignored: docs/handoffs/ign.md" "$W" "$W/docs/hando
 touch "$W/.git/MERGE_HEAD"
 stuck0 "MERGE_HEAD" "stuck: half-applied operation (MERGE_HEAD)" "$W" "$W/THREAD.md"
 rm -f "$W/.git/MERGE_HEAD"
+mkdir "$W/.git/sequencer"   # a multi-pick whose stopped pick was committed by hand: no CHERRY_PICK_HEAD
+stuck0 "sequencer" "stuck: half-applied operation (sequencer)" "$W" "$W/THREAD.md"
+rmdir "$W/.git/sequencer"
 git -C "$W" checkout -q --detach
 stuck0 "detached HEAD" "stuck: detached HEAD" "$W" "$W/THREAD.md"
 git -C "$W" checkout -q master
@@ -626,6 +629,8 @@ ok "$(head -n 1 "$LAND")" "#!/usr/bin/env bash" "structural: the shebang has no 
 ok "$(printf '%s\n' "$code" | grep -c 'thread:close')" 0 "structural: land.sh names no caller in what it writes"
 ok "$(printf '%s\n' "$code" | grep -E '(^|[^[:alnum:]_])(git (push|fetch|ls-remote)|gh )' | grep -vcE '^[[:space:]]*(out=\$\()?bounded ')" 0 \
    "structural: every git push|fetch|ls-remote and gh line starts with bounded"
+ok "$(printf '%s\n' "$code" | grep -c 'lc_fetch ')|$(printf '%s\n' "$code" | grep -cE '^[[:space:]]*lc_fetch "\$top" "\$[A-Za-z]+" bounded 2>')" "3|3" \
+   "structural: every live-checkout fetch (S4, O4's two) runs under bounded, its stderr kept"
 has "$src" "alarm \$t; waitpid(\$pid,0); my \$st=\$?; alarm 0;
 kill 'KILL',-\$pid;" "structural: a post-waitpid group kill"
 for w in 'exec { $ARGV[0] } @ARGV' '$t=1 unless' 'return 124          # deadline' '[ "$rem" -lt "$t" ] && t=$rem'; do
@@ -658,12 +663,12 @@ has "$(printf '%s\n' "$code" | grep "trap '")" 'git worktree remove --force "$wt
 has "$(printf '%s\n' "$code" | grep "trap '")" 'git worktree prune' "structural: worktree prune in a trap"
 s4=$(awk '/---- S4\./{on=1} /---- S5\./{on=0} on' "$LAND")
 has "$(printf '%s\n' "$s4" | sed -n 2p)" 'if [ "$class" = landable ] && [ "$b" = "$d" ]; then' "structural: S4 sits inside the landable-and-on-<d> guard"
-has "$s4" 'git fetch' "structural: …holding the fetch"; has "$s4" 'merge --ff-only' "structural: …and the fast-forward"
+has "$s4" 'lc_fetch "$top" "$d" bounded' "structural: …holding the fetch"; has "$s4" 'out=$(lc_ff "$top" "$d"); rc=$?' "structural: …and the fast-forward (live-checkout.sh's, the overlap checked first)"
 # The own-branch mode is one delimited block; the close-out route outside it fetches and fast-forwards only in S4.
 ownb=$(awk '/^# ==== own-branch mode/{on=1} on{print} /^# ==== end own-branch mode/{exit}' "$LAND" | grep -v '^[[:space:]]*#')
 closeout=$(awk '/^# ==== own-branch mode/{on=1} !on{print} /^# ==== end own-branch mode/{on=0}' "$LAND" | grep -v '^[[:space:]]*#')
-ok "$(printf '%s\n' "$closeout" | grep -cE 'git fetch|merge --ff-only')" 2 "structural: the close-out route fetches and fast-forwards only in S4"
-ok "$(printf '%s\n' "$ownb" | grep -cE 'git fetch')" 3 "structural: own-branch fetches origin/<d>, origin/<B> and a merged PR's head only"
+ok "$(printf '%s\n' "$closeout" | grep -cE 'git fetch|merge --ff-only|lc_fetch|lc_ff')" 2 "structural: the close-out route fetches and fast-forwards only in S4"
+ok "$(printf '%s\n' "$ownb" | grep -cE 'git fetch|lc_fetch')" 3 "structural: own-branch fetches origin/<d>, origin/<B> and a merged PR's head only"
 ok "$(printf '%s\n' "$ownb" | grep -c 'merge --ff-only')" 1 "structural: own-branch fast-forwards once (O9)"
 ok "$(printf '%s\n' "$ownb" | grep -c 'git push')" 1 "structural: own-branch pushes once"
 has "$ownb" 'bounded git push origin "refs/heads/$B:refs/heads/$B"' "structural: …<B> to itself, no -u, no force"
@@ -719,9 +724,11 @@ has "$(ghlog)" "POST repos/o/c31/pulls" "case 31 control: a different sha12 is n
 
 echo "== 32. FF refused by a dirty overlap, protected"
 ghreset; mkrepo c32; B0=$(git -C "$W" rev-parse HEAD); srvcommit c32 a.txt "origin a"; echo mine >> "$W/a.txt"; edit
+oh=$(cat "$W/.git/ORIG_HEAD" 2>/dev/null)
 land -- "$W" "$W/THREAD.md"
 res "case 32" 0 "queued https://github.com/o/c32/pull/1"
-has "$err" "land: ff refused: " "case 32: the ff refused note"
+has "$err" "land: ff refused: local changes overlap origin/master (a.txt)" "case 32: the ff refused note names the overlap"
+ok "$(cat "$W/.git/ORIG_HEAD" 2>/dev/null)" "$oh" "case 32: … no merge ran, so ORIG_HEAD is untouched"
 ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 32: C's parent is the old base"
 ok "$(srvclose c32 | cut -d' ' -f2)" "$(git -C "$W" rev-parse HEAD)" "case 32: the server close/ branch is C"
 ok "$(cnt "$(ghlog)" update-branch)" 1 "case 32: update-branch once"
@@ -1251,7 +1258,9 @@ git -C "$W" checkout -q --detach "$OB"
 own --; ores "case 52 detached" 1 "stuck: detached HEAD"; nossh "case 52 detached"; nogh "case 52 detached"
 git -C "$W" checkout -q "$OB"; touch "$W/.git/MERGE_HEAD"
 own --; ores "case 52 half-applied" 1 "stuck: half-applied operation (MERGE_HEAD)"; nossh "case 52 half-applied"
-rm -f "$W/.git/MERGE_HEAD"
+rm -f "$W/.git/MERGE_HEAD"; mkdir "$W/.git/sequencer"
+own --; ores "case 52 sequencer" 1 "stuck: half-applied operation (sequencer)"; nossh "case 52 sequencer"
+rmdir "$W/.git/sequencer"
 
 echo "== 53. own branch: route classes"
 ghreset; mkbranch c53; printf -- '- o/c53 — team repo\n' > "$LANDING_REGISTER"
@@ -1928,6 +1937,19 @@ for sh in "${shells[@]}"; do
   ofill "--queue" "$R"; snip "$sh" GH_CHECKS_MAP="$H=pending"
   ores "case 77 [$sh] snippet, no budget" 1 "stuck: unreviewed commits after $(h7 "$R"): 🐛 fix: the fix"
 done
+
+echo "== 78. a land.sh with no live-checkout.sh beside it fails closed"
+mkdir -p "$tmp/lonely"; cp "$LAND" "$tmp/lonely/land.sh"; LONELY=$(cd "$tmp/lonely" && pwd -P)
+ghreset; mkrepo c78; edit; H0=$(git -C "$W" rev-parse HEAD); touch "$W/.git/MERGE_HEAD"
+LAND="$tmp/lonely/land.sh" land -- "$W" "$W/THREAD.md"
+res "case 78" 1 "stuck: cannot load $LONELY/live-checkout.sh"
+has "$err" "land: nothing committed" "case 78: nothing committed"
+ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 78: HEAD unchanged (never past the half-applied merge)"
+nossh "case 78"; nogh "case 78"
+rm -f "$W/.git/MERGE_HEAD"
+LAND="$tmp/lonely/land.sh" land -- --origin-slug "$W"; ok "$out/$rc" "o/c78/0" "case 78: --origin-slug never loads it"
+ghreset; mkbranch c78b
+LAND="$tmp/lonely/land.sh" own --; ores "case 78 own" 1 "stuck: cannot load $LONELY/live-checkout.sh"; nossh "case 78 own"; nogh "case 78 own"
 }  # end shard_12
 
 # ---- run this child's shard -------------------------------------------------------------------------------

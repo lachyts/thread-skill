@@ -24,8 +24,10 @@
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
-#   R1-R6   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031), never a snapshotted rollout (R5, ADR 0043),
-#           never an approved queue whose only marks are ended room stops (R6, p30-4)
+#   R1-R7   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031), never a snapshotted rollout (R5, ADR 0043),
+#           never an approved queue whose only marks are ended room stops (R6, p30-4), never a stuck serial chain with no
+#           Queue row running (R7, ADR 0060 d1 as ADR 0066's 2026-11-05 amendment carries it), an unreadable one counted
+#           with a WARN
 #   S1-S16  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run rooted in place in a
 #           checkout a live serial chain works, before any supersede (S2c), naming whose note it is in each remedy
 #           (S9), never a clone root beside an in-place chain (S13, ADR 0042), a reach-only chain's launch checkout
@@ -2457,6 +2459,27 @@ BODY="$RS_ENDED" mkro ro-rs.md "$R" "$AQ_HOLD"; mkt t-rs.md ro-rs open
 run
 hasnt "$out" "ro-aq" "R6: an approved queue with only ended room stops is not running"
 has "$out" "running ro-rs" "R6: … a plain one with the same room stops is"
+
+# R7 (ADR 0060 d1, as ADR 0066's 2026-11-05 amendment carries it to the primary hold): an unstamped serial chain that reads
+# stuck with no Queue row running has no Leg open and uses no index or HEAD, so it holds nothing on the Primary checkout
+scen r7
+stuck5 ca
+run
+ok "$rc|$out" "0|none" "R7a: an unstamped stuck chain (four rows done, the fifth set aside, no Leg open) is not running"
+stuck5 ca in_progress
+run
+ok "$rc|$out" "0|running ca" "R7b: with its fifth row handed back in progress, the chain is not stuck: running"
+stuck5 ca blocked t6~in_progress~"$VC"~'owner: lachy'
+run
+ok "$rc|$out" "0|running ca" "R7b: a stuck chain with a row in progress (owned by hand) still runs"
+LOG="- 2026-10-29T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x" stuck5 ca
+run
+ok "$rc|$out" "0|running ca" "R7c: a chain with a Leg open runs"
+stuck5 ca
+mkdir -p "$S/plug"; cp -R "$root/skills" "$S/plug/skills"; printf 'raise RuntimeError("boom")\n' > "$S/plug/skills/execute/scripts/leg.py"
+python3 "$S/plug/skills/_shared/scripts/unfinished-rollout.py" running --tasks-dir "$T" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err")
+ok "$rc|$out" "0|running ca" "R7d: a copy whose leg.py raises on import still counts the chain as running (fails closed)"
+has "$err" "WARN: ca: its chain is unreadable (leg.py would not load (exit 2)): counted as running" "R7d: … with the WARN"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

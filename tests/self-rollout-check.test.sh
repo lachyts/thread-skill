@@ -43,11 +43,12 @@ snip_f="$tmp/snippet.sh"; printf '%s\n' "$snip" > "$snip_f"
 # ---- fixtures -------------------------------------------------------------------------------------------
 home="$tmp/home"; cfg="$tmp/cfg"; mkdir -p "$home/repos/plug" "$home/repos/mono/tools/plug" "$home/repos/plugin2" "$tmp/other" "$cfg/plugins" "$tmp/noplugin"
 ln -s "$home/repos/plug" "$tmp/link"
-# plugin_copy <dir>: a plugin root the snippet can run from (the check and the land.sh its lookup calls)
+# plugin_copy <dir>: a plugin root the snippet can run from (the check, the land.sh its lookup calls, and the
+# live-checkout.sh both source, with the default-branch.sh it asks origin through)
 plugin_copy() {
   mkdir -p "$1/skills/execute/scripts" "$1/skills/_shared/scripts"
-  cp "$root/skills/execute/scripts/self-rollout-check.sh" "$1/skills/execute/scripts/"
-  cp "$root/skills/_shared/scripts/land.sh" "$1/skills/_shared/scripts/"
+  cp "$root/skills/execute/scripts/self-rollout-check.sh" "$root/skills/execute/scripts/default-branch.sh" "$1/skills/execute/scripts/"
+  cp "$root/skills/_shared/scripts/land.sh" "$root/skills/_shared/scripts/live-checkout.sh" "$1/skills/_shared/scripts/"
 }
 pd="$home/repos/pd"; plugin_copy "$pd/plugin"; mkdir -p "$pd-x"; ln -s "$pd" "$tmp/pdlink"
 reg="$cfg/plugins/known_marketplaces.json"
@@ -337,9 +338,11 @@ has "$err" "refreshed $e1-rollout: fast-forwarded to origin/master" "ensure: …
 ok "$(git -C "$e1-rollout" rev-parse HEAD)" "$(srvtip o/e1)" "ensure: … to the server's tip"
 # a dirty overlap: the clone's a.txt edited, origin changes a.txt → a note, the file intact, HEAD unmoved
 echo dirty > "$e1-rollout/a.txt"; push o/e1 a.txt upstream; held=$(git -C "$e1-rollout" rev-parse HEAD)
+oh=$(cat "$e1-rollout/.git/ORIG_HEAD" 2>/dev/null)
 sr --ensure "$e1"; ok "$rc|$out" "0|$e1-rollout" "ensure: a dirty overlap → still 0 and the clone"
 has "$err" "not refreshed: local changes overlap origin/master" "ensure: … a note"
 ok "$(cat "$e1-rollout/a.txt")|$(git -C "$e1-rollout" rev-parse HEAD)" "dirty|$held" "ensure: … the file intact, HEAD unmoved"
+ok "$(cat "$e1-rollout/.git/ORIG_HEAD" 2>/dev/null)" "$oh" "ensure: … and ORIG_HEAD untouched (no merge ran)"
 git -C "$e1-rollout" checkout -q -- a.txt
 git -C "$e1-rollout" switch -q -c side
 sr --ensure "$e1"; has "$err" "not refreshed: on 'side', not master" "ensure: the clone on another branch → a note"
@@ -437,8 +440,20 @@ g -C "$r5" switch -q -c side; push o/r5 c.txt 2
 sr --refresh-in-place "$r5-rollout"; ok "$out" "in-place: $r5 not moved: on 'side', not master" "in-place: another branch → not moved"
 g -C "$r5" switch -q master
 echo dirty > "$r5/a.txt"; push o/r5 a.txt up; held=$(git -C "$r5" rev-parse HEAD); git -C "$r5" config merge.autoStash true
+oh=$(cat "$r5/.git/ORIG_HEAD" 2>/dev/null)
 sr --refresh-in-place "$r5-rollout"; ok "$out" "in-place: $r5 not moved: local changes overlap origin/master" "in-place: a dirty overlap under merge.autoStash → not moved"
 ok "$(cat "$r5/a.txt")|$(git -C "$r5" rev-parse HEAD)|$(git -C "$r5" stash list)" "dirty|$held|" "in-place: … the file intact, HEAD unmoved, the stash list empty"
+ok "$(cat "$r5/.git/ORIG_HEAD" 2>/dev/null)" "$oh" "in-place: … and ORIG_HEAD untouched (no merge ran)"
+nolc="$tmp/nolc"; plugin_copy "$nolc"; rm -f "$nolc/skills/_shared/scripts/live-checkout.sh"
+SC="$nolc/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$r5-rollout"
+ok "$rc|$out" "0|in-place: $r5 not moved: cannot load live-checkout.sh" "in-place: a plugin copy with no live-checkout.sh → not moved, still 0"
+ok "$(git -C "$r5" rev-parse HEAD)" "$held" "in-place: … unmoved"
+SC="$nolc/skills/execute/scripts/self-rollout-check.sh" sr --ensure "$e1"
+ok "$rc|$out" "2|" "ensure: a plugin copy with no live-checkout.sh → 2, nothing printed"
+has "$err" "cannot load $nolc/skills/execute/scripts/../../_shared/scripts/live-checkout.sh" "ensure: … naming the file"
+SC="$nolc/skills/execute/scripts/self-rollout-check.sh" sr --refresh "$e1-rollout"
+ok "$rc|$out" "0|" "refresh: a plugin copy with no live-checkout.sh → 0"
+has "$err" "note: $e1-rollout not refreshed: cannot load live-checkout.sh" "refresh: … with a note"
 git -C "$r5" checkout -q -- a.txt; git -C "$r5" config --unset merge.autoStash
 sr --refresh-in-place "$r5-rollout" FAKE_SSH=fail; ok "$rc" 0 "in-place: a failed fetch → 0"
 has "$out" "in-place: $r5 not moved: fetch failed" "in-place: … fetch failed"

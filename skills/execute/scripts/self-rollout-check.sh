@@ -77,11 +77,12 @@
 # Exit 2 is the check unable to run (usage, python3 or land.sh missing). It never clones, fetches or writes.
 #
 # ---- --ensure <Local:> [<slug>]: schedule § 0 only, after the remote, gh and landing-register checks and Lachy's yes
-# to the clone (exit 4 above). In order: --resolve's steps 1-5b (exits 3, 5 and 2 pass through); C absent and dirname(C)
+# to the clone (exit 4 above). In order: live-checkout.sh loaded (below; exit 2 `cannot load <path>` when it will not);
+# --resolve's steps 1-5b (exits 3, 5 and 2 pass through); C absent and dirname(C)
 # inside a work tree P: `mkdir C`, then `git -C P check-ignore -q -- <rel>/`, and when that is not 0, `rmdir C` and
 # exit 3 (P would track the clone: its next `git add -A`, the daily sweep's, would embed it as a gitlink); C absent:
 # one `git clone -- <raw remote.origin.url of T> <C>` with GIT_TERMINAL_PROMPT=0 and `ssh -o BatchMode=yes` unless
-# the operator set an ssh command (land.sh's rule), a failed clone exiting 2 with git's first line and the probe
+# the operator set an ssh command, T's core.sshCommand included (land.sh's rule, lc_ssh_rule), a failed clone exiting 2 with git's first line and the probe
 # directory removed; the usable-clone checks, re-run on every invocation; the clone refresh (below); the local-state
 # notes (below); then `C[/<sub>]` on stdout, or exit 3 when C still lacks `<sub>` after the refresh: "land <sub>
 # first" when origin/<default> lacks it too, else that the clone could not move to it (the refresh's note says why).
@@ -92,10 +93,20 @@
 #   `.mcp.json`, and the local git config keys user.name, user.email and core.hooksPath. A `WARN:` for a
 #   `.workspace-launch.json` with no `.mcp.json` beside it in the clone: the Chorus Stage refuses a Session there.
 #
+# ---- The live checkout: skills/_shared/scripts/live-checkout.sh, the one primitive for "fast-forward a live checkout"
+# that land.sh and primary-refresh.py share (ADR 0066's 2026-11-05 amendment), is sourced by --ensure, --refresh and
+# --refresh-in-place only: origin's default branch (lc_default: a local origin/HEAD, else origin asked), the ssh rule
+# for the repo being moved (lc_ssh_rule, reading that repo's own core.sshCommand), a half-applied operation (lc_op:
+# rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD, BISECT_LOG or a multi-pick's sequencer/), the
+# one-branch fetch (lc_fetch: +refs/heads/<default>, no tags, no FETCH_HEAD) and the fast-forward (lc_ff: the dirty
+# overlap checked first, so a refused move never runs a merge or rewrites ORIG_HEAD).
+#
 # ---- The clone refresh (--ensure; --refresh <Project root>, execute § 2.7 at entry points only, just before
-# pushed-base): `git fetch origin <default>`, then, with the default branch checked out,
-# `git merge --ff-only --no-autostash origin/<default>`. A clone that cannot move (another branch, an operation in
-# progress, local commits, a dirty overlap) gets a `note:` and stays put, and so does a failed fetch. --refresh does
+# pushed-base): lc_fetch of origin's <default>, then, with the default branch checked out, lc_ff (`git merge
+# --ff-only --no-autostash refs/remotes/origin/<default>` once no local change overlaps it). A clone that cannot move
+# (another branch, an operation in progress, local commits, a dirty overlap, git's own refusal, `git merge --ff-only
+# refused: <why>`) gets a `note:` and stays put, and so does a failed fetch; --refresh with live-checkout.sh unloadable
+# notes `not refreshed: cannot load live-checkout.sh`. --refresh does
 # nothing on a root `--in-place` does not name (a pre-P26 in-place root, which merge-task already moves), and a
 # refresh that changes CLAUDE.md, AGENTS.md, CLAUDE.local.md, .mcp.json or anything under .claude/, at the root or
 # an ancestor of it up to the toplevel, prints a relaunch `WARN:`: the lead loaded the old copy. It never halts:
@@ -105,12 +116,13 @@
 # merge; the completion ceremony once, after its `status: done` stamp). Nothing for a root `--in-place` does not
 # name. A twin that is the plugin's primary checkout while a rollout with no Engine snapshot runs is held
 # (primary-hold.sh, ADR 0031; run from a snapshot, the hold reads the snapshot's Primary, ADR 0043).
-# Otherwise it fetches origin/<default> in the twin (land.sh's ssh and prompt rule) and runs only
+# Otherwise it fetches origin/<default> in the twin (lc_fetch, under the ssh and prompt rule) and runs only lc_ff's
 # `git merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash, never during an operation.
 # One stdout line, `in-place: <twin> …`, or nothing:
-#   held: <primary-hold line> (ADR 0031) · not moved: fetch failed: <first line> · not moved: on '<b>', not <d> ·
-#   not moved: an operation is in progress · fast-forwarded to origin/<d> (<old7>..<new7>) · not moved: local
-#   changes overlap origin/<d> · ahead: <repo-state.sh line> · already at origin/<d> ·
+#   held: <primary-hold line> (ADR 0031) · not moved: cannot load live-checkout.sh · not moved: fetch failed: <first
+#   line> · not moved: on '<b>', not <d> · not moved: an operation is in progress · fast-forwarded to origin/<d>
+#   (<old7>..<new7>) · not moved: local changes overlap origin/<d> · not moved: git merge --ff-only refused: <why> ·
+#   ahead: <repo-state.sh line> · already at origin/<d> ·
 #   not moved: diverged: <N> local-only commit(s) (<repo-state.sh line>), <M> behind origin/<d>; <remedy>
 # The diverged remedy follows the twin's landing route, land.sh's read-only route mode `land.sh --route -- <twin>`:
 # `not landed: <reason>` (swept by the daily sweep, listed on the landing register, no GitHub origin) gives the
@@ -242,26 +254,13 @@ toplevel() {  # toplevel <dir>: its canonical git toplevel, or fail
   t=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) && [ -n "$t" ] && canon "$t"
 }
 first() { printf '%s\n' "$1" | sed -n '/[^[:space:]]/{s/^[[:space:]]*//;p;q;}' | cut -c1-200; }
-ssh_rule() {  # land.sh's rule: never prompt, and batch ssh unless the operator set an ssh command
-  export GIT_TERMINAL_PROMPT=0
-  if [ -z "${GIT_SSH_COMMAND:-}" ] && [ -z "${GIT_SSH:-}" ] && [ -z "$(git config core.sshCommand 2>/dev/null)" ]; then
-    export GIT_SSH_COMMAND='ssh -o BatchMode=yes'
-  fi
-}
-in_op() {  # in_op <repo>: 0 when a half-applied operation is in progress (close 7.1(c)'s list)
-  local m
-  for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
-    [ -e "$(git -C "$1" rev-parse --path-format=absolute --git-path "$m" 2>/dev/null)" ] && return 0
-  done
-  return 1
-}
-default_of() {  # default_of <repo>…: the first local origin/HEAD symref among them, else origin's answer
-  local r d
-  for r in "$@"; do
-    d=$(git -C "$r" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) && d=${d#refs/remotes/origin/} && [ -n "$d" ] \
-      && { printf '%s\n' "$d"; return 0; }
-  done
-  bash "$here/default-branch.sh" "$1" 2>/dev/null
+# lc_load: the live-checkout primitive (lc_op, lc_ssh_rule, lc_default, lc_fetch, lc_ff), the one land.sh and
+# primary-refresh.py share. 1 when it will not load (missing, or a source that stopped partway): never an undefined lc_op
+# read as "no operation in progress". Only --ensure, --refresh and --refresh-in-place load it.
+LC_SH="$here/../../_shared/scripts/live-checkout.sh"
+lc_load() {
+  . "$LC_SH" 2>/dev/null
+  [ "$(type -t lc_loaded 2>/dev/null)" = function ]
 }
 
 # walk_twin <clone path> <owner/name>: the twin walk over names beside the clone (ADR 0064), name-only (the clone need
@@ -389,7 +388,7 @@ sub_missing() { [ -n "$SUB" ] && [ ! -d "$C/$SUB" ]; }
 sub_present() {  # --ensure only, after the refresh: exits 3 when C still lacks <sub>
   local d
   sub_missing || return 0
-  d=$(default_of "$C") || d=''
+  d=$(lc_default "$C") || d=''
   if [ -n "$d" ] && [ "$(git -C "$C" cat-file -t "refs/remotes/origin/$d:$SUB" 2>/dev/null)" = tree ]; then
     echo "$SR: $C has no $SUB, though origin/$d has it: the clone could not fast-forward to origin/$d (the note above says why), so fix that in $C, then re-run /thread:schedule" >&2
   else
@@ -400,16 +399,16 @@ sub_present() {  # --ensure only, after the refresh: exits 3 when C still lacks 
 
 # refresh_clone <clone> <root sub-path> <warn 1|0>: fetch, then a fast-forward on the default branch. stderr only.
 refresh_clone() {
-  local c="$1" sub="$2" warn="$3" d cur old new e f a pfx changed=''
-  d=$(default_of "$c") || d=''
+  local c="$1" sub="$2" warn="$3" d cur old new e f a pfx rc changed=''
+  d=$(lc_default "$c") || d=''
   [ -n "$d" ] || { echo "$SR: note: $c not refreshed: origin's default branch is unresolved" >&2; return 0; }
-  ssh_rule
-  if ! e=$(git -C "$c" fetch -q origin "$d" 2>&1); then
+  lc_ssh_rule "$c"
+  if ! e=$(lc_fetch "$c" "$d" 2>&1); then
     echo "$SR: note: $c not refreshed: fetch failed: $(first "$e")" >&2; return 0
   fi
   cur=$(git -C "$c" symbolic-ref -q --short HEAD 2>/dev/null)
   [ "$cur" = "$d" ] || { echo "$SR: note: $c not refreshed: on '${cur:-a detached HEAD}', not $d" >&2; return 0; }
-  in_op "$c" && { echo "$SR: note: $c not refreshed: an operation is in progress" >&2; return 0; }
+  lc_op "$c" >/dev/null && { echo "$SR: note: $c not refreshed: an operation is in progress" >&2; return 0; }
   old=$(git -C "$c" rev-parse -q --verify HEAD 2>/dev/null)
   if git -C "$c" merge-base --is-ancestor "refs/remotes/origin/$d" HEAD 2>/dev/null; then
     if [ "$(git -C "$c" rev-parse -q --verify "refs/remotes/origin/$d")" = "$old" ]; then
@@ -422,8 +421,11 @@ refresh_clone() {
   if ! git -C "$c" merge-base --is-ancestor HEAD "refs/remotes/origin/$d" 2>/dev/null; then
     echo "$SR: note: $c not refreshed: diverged from origin/$d ($(bash "$REPO_STATE" "$c" 2>/dev/null))" >&2; return 0
   fi
-  if ! git -C "$c" merge -q --ff-only --no-autostash "refs/remotes/origin/$d" >/dev/null 2>&1; then
+  e=$(lc_ff "$c" "$d"); rc=$?
+  if [ "$rc" = 3 ]; then
     echo "$SR: note: $c not refreshed: local changes overlap origin/$d" >&2; return 0
+  elif [ "$rc" != 0 ]; then
+    echo "$SR: note: $c not refreshed: git merge --ff-only refused: $e" >&2; return 0
   fi
   new=$(git -C "$c" rev-parse -q --verify HEAD 2>/dev/null)
   echo "$SR: refreshed $c: fast-forwarded to origin/$d (${old:0:7}..${new:0:7})" >&2
@@ -490,6 +492,7 @@ case "$mode" in
     exit 0 ;;
 
   ensure)
+    lc_load || { echo "$SR: cannot load $LC_SH" >&2; exit 2; }
     resolve_root "$1"
     if [ ! -e "$C" ] && [ ! -L "$C" ]; then
       if [ -n "$P" ]; then
@@ -500,7 +503,7 @@ case "$mode" in
           exit 3
         fi
       fi
-      ssh_rule
+      lc_ssh_rule "$T"
       if ! e=$(git clone -q -- "$URL" "$C" 2>&1); then
         rm -rf "$C"
         echo "$SR: git clone of $URL into $C failed: $(first "$e")" >&2
@@ -521,6 +524,7 @@ case "$mode" in
     R=$(canon "$1")
     C=$(toplevel "$R") || exit 0
     case "$R" in "$C"/*) sub=${R#"$C"/} ;; *) sub='' ;; esac
+    lc_load || { echo "$SR: note: $C not refreshed: cannot load live-checkout.sh" >&2; exit 0; }
     refresh_clone "$C" "$sub" 1
     exit 0 ;;
 
@@ -530,15 +534,16 @@ case "$mode" in
     tw=$TWIN_TOP; root=$(toplevel "$(canon "$1")") || root=$(canon "$1")
     h=$(bash "$HOLD_SH" "$tw" 2>/dev/null)
     if [ -n "$h" ]; then echo "in-place: $tw held: $h (ADR 0031)"; exit 0; fi
-    d=$(default_of "$root" "$tw") || d=''
+    lc_load || { echo "in-place: $tw not moved: cannot load live-checkout.sh"; exit 0; }
+    d=$(lc_default "$root" "$tw") || d=''
     [ -n "$d" ] || { echo "in-place: $tw not moved: origin's default branch is unresolved"; exit 0; }
-    ssh_rule
-    if ! e=$(git -C "$tw" fetch -q origin "$d" 2>&1); then
+    lc_ssh_rule "$tw"
+    if ! e=$(lc_fetch "$tw" "$d" 2>&1); then
       echo "in-place: $tw not moved: fetch failed: $(first "$e")"; exit 0
     fi
     cur=$(git -C "$tw" symbolic-ref -q --short HEAD 2>/dev/null)
     [ "$cur" = "$d" ] || { echo "in-place: $tw not moved: on '${cur:-a detached HEAD}', not $d"; exit 0; }
-    in_op "$tw" && { echo "in-place: $tw not moved: an operation is in progress"; exit 0; }
+    lc_op "$tw" >/dev/null && { echo "in-place: $tw not moved: an operation is in progress"; exit 0; }
     up="refs/remotes/origin/$d"
     ahead=$(git -C "$tw" rev-list --count "$up..HEAD" 2>/dev/null) || ahead=''
     behind=$(git -C "$tw" rev-list --count "HEAD..$up" 2>/dev/null) || behind=''
@@ -548,12 +553,13 @@ case "$mode" in
     [ -n "$rs" ] || rs="on $d, $ahead commit(s) not on origin/$d"
     if [ "$ahead" = 0 ]; then
       old=$(git -C "$tw" rev-parse -q --verify HEAD)
-      if git -C "$tw" merge -q --ff-only --no-autostash "$up" >/dev/null 2>&1; then
-        new=$(git -C "$tw" rev-parse -q --verify HEAD)
-        echo "in-place: $tw fast-forwarded to origin/$d (${old:0:7}..${new:0:7})"
-      else
-        echo "in-place: $tw not moved: local changes overlap origin/$d"
-      fi
+      e=$(lc_ff "$tw" "$d"); rc=$?
+      case $rc in
+        0) new=$(git -C "$tw" rev-parse -q --verify HEAD)
+           echo "in-place: $tw fast-forwarded to origin/$d (${old:0:7}..${new:0:7})" ;;
+        3) echo "in-place: $tw not moved: local changes overlap origin/$d" ;;
+        *) echo "in-place: $tw not moved: git merge --ff-only refused: $e" ;;
+      esac
       exit 0
     fi
     if [ "$behind" = 0 ]; then echo "in-place: $tw ahead: $rs"; exit 0; fi
