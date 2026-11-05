@@ -398,6 +398,41 @@ def _load_settings():
     return mod
 
 
+def _run_owned(argv, timeout):
+    """subprocess.run(argv, stdin=DEVNULL, capture_output=True, text=True, timeout=timeout), with the child owned from
+    its fork (p37-6): SIGNALS are held across Popen's construction and released only inside the try that kills and
+    reaps the child, so a stop's handler (a raising _on_signal, in `run` and lead-integrate.py's verify) never lands
+    where the child is forked but nothing will kill it. subprocess.run's own try starts only after Popen returns, so a
+    stop landing in the rest of Popen's construction leaked the child (the VR9 Flake). The child gets the caller's own
+    mask back before its exec (preexec_fn: these scripts start no thread). A timeout or a stop kills and reaps the child,
+    signals held again, and passes through: TimeoutExpired, or the handler's exception. heat_level()'s notifyutil keeps
+    subprocess.run: `-g` exits at once, so a child left in that window ends on its own."""
+    try:
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    except (AttributeError, OSError, ValueError):
+        return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+    try:
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, mask))
+    except BaseException:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)   # a held stop is delivered here: no child to leak
+        raise
+    try:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)   # a stop held over the construction raises here, in the try
+        out, err = p.communicate(timeout=timeout)
+    except BaseException:
+        signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)   # a second stop cannot cut the kill and its reap
+        try:
+            p.kill()
+            p.wait()   # never communicate(): a grandchild holding the pipes open would hold the stop with it
+            p.stdout.close()
+            p.stderr.close()
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        raise
+    return subprocess.CompletedProcess(argv, p.returncode, out, err)
+
+
 def _resolve_slots():
     """configured_slots()'s work, which may raise anything: (n, source, warn). In process first; a present file on a
     python with no tomllib (SettingsError code 3) is read through rollout-settings.py's CLI under each of
@@ -420,8 +455,7 @@ def _resolve_slots():
             break
         tried.append(py)
         try:
-            p = subprocess.run([py, "-I", "-B", SETTINGS_PY], stdin=subprocess.DEVNULL, capture_output=True,
-                               text=True, timeout=left)
+            p = _run_owned([py, "-I", "-B", SETTINGS_PY], timeout=left)
         except (OSError, subprocess.TimeoutExpired):
             continue
         if p.returncode == 0:
@@ -437,7 +471,7 @@ def configured_slots(reraise=()):
     `verify_slots` (source `file:defaults`) or rollout-settings.py's built-in (`built-in`), with warn None; on any
     failure (a refused file, no python that can read it, a resolver that will not load or answers in the wrong shape)
     BUILT_IN_SLOTS, `fallback` and warn the reason, never an error. `reraise` holds the caller's stop types (its signal
-    handlers' exception), which pass straight through: a subprocess.run cut by one kills and reaps its child first."""
+    handlers' exception), which pass straight through, its resolver child killed and reaped first (_run_owned)."""
     try:
         return _resolve_slots()
     except reraise:

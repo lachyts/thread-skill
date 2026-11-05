@@ -21,7 +21,8 @@
 #   TERM while suite-started walks the vault: never swallowed (76, no verdict: the suite never runs, no line, the slot
 #   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free
 #   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run
-#   VR9 a TERM while a task tree's `run` with no --slots resolves its slot count (p34-1): 76, no line, the slot free.
+#   VR9 a TERM while a task tree's `run` with no --slots resolves its slot count (p34-1): 76, no line, the slot free
+#   VR9b the same TERM landed between the resolver child's fork and its kill-and-reap (p37-6): the child still reaped.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -594,6 +595,50 @@ ok "$(recq '[d["kind"] for d in L]')" '[]' "VR9: … and no line in the Run reco
 within 30 gone "$(cat "$D/vr9.slow")" && s=gone || s="slowpy alive after 30 s"
 ok "$s" gone "VR9: … the resolver child is gone"
 ok "$(slot_state 0 1)" free "VR9: … the slot is free"
+
+# VR9b (p37-6, the VR9 Flake): the same TERM, landed in the window VR9 hits only under load: after the resolver child is
+# forked and before the call that kills and reaps it on a stop is ready (subprocess.run's own try starts after Popen
+# returns). The harness sends it from Popen's construction, once slowpy has written its pid, so the window is hit every
+# time: 76, the resolver child killed and reaped all the same, the slot free.
+: > "$VEV/r1.jsonl"
+cat > "$D/vr9b.py" <<'PY2'
+import importlib.util, os, signal, subprocess, sys, time
+class NoToml:
+    def find_spec(self, name, path=None, target=None):
+        if name == "tomllib":
+            raise ModuleNotFoundError("No module named 'tomllib' (blocked by the test)", name=name)
+        return None
+sys.meta_path.insert(0, NoToml())
+sys.modules.pop("tomllib", None)
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+vs.RESOLVE_TIMEOUT = 120
+Real = subprocess.Popen
+class StoppedInConstruction(Real):
+    def __init__(self, args, *a, **k):   # the fork is done; the TERM lands before Popen returns
+        super().__init__(args, *a, **k)
+        if args[0] != os.environ["THREAD_TOML_PYTHONS"]:
+            return   # only the resolver child's construction (git and the rest are left alone)
+        pidfile, end = os.environ["SLOWPID"], time.monotonic() + 30
+        while time.monotonic() < end and not (os.path.exists(pidfile) and os.path.getsize(pidfile)):
+            time.sleep(0.05)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.5)
+subprocess.Popen = StoppedInConstruction
+sys.exit(vs.main(["run", "--", "sh", "-c", "touch " + sys.argv[2]]))
+PY2
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" THREAD_TOML_PYTHONS="$D/slowpy" SLOWPID="$D/vr9b.slow" \
+  exec python3 "$D/vr9b.py" "$VS" "$D/vr9b.ran") > "$D/vr9b.out" 2> "$D/vr9b.err"; rc=$?
+ok "$rc" 76 "VR9b: a TERM between the resolver child's fork and its kill-and-reap → 76 (no verdict)"
+has "$(cat "$D/vr9b.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "VR9b: … with its no-verdict line"
+ok "$([ -e "$D/vr9b.ran" ] && echo ran || echo never)|$(recq '[d["kind"] for d in L]')" "never|[]" "VR9b: … the suite never ran, no line in the Run record"
+within 30 nonempty "$D/vr9b.slow" || echo "FAIL - VR9b: slowpy never started"
+sp=$(cat "$D/vr9b.slow" 2>/dev/null)
+within 30 gone "$sp" && s=gone || s="slowpy alive after 30 s"
+ok "$s" gone "VR9b: … the resolver child is gone all the same (killed and reaped, never leaked)"
+[ -n "$sp" ] && kill -KILL "$sp" 2>/dev/null   # a leaked one is this suite's own: stopped by the pid it wrote
+ok "$(slot_state 0 1)" free "VR9b: … the slot is free"
 rm -f "$VH/.config/thread/rollouts.toml"
 
 # ======== V-capacity: a fresh capacity.json lowers the pool to min(N, C), never raises it (p36-7, contract 10) =========
