@@ -11,8 +11,10 @@
 # `.git` and dirname(common) is its own toplevel, so a lead running from a snapshot still holds the Primary for an
 # older rollout. And `running` lists only rollouts with no `engine_snapshot:` stamp: a snapshotted rollout never runs
 # on the Primary, so this hold covers only an unstamped rollout (scheduled before P29, or by a cut exit 4), and only
-# from its launch to its next Reinstate or Leg begin, which stamps it (ADR 0043, as amended by p36-1). It stays as a
-# guard: retire it once no unstamped note can exist.
+# from its launch to its next Reinstate or Leg begin, which stamps it (ADR 0043, as amended by p36-1). Nor does it list
+# a serial chain ADR 0060 decision 1 reads as stuck with no Queue row running: it has no Leg open and uses no index or
+# HEAD, so it holds nothing here (ADR 0066's 2026-11-05 amendment). It stays as a guard: retire it once no unstamped
+# note can exist.
 #
 # stdout: one line saying why it holds, or nothing. Exit 0, or 2 on a usage error. A failed running check
 # holds (holding only skips moving the checkout); a missing vault is no rollout, so nothing holds.

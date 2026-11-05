@@ -123,6 +123,7 @@ ok "$args" "com.thread.primary-refresh 300 True $tmp/bin/primary-refresh.py run 
   "R8: the job runs the installed copy every 300 s, with --primary, each --also, --log and --job-shape"
 ok "$(python3 - "$tmp/job.plist" "$pr" <<'PY'
 import importlib.util, plistlib, sys
+sys.dont_write_bytecode = True
 j = plistlib.load(open(sys.argv[1], "rb"))
 spec = importlib.util.spec_from_file_location("pr", sys.argv[2]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 flags = [a for a in j["ProgramArguments"][2:] if a == "run" or a.startswith("--")]

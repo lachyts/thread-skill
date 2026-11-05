@@ -226,11 +226,15 @@ installs a fallback that never probes, for the meantime.
 The **Primary refresh** (ADR 0066) keeps the Primary checkout current: a launchd
 job that fast-forwards it to origin every 5 minutes whenever no rollout without
 an Engine snapshot runs on it, and keeps `~/.agents` (/fresh-review and the
-shared skills) current the same way. It runs an installed copy of
-`skills/_shared/scripts/primary-refresh.py`, which updates itself. Installing it
-is a one-time step:
+shared skills) current the same way. It runs an installed bundle in
+`~/.local/state/thread/bin` (`skills/_shared/scripts/primary-refresh.py` and the
+helpers it runs), which updates itself after a smoke run. Installing it is a
+one-time step, with python 3.11 or newer:
 `python3 skills/_shared/scripts/primary-refresh.py install --primary ~/repos/tools/thread-skill --also ~/.agents`,
-then the `launchctl bootstrap` line it prints. Its log is
+then the one line it prints (a `launchctl bootout`, a wait, then the
+`launchctl bootstrap`). After an update whose job notice says the job predates
+the copy (this one included, ADR 0066's 2026-11-05 amendment), re-run install
+and its line: the self-update never rewrites the plist. Its log is
 `~/Library/Logs/thread-primary-refresh.log`.
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema. Its

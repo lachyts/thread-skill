@@ -159,6 +159,7 @@ rc 3" "LC6 $n: an overlap returns rc 3 with its paths"
   ok "$forms" " current ahead diverged busy overlap behind unreadable" "LC7 $n: the seven forms, in their order"
   ok "$(python3 - "$PR" "$tmp/forms" <<'PY'
 import importlib.util, sys
+sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("pr", sys.argv[1]); m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 bad = [l for l in open(sys.argv[2]).read().splitlines() if not m.CHECK_FORMS[l.split(" ", 1)[0]].match(l)]

@@ -400,9 +400,9 @@ sub_present() {  # --ensure only, after the refresh: exits 3 when C still lacks 
 # refresh_clone <clone> <root sub-path> <warn 1|0>: fetch, then a fast-forward on the default branch. stderr only.
 refresh_clone() {
   local c="$1" sub="$2" warn="$3" d cur old new e f a pfx rc changed=''
+  lc_ssh_rule "$c"   # first, so an ls-remote for an unset origin/HEAD runs under it too
   d=$(lc_default "$c") || d=''
   [ -n "$d" ] || { echo "$SR: note: $c not refreshed: origin's default branch is unresolved" >&2; return 0; }
-  lc_ssh_rule "$c"
   if ! e=$(lc_fetch "$c" "$d" 2>&1); then
     echo "$SR: note: $c not refreshed: fetch failed: $(first "$e")" >&2; return 0
   fi
@@ -535,9 +535,9 @@ case "$mode" in
     h=$(bash "$HOLD_SH" "$tw" 2>/dev/null)
     if [ -n "$h" ]; then echo "in-place: $tw held: $h (ADR 0031)"; exit 0; fi
     lc_load || { echo "in-place: $tw not moved: cannot load live-checkout.sh"; exit 0; }
+    lc_ssh_rule "$tw"
     d=$(lc_default "$root" "$tw") || d=''
     [ -n "$d" ] || { echo "in-place: $tw not moved: origin's default branch is unresolved"; exit 0; }
-    lc_ssh_rule "$tw"
     if ! e=$(lc_fetch "$tw" "$d" 2>&1); then
       echo "in-place: $tw not moved: fetch failed: $(first "$e")"; exit 0
     fi
