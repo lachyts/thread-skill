@@ -5,7 +5,9 @@
 # $tmp/bin, and job() runs the plist's own ProgramArguments (read with plistlib, so --log and --job-shape are in it) plus
 # --ntfy-server and each arm's flags, outside any work tree, as launchd does; run() is a checkout copy (no install
 # marker). Notices go through the real ntfy-push.py to a local http.server stub that appends each message to $NTFY_LOG
-# and answers 500 while $NTFY_FAIL exists ([notify] ntfy_topic is set in the temp HOME's rollouts.toml).
+# and answers 500 while $NTFY_FAIL exists ([notify] ntfy_topic is set in the temp HOME's rollouts.toml). The stub binds
+# through TCPServer's bind, with no reverse lookup (a name lookup in it is an error), and the suite stops if it writes
+# no port.
 #   install   I1 I5 R8 I4 (the job's flags and env pinned beside JOB_SHAPE) I3 I2
 #   a pass    R1-R9, R4/N1-N3, F1 B1 D1 (the fetch and the ssh rule), O1 O2 (the overlap), X1 (the helper's contract)
 #   notices   P0-P2 (one per kind), U1 (an entry from before p37-7), M1 H1 N4 N5, T1 T2 (timeouts and a TERM), K1 L1 J1
@@ -38,7 +40,8 @@ export PATH="$tmp/sshbin:$PATH"
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
 lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
 posts() { wc -l < "$NTFY_LOG" | tr -d ' '; }
-gone() {  # gone <pid> <label>: the pid is gone within 5 s (reaping included)
+gone() {  # gone <pid> <label>: the pid is gone within 5 s (reaping included); no pid recorded is a FAIL, never a pass
+  [ -n "$1" ] || { ok "no pid recorded" gone "$2"; return; }
   local i=0
   while kill -0 "$1" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
   ok "$(kill -0 "$1" 2>/dev/null && echo alive || echo gone)" gone "$2"
@@ -70,7 +73,11 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
     def log_message(self, *a):
         pass
-s = http.server.HTTPServer(("127.0.0.1", 0), H)
+class S(http.server.HTTPServer):
+    def server_bind(self):  # TCPServer's bind, without HTTPServer's getfqdn
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+s = S(("127.0.0.1", 0), H)
 open(sys.argv[1] + ".tmp", "w").write(str(s.server_address[1])); os.replace(sys.argv[1] + ".tmp", sys.argv[1])
 s.serve_forever()
 PY
@@ -357,6 +364,7 @@ job --state "$S" >/dev/null
 land t2 t2; rm -f "$HOOK_PID"
 (cd "$tmp/out" && exec "${JOB[@]}" --ntfy-server "$SERVER" --state "$tmp/s-t2.json" > "$tmp/t2.out" 2>&1) & ppid=$!
 i=0; while [ ! -s "$HOOK_PID" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done
+ok "$([ -s "$HOOK_PID" ] && echo started || echo 'not started in 30 s')" started "T2: the merge's post-merge hook started (the TERM lands mid-merge)"
 t0=$SECONDS; kill -TERM "$ppid"; wait "$ppid"; rc=$?; dt=$((SECONDS - t0))
 ok "$rc" 143 "T2: a TERM mid-merge: the pass exits 143"
 ok "$([ "$dt" -le 7 ] && echo fast || echo "slow ${dt}s")" fast "T2: … within KILL_GRACE + 2 s"
@@ -658,6 +666,7 @@ t0=$SECONDS; out=$(HANG_PIDS="$tmp/hang.pids" job --state "$S" --smoke-timeout 3
 has "$out" "primary: moved" "S6i: the parent's pass, on the installed helper, is unaffected"
 has "$out" "self-update: origin's bundle at $t6i failed its smoke run (ran past 3 s and was stopped)" "S6i: a candidate whose staged helper hangs is stopped at --smoke-timeout"
 ok "$([ "$dt" -le 15 ] && echo bounded || echo "slow ${dt}s")" bounded "S6i: … the pass done within 3 + SMOKE_GRACE + 2 s"
+ok "$(wc -w < "$tmp/hang.pids" 2>/dev/null | tr -d ' ')" 2 "S6i: the candidate's helper recorded itself and its sleep"
 for p in $(cat "$tmp/hang.pids"); do gone "$p" "S6i: … the candidate's helper and its sleep are gone ($p)"; done
 ok "$(same "$root/$LCR" "$B")" same "S6i: … and the installed helper is unchanged"
 real; echo "# s6i fixed" >> "$tmp/seed/$LCR"; commit "s6i fixed"
