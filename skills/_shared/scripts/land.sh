@@ -39,6 +39,16 @@
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
 #   runs S2) and the own branch never drift.
 #
+# The live checkout is skills/_shared/scripts/live-checkout.sh, the one primitive self-rollout-check.sh and
+# primary-refresh.py share, sourced just before S1 and O1 (a source that fails or stops partway is `stuck: cannot load
+# <path>`, never an undefined check read as clear; --origin-slug never loads it). S1 and O1 refuse a half-applied
+# operation, `stuck: half-applied operation (<m>)`, <m> one of rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD,
+# REVERT_HEAD, BISECT_LOG or sequencer (a multi-pick whose stopped pick was committed by hand), and set its ssh rule
+# (BatchMode unless the operator set an ssh command, read from <repo>'s own config; never a prompt). S4 and O4 fetch one
+# branch each with it, under `bounded`. S4's fast-forward checks the overlap first: a dirty or untracked path origin's
+# commits would overwrite is `land: ff refused: local changes overlap origin/<d> (<paths>)`, with no merge run and
+# ORIG_HEAD untouched; any other refusal is `land: ff refused: <git's reason, on one line>`.
+#
 # Route mode (`--route`, read-only; leg.py's Complete, execute legs.md; self-rollout-check.sh --refresh-in-place,
 # whose diverged-twin remedy follows the twin's route, ADR 0042) runs S1 with no paths through S3 exactly as
 # a landing does and returns before S4: nothing is fetched, committed or pushed (the one bounded ls-remote S3 makes
@@ -359,6 +369,11 @@ main() {
     result "$1"; exit "$2"
   }
 
+  # The live-checkout primitive (lc_op, lc_ssh_rule, lc_fetch, lc_ff): a source that fails, or stops partway, is stuck,
+  # never an undefined lc_op read as "no operation in progress".
+  . "$here/live-checkout.sh" 2>/dev/null
+  [ "$(type -t lc_loaded 2>/dev/null)" = function ] || stuck_early "cannot load $here/live-checkout.sh"
+
   # ---- S1. Local preflight ----------------------------------------------------------------------------
   phys "$repo"; [ $? = 1 ] && stuck_early "cannot resolve $repo"
   top=$(git -C "$PHYS_ANC" rev-parse --show-toplevel 2>"$tmpd/top.err") && [ -n "$top" ] \
@@ -380,12 +395,8 @@ main() {
   bref=$(git symbolic-ref -q HEAD) || stuck_early "detached HEAD"
   b=${bref#refs/heads/}
   local m
-  for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
-    [ -e "$(git rev-parse --path-format=absolute --git-path "$m")" ] && stuck_early "half-applied operation ($m)"
-  done
-  if [ -z "${GIT_SSH_COMMAND:-}" ] && [ -z "${GIT_SSH:-}" ] && [ -z "$(git config core.sshCommand 2>/dev/null)" ]; then
-    export GIT_SSH_COMMAND='ssh -o BatchMode=yes'
-  fi
+  if m=$(lc_op "$top"); then stuck_early "half-applied operation ($m)"; fi
+  lc_ssh_rule "$top"
 
   # ---- S2. Route class, local only --------------------------------------------------------------------
   if [ -n "$commit_only" ]; then
@@ -426,7 +437,7 @@ main() {
 
   # ---- S4. Refresh: only a landable repo on its default branch ------------------------------------------
   if [ "$class" = landable ] && [ "$b" = "$d" ]; then
-    bounded git fetch --no-tags --no-write-fetch-head origin "+refs/heads/$d:refs/remotes/origin/$d" 2>"$tmpd/fetch.err"; rc=$?
+    lc_fetch "$top" "$d" bounded 2>"$tmpd/fetch.err"; rc=$?
     net_rc "$rc" fetch required "$tmpd/fetch.err" git; rc=$?
     if [ "$rc" = 124 ]; then class=pending; pending=$NET_ERR
     elif [ "$rc" != 0 ]; then class=pending; pending="cannot fetch origin/$d: $NET_ERR"
@@ -437,8 +448,13 @@ main() {
          && git merge-base --is-ancestor HEAD "refs/remotes/origin/$d"; then
       if primary_hold; then
         echo "land: held the primary checkout at $(git rev-parse --short HEAD), not fast-forwarded: $HOLD"
-      elif ! git merge --ff-only --no-autostash -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
-        echo "land: ff refused: $(first_line "$tmpd/ff.err")"
+      else
+        out=$(lc_ff "$top" "$d"); rc=$?
+        case $rc in
+          0) ;;
+          3) echo "land: ff refused: local changes overlap origin/$d ($out)" ;;
+          *) echo "land: ff refused: $out" ;;
+        esac
       fi
     fi
   fi
@@ -1050,6 +1066,8 @@ own_main() {
 
   tmpd=$(mktemp -d "${TMPDIR:-/tmp}/land.XXXXXX") || { result "stuck: cannot create temp dir"; exit 1; }
   trap 'rm -rf "$tmpd"; [ -z "$own_ref" ] || git update-ref -d "$own_ref" >/dev/null 2>&1' EXIT
+  . "$here/live-checkout.sh" 2>/dev/null
+  [ "$(type -t lc_loaded 2>/dev/null)" = function ] || { result "stuck: cannot load $here/live-checkout.sh"; exit 1; }
 
   # ---- O1. Preflight, local only; no upstream is touched on these ---------------------------------------
   phys "$repo"; [ $? = 1 ] && { result "stuck: cannot resolve $repo"; exit 1; }
@@ -1058,14 +1076,10 @@ own_main() {
   top=$(cd "$top" && pwd -P) && cd "$top" || { result "stuck: cannot enter $top"; exit 1; }
   bref=$(git symbolic-ref -q HEAD) || { result "stuck: detached HEAD"; exit 1; }
   b=${bref#refs/heads/}
-  for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
-    [ -e "$(git rev-parse --path-format=absolute --git-path "$m")" ] && { result "stuck: half-applied operation ($m)"; exit 1; }
-  done
+  if m=$(lc_op "$top"); then result "stuck: half-applied operation ($m)"; exit 1; fi
   [ "$b" = "$B" ] || { result "stuck: checkout moved: on $b, not $B"; exit 1; }
   git rev-parse -q --verify HEAD >/dev/null || { result "stuck: $B has no commits"; exit 1; }
-  if [ -z "${GIT_SSH_COMMAND:-}" ] && [ -z "${GIT_SSH:-}" ] && [ -z "$(git config core.sshCommand 2>/dev/null)" ]; then
-    export GIT_SSH_COMMAND='ssh -o BatchMode=yes'
-  fi
+  lc_ssh_rule "$top"
   own_restore=1
   d=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) && d=${d#refs/remotes/origin/}
 
@@ -1090,7 +1104,7 @@ own_main() {
   od="refs/remotes/origin/$d"; ob="refs/remotes/origin/$B"
 
   # ---- O4. Refresh origin/<d> and origin/<B> --------------------------------------------------------------
-  bounded git fetch --no-tags --no-write-fetch-head origin "+refs/heads/$d:$od" 2>"$tmpd/fetch.err"; rc=$?
+  lc_fetch "$top" "$d" bounded 2>"$tmpd/fetch.err"; rc=$?
   net_rc "$rc" fetch required "$tmpd/fetch.err" git; rc=$?
   [ "$rc" = 124 ] && own_finish "stuck: $NET_ERR" 1
   [ "$rc" = 0 ] || own_finish "stuck: cannot fetch origin/$d: $NET_ERR" 1
@@ -1099,7 +1113,7 @@ own_main() {
   [ "$rc" = 124 ] && own_finish "stuck: $NET_ERR" 1
   [ "$rc" = 0 ] || own_finish "stuck: cannot read origin/$B: $NET_ERR" 1
   if [ -n "$out" ]; then
-    bounded git fetch --no-tags --no-write-fetch-head origin "+refs/heads/$B:$ob" 2>"$tmpd/fetch.err"; rc=$?
+    lc_fetch "$top" "$B" bounded 2>"$tmpd/fetch.err"; rc=$?
     net_rc "$rc" fetch required "$tmpd/fetch.err" git; rc=$?
     [ "$rc" = 124 ] && own_finish "stuck: $NET_ERR" 1
     [ "$rc" = 0 ] || own_finish "stuck: cannot fetch origin/$B: $NET_ERR" 1

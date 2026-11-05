@@ -975,7 +975,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its own work tree's toplevel: a version-cache copy, even inside another repo
   (~/.claude's config repo), has none, and a snapshot stands for the checkout
   it was cut from (`engine-snapshot.py`'s git_primary). What moves it is the
-  **Primary refresh** (ADR 0066). Not the engine's "main
+  **Primary refresh** (ADR 0066), and land.sh S4 and merge-task's in-place
+  refresh whenever the hold is clear. Not the engine's "main
   checkout", which is a rollout's own repo. _Avoid_: live checkout, installed
   copy.
 - **Primary refresh** — the background job that keeps the **Primary checkout**
@@ -984,8 +985,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
   Fast-forward only: a diverged checkout, or one with an uncommitted edit
   origin would overwrite, is left as it is (an edit origin never touches rides
-  along), and Lachy hears only when one stays unable to catch up for a day, a
-  rollout's hold included (ADR 0066). _Avoid_: auto-update,
+  along; `refused` only once the hold is clear), and Lachy hears when one stays
+  unable to catch up for a day, a rollout's hold included, then once more for
+  each new cause (ADR 0066, as amended 2026-11-05). It runs an installed bundle
+  that updates itself only after a smoke run with the job's own argv and a real
+  fetch, and it reports a launchd job an update left stale. _Avoid_: auto-update,
   plugin update (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never
@@ -1027,7 +1031,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Running rollout** — a live, started rollout at the current protocol,
   neither `done` nor `dropped` and not hard-paused: one a lead may be running.
   Only one with no **Engine snapshot** holds the **Primary checkout** (ADR
-  0031's hold, narrowed by ADR 0043).
+  0031's hold, narrowed by ADR 0043), and never a serial chain that is stuck
+  with no Leg open (ADR 0060's stuck, ADR 0066's 2026-11-05 amendment).
   It differs from unfinished both ways: it leaves out paused, never-started
   and protocol-3 rollouts, and keeps one whose every task merged but whose
   completion ceremony has not run. _Avoid_: active, in flight.

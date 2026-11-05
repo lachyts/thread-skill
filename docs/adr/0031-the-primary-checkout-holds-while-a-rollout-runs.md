@@ -6,6 +6,7 @@ Status: accepted (amends ADR 0030's migration consequence; decided with Lachy in
 Superseded in part by ADR 0043 (2026-10-21): the hold covers only a running rollout whose note names no
 Engine snapshot.
 Amended by ADR 0066 (2026-11-02): the Primary refresh moves the checkout whenever this hold is clear.
+Amended by ADR 0066's 2026-11-05 amendment (p37-7): a serial chain ADR 0060 reads as stuck, with no Queue row running, is not a running rollout.
 
 ## Context
 

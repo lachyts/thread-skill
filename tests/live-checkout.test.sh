@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# skills/_shared/scripts/live-checkout.sh, executed (ADR 0066's 2026-11-05 amendment, p37-7): the one primitive land.sh,
+# self-rollout-check.sh and primary-refresh.py share for "fast-forward a live checkout". Every arm runs under bash on
+# PATH and under /bin/bash (3.2 on macOS). LC1 lc_op's seven markers; LC2 the ssh rule; LC3 the default branch, local
+# first; LC4 the one-branch fetch; LC5 the overlap; LC6 lc_ff; LC7 every lc_check form against primary-refresh.py's own
+# regexes; LC8 sourcing changes nothing of the caller's; LC9 the run modes' exit codes. Origins are
+# git@github.com:<o>/<r>.git, served from $SRV/<o>/<r>.git by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`, with
+# GIT_SSH_COMMAND unset, so the ssh rule is what reaches it. Hermetic: HOME and every path live under mktemp; commits
+# carry an inline identity; global/system git config is ignored; never the network.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+. tests/lib/assert.sh
+unset $(git rev-parse --local-env-vars)
+unset GIT_SSH_COMMAND GIT_SSH CDPATH
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+root=$(pwd -P)
+LC="$root/skills/_shared/scripts/live-checkout.sh"
+PR="$root/skills/_shared/scripts/primary-refresh.py"
+
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(cd "$tmp" && pwd -P)
+export HOME="$tmp/home"; mkdir -p "$HOME" "$tmp/sshbin" "$tmp/srv"
+cp tests/fixtures/land/fake-ssh.sh "$tmp/sshbin/ssh"; chmod +x "$tmp/sshbin/ssh"
+export PATH="$tmp/sshbin:$PATH" SRV="$tmp/srv" LOG_SSH="$tmp/ssh.log"; : > "$LOG_SSH"
+g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
+lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
+
+# srv <name> [branch]: a bare server o/<name> with one commit (a.txt) on <branch> (master), and its seed clone
+srv() {
+  local b=${2:-master}
+  g init -q --bare -b "$b" "$SRV/o/$1.git"; g clone -q "$SRV/o/$1.git" "$tmp/seed-$1" 2>/dev/null
+  g -C "$tmp/seed-$1" checkout -q -b "$b" 2>/dev/null
+  echo base > "$tmp/seed-$1/a.txt"; g -C "$tmp/seed-$1" add -A; g -C "$tmp/seed-$1" commit -qm base
+  g -C "$tmp/seed-$1" push -q origin "$b" 2>/dev/null
+}
+# push <name> <file> <text>: a commit on the server through its seed
+push() {
+  mkdir -p "$(dirname "$tmp/seed-$1/$2")"; printf '%s\n' "$3" > "$tmp/seed-$1/$2"
+  g -C "$tmp/seed-$1" add -A; g -C "$tmp/seed-$1" commit -qm "srv: $2"
+  g -C "$tmp/seed-$1" push -q origin "$(git -C "$tmp/seed-$1" symbolic-ref --short HEAD)" 2>/dev/null
+}
+tipof() { git --git-dir "$SRV/o/$1.git" rev-parse "refs/heads/${2:-master}"; }
+cl() { g clone -q "git@github.com:o/$1.git" "$2" 2>/dev/null; }   # a clone over the fake ssh, origin/HEAD set
+fetchall() { git -C "$1" fetch -q origin 2>/dev/null; }
+
+for SH in "$(command -v bash)" /bin/bash; do
+  [ -x "$SH" ] || { echo "SKIP - $SH is not here"; continue; }
+  n=$("$SH" -c 'echo "bash ${BASH_VERSION%%(*}"')
+  rm -rf "$tmp/w" "$SRV/o" "$tmp"/seed-*; mkdir -p "$tmp/w" "$SRV/o"
+  src() { "$SH" -c '. "$1"; shift; "$@"' _ "$LC" "$@"; }   # src <fn> <args…>: one call of a sourced function
+  mode() { "$SH" "$LC" "$@"; }                               # mode <mode> <args…>: a run mode
+
+  # ---- LC1: lc_op finds each of the seven markers, a linked worktree's own included -------------------------------
+  srv r1; c="$tmp/w/r1"; cl r1 "$c"
+  ok "$(src lc_op "$c"; echo "rc $?")" "rc 1" "LC1 $n: a quiet checkout: no marker, rc 1"
+  for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG sequencer; do
+    case $m in rebase-*|sequencer) mkdir "$c/.git/$m" ;; *) : > "$c/.git/$m" ;; esac
+    ok "$(src lc_op "$c"; echo "rc $?")" "$m
+rc 0" "LC1 $n: $m is named, rc 0"
+    rm -rf "${c:?}/.git/$m"
+  done
+  g -C "$c" worktree add -q -b side "$tmp/w/r1-wt" 2>/dev/null
+  : > "$(git -C "$tmp/w/r1-wt" rev-parse --path-format=absolute --git-dir)/MERGE_HEAD"
+  ok "$(src lc_op "$tmp/w/r1-wt")" MERGE_HEAD "LC1 $n: a linked worktree's own MERGE_HEAD is named"
+  ok "$(src lc_op "$c"; echo "rc $?")" "rc 1" "LC1 $n: … and never read as its main checkout's"
+
+  # ---- LC2: the ssh rule -----------------------------------------------------------------------------------------
+  rule() { (cd "$1" && "$SH" -c '. "$1"; lc_ssh_rule "$2"; printf "%s|%s" "${GIT_SSH_COMMAND:-}" "${GIT_TERMINAL_PROMPT:-}"' _ "$LC" "$2"); }
+  ok "$(rule "$tmp" "$c")" "ssh -o BatchMode=yes|0" "LC2 $n: nothing set: BatchMode exported, and no prompt"
+  git -C "$c" config core.sshCommand myssh
+  ok "$(rule "$tmp" "$c")" "|0" "LC2 $n: the repo's core.sshCommand is left alone"
+  g init -q "$tmp/w/plain"
+  ok "$(rule "$c" "$tmp/w/plain")" "ssh -o BatchMode=yes|0" "LC2 $n: the target repo's config is read, not the current directory's"
+  ok "$(rule "$tmp/w/plain" "$c")" "|0" "LC2 $n: … either way round"
+  git -C "$c" config --unset core.sshCommand
+  ok "$(GIT_SSH_COMMAND=mine rule "$tmp" "$c")" "mine|0" "LC2 $n: a caller's GIT_SSH_COMMAND is left alone"
+  ok "$(GIT_SSH=/x/ssh rule "$tmp" "$c")" "|0" "LC2 $n: … and so is a caller's GIT_SSH"
+
+  # ---- LC3: the default branch, local first ----------------------------------------------------------------------
+  git -C "$c" remote set-head origin -d; : > "$LOG_SSH"
+  ok "$(mode default "$c"; echo "rc $?")" "master
+rc 0" "LC3 $n: origin/HEAD deleted: master is read locally"
+  ok "$(cat "$LOG_SSH")" "" "LC3 $n: … and origin is never asked"
+  ok "$(src lc_default_local "$c")" master "LC3 $n: lc_default_local reads origin/master"
+  srv tr trunk; cl tr "$tmp/w/tr"; git -C "$tmp/w/tr" remote set-head origin -d; : > "$LOG_SSH"
+  ok "$(src lc_default_local "$tmp/w/tr"; echo "rc $?")" "rc 1" "LC3 $n: only origin/trunk: no local answer, rc 1"
+  ok "$(mode default "$tmp/w/tr"; echo "rc $?")" "trunk
+rc 0" "LC3 $n: … so origin is asked, and answers trunk"
+  has "$(cat "$LOG_SSH")" "-o BatchMode=yes" "LC3 $n: … over ssh with -o BatchMode=yes"
+  g init -q "$tmp/w/none"; git -C "$tmp/w/none" remote add origin git@github.com:o/nowhere.git
+  ok "$(mode default "$tmp/w/none" 2>/dev/null; echo "rc $?")" "rc 1" "LC3 $n: an unreachable server and no local refs: exit 1, nothing printed"
+  git -C "$c" remote set-head origin master
+  ok "$(src lc_default "$tmp/w/none" "$c")" master "LC3 $n: lc_default takes the first repo with a local origin/HEAD"
+
+  # ---- LC4: one branch, no tags, no FETCH_HEAD -------------------------------------------------------------------
+  git -C "$c" update-ref refs/remotes/origin/feat HEAD
+  g -C "$tmp/seed-r1" push -q origin HEAD:refs/heads/feat/x 2>/dev/null
+  g -C "$tmp/seed-r1" tag v1; g -C "$tmp/seed-r1" push -q origin v1 2>/dev/null
+  push r1 b.txt two
+  ok "$(git -C "$c" fetch -q origin >/dev/null 2>&1; echo "rc $?")" "rc 1" "LC4 $n: (fixture) a plain fetch fails on the stale origin/feat against origin's feat/x"
+  git -C "$c" tag -d v1 >/dev/null 2>&1; rm -f "$c/.git/FETCH_HEAD"
+  ok "$(src lc_fetch "$c" master; echo "rc $?")" "rc 0" "LC4 $n: the one-branch fetch does not fail on it"
+  ok "$(git -C "$c" rev-parse refs/remotes/origin/master)" "$(tipof r1)" "LC4 $n: … and moves origin/master to the server's tip"
+  ok "$(git -C "$c" tag -l)" "" "LC4 $n: … no tag is fetched"
+  ok "$([ -e "$c/.git/FETCH_HEAD" ] && echo written)" "" "LC4 $n: … no FETCH_HEAD is written"
+  ok "$(src lc_fetch "$c" master echo)" "git -C $c fetch --quiet --no-tags --no-write-fetch-head origin +refs/heads/master:refs/remotes/origin/master" \
+    "LC4 $n: a runner prefixes the very argv (land.sh's bounded)"
+  git -C "$c" update-ref -d refs/remotes/origin/feat
+
+  # ---- LC5: the overlap --------------------------------------------------------------------------------------------
+  srv o5; c5="$tmp/w/o5"; cl o5 "$c5"
+  push o5 a.txt origin; fetchall "$c5"; echo mine > "$c5/a.txt"
+  ok "$(src lc_overlap "$c5" master)" "a.txt" "LC5 $n: a dirty tracked file origin changes"
+  git -C "$c5" add a.txt
+  ok "$(src lc_overlap "$c5" master)" "a.txt" "LC5 $n: … staged too"
+  git -C "$c5" reset -q --hard origin/master
+  push o5 new.txt added; fetchall "$c5"; echo mine > "$c5/new.txt"
+  ok "$(src lc_overlap "$c5" master)" "new.txt" "LC5 $n: an untracked file origin adds"
+  rm -f "$c5/new.txt"; git -C "$c5" reset -q --hard origin/master
+  push o5 "my file.txt" sp; push o5 "café.txt" acc; fetchall "$c5"
+  echo mine > "$c5/my file.txt"; echo mine > "$c5/café.txt"
+  ok "$(src lc_overlap "$c5" master)" "café.txt, my file.txt" "LC5 $n: a space and a non-ASCII name, printed unquoted"
+  rm -f "$c5/my file.txt" "$c5/café.txt"; git -C "$c5" reset -q --hard origin/master
+  push o5 d/x.txt dir; fetchall "$c5"; echo mine > "$c5/d"
+  ok "$(src lc_overlap "$c5" master)" "d/x.txt" "LC5 $n: an untracked file where origin makes a directory"
+  rm -f "$c5/d"; git -C "$c5" reset -q --hard origin/master
+  push o5 a.txt again; fetchall "$c5"; echo note > "$c5/untouched.txt"; echo mine >> "$c5/sub.txt"
+  ok "$(src lc_overlap "$c5" master)" "" "LC5 $n: a dirty file origin never touches: nothing"
+  rm -f "$c5/untouched.txt" "$c5/sub.txt"
+
+  # ---- LC6: lc_ff ------------------------------------------------------------------------------------------------
+  srv f6; c6="$tmp/w/f6"; cl f6 "$c6"; old6=$(git -C "$c6" rev-parse HEAD)
+  push f6 a.txt origin; fetchall "$c6"; echo mine > "$c6/a.txt"; rm -f "$c6/.git/ORIG_HEAD"
+  git -C "$c6" config merge.autoStash true
+  ok "$(src lc_ff "$c6" master; echo "rc $?")" "a.txt
+rc 3" "LC6 $n: an overlap returns rc 3 with its paths"
+  ok "$([ -e "$c6/.git/ORIG_HEAD" ] && echo written)|$(git -C "$c6" rev-parse HEAD)|$(cat "$c6/a.txt")" "|$old6|mine" \
+    "LC6 $n: … no merge ran: ORIG_HEAD absent, HEAD and the edit untouched"
+  git -C "$c6" checkout -q -- a.txt; echo note > "$c6/untouched.txt"
+  ok "$(src lc_ff "$c6" master; echo "rc $?")" "rc 0" "LC6 $n: a tree clean of overlaps returns rc 0"
+  ok "$(git -C "$c6" rev-parse HEAD)|$(git -C "$c6" stash list)|$(cat "$c6/untouched.txt")" "$(tipof f6)||note" \
+    "LC6 $n: … at origin's tip, under merge.autoStash with the stash list empty and the untracked file kept"
+  g -C "$c6" commit -q --allow-empty -m local; push f6 b.txt more; fetchall "$c6"
+  out=$(src lc_ff "$c6" master); rc=$?
+  ok "$rc|$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1|1" "LC6 $n: a merge git refuses (diverged): rc 1, one line"
+  has "$out" "Not possible to fast-forward" "LC6 $n: … git's own reason"
+
+  # ---- LC7: every lc_check form, each one primary-refresh.py's regex accepts --------------------------------------
+  srv k7; c7="$tmp/w/k7"; cl k7 "$c7"; forms=
+  form() { printf '%s\n' "$1" >> "$tmp/forms"; forms="$forms ${1%% *}"; }
+  : > "$tmp/forms"
+  form "$(src lc_check "$c7" master)"
+  g -C "$c7" commit -q --allow-empty -m local; form "$(src lc_check "$c7" master)"
+  push k7 b.txt more; fetchall "$c7"; form "$(src lc_check "$c7" master)"
+  g -C "$c7" reset -q --hard HEAD~1; : > "$c7/.git/index.lock"; form "$(src lc_check "$c7" master)"
+  rm -f "$c7/.git/index.lock"; echo mine > "$c7/b.txt"; form "$(src lc_check "$c7" master)"
+  rm -f "$c7/b.txt"; form "$(src lc_check "$c7" master)"
+  g init -q "$tmp/w/unborn"; form "$(src lc_check "$tmp/w/unborn" master)"
+  ok "$forms" " current ahead diverged busy overlap behind unreadable" "LC7 $n: the seven forms, in their order"
+  ok "$(python3 - "$PR" "$tmp/forms" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("pr", sys.argv[1]); m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+bad = [l for l in open(sys.argv[2]).read().splitlines() if not m.CHECK_FORMS[l.split(" ", 1)[0]].match(l)]
+print(bad or "all")
+PY
+)" all "LC7 $n: … each matching primary-refresh.py's CHECK_FORMS regex"
+  ok "$(src lc_check "$c7" master)" "behind $(tipof k7) 1 $(git -C "$c7" rev-parse HEAD)" "LC7 $n: behind names origin's tip, the count and HEAD"
+  : > "$c7/.git/MERGE_HEAD"
+  ok "$(src lc_check "$c7" master)" "busy $(tipof k7) a merge in progress" "LC7 $n: an operation reads busy, in words"
+  rm -f "$c7/.git/MERGE_HEAD"; git -C "$c7" checkout -q --detach
+  ok "$(src lc_check "$c7" master)" "busy $(tipof k7) HEAD detached" "LC7 $n: a detached HEAD behind origin reads busy"
+  git -C "$c7" checkout -q -b side
+  ok "$(src lc_check "$c7" master)" "busy $(tipof k7) on side, not master" "LC7 $n: another branch reads busy"
+  git -C "$c7" checkout -q --detach "$(tipof k7)"
+  ok "$(src lc_check "$c7" master)" "current $(tipof k7)" "LC7 $n: a detached HEAD at origin's tip reads current"
+
+  # ---- LC8: sourcing changes nothing of the caller's ---------------------------------------------------------------
+  out=$("$SH" -c '
+    set -euo pipefail
+    here=H d=D m=M e=E out=O rc=R
+    o0=$(set -o); s0=$(shopt -p); v0=$(compgen -v | LC_ALL=C sort)
+    . "$1"
+    v1=$(compgen -v | LC_ALL=C sort)
+    printf "new:%s\n" "$(LC_ALL=C comm -13 <(printf "%s\n" "$v0") <(printf "%s\n" "$v1") | grep -v "^_$" | tr "\n" " ")"
+    lc_op "$2" >/dev/null || :; lc_ssh_rule "$2"; lc_default "$2" >/dev/null || :; lc_default_local "$2" >/dev/null || :
+    lc_fetch "$2" master >/dev/null 2>&1 || :; lc_overlap "$2" master >/dev/null || :; lc_ff "$2" master >/dev/null 2>&1 || :
+    lc_check "$2" master >/dev/null || :; lc_loaded
+    printf "vals:%s\n" "$here $d $m $e $out $rc"
+    [ "$(set -o)" = "$o0" ] && echo "set -o: same"; [ "$(shopt -p)" = "$s0" ] && echo "shopt: same"
+    v2=$(compgen -v | LC_ALL=C sort)
+    printf "after:%s\n" "$(LC_ALL=C comm -13 <(printf "%s\n" "$v0") <(printf "%s\n" "$v2") | grep -v "^_$" | tr "\n" " ")"
+  ' _ "$LC" "$c7" 2>&1)
+  has "$out" "new:_lc_dir " "LC8 $n: sourcing sets only _lc_dir"
+  has "$out" "vals:H D M E O R" "LC8 $n: every function called under set -euo pipefail leaves here d m e out rc as they were"
+  has "$out" "set -o: same" "LC8 $n: … and set -o"
+  has "$out" "shopt: same" "LC8 $n: … and shopt -p"
+  has "$out" "after:GIT_SSH_COMMAND GIT_TERMINAL_PROMPT _lc_dir " "LC8 $n: … the only names it adds are _lc_dir and the ssh rule's two exports"
+
+  # ---- LC9: the run modes' exit codes --------------------------------------------------------------------------------
+  srv m9; c9="$tmp/w/m9"; cl m9 "$c9"
+  out=$(FAKE_SSH=fail mode fetch "$c9" master 2>"$tmp/err"); rc=$?
+  ok "$rc|$out" "128|" "LC9 $n: fetch against an unreachable origin exits git's 128, nothing on stdout"
+  has "$(cat "$tmp/err")" "fatal: " "LC9 $n: … git's fatal line on stderr"
+  push m9 b.txt more
+  ok "$(mode fetch "$c9" master 2>&1; echo "rc $?")" "rc 0" "LC9 $n: a fetch that succeeds exits 0"
+  ok "$(mode check "$c9" master | wc -l | tr -d ' ')|$(mode check "$c9" master >/dev/null; echo $?)" "1|0" "LC9 $n: check: one line, exit 0"
+  old9=$(git -C "$c9" rev-parse HEAD)
+  ok "$(mode ff "$c9" master; echo "rc $?")" "moved $old9 $(tipof m9)
+rc 0" "LC9 $n: ff: moved <old> <new>, exit 0"
+  push m9 a.txt origin; mode fetch "$c9" master; echo mine > "$c9/a.txt"
+  ok "$(mode ff "$c9" master; echo "rc $?")" "overlap a.txt
+rc 0" "LC9 $n: ff: overlap <paths>, exit 0"
+  git -C "$c9" checkout -q -- a.txt; g -C "$c9" commit -q --allow-empty -m local
+  out=$(mode ff "$c9" master); rc=$?
+  ok "$rc|${out%% *}|$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "0|refused|1" "LC9 $n: ff: refused <why>, one line, exit 0"
+  ok "$(mode default "$tmp/w/none" 2>/dev/null; echo "rc $?")" "rc 1" "LC9 $n: default with nothing resolvable exits 1"
+  for args in "" "default" "fetch $c9" "check $c9" "ff $c9" "check $c9 master extra" "bogus $c9 master"; do
+    out=$(mode $args 2>"$tmp/err"); rc=$?
+    ok "$rc|$out" "2|" "LC9 $n: usage '${args:-<none>}' exits 2, stdout empty"
+    has "$(cat "$tmp/err")" "live-checkout: usage: " "LC9 $n: … with the usage line"
+  done
+  g init -q "$tmp/w/decoy"; g -C "$tmp/w/decoy" commit -q --allow-empty -m decoy
+  ok "$(GIT_DIR="$tmp/w/decoy/.git" mode check "$c9" master | cut -d' ' -f1)" "diverged" "LC9 $n: a caller's GIT_DIR is scrubbed: the named repo is read"
+done
+
+exit $fail
