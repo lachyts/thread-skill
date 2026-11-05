@@ -714,9 +714,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Trickle**'s and the **Away cap**'s number, Legs count behind their
   **Lease**, and a lead or Leg whose Login is inside its line starts nothing
   new (the quota hold); a missing, stale or unreadable reading falls back to
-  them, never to open (ADR 0067 d8; execute away.md § Capacity). A Leg's wait
-  for room is a `wait` of kind `capacity` (or `quota`), never a **Rank
-  wait**. _Avoid_: governor (the mechanism), throttle.
+  them, never to open (ADR 0067 d8; execute away.md § Capacity). A fresh
+  reading's `stop_suites` (memory critical) also holds and stops slotted
+  suites, as the **Heat hold** does. A Leg's wait for room is a `wait` of
+  kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
+  mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
   Chorus sets another (Chorus ADR 0104 d2); while **Capacity** is in force its

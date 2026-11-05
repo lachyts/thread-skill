@@ -6,9 +6,16 @@ holds its constants and its reading, and nothing else. Stdlib only. It never rai
 a fresh, well-formed file reads as no Capacity, and its callers then fall back to today's Trickle and Away cap
 (reconcile-rollout.py `_capacity_state`), never to open.
 
-    read(now)            {file, why, capacity, writtenAt, logins}: file is fresh, missing, unreadable or stale; why
-                         null only when fresh; capacity (an int >= 1), writtenAt (the file's string) and logins
-                         ({<name>: {inside_line, why}}) are the file's, and only when fresh (else null, null, {}).
+    read(now)            {file, why, capacity, writtenAt, logins, signals}: file is fresh, missing, unreadable or
+                         stale; why null only when fresh; capacity (an int >= 1), writtenAt (the file's string), logins
+                         ({<name>: {inside_line, why}}) and signals (the file's object, as written) are the file's, and
+                         only when fresh (else null, null, {}, {}).
+    suite_stop(reading)  None, or the label of the Capacity stop (p36-10, ADR 0067 d8; verify-slot.py contract 7):
+                         only for a fresh reading whose signals' CAPACITY_STOP_KEY is exactly JSON true; "memory:
+                         critical" when signals' `memory` is an integer (never a bool) >= CAPACITY_MEMORY_CRITICAL,
+                         else "capacity: stop_suites" (Chorus saw thermal trapping notifyutil did not). Any other
+                         value of the key (false, null, "true", 1, missing) is no stop and never makes the file
+                         unreadable, so it never drops C. Never raises.
     login(env)           The caller's Chorus Login name, or None: None unless env holds CLAUDE_CODE_SESSION_ID (a
                          Claude Code session; a Codex or other caller is never held, since the shell sets the pin in
                          every shell); else CLAUDE_ACCOUNT_PINNED stripped, else CLAUDE_CONFIG_DIR's basename (a
@@ -35,6 +42,8 @@ CAPACITY_MAX_BYTES = 64 * 1024
 CAPACITY_WARN = "WARN: ~/.config/thread/capacity.json"   # the stale / unreadable / unresolved stderr line's prefix
 CAPACITY_PRIMARY_LOGIN = "dummy"                     # Chorus's PRIMARY Login: neither the pin nor a config dir set
 CAPACITY_KEYS = ("capacity", "written_at")           # both required, in away.md § Capacity's key-table order
+CAPACITY_STOP_KEY = "stop_suites"                    # signals' flag: JSON true holds and stops slotted suites (p36-10)
+CAPACITY_MEMORY_CRITICAL = 4                         # signals' `memory` at this level or above: the stop reads memory
 
 
 def _stamp(value):
@@ -113,10 +122,10 @@ def _load(path):
 
 
 def read(now) -> dict:
-    """The Capacity reading at `now` (an aware datetime): {file, why, capacity, writtenAt, logins} (the module
-    docstring). Stale: `written_at` more than CAPACITY_STALE_AFTER before now, or more than CAPACITY_FUTURE_SKEW after
+    """The Capacity reading at `now` (an aware datetime): {file, why, capacity, writtenAt, logins, signals} (the
+    module docstring). Stale: `written_at` more than CAPACITY_STALE_AFTER before now, or more than CAPACITY_FUTURE_SKEW after
     it. Never raises."""
-    out = {"file": "missing", "why": "no file", "capacity": None, "writtenAt": None, "logins": {}}
+    out = {"file": "missing", "why": "no file", "capacity": None, "writtenAt": None, "logins": {}, "signals": {}}
     try:
         file, why, data = _load(Path.home() / CAPACITY_FILE_REL)
     except Exception as e:  # noqa: BLE001 — a reading never raises: anything unforeseen fails closed
@@ -132,8 +141,26 @@ def read(now) -> dict:
         out.update(file="stale", why=f"written_at {data['written_at']} is more than 5 minutes ahead of now")
         return out
     logins = {name: {"inside_line": e["inside_line"], "why": e.get("why")} for name, e in (data.get("logins") or {}).items()}
-    out.update(file="fresh", why=None, capacity=data["capacity"], writtenAt=data["written_at"], logins=logins)
+    out.update(file="fresh", why=None, capacity=data["capacity"], writtenAt=data["written_at"], logins=logins,
+               signals=dict(data.get("signals") or {}))
     return out
+
+
+def suite_stop(reading):
+    """None, or the Capacity stop's label for a fresh reading whose signals' stop_suites is JSON true (the module
+    docstring). Never raises."""
+    try:
+        if reading.get("file") != "fresh":
+            return None
+        signals = reading.get("signals")
+        if not isinstance(signals, dict) or signals.get(CAPACITY_STOP_KEY) is not True:
+            return None
+        memory = signals.get("memory")
+        if isinstance(memory, int) and not isinstance(memory, bool) and memory >= CAPACITY_MEMORY_CRITICAL:
+            return "memory: critical"
+        return "capacity: stop_suites"
+    except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape stops nothing
+        return None
 
 
 def login(env):

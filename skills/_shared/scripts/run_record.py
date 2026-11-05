@@ -199,7 +199,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      a green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
                      env_bootstrap never let the suite run, or a git-env trip fell inside the window), stopped (a
                      signal stop: a TaskStop, a hard pause, a room stop) and heat (the Mac was too hot to run the
-                     suite, the Heat hold) no verdict, the attempt runs again; followup
+                     suite, the Heat hold, or its memory critical, the Capacity stop) no verdict, the attempt runs
+                     again; followup
                      the fix task a final red filed; ADR 0052: completion-verify --run writes it).
   verify-skipped  T  repo (the origin's owner/name, else the repo path), paths (at most 200 paths, the move's first),
                      pathsTotal (int >= 0: every path the move changed); base?, main?, head? (the green run's base, the
@@ -343,7 +344,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      serial chain's counted Leg claims included while Capacity is in force (p36-9)). A task is
                      optional: a completion suite has none.
   suite-ended        suite, by, runner (as suite-started), outcome (green | red | timeout | stopped | unrun | noslot |
-                     heat: the Heat hold, verify-slot.py contract 7, stopped the run, no verdict, or held it past the
+                     heat: the Heat hold, verify-slot.py contract 7, or its Capacity stop (memory critical, a fresh
+                     capacity.json's signals.stop_suites, p36-10), stopped the run, no verdict, or held it past the
                      slot wait), seconds (>= 0: the run, after any slot wait); load?, rc? (an int 0-255, never on noslot
                      or heat), failing? (at most 50 names of at most 200 characters each, read from the run's output on
                      red or timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
@@ -549,7 +551,8 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   lead-entry).
 - Suites pair by `suite`. A suite-started with no suite-ended never finished (killed with its wrapper, the lead or the
   Mac); a suite-ended with no suite-started is a noslot or a heat (the suite never got a slot, so it never started).
-  A heat stop ends its run's suite `heat`, and the restart once the Mac cools is a suite of its own. Writers:
+  A heat stop ends its run's suite `heat`, and the restart once the Mac cools is a suite of its own; so does a
+  Capacity stop (verify-slot.py contract 7: memory critical), its restart once the stop clears. Writers:
   skills/execute/scripts/verify-slot.py `run` (an agent's suite, runner agent, the task read from a cwd under
   `<repo>/.claude/worktrees/<slug>`) and lead-integrate.py `verify --rollout` (the lead's Integration, RACE and
   completion suites, runner lead). `running` is absent on a stop by signal (no vault scan on that path).
