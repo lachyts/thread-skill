@@ -10,6 +10,12 @@ the terminal is the one not-sent that counts as pushed and skips the fallback. `
 whether a topic is set: on ntfy.sh a topic is its own read and publish credential.)*
 *(Amended 2026-10-27 by p30-8: d2's schedule and orient Planner line is now written on every spend-smell task, recorded
 under `## Decisions (recorded <date>)` and never asked; ADR 0034's 2026-10-27 amendment.)*
+*(Amended 2026-11-05 by p37-4, ADR 0034's amendment of that date: for the standing approval, § Consequences' "No
+pricer change" and the rejected "pricer that reads only the cap clause" are superseded. A gate the full reading
+refuses is priced from its readable cap, in a form that keeps both of this ADR's reasons: a note the plan judge
+bounced still signs nothing, and the per-Login gate behind a comma still asks (rule 7(ix)). A judge-less mid-run gate
+now signs at its cap plus its USD amounts. `exposure -` prints that standing reading, so the judge never bounces a
+gate whose cap reads.)*
 
 ## Context
 

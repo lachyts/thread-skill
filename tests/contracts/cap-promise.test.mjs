@@ -153,7 +153,8 @@ function checkCap(f, E) {
   // gate bounces: a gates-only `changes` never climbs and bounces once, then gate-pending, never plan-blocked, with the
   // bounce line, which reconcile writes under `## Gate bounce (awaiting sign-off)`, where the standing approval signs
   // nothing; a priced gate whose sub-bullets break its Cap, and a capless or two-cap gate, stay a climbing `changes`;
-  // no check while the standing approval is off.
+  // no check while the standing approval is off. Since p37-4 `exposure -` prints the standing reading, so a gate whose
+  // cap reads prints its cap-only amount and is never bounced on wording alone, and a mid-run gate is priced so too.
   const cap37 = labelled(f.execute, S37, "The Cap's format (ADR 0038).")
   if (!has(cap37, 'A spend gate is **one line**, `spend: <what> — cap N USD`', "While § 4's `gatePricer` is set (the task's standing approval is on)",
     'through `gated_inputs.py exposure -`, the gate on stdin', 'A gate already in `## Approved gates` is exempt.',
@@ -161,7 +162,9 @@ function checkCap(f, E) {
     '**gate-pending, never plan-blocked**', "the row's blockerDiagnosis carries `bounced by the plan judge (ADR 0038)`",
     'Reconcile writes that paragraph under **`## Gate bounce (awaiting sign-off)`**', 'while it stands `approve-gates --standing` signs nothing on the note',
     'A gate that prices but whose sub-bullets name spend its Cap does not hold is an ordinary `changes`, which climbs',
-    "A spend gate with no cap, or more than one, stays ADR 0008's automatic `changes`, which climbs.", 'With the standing approval off there is no check.') ||
+    "A spend gate with no cap, or more than one, stays ADR 0008's automatic `changes`, which climbs.", 'With the standing approval off there is no check.',
+    '`exposure -` prints the standing reading (p37-4), so a gate whose cap reads prints its cap-only amount, with an empty why, and is never bounced on wording alone.',
+    'is priced as before, at sign-off (cap-only pricing included).') ||
     cap37.includes('the fail-closed pricer asks')) {
     fails.push('execute-37')
   }
@@ -295,6 +298,12 @@ test("control: *The Cap's format* that bounces a priced gate, or signs a bounced
     "A `changes` over spend gates' format alone", 'execute-37', 'any gate bounces')
   onlyFile('execute', /Reconcile writes that paragraph under[\s\S]*?Lachy's sign-off removes the section\. /, 'At sign-off the fail-closed pricer asks with its why. ',
     'execute-37', 'the pricer signs it')
+})
+
+test("control: *The Cap's format* without p37-4's standing-reading sentence fails execute-37", () => {
+  onlyFile('execute', ' `exposure -` prints the standing reading (p37-4), so a gate whose cap reads prints its cap-only amount, with an empty why, and is never bounced on wording alone.', '',
+    'execute-37', 'no standing-reading sentence')
+  onlyFile('execute', 'at sign-off (cap-only pricing included).', 'at sign-off.', 'execute-37', 'mid-run gate priced in full only')
 })
 
 test('control: a gatePricer resolved on a resume fails execute-args', () => {

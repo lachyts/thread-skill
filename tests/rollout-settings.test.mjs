@@ -50,9 +50,11 @@ const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
 const TABLES_LINE = 'rollouts.toml holds only a top-level schema and [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
 // The JSON's top-level keys: the repo's Inert paths (p29-3, ADR 0045) and its test-credential class (ADR 0063) follow the
 // three tables, then the schema pair and the ignored keys (ADR 0043, p29-1).
-const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'inert_paths', 'test_credentials', 'schema', 'ignored']
+// The machine's declared test Logins (p37-4) follow the class, outside settings too.
+const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'inert_paths', 'test_credentials', 'test_logins', 'schema', 'ignored']
 const NO_INERT = { value: [], source: 'built-in' }
 const NO_CREDS = { value: null, source: 'built-in' }
+const NO_LOGINS = { value: [], source: 'built-in' }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -139,6 +141,7 @@ function assertAllBuiltIn(out) {
   assert.deepEqual(out.notify, UNSET)
   assert.deepEqual(out.inert_paths, NO_INERT)
   assert.deepEqual(out.test_credentials, NO_CREDS)
+  assert.deepEqual(out.test_logins, NO_LOGINS)
 }
 
 // ---- R1: no file ----------------------------------------------------------------------------------------
@@ -312,7 +315,7 @@ const REFUSALS = [
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
   ['an unknown key names all eight rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
-    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots, capacity_max, inert_paths, test_credentials\)/],
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots, capacity_max, inert_paths, test_credentials, test_logins\)/],
   ['verify_slots = 0', ['[defaults]', 'verify_slots = 0'], 2, /\[defaults\] verify_slots must be an integer >= 1, got 0/],
   ['verify_slots = true', ['[defaults]', 'verify_slots = true'], 2, /verify_slots must be an integer >= 1, got a boolean/],
   ['verify_slots = 1.5', ['[defaults]', 'verify_slots = 1.5'], 2, /verify_slots must be an integer >= 1, got a float/],
@@ -653,14 +656,14 @@ test('K2 an absent schema reads as 1, and an unknown key is refused as ever', (t
   const home = tmpHome(t)
   writeSettings(home, ['[defaults]', 'parallel_ceiling = 2'])
   const out = resolves(home)
-  assert.deepEqual(out.schema, { file: 1, engine: 4 })
+  assert.deepEqual(out.schema, { file: 1, engine: 5 })
   assert.deepEqual(out.ignored, [])
   writeSettings(home, ['[defaults]', 'foo_bar = 2'])
   refused(home, { line: 2, reason: /\[defaults\]: unknown key "foo_bar" \(a rollout table holds/ })
   writeSettings(home, ['schema = 1', '[defaults]', 'foo_bar = 2'])
   refused(home, { line: 3, reason: /\[defaults\]: unknown key "foo_bar"/ })
   const none = resolves(tmpHome(t))
-  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 4 }, []], 'no file: schema 1')
+  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 5 }, []], 'no file: schema 1')
 })
 
 test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (t) => {
@@ -671,13 +674,14 @@ test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (
   }
 })
 
+// p37-4 raised SCHEMA to 5, so the newer file in K4-K6 and K9 says schema = 6.
 test('K4 under a schema above SCHEMA an unknown key is ignored and listed, at every scope', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 5', '', '[defaults]', 'merge_train = 3', 'parallel_ceiling = 3', '', '[guardrails]',
+  writeSettings(home, ['schema = 6', '', '[defaults]', 'merge_train = 3', 'parallel_ceiling = 3', '', '[guardrails]',
     'away_hours = 2', '', '[notify]', 'chorus_topic = "x"', '', '[away]', 'cap = 1', '', '[repo."o/r"]', 'merge_train = 1'])
   const out = resolves(home)
   assert.deepEqual(out.ignored, ['away', 'defaults.merge_train', 'guardrails.away_hours', 'notify.chorus_topic', 'repo."o/r".merge_train'])
-  assert.deepEqual(out.schema, { file: 5, engine: 4 })
+  assert.deepEqual(out.schema, { file: 6, engine: 5 })
   expectValues(out, { parallel_ceiling: 3 }, { parallel_ceiling: 'file:defaults' })
   assert.deepEqual(out.notify, UNSET)
 })
@@ -686,22 +690,22 @@ test('K5 a near-miss by case or _/- is refused even under a newer schema', (t) =
   for (const [table, key] of [['defaults', 'Parallel_Ceiling'], ['defaults', 'parallel-ceiling'], ['guardrails', 'quotastalls'],
     ['notify', 'NTFY_TOPIC']]) {
     const home = tmpHome(t)
-    writeSettings(home, ['schema = 5', `[${table}]`, `${key} = 1`])
+    writeSettings(home, ['schema = 6', `[${table}]`, `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${escapeRe(key)}".*a near-miss of`) })
   }
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 5', '[Defaults]', 'parallel_ceiling = 1'])
+  writeSettings(home, ['schema = 6', '[Defaults]', 'parallel_ceiling = 1'])
   refused(home, { line: 2, reason: /unknown top-level key "Defaults".*a near-miss of "defaults"/ })
 })
 
 test('K6 a near-miss within OSA distance 2 is refused; a key three edits away is ignored', (t) => {
   for (const key of ['paralel_ceiling', 'parallel_cieling', 'max_iteratoins', 'max_review_round', 'verify_slot', 'inert_path', 'test_credential']) {
     const home = tmpHome(t)
-    writeSettings(home, ['schema = 5', '[defaults]', `${key} = 1`])
+    writeSettings(home, ['schema = 6', '[defaults]', `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${key}".*a near-miss of`) })
   }
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 5', '[defaults]', 'max_iter = 1'])
+  writeSettings(home, ['schema = 6', '[defaults]', 'max_iter = 1'])
   assert.deepEqual(resolves(home).ignored, ['defaults.max_iter'])
 })
 
@@ -737,12 +741,12 @@ print(json.dumps(bad))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYT
 
 test('K9 the JSON carries schema {file, engine} and ignored, in process too', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 5', '[defaults]', 'later_key = 1'])
+  writeSettings(home, ['schema = 6', '[defaults]', 'later_key = 1'])
   const out = resolves(home)
   assert.deepEqual(Object.keys(out), OUT_KEYS)
-  assert.deepEqual([out.schema, out.ignored], [{ file: 5, engine: 4 }, ['defaults.later_key']])
+  assert.deepEqual([out.schema, out.ignored], [{ file: 6, engine: 5 }, ['defaults.later_key']])
   const inp = resolvedInProcess(home)
-  assert.deepEqual([inp.schema, inp.ignored], [{ file: 5, engine: 4 }, ['defaults.later_key']])
+  assert.deepEqual([inp.schema, inp.ignored], [{ file: 6, engine: 5 }, ['defaults.later_key']])
 })
 
 // K10's failure message is the add-a-key recipe (rollout-settings.py's header), the writer rule included.
@@ -784,7 +788,7 @@ test('K11 inert_paths in a repo table resolves as file:repo, outside settings; a
   assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.inert_paths, { value: ['THREAD.md', 'docs/handoffs/**'], source: 'file:repo' })
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'inert_paths is never a settings key')
-  assert.deepEqual(out.schema, { file: 2, engine: 4 })
+  assert.deepEqual(out.schema, { file: 2, engine: 5 })
   assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).inert_paths.value, ['THREAD.md', 'docs/handoffs/**'])
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).inert_paths, NO_INERT)
   assert.deepEqual(resolves(home).inert_paths, NO_INERT, 'no --repo: built-in []')
@@ -892,7 +896,7 @@ test('K13 the one-line class resolves as file:repo, in file order, outside setti
   assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.test_credentials, { value: CRED_VALUE, source: 'file:repo' })
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'test_credentials is never a settings key')
-  assert.deepEqual(out.schema, { file: 3, engine: 4 })
+  assert.deepEqual(out.schema, { file: 3, engine: 5 })
   assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).test_credentials.value, CRED_VALUE)
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).test_credentials, NO_CREDS)
   assert.deepEqual(resolves(home).test_credentials, NO_CREDS, 'no --repo: no class')
@@ -986,4 +990,71 @@ print(json.dumps(m.resolve(repo=sys.argv[2])))`, SCRIPT, repo] })
   const o = JSON.parse(forRepo.stdout)
   assert.deepEqual([o.settings.parallel_ceiling.value, o.inert_paths.value, o.test_credentials], [5, ['THREAD.md'], NO_CREDS])
   assert.deepEqual(resolves(home, ['--repo', repo]).test_credentials.source, 'file:repo', 'control: the schema-3 reader resolves it')
+})
+
+// ---- K15-K16: test_logins, the first schema-5 key (p37-4) --------------------------------------------------------------
+// The machine's declared test Logins: ONE line under [defaults] only, a list of 1 to 16 Login names, resolved as its own
+// top-level field (never in `settings`), built-in []. A repo table holding it is refused as machine-wide; a schema-4 file
+// holding it is refused with the raise remedy; an older reader (schema 4, patched) ignores it under a schema-5 file, so
+// that rollout asks every Login gate as before.
+
+test('K15 test_logins under [defaults] resolves as file:defaults, outside settings, with --repo or none; built-in []', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 5', '', '[defaults]', 'spend_approval_usd = 200', 'test_logins = ["dummy", "Probe-2"]   # the dummy Login', '',
+    '[repo."o/r"]', 'parallel_ceiling = 3'])
+  const out = resolves(home)
+  assert.deepEqual(Object.keys(out), OUT_KEYS)
+  assert.deepEqual(out.test_logins, { value: ['dummy', 'Probe-2'], source: 'file:defaults' })
+  assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'test_logins is never a settings key')
+  assert.deepEqual(out.schema, { file: 5, engine: 5 })
+  assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')]).test_logins.value, ['dummy', 'Probe-2'], 'machine-wide: a repo resolves it too')
+  assert.deepEqual(resolvedInProcess(home).test_logins.value, ['dummy', 'Probe-2'])
+  writeSettings(home, ['schema = 5', '[defaults]', 'parallel_ceiling = 3'])
+  assert.deepEqual(resolves(home).test_logins, NO_LOGINS, 'no line: built-in []')
+  assert.deepEqual(resolves(tmpHome(t)).test_logins, NO_LOGINS, 'no file: built-in []')
+})
+
+const LOGIN_REFUSALS = [
+  ['in a repo table (machine-wide)', ['schema = 5', '[repo."o/r"]', 'test_logins = ["dummy"]'], 3, /\[repo\."o\/r"\] test_logins is machine-wide: set it under \[defaults\]/],
+  ['in a schema-4 file (the raise remedy)', ['schema = 4', '[defaults]', 'test_logins = ["dummy"]'], 3,
+    /rollout\.test_logins is a schema-5 key but the file says schema = 4: raise the file's top-level `schema` line to 5 in the same edit/],
+  ['with no schema line (the raise remedy)', ['[defaults]', 'test_logins = ["dummy"]'], 2, /rollout\.test_logins is a schema-5 key but the file says schema = 1/],
+  ['an empty list', ['schema = 5', '[defaults]', 'test_logins = []'], 3, /\[defaults\] test_logins is empty \(it lists 1 to 16 Login names; remove the line to declare none\)/],
+  ['a duplicate ignoring case', ['schema = 5', '[defaults]', 'test_logins = ["dummy", "Dummy"]'], 3, /test_logins lists the name "Dummy" twice \(ignoring case\)/],
+  ['a bad name', ['schema = 5', '[defaults]', 'test_logins = ["the dummy"]'], 3, /test_logins holds "the dummy", which is not a Login name/],
+  ['a name starting _', ['schema = 5', '[defaults]', 'test_logins = ["_x"]'], 3, /test_logins holds "_x", which is not a Login name/],
+  ['a 41-character name', ['schema = 5', '[defaults]', `test_logins = ["${'a'.repeat(41)}"]`], 3, /which is not a Login name/],
+  ['the reserved Claude', ['schema = 5', '[defaults]', 'test_logins = ["Claude"]'], 3, /test_logins holds the reserved name "Claude" \(claude, login and logins never name a Login\)/],
+  ['the reserved login', ['schema = 5', '[defaults]', 'test_logins = ["login"]'], 3, /holds the reserved name "login"/],
+  ['a string, not a list', ['schema = 5', '[defaults]', 'test_logins = "dummy"'], 3, /\[defaults\] test_logins must be a list of 1 to 16 Login names, got a string/],
+  ['a number in the list', ['schema = 5', '[defaults]', 'test_logins = [3]'], 3, /test_logins holds a name that is not a string \(got 3\)/],
+  ['17 names', ['schema = 5', '[defaults]', `test_logins = [${Array.from({ length: 17 }, (_, i) => `"l${i}"`).join(', ')}]`], 3, /test_logins holds 17 names \(at most 16\)/],
+  ['a value spanning lines', ['schema = 5', '[defaults]', 'test_logins = [', '  "dummy",', ']'], 3, /\[defaults\] test_logins must be one line: test_logins = \["<name>", …\]/],
+  ['a near-miss typo', ['schema = 5', '[defaults]', 'test_login = ["dummy"]'], 3, /unknown key "test_login"/],
+]
+for (const [name, lines, line, reason] of LOGIN_REFUSALS) {
+  test(`K15 refused: test_logins ${name}`, (t) => {
+    const home = tmpHome(t)
+    writeSettings(home, lines)
+    refused(home, { line, reason })
+  })
+}
+
+test('K15 16 distinct names are valid', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 5', '[defaults]', `test_logins = [${Array.from({ length: 16 }, (_, i) => `"l-${i}_x"`).join(', ')}]`])
+  assert.equal(resolves(home).test_logins.value.length, 16)
+})
+
+test('K16 an older reader (schema 4, patched) ignores defaults.test_logins under a schema-5 file and resolves the rest', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 5', '', '[defaults]', 'max_iterations = 2', 'test_logins = ["dummy"]'])
+  const older = 'm.SCHEMA = 4; del m.KEY_SCHEMA[("rollout", "test_logins")]; m.DEFAULTS_ONLY = ()'
+  const r = inProcess(home, older)
+  assert.equal(r.status, 0, r.err)
+  assert.deepEqual(r.out.ignored, ['defaults.test_logins'])
+  assert.deepEqual(r.out.schema, { file: 5, engine: 4 })
+  assert.equal(r.out.settings.max_iterations.value, 2)
+  assert.deepEqual(r.out.test_logins, NO_LOGINS, 'the older reader declares no test Login: that rollout asks every Login gate')
+  assert.deepEqual(resolves(home).test_logins.source, 'file:defaults', 'control: the schema-5 reader resolves it')
 })
