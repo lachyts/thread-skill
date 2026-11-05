@@ -12,7 +12,23 @@ Verbs:
                                      note its `projects:` links.
   fill <task> [--action <line|->]    Every other writer (orient): the same targets, but `next_task:` only
                                      where the slot is blank or dead, `next_action:` only where blank.
-  read <project>...                  Each project's slot: live, blank, or dead (with the reason).
+  read <project>...                  Each project's slot: live, blank, dead (with the reason), or unparseable
+                                     (a live task whose frontmatter does not parse: mend it, never fill over it).
+                                     The first live link whose note can be read is the slot; only when every
+                                     live one is broken does it read unparseable, with the first one's why.
+  mend <task>                        Quote the plain values the task's YAML error names, so its frontmatter
+                                     parses (orient § 4, schedule § 1.5): `parses`, `unmendable:<why>` or
+                                     `mended:<key,…>`. Only a value that fails to scan on its own is quoted,
+                                     as one JSON double-quoted string, which YAML reads back as exactly the
+                                     text that was there; a value starting with one of '[{|>&*!%@` is never
+                                     touched, nor a run-on value, nor a value that scans but will not
+                                     construct (`due: 2026-02-30`). The quoting rule is the estate's
+                                     frontmatter_yaml.quote_fix (~/repos/workspaces/_shared/hooks/), ported
+                                     because the plugin cannot import from there, and pinned by the same
+                                     cases in tests/next-action.test.mjs. Its checks stand in for the
+                                     estate's PreToolUse frontmatter hook, which sees no script write: the
+                                     result must load as a mapping with the original top-level keys, and
+                                     each quoted line must read back as its old text, before the one save.
   captures [--slug S] [--thread-file P] [--for-close]
                                      Thread captures: open, `thread`-tagged tasks directly under
                                      Work/Tasks, each with whether its writer marked it
@@ -26,13 +42,20 @@ Verbs:
     EOF
 
 <task> and <project> are a name, or — when the argument contains a `/` — a path inside the vault
-(absolute, or relative to the vault; never to the working directory). A task must sit directly under
+(absolute, or relative to the vault; never to the working directory). A path with no `.md` that names no
+file resolves as a path-qualified link does (`Work/Tasks/x`, any case), so the task column of a `read`
+slot row (a link's own target) can be passed to `mend` as it is. A task must sit directly under
 Work/Tasks; a project must be a `project`-tagged note under Work/Projects, outside Archive/.
 
 Links resolve as Obsidian resolves them: an exact-case name first, else any case; an optional `.md`;
 a path-qualified `[[Work/Tasks/x]]`. A link is dead when its target is missing, lives only under an
 Archive/ folder, carries the `archived` tag, or has status done, merged or dropped. An unreadable
 target is never dead.
+
+A note's frontmatter does not parse when its load raises a YAMLError, or a ValueError or TypeError from
+a constructor (`due: 2026-02-30`); its why then carries where, `frontmatter does not parse (line N,
+<key>)`: N the file's own 1-based line, the key the top-level property it sits in. A note that never
+opens `---` (an empty one included) has no frontmatter: out of scope, never broken.
 
 Writes change one top-level key, located by the YAML parser itself: the key's lines become one
 `key: "<value>"` line with JSON escaping, or the line is added before the closing `---`. Every edit is
@@ -46,10 +69,15 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
     task      <task>     next_action  written | kept | unchanged
     project   <name>     next_task    written | kept | unchanged    <vault-relative path>
     skip      <name>     <reason>
-    slot      <name>     live | blank | dead:<reason>   <task>   <next_action or task name>
+    slot      <name>     live | blank | dead:<reason> | unparseable:<why>   <task>   <next_action or task name>
+                         (<why>: `frontmatter does not parse (line N, <key>)`, `no closed frontmatter`,
+                         `frontmatter is not a mapping` or `unreadable`)
+    mend      <task>     parses | unmendable:<why> | mended:<key,…>
     capture   <task>     <status>     <match,…>        (thread-tag, plus marked, slug and/or thread-file)
 
-Exit 0 on success (skips included). Exit 2 when the input is refused — stderr then carries one line
+Exit 0 on success (skips, and mend's `parses` and `unmendable:` rows, included). Exit 2 when the input
+is refused (mend's included: a path that names no note, a name that names no task note directly under
+Work/Tasks or names two, a task that is not directly under Work/Tasks) — stderr then carries one line
 starting `next-action: ` and nothing was written. Exit 3 when the vault or PyYAML is missing.
 """
 import argparse
@@ -67,12 +95,25 @@ PROJECTS_DIR = os.path.join("Work", "Projects")
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 # Characters YAML counts as line breaks that splitting on "\n" would not: refuse to edit around them.
 ODD_BREAKS = re.compile("\r(?!\n)|[\x85\u2028\u2029]")
+# mend's quoting rule, ported verbatim from the estate's ~/repos/workspaces/_shared/hooks/frontmatter_yaml.py (its
+# quote_fix): the plugin cannot import from the workspaces repo, so tests/next-action.test.mjs pins the same cases.
+# KEY_LINE is a top-level or nested `key: value` line; a value starting with NOT_PLAIN is never plain text, so never
+# touched; MAX_FIXES bounds the passes.
+KEY_LINE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[A-Za-z0-9_][A-Za-z0-9_ .-]*?):[ \t]+(?P<value>\S.*?)[ \t]*$")
+NOT_PLAIN = tuple("'[{|>&*!%@`")
+MAX_FIXES = 50
+# A top-level key line, its value possibly empty (`scheduled: `): the key set mend's result must keep.
+TOP_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_][A-Za-z0-9_ .-]*?):(?:[ \t]|$)")
 
 try:
     import yaml
     LOADER = getattr(yaml, "CSafeLoader", None) or yaml.SafeLoader  # libyaml when present: same result, faster
+    # What a load can raise on bad input (frontmatter_yaml.py's own tuple): a YAMLError for the syntax, and a plain
+    # ValueError or TypeError from a constructor (`due: 2026-02-30`, `x: !!int abc`), which carries no mark.
+    LOAD_ERRORS = (yaml.YAMLError, ValueError, TypeError)
 except ImportError:
     yaml = None
+    LOAD_ERRORS = (ValueError, TypeError)
 
 
 class Refused(Exception):
@@ -109,17 +150,114 @@ def ending_of(line):
     return line[len(line.rstrip("\r\n")):]
 
 
+def load_error(text):
+    """None when `text` loads as YAML, else the exception the load raised (one of LOAD_ERRORS)."""
+    try:
+        yaml.load(text, Loader=LOADER)
+    except LOAD_ERRORS as e:
+        return e
+    return None
+
+
+def mark_line(e):
+    """A YAMLError's 0-based line: its problem mark first, else its context mark, else 0."""
+    mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
+    return mark.line if mark is not None else 0
+
+
+def where_of(body, e):
+    """`line N, <key>` (N the file's own 1-based line), `line N`, or None: where a load error sits in a frontmatter
+    block, `body` its lines without their endings.
+
+    A YAMLError names the first of (mark_line, the line before) that is a KEY_LINE whose value fails on its own, the
+    order mend tries, so a flow list that never closes (its mark on the next line, or past the block's end) names its
+    own line; else the mark's line, clamped to the block. A mark-less constructor error names the first KEY_LINE whose
+    value fails on its own (frontmatter_yaml._problem's rule), else nothing. The key is the nearest top-level key at
+    or above that line, so a nested or run-on break names the property it belongs to."""
+    if not body:
+        return None
+    if isinstance(e, yaml.YAMLError):
+        at = mark_line(e)
+        at = next((i for i in (at, at - 1) if 0 <= i < len(body) and isinstance(value_error(body[i]), yaml.YAMLError)),
+                  min(at, len(body) - 1))
+    else:
+        at = next((i for i, ln in enumerate(body) if value_error(ln) is not None), None)
+        if at is None:
+            return None
+    key = next((m.group("key") for m in (TOP_KEY.match(body[i]) for i in range(at, -1, -1)) if m), None)
+    return "line %d, %s" % (at + 2, key) if key else "line %d" % (at + 2)
+
+
+def value_error(line):
+    """The error a KEY_LINE's value raises on its own (`k: <value>`), or None: no KEY_LINE, or a value that loads."""
+    m = KEY_LINE.match(line)
+    return load_error("k: " + m.group("value")) if m else None
+
+
+def quoted(line):
+    """The line with its value as a JSON double-quoted string, or None (frontmatter_yaml._quoted, ported).
+
+    Only a value that fails to scan on its own is quoted: one that loads (`priority: 3` stays a number), or that scans
+    but will not construct (`due: 2026-02-30`), is not what quoting mends. A value that starts and ends with `"` around
+    bare inner quotes is quoted whole, outer pair included: whether that pair is delimiters (`"A "B" C"`) or the text's
+    own (`"A" - "B"`) cannot be told from the line, and keeping it loses nothing. Escapes mixed with bare quotes, or a
+    value starting with NOT_PLAIN, are left alone."""
+    m = KEY_LINE.match(line)
+    if not m:
+        return None
+    value = m.group("value")
+    if not isinstance(load_error("k: " + value), yaml.YAMLError):
+        return None
+    if value.startswith('"'):
+        if not (value.endswith('"') and len(value) >= 2):
+            return None
+        inner = value[1:-1]
+        if '"' not in inner.replace('\\"', ""):
+            return None  # a well-formed quoted value is not what broke
+        if "\\" in inner:
+            return None  # escapes mixed with bare quotes: too ambiguous to mend
+    elif value.startswith(NOT_PLAIN):
+        return None
+    return "%s%s: %s" % (m.group("indent"), m.group("key"), json.dumps(value, ensure_ascii=False))
+
+
+def continues(body, i):
+    """Whether line i's value runs on to the next line (a multi-line plain scalar): frontmatter_yaml._continues."""
+    if i + 1 >= len(body):
+        return False
+    here = len(body[i]) - len(body[i].lstrip(" \t"))
+    nxt = body[i + 1]
+    if not nxt.strip():
+        return False
+    there = len(nxt) - len(nxt.lstrip(" \t"))
+    return there > here and not nxt.lstrip().startswith(("- ", "#")) and not KEY_LINE.match(nxt)
+
+
 class Note:
     """A note's text, its lines (endings kept) and its frontmatter parsed by PyYAML.
 
     `fm` is the parsed mapping, or None — `error` then says why (no closed frontmatter, does not
-    parse, not a mapping, unreadable)."""
+    parse, not a mapping, unreadable), a bare token its readers match on. A load error also sets
+    `where` (`line N, <key>`, or None when nothing can be placed), and `why` is the error with it."""
 
     def __init__(self, path, text):
         self.path, self.text = path, text
         self.lines = split_lines(text)
         self.span = find_span(self.lines)
+        self.where = None
         self.fm, self.error = self._parse()
+
+    @property
+    def why(self):
+        """The error, with ` (<where>)` when the load error could be placed."""
+        return "%s (%s)" % (self.error, self.where) if self.error and self.where else self.error
+
+    @property
+    def broken(self):
+        """Present but unreadable frontmatter: the one copy of the rule. A note that never opens `---` (an empty one
+        included) has no frontmatter, so it is out of scope, never broken; one that opens and never closes is."""
+        return self.fm is None and (self.error != "no closed frontmatter" or
+                                    (bool(self.lines) and self.lines[0].rstrip() == "---"))
 
     @classmethod
     def load(cls, path):
@@ -139,7 +277,8 @@ class Note:
             return None, "no closed frontmatter"
         try:
             fm = yaml.load(self.body(), Loader=LOADER)
-        except yaml.YAMLError:
+        except LOAD_ERRORS as e:
+            self.where = where_of([ln.rstrip("\r\n") for ln in self.lines[self.span[0]:self.span[1]]], e)
             return None, "frontmatter does not parse"
         if fm is None:
             return {}, None
@@ -294,16 +433,22 @@ class Vault:
         return None, reasons[0]
 
     def path_arg(self, arg):
-        """The vault-relative path an argument containing a `/` names, or None for a name."""
+        """The vault-relative path an argument containing a `/` names, or None for a name. A path with no `.md` that
+        names no file resolves as a path-qualified wikilink does (`Work/Tasks/x`, any case), so the task column of a
+        `read` slot row (a link's own target) can be passed back as it is."""
         if "/" not in arg and os.sep not in arg:
             return None
         raw = os.path.expanduser(arg)
         full = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(self.root, raw))
         if os.path.commonpath([full, self.root]) != self.root:
             raise Refused("%s is outside the vault (%s)" % (arg, self.root))
-        if not os.path.isfile(full):
+        rel = os.path.relpath(full, self.root)
+        if os.path.isfile(full):
+            return rel
+        linked = None if arg.lower().endswith(".md") else self.index()[1].get(rel.replace(os.sep, "/").lower())
+        if linked is None:
             raise Refused("no note at %s" % arg)
-        return os.path.relpath(full, self.root)
+        return linked
 
     def resolve_task(self, arg):
         rel = self.path_arg(arg)
@@ -433,10 +578,110 @@ def read_slots(vault, args):
             reason = "; ".join("%s %s" % (t, why) for t, _, why in copies)
             rows.append({"kind": "slot", "name": name, "result": "dead:" + reason, "task": links[0], "next_action": None})
             continue
-        target, trel = live[0]
-        line = text_of(vault.note(trel).get("next_action"))
+        # The first live link whose note can be read is the slot. Only when every live one is broken (Note.broken) does
+        # it read `unparseable:` with the first one's why, never `live` with its next_action lost.
+        readable = [(t, r) for t, r in live if not vault.note(r).broken]
+        if not readable:
+            target, trel = live[0]
+            rows.append({"kind": "slot", "name": name, "result": "unparseable:" + vault.note(trel).why, "task": target,
+                         "next_action": target})
+            continue
+        target, trel = readable[0]
+        tnote = vault.note(trel)
+        line = text_of(tnote.get("next_action"))
         rows.append({"kind": "slot", "name": name, "result": "live", "task": target, "next_action": line or target})
     return rows
+
+
+def mend(vault, task_arg):
+    """Quote the plain values a task note's YAML error names, so its frontmatter parses: one `mend` row.
+
+    `parses` when the note is not broken (no frontmatter is not broken), and nothing is written; `unmendable:<why>`
+    when quoting cannot mend it, and nothing is written; `mended:<key,...>` when it did (each key once, in line order),
+    the note saved in place once. Only a note whose frontmatter does not parse is tried, one with no line break but
+    "\n" (a CRLF ending is fine), and only a YAMLError: a value that scans but will not construct (`due: 2026-02-30`)
+    is no quoting fault. Each pass takes the error's line, then the line before (a run-on value's line is never
+    touched), and quotes the first one `quoted` accepts; up to MAX_FIXES passes, re-loading after each. The result is
+    checked whole before the save, standing in for the estate's PreToolUse frontmatter hook, which sees no script
+    write: it loads as a mapping, its top-level keys are the original block's (TOP_KEY, empty values included), and
+    each quoted line composes back to a str scalar equal to its original value text."""
+    rel = vault.resolve_task(task_arg)
+    note = vault.note(rel)
+    name = os.path.basename(rel)[:-3]
+
+    def row(result):
+        return [{"kind": "mend", "name": name, "result": result}]
+    if not note.broken:
+        return row("parses")
+    if note.error != "frontmatter does not parse":
+        return row("unmendable:" + note.why)
+    lines = note.lines[note.span[0]:note.span[1]]
+    if any(ODD_BREAKS.search(ln) for ln in lines):  # a lone CR, NEL, U+2028, U+2029; a CRLF ending is fine
+        return row("unmendable:frontmatter has line breaks other than \\n")
+    body = [ln.rstrip("\r\n") for ln in lines]
+    original = list(body)
+
+    def unmendable(e):
+        where = where_of(body, e)
+        return row("unmendable:frontmatter does not parse" + (" (%s)" % where if where else ""))
+    e = load_error("\n".join(body))
+    if not isinstance(e, yaml.YAMLError):
+        return unmendable(e)
+    tried, mended = set(), []
+    for _ in range(MAX_FIXES):
+        at = mark_line(e)
+        for i in (at, at - 1):
+            if 0 <= i < len(body) and i not in tried and not continues(body, i):
+                fixed = quoted(body[i])
+                if fixed is not None and fixed != body[i]:
+                    tried.add(i)
+                    mended.append(i)
+                    body[i] = fixed
+                    break
+        else:
+            return unmendable(e)
+        e = load_error("\n".join(body))
+        if e is None:
+            break
+        if not isinstance(e, yaml.YAMLError):
+            return unmendable(e)
+    else:
+        return unmendable(e)
+    text = "".join(note.lines[:note.span[0]] + [b + ending_of(ln) for b, ln in zip(body, lines)] + note.lines[note.span[1]:])
+    if not mended_whole(Note(note.path, text), original, mended):
+        return row("unmendable:mending would change other frontmatter")
+    note.save(text)
+    keys = dict.fromkeys(KEY_LINE.match(original[i]).group("key") for i in sorted(mended))  # a duplicate key once
+    return row("mended:" + ",".join(keys))
+
+
+def mended_whole(check, original, mended):
+    """Whether mend's result changes nothing but the quoting: it loads as a mapping whose top-level keys are the
+    original block's, and each mended line's (key, value) pair composes to a str scalar equal to its old value text."""
+    if not isinstance(check.fm, dict):
+        return False
+    keys = {m.group("key") for m in (TOP_KEY.match(ln) for ln in original) if m}
+    if set(check.fm) != keys:
+        return False
+    pairs, todo, seen = {}, [yaml.compose(check.body(), Loader=LOADER)], set()
+    while todo:
+        node = todo.pop()
+        if id(node) in seen:  # an alias shares its anchor's node, and a recursive one would loop
+            continue
+        seen.add(id(node))
+        if isinstance(node, yaml.MappingNode):
+            for k, v in node.value:
+                pairs.setdefault(k.start_mark.line, (k, v))
+                todo += [k, v]
+        elif isinstance(node, yaml.SequenceNode):
+            todo += node.value
+    for i in mended:
+        m = KEY_LINE.match(original[i])
+        k, v = pairs.get(i, (None, None))
+        if not (isinstance(k, yaml.ScalarNode) and k.value == m.group("key") and isinstance(v, yaml.ScalarNode) and
+                v.tag == "tag:yaml.org,2002:str" and v.value == m.group("value")):
+            return False
+    return True
 
 
 def captures(vault, slug, thread_file, for_close):
@@ -476,7 +721,7 @@ def emit(rows, as_json):
             cols = [r["kind"], r["name"], r["result"], r["task"], r["next_action"]]
         elif r["kind"] == "capture":
             cols = [r["kind"], r["name"], r["result"], r["match"]]
-        elif r["kind"] == "skip":
+        elif r["kind"] in ("skip", "mend"):
             cols = [r["kind"], r["name"], r["result"]]
         else:
             cols = [r["kind"], r["name"], r["field"], r["result"]] + ([r["path"]] if "path" in r else [])
@@ -496,16 +741,18 @@ def main(argv):
     f.add_argument("--action")
     r = sub.add_parser("read")
     r.add_argument("project", nargs="+")
+    m = sub.add_parser("mend")
+    m.add_argument("task")
     c = sub.add_parser("captures")
     c.add_argument("--slug")
     c.add_argument("--thread-file")
     c.add_argument("--for-close", action="store_true")
-    for sp in (s, f, r, c):  # accept the global flags after the verb too
+    for sp in (s, f, r, m, c):  # accept the global flags after the verb too
         sp.add_argument("--vault", default=argparse.SUPPRESS)
         sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: set-down | fill | read | captures")
+        fail(2, "a verb is required: set-down | fill | read | mend | captures")
     if yaml is None:
         fail(3, "PyYAML is required: python3 -m pip install pyyaml")
 
@@ -517,6 +764,8 @@ def main(argv):
             rows = write(vault, args.task, args.action, overwrite=False)
         elif args.verb == "read":
             rows = read_slots(vault, args.project)
+        elif args.verb == "mend":
+            rows = mend(vault, args.task)
         else:
             rows = captures(vault, args.slug, args.thread_file, args.for_close)
     except Refused as e:

@@ -682,7 +682,7 @@ def plain_item(item):
     try:
         if NA.yaml.load("- " + item, Loader=NA.LOADER) == [item]:
             return item
-    except NA.yaml.YAMLError:
+    except NA.LOAD_ERRORS:  # a YAMLError, or a constructor's ValueError or TypeError (`2026-02-30`): quote it
         pass
     return json.dumps(item, ensure_ascii=False)
 

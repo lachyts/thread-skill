@@ -134,9 +134,13 @@ and Drift and the slots for each swept project.
   note's `next_task:` and that task's `next_action:` (its title when the
   line is blank), read with
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py read <project>…`
-  — one `slot <project> live | blank | dead:<reason> <task> <line>` row
+  — one `slot <project> live | blank | dead:<reason> | unparseable:<why> <task> <line>` row
   each. A **dead link** (CONTEXT.md **Next task**) reads as a blank slot;
-  the script decides which links are dead, never judge it by eye. The slot
+  the script decides which links are dead, never judge it by eye. An
+  `unparseable:<why>` slot is a live task nobody can read (its frontmatter
+  does not parse, usually a free-text value holding an unquoted `: `): never
+  fill over it. § 3 names it with its why, and § 4 mends it with the drift
+  fixes. The slot
   is the project's standing answer; the rest of the sweep is weighed
   against it.
 - **Vault**: the area note + every sub-project note (a note whose
@@ -213,7 +217,8 @@ A situational report written for Lachy catching up, not a log:
 
 - **Headline** (1–2 sentences): the state of the project as a whole.
 - **Balls in the air**: per-sub-project one-liners — the slot first
-  (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
+  (`next: <next_action> ([[<task>]])`, `unparseable: <why> ([[<task>]])`
+  for an `unparseable:<why>` slot, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight / stalled /
   dormant. An open decision task (§ 2 Decisions waiting) is listed first, as
   blocked on Lachy: its rule proposals and held trades wait for his yes or no. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
@@ -298,7 +303,8 @@ card (§ 3.5), and whose grill he can stop at any question. The opt-outs come wi
 - **Steer only** (`--steer`, or "steer only" in the arguments) — no reshaping: route the open work
   as it stands (§ 6), e.g. to schedule a serial rollout.
 - **Look only** (`--look`, or "look only" in the arguments) — the audit was the deliverable; stop
-  after § 3, with no writes of any kind: no drift fixes, no learned directory, no slot write.
+  after § 3, with no writes of any kind: no drift fixes, no slot mend, no learned directory, no
+  slot write.
 - **An empty shape** (§ 3 Shape: nothing loose, unclear or unphased, and no pull-ins) — nothing to
   reshuffle, so go straight to § 6's steering.
 
@@ -316,6 +322,21 @@ possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2
 run, report its Drift line and apply from the new file. Ambiguous items are listed for Lachy and
 never applied. A scoped target applies no drift fixes: it reshapes one note, so the § 3 Drift line
 is report-only for it. It goes straight to its reshuffle (`--look` still stops it after § 3).
+
+**Unparseable slots.** Mended under the drift fixes' authority: a default run and Steer only, never
+`--look`, a dry run or a scoped target. For each § 2 slot whose why starts `frontmatter does not parse`
+(it names the line and key, `(line 7, next_action)`), run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <task>` once, `<task>` the
+slot row's task column as it is (a path-form link's `Work/Tasks/x` included), never a hand Edit: it
+quotes the plain value the YAML error names (a free-text value holding `: `, or a bare `"` inside
+quotes) and re-parses the note before its one save. § 3's report was shown before this step, so each
+result is reported as the mend runs, with the drift fixes' report. A `mended:<keys>` row is a call
+made for him (Owner *technical*): one `Mended for you: [[<task>]] <keys> (technical: <the slot's
+why>)` line there, never in the note's `## Decided for you` section; then the slot is read once
+more. That is the only attempt. These are reported there too, for Lachy, each with its slot's why:
+an `unmendable:` row, as printed; an exit 2, with its one `next-action:` stderr line quoted as
+printed, never paraphrased (nothing was written); and a slot that still reads `unparseable`. A slot
+whose why is anything else is left as § 3 named it.
 
 **The learned directory.** A default run and Steer only also run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`
@@ -522,7 +543,8 @@ given). It resolves, asks, reads and writes nothing.
   the slot write included — in Look only or dry runs.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
-- **Don't write before the reshuffle's gate**, drift fixes, the learned `repos:` entry (§ 4) and the
+- **Don't write before the reshuffle's gate**, drift fixes, the unparseable-slot mend, the learned
+  `repos:` entry (§ 4) and the
   Priorities card with the Notes that correct it (§ 3.5) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
