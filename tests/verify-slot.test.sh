@@ -22,7 +22,8 @@
 #   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free
 #   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run
 #   VR9 a TERM while a task tree's `run` with no --slots resolves its slot count (p34-1): 76, no line, the slot free
-#   VR9b the same TERM landed between the resolver child's fork and its kill-and-reap (p37-6): the child still reaped.
+#   VR9b the same TERM landed between the resolver child's fork and its kill-and-reap (p37-6): the child still reaped
+#   VR9c a second TERM run by the kill-and-reap's own block (p37-6): the child still reaped.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -583,7 +584,7 @@ PY2
 (cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" THREAD_TOML_PYTHONS="$D/slowpy" SLOWPID="$D/vr9.slow" \
   exec python3 "$D/vr9.py" "$VS" "$D/vr9.recorded" "$D/vr9.ran") > "$D/vr9.out" 2> "$D/vr9.err" &
 vp=$!; pids+=($vp)
-within 30 nonempty "$D/vr9.slow" && s=started || s="slowpy never started in 30 s"
+within 120 nonempty "$D/vr9.slow" && s=started || s="slowpy never started in 120 s"
 ok "$s" started "VR9: a task tree's run with no --slots, no tomllib: its resolver candidate (slowpy) started"
 kill -TERM "$vp"; wait "$vp"; rc=$?
 ok "$rc" 76 "VR9: a TERM while it resolves → 76 (no verdict)"
@@ -592,15 +593,19 @@ verify-slot: exit 76 (run $vp)" "VR9: … its no-verdict line, then its exit lin
 ok "$([ -e "$D/vr9.recorded" ] && echo recorded || echo plain)|$([ -e "$D/vr9.ran" ] && echo ran || echo never)" "recorded|never" \
   "VR9: … on the Run-record path, the suite never ran"
 ok "$(recq '[d["kind"] for d in L]')" '[]' "VR9: … and no line in the Run record"
-within 30 gone "$(cat "$D/vr9.slow")" && s=gone || s="slowpy alive after 30 s"
+sp=$(cat "$D/vr9.slow" 2>/dev/null)
+within 120 gone "$sp" && s=gone || s="slowpy alive after 120 s"
 ok "$s" gone "VR9: … the resolver child is gone"
+[ "$s" != gone ] && [ -n "$sp" ] && kill -KILL "$sp" 2>/dev/null   # only a leaked one, still this suite's own: by the pid it wrote
 ok "$(slot_state 0 1)" free "VR9: … the slot is free"
 
 # VR9b (p37-6, the VR9 Flake): the same TERM, landed in the window VR9 hits only under load: after the resolver child is
 # forked and before the call that kills and reaps it on a stop is ready (subprocess.run's own try starts after Popen
 # returns). The harness sends it from Popen's construction, once slowpy has written its pid, so the window is hit every
 # time: 76, the resolver child killed and reaped all the same, the slot free.
-: > "$VEV/r1.jsonl"
+# VR9c (p37-6): on top of VR9b's stop, a second one that lands before the kill-and-reap's own block, so that block's
+# call runs it and raises out of it (pthread_sigmask's own signal check). The harness runs it from that call, after the
+# real block, as the check does: 76, the resolver child killed and reaped all the same.
 cat > "$D/vr9b.py" <<'PY2'
 import importlib.util, os, signal, subprocess, sys, time
 class NoToml:
@@ -620,25 +625,43 @@ class StoppedInConstruction(Real):
         super().__init__(args, *a, **k)
         if args[0] != os.environ["THREAD_TOML_PYTHONS"]:
             return   # only the resolver child's construction (git and the rest are left alone)
-        pidfile, end = os.environ["SLOWPID"], time.monotonic() + 30
+        pidfile, end = os.environ["SLOWPID"], time.monotonic() + 120
         while time.monotonic() < end and not (os.path.exists(pidfile) and os.path.getsize(pidfile)):
             time.sleep(0.05)
         os.kill(os.getpid(), signal.SIGTERM)
         time.sleep(0.5)
 subprocess.Popen = StoppedInConstruction
+if os.environ.get("SECOND_STOP"):
+    real_mask, parent = signal.pthread_sigmask, os.getpid()
+    def second_stop(how, mask):   # the kill-and-reap's own block, under the first stop: the second one runs from it
+        old = real_mask(how, mask)
+        if (how == signal.SIG_BLOCK and os.getpid() == parent and sys._getframe(1).f_code.co_name == "_run_owned"
+                and isinstance(sys.exc_info()[1], vs._Signalled) and not os.path.exists(os.environ["SECOND_STOP"])):
+            open(os.environ["SECOND_STOP"], "w").close()
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        return old
+    signal.pthread_sigmask = second_stop
 sys.exit(vs.main(["run", "--", "sh", "-c", "touch " + sys.argv[2]]))
 PY2
-(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" THREAD_TOML_PYTHONS="$D/slowpy" SLOWPID="$D/vr9b.slow" \
-  exec python3 "$D/vr9b.py" "$VS" "$D/vr9b.ran") > "$D/vr9b.out" 2> "$D/vr9b.err"; rc=$?
-ok "$rc" 76 "VR9b: a TERM between the resolver child's fork and its kill-and-reap → 76 (no verdict)"
-has "$(cat "$D/vr9b.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "VR9b: … with its no-verdict line"
-ok "$([ -e "$D/vr9b.ran" ] && echo ran || echo never)|$(recq '[d["kind"] for d in L]')" "never|[]" "VR9b: … the suite never ran, no line in the Run record"
-within 30 nonempty "$D/vr9b.slow" || echo "FAIL - VR9b: slowpy never started"
-sp=$(cat "$D/vr9b.slow" 2>/dev/null)
-within 30 gone "$sp" && s=gone || s="slowpy alive after 30 s"
-ok "$s" gone "VR9b: … the resolver child is gone all the same (killed and reaped, never leaked)"
-[ -n "$sp" ] && kill -KILL "$sp" 2>/dev/null   # a leaked one is this suite's own: stopped by the pid it wrote
-ok "$(slot_state 0 1)" free "VR9b: … the slot is free"
+vr9b() {  # vr9b <name> <label> <what> [second-stop marker]: VR9b's arm, or VR9c's with the marker
+  local n=$1 l=$2 sp
+  : > "$VEV/r1.jsonl"
+  (cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" THREAD_TOML_PYTHONS="$D/slowpy" SLOWPID="$D/$n.slow" \
+    SECOND_STOP="${4:-}" exec python3 "$D/vr9b.py" "$VS" "$D/$n.ran") > "$D/$n.out" 2> "$D/$n.err"; rc=$?
+  ok "$rc" 76 "$l: $3 → 76 (no verdict)"
+  has "$(cat "$D/$n.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "$l: … with its no-verdict line"
+  ok "$([ -e "$D/$n.ran" ] && echo ran || echo never)|$(recq '[d["kind"] for d in L]')" "never|[]" "$l: … the suite never ran, no line in the Run record"
+  within 120 nonempty "$D/$n.slow" && s=started || s="slowpy never started in 120 s"
+  ok "$s" started "$l: … its resolver candidate (slowpy) started"
+  sp=$(cat "$D/$n.slow" 2>/dev/null)
+  within 120 gone "$sp" && s=gone || s="slowpy alive after 120 s"
+  ok "$s" gone "$l: … the resolver child is gone all the same (killed and reaped, never leaked)"
+  [ "$s" != gone ] && [ -n "$sp" ] && kill -KILL "$sp" 2>/dev/null   # only a leaked one, still this suite's own: by the pid it wrote
+  ok "$(slot_state 0 1)" free "$l: … the slot is free"
+}
+vr9b vr9b VR9b "a TERM between the resolver child's fork and its kill-and-reap"
+vr9b vr9c VR9c "a second TERM run by the kill-and-reap's own block" "$D/vr9c.second"
+ok "$([ -e "$D/vr9c.second" ] && echo landed || echo never)" landed "VR9c: … the second stop landed from that block's call"
 rm -f "$VH/.config/thread/rollouts.toml"
 
 # ======== V-capacity: a fresh capacity.json lowers the pool to min(N, C), never raises it (p36-7, contract 10) =========

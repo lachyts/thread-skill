@@ -421,14 +421,18 @@ def _run_owned(argv, timeout):
         signal.pthread_sigmask(signal.SIG_SETMASK, mask)   # a stop held over the construction raises here, in the try
         out, err = p.communicate(timeout=timeout)
     except BaseException:
-        signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)   # a second stop cannot cut the kill and its reap
         try:
-            p.kill()
-            p.wait()   # never communicate(): a grandchild holding the pipes open would hold the stop with it
-            p.stdout.close()
-            p.stderr.close()
+            # A stop after the block cannot cut the kill and its reap. A second one that lands before it is run by
+            # this call's own signal check, the mask already set, and raises out of it: the finally kills all the same.
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
         finally:
-            signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+            try:
+                p.kill()
+                p.wait()   # never communicate(): a grandchild holding the pipes open would hold the stop with it
+                p.stdout.close()
+                p.stderr.close()
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
         raise
     return subprocess.CompletedProcess(argv, p.returncode, out, err)
 
