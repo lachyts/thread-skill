@@ -213,9 +213,150 @@ test('read: a live slot task whose frontmatter does not parse is unparseable, ne
     [`${T}/broken.md`]: task('tags: [task]\nstatus: open\nnext_action: Build A2 from the board: the name first'),
     [`${P}/Broke.md`]: task('tags: [project]\nnext_task: "[[broken]]"'),
   })
+  // The why names the line (the file's own, 1-based) and its top-level key, so a reader can go straight to it.
   assert.deepEqual(ok(dir, ['read', 'Broke']).map((r) => [r[1], r[2], r[3], r[4]]), [
-    ['Broke', 'unparseable:frontmatter does not parse', 'broken', 'broken'],
+    ['Broke', 'unparseable:frontmatter does not parse (line 4, next_action)', 'broken', 'broken'],
   ])
+})
+
+test('read: every way a slot task can be unreadable is named with its cause and place; a note with none reads live', () => {
+  fs.mkdirSync(path.join(scratch, 'gone'), { recursive: true })
+  const dir = vault({
+    // A bare quote inside quotes: the problem mark (line 4), never the context mark (the mapping's start, line 2).
+    [`${T}/quote.md`]: task('tags: [task]\nstatus: open\ntitle: "A "B" C"'),
+    // A value that scans but will not construct: a ValueError with no mark, never a traceback.
+    [`${T}/date.md`]: task('tags: [task]\nstatus: open\ndue: 2026-02-30'),
+    // A ConstructorError carries its mark.
+    [`${T}/tag.md`]: task('tags: [task]\nstatus: open\nx: !foo bar'),
+    // A run-on value: the mark sits on the continuation line, named by the top-level key it belongs to.
+    [`${T}/runon.md`]: task('tags: [task]\nstatus: open\nnext_action: Build A2 from\n  the board: the name first'),
+    // A flow list that never closes: named on its own line, though the mark falls past the end of the block.
+    [`${T}/flow.md`]: task('tags: [task'),
+    [`${T}/unclosed.md`]: '---\ntags: [task]\nstatus: open\n\n# Never closed\n',
+    [`${T}/plain.md`]: '# Plain\n\nJust a markdown note.\n',
+    [`${T}/empty.md`]: '',
+    [`${T}/broken.md`]: task('tags: [task]\nstatus: open\nnext_action: a: b'),
+    [`${T}/good.md`]: task('tags: [task]\nstatus: open\nnext_action: Ring the council'),
+    [`${P}/Quote.md`]: task('tags: [project]\nnext_task: "[[quote]]"'),
+    [`${P}/Date.md`]: task('tags: [project]\nnext_task: "[[date]]"'),
+    [`${P}/Tag.md`]: task('tags: [project]\nnext_task: "[[tag]]"'),
+    [`${P}/Runon.md`]: task('tags: [project]\nnext_task: "[[runon]]"'),
+    [`${P}/Flow.md`]: task('tags: [project]\nnext_task: "[[flow]]"'),
+    [`${P}/Unclosed.md`]: task('tags: [project]\nnext_task: "[[unclosed]]"'),
+    [`${P}/Gone.md`]: task('tags: [project]\nnext_task: "[[dangling]]"'),
+    [`${P}/Plain.md`]: task('tags: [project]\nnext_task: "[[plain]]"'),
+    [`${P}/Empty.md`]: task('tags: [project]\nnext_task: "[[empty]]"'),
+    [`${P}/Pair.md`]: task('tags: [project]\nnext_task: ["[[broken]]", "[[good]]"]'),
+    [`${P}/Both.md`]: task('tags: [project]\nnext_task: ["[[broken]]", "[[quote]]"]'),
+  })
+  fs.symlinkSync(path.join(scratch, 'gone', 'nothing.md'), path.join(dir, T, 'dangling.md'))  // a moved file
+  const names = ['Quote', 'Date', 'Tag', 'Runon', 'Flow', 'Unclosed', 'Gone', 'Plain', 'Empty', 'Pair', 'Both']
+  assert.deepEqual(ok(dir, ['read', ...names]).map((r) => r.slice(1, 5)), [
+    ['Quote', 'unparseable:frontmatter does not parse (line 4, title)', 'quote', 'quote'],
+    ['Date', 'unparseable:frontmatter does not parse (line 4, due)', 'date', 'date'],
+    ['Tag', 'unparseable:frontmatter does not parse (line 4, x)', 'tag', 'tag'],
+    ['Runon', 'unparseable:frontmatter does not parse (line 5, next_action)', 'runon', 'runon'],
+    ['Flow', 'unparseable:frontmatter does not parse (line 2, tags)', 'flow', 'flow'],
+    ['Unclosed', 'unparseable:no closed frontmatter', 'unclosed', 'unclosed'],
+    ['Gone', 'unparseable:unreadable', 'dangling', 'dangling'],
+    // No frontmatter at all is out of scope, never broken (an empty Untitled.md included): it reads live.
+    ['Plain', 'live', 'plain', 'plain'],
+    ['Empty', 'live', 'empty', 'empty'],
+    // A broken link first, a readable one after: the readable one is the slot; all broken, the first one's why.
+    ['Pair', 'live', 'good', 'Ring the council'],
+    ['Both', 'unparseable:frontmatter does not parse (line 4, next_action)', 'broken', 'broken'],
+  ])
+})
+
+// ---- mend: quote the plain value a frontmatter's YAML error names, re-parsed before anything is saved ------------
+test('mend quotes a free-text value holding `: `, and the note differs on that one line only', () => {
+  // chorus-p95-2's shape (2026-11-04): block lists, empty values, and one unquoted `: ` in next_action.
+  const fm = 'tags:\n  - task\n  - ai\nstatus: open\nprojects:\n  - "[[Chorus]]"\nscheduled: \ndue: \n' +
+    'next_action: Build A2 from the mockup board: the name first\ncaptured: 2026-11-04'
+  const before = task(fm)
+  const dir = vault({ [`${T}/p95.md`]: before })
+  assert.deepEqual(ok(dir, ['mend', 'p95']), [['mend', 'p95', 'mended:next_action']])
+  const after = read(dir, `${T}/p95.md`)
+  const a = before.split('\n')
+  const b = after.split('\n')
+  assert.equal(a.length, b.length)
+  assert.deepEqual(a.map((l, i) => [l, b[i]]).filter(([x, y]) => x !== y),
+    [['next_action: Build A2 from the mockup board: the name first', 'next_action: "Build A2 from the mockup board: the name first"']])
+  // It reads back as exactly the text that was written, and a second mend finds nothing to do.
+  const p = vault({ [`${T}/p95.md`]: after, [`${P}/C.md`]: task('tags: [project]\nnext_task: "[[p95]]"') })
+  assert.deepEqual(ok(p, ['read', 'C']), [['slot', 'C', 'live', 'p95', 'Build A2 from the mockup board: the name first']])
+  assert.deepEqual(ok(dir, ['mend', 'p95']), [['mend', 'p95', 'parses']])
+  assert.equal(read(dir, `${T}/p95.md`), after)
+})
+
+test('mend quotes a bare-quoted value whole, and mends two broken lines in one call', () => {
+  const dir = vault({
+    [`${T}/quote.md`]: task('tags: [task]\nstatus: open\ntitle: "A "B" C"'),
+    [`${T}/two.md`]: task('tags: [task]\nstatus: open\ntitle: Plan: the first\nnext_action: Ring: the council'),
+  })
+  assert.deepEqual(ok(dir, ['mend', 'quote']), [['mend', 'quote', 'mended:title']])
+  assert.equal(read(dir, `${T}/quote.md`), task('tags: [task]\nstatus: open\ntitle: "\\"A \\"B\\" C\\""'))
+  assert.deepEqual(ok(dir, ['mend', 'two']), [['mend', 'two', 'mended:title,next_action']])
+  assert.equal(read(dir, `${T}/two.md`),
+    task('tags: [task]\nstatus: open\ntitle: "Plan: the first"\nnext_action: "Ring: the council"'))
+})
+
+test('mend reports a note that parses, or has no frontmatter, and writes nothing', () => {
+  const dir = vault({
+    [`${T}/fine.md`]: task('tags: [task]\nstatus: open\nnext_action: Ring the council'),
+    [`${T}/plain.md`]: '# Plain\n',
+    [`${T}/empty.md`]: '',
+  })
+  const before = snapshot(dir)
+  assert.deepEqual(ok(dir, ['mend', 'fine']), [['mend', 'fine', 'parses']])
+  assert.deepEqual(ok(dir, ['mend', 'plain']), [['mend', 'plain', 'parses']])
+  assert.deepEqual(ok(dir, ['mend', 'empty']), [['mend', 'empty', 'parses']])
+  assert.deepEqual(snapshot(dir), before)
+  assert.equal(fs.statSync(path.join(dir, T, 'empty.md')).size, 0, 'the empty note stays 0 bytes')
+})
+
+test('mend refuses anything quoting cannot mend, and leaves its bytes alone', () => {
+  const cases = {
+    // A flow list that never closes: quoting `[task` would change what tags holds.
+    flow: [task('tags: [task\nstatus: open'), /^unmendable:frontmatter does not parse \(line 2, tags\)$/],
+    // A value that scans but will not construct (step 4): quoting would change a date into text.
+    date: [task('tags: [task]\nstatus: open\ndue: 2026-02-30'), /^unmendable:frontmatter does not parse \(line 4, due\)$/],
+    // A ConstructorError: its value starts with `!`, which quoting never touches (step 5, NOT_PLAIN).
+    tag: [task('tags: [task]\nstatus: open\nx: !foo bar'), /^unmendable:frontmatter does not parse \(line 4, x\)$/],
+    // A lone CR is a YAML line break a "\n" split does not see (the cell escapes the why's backslash).
+    cr: [task('tags: [task]\nstatus: open\nnext_action: a: b\rc: d'), /^unmendable:frontmatter has line breaks other than \\\\n$/],
+    // A run-on value is never quoted: its continuation would be lost.
+    runon: [task('tags: [task]\nstatus: open\nnext_action: Build A2 from\n  the board: the name first'),
+      /^unmendable:frontmatter does not parse \(line 5, next_action\)$/],
+    // The first quote mends next_action; a constructor error is left behind it, so nothing is saved.
+    after: [task('tags: [task]\nstatus: open\nnext_action: a: b\ndue: 2026-02-30'),
+      /^unmendable:frontmatter does not parse \(line 5, due\)$/],
+    unclosed: ['---\ntags: [task]\nstatus: open\n', /^unmendable:no closed frontmatter$/],
+    list: [task('- task\n- open'), /^unmendable:frontmatter is not a mapping$/],
+  }
+  const dir = vault(Object.fromEntries(Object.entries(cases).map(([k, [text]]) => [`${T}/${k}.md`, text])))
+  const before = snapshot(dir)
+  for (const [k, [, want]] of Object.entries(cases)) {
+    const rows = ok(dir, ['mend', k])
+    assert.equal(rows.length, 1, k)
+    assert.deepEqual(rows[0].slice(0, 2), ['mend', k], k)
+    assert.match(rows[0][2], want, k)
+  }
+  assert.deepEqual(snapshot(dir), before, 'an unmendable note is never written')
+})
+
+test('mend keeps CRLF endings, and finds only a task directly under Work/Tasks', () => {
+  const crlf = task('tags: [task]\nstatus: open\nnext_action: Ring: the council').replace(/\n/g, '\r\n')
+  const dir = vault({
+    [`${T}/crlf.md`]: crlf,
+    [`${T}/Archive/old.md`]: task('tags: [task]\nstatus: open\nnext_action: a: b'),
+    ['Notes/loose.md']: task('tags: [task]\nstatus: open\nnext_action: a: b'),
+  })
+  assert.deepEqual(ok(dir, ['mend', 'crlf']), [['mend', 'crlf', 'mended:next_action']])
+  assert.equal(read(dir, `${T}/crlf.md`), crlf.replace('next_action: Ring: the council', 'next_action: "Ring: the council"'))
+  refused(dir, ['mend', 'old'], /no task note 'old' directly under Work\/Tasks/)
+  refused(dir, ['mend', `${T}/Archive/old.md`], /is not directly under Work\/Tasks/)
+  refused(dir, ['mend', 'Notes/loose.md'], /is not directly under Work\/Tasks/)
 })
 
 test('captures: open, thread-tagged tasks in either tag form, with their slug and thread-file matches', () => {
