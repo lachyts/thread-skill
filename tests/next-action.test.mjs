@@ -768,10 +768,55 @@ test('now stops the run at a closing line or a blank line: what follows it is ke
 })
 
 test('now replaces a run at the end of the file and keeps the missing final newline', () => {
-  const head = '---\ntags: [project]\n---\n\n## Now\n\n'
-  const { rows, text } = oneNow(`${head}As of 2026-11-01, from the thread:\n- See [THREAD.md](vscode://file${OPT}) for more`)
+  // The thread is named above the run, in a line the write keeps: the run itself names nothing.
+  const head = `---\ntags: [project]\n---\n\n## Now\n\nRuns on its own phases; see [THREAD.md](vscode://file${OPT}).\n\n`
+  const { rows, text } = oneNow(`${head}As of 2026-11-01, from the thread:\n- **Old bullet**, the last line`)
   assert.deepEqual(rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]])
   assert.equal(text, `${head}${BLOCK}`)
+})
+
+test("now's thread guard reads only the lines it keeps: a path in the run it replaces never passes it", () => {
+  // X's closing line names OPT; its As-of run names SEO's path. The run is what the write replaces, so it never counts.
+  const run = `As of 2026-11-01, from the thread:\n- **Old bullet.** See [seo THREAD.md](vscode://file${SEO}) for it.`
+  const note = dash(nowOf(OPT, run))
+  const seo = oneNow(note, { thread: SEO })
+  assert.deepEqual(seo.rows, [['skip', 'Pr', "not this thread's Now"]])
+  assert.deepEqual(snapshot(seo.dir), seo.before, 'the note is byte-identical')
+  const opt = oneNow(note, { thread: OPT })
+  assert.deepEqual(opt.rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]])
+  assert.equal(opt.text, dash(nowOf(OPT, BLOCK)))
+  // A run that runs to the section's end, naming the thread only inside itself, is no Now of this thread either.
+  const only = oneNow(dash(`As of 2026-11-01, from the thread:\n- See [THREAD.md](vscode://file${OPT}) for more`))
+  assert.deepEqual(only.rows, [['skip', 'Pr', "not this thread's Now"]])
+  assert.deepEqual(snapshot(only.dir), only.before, 'the run-only Now is byte-identical')
+})
+
+test('now anchors only on the dated opener: a hand paragraph opening `As of ` is no run, and never a second one', () => {
+  const line = closingLine(OPT)
+  const lastWeek = 'As of last week, Lachy wrote this by hand.\nIt is still true.'
+  for (const [name, now] of [
+    ['a hand `As of last week` paragraph', `${lastWeek}\n\n${line}`],
+    ['an `As of the August cut` paragraph', `As of the August cut, Lachy wrote this by hand.\n- One.\n\n${line}`],
+    ['a dated hand line that is not the opener', `As of 2026-08-01 Lachy wrote this by hand.\n\n${line}`],
+  ]) {
+    const { rows, before, dir } = oneNow(dash(now))
+    assert.deepEqual(rows, [['skip', 'Pr', 'Now has no "As of" line']], name)
+    assert.deepEqual(snapshot(dir), before, `${name} is byte-identical`)
+  }
+  // Beside a dated run, the hand paragraph is no second anchor: the run alone is replaced, before or after it.
+  for (const [name, now, want] of [
+    ['hand paragraph first', `${lastWeek}\n\n${RUN}\n\n${line}`, `${lastWeek}\n\n${BLOCK}\n\n${line}`],
+    ['hand paragraph after', `${RUN}\n\n${lastWeek}\n\n${line}`, `${BLOCK}\n\n${lastWeek}\n\n${line}`],
+  ]) {
+    const { rows, text } = oneNow(dash(now))
+    assert.deepEqual(rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]], name)
+    assert.equal(text, dash(want), name)
+  }
+  // The block's own rule is the same: a later `As of last week` line is plain text, and the next run finds it again.
+  const block = `${BLOCK}\nAs of last week, the CI was red.`
+  const first = oneNow(dash(nowOf(OPT)), { block })
+  assert.equal(first.text, dash(nowOf(OPT, block)))
+  assert.equal(oneNow(first.text).text, dash(nowOf(OPT, BLOCK)), 'a later run replaces the whole block')
 })
 
 test('now ignores a ## Now inside a fence: absent', () => {
@@ -875,7 +920,7 @@ test('now refuses a block that breaks the shape, a bad task or a bad --thread-fi
     [`${opener}\n\n- a`, /blank line/],
     ['As at 2026-11-05, from the thread:\n- a', /must open/],
     ['As of 2026-02-30, from the thread:\n- a', /2026-02-30 is no date/],
-    [`${opener}\nAs of 2026-11-04, from the thread:`, /second `As of `/],
+    [`${opener}\nAs of 2026-11-04, from the thread:`, /second `As of YYYY-MM-DD, from the thread:` line/],
     [`${opener}\n# Heading`, /heading or fence/],
     [`${opener}\n\`\`\`\n- a`, /heading or fence/],
     [`${opener}\n**Next task:** x`, /closing line/],

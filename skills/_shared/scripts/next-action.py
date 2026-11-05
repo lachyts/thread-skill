@@ -47,27 +47,33 @@ Verbs:
     EOF
 
 `--text -` reads the Now block from stdin the same way. The block is at most 5 lines with no blank line. Its first
-line is exactly `As of YYYY-MM-DD, from the thread:` (a real date). No other line opens `As of `, is a heading or a
-fence line, or opens a closing marker (`**Next task:**`, `**Thread:**`, `**History:**`): each would break the next
-run's placement. A block that breaks the shape is refused. A dead task is not refused, because the Now is no pointer.
+line is exactly `As of YYYY-MM-DD, from the thread:` (a real date), the opener. No other line is the opener, a heading
+or a fence line, or opens a closing marker (`**Next task:**`, `**Thread:**`, `**History:**`): each would break the
+next run's placement. A block that breaks the shape is refused. A dead task is not refused, because the Now is no
+pointer.
 
 The Now section is the one level-2 heading reading exactly `## Now` outside a ``` or ~~~ fence (`## Now / Next` is
 none), up to the next `#`/`##` heading outside a fence, or the end of the file. Its placement:
-  - The thread guard first: the section's own lines must name <P>, or the note is skipped `not this thread's Now`
-    (another thread's Now, or one naming none, `**Thread:** none yet`). The needles are <P> raw, `~`-expanded, fully
+  - The run runs from the section's one opener, the dated `As of YYYY-MM-DD, from the thread:` at column 0 outside
+    a fence, to the first blank line, closing-marker line or section end. Any other line opening `As of ` (a hand
+    `As of last week, ...` paragraph, or `As of 2026-08-01 Lachy wrote ...`) is no opener: it is hand text.
+  - The thread guard first: the lines the write keeps must name <P>, or the note is skipped `not this thread's Now`
+    (another thread's Now, or one naming none, `**Thread:** none yet`). The kept lines are the section without the
+    run it replaces, whose old text may name another thread; with no run (an insert, or a skip below) the whole
+    section. In practice that is the closing `**Thread:**` link. The needles are <P> raw, `~`-expanded, fully
     percent-encoded (`urllib.parse.quote`, `/` and `~` kept) and spaces-only `%20`, each matched as a substring of
-    the section, never followed by another path character (`[A-Za-z0-9_-]`, or a `.` before one), tried at every
+    the kept lines, never followed by another path character (`[A-Za-z0-9_-]`, or a `.` before one), tried at every
     occurrence: `THREAD.md.bak` and `THREAD.mdx` never count, and a sentence-ending `THREAD.md.` does. There is no
     leading guard: the needle is absolute, so a false leading match needs a path holding a whole absolute path, and a
     `vscode://file` prefix would defeat a leading boundary. `captures` keeps its two raw needles and no guard: its
     writer (task-writer.md § 4) writes the raw path.
-  - The run from the one column-0 `As of ` line to the first blank line, closing-marker line or section end is
-    replaced by the block; everything else is kept. A section whose non-blank lines are all closing lines gets
-    [blank, block, blank] above them. A section with hand text but no `As of ` line is skipped `Now has no "As of"
+  - The run is replaced by the block; everything else is kept. A section whose non-blank lines are all closing lines
+    gets [blank, block, blank] above them. A section with hand text but no opener is skipped `Now has no "As of"
     line`, never partly replaced. A note with no `## Now` is `absent`; one is never added.
-  - Not editable, so skipped `Now not editable (<why>)`: two `## Now` sections, two `As of ` lines, a heading or fence
-    line in the run, line breaks other than \\n in the section, or a result that does not re-read (the frontmatter's
-    bytes and parse unchanged, the placed run equal to the block). The new lines take the heading's line ending.
+  - Not editable, so skipped `Now not editable (<why>)`: two `## Now` sections, two openers (`two As of lines`), a
+    heading or fence line in the run, line breaks other than \\n in the section, or a result that does not re-read
+    (the frontmatter's bytes and parse unchanged, the placed run equal to the block). The new lines take the
+    heading's line ending.
 
 <task> and <project> are a name, or — when the argument contains a `/` — a path inside the vault
 (absolute, or relative to the vault; never to the working directory). A path with no `.md` that names no
@@ -139,11 +145,12 @@ NOT_PLAIN = tuple("'[{|>&*!%@`")
 MAX_FIXES = 50
 # A top-level key line, its value possibly empty (`scheduled: `): the key set mend's result must keep.
 TOP_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_][A-Za-z0-9_ .-]*?):(?:[ \t]|$)")
-# The Now refresh (`now`): the block's shape, the section's heading and end, and the closing line's markers.
+# The Now refresh (`now`): the block's shape, the section's heading and end, and the closing line's markers. NOW_OPENER
+# is both the block's first line and the run's anchor in a section (is_opener): a hand line opening `As of last week`
+# is neither.
 NOW_MAX_LINES = 5
 NOW_HEADING = "## Now"
 NOW_OPENER = re.compile(r"^As of (\d{4}-\d{2}-\d{2}), from the thread:$")
-AS_OF = "As of "
 CLOSING_MARKERS = ("**Next task:**", "**Thread:**", "**History:**")
 HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 FENCE_LINE = re.compile(r"^\s{0,3}(?:```|~~~)")
@@ -789,6 +796,12 @@ def is_closing(line):
     return line.lstrip().startswith(CLOSING_MARKERS)
 
 
+def is_opener(line):
+    """Whether a line is the dated Now opener, `As of YYYY-MM-DD, from the thread:` at column 0 (its ending and trailing
+    blanks aside): the one line a run starts at, and the one the block holds only as its first."""
+    return bool(NOW_OPENER.match(line.rstrip()))
+
+
 def read_now(text):
     """The Now block's lines, or Refused when it breaks the shape (the module docstring's `--text -`)."""
     if text == "-":
@@ -813,8 +826,8 @@ def read_now(text):
     except ValueError:
         raise Refused("the Now block's %s is no date" % m.group(1))
     for ln in lines[1:]:
-        if ln.startswith(AS_OF):
-            raise Refused("the Now block holds a second `As of ` line")
+        if is_opener(ln):
+            raise Refused("the Now block holds a second `As of YYYY-MM-DD, from the thread:` line")
         if HEADING_LINE.match(ln) or FENCE_LINE.match(ln):
             raise Refused("the Now block holds a heading or fence line")
         if is_closing(ln):
@@ -866,12 +879,18 @@ def locate_now(note, needles):
         return ("absent",)
     h, e, fenced = found
     lines = note.lines
-    section = "".join(lines[h:e])
-    if needles is not None and not names_thread(section, needles):
+    anchors = [i for i in range(h + 1, e) if not fenced[i] and is_opener(lines[i])]
+    a = b = None
+    if len(anchors) == 1:
+        a = anchors[0]
+        b = next((i for i in range(a + 1, e) if not lines[i].strip() or is_closing(lines[i])), e)
+    # The guard reads only the lines the write keeps: the section without the run it replaces, whose old text may name
+    # another thread. With no run to replace (an insert, or a skip below) that is the whole section.
+    kept = lines[h:a] + lines[b:e] if a is not None else lines[h:e]
+    if needles is not None and not names_thread("".join(kept), needles):
         return ("skip", "not this thread's Now")
-    if ODD_BREAKS.search(section):
+    if ODD_BREAKS.search("".join(lines[h:e])):
         return ("skip", "Now not editable (line breaks other than \\n)")
-    anchors = [i for i in range(h + 1, e) if not fenced[i] and lines[i].startswith(AS_OF)]
     if len(anchors) > 1:
         return ("skip", "Now not editable (two As of lines)")
     if not anchors:
@@ -879,8 +898,6 @@ def locate_now(note, needles):
         if body and all(is_closing(lines[i]) for i in body):
             return ("insert", h, body[0])
         return ("skip", 'Now has no "As of" line')
-    a = anchors[0]
-    b = next((i for i in range(a + 1, e) if not lines[i].strip() or is_closing(lines[i])), e)
     if any(HEADING_LINE.match(ln) or FENCE_LINE.match(ln) for ln in lines[a:b]):
         return ("skip", "Now not editable (heading or fence in its As of run)")
     return ("replace", h, a, b)

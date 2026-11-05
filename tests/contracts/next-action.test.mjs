@@ -80,10 +80,12 @@ test("task-writer § 4b gives close a Now refresh: the agent writes, the script 
     // The path: the active thread's resolved file, a rollout clone's in-place twin's, never the clone's copy.
     /the same path step 5 passes to `captures --thread-file`/,
     /in-place twin/, /§ Repo-thread lookup/,
-    // The thread guard, and its match recorded once.
-    /names that thread file/, "not this thread's Now",
-    /percent-encoded/, /`THREAD\.md\.bak` never counts/,
-    /no `As of` line is left alone/,
+    // The run's anchor: the dated opener, never a hand line that merely opens `As of `.
+    /the one dated opener in the `## Now` section/, /a hand paragraph opening `As of last week` is no run/,
+    // The thread guard reads only the kept lines, never the run it replaces, and its match is recorded once.
+    /the lines the write keeps name that thread file/, /never the old run/, "not this thread's Now",
+    /a substring of the kept lines/, /percent-encoded/, /`THREAD\.md\.bak` never counts/,
+    /a Now with no dated opener is left alone/,
     /never adds a `## Now`/,
     /stash and defer leave the Now alone/,
     'Now not written: <stderr>',
@@ -197,4 +199,10 @@ test('CONTEXT.md defines the next-action vocabulary', () => {
     /^- \*\*Set-down\*\* — /m, /^- \*\*Next action\*\* — /m, /^- \*\*Next task\*\* — /m, /^- \*\*Now\*\* — /m,
     '~/repos/workspaces/_shared/CONTEXT.md` § Next action',
   ])
+  // Lachy hand-writes Nows too: the refresh is the only agent writer, never the only writer.
+  const now = slice(ctx, /^- \*\*Now\*\* — /, /^(?:- \*\*|## )/)
+  assertHas(now && collapse(now), 'CONTEXT.md **Now**', [
+    /Lachy writes it by hand too/, /its only agent writer/, /dated opener/, /the lines it keeps/,
+  ])
+  assert.doesNotMatch(collapse(now ?? ''), /Only close's Now refresh writes/, 'CONTEXT.md **Now**: not its only writer')
 })

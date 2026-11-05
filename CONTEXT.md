@@ -341,10 +341,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   for Lachy. _Avoid_: up next, focus task.
 - **Now** — a project note's `## Now` section: the few current lines of the
   thread it names, opening `As of <date>, from the thread:`, above its
-  closing Next task / Thread / History line. Only close's Now refresh writes
-  it (`task-writer.md` § 4b, Close's Now, through `next-action.py now`), and
-  only when the section names the closing thread's file; it is never added
-  to a note that lacks one. _Avoid_: status, Now / Next.
+  closing Next task / Thread / History line. Lachy writes it by hand too;
+  close's Now refresh is its only agent writer (`task-writer.md` § 4b,
+  Close's Now, through `next-action.py now`). The refresh replaces only the
+  run from that dated opener, never a hand line that merely opens `As of `,
+  and only when the lines it keeps (the closing Thread link, in practice)
+  name the closing thread's file; it never adds a Now to a note that lacks
+  one. _Avoid_: status, Now / Next.
 
 ## Memory capture (close-side)
 

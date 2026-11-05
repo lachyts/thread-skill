@@ -283,18 +283,22 @@ EOF
 `--thread-file` is the active thread's resolved file, the same path step 5
 passes to `captures --thread-file`. From a rollout clone it is the in-place
 twin's THREAD.md (`open/SKILL.md` § Repo-thread lookup, its **Rollout
-clones** rule), never the clone's copy, which no Now names. The thread
-guard: a note is written only when its `## Now` section names that thread
-file (its closing `**Thread:**` link), so a task linking two projects never
-writes one thread's state into the other's Now. Another thread's Now, or
-one naming none, is `skip <link> not this thread's Now`. The match is
-recorded here and in the script's docstring: a substring of the Now
-section, in the raw, `~`-expanded or percent-encoded (`%20`) form, never
-followed by another path character, so `THREAD.md.bak` never counts and a
-sentence-ending `.` does. The script replaces the run from the `As of` line
-to the first blank or closing line and keeps everything else. A Now holding
-only its closing line gets the block above it; a Now with no `As of` line is
-left alone. It never adds a `## Now` to a note without one. Close only:
+clones** rule), never the clone's copy, which no Now names. The run runs
+from the one dated opener in the `## Now` section, `As of <date>, from the
+thread:` (the block's own first line), to the first blank or closing line;
+a hand paragraph opening `As of last week` is no run. The thread guard: a
+note is written only when the lines the write keeps name that thread file,
+so a task linking two projects never writes one thread's state into the
+other's Now. The kept lines are the section outside the run it replaces
+(in practice its closing `**Thread:**` link), never the old run, whose
+text may name another thread. Another thread's Now, or one naming none, is
+`skip <link> not this thread's Now`. The match is recorded here and in the
+script's docstring: a substring of the kept lines, in the raw,
+`~`-expanded or percent-encoded (`%20`) form, never followed by another
+path character, so `THREAD.md.bak` never counts and a sentence-ending `.`
+does. The script replaces the run and keeps everything else. A Now holding
+only its closing line gets the block above it; a Now with no dated opener
+is left alone. It never adds a `## Now` to a note without one. Close only:
 stash and defer leave the Now alone, because they never rewrite Where we
 are. On exit 2 or 3, say `Now not written: <stderr>` in step 8 and never
 edit the note by hand. An exit 2 with `python3`'s
