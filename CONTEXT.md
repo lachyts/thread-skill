@@ -339,6 +339,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   whose cause is a plain value (an unquoted `: `, say); an unclosed or
   non-mapping frontmatter, or an unreadable file, carries neither and is left
   for Lachy. _Avoid_: up next, focus task.
+- **Now** — a project note's `## Now` section: the few current lines of the
+  thread it names, opening `As of <date>, from the thread:`, above its
+  closing Next task / Thread / History line. Lachy writes it by hand too;
+  close's Now refresh is its only agent writer (`task-writer.md` § 4b,
+  Close's Now, through `next-action.py now`). The refresh replaces only the
+  run from that dated opener, never a hand line that merely opens `As of `,
+  and only when the lines it keeps (the closing Thread link, in practice)
+  name the closing thread's file; it never adds a Now to a note that lacks
+  one. _Avoid_: status, Now / Next.
 
 ## Memory capture (close-side)
 
@@ -705,9 +714,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Trickle**'s and the **Away cap**'s number, Legs count behind their
   **Lease**, and a lead or Leg whose Login is inside its line starts nothing
   new (the quota hold); a missing, stale or unreadable reading falls back to
-  them, never to open (ADR 0067 d8; execute away.md § Capacity). A Leg's wait
-  for room is a `wait` of kind `capacity` (or `quota`), never a **Rank
-  wait**. _Avoid_: governor (the mechanism), throttle.
+  them, never to open (ADR 0067 d8; execute away.md § Capacity). A fresh
+  reading's `stop_suites` (memory critical) also holds and stops slotted
+  suites, as the **Heat hold** does. A Leg's wait for room is a `wait` of
+  kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
+  mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
   Chorus sets another (Chorus ADR 0104 d2); while **Capacity** is in force its

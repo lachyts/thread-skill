@@ -40,7 +40,7 @@ sessions.
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop or a Chorus Session also create a fresh visible task seeded with it (a sidebar task in Codex Desktop); elsewhere label it a manual handoff. Then it runs `/thread:next` once for this session, unless `next` or a Rollout launch dispatched it. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual; lands its close-out and its own branch (ADR 0028): the own branch is reviewed by `/fresh-review` before its merge is queued. |
 
-Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`): each writes the task's `next_action:` and points the `next_task:` of every project note the task links (area notes skipped) at it, most recent winning — close only when the thread has a concrete next task. `orient` reads that slot first and fills it only when blank. Both go through `skills/_shared/scripts/next-action.py` (`skills/_shared/task-writer.md` § 4b).
+Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`): each writes the task's `next_action:` and points the `next_task:` of every project note the task links (area notes skipped) at it, most recent winning — close only when the thread has a concrete next task. Close also refreshes the `## Now` of each project note it targets whose Now names its thread, through the same script. `orient` reads that slot first and fills it only when blank. Both go through `skills/_shared/scripts/next-action.py` (`skills/_shared/task-writer.md` § 4b).
 
 ## Rollout verbs
 
@@ -500,7 +500,7 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   `tests/contracts/reflect.test.mjs` (the verb's wiring, every close scoring its rollout, its
   SKILL's order and triggers, and the retired name staying gone) and `tests/contracts/escapes-fixes-key.test.mjs` (every
   writer of a fix of landed work adds `fixes:`, and the Reflection presents Quality).
-- **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
+- **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, now, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
 - **Target resolver** — `tests/resolve-target.test.mjs`: `resolve-target.py` against a fixture vault of real

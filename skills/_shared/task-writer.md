@@ -264,6 +264,48 @@ instructions — never an older capture's `Next move:`, which may be stale.
 No such task, or more than one with nothing to choose between them →
 write neither field and leave every project slot as it is.
 
+**Close's Now.** Close only, after its set-down exited 0, with a thread
+active: it refreshes the `## Now` section of the project notes that
+set-down targets. The agent writes, the script places. The agent's block is
+at most five lines in plain words, taken from THREAD.md's Where we are as
+close's step 4 left it. Its first line is exactly
+`As of <today>, from the thread:`, and it holds no blank line, heading,
+fence or closing line (`**Next task:**`, `**Thread:**`, `**History:**`):
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py now \
+  ~/repos/obsidian/Work/Tasks/<slug>.md \
+  --thread-file <abs path of the THREAD.md> --text - <<'EOF'
+<the block>
+EOF
+```
+
+`--thread-file` is the active thread's resolved file, the same path step 5
+passes to `captures --thread-file`. From a rollout clone it is the in-place
+twin's THREAD.md (`open/SKILL.md` § Repo-thread lookup, its **Rollout
+clones** rule), never the clone's copy, which no Now names. The run runs
+from the one dated opener in the `## Now` section, `As of <date>, from the
+thread:` (the block's own first line), to the first blank or closing line;
+a hand paragraph opening `As of last week` is no run. The thread guard: a
+note is written only when the lines the write keeps name that thread file,
+so a task linking two projects never writes one thread's state into the
+other's Now. The kept lines are the section outside the run it replaces
+(in practice its closing `**Thread:**` link), never the old run, whose
+text may name another thread. Another thread's Now, or one naming none, is
+`skip <link> not this thread's Now`. The match is recorded here and in the
+script's docstring: a substring of the kept lines, in the raw,
+`~`-expanded or percent-encoded (`%20`) form, never followed by another
+path character, so `THREAD.md.bak` never counts and a sentence-ending `.`
+does. The script replaces the run and keeps everything else. A Now holding
+only its closing line gets the block above it; a Now with no dated opener
+is left alone. It never adds a `## Now` to a note without one. Close only:
+stash and defer leave the Now alone, because they never rewrite Where we
+are. On exit 2 or 3, say `Now not written: <stderr>` in step 8 and never
+edit the note by hand. An exit 2 with `python3`'s
+`can't open file '/skills/…'` is not that refusal: export the root and
+re-run the same call by `plugin-root.md` rule 4, then apply these rules to
+that run.
+
 This section is the only overwrite by an agent. Every other writer fills a
 blank slot only, with `next-action.py fill` (orient's rule: `orient/SKILL.md`
 § Route, the slot write), and pickup clears neither field (`open/SKILL.md`, the

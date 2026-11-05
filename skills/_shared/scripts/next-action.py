@@ -35,11 +35,45 @@ Verbs:
                                      (`capture: continuation`), whether it is named <S> and whether its
                                      text names <P>. --for-close keeps only a capture matched by <S> or
                                      <P> — close's concrete match; the marker alone is none.
+  now <task> --thread-file <P> --text <block|->
+                                     Close's Now refresh (task-writer.md § 4b, Close's Now): place the
+                                     agent-written block in the `## Now` section of each project note the
+                                     task's `projects:` links (the set-down's targets), only where that
+                                     section names the thread file <P>.
 
 `--action -` reads the line from stdin, so any character is safe:
     next-action.py set-down <task> --action - <<'EOF'
     Find the council's phone number
     EOF
+
+`--text -` reads the Now block from stdin the same way. The block is at most 5 lines with no blank line. Its first
+line is exactly `As of YYYY-MM-DD, from the thread:` (a real date), the opener. No other line is the opener, a heading
+or a fence line, or opens a closing marker (`**Next task:**`, `**Thread:**`, `**History:**`): each would break the
+next run's placement. A block that breaks the shape is refused. A dead task is not refused, because the Now is no
+pointer.
+
+The Now section is the one level-2 heading reading exactly `## Now` outside a ``` or ~~~ fence (`## Now / Next` is
+none), up to the next `#`/`##` heading outside a fence, or the end of the file. Its placement:
+  - The run runs from the section's one opener, the dated `As of YYYY-MM-DD, from the thread:` at column 0 outside
+    a fence, to the first blank line, closing-marker line or section end. Any other line opening `As of ` (a hand
+    `As of last week, ...` paragraph, or `As of 2026-08-01 Lachy wrote ...`) is no opener: it is hand text.
+  - The thread guard first: the lines the write keeps must name <P>, or the note is skipped `not this thread's Now`
+    (another thread's Now, or one naming none, `**Thread:** none yet`). The kept lines are the section without the
+    run it replaces, whose old text may name another thread; with no run (an insert, or a skip below) the whole
+    section. In practice that is the closing `**Thread:**` link. The needles are <P> raw, `~`-expanded, fully
+    percent-encoded (`urllib.parse.quote`, `/` and `~` kept) and spaces-only `%20`, each matched as a substring of
+    the kept lines, never followed by another path character (`[A-Za-z0-9_-]`, or a `.` before one), tried at every
+    occurrence: `THREAD.md.bak` and `THREAD.mdx` never count, and a sentence-ending `THREAD.md.` does. There is no
+    leading guard: the needle is absolute, so a false leading match needs a path holding a whole absolute path, and a
+    `vscode://file` prefix would defeat a leading boundary. `captures` keeps its two raw needles and no guard: its
+    writer (task-writer.md § 4) writes the raw path.
+  - The run is replaced by the block; everything else is kept. A section whose non-blank lines are all closing lines
+    gets [blank, block, blank] above them. A section with hand text but no opener is skipped `Now has no "As of"
+    line`, never partly replaced. A note with no `## Now` is `absent`; one is never added.
+  - Not editable, so skipped `Now not editable (<why>)`: two `## Now` sections, two openers (`two As of lines`), a
+    heading or fence line in the run, line breaks other than \\n in the section, or a result that does not re-read
+    (the frontmatter's bytes and parse unchanged, the placed run equal to the block). The new lines take the
+    heading's line ending.
 
 <task> and <project> are a name, or — when the argument contains a `/` — a path inside the vault
 (absolute, or relative to the vault; never to the working directory). A path with no `.md` that names no
@@ -68,6 +102,7 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
 
     task      <task>     next_action  written | kept | unchanged
     project   <name>     next_task    written | kept | unchanged    <vault-relative path>
+    project   <name>     now          written | unchanged | absent  <vault-relative path>
     skip      <name>     <reason>
     slot      <name>     live | blank | dead:<reason> | unparseable:<why>   <task>   <next_action or task name>
                          (<why>: `frontmatter does not parse (line N, <key>)`, `no closed frontmatter`,
@@ -75,16 +110,22 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
     mend      <task>     parses | unmendable:<why> | mended:<key,…>
     capture   <task>     <status>     <match,…>        (thread-tag, plus marked, slug and/or thread-file)
 
+Rows name each target by its link in `projects:` order; a link resolve_project skips is a `skip` row each time it
+occurs, and a later link to a project note already met gives no row.
+
 Exit 0 on success (skips, and mend's `parses` and `unmendable:` rows, included). Exit 2 when the input
 is refused (mend's included: a path that names no note, a name that names no task note directly under
-Work/Tasks or names two, a task that is not directly under Work/Tasks) — stderr then carries one line
+Work/Tasks or names two, a task that is not directly under Work/Tasks; now's: a block that breaks the shape,
+a --thread-file that is not absolute or names no file) — stderr then carries one line
 starting `next-action: ` and nothing was written. Exit 3 when the vault or PyYAML is missing.
 """
 import argparse
+import datetime
 import json
 import os
 import re
 import sys
+import urllib.parse
 
 VAULT_DEFAULT = os.path.expanduser("~/repos/obsidian")
 DEAD_STATUSES = {"done", "merged", "dropped"}
@@ -104,6 +145,19 @@ NOT_PLAIN = tuple("'[{|>&*!%@`")
 MAX_FIXES = 50
 # A top-level key line, its value possibly empty (`scheduled: `): the key set mend's result must keep.
 TOP_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_][A-Za-z0-9_ .-]*?):(?:[ \t]|$)")
+# The Now refresh (`now`): the block's shape, the section's heading and end, and the closing line's markers. NOW_OPENER
+# is both the block's first line and the run's anchor in a section (is_opener): a hand line opening `As of last week`
+# is neither.
+NOW_MAX_LINES = 5
+NOW_HEADING = "## Now"
+NOW_OPENER = re.compile(r"^As of (\d{4}-\d{2}-\d{2}), from the thread:$")
+CLOSING_MARKERS = ("**Next task:**", "**Thread:**", "**History:**")
+HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
+FENCE_LINE = re.compile(r"^\s{0,3}(?:```|~~~)")
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+SECTION_END = re.compile(r"^ {0,3}#{1,2}(?:\s|$)")
+# A thread-file needle never followed by another path character; a lone `.` ending a sentence is fine.
+AFTER_PATH = r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])"
 
 try:
     import yaml
@@ -506,6 +560,22 @@ def read_action(action):
     return action
 
 
+def project_targets(vault, task):
+    """The set-down's targets, in `projects:` link order: (link, None, why) for each link resolve_project skips (one
+    per occurrence), (link, rel, None) for the first link to each project note; a later link to the same note yields
+    nothing. set-down, fill and now each name their rows by `link`."""
+    seen = set()
+    for link in links_in(task.get("projects")):
+        prel, why = vault.resolve_project(link, link=True)
+        if why:
+            yield link, None, why
+            continue
+        if prel in seen:
+            continue
+        seen.add(prel)
+        yield link, prel, None
+
+
 def write(vault, task_arg, action, overwrite):
     action = read_action(action)
     if overwrite and action is None:
@@ -531,15 +601,10 @@ def write(vault, task_arg, action, overwrite):
         head = "written"
     rows.append({"kind": "task", "name": name, "field": "next_action", "result": head})
 
-    seen = set()
-    for link in links_in(task.get("projects")):
-        prel, why = vault.resolve_project(link, link=True)
+    for link, prel, why in project_targets(vault, task):
         if why:
             rows.append({"kind": "skip", "name": link, "result": why})
             continue
-        if prel in seen:
-            continue
-        seen.add(prel)
         note = vault.note(prel)
         blank = all(vault.live_copy(t)[0] is None for t in links_in(note.get("next_task")))
         if not (overwrite or blank):
@@ -684,8 +749,13 @@ def mended_whole(check, original, mended):
     return True
 
 
+def thread_needles(path):
+    """The forms a note names a thread file in, as `captures` matches it: the argument raw and `~`-expanded."""
+    return {path, os.path.expanduser(path)}
+
+
 def captures(vault, slug, thread_file, for_close):
-    needles = {thread_file, os.path.expanduser(thread_file)} if thread_file else set()
+    needles = thread_needles(thread_file) if thread_file else set()
     rows = []
     tasks = os.path.join(vault.root, TASKS_DIR)
     for fname in sorted(os.listdir(tasks)) if os.path.isdir(tasks) else []:
@@ -705,6 +775,191 @@ def captures(vault, slug, thread_file, for_close):
         if for_close and not {"slug", "thread-file"} & set(why):
             continue
         rows.append({"kind": "capture", "name": base, "result": status_of(note), "match": ",".join(why)})
+    return rows
+
+
+# ---- now: close's Now refresh -----------------------------------------------------------------------
+
+def now_needles(path):
+    """The forms a Now names a thread file in: thread_needles' two, plus each one fully percent-encoded (`/` and `~`
+    kept) and spaces-only `%20`, the house link rule's form (it asks only that spaces be encoded)."""
+    raw = thread_needles(path)
+    return raw | {urllib.parse.quote(n, safe="/~") for n in raw} | {n.replace(" ", "%20") for n in raw}
+
+
+def names_thread(text, needles):
+    """Whether `text` names the thread file: a needle not followed by another path character, at any occurrence."""
+    return any(re.search(re.escape(n) + AFTER_PATH, text) for n in needles)
+
+
+def is_closing(line):
+    return line.lstrip().startswith(CLOSING_MARKERS)
+
+
+def is_opener(line):
+    """Whether a line is the dated Now opener, `As of YYYY-MM-DD, from the thread:` at column 0 (its ending and trailing
+    blanks aside): the one line a run starts at, and the one the block holds only as its first."""
+    return bool(NOW_OPENER.match(line.rstrip()))
+
+
+def read_now(text):
+    """The Now block's lines, or Refused when it breaks the shape (the module docstring's `--text -`)."""
+    if text == "-":
+        text = sys.stdin.read()
+    text = text[:-1] if text.endswith("\n") else text
+    text = text[:-1] if text.endswith("\r") else text
+    lines = [ln[:-1] if ln.endswith("\r") else ln for ln in text.split("\n")]
+    if any(ODD_BREAKS.search(ln) for ln in lines):
+        raise Refused("the Now block has line breaks other than \\n")
+    lines = [ln.rstrip(" \t") for ln in lines]
+    if not any(lines):
+        raise Refused("the Now block is empty")
+    if len(lines) > NOW_MAX_LINES:
+        raise Refused("the Now block is %d lines; it holds at most %d lines" % (len(lines), NOW_MAX_LINES))
+    if not all(ln.strip() for ln in lines):
+        raise Refused("the Now block holds a blank line")
+    m = NOW_OPENER.match(lines[0])
+    if not m:
+        raise Refused("the Now block must open `As of YYYY-MM-DD, from the thread:`")
+    try:
+        datetime.date.fromisoformat(m.group(1))
+    except ValueError:
+        raise Refused("the Now block's %s is no date" % m.group(1))
+    for ln in lines[1:]:
+        if is_opener(ln):
+            raise Refused("the Now block holds a second `As of YYYY-MM-DD, from the thread:` line")
+        if HEADING_LINE.match(ln) or FENCE_LINE.match(ln):
+            raise Refused("the Now block holds a heading or fence line")
+        if is_closing(ln):
+            raise Refused("the Now block holds a closing line (%s)" % ", ".join(CLOSING_MARKERS))
+    return lines
+
+
+def fenced_lines(lines, start):
+    """For each line: whether it is a fence line or inside a ``` or ~~~ fence, from `start` on (a close fence repeats its
+    opener's character, at least as many times, and nothing after it)."""
+    out, opener = [False] * len(lines), None
+    for i in range(start, len(lines)):
+        text = lines[i].rstrip("\r\n")
+        m = FENCE_OPEN.match(text)
+        if opener is None:
+            if m:
+                opener, out[i] = m.group(1), True
+            continue
+        out[i] = True
+        if m and m.group(1)[0] == opener[0] and len(m.group(1)) >= len(opener) and not text[m.end():].strip():
+            opener = None
+    return out
+
+
+def now_section(note):
+    """(h, e, fenced) for the note's one `## Now` section (its heading's index, its end's), None when it has none, or
+    Refused when it has two. Only the lines after the frontmatter are read."""
+    lines = note.lines
+    start = note.span[1] + 1 if note.span else 0
+    fenced = fenced_lines(lines, start)
+    heads = [i for i in range(start, len(lines)) if not fenced[i] and lines[i].rstrip() == NOW_HEADING]
+    if not heads:
+        return None
+    if len(heads) > 1:
+        raise Refused("two ## Now sections")
+    h = heads[0]
+    e = next((i for i in range(h + 1, len(lines)) if not fenced[i] and SECTION_END.match(lines[i])), len(lines))
+    return h, e, fenced
+
+
+def locate_now(note, needles):
+    """Where a Now block goes: ("absent",), ("skip", reason), ("replace", h, a, b) for the run [a, b), or ("insert", h,
+    k) above line k. `needles` None skips the thread guard (the self-check's re-read)."""
+    try:
+        found = now_section(note)
+    except Refused as e:
+        return ("skip", "Now not editable (%s)" % e)
+    if found is None:
+        return ("absent",)
+    h, e, fenced = found
+    lines = note.lines
+    anchors = [i for i in range(h + 1, e) if not fenced[i] and is_opener(lines[i])]
+    a = b = None
+    if len(anchors) == 1:
+        a = anchors[0]
+        b = next((i for i in range(a + 1, e) if not lines[i].strip() or is_closing(lines[i])), e)
+    # The guard reads only the lines the write keeps: the section without the run it replaces, whose old text may name
+    # another thread. With no run to replace (an insert, or a skip below) that is the whole section.
+    kept = lines[h:a] + lines[b:e] if a is not None else lines[h:e]
+    if needles is not None and not names_thread("".join(kept), needles):
+        return ("skip", "not this thread's Now")
+    if ODD_BREAKS.search("".join(lines[h:e])):
+        return ("skip", "Now not editable (line breaks other than \\n)")
+    if len(anchors) > 1:
+        return ("skip", "Now not editable (two As of lines)")
+    if not anchors:
+        body = [i for i in range(h + 1, e) if lines[i].strip()]
+        if body and all(is_closing(lines[i]) for i in body):
+            return ("insert", h, body[0])
+        return ("skip", 'Now has no "As of" line')
+    if any(HEADING_LINE.match(ln) or FENCE_LINE.match(ln) for ln in lines[a:b]):
+        return ("skip", "Now not editable (heading or fence in its As of run)")
+    return ("replace", h, a, b)
+
+
+def now_edited(note, block, needles):
+    """(result, text): ("absent"|"unchanged", None), ("written", the new text), or ("skip", reason)."""
+    where = locate_now(note, needles)
+    if where[0] == "absent":
+        return ("absent", None)
+    if where[0] == "skip":
+        return where
+    lines = list(note.lines)
+    ending = ending_of(lines[where[1]]) or "\n"
+    new = [ln + ending for ln in block]
+    if where[0] == "replace":
+        _, _, a, b = where
+        if not ending_of(lines[b - 1]):  # the run ends the file without a newline: so does the block
+            new[-1] = block[-1]
+        lines[a:b] = new
+    else:
+        _, h, k = where
+        lines[h + 1:k] = [ending] + new + [ending]
+    text = "".join(lines)
+    check = Note(note.path, text)
+    close = note.span[1] + 1 if note.span else 0
+    again = locate_now(check, None)
+    if (check.lines[:close] != note.lines[:close] or check.fm != note.fm or again[0] != "replace"
+            or [ln.rstrip("\r\n") for ln in check.lines[again[2]:again[3]]] != block):
+        return ("skip", "Now not editable (placement did not re-read)")
+    return ("unchanged", None) if text == note.text else ("written", text)
+
+
+def now(vault, task_arg, text, thread_file):
+    """Close's Now refresh: the block placed in each target's `## Now` that names the thread file (module docstring).
+    Every target is planned before the first save; each save is in place."""
+    block = read_now(text)
+    path = os.path.expanduser(thread_file)
+    if not os.path.isabs(path):
+        raise Refused("--thread-file must be an absolute path: %s" % thread_file)
+    if not os.path.isfile(path):
+        raise Refused("no thread file at %s" % thread_file)
+    needles = now_needles(thread_file)
+    rel = vault.resolve_task(task_arg)
+    task = vault.note(rel)
+    if task.fm is None:
+        raise Refused("%s: %s" % (rel, task.error))
+    plan, rows = [], []
+    for link, prel, why in project_targets(vault, task):
+        if why:
+            rows.append({"kind": "skip", "name": link, "result": why})
+            continue
+        note = vault.note(prel)
+        result, new = now_edited(note, block, needles)
+        if result == "skip":
+            rows.append({"kind": "skip", "name": link, "result": new})
+            continue
+        if result == "written":
+            plan.append((note, new))
+        rows.append({"kind": "project", "name": link, "field": "now", "result": result, "path": prel})
+    for note, new in plan:
+        note.save(new)
     return rows
 
 
@@ -747,12 +1002,16 @@ def main(argv):
     c.add_argument("--slug")
     c.add_argument("--thread-file")
     c.add_argument("--for-close", action="store_true")
-    for sp in (s, f, r, m, c):  # accept the global flags after the verb too
+    n = sub.add_parser("now")
+    n.add_argument("task")
+    n.add_argument("--thread-file", required=True)
+    n.add_argument("--text", required=True)
+    for sp in (s, f, r, m, c, n):  # accept the global flags after the verb too
         sp.add_argument("--vault", default=argparse.SUPPRESS)
         sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: set-down | fill | read | mend | captures")
+        fail(2, "a verb is required: set-down | fill | read | mend | captures | now")
     if yaml is None:
         fail(3, "PyYAML is required: python3 -m pip install pyyaml")
 
@@ -766,6 +1025,8 @@ def main(argv):
             rows = read_slots(vault, args.project)
         elif args.verb == "mend":
             rows = mend(vault, args.task)
+        elif args.verb == "now":
+            rows = now(vault, args.task, args.text, args.thread_file)
         else:
             rows = captures(vault, args.slug, args.thread_file, args.for_close)
     except Refused as e:

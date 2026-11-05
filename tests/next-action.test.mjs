@@ -29,8 +29,9 @@ const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), 'utf8')
 const snapshot = (dir) => Object.fromEntries(
   fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.md')).map((f) => [f, read(dir, f)]))
 
-function run(dir, args, { cwd, input, pyFlags = [] } = {}) {
-  return spawnSync('python3', [...pyFlags, SCRIPT, '--vault', dir, ...args], { encoding: 'utf8', cwd, input })
+function run(dir, args, { cwd, input, pyFlags = [], env } = {}) {
+  return spawnSync('python3', [...pyFlags, SCRIPT, '--vault', dir, ...args],
+    { encoding: 'utf8', cwd, input, env: env ? { ...process.env, ...env } : undefined })
 }
 function ok(dir, args, opts) {
   const r = run(dir, args, opts)
@@ -650,4 +651,341 @@ test('captures marks a capture its writer stamped `capture: continuation`; an un
   assert.deepEqual(ok(dir, ['captures', '--for-close']), [])
   assert.deepEqual(ok(dir, ['captures', '--thread-file', THREAD, '--for-close']).map((r) => r[1]),
     ['chorus-misstep-walk-and-knob', 'chorus-next', 'other-marker'])
+})
+
+// ---- now: close's Now refresh (task-writer § 4b, Close's Now) --------------------------------------------------
+// The close agent writes the block; the script places it in the `## Now` of each project note the task links, and
+// only where that section names the closing thread's file. The thread files are real files outside the vault.
+function threadFile(rel) {
+  const p = path.join(scratch, 'threads', rel, 'THREAD.md')
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, '# A thread\n')
+  return p
+}
+const OPT = threadFile('opt')
+const SEO = threadFile('seo')
+
+const BLOCK = 'As of 2026-11-05, from the thread:\n- **Large-file routes are decided.** Keep the premium engine.\n' +
+  '- **Paid tier:** pricing is on hold; the grill is next.'
+const RUN = 'As of 2026-11-01, from the thread:\n- **Old bullet one.**\n- **Old bullet two.**'
+// A decoy `## Now` inside a ```base fence, as the live project notes carry one above their sections.
+const BASE = '```base\nfilters:\n  and:\n    - file.hasTag("task")\n## Now\n```\n'
+const closingLine = (thread) => '**Next task:** the `next_task` property at the top (thread closes keep it current). ' +
+  `**Thread:** [opt THREAD.md](vscode://file${thread}) (the running record). **History:** [[Alpha log]].`
+// The Animately App shape: frontmatter, a base fence, a goal, the Now (an As-of run and its closing line), notes.
+const dash = (now, notes = 'Keep me.') => '---\ntags:\n  - project\nstatus: active\nnext_task: "[[old]]"\n---\n\n' +
+  `${BASE}\n## Goal\n\nShip the thing.\n\n## Now\n\n${now}\n\n## Notes\n\n${notes}\n`
+const nowOf = (thread, run = RUN) => `${run}\n\n${closingLine(thread)}`
+// The GifLab shape: a standing preamble, the As-of run, and a closing line with a `**Reference:**` mid-line.
+const gifNow = (ref, run = RUN) => `GifLab sits outside the Backlog: it runs on its own phases.\n\n${run}\n\n` +
+  `**Next task:** the \`next_task\` property. **Thread:** ${ref}. **Reference:** [[GifLab reference]] (programme map). ` +
+  '**History:** [[GifLab log]].'
+const nowArgs = (thread, taskName = 'cap') => ['now', taskName, '--thread-file', thread, '--text', '-']
+
+// One task linking one project note `Pr` holding `note`; the refresh run once.
+function oneNow(note, { thread = OPT, block = BLOCK } = {}) {
+  const dir = vault({
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Pr]]"]'),
+    [`${P}/Pr.md`]: note,
+  })
+  const before = snapshot(dir)
+  const rows = ok(dir, nowArgs(thread), { input: `${block}\n` })
+  return { dir, rows, before, text: read(dir, `${P}/Pr.md`) }
+}
+
+test("now rewrites only the Now body of each linked project note whose Now names the thread file; another thread's Now and a note without ## Now are byte-identical", () => {
+  const files = {
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Area]]", "[[Alpha]]", "[[Seo]]", "[[Beta]]", "[[Old]]", "[[Alpha]]"]'),
+    [`${P}/A/Alpha.md`]: dash(nowOf(OPT)),
+    // SEO's own thread in its Now; the closing thread named only in its Notes, which the guard never reads.
+    [`${P}/S/Seo.md`]: dash(nowOf(SEO), `See also [the optimizer thread](vscode://file${OPT}).`),
+    [`${P}/B/Beta.md`]: `---\ntags: [project]\n---\n\n## Now / Next (2026-08-28)\n\nStale lines; the thread is ${OPT}.\n`,
+    [`${P}/Area/Area.md`]: task('tags: [area]', `\n## Now\n\n${nowOf(OPT)}\n`),
+    [`${P}/Archive/Old.md`]: task('tags: [project]', `\n## Now\n\n${nowOf(OPT)}\n`),
+  }
+  const dir = vault(files)
+  const rows = ok(dir, nowArgs(OPT), { input: `${BLOCK}\n` })
+  assert.deepEqual(rows, [
+    ['skip', 'Area', `area note (${P}/Area/Area.md)`],
+    ['project', 'Alpha', 'now', 'written', `${P}/A/Alpha.md`],
+    ['skip', 'Seo', "not this thread's Now"],
+    ['project', 'Beta', 'now', 'absent', `${P}/B/Beta.md`],
+    ['skip', 'Old', 'archived'],
+  ])
+  // Only the As-of run changes: the frontmatter, the fence's decoy, the closing line and every other section stay.
+  assert.equal(read(dir, `${P}/A/Alpha.md`), dash(nowOf(OPT, BLOCK)))
+  for (const rel of [`${T}/cap.md`, `${P}/S/Seo.md`, `${P}/B/Beta.md`, `${P}/Area/Area.md`, `${P}/Archive/Old.md`]) {
+    assert.equal(read(dir, rel), files[rel], `${rel} is byte-identical`)
+  }
+  // A second identical run reports unchanged and rewrites nothing.
+  const before = snapshot(dir)
+  assert.deepEqual(ok(dir, nowArgs(OPT), { input: `${BLOCK}\n` })[1], ['project', 'Alpha', 'now', 'unchanged', `${P}/A/Alpha.md`])
+  assert.deepEqual(snapshot(dir), before)
+})
+
+test('now keeps a standing preamble and a closing line with other links, and replaces only the As-of run', () => {
+  const ref = `[giflab THREAD.md](vscode://file${OPT})`
+  const { rows, text } = oneNow(dash(gifNow(ref)))
+  assert.deepEqual(rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]])
+  assert.equal(text, dash(gifNow(ref, BLOCK)))
+})
+
+test('now leaves a Now it cannot place byte-identical: no thread named, no As-of line, a preamble with no run', () => {
+  const website = (thread) => "Last moved on 2026-08-25. From the log's latest lines:\n" +
+    '- **The focus item is the `/api` pilot cycle.**\n- **Waiting on your call.**\n\n' +
+    (thread ? `**Thread:** [THREAD.md](vscode://file${thread}). ` :
+      '**Thread:** none yet; the next session that works here opens one (`/thread:open`), and history goes there. ') +
+    '**History:** [[Website log]].'
+  const preAsOf = 'GifLab sits outside the Backlog: it runs on its own phases.\n\n' +
+    'CI is back and the rollout merged four of four.\n\n' + `**Thread:** [giflab THREAD.md](vscode://file${OPT}).`
+  for (const [name, now, why] of [
+    ['a Now naming no thread file', website(null), "not this thread's Now"],
+    ['a Now with hand text and no As-of line', website(OPT), 'Now has no "As of" line'],
+    ['a preamble and a status paragraph, no As-of line', preAsOf, 'Now has no "As of" line'],
+  ]) {
+    const { rows, before, dir } = oneNow(dash(now))
+    assert.deepEqual(rows, [['skip', 'Pr', why]], name)
+    assert.deepEqual(snapshot(dir), before, `${name} is byte-identical`)
+  }
+})
+
+test('now puts the block above a Now that holds only its closing line', () => {
+  const line = closingLine(OPT)
+  assert.equal(oneNow(dash(line)).text, dash(nowOf(OPT, BLOCK)), 'heading, blank, closing line')
+  const tight = `---\ntags: [project]\n---\n\n## Now\n${line}\n\n## Notes\n\nKeep me.\n`
+  const { rows, text } = oneNow(tight)
+  assert.deepEqual(rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]])
+  assert.equal(text, `---\ntags: [project]\n---\n\n## Now\n\n${BLOCK}\n\n${line}\n\n## Notes\n\nKeep me.\n`, 'heading, closing line')
+})
+
+test('now stops the run at a closing line or a blank line: what follows it is kept', () => {
+  const line = closingLine(OPT)
+  // A closing line straight after the bullets, no blank between.
+  assert.equal(oneNow(dash(`${RUN}\n${line}`)).text, dash(`${BLOCK}\n${line}`))
+  // A hand paragraph after a blank line survives untouched.
+  const hand = 'A paragraph Lachy wrote by hand.'
+  assert.equal(oneNow(dash(`${RUN}\n\n${hand}\n\n${line}`)).text, dash(`${BLOCK}\n\n${hand}\n\n${line}`))
+})
+
+test('now replaces a run at the end of the file and keeps the missing final newline', () => {
+  // The thread is named above the run, in a line the write keeps: the run itself names nothing.
+  const head = `---\ntags: [project]\n---\n\n## Now\n\nRuns on its own phases; see [THREAD.md](vscode://file${OPT}).\n\n`
+  const { rows, text } = oneNow(`${head}As of 2026-11-01, from the thread:\n- **Old bullet**, the last line`)
+  assert.deepEqual(rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]])
+  assert.equal(text, `${head}${BLOCK}`)
+})
+
+test("now's thread guard reads only the lines it keeps: a path in the run it replaces never passes it", () => {
+  // X's closing line names OPT; its As-of run names SEO's path. The run is what the write replaces, so it never counts.
+  const run = `As of 2026-11-01, from the thread:\n- **Old bullet.** See [seo THREAD.md](vscode://file${SEO}) for it.`
+  const note = dash(nowOf(OPT, run))
+  const seo = oneNow(note, { thread: SEO })
+  assert.deepEqual(seo.rows, [['skip', 'Pr', "not this thread's Now"]])
+  assert.deepEqual(snapshot(seo.dir), seo.before, 'the note is byte-identical')
+  const opt = oneNow(note, { thread: OPT })
+  assert.deepEqual(opt.rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]])
+  assert.equal(opt.text, dash(nowOf(OPT, BLOCK)))
+  // A run that runs to the section's end, naming the thread only inside itself, is no Now of this thread either.
+  const only = oneNow(dash(`As of 2026-11-01, from the thread:\n- See [THREAD.md](vscode://file${OPT}) for more`))
+  assert.deepEqual(only.rows, [['skip', 'Pr', "not this thread's Now"]])
+  assert.deepEqual(snapshot(only.dir), only.before, 'the run-only Now is byte-identical')
+})
+
+test('now anchors only on the dated opener: a hand paragraph opening `As of ` is no run, and never a second one', () => {
+  const line = closingLine(OPT)
+  const lastWeek = 'As of last week, Lachy wrote this by hand.\nIt is still true.'
+  for (const [name, now] of [
+    ['a hand `As of last week` paragraph', `${lastWeek}\n\n${line}`],
+    ['an `As of the August cut` paragraph', `As of the August cut, Lachy wrote this by hand.\n- One.\n\n${line}`],
+    ['a dated hand line that is not the opener', `As of 2026-08-01 Lachy wrote this by hand.\n\n${line}`],
+  ]) {
+    const { rows, before, dir } = oneNow(dash(now))
+    assert.deepEqual(rows, [['skip', 'Pr', 'Now has no "As of" line']], name)
+    assert.deepEqual(snapshot(dir), before, `${name} is byte-identical`)
+  }
+  // Beside a dated run, the hand paragraph is no second anchor: the run alone is replaced, before or after it.
+  for (const [name, now, want] of [
+    ['hand paragraph first', `${lastWeek}\n\n${RUN}\n\n${line}`, `${lastWeek}\n\n${BLOCK}\n\n${line}`],
+    ['hand paragraph after', `${RUN}\n\n${lastWeek}\n\n${line}`, `${BLOCK}\n\n${lastWeek}\n\n${line}`],
+  ]) {
+    const { rows, text } = oneNow(dash(now))
+    assert.deepEqual(rows, [['project', 'Pr', 'now', 'written', `${P}/Pr.md`]], name)
+    assert.equal(text, dash(want), name)
+  }
+  // The block's own rule is the same: a later `As of last week` line is plain text, and the next run finds it again.
+  const block = `${BLOCK}\nAs of last week, the CI was red.`
+  const first = oneNow(dash(nowOf(OPT)), { block })
+  assert.equal(first.text, dash(nowOf(OPT, block)))
+  assert.equal(oneNow(first.text).text, dash(nowOf(OPT, BLOCK)), 'a later run replaces the whole block')
+})
+
+test('now ignores a ## Now inside a fence: absent', () => {
+  const note = `---\ntags: [project]\n---\n\n~~~\n\`\`\`\n## Now\n\n${nowOf(OPT)}\n~~~\n\n## Notes\n`
+  const { rows, before, dir } = oneNow(note)
+  assert.deepEqual(rows, [['project', 'Pr', 'now', 'absent', `${P}/Pr.md`]])
+  assert.deepEqual(snapshot(dir), before)
+})
+
+test('now skips a Now it cannot edit safely, and leaves it byte-identical', () => {
+  const line = closingLine(OPT)
+  for (const [name, note, why] of [
+    ['two ## Now sections', `${dash(nowOf(OPT))}\n## Now\n\nAgain.\n`, 'Now not editable (two ## Now sections)'],
+    ['two As-of lines', dash(`${RUN}\n\nAs of 2026-10-01, from the thread:\n- Older.\n\n${line}`), 'Now not editable (two As of lines)'],
+    ['a ### heading in the run', dash(`As of 2026-11-01, from the thread:\n### Sub\n- a\n\n${line}`),
+      'Now not editable (heading or fence in its As of run)'],
+    ['a fence in the run', dash(`As of 2026-11-01, from the thread:\n\`\`\`\ncode\n\`\`\`\n\n${line}`),
+      'Now not editable (heading or fence in its As of run)'],
+    ['a lone CR in the section', dash(`${RUN}\rx\n\n${line}`), 'Now not editable (line breaks other than \\\\n)'],
+  ]) {
+    const { rows, before, dir } = oneNow(note)
+    assert.deepEqual(rows, [['skip', 'Pr', why]], name)
+    assert.deepEqual(snapshot(dir), before, `${name} is byte-identical`)
+  }
+})
+
+test('now keeps CRLF on the lines it writes, and writes in place (the inode kept)', () => {
+  const crlf = (s) => s.replace(/\n/g, '\r\n')
+  const dir = vault({
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Pr]]"]'),
+    [`${P}/Pr.md`]: crlf(dash(nowOf(OPT))),
+  })
+  const ino = fs.statSync(path.join(dir, P, 'Pr.md')).ino
+  ok(dir, nowArgs(OPT), { input: `${BLOCK}\n` })
+  assert.equal(read(dir, `${P}/Pr.md`), crlf(dash(nowOf(OPT, BLOCK))))
+  assert.equal(fs.statSync(path.join(dir, P, 'Pr.md')).ino, ino)
+})
+
+// One task linking a project note per `refs` entry, each with the GifLab-shaped Now naming its own ref; one run.
+function forms(threadArg, refs, opts) {
+  const names = Object.keys(refs)
+  const files = { [`${T}/cap.md`]: task(`tags: [task]\nstatus: open\nprojects: [${names.map((n) => `"[[${n}]]"`).join(', ')}]`) }
+  for (const [n, ref] of Object.entries(refs)) files[`${P}/${n}.md`] = dash(gifNow(ref))
+  const dir = vault(files)
+  const rows = ok(dir, nowArgs(threadArg), { input: `${BLOCK}\n`, ...opts })
+  for (const [n, ref] of Object.entries(refs)) {
+    const row = rows.find((r) => r[1] === n)
+    assert.equal(read(dir, `${P}/${n}.md`), row[0] === 'project' ? dash(gifNow(ref, BLOCK)) : files[`${P}/${n}.md`], n)
+  }
+  return Object.fromEntries(rows.map((r) => [r[1], r[0] === 'skip' ? r[2] : r[3]]))
+}
+
+test('now matches the thread file raw, ~-expanded, percent-encoded or spaces-only, never as a longer path', () => {
+  // `~` forms: HOME moved for the run, its user site pinned so PyYAML still loads (tests/run.sh does the same).
+  const home = path.join(scratch, 'home')
+  const tilde = path.join(home, 'threads', 'opt', 'THREAD.md')
+  fs.mkdirSync(path.dirname(tilde), { recursive: true })
+  fs.writeFileSync(tilde, '# A thread\n')
+  const userBase = process.env.PYTHONUSERBASE ??
+    spawnSync('python3', ['-c', 'import site; print(site.getuserbase())'], { encoding: 'utf8' }).stdout.trim()
+  assert.deepEqual(forms('~/threads/opt/THREAD.md', {
+    Expanded: `[THREAD.md](vscode://file${tilde})`,
+    Raw: '[THREAD.md](~/threads/opt/THREAD.md)',
+  }, { env: { HOME: home, PYTHONUSERBASE: userBase } }), { Expanded: 'written', Raw: 'written' })
+
+  // Spaces: the house link rule writes %20; an angle-bracket link keeps the raw space.
+  const ur = threadFile('user research')
+  assert.deepEqual(forms(ur, {
+    Encoded: `[THREAD.md](vscode://file${ur.replace(/ /g, '%20')})`,
+    Angle: `[x](<vscode://file${ur}>)`,
+    Other: `[THREAD.md](vscode://file${path.join(scratch, 'threads')}/other%20research/THREAD.md)`,
+  }), { Encoded: 'written', Angle: 'written', Other: "not this thread's Now" })
+
+  // Both encodings: a full quote encodes the parentheses too; a spaces-only link leaves them raw.
+  const paren = threadFile('user research (2026)')
+  assert.deepEqual(forms(paren, {
+    Full: `[THREAD.md](vscode://file${paren.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29')})`,
+    Spaces: `[THREAD.md](vscode://file${paren.replace(/ /g, '%20')})`,
+  }), { Full: 'written', Spaces: 'written' })
+
+  // The trailing guard: no further path character after the needle; a sentence-ending `.` is fine, and a false
+  // occurrence never hides a true one later in the section.
+  assert.deepEqual(forms(OPT, {
+    Bak: `[backup](vscode://file${OPT}.bak)`,
+    Longer: `[x](vscode://file${OPT}x)`,
+    BakThenTrue: `[backup](vscode://file${OPT}.bak), then [THREAD.md](vscode://file${OPT})`,
+    Sentence: `see ${OPT}`,
+  }), { Bak: "not this thread's Now", Longer: "not this thread's Now", BakThenTrue: 'written', Sentence: 'written' })
+})
+
+test('now refuses a block that breaks the shape, a bad task or a bad --thread-file, and writes nothing', () => {
+  const dir = vault({
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Pr]]"]'),
+    [`${T}/broken.md`]: task('tags: [task]\nstatus: open\nnext_action: a: b'),
+    [`${P}/Pr.md`]: dash(nowOf(OPT)),
+  })
+  const opener = 'As of 2026-11-05, from the thread:'
+  for (const [block, why] of [
+    [`${opener}\n- 1\n- 2\n- 3\n- 4\n- 5`, /at most 5 lines/],
+    ['', /empty/],
+    [`${opener}\n\n- a`, /blank line/],
+    ['As at 2026-11-05, from the thread:\n- a', /must open/],
+    ['As of 2026-02-30, from the thread:\n- a', /2026-02-30 is no date/],
+    [`${opener}\nAs of 2026-11-04, from the thread:`, /second `As of YYYY-MM-DD, from the thread:` line/],
+    [`${opener}\n# Heading`, /heading or fence/],
+    [`${opener}\n\`\`\`\n- a`, /heading or fence/],
+    [`${opener}\n**Next task:** x`, /closing line/],
+    [`${opener}\n  **Thread:** x`, /closing line/],
+    [`${opener}\n**History:** x`, /closing line/],
+    [`${opener}\n- a\u2028b`, /line breaks other than/],
+    [`${opener}\n- a\rb`, /line breaks other than/],
+  ]) refused(dir, nowArgs(OPT), why, { input: `${block}\n` })
+  refused(dir, nowArgs(OPT, 'nope'), /no task note/, { input: `${BLOCK}\n` })
+  refused(dir, nowArgs(OPT, 'broken'), /frontmatter does not parse/, { input: `${BLOCK}\n` })
+  refused(dir, ['now', 'cap', '--text', '-'], /--thread-file/, { input: `${BLOCK}\n` })
+  refused(dir, nowArgs('THREAD.md'), /--thread-file must be an absolute path/, { input: `${BLOCK}\n` })
+  refused(dir, nowArgs(path.join(scratch, 'threads', 'nowhere', 'THREAD.md')), /no thread file at /, { input: `${BLOCK}\n` })
+})
+
+test("now's --text - takes the block from stdin byte-exact, and --text takes it inline", () => {
+  const block = 'As of 2026-11-05, from the thread:\n- Lachy\'s "call" on C:\\temp waits, with [[a-task|its link]] & *star*.'
+  assert.equal(oneNow(dash(nowOf(OPT)), { block }).text, dash(nowOf(OPT, block)))
+  const dir = vault({ [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Pr]]"]'), [`${P}/Pr.md`]: dash(nowOf(OPT)) })
+  ok(dir, ['now', 'cap', '--thread-file', OPT, '--text', BLOCK])
+  assert.equal(read(dir, `${P}/Pr.md`), dash(nowOf(OPT, BLOCK)))
+})
+
+test('now plans every note before it saves: a written note lands beside a skipped one left byte-identical', () => {
+  const skipped = dash(`${RUN}\n\nAs of 2026-10-01, from the thread:\n- Older.\n\n${closingLine(OPT)}`)
+  const dir = vault({
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Good]]", "[[Twice]]"]'),
+    [`${P}/Good.md`]: dash(nowOf(OPT)),
+    [`${P}/Twice.md`]: skipped,
+  })
+  const r = run(dir, [...nowArgs(OPT), '--json'], { input: `${BLOCK}\n` })
+  assert.equal(r.status, 0, r.stderr)
+  // --json returns the same rows as objects.
+  assert.deepEqual(JSON.parse(r.stdout), [
+    { kind: 'project', name: 'Good', field: 'now', result: 'written', path: `${P}/Good.md` },
+    { kind: 'skip', name: 'Twice', result: 'Now not editable (two As of lines)' },
+  ])
+  assert.equal(read(dir, `${P}/Good.md`), dash(nowOf(OPT, BLOCK)))
+  assert.equal(read(dir, `${P}/Twice.md`), skipped)
+})
+
+test('set-down, fill and now name their rows by link in projects: order, a resolve skip first, a duplicate once', () => {
+  const fixture = () => vault({
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Area]]", "[[Work/Projects/A/Alpha]]", "[[Alpha]]"]'),
+    [`${P}/A/Alpha.md`]: dash(nowOf(OPT)),
+    [`${P}/Area/Area.md`]: task('tags: [area]'),
+  })
+  const area = ['skip', 'Area', `area note (${P}/Area/Area.md)`]
+  const alpha = `${P}/A/Alpha`
+  assert.deepEqual(ok(fixture(), ['set-down', 'cap', '--action', 'Go']), [
+    ['task', 'cap', 'next_action', 'written'], area, ['project', alpha, 'next_task', 'written', `${alpha}.md`],
+  ])
+  assert.deepEqual(ok(fixture(), ['fill', 'cap', '--action', 'Go']), [
+    // Alpha's `[[old]]` names no note: a dead slot, so fill writes it too.
+    ['task', 'cap', 'next_action', 'written'], area, ['project', alpha, 'next_task', 'written', `${alpha}.md`],
+  ])
+  assert.deepEqual(ok(fixture(), nowArgs(OPT), { input: `${BLOCK}\n` }), [area, ['project', alpha, 'now', 'written', `${alpha}.md`]])
+})
+
+test('set-down then now on one note: next_task and the Now both land, and nothing else changes', () => {
+  const dir = vault({
+    [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[Alpha]]"]'),
+    [`${P}/A/Alpha.md`]: dash(nowOf(OPT)),
+  })
+  ok(dir, ['set-down', 'cap', '--action', 'Go'])
+  ok(dir, nowArgs(OPT), { input: `${BLOCK}\n` })
+  assert.equal(read(dir, `${P}/A/Alpha.md`), dash(nowOf(OPT, BLOCK)).replace('next_task: "[[old]]"', 'next_task: "[[cap]]"'))
 })
