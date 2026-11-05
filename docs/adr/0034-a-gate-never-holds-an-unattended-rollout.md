@@ -13,6 +13,11 @@ calendar-month line.)*
 declared test credential, proved present in its declared file: the standing approval signs it, at any spend limit, and
 schedule and orient record it instead of asking it ahead. Irreversible gates, and every other credential, are
 unchanged.)*
+*(Amended 2026-11-05 by p37-4, § Amendment (2026-11-05) below: unpriceable never means asked. A spend gate the
+exposure reading cannot price is priced from its readable cap and signed within the limit and the month line, and
+`per`/`each` is a rate only before a unit. A credential gate naming only a declared test Login (`[defaults]
+test_logins`) passes the standing approval too, so the 2026-11-01 line's "every other credential, are unchanged" no
+longer holds for a declared test Login.)*
 
 ## Context
 
@@ -160,3 +165,63 @@ Accepted residuals:
 - (xi) A month-line `ASK:` on a running rollout is re-judged only under a new step-1.2 key, a new lead session or a
   Reinstate, never at the turn of the month mid-session; until then it reaches Lachy. A timezone change shifts a
   boundary line by hours.
+
+## Amendment (2026-11-05, p37-4: unpriceable never means asked)
+
+`[[chorus-rollout-2026-11-02]]` stopped for Lachy's sign-off on a US$1 probe: `spend: live probe of a tag-led Steer
+into a running Turn (Haiku 4.5, CLI 2.1.314 and the day's pin, per the task note's 'Measure first') — cap 1 USD`. The
+exposure reading refused it on `per/each outside the cap clause: per`, the word "per" in prose read as a rate. Lachy,
+2026-11-03: "I can't believe that I am still giving permission for small amounts of money on these rollouts … How can
+we prevent it from having any gates on spends in rollouts?" He first answered **Never ask**, then kept the US$200
+line: "you're asking me about $1 and stopping a whole rollout for it". The limit is right; the failure was that a gate
+the pricer could not price asked however small it was. The same day: rollouts may use the dummy Claude Login for
+probes without asking, always.
+
+- **Cap-only pricing.** `approve-gates --standing`, and the `exposure -` CLI the plan judge runs, apply
+  `gated_inputs.py`'s standing reading: the full reading (decision 1's, unchanged) when it prices; else the cap-only
+  reading. That runs the full reading's rules 1-4 and 6 as ever (no cap, two caps, a malformed, magnitude or range
+  amount anywhere, a non-USD or ambiguous currency anywhere still ask), reads the clause with a cap-only reject list
+  (a rate, multiplier, `%`, any `plus` or `+`, widening word, currency or per-unit noun on the cap still asks; a digit,
+  number word or bare unit noun beside it does not), and outside the clause asks only on a plural
+  Logins/accounts/seats/users (7(ii)) or a per-unit word (7(ix)). Its value is the full reading's sum, the cap times
+  the clause's count plus every other USD amount the gate names, so it never reads below what the full reading would:
+  `US$500 per run — cap 1 USD` reads 501 and asks over the line. Only a gate with no readable cap, or one over the
+  line or past the month line, reaches him. A gate signed so is annotated and logged exactly as a fully priced one,
+  and its approval line names the full reading's why.
+- **The per/each reading.** `per` or `each` is a rate only before a unit (a RATE_UNITS noun or a digit, joined by
+  whitespace, `-` or `/`), `each` also before `of`, punctuation or the gate's end, or straight after a digit: never
+  in prose (`per the task note`). A new last rule 7(ix) asks on a per-unit word outside the clause (`per the dummy
+  Login`, `each new Login`, `every Login`, `/Login`), so relaxing per/each never lets a per-Login reading through.
+  `every signed-in Claude Login` (p18-7) still passes.
+- **The plan judge.** The CLI prints only the standing reading's {usd, why}, so a gate whose cap reads prints its
+  amount, and the judge, which bounces only a null "usd", never bounces it on wording alone. task.workflow.js is
+  unchanged, so no prompt bytes change. ADR 0038's bounce stands for a gate neither reading prices, and a bounced
+  note still signs nothing.
+- **The test Login.** A credential gate whose text names a Claude Login and no env name passes when every Login it
+  names is one of the machine's declared test Logins: `[defaults] test_logins` in `~/.config/thread/rollouts.toml`
+  (rollout-settings.py, schema 5), one line, operator-only (ADR 0063 d1's rule: no agent or script writes it, since an
+  agent could otherwise widen its own approval; tune.py refuses an edit that changes it). It fails closed: a deny word
+  (a `live` before a probe, run or test excepted), an env name, another credential beside it, a plural `Logins`, a
+  Login it cannot name or one not declared asks. It reads no limit, ledger or month line, is machine-wide (a Leg
+  signs one), and is annotated `(approved <date> under the standing approval: test Login <name>, from <source>)`.
+  The built-in is [] (off): the plugin is public, so a hard-coded `dummy` was rejected. Lachy adds `test_logins =
+  ["dummy"]` (with `schema = 5`) by hand, after installing the release that knows the key and running the reader
+  check rollout-settings.py's header names; until then the Login gate asks as before.
+
+Accepted residuals, each safe because the cap is the implementer's ceiling (the engine's GATED_INPUTS_CHECK: blowing
+it is a verifier or review failure) and the annotation records the total exposure:
+
+- (i) In the cap-only reading, outside the clause, widening words, `%`, multipliers, periods, rates that are no
+  per-unit word and bare numbers are waived (`soft probe`, `3 runs`, `plus 20%`, `×3`, `each night`).
+- (ii) Inside the clause, digits, number words and bare unit nouns that are no per-unit noun are waived: `cap 1 USD
+  for 3 runs`, `10k tokens` and `for both probes` read as the cap, a total.
+- (iii) A non-adjacent rate whose unit is not on UNIT_NOUNS (`per generated image`) reads x1 in either clause reading,
+  as `an image` does today.
+- (iv) An `each such call`-style rate outside the clause reads x1 in the full reading, the value the cap-only reading
+  gives anyway.
+- (v) A judge-less mid-run gate (ADR 0038's second reason) now signs at its cap plus its amounts; the per-Login gate
+  behind a comma (its first) still asks, on 7(ix).
+- (vi) The test-Login reading asks falsely, fail closed, on `access` or `token` beside the Login (`access to the dummy
+  Claude Login`, `the dummy Claude Login's session token`), on an account, key, API, PAT or `.env` anywhere on the
+  gate's line, and on a `live` before anything but a probe, run or test. Schedule and orient's Planner line (a
+  follow-on) words the gate to avoid them.

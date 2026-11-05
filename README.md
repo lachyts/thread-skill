@@ -91,7 +91,10 @@ installing a version that knows the key, because an older `rollout-settings.py`
 refuses it, and every rollout's settings with it. The same limit is also a
 calendar-month line: a gate it covers still reaches you once this month's
 standing approvals, summed from every rollout note's `## Needs-you log`, would
-pass it with that gate. Spend is never asked ahead of a run.
+pass it with that gate. Spend is never asked ahead of a run. A gate whose
+wording the full exposure reading cannot price is priced from its stated cap
+alone (the cap times its count, plus every other USD amount it names), so
+only a gate with no readable cap, or one over the line, reaches you.
 `skills/_shared/scripts/gated_inputs.py` holds the exposure reading it applies
 and schedule's gated-input sweep.
 
@@ -116,6 +119,25 @@ later reaches the next build. The gate is signed only when each key it
 names is in the file with its declared prefix or project; a missing key reaches
 you at the stop, by name. The class is its own switch, independent of
 `spend_approval_usd`: it signs at the built-in 0 too.
+
+A credential gate naming only a declared test Login, such as a dummy Claude
+Login kept for probes, signs itself too. Declare it as ONE line under
+`[defaults]`, with `schema = 5` at the top of the file, by hand and only after
+installing a release that knows the key (an older snapshot ignores it; a
+pre-P29 reader refuses the `schema` line, so check each live rollout's engine
+root reads the new file first):
+
+```toml
+schema = 5
+
+[defaults]
+test_logins = ["dummy"]
+```
+
+Then run `python3 skills/_shared/scripts/rollout-settings.py` to check it reads:
+it prints `"test_logins": {"value": ["dummy"], "source": "file:defaults"}`. It is
+operator-only: no skill or script writes it. A gate that names anything beside
+the Login (a token, an API key, another account, a live account) still asks.
 
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a
