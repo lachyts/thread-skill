@@ -1243,6 +1243,8 @@ function check({ status, repair, execute, fx }) {
   // gitEnvHold entry, a non-empty mainRed; the undecided UNVERIFIED is first-match's); a lane-only trip or an
   // undecided RACE holds only the lane, so it is reported and handed off, check-all's exit 9 and resume's exit 3
   // going on.
+  // p37-5: the Run record's entry (record-entry --by repair, --by watchdog for a Watchdog recovery's repair) runs once,
+  // after the launch-directory check (a repair it stops hands off nothing, so the halt stays open) and before § 2.5.
   if (!ho.includes('no lead is live and no pause stands') ||
     !ho.includes('and never while a whole-rollout hold stands: a `gitEnvHold` entry with `scope: rollout` (a bare checkout; § 3e: report it and stop there), a non-empty `mainRed` (a RACE revert that did not land; § 3c: report it and stop there)') ||
     !ho.includes('A hold on the Integration lane alone never stops it (ADR 0046): a git-env trip with `scope: lane` (§ 3e) or an undecided RACE (§ 3c, its escalation shown) holds only the lane') ||
@@ -1253,6 +1255,9 @@ function check({ status, repair, execute, fx }) {
     !ho.includes("First the launch-directory check, execute § 2.8's snippet") ||
     !ho.includes('`self-rollout-check.sh --launch-check <Project root> <launch dir>`') ||
     !before(ho, '--launch-check', 'Then execute § 2.5') || !ho.includes('never `pwd`') ||
+    !collapse(ho).includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <rollout-note> --by repair || true`') ||
+    !collapse(ho).includes('`--by watchdog` instead when the Prompt that ran this repair leads with `Chorus: a Watchdog recovery`') ||
+    !before(ho, '--launch-check', 'record-entry') || !before(ho, 'record-entry', 'Then execute § 2.5') ||
     !ho.includes('exit 3, exit 2 or any other non-zero exit stops repair at the diagnosis, with no hand-off') ||
     !ho.includes('start a session in the Project root and run `/thread:execute [[<rollout>]]` there') ||
     !before(ho, 'execute § 2.5', '`reconcile-rollout.py resume`') ||
@@ -1996,6 +2001,16 @@ test("control: a hand-off without execute § 2.8's launch-directory check, or go
     'hand-off', 'exit 3 goes on')
   only(rp('start a session in\n  the Project root and run `/thread:execute [[<rollout>]]` there.', 'cd to the Project root.'),
     'hand-off', 'no remedy')
+})
+// p37-5: the hand-off's Run record entry, removed, or moved ahead of the launch-directory check.
+const HO_ENTRY = "Then the Run record's entry, once (execute § 2's first write, by pointer): " +
+  '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <rollout-note> --by repair || true`, ' +
+  'or `--by watchdog` instead when the Prompt that ran this repair leads with `Chorus: a Watchdog recovery` (execute § 4.5 ' +
+  "*Run record*'s table); an open halt's `lead-entry` reads `stop: halt`."
+test('control: a hand-off without its record-entry, or with it before the launch-directory check, fails hand-off', () => {
+  only(rp(` ${HO_ENTRY}`, ''), 'hand-off', 'no record-entry')
+  only({ repair: edit(edit(real.repair, ` ${HO_ENTRY}`, ''), "First the launch-directory check, execute § 2.8's snippet",
+    `${HO_ENTRY} First the launch-directory check, execute § 2.8's snippet`) }, 'hand-off', 'record-entry before the launch check')
 })
 test('control: a wave in status fails no-wave', () => {
   only(st('**Outside the count.**', 'Group by wave.\n\n**Outside the count.**'), 'no-wave', 'status wave')
