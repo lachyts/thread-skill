@@ -1296,11 +1296,12 @@ test('D17. slices --tasks keeps only the named gradeable tasks; --superseding ma
   const plain = ok(sl('plain', []))
   assert.deepEqual(plain.homes.map((h) => [h.project, h.tasks]), [['Pf', ['c', 'd1', 'd2', 'g', 'o', 'r', 'u']]])
   assert.deepEqual(fileTasks(plain), ['c', 'd1', 'd2', 'g', 'o', 'r', 'u'])
-  assert.deepEqual(plain.notGradeable, [{ slug: 'q', why: 'in flight' }, { slug: 's', why: 'in flight' },
-    { slug: 'zz', why: 'not in the scan' }])
+  // Each named task the scan holds carries its note; one with no note at all is `not in the scan`, with none.
+  assert.deepEqual(plain.notGradeable, [{ slug: 'q', why: 'in flight', note: 'Work/Tasks/q.md' },
+    { slug: 's', why: 'in flight', note: 'Work/Tasks/s.md' }, { slug: 'zz', why: 'not in the scan' }])
   const sup = ok(sl('sup', ['--superseding', 'prior']))
   assert.deepEqual(fileTasks(sup), ['c', 'd1', 'd2', 'g', 'o', 'q', 'r', 'u'])
-  assert.deepEqual(sup.notGradeable, [{ slug: 's', why: 'in flight' }, { slug: 'zz', why: 'not in the scan' }])
+  assert.deepEqual(sup.notGradeable, [{ slug: 's', why: 'in flight', note: 'Work/Tasks/s.md' }, { slug: 'zz', why: 'not in the scan' }])
   // gradeable and skipped still count the whole scan: x, co and uo are gradeable and named nowhere; e and s are skipped.
   assert.deepEqual([plain.gradeable, plain.skipped, sup.gradeable, sup.skipped], [10, 3, 11, 2])
   assert.ok(!fileTasks(sup).includes('x'), 'x is in no file')
@@ -2028,16 +2029,53 @@ sys.exit(m.main(sys.argv[2:]))`, DISPATCH, 'rank-stamp', '--rank', rank, '--plan
 })
 
 // ---- D17b. a task the scan could not read is named for its cause ---------------------------------------------------
-test('D17b. slices and preflight name a task whose frontmatter did not parse by the scan\'s why, never "not in the scan"', () => {
-  assert.equal(vfScanRun.status, 0, vfScanRun.stderr)
-  const scan = JSON.parse(fs.readFileSync(VF_SCAN, 'utf8'))
-  scan.skipped = [...(scan.skipped || []), { note: 'Work/Tasks/bk.md', why: 'frontmatter does not parse' },
-    { note: 'Work/Projects/Pf/bk.md', why: 'frontmatter does not parse (a project note, never a task)' }]
-  const patched = path.join(S, 'pf', 'scan-unread.json')
-  write(patched, JSON.stringify(scan))
-  const sl = ok(py(['slices', '--scan', patched, '--dir', path.join(S, 'pf', 'unread'), '--tasks', 'r,bk,zz']))
-  assert.deepEqual(sl.notGradeable, [{ slug: 'bk', why: 'frontmatter does not parse' }, { slug: 'zz', why: 'not in the scan' }])
-  pfRanked()
-  const pf = ok(preflight(['--tasks', 'r,bk'], VF_RANK, patched))
-  assert.deepEqual(pf.out.filter((o) => o.slug === 'bk').map((o) => [o.why, o.reason]), [['ungraded', 'frontmatter does not parse']])
+// Its own vault VU, planted for real: project Pf; ok (Ready); foo, whose next_action holds an unquoted `: ` on line 7
+// (chorus-p95-2's break, 2026-11-04); cf, a One call that depends on foo; and Archive/foo.md, a dangling symlink, an
+// unreadable namesake that must never shadow foo's why. The scan, the grades and the rank are the real ones.
+test('D17b. slices, rank and preflight name a task whose frontmatter did not parse by the scan\'s why, and its dependants leave', () => {
+  const VU = path.join(S, 'vu')
+  const UT = path.join(VU, 'Work', 'Tasks')
+  const task = (rest = '') => fm(`tags:\n  - task\nstatus: open\nprojects:\n  - "[[Pf]]"${rest}`)
+  write(path.join(VU, 'Work', 'Projects', 'Pf.md'), fm('tags:\n  - project\nstatus: active'))
+  write(path.join(UT, 'ok.md'), task())
+  write(path.join(UT, 'foo.md'), task('\nnext_action: Build A2 from the board: the name first'))
+  write(path.join(UT, 'cf.md'), task(links('depends-on', ['foo'])))
+  mkdir(path.join(UT, 'Archive'))
+  fs.symlinkSync(path.join(S, 'vu-gone.md'), path.join(UT, 'Archive', 'foo.md'))  // a moved file
+  const scanRun = spawnSync('python3', [SCAN, '--vault', VU, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(scanRun.status, 0, scanRun.stderr)
+  const scanFile = keep('vu-scan.json', scanRun.stdout)
+  const WHY = 'frontmatter does not parse (line 7, next_action)'
+  const FOO = 'Work/Tasks/foo.md'
+  assert.deepEqual(JSON.parse(scanRun.stdout).unreadTasks, [{ slug: 'foo', note: FOO, why: WHY }])
+  // slices: the scan's own why and the note, never `not in the scan`; that stays for a slug with no note at all.
+  const sl = ok(py(['slices', '--scan', scanFile, '--dir', path.join(S, 'vu-out', 'named'), '--tasks', 'ok,foo,zz']))
+  assert.deepEqual(sl.notGradeable, [{ slug: 'foo', why: WHY, note: FOO }, { slug: 'zz', why: 'not in the scan' }])
+  // orient-all's pass (no --tasks) counts it among the skipped, never drops it silently.
+  const all = ok(py(['slices', '--scan', scanFile, '--dir', path.join(S, 'vu-out', 'all')]))
+  assert.deepEqual([all.gradeable, all.skipped], [2, 1])
+  // rank: skipped `unreadable` with its reason and note, and the task that depends on it is held by it.
+  const grades = keep('vu-grades.json', JSON.stringify({ project: 'Pf', tasks: [R('ok', 'serial'), G('cf', 'One call', 'serial', { decisions: one() })] }))
+  const rankRun = spawnSync('python3', [RANK, 'rank', '--scan', scanFile, '--today', TODAY, '--grades', grades], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(rankRun.status, 0, rankRun.stderr)
+  const rk = JSON.parse(rankRun.stdout)
+  const rankFile = keep('vu-rank.json', rankRun.stdout)
+  assert.deepEqual(rk.skipped, [{ slug: 'foo', why: 'unreadable', reason: WHY, note: FOO }])
+  assert.deepEqual(rk.tasks.find((t) => t.slug === 'cf').blockedBy, [{ slug: 'foo', why: 'unreadable' }])
+  // preflight: out as `unreadable`, decided or not; cf leaves through it whatever Lachy would answer, so nothing is asked.
+  const OUT = [{ slug: 'foo', grade: null, why: 'unreadable', reason: WHY, note: FOO },
+    { slug: 'cf', grade: 'One call', why: 'dependency', via: 'foo', note: 'Work/Tasks/cf.md' }]
+  for (const more of [[], ['--decided', 'cf,foo']]) {
+    const j = ok(preflight(['--tasks', 'ok,foo,cf', ...more], rankFile, scanFile))
+    assert.deepEqual(j.queue, ['ok'], more.join(' '))
+    assert.deepEqual(j.out, OUT, more.join(' '))
+    assert.deepEqual([j.asks, j.index], [[], []], more.join(' '))
+    assert.equal(j.counts.ungraded, 1)
+  }
+  // A --dep on it behaves the same; a kept task never leaves, and its warning names the unread dependency.
+  const dep = ok(preflight(['--tasks', 'ok,foo', '--dep', 'ok=foo'], rankFile, scanFile))
+  assert.deepEqual([dep.queue, dep.out.map((o) => [o.slug, o.why, o.via ?? null])], [[], [['ok', 'dependency', 'foo'], ['foo', 'unreadable', null]]])
+  const kept = ok(preflight(['--tasks', 'ok,foo', '--kept', 'ok', '--dep', 'ok=foo'], rankFile, scanFile))
+  assert.deepEqual([kept.queue, kept.warnings], [['ok'], ['[[ok]] keeps its place (a carried task that has started) but depends on ' +
+    '[[foo]], which this rollout leaves out']])
 })

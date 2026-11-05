@@ -86,10 +86,12 @@ scan's project order, holding {project (the scan row), tasks[] (its gradeable sc
 rows whose declared paths meet the project's `repos:`), today}. It creates D; any target file that already exists is
 exit 2 with nothing written. Prints {homes[] {project, note, file, tasks}, gradeable, skipped}. --tasks (schedule
 § 1.5's graded set) keeps only the named tasks that are gradeable, matched by ER.slug_key, so a home with none gets
-no file, and adds notGradeable[] {slug, why}, in the order named: each named task that is not gradeable, why the
-Ranker's skip reason (`unhomed`, `in flight`, `hold`) or `not in the scan`. --superseding passes the prior to the
-Ranker, so a carried task still queued is gradeable (ER's Gradeable exception). gradeable and skipped count the whole
-scan either way. With neither flag (orient-all § 2) the output is as it always was.
+no file, and adds notGradeable[] {slug, why, note?}, in the order named: each named task that is not gradeable, why the
+Ranker's skip reason (`unhomed`, `in flight`, `hold`), the scan's own why for a task note it could not read (its
+unreadTasks[], which the Ranker folds in: `frontmatter does not parse (line N, <key>)`, say), or `not in the scan` for
+a slug that names no note; note is the task's vault path whenever the scan row or the unread row has one.
+--superseding passes the prior to the Ranker, so a carried task still queued is gradeable (ER's Gradeable exception).
+gradeable and skipped count the whole scan either way, skipped each unread task too (the Ranker's `unreadable`). With neither flag (orient-all § 2) the output is as it always was.
 
 rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round, cut to N minutes.
   Sign-offs: each scan rollout summary's `pendingSignOffs` (with a null summary, the scan's open tasks at status
@@ -342,6 +344,8 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   - graded Ready (the rank's tasks[]): in, `ready`;
   - One call or Grill: in when decided (`decided`), else out (`undecided`);
   - Orient: out (`orient`, with its `home`), decided or not;
+  - not readable (the scan's unreadTasks[], a key no scan task holds): out (`unreadable`, its reason the scan's why
+    and its note), decided or not; no schedule can stamp a note that does not parse;
   - not graded (the rank's invalid[], ungraded[] or skipped[], or no scan row): ungraded, its reason `invalid: <the
     errors>`, the rank's why (`no grade`, a skip reason) or `not in the scan`, with STATUS_OUTSIDE in place of a skip
     reason `in flight` or `hold` when the scan row's statusClass is `hold` (its own status is the cause: a carried
@@ -349,13 +353,13 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
     stands`), else out (`ungraded`).
   The Dependent closure, in two steps. The edges are each candidate's scan `dependsOn`, matched by ER.slug_key among
   the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose dependency is out gives
-  one warnings[] line naming them. First what leaves whatever Lachy answers: every candidate that depends on an
-  Orient one, directly or through others, leaves as `dependency` (Ready, decided, undecided or ungraded alike), via
-  its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a dependency is out:
-  `dependency`, via the first such dependency.
+  one warnings[] line naming them. First what leaves whatever Lachy answers (LEAVES): every candidate that depends on
+  an Orient or unreadable one, directly or through others, leaves as `dependency` (Ready, decided, undecided or
+  ungraded alike), via its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a
+  dependency is out: `dependency`, via the first such dependency.
   The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
-  so never a task already out through an Orient dependency, which leaves whatever the answer: the One calls in rank
-  order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), each text
+  so never an unreadable task nor one already out through an Orient or unreadable dependency, which leaves whatever the
+  answer: the One calls in rank order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), each text
   followed by its `goal` when it has one and NOTE_INVITE (framing(), as rounds), then the ungraded in --tasks order
   (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as it stands? <NOTE_INVITE>`,
   UNGRADED_OPTIONS, `Leave it out` recommended, its description and UNGRADED_WHY saying why over his autonomy). Only
@@ -418,6 +422,9 @@ UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that de
 UNGRADED_WHY = ("nobody could read it for a decision of yours; queued unread it can build the wrong thing, and quality "
                 "over speed outweighs one schedule's wait")
 STATUS_OUTSIDE = "status outside Active"  # an ungraded candidate's reason when its own status is the cause
+# The Pre-flight whys that leave whatever Lachy answers, with their Dependent closure: an Orient task (ADR 0047), and a
+# task whose note the scan could not read, which no schedule can stamp.
+LEAVES = ("orient", "unreadable")
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
@@ -841,9 +848,16 @@ def cmd_slices(args):
             seen.add(key)
             slug = ranker.lower.get(key)
             if slug is None:
-                not_gradeable.append({"slug": raw, "why": unread_tasks(scan, M.ER.slug_key).get(key, "not in the scan")})
+                not_gradeable.append({"slug": raw, "why": "not in the scan"})
             elif slug not in ranker.home:
-                not_gradeable.append({"slug": slug, "why": ranker.skip[slug]})
+                # A task the scan could not read carries the scan's why (`frontmatter does not parse (line N, key)`),
+                # any other its skip reason; each its note.
+                unread = ranker.unread.get(slug)
+                row = {"slug": slug, "why": unread["why"] if unread else ranker.skip[slug]}
+                note = (unread or ranker.tasks.get(slug) or {}).get("note")
+                if isinstance(note, str):
+                    row["note"] = note
+                not_gradeable.append(row)
             else:
                 wanted.add(slug)
     by_home = {}
@@ -2351,24 +2365,6 @@ def cmd_log(args):
 
 # ---- preflight ---------------------------------------------------------------------------------------------------
 
-def unread_tasks(scan, key):
-    """Each task note the scan skipped, by its slug key, mapped to the scan's why (`frontmatter does not parse`, say),
-    so a task it could not read is named for what it is, never `not in the scan` (2026-11-04: chorus-p95-2, one
-    unquoted `: ` in its next_action, was put to Lachy as ungraded and left out of a rollout)."""
-    out = {}
-    for row in scan.get("skipped") or []:
-        note, why = row.get("note"), row.get("why")
-        if not isinstance(note, str) or not isinstance(why, str) or not note.endswith(".md"):
-            continue
-        parts = note.split("/")
-        if len(parts) != 3 or parts[:2] != ["Work", "Tasks"]:  # a task is a note directly in Work/Tasks, never Archive/
-            continue
-        k = key(parts[-1][:-3])
-        if k:
-            out.setdefault(k, why)
-    return out
-
-
 def decision_of(d):
     """A rank decision as the index carries it: question, options (the recommendation first), recommendation, and its
     why and fork when it has them."""
@@ -2386,7 +2382,6 @@ class Preflight:
     def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
         self.ER, self.rank, self.scan = ER, rank, scan
         key = ER.slug_key
-        self.unread = unread_tasks(scan, key)  # a task the scan skipped, by why (its frontmatter does not parse)
         self.rows = {}  # the rank's graded tasks by key, in rank order
         for t in rank["tasks"]:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
@@ -2395,6 +2390,14 @@ class Preflight:
         for t in scan["tasks"]:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
                 self.scanned.setdefault(key(t["slug"]), t)
+        # The scan's unreadTasks[]: task notes whose frontmatter it could not read, by key; a scan task's key wins.
+        self.unread = {}
+        unread = scan.get("unreadTasks")
+        for t in unread if isinstance(unread, list) else []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str) and isinstance(t.get("why"), str):
+                k = key(t["slug"])
+                if k and k not in self.scanned:
+                    self.unread.setdefault(k, t)
         self.listed = {}  # the rank's other lists: the why of a task it could not grade
         for t in rank.get("invalid") or []:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
@@ -2411,7 +2414,7 @@ class Preflight:
             k = key(raw)
             if k and k not in self.shown:
                 self.order.append(k)
-                row = self.scanned.get(k) or self.rows.get(k)
+                row = self.scanned.get(k) or self.rows.get(k) or self.unread.get(k)
                 self.shown[k] = row["slug"] if row else raw
         if not self.order:
             fail(2, "--tasks names no task")
@@ -2440,16 +2443,17 @@ class Preflight:
                 self.edges[ka].append(kb)
 
     def note_of(self, k):
-        row = self.scanned.get(k) or self.rows.get(k) or {}
+        row = self.scanned.get(k) or self.rows.get(k) or self.unread.get(k) or {}
         return row.get("note") if isinstance(row.get("note"), str) else None
 
     def reason(self, k):
         """Why a candidate could not be graded: the rank's why, else `no grade` or `not in the scan`. A task whose own
         status is outside Active (its scan statusClass `hold`) is skipped by the ranker as `hold`, or as `in flight`
         when its `rollout:` is live: a carried task at an empty status, which carry queues but ES.still_to_start does
-        not, as it reads `open` alone. Either way the real cause is its status, so it is named STATUS_OUTSIDE."""
+        not, as it reads `open` alone. Either way the real cause is its status, so it is named STATUS_OUTSIDE. A task the
+        scan could not read never comes here: run() puts it out as `unreadable`, its reason the scan's why."""
         row = self.scanned.get(k)
-        why = self.listed.get(k) or ("no grade" if row else self.unread.get(k, "not in the scan"))
+        why = self.listed.get(k) or ("no grade" if row else "not in the scan")
         if why in ("in flight", "hold") and row and row.get("statusClass") == "hold":
             return STATUS_OUTSIDE
         return why
@@ -2475,6 +2479,8 @@ class Preflight:
             e = {"slug": self.shown[k], "grade": grade, "decided": k in self.decided}
             if k in self.kept:
                 e.update({"in": True, "why": "kept"})
+            elif k in self.unread:  # no schedule can stamp a note that does not parse, so it is out, decided or not
+                e.update({"in": False, "why": "unreadable", "reason": self.unread[k]["why"]})
             elif grade == "Ready":
                 e.update({"in": True, "why": "ready"})
             elif grade in ("One call", "Grill"):
@@ -2486,12 +2492,12 @@ class Preflight:
                 e.update({"in": k in self.decided, "why": "queued as it stands" if k in self.decided else "ungraded",
                           "reason": reason})
             entry[k] = e
-        # The Dependent closure, in two steps. First what leaves whatever Lachy answers: the Orient candidates and
-        # every task that depends on one, directly or through another, whatever its grade or answer. Those are out as
-        # `dependency` before the round is built, so none of them is asked.
-        fixed = self.closure(k for k in self.order if entry[k]["why"] == "orient")
+        # The Dependent closure, in two steps. First what leaves whatever Lachy answers: the Orient and unreadable
+        # candidates (LEAVES) and every task that depends on one, directly or through another, whatever its grade or
+        # answer. Those are out as `dependency` before the round is built, so none of them is asked.
+        fixed = self.closure(k for k in self.order if entry[k]["why"] in LEAVES)
         for k in self.order:
-            if k in fixed and entry[k]["why"] != "orient":
+            if k in fixed and entry[k]["why"] not in LEAVES:
                 entry[k].update({"in": False, "why": "dependency", "via": self.via(k, fixed)})
         # Then the rest: a task that is in leaves when a dependency is out (one undecided or ungraded included).
         out = self.closure(k for k in self.order if not entry[k]["in"])
