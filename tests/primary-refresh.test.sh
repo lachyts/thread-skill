@@ -53,7 +53,13 @@ mode_of() { python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.a
 
 # ---- the ntfy stub ----------------------------------------------------------------------------------------------
 cat > "$tmp/ntfy-stub.py" <<'PY'
-import http.server, json, os, sys
+import http.server, json, os, socket, socketserver, sys
+# The stub makes no name lookup: HTTPServer's own server_bind runs getfqdn (a reverse lookup of 127.0.0.1) before the port
+# is written, and on the macOS runner that lookup outlasted the port wait (PR #308, twice), so every notice arm saw no
+# POST. A lookup anywhere in the stub is an error on every platform, not only in CI.
+def no_lookup(*a):
+    raise RuntimeError("ntfy stub: a name lookup of %r" % (a,))
+socket.getfqdn = socket.gethostbyaddr = no_lookup
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -69,7 +75,11 @@ open(sys.argv[1] + ".tmp", "w").write(str(s.server_address[1])); os.replace(sys.
 s.serve_forever()
 PY
 python3 "$tmp/ntfy-stub.py" "$tmp/port" & stub_pid=$!
-i=0; while [ ! -s "$tmp/port" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+i=0; while [ ! -s "$tmp/port" ] && kill -0 "$stub_pid" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done
+[ -s "$tmp/port" ] || {
+  echo "FAIL - the ntfy stub wrote no port ($(kill -0 "$stub_pid" 2>/dev/null && echo 'still starting after 30 s' || echo 'it exited')): every notice arm needs it"
+  exit 1
+}
 SERVER="http://127.0.0.1:$(cat "$tmp/port")"
 
 # ---- fixtures -------------------------------------------------------------------------------------------------------
