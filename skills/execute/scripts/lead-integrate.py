@@ -84,7 +84,11 @@ Subcommands:
       run counts against W (the first pass always tries once, a re-queue only while W remains), so verify still ends
       within W + S plus one kill grace. When W runs out on a heat hold or after a heat stop: O.rc reads `heat`, the log
       says `verify: no verdict: the Mac was too hot (heat: <name>) within Ws; verifier not run to a verdict (rc
-      heat)`, the exit is 76: no verdict, never red. The log keeps every attempt.
+      heat)`, the exit is 76: no verdict, never red. The log keeps every attempt. The Capacity stop (verify-slot.py
+      contract 7, p36-10: a fresh capacity.json's `signals.stop_suites` true) takes the same path, its label in place
+      of the heat's: `verify: waiting (memory: critical)`, `verify: capacity stop (memory: critical) during the <step>:
+      …; back in line`, and `verify: no verdict: the Capacity stopped suites (memory: critical) within Ws; …`, still
+      O.rc `heat` (exit 76) and a suite ended `heat`.
       --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
       the attempt's lock, ADR 0052) changes one thing and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
@@ -911,7 +915,7 @@ class _Signalled(Exception):
         self.signum = signum
 
 
-_live = {"proc": None, "heat": None}   # the live step; "heat": the level a heat stop read (verify-slot.py, contract 7)
+_live = {"proc": None, "heat": None}   # the live step; "heat": the hold a stop read (verify-slot.py, contract 7)
 
 
 def _on_signal(signum, _frame):
@@ -971,8 +975,8 @@ def _run_guarded(cmd, tree, log, deadline, slot, heat=False, env=None):
     """A slotted step: `bash -c cmd` under verify-slot.py's guard, which shares the slot's lock and ends the step's
     group if verify dies by any means. Guarded holds SIGNALS across its spawn and records itself in `_live` inside
     that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT. With
-    `heat`, the Heat hold's stop (verify-slot.py contract 7) watches it too: VS.HEAT_STOPPED, the level in
-    `_live["heat"]`."""
+    `heat`, the Heat hold's stop (verify-slot.py contract 7, the Capacity stop's included) watches it too:
+    VS.HEAT_STOPPED, the hold (the heat level, or the Capacity stop's label) in `_live["heat"]`."""
     g = VS.Guarded(["bash", "-c", cmd], hold=slot, on_spawn=lambda x: _live.__setitem__("proc", x), cwd=tree,
                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env or ENV)
     try:
@@ -1202,8 +1206,8 @@ def cmd_verify(args):
             # reruns from the beginning, under a fresh deadline. Every slot wait, heat hold and heat-stopped run counts
             # against W (t0 is taken before the first acquire), and a pass starts only while W remains.
             t0 = time.monotonic()
-            why = {"heat": None}   # acquire's: the level that held its last poll, or None
-            stopped = None         # the heat name of the last heat stop
+            why = {"heat": None}   # acquire's: the hold of its last poll (a heat level or a Capacity label), or None
+            stopped = None         # the hold of the last stop (the heat level, or the Capacity stop's label)
             first = True
             while True:
                 # Each pass starts clean: no verdict, no step or signal, no live step, no slot, no Flake record.
@@ -1232,8 +1236,8 @@ def cmd_verify(args):
                     else:
                         if slot is None:
                             if why["heat"] is not None or stopped is not None:
-                                name = VS.heat_name(why["heat"]) if why["heat"] is not None else stopped
-                                note(f"verify: no verdict: the Mac was too hot (heat: {name}) within "
+                                h = why["heat"] if why["heat"] is not None else stopped
+                                note(f"verify: no verdict: {VS.while_words(h, hot='the Mac was too hot')} within "
                                      f"{args.slot_wait:g}s; verifier not run to a verdict (rc heat)")
                                 rc = "heat"
                                 result["ended"] = "heat"
@@ -1303,9 +1307,9 @@ def cmd_verify(args):
                                     result.update(ended="deadline", step=name)
                 if heat_step is None:   # only a watched step (a slot held) is ever heat-stopped
                     break
-                stopped = VS.heat_name(_live["heat"])
-                note(f"verify: heat stop ({stopped}) during the {heat_where or heat_step}: stopped its process group, "
-                     "no verdict; back in line")
+                stopped = _live["heat"]
+                note(f"verify: {VS.stop_words(stopped)} during the {heat_where or heat_step}: stopped its process "
+                     "group, no verdict; back in line")
                 if rec is not None:
                     # p29-10: the heat-stopped pass's suite ends `heat` (no verdict, no rc) once its slot is released,
                     # with stops held for the write, so a stop meanwhile ends no suite twice; the next pass is a suite
@@ -2533,7 +2537,7 @@ def main(argv=None):
                     "rollouts.toml (p34-1), else the built-in 2 with a WARN in the log")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "
                     "slotWait), heat holds and heat-stopped runs included; none in time is rc `noslot`, exit 75, or "
-                    "`heat`, exit 76, when the Mac was too hot")
+                    "`heat`, exit 76, when the Mac was too hot or the Capacity stopped suites")
     vf.add_argument("--rollout", default=None, help="the rollout note: record the suite in its Run record (p29-10)")
     vf.add_argument("--slug", default=None, help="with --rollout: the task the suite is for (none for a completion suite)")
     vf.add_argument("--diff-base", default=None, help="the Flake check (ADR 0050): the rev the task's diff is read from "

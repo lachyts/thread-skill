@@ -14,9 +14,10 @@ count themselves when given no --slots (p34-1). This header is the one copy of t
 
 Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
 `next` for the heat reading): slots_dir(), SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(),
-held_by(), heat_level(), heat_name(), KILL_GRACE, REAP_WAIT, GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP,
-HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED, HELD_ENV, configured_slots(), SETTINGS_PY,
-RESOLVE_TIMEOUT, TOML_PYTHONS, TOML_ENV, BUILT_IN_SLOTS, QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS, HEAD_AGE.
+held_by(), heat_level(), heat_name(), capacity_stop(), hold_why(), stop_words(), while_words(), KILL_GRACE, REAP_WAIT,
+GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP, HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE,
+HEAT_STOPPED, HELD_ENV, configured_slots(), SETTINGS_PY, RESOLVE_TIMEOUT, TOML_PYTHONS, TOML_ENV, BUILT_IN_SLOTS,
+QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS, HEAD_AGE.
 
 The pool. `slot-0.lock` … `slot-(N-1).lock` in
 `${THREAD_VERIFY_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/verify-slots}` (run_record.py's
@@ -123,6 +124,24 @@ Contract.
    Residuals: a command that exits after the settle check, inside the guard's last poll (at most one GUARD_POLL),
    reads as heat-stopped and is rerun (no verdict, never red); a copy of this script from before the Heat hold
    (another rollout's Engine snapshot, an older plugin install) shares the pool and still runs hot.
+   The Capacity stop (p36-10, ADR 0067 d8; execute away.md § Capacity): memory critical, read from a fresh
+   capacity.json's `signals.stop_suites` (Chorus sets it at memory critical, or at thermal trapping) through
+   capacity_stop(), holds and stops slotted suites exactly as trapping does. While it is JSON true, no slot is free
+   (as at heavy: no slot tried, no line reaped, the heartbeat kept, the head-age clock counting, a priority waiter
+   keeping its waiter file; `waiting (<label>)`), and a running slotted suite is stopped at the same watch tick (the
+   same HEAT_SETTLE, stop() and re-queue; `verify-slot: capacity stop (<label>): ended the suite after Ns; no verdict,
+   never red: back in line to restart from the beginning once the Capacity stop clears`). The label is `memory:
+   critical` when `signals.memory` is an integer of at least 4, else `capacity: stop_suites` (Chorus saw thermal
+   trapping notifyutil did not). Its no-verdict lines name it in place of the heat: `verify-slot: no verdict:
+   stopped while the Capacity stopped suites (<label>); exit 76` and `… no verify slot within <S>s (<label>); exit
+   76`; the Run record ends its suite `heat` and lead-integrate.py's verify reads `heat` (exit 76), so the outcome
+   vocabulary is unchanged. The heat is read first, so at heavy or worse the heat holds and at trapping or worse a
+   stop is a heat stop, its lines unchanged; acquire() reads capacity.json once per poll that the heat does not
+   hold, for both the stop and contract 10's eff. Fails open: a missing, stale or unreadable file, a flag that is
+   anything but JSON true, or a capacity.py that will not load stops nothing. Residuals: the hold and the stop share
+   one threshold (no hysteresis, as heat has), so a suite whose own memory tips the Mac critical can cycle stop and
+   restart, each no verdict, bounded by its one slot-wait deadline; and a copy of this script from before p36-10
+   shares the pool and never stops for memory.
 8. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
    such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
    suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
@@ -175,6 +194,7 @@ Contract.
    stale or unreadable file, a capacity.py that will not load) reads N. So it only ever lowers today's pool: every
    slot is scanned (none taken while held + need passes min(N, C)), a C below the slots already held blocks new
    acquirers, priority ones included, and never stops a holder. The waiting line then adds `; the Capacity allows C`.
+   C never stops a holder; only the Capacity stop (contract 7, capacity_stop(), from the same reading) does.
 
 `run [--slots N] [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot, in
 line behind the Integration waiters and the runs that came first (contract 5): `verify-slot: waiting for one of N verify
@@ -184,7 +204,9 @@ beside the Integration waiters` once, when its age bound starts; `verify-slot: s
 runs CMD under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is
 hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop
 (<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
-cools`, and the exit is the last run's rc. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
+cools`, and the exit is the last run's rc. The Capacity stop (contract 7) does the same with its label: `verify-slot:
+waiting (memory: critical)` and `verify-slot: capacity stop (memory: critical): …`, and its no-verdict lines name it
+in place of the heat. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
 integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default
 `verify_timeout` of 1800 s, max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify
 does; a constant, never a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for
@@ -210,10 +232,10 @@ not load; an answer with no integer `verify_slots` >= 1) is the built-in BUILT_I
 
 `status [--slots N]` reaps stale waiter and line files and prints {dir, slots: [{index, state: free|held, holder}],
 waiters: [{pid, cwd, since, kind}], queue: [{pid, cwd, since, kind, asleep}] (the line, first in line first),
-verify_slots: {value, source}, heat: {level, name}}. With --slots N it lists slots 0
-to N-1, source `--slots`; without, N is read as `run` reads it (its WARN on stderr, and status still exits 0; source
-`file:defaults`, `built-in` or `fallback`) and it lists slots 0 to N-1 and any other slot file present. Stdlib only,
-POSIX.
+verify_slots: {value, source}, heat: {level, name}, capacityStop: <label>|null (contract 7)}. With --slots N it
+lists slots 0 to N-1, source `--slots`; without, N is read as `run` reads it (its WARN on stderr, and status still
+exits 0; source `file:defaults`, `built-in` or `fallback`) and it lists slots 0 to N-1 and any other slot file present.
+Stdlib only, POSIX.
 """
 
 import errno
@@ -783,9 +805,9 @@ def _open_slot(d, k):
 _CAPACITY_MOD = None
 
 
-def _capacity_slots(slots):
-    """min(slots, C) for a fresh capacity.json (contract 10), else slots: capacity.py read once per call, never
-    raising (any failure reads slots)."""
+def _capacity_reading():
+    """capacity.py's read() now (contract 10 and the Capacity stop, contract 7), or None when capacity.py (beside
+    SCRIPT, loaded once) will not load or its read fails. Never raises."""
     global _CAPACITY_MOD
     try:
         if _CAPACITY_MOD is None:
@@ -796,11 +818,60 @@ def _capacity_slots(slots):
             spec.loader.exec_module(mod)
             _CAPACITY_MOD = mod
         reading = _CAPACITY_MOD.read(datetime.now().astimezone())
-        if reading["file"] == "fresh":
+        return reading if isinstance(reading, dict) else None
+    except Exception:  # noqa: BLE001 — a reading that fails reads as none: no lowering, no stop
+        return None
+
+
+def _capacity_slots(slots, reading):
+    """min(slots, C) for a fresh reading (contract 10), else slots: never raising (any failure reads slots)."""
+    try:
+        if reading is not None and reading["file"] == "fresh":
             return min(slots, max(1, int(reading["capacity"])))
     except Exception:  # noqa: BLE001 — a reading that fails reads the configured slots: it only ever lowers them
         pass
     return slots
+
+
+def _suite_stop(reading):
+    """capacity.py's suite_stop(reading): the Capacity stop's label (a non-empty str), else None. Never raises."""
+    if reading is None:
+        return None
+    try:
+        label = _CAPACITY_MOD.suite_stop(reading)
+    except Exception:  # noqa: BLE001 — a capacity.py with no suite_stop, or one that raises, stops nothing
+        return None
+    return label if isinstance(label, str) and label else None
+
+
+def capacity_stop(reading=None):
+    """The Capacity stop (contract 7): None, or its label (`memory: critical`, or `capacity: stop_suites` when Chorus
+    saw thermal trapping notifyutil did not) while a fresh capacity.json's `signals.stop_suites` is JSON true. With no
+    `reading` it reads the file itself. Fails open: a missing, stale or unreadable file, any other value of the flag, or
+    a capacity.py that will not load is None."""
+    return _suite_stop(reading if reading is not None else _capacity_reading())
+
+
+def hold_why(h):
+    """A hold's words (contract 7): `heat: <name>` for a heat level (an int), the Capacity stop's label (a str) as it
+    is."""
+    return h if isinstance(h, str) else f"heat: {heat_name(h)}"
+
+
+def stop_words(h):
+    """A stop's words (contract 7): `heat stop (<name>)` for a heat level, `capacity stop (<label>)` for the Capacity's."""
+    return f"capacity stop ({h})" if isinstance(h, str) else f"heat stop ({heat_name(h)})"
+
+
+def while_words(h, hot="the Mac was hot"):
+    """What held a run that ended with no verdict (contract 7): `<hot> (heat: <name>)` for a heat level, `the Capacity
+    stopped suites (<label>)` for the Capacity's."""
+    return f"the Capacity stopped suites ({h})" if isinstance(h, str) else f"{hot} ({hold_why(h)})"
+
+
+def _until_words(h):
+    """When a stopped suite restarts (contract 7): once the Mac cools, or once the Capacity stop clears."""
+    return "once the Capacity stop clears" if isinstance(h, str) else "once the Mac cools"
 
 
 def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None,
@@ -819,10 +890,13 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
     the holders. SlotDirError when the dir is unusable (checked before any heat reading).
     The Heat hold (contract 7): each poll reads heat_level() first; at HEAT_HOLD or worse it tries no slot (a miss),
     and on_wait gets `waiting (heat: <name>)`, said at the first miss, whenever the holding reason changes (another
-    heat name, or a switch between heat and slots) and every REMIND_EVERY seconds. `why`, a dict the caller keeps,
-    gets "heat": the level each poll that heat held, else None. max_wait bounds the whole wait, heat included.
-    The Capacity (contract 10): each poll that is not heat-held reads eff = min(slots, C) (_capacity_slots), scans every
-    slot, and takes one only while eff - (the slots held) >= need."""
+    heat name, or a switch between heat and slots) and every REMIND_EVERY seconds. Below HEAT_HOLD it reads
+    capacity.json once (_capacity_reading), and the Capacity stop holds the poll the same way (capacity_stop: no slot
+    tried, no line reaped, `waiting (<label>)`, e.g. `waiting (memory: critical)`). `why`, a dict the caller keeps,
+    gets "heat": the hold of each poll held, the level (an int) for the heat or the label (a str) for the Capacity
+    stop (hold_why() renders either), else None. max_wait bounds the whole wait, holds included.
+    The Capacity (contract 10): each poll that is not held reads eff = min(slots, C) (_capacity_slots) from that same
+    reading, scans every slot, and takes one only while eff - (the slots held) >= need."""
     if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:
         raise ValueError(f"slots must be an integer >= 1, got {slots!r}")
     d = where or slots_dir()
@@ -856,14 +930,17 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                 except OSError:
                     pass
             level = heat_level()
-            hot = level >= HEAT_HOLD
+            # The heat first; below heavy, one capacity.json reading gives both the Capacity stop and eff.
+            reading = None if level >= HEAT_HOLD else _capacity_reading()
+            hold = level if level >= HEAT_HOLD else _suite_stop(reading)
+            hot = hold is not None
             if why is not None:
-                why["heat"] = level if hot else None
+                why["heat"] = hold
             ahead = inline = 0
             got, held = [], []
             eff = slots
             if not hot:
-                eff = _capacity_slots(slots)
+                eff = _capacity_slots(slots, reading)
                 live = _scan_waiters(d)
                 if priority:
                     need = 1
@@ -907,7 +984,7 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
             if not priority and not joined:
                 joined = True
                 qfd, qpath, place = _join_line(d, kind, base)
-            reason = f"heat: {heat_name(level)}" if hot else "slots"
+            reason = hold_why(hold) if hot else "slots"
             if on_wait is not None and (told is None or reason != told_reason or now - told >= REMIND_EVERY):
                 if hot:
                     on_wait(f"waiting ({reason})")
@@ -977,7 +1054,7 @@ class Guarded:
         self.group = None
         self.proc = None
         self._death = None
-        self.heat = None   # the level a heat stop read (watch)
+        self.heat = None   # the hold a stop read (watch): the heat level, or the Capacity stop's label
         death_r, death_w = os.pipe()
         rep_r, rep_w = os.pipe()
         fds = [death_r, rep_w]
@@ -1057,7 +1134,9 @@ class Guarded:
         the poll base it reads heat_level(); at HEAT_STOP or worse it first gives the guard HEAT_SETTLE to exit by
         itself (a command that already ended: the guard reaps its child within one GUARD_POLL), and keeps that rc,
         never calling stop(); only a guard still there is stopped (stop(): TERM, KILL_GRACE, KILL, reaped), with the
-        level kept in `.heat`. Heavy never stops a suite. heat=False is exactly wait(timeout)."""
+        level kept in `.heat`. Heavy never stops a suite. Below HEAT_STOP it reads capacity_stop() at the same tick: a
+        label stops the suite the same way, the label kept in `.heat` (the heat is read first, so trapping is always a
+        heat stop). heat=False is exactly wait(timeout)."""
         if not heat:
             return self.wait(timeout)
         end = None if timeout is None else time.monotonic() + max(0.0, timeout)
@@ -1070,13 +1149,13 @@ class Guarded:
             except subprocess.TimeoutExpired:
                 if end is not None and time.monotonic() >= end:
                     return None
-                level = heat_level()
-                if level < HEAT_STOP:
+                hold = _stop_reading()
+                if hold is None:
                     continue
                 try:
                     rc = self.proc.wait(HEAT_SETTLE)
                 except subprocess.TimeoutExpired:
-                    self.heat = level
+                    self.heat = hold
                     self.stop()
                     return HEAT_STOPPED
             self.close()
@@ -1104,6 +1183,13 @@ class Guarded:
                     pass
             return 128 + signal.SIGKILL
         return self._after(rc)
+
+
+def _stop_reading():
+    """A running slotted suite's stop reading (contract 7): the heat level at HEAT_STOP or worse, else the Capacity
+    stop's label, else None. The heat is read first, so at trapping the heat stop wins."""
+    level = heat_level()
+    return level if level >= HEAT_STOP else capacity_stop()
 
 
 def _guard(death_fd, report_fd, argv):
@@ -1297,11 +1383,11 @@ def _acquire_within(slots, prio, why, wait, t_end, first):
 
 
 def _no_slot(wait, why, stopped):
-    """A slot wait that ran out (p32-1): its no-verdict line, naming the heat that held its last poll, else its last heat
-    stop's; HEAT_EXIT, no verdict and never red."""
-    name = heat_name(why["heat"]) if why["heat"] is not None else stopped
-    heat = f" (heat: {name})" if name else ""
-    _say(f"no verdict: no verify slot within {wait}s{heat}; exit {HEAT_EXIT}")
+    """A slot wait that ran out (p32-1): its no-verdict line, naming the hold (the heat, or the Capacity stop) that held
+    its last poll, else its last stop's; HEAT_EXIT, no verdict and never red."""
+    h = why["heat"] if why["heat"] is not None else stopped
+    held = f" ({hold_why(h)})" if h is not None else ""
+    _say(f"no verdict: no verify slot within {wait}s{held}; exit {HEAT_EXIT}")
     return HEAT_EXIT
 
 
@@ -1313,8 +1399,8 @@ def cmd_run(argv):
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
-    why = {"heat": None}   # acquire's: the level that held the last poll, or None
-    stopped = None         # the heat name of the last heat stop
+    why = {"heat": None}   # acquire's: the hold of the last poll (a heat level, or the Capacity stop's label), or None
+    stopped = None         # the hold of the last stop (the heat level, or the Capacity stop's label)
     slot = None
     rc = None
     try:
@@ -1349,9 +1435,9 @@ def cmd_run(argv):
             slot.release()
             slot = None
             box["g"] = None
-            stopped = heat_name(g.heat)
-            _say(f"heat stop ({stopped}): ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never red: "
-                 "back in line to restart from the beginning once the Mac cools")
+            stopped = g.heat
+            _say(f"{stop_words(stopped)}: ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never red: "
+                 f"back in line to restart from the beginning {_until_words(stopped)}")
     except _Signalled as s:
         for sig in SIGNALS:
             signal.signal(sig, signal.SIG_IGN)
@@ -1359,9 +1445,9 @@ def cmd_run(argv):
             box["g"].stop()
             rc = 128 + s.signum
         elif why["heat"] is not None or stopped is not None:
-            # Stopped while held for the heat, or back in line after a heat stop: no verdict, never red.
-            name = heat_name(why["heat"]) if why["heat"] is not None else stopped
-            _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
+            # Stopped while held for the heat or the Capacity stop, or back in line after a stop: no verdict, never red.
+            h = why["heat"] if why["heat"] is not None else stopped
+            _say(f"no verdict: stopped while {while_words(h)}; exit {HEAT_EXIT}")
             rc = HEAT_EXIT
         else:
             # Stopped before the guard spawned the suite (in the slot wait, or between the slot and the spawn): nothing
@@ -1394,8 +1480,8 @@ def _pump(g, capture, heat=False):
     exits, drain what is ready for at most DRAIN_FOR seconds, never waiting for EOF (a leftover background process may
     hold the pipes), close the pipes and return the command's rc as Guarded.wait does. With `heat`, the Heat hold's stop
     as Guarded.watch() (contract 7): while the guard runs it reads heat_level() every HEAT_POLL_FACTOR * the poll base;
-    at HEAT_STOP or worse it gives the guard HEAT_SETTLE to exit by itself (that rc is kept), else stops it, keeps the
-    level in `g.heat` and returns HEAT_STOPPED."""
+    at HEAT_STOP or worse, or on the Capacity stop below it, it gives the guard HEAT_SETTLE to exit by itself (that rc is
+    kept), else stops it, keeps the hold in `g.heat` and returns HEAT_STOPPED."""
     srcs = {g.proc.stdout.fileno(): 1, g.proc.stderr.fileno(): 2}
     until = None
     due = time.monotonic() + HEAT_POLL_FACTOR * _poll_base() if heat else None
@@ -1405,12 +1491,12 @@ def _pump(g, capture, heat=False):
             until = time.monotonic() + DRAIN_FOR
         if until is None and due is not None and time.monotonic() >= due:
             due = time.monotonic() + HEAT_POLL_FACTOR * _poll_base()
-            level = heat_level()
-            if level >= HEAT_STOP:
+            hold = _stop_reading()
+            if hold is not None:
                 try:
                     g.proc.wait(HEAT_SETTLE)
                 except subprocess.TimeoutExpired:
-                    g.heat = level
+                    g.heat = hold
                     g.stop()
                     stopped = True
                     break
@@ -1479,8 +1565,8 @@ def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
-    why = {"heat": None}   # acquire's: the level that held the last poll, or None
-    stopped = None         # the heat name of the last heat stop
+    why = {"heat": None}   # acquire's: the hold of the last poll (a heat level, or the Capacity stop's label), or None
+    stopped = None         # the hold of the last stop (the heat level, or the Capacity stop's label)
     slot = capture = None
     rc = signalled = None
     unspawned = False      # a stop before the guard spawned the suite: its suite-ended carries no rc
@@ -1523,12 +1609,12 @@ def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
             rc = _pump(g, capture, heat=slot is not None) if piped else g.watch(heat=slot is not None)
             if rc is not HEAT_STOPPED:
                 break
-            stopped = heat_name(g.heat)
+            stopped = g.heat
             # With stops held, so a stop meanwhile ends no suite twice: the slot released, then the heat-stopped run's
-            # suite ended heat (_heat_run_ended); the restart is a fresh suite.
+            # suite ended heat (_heat_run_ended; a Capacity stop's too); the restart is a fresh suite.
             with rr._signals_held():
-                _say(f"heat stop ({stopped}): ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never "
-                     "red: back in line to restart from the beginning once the Mac cools")
+                _say(f"{stop_words(stopped)}: ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never "
+                     f"red: back in line to restart from the beginning {_until_words(stopped)}")
                 _heat_run_ended(rr, owner, slot, suite, by, t0, written)
                 slot = None
                 box["g"] = None
@@ -1545,9 +1631,9 @@ def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
             box["g"].stop()
             rc = 128 + s.signum
         elif why["heat"] is not None or stopped is not None:
-            # Stopped while held for the heat, or back in line after a heat stop: no verdict, never red.
-            name = heat_name(why["heat"]) if why["heat"] is not None else stopped
-            _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
+            # Stopped while held for the heat or the Capacity stop, or back in line after a stop: no verdict, never red.
+            h = why["heat"] if why["heat"] is not None else stopped
+            _say(f"no verdict: stopped while {while_words(h)}; exit {HEAT_EXIT}")
             rc = HEAT_EXIT
         else:
             # Stopped before the guard spawned the suite (cmd_run's, p32-1): no verdict, never red.
@@ -1635,7 +1721,7 @@ def cmd_status(argv):
     level = heat_level()
     print(json.dumps({"dir": d, "slots": out, "waiters": ws, "queue": line,
                       "verify_slots": {"value": n, "source": source},
-                      "heat": {"level": level, "name": heat_name(level)}}))
+                      "heat": {"level": level, "name": heat_name(level)}, "capacityStop": capacity_stop()}))
     return 0
 
 

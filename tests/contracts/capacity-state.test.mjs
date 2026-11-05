@@ -14,6 +14,8 @@
 //   lease      it states the code's LEG_LEASE_LAPSE (90) and LEG_WAIT_LAPSE (180) and that close deletes the lease
 //   glossary   CONTEXT.md's **Capacity** and **Rollout** entries no longer call it "not yet built"
 //   legs       legs.md names `leg.py next` at § Verify's renewal point and the `wait` kinds `capacity` and `quota`
+//   stop       § Capacity reads `signals` for the code's CAPACITY_STOP_KEY (`stop_suites`, p36-10) and no longer calls it
+//              "never read here yet"
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read } from '../lib/contract-text.mjs'
@@ -53,6 +55,7 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
   const maxKiB = grab(cap, /^CAPACITY_MAX_BYTES = (\d+) \* 1024/m)
   const primary = grab(cap, /^CAPACITY_PRIMARY_LOGIN = "([^"]*)"/m)
   const warn = grab(cap, /^CAPACITY_WARN = "([^"]*)"/m)
+  const stopKey = grab(cap, /^CAPACITY_STOP_KEY = "([^"]*)"/m)
   const keys = (grab(cap, /^CAPACITY_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((k) => k.slice(1, -1)) ?? []
   const legLapse = grab(code, /^LEG_LEASE_LAPSE = timedelta\(minutes=(\d+)\)/m)
   const waitLapse = grab(code, /^LEG_WAIT_LAPSE = timedelta\(minutes=(\d+)\)/m)
@@ -79,6 +82,9 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
   const verify = collapse(legs.split('\n').find((l) => l.startsWith('**Verify.**')) ?? '')
   if (!verify.includes('Run `leg.py next` before each re-run of the wait after a `verify-slot: still running` line') ||
     !legs.includes('- `wait` of kind `capacity` or `quota`')) fails.push('legs')
+  const signalsRow = collapse(away.split('\n').find((l) => l.startsWith('| `signals` |')) ?? '')
+  if (stopKey !== 'stop_suites' || !signalsRow.includes(`Read for \`${stopKey}\` only`) ||
+    !s.includes(`\`CAPACITY_STOP_KEY = "${stopKey}"\``) || /never read here yet/.test(s)) fails.push('stop')
   return fails
 }
 
@@ -88,7 +94,7 @@ test('away.md § Capacity, capacity.py, reconcile-rollout.py, the settings and l
 
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
-const RULES = ['path', 'staleness', 'login', 'warn', 'fallback', 'max', 'lease', 'glossary', 'legs']
+const RULES = ['path', 'staleness', 'login', 'warn', 'fallback', 'max', 'lease', 'glossary', 'legs', 'stop']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -117,6 +123,8 @@ test('controls: each mutation fails exactly its rule', () => {
   only('legs', 'Run `leg.py next` before each re-run of the wait after a `verify-slot: still running` line',
     'Re-run the wait after a `verify-slot: still running` line', 'legs', 'no renewal point')
   only('legs', '- `wait` of kind `capacity` or `quota`', '- `wait` of kind `room`', 'legs', 'no Capacity kinds')
+  only('away', 'Read for `stop_suites` only', 'Carried, never read here yet', 'stop', 'the row back to carried-only')
+  only('cap', 'CAPACITY_STOP_KEY = "stop_suites"', 'CAPACITY_STOP_KEY = "suites_stop"', 'stop', 'another stop key in the code')
 })
 
 test('every rule has a control', () => {

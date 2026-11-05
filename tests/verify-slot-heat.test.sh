@@ -21,11 +21,20 @@
 #   suite (its step named)   HR3 verify --rollout pinned heavy: only a suite-ended heat with its wait.
 #   The Flake check (p29-9, ADR 0050): L8 a heat stop in its named re-run: back in line, every step reruns, the Flake and
 #   the flake record the last pass's.
+#   The Capacity stop (p36-10, ADR 0067 d8; verify-slot.py contract 7): a fresh capacity.json whose `signals.stop_suites`
+#   is JSON true holds and stops slotted suites as the Heat hold does. M0 the reading (capacity_stop(), capacity.py's
+#   read() and suite_stop(), fail-open)   M1 a fresh stop: never starts; a TERM exits 76   M2 a fresh stop mid-run stops
+#   it, back in line, restart once clear (a fresh green file runs it)   M3 a stale stop stops nothing   M4 a fresh stop
+#   with `--slot-wait 1`: 76, never started   M5 heat first: at trapping the heat lines win   MW the stop's unit harness
+#   on Guarded.watch   MH1 the Run record: a capacity stop ends its suite heat (no rc), the restart a fresh suite
+#   ML1 lead-integrate verify: a capacity stop during the verifier, back in line, restart green   ML2 … pinned stop with
+#   --slot-wait 1: rc heat, exit 76.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; the stub notifyutil reads the level
 # from <arm>/out and appends one line per read to <arm>/reads, so "N more reads" is the clock; every wait is a
 # `within <s>` poll whose bound only slows a real failure. Every background pid is recorded and stopped only by it.
 # Hermetic: every pool lives under mktemp (THREAD_VERIFY_SLOTS_DIR), the heat is pinned at 0 (THREAD_HEAT_LEVEL) but
-# where an arm unsets it to read its own stub.
+# where an arm unsets it to read its own stub, and HOME is a temp dir with no capacity.json but where an arm writes its
+# own (so a standalone run never reads the Mac's real Capacity).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd -P)
@@ -40,6 +49,8 @@ export THREAD_NOTE_LOCK_DIR="${tmp}/note-locks"                      # the note 
 export THREAD_VERIFY_SLOTS_DIR="$tmp/slots"                          # never the machine's real pool
 export THREAD_VERIFY_SLOT_POLL=0.1
 export THREAD_HEAT_LEVEL=0                                           # never the Mac's real heat, but where an arm reads its stub
+export HOME="$tmp/home"; mkdir -p "$HOME"                            # never the Mac's real capacity.json, but where an arm writes its own
+H0=$HOME
 VS="$root/skills/execute/scripts/verify-slot.py"
 LI="$root/skills/execute/scripts/lead-integrate.py"
 PY=$(command -v python3)
@@ -501,6 +512,214 @@ ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["verd
   "flake  ['tests/test_b.py::t'] ['tests/test_b.py::t']" "L8: the flake record is the last pass's: a Flake of its first run's test only"
 ok "$(recq "$D/events" ro "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,"verifier"],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
   "L8: the heat-stopped pass ends its suite heat (step verifier); the re-queued pass is a suite of its own, green"
+
+# ======== M0–ML2: the Capacity stop (p36-10, ADR 0067 d8; verify-slot.py contract 7) =============================
+# capjson <home> <stop_suites JSON> [memory JSON] [age in minutes]: <home>'s capacity.json, written atomically (a temp
+# file and a rename), its written_at now (or <age> minutes ago: 20 is stale), capacity 4 (above --slots 1: no lowering).
+capjson() {
+  local h=$1 stop=$2 mem=${3:-4} age=${4:-0} at
+  at=$(python3 -c 'import sys, datetime as d; print((d.datetime.now(d.timezone.utc) - d.timedelta(minutes=int(sys.argv[1]))).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$age")
+  mkdir -p "$h/.config/thread"
+  printf '{"capacity": 4, "written_at": "%s", "signals": {"stop_suites": %s, "memory": %s}}\n' "$at" "$stop" "$mem" > "$h/.config/thread/capacity.json.tmp"
+  mv "$h/.config/thread/capacity.json.tmp" "$h/.config/thread/capacity.json"
+}
+caprm() { rm -f "$1/.config/thread/capacity.json"; }
+after_cap() { awk '/capacity stop \(memory: critical\)/{s=1; next} s && /waiting \(memory: critical\)/{n++} END{print n+0}' "$1"; }
+
+# M0: the reading.
+arm m0
+export HOME="$D/home"; mkdir -p "$HOME"
+cat > "$tmp/cs.py" <<'PY2'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("vs", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+if len(sys.argv) > 2:
+    vs.SCRIPT = sys.argv[2]   # capacity.py is loaded from SCRIPT's dir
+print(vs.capacity_stop())
+PY2
+cs() { "$PY" "$tmp/cs.py" "$VS" "$@"; }
+ok "$(cs)" None "M0: no capacity.json: no stop"
+mkdir -p "$HOME/.config/thread"; printf 'not json' > "$HOME/.config/thread/capacity.json"
+ok "$(cs)" None "M0: an unreadable capacity.json: no stop"
+capjson "$HOME" true 4 20; ok "$(cs)" None "M0: a stale stop (20 minutes old): no stop"
+capjson "$HOME" false; ok "$(cs)" None "M0: stop_suites false: no stop"
+for v in '"true"' 1 null; do
+  capjson "$HOME" "$v"; ok "$(cs)" None "M0: stop_suites $v (not JSON true): no stop"
+done
+capjson "$HOME" true 4; ok "$(cs)" "memory: critical" "M0: stop_suites true with memory 4: memory: critical"
+capjson "$HOME" true 1; ok "$(cs)" "capacity: stop_suites" "M0: stop_suites true with memory 1 (Chorus's thermal trapping): capacity: stop_suites"
+capjson "$HOME" true true; ok "$(cs)" "capacity: stop_suites" "M0: … a bool memory is no level"
+capjson "$HOME" true 4
+mkdir -p "$D/broken" "$D/lacks"
+printf 'def (\n' > "$D/broken/capacity.py"
+ok "$(cs "$D/broken/verify-slot.py")" None "M0: a capacity.py that will not load: no stop (fail open)"
+printf 'def read(now):\n    return {"file": "fresh", "signals": {"stop_suites": True}}\n' > "$D/lacks/capacity.py"
+ok "$(cs "$D/lacks/verify-slot.py")" None "M0: a capacity.py with no suite_stop: no stop (fail open)"
+CP="$root/skills/execute/scripts/capacity.py"
+cr() { "$PY" -c 'import importlib.util, sys, datetime as d
+spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+r = m.read(d.datetime.now(d.timezone.utc))
+print(r["file"], r["signals"], m.suite_stop(r))' "$CP"; }
+capjson "$HOME" true 4; ok "$(cr)" "fresh {'stop_suites': True, 'memory': 4} memory: critical" "M0: capacity.py read() carries a fresh file's signals"
+capjson "$HOME" true 4 20; ok "$(cr)" "stale {} None" "M0: … and none from a stale one"
+ok "$("$PY" -c 'import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.suite_stop(None), m.suite_stop({"file": "fresh", "signals": "x"}), m.CAPACITY_STOP_KEY, m.CAPACITY_MEMORY_CRITICAL)' "$CP")" \
+  "None None stop_suites 4" "M0: suite_stop never raises on an ill-shaped reading; the key and the critical level"
+export HOME="$H0"
+
+# M1: a fresh stop: no slot; a TERM exits 76.
+arm m1
+export HOME="$D/home"; capjson "$HOME" true 4
+runbg "echo x >> '$D/starts'"
+within 120 grepq 'verify-slot: waiting (memory: critical)' "$D/err" && s=waiting || s="no capacity line in 120 s"
+ok "$s" waiting "M1: a fresh stop_suites: run waits with a 'waiting (memory: critical)' line"
+J=$(st --slots 1)
+ok "$(js "d['slots'][0]['state'], d['capacityStop']" "$J")" "('free', 'memory: critical')" "M1: status shows the slot free and capacityStop 'memory: critical'"
+kill -TERM "$W"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "76|0" "M1: a TERM while held by the Capacity exits 76, the command never run"
+has "$(cat "$D/err")" "verify-slot: no verdict: stopped while the Capacity stopped suites (memory: critical); exit 76" "M1: … with its no-verdict line"
+ok "$(grep -c 'waiting (memory: critical)' "$D/err")" 1 "M1: the Capacity line is said once while the reason holds"
+capjson "$HOME" false
+ok "$(js "d['capacityStop']" "$(st --slots 1)")" None "M1: status's capacityStop is null for a fresh green file"
+export HOME="$H0"
+
+# M2: a fresh stop mid-run stops it; back in line; restart once clear. A fresh green file runs it.
+arm m2
+export HOME="$D/home"; capjson "$HOME" false
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M2: a fresh green file did not run the command"
+p1=$(cat "$D/c.pid")
+capjson "$HOME" true 4
+within 120 gone "$p1" && s=gone || s="alive after 120 s"
+ok "$s" gone "M2: a fresh stop_suites: the running suite is ended"
+within 120 grepq 'waiting (memory: critical)' "$D/err" || echo "FAIL - M2: no waiting line"
+ok "$(is_free && echo free || echo held)" free "M2: … its verify slot is free while it waits"
+has "$(cat "$D/err")" "verify-slot: capacity stop (memory: critical): ended the suite after" "M2: stderr names the capacity stop"
+ok "$(after_cap "$D/err")" 1 "M2: the capacity stop, then the Capacity wait"
+lacks "$(cat "$D/err")" "heat stop" "M2: … never a heat stop"
+more 3
+ok "$(count "$D/starts")" 1 "M2: the stop still holds the restart"
+capjson "$HOME" false
+started 2 && s=restarted || s="no restart in 120 s"
+ok "$s" restarted "M2: once the stop clears the suite restarts from the beginning"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "0|2" "M2: the restart's exit is the verdict: 0, two starts"
+export HOME="$H0"
+
+# M3: a stale stop stops nothing.
+arm m3
+export HOME="$D/home"; capjson "$HOME" true 4 20
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M3: a stale stop held the start"
+more 3
+ok "$(alive "$(cat "$D/c.pid")" && echo alive || echo gone)" alive "M3: a stale stop_suites for 3 more reads: the running suite is not stopped"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "0|1" "M3: it finishes: exit 0, one start"
+lacks "$(cat "$D/err")" "capacity stop" "M3: … no capacity stop"
+lacks "$(cat "$D/err")" "memory: critical" "M3: … and no Capacity wait"
+export HOME="$H0"
+
+# M4: a fresh stop with a bounded slot wait: 76, never started.
+arm m4
+export HOME="$D/home"; capjson "$HOME" true 4
+hot python3 "$VS" run --slots 1 --slot-wait 1 -- sh -c "echo x >> '$D/starts'" > /dev/null 2> "$D/err"; rc=$?
+ok "$rc|$(count "$D/starts")" "76|0" "M4: a fresh stop for the whole wait: exit 76, the command never started"
+has "$(cat "$D/err")" "verify-slot: no verdict: no verify slot within 1s (memory: critical); exit 76" "M4: … its no-verdict line names the Capacity stop"
+export HOME="$H0"
+
+# M5: heat first. Trapping stops the suite (a heat stop), then a fresh stop file: the hold reads the heat, never the label.
+arm m5
+export HOME="$D/home"; capjson "$HOME" false
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M5: the command did not start"
+level 3
+within 120 grepq 'heat stop (trapping)' "$D/err" || echo "FAIL - M5: no heat stop"
+capjson "$HOME" true 4
+more 3
+within 120 grepq 'waiting (heat: trapping)' "$D/err" || echo "FAIL - M5: no heat wait line"
+kill -TERM "$W"; wait "$W"; rc=$?
+E=$(cat "$D/err")
+ok "$rc|$(count "$D/starts")" "76|1" "M5: a TERM back in line: exit 76, one start"
+has "$E" "verify-slot: no verdict: stopped while the Mac was hot (heat: trapping); exit 76" "M5: … the heat's no-verdict line"
+lacks "$E" "memory: critical" "M5: at trapping the lines never name the Capacity"
+hot python3 "$VS" run --slots 1 --slot-wait 1 -- true > /dev/null 2> "$D/err2"; rc=$?
+ok "$rc" 76 "M5: at trapping with a fresh stop and --slot-wait 1: exit 76"
+has "$(cat "$D/err2")" "no verify slot within 1s (heat: trapping); exit 76" "M5: … naming the heat, never the Capacity"
+export HOME="$H0"
+
+# MW: the stop's unit harness on Guarded.watch (R6's): a capacity stop below trapping, heat first at trapping.
+arm mw
+export HOME="$D/home"; capjson "$HOME" true 4
+mw() { THREAD_HEAT_LEVEL=$1 python3 -c 'import importlib.util, subprocess, sys
+spec = importlib.util.spec_from_file_location("vs", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+class P:
+    def __init__(self, waits):
+        self.waits = list(waits)
+    def wait(self, timeout=None):
+        w = self.waits.pop(0)
+        if w is None:
+            raise subprocess.TimeoutExpired("guard", timeout)
+        return w
+class G(vs.Guarded):
+    def __init__(self, waits):
+        self.proc, self._death, self.group, self.stops, self.heat = P(waits), None, None, 0, None
+    def stop(self):
+        self.stops += 1
+        return 143
+a = G([None, 3])
+ra = a.watch()
+b = G([None, None])
+rb = b.watch()
+print(ra, a.stops, rb is vs.HEAT_STOPPED, b.stops, repr(b.heat), vs.stop_words(b.heat), vs.hold_why(b.heat))' "$VS"; }
+ok "$(mw 2)" "3 0 True 1 'memory: critical' capacity stop (memory: critical) memory: critical" \
+  "MW: below trapping a fresh stop stops a guard still there (its label kept), keeps the rc of one that exits in the settle"
+ok "$(mw 3)" "3 0 True 1 3 heat stop (trapping) heat: trapping" "MW: at trapping the heat is read first: a heat stop, its level kept"
+export HOME="$H0"
+
+# MH1: the Run record on the recorded path (HR1's task tree, its vault under VH): a capacity stop ends its suite heat.
+arm mh1
+capjson "$VH" false
+(cd "$T1" && exec env -u THREAD_HEAT_LEVEL HOME="$VH" THREAD_EVENTS_DIR="$D/events" PATH="$tmp/bin:$PATH" HEAT_D="$D" \
+  python3 "$VS" run --slots 1 -- sh -c "echo out-line; $(hold_cmd)") > "$D/out.txt" 2> "$D/err" &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - MH1: the suite did not start"
+capjson "$VH" true 4
+within 120 grepq 'waiting (memory: critical)' "$D/err" || echo "FAIL - MH1: no capacity stop and wait"
+has "$(cat "$D/err")" "verify-slot: capacity stop (memory: critical): ended the suite after" "MH1: the pump's capacity stop is named"
+ok "$(recq "$D/events" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null]]' \
+  "MH1: the capacity stop ends the suite heat, no rc, before the run waits"
+capjson "$VH" false
+started 2 || echo "FAIL - MH1: no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc" 0 "MH1: the restart is green, exit 0"
+ok "$(recq "$D/events" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
+  "MH1: the restart is a suite of its own: started, then green with rc 0"
+caprm "$VH"
+
+# ML1: lead-integrate verify: a capacity stop during the verifier; back in line; restart green.
+arm ml1
+mkdir -p "$D/tree"; capjson "$D/home" false
+env -u THREAD_HEAT_LEVEL HOME="$D/home" PATH="$tmp/bin:$PATH" HEAT_D="$D" python3 "$LI" verify --tree "$D/tree" --out "$D/o" --timeout 600 --slots 1 --slot-wait 600 --verifier "$(vcmd)" > /dev/null 2>&1 &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - ML1: the verifier did not start"
+capjson "$D/home" true 4
+within 120 grepq 'verify: capacity stop (memory: critical) during the verifier: stopped its process group, no verdict; back in line' "$D/o.log" && s=stopped || s="no capacity stop in 120 s"
+ok "$s" stopped "ML1: a fresh stop during the verifier: the capacity stop is logged"
+within 120 grepq 'verify: waiting (memory: critical)' "$D/o.log" || echo "FAIL - ML1: no Capacity wait line"
+ok "$(is_free && echo free || echo held)|$(count "$D/starts")" "free|1" "ML1: … its slot freed while it waits, one start"
+capjson "$D/home" false
+started 2 || echo "FAIL - ML1: no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$(count "$D/starts")" "0|0|2" "ML1: the restart is green: exit 0, O.rc 0, two starts"
+
+# ML2: verify with a pinned fresh stop and --slot-wait 1: rc heat, exit 76.
+arm ml2
+mkdir -p "$D/tree"; capjson "$D/home" true 4
+HOME="$D/home" python3 "$LI" verify --tree "$D/tree" --out "$D/o" --timeout 60 --slots 1 --slot-wait 1 --verifier "touch '$D/ran'" > /dev/null 2>&1
+rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$([ -e "$D/ran" ] && echo ran || echo never)" "76|heat|never" "ML2: a fresh stop for the whole --slot-wait: exit 76, rc heat, the verifier never ran"
+has "$(cat "$D/o.log")" "verify: no verdict: the Capacity stopped suites (memory: critical) within 1s; verifier not run to a verdict (rc heat)" "ML2: … the log says why"
+has "$(cat "$D/o.log")" "verify: waiting (memory: critical)" "ML2: … after its Capacity wait line"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-heat: ALL PASS" || echo "verify-slot-heat: SOME FAILED"
 exit "$fail"
