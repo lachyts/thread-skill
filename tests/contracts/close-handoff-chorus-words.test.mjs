@@ -395,7 +395,7 @@ test('close step 8: the rollout-not-started row (ADR 0057) is a statement, so th
     'control: a question-form row reads as asking')
 })
 
-test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Session; without it, it archives', () => {
+test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Session; without it, the fast path reads it closed', () => {
   const q = questionLine(real.close)
   assert.ok(q, 'step 9 has no rule (3) question line')
   const d = banners(real.close)[3]
@@ -407,6 +407,8 @@ test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Se
   const bare = closing(`${REPORT}\n${NEEDS_CALL}\n${DISCARD}`, fill(d))
   assert.equal(R(bare).asks, false, 'control: the row alone asks')
   assert.equal(fastClose(bare), 'closed', 'control: the row alone keeps the Session')
+  // the fast path's *closed* is not yet an archive: banner D's ", but" flags the bare close, so it stays a report
+  assert.equal(R(bare).flagged, true, 'banner D reads unflagged, so the bare close would archive')
 })
 
 test('close step 9 rule (2): banner then the lead\'s status line archives at done, never at halted', () => {
@@ -429,6 +431,13 @@ test('close step 9: banners C and D flag by their ", but" with no model, A and B
   b.forEach((x, i) => {
     const done = R(closing(REPORT, `${x}\n${STATUS_DONE}`))
     assert.deepEqual(done.statusClose, i < 2 ? ['closed', ''] : ['a report', 'work not landed'], `a lead's done on banner ${'ABCD'[i]}`)
+  })
+  // a lead's done gets no flag read: a follow-up row (step 8's rollout row) before banner A or B still reads closed
+  const row = rolloutRow(real.close)
+  assert.ok(row, 'step 8 has no `rollout not started: …` statement row')
+  b.slice(0, 2).forEach((x, i) => {
+    const done = R(closing(`${REPORT}\n${fill(row)}`, `${x}\n${STATUS_DONE}`))
+    assert.deepEqual(done.statusClose, ['closed', ''], `a lead's done on banner ${'AB'[i]} after a follow-up row`)
   })
 })
 
@@ -521,6 +530,10 @@ const FLAG_PROSE = [
 ]
 const FLAG_RULE = 'and banners (C) and (D) by the `, but` that follows it'
 const FLAG_EDGE = ['banner (C) or (D) stays as *a report*', 'only when the Stage\'s flag read finds nothing for him']
+// A rollout lead's `done` takes the banner rule alone (Chorus ADR 0089 § Built, chorus-p96-3): no flag read, so
+// banner A or B before it archives whatever the rows say; step 9 and the edge case each say so.
+const LEAD_DONE = "A rollout lead's `done` line (rule (2)) gets no flag read: (A) or (B) before it, with nothing asked, archives the Session whatever its rows say"
+const LEAD_DONE_EDGE = "a rollout lead's `done` line after the banner (step 9's rule (2)) gets no flag read, so (A) or (B) before it archives whatever its rows say"
 const OFFER = '`research not landed: <pointer>; say "land it" to file it`, never as a question (step 9, rule (3))'
 const AFTER_HANDOFF = [
   "After this session's own handoff, next prints no step-2 summary and no open question",
@@ -541,7 +554,7 @@ function check(files) {
   if (!(lineOf(s9, /^9\. /) ?? '').includes('(rule (2) below names its one exception)')) fails.push('close:intro')
   if (!collapse(STEP8(files.close)).includes(OFFER)) fails.push('close:offer')
   if (!has(EDGES(files.close), ['**On the Chorus Stage**', "step 9's rule (3) question line", 'leaves it unarchived'])) fails.push('close:edge')
-  if (!has(s9, FLAG_PROSE) || !has(s9, [FLAG_RULE]) || !has(EDGES(files.close), FLAG_EDGE) ||
+  if (!has(s9, FLAG_PROSE) || !has(s9, [FLAG_RULE, LEAD_DONE]) || !has(EDGES(files.close), [...FLAG_EDGE, LEAD_DONE_EDGE]) ||
     ['a closing message that ends on it and asks nothing archives its Session', 'a close whose message ends on its banner and asks nothing archives its Session']
       .some((old) => collapse(files.close).includes(old))) fails.push('close:flag')
   if (['never as a question (the banner stays last)', 'Close never asks:', 'Close never calls the question tool', 'never a question, never a fought hook']
@@ -638,6 +651,9 @@ test('controls: close pins fail on their own mutation', () => {
   only('flag', swap('close', 'Banners (C) and (D) stay on the Stage as *a report · work not landed*', 'Banners (C) and (D) archive'), ['close:flag'])
   only('flag:rule', swap('close', FLAG_RULE, ''), ['close:flag'])
   only('flag:edge', swap('close', 'banner (C) or (D) stays as *a report*', 'banner (C) or (D) archives'), ['close:flag'])
+  // the lead's done back under the flag read, in step 9 and then in the edge case
+  only('flag:lead', swap('close', "A rollout lead's `done` line (rule (2)) gets no flag read", "A rollout lead's `done` line (rule (2)) gets the flag read"), ['close:flag'])
+  only('flag:lead:edge', swap('close', "line after the banner (step 9's rule (2)) gets no flag read", "line after the banner (step 9's rule (2)) gets the flag read"), ['close:flag'])
   only('flag:old', swap('close', 'Rules (1) to (3) cover the four closed banners above',
     'Once, a closing message that ends on it and asks nothing archives its Session. Rules (1) to (3) cover the four closed banners above'), ['close:flag'])
   only('asks', swap('close', 'never the question tool, never a fought hook', 'never a question, never a fought hook'), ['close:asks'])
