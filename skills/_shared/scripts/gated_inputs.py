@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""gated_inputs.py — the gated-input sweep and the standing approval's readings (ADR 0008, ADR 0034, ADR 0063).
+"""gated_inputs.py — the gated-input sweep and the standing approval's readings (ADR 0008, ADR 0034, ADR 0038, ADR
+0063).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...
     python3 -I ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py exposure - <<'EOF'
@@ -29,9 +30,10 @@ nothing and makes no network call.
    `gated_inputs: <path>: <reason>` line on stderr and the run goes on; the exit is then 1 (else 0; usage 2).
 
 2. The exposure reading (execute's standing approval, `reconcile-rollout.py approve-gates --standing`).
-   `exposure(gate)` returns {"usd": Decimal | None, "why": str}; None means "ask Lachy". It fails closed: the rules
-   run in order and the first failure gives `why`. `covered(gate, limit)` adds the limit: covered iff limit > 0 and
-   usd <= limit (inclusive). The rules, in order:
+   `exposure(gate)` returns {"usd": Decimal | None, "why": str}, the full reading; None means it cannot price the
+   gate. It fails closed: the rules run in order and the first failure gives `why`. `covered(gate, limit)` reads the
+   gate with the standing reading below and adds the limit: covered iff limit > 0 and usd <= limit (inclusive). The
+   rules, in order:
      1. Kind: the text before the first `:`, case-insensitive. Only `spend` can be covered ("not a spend gate").
      2. USD amount tokens over the whole gate, code spans included: a marker (`US$`, `USD`, or a `$` with no
         letter, digit or `_` before it, so `A$` is never USD), at most one space, then a number; or a number, at
@@ -50,18 +52,33 @@ nothing and makes no network call.
         xN. A per-unit token with no count asks ("per-Login cap with no Login count"), two ask ("more than one
         per-unit token"), and a count whose noun is another unit asks ("count unit does not match the per-unit
         token"; Login and account are one unit, as p18-7's "per Login (per account)" reads). The leftover is read
-        against a reject list, not a whitelist: any digit, number word, MULTIPLIER_WORDS word, `per`/`each`/`every`,
-        `/` + letter, unit noun, period adverb, currency, WIDENING word or `before` asks ("unrecognised clause:
-        <leftover>"); any other word passes. An empty clause is a total.
+        against a reject list, not a whitelist (LEFTOVER_RES): any digit, number word, MULTIPLIER_WORDS word, a rate
+        (RATE_RE, below) or any `every`, `/` + letter, unit noun, period adverb, currency, WIDENING word or `before`
+        asks ("unrecognised clause: <leftover>"); any other word passes. An empty clause is a total.
+        The rate reading (RATE_RE, p37-4): `per` or `each` at a word start is a rate only before a unit, never in
+        prose (`per the task note`, `per the brief`, `per ADR 0038`). `per` is a rate when SEP (whitespace, or a `-`
+        or `/` with optional spaces) then a RATE_UNITS noun (UNIT_NOUNS plus month, time, image, token, invocation,
+        iteration, attempt, probe, push, item, task, eval, case, commit, PR, file, page, prompt, query, message, step,
+        batch, job, model, character, word, second, generation, render, video, clip and frame; each may be plural)
+        or a digit follows (`per run`, `per-run`, `per-Login`, `Per day`, `per 1,000 tokens`, `per 1k`). `each` is a
+        rate on the same terms, or before `of`, or before a non-letter, non-digit character or the gate's end after
+        optional spaces (`one call each —`, `3 each,`, `each --max-cost-usd 4`, `each $5`, `cap US$5 each`), or
+        straight after a digit and one space (`US$5 each for the runs`). The match is the word alone, so a why lists
+        `per`/`each` as the gate writes it.
      6. Currency, whole gate: a non-USD amount (`A$`, `AU$`, `NZ$`, `C$`, `CA$`, `€`, `£`, `¥`, `AUD`, `NZD`, `CAD`,
         `EUR`, `GBP`, `JPY` beside a number, or `minor units` after one), a currency word (dollar, bucks, euro,
         pound, cent), a number word beside a currency, or a magnitude before a code ("non-USD or ambiguous
         currency").
      7. Multipliers, periods and widening words outside the clause (code spans included; `_` is a word
-        character, so `per_call_cap` never matches): (i) any `per`/`each`; (ii) a plural
-        Logins/accounts/seats/users; (iii) `every`/`a`/`an` directly before a UNIT_NOUNS noun; (iv) `night(s)` or a
-        PERIOD_ADVERBS word; (v) `/` + a unit noun; (vi) `×`, `x` + digit, digit + `x`, a MULTIPLIER_WORDS word
-        (`times`, `twice`, `double`, `triple`, `apiece`); (vii) `%`; (viii) a WIDENING word.
+        character, so `per_call_cap` never matches): (i) a `per`/`each` rate (RATE_RE, rule 5's reading); (ii) a
+        plural Logins/accounts/seats/users; (iii) `every`/`a`/`an` directly before a UNIT_NOUNS noun; (iv) `night(s)`
+        or a PERIOD_ADVERBS word; (v) `/` + a unit noun; (vi) `×`, `x` + digit, digit + `x`, a MULTIPLIER_WORDS word
+        (`times`, `twice`, `double`, `triple`, `apiece`); (vii) `%`; (viii) a WIDENING word; (ix), last, a per-unit
+        word (PER_UNIT_OUTSIDE_RE, p37-4): `per`/`each`, up to three SEP-joined letter-words, then a singular Login,
+        account, seat or user (an `'s` allowed: `per the dummy Login`, `each new Login`, `per-Login`), or
+        `every`/`a`/`an` directly before one, or a `/` before one ("per-<unit> cap with no <unit> count", the unit as
+        the gate writes it). It fires only where nothing earlier did, so relaxing per/each never lets a per-Login
+        reading through; `every signed-in Claude Login` (p18-7) still passes, since `every` needs adjacency.
         WIDENING is one list for rules 5 and 7, so the two readings never disagree: words that say the cap is not
         the ceiling (`plus` or a bare `+` with no amount after it; `excluding`, `exclusive of`, `excl`, `ex`;
         `tax(es)`, `VAT`, `GST`; `fee(s)`; `overage(s)`; `soft`; `uncapped`; `no hard limit|cap`; `exceed`;
@@ -71,14 +88,40 @@ nothing and makes no network call.
      8. A bare number outside the clause, code spans and amount tokens (no letter, digit, `_`, `.`, `,` or `-`
         before it): "a number outside the cap clause".
      9. The value: the cap amount × the clause multiplier, plus every other USD token (each once), in Decimal.
-   Accepted residuals (pinned in the tests; the first two are named in ADR 0034 § Consequences, *A fail-closed
-   reading*): a number word outside the clause with no Login/account/seat/user noun ("seven Turns") is not counted;
-   `every`/`a`/`an` before a noun not on UNIT_NOUNS (`every push`, `every image`) reads x1, safe because the cap is
-   the task's total ceiling (the engine's GATED_INPUTS_CHECK, task.workflow.js) and the annotation records "total
-   exposure"; digits inside code spans.
 
-   CLI (ADR 0038): `exposure -` reads ONE gate on stdin and prints exposure()'s reading as one JSON line,
-   {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, then exits 0. The plan judge runs
+   The cap-only reading (p37-4, ADR 0034's 2026-11-05 amendment: unpriceable never means asked) prices a gate from
+   its cap when the full reading refuses it: rules 1-4 and 6 run exactly as above (rule 4 over every token, the
+   cap's first; currency over the whole gate); rule 5 reads the leftover against CAP_ONLY_LEFTOVER_RES, which is
+   LEFTOVER_RES without a digit, a number word or a bare unit noun, its multiplier widened to `x 3`, `x3` and `3x`,
+   its `/` unit to `/` before a digit (`/1k`), its widening word to any `plus` or `+` (an amount after it inside the
+   clause is a second amount the clause cannot read), plus `%`, a rate unit (`per`/`each`, one to three SEP-joined
+   letter-words, then a UNIT_NOUNS noun: `per big run`; or `a`/`an` directly before one: `a day`) and a per-unit noun
+   (Login, account, seat or user, singular or plural); the per-unit/count whitelist runs first, as in rule 5, and the
+   why stays `unrecognised clause: <leftover>`; outside the clause only 7(ii) (plurals) and 7(ix) (per-unit words)
+   ask; the rest of rule 7, and rule 8, are waived; the value is rule 9's (the cap times the clause's count, plus
+   every other USD amount the gate names, so it never reads below the full reading: `US$500 — cap 1 USD` and
+   `US$500 per run — cap 1 USD` both read 501).
+   `standing_exposure(gate)` -> {"usd", "why", "capOnly"} is the standing reading covered() and the CLI apply: the
+   full reading when it prices (capOnly ""); else the cap-only reading when that prices (capOnly the full reading's
+   why); else {None, the cap-only reading's why, ""}, which for a rule 1-4 or 6 failure, and most rule 5 failures, is
+   the full reading's why.
+
+   Accepted residuals (pinned in the tests; the first two are named in ADR 0034 § Consequences, *A fail-closed
+   reading*, the rest in its 2026-11-05 amendment): a number word outside the clause with no Login/account/seat/user
+   noun ("seven Turns") is not counted; `every`/`a`/`an` before a noun not on UNIT_NOUNS (`every push`, `every image`)
+   reads x1, safe because the cap is the task's total ceiling (the engine's GATED_INPUTS_CHECK, task.workflow.js) and
+   the annotation records "total exposure"; digits inside code spans. In the cap-only reading, outside the clause,
+   widening words, `%`, multipliers, periods, rates that are no per-unit word and bare numbers are waived (`soft
+   probe`, `3 runs`, `plus 20%`, `×3`, `every push`, `each night`); inside it, digits, number words and bare unit nouns
+   that are no per-unit noun are waived (`for 3 runs`, `10k tokens`, `for both probes` read as the cap): the cap is the
+   implementer's ceiling all the same. A non-adjacent rate whose unit is not on UNIT_NOUNS (`per generated image`)
+   reads x1 in either clause reading, as `an image` does. An `each such call`-style rate outside the clause reads x1 in
+   the full reading, the value the cap-only reading gives anyway.
+
+   CLI (ADR 0038): `exposure -` reads ONE gate on stdin and prints standing_exposure()'s {usd, why} as one JSON line,
+   {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, never its capOnly, then exits 0:
+   a gate whose cap reads prints its cap-only amount with why "", so the plan judge, which bounces only a null "usd",
+   never bounces it on wording alone (p37-4). The plan judge runs
    it on each top-level spend gate the engine parsed, the gate on stdin through a quoted heredoc (`<<'EOF'`), never as
    a shell argument, where `$` and backticks would expand. stdin is decoded as UTF-8 whatever the locale (bad UTF-8:
    exit 1) and split on newlines, a trailing CR dropped; exactly one non-blank line is a gate. Two or more print
@@ -162,10 +205,41 @@ nothing and makes no network call.
      standing approval: test credential K1, K2 present in <file>, class from <source>)`, the file as declared; it
      raises ValueError on a `)` in any part, as annotation() does.
 
+5. The test-Login reading (p37-4, ADR 0034's 2026-11-05 amendment): a credential gate the standing approval may sign
+   because it names only Claude Logins the operator declared as test Logins (rollout-settings.py's `[defaults]
+   test_logins`, schema 5, operator-only: `logins` below, a list of names, or None). Machine-wide, so a Leg's serial
+   note signs one too. It reads no limit, ledger, month line or file.
+   - `has_login_phrase(gate)`: true when the text after the first `:` holds a `Login` or `Logins` word (any case) and
+     no upper-snake env token (ENV_TOKEN_RE). Such a gate takes this reading, never the class one of 4; a gate with
+     an env token keeps 4's path, which needs one, so no gate routed here could have signed there.
+   - `login_reading(gate, logins)` -> {"names": [...] | None, "why"}: fail closed, the first failure wins, reading only
+     the text after the first `:`. In order:
+       1. The kind is `credential` ("not a credential gate").
+       2. The deny rules, each why `deny word: <match>`, the first in text order: DENY_LIVE_PROD_RE, except a `live`
+          directly followed (whitespace or `-`) by probe, run or test, plural allowed (`a live probe on the dummy
+          Login`; `livemode` and `live Stripe` still deny); the IRREVERSIBLE list; DENY_NOUNS, unchanged.
+       3. No upper-snake env token ("an env key beside a Login: <TOKEN>").
+       4. No other credential noun: `account(s)`, `key(s)`, `credential(s)`, `API` (any case), `PAT(s)` (case
+          sensitive), `.env` ("another credential beside the Login: <match>").
+       5. No plural `Logins` ("more than one Login: Logins"); every `Login` word ends a `<name> (Claude )?Login('s)?`
+          phrase, the name `[A-Za-z0-9][A-Za-z0-9_-]{0,39}` and the leftmost one winning, so `the Claude Login` names
+          `the` ("a Login it cannot name"); at least one phrase ("it names no Login").
+       6. `logins` is set and non-empty (NO_LOGINS_WHY: "no test Logins declared (set [defaults] test_logins in
+          ~/.config/thread/rollouts.toml)").
+       7. Each named Login is declared, ignoring case ("<name> is not a declared test Login").
+     Steps 1-5 need no `logins`, so a gate no declaration could sign says why without the settings being read. names
+     are the named Logins in text order, each once, in their declared spelling. Known false asks, pinned (fail
+     closed): `access to the dummy Claude Login` (`deny word: access`), `the dummy Claude Login's session token`
+     (`deny word: token`), any API, account, key, PAT or `.env` on the gate's line, and a `live` before anything but a
+     probe, run or test.
+   - `login_annotation(date, names, source)`: the `## Approved gates` suffix, `(approved <date> under the standing
+     approval: test Login <n1, n2>, from <source>)`; it raises ValueError on a `)` in any part, as annotation() does.
+
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
-OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, exposure, covered, annotation, format_usd, gate_kind,
-credential_reading, read_env, env_proof, bootstrap_refreshes, credential_covered, credential_annotation, MAX_ENV_BYTES,
-DENY_NOUNS.
+OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
+PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, covered, annotation, format_usd, gate_kind, credential_reading,
+read_env, env_proof, bootstrap_refreshes, credential_covered, credential_annotation, MAX_ENV_BYTES, DENY_NOUNS,
+has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY.
 """
 import base64
 import binascii
@@ -314,17 +388,53 @@ WIDENING = (r"(?:" + WS + r"plus" + WE + r"|\+)(?!\s*(?:US\$|USD|\$)?\s?\d)|" + 
     r"uncapped", r"no\s+hard\s+(?:limit|cap)", r"exceed(?:s|ed|ing)?", r"initially", r"to\s+start", r"for\s+now",
     r"or\s+more", r"at\s+least", r"minimum", r"approx(?:imately)?", r"roughly")) + r")" + WE)
 MULTIPLIER = r"×|" + WS + r"x\d|" + WS + _alt(MULTIPLIER_WORDS) + WE
+# Do 2 (p37-4): `per` or `each` is a rate only before a unit, never in prose ("per the task note", "per ADR 0038").
+# RATE_UNITS is UNIT_NOUNS plus the nouns spend is counted in; each may be plural (`s`, `es`, `queries`). SEP joins a
+# rate word to its unit: whitespace, or a `-` or `/` with optional spaces around it (`per run`, `per-run`, `per/run`).
+RATE_UNITS = UNIT_NOUNS + ("month", "time", "image", "token", "invocation", "iteration", "attempt", "probe", "push",
+                           "item", "task", "eval", "case", "commit", "PR", "file", "page", "prompt", "query", "message",
+                           "step", "batch", "job", "model", "character", "word", "second", "generation", "render",
+                           "video", "clip", "frame")
+RATE_UNIT = ("(?:" + "|".join("quer(?:y|ies)" if u == "query" else re.escape(u) + "(?:e?s)?" for u in RATE_UNITS)
+             + ")" + WE)
+SEP = r"(?:\s+|\s*[-/]\s*)"
+# The match is the word alone (lookarounds hold the rest), so a why lists `per`/`each` as the gate writes it. `each` is
+# a rate before a unit or a digit, before `of`, before a non-letter, non-digit character or the gate's end (`one call
+# each —`, `3 each,`, `each --max-cost-usd 4`, `cap US$5 each`), or straight after a digit and one space (`US$5 each
+# for the runs`).
+RATE_RE = re.compile(
+    WS + r"per" + WE + r"(?=" + SEP + r"(?:" + RATE_UNIT + r"|\d))"
+    + r"|" + WS + r"each" + WE + r"(?=" + SEP + r"(?:" + RATE_UNIT + r"|\d)|\s+of" + WE + r"|\s*(?:[^\sA-Za-z0-9]|\Z))"
+    + r"|(?<=\d\s)each" + WE, re.I)
+RATE_OR_EVERY = re.compile(RATE_RE.pattern + r"|" + WS + r"every" + WE, re.I)
 LEFTOVER_RES = (
     ("a digit", re.compile(r"\d")),
     ("a number word", re.compile(WS + _alt(NUMBER_WORDS) + WE, re.I)),
     ("a multiplier", re.compile(MULTIPLIER, re.I)),
-    ("per/each/every", re.compile(WS + _alt(("per", "each", "every")) + WE, re.I)),
+    ("per/each/every", RATE_OR_EVERY),
     ("a / unit", re.compile(r"/\s?[A-Za-z]")),
     ("a unit noun", re.compile(WS + UNIT_RE + WE, re.I)),
     ("a period adverb", re.compile(WS + _alt(PERIOD_ADVERBS) + WE, re.I)),
     ("a currency", re.compile(r"[$€£¥]|" + WS + _alt(("USD",) + NON_USD_CODES) + WE, re.I)),
     # `before` is the clause's alone: p18-7's probe reads "stopping before any Turn" outside its clause.
     ("a widening word", re.compile(WIDENING + "|" + WS + r"before" + WE, re.I)),
+)
+# The cap-only reading's rule 5 (p37-4): LEFTOVER_RES without a digit, a number word or a bare unit noun, so prose
+# beside a readable cap (`(Haiku 4.5)`, `for the 3 probes`) reads as the cap. What still asks is a word that changes
+# what the cap is: a multiplier (`x 3`, `3x` too), `%`, a rate (`per day`, `each`, `every run`, `per big run`, `a day`,
+# `/1k`), a per-unit noun (Login, account, seat, user), a period adverb, a currency (a second amount the clause cannot
+# read) or a widening word (any `plus` or `+` too: an amount after it inside the clause is a second amount).
+CAP_ONLY_LEFTOVER_RES = (
+    ("a multiplier", re.compile(MULTIPLIER + r"|" + WS + r"x ?\d|\d ?x" + WE, re.I)),
+    ("a percentage", re.compile(r"%")),
+    ("per/each/every", RATE_OR_EVERY),
+    ("a / unit", re.compile(r"/\s?[A-Za-z0-9]")),
+    ("a rate unit", re.compile(WS + r"(?:per|each)(?:" + SEP + r"[A-Za-z]+){1,3}" + SEP + UNIT_RE + WE + r"|"
+                               + WS + r"(?:a|an)\s+" + UNIT_RE + WE, re.I)),
+    ("a per-unit noun", re.compile(WS + _alt(PER_UNITS) + r"s?" + WE, re.I)),
+    ("a period adverb", re.compile(WS + _alt(PERIOD_ADVERBS) + WE, re.I)),
+    ("a currency", re.compile(r"[$€£¥]|" + WS + _alt(("USD",) + NON_USD_CODES) + WE, re.I)),
+    ("a widening word", re.compile(WIDENING + r"|" + WS + r"plus" + WE + r"|\+|" + WS + r"before" + WE, re.I)),
 )
 CURRENCY_MARK = r"(?:US\$|USD" + WE + r"|\$|" + WS + _alt(NON_USD_CODES) + WE + ")"
 CURRENCY_RES = (
@@ -336,8 +446,14 @@ CURRENCY_RES = (
                + r"(?:US\$|" + WS + r"USD|" + WS + _alt(NON_USD_CODES) + r"|\$)\s?" + _alt(CURRENCY_NUMBER_WORDS) + WE, re.I),
     re.compile(r"\d[\d,.]*\s?" + _alt(MAGNITUDES) + r"\s?" + WS + _alt(("USD",) + NON_USD_CODES) + WE, re.I),
 )
+# 7(ix) (p37-4): a per-unit word outside the clause, last, so relaxing per/each never lets a per-Login reading through:
+# `per`/`each`, up to three SEP-joined words, then a singular Login, account, seat or user (`per the dummy Login`, `each
+# new Login`, `per-Login`); `every`/`a`/`an` directly before one; a `/` before one. Its why names the unit as written.
+PER_UNIT_OUTSIDE_RE = re.compile(
+    r"(?:" + WS + r"(?:per|each)(?:" + SEP + r"[A-Za-z]+){0,3}" + SEP + r"|" + WS + r"(?:every|a|an)\s+|/\s?)"
+    + r"(?P<unit>" + _alt(PER_UNITS) + r")(?:'s)?" + WE, re.I)
 OUTSIDE_RES = (
-    ("per/each outside the cap clause", re.compile(WS + _alt(("per", "each")) + WE, re.I)),
+    ("per/each outside the cap clause", RATE_RE),
     ("plural unit outside the cap clause", re.compile(WS + _alt(("Logins", "accounts", "seats", "users")) + WE, re.I)),
     # (iii) stays a list, never a blanket `every`: p18-7's probe reads "every signed-in Claude Login" and must pass
     # (ADR 0034 decision 1). Accepted residual: `every`/`a`/`an` before a noun NOT on UNIT_NOUNS (`every push`, `every
@@ -350,7 +466,10 @@ OUTSIDE_RES = (
     ("multiplier outside the cap clause", re.compile(MULTIPLIER + r"|\dx" + WE, re.I)),
     ("percentage outside the cap clause", re.compile(r"%")),
     ("widening word outside the cap clause", re.compile(WIDENING, re.I)),
+    (None, PER_UNIT_OUTSIDE_RE),   # 7(ix): `per-<unit> cap with no <unit> count`
 )
+# The cap-only reading runs only these outside the clause: a plural unit (ii) and a per-unit word (ix).
+CAP_ONLY_OUTSIDE = (OUTSIDE_RES[1], OUTSIDE_RES[-1])
 BARE_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.,\-])\d+")
 
 
@@ -385,8 +504,9 @@ def _none(why):
     return {"usd": None, "why": why}
 
 
-def _clause(clause):
-    """(multiplier, why): the clause read against the whitelist (rule 5); multiplier None when it asks."""
+def _clause(clause, cap_only=False):
+    """(multiplier, why): the clause read against the whitelist (rule 5); multiplier None when it asks. The leftover is
+    read against LEFTOVER_RES, or CAP_ONLY_LEFTOVER_RES for the cap-only reading."""
     spans = []
     for regex in TOTAL_RES + MONTH_RES:
         spans += [m.span() for m in regex.finditer(_blank(clause, spans))]
@@ -409,14 +529,20 @@ def _clause(clause):
         mult = int(n) if n.isdigit() else COUNT_WORDS.index(n.lower()) + 1
         rest = _blank(rest, [per[0].span(), counts[0].span()])
     left = re.sub(r"\s+", " ", rest).strip()
-    for _label, regex in LEFTOVER_RES:
+    for _label, regex in (CAP_ONLY_LEFTOVER_RES if cap_only else LEFTOVER_RES):
         if regex.search(rest):
             return None, f"unrecognised clause: {left}"
     return mult, ""
 
 
 def exposure(gate):
-    """{"usd": Decimal | None, "why": str} for one declared gate (the module docstring's rules 1-9)."""
+    """{"usd": Decimal | None, "why": str} for one declared gate: the full reading (module docstring, 2: rules 1-9)."""
+    return _reading(gate, False)
+
+
+def _reading(gate, cap_only):
+    """The full reading (rules 1-9), or with `cap_only` the cap-only one: rules 1-4 and 6 unchanged, rule 5 against
+    CAP_ONLY_LEFTOVER_RES, rule 7 only (ii) and (ix), rule 8 skipped, rule 9 unchanged (module docstring, 2)."""
     gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
     if gate_kind(gate) != "spend":
         return _none("not a spend gate")
@@ -441,7 +567,7 @@ def exposure(gate):
             return _none(f"range: {gate[t[0]:t[2]]}{TAIL_RANGE_RE.match(tail).group(0)}")
     end = CLAUSE_END_RE.search(gate, cap[1])
     clause_end = end.start() if end else len(gate)
-    mult, why = _clause(gate[cap[1]:clause_end])
+    mult, why = _clause(gate[cap[1]:clause_end], cap_only)
     if mult is None:
         return _none(why)
     for regex in CURRENCY_RES:
@@ -449,24 +575,46 @@ def exposure(gate):
         if m:
             return _none(f"non-USD or ambiguous currency: {m.group(0).strip()}")
     outside = _blank(gate, [(cap[1], clause_end)])
-    for label, regex in OUTSIDE_RES:
-        found = [m.group(0).strip() for m in regex.finditer(outside)]
+    for entry in OUTSIDE_RES:
+        if cap_only and entry not in CAP_ONLY_OUTSIDE:
+            continue
+        label, regex = entry
+        found = list(regex.finditer(outside))
         if found:
-            return _none(f"{label}: {', '.join(found)}")
-    plain = _blank(outside, [m.span() for m in CODE_SPAN_RE.finditer(outside)] + [(t[0], t[1]) for t in tokens])
-    bare = BARE_NUMBER_RE.search(plain)
-    if bare:
-        return _none(f"a number outside the cap clause: {bare.group(0)}")
+            if label is None:   # 7(ix): the unit as the gate writes it
+                unit = found[0].group("unit")
+                return _none(f"per-{unit} cap with no {unit} count")
+            return _none(f"{label}: {', '.join(m.group(0).strip() for m in found)}")
+    if not cap_only:
+        plain = _blank(outside, [m.span() for m in CODE_SPAN_RE.finditer(outside)] + [(t[0], t[1]) for t in tokens])
+        bare = BARE_NUMBER_RE.search(plain)
+        if bare:
+            return _none(f"a number outside the cap clause: {bare.group(0)}")
     usd = cap[3] * mult + sum((t[3] for t in tokens if t is not cap), Decimal(0))
     return {"usd": usd, "why": ""}
 
 
+def standing_exposure(gate):
+    """{"usd": Decimal | None, "why": str, "capOnly": str}: the standing reading (module docstring, 2). The full
+    reading when it prices (capOnly ""); else the cap-only reading when that prices, capOnly then the full reading's
+    why; else None with the cap-only reading's why (for a rule 1-4 or 6 failure, and most rule 5 failures, the full
+    reading's why too)."""
+    full = exposure(gate)
+    if full["usd"] is not None:
+        return {"usd": full["usd"], "why": "", "capOnly": ""}
+    cap = _reading(gate, True)
+    if cap["usd"] is not None:
+        return {"usd": cap["usd"], "why": "", "capOnly": full["why"]}
+    return {"usd": None, "why": cap["why"], "capOnly": ""}
+
+
 def covered(gate, limit):
-    """{"covered": bool, "usd": Decimal | None, "why": str}: exposure(gate) against the standing approval's limit
-    (an int >= 0; 0 is off). Covered iff limit > 0 and usd <= limit, inclusive."""
-    out = exposure(gate)
+    """{"covered": bool, "usd": Decimal | None, "why": str, "capOnly": str}: standing_exposure(gate) against the
+    standing approval's limit (an int >= 0; 0 is off). Covered iff limit > 0 and usd <= limit, inclusive. capOnly is
+    the full reading's why when the gate was priced from its cap alone, else ""."""
+    out = standing_exposure(gate)
     ok = out["usd"] is not None and limit > 0 and out["usd"] <= Decimal(limit)
-    return {"covered": ok, "usd": out["usd"], "why": out["why"]}
+    return {"covered": ok, "usd": out["usd"], "why": out["why"], "capOnly": out["capOnly"]}
 
 
 def format_usd(value):
@@ -824,6 +972,88 @@ def credential_annotation(date, names, file, source):
     return text
 
 
+# ---- the test-Login reading (p37-4, ADR 0034's 2026-11-05 amendment) ---------------------------------------------
+
+NO_LOGINS_WHY = "no test Logins declared (set [defaults] test_logins in ~/.config/thread/rollouts.toml)"
+LOGIN_WORD_RE = re.compile(WS + r"Logins?(?:'s)?" + WE, re.I)
+LOGIN_NAME = r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}"
+# A `<name> (Claude )?Login('s)?` phrase; the leftmost name wins, so `the Claude Login` names `the`.
+LOGIN_PHRASE_RE = re.compile(r"(?<![A-Za-z0-9_-])(?P<name>" + LOGIN_NAME + r")\s+(?:Claude\s+)?(?P<login>Login(?:'s)?)"
+                             + WE, re.I)
+# A `live` directly before a probe, run or test (`a live probe on the dummy Login`) is no deny word here.
+LIVE_USE_RE = re.compile(r"(?:\s+|-)(?:probe|run|test)s?" + WE, re.I)
+OTHER_CREDENTIAL_RES = (re.compile(WS + r"(?:accounts?|keys?|credentials?|API)" + WE, re.I),
+                        re.compile(WS + r"PATs?" + WE), re.compile(r"\.env" + WE))
+
+
+def has_login_phrase(gate):
+    """True when the text after the gate's first `:` holds a `Login` or `Logins` word (any case) and no upper-snake env
+    token (module docstring, 5): the gate takes the test-Login reading, never the class one."""
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    if ":" not in gate:
+        return False
+    text = gate.split(":", 1)[1]
+    return bool(LOGIN_WORD_RE.search(text)) and not ENV_TOKEN_RE.search(text)
+
+
+def login_reading(gate, logins):
+    """{"names": [...] | None, "why"}: the test-Login reading of one gate (module docstring, 5). Fail closed, the first
+    failure wins, reading only the text after the first `:`; steps 1-5 need no `logins` (None or a list of declared
+    names). names are the declared spellings of the Logins it names, in text order, each once."""
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    if gate_kind(gate) != "credential":
+        return _cred_none("not a credential gate")
+    text = gate.split(":", 1)[1]
+    found = []
+    for i, regex in enumerate(DENY_RES):
+        for m in regex.finditer(text):
+            if i == 0 and m.group(0).lstrip("_").lower() == "live" and LIVE_USE_RE.match(text, m.end()):
+                continue   # `live probe`, `live-run`, `live tests`
+            found.append((m.start(), -len(m.group(0)), m.group(0)))
+    if found:
+        word = re.sub(r"\s+", " ", min(found)[2]).lstrip("_")
+        return _cred_none(f"deny word: {word}")
+    env = ENV_TOKEN_RE.search(text)
+    if env:
+        return _cred_none(f"an env key beside a Login: {env.group(0)}")
+    other = [m for regex in OTHER_CREDENTIAL_RES for m in regex.finditer(text)]
+    if other:
+        return _cred_none(f"another credential beside the Login: {min(other, key=lambda m: m.start()).group(0)}")
+    words = list(LOGIN_WORD_RE.finditer(text))
+    plural = next((m for m in words if re.match(r"Logins" + WE, m.group(0), re.I)), None)
+    if plural:
+        return _cred_none(f"more than one Login: {plural.group(0)}")
+    phrases = list(LOGIN_PHRASE_RE.finditer(text))
+    ends = {m.end("login") for m in phrases}
+    if any(m.end() not in ends for m in words):
+        return _cred_none("a Login it cannot name")
+    if not phrases:
+        return _cred_none("it names no Login")
+    named = []
+    for m in phrases:
+        if m.group("name").lower() not in [n.lower() for n in named]:
+            named.append(m.group("name"))
+    if not logins:
+        return _cred_none(NO_LOGINS_WHY)
+    declared = {n.lower(): n for n in logins}
+    names = []
+    for n in named:
+        if n.lower() not in declared:
+            return _cred_none(f"{n} is not a declared test Login")
+        names.append(declared[n.lower()])
+    return {"names": names, "why": ""}
+
+
+def login_annotation(date, names, source):
+    """The standing approval's `## Approved gates` suffix for a declared test Login (module docstring, 5): `(approved
+    <date> under the standing approval: test Login <n1, n2>, from <source>)`. Raises ValueError on a `)` in any part,
+    as annotation() does."""
+    text = f"(approved {date} under the standing approval: test Login {', '.join(names)}, from {source})"
+    if text.count(")") != 1:
+        raise ValueError(f"an annotation part holds a ')': {date!r}, {names!r}, {source!r}")
+    return text
+
+
 # ---- CLI --------------------------------------------------------------------------------------------------------
 
 USAGE = ("usage: gated_inputs.py sweep <note>...\n"
@@ -845,7 +1075,9 @@ def _exposure_cli():
     if len(gates) > 1:
         out = {"usd": None, "why": f"stdin holds {len(gates)} lines: pass one gate"}
     else:
-        r = exposure(gates[0])
+        # The standing reading's {usd, why}, never capOnly: a gate whose cap reads prints its amount, so the plan judge
+        # never bounces it on wording alone (p37-4).
+        r = standing_exposure(gates[0])
         out = {"usd": None if r["usd"] is None else format_usd(r["usd"]), "why": r["why"]}
     sys.stdout.buffer.write((json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
     sys.stdout.buffer.flush()

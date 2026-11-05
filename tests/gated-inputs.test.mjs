@@ -16,6 +16,11 @@
 // - the sweep: p18-7's verbatim capture flags spend (and so did the old list: the 2026-10-10 miss was by eye), the new
 //   words flag where the old list is silent, and the currency amount marker never flags a shell variable while the old
 //   literal `$` does;
+// - p37-4 (ADR 0034's 2026-11-05 amendment, unpriceable never means asked): the verbatim gate that stopped
+//   chorus-rollout-2026-11-02 reads null in full and US$1 in the standing reading, covered at 200, its CLI line exactly
+//   {"usd": "1", "why": ""}; the reading is monotone (a US$ amount is never dropped); per/each is a rate only before a
+//   unit; 7(ix) holds every per-unit word; the cap-only clause signs prose and still asks on a rate, multiplier, %,
+//   plus, widening word, currency or per-unit noun; the accepted residuals; and the test-Login reading, each why;
 // - the test-credential reading (ADR 0063): each step's why, in order (the class-independent steps first); p8-1's two
 //   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
 //   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
@@ -55,6 +60,17 @@ for req in json.loads(sys.argv[3]):
         r = gi.exposure(req["gate"]); out.append({"usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"]})
     elif op == "covered":
         r = gi.covered(req["gate"], req["limit"]); out.append({"covered": r["covered"], "usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"]})
+    elif op == "standing":
+        r = gi.standing_exposure(req["gate"]); out.append({"usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"], "capOnly": r["capOnly"]})
+    elif op == "login":
+        out.append(gi.login_reading(req["gate"], req.get("logins")))
+    elif op == "has_login":
+        out.append(gi.has_login_phrase(req["gate"]))
+    elif op == "login_annotation":
+        try:
+            out.append(gi.login_annotation(req["date"], req["names"], req["source"]))
+        except ValueError as e:
+            out.append({"error": str(e)})
     elif op == "annotation":
         out.append(gi.annotation(req["date"], req["usd"], req["limit"], req["source"]))
     elif op == "strip":
@@ -99,12 +115,16 @@ function py(reqs, env = {}) {
 }
 const exposure = (gate) => py([{ op: 'exposure', gate }])[0]
 const covered = (gate, limit) => py([{ op: 'covered', gate, limit }])[0]
+const standing = (gate) => py([{ op: 'standing', gate }])[0]
 const num = (usd) => (usd === null ? null : Number(usd))
 
 // p18-7's real gates, verbatim from Archive/chorus-p18-7-fast-while-held.md `## Approved gates`, ` (approved 2026-10-12)`
 // stripped.
 const PROBE = "spend: the fast-mode probe (`scripts/stage/probe-fast.py`). Phase A is free (`get_usage` only, every signed-in Claude Login). Phase B runs seven Turns on `claude-opus-5-5` on ONE Login that passes the cap (three standard, four fast), drawn from that Login's usage credits. Cap US$5 total, held by the client's `max_budget_usd=5` and the script stopping before any Turn once the cumulative `total_cost_usd` reaches US$4."
 const FAST = "spend: the live feature, Claude fast mode on each run of questions on the Session he is on, drawn from that Login's usage credits (extra usage). Cap US$50 per Login (per account) per calendar month, enforced in code: fast is asked only while the Login's extra-usage monthly limit reads at or under `fast_credit_cap` (5000 minor units, USD or AUD only) with used credits under it, and unknown, stale, unlimited or over-cap credits keep it standard."
+// The gate that stopped chorus-rollout-2026-11-02 (p37-4), verbatim from
+// Archive/chorus-a-steer-that-leads-with-a-local-command-tag-reads-lost.md:54, ` (approved 2026-11-03)` stripped.
+const STEER = "spend: live probe of a tag-led Steer into a running Turn (Haiku 4.5, CLI 2.1.314 and the day's pin, per the task note's 'Measure first') — cap 1 USD"
 // The count-phrased rewording the ask-ahead Planner line asks for.
 const FAST_COUNTED = "spend: Claude fast mode on the Session he is on, drawn from that Login's usage credits (extra usage) — cap US$50 per Login per month across 3 Logins"
 
@@ -246,7 +266,6 @@ test('never covered: each failure names its rule', () => {
     ['spend: fast mode on the Logins — cap US$15 per month', 'plural unit outside the cap clause: Logins'],
     ['spend: fast mode across Logins — cap US$15/month', 'plural unit outside the cap clause: Logins'],
     // 7. the rest
-    ['spend: image batch per the brief — cap US$5', 'per/each outside the cap clause: per'],
     ['spend: one call each — cap US$5 total', 'per/each outside the cap clause: each'],
     ['spend: x — cap US$5. Per day after that', 'per/each outside the cap clause: Per'],
     ['spend: fast mode on each Login — cap US$15 per month', 'per/each outside the cap clause: each'],
@@ -276,7 +295,7 @@ test('never covered: each failure names its rule', () => {
 
 // A cap whose own wording says it is not the ceiling never reads as the bare cap (ADR 0034: anything it cannot price
 // asks). WIDENING is one list for rule 5 (inside the clause) and rule 7 (outside it).
-test('never covered: a widening word inside or outside the cap clause asks, and is never read as the bare cap', () => {
+test('never covered: a widening word inside or outside the cap clause asks in full; inside the clause it is never read as the bare cap', () => {
   const cases = [
     // the review's shapes, each read as the bare cap and approved at 50 before WIDENING
     ['spend: x — cap US$50 (no hard limit: overage possible)', 'unrecognised clause: (no hard limit'],
@@ -311,7 +330,11 @@ test('never covered: a widening word inside or outside the cap clause asks, and 
   const got = py(cases.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'covered', gate, limit: 50 }]))
   cases.forEach(([gate, why], i) => {
     assert.deepEqual(got[2 * i], { usd: null, why }, gate)
-    assert.equal(got[2 * i + 1].covered, false, `${gate}: never covered at 50`)
+    // p37-4: the standing reading prices a gate whose widening word sits outside the cap clause from its cap alone
+    // (an accepted residual of the cap-only reading: the cap stays the implementer's ceiling); one inside the clause
+    // still asks there too.
+    const inside = why.startsWith('unrecognised clause: ')
+    assert.equal(got[2 * i + 1].covered, !inside, `${gate}: ${inside ? 'never covered' : 'covered from its cap'} at 50`)
   })
   // controls: `plus` with an amount after it is an amount (summed), and `before` outside the clause is the probe's own
   // "stopping before any Turn", so p18-7's probe still reads 9 and the count-phrased fast-mode gate still reads 150
@@ -451,19 +474,26 @@ test('ADR 0038: `exposure -` prices the one-line gates and names p19-10\'s `each
     ['spend: claude plugin eval re-runs of the two close cases — cap 20 USD', { usd: '20', why: '' }],
     [P19_5_ONE_LINE, { usd: '50', why: '' }],
     ['spend: two make evals runs (pre-trim and post-trim) — cap 50 USD total', { usd: '50', why: '' }],
-    [P19_10, { usd: null, why: 'per/each outside the cap clause: each, each' }],
+    // p37-4: the CLI prints the standing reading, so p19-10's gate prints its cap-only amount (its cap plus its
+    // `--max-cost-usd 4`) and the plan judge never bounces it on wording alone; exposure() still asks (below).
+    [P19_10, { usd: '24', why: '' }],
   ]) {
     const r = cli(gate + '\n')
     assert.equal(r.status, 0, r.stderr)
     assert.equal(r.stdout.split('\n').filter(Boolean).length, 1, 'one JSON line')
     assert.deepEqual(r.out, want, gate)
   }
+  const [full, stand] = py([{ op: 'exposure', gate: P19_10 }, { op: 'standing', gate: P19_10 }])
+  assert.deepEqual(full, { usd: null, why: 'per/each outside the cap clause: each, each' }, 'the full reading still names its two each')
+  assert.deepEqual(stand, { usd: '24', why: '', capOnly: 'per/each outside the cap clause: each, each' }, 'the standing reading carries it as capOnly')
 })
 
-test('ADR 0038: `exposure -` agrees with exposure() and holds under LC_ALL=C (the em dash still prices)', () => {
+// p37-4: the CLI prints standing_exposure()'s {usd, why}, never capOnly.
+test('ADR 0038: `exposure -` agrees with standing_exposure() and holds under LC_ALL=C (the em dash still prices)', () => {
   const gates = [PROBE, FAST, FAST_COUNTED, 'spend: image API — cap US$40, plus US$30 for the fallback',
-    'credential: the Replicate API key', 'spend: fast mode — cap US$12.50 per month', 'spend: x — cap 5 USD and cap 3 USD']
-  const want = py(gates.map((gate) => ({ op: 'exposure', gate })))
+    'credential: the Replicate API key', 'spend: fast mode — cap US$12.50 per month', 'spend: x — cap 5 USD and cap 3 USD',
+    STEER, P19_10, 'spend: probe — cap 1 USD x 3']
+  const want = py(gates.map((gate) => ({ op: 'standing', gate })))
   gates.forEach((gate, i) => {
     for (const env of [{}, { LC_ALL: 'C', LANG: 'C' }]) {
       const r = cli(gate, undefined, env)
@@ -471,6 +501,7 @@ test('ADR 0038: `exposure -` agrees with exposure() and holds under LC_ALL=C (th
       assert.deepEqual([num(r.out.usd), r.out.why], [num(want[i].usd), want[i].why], `${gate} ${JSON.stringify(env)}`)
     }
   })
+  assert.deepEqual(cli(STEER + '\n').out, { usd: '1', why: '' }, 'the verbatim Steer gate prints exactly its cap, no capOnly key')
   const c = cli(P19_10_ONE_LINE + '\r\n', undefined, { LC_ALL: 'C', LANG: 'C' })
   assert.deepEqual(c.out, { usd: '24', why: '' }, 'a CRLF line under LC_ALL=C')
   assert.equal(cli('spend: x — cap 2 USD for the €-priced tier').stdout.includes('€'), true, 'the why is UTF-8, never ASCII-escaped')
@@ -535,6 +566,159 @@ test('ADR 0038 pipeline: sub-bullets are commentary, the one gate prices 24 thro
   } finally {
     fs.rmSync(D, { recursive: true, force: true })
   }
+})
+
+// ---- p37-4: unpriceable never means asked (ADR 0034's 2026-11-05 amendment) -------------------------------------------
+// The standing reading prices a gate the full reading refuses from its one readable cap: rules 1-4 and 6 as ever, rule 5
+// against the cap-only leftover list, outside the clause only plurals (7(ii)) and per-unit words (7(ix)), the value
+// rule 9's sum. Each pin below names the reading it holds.
+
+test('p37-4 the verbatim Steer gate: null in full on the bare 4, US$1 standing, covered at 200, the CLI exactly {usd: "1", why: ""}', () => {
+  const [full, stand, cov] = py([{ op: 'exposure', gate: STEER }, { op: 'standing', gate: STEER }, { op: 'covered', gate: STEER, limit: 200 }])
+  assert.deepEqual(full, { usd: null, why: 'a number outside the cap clause: 4' }, '"per the task note" is no rate; the bare 4 of "Haiku 4.5" is')
+  assert.deepEqual(stand, { usd: '1', why: '', capOnly: 'a number outside the cap clause: 4' })
+  assert.deepEqual([cov.covered, cov.usd], [true, '1'])
+  const r = cli(STEER + '\n')
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(r.out, { usd: '1', why: '' }, 'no capOnly key: the plan judge reads {usd, why} only')
+  assert.equal(r.stdout, '{"usd": "1", "why": ""}\n')
+})
+
+test('p37-4 monotone: a USD amount outside the clause is summed in both readings, and a malformed one asks in both', () => {
+  const [a, b, c, d] = py([{ op: 'standing', gate: 'spend: probe, US$500 — cap 1 USD' },
+    { op: 'standing', gate: 'spend: probe, US$500 per run — cap 1 USD' },
+    { op: 'exposure', gate: 'spend: probe, US$5k per run — cap 1 USD' }, { op: 'standing', gate: 'spend: probe, US$5k per run — cap 1 USD' }])
+  assert.deepEqual(a, { usd: '501', why: '', capOnly: '' }, 'priced in full')
+  assert.deepEqual(b, { usd: '501', why: '', capOnly: 'per/each outside the cap clause: per' }, 'cap-only, never below the full sum')
+  assert.deepEqual(c, { usd: null, why: 'malformed amount: US$5k' })
+  assert.deepEqual(d, { usd: null, why: 'malformed amount: US$5k', capOnly: '' })
+})
+
+test('p37-4 Do 2: per/each is a rate only before a unit; prose per is none; 7(ix) holds the per-Login words', () => {
+  const prose = ['spend: image batch per the brief — cap US$5', 'spend: x per the task note — cap US$5', 'spend: x per ADR 0038 — cap US$5']
+  const proseGot = py(prose.map((gate) => ({ op: 'exposure', gate })))
+  // `per ADR 0038` drops its per but keeps its bare number, which only the full reading asks
+  assert.deepEqual(proseGot, [{ usd: '5', why: '' }, { usd: '5', why: '' }, { usd: null, why: 'a number outside the cap clause: 0038' }])
+  const rates = [['per run', 'per'], ['per-run', 'per'], ['per-call', 'per'], ['per-image', 'per'], ['per 1,000 tokens', 'per'],
+    ['Per day', 'Per'], ['each night', 'each'], ['each of the runs', 'each'], ['one call each', 'each'], ['each --max-cost-usd 4', 'each'],
+    ['per/run', 'per'], ['per 1k', 'per'], ['3 each, then', 'each']]
+  const rateGot = py(rates.map(([w]) => ({ op: 'exposure', gate: `spend: x ${w} — cap US$5` })))
+  rates.forEach(([w, word], i) => assert.equal(rateGot[i].why.startsWith(`per/each outside the cap clause: ${word}`), true, `${w}: ${rateGot[i].why}`))
+  const [five] = py([{ op: 'exposure', gate: 'spend: x — cap US$5, US$5 each for the runs' }])
+  assert.deepEqual(five, { usd: null, why: 'per/each outside the cap clause: each' }, '`US$5 each`: straight after a digit')
+  for (const w of ['per-Login', 'each Login']) {
+    assert.deepEqual(exposure(`spend: x ${w} — cap US$5`), { usd: null, why: `per/each outside the cap clause: ${w.slice(0, 3) === 'per' ? 'per' : 'each'}` }, w)
+  }
+  // 7(ix): a per-unit word no earlier rule names, in both readings
+  for (const w of ['per the dummy Login', 'each new Login']) {
+    const g = `spend: x ${w} — cap 5 USD`
+    const [f, st] = py([{ op: 'exposure', gate: g }, { op: 'standing', gate: g }])
+    assert.deepEqual(f, { usd: null, why: 'per-Login cap with no Login count' }, `${w}: full`)
+    assert.deepEqual(st, { usd: null, why: 'per-Login cap with no Login count', capOnly: '' }, `${w}: standing`)
+  }
+  assert.deepEqual([exposure(PROBE), exposure(FAST_COUNTED)], [{ usd: '9', why: '' }, { usd: '150', why: '' }], 'PROBE and FAST_COUNTED unchanged')
+})
+
+test('p37-4 the cap-only clause: prose beside the cap signs at it; a rate, multiplier, %, plus, widening word, currency or per-unit noun asks', () => {
+  // signs at the cap, capOnly the full reading's why (the last three are accepted residuals: a count on the cap with no
+  // rate word reads as the cap, the implementer's ceiling)
+  const sign = ['(Haiku 4.5)', 'for the 3 probes', 'for 3 runs', 'for 10k tokens', 'for both probes']
+  const signGot = py(sign.map((c) => ({ op: 'standing', gate: `spend: probe — cap 1 USD ${c}` })))
+  sign.forEach((c, i) => assert.deepEqual(signGot[i], { usd: '1', why: '', capOnly: `unrecognised clause: ${c}` }, c))
+  // still asks, with the full reading's why
+  const ask = ['x 3', '3x', 'plus 20%', 'plus 30 more', '+ 2', 'per big run', '/1k tokens', 'a day', 'for 3 Logins', 'for the dummy Login',
+    '(US$15 with retries)', 'soft', 'before tax', 'each', 'per day', 'every run', 'daily', 'three times', 'per new Login']
+  const askGot = py(ask.flatMap((c) => [{ op: 'exposure', gate: `spend: probe — cap US$1 ${c}` }, { op: 'standing', gate: `spend: probe — cap US$1 ${c}` }]))
+  ask.forEach((c, i) => {
+    assert.deepEqual(askGot[2 * i], { usd: null, why: `unrecognised clause: ${c}` }, `${c}: full`)
+    assert.deepEqual(askGot[2 * i + 1], { usd: null, why: `unrecognised clause: ${c}`, capOnly: '' }, `${c}: standing`)
+  })
+  const [perLogin, counted] = py([{ op: 'standing', gate: 'spend: x — cap US$1 per Login' }, { op: 'standing', gate: 'spend: x — cap US$1 per Login across 3 Logins' }])
+  assert.deepEqual(perLogin, { usd: null, why: 'per-Login cap with no Login count', capOnly: '' })
+  assert.deepEqual(counted, { usd: '3', why: '', capOnly: '' }, 'the per-unit count still multiplies')
+})
+
+test('p37-4 cap-only outside the clause: rules 1-4 and 6, plurals and per-unit words ask; other prose reads as the cap (accepted residuals)', () => {
+  const ask = [['credential: the dummy Login — cap 1 USD', 'not a spend gate'], ['spend: probe — no cap', 'no cap clause'],
+    ['spend: x — cap 1 USD and cap 2 USD', '2 cap clauses'], ['spend: x — cap 30 AUD', 'no cap clause'],
+    ['spend: x — cap US$1k', 'malformed amount: US$1k'], ['spend: x — cap US$40 to US$60', 'range: US$40 to US$60'],
+    ['spend: probe, A$500 of credits — cap 1 USD', 'non-USD or ambiguous currency: A$5'],
+    ['spend: probe in dollars — cap 1 USD', 'non-USD or ambiguous currency: dollars'],
+    ['spend: fast mode on the Logins — cap 1 USD', 'plural unit outside the cap clause: Logins'],
+    ['spend: fast mode — cap 50 USD, per Login per month', 'per-Login cap with no Login count'],
+    ['spend: fast mode at US$2 per-Login — cap 5 USD', 'per-Login cap with no Login count'],
+    ['spend: fast mode on every Login — cap 5 USD', 'per-Login cap with no Login count'],
+    ['spend: fast mode on a Login — cap 5 USD', 'per-Login cap with no Login count'],
+    ['spend: fast mode, US$2/Login — cap 5 USD', 'per-Login cap with no Login count'],
+    [FAST, 'per-Login cap with no Login count']]
+  const askGot = py(ask.map(([gate]) => ({ op: 'standing', gate })))
+  ask.forEach(([gate, why], i) => assert.deepEqual(askGot[i], { usd: null, why, capOnly: '' }, gate))
+  const waived = [['spend: soft probe — cap 1 USD', 'widening word outside the cap clause: soft'], ['spend: 3 runs — cap 1 USD', 'a number outside the cap clause: 3'],
+    ['spend: probe, plus 20% — cap 1 USD', 'percentage outside the cap clause: %'], ['spend: probe ×3 — cap 1 USD', 'multiplier outside the cap clause: ×'],
+    ['spend: CI each night — cap 1 USD', 'per/each outside the cap clause: each']]
+  const waivedGot = py(waived.map(([gate]) => ({ op: 'standing', gate })))
+  waived.forEach(([gate, why], i) => assert.deepEqual(waivedGot[i], { usd: '1', why: '', capOnly: why }, gate))
+  assert.deepEqual(standing('spend: CI on every push — cap 1 USD'), { usd: '1', why: '', capOnly: '' }, 'every push: x1 in full already')
+  assert.equal(num(standing(PROBE).usd), 9, "control: p18-7's `every signed-in Claude Login` still passes in full")
+})
+
+// ---- the test-Login reading (p37-4) ---------------------------------------------------------------------------------
+const LOGINS = ['dummy']
+const NO_LOGINS = 'no test Logins declared (set [defaults] test_logins in ~/.config/thread/rollouts.toml)'
+const DUMMY = 'credential: the dummy Claude Login, to run that probe'   // verbatim from the archived Steer note's line 55
+
+test('p37-4 the test-Login reading: each why in order; names matched ignoring case, a possessive, Claude optional, a live probe', () => {
+  const ok = [[DUMMY, ['dummy']], ['credential: a live probe on the dummy Login', ['dummy']], ["credential: the Dummy Login's history", ['dummy']],
+    ['credential: the dummy login, live-run', ['dummy']], ['- Credential: the dummy Claude Login', ['dummy']],
+    ['credential: the dummy Login, then the dummy Claude Login again', ['dummy']]]
+  assert.deepEqual(py(ok.map(([gate]) => ({ op: 'login', gate, logins: LOGINS }))), ok.map(([, names]) => ({ names, why: '' })))
+  const cases = [
+    ['spend: the dummy Login — cap 1 USD', 'not a credential gate'],
+    ['credential: access to the dummy Claude Login', 'deny word: access'],   // a known false ask, pinned
+    ["credential: the dummy Claude Login's session token", 'deny word: token'],   // a known false ask, pinned
+    ["credential: the dummy Login's OAuth token", 'deny word: OAuth'],
+    ['credential: the dummy Claude Login and the live Stripe account', 'deny word: live'],
+    ['credential: livemode on the dummy Login', 'deny word: livemode'],
+    ['credential: the production dummy Login', 'deny word: production'],
+    ['credential: wipe the dummy Login', 'deny word: wipe'],
+    ['credential: the dummy Login and STRIPE_SECRET', 'an env key beside a Login: STRIPE_SECRET'],
+    ['credential: the dummy Claude Login and the Stripe test account', 'another credential beside the Login: account'],
+    ['credential: the dummy Login and the GitHub PAT', 'another credential beside the Login: PAT'],
+    ['credential: the dummy Login and its API', 'another credential beside the Login: API'],
+    ['credential: the dummy Login from .env.local', 'another credential beside the Login: .env'],
+    ['credential: the dummy Login and the deploy keys', 'another credential beside the Login: keys'],
+    ['credential: the Logins', 'more than one Login: Logins'],
+    ['credential: Login for the probe', 'a Login it cannot name'],
+    ['credential: the dummy account', 'another credential beside the Login: account'],
+    ['credential: the dummy probe', 'it names no Login'],
+    ['credential: the animately Login', 'animately is not a declared test Login'],
+    ['credential: the Claude Login', 'the is not a declared test Login'],   // the leftmost name wins
+    ['credential: the dummy Login and the animately Login', 'animately is not a declared test Login'],
+  ]
+  const got = py(cases.map(([gate]) => ({ op: 'login', gate, logins: LOGINS })))
+  cases.forEach(([gate, why], i) => assert.deepEqual(got[i], { names: null, why }, gate))
+  // steps 1-5 need no Logins: a gate they pass says NO_LOGINS_WHY with none declared, [] or null
+  const [none, empty, pre] = py([{ op: 'login', gate: DUMMY, logins: null }, { op: 'login', gate: DUMMY, logins: [] },
+    { op: 'login', gate: 'credential: access to the dummy Claude Login', logins: null }])
+  assert.deepEqual([none, empty], [{ names: null, why: NO_LOGINS }, { names: null, why: NO_LOGINS }])
+  assert.deepEqual(pre, { names: null, why: 'deny word: access' }, 'a deny word says so with no Logins')
+  assert.deepEqual(py([{ op: 'login', gate: 'credential: the Dummy Login', logins: ['DUMMY'] }])[0], { names: ['DUMMY'], why: '' }, 'the declared spelling')
+})
+
+test('p37-4 has_login_phrase: a Login word and no env token; the class path keeps an env-token gate', () => {
+  const got = py([DUMMY, 'credential: the Logins', 'credential: test-mode STRIPE_SECRET (sk_test_) for the dummy Login',
+    'credential: the dummy account', 'credential: Stripe test-mode keys STRIPE_SECRET (sk_test_)', 'Login: no colon text'].map((gate) => ({ op: 'has_login', gate })))
+  assert.deepEqual(got, [true, true, false, false, false, false])
+})
+
+test('p37-4 login_annotation: its text, one `)` last, stripped by GATE_ANNOT_RE and unapprovedGates; a `)` in a part raises', () => {
+  const T = loadEngine(['unapprovedGates'])
+  const [ann, bad] = py([{ op: 'login_annotation', date: '2026-10-14', names: ['dummy'], source: 'file:defaults' },
+    { op: 'login_annotation', date: '2026-10-14', names: ['a)'], source: 'file:defaults' }])
+  assert.equal(ann, '(approved 2026-10-14 under the standing approval: test Login dummy, from file:defaults)')
+  assert.match(bad.error, /an annotation part holds a '\)'/)
+  assert.deepEqual(py([{ op: 'strip', gate: DUMMY, line: `${DUMMY} ${ann}` }]), [true])
+  assert.deepEqual([...T.unapprovedGates([DUMMY], [`${DUMMY} ${ann}`])], [])
 })
 
 // ---- the test-credential reading (ADR 0063) -----------------------------------------------------------------------

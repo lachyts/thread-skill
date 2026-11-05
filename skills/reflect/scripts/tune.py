@@ -100,8 +100,9 @@ backstop: an edit that forgets the raise does not validate, and nothing is writt
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
 `file:repo`, every other key and Guardrail unchanged, `[notify]` (ADR 0038 d3, machine-wide) unchanged too, and every
-repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers) and
-every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) unchanged.
+repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers),
+every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) and the resolved `[defaults]
+test_logins` (p37-4: the operator's declared test Logins, no automated writer) unchanged.
 
 Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
@@ -519,7 +520,8 @@ def edit_text(text, slug, picks, doc):
 
 def _repo_tables(path, key):
     """{repo key (lowered): its `key`} over every repo table of the file at `path` that sets it ({} for no file): a
-    repo-only key no Tuning may touch (inert_paths, test_credentials)."""
+    repo-only key no Tuning may touch (inert_paths, test_credentials). The machine-wide `test_logins` (p37-4) is
+    compared on resolve()'s result instead, in _apply."""
     try:
         tables = RS.load_tables(path)
     except RS.SettingsError as e:
@@ -700,6 +702,9 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
         for key in ("inert_paths", "test_credentials"):
             if _repo_tables(tmp, key) != _repo_tables(config, key):
                 raise Stop("the edit changes a repo's %s: nothing written" % key, 2)
+        # p37-4: the declared test Logins are the operator's alone (machine-wide, [defaults]): no Tuning moves them.
+        if after.get("test_logins") != before.get("test_logins"):
+            raise Stop("the edit changes test_logins: nothing written", 2)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:

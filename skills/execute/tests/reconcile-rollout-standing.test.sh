@@ -10,8 +10,9 @@
 #   Q3-Q5  await-sign-off (the sign-off pause), status's pausedFor and clear-pause's STILL-AWAITING refusal, then the
 #          reinstate once signed (by hand, or by a raised standing approval).
 #   S7     ADR 0038's one-line gates through approve-gates --standing: p19-10's restated gate (cap 24 USD) and p19-5's
-#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`. It runs at a
-#          US$200 limit, so the month line (S9) never touches its pricing; S9c3 is the same two gates at US$50.
+#          (cap 50 USD total) are signed; p19-10's original one-line gate, which the full reading refuses on its two
+#          `each`, is signed too since p37-4, priced from its cap (US$24 with its `--max-cost-usd 4`). It runs at a
+#          US$200 limit, so the month line (S9) never touches its pricing; S9c3 is the first two gates at US$50.
 #   S8     ADR 0038's bounce, end to end from the engine: a priced gate (cap 24 USD) whose sub-bullet spends 40, flagged
 #          on both plan rounds, is plan-blocked when the judge obeys the usd-null rule; a judge that wrongly bounces it
 #          leaves `## Gate bounce (awaiting sign-off)` on the gate-pending note, and the standing approval asks instead of
@@ -227,13 +228,15 @@ ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
 mkt a gate-pending; gate a "$ONE24"
 mkt b gate-pending; gate b "$ONE50"
 mkt c gate-pending; gate c "$P19_10"
-before=$(cat "$D/c.md")
 HH="$H200" sa a,b,c
-ok "$rc" 3 "S7: two signed, one asks: exit 3"
+# p37-4 flips c by design: the full reading still refuses its two `each`, and the cap-only reading prices it at its cap
+# plus its `--max-cost-usd 4` amount, US$24, so all three sign (24 + 50 + 24 = 98, within the US$200 month line).
+ok "$rc" 0 "S7: all three signed: exit 0"
 has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$200, file:defaults)" "S7: p19-10's restated gate signs US\$24"
 has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$200, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
-has "$out" "ASK: c: $P19_10: per/each outside the cap clause: each, each" "S7: p19-10's original gate asks, naming its two each"
-ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
+has "$out" "c: gate approved under the standing approval: $P19_10 (exposure US\$24 of US\$200, file:defaults; cap-only pricing, the full reading refused: per/each outside the cap clause: each, each)" "S7: p19-10's original gate signs US\$24 from its cap (p37-4), naming its two each"
+ok "$(fm c status)|$(section c '## Approved gates')" "status: in_progress|- $P19_10 (approved $DATE under the standing approval: total exposure US\$24, limit US\$200 from file:defaults)" "S7: … c.md is written"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "3|98" "S7: three log lines, month to date US\$98 of US\$200"
 
 # ── S8: a gate the plan judge flagged never reaches the standing approval (ADR 0038, p23-1 round 2) ──────────────
 # The reviewer's reproduction, end to end: the engine (task.workflow.js, through tests/lib/engine.mjs) runs a plan whose
