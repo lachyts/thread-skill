@@ -369,6 +369,16 @@ for c in bytes list since5 sincex; do
   has "$out" "primary: current" "K1 $c: … the pass completes"
   ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["v"], d["stuck"])' "$S")" "1 {}" "K1 $c: … and the state is rewritten valid"
 done
+# K1b: a stored self-update spell whose notifiedKinds is no list, on a pass whose fetch fails (so nothing touches it)
+S="$tmp/s-k1b.json"; n0=$(posts)
+printf '{"v": 1, "stuck": {"self-update": {"since": "%s", "kind": "refused", "kindSince": "%s", "outcome": "x", "notifiedKinds": 5, "tip": "%s", "tipAt": "%s"}}}\n' \
+  "$(at 0)" "$(at 0)" "$(tip)" "$(at 0)" > "$S"
+g -C "$tmp/primary" remote set-url origin "$tmp/nowhere.git"
+out=$(job --state "$S" --now "$(at 1500)")
+lacks "$out" "Traceback" "K1b: a malformed notifiedKinds on a spell this pass never touched is no traceback"
+has "$out" "primary: self-update: notified" "K1b: … the spell still notifies at 24 h"
+ok "$(posts)|$(sv "$S" self-update notifiedKinds)" "$((n0+1))|['refused']" "K1b: … once, and the list is rewritten"
+g -C "$tmp/primary" remote set-url origin "$tmp/origin.git"
 
 # ---- L1: the log rotates at 1 MiB, never under --dry-run ------------------------------------------------------------------------
 L="$tmp/big.log"; head -c 1048577 /dev/zero | tr '\0' x > "$L"

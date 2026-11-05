@@ -1003,8 +1003,9 @@ def cmd_run(args):
             _line(primary, f"job: {e.get('outcome')}")
         rc, why = _notify(primary, message, args.ntfy_server)
         if rc == 0:
-            if e["kind"] not in e["notifiedKinds"]:
-                e["notifiedKinds"].append(e["kind"])
+            kinds = e.setdefault("notifiedKinds", [])  # an untouched copy spell may have lost a malformed list
+            if e["kind"] not in kinds:
+                kinds.append(e["kind"])
             e["notified"] = stamp
             e.pop("notifyFailed", None)
             e.pop("notifyWhy", None)
