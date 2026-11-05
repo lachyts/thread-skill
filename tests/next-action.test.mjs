@@ -377,6 +377,32 @@ test('mend keeps CRLF endings, and finds only a task directly under Work/Tasks',
   refused(dir, ['mend', 'Notes/loose.md'], /is not directly under Work\/Tasks/)
 })
 
+test('mend takes the task column of a read slot row as it is, a path-form link included (orient § 4)', () => {
+  const dir = vault({
+    [`${T}/foo.md`]: task('tags: [task]\nstatus: open\nnext_action: Ring the council: the clerk first'),
+    [`${P}/Alpha.md`]: task('tags: [project]\nnext_task: "[[Work/Tasks/foo|Foo]]"'),
+    [`${T}/Archive/old.md`]: task('tags: [task]\nstatus: open\nnext_action: a: b'),
+  })
+  const [slot] = ok(dir, ['read', 'Alpha'])
+  assert.deepEqual(slot, ['slot', 'Alpha', 'unparseable:frontmatter does not parse (line 4, next_action)',
+    `${T}/foo`, `${T}/foo`])
+  assert.deepEqual(ok(dir, ['mend', slot[3]]), [['mend', 'foo', 'mended:next_action']])
+  assert.deepEqual(ok(dir, ['read', 'Alpha']), [['slot', 'Alpha', 'live', `${T}/foo`, 'Ring the council: the clerk first']])
+  // Any case, as Obsidian resolves a link; a path that names no note, or names one with `.md` that is not there, is
+  // still refused, and one outside Work/Tasks is held to the directly-under check after it resolves.
+  assert.deepEqual(ok(dir, ['mend', 'work/tasks/FOO']), [['mend', 'foo', 'parses']])
+  refused(dir, ['mend', `${T}/nothing`], /no note at Work\/Tasks\/nothing\n$/)
+  refused(dir, ['mend', `${T}/nothing.md`], /no note at Work\/Tasks\/nothing\.md\n$/)
+  refused(dir, ['mend', `${T}/Archive/old`], /Work\/Tasks\/Archive\/old\.md is not directly under Work\/Tasks/)
+})
+
+test('mend names a key quoted on two lines once, in line order', () => {
+  const dir = vault({ [`${T}/dup.md`]: task('tags: [task]\nnext_action: a: b\nstatus: open\nnext_action: c: d\ntitle: e: f') })
+  assert.deepEqual(ok(dir, ['mend', 'dup']), [['mend', 'dup', 'mended:next_action,title']])
+  assert.equal(read(dir, `${T}/dup.md`),
+    task('tags: [task]\nnext_action: "a: b"\nstatus: open\nnext_action: "c: d"\ntitle: "e: f"'))
+})
+
 test('captures: open, thread-tagged tasks in either tag form, with their slug and thread-file matches', () => {
   const dir = vault({
     [`${T}/inline.md`]: task('tags: [task, thread]\nstatus: open'),

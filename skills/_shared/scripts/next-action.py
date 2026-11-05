@@ -42,7 +42,9 @@ Verbs:
     EOF
 
 <task> and <project> are a name, or — when the argument contains a `/` — a path inside the vault
-(absolute, or relative to the vault; never to the working directory). A task must sit directly under
+(absolute, or relative to the vault; never to the working directory). A path with no `.md` that names no
+file resolves as a path-qualified link does (`Work/Tasks/x`, any case), so the task column of a `read`
+slot row (a link's own target) can be passed to `mend` as it is. A task must sit directly under
 Work/Tasks; a project must be a `project`-tagged note under Work/Projects, outside Archive/.
 
 Links resolve as Obsidian resolves them: an exact-case name first, else any case; an optional `.md`;
@@ -74,9 +76,9 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
     capture   <task>     <status>     <match,…>        (thread-tag, plus marked, slug and/or thread-file)
 
 Exit 0 on success (skips, and mend's `parses` and `unmendable:` rows, included). Exit 2 when the input
-is refused (mend's included: a task that is not directly under Work/Tasks, or a name naming two notes)
-— stderr then carries one line starting `next-action: ` and nothing was written. Exit 3 when the vault
-or PyYAML is missing.
+is refused (mend's included: a path that names no note, a name that names no task note directly under
+Work/Tasks or names two, a task that is not directly under Work/Tasks) — stderr then carries one line
+starting `next-action: ` and nothing was written. Exit 3 when the vault or PyYAML is missing.
 """
 import argparse
 import json
@@ -431,16 +433,22 @@ class Vault:
         return None, reasons[0]
 
     def path_arg(self, arg):
-        """The vault-relative path an argument containing a `/` names, or None for a name."""
+        """The vault-relative path an argument containing a `/` names, or None for a name. A path with no `.md` that
+        names no file resolves as a path-qualified wikilink does (`Work/Tasks/x`, any case), so the task column of a
+        `read` slot row (a link's own target) can be passed back as it is."""
         if "/" not in arg and os.sep not in arg:
             return None
         raw = os.path.expanduser(arg)
         full = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(self.root, raw))
         if os.path.commonpath([full, self.root]) != self.root:
             raise Refused("%s is outside the vault (%s)" % (arg, self.root))
-        if not os.path.isfile(full):
+        rel = os.path.relpath(full, self.root)
+        if os.path.isfile(full):
+            return rel
+        linked = None if arg.lower().endswith(".md") else self.index()[1].get(rel.replace(os.sep, "/").lower())
+        if linked is None:
             raise Refused("no note at %s" % arg)
-        return os.path.relpath(full, self.root)
+        return linked
 
     def resolve_task(self, arg):
         rel = self.path_arg(arg)
@@ -589,14 +597,14 @@ def mend(vault, task_arg):
     """Quote the plain values a task note's YAML error names, so its frontmatter parses: one `mend` row.
 
     `parses` when the note is not broken (no frontmatter is not broken), and nothing is written; `unmendable:<why>`
-    when quoting cannot mend it, and nothing is written; `mended:<key,...>` when it did, the note saved in place once.
-    Only a note whose frontmatter does not parse is tried, one with no line break but "\n" (a CRLF ending is fine),
-    and only a YAMLError: a value that scans but will not construct (`due: 2026-02-30`) is no quoting fault. Each pass
-    takes the error's line, then the line before (a run-on value's line is never touched), and quotes the first one
-    `quoted` accepts; up to MAX_FIXES passes, re-loading after each. The result is checked whole before the save,
-    standing in for the estate's PreToolUse frontmatter hook, which sees no script write: it loads as a mapping, its
-    top-level keys are the original block's (TOP_KEY, empty values included), and each quoted line composes back to a
-    str scalar equal to its original value text."""
+    when quoting cannot mend it, and nothing is written; `mended:<key,...>` when it did (each key once, in line order),
+    the note saved in place once. Only a note whose frontmatter does not parse is tried, one with no line break but
+    "\n" (a CRLF ending is fine), and only a YAMLError: a value that scans but will not construct (`due: 2026-02-30`)
+    is no quoting fault. Each pass takes the error's line, then the line before (a run-on value's line is never
+    touched), and quotes the first one `quoted` accepts; up to MAX_FIXES passes, re-loading after each. The result is
+    checked whole before the save, standing in for the estate's PreToolUse frontmatter hook, which sees no script
+    write: it loads as a mapping, its top-level keys are the original block's (TOP_KEY, empty values included), and
+    each quoted line composes back to a str scalar equal to its original value text."""
     rel = vault.resolve_task(task_arg)
     note = vault.note(rel)
     name = os.path.basename(rel)[:-3]
@@ -643,7 +651,8 @@ def mend(vault, task_arg):
     if not mended_whole(Note(note.path, text), original, mended):
         return row("unmendable:mending would change other frontmatter")
     note.save(text)
-    return row("mended:" + ",".join(KEY_LINE.match(original[i]).group("key") for i in sorted(mended)))
+    keys = dict.fromkeys(KEY_LINE.match(original[i]).group("key") for i in sorted(mended))  # a duplicate key once
+    return row("mended:" + ",".join(keys))
 
 
 def mended_whole(check, original, mended):
