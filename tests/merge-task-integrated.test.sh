@@ -313,6 +313,32 @@ chk 1 "$(row integration-timeout fail)" "timed out"; echo "https://github.com/o/
 echo "Run integration tests" > "$MT_STATE/steps"
 run 5 "$I" "$B"
 ok "$rc" 1 "16f. a red row with 'timed out' on stderr still exits 1"
+# 16g. gh 2.43.1 (the fake's default) refuses `pr checks --json`: the infra re-run reads the failed required
+#      checks from the plain table instead (p37-2), so an infra-only red is re-run, not set aside as genuine.
+#      Only the failing row's run is re-run; the passing row's run is left alone.
+fresh; pair; mkpr 5 "$I" UNSTABLE
+chk 1 "$(printf '%s\n%s' "$(row ci fail)" "lint	pass	1m	https://github.com/o/r/actions/runs/3/job/4	")" ""
+chk 0 "$(row ci pass)" ""
+echo "Set up job" > "$MT_STATE/steps"
+run 5 "$I" "$B"
+ok "$rc" 0 "16g. gh 2.43.1: an infra-only red is re-run, then merges"; ok "$(nmerge)" 1 "16g. merged"
+has "$(glog)" "pr checks 5 -R o/r --required --json" "16g. tried --json first"
+ok "$(grep -cx 'pr checks 5 -R o/r --required' "$MT_STATE/gh.log")" 1 "16g. read the plain table once"
+has "$(glog)" "run rerun 7 --failed" "16g. re-ran the failing row's run"
+lacks "$(glog)" "run rerun 3" "16g. never the passing row's run"
+has "$out" "re-ran failed jobs of run 7" "16g. says so"
+# 16h. a gh with --json on pr checks reads the links from it and never the table.
+fresh; pair; mkpr 5 "$I" UNSTABLE; touch "$MT_STATE/checks.json"
+chk 1 "$(row ci fail)" ""; chk 0 "$(row ci pass)" ""
+echo "https://github.com/o/r/actions/runs/7/job/8" > "$MT_STATE/links"; echo "Set up job" > "$MT_STATE/steps"
+run 5 "$I" "$B"
+ok "$rc" 0 "16h. --json gh: an infra-only red is re-run, then merges"; has "$(glog)" "run rerun 7 --failed" "16h. re-ran run 7"
+ok "$(grep -cx 'pr checks 5 -R o/r --required' "$MT_STATE/gh.log")" 0 "16h. never the plain table"
+# 16i. gh 2.43.1 and a red row with no run link: nothing to re-run, genuine (fail-closed).
+fresh; pair; mkpr 5 "$I" BLOCKED
+chk 1 "ext-status	fail	0	https://example.com/status	" ""; echo "Set up job" > "$MT_STATE/steps"
+run 5 "$I" "$B"
+ok "$rc" 1 "16i. a red row with no run link exits 1"; lacks "$(glog)" "run rerun" "16i. no rerun"
 
 # 17. already merged, verified: no merge call, the anchor ref deleted
 fresh; pair; M=$(mk "$B" squash); git --git-dir "$MT_SRV" update-ref refs/heads/master "$M"

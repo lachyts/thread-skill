@@ -942,7 +942,15 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
   # (fail-closed), and `gh run rerun --failed` only when EVERY failed step is provably setup/infra.
   local links runs run_id steps s verdict reran=0
   # Failed REQUIRED checks only (branch protection's definition) → their run ids via the details link.
-  links="$(gh pr checks "$PR" -R "$OWNER/$REPO" --required --json state,link -q '.[] | select(.state=="FAILURE") | .link' 2>/dev/null)"
+  # `pr checks --json` is newer than gh 2.43.1 (this Mac's gh, p37-2), which refuses it ("unknown flag: --json",
+  # rc 1): then read the same --required checks from the plain table, whose tab-separated rows are
+  # name, state (pass | fail | pending | skipping), elapsed, link, description, and keep each `fail` row's link.
+  # The check-runs API is no fallback: it cannot tell a required check from the rest, and a red non-required
+  # check would then read as genuine. Any gh: a failed read leaves no links, which is genuine (fail-closed).
+  if ! links="$(gh pr checks "$PR" -R "$OWNER/$REPO" --required --json state,link -q '.[] | select(.state=="FAILURE") | .link' 2>/dev/null)"; then
+    links="$(gh pr checks "$PR" -R "$OWNER/$REPO" --required 2>/dev/null \
+      | awk -F'\t' '{f=0; l=""; for(i=1;i<=NF;i++){ if($i=="fail") f=1; if($i ~ /^https?:\/\//) l=$i } if(f && l!="") print l}')"
+  fi
   [ -z "$links" ] && { echo "  infra-classify: no failed required-check links — genuine (fail-closed)." >&2; return 1; }
   runs="$(printf '%s\n' "$links" | grep -oE 'runs/[0-9]+' | grep -oE '[0-9]+' | sort -u)"
   [ -z "$runs" ] && { echo "  infra-classify: could not parse run ids — genuine (fail-closed)." >&2; return 1; }
