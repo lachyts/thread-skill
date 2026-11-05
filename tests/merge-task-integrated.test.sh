@@ -229,6 +229,8 @@ ok "$rc" 1 "12c. BLOCKED, no review pending, green checks exits 1"; has "$out" "
 ok "$(sent)" "failed:1" "12c. failed:1, never 8"
 ok "$(awk '/^pr checks/{c=1} c && /^pr view/{v=1} END{print v ? "y" : "n"}' "$MT_STATE/gh.log")" y "12c. the PR is re-read after the checks wait"
 lacks "$(glog)" "--admin" "12c. no --admin in any argv"
+ok "$(grep -c '^api repos/o/r/branches/master$' "$MT_STATE/gh.log")" 1 "12c. one required-gate read (ADR 0069): protected, so some"
+lacks "$(glog)" "rules/" "12c. protected needs no rules read"
 fresh; pair; mkpr 5 "$I" BLOCKED
 fo=$(MT_STATE="$MT_STATE" "$tmp/bin/gh" pr merge 5 -R o/r --squash 2>&1); frc=$?
 ok "$frc" 1 "12d. (fake fidelity) BLOCKED without --admin is refused"
@@ -390,6 +392,103 @@ for t in "GraphQL: Squash merges are not allowed on this repository. (mergePullR
   ok "$rc" 1 "24. '$t' exits 1"; ok "$(sent)" "failed:1" "24. failed:1"; ok "$(nmerge)" 1 "24. exactly one merge call"
   has "$out" "GitHub refused to merge PR #5" "24. says GitHub refused"; lacks "$out" "nothing changed" "24. never the retryable text"
 done
+
+# 25. GitHub's lazy mergeability (ADR 0069): the default branch's required gate (branches/<b>, then rules/branches/<b>)
+#     reads some, none or unknown; with none a PR never waits on checks, and one GitHub has not settled (UNKNOWN or
+#     BLOCKED with nothing required, or UNKNOWN once its checks went green) is re-polled, then exits 8, never 1. Every
+#     mergeStateStatus.seq counts the pre-pass's read (`before the merge`) first.
+SETTLE="GitHub has not settled its mergeability"
+mss() { printf '%s\n' "$@" > "$MT_STATE/pr/5/mergeStateStatus.seq"; }
+nlog() { grep -c -- "$1" "$MT_STATE/gh.log" 2>/dev/null; }
+# (a) lachyts/chorus's shape (protected false, rulesets need GitHub Pro): UNKNOWN re-polled until CLEAN, no checks wait
+fresh; pair; mkpr 5 "$I"; echo unprotected > "$MT_STATE/branch"; echo 403-plan > "$MT_STATE/rules"
+mss UNKNOWN UNKNOWN UNKNOWN CLEAN
+run 5 "$I" "$B"
+ok "$rc" 0 "25a. chorus shape: UNKNOWN re-polled until CLEAN merges"; ok "$(sent)" "ok" "25a. ok"; ok "$(nmerge)" 1 "25a. one merge"
+lacks "$(glog)" "pr checks" "25a. no checks wait"
+ok "$(nlog '^api repos/o/r/branches/master$')" 1 "25a. the branch read once across the re-polls"
+ok "$(nlog '^api repos/o/r/rules/branches/master')" 1 "25a. the rules read once across the re-polls"
+has "$out" "nothing required on master" "25a. says nothing is required"
+# (b) a protection-less repo never waits on checks: UNSTABLE merges at once
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo unprotected > "$MT_STATE/branch"
+run 5 "$I" "$B"
+ok "$rc" 0 "25b. unprotected, no rules, UNSTABLE: merges"; ok "$(nmerge)" 1 "25b. one merge"
+lacks "$(glog)" "pr checks" "25b. a protection-less repo never waits on checks"
+# (c) the incident (chorus PR #632): UNKNOWN sticky, no check reported, nothing in flight → 8, never "never appeared"
+fresh; pair; mkpr 5 "$I" UNKNOWN; echo unprotected > "$MT_STATE/branch"; echo 403-plan > "$MT_STATE/rules"
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"; seed 5 "$(b 1)"
+run 5 "$I" "$B"
+ok "$rc" 8 "25c. the incident's shape exits 8"; ok "$(sent)" "failed:8" "25c. failed:8"; ok "$(nmerge)" 0 "25c. nothing merged"
+ok "$(ctr 5)" "$(b 1)" "25c. the counter is untouched"; has "$out" "$SETTLE" "25c. carries the settling mark"
+lacks "$(glog)" "pr checks" "25c. no checks wait"; lacks "$out" "never appeared" "25c. never 'never appeared'"
+# (d) chorus shape, BLOCKED with no review pending: re-polled, then 8, never the NON-check gate
+fresh; pair; mkpr 5 "$I" BLOCKED; echo unprotected > "$MT_STATE/branch"; echo 403-plan > "$MT_STATE/rules"
+run 5 "$I" "$B"
+ok "$rc" 8 "25d. chorus shape, BLOCKED: exits 8"; has "$out" "$SETTLE" "25d. the settling mark"
+has "$out" "stays BLOCKED with nothing required on master" "25d. says it stays BLOCKED with nothing required"
+lacks "$out" "NON-check gate" "25d. never the NON-check gate"
+# (e) unprotected, but a ruleset requires a check: some, today's wait and 12c's exit 1
+fresh; pair; mkpr 5 "$I" BLOCKED; echo unprotected > "$MT_STATE/branch"
+echo '[{"type":"deletion"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"ci"}]}}]' > "$MT_STATE/rules"
+run 5 "$I" "$B"
+ok "$rc" 1 "25e. a required_status_checks rule: exits 1 (12c)"; has "$out" "NON-check gate" "25e. NON-check gate"
+has "$(glog)" "pr checks" "25e. waits on the required checks"
+# (e2) thread-skill's shape: protected by a ruleset (classic protection off): some, with no rules read
+fresh; pair; mkpr 5 "$I" BLOCKED; echo ruleset > "$MT_STATE/branch"
+run 5 "$I" "$B"
+ok "$rc" 1 "25e2. protected by a ruleset: exits 1 (12c)"; has "$(glog)" "pr checks" "25e2. waits on the required checks"
+lacks "$(glog)" "rules/" "25e2. protected true needs no rules read"
+# (f) the branch read fails transiently: unknown, so today's wait; checks absent with nothing in flight → 8, not 1
+fresh; pair; mkpr 5 "$I" BLOCKED; echo "gh: Server Error (HTTP 502)" > "$MT_STATE/err.branch"
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 8 "25f. an unreadable gate and absent checks exit 8"; has "$out" "retryable:" "25f. retryable"
+has "$out" "$SETTLE" "25f. the settling mark"; lacks "$out" "never appeared" "25f. never 'never appeared'"
+ok "$(nlog '^api repos/o/r/branches/master$')" 2 "25f. the branch read tried READ_TRIES (2) times"
+lacks "$(glog)" "rules/" "25f. no rules read"; has "$(glog)" "pr checks" "25f. waits on the required checks"
+# (g) the control: something is required (the fake's default), checks absent with nothing in flight → 1
+fresh; pair; mkpr 5 "$I" BLOCKED
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 1 "25g. required checks that never appeared while something is required: exit 1"
+has "$out" "required checks never appeared for PR #5" "25g. the never-appeared text"
+# (h) a branch read that is no clean answer reads unknown: today's wait, and 12c's exit 1
+for v in 404-notfound 404-branch 403-integration 403-rate noflag; do
+  fresh; pair; mkpr 5 "$I" BLOCKED; echo "$v" > "$MT_STATE/branch"
+  run 5 "$I" "$B"
+  has "$(glog)" "pr checks" "25h. branch $v reads unknown: waits on the required checks"
+  ok "$rc" 1 "25h. branch $v: exits 1"; has "$out" "NON-check gate" "25h. branch $v: NON-check gate"
+done
+# (h-rules) a rules read that is rate-limited or not found reads unknown, never none
+for v in 403-rate 404; do
+  fresh; pair; mkpr 5 "$I" BLOCKED; echo unprotected > "$MT_STATE/branch"; echo "$v" > "$MT_STATE/rules"
+  run 5 "$I" "$B"
+  has "$(glog)" "pr checks" "25h-rules. rules $v reads unknown: waits on the required checks"
+  ok "$rc" 1 "25h-rules. rules $v: exits 1"; lacks "$out" "$SETTLE" "25h-rules. rules $v: never none"
+done
+# (i) the review gate fires before the gate read: 12a asserts no branches/ and no rules/ read.
+# (j) UNKNOWN once the required checks went green is re-polled, never the NON-check gate (12c keeps BLOCKED's exit 1)
+fresh; pair; mkpr 5 "$I"; mss UNKNOWN UNKNOWN UNKNOWN CLEAN
+run 5 "$I" "$B"
+ok "$rc" 0 "25j. UNKNOWN after green checks, then CLEAN: merges"; ok "$(nmerge)" 1 "25j. one merge"
+lacks "$out" "NON-check gate" "25j. never the NON-check gate"
+# (k) the recompute guard's CLEAN sample, then UNKNOWN again: re-polled, never the NON-check gate
+fresh; pair; mkpr 5 "$I"; mss UNKNOWN UNKNOWN CLEAN UNKNOWN CLEAN
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 0 "25k. the guard's CLEAN, then UNKNOWN, then CLEAN: merges"; ok "$(nmerge)" 1 "25k. one merge"
+lacks "$out" "NON-check gate" "25k. never the NON-check gate"
+# (l) UNKNOWN that never settles after green checks: 8 after LAZY_REPOLL_MAX (6) re-polls
+fresh; pair; mkpr 5 "$I" UNKNOWN
+run 5 "$I" "$B"
+ok "$rc" 8 "25l. UNKNOWN for good after green checks: exits 8"; has "$out" "$SETTLE" "25l. the settling mark"
+lacks "$out" "NON-check gate" "25l. never the NON-check gate"; lacks "$out" "did not converge" "25l. never 'did not converge'"
+ok "$(nlog '^pr view')" 9 "25l. 9 PR reads: the pre-pass, the wait pass, 6 re-polls and the read that exits"
+# (m) the state guard never pre-empts the settling 8: three BEHIND re-polls, the wait, six lazy re-polls
+fresh; pair; mkpr 5 "$I"; mss UNKNOWN BEHIND BEHIND BEHIND UNKNOWN
+run 5 "$I" "$B"
+ok "$rc" 8 "25m. BEHIND three times, then UNKNOWN for good: exits 8"; has "$out" "$SETTLE" "25m. the settling mark"
+lacks "$out" "did not converge" "25m. never 'did not converge' (the guard is derived)"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task integrated: ALL PASS" || echo "merge-task integrated: SOME FAILED"
 exit "$fail"

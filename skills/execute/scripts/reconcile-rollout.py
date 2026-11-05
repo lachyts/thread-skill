@@ -8703,9 +8703,10 @@ def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
 
 def _merge_task_cause(reason) -> str:
     """The own cause of a merge-task exit-1 reason (ADR 0068 d4): the reason from its last `ERROR:` line (ERROR_LINE_RE,
-    an optional `merge-task:` prefix allowed) to the end, or the whole reason when it holds no `ERROR:` line. Both of
-    the reason's readers take it: _merge_gate_stop (the Run record's reasonClass) and lead-integrate.py's
-    MERGE_TASK_FIXABLE check (the automatic retry). merge-task.sh prints its red-check line before each infra rerun, so
+    an optional `merge-task:` prefix allowed) to the end, or the whole reason when it holds no `ERROR:` line. The
+    reason's three readers take it: _merge_gate_stop (the Run record's reasonClass), lead-integrate.py's
+    MERGE_TASK_FIXABLE check (the automatic retry) and _merge_task_infra_stop (a stop on GitHub's side, ADR 0069: the
+    retry class and the same check). merge-task.sh prints its red-check line before each infra rerun, so
     a reason that keeps more than its tail (a lead that did not trim it, execute § 4.5 step 4) reads as its last stop,
     never as an earlier line's."""
     lines = reason.split("\n")
@@ -10147,6 +10148,19 @@ MERGE_GATE_MARK = "a REQUIRED check FAILED on PR"
 # any future wording, is a human's), read in the reason's own cause (_merge_task_cause). Each is pinned against
 # merge-task.sh by the auto-retry suite.
 MERGE_TASK_FIXABLE = ("has a MERGE CONFLICT with", MERGE_GATE_MARK)
+# merge-task.sh's exit-1 texts no code fix clears (ADR 0069 d3): GitHub's side, a stop that is no human's either. Read in
+# the reason's own cause with no red check there (_merge_task_infra_stop), they retry as `infra`. Pinned against
+# merge-task.sh by the auto-retry suite.
+MERGE_TASK_INFRA = ("required checks never appeared for PR",)
+# The mark each of merge-task.sh's exit-8 texts carries while GitHub settles a PR's mergeability (ADR 0069 d2): a third
+# exit 8 with it retries as `infra`. Pinned against merge-task.sh by the auto-retry suite.
+MERGE_TASK_SETTLING_MARK = "GitHub has not settled its mergeability"
+# The lead's Integration set-aside reasons for merge-task (execute § 4.5 step 4, rows 1 and 8). The GitHub-side opening
+# is pinned against execute SKILL.md by the auto-retry suite.
+MERGE_TASK_GITHUB_OPENING = "merge-task exit 1, GitHub-side:"
+MERGE_TASK_EXIT8_OPENING = "merge-task exit 8 three times:"
+# A `fail` cell of a `gh pr checks` row, merge-task.sh's own `$i=="fail"` test: a red check in the cause.
+FAIL_CELL_RE = re.compile(r"(?:^|\t)fail(?:\t|$)", re.M)
 # An `ERROR:` line of merge-task.sh's output, as the lead's exit-1 reason carries it (its first line prefixed
 # `merge-task: `, execute § 4.5 step 4): _merge_task_cause reads from the last one as the stop's own cause.
 ERROR_LINE_RE = re.compile(r"\s*(?:merge-task:\s*)?error:", re.I)
@@ -10224,20 +10238,41 @@ def _note_reason(note):
 
 # The lead's own Integration set-asides that are the environment's, never the task's (ADR 0048, p29-7; execute § 4.5
 # step 3's exit 8 and step 4's signal row): an origin outage, or a merge-task killed twice. Each cools down as infra.
-# merge-task's exit-8 text stays `agent` (ADR 0033's tested contract).
+# merge-task's exit-8 text stays `agent` (ADR 0033's tested contract), except while GitHub settles a PR's mergeability
+# (MERGE_TASK_SETTLING_MARK, ADR 0069 d3).
 INFRA_LEAD_OPENINGS = ("prepare: origin unreachable three times", "merge-task signalled twice")
+
+
+def _merge_task_infra_stop(reason) -> bool:
+    """Whether merge-task's own stop was GitHub's (ADR 0069 d3): its own cause (_merge_task_cause) holds a
+    MERGE_TASK_INFRA text, holds no MERGE_GATE_MARK (compared lowercased) and no `fail` cell of a check table
+    (FAIL_CELL_RE). No code fix clears it and no human's act does, so it retries as `infra`. Read by _retry_class
+    (a GitHub-side Integration set-aside, and a legacy one set aside at its own run) and lead-integrate.py's cause 15."""
+    cause = _merge_task_cause(reason)
+    return (any(t in cause for t in MERGE_TASK_INFRA) and MERGE_GATE_MARK.lower() not in cause.lower()
+            and not FAIL_CELL_RE.search(cause))
 
 
 def _retry_class(note) -> str:
     """How an automatic retry treats a block: `quota` (a dead call, `workflow call failed:`, whose error line reads as
-    a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, or a lead-written
-    Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS) or `agent` (everything else: an agent
-    can act on its feedback)."""
+    a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
+    Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS, or a stop on GitHub's side, ADR 0069 d3:
+    an Integration set-aside opening MERGE_TASK_GITHUB_OPENING whose rest is a _merge_task_infra_stop, a third exit 8
+    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, or a legacy own-run `merge-task` reason that is a
+    _merge_task_infra_stop) or `agent` (everything else: an agent can act on its feedback; every other exit-8 text
+    included)."""
     kind, reason = _note_reason(note)
     first = reason.split("\n", 1)[0].strip()
     if first.lower().startswith(CALL_FAILED_PREFIX):
         return "quota" if QUOTA_RE.search(first) else "infra"
     if kind == "integration" and first.startswith(INFRA_LEAD_OPENINGS):
+        return "infra"
+    if kind == "integration" and first.startswith(MERGE_TASK_GITHUB_OPENING) and \
+            _merge_task_infra_stop(first[len(MERGE_TASK_GITHUB_OPENING):]):
+        return "infra"
+    if kind == "integration" and first.startswith(MERGE_TASK_EXIT8_OPENING) and MERGE_TASK_SETTLING_MARK in first:
+        return "infra"
+    if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"
     return "infra" if TRANSIENT_MARK in _blocker_summary(note) else "agent"
 
