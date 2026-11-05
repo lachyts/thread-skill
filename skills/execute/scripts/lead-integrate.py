@@ -2220,7 +2220,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          Integration): H7 `fix the note's pr: or defer`, handBack false (the fix changes the note first);
      13. prepare's `the PR branch is gone`: H8 `restore, recut or defer`;
      14. a `--gated` decline; 15. a merge-task exit-1 reason whose own cause (reconcile-rollout.py _merge_task_cause,
-         the reason from its last `ERROR:` line) holds no MERGE_TASK_FIXABLE text: H9 or H10 (_raise_field gives none);
+         the reason from its last `ERROR:` line) holds no MERGE_TASK_FIXABLE text and is no stop on GitHub's side
+         (reconcile-rollout.py _merge_task_infra_stop, ADR 0069: that one falls through, an infra block): H9 or H10
+         (_raise_field gives none);
      16. an invalid budget stamp (any of the four keys, re-read live: _retry_budget's error, else
          reconcile-rollout.py _round_budget_error): `autoRetryError`, H12 `fix the round budget`, handBack false; once
          the stamp reads valid it falls through;
@@ -2231,7 +2233,8 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          source run's spent budget, else H10 `hand back or defer`, the detail its autoRetryWhy;
      and a quota block still cooling (QUOTA_COOLDOWN_MIN[quota_retries_used] from the later of the block's run stamp and
      `auto_retry_at`, setting `autoRetryAfter`) or an infra block still cooling (INFRA_COOLDOWN_MIN[auto_retries_used],
-     the last repeating; no stamp fails closed) refuses with a null humanFix: the lead retries it once the cool-down ends.
+     the last repeating; no stamp fails closed; a stop on GitHub's side among them, reconcile-rollout.py _retry_class,
+     ADR 0069) refuses with a null humanFix: the lead retries it once the cool-down ends.
     Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
     max_review_rounds is <= lastRound (one round per retry).
 
@@ -2365,8 +2368,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if status == "blocked" and kind == "own" and first.lower().startswith("merge-task"):
         # The reason's own cause (ADR 0068 d4), the same text the Run record's reasonClass reads: a red-check line
         # printed before an infra rerun that a later `ERROR:` line follows is no fixable text of this stop.
+        # A stop on GitHub's side (ADR 0069 d3: required checks that never appeared, no red check in the cause) is no
+        # human's either: it falls through to the budget and the infra cool-down (_retry_class reads it infra).
         cause = rr._merge_task_cause(reason)
-        if not any(f in cause for f in rr.MERGE_TASK_FIXABLE):
+        if not any(f in cause for f in rr.MERGE_TASK_FIXABLE) and not rr._merge_task_infra_stop(reason):
             stop = cause.split("\n", 1)[0].strip()
             return spent(f"merge-task needs a human: {stop}")
     # Cause 16 (ADR 0048): an invalid round-budget stamp, re-read live on every call, so once Lachy fixes the stamp the

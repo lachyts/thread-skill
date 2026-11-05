@@ -9,6 +9,9 @@ descope is durable; an answered block (`inputs`' `answerRecorded`) is never retr
 hands a `hand-back` answer back itself; an at-Integration set-aside with no `pr:` is restored, never handed back.)*
 *(Amended by ADR 0048, 2026-10-28: an invalid round-budget stamp on a task sets that task aside (H12), never a halt; a
 cool-down waits over an UNVERIFIED task too, its (b) item pushed, the option this ADR rejected.)*
+*(Amended by ADR 0069, 2026-11-05: decision 8's allowlist stands, but merge-task's GitHub-side exit 1 (required
+checks that never appeared, no red check in its cause) is no human's text either: the lead sets it aside at
+Integration and it retries as `infra`.)*
 
 ## Context
 
