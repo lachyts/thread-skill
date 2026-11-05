@@ -20,6 +20,7 @@
 #   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
 #   TERM while suite-started walks the vault: never swallowed (76, no verdict: the suite never runs, no line, the slot
 #   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free
+#   VR7c a TERM inside the running count's Capacity read (p36-9): held, then delivered, never swallowed (as VR7)
 #   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run
 #   VR9 a TERM while a task tree's `run` with no --slots resolves its slot count (p34-1): 76, no line, the slot free.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
@@ -539,6 +540,34 @@ ok "$([ -e "$D/vr7b.ran" ] && echo ran || echo never)" never "VR7b: the suite ne
 ok "$(recq '[[d["kind"], d.get("outcome"), "rc" in d] for d in L]')" '[["suite-started",null,false],["suite-ended","stopped",false]]' \
   "VR7b: a suite-started, then a suite-ended stopped with no rc"
 ok "$(slot_state 0 1)" free "VR7b: the slot is free"
+
+# VR7c (p36-9): the stop lands inside the running count's Capacity read (capacity.py's read(), whose callers catch any
+# exception): the read runs with the stop held, so the signal is delivered as it ends and still ends the run, as VR7.
+: > "$VEV/r1.jsonl"
+cat > "$D/vr7c.py" <<'PY2'
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+load = vs._load_reconcile
+def stopped_in_the_capacity_read():
+    rr = load()
+    mod = rr._capacity_module()
+    real = mod.read
+    def read(now):   # the TERM lands as mac_running reads the Capacity for its running count
+        os.kill(os.getpid(), signal.SIGTERM)
+        return real(now)
+    mod.read = read
+    return rr
+vs._load_reconcile = stopped_in_the_capacity_read
+sys.exit(vs.main(["run", "--slots", "1", "--"] + sys.argv[2:]))
+PY2
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$D/vr7c.py" "$VS" sh -c "touch '$D/vr7c.ran'") > "$D/vr7c.out" 2> "$D/vr7c.err"; rc=$?
+ok "$rc" 76 "VR7c: a TERM in the running count's Capacity read: exit 76 (no verdict), never swallowed"
+has "$(cat "$D/vr7c.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "VR7c: … with its no-verdict line"
+ok "$([ -e "$D/vr7c.ran" ] && echo ran || echo never)" never "VR7c: the suite never ran"
+ok "$(recq '[d["kind"] for d in L]')" '[]' "VR7c: no line: no suite-started, no green suite-ended"
+ok "$(slot_state 0 1)" free "VR7c: the slot is free"
 
 # VR8 (p32-1): the bounded slot wait on the recorded path, the one every agent suite takes (an agent always runs from a
 # task tree): with the slot held, `--slot-wait 1` runs out → 76 and its no-verdict line, the command never run, and no
