@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-05
+last_touched: 2026-11-06
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -10,7 +10,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
-**2026-11-05 (latest): orient reshuffled Thread Skill into P37 and P38 and scheduled [[thread-skill-rollout-2026-11-05]], whose lead is running (Stage task_9d26d480).**
+**2026-11-06 (latest): [[thread-skill-rollout-2026-11-05]] finished 11/11 merged in 15h 15m with no halt and nothing asked of Lachy; P37 and P38 closed, P36 left open (p36-8, p36-11, p36-12).**
+- **Landed:** #299 p37-1 (merge-task waits out lazy mergeability; ADR 0069, a GitHub stop retries by itself), #300 p37-3 (unparseable task notes named and mended before the Pre-flight; carried #292's branch), #301 p37-2 (checks read on any gh, table fallback for 2.43.1), #302 p37-4 (no spend gate under the line pauses a rollout; the test-Login reading), #303 p37-5 (Upkeep repair recorded as `repair`), #304 p37-6 (verify-slot flake fixed), #305 p36-9 (Run record `running` counts Legs), #306 p38-1 (close refreshes the project note's Now), #307 p36-10 (memory critical stops slotted suites), #309 p38-2 (a flagged banner stays on the Stage; a lead's `done` takes the banner rule only), #308 p37-7 (one `live-checkout.sh` primitive, notice per cause, smoke-tested self-update bundle).
+- **How it ran:** held by the last starts to the 09:00 Morning, then the Trickle and the Away cap (chorus and mac-data-mcp rollouts shared the Mac) and three Heat holds; none halted. p37-7 used both automatic retries: a plan-block, then a red `make test (macos-latest)` on #308, which its retry traced to the ntfy stub's reverse-DNS lookup in `tests/primary-refresh.test.sh` and fixed harness-only (af923bc). #307 hit one GitHub GraphQL reset (merge-task exit 8), cleared by the 60 s backoff. p37-4 declared no unapproved gate. Completion log in the archived note; close-score `t-20261105T135350Z-4606d7`.
+- **Follow-ons filed:** [[thread-skill-reflect-p37-rollout-2026-11-05]], [[thread-skill-confirm-infra-rerun-reads-checks-on-both-gh]], [[thread-skill-close-superseded-pr-292]]; and by the tasks: [[thread-skill-reinstall-the-primary-refresh-job]] (Lachy's, after #308), [[thread-skill-watchdog-shares-the-primary-refresh-plumbing]], [[thread-skill-every-live-fast-forward-uses-live-checkout]], [[thread-skill-close-guard-names-every-half-applied-operation]], [[thread-skill-capacity-stop-holds-the-restart-past-warning]], and three test-Login / leg.py follow-ups.
+
+**2026-11-05: orient reshuffled Thread Skill into P37 and P38 and scheduled [[thread-skill-rollout-2026-11-05]], whose lead is running (Stage task_9d26d480).**
 - **Reshuffle** (Lachy: "Write it"): P36 gained p36-9 (the Run record's `running` counts Legs), p36-10 (memory critical stops slotted suites; chorus-p96-28 has landed), p36-11 (structure-audit exempts Chain copies, workspaces repo) and p36-12 (check the spike review's 22 findings against ADR 0067 as built, a session task). New [[thread-skill-p37-a-rollout-never-waits-on-a-glitch]] (p37-1 to p37-7: lazy mergeability, `gh pr checks --json` on gh 2.43, unparseable notes, spend gates under the line, Upkeep repair as `repair`, the verify-slot flake, the Primary refresh's open findings) and [[thread-skill-p38-close-keeps-the-project-note-a-dashboard]] (p38-1 Now refresh, p38-2 flagged banner). Merged: the p36-8 schedule reminder into p36-8, and the two older reflections into [[thread-skill-reflect-p36-rollout-side-by-side]]. 13 renames, vault backlinks rewritten.
 - **Rollout:** 11 tasks (P37, p36-9, p36-10, P38), all graded Ready, from `~/repos/tools/thread-skill-rollout` on snapshot `5a83725f60f5`; verifier `make test` covers the merge gate. Launch doc landed by PR #297 and consumed by the lead.
 - **Not done, his call "Not now":** [[thread-skill-set-up-ntfy-rollout-alerts]], still the next action: until it is done, needs-you alerts reach only the Stage.
@@ -1138,6 +1143,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-06 (P37 rollout done):** first [[thread-skill-reinstall-the-primary-refresh-job]] (the launchd job still runs the pre-#308 copy), then [[thread-skill-close-superseded-pr-292]]. Next work: [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] from `~/repos/workspaces` once its checkout is free (they close P36 with [[thread-skill-p36-12-check-the-spike-review-against-adr-0067]], a session task), then [[thread-skill-reflect-p37-rollout-2026-11-05]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open.
+
 **From 2026-11-05 (orient, P37 scheduled):** [[thread-skill-rollout-2026-11-05]] runs in its own lead session: check it with `/thread:status [[thread-skill-rollout-2026-11-05]]`, never a second lead. Next by hand: [[thread-skill-set-up-ntfy-rollout-alerts]] (five minutes of Lachy's phone). Then schedule [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] from `~/repos/workspaces` once its checkout is free, and run [[thread-skill-p36-12-check-the-spike-review-against-adr-0067]] as a session.
 
 **From 2026-11-04 (P36 rollout done):** next is [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] (p36-8 on `~/repos/workspaces` once its checkout is free; it closes P36), then [[thread-skill-reflect-p36-rollout-side-by-side]] and [[thread-skill-p37-2-merge-task-reads-checks-on-any-gh]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open. One-off: [[thread-skill-decisions-2026-11-02]] still carries `scheduled: 2026-11-04` and a day-page line.
@@ -1175,6 +1182,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-06 (close, execute): led [[thread-skill-rollout-2026-11-05]] to 11/11 merged (15h 15m, no halt); P37 and P38 closed; #308's macOS red fixed by an automatic retry; three follow-ons filed.
 - 2026-11-05 (close, orient): reshuffled Thread Skill (P36 +4, new P37 and P38, 13 renames, 3 merges) and scheduled [[thread-skill-rollout-2026-11-05]] (11 Ready tasks), handed to a fresh lead; ntfy left for later.
 - 2026-11-04 (close, execute): led [[thread-skill-rollout-2026-11-03]] to 15/15 merged (26h 13m) and ran its completion ceremony; P36 open for p36-8; three follow-ons filed.
 - 2026-11-04 (close, decisions check): checked [[thread-skill-decisions-2026-11-02]]: still live, 13 of 14 items open (f0ab0604 decided 3 Nov); its `scheduled:` is a legacy key #283's `reflect.py decide` drops, so Lachy leaves it to the Reflection Routine. Its routine link resolves to `Work/Tasks/Archive/` (not dead); no change kept.
