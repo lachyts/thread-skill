@@ -39,8 +39,8 @@
 #          rate, multiplier, per-Login word, other currency, malformed amount, no cap, an amount over the line and an
 #          irreversible gate still ask. The dummy Claude Login, declared in `[defaults] test_logins` (schema 5), signs
 #          its credential gate (on a serial note too: it is machine-wide); another Login, a deny word, another
-#          credential beside it, a bounce and no declaration ask; a refused file is exit 1; an env token keeps the
-#          ADR 0063 path.
+#          credential, an `@` or a conjunction beside it, a bounce and no declaration ask; a per/each on the cap
+#          itself asks; a refused file is exit 1; an env token keeps the ADR 0063 path.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -762,18 +762,21 @@ ok "$(section ro '## Needs-you log')" "$(logl a 1 1 "$STEER")" "S11a: one Needs-
 ok "$(fm a status)" "status: in_progress" "S11a: it flips to in_progress"
 
 # S11b: prose around a readable cap signs at the cap; a rate, multiplier, plural, per-Login word, other currency, a
-# malformed amount, no cap, and an amount over the line all still ask; irreversible gates still ask
+# malformed amount, no cap, and an amount over the line all still ask; irreversible gates still ask; a per/each on the
+# cap itself asks whatever follows it (`per GB`, `each for the images`: review round 1, never priced as a bare total)
 scen s11b
 S11_SIGN=('spend: probe — cap 1 USD (Haiku 4.5)' 'spend: probe — cap 1 USD for the 3 probes' 'spend: soft probe — cap 1 USD')
 S11_WHY=('unrecognised clause: (Haiku 4.5)' 'unrecognised clause: for the 3 probes' 'widening word outside the cap clause: soft')
 S11_ASK=('spend: probe — cap 1 USD x 3' 'spend: probe, US$500 per run — cap 1 USD' 'spend: probe, US$5k per run — cap 1 USD'
   'spend: fast mode — cap 50 USD, per Login per month' 'spend: fast mode at US$2 per-Login — cap 5 USD'
   'spend: probe, A$500 of credits — cap 1 USD' 'spend: 3 runs — cap 500 USD' 'spend: probe — no cap' "$FAST"
-  "irreversible: wipe the dummy Login's history")
+  "irreversible: wipe the dummy Login's history" 'spend: egress — cap US$0.10 per GB'
+  'spend: probes — cap US$5 each for the images')
 S11_ASKWHY=('unrecognised clause: x 3' "total exposure US\$501 is over the standing approval's US\$200 (file:defaults)"
   'malformed amount: US$5k' 'per-Login cap with no Login count' 'per-Login cap with no Login count'
   'non-USD or ambiguous currency: A$5' "total exposure US\$500 is over the standing approval's US\$200 (file:defaults)"
-  'no cap clause' 'per-Login cap with no Login count' 'not a spend gate')
+  'no cap clause' 'per-Login cap with no Login count' 'not a spend gate' 'unrecognised clause: per GB'
+  'unrecognised clause: each for the images')
 ord=""; i=0
 for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[g$i]]"$'\n'; done
 ORDER="$ord" mkro
@@ -790,14 +793,18 @@ done
 ok "$(printf '%s\n' "$out" | grep -c '^ASK: ')" "${#S11_ASK[@]}" "S11b: one ASK per gate that cannot be signed"
 ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "3|3" "S11b: three log lines, month to date US\$3 of the US\$200 line"
 
-# S11c: the dummy Claude Login, a declared test Login, signs itself; anything beside it, or another Login, asks
+# S11c: the dummy Claude Login, a declared test Login, signs itself; a deny word, env key, credential noun, `@` or
+# conjunction beside it, or another Login, asks (a second thing in plain prose with none of these is the residual
+# tests/gated-inputs.test.mjs pins)
 scen s11c
 LIVE='credential: a live probe on the dummy Login'
 L_ASK=('credential: the animately Login' 'credential: the Logins' 'credential: access to the dummy Claude Login'
   "credential: the dummy Login's OAuth token" 'credential: the dummy Claude Login and the live Stripe account'
-  'credential: the dummy Claude Login and the Stripe test account' 'credential: the dummy Login and the GitHub PAT')
+  'credential: the dummy Claude Login and the Stripe test account' 'credential: the dummy Login and the GitHub PAT'
+  "credential: the dummy Login and Lachy's Gmail" 'credential: the dummy Login, then sign in as lachy@animately.com')
 L_WHY=('animately is not a declared test Login' 'more than one Login: Logins' 'deny word: access' 'deny word: OAuth'
-  'deny word: live' 'another credential beside the Login: account' 'another credential beside the Login: PAT')
+  'deny word: live' 'another credential beside the Login: account' 'another credential beside the Login: PAT'
+  'something joined to the Login: and' 'an address beside the Login: lachy@animately.com')
 ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
 mkt a gate-pending; gate a "$DUMMY"
 HH="$HL" sa a

@@ -52,25 +52,17 @@ nothing and makes no network call.
         xN. A per-unit token with no count asks ("per-Login cap with no Login count"), two ask ("more than one
         per-unit token"), and a count whose noun is another unit asks ("count unit does not match the per-unit
         token"; Login and account are one unit, as p18-7's "per Login (per account)" reads). The leftover is read
-        against a reject list, not a whitelist (LEFTOVER_RES): any digit, number word, MULTIPLIER_WORDS word, a rate
-        (RATE_RE, below) or any `every`, `/` + letter, unit noun, period adverb, currency, WIDENING word or `before`
-        asks ("unrecognised clause: <leftover>"); any other word passes. An empty clause is a total.
-        The rate reading (RATE_RE, p37-4): `per` or `each` at a word start is a rate only before a unit, never in
-        prose (`per the task note`, `per the brief`, `per ADR 0038`). `per` is a rate when SEP (whitespace, or a `-`
-        or `/` with optional spaces) then a RATE_UNITS noun (UNIT_NOUNS plus month, time, image, token, invocation,
-        iteration, attempt, probe, push, item, task, eval, case, commit, PR, file, page, prompt, query, message, step,
-        batch, job, model, character, word, second, generation, render, video, clip and frame; each may be plural)
-        or a digit follows (`per run`, `per-run`, `per-Login`, `Per day`, `per 1,000 tokens`, `per 1k`). `each` is a
-        rate on the same terms, or before `of`, or before a non-letter, non-digit character or the gate's end after
-        optional spaces (`one call each —`, `3 each,`, `each --max-cost-usd 4`, `each $5`, `cap US$5 each`), or
-        straight after a digit and one space (`US$5 each for the runs`). The match is the word alone, so a why lists
-        `per`/`each` as the gate writes it.
+        against a reject list, not a whitelist (LEFTOVER_RES): any digit, number word, MULTIPLIER_WORDS word, any
+        `per`, `each` or `every` whatever follows it (PER_EACH_EVERY_RE: a word on the cap itself is a rate on the
+        cap, `cap US$0.10 per GB`, `cap US$5 each for the images`), `/` + letter, unit noun, period adverb,
+        currency, WIDENING word or `before` asks ("unrecognised clause: <leftover>"); any other word passes. An
+        empty clause is a total.
      6. Currency, whole gate: a non-USD amount (`A$`, `AU$`, `NZ$`, `C$`, `CA$`, `€`, `£`, `¥`, `AUD`, `NZD`, `CAD`,
         `EUR`, `GBP`, `JPY` beside a number, or `minor units` after one), a currency word (dollar, bucks, euro,
         pound, cent), a number word beside a currency, or a magnitude before a code ("non-USD or ambiguous
         currency").
      7. Multipliers, periods and widening words outside the clause (code spans included; `_` is a word
-        character, so `per_call_cap` never matches): (i) a `per`/`each` rate (RATE_RE, rule 5's reading); (ii) a
+        character, so `per_call_cap` never matches): (i) a `per`/`each` rate (RATE_RE, below); (ii) a
         plural Logins/accounts/seats/users; (iii) `every`/`a`/`an` directly before a UNIT_NOUNS noun; (iv) `night(s)`
         or a PERIOD_ADVERBS word; (v) `/` + a unit noun; (vi) `×`, `x` + digit, digit + `x`, a MULTIPLIER_WORDS word
         (`times`, `twice`, `double`, `triple`, `apiece`); (vii) `%`; (viii) a WIDENING word; (ix), last, a per-unit
@@ -79,6 +71,17 @@ nothing and makes no network call.
         `every`/`a`/`an` directly before one, or a `/` before one ("per-<unit> cap with no <unit> count", the unit as
         the gate writes it). It fires only where nothing earlier did, so relaxing per/each never lets a per-Login
         reading through; `every signed-in Claude Login` (p18-7) still passes, since `every` needs adjacency.
+        The rate reading (RATE_RE, p37-4), 7(i)'s alone, never rule 5's: outside the clause `per` or `each` at a word
+        start is a rate only before a unit, never in prose (`per the task note`, `per the brief`, `per ADR 0038`).
+        `per` is a rate when SEP (whitespace, or a `-` or `/` with optional spaces) then a RATE_UNITS noun
+        (UNIT_NOUNS plus month, time, image, token, invocation, iteration, attempt, probe, push, item, task, eval,
+        case, commit, PR, file, page, prompt, query, message, step, batch, job, model, character, word, second,
+        generation, render, video, clip and frame; each may be plural) or a digit follows (`per run`, `per-run`,
+        `per-Login`, `Per day`, `per 1,000 tokens`, `per 1k`). `each` is a rate on the same terms, or before `of`,
+        or before a non-letter, non-digit character or the gate's end after optional spaces (`one call each —`, `3
+        each,`, `each --max-cost-usd 4`, `each $5`), or straight after a digit and one space (`US$5 each for the
+        runs`). It reads the whole gate with only the clause blanked, so the lookbehind sees the digit before an
+        `each`. The match is the word alone, so a why lists `per`/`each` as the gate writes it.
         WIDENING is one list for rules 5 and 7, so the two readings never disagree: words that say the cap is not
         the ceiling (`plus` or a bare `+` with no amount after it; `excluding`, `exclusive of`, `excl`, `ex`;
         `tax(es)`, `VAT`, `GST`; `fee(s)`; `overage(s)`; `soft`; `uncapped`; `no hard limit|cap`; `exceed`;
@@ -94,13 +97,13 @@ nothing and makes no network call.
    cap's first; currency over the whole gate); rule 5 reads the leftover against CAP_ONLY_LEFTOVER_RES, which is
    LEFTOVER_RES without a digit, a number word or a bare unit noun, its multiplier widened to `x 3`, `x3` and `3x`,
    its `/` unit to `/` before a digit (`/1k`), its widening word to any `plus` or `+` (an amount after it inside the
-   clause is a second amount the clause cannot read), plus `%`, a rate unit (`per`/`each`, one to three SEP-joined
-   letter-words, then a UNIT_NOUNS noun: `per big run`; or `a`/`an` directly before one: `a day`) and a per-unit noun
-   (Login, account, seat or user, singular or plural); the per-unit/count whitelist runs first, as in rule 5, and the
-   why stays `unrecognised clause: <leftover>`; outside the clause only 7(ii) (plurals) and 7(ix) (per-unit words)
-   ask; the rest of rule 7, and rule 8, are waived; the value is rule 9's (the cap times the clause's count, plus
-   every other USD amount the gate names, so it never reads below the full reading: `US$500 — cap 1 USD` and
-   `US$500 per run — cap 1 USD` both read 501).
+   clause is a second amount the clause cannot read), plus `%`, a recurring unit (`a`/`an` directly before a
+   UNIT_NOUNS noun: `a day`) and a per-unit noun (Login, account, seat or user, singular or plural); any `per`, `each`
+   or `every` asks there as in rule 5 (`per GB`, `per developer`, `each for the images`, `per big run`); the
+   per-unit/count whitelist runs first, as in rule 5, and the why stays `unrecognised clause: <leftover>`; outside
+   the clause only 7(ii) (plurals) and 7(ix) (per-unit words) ask; the rest of rule 7, and rule 8, are waived; the
+   value is rule 9's (the cap times the clause's count, plus every other USD amount the gate names, so it never reads
+   below the full reading: `US$500 — cap 1 USD` and `US$500 per run — cap 1 USD` both read 501).
    `standing_exposure(gate)` -> {"usd", "why", "capOnly"} is the standing reading covered() and the CLI apply: the
    full reading when it prices (capOnly ""); else the cap-only reading when that prices (capOnly the full reading's
    why); else {None, the cap-only reading's why, ""}, which for a rule 1-4 or 6 failure, and most rule 5 failures, is
@@ -114,9 +117,9 @@ nothing and makes no network call.
    widening words, `%`, multipliers, periods, rates that are no per-unit word and bare numbers are waived (`soft
    probe`, `3 runs`, `plus 20%`, `×3`, `every push`, `each night`); inside it, digits, number words and bare unit nouns
    that are no per-unit noun are waived (`for 3 runs`, `10k tokens`, `for both probes` read as the cap): the cap is the
-   implementer's ceiling all the same. A non-adjacent rate whose unit is not on UNIT_NOUNS (`per generated image`)
-   reads x1 in either clause reading, as `an image` does. An `each such call`-style rate outside the clause reads x1 in
-   the full reading, the value the cap-only reading gives anyway.
+   implementer's ceiling all the same. Outside the clause, a `per`/`each` rate RATE_RE cannot see (a unit not straight
+   after it, or one off RATE_UNITS: `per generated image`, `each such call`) reads x1 in the full reading, the value
+   the cap-only reading gives anyway; inside the clause any `per`, `each` or `every` asks in both readings.
 
    CLI (ADR 0038): `exposure -` reads ONE gate on stdin and prints standing_exposure()'s {usd, why} as one JSON line,
    {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, never its capOnly, then exits 0:
@@ -221,17 +224,25 @@ nothing and makes no network call.
        3. No upper-snake env token ("an env key beside a Login: <TOKEN>").
        4. No other credential noun: `account(s)`, `key(s)`, `credential(s)`, `API` (any case), `PAT(s)` (case
           sensitive), `.env` ("another credential beside the Login: <match>").
-       5. No plural `Logins` ("more than one Login: Logins"); every `Login` word ends a `<name> (Claude )?Login('s)?`
+       5. Nothing joined beside the Login, the first in text order: no `@` (ADDRESS_RE: an address or handle, another
+          account to sign in as; "an address beside the Login: <the token holding it>"), and no conjunction that
+          joins a second thing (CONJUNCTION_RE: `and`, `or`, `plus`, `as well as`, `along with`, `together with`, any
+          case, or `&`, `+`, `;`; "something joined to the Login: <match>"), whatever the second thing is.
+       6. No plural `Logins` ("more than one Login: Logins"); every `Login` word ends a `<name> (Claude )?Login('s)?`
           phrase, the name `[A-Za-z0-9][A-Za-z0-9_-]{0,39}` and the leftmost one winning, so `the Claude Login` names
           `the` ("a Login it cannot name"); at least one phrase ("it names no Login").
-       6. `logins` is set and non-empty (NO_LOGINS_WHY: "no test Logins declared (set [defaults] test_logins in
+       7. `logins` is set and non-empty (NO_LOGINS_WHY: "no test Logins declared (set [defaults] test_logins in
           ~/.config/thread/rollouts.toml)").
-       7. Each named Login is declared, ignoring case ("<name> is not a declared test Login").
-     Steps 1-5 need no `logins`, so a gate no declaration could sign says why without the settings being read. names
+       8. Each named Login is declared, ignoring case ("<name> is not a declared test Login").
+     Steps 1-6 need no `logins`, so a gate no declaration could sign says why without the settings being read. names
      are the named Logins in text order, each once, in their declared spelling. Known false asks, pinned (fail
      closed): `access to the dummy Claude Login` (`deny word: access`), `the dummy Claude Login's session token`
-     (`deny word: token`), any API, account, key, PAT or `.env` on the gate's line, and a `live` before anything but a
-     probe, run or test.
+     (`deny word: token`), any API, account, key, PAT or `.env` on the gate's line, a `live` before anything but a
+     probe, run or test, and any conjunction or `+` (two declared Logins joined by `and` ask: list them with a comma or
+     `then`). The accepted residual (as ADR 0063's residual i is for the class): the deny list and steps 3-5 are a
+     reject list, not a whitelist, so a second thing named in plain prose with no deny word, env key, credential noun,
+     `@` or conjunction (`the dummy Login, to push to the npm registry`, `the dummy Login, then Lachy's Gmail`) passes;
+     the annotation names only the Login, and any other use is a review failure.
    - `login_annotation(date, names, source)`: the `## Approved gates` suffix, `(approved <date> under the standing
      approval: test Login <n1, n2>, from <source>)`; it raises ValueError on a `)` in any part, as annotation() does.
 
@@ -388,7 +399,8 @@ WIDENING = (r"(?:" + WS + r"plus" + WE + r"|\+)(?!\s*(?:US\$|USD|\$)?\s?\d)|" + 
     r"uncapped", r"no\s+hard\s+(?:limit|cap)", r"exceed(?:s|ed|ing)?", r"initially", r"to\s+start", r"for\s+now",
     r"or\s+more", r"at\s+least", r"minimum", r"approx(?:imately)?", r"roughly")) + r")" + WE)
 MULTIPLIER = r"×|" + WS + r"x\d|" + WS + _alt(MULTIPLIER_WORDS) + WE
-# Do 2 (p37-4): `per` or `each` is a rate only before a unit, never in prose ("per the task note", "per ADR 0038").
+# Do 2 (p37-4): outside the cap clause, `per` or `each` is a rate only before a unit, never in prose ("per the task
+# note", "per ADR 0038"); on the cap itself any per/each/every still asks (PER_EACH_EVERY_RE).
 # RATE_UNITS is UNIT_NOUNS plus the nouns spend is counted in; each may be plural (`s`, `es`, `queries`). SEP joins a
 # rate word to its unit: whitespace, or a `-` or `/` with optional spaces around it (`per run`, `per-run`, `per/run`).
 RATE_UNITS = UNIT_NOUNS + ("month", "time", "image", "token", "invocation", "iteration", "attempt", "probe", "push",
@@ -400,18 +412,22 @@ RATE_UNIT = ("(?:" + "|".join("quer(?:y|ies)" if u == "query" else re.escape(u) 
 SEP = r"(?:\s+|\s*[-/]\s*)"
 # The match is the word alone (lookarounds hold the rest), so a why lists `per`/`each` as the gate writes it. `each` is
 # a rate before a unit or a digit, before `of`, before a non-letter, non-digit character or the gate's end (`one call
-# each —`, `3 each,`, `each --max-cost-usd 4`, `cap US$5 each`), or straight after a digit and one space (`US$5 each
-# for the runs`).
+# each —`, `3 each,`, `each --max-cost-usd 4`), or straight after a digit and one space (`US$5 each for the runs`).
+# RATE_RE is rule 7(i)'s alone, read over the whole gate with only the clause blanked, so its `(?<=\d\s)` lookbehind
+# sees the digit before it. Inside the clause any `per`/`each`/`every` asks (PER_EACH_EVERY_RE, below): a word on the
+# cap itself is a rate on the cap whatever follows it (`cap US$0.10 per GB`, `cap US$5 each for the images`).
 RATE_RE = re.compile(
     WS + r"per" + WE + r"(?=" + SEP + r"(?:" + RATE_UNIT + r"|\d))"
     + r"|" + WS + r"each" + WE + r"(?=" + SEP + r"(?:" + RATE_UNIT + r"|\d)|\s+of" + WE + r"|\s*(?:[^\sA-Za-z0-9]|\Z))"
     + r"|(?<=\d\s)each" + WE, re.I)
-RATE_OR_EVERY = re.compile(RATE_RE.pattern + r"|" + WS + r"every" + WE, re.I)
+# Rule 5's per/each/every, in both clause readings: any of the three words on the cap asks (the reading before p37-4,
+# kept: only the prose `per` outside the clause needed relaxing, and the Steer gate's clause is empty).
+PER_EACH_EVERY_RE = re.compile(WS + _alt(("per", "each", "every")) + WE, re.I)
 LEFTOVER_RES = (
     ("a digit", re.compile(r"\d")),
     ("a number word", re.compile(WS + _alt(NUMBER_WORDS) + WE, re.I)),
     ("a multiplier", re.compile(MULTIPLIER, re.I)),
-    ("per/each/every", RATE_OR_EVERY),
+    ("per/each/every", PER_EACH_EVERY_RE),
     ("a / unit", re.compile(r"/\s?[A-Za-z]")),
     ("a unit noun", re.compile(WS + UNIT_RE + WE, re.I)),
     ("a period adverb", re.compile(WS + _alt(PERIOD_ADVERBS) + WE, re.I)),
@@ -421,16 +437,16 @@ LEFTOVER_RES = (
 )
 # The cap-only reading's rule 5 (p37-4): LEFTOVER_RES without a digit, a number word or a bare unit noun, so prose
 # beside a readable cap (`(Haiku 4.5)`, `for the 3 probes`) reads as the cap. What still asks is a word that changes
-# what the cap is: a multiplier (`x 3`, `3x` too), `%`, a rate (`per day`, `each`, `every run`, `per big run`, `a day`,
-# `/1k`), a per-unit noun (Login, account, seat, user), a period adverb, a currency (a second amount the clause cannot
-# read) or a widening word (any `plus` or `+` too: an amount after it inside the clause is a second amount).
+# what the cap is: a multiplier (`x 3`, `3x` too), `%`, any `per`, `each` or `every` (`per day`, `per GB`, `each`,
+# `every run`), a recurring unit (`a day`, `an hour`), a `/` unit (`/1k` too), a per-unit noun (Login, account, seat,
+# user), a period adverb, a currency (a second amount the clause cannot read) or a widening word (any `plus` or `+`
+# too: an amount after it inside the clause is a second amount).
 CAP_ONLY_LEFTOVER_RES = (
     ("a multiplier", re.compile(MULTIPLIER + r"|" + WS + r"x ?\d|\d ?x" + WE, re.I)),
     ("a percentage", re.compile(r"%")),
-    ("per/each/every", RATE_OR_EVERY),
+    ("per/each/every", PER_EACH_EVERY_RE),
     ("a / unit", re.compile(r"/\s?[A-Za-z0-9]")),
-    ("a rate unit", re.compile(WS + r"(?:per|each)(?:" + SEP + r"[A-Za-z]+){1,3}" + SEP + UNIT_RE + WE + r"|"
-                               + WS + r"(?:a|an)\s+" + UNIT_RE + WE, re.I)),
+    ("a recurring unit", re.compile(WS + r"(?:a|an)\s+" + UNIT_RE + WE, re.I)),
     ("a per-unit noun", re.compile(WS + _alt(PER_UNITS) + r"s?" + WE, re.I)),
     ("a period adverb", re.compile(WS + _alt(PERIOD_ADVERBS) + WE, re.I)),
     ("a currency", re.compile(r"[$€£¥]|" + WS + _alt(("USD",) + NON_USD_CODES) + WE, re.I)),
@@ -984,6 +1000,13 @@ LOGIN_PHRASE_RE = re.compile(r"(?<![A-Za-z0-9_-])(?P<name>" + LOGIN_NAME + r")\s
 LIVE_USE_RE = re.compile(r"(?:\s+|-)(?:probe|run|test)s?" + WE, re.I)
 OTHER_CREDENTIAL_RES = (re.compile(WS + r"(?:accounts?|keys?|credentials?|API)" + WE, re.I),
                         re.compile(WS + r"PATs?" + WE), re.compile(r"\.env" + WE))
+# Step 5: nothing joined beside the Login. An `@` (an address or handle: another account to sign in as) or a
+# conjunction that joins a second thing to the Login asks, whatever the second thing is (`the dummy Login and Lachy's
+# Gmail`), so a gate signed here grants the Login alone. A second thing in plain prose with neither (`the dummy Login,
+# to push to the npm registry`) still passes: an accepted residual (module docstring, 5).
+ADDRESS_RE = re.compile(r"[^\s,;()\[\]<>'\"`]*@[^\s,;()\[\]<>'\"`]*")
+CONJUNCTION_RE = re.compile(WS + r"(?:and|or|plus|as\s+well\s+as|along\s+with|together\s+with)" + WE + r"|[&+;]",
+                            re.I)
 
 
 def has_login_phrase(gate):
@@ -998,7 +1021,7 @@ def has_login_phrase(gate):
 
 def login_reading(gate, logins):
     """{"names": [...] | None, "why"}: the test-Login reading of one gate (module docstring, 5). Fail closed, the first
-    failure wins, reading only the text after the first `:`; steps 1-5 need no `logins` (None or a list of declared
+    failure wins, reading only the text after the first `:`; steps 1-6 need no `logins` (None or a list of declared
     names). names are the declared spellings of the Logins it names, in text order, each once."""
     gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
     if gate_kind(gate) != "credential":
@@ -1019,6 +1042,11 @@ def login_reading(gate, logins):
     other = [m for regex in OTHER_CREDENTIAL_RES for m in regex.finditer(text)]
     if other:
         return _cred_none(f"another credential beside the Login: {min(other, key=lambda m: m.start()).group(0)}")
+    joined = [(m.start(), "an address beside the Login: " + m.group(0).rstrip(".")) for m in ADDRESS_RE.finditer(text)]
+    joined += [(m.start(), "something joined to the Login: " + re.sub(r"\s+", " ", m.group(0)))
+               for m in CONJUNCTION_RE.finditer(text)]
+    if joined:
+        return _cred_none(min(joined)[1])
     words = list(LOGIN_WORD_RE.finditer(text))
     plural = next((m for m in words if re.match(r"Logins" + WE, m.group(0), re.I)), None)
     if plural:

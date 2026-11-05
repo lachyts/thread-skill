@@ -18,9 +18,11 @@
 //   literal `$` does;
 // - p37-4 (ADR 0034's 2026-11-05 amendment, unpriceable never means asked): the verbatim gate that stopped
 //   chorus-rollout-2026-11-02 reads null in full and US$1 in the standing reading, covered at 200, its CLI line exactly
-//   {"usd": "1", "why": ""}; the reading is monotone (a US$ amount is never dropped); per/each is a rate only before a
-//   unit; 7(ix) holds every per-unit word; the cap-only clause signs prose and still asks on a rate, multiplier, %,
-//   plus, widening word, currency or per-unit noun; the accepted residuals; and the test-Login reading, each why;
+//   {"usd": "1", "why": ""}; the reading is monotone (a US$ amount is never dropped); outside the clause per/each is a
+//   rate only before a unit, and on the cap any per/each/every asks in both readings; 7(ix) holds every per-unit word;
+//   the cap-only clause signs prose and still asks on a rate, multiplier, %, plus, widening word, currency or per-unit
+//   noun; the accepted residuals; and the test-Login reading, each why (an `@` or a conjunction beside the Login
+//   asks) and its residual (a second thing in plain prose);
 // - the test-credential reading (ADR 0063): each step's why, in order (the class-independent steps first); p8-1's two
 //   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
 //   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
@@ -619,6 +621,41 @@ test('p37-4 Do 2: per/each is a rate only before a unit; prose per is none; 7(ix
   assert.deepEqual([exposure(PROBE), exposure(FAST_COUNTED)], [{ usd: '9', why: '' }, { usd: '150', why: '' }], 'PROBE and FAST_COUNTED unchanged')
 })
 
+// Review round 1 (p37-4): RATE_RE is rule 7(i)'s alone. On the cap itself any per/each/every asks in both readings,
+// whatever follows it, as before p37-4: a rate on the cap never prices as a bare total. `_clause()` reads a substring,
+// so RATE_RE's `(?<=\d\s)each` could never see the cap's digit there.
+test('p37-4 a per/each/every on the cap itself asks in both readings, whatever follows; prose per outside the clause still prices', () => {
+  // [gate, its clause]: the review's shapes, each priced as its bare cap before this pin
+  const gates = [['spend: egress — cap US$0.10 per GB', 'per GB'], ['spend: x — cap US$5 per developer', 'per developer'],
+    ['spend: x — cap US$5 per org', 'per org'], ['spend: x — cap US$2 per sample', 'per sample'],
+    ['spend: probes — cap US$5 each for the images', 'each for the images'],
+    ['spend: probes — cap US$5 each across the models', 'each across the models'],
+    ['spend: x — cap US$2 per developer for 3 developers', 'per developer for 3 developers'],
+    ['spend: x — cap US$5 per generated image', 'per generated image']]
+  const got = py(gates.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'standing', gate }]))
+  gates.forEach(([gate, c], i) => {
+    assert.deepEqual(got[2 * i], { usd: null, why: `unrecognised clause: ${c}` }, `${gate}: full`)
+    assert.deepEqual(got[2 * i + 1], { usd: null, why: `unrecognised clause: ${c}`, capOnly: '' }, `${gate}: standing`)
+  })
+  assert.equal(covered('spend: egress — cap US$0.10 per GB', 200).covered, false, 'a per-GB cap is never covered as a 10-cent total')
+  // controls: the prose `per` outside the clause prices in both readings, and so does a month on the cap
+  const [prose, proseSt, month] = py([{ op: 'exposure', gate: 'spend: x per the task note — cap US$5' },
+    { op: 'standing', gate: 'spend: x per the task note — cap US$5' }, { op: 'standing', gate: 'spend: x — cap US$5 per month' }])
+  assert.deepEqual([prose, proseSt, month], [{ usd: '5', why: '' }, { usd: '5', why: '', capOnly: '' }, { usd: '5', why: '', capOnly: '' }])
+})
+
+// ADR 0034's 2026-11-05 amendment, residuals (iii) and (iv): outside the clause a per/each rate RATE_RE cannot see (its
+// unit not straight after it, or off RATE_UNITS) reads x1 in the full reading, the value the cap-only reading gives
+// anyway; the same words on the cap ask (the test above).
+test('accepted residual (ADR 0034 amendment iii, iv): outside the clause `per generated image` and `each such call` read x1', () => {
+  const gates = ['spend: image API per generated image — cap US$5', 'spend: image API, each such call — cap US$5']
+  const got = py(gates.flatMap((gate) => [{ op: 'exposure', gate }, { op: 'standing', gate }]))
+  gates.forEach((gate, i) => {
+    assert.deepEqual(got[2 * i], { usd: '5', why: '' }, `${gate}: full`)
+    assert.deepEqual(got[2 * i + 1], { usd: '5', why: '', capOnly: '' }, `${gate}: standing`)
+  })
+})
+
 test('p37-4 the cap-only clause: prose beside the cap signs at it; a rate, multiplier, %, plus, widening word, currency or per-unit noun asks', () => {
   // signs at the cap, capOnly the full reading's why (the last three are accepted residuals: a count on the cap with no
   // rate word reads as the cap, the implementer's ceiling)
@@ -687,21 +724,45 @@ test('p37-4 the test-Login reading: each why in order; names matched ignoring ca
     ['credential: the dummy Login and its API', 'another credential beside the Login: API'],
     ['credential: the dummy Login from .env.local', 'another credential beside the Login: .env'],
     ['credential: the dummy Login and the deploy keys', 'another credential beside the Login: keys'],
+    // step 5 (review round 1): nothing joined beside the Login; each of these signed as `test Login dummy` before it
+    ["credential: the dummy Login and Lachy's Gmail", 'something joined to the Login: and'],
+    ['credential: the dummy Login and the Supabase service role', 'something joined to the Login: and'],
+    ['credential: the dummy Login and the GitHub admin rights on lachyts/thread-skill', 'something joined to the Login: and'],
+    ['credential: the dummy Login, then sign in as lachy@animately.com', 'an address beside the Login: lachy@animately.com'],
+    ['credential: the dummy Login (lachy+dummy@animately.com).', 'an address beside the Login: lachy+dummy@animately.com'],
+    ['credential: the dummy Login plus the Stripe dashboard', 'something joined to the Login: plus'],
+    ['credential: the dummy Login & the deploy box', 'something joined to the Login: &'],
+    ['credential: the dummy Login + Gmail', 'something joined to the Login: +'],
+    ["credential: the dummy Login as well as Lachy's Gmail", 'something joined to the Login: as well as'],
+    ['credential: the dummy Login along  with Gmail', 'something joined to the Login: along with'],
+    ['credential: the dummy Login; the main Login', 'something joined to the Login: ;'],
+    ['credential: the dummy Login OR the main Login', 'something joined to the Login: OR'],
+    // a known false ask, pinned: two declared Logins joined by `and` ask too (list them with a comma or `then`)
+    ['credential: the dummy Login and the dummy Claude Login', 'something joined to the Login: and'],
     ['credential: the Logins', 'more than one Login: Logins'],
     ['credential: Login for the probe', 'a Login it cannot name'],
     ['credential: the dummy account', 'another credential beside the Login: account'],
     ['credential: the dummy probe', 'it names no Login'],
     ['credential: the animately Login', 'animately is not a declared test Login'],
     ['credential: the Claude Login', 'the is not a declared test Login'],   // the leftmost name wins
-    ['credential: the dummy Login and the animately Login', 'animately is not a declared test Login'],
+    ['credential: the dummy Login, then the animately Login', 'animately is not a declared test Login'],
+    // the order: steps 2-4 name their own word before step 5's conjunction (`and STRIPE_SECRET`, `and the GitHub PAT`
+    // above), and step 5 runs before the naming steps 6-8, so a second Login joined by `and` asks on its conjunction
+    ['credential: the dummy Login and the animately Login', 'something joined to the Login: and'],
   ]
   const got = py(cases.map(([gate]) => ({ op: 'login', gate, logins: LOGINS })))
   cases.forEach(([gate, why], i) => assert.deepEqual(got[i], { names: null, why }, gate))
-  // steps 1-5 need no Logins: a gate they pass says NO_LOGINS_WHY with none declared, [] or null
-  const [none, empty, pre] = py([{ op: 'login', gate: DUMMY, logins: null }, { op: 'login', gate: DUMMY, logins: [] },
-    { op: 'login', gate: 'credential: access to the dummy Claude Login', logins: null }])
+  // steps 1-6 need no Logins: a gate they pass says NO_LOGINS_WHY with none declared, [] or null
+  const [none, empty, pre, joined] = py([{ op: 'login', gate: DUMMY, logins: null }, { op: 'login', gate: DUMMY, logins: [] },
+    { op: 'login', gate: 'credential: access to the dummy Claude Login', logins: null },
+    { op: 'login', gate: "credential: the dummy Login and Lachy's Gmail", logins: null }])
   assert.deepEqual([none, empty], [{ names: null, why: NO_LOGINS }, { names: null, why: NO_LOGINS }])
   assert.deepEqual(pre, { names: null, why: 'deny word: access' }, 'a deny word says so with no Logins')
+  assert.deepEqual(joined, { names: null, why: 'something joined to the Login: and' }, 'a conjunction says so with no Logins')
+  // the accepted residual (module docstring 5; ADR 0034 amendment vi): a second thing in plain prose with no deny word,
+  // env key, credential noun, `@` or conjunction passes; the annotation names only the Login
+  const residual = ['credential: the dummy Login to push to the npm registry', "credential: the dummy Login, then Lachy's Gmail"]
+  assert.deepEqual(py(residual.map((gate) => ({ op: 'login', gate, logins: LOGINS }))), residual.map(() => ({ names: ['dummy'], why: '' })))
   assert.deepEqual(py([{ op: 'login', gate: 'credential: the Dummy Login', logins: ['DUMMY'] }])[0], { names: ['DUMMY'], why: '' }, 'the declared spelling')
 })
 
