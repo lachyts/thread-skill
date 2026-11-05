@@ -2,8 +2,11 @@
 // assistant message (Chorus src/stage/session.py: `response = ev["text"]`) with no model first: a Response that
 // ENDS on the Agent's closing sentence and asks nothing anywhere reads *closed*, which archives its Session
 // (Chorus ADR 0089 d2); a Response that asks, or a sentence more text follows, goes to the model leg and never
-// archives on its own. A rollout lead's ROLLOUT-STATUS line is the one thing allowed after the sentence: the
-// Stage takes it out before it reads, and at `state=done` reads *closed* by the same rule. A handoff on the
+// archives on its own. A *closed* read is then read for a flag before it is worn (Chorus ADR 0089 § Built
+// (2026-11-04, chorus-p96-3)): close's banners C and D flag by their ", but" wording with no model (a lead's
+// `done` included, which has no other reading), A and B only by the Stage's model flag read. A rollout lead's
+// ROLLOUT-STATUS line is the one thing allowed after the sentence: the Stage takes it out before it reads, and at
+// `state=done` reads *closed* by the same rule, or *a report · work not landed* on banner C or D. A handoff on the
 // Stage starts its next Session at once (ADR 0089 d1), so its closing words say so and never ask Lachy to
 // start it. A handoff then runs `next` for this session, the parent (handoff § Next for this session), after its
 // closing line, so on the Stage the Turn's last message is next's. The port reads two fixed template lines only:
@@ -44,6 +47,11 @@ import { read, slice, section, lineOf, collapse, fencedBlocks, FENCE } from '../
 //   _without_fences (1957), asks (1974)
 //   close (2091), its fast path only: `ends_closed(response) and not asks(response)` → *closed*
 //   ROLLOUT_STATUS (2135), _last_line (2150), _cut_on_a_word (2220), CLOSE_VALUES (1869)
+// Chorus 4c88c9de, src/summarise.py, the flag read's no-model half (ADR 0089 § Built (2026-11-04, chorus-p96-3)):
+//   _CLOSING_FLAGGED (3221)             re.compile(r"(thread closed)\W+(safe to end this session)\W{1,4}but\b", re.I)
+//   closing_flagged (3224), over _closing_block (2730): the last block that declares; the port's declaration is
+//   _CLOSING alone, as its ends_closed is (a handoff's archive sentence is not ported)
+//   leadClose's flagged `done` branch (Chorus 3390): *a report · work not landed* (_FLAG_OBJECT, 3216)
 //   the lead's line, named here after Chorus's docstrings ("the lead's line"), as the queue-only register keeps
 //   the retired word out: OLD_STATUS, LEAD_REASON, LEAD_HEAD, LEAD_TAIL, LEAD_FENCE, HALTED, WEDGED, REASON_CHARS
 //   are WAVE_STATUS (2131), _WAVE_REASON, _WAVE_LINE_HEAD, _WAVE_LINE_TAIL, _WAVE_FENCE (2139-2142), WAVE_HALTED,
@@ -71,6 +79,8 @@ const LEAD_REASON = /\s+reason="(?<reason>[^"]*)"/uy
 const LEAD_HEAD = new Set(' \t`>*_-')
 const LEAD_TAIL = new Set(' \t`*_.')
 const LEAD_FENCE = /^\s*(?:`{3,}|~{3,})\s*$/u
+const CLOSING_FLAGGED = /(thread closed)[^\p{L}\p{N}_]+(safe to end this session)[^\p{L}\p{N}_]{1,4}but(?![\p{L}\p{N}_])/iu
+const FLAG_OBJECT = 'work not landed'
 const CLOSE_VALUES = { question: 'a question', review: 'work to review', report: 'a report', nothing: 'nothing yet', closed: 'closed' }
 const HALTED = 'halted'
 const WEDGED = 'likely wedged'
@@ -134,6 +144,21 @@ function endsClosed(response) {
   return blocks.length > 0 && CLOSING.test(blocks[blocks.length - 1])
 }
 
+function closingBlock(response) {
+  const tail = withoutLeadLine(response).slice(-CLOSE_CHARS)
+  let found = null
+  for (const block of tail.split(BLOCKS)) {
+    const one = words(block).join(' ')
+    if (one && CLOSING.test(one)) found = one
+  }
+  return found
+}
+
+function closingFlagged(response) {
+  const block = closingBlock(response)
+  return block !== null && CLOSING_FLAGGED.test(block)
+}
+
 function withoutFences(text) {
   const kept = []
   let fence = null
@@ -174,7 +199,10 @@ function leadClose(status, response) {
   if (state === 'waiting' || (state === 'running' && status.queue)) return [CLOSE_VALUES.nothing, '']
   if (state === 'halted') return [HALTED, cutOnAWord(status.reason || '', REASON_CHARS)]
   if (state === 'done') {
-    if (endsClosed(response) && !asks(response)) return [CLOSE_VALUES.closed, '']
+    if (endsClosed(response) && !asks(response)) {
+      if (closingFlagged(response)) return [CLOSE_VALUES.report, FLAG_OBJECT]
+      return [CLOSE_VALUES.closed, '']
+    }
     return [CLOSE_VALUES.review, 'the rollout']
   }
   if (state === 'running') return [HALTED, WEDGED]
@@ -184,7 +212,7 @@ function leadClose(status, response) {
 // What the Stage reads off one Response; the drift check compares exactly this with the Python.
 const reading = (t) => {
   const s = leadStatus(t)
-  return { endsClosed: endsClosed(t), asks: asks(t), status: s, statusClose: leadClose(s, t) }
+  return { endsClosed: endsClosed(t), asks: asks(t), flagged: closingFlagged(t), status: s, statusClose: leadClose(s, t) }
 }
 
 // ---- The skill text -------------------------------------------------------------------------------------
@@ -225,6 +253,7 @@ function fill(s) {
 const banners = (t) => fencedBlocks(STEP9(t)).map((b) => b.map((l) => l.trim()).join(' '))
 const pick = (text, re) => text.match(re)?.[1] ?? null
 const paraphrase = (t) => pick(STEP9(t), /\*"(This thread is closed:[^"]*)"\*/)
+const reworded = (t) => pick(STEP9(t), /\*"(Thread closed\. Safe to end this session[^"]*)"\*/)
 const notClosed = (t) => pick(STEP9(t), /\*"(Thread NOT closed: [^"]*)"\*/)
 const questionLine = (t) => pick(STEP9(t), /`(Which way on the Needs your call row\(s\) above\?)`/)
 const offer = (t) => pick(STEP8(t), /`(research not landed: [^`]*)`/)
@@ -308,6 +337,19 @@ test('port: a lead\'s status line after the banner is taken out, in a closing fe
   assert.deepEqual(alone.statusClose, ['work to review', 'the rollout'])
 })
 
+test('port: the flag reads the last declaring block for its ", but", the lead\'s line out first', () => {
+  const flaggedBanner = '**Thread closed. Safe to end this session, but work is NOT queued to land in x: see its landing row.**'
+  assert.equal(R(closing(REPORT, flaggedBanner)).flagged, true)
+  assert.equal(R(closing(REPORT, BANNER)).flagged, false, 'a dash after the sentence flags')
+  assert.equal(R(`${closing(REPORT, flaggedBanner)}\n${STATUS_DONE}`).flagged, true, 'the lead\'s line hides the flag')
+  assert.equal(R(`${closing(REPORT, flaggedBanner)}\n\nWant me to file it?`).flagged, true,
+    'the flag reads the declaring block, wherever the Response ends')
+  assert.equal(R(closing(`Earlier: ${flaggedBanner}`, BANNER)).flagged, false, 'an earlier declaring block flags')
+  assert.equal(R(closing(REPORT, 'Thread closed. Safe to end this session, butter is out.')).flagged, false,
+    '"but" matches inside a word')
+  assert.equal(R('Nothing declared, but work is NOT queued to land.').flagged, false, 'no declaration flags')
+})
+
 // ---- 3. The skill text read through the port ------------------------------------------------------------
 test('close step 9: exactly four banners, each ending its message closed with nothing asked', () => {
   const b = banners(real.close)
@@ -333,7 +375,7 @@ test('close step 9: the paraphrase, the NOT-closed form and open save\'s line ne
   assert.equal(R(closing(REPORT, s)).endsClosed, false, 'a checkpoint reads closed and would archive')
 })
 
-test('close step 8: the research-landing offer is a statement, so the close still archives', () => {
+test('close step 8: the research-landing offer is a statement, so the close never asks', () => {
   const o = offer(real.close)
   assert.ok(o, 'step 8 has no `research not landed: …` statement offer')
   const t = closing(`${REPORT}\n${fill(o)}`, BANNER)
@@ -343,7 +385,7 @@ test('close step 8: the research-landing offer is a statement, so the close stil
     'control: a question-form offer reads as asking')
 })
 
-test('close step 8: the rollout-not-started row (ADR 0057) is a statement, so the close still archives', () => {
+test('close step 8: the rollout-not-started row (ADR 0057) is a statement, so the close never asks', () => {
   const o = rolloutRow(real.close)
   assert.ok(o, 'step 8 has no `rollout not started: …` statement row')
   const t = closing(`${REPORT}\n${fill(o)}`, BANNER)
@@ -353,7 +395,7 @@ test('close step 8: the rollout-not-started row (ADR 0057) is a statement, so th
     'control: a question-form row reads as asking')
 })
 
-test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Session; without it, it archives', () => {
+test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Session; without it, the fast path reads it closed', () => {
   const q = questionLine(real.close)
   assert.ok(q, 'step 9 has no rule (3) question line')
   const d = banners(real.close)[3]
@@ -365,6 +407,8 @@ test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Se
   const bare = closing(`${REPORT}\n${NEEDS_CALL}\n${DISCARD}`, fill(d))
   assert.equal(R(bare).asks, false, 'control: the row alone asks')
   assert.equal(fastClose(bare), 'closed', 'control: the row alone keeps the Session')
+  // the fast path's *closed* is not yet an archive: banner D's ", but" flags the bare close, so it stays a report
+  assert.equal(R(bare).flagged, true, 'banner D reads unflagged, so the bare close would archive')
 })
 
 test('close step 9 rule (2): banner then the lead\'s status line archives at done, never at halted', () => {
@@ -377,6 +421,33 @@ test('close step 9 rule (2): banner then the lead\'s status line archives at don
   const signoff = closing(REPORT, `${fill(b)}\n${STATUS_SIGNOFF}`)
   assert.deepEqual(R(signoff).statusClose, ['halted', 'awaiting sign-off: [[thread-skill-p22-9]]'])
   assert.equal(R(STATUS_DONE).endsClosed, false, 'control: the status line alone ends closed')
+})
+
+test('close step 9: banners C and D flag by their ", but" with no model, A and B never; a lead\'s done reads C and D a report', () => {
+  const b = banners(real.close).map(fill)
+  assert.equal(b.length, 4, 'step 9 holds four banners')
+  const flagged = b.map((x) => R(closing(REPORT, x)).flagged)
+  assert.deepEqual(flagged, [false, false, true, true], 'banners A, B, C, D read flagged as')
+  b.forEach((x, i) => {
+    const done = R(closing(REPORT, `${x}\n${STATUS_DONE}`))
+    assert.deepEqual(done.statusClose, i < 2 ? ['closed', ''] : ['a report', 'work not landed'], `a lead's done on banner ${'ABCD'[i]}`)
+  })
+  // a lead's done gets no flag read: a follow-up row (step 8's rollout row) before banner A or B still reads closed
+  const row = rolloutRow(real.close)
+  assert.ok(row, 'step 8 has no `rollout not started: …` statement row')
+  b.slice(0, 2).forEach((x, i) => {
+    const done = R(closing(`${REPORT}\n${fill(row)}`, `${x}\n${STATUS_DONE}`))
+    assert.deepEqual(done.statusClose, ['closed', ''], `a lead's done on banner ${'AB'[i]} after a follow-up row`)
+  })
+})
+
+test('close step 9 rule (1): a reworded banner C loses its flag, so a lead\'s done reads it closed', () => {
+  const w = reworded(real.close)
+  assert.ok(w, 'rule (1) quotes no reworded "Thread closed. Safe to end this session …" counter-example')
+  const t = closing(REPORT, fill(w))
+  assert.equal(R(t).endsClosed, true, 'the reworded banner no longer declares the close')
+  assert.equal(R(t).flagged, false, 'the reworded banner still flags: it is no counter-example')
+  assert.deepEqual(R(`${t}\n${STATUS_DONE}`).statusClose, ['closed', ''], 'a lead\'s done does not read it closed')
 })
 
 test('handoff § Build: the closing line says the next Session is starting and never asks', () => {
@@ -450,6 +521,19 @@ const RULES = [
   'Which way on the Needs your call row(s) above?',
   'Chorus ADR 0089 d2',
 ]
+// Step 9's Stage paragraph and rule (1) say C and D stay as a report by their ", but" (Chorus ADR 0089 d3,
+// chorus-p96-3), and A and B archive only when the flag read finds nothing; the edge case says the same.
+const FLAG_PROSE = [
+  'Banners (C) and (D) stay on the Stage as *a report · work not landed*',
+  'archives its Session only when the Stage\'s flag read finds nothing for him to see',
+  'd3 as built 2026-11-04, chorus-p96-3',
+]
+const FLAG_RULE = 'and banners (C) and (D) by the `, but` that follows it'
+const FLAG_EDGE = ['banner (C) or (D) stays as *a report*', 'only when the Stage\'s flag read finds nothing for him']
+// A rollout lead's `done` takes the banner rule alone (Chorus ADR 0089 § Built, chorus-p96-3): no flag read, so
+// banner A or B before it archives whatever the rows say; step 9 and the edge case each say so.
+const LEAD_DONE = "A rollout lead's `done` line (rule (2)) gets no flag read: (A) or (B) before it, with nothing asked, archives the Session whatever its rows say"
+const LEAD_DONE_EDGE = "a rollout lead's `done` line after the banner (step 9's rule (2)) gets no flag read, so (A) or (B) before it archives whatever its rows say"
 const OFFER = '`research not landed: <pointer>; say "land it" to file it`, never as a question (step 9, rule (3))'
 const AFTER_HANDOFF = [
   "After this session's own handoff, next prints no step-2 summary and no open question",
@@ -470,6 +554,9 @@ function check(files) {
   if (!(lineOf(s9, /^9\. /) ?? '').includes('(rule (2) below names its one exception)')) fails.push('close:intro')
   if (!collapse(STEP8(files.close)).includes(OFFER)) fails.push('close:offer')
   if (!has(EDGES(files.close), ['**On the Chorus Stage**', "step 9's rule (3) question line", 'leaves it unarchived'])) fails.push('close:edge')
+  if (!has(s9, FLAG_PROSE) || !has(s9, [FLAG_RULE, LEAD_DONE]) || !has(EDGES(files.close), [...FLAG_EDGE, LEAD_DONE_EDGE]) ||
+    ['a closing message that ends on it and asks nothing archives its Session', 'a close whose message ends on its banner and asks nothing archives its Session']
+      .some((old) => collapse(files.close).includes(old))) fails.push('close:flag')
   if (['never as a question (the banner stays last)', 'Close never asks:', 'Close never calls the question tool', 'never a question, never a fought hook']
     .some((old) => collapse(files.close).includes(old))) fails.push('close:asks')
 
@@ -561,6 +648,14 @@ test('controls: close pins fail on their own mutation', () => {
   only('intro', swap('close', ' (rule (2) below names its one exception)', ''), ['close:intro'])
   only('offer', swap('close', 'never as a question (step 9, rule (3))', 'as a question'), ['close:offer'])
   only('edge', swap('close', '- **On the Chorus Stage** →', '- **On the Stage** →'), ['close:edge'])
+  only('flag', swap('close', 'Banners (C) and (D) stay on the Stage as *a report · work not landed*', 'Banners (C) and (D) archive'), ['close:flag'])
+  only('flag:rule', swap('close', FLAG_RULE, ''), ['close:flag'])
+  only('flag:edge', swap('close', 'banner (C) or (D) stays as *a report*', 'banner (C) or (D) archives'), ['close:flag'])
+  // the lead's done back under the flag read, in step 9 and then in the edge case
+  only('flag:lead', swap('close', "A rollout lead's `done` line (rule (2)) gets no flag read", "A rollout lead's `done` line (rule (2)) gets the flag read"), ['close:flag'])
+  only('flag:lead:edge', swap('close', "line after the banner (step 9's rule (2)) gets no flag read", "line after the banner (step 9's rule (2)) gets the flag read"), ['close:flag'])
+  only('flag:old', swap('close', 'Rules (1) to (3) cover the four closed banners above',
+    'Once, a closing message that ends on it and asks nothing archives its Session. Rules (1) to (3) cover the four closed banners above'), ['close:flag'])
   only('asks', swap('close', 'never the question tool, never a fought hook', 'never a question, never a fought hook'), ['close:asks'])
   only('asks:stop', swap('close', 'A stop never calls the question tool', 'Close never calls the question tool'), ['close:asks'])
   // step 8 back to the order rule (3) contradicts: the question line before the discard note
@@ -637,7 +732,8 @@ spec.loader.exec_module(s)
 out = []
 for t in json.load(sys.stdin):
     st = s.wave_status(t); wc = s.wave_close(st, t)
-    out.append({"endsClosed": s.ends_closed(t), "asks": s.asks(t), "status": st, "statusClose": list(wc) if wc else None})
+    out.append({"endsClosed": s.ends_closed(t), "asks": s.asks(t), "flagged": s.closing_flagged(t), "status": st,
+                "statusClose": list(wc) if wc else None})
 print(json.dumps(out))
 `
 
