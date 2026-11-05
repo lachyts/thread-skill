@@ -334,8 +334,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   dropped, archived or missing task is a **dead link**: read as blank
   everywhere, and no sweep or pickup clears it — it stays until the next
   set-down, a fill-blank writer or Lachy replaces it. A live link whose task
-  note does not parse reads *unparseable*, with its line and key: it is never
-  filled over, and orient mends it. _Avoid_: up next, focus task.
+  note cannot be read reads *unparseable*, with its why, and is never filled
+  over. A parse error's why carries its line and key, and orient mends one
+  whose cause is a plain value (an unquoted `: `, say); an unclosed or
+  non-mapping frontmatter, or an unreadable file, carries neither and is left
+  for Lachy. _Avoid_: up next, focus task.
 
 ## Memory capture (close-side)
 

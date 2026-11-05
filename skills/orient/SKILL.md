@@ -327,13 +327,16 @@ is report-only for it. It goes straight to its reshuffle (`--look` still stops i
 `--look`, a dry run or a scoped target. For each § 2 slot whose why starts `frontmatter does not parse`
 (it names the line and key, `(line 7, next_action)`), run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <task>` once, `<task>` the
-slot row's task, never a hand Edit: it quotes the plain value the YAML error names (a free-text value
-holding `: `, or a bare `"` inside quotes) and re-parses the note before its one save. A
-`mended:<keys>` row is listed in the report's Decided for you (Owner *technical*), never in the note's
-`## Decided for you` section, and the slot is read once more. That is the only attempt. These stay
-named in § 3's report with their why, for Lachy: an `unmendable:` row; an exit 2 (its `next-action:`
-line: the note is not directly under Work/Tasks, and nothing was written); a slot that still reads
-`unparseable`; and a slot whose why is anything else.
+slot row's task column as it is (a path-form link's `Work/Tasks/x` included), never a hand Edit: it
+quotes the plain value the YAML error names (a free-text value holding `: `, or a bare `"` inside
+quotes) and re-parses the note before its one save. § 3's report was shown before this step, so each
+result is reported as the mend runs, with the drift fixes' report. A `mended:<keys>` row is a call
+made for him (Owner *technical*): one `Mended for you: [[<task>]] <keys> (technical: <the slot's
+why>)` line there, never in the note's `## Decided for you` section; then the slot is read once
+more. That is the only attempt. These are reported there too, for Lachy, each with its slot's why:
+an `unmendable:` row, as printed; an exit 2, with its one `next-action:` stderr line quoted as
+printed, never paraphrased (nothing was written); and a slot that still reads `unparseable`. A slot
+whose why is anything else is left as § 3 named it.
 
 **The learned directory.** A default run and Steer only also run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`
