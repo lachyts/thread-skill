@@ -91,7 +91,9 @@ Ranker's skip reason (`unhomed`, `in flight`, `hold`), the scan's own why for a 
 unreadTasks[], which the Ranker folds in: `frontmatter does not parse (line N, <key>)`, say), or `not in the scan` for
 a slug that names no note; note is the task's vault path whenever the scan row or the unread row has one.
 --superseding passes the prior to the Ranker, so a carried task still queued is gradeable (ER's Gradeable exception).
-gradeable and skipped count the whole scan either way, skipped each unread task too (the Ranker's `unreadable`). With neither flag (orient-all § 2) the output is as it always was.
+gradeable and skipped count the whole scan either way, skipped each unread task too (the Ranker's `unreadable`). With
+neither flag (orient-all § 2) the output is the plain {homes[], gradeable, skipped}, no notGradeable[], and its skipped
+now includes each unread task.
 
 rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round, cut to N minutes.
   Sign-offs: each scan rollout summary's `pendingSignOffs` (with a null summary, the scan's open tasks at status

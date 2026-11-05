@@ -12,11 +12,12 @@
 // The main vault V1 runs once online and once offline (shared across the cases), plus a second online run for
 // determinism, a GIT_SSH_COMMAND run, a --deadline 0 run behind a `git` shim, and a run behind a shim whose
 // `rev-parse --local-env-vars` fails. V2 holds a chmod-000 note under Work/Tasks/Archive/ (the vault-level case;
-// skipped under root). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT, VI, VL, VJ, VR,
-// VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M), the clone repos (K, whose
-// K-rollout is ahead on its own, and ST, whose ST-rollout is stale) and the phase-membership notes. Case 16 runs
-// pushed-base.sh as schedule § 0 runs it, on copies of A, C, D, Q, M and K and fresh clones under S/parity (it
-// fetches), never on the repos case 9 snapshots.
+// skipped under root), and V2b a dangling symlink and an upper-case `Bar.MD` that does not parse, both directly in
+// Work/Tasks (case 8b's unreadTasks). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT,
+// VI, VL, VJ, VR, VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M), the clone
+// repos (K, whose K-rollout is ahead on its own, and ST, whose ST-rollout is stale) and the phase-membership notes.
+// Case 16 runs pushed-base.sh as schedule § 0 runs it, on copies of A, C, D, Q, M and K and fresh clones under
+// S/parity (it fetches), never on the repos case 9 snapshots.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -296,6 +297,14 @@ write(path.join(V2, 'Work', 'Tasks', 'v2-task.md'), task('open', ['V2 Project'],
 write(LOCKED, task('done', ['V2 Project']))
 const ROOT_USER = process.getuid?.() === 0
 if (!ROOT_USER) fs.chmodSync(LOCKED, 0o000)
+
+// ---- Vault V2b: task notes directly in Work/Tasks that cannot be read -----------------------------------------
+// A dangling symlink (unreadable, under root too) and an upper-case `Bar.MD` whose frontmatter does not parse.
+const V2B = path.join(S, 'v2b')
+write(path.join(V2B, 'Work', 'Projects', 'V2b Project.md'), project('queued'))
+write(path.join(V2B, 'Work', 'Tasks', 'v2b-task.md'), task('open', ['V2b Project']))
+write(path.join(V2B, 'Work', 'Tasks', 'Bar.MD'), task('open', ['V2b Project'], '\nnext_action: Ring: the council'))
+fs.symlinkSync(path.join(S, 'nowhere', 'gone.md'), path.join(V2B, 'Work', 'Tasks', 'gone.md'))
 
 // ---- Vault V3: one project whose repo's remote hangs ----------------------------------------------------------
 const V3 = path.join(S, 'v3')
@@ -818,6 +827,21 @@ test('8. an unreadable note under Work/Tasks is reported once, and status and un
   assert.deepEqual([j.unreadTasks, j.counts.unreadTasks], [[], 0])
   assert.ok(!run.stdout.includes('Traceback'))
   assert.equal(j.tasks.length, 1)
+})
+
+test('8b. a task note directly in Work/Tasks that cannot be read is an unreadTasks row, an upper-case .MD included', () => {
+  const run = scan(V2B)
+  const j = ok(run)
+  // The dangling symlink will not open: the Tasks-dir pre-check names it, and it is skipped as `unreadable`.
+  assert.deepEqual(j.vaultErrors, [{ kind: 'unreadable-tasks-notes', notes: ['Work/Tasks/gone.md'],
+    skips: ['rollout status', 'unfinished-rollout'] }])
+  const bar = { note: 'Work/Tasks/Bar.MD', why: 'frontmatter does not parse (line 7, next_action)' }
+  assert.deepEqual(j.skipped, [bar, { note: 'Work/Tasks/gone.md', why: 'unreadable' }])
+  // Its slug is the basename less its extension, whatever the extension's case.
+  assert.deepEqual(j.unreadTasks, [{ slug: 'Bar', ...bar }, { slug: 'gone', note: 'Work/Tasks/gone.md', why: 'unreadable' }])
+  assert.deepEqual([j.counts.skipped, j.counts.unreadTasks], [2, 2])
+  assert.deepEqual(j.tasks.map((t) => t.slug), ['v2b-task'])
+  assert.ok(!run.stdout.includes('Traceback'))
 })
 
 // ---- 9. Read-only -------------------------------------------------------------------------------------------------
