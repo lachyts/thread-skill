@@ -756,11 +756,17 @@ Subcommands:
               line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
               gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
               session only after Lachy explicitly signs off.
-              --standing --rollout <note> (ADR 0034, ADR 0063): the standing approval, run by the lead
-              unattended. It signs only the spend gates Lachy's recorded standing approval covers and the
-              credential gates his declared test-credential class covers (below). Each pending spend bullet is
-              priced by skills/_shared/scripts/gated_inputs.py's exposure() (fail closed: irreversible gates, a
-              credential outside the class, and any shape it cannot price, never pass) against the limit
+              --standing --rollout <note> (ADR 0034, ADR 0063, p37-4): the standing approval, run by the lead
+              unattended. It signs only the spend gates Lachy's recorded standing approval covers, the
+              credential gates his declared test-credential class covers, and the credential gates naming only a
+              declared test Login (below). Each pending spend bullet is priced by
+              skills/_shared/scripts/gated_inputs.py's standing reading, covered() (fail closed: irreversible
+              gates, a credential outside the class and the test Logins, and any shape it cannot price even from
+              its cap, never pass): the full exposure() reading, else (p37-4, ADR 0034's 2026-11-05 amendment:
+              unpriceable never means asked) the cap-only reading, the cap times the clause's count plus every
+              other USD amount, where prose around a readable cap never asks; a gate priced so prints `; cap-only
+              pricing, the full reading refused: <the full reading's why>` at the end of its detail below, and
+              its annotation, log line and ASKs are a fully priced gate's. It is priced against the limit
               `spend_approval_usd`, resolved task frontmatter -> rollout frontmatter -> rollouts.toml
               (_resolved_settings: file:repo, file:defaults) -> built-in 0, which is off (sources `task`,
               `rollout`, `file:repo`, `file:defaults`, `built-in`; _retry_budget's order), lazily: at a slug's
@@ -780,7 +786,19 @@ Subcommands:
               then not written again. Its annotation is gated_inputs.credential_annotation()'s `(approved <date>
               under the standing approval: test credential K1, K2 present in <file>, class from <source>)`, and
               its line prints `<slug>: gate approved under the standing approval: <gate> (test credential K1, K2
-              present in <file>, <source>)`. A spend gate is covered iff
+              present in <file>, <source>)`. A credential gate on an unbounced note whose text holds a `Login`
+              word and no env token (gated_inputs.has_login_phrase(); p37-4) takes the test-Login reading instead,
+              never the class one, which needs an env token: gated_inputs.login_reading() with no Logins first (any
+              why but NO_LOGINS_WHY is the gate's ASK, and the settings are never resolved for it), then with
+              rollouts.toml's `[defaults] test_logins` (read through _resolved_settings once per call, as the class
+              is; machine-wide, so a serial note reads it too; a refused file is exit 1 for each slug that needs
+              it). It is covered iff every Login it names is declared and the reading finds nothing beside it: no
+              deny word, env key, other credential word, `@` address or conjunction joining a second thing (a
+              second thing in plain prose with none of these is not seen: gated_inputs.py's module docstring, 5,
+              names the residual). It reads no limit and gets no ledger, month line, Needs-you line or
+              spend lock; its annotation is gated_inputs.login_annotation()'s `(approved <date> under the standing
+              approval: test Login <n1, n2>, from <source>)`, and its line prints `<slug>: gate approved under the
+              standing approval: <gate> (test Login <n1, n2>, <source>)`. A spend gate is covered iff
               the limit is > 0, its total exposure is at most the limit, and (p30-8, ADR 0034's 2026-10-27
               amendment: spend is never asked ahead) this calendar month's standing-approved spend with it stays
               within the same limit, the month line, inclusive. The month (local time, from --now) sums the
@@ -808,7 +826,8 @@ Subcommands:
               otherwise the remaining bullets stay pending (rewritten without the covered ones) and the note
               stays gate-pending. Each remaining gate prints `ASK: <slug>: <gate>: <why>` (with a built-in
               limit, a priceable gate's why is `standing approval off (built-in 0): set [defaults]
-              spend_approval_usd in ~/.config/thread/rollouts.toml`). A note carrying "## Gate bounce (awaiting
+              spend_approval_usd in ~/.config/thread/rollouts.toml`; a gate neither reading prices asks with the
+              cap-only reading's why). A note carrying "## Gate bounce (awaiting
               sign-off)" (ADR 0038: the plan judge bounced its plan, reconcile wrote the section) has nothing
               covered, whatever its gates price: each gate is an ASK whose why starts `the plan judge bounced
               this plan (ADR 0038; …)` and ends with the pricer's reading, and nothing is written (exit 3). Lachy's
@@ -3437,32 +3456,37 @@ def _machine_settings():
 
 def _resolved_settings(rollout_note) -> dict:
     """rollout-settings.py's resolve() for the rollout note's Project root (repo=None when it has no Project root line):
-    rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, test_credentials, error, cause,
-    where}: settings is resolve()'s `settings` object (each key {value, source}), or None when it cannot resolve, and
-    then error is the resolver's own words and cause what the error needs: "resolver" (rollout-settings.py would not
-    load, or failed), "root" (a `--repo` refusal: the Project root is gone or its origin unreadable) or "file"
-    (rollouts.toml was refused; `where` names its path and line). test_credentials is resolve()'s field of that name
-    ({value, source}: the repo's test-credential class, ADR 0063; value None with no class, as with no Project root),
-    or None on an error. The one loader _resolved_ceiling, _resolved_caps, _retry_budget and the standing approval
-    share; it writes nothing and never raises."""
+    rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, test_credentials, test_logins,
+    error, cause, where}: settings is resolve()'s `settings` object (each key {value, source}), or None when it cannot
+    resolve, and then error is the resolver's own words and cause what the error needs: "resolver"
+    (rollout-settings.py would not load, or failed), "root" (a `--repo` refusal: the Project root is gone or its origin
+    unreadable) or "file" (rollouts.toml was refused; `where` names its path and line). test_credentials is resolve()'s
+    field of that name ({value, source}: the repo's test-credential class, ADR 0063; value None with no class, as with
+    no Project root), and test_logins resolve()'s ({value, source}: the machine's declared test Logins, p37-4; value []
+    with none; read from [defaults], so a note with no Project root resolves it too); each is None on an error. The
+    one loader _resolved_ceiling, _resolved_caps, _retry_budget and the standing approval share; it writes nothing and
+    never raises."""
     root = _project_root(rollout_note)
+
+    def failed(error, cause, where=""):
+        return {"settings": None, "test_credentials": None, "test_logins": None, "error": error, "cause": cause,
+                "where": where}
+
     try:
         mod = _settings_module()
     except Exception as e:
-        return {"settings": None, "test_credentials": None, "error": f"rollout-settings.py would not load: {e}",
-                "cause": "resolver", "where": ""}
+        return failed(f"rollout-settings.py would not load: {e}", "resolver")
     try:
         out = mod.resolve(repo=None if root is None else str(root))
-        return {"settings": out["settings"], "test_credentials": out.get("test_credentials"), "error": None,
-                "cause": None, "where": ""}
+        return {"settings": out["settings"], "test_credentials": out.get("test_credentials"),
+                "test_logins": out.get("test_logins"), "error": None, "cause": None, "where": ""}
     except mod.SettingsError as e:
         if (e.subject or "").startswith("--repo "):
-            return {"settings": None, "test_credentials": None, "error": str(e), "cause": "root", "where": ""}
+            return failed(str(e), "root")
         where = f"{e.subject} at line {e.line}" if e.line is not None else f"{e.subject}"
-        return {"settings": None, "test_credentials": None, "error": str(e), "cause": "file", "where": where}
+        return failed(str(e), "file", where)
     except Exception as e:
-        return {"settings": None, "test_credentials": None, "error": f"rollout-settings.py failed: {e}",
-                "cause": "resolver", "where": ""}
+        return failed(f"rollout-settings.py failed: {e}", "resolver")
 
 
 # A null ceiling's cause (status's `ceilingCause`, status § 3's Ceiling unresolved flag) picks its remedy: "stamp"
@@ -11521,14 +11545,16 @@ def _month_why(month, total, limit, gi):
 
 
 class _CredentialContext:
-    """The repo's test-credential class and the rollout's env_bootstrap for one approve-gates --standing call (ADR
-    0063), resolved lazily, once: only a credential gate on an unbounced note that passes the reading's
-    class-independent steps (credential_reading with no class gives NO_CLASS_WHY) asks for it. get() -> {error, cls,
-    source, boot, boot_err}: error is `rollout settings refused: <the resolver's words>` (exit 1 for each slug that
-    needs it, nothing written for it); otherwise cls is rollouts.toml's `test_credentials` value (None with no class:
-    no Project root, as on every serial note, no repo table, or no GitHub origin), and boot the rollout's
-    `env_bootstrap` (_command_value), or boot_err its CompletionValueError's words, which each credential gate then
-    asks with."""
+    """The repo's test-credential class, the machine's declared test Logins and the rollout's env_bootstrap for one
+    approve-gates --standing call (ADR 0063, p37-4), resolved lazily, once: only a credential gate on an unbounced note
+    that passes its reading's settings-independent steps (credential_reading with no class gives NO_CLASS_WHY,
+    login_reading with no Logins NO_LOGINS_WHY) asks for it. get() -> {error, cls, source, logins, logins_source, boot,
+    boot_err}: error is `rollout settings refused: <the resolver's words>` (exit 1 for each slug that needs it, nothing
+    written for it); otherwise cls is rollouts.toml's `test_credentials` value (None with no class: no Project root,
+    as on every serial note, no repo table, or no GitHub origin), logins its `[defaults] test_logins` value ([] with
+    none; machine-wide, so a serial note reads it too) and logins_source its source, and boot the rollout's
+    `env_bootstrap` (_command_value), or boot_err its CompletionValueError's words, which each class credential gate
+    then asks with."""
 
     def __init__(self, rollout_note):
         self.rollout_note, self._ctx = rollout_note, None
@@ -11540,11 +11566,13 @@ class _CredentialContext:
                 self._ctx = {"error": f"rollout settings refused: {res['error']}"}
             else:
                 tc = res.get("test_credentials") or {"value": None, "source": "built-in"}
+                tl = res.get("test_logins") or {"value": [], "source": "built-in"}
                 try:
                     boot, boot_err = _command_value(self.rollout_note, ENV_BOOTSTRAP_KEY), None
                 except CompletionValueError as e:
                     boot, boot_err = "", str(e)
                 self._ctx = {"error": None, "cls": tc.get("value"), "source": tc.get("source") or "built-in",
+                             "logins": list(tl.get("value") or []), "logins_source": tl.get("source") or "built-in",
                              "boot": boot, "boot_err": boot_err}
         return self._ctx
 
@@ -11562,17 +11590,21 @@ def _credential_verdict(g, ctx, gi):
 
 
 def _approve_standing(args) -> int:
-    """approve-gates --standing (ADR 0034, ADR 0063; the module docstring): sign each pending gate the standing approval
-    covers, leave the rest pending with an ASK line. A spend gate is covered when it prices within the resolved limit
-    and, unless it is already in `## Approved gates`, when this calendar month's standing approvals (_StandingLedger,
-    the month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A credential gate on a note
-    the plan judge never bounced is covered when it reads as the repo's declared test credential, the rollout's
+    """approve-gates --standing (ADR 0034, ADR 0063, p37-4; the module docstring): sign each pending gate the standing
+    approval covers, leave the rest pending with an ASK line. A spend gate is covered when its standing reading
+    (gated_inputs.covered(): the full reading, else the cap-only one, p37-4) prices within the resolved limit and,
+    unless it is already in `## Approved gates`, when this calendar month's standing approvals (_StandingLedger, the
+    month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A credential gate on a note the
+    plan judge never bounced is covered when it reads as the repo's declared test credential, the rollout's
     env_bootstrap refreshes the declared file with a plain cp, and each key it names is in that file with its declared
     form (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line, no spend lock, and the limit
-    is never resolved for it, so the class is its own switch. The limit resolves lazily, at a slug's first gate that is
-    not such a credential gate. A slug's new spend signings are logged in the rollout note's `## Needs-you log` first,
-    then its task note is written, so a failure between the two over-counts (fails closed). Exit 0 every gate written,
-    3 some left, 1 an error (a held standing-spend lock included)."""
+    is never resolved for it, so the class is its own switch. A credential gate holding a Login word and no env token
+    (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered when every Login it names is
+    a declared test Login and the reading finds nothing beside it (gated_inputs.login_reading: no deny word, env key,
+    other credential word, `@` or conjunction), under the same no-limit rules. The limit resolves
+    lazily, at a slug's first gate that is not such a credential gate. A slug's new spend signings are logged in the
+    rollout note's `## Needs-you log` first, then its task note is written, so a failure between the two over-counts
+    (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock included)."""
     if not args.rollout:
         print("ERROR: --standing needs --rollout", file=sys.stderr)
         return 1
@@ -11630,6 +11662,26 @@ def _approve_standing(args) -> int:
             # stop the slug with nothing written.
             covered, left, logged, slug_new, lock_err, slug_err, limit = [], [], [], Decimal(0), None, None, None
             for g in gates:
+                if not bounced and gi.gate_kind(g) == "credential" and gi.has_login_phrase(g):
+                    # p37-4: a declared test Login (machine-wide [defaults] test_logins); no limit, ledger, month line,
+                    # Needs-you line or spend lock. Its settings-independent steps run first, so a gate no declaration
+                    # could sign asks with its why and never reads the settings. A gate with an env token never comes
+                    # here: it takes the class path below, which needs one.
+                    pre = gi.login_reading(g, None)
+                    if pre["why"] != gi.NO_LOGINS_WHY:
+                        left.append((g, pre["why"]))
+                        continue
+                    ctx = creds.get()
+                    if ctx["error"]:
+                        slug_err = ctx["error"]
+                        break
+                    lr = gi.login_reading(g, ctx["logins"])
+                    if lr["names"] is None:
+                        left.append((g, lr["why"]))
+                        continue
+                    covered.append((g, gi.login_annotation(date, lr["names"], ctx["logins_source"]),
+                                    f"test Login {', '.join(lr['names'])}, {ctx['logins_source']}"))
+                    continue
                 if not bounced and gi.gate_kind(g) == "credential":
                     # ADR 0063: a declared test credential, proved present in its file; it never reads the limit.
                     # The reading's class-independent steps run first (d2): a gate no class could ever sign asks
@@ -11667,6 +11719,8 @@ def _approve_standing(args) -> int:
                 spend_ann = gi.annotation(date, verdict["usd"], limit["value"], limit["source"])
                 spend_detail = (f"exposure US${gi.format_usd(verdict['usd'])} of US${gi.format_usd(limit['value'])}, "
                                 f"{limit['source']}")
+                if verdict.get("capOnly"):   # p37-4: priced from its cap alone; the stdout detail names the refusal
+                    spend_detail += f"; cap-only pricing, the full reading refused: {verdict['capOnly']}"
                 if norm in approved:
                     covered.append((g, spend_ann, spend_detail))   # signed already, or listed twice: no month check, no log
                     continue
@@ -13605,9 +13659,11 @@ def _parser():
                     help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
                          "rollouts.toml, built-in 0 = off), and while this calendar month's standing-approved spend "
                          "(every rollout note's ## Needs-you log) stays within the same limit; each signing is logged "
-                         "there; and the credential gates the repo's declared test-credential class covers "
-                         "(rollouts.toml test_credentials, each key proved present in its file; ADR 0063); the rest "
-                         "stay pending as ASK lines: exit 0 all signed, 3 some left, 1 an error (ADR 0034)")
+                         "there (a gate the full reading cannot price is priced from its cap alone, p37-4); the "
+                         "credential gates the repo's declared test-credential class covers (rollouts.toml "
+                         "test_credentials, each key proved present in its file; ADR 0063); and the credential gates "
+                         "naming only a declared test Login ([defaults] test_logins, p37-4); the rest stay pending as "
+                         "ASK lines: exit 0 all signed, 3 some left, 1 an error (ADR 0034)")
     ag.add_argument("--rollout", default=None,
                     help="with --standing (required there): the rollout note, whose frontmatter and Project root "
                          "resolve spend_approval_usd; the task's rollout: must name it. Without --standing only the "

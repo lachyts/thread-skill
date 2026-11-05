@@ -3,6 +3,9 @@
 Date: 2026-11-01
 Status: accepted (implemented by p34-8, `thread-skill-p34-8-standing-approval-for-test-credentials`; amends ADR 0034
 decisions 1 and 2, where credential gates never passed the standing approval, and ADR 0008)
+*(Amended 2026-11-05 by p37-4, ADR 0034's amendment of that date: a declared test Login (`[defaults] test_logins`,
+schema 5, operator-only by this ADR's d1 rule) signs a credential gate that names only it. It is machine-wide, so
+(vii) "A Leg never signs one" holds for classes only.)*
 
 ## Context
 

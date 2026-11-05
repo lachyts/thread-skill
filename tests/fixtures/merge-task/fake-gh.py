@@ -37,8 +37,13 @@ State (a missing file takes the default in brackets):
                           secondary rate limit; `404` ⇒ the Not Found form. err.rules: its text, rc 1, on every read.
   inflight [0]            actions/runs in-flight count.
   checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
-                          sticky; absent ⇒ rc 0 with one passing row.
-  links, steps            the infra-classify reads; `run rerun` is logged, rc 0.
+                          sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
+                          A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
+                          checks as they stand. `pr checks --json` is gh 2.43.1's "unknown flag: --json", rc 1,
+                          unless checks.json is present (a newer gh), which prints `links`.
+  links, steps            the infra-classify reads; `run rerun` is logged, rc 0. `run view <id>` serves
+                          steps.<id> when that file exists (an empty one: a run with no failed step),
+                          else steps.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
   merge.queue             rc 0, autoMergeRequest set, stays OPEN.   merge.noop: rc 0, nothing changed.
@@ -267,12 +272,20 @@ if args[:2] == ["pr", "list"]:
 # ---- pr checks ------------------------------------------------------------------------------------------
 if args[:2] == ["pr", "checks"]:
     guard_num()
-    if "--json" in args:  # infra_flake_rerun's failed-required-links read
+    if "--json" in args:  # infra_flake_rerun's failed-required-links read: gh 2.43.1 has no --json on pr checks
+        if not has("checks.json"):
+            die("unknown flag: --json\n\nUsage:  gh pr checks [<number> | <url> | <branch>] [flags]\n")
         print(rd(p("links"), ""))
         sys.exit(0)
     e = {"rc": 0, "out": "ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n", "err": ""}
+    if "--watch" not in args:  # a one-shot read: the checks as they stand, the last watch's result
+        if has("checks.cur"):
+            e = json.loads(rd(p("checks.cur")))
+        sys.stdout.write(e.get("out", ""))
+        sys.exit(int(e.get("rc", 0)))
     if has("checks.seq"):
         e = json.loads(pop(p("checks.seq")))
+        wr(p("checks.cur"), json.dumps(e))
     if e.get("sleep"):
         time.sleep(float(e["sleep"]))
     sys.stdout.write(e.get("out", ""))
@@ -281,7 +294,8 @@ if args[:2] == ["pr", "checks"]:
 
 # ---- run view / run rerun -------------------------------------------------------------------------------
 if args[:2] == ["run", "view"]:
-    print(rd(p("steps"), ""))
+    own = "steps.%s" % args[2] if len(args) > 2 else ""
+    print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:
     sys.exit(0)

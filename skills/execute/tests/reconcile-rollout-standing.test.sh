@@ -10,8 +10,9 @@
 #   Q3-Q5  await-sign-off (the sign-off pause), status's pausedFor and clear-pause's STILL-AWAITING refusal, then the
 #          reinstate once signed (by hand, or by a raised standing approval).
 #   S7     ADR 0038's one-line gates through approve-gates --standing: p19-10's restated gate (cap 24 USD) and p19-5's
-#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`. It runs at a
-#          US$200 limit, so the month line (S9) never touches its pricing; S9c3 is the same two gates at US$50.
+#          (cap 50 USD total) are signed; p19-10's original one-line gate, which the full reading refuses on its two
+#          `each`, is signed too since p37-4, priced from its cap (US$24 with its `--max-cost-usd 4`). It runs at a
+#          US$200 limit, so the month line (S9) never touches its pricing; S9c3 is the first two gates at US$50.
 #   S8     ADR 0038's bounce, end to end from the engine: a priced gate (cap 24 USD) whose sub-bullet spends 40, flagged
 #          on both plan rounds, is plan-blocked when the judge obeys the usd-null rule; a judge that wrongly bounces it
 #          leaves `## Gate bounce (awaiting sign-off)` on the gate-pending note, and the standing approval asks instead of
@@ -32,6 +33,14 @@
 #          bounce all ask; a refused class form exits 1, but a gate the reading's class-independent steps refuse
 #          still asks without resolving it; a spend gate beside one still logs alone; a bad spend stamp errors only a
 #          slug that resolves the limit. No value from the file is ever printed or written.
+#   S11    no spend gate under the line pauses a rollout (p37-4, ADR 0034's 2026-11-05 amendment): chorus-rollout-
+#          2026-11-02's verbatim probe gate, which the full reading refuses on a bare number in its prose, is priced
+#          from its cap alone and signs at US$1 (exit 0, no ASK); prose around a readable cap signs at the cap, while a
+#          rate, multiplier, per-Login word, other currency, malformed amount, no cap, an amount over the line and an
+#          irreversible gate still ask. The dummy Claude Login, declared in `[defaults] test_logins` (schema 5), signs
+#          its credential gate (on a serial note too: it is machine-wide); another Login, a deny word, another
+#          credential, an `@` or a conjunction beside it, a bounce and no declaration ask; a per/each on the cap
+#          itself asks; a refused file is exit 1; an env token keeps the ADR 0063 path.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -219,13 +228,15 @@ ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
 mkt a gate-pending; gate a "$ONE24"
 mkt b gate-pending; gate b "$ONE50"
 mkt c gate-pending; gate c "$P19_10"
-before=$(cat "$D/c.md")
 HH="$H200" sa a,b,c
-ok "$rc" 3 "S7: two signed, one asks: exit 3"
+# p37-4 flips c by design: the full reading still refuses its two `each`, and the cap-only reading prices it at its cap
+# plus its `--max-cost-usd 4` amount, US$24, so all three sign (24 + 50 + 24 = 98, within the US$200 month line).
+ok "$rc" 0 "S7: all three signed: exit 0"
 has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$200, file:defaults)" "S7: p19-10's restated gate signs US\$24"
 has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$200, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
-has "$out" "ASK: c: $P19_10: per/each outside the cap clause: each, each" "S7: p19-10's original gate asks, naming its two each"
-ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
+has "$out" "c: gate approved under the standing approval: $P19_10 (exposure US\$24 of US\$200, file:defaults; cap-only pricing, the full reading refused: per/each outside the cap clause: each, each)" "S7: p19-10's original gate signs US\$24 from its cap (p37-4), naming its two each"
+ok "$(fm c status)|$(section c '## Approved gates')" "status: in_progress|- $P19_10 (approved $DATE under the standing approval: total exposure US\$24, limit US\$200 from file:defaults)" "S7: … c.md is written"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "3|98" "S7: three log lines, month to date US\$98 of US\$200"
 
 # ── S8: a gate the plan judge flagged never reaches the standing approval (ADR 0038, p23-1 round 2) ──────────────
 # The reviewer's reproduction, end to end: the engine (task.workflow.js, through tests/lib/engine.mjs) runs a plan whose
@@ -722,6 +733,139 @@ before=$(cat "$D/i.md")
 HH="$HC" sa i
 ok "$rc|$(cat "$D/i.md")" "1|$before" "S10i: beside a spend gate the same stamp exits 1, the note byte-identical"
 has "$out" "spend_approval_usd on [[i]] must be an integer >= 0" "S10i: … naming the stamp"
+
+# ── S11: no spend gate under the line pauses a rollout (p37-4, ADR 0034's 2026-11-05 amendment) ──────────────────────
+# The Verify: chorus-rollout-2026-11-02's probe gate, verbatim from Archive/chorus-a-steer-that-leads-with-a-local-
+# command-tag-reads-lost.md:54 (` (approved 2026-11-03)` stripped), which the full reading refuses on the bare `4` of
+# "Haiku 4.5" once "per the task note" is no rate: priced from its cap alone it signs at US$1. And its credential gate,
+# verbatim from :55, signs as a declared test Login. HL holds `schema = 5`, the US$200 limit and `test_logins =
+# ["dummy"]`; HLR holds `test_logins` under `schema = 4`, which is refused.
+STEER="spend: live probe of a tag-led Steer into a running Turn (Haiku 4.5, CLI 2.1.314 and the day's pin, per the task note's 'Measure first') — cap 1 USD"
+DUMMY='credential: the dummy Claude Login, to run that probe'
+HL="$TMP/home-logins"; mkdir -p "$HL/.config/thread"
+printf 'schema = 5\n\n[defaults]\nspend_approval_usd = 200\ntest_logins = ["dummy"]\n' > "$HL/.config/thread/rollouts.toml"
+HLR="$TMP/home-logins-refused"; mkdir -p "$HLR/.config/thread"
+printf 'schema = 4\n\n[defaults]\nspend_approval_usd = 200\ntest_logins = ["dummy"]\n' > "$HLR/.config/thread/rollouts.toml"
+CAPONLY='cap-only pricing, the full reading refused:'
+LOGIN_ANN="(approved $DATE under the standing approval: test Login dummy, from file:defaults)"
+NO_LOGINS='no test Logins declared (set [defaults] test_logins in ~/.config/thread/rollouts.toml)'
+
+# S11a: the Verify's spend gate signs at US$1 from its cap, exit 0, no ASK
+scen s11a
+mkro; mkt a gate-pending; gate a "$STEER"
+HH="$H200" sa a
+ok "$rc" 0 "S11a: the verbatim probe gate signs: exit 0"
+hasnt "$out" "ASK:" "S11a: … and nothing asks"
+has "$out" "a: gate approved under the standing approval: $STEER (exposure US\$1 of US\$200, file:defaults; $CAPONLY a number outside the cap clause: 4)" "S11a: the approval line names the cap-only pricing and the full reading's why"
+ok "$(section a '## Approved gates')" "- $STEER (approved $DATE under the standing approval: total exposure US\$1, limit US\$200 from file:defaults)" "S11a: … annotated as any standing approval, total exposure US\$1"
+ok "$(section ro '## Needs-you log')" "$(logl a 1 1 "$STEER")" "S11a: one Needs-you log line, US\$1"
+ok "$(fm a status)" "status: in_progress" "S11a: it flips to in_progress"
+
+# S11b: prose around a readable cap signs at the cap; a rate, multiplier, plural, per-Login word, other currency, a
+# malformed amount, no cap, and an amount over the line all still ask; irreversible gates still ask; a per/each on the
+# cap itself asks whatever follows it (`per GB`, `each for the images`: review round 1, never priced as a bare total)
+scen s11b
+S11_SIGN=('spend: probe — cap 1 USD (Haiku 4.5)' 'spend: probe — cap 1 USD for the 3 probes' 'spend: soft probe — cap 1 USD')
+S11_WHY=('unrecognised clause: (Haiku 4.5)' 'unrecognised clause: for the 3 probes' 'widening word outside the cap clause: soft')
+S11_ASK=('spend: probe — cap 1 USD x 3' 'spend: probe, US$500 per run — cap 1 USD' 'spend: probe, US$5k per run — cap 1 USD'
+  'spend: fast mode — cap 50 USD, per Login per month' 'spend: fast mode at US$2 per-Login — cap 5 USD'
+  'spend: probe, A$500 of credits — cap 1 USD' 'spend: 3 runs — cap 500 USD' 'spend: probe — no cap' "$FAST"
+  "irreversible: wipe the dummy Login's history" 'spend: egress — cap US$0.10 per GB'
+  'spend: probes — cap US$5 each for the images')
+S11_ASKWHY=('unrecognised clause: x 3' "total exposure US\$501 is over the standing approval's US\$200 (file:defaults)"
+  'malformed amount: US$5k' 'per-Login cap with no Login count' 'per-Login cap with no Login count'
+  'non-USD or ambiguous currency: A$5' "total exposure US\$500 is over the standing approval's US\$200 (file:defaults)"
+  'no cap clause' 'per-Login cap with no Login count' 'not a spend gate' 'unrecognised clause: per GB'
+  'unrecognised clause: each for the images')
+ord=""; i=0
+for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[g$i]]"$'\n'; done
+ORDER="$ord" mkro
+i=0; slugs=""
+for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); mkt "g$i" gate-pending; gate "g$i" "$g"; slugs="$slugs${slugs:+,}g$i"; done
+HH="$H200" sa "$slugs"
+ok "$rc" 3 "S11b: the readable caps sign, the rest ask: exit 3"
+for k in 0 1 2; do
+  has "$out" "g$((k + 1)): gate approved under the standing approval: ${S11_SIGN[$k]} (exposure US\$1 of US\$200, file:defaults; $CAPONLY ${S11_WHY[$k]})" "S11b: ${S11_SIGN[$k]} signs at US\$1 from its cap"
+done
+for k in $(seq 0 $((${#S11_ASK[@]} - 1))); do
+  has "$out" "ASK: g$((k + 4)): ${S11_ASK[$k]}: ${S11_ASKWHY[$k]}" "S11b: ${S11_ASK[$k]} asks (${S11_ASKWHY[$k]})"
+done
+ok "$(printf '%s\n' "$out" | grep -c '^ASK: ')" "${#S11_ASK[@]}" "S11b: one ASK per gate that cannot be signed"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "3|3" "S11b: three log lines, month to date US\$3 of the US\$200 line"
+
+# S11c: the dummy Claude Login, a declared test Login, signs itself; a deny word, env key, credential noun, `@` or
+# conjunction beside it, or another Login, asks (a second thing in plain prose with none of these is the residual
+# tests/gated-inputs.test.mjs pins)
+scen s11c
+LIVE='credential: a live probe on the dummy Login'
+L_ASK=('credential: the animately Login' 'credential: the Logins' 'credential: access to the dummy Claude Login'
+  "credential: the dummy Login's OAuth token" 'credential: the dummy Claude Login and the live Stripe account'
+  'credential: the dummy Claude Login and the Stripe test account' 'credential: the dummy Login and the GitHub PAT'
+  "credential: the dummy Login and Lachy's Gmail" 'credential: the dummy Login, then sign in as lachy@animately.com')
+L_WHY=('animately is not a declared test Login' 'more than one Login: Logins' 'deny word: access' 'deny word: OAuth'
+  'deny word: live' 'another credential beside the Login: account' 'another credential beside the Login: PAT'
+  'something joined to the Login: and' 'an address beside the Login: lachy@animately.com')
+ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
+mkt a gate-pending; gate a "$DUMMY"
+HH="$HL" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S11c: the verbatim dummy-Login gate signs: exit 0, in_progress"
+ok "$(section a '## Approved gates')" "- $DUMMY $LOGIN_ANN" "S11c: … annotated as a declared test Login, from file:defaults"
+has "$out" "a: gate approved under the standing approval: $DUMMY (test Login dummy, file:defaults) [written]" "S11c: … its approval line"
+ok "$(section ro '## Needs-you log')" "" "S11c: … and no Needs-you log line (no spend, no month line)"
+mkt b gate-pending; gate b "$DUMMY"
+before=$(cat "$D/b.md")
+HH="$H200" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S11c: with no test Logins declared (built-in []) it asks, nothing written"
+has "$out" "ASK: b: $DUMMY: $NO_LOGINS" "S11c: … naming the key to set"
+mkt c gate-pending; gate c "$LIVE"
+HH="$HL" sa c
+ok "$rc" 0 "S11c: a live probe on the dummy Login signs (live before probe, run or test is no deny word)"
+ORDER=""; i=0
+for g in "${L_ASK[@]}"; do i=$((i + 1)); ORDER="$ORDER- [[l$i]]"$'\n'; done
+mkro; ORDER=""
+i=0; slugs=""
+for g in "${L_ASK[@]}"; do i=$((i + 1)); mkt "l$i" gate-pending; gate "l$i" "$g"; slugs="$slugs${slugs:+,}l$i"; done
+before=$(cat "$D"/l*.md)
+HH="$HL" sa "$slugs"
+ok "$rc|$(cat "$D"/l*.md)" "3|$before" "S11c: every other Login shape asks, nothing written"
+for k in $(seq 0 $((${#L_ASK[@]} - 1))); do
+  has "$out" "ASK: l$((k + 1)): ${L_ASK[$k]}: ${L_WHY[$k]}" "S11c: ${L_ASK[$k]} asks (${L_WHY[$k]})"
+done
+
+# S11d: a bounced note asks, the Login gate included, naming the bounce
+scen s11d
+mkro; mkt a gate-pending; gate a "$DUMMY" "$STEER"
+printf '\n%s\n\nbounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce\n' "$BOUNCE_H" >> "$D/a.md"
+before=$(cat "$D/a.md")
+HH="$HL" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S11d: a bounced note signs nothing (exit 3), nothing written"
+has "$out" "ASK: a: $DUMMY: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: not a spend gate" "S11d: the Login gate asks, naming the bounce"
+has "$out" "ASK: a: $STEER: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: exposure US\$1" "S11d: the cap-only gate asks too, its pricer reading its cap"
+
+# S11e: a Leg: the test Logins are machine-wide, so a serial note (no Project root) signs the Login gate
+scen s11e
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\n---\n\n## Queue\n\n- [[a]]\n' > "$D/ro.md"
+mkt a gate-pending; gate a "$DUMMY"
+HH="$HL" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S11e: on a serial note the dummy-Login gate signs"
+ok "$(section a '## Approved gates')" "- $DUMMY $LOGIN_ANN" "S11e: … with the test-Login annotation"
+
+# S11f: a refused rollouts.toml (test_logins under schema 4) is exit 1 for the Login gate's slug, nothing written
+scen s11f
+mkro; mkt a gate-pending; gate a "$DUMMY"
+before=$(cat "$D/a.md")
+HH="$HLR" sa a
+ok "$rc|$(cat "$D/a.md")" "1|$before" "S11f: a refused file exits 1, nothing written"
+has "$out" "ERROR: a: rollout settings refused: " "S11f: … the ERROR names the refusal"
+has "$out" "rollout.test_logins is a schema-5 key but the file says schema = 4" "S11f: … and the raise remedy"
+
+# S11g: a gate holding an env token and the word Login keeps the ADR 0063 class path
+scen s11g
+CLS_LOGIN='credential: test-mode STRIPE_SECRET (sk_test_) for the dummy Login'
+mkro; mkt a gate-pending; gate a "$CLS_LOGIN"
+HH="$HL" sa a
+ok "$rc" 3 "S11g: an env-token gate naming a Login asks: exit 3"
+has "$out" "ASK: a: $CLS_LOGIN: $OFF" "S11g: … with the class path's why, never the Login reading's"
 
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"

@@ -941,14 +941,34 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
   # Finding #4: inspect the failed REQUIRED runs' failing STEP names, classify infra vs genuine
   # (fail-closed), and `gh run rerun --failed` only when EVERY failed step is provably setup/infra.
   local links runs run_id steps s verdict reran=0
-  # Failed REQUIRED checks only (branch protection's definition) → their run ids via the details link.
-  links="$(gh pr checks "$PR" -R "$OWNER/$REPO" --required --json state,link -q '.[] | select(.state=="FAILURE") | .link' 2>/dev/null)"
+  # Failed REQUIRED checks only (branch protection's definition) → their run ids via the details link. Either read
+  # selects the same rows, gh's `fail` and `cancel` buckets: `fail` holds ERROR, FAILURE, TIMED_OUT and
+  # ACTION_REQUIRED, `cancel` holds CANCELLED. A gh with `pr checks --json` reads them by bucket. gh 2.43.1 (this
+  # Mac's gh, p37-2) has no --json there ("unknown flag: --json", rc 1): then read the plain table. Off a TTY its
+  # tab-separated columns are name, state, elapsed, link, description, and its state is the bucket with `cancel`
+  # printed as `fail` (pass | fail | pending | skipping), so its `fail` rows are the same ERROR/FAILURE/TIMED_OUT/
+  # ACTION_REQUIRED/CANCELLED set. Keep column 4 of each `fail` row: the link, never a URL-like description.
+  # That set is wider than "a step failed": a cancelled, timed-out or errored run can hold no failed step, and
+  # would add nothing to the classification. The per-run guard below stops as genuine on any selected run with no
+  # failed step, before any re-run, so another run's setup failure never re-runs it on any gh (fail-closed).
+  # The check-runs API is no fallback: it cannot tell a required check from the rest, and a red non-required
+  # check would then read as genuine. Any gh: a failed read leaves no links, which is genuine (fail-closed).
+  if ! links="$(gh pr checks "$PR" -R "$OWNER/$REPO" --required --json bucket,link -q '.[] | select(.bucket=="fail" or .bucket=="cancel") | .link' 2>/dev/null)"; then
+    links="$(gh pr checks "$PR" -R "$OWNER/$REPO" --required 2>/dev/null \
+      | awk -F'\t' '$2=="fail" && $4 ~ /^https?:\/\// {print $4}')"
+  fi
   [ -z "$links" ] && { echo "  infra-classify: no failed required-check links — genuine (fail-closed)." >&2; return 1; }
   runs="$(printf '%s\n' "$links" | grep -oE 'runs/[0-9]+' | grep -oE '[0-9]+' | sort -u)"
   [ -z "$runs" ] && { echo "  infra-classify: could not parse run ids — genuine (fail-closed)." >&2; return 1; }
   steps=""
   for run_id in $runs; do
-    s="$(gh run view "$run_id" -R "$OWNER/$REPO" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | .name' 2>/dev/null)"
+    s="$(gh run view "$run_id" -R "$OWNER/$REPO" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | .name' 2>/dev/null)" || s=""
+    # The per-run guard: a selected run with no failed step (cancelled, timed out, errored, or its read failed)
+    # cannot be proven setup, and re-running it could turn a hang or a flaky test green.
+    case "$s" in
+      *[![:space:]]*) ;;
+      *) echo "  infra-classify: run $run_id has no failed step to classify — genuine (fail-closed)." >&2; return 1 ;;
+    esac
     steps="$(printf '%s\n%s' "$steps" "$s")"
   done
   verdict="$(printf '%s\n' "$steps" | classify_failed_steps)"
