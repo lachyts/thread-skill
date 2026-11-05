@@ -736,7 +736,10 @@ there is nothing to clear. Per stage:
   a repair launched in the vault or in the in-place checkout would run a clone-rooted rollout's merges, verifies
   and worktrees from the wrong tree. Exit 0 goes on (pass a `WARN:` on); exit 3, exit 2 or any other non-zero exit
   stops repair at the diagnosis, with no hand-off: print its stderr verbatim and tell Lachy to start a session in
-  the Project root and run `/thread:execute [[<rollout>]]` there. Then execute § 2.5 (then § 2.6), then execute
+  the Project root and run `/thread:execute [[<rollout>]]` there. Then the Run record's entry, once (execute § 2's
+  first write, by pointer): `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <rollout-note> --by repair || true`,
+  or `--by watchdog` instead when the Prompt that ran this repair leads with `Chorus: a Watchdog recovery` (execute
+  § 4.5 *Run record*'s table); an open halt's `lead-entry` reads `stop: halt`. Then execute § 2.5 (then § 2.6), then execute
   § 3's `verify_timeout` check (a halt there
   writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts, but its
   exit 9, the lane hold, goes on), then
