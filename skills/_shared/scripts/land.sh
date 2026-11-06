@@ -45,9 +45,10 @@
 # operation, `stuck: half-applied operation (<m>)`, <m> one of rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD,
 # REVERT_HEAD, BISECT_LOG or sequencer (a multi-pick whose stopped pick was committed by hand), and set its ssh rule
 # (BatchMode unless the operator set an ssh command, read from <repo>'s own config; never a prompt). S4 and O4 fetch one
-# branch each with it, under `bounded`. S4's fast-forward checks the overlap first: a dirty or untracked path origin's
-# commits would overwrite is `land: ff refused: local changes overlap origin/<d> (<paths>)`, with no merge run and
-# ORIG_HEAD untouched; any other refusal is `land: ff refused: <git's reason, on one line>`.
+# branch each with it, under `bounded`. S4's and O9's fast-forwards (lc_ff, each run only when HEAD is strictly behind)
+# check the overlap first: a dirty or untracked path origin's commits would overwrite is `land: ff refused: local
+# changes overlap origin/<d> (<paths>)` at S4 and `stuck: ff refused: local changes overlap origin/<B> (<paths>)` at O9,
+# with no merge run and ORIG_HEAD untouched; any other refusal is `… ff refused: <git's reason, on one line>`.
 #
 # Route mode (`--route`, read-only; leg.py's Complete, execute legs.md; self-rollout-check.sh --refresh-in-place,
 # whose diverged-twin remedy follows the twin's route, ADR 0042) runs S1 with no paths through S3 exactly as
@@ -1188,8 +1189,14 @@ EOF
   # ---- O9. Reconcile with origin/<B>: fast-forward, or merge update-branch's commits; never force ----------
   if git rev-parse -q --verify "$ob" >/dev/null && ! git merge-base --is-ancestor "$ob" HEAD; then
     if git merge-base --is-ancestor HEAD "$ob"; then
-      git merge --ff-only --no-autostash -q "$ob" >"$tmpd/ff.err" 2>&1 \
-        || { cat "$tmpd/ff.err"; own_finish "stuck: ff refused: $(first_line "$tmpd/ff.err")" 1; }
+      # Strictly behind (the guard above): live-checkout.sh's lc_ff, the overlap first, so a refusal over a local
+      # change runs no merge and leaves ORIG_HEAD alone.
+      out=$(lc_ff "$top" "$B"); rc=$?
+      case $rc in
+        0) ;;
+        3) own_finish "stuck: ff refused: local changes overlap origin/$B ($out)" 1 ;;
+        *) own_finish "stuck: ff refused: $out" 1 ;;
+      esac
     else
       out=$(git rev-list --no-merges "HEAD..$ob" "^$od")
       if [ -n "$out" ]; then

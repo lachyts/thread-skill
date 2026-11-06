@@ -1224,7 +1224,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   second thing beside them, signs itself under the Standing approval with no
   limit, ledger or month line (p37-4, ADR 0034's 2026-11-05 amendment); a
   serial Leg signs one too. A second thing named in plain prose with none of
-  those is not seen, and signs (a residual). Only Lachy writes it.
+  those is not seen, and signs (a residual). Only Lachy writes it. Schedule
+  and orient record such a gate, never ask it ahead, on a serial chain too.
   _Avoid_: dummy account, test account.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no

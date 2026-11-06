@@ -93,7 +93,11 @@ its own top-level `test_credentials` (Output), null with no class. A schema-2 re
 
 `test_logins` (p37-4, ADR 0034's 2026-11-05 amendment; schema 5, the first schema-5 key) is the operator's declared
 test Logins: the Claude Logins (Lachy's dummy Login) a credential gate may name and still be signed by execute's
-standing approval (gated_inputs.py's test-Login reading, its part 5), with no limit, ledger or month line. It is one
+standing approval (gated_inputs.py's test-Login reading, its part 5), with no limit, ledger or month line.
+gated_inputs.py's `sweep` CLI (its part 1: schedule § 3.6, orient reshuffle R3 (c)) reads it too, through
+resolve(repo=None) in process, only when a `credential:` gate line naming a Login reaches that reading's step 7, so
+schedule and orient record such a gate ahead instead of asking it (p39-3); a file that will not resolve leaves those
+hits unread, so they keep the ask (one `gated_inputs: test_logins:` stderr line, exit 1). It is one
 line under `[defaults]` only, `test_logins = ["<name>", …]`, a trailing comment allowed: a value that spans lines is
 refused at its line (`[defaults] test_logins must be one line: …`), and so is the key in a `[repo."o/r"]` table
 (`… test_logins is machine-wide: set it under [defaults]`). The value (logins_problem(), the first failure wins) is a
