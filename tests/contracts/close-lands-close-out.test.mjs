@@ -18,6 +18,8 @@ const STEP8 = () => slice(text(), /^8\. \*\*Print the "What landed" report/, /^9
 const STEP9 = () => slice(text(), /^9\. \*\*End with the closing banner/, /^## Edge cases/)
 const EDGES = () => section(text(), /^## Edge cases/)
 const GUARD = () => section(text(), /^## Guardrails/)
+const LIVE = 'skills/_shared/scripts/live-checkout.sh'
+const SEVEN = '`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `BISECT_LOG` or `sequencer`'
 
 const BANNER_A = '**Thread closed. Safe to end this session — nothing valuable left in conversation state.**'
 const BANNER_B = '**Thread closed. Safe to end this session — pushed where the landing rows say; any own-branch review ran clean here; queued PRs are not merged yet, and nothing here waits for CI.**'
@@ -65,12 +67,33 @@ test('7.2: one landing commit per repo, the guard and rm -f kept, landing is its
 test('7.2: the half-applied guard is 7.1(c)\'s, located through git (p19-9)', () => {
   const l = s72()
   assertHas(l, 'step 7.2', [
-    '`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD` or `BISECT_LOG`',
+    SEVEN,
     '[ -e "$(git -C "$(dirname <doc>)" rev-parse --path-format=absolute --git-path <name>)" ]',
     'so a linked worktree works too', "7.1(c)'s guard",
   ])
   assert.ok(!l.includes('under `.git/`'), 'step 7.2 still locates the markers under .git/')
   assert.ok(!s71().includes('stricter form'), 'step 7.1 still calls its guard stricter than 7.2\'s')
+})
+
+test('7.1(c) and 7.2 name every lc_op marker (p39-5)', () => {
+  const l71 = s71(), l72 = s72()
+  assertHas(l71, 'step 7.1(c)', [
+    SEVEN,
+    '(`sequencer`, a directory, is a multi-pick cherry-pick or revert whose stopped pick was committed by hand: no `CHERRY_PICK_HEAD`, still mid-sequence)',
+    "`skills/_shared/scripts/live-checkout.sh`'s `lc_op` list, which land.sh S1 checks",
+  ])
+  const lc = readIf(LIVE)
+  assert.ok(lc, `${LIVE} is missing`)
+  const m = lc.match(/^\s*for _lc_m in ([^;]+); do$/m)
+  assert.ok(m, `no \`for _lc_m in … ; do\` line in ${LIVE}'s lc_op`)
+  const markers = m[1].trim().split(/\s+/)
+  for (const mk of markers) {
+    assert.ok(l71.includes(`\`${mk}\``), `step 7.1(c) does not name lc_op's marker ${mk}`)
+    assert.ok(l72.includes(`\`${mk}\``), `step 7.2 does not name lc_op's marker ${mk}`)
+  }
+  for (const [name, l] of [['7.1(c)', l71], ['7.2', l72]]) {
+    assert.ok(!l.includes('`CHERRY_PICK_HEAD` or `BISECT_LOG`'), `step ${name} still holds the old five-marker list`)
+  }
 })
 
 test('§ Land the close-outs sits after Commit hygiene and before step 8', () => {
