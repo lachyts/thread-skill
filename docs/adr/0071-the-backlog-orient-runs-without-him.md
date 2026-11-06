@@ -34,13 +34,13 @@ The default orient asks at R4's gate and at § 6's steer, and has no park. Sched
    - Each serial note's Leg 1 starts through `create_thread` on the Chorus Stage, or is a paste-ready prompt off it.
    - A serial note is never stamped, and `/thread:repair` is never run.
 7. **The record and the write-back.**
-   - **The record** is written after the last task write, then `last_orient_at` and `last_reason` are written back into the area's `backlog_trigger:` file. The write keeps the Pulse's keys in order, as investigations.atomic_write_json writes, and rounds `last_orient_at` up to the next whole second, so a write in the same second counts as seen.
+   - **The record** is written after the last task write of the main flow (B5's and its forks'), then `last_orient_at` and `last_reason` are written back into the area's `backlog_trigger:` file. The write keeps the Pulse's keys in order, as investigations.atomic_write_json writes, and rounds `last_orient_at` up to the next whole second, so a write in the same second counts as seen.
    - **The guards.** It writes only when four guards pass:
      - the stamp has not moved;
      - every Backlog task written after the sweep's `read_at` is named (linked by the record outside Answered, waiting, linked from a rollout note the record's Batches links, or back-linking one by its `rollout:`);
      - `last_orient_at` is the one the run read;
      - on a re-stamp, no answered task waits.
-   - **Fold once, then hold.** A guard that fails folds the new tasks in once; a second failure holds the write-back, and the stamp stays pending. After his answers, one re-stamp lands only when every decided task joined a rollout.
+   - **Fold once, then hold.** A guard that fails folds the new tasks in once; a second failure holds the write-back, and the stamp stays pending. After his answers, one re-stamp lands only when every decided task joined a rollout. The re-stamp is its own mode (`trigger --write --restamp`), never inferred from the record: after a held write-back #1 there is no re-stamp, and `--restamp` holds on such a record, so no later write closes a stamp the run left pending.
    - **What it departs from.** This departs from metrics ADR 0015 d2 ("the orient writes no task after `last_orient_at`") and from its d9 Baseline bullet: the answers are written after write-back #1, and when the re-stamp is skipped the Pulse counts them, at most one capped pile-up. It narrows the orient's side of metrics ADR 0015's Known race (guard 1 refuses a stamp the run never read, and guard 2 an unnamed write), without closing it: that needs a field agreed across the three halves. The follow-up is the vault task `pulse-adr-0015-records-the-backlog-orient-write-back`.
 
 ## Considered options

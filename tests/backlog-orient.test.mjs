@@ -3,16 +3,18 @@
 // own copy of V (its own HOME, so the declared trigger file `~/trigger.json` is that copy's). The cases:
 //   (a)  sweep: exactly the Backlog the Pulse's line rules give, every row's fields, projects[] and excluded[], no write;
 //   (a2) sweep's set equals an oracle written here from those rules (fm_lines, fm_list, link_names, the status line);
-//   (b)  park: only `status:`, the inserted `parked-by:` and one Notes line change; every shared refusal is exit 2,
-//        one stderr line and a byte-identical vault; a BOM+CRLF note keeps both;
+//   (b)  park: only `status:`, the inserted `parked-by:` and one Notes line change; every shared refusal, and B3's
+//        urgent, `priority: high` and `work_depth: deep`, is exit 2, one stderr line and a byte-identical vault; a
+//        BOM+CRLF note keeps both;
 //   (c)  reopen, (d) obsolete, (d2) rehome and (h) wait: their writes and refusals;
 //   (e)  record: its path (` (2)` on a second run), its sections in order, its tags and frontmatter, --append;
 //   (f)  trigger: the write's format (key order, offsets, whole seconds rounded up, indent, newline, mode, a replaced
-//        inode, no .tmp left), a missing, corrupt or non-object file, --at, the env seam, --read, guards 1 and 3, and a
-//        Pulse stamp landing in _before_replace;
+//        inode, no .tmp left), a missing, corrupt or non-object file, --at, the env seam, --read, guards 1 and 3, and
+//        each branch of _before_replace's retry: a Pulse stamp (held), a kept key (written over), a change twice (held);
 //   (g)  every disposition on one vault, then the guards after write-back #1: a Pulse stamp (g1), a new task (g2), a
 //        clean answered write (g3), the Batches notes naming the fork-written members (g4), the unparseable task (g5),
-//        Answered, waiting (g6), a kept § 3.5 answer recorded through the real estate-dispatch.py (g7), a held gate (g8).
+//        Answered, waiting (g6), a kept § 3.5 answer recorded through the real estate-dispatch.py (g7), a held gate (g8),
+//        and the mode: `--restamp` after a held write-back #1 holds, and a plain `--write` after #1 is refused (g9).
 // Reads and writes only under S.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -49,7 +51,8 @@ const task = (status, projects, more = '') => `tags:\n  - task\nstatus: ${status
 
 P('Animately/Animately.md', 'tags:\n  - area\naliases: [Anim]\nbacklog_excludes: ["[[GifLab]]"]\nbacklog_trigger: ~/trigger.json')
 P('Animately/Website.md', 'tags:\n  - project\nstatus: active\nrepos:\n  - ~/repos/x')
-P('Animately/Sub/Deep Note.md', 'tags:\n  - project\naliases: [Deep]')
+write(path.join(V, 'Work', 'Projects', 'Animately', 'Sub', 'Deep Note.md'),
+  fm('tags:\n  - project\naliases: [Deep]', '\n# Deep Note\n\nRepo: deep · Local: `~/repos/deep/`\n'))
 P('Animately/GifLab.md', 'tags:\n  - project')
 P('Animately/GifLab Large-File Routes Research.md', 'tags:\n  - research')
 P('Animately/Press kit.md', 'tags:\n  - reference')
@@ -61,6 +64,7 @@ T('t-block', 'tags:\n  - task\nstatus: open\nprojects:\n  - "[[Deep]]"\n  - "[[A
 T('t-scalar', task('open', '"[[Sub/Deep Note|the deep one]]"'))
 T('t-bare', task('open', '[Website]'))
 T('t-area', task('open', '["[[Animately]]"]'))
+T('t-deep', task('open', '["[[Website]]"]', '\nwork_depth: deep'))
 write(path.join(V, 'Work', 'Tasks', 't-bom.md'),
   '\ufeff---\r\ntags:\r\n  - task\r\nstatus: open\r\nprojects: ["[[Anim]]"]\r\n---\r\n\r\n# t-bom\r\n\r\n## Notes\r\n\r\nCRLF.\r\n')
 T('t-orient-park', task('parked', '["[[Website]]"]', '\nparked-by: backlog-orient 2026-11-01'))
@@ -86,9 +90,8 @@ write(path.join(V, 'Work', 'Tasks', 'website-rollout-2026-11-06.md'),
 write(path.join(V, 'Work', 'Tasks', 'Archive', 'Rollouts', 'website-rollout-2026-11-01.md'),
   fm('tags:\n  - task\n  - rollout\nstatus: done\nprojects: ["[[Website]]"]', '\n## Queue\n\nNothing linked here.\n'))
 
-const MEMBERS = ['c-none', 'gate-one', 'gate-two', 'm-a', 'm-b', 'm-c', 't-area', 't-bare', 't-block', 't-bom', 't-decisions',
+const MEMBERS = ['gate-one', 'gate-two', 'm-a', 'm-b', 'm-c', 't-area', 't-bare', 't-block', 't-bom', 't-decisions', 't-deep',
   't-held-park', 't-inline', 't-notask', 't-orient-park', 't-record-link', 't-scalar', 't-thread', 't-unparseable']
-  .filter((s) => s !== 'c-none')
 
 // ---- running it ----------------------------------------------------------------------------------------------------
 let copies = 0
@@ -174,9 +177,13 @@ test('(a) sweep reads exactly the Backlog, every row field, projects[] and exclu
   assert.deepEqual(rows['t-bare'].homes, ['Website'])
   assert.deepEqual(rows['t-record-link'].homes, ['2026-11-01 Animately Backlog orient'])
   assert.equal(rows['t-inline'].priority, 'high')
+  assert.equal(rows['t-deep'].workDepth, 'deep')
   assert.equal(rows['t-bom'].rel, 'Work/Tasks/t-bom.md')
   assert.deepEqual(out.projects.map((p) => p.name).sort(), ['Deep Note', 'Website'])
   assert.deepEqual(out.projects.find((p) => p.name === 'Website').repos, ['~/repos/x'])
+  assert.deepEqual(out.projects.find((p) => p.name === 'Website').local, [])
+  assert.deepEqual(out.projects.find((p) => p.name === 'Deep Note').repos, [])
+  assert.deepEqual(out.projects.find((p) => p.name === 'Deep Note').local, ['~/repos/deep/'], 'its Local: line, for B5\'s root')
   assert.deepEqual(out.excluded.map((p) => p.name).sort(), ['GifLab', 'GifLab Large-File Routes Research'])
   assert.equal(out.trigger.declared, true)
   assert.equal(out.trigger.exists, false)
@@ -234,13 +241,13 @@ test('(a2) sweep\'s Backlog equals the oracle written from the Pulse\'s line rul
 // ---- (b) park ---------------------------------------------------------------------------------------------------------
 test('(b) park writes status, parked-by and one Notes line, byte for byte; [no-change] on an orient park', () => {
   const c = copyVault('park')
-  const old = read(tf(c, 't-inline'))
-  const r = run(c, ['park', '--area', AREA, '--task', 't-inline', '--reason', 'its batch is not worth a rollout yet', '--today', D])
+  const old = read(tf(c, 't-bare'))
+  const r = run(c, ['park', '--area', AREA, '--task', 't-bare', '--reason', 'its batch is not worth a rollout yet', '--today', D])
   assert.equal(r.status, 0, r.stderr)
-  assert.equal(r.stdout, 'parked Work/Tasks/t-inline.md: its batch is not worth a rollout yet\n')
+  assert.equal(r.stdout, 'parked Work/Tasks/t-bare.md: its batch is not worth a rollout yet\n')
   const want = old.replace('status: open\n', `status: parked\nparked-by: backlog-orient ${D}\n`)
     .replace('Captured for the fixture.\n', `Captured for the fixture.\n- ${D} parked by the Backlog orient: its batch is not worth a rollout yet\n`)
-  assert.equal(read(tf(c, 't-inline')), want)
+  assert.equal(read(tf(c, 't-bare')), want)
   const before = snap(c.dir)
   const again = run(c, ['park', '--area', AREA, '--task', 't-orient-park', '--reason', 'x'])
   assert.equal(again.status, 0, again.stderr)
@@ -258,12 +265,14 @@ test('(b) a BOM and CRLF note keeps both through a park', () => {
 const SHARED = [['m-b', /in flight/], ['t-done', /done/], ['t-thread', /`thread`/], ['t-decisions', /`decisions`/],
   ['t-notask', /not a task/], ['t-held-park', /held park/], ['t-unparseable', /does not parse.*mend it first/], ['nope', /no task note/]]
 
-test('(b) park refuses each shared case, an empty reason and an urgent task, exit 2 with the vault byte-identical', () => {
+test('(b) park refuses each shared case, an empty reason, an urgent, a high-priority and a deep task, exit 2 with the vault byte-identical', () => {
   const c = copyVault('park-refuse', { stamped_at: STAMP, reason: 'urgent', tasks: ['Work/Tasks/t-area.md'],
     urgent: [{ task: 'Work/Tasks/t-area.md', rule: 'severity-1' }] })
   for (const [slug, re] of SHARED) refused(c, ['park', '--area', AREA, '--task', slug, '--reason', 'r'], re)
-  refused(c, ['park', '--area', AREA, '--task', 't-inline', '--reason', '   '], /--reason is empty/)
+  refused(c, ['park', '--area', AREA, '--task', 't-bare', '--reason', '   '], /--reason is empty/)
   refused(c, ['park', '--area', AREA, '--task', 't-area', '--reason', 'r'], /urgent/)
+  refused(c, ['park', '--area', AREA, '--task', 't-inline', '--reason', 'r'], /t-inline\.md is at priority: high: such a task is never parked/)
+  refused(c, ['park', '--area', AREA, '--task', 't-deep', '--reason', 'r'], /t-deep\.md is at work_depth: deep: such a task is never parked/)
 })
 
 // ---- (c) reopen and (d) obsolete -------------------------------------------------------------------------------------
@@ -384,7 +393,7 @@ test('(f) the write-back keeps every key in order, rounds up to the next whole s
   const c = copyVault('trig', { ...PULSE, x: 'kept', last_orient_at: '2026-10-28T14:05:00+11:00', last_reason: 'urgent' })
   const rel = freshRecord(c, { seen: '2026-10-28T14:05:00+11:00' })
   const ino = fs.statSync(c.trig).ino
-  // 01:30:00.250 UTC is 12:30:00.250 in Melbourne (AEDT, +11:00): rounded up to 12:30:01.
+  // A minute ago, at .250 of its second: written in Melbourne time, rounded up to the next whole second.
   const at = new Date(Date.now() - 60000)
   at.setUTCMilliseconds(250)
   const r = writeBack(c, rel, ['--at', iso(at)])
@@ -461,27 +470,38 @@ test('(f) guard 1 names each stamp task missing from the Trigger section as unre
   assert.match(r3.stdout, /^last_orient_at 2026-11-06T08:00:00\+11:00 \(the record read 2026-10-28T14:05:00\+11:00\)$/m)
 })
 
+// _before_replace, the seam: `stamp` lands a Pulse stamp on every call, `key` adds a key on the first call only (the
+// guards still pass), `always` changes the bytes on every call.
 const HOOK = `
 import importlib.util, json, sys
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("backlog_orient", sys.argv[1])
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
-def stamp():
-    p = sys.argv[2]
+mode, p, calls = sys.argv[2], sys.argv[3], [0]
+def hook():
+    calls[0] += 1
     d = json.load(open(p))
-    d["stamped_at"] = "2026-11-06T09:30:00+11:00"
-    d["tasks"].append("Work/Tasks/t-block.md")
+    if mode == "stamp":
+        d["stamped_at"] = "2026-11-06T09:30:00+11:00"
+        d["tasks"].append("Work/Tasks/t-block.md")
+    elif mode == "key" and calls[0] == 1:
+        d["pulse_note"] = "kept"
+    elif mode == "always":
+        d["n"] = calls[0]
+    else:
+        return
     open(p, "w").write(json.dumps(d, indent=1) + "\\n")
-m._before_replace = stamp
-sys.exit(m.main(sys.argv[3:]))
+m._before_replace = hook
+sys.exit(m.main(sys.argv[4:]))
 `
+const hooked = (c, mode, rel) => spawnSync('python3', ['-c', HOOK, SCRIPT, mode, c.trig, '--vault', c.v, 'trigger', '--area', AREA,
+  '--write', '--reason', 'pile-up', '--record', rel], { encoding: 'utf8', env: { ...base, HOME: c.home } })
 
 test('(f) a Pulse stamp landing in _before_replace runs the guards again: exit 4, the Pulse\'s bytes intact', () => {
   const c = copyVault('hook', PULSE)
   const rel = freshRecord(c)
-  const r = spawnSync('python3', ['-c', HOOK, SCRIPT, c.trig, '--vault', c.v, 'trigger', '--area', AREA, '--write', '--reason',
-    'pile-up', '--record', rel], { encoding: 'utf8', env: { ...base, HOME: c.home } })
+  const r = hooked(c, 'stamp', rel)
   assert.equal(r.status, 4, r.stderr)
   assert.match(r.stdout, /^stamp 2026-11-06T09:30:00\+11:00\nunread Work\/Tasks\/t-block\.md\n$/)
   const obj = JSON.parse(read(c.trig))
@@ -489,6 +509,33 @@ test('(f) a Pulse stamp landing in _before_replace runs the guards again: exit 4
   assert.ok(!('last_orient_at' in obj), 'the orient wrote nothing over the Pulse')
   assert.deepEqual(fs.readdirSync(c.home).filter((n) => n.endsWith('.tmp')), [])
   assert.match(read(path.join(c.v, rel)), /\nlast_orient_at:\n/)
+})
+
+test('(f) bytes that change in _before_replace while the guards still pass are written over: the hook\'s key kept', () => {
+  const c = copyVault('hook-key', PULSE)
+  const rel = freshRecord(c)
+  const r = hooked(c, 'key', rel)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  const obj = JSON.parse(read(c.trig))
+  assert.deepEqual(Object.keys(obj), ['stamped_at', 'reason', 'tasks', 'urgent', 'pulse_note', 'last_orient_at', 'last_reason'])
+  assert.equal(obj.pulse_note, 'kept', 'the second attempt writes over the bytes the hook left')
+  assert.equal(obj.stamped_at, STAMP)
+  assert.deepEqual(fs.readdirSync(c.home).filter((n) => n.endsWith('.tmp')), [])
+  assert.match(read(path.join(c.v, rel)), new RegExp(`\\nlast_orient_at: "${obj.last_orient_at.replace(/[+]/g, '\\+')}"\\n`))
+})
+
+test('(f) bytes that change on both attempts hold the write-back: exit 4, `changed <path>`, the hook\'s bytes, no .tmp', () => {
+  const c = copyVault('hook-always', PULSE)
+  const rel = freshRecord(c)
+  const recBefore = fs.readFileSync(path.join(c.v, rel))
+  const r = hooked(c, 'always', rel)
+  assert.equal(r.status, 4, r.stdout + r.stderr)
+  assert.equal(r.stdout, `changed ${c.trig}\n`)
+  assert.match(r.stderr, /^backlog-orient: the trigger file changed twice during the write-back: held, unchanged\n$/)
+  const obj = JSON.parse(read(c.trig))
+  assert.deepEqual(obj, { ...PULSE, n: 2 }, 'the file is left exactly as the hook last wrote it')
+  assert.deepEqual(fs.readdirSync(c.home).filter((n) => n.endsWith('.tmp')), [])
+  assert.deepEqual(fs.readFileSync(path.join(c.v, rel)), recBefore, 'the record is unchanged')
 })
 
 // ---- (g) every disposition on one vault, then the guards -----------------------------------------------------------
@@ -500,7 +547,7 @@ function dispositions(name, { skip = [], mend = false } = {}) {
   const c = copyVault(name, { stamped_at: STAMP, reason: 'pile-up', tasks: STAMPED, urgent: [] })
   const at = sweep(c).read_at
   const ok = (args) => { const r = run(c, args); assert.equal(r.status, 0, `${args.join(' ')}: ${r.stderr}`) }
-  ok(['park', '--area', AREA, '--task', 't-inline', '--reason', 'not worth a rollout yet', '--today', D])
+  ok(['park', '--area', AREA, '--task', 't-block', '--reason', 'not worth a rollout yet', '--today', D])
   ok(['reopen', '--task', 't-orient-park', '--batch', 'batch 1', '--today', D])
   ok(['obsolete', '--task', 't-scalar', '--gone', 'the issue is gone', '--today', D])
   ok(['rehome', '--area', AREA, '--task', 't-area', '--to', 'Website', '--today', D])
@@ -513,13 +560,13 @@ function dispositions(name, { skip = [], mend = false } = {}) {
     ['website-rollout-2026-11-01', '[[website-rollout-2026-11-01]] (the prior, carried)']].filter(([n]) => !skip.includes(n)).map(([, r]) => r)
   const rel = freshRecord(c, { readAt: at, rows: {
     Trigger: STAMPED.map((t) => `[[${path.basename(t, '.md')}]] pile-up`), Batches: batches,
-    Parks: ['[[t-inline]]: not worth a rollout yet'], Reopens: ['[[t-orient-park]]: batch 1'],
+    Parks: ['[[t-block]]: not worth a rollout yet'], Reopens: ['[[t-orient-park]]: batch 1'],
     Obsoletes: ['[[t-scalar]]: the issue is gone'], 'Re-homes': ['[[t-area]] → [[Website]]'],
     ...(mend ? { 'Drift fixes and mends': ['[[t-unparseable]] mended:summary'] } : {}) },
-  touched: ['t-inline', 't-orient-park', 't-scalar', 't-area'] })
+  touched: ['t-block', 't-orient-park', 't-scalar', 't-area'] })
   return { c, rel, at, wb: writeBack(c, rel) }
 }
-const restamp = (c, rel) => writeBack(c, rel)
+const restamp = (c, rel) => writeBack(c, rel, ['--restamp'])
 const lastOrient = (c) => JSON.parse(read(c.trig)).last_orient_at
 
 test('(g) every disposition lands, and write-back #1 lands after every task write', () => {
@@ -530,7 +577,7 @@ test('(g) every disposition lands, and write-back #1 lands after every task writ
     const m = fs.statSync(path.join(c.v, 'Work', 'Tasks', name), { bigint: true }).mtimeNs
     assert.ok(m <= L, `${name} was written after last_orient_at (${m} > ${L})`)
   }
-  assert.match(read(tf(c, 't-inline')), /\nstatus: parked\nparked-by: backlog-orient /)
+  assert.match(read(tf(c, 't-block')), /\nstatus: parked\nparked-by: backlog-orient /)
   assert.match(read(tf(c, 't-orient-park')), /\nstatus: open\n/)
   assert.match(read(tf(c, 't-scalar')), /\nstatus: dropped\n/)
   assert.match(read(tf(c, 't-area')), /\nprojects: \["\[\[Website\]\]"\]\n/)
@@ -569,12 +616,12 @@ test('(g3) a clean answered write lets the re-stamp land, after that write', () 
 })
 
 test('(g4) the fork-written members are named through the Batches notes; a Batches row removed leaves exactly its members unread', () => {
-  const { c, rel, wb } = dispositions('g4')
+  const { c, rel, at, wb } = dispositions('g4')
   assert.equal(wb.status, 0, wb.stdout)
   const t = read(path.join(c.v, rel))
   for (const s of ['m-a', 'm-b', 'm-c']) {
     assert.ok(!t.includes(`[[${s}]]`), `${s} is named only through a Batches note`)
-    assert.ok(fs.statSync(tf(c, s)).mtimeMs > new Date(JSON.parse(read(c.trig)).last_orient_at).getTime() - 60000)
+    assert.ok(fs.statSync(tf(c, s), { bigint: true }).mtimeNs > ns(at), `${s} was written after read_at, so guard 2 reads it`)
   }
   const noNew = dispositions('g4-new', { skip: ['website-rollout-2026-11-06'] })
   assert.equal(noNew.wb.status, 4)
@@ -651,4 +698,31 @@ test('(g8) a held gate writes nothing to its task, takes no wait line and never 
   assert.ok(!r.stdout.includes('waiting'))
   assert.deepEqual(fs.readFileSync(tf(c, 'gate-two')), before)
   assert.ok(!read(tf(c, 'gate-two')).includes('waits for the next Backlog orient'))
+})
+
+test('(g9) a re-stamp after a held write-back #1 holds (exit 4, the trigger file unchanged); a plain --write after #1 is refused', () => {
+  const c = copyVault('g9', PULSE)
+  const at = sweep(c).read_at
+  write(tf(c, 'b'), fm(task('open', '["[[Website]]"]')))
+  const rel = freshRecord(c, { readAt: at })
+  const wb = writeBack(c, rel)
+  assert.equal(wb.status, 4, wb.stdout + wb.stderr)
+  assert.equal(wb.stdout, 'unread Work/Tasks/b.md\n')
+  assert.equal(append(c, rel, { rows: { 'Write-back': ['write-back #1 held (guard 2): unread [[b]]'],
+    'Answered, waiting': ['[[gate-two]]: its project\'s rollout already runs'] } }).status, 0)
+  const trig = fs.readFileSync(c.trig)
+  const mtime = fs.statSync(c.trig, { bigint: true }).mtimeNs
+  const before = snap(c.dir)
+  const r = restamp(c, rel)
+  assert.equal(r.status, 4, r.stdout + r.stderr)
+  assert.equal(r.stdout, `no write-back #1 ${rel}\n`)
+  assert.match(r.stderr, /^backlog-orient: re-stamp held: write-back #1 never landed on /)
+  assert.deepEqual(fs.readFileSync(c.trig), trig, 'the trigger file is unchanged')
+  assert.equal(fs.statSync(c.trig, { bigint: true }).mtimeNs, mtime)
+  assert.ok(!('last_orient_at' in JSON.parse(read(c.trig))), 'the stamp stays pending')
+  assert.deepEqual(snap(c.dir), before)
+  const g = dispositions('g9-landed')
+  assert.equal(g.wb.status, 0, g.wb.stdout + g.wb.stderr)
+  refused(g.c, ['trigger', '--area', AREA, '--write', '--reason', 'pile-up', '--record', g.rel], /already holds write-back #1 .*--write --restamp/)
+  refused(g.c, ['trigger', '--area', AREA, '--read', '--restamp'], /takes no --reason, --record, --at or --restamp/)
 })

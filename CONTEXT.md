@@ -227,7 +227,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollouts, then puts his questions to him one at a time, each holding back only its
   own tasks. A gate he holds writes nothing to its task and is put again at the next
   Backlog orient that batches it. It writes `last_orient_at` back into the Pulse's
-  trigger file, only after its last task write and only while its guards pass.
+  trigger file once its forks' writes are done, and re-stamps it once after his
+  answers unless that first write was held, each only while its guards pass.
   _Avoid_: auto-orient, unattended reshuffle.
 - **Backlog disposition** — what a Backlog orient does with one task: batch it, or
   **park** it (`status: parked`, `parked-by: backlog-orient <date>`: not worth a

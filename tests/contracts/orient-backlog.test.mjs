@@ -13,10 +13,12 @@
 //   dispositions park, reopen, obsolete, re-home, merge and unbundle; never for size; no Drop and no rename; obsolete
 //                is not the phase retire, whose R2 bullet stays word for word;
 //   record       B7 writes the record after every task write, its sections the script's SECTIONS, in order;
-//   batches      B5's fork prompts and orient-all § 6.2's batch rule;
+//   batches      B5's fork prompts, its root (`repos:`, else `Local:`; with neither, no fork) and orient-all § 6.2's
+//                batch rule;
 //   answers      B6 answers schedule's questions in exactly 23 items, asking nothing, the clone with the Yes;
-//   write-back   B7's write, its one fold and its hold; the script writes as atomic_write_json does;
-//   look         B10 writes nothing of any kind;
+//   write-back   B7's write, its one fold and its hold; B9's re-stamp is its own `--restamp` mode, skipped after a
+//                held write-back #1; the script writes as atomic_write_json does;
+//   look         `--look` runs B2's steps 1–4 only (never its mend) and B10 writes nothing of any kind;
 //   schedule     schedule's **Under the Backlog orient.**, § 0 item 4, § 1.2 and § Scope;
 //   grammar      the vault grammar's Writers name `stamp-start --backlog`, never a serial or held note;
 //   asking       asking.md § 1's clone bullet names the Backlog orient's exception;
@@ -157,8 +159,13 @@ function check(F) {
   // batches
   need('batches', 'B5', B(F, 5), ["by orient-all § 6.2's rule", 'land.sh --origin-slug <root>', "urgent members' forks go in batch 1",
     'serial forks run one per batch, after every parallel batch', 'never two batches at once', '/thread:schedule --regenerate --tasks <members>',
-    "`Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the home project's first repos: entry>; decided none`",
-    '`Under the Backlog orient: <area>; decided none`', 'and **touched**, every task note it wrote'])
+    "`Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the batch's root>; decided none`",
+    '`Under the Backlog orient: <area>; decided none`', 'and **touched**, every task note it wrote',
+    "its home project's first `repos:` entry", 'else its first `Local:` path', '**A batch with no root gets no fork**',
+    '`no root: [[<project>]] declares no repos: and no Local:`', 'Its serial-shaped members still fork below'])
+  need('batches', 'B9', B(F, 9), ["B5's root, grouping and batch rules", 'A decided task whose batch has no root gets `wait`'])
+  need('batches', 'B10', sec(b, /^## B10\. /), ['each batch with no root with its misfit line'])
+  need('batches', "the script's header", head, ['`local`, the two places B5 roots a parallel fork from'])
 
   // answers
   const b6 = B(F, 6)
@@ -172,9 +179,18 @@ function check(F) {
   need('write-back', 'B7', b7, ["backlog-orient.py trigger --area <note> --write --reason <B2's reason> --record <path>",
     '**Exit 4: one fold.**', 're-forks with `--regenerate`', '`seen … urgent`', 'A second exit 4', '**holds the write-back**', 'the stamp stays pending'])
   need('write-back', 'the script', py, ['def _before_replace():', 'os.replace(fd.name, path)', 'json.dump(obj, fd, indent=1, ensure_ascii=False)',
-    'FUTURE_TOLERANCE_MINUTES = 15', 'rounded up to the next whole second'])
+    'FUTURE_TOLERANCE_MINUTES = 15', 'rounded up to the next whole second', 'restamp = args.restamp',
+    'tg.add_argument("--restamp", action="store_true")'])
+  if (/restamp = rec\.front/.test(py)) flag('write-back', 'the script infers the re-stamp from the record')
+  need('write-back', 'B7', b7, ['A held write-back #1 takes no re-stamp'])
+  need('write-back', 'B9', B(F, 9), ['`backlog-orient.py trigger --area <note> --write --restamp --reason <reason> --record <path>`',
+    '**The re-stamp is skipped when write-back #1 was held**', '`no write-back #1 <record>`'])
+  need('write-back', "B's Don'ts", sec(b, /^## Don'ts/), ['write-back #1 never before the last task write of B5 and its forks (B7)',
+    "the re-stamp (`--restamp`) only after B9's last write, never after a held write-back #1"])
 
   // look
+  need('look', 'B1', B(F, 1), ["runs B1, B2's steps 1–4 and B10 only"])
+  need('look', 'B2', B(F, 2), ['Not under `--look`, which lists them unmended (B10)'])
   need('look', 'B10', sec(b, /^## B10\. /), ['It writes nothing of any kind', 'no mend', 'no drift apply', 'no learn',
     'no script write verb', 'no record', 'no fork', 'no stamp', 'no `create_thread` and no write-back'])
 
@@ -335,9 +351,13 @@ const CONTROLS = [
   ['dispositions', [BACK, '**Not under `--backlog`:** no **Drop**', '**Not under `--backlog`:** a **Drop**']],
   ['record', [BACK, 'Answered, waiting,\n   Folded, Write-back and Touched.', 'Answered, waiting,\n   Write-back and Touched.']],
   ['batches', [BACK, "urgent\n  members' forks go in batch 1", "urgent\n  members' forks go in batch 2"]],
+  ['batches', [BACK, '**A batch\n  with no root gets no fork**', '**A batch\n  with no root forks anyway**']],
   ['answers', [BACK, "18. Step 4.7's rungs: none, with the hard tasks named.\n", '']],
   ['write-back', [BACK, '4. A second exit 4, or guard 3', '4. Each exit 4, or guard 3']],
+  ['write-back', [SCRIPT, 'restamp = args.restamp', 'restamp = rec.front["last_orient_at"] is not None']],
+  ['write-back', [BACK, '--write --restamp --reason <reason> --record <path>`.', '--write --reason <reason> --record <path>`.']],
   ['look', [BACK, 'no `create_thread` and no write-back', 'no `create_thread`, and then the write-back']],
+  ['look', [BACK, "runs B1, B2's steps 1–4 and B10 only", 'runs B1, B2 and B10 only']],
   ['schedule', [SCHED, 'under the Backlog orient (`skills/orient/backlog.md` § B6), or under orient § 6', 'or under orient § 6']],
   ['grammar', [GRAMMAR, ', never a serial or held one', '']],
   ['asking', [ASKING, ', except under the Backlog orient, which creates it (ADR 0071)', '']],

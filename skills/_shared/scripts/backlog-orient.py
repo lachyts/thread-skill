@@ -9,11 +9,12 @@ Verbs:
 
   sweep --area <note> [--json]
       The area's Backlog, read at one instant: `read_at` (Melbourne time, microseconds, taken before the first read),
-      one row per member, `projects[]`, `excluded[]` and the declared trigger's read. Writes nothing.
+      one row per member, `projects[]` (each with its `repos:` and its `` Local: `<path>` `` lines, `local`, the two
+      places B5 roots a parallel fork from), `excluded[]` and the declared trigger's read. Writes nothing.
   park --area <note> --task <t> --reason <r> [--today D]
       `status: parked`, a `parked-by: backlog-orient <D>` line just below `status:`, and the Notes line
-      `- <D> parked by the Backlog orient: <r>`. A task the orient already parked is `[no-change]`. Also refused: a
-      task the trigger's `urgent[]` names.
+      `- <D> parked by the Backlog orient: <r>`. A task the orient already parked is `[no-change]`. Also refused, by
+      B3's rule: a task the trigger's `urgent[]` names, one at `priority: high` and one at `work_depth: deep`.
   reopen --task <t> --batch <b> [--today D]
       An orient park back to `status: open`, its `parked-by:` line removed, and `- <D> reopened by the Backlog orient:
       joins <b>`. Refused: a held park, a task that is not parked.
@@ -37,9 +38,11 @@ Verbs:
   trigger --area <note> --read [--json] [--file P]
       The trigger file read: writes nothing. Its path is --file; otherwise, and only when the area note declares
       `backlog_trigger:`, $PULSE_TRIGGER_FILE or the declared path. With neither: `trigger: none declared on [[<area>]]`.
-  trigger --area <note> --write --reason pile-up|urgent|manual --record <path> [--file P] [--at ISO]
-      The write-back. An empty `last_orient_at:` in the record makes it write-back #1; a set one, a re-stamp. Guards,
-      all checked before anything is written:
+  trigger --area <note> --write [--restamp] --reason pile-up|urgent|manual --record <path> [--file P] [--at ISO]
+      The write-back. The mode is the caller's, never inferred: plain `--write` is write-back #1 and refuses (exit 2) a
+      record whose `last_orient_at:` is set; `--restamp` is B9's re-stamp and holds (exit 4, `no write-back #1 <rel>`)
+      on a record whose `last_orient_at:` is empty, since a write-back #1 that was held (B7.4) leaves the stamp pending
+      and no re-stamp may close it. Guards, all checked before anything is written:
         1. the file's `stamped_at` (or none) is the record's `trigger_stamp`; else `stamp <value>`, then for each task in
            `tasks` and `urgent[].task` missing from the record's `## Trigger`: `unread <rel>` (named nowhere) or
            `seen <rel>` (named), with ` urgent` when `urgent[]` names it;
@@ -132,6 +135,8 @@ ITEM_RE = re.compile(r"^\s*-\s*(.*)$")
 BODY_LINK_RE = re.compile(r"\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]")
 HEADING_RE = re.compile(r"^#{1,2}[ \t]")
 FENCE_RE = re.compile(r"^ {0,3}(?:```|~~~)")
+# A project note's `` Local: `<path>` `` line, the one schedule § 0 reads (serial-chains.py's LOCAL_RE).
+LOCAL_RE = re.compile(r"Local:\s*`(~?/[^`\n]*)`")
 
 
 class Refused(Exception):
@@ -310,7 +315,7 @@ class Area:
         found = []
         for d, _, files in os.walk(os.path.join(vault.root, self.folder)):
             found.extend(os.path.join(d, n) for n in files if n.endswith(".md"))
-        rows = []   # (rel, stem, frontmatter lines) of each
+        rows = []   # (rel, stem, frontmatter lines, its Local: paths) of each
         for path in sorted(found, key=lambda x: x.split(os.sep)):
             try:
                 text = read_text(path)
@@ -320,7 +325,7 @@ class Area:
             stem = os.path.basename(path)[:-3]
             for n in [stem, *fm_list(nlines, "aliases")]:
                 self.stems.setdefault(n.casefold(), stem)
-            rows.append((os.path.relpath(path, vault.root), stem, nlines))
+            rows.append((os.path.relpath(path, vault.root), stem, nlines, LOCAL_RE.findall(text)))
         self.notes = rows
 
     def link(self):
@@ -665,6 +670,9 @@ def cmd_park(vault, args):
     trig = trigger_read(area, None)
     if any(u.get("task") == shown for u in trig.get("urgent", [])):
         raise Refused("%s is urgent (the trigger's urgent[] names it): an urgent task is never parked" % shown)
+    for key, value in (("priority", "high"), ("work_depth", "deep")):
+        if str(note.get(key) or "").strip().lower() == value:
+            raise Refused("%s is at %s: %s: such a task is never parked (backlog.md § B3)" % (shown, key, value))
     d = today_of(args)
     want = dict(note.fm)
     want["status"] = "parked"
@@ -802,7 +810,7 @@ def cmd_sweep(vault, args):
                      "stamped": posix(rel) in stamped, "priority": unquote(f.get("priority", "")) or None,
                      "workDepth": unquote(f.get("work_depth", "")) or None, "phase": unquote(f.get("phase", "")) or None})
     projects, excluded = [], []
-    for rel, stem, lines in area.notes:
+    for rel, stem, lines, local in area.notes:
         if area.excluded(stem):
             excluded.append({"note": posix(rel), "name": stem})
             continue
@@ -810,7 +818,7 @@ def cmd_sweep(vault, args):
             continue
         projects.append({"note": posix(rel), "name": stem,
                          "status": unquote(fields_of(lines).get("status", "")) or None,
-                         "repos": fm_list(lines, "repos")})
+                         "repos": fm_list(lines, "repos"), "local": local})
     out = {"schema": 1, "area": {"note": posix(area.rel), "name": area.stem, "folder": posix(area.folder)},
            "read_at": read_at.isoformat(timespec="microseconds"), "excludes": area.excludes, "rows": rows,
            "projects": projects, "excluded": excluded, "trigger": trig}
@@ -1123,8 +1131,8 @@ def cmd_trigger(vault, args):
     if args.read == args.write:
         raise Refused("trigger takes exactly one of --read and --write")
     if args.read:
-        if args.reason or args.record or args.at:
-            raise Refused("trigger --read takes no --reason, --record or --at")
+        if args.reason or args.record or args.at or args.restamp:
+            raise Refused("trigger --read takes no --reason, --record, --at or --restamp")
         t = trigger_read(area, args.file)
         if args.json:
             return t
@@ -1155,7 +1163,14 @@ def cmd_trigger(vault, args):
         now = now.replace(microsecond=0) + datetime.timedelta(seconds=1)
     stamp = now.isoformat(timespec="seconds")
     rec = Record(vault, args.record)
-    restamp = rec.front["last_orient_at"] is not None
+    restamp = args.restamp
+    shown = posix(os.path.relpath(rec.path, vault.root))
+    if restamp and rec.front["last_orient_at"] is None:
+        raise Held(["no write-back #1 %s" % shown], "re-stamp held: write-back #1 never landed on %s, so its stamp stays "
+                   "pending for the next Backlog orient; the trigger file and the record are unchanged" % shown)
+    if not restamp and rec.front["last_orient_at"] is not None:
+        raise Refused("%s already holds write-back #1 (last_orient_at %s): the re-stamp is --write --restamp" %
+                      (shown, rec.front["last_orient_at"]))
     raw = read_trigger_bytes(path)
     state = trigger_state(path, raw)
     found = guards(vault, area, rec, state, restamp)
@@ -1247,6 +1262,7 @@ def main(argv):
     tg.add_argument("--area", required=True)
     tg.add_argument("--read", action="store_true")
     tg.add_argument("--write", action="store_true")
+    tg.add_argument("--restamp", action="store_true")
     tg.add_argument("--reason")
     tg.add_argument("--record")
     tg.add_argument("--file")

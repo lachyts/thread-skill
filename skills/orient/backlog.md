@@ -11,7 +11,7 @@ its rules: orient's SKILL.md and `reshuffle.md` point here, one paragraph per se
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
 **The order.** B1 → B2 → orient § 4's writes under `--backlog` → B3 → B4 → B5 (the forks, answered by B6) → B7 →
-B8 → B9. `--look` stops at B10 instead. The default orient path is unchanged by any of it.
+B8 → B9. `--look` runs B2's steps 1–4 only, then stops at B10. The default orient path is unchanged by any of it.
 
 **Write surface.** Task notes through `backlog-orient.py`'s verbs and orient § 4's `next-action.py mend`, the
 `estate-dispatch.py record` answers, the forks' own schedule writes, the record note
@@ -28,7 +28,8 @@ R5.4. Never git or gh of its own.
   resolver's line and the `/thread:orient <area> --backlog` line to run by hand; nobody is there to pick.
 - **No card, no learn.** § 3.5's Priorities card is never put (an area puts none anyway), and no learned directory
   is held.
-- **`--look`** combines with it: `/thread:orient <area> --backlog --look` runs B1, B2 and B10 only.
+- **`--look`** combines with it: `/thread:orient <area> --backlog --look` runs B1, B2's steps 1–4 and B10 only (B2's
+  step 5 mends, so it never runs under `--look`).
 
 ## B2. The Backlog read
 
@@ -49,7 +50,8 @@ R5.4. Never git or gh of its own.
    its `tasks`, its `urgent[]` entries and `last_orient_at`. With no `backlog_trigger:` on the area note it prints
    `trigger: none declared on [[<area>]]`, and the record says so. The run's reason is the stamp's `reason` when it is
    pending, else `manual` (the read's `runReason`).
-5. **The unparseable rows.** Under `--backlog`, orient § 4 mends each `unparseable` row with
+5. **The unparseable rows.** Not under `--look`, which lists them unmended (B10). Under `--backlog`, orient § 4 mends
+   each `unparseable` row with
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <task>`, as its **Unparseable slots**
    paragraph does, and names each result in the record's Drift fixes and mends. Then `sweep` runs once more, and its
    rows and `read_at` replace this step's. A row that still reads `unparseable` is frozen and listed for him.
@@ -95,9 +97,15 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   hand edit; a refusal is listed, never written by hand. A merge, an unbundle and a phase retire run by reshuffle
   R5.4. R5.1 and R5.3 write nothing (no new phase, no rename).
 - **The fit test.** The three-way execution-fit test runs on each batch, as in orient § 6.
-- **The forks.** Each parallel batch gets one forked subagent per (repo, project), with the prompt
+- **The root.** A parallel batch's root is its home project's first `repos:` entry (`sweep`'s `projects[].repos`),
+  else its first `Local:` path (`projects[].local`, the `` Local: `<path>` `` line schedule § 0 reads). **A batch
+  with no root gets no fork**: its members are listed under Session lane and misfits, each with
+  `no root: [[<project>]] declares no repos: and no Local:`. An open member stays open and unstamped, an orient park
+  stays parked (it joins no batch this run schedules), and none is parked for it. Its serial-shaped members still
+  fork below, since the serial path reads no root.
+- **The forks.** Each parallel batch with a root gets one forked subagent per (repo, project), with the prompt
   `/thread:schedule --regenerate --tasks <members>` and then the line
-  `Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the home project's first repos: entry>; decided none`.
+  `Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the batch's root>; decided none`.
   Serial-shaped members get one fork per project, `/thread:schedule --tasks <members>`, with the line
   `Under the Backlog orient: <area>; decided none`.
 - **Batches**, by orient-all § 6.2's rule: no two parallel forks in one batch share an origin
@@ -193,7 +201,8 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
       Trigger rows and the new `trigger_stamp`.
    4. The write runs once more.
 4. A second exit 4, or guard 3 (another orient wrote `last_orient_at` meanwhile), **holds the write-back**: the
-   record names it, and the stamp stays pending for the next Backlog orient.
+   record names it, and the stamp stays pending for the next Backlog orient. A held write-back #1 takes no re-stamp
+   (B9).
 5. Exit 2 (a corrupt file, or none declared): named, and the file is left untouched. With no declaration there is no
    write-back.
 
@@ -246,9 +255,11 @@ cluster by cluster. Each question holds only its tasks.
 - Every answer then gets `record --append` of its Questions asked row. Questions left open (his "stop", or no reply)
   go under Questions waiting; the rollouts already run.
 
-**Then one post-question round** over the decided tasks: B5's grouping and batch rule, without `--regenerate`, with
-the line `Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <root>; decided <slugs>`
-(serial: `Under the Backlog orient: <area>; decided <slugs>`).
+**Then one post-question round** over the decided tasks: B5's root, grouping and batch rules, without
+`--regenerate`, with the line
+`Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the batch's root>; decided <slugs>`
+(serial: `Under the Backlog orient: <area>; decided <slugs>`). A decided task whose batch has no root gets `wait`
+and an `## Answered, waiting` row, as a fork that stopped.
 
 - **A fork that wrote a note** → `record --append` of its Batches row and its touched; then § B8 on that note; then its
   Rollouts started row. Each decided member that note does not queue gets
@@ -258,16 +269,20 @@ the line `Under the Backlog orient: <area>; name the note with slug <projectSlug
   note) → `wait` for each decided member, and an `## Answered, waiting` row each.
 - New `asks[]` or § 3.5 drops from this round go to Questions waiting. There is no second round.
 
-**Then one re-stamp, last:** `backlog-orient.py trigger --area <note> --write --reason <reason> --record <path>`. It
-lands only when guards 1–4 pass: no stamp moved, every Backlog task written after `read_at` is named, `last_orient_at`
-is unchanged, and `## Answered, waiting` is empty. In words: every decided task joined a rollout, and a task his
-answer holds out waits on nothing the Pulse should count. Exit 4 → a `re-stamp skipped: <line>` row under Write-back;
-the Pulse then counts those writes, at most one capped pile-up.
+**Then one re-stamp, last:** `backlog-orient.py trigger --area <note> --write --restamp --reason <reason> --record <path>`.
+**The re-stamp is skipped when write-back #1 was held** (B7.4): that stamp stays pending for the next Backlog orient,
+so nothing closes it here, and `--restamp` holds anyway on a record with no `last_orient_at:` (exit 4,
+`no write-back #1 <record>`). Otherwise it lands only when guards 1–4 pass: no stamp moved, every Backlog task written
+after `read_at` is named, `last_orient_at` is the one write-back #1 wrote, and `## Answered, waiting` is empty. In
+words: every decided task joined a rollout, and a task his answer holds out waits on nothing the Pulse should count.
+Exit 4 → a `re-stamp skipped: <line>` row under Write-back; the Pulse then counts those writes, at most one capped
+pile-up.
 
 ## B10. `--look`
 
 `--backlog --look` prints the rows by disposition; the re-homes, the held parks and the parks; the batches, with
-their prompt lines and batch numbers; the trigger read; the unparseable rows; and the questions it can already see.
+their prompt lines and batch numbers, and each batch with no root with its misfit line; the trigger read; the
+unparseable rows; and the questions it can already see.
 It writes nothing of any kind: no mend, no drift apply, no learn, no script write verb, no record, no fork, no stamp,
 no `create_thread` and no write-back.
 
@@ -278,5 +293,7 @@ no `create_thread` and no write-back.
 - **Never supersede a prior that answer 6 stops on.**
 - **Never park for size alone, or close a task for being small**: a task closes only once it stops being true.
 - **Never rename a task**: the Pulse keys it by its path.
-- **Never write the trigger file except through `trigger --write`**, and never before the last task write.
+- **Never write the trigger file except through `trigger --write`**: write-back #1 never before the last task write
+  of B5 and its forks (B7), and the re-stamp (`--restamp`) only after B9's last write, never after a held write-back
+  #1.
 - **Never put a question before the start**, and never leave a note the post-question round wrote unstarted.
