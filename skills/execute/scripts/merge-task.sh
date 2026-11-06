@@ -438,10 +438,15 @@ refresh_in_place() {  # $1=repoPath
 # whose origin default branch is `master` (no `main` anywhere): checkout on master ⇒ fast-forwarded;
 # checkout on another branch ⇒ untouched; unresolved base ⇒ skipped; a local-only commit ⇒ named stranded,
 # then queued once a close/… branch carries it, then split once a stranded one sits on top; a dirty
-# overlap ⇒ says so; origin/HEAD unset or stale ⇒ counted, with a hint that tells the two apart; a no-op
-# fast-forward ⇒ "already at or ahead", never "fast-forwarded"; merge.autoStash with a dirty overlap ⇒
+# overlap ⇒ says so, naming its paths; origin/HEAD unset or stale ⇒ counted, with a hint that tells the two apart; a
+# no-op fast-forward ⇒ "already at or ahead", never "fast-forwarded"; merge.autoStash with a dirty overlap ⇒
 # refused, file and stash list intact; a failed fetch, or an origin/master lacking the given merge ⇒ 6,
-# "NOT refreshed", nothing moved. Needs git only — no GitHub.
+# "NOT refreshed", nothing moved. p39-4: every refusal and no-op (diverged, ahead, equal, an overlap, a half-applied
+# operation) leaves ORIG_HEAD absent: no merge ran (g); a local branch named origin/master never stands in for
+# refs/remotes/origin/master (d); an index.lock is git's own refusal, in its words (h); rebase-merge/ on master, or
+# with a detached HEAD, is the half-applied WARN, never the non-base NOTE (i); an unloadable live-checkout.sh is a
+# WARN, rc 0 (j); a hung ssh times out on both tries, 6, every ssh gone (e); the ssh rule runs per try, BatchMode and
+# no prompt, nothing exported into the caller (f). Needs git only — no GitHub.
 if [ "${1:-}" = "--self-test-base" ]; then
   st_fail=0
   sb_ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected $2 got $1"; st_fail=1; fi; }
