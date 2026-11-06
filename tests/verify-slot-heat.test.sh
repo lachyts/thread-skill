@@ -28,9 +28,20 @@
 #   with `--slot-wait 1`: 76, never started   M5 heat first: at trapping the heat lines win   MW the stop's unit harness
 #   on Guarded.watch   MS a TERM inside the Capacity read (capacity.py's file read or suite_stop()) is held and raised
 #   as the read ends, never swallowed into no reading (`run`'s and lead-integrate.py's handlers alike)
-#   MH1 the Run record: a capacity stop ends its suite heat (no rc), the restart a fresh suite
-#   ML1 lead-integrate verify: a capacity stop during the verifier, back in line, restart green   ML2 … pinned stop with
-#   --slot-wait 1: rc heat, exit 76.
+#   MH1 the Run record: a capacity stop ends its suite heat (no rc), the restart a fresh suite, none started while the
+#   restart hold holds   ML1 lead-integrate verify: a capacity stop during the verifier, back in line, restart green
+#   ML2 … pinned stop with --slot-wait 1: rc heat, exit 76.
+#   The restart hold (p39-7, verify-slot.py contract 7): after a Capacity stop the re-queue also waits while a fresh
+#   reading's `signals.memory` is an integer of at least 2 (warning), as the heat holds a trapping stop's restart at
+#   heavy; a fresh suite, and a heat stop's re-queue, never wait on it. M0 also pins capacity.py's restart_hold() and
+#   verify-slot's _restart_hold() (fail-open)   MS … a TERM inside restart_hold() is raised, never swallowed
+#   MR the hold's unit harness on acquire(): a restart-held poll drops the line entry or waiter file before its waiting
+#   line, a priority waiter registers again (an OSError there waits unregistered with a WARN), its slot-wait deadline
+#   names it, and a fresh or heat re-queue is never held   M6 a capacity stop, then memory at warning: the restart waits
+#   (said once), holds no place in line, a fresh suite runs at once, and it restarts below warning   M6b a TERM while
+#   restart-held exits 76 naming it   M6c fail-open: a stale reading, then no file, holds no restart   M7 a heat stop's
+#   re-queue at warning is never held   ML3 lead-integrate verify: restart-held, its waiter file dropped (kept under the
+#   stop), a fresh run goes first, restart green below warning.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; the stub notifyutil reads the level
 # from <arm>/out and appends one line per read to <arm>/reads, so "N more reads" is the clock; every wait is a
 # `within <s>` poll whose bound only slows a real failure. Every background pid is recorded and stopped only by it.
@@ -527,6 +538,7 @@ capjson() {
 }
 caprm() { rm -f "$1/.config/thread/capacity.json"; }
 after_cap() { awk '/capacity stop \(memory: critical\)/{s=1; next} s && /waiting \(memory: critical\)/{n++} END{print n+0}' "$1"; }
+RH='waiting (memory: warning, after a capacity stop)'   # the restart hold's waiting line (p39-7)
 
 # M0: the reading.
 arm m0
@@ -554,8 +566,25 @@ capjson "$HOME" true 4
 mkdir -p "$D/broken" "$D/lacks"
 printf 'def (\n' > "$D/broken/capacity.py"
 ok "$(cs "$D/broken/verify-slot.py")" None "M0: a capacity.py that will not load: no stop (fail open)"
-printf 'def read(now):\n    return {"file": "fresh", "signals": {"stop_suites": True}}\n' > "$D/lacks/capacity.py"
+printf 'def read(now):\n    return {"file": "fresh", "signals": {"stop_suites": True, "memory": 2}}\n' > "$D/lacks/capacity.py"
 ok "$(cs "$D/lacks/verify-slot.py")" None "M0: a capacity.py with no suite_stop: no stop (fail open)"
+# The restart hold (p39-7): verify-slot's _restart_hold() over the real capacity.py, then over the fixtures.
+cat > "$tmp/rh.py" <<'PY2'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("vs", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+if len(sys.argv) > 2:
+    vs.SCRIPT = sys.argv[2]   # capacity.py is loaded from SCRIPT's dir
+print(vs._restart_hold(vs._capacity_reading()))
+PY2
+rh() { "$PY" "$tmp/rh.py" "$VS" "$@"; }
+capjson "$HOME" false 2; ok "$(rh)" "memory: warning, after a capacity stop" "M0: _restart_hold: a fresh memory 2 (stop_suites false) is the warning label"
+capjson "$HOME" false 4; ok "$(rh)" "memory: critical, after a capacity stop" "M0: … memory 4 with stop_suites false (a hand-written file) the critical label"
+capjson "$HOME" false 1; ok "$(rh)" None "M0: … memory 1 (normal) holds nothing"
+capjson "$HOME" false 2 20; ok "$(rh)" None "M0: … a stale memory 2 holds nothing (fail open)"
+ok "$(rh "$D/lacks/verify-slot.py")" None "M0: a capacity.py with no restart_hold: no restart hold (fail open)"
+mkdir -p "$D/raises"
+printf 'def read(now):\n    return {"file": "fresh", "signals": {"stop_suites": False, "memory": 2}}\ndef restart_hold(reading):\n    raise ValueError("boom")\n' > "$D/raises/capacity.py"
+ok "$(rh "$D/raises/verify-slot.py")" None "M0: a capacity.py whose restart_hold raises: no restart hold (fail open)"
 CP="$root/skills/execute/scripts/capacity.py"
 cr() { "$PY" -c 'import importlib.util, sys, datetime as d
 spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
@@ -567,6 +596,13 @@ ok "$("$PY" -c 'import importlib.util, sys
 spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(m.suite_stop(None), m.suite_stop({"file": "fresh", "signals": "x"}), m.CAPACITY_STOP_KEY, m.CAPACITY_MEMORY_CRITICAL)' "$CP")" \
   "None None stop_suites 4" "M0: suite_stop never raises on an ill-shaped reading; the key and the critical level"
+ok "$("$PY" -c 'import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+f = lambda s: {"file": "fresh", "signals": s}
+cases = [None, {"file": "stale", "signals": {"memory": 4}}, f("x"), f({})] + [f({"memory": v}) for v in (None, True, 1, "2", 2.0, 2, 3, 4, 9)]
+print(*[m.restart_hold(c) for c in cases], m.CAPACITY_MEMORY_WARN)' "$CP")" \
+  "None None None None None None None None None warning warning critical critical 2" \
+  "M0: restart_hold: None for no, a stale or an ill-shaped reading and a memory null, bool, 1, string or float; warning at 2 and 3, critical at 4 or more; the warning level 2"
 export HOME="$H0"
 
 # M1: a fresh stop: no slot; a TERM exits 76.
@@ -601,7 +637,7 @@ ok "$(after_cap "$D/err")" 1 "M2: the capacity stop, then the Capacity wait"
 lacks "$(cat "$D/err")" "heat stop" "M2: … never a heat stop"
 more 3
 ok "$(count "$D/starts")" 1 "M2: the stop still holds the restart"
-capjson "$HOME" false
+capjson "$HOME" false 1   # memory normal: below warning, so the restart hold (p39-7) holds nothing
 started 2 && s=restarted || s="no restart in 120 s"
 ok "$s" restarted "M2: once the stop clears the suite restarts from the beginning"
 touch "$D/c.go"; wait "$W"; rc=$?
@@ -715,6 +751,13 @@ cap._load = real_load
 cap.suite_stop = term_stop
 case("suite_stop", lambda: vs._suite_stop(r))
 cap.suite_stop = real_stop
+real_rh = getattr(cap, "restart_hold", None)   # the restart hold (p39-7): absent before it, so this case fails
+def term_rh(reading):
+    os.kill(os.getpid(), signal.SIGTERM)
+    return real_rh(reading)
+cap.restart_hold = term_rh
+case("restart_hold", lambda: vs._restart_hold(r))
+cap.restart_hold = real_rh
 class Other(Exception):   # lead-integrate.py verify's own handler raises its own class, never vs._Signalled
     pass
 def other(signum, _frame):
@@ -730,7 +773,74 @@ has "$MS" "reading raised _Signalled 15 False" "MS: a TERM inside capacity.py's 
 has "$MS" "stop_reading raised _Signalled 15 False" "MS: … and so does a running suite's _stop_reading() (Guarded.watch's and _pump's)"
 has "$MS" "capacity_stop raised _Signalled 15 False" "MS: … and capacity_stop()"
 has "$MS" "suite_stop raised _Signalled 15 False" "MS: a TERM inside capacity.py's suite_stop(): _suite_stop() raises _Signalled"
+has "$MS" "restart_hold raised _Signalled 15 False" "MS: a TERM inside capacity.py's restart_hold(): _restart_hold() raises _Signalled (p39-7)"
 has "$MS" "other raised Other 15 False" "MS: another handler's Exception (lead-integrate.py verify's) is raised too"
+export HOME="$H0"
+
+# MR: the restart hold's unit harness on acquire() (p39-7). Each mode calls acquire(1, …, restart=…) in a pool of its
+# own with capacity.json at stop_suites true, memory 4 (a fresh, heat and deadline mode: false, memory 2). Its on_wait
+# counts the line and the Integration waiters at the moment each waiting line is said, then moves the file on: under the
+# stop to false 2 (warning), under the restart hold to false 1 (normal). It prints "slot" (or "none"), the number of
+# waiter-file registrations, then each (line, entries in line, waiter files) said. In `deadline` the file stays at warning
+# until a 1 s max_wait runs out, and _no_slot's line is printed with the hold acquire left in `why`.
+arm mr
+export HOME="$D/home"
+cat > "$tmp/mr.py" <<'PY2'
+import errno, importlib.util, json, os, sys
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location("vs", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+mode, d = sys.argv[2], sys.argv[3]
+cfg = os.path.join(os.environ["HOME"], ".config", "thread")
+def capjson(stop, mem):
+    os.makedirs(cfg, exist_ok=True)
+    at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(os.path.join(cfg, "capacity.json.tmp"), "w") as f:
+        json.dump({"capacity": 4, "written_at": at, "signals": {"stop_suites": stop, "memory": mem}}, f)
+    os.rename(os.path.join(cfg, "capacity.json.tmp"), os.path.join(cfg, "capacity.json"))
+seen = []
+def on_wait(msg):
+    counts = (len(vs._scan_queue(d)), len(vs._scan_waiters(d)))
+    if msg == "waiting (memory: critical)":
+        seen.append(("stop",) + counts)
+        capjson(False, 2)
+    elif msg == "waiting (memory: warning, after a capacity stop)":
+        seen.append(("restart",) + counts)
+        if mode != "deadline":
+            capjson(False, 1)
+    else:
+        seen.append((msg,) + counts)
+calls = [0]
+real = vs._register_waiter
+def reg(dd, kind, prefix="waiter", extra=None):
+    if prefix == "waiter":
+        calls[0] += 1
+        if mode == "prio-oserror" and calls[0] == 2:
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+    return real(dd, kind, prefix, extra)
+vs._register_waiter = reg
+restart = {"fresh": None, "heat": 3}.get(mode, "memory: critical")
+capjson(*((False, 2) if mode in ("fresh", "heat", "deadline") else (True, 4)))
+why = {"heat": None}
+s = vs.acquire(1, max_wait=1 if mode == "deadline" else 60, where=d, poll=0.1, on_wait=on_wait,
+               priority=mode.startswith("prio"), why=why, restart=restart)
+print("slot" if s is not None else "none", calls[0], seen)
+if s is None:
+    vs._no_slot(1, why, restart)
+PY2
+mr() { THREAD_HEAT_LEVEL=0 "$PY" "$tmp/mr.py" "$VS" "$1" "$D/slots-$1" 2> "$D/mr-$1.err"; }
+ok "$(mr line)" "slot 0 [('stop', 1, 0), ('restart', 0, 0)]" \
+  "MR: a run in line joins under the stop, and its entry is gone by the time the restart hold's line is said; slot below warning"
+ok "$(mr prio)" "slot 2 [('stop', 0, 1), ('restart', 0, 0)]" \
+  "MR: a priority run keeps its waiter file under the stop, drops it before the restart hold's line, and registers again"
+ok "$(mr prio-oserror)" "slot 2 [('stop', 0, 1), ('restart', 0, 0)]" \
+  "MR: an OSError registering the waiter file again waits unregistered, never a SlotDirError, and takes its slot"
+has "$(cat "$D/mr-prio-oserror.err")" "verify-slot: WARN $D/slots-prio-oserror: could not register a waiter again (" "MR: … with a WARN naming why"
+has "$(cat "$D/mr-prio-oserror.err")" "waiting unregistered" "MR: … that says it waits unregistered"
+ok "$(mr fresh)" "slot 0 []" "MR: a fresh run (restart None) at warning takes its slot at once, no waiting line"
+ok "$(mr heat)" "slot 0 []" "MR: a heat stop's re-queue (restart 3) at warning takes its slot at once, no waiting line"
+ok "$(mr deadline)" "none 0 [('restart', 0, 0)]" "MR: restart-held for the whole max_wait: no slot"
+has "$(cat "$D/mr-deadline.err")" "verify-slot: no verdict: no verify slot within 1s (memory: warning, after a capacity stop); exit 76" \
+  "MR: … and the no-verdict line names the restart hold"
 export HOME="$H0"
 
 # MH1: the Run record on the recorded path (HR1's task tree, its vault under VH): a capacity stop ends its suite heat.
@@ -745,7 +855,11 @@ within 120 grepq 'waiting (memory: critical)' "$D/err" || echo "FAIL - MH1: no c
 has "$(cat "$D/err")" "verify-slot: capacity stop (memory: critical): ended the suite after" "MH1: the pump's capacity stop is named"
 ok "$(recq "$D/events" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null]]' \
   "MH1: the capacity stop ends the suite heat, no rc, before the run waits"
-capjson "$VH" false
+capjson "$VH" false 2
+within 120 grepq "$RH" "$D/err" || echo "FAIL - MH1: no restart-hold line"
+ok "$(recq "$D/events" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null]]' \
+  "MH1: memory at warning holds the restart (p39-7): no suite-started while it holds"
+capjson "$VH" false 1
 started 2 || echo "FAIL - MH1: no restart"
 touch "$D/c.go"; wait "$W"; rc=$?
 ok "$rc" 0 "MH1: the restart is green, exit 0"
@@ -764,7 +878,7 @@ within 120 grepq 'verify: capacity stop (memory: critical) during the verifier: 
 ok "$s" stopped "ML1: a fresh stop during the verifier: the capacity stop is logged"
 within 120 grepq 'verify: waiting (memory: critical)' "$D/o.log" || echo "FAIL - ML1: no Capacity wait line"
 ok "$(is_free && echo free || echo held)|$(count "$D/starts")" "free|1" "ML1: … its slot freed while it waits, one start"
-capjson "$D/home" false
+capjson "$D/home" false 1   # memory normal: below warning, so the restart hold (p39-7) holds nothing
 started 2 || echo "FAIL - ML1: no restart"
 touch "$D/c.go"; wait "$W"; rc=$?
 ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$(count "$D/starts")" "0|0|2" "ML1: the restart is green: exit 0, O.rc 0, two starts"
@@ -777,6 +891,118 @@ rc=$?
 ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$([ -e "$D/ran" ] && echo ran || echo never)" "76|heat|never" "ML2: a fresh stop for the whole --slot-wait: exit 76, rc heat, the verifier never ran"
 has "$(cat "$D/o.log")" "verify: no verdict: the Capacity stopped suites (memory: critical) within 1s; verifier not run to a verdict (rc heat)" "ML2: … the log says why"
 has "$(cat "$D/o.log")" "verify: waiting (memory: critical)" "ML2: … after its Capacity wait line"
+
+# ======== M6–ML3: the restart hold (p39-7; verify-slot.py contract 7) =============================================
+# After a Capacity stop the run's re-queue also waits while a fresh reading's signals.memory is at warning (2) or worse,
+# as the heat holds a trapping stop's restart at heavy. A fresh suite, and a heat stop's re-queue, never wait on it, and
+# a restart-held run holds no place in line and no Integration waiter file.
+after_cap_rh() { awk '/capacity stop \(memory: critical\)/{s=1; next} s && /waiting \(memory: warning, after a capacity stop\)/{n++} END{print n+0}' "$1"; }
+qfree() { local J; J=$(st --slots 1) && [ "$(js "d['queue'] == [] and d['slots'][0]['state'] == 'free'" "$J")" = True ]; }
+nwaiters() { local J; J=$(st --slots 1) && [ "$(js "len(d['waiters'])" "$J")" = "$1" ]; }
+crit2() { [ "$(grep -c 'waiting (memory: critical)' "$D/err")" -ge 2 ]; }
+
+# M6: a capacity stop, then memory at warning: the re-queue waits, said once, with no place in line, so a fresh suite at
+# warning runs at once; below warning it restarts.
+arm m6
+export HOME="$D/home"; capjson "$HOME" false 4
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M6: a fresh suite at memory 4 with stop_suites false did not start"
+p1=$(cat "$D/c.pid")
+capjson "$HOME" true 4
+within 120 gone "$p1" || echo "FAIL - M6: the capacity stop did not end the suite"
+within 120 grepq 'waiting (memory: critical)' "$D/err" || echo "FAIL - M6: no Capacity wait line"
+capjson "$HOME" false 2
+within 120 grepq "$RH" "$D/err" && s=held || s="no restart-hold line in 120 s"
+ok "$s" held "M6: stop_suites cleared with memory at warning: the re-queue waits, '$RH'"
+ok "$(after_cap_rh "$D/err")" 1 "M6: … said once, after the capacity stop"
+has "$(cat "$D/err")" "back in line to restart from the beginning once the Capacity stop clears and memory falls below warning" \
+  "M6: the stop line says the restart waits for memory below warning"
+within 30 qfree && s=clear || s="not clear: $(st --slots 1)"
+ok "$s" clear "M6: the restart-held run holds no place in line and no slot"
+hot python3 "$VS" run --slots 1 --slot-wait 30 -- sh -c "echo f >> '$D/fresh'" > /dev/null 2> "$D/err2"; rc=$?
+ok "$rc|$(count "$D/fresh")|$(count "$D/starts")" "0|1|1" "M6: a fresh suite at warning runs at once, never behind the restart-held run"
+more 3
+ok "$(count "$D/starts")|$(grep -c "$RH" "$D/err")" "1|1" "M6: warning still holds the restart, its line said once"
+capjson "$HOME" false 1
+started 2 && s=restarted || s="no restart in 120 s"
+ok "$s" restarted "M6: below warning the suite restarts from the beginning"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "0|2" "M6: the restart's exit is the verdict: 0, two starts"
+export HOME="$H0"
+
+# M6b: a TERM while restart-held exits 76, its no-verdict line naming the restart hold.
+arm m6b
+export HOME="$D/home"; capjson "$HOME" false 1
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M6b: the command did not start"
+capjson "$HOME" true 4
+within 120 grepq 'waiting (memory: critical)' "$D/err" || echo "FAIL - M6b: no Capacity wait line"
+capjson "$HOME" false 2
+within 120 grepq "$RH" "$D/err" || echo "FAIL - M6b: no restart-hold line"
+kill -TERM "$W"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "76|1" "M6b: a TERM while restart-held exits 76, no restart"
+has "$(cat "$D/err")" "verify-slot: no verdict: stopped while the Capacity stopped suites (memory: warning, after a capacity stop); exit 76" \
+  "M6b: … its no-verdict line names the restart hold"
+export HOME="$H0"
+
+# M6c: fail-open. After a capacity stop a stale reading at warning holds no restart; after a second one, no file.
+arm m6c
+export HOME="$D/home"; capjson "$HOME" false 1
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M6c: the command did not start"
+capjson "$HOME" true 4
+within 120 grepq 'waiting (memory: critical)' "$D/err" || echo "FAIL - M6c: no Capacity wait line"
+capjson "$HOME" false 2 20
+started 2 && s=restarted || s="no restart in 120 s"
+ok "$s" restarted "M6c: a stale reading at warning holds no restart (fail open)"
+capjson "$HOME" true 4
+within 120 crit2 || echo "FAIL - M6c: no second capacity stop"
+caprm "$HOME"
+started 3 && s=restarted || s="no restart in 120 s"
+ok "$s" restarted "M6c: … and after a second capacity stop, no file holds none"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")|$(grep -c "$RH" "$D/err")" "0|3|0" "M6c: exit 0, three starts, never restart-held"
+export HOME="$H0"
+
+# M7: a heat stop's re-queue at warning is never held by memory.
+arm m7
+export HOME="$D/home"; capjson "$HOME" false 2
+runbg "$(hold_cmd)"
+started 1 || echo "FAIL - M7: a fresh suite at warning did not start"
+level 3
+within 120 grepq 'heat stop (trapping)' "$D/err" || echo "FAIL - M7: no heat stop"
+within 120 grepq 'waiting (heat: trapping)' "$D/err" || echo "FAIL - M7: no heat wait line"
+level 0
+started 2 && s=restarted || s="no restart in 120 s"
+ok "$s" restarted "M7: after a heat stop, memory at warning holds no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "0|2" "M7: exit 0, two starts"
+lacks "$(cat "$D/err")" "after a capacity stop" "M7: … never the restart hold"
+export HOME="$H0"
+
+# ML3: lead-integrate verify: restart-held after a capacity stop, its waiter file kept under the stop and dropped under
+# the restart hold, so a fresh run is never held behind it; below warning the restart is green.
+arm ml3
+mkdir -p "$D/tree"; capjson "$D/home" false
+env -u THREAD_HEAT_LEVEL HOME="$D/home" PATH="$tmp/bin:$PATH" HEAT_D="$D" python3 "$LI" verify --tree "$D/tree" --out "$D/o" --timeout 600 --slots 1 --slot-wait 600 --verifier "$(vcmd)" > /dev/null 2>&1 &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - ML3: the verifier did not start"
+capjson "$D/home" true 4
+within 120 grepq 'verify: capacity stop (memory: critical) during the verifier' "$D/o.log" || echo "FAIL - ML3: no capacity stop"
+within 120 grepq 'verify: waiting (memory: critical)' "$D/o.log" || echo "FAIL - ML3: no Capacity wait line"
+within 30 nwaiters 1 && s=kept || s="not one waiter: $(st --slots 1)"
+ok "$s" kept "ML3: under the stop its Integration waiter file is kept"
+capjson "$D/home" false 2
+within 120 grepq "verify: $RH" "$D/o.log" && s=held || s="no restart-hold line in 120 s"
+ok "$s" held "ML3: memory at warning: 'verify: $RH'"
+within 30 nwaiters 0 && s=dropped || s="still a waiter: $(st --slots 1)"
+ok "$s|$(is_free && echo free || echo held)|$(count "$D/starts")" "dropped|free|1" "ML3: … its waiter file dropped, the slot free, one start"
+HOME="$D/home" python3 "$VS" run --slots 1 --slot-wait 30 -- sh -c "echo f >> '$D/fresh'" > /dev/null 2>&1; rc=$?
+ok "$rc|$(count "$D/fresh")" "0|1" "ML3: a fresh run at warning runs at once, never behind the restart-held verify"
+capjson "$D/home" false 1
+started 2 || echo "FAIL - ML3: no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$(count "$D/starts")" "0|0|2" "ML3: the restart below warning is green: exit 0, O.rc 0, two starts"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-heat: ALL PASS" || echo "verify-slot-heat: SOME FAILED"
 exit "$fail"
