@@ -312,7 +312,7 @@ test('controls: next (p1 to p4)', () => {
   only(swap(NEXT, "then dispatches this session's own move", 'and ends the turn'), 'p4', 'launch ends the turn')
   only(swap(NEXT, 'is never put to him as a question', 'is offered to him'), 'p4', "§ Don't offers it")
   // the move not clear: the overturn sentence with nowhere to go, in step 4 and then in step 5
-  only(swap(NEXT, ' When the move is not clear there is no line: each launch\'s `A fresh session runs …` sentence, and each held note\'s sentence, prints on its own line just before the menu (**The menu, when the move is not clear.**), so his overturn still has its place.', ''),
+  only(swap(NEXT, ' When the move is not clear there is no line: each launch\'s `A fresh session runs …` sentence, and each held note\'s sentence, prints on its own line just before the menu (the menu below), so his overturn still has its place.', ''),
     'p3', 'no sentence before the menu')
   only(swap(NEXT, ", and its sentence (step 4's **The launch, first in the line.**) prints on its own line just before the menu", ''),
     'p4', 'step 5 prints no sentence before the menu')
