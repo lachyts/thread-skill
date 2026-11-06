@@ -203,7 +203,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
-  which writes nothing and is never a route either.
+  which writes nothing and is never a route either. A rollout note written and
+  waiting with no lead gets its **execute handoff** first, before the move
+  (ADR 0072).
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules parallel-shaped
@@ -734,7 +736,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   new (the quota hold); a missing, stale or unreadable reading falls back to
   them, never to open (ADR 0067 d8; execute away.md § Capacity). A fresh
   reading's `stop_suites` (memory critical) also holds and stops slotted
-  suites, as the **Heat hold** does. A Leg's wait for room is a `wait` of
+  suites, as the **Heat hold** does, and a stopped suite restarts only once
+  memory falls below warning. A Leg's wait for room is a `wait` of
   kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
   mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
@@ -1062,9 +1065,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (orient § 9, schedule step 8; ADR 0057): decided and never asked, it hands
   the note to a fresh session through handoff's **Rollout launch.**, whose doc
   carries `launches:` and briefs the rollout's lead, never this thread. Only his
-  words choose here, not yet or start when ready instead, and only a refused
-  ladder file holds it. Close's `rollout not started:` row names it again for a
-  note this session wrote and left with no lead. _Avoid_: execute offer.
+  words choose here, not yet or start when ready instead, and at orient § 9 and
+  schedule step 8 only a refused ladder file holds it. For a note this session
+  wrote, or its THREAD.md names, that no lead runs, `next` runs it first, before
+  this session's own move, and close ends with it (ADR 0072); only his not yet
+  or a hold close step 2 names leaves close's `rollout not started:` row
+  instead. _Avoid_: execute offer.
 - **Start when ready** — the execute handoff's fourth move, on his word
   (orient § 9, schedule step 8): it stamps `start: unattended` on the rollout note just
   written and ends, running nothing. Said after the handoff, it withdraws the

@@ -16,6 +16,14 @@ a fresh, well-formed file reads as no Capacity, and its callers then fall back t
                          else "capacity: stop_suites" (Chorus saw thermal trapping notifyutil did not). Any other
                          value of the key (false, null, "true", 1, missing) is no stop and never makes the file
                          unreadable, so it never drops C. Never raises.
+    restart_hold(reading)
+                         None, or the level word of the restart hold (p39-7; verify-slot.py contract 7): the run a
+                         Capacity stop put back in line also waits while memory is at warning or worse. Only for a
+                         fresh reading whose signals' `memory` is an integer (never a bool) >= CAPACITY_MEMORY_WARN:
+                         "warning" below CAPACITY_MEMORY_CRITICAL, else "critical". It ignores stop_suites (the caller
+                         reads the stop first). `memory` is Chorus's `kern.memorystatus_vm_pressure_level`: 1 normal, 2
+                         warning, 4 critical (chorus-p96-28); a null, a bool, a string, a float or anything below 2
+                         holds nothing. Never raises.
     login(env)           The caller's Chorus Login name, or None: None unless env holds CLAUDE_CODE_SESSION_ID (a
                          Claude Code session; a Codex or other caller is never held, since the shell sets the pin in
                          every shell); else CLAUDE_ACCOUNT_PINNED stripped, else CLAUDE_CONFIG_DIR's basename (a
@@ -44,6 +52,8 @@ CAPACITY_PRIMARY_LOGIN = "dummy"                     # Chorus's PRIMARY Login: n
 CAPACITY_KEYS = ("capacity", "written_at")           # both required, in away.md § Capacity's key-table order
 CAPACITY_STOP_KEY = "stop_suites"                    # signals' flag: JSON true holds and stops slotted suites (p36-10)
 CAPACITY_MEMORY_CRITICAL = 4                         # signals' `memory` at this level or above: the stop reads memory
+CAPACITY_MEMORY_WARN = 2                             # signals' `memory` at this level or above: a Capacity-stopped
+                                                     # run's restart waits (p39-7, restart_hold)
 
 
 def _stamp(value):
@@ -160,6 +170,23 @@ def suite_stop(reading):
             return "memory: critical"
         return "capacity: stop_suites"
     except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape stops nothing
+        return None
+
+
+def restart_hold(reading):
+    """None, or the restart hold's level word, "warning" or "critical", for a fresh reading whose signals' `memory` is
+    an integer (never a bool) of at least CAPACITY_MEMORY_WARN (the module docstring). Never raises."""
+    try:
+        if reading.get("file") != "fresh":
+            return None
+        signals = reading.get("signals")
+        if not isinstance(signals, dict):
+            return None
+        memory = signals.get("memory")
+        if isinstance(memory, bool) or not isinstance(memory, int) or memory < CAPACITY_MEMORY_WARN:
+            return None
+        return "critical" if memory >= CAPACITY_MEMORY_CRITICAL else "warning"
+    except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape holds nothing
         return None
 
 
