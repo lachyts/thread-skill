@@ -171,7 +171,7 @@ on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the
 Mac is back at 2. Each lead also keeps a lease, `~/.config/thread/leases/<rollout>.json`,
 rewritten at its every `next` and loop entry; a rollout whose lease has lapsed (45
 minutes after its last write, or after the Mac's latest boot or wake if later,
-unless a room stop stands) stops holding room in the count.
+unless a room stop stands under its 6 h bound) stops holding room in the count.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
