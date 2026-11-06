@@ -17,9 +17,9 @@
 //   h6  orient § 9: its heading and anchor, decided and never asked, the Fresh session decided, the other moves on
 //       his word, the one hold, several notes, no question tool, and Start when ready withdrawing a launch said after
 //       the handoff; the vault grammar's Writers stamp only a note whose launch was never made or was withdrawn.
-//   h7  handoff's **Invocation gate.** names schedule step 8 and close's row; **Rollout launch.** carries
-//       `launches:`, skips Open captures and the Thread state row, and is a dispatch; the handoff-lifecycle's Front
-//       matter, While pending, Withdrawn and Thread state say the same.
+//   h7  handoff's **Invocation gate.** names schedule step 8 and close's row (beside next step 4's held-note line,
+//       ADR 0072); **Rollout launch.** carries `launches:`, skips Open captures and the Thread state row, and is a
+//       dispatch; the handoff-lifecycle's Front matter, While pending, Withdrawn and Thread state say the same.
 //   h8  close: the `launch` status, step 2's **Stale launch.** (`unstarted` on each launch doc's `launches:`:
 //       `closed` stale at once, `started` stale under the peer guard's rule (b), anything else left) with 7.2's
 //       deletion and step 8's stale row, step 2's **Rollouts this session wrote.** (its evidence order, orient-all
@@ -186,7 +186,7 @@ function check(F) {
   const h = F[HANDOFF] ?? ''
   const gate = slice(h, /^\*\*Invocation gate\.\*\*/, /^$/) ?? ''
   need('h7', "handoff's **Invocation gate.**", gate, ["or a **Rollout launch.** that schedule step 8's **Execute handoff.**",
-    '"hand it off" on close\'s `rollout not started:` row dispatched', "never a fork of this conversation"])
+    '"hand it off" on close\'s `rollout not started:` row or on next step 4\'s held-note line dispatched', "never a fork of this conversation"])
   const rl = slice(h, /^\*\*Rollout launch\.\*\*/, /^\*\*Split launch\.\*\*/) ?? ''
   need('h7', "handoff's **Rollout launch.**", rl, ["orient § 9's Fresh session, or schedule step 8's **Execute handoff.**",
     'or his "hand it off" on close\'s `rollout not started:` row', 'Its front matter adds `launches: <rollout slug>`',
@@ -313,7 +313,7 @@ test('controls: each rule fails on its own known-bad shape', () => {
   only(swap(ORIENT, /`already_started_by_stage` or `already_started` → no stamp, and it says a lead is\n\s*already running;/,
     '`already_started_by_stage` or `already_started` → the stamp all the same;'), 'h6', 'orient stamps beside a running lead')
   only(swap(GRAMMAR, 'whose\n  launch was never made or was withdrawn first', 'whose\n  launch was made'), 'h6', 'grammar writers')
-  only(swap(HANDOFF, ' or Lachy\'s\n"hand it off" on close\'s `rollout not started:` row dispatched', ''), 'h7', 'gate close row')
+  only(swap(HANDOFF, ' or Lachy\'s\n"hand it off" on close\'s `rollout not started:` row or on next step 4\'s held-note line dispatched', ''), 'h7', 'gate close row')
   only(swap(HANDOFF, '**Open captures.** and the **Thread state.** row are skipped', '**Open captures.** runs'), 'h7', 'skips')
   only(swap(CLOSE, "Not yet's line, a held `Execute:` line and step 8's by-hand `execute [[<slug>]]` lines are no handover. ", ''), 'h8', 'not yet')
   only(swap(CLOSE, /A handoff withdrawn later in this session is no handover[^]*?are no withdrawal\./, ''), 'h8', 'withdrawn')

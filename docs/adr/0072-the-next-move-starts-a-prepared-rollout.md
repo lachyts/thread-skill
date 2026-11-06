@@ -40,15 +40,20 @@ names the rollout as handed to a fresh lead, never as a `/thread:execute` step l
 the thread, a note this session wrote launches all the same, since only this session knows it waits (step 3's decided
 act whose inputs only this session holds), and the archive line follows; a note only THREAD.md names is that other
 session's, so it is not checked. Step 4's line opens `Next move: hand [[<slug>]] to a fresh lead, then <move>, …` and
-says "not yet" withdraws the handoff.
+says "not yet" withdraws the handoff; when the move is not clear there is no line, so that sentence prints on its own
+line just before the menu. A held note's sentence asks for "hand it off", and that reply runs handoff's Rollout launch
+for the note, never a handoff of this thread: handoff's Invocation gate and **Rollout launch.** name next step 4's
+held-note line beside close's row. With archive as the move, the launch's sentence opens the archive line before its
+two parts, whose archive part says "Nothing else is written."
 
 **d2. Close ends with the launch.** A new sub-step 7.10 runs the Rollout launch for each note step 2 found `unstarted`
 with no hold, after every commit and after 7.9, before step 8's report. Handoff lands its own doc, and that landing row
 counts in step 9's banner choice. The statement row `rollout handed off: [[<slug>]] · <doc> · starting on the Stage
-(task_id …)`, or `· manual handoff: its prompt is above; run it from <root>`, replaces handoff's Chorus closing line,
-so close's banner stays last. A manual handoff's labelled prompt prints fenced, just above the report. A resolver
-failure asks nothing and gives the `rollout not started: … (launch failed: …)` row; a `create_thread` error is handoff
-§ Fail closed.
+(task_id …)`, `· started as a Codex Desktop task (<threadId>)`, or `· manual handoff: its prompt is above; run it from
+<root>`, replaces handoff's Chorus closing line, so close's banner stays last. A manual handoff's labelled prompt prints
+fenced, just above the report, and in Codex Desktop the created task's `::created-thread` directive prints bare in the
+same place, so nothing follows the banner. A resolver failure asks nothing and gives the `rollout not started: …
+(launch failed: …)` row; a `create_thread` error is handoff § Fail closed.
 
 **d3. The holds.** Each gives close's `rollout not started:` row with a `(held: <why>)` suffix, and `next` names the
 note in its line; nothing is launched:
@@ -62,18 +67,25 @@ note in its line; nothing is launched:
 - a THREAD.md-named note fails its guard (d4), or the handoff scan failed;
 - `/thread:open save`, and a Leg's close.
 
+Only his not yet and orient-all's `left[]` carry into a later session: they live only in the transcript that saw them.
+So close step 4 writes every held note's step in one fixed form, `/thread:execute [[<slug>]] (held: <why>)`, and a later
+session's guard (d4) reads `(held: not yet)` or `(held: orient-all left it)` as that hold again: close's row or next's
+line, never a launch, until he says "hand it off". The holds read fresh (the ladder, no Project root line, a failed
+guard or scan, `/thread:open save`, a Leg) never carry: a held step naming one reads as the bare step it holds.
+
 **d4. THREAD.md-named notes.** A note counts when the active THREAD.md's Where we are, Next steps or Resume
 instructions, as they stood before this session's first write to it, carry a `[[<project-slug>-rollout-<YYYY-MM-DD>[-N]]]`
 link or a `/thread:execute [[<slug>]]` line naming it as the waiting or next step, never only as history. Only
 `unstarted <slug> <root>` from `unfinished-rollout.py` makes one launchable, and only when all three hold: THREAD.md's
-own lines record no handover for it; on the Chorus Stage, `list_sessions` shows no session on it; and `unstarted` was
-also run with the Project root's handoff home (`handoff-home.sh --dir <root>`'s `docs/handoffs`). Otherwise close
-prints the row, or `next` prints the line, and nothing is launched.
+own lines record no handover for it and no carried hold (d3); on the Chorus Stage, `list_sessions` shows no session on
+it; and `unstarted` was also run with the Project root's handoff home (`handoff-home.sh --dir <root>`'s
+`docs/handoffs`). Otherwise close prints the row, or `next` prints the line, and nothing is launched.
 
 **d5. THREAD.md records the handover.** Close step 4 records the launch 7.10 will run as `close hands [[<slug>]] to a
 fresh lead (see the step-8 row)`, which stays true if the launch fails, and logs a handover already in the transcript
-as `handed [[<slug>]] to a fresh lead`. It never keeps a bare `/thread:execute [[<slug>]]` step for either. A later
-session's guard (d4) reads those lines as a recorded handover, so it prints a row and never starts a second lead.
+as `handed [[<slug>]] to a fresh lead`. It never keeps a bare `/thread:execute [[<slug>]]` step for either, and writes a
+held note's step in d3's one form. A later session's guard (d4) reads those lines as a recorded handover, so it prints a
+row and never starts a second lead.
 
 ## Decided for him (overturnable)
 
@@ -85,6 +97,8 @@ session's guard (d4) reads those lines as a recorded handover, so it prints a ro
   `landed` → B).
 - A manual 7.10 handoff is a follow-up for the Stage's flag read (its prompt is his to open); a raised card is not.
 - The ladder is read fresh at the launch; a held `Execute:` line printed earlier holds nothing by itself.
+- Only his not yet and orient-all's `left[]` carry into a later session (d3): every other hold is read fresh there, so
+  a ladder file fixed or a Project root line added since lets that session launch.
 - A THREAD.md-named note is launched only behind the three-part guard (d4); a recorded handover with `unstarted` still
   gets a row, never a launch, and he says "hand it off" when no lead runs.
 - Orient-all's `left[]` is a hold, and a note this thread's own handoff doc names as its consumer's step is a handover:
@@ -118,7 +132,8 @@ session's guard (d4) reads those lines as a recorded handover, so it prints a ro
   orient § 9 and schedule step 8.
 - `next` may run a dispatch and a move in one turn. Handoff's Invocation gate, **Rollout launch.**, **Skipped on a
   dispatch.**, **Failure path.** and § Build name close 7.10 and next step 5, so § Next for this session never runs a
-  second `next`.
+  second `next`; the gate, **Rollout launch.** and **Skipped on a dispatch.** also name his "hand it off" to next step
+  4's held-note line beside close's row.
 - A double lead stays possible for a THREAD.md-named note in one window: an orient-all § 7 card that waits, or a
   launch doc in a third home, with no `lead-entry` yet, nothing in THREAD.md, and the session off the Stage (or a
   waiting card `list_sessions` does not list). Execute's per-task `owner:` stamps and claims keep one task from
@@ -130,5 +145,6 @@ session's guard (d4) reads those lines as a recorded handover, so it prints a ro
 
 - A description trim for next and close, whose descriptions do not mention the launch. The Makefile requires a scored
   eval baseline before any description changes (`make evals`), and the trim must stay inside the 7950 description
-  ratchet.
-- README's next and close rows, which still describe the moves without the launch.
+  ratchet. Filed as the vault task `thread-skill-followup-next-and-close-descriptions-name-the-launch`.
+- README's next and close rows, which still describe the moves without the launch. Filed as the vault task
+  `thread-skill-followup-readme-next-and-close-rows-name-the-launch`.
