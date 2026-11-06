@@ -588,6 +588,10 @@ Subcommands:
               line, nothing written): not found, serial, incomplete (so it runs after step 7.5, which closes the prior),
               closed, superseded, paused or pause-requested, not never started, a valued `started_unattended:`, or no
               `supersedes:`.
+              `--backlog` (ADR 0071): the Backlog orient's decided start (skills/orient/backlog.md § B8) on a parallel
+              note its forks wrote. It drops only the `supersedes:` refusal and adds one: a rollout-scope `hold_until`
+              (readable or not) is refused, `… carries hold_until <pr>: a held queue starts on Lachy's word`. Its undo
+              line ends `the Backlog orient stamped it`.
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
@@ -11253,7 +11257,9 @@ def cmd_stamp_start(args) -> int:
     """Under the chain (schedule step 8, after step 7.5): stamp `start: unattended` on the note the approved queue's
     regenerate just wrote, and print the one undo line. Refuses (exit 1, one ERROR line, nothing written) a note that
     is not found, serial, incomplete, closed, superseded, paused, not never started, already started by the Stage (a
-    valued `started_unattended:`) or that supersedes nothing. A stamp already there is not rewritten."""
+    valued `started_unattended:`) or that supersedes nothing. A stamp already there is not rewritten.
+    With `--backlog` (ADR 0071, skills/orient/backlog.md § B8) the note need supersede nothing, and a rollout-scope
+    `hold_until` (readable or not) refuses instead: a held queue starts on Lachy's word, never the Backlog orient's."""
     def refuse(msg):
         print(f"ERROR: stamp-start: {msg}", file=sys.stderr)
         return 1
@@ -11283,7 +11289,12 @@ def cmd_stamp_start(args) -> int:
         return refuse(f"{stem} carries started_unattended: {_scalar(note.get('started_unattended'))}: the Stage "
                       "already started it")
     prior = _link_slug(note, "supersedes")
-    if not prior:
+    backlog = getattr(args, "backlog", False)
+    if backlog:
+        own = _hold_until(note, None)
+        if own is not None:
+            return refuse(f"{stem} carries {HOLD_KEY} {own['pr'] or '<unreadable>'}: a held queue starts on Lachy's word")
+    elif not prior:
         return refuse(f"{stem} supersedes nothing: only an approved queue's regenerate stamps its new note here")
     if not _start_unattended(note):
         note.set(START_KEY, START_UNATTENDED, after=("status",))
@@ -11291,6 +11302,10 @@ def cmd_stamp_start(args) -> int:
         note.save()
     except OSError as e:
         return refuse(f"{stem}: cannot write {path}: {e}; nothing written")
+    if backlog:
+        print(f"undo: remove {START_KEY}: {START_UNATTENDED} from [[{stem}]] before the Stage starts it, or pause "
+              f"[[{stem}]] once it runs; the Backlog orient stamped it")
+        return 0
     entry = index.get(prior)
     hold = (_hold_until(entry[1], None) if entry is not None else None) or _hold_until(note, None)
     prior_name = entry[0].stem if entry is not None else _wikilink_slug(_scalar(note.get("supersedes")))
@@ -13609,6 +13624,8 @@ def _parser():
     ss = sub.add_parser("stamp-start", help="under an approved queue's chain (schedule step 8): stamp start: unattended "
                                             "on the note its regenerate wrote, print one undo line; exit 1 refused")
     ss.add_argument("--rollout", required=True, help="path to the new rollout note (it supersedes the approved queue)")
+    ss.add_argument("--backlog", action="store_true", help="the Backlog orient's decided start (ADR 0071): the note "
+                                                            "need supersede nothing, and a rollout hold_until refuses")
     ss.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ss.set_defaults(func=cmd_stamp_start)
 
