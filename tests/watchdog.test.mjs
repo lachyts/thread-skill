@@ -7,7 +7,8 @@
 // note-lock dir, the state file), a node http server standing in for ntfy (and one for the Stage where a case needs it
 // up), and a closed port for a Stage that is down. The script runs through an async spawn, so the in-process servers
 // keep answering. Record mtimes are set with fs.utimesSync against a fixed --now. W14 loads watchdog.py in process
-// (python3 -c) with a moving_verdict that raises for one rollout, so a defect there is a lost look, never the whole run.
+// (python3 -c) with a moving_verdict that raises for one rollout, so a defect there is a lost look, never the whole run;
+// W17 loads it the same way with NTFY_PY a script that hangs and NTFY_TIMEOUT 2 s, so the bound is seen in seconds.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -337,4 +338,72 @@ test('W14. a rollout whose moving_verdict raises anything is a lost look: its ke
   assert.match(JSON.parse(posts(n)[0].body).message, new RegExp(RO))
   assert.deepEqual(Object.keys(state(s).notified).sort(), [BAD, RO])
   assert.equal(state(s).notified[BAD].lastEvent, 'x')
+})
+
+test('W15. a state file that is not UTF-8 is one WARN, read as empty, never a traceback, and rewritten valid', async (t) => {
+  const s = scratch(t); const n = await ntfy(t); const chorus = await closedPort()
+  stall(s)
+  fs.mkdirSync(path.dirname(s.state), { recursive: true })
+  fs.writeFileSync(s.state, Buffer.from([0o377, 0o376, 0x7b]))
+  const r = await check(s, chorus, n)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr.split('\n').filter((l) => /^WARN: watchdog: state .* is corrupt/.test(l)).length, 1, r.stderr)
+  assert.ok(!r.stdout.includes('Traceback') && !r.stderr.includes('Traceback'), r.stderr)
+  assert.equal(posts(n).length, 1, r.stdout)
+  assert.equal(state(s).v, 1)
+  assert.deepEqual(Object.keys(state(s).notified), [RO])
+})
+
+test('W16. plist: python3 on PATH that is this interpreter is the job\'s interpreter, and PATH still starts with gh\'s dir', async (t) => {
+  const s = scratch(t)
+  const exe = execFileSync(PY, ['-c', 'import sys; print(sys.executable)'], { env: s.env, encoding: 'utf8' }).trim()
+  const pydir = path.join(s.dir, 'pydir')
+  fs.mkdirSync(pydir)
+  fs.symlinkSync(exe, path.join(pydir, 'python3'))
+  const r = await run(s, ['plist'], { env: { ...s.env, PATH: `${pydir}:${s.bin}:/usr/bin:/bin` } })
+  assert.equal(r.status, 0, r.stderr)
+  const job = JSON.parse(execFileSync(PY, ['-c', 'import json, plistlib, sys; print(json.dumps(plistlib.loads(sys.stdin.buffer.read())))'],
+    { input: r.stdout, encoding: 'utf8' }))
+  assert.equal(job.ProgramArguments[0], path.join(pydir, 'python3'))
+  assert.equal(job.EnvironmentVariables.PATH.split(':')[0], s.bin)
+})
+
+test('W17. an ntfy-push that hangs is stopped at its bound: nothing recorded, exit 124, what it printed shown as text', async (t) => {
+  const s = scratch(t); const n = await ntfy(t); const chorus = await closedPort()
+  stall(s)
+  const hang = path.join(s.dir, 'hang-ntfy.py')
+  const pidFile = path.join(s.dir, 'hang.pid')
+  fs.writeFileSync(hang, ['import os, sys, time', 'open(os.environ["HANG_PID"], "w").write(str(os.getpid()))', 'sys.stdin.read()',
+    'print("posting", flush=True)', 'time.sleep(30)', ''].join('\n'))
+  // watchdog.py in process (W14's harness), its NTFY_PY the hanging script and NTFY_TIMEOUT 2 s, both read at call time.
+  const harness = [
+    'import importlib.util, sys',
+    'from pathlib import Path',
+    'sys.dont_write_bytecode = True',
+    'spec = importlib.util.spec_from_file_location("wd", sys.argv[1]); wd = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(wd)',
+    'wd.NTFY_PY = Path(sys.argv[2])',
+    'wd.NTFY_TIMEOUT = 2',
+    'sys.exit(wd.main(sys.argv[3:]))',
+  ].join('\n')
+  const t0 = Date.now()
+  const r = await spawnPy(s, ['-B', '-c', harness, WD, hang, ...checkArgs(s, chorus, n)], { env: { ...s.env, HANG_PID: pidFile } })
+  assert.ok(Date.now() - t0 < 15000, `back within 15 s: ${Date.now() - t0} ms`)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, new RegExp(`${RO} stalled silent: not notified \\(ntfy-push exit 124\\)`))
+  assert.ok(r.stdout.includes('watchdog: posting'), r.stdout)
+  assert.ok(r.stderr.includes('watchdog: ntfy-push did not run: ntfy-push ran past 2 s and was stopped'), r.stderr)
+  for (const out of [r.stdout, r.stderr]) {
+    assert.ok(!out.includes('Traceback'), out)
+    assert.ok(!out.includes("b'"), out)
+  }
+  assert.equal(posts(n).length, 0)
+  assert.equal(state(s), null, 'nothing recorded')
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+  assert.ok(pid > 0)
+  let alive = true
+  for (let i = 0; i < 20 && alive; i++) {
+    try { process.kill(pid, 0); await new Promise((resolve) => setTimeout(resolve, 100)) } catch { alive = false }
+  }
+  assert.equal(alive, false, `the hung ntfy-push (${pid}) is gone`)
 })

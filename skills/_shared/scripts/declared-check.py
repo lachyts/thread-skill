@@ -48,8 +48,8 @@ On `advance`, `failed` and `timeout` are the `--advance` run's own; a failed or 
 
 Exit 0 on every header. Exit 2 on a refusal (a usage error, a project that is not one live project note,
 `advance` on a note with no `orient_check:`, an --expect that is not 64 lowercase hex): stderr carries one line
-starting `declared-check: ` and nothing ran. Exit 3 when the vault or PyYAML is missing. Signalled, it kills the
-live check's group and exits 128 + the signal number.
+starting `declared-check: ` and nothing ran. Exit 3 when the vault or PyYAML is missing, or next-action.py or
+background_job.py will not load. Signalled, it kills the live check's group and exits 128 + the signal number.
 """
 import argparse
 import hashlib
@@ -60,10 +60,10 @@ import re
 import signal
 import subprocess
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NEXT_ACTION_PY = os.path.join(HERE, "next-action.py")
+BACKGROUND_JOB_PY = os.path.join(HERE, "background_job.py")  # kill_group, the stop the background jobs share
 VAULT_DEFAULT = "~/repos/obsidian"
 TIMEOUT_DEFAULT = 90.0
 KILL_GRACE = 2.0
@@ -94,10 +94,13 @@ def _load(name, path):
     return mod
 
 
+_mods, _path = [], None
 try:
-    NA = _load("thread_next_action", NEXT_ACTION_PY)
+    for _name, _path in (("thread_next_action", NEXT_ACTION_PY), ("thread_background_job", BACKGROUND_JOB_PY)):
+        _mods.append(_load(_name, _path))
 except Exception as e:  # a broken install: report it as this script, never as a traceback
-    fail(3, "cannot load %s: %s" % (NEXT_ACTION_PY, e))
+    fail(3, "cannot load %s: %s" % (_path, e))
+NA, BJ = _mods
 
 
 class Parser(argparse.ArgumentParser):
@@ -185,24 +188,9 @@ def git_env():
 
 
 def kill_group(proc):
-    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it (lead-integrate's)."""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        proc.poll()
-        return
-    end = time.monotonic() + KILL_GRACE
-    while time.monotonic() < end:
-        proc.poll()
-        try:
-            os.killpg(proc.pid, 0)
-        except (ProcessLookupError, PermissionError):
-            return
-        time.sleep(0.05)
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
+    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it: background_job.py's, with
+    KILL_GRACE."""
+    BJ.kill_group(proc, KILL_GRACE)
 
 
 def on_signal(signum, _frame):

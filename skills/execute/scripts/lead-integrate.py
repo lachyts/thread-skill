@@ -325,6 +325,11 @@ _spec.loader.exec_module(rr)
 _vs_spec = importlib.util.spec_from_file_location("verify_slot", Path(__file__).resolve().parent / "verify-slot.py")
 VS = importlib.util.module_from_spec(_vs_spec)
 _vs_spec.loader.exec_module(VS)
+# The process-group stop the background jobs share (skills/_shared/scripts/background_job.py's kill_group, p39-6).
+_bj_py = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "background_job.py"
+_bj_spec = importlib.util.spec_from_file_location("thread_background_job", _bj_py)
+BJ = importlib.util.module_from_spec(_bj_spec)
+_bj_spec.loader.exec_module(BJ)
 
 # ---- engine copies (task.workflow.js; pinned by tests/lead-integrate.test.sh) --------------------------
 
@@ -938,28 +943,10 @@ def _on_signal(signum, _frame):
 
 
 def _kill_group(proc):
-    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it."""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        proc.poll()
-        return
-    end = time.monotonic() + KILL_GRACE
-    while time.monotonic() < end:
-        proc.poll()
-        try:
-            os.killpg(proc.pid, 0)
-        except (ProcessLookupError, PermissionError):
-            return
-        time.sleep(0.1)
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        pass
+    """background_job.py's kill_group: SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL
+    it and reap the step for up to 5 s. Kept by this name and signature because reconcile-rollout.py calls
+    li._kill_group."""
+    BJ.kill_group(proc, KILL_GRACE, reap=5)
 
 
 def _run_step(cmd, tree, log, deadline, guard=False, slot=None, env=None):
