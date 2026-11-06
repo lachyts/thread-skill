@@ -62,7 +62,7 @@ P('Mira', 'active', repos('mira'))
 P('Mirb', 'active', repos('mirb'))
 P('Two', 'active', repos('two-a', 'two-b'))
 P('Dup One', 'active', repos('dup1'))
-P('dup-one', 'active', repos('dup2'))
+P('dup-one', 'active', repos('dup1'))
 P("Lachy's Tools", 'active', repos('lt1'))
 P('Lachys Tools', 'active', repos('lt2'))
 P('Café', 'active', repos('cafe1'))
@@ -117,7 +117,9 @@ for (const s of ['grl-a', 'grl-b']) T(s, 'open', ['Grl'])
 T('sess-a', 'open', ['Sess'])
 T('bo-orient', 'open', ['Bo'])
 // Ready work on a dependency the ranker lets pass (Ready, unheld) but no scheduled run will hold: the same-root waiter's
-// task (a deadlock, as Act takes the root), a blocked run's, session-lane work; and, held in turn, work on one of them.
+// task (dup-one's: Dup One, of one projectSlug, takes the root), a blocked run's, session-lane work; and, held in turn,
+// work on one of them. Act's task on Shared's is scheduled: Shared, another project on Act's root, goes after it.
+T('act-on-dup', 'open', ['Act'], links('depends-on', ['dup2-a']))
 T('act-on-shared', 'open', ['Act'], links('depends-on', ['shared-a']))
 T('deps-blk', 'open', ['Deps'], links('depends-on', ['blk-a']))
 T('deps-sess', 'open', ['Deps'], links('depends-on', ['sess-a']))
@@ -128,7 +130,7 @@ T('chain-a', 'open', ['Chain'], links('depends-on', ['deps-blk']))
 T('gone-dropped', 'dropped', ['Rec'])
 write(path.join(TASKS, 'gone-archived.md'), fm('tags:\n  - task\n  - archived\nstatus: open\nprojects:\n  - "[[Rec]]"'))
 write(path.join(TASKS, 'Archive', 'gone-shelved.md'), fm('tags:\n  - task\nstatus: open\nprojects:\n  - "[[Rec]]"'))
-T('tomb-open', 'merged', ['Rec'], '\nmerged_into: "[[shared-a]]"')
+T('tomb-open', 'merged', ['Rec'], '\nmerged_into: "[[dup2-a]]"')
 T('tomb-done', 'merged', ['Rec'], '\nmerged_into: "[[rec-done]]"')
 
 // The record cases' tasks (ungraded: an ungraded task holds nothing it does not block).
@@ -252,7 +254,7 @@ const GRADES = {
   Act: [R('act-a', 'parallel', { size: 'M' }),
     G('act-call', 'One call', 'parallel', { decisions: [D('Which store?', 'sqlite', ['sqlite', LONG60], { fork: 'Store choice' })] }),
     R('act-dep'), G('act-orient', 'Orient', 'serial'), R('act-held'), R('act-on-park'), R('act-cyc-a'), R('act-cyc-b'),
-    R('act-on-shared')],
+    R('act-on-shared'), R('act-on-dup')],
   Shared: [R('shared-a')],
   Mira: [R('mira-a')],
   Mirb: [R('mirb-a')],
@@ -547,11 +549,11 @@ test('D7. acceptance: plan schedules decided members whose holds clear, and noth
   const act = runId('Act', 'parallel', 'shared')
   const j = tracked(PLAN())
   assert.deepEqual(entryOf(j, runId('Crown', 'parallel', 'crown')).members, ['crown-a', 'crown-b'], 'Ready is scheduled')
-  assert.deepEqual(entryOf(j, act).members, ['act-a'])
+  assert.deepEqual(entryOf(j, act).members, ['act-a', 'act-on-shared'])
   assert.ok(j.undecided.some((x) => x.slug === 'act-call' && x.grade === 'One call'), 'an undecided One call waits')
   assert.deepEqual(j.held.find((x) => x.slug === 'act-dep').blockedBy, [{ slug: 'act-call', why: 'One call' }])
   const d = tracked(plan(['--decided', 'act-call']))
-  assert.deepEqual(entryOf(d, act).members, ['act-a', 'act-dep', 'act-call'], 'decided, and its dependant clears')
+  assert.deepEqual(entryOf(d, act).members, ['act-a', 'act-dep', 'act-on-shared', 'act-call'], 'decided, and its dependant clears')
   assert.ok(!d.undecided.some((x) => x.slug === 'act-call') && !d.held.some((x) => x.slug === 'act-dep'))
   for (const p of [j, d]) {
     assert.deepEqual(p.held.find((x) => x.slug === 'act-held').blockedBy, [{ slug: 'act-orient', why: 'Orient' }], 'Orient-held stays')
@@ -561,12 +563,12 @@ test('D7. acceptance: plan schedules decided members whose holds clear, and noth
   const u = tracked(plan(['--unparked', 'ParkA', '--decided', 'act-cyc-a', '--decided', 'act-cyc-b']))
   assert.ok(entryOf(u, act).members.includes('act-on-park'), 'the parked hold clears once its home is unparked')
   for (const c of ['act-cyc-a', 'act-cyc-b']) assert.ok(u.held.some((x) => x.slug === c), `${c} stays held, decided or not`)
-  assert.deepEqual(entryOf(tracked(plan(['--unparked', 'Work/Projects/ParkA.md'])), act).members, ['act-a', 'act-on-park'],
+  assert.deepEqual(entryOf(tracked(plan(['--unparked', 'Work/Projects/ParkA.md'])), act).members, ['act-a', 'act-on-park', 'act-on-shared'],
     '--unparked takes the note too')
   // A dependency the ranker lets pass but no scheduled entry holds: the member is held, whatever is decided.
   const rk = ranked()
   const NOT = (slug) => [{ slug, why: 'dependency not scheduled' }]
-  const WANT = { 'act-on-shared': 'shared-a', 'deps-blk': 'blk-a', 'deps-sess': 'sess-a', 'chain-a': 'deps-blk' }
+  const WANT = { 'act-on-dup': 'dup2-a', 'deps-blk': 'blk-a', 'deps-sess': 'sess-a', 'chain-a': 'deps-blk' }
   for (const p of [j, d, u]) {
     for (const [slug, dep] of Object.entries(WANT)) {
       assert.deepEqual(rk.tasks.find((t) => t.slug === slug).blockedBy, [], `${slug}: the ranker holds nothing`)
@@ -575,6 +577,12 @@ test('D7. acceptance: plan schedules decided members whose holds clear, and noth
     }
   }
   assert.ok(entryOf(j, act).members.includes('act-a'), 'the run keeps its other members')
+  // A dependency in a run that goes after its own on one root (another project's, p39-10) is scheduled: no hold.
+  for (const p of [j, d, u]) {
+    assert.ok(entryOf(p, act).members.includes('act-on-shared'), 'act-on-shared goes with Act')
+    assert.ok(entryOf(p, runId('Shared', 'parallel', 'shared')).members.includes('shared-a'), 'its dependency goes too')
+    assert.ok(!p.held.some((x) => x.slug === 'act-on-shared'))
+  }
 })
 
 // ---- D8. plan: runs ---------------------------------------------------------------------------------------------------
@@ -588,12 +596,22 @@ test('D8. plan: a blocker, an unknown or undeclared repo, a shared root and a pa
   entryOf(j, crownRun.id)
   assert.equal(waitOf(j, runId('Two', 'parallel')).why.kind, 'repo unknown')
   assert.equal(waitOf(j, runId('NoRepo', 'parallel')).why.kind, 'no repo declared')
-  const shared = waitOf(j, runId('Shared', 'parallel', 'shared'))
-  assert.equal(shared.why.kind, 'same root')
-  assert.ok(shared.why.detail.includes(runId('Act', 'parallel', 'shared')), shared.why.detail)
-  const mirb = waitOf(j, runId('Mirb', 'parallel', 'mirb'))
-  assert.equal(mirb.why.kind, 'same root', 'matching rolloutRoots with different roots are one root')
-  assert.ok(mirb.why.detail.includes(runId('Mira', 'parallel', 'mira')) && mirb.why.detail.includes(CLONE), mirb.why.detail)
+  // The root contest (p39-10): one run per projectSlug on a root. dup-one, of Dup One's projectSlug, waits on Dup
+  // One's root; Shared, another project on Act's, goes in a batch after Act's, its after[] naming Act.
+  const dupOne = runId('Dup One', 'parallel', 'dup1')
+  const dupTwo = runId('dup-one', 'parallel', 'dup1')
+  const dup = waitOf(j, dupTwo)
+  assert.equal(dup.why.kind, 'same root')
+  assert.equal(dup.why.detail, `${dupOne} goes on ${ROOT('dup1')}`)
+  const shared = entryOf(j, runId('Shared', 'parallel', 'shared'))
+  const actRun = entryOf(j, runId('Act', 'parallel', 'shared'))
+  assert.deepEqual([shared.after, actRun.after], [[actRun.run], []])
+  assert.ok(shared.batch > actRun.batch, `Shared in batch ${shared.batch}, after Act's ${actRun.batch}`)
+  const mirb = entryOf(j, runId('Mirb', 'parallel', 'mirb'))
+  const miraRun = entryOf(j, runId('Mira', 'parallel', 'mira'))
+  assert.deepEqual(mirb.after, [miraRun.run], 'matching rolloutRoots with different roots are one root')
+  assert.ok(mirb.batch > miraRun.batch, `Mirb in batch ${mirb.batch}, after Mira's ${miraRun.batch}`)
+  for (const e of j.schedule) if (![shared.run, mirb.run].includes(e.run)) assert.deepEqual(e.after, [], e.run)
   for (const e of j.schedule) {
     assert.ok(!e.args.includes('--regenerate'), e.run)
     assert.equal(e.args, `--tasks ${e.members.join(',')}`)
@@ -622,29 +640,30 @@ test('D8. plan: a blocker, an unknown or undeclared repo, a shared root and a pa
   const { j: m } = planWith('mira-on-blk', { 'mira-a': ['blk-a'] })
   assert.deepEqual(waitOf(m, mira).why,
     { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: blk-a' })
-  assert.deepEqual(entryOf(m, mirb.run).members, ['mirb-a'], 'the same-root waiter goes once the root is free')
+  assert.deepEqual([entryOf(m, mirb.run).members, entryOf(m, mirb.run).after], [['mirb-a'], []],
+    'the next run on the root goes once the root is free, after nothing')
   // The review's probe: Act's act-a depends on Mirb's task. Mira never takes the clone root, so Mirb goes, act-a goes
-  // with it, and Act keeps its root: the lower-ranked Shared still waits on it.
+  // with it, and Act keeps its root: the lower-ranked Shared goes after it.
   const { j: ma } = planWith('mira-act', { 'mira-a': ['blk-a'], 'act-a': ['mirb-a'] })
-  assert.deepEqual(entryOf(ma, act).members, ['act-a'], 'act-a is scheduled, its dependency with it')
+  assert.ok(entryOf(ma, act).members.includes('act-a'), 'act-a is scheduled, its dependency with it')
   assert.deepEqual(entryOf(ma, mirb.run).members, ['mirb-a'])
-  assert.equal(waitOf(ma, shared.run).why.kind, 'same root')
-  assert.ok(waitOf(ma, shared.run).why.detail.includes(act), waitOf(ma, shared.run).why.detail)
-  assert.ok(!ma.held.some((x) => x.slug === 'act-a'))
-  assert.deepEqual(ma.held.find((x) => x.slug === 'act-on-shared').blockedBy, [{ slug: 'shared-a', why: 'dependency not scheduled' }])
-  // A genuine late hold, a same-root cascade the pre-hold cannot foresee: crown-a and crown-b depend on shared-a, whose
-  // run loses the shared root to Act, and act-a depends on crown-a. The first choice holds both Crown members; the
-  // second holds act-a, so Act empties and frees the root, and Shared goes. crown-a and crown-b stay held, so the plan
-  // never flips back, and say why: their dependency was scheduled only after they were held, and they go next pass.
+  assert.deepEqual(entryOf(ma, shared.run).after, [act])
+  assert.ok(!ma.held.some((x) => x.slug === 'act-a' || x.slug === 'act-on-shared'))
+  assert.deepEqual(ma.held.find((x) => x.slug === 'act-on-dup').blockedBy, [{ slug: 'dup2-a', why: 'dependency not scheduled' }])
+  // A genuine late hold, a same-root cascade the pre-hold cannot foresee: crown-a and crown-b depend on dup2-a, whose
+  // run loses the dup1 root to Dup One (one projectSlug), and dup1-a depends on crown-a. The first choice holds both
+  // Crown members (and act-on-dup); the second holds dup1-a, so Dup One empties and frees the root, and dup-one goes.
+  // crown-a and crown-b stay held, so the plan never flips back, and say why: their dependency was scheduled only after
+  // they were held, and they go next pass.
   const crown = runId('Crown', 'parallel', 'crown')
-  const { j: late } = planWith('late', { 'crown-a': ['shared-a'], 'crown-b': ['shared-a'], 'act-a': ['crown-a'] })
-  assert.deepEqual(entryOf(late, shared.run).members, ['shared-a'])
-  const LATE = [{ slug: 'shared-a', why: 'dependency scheduled late' }]
-  for (const s of ['crown-a', 'crown-b', 'act-on-shared']) assert.deepEqual(late.held.find((x) => x.slug === s)?.blockedBy, LATE, s)
-  assert.deepEqual(late.held.find((x) => x.slug === 'act-a').blockedBy, [{ slug: 'crown-a', why: 'dependency not scheduled' }])
+  const { j: late } = planWith('late', { 'crown-a': ['dup2-a'], 'crown-b': ['dup2-a'], 'dup1-a': ['crown-a'] })
+  assert.deepEqual([entryOf(late, dupTwo).members, entryOf(late, dupTwo).after], [['dup2-a'], []])
+  const LATE = [{ slug: 'dup2-a', why: 'dependency scheduled late' }]
+  for (const s of ['crown-a', 'crown-b', 'act-on-dup']) assert.deepEqual(late.held.find((x) => x.slug === s)?.blockedBy, LATE, s)
+  assert.deepEqual(late.held.find((x) => x.slug === 'dup1-a').blockedBy, [{ slug: 'crown-a', why: 'dependency not scheduled' }])
   assert.deepEqual(waitOf(late, crown).why, { kind: 'dependency scheduled late',
-    detail: 'every member left was held before its dependency was scheduled, and goes next pass: shared-a' })
-  assert.deepEqual(waitOf(late, act).why,
+    detail: 'every member left was held before its dependency was scheduled, and goes next pass: dup2-a' })
+  assert.deepEqual(waitOf(late, dupOne).why,
     { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: crown-a' })
   // Dependencies outside the scan. reconcile-rollout holds a row until its dependency lands, and a dropped note, an
   // archived open one (by tag or in the Archive folder) or a link to no note never does, so the member is held; a landed
@@ -657,7 +676,7 @@ test('D8. plan: a blocker, an unknown or undeclared repo, a shared root and a pa
   assert.deepEqual(gone('lt1-a'), [{ slug: 'gone-archived', why: 'dependency dropped' }])
   assert.deepEqual(gone('lt2-a'), [{ slug: 'gone-shelved', why: 'dependency dropped' }])
   assert.deepEqual(gone('cafe1-a'), [{ slug: 'no-such-task', why: 'dependency not found' }])
-  assert.deepEqual(gone('cafe2-a'), [{ slug: 'shared-a', why: 'dependency not scheduled' }], 'a tombstone holds as its unit')
+  assert.deepEqual(gone('cafe2-a'), [{ slug: 'dup2-a', why: 'dependency not scheduled' }], 'a tombstone holds as its unit')
   assert.deepEqual(waitOf(g, runId("Lachy's Tools", 'parallel', 'lt1')).why,
     { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: gone-archived' })
 })
@@ -702,19 +721,24 @@ function depsScheduled(j, rk = ranked()) {
 // D8c (ADR 0064): Act and Shared both declare ~/repos/shared. With each in its own clone (the scan's projects[] entries,
 // injected as estate-scan finds them), both are scheduled, on one origin in different batches; with both on D they
 // still contest the root.
-function sharedPlan(name, shared) {
+function scanPlan(name, edit) {
   const s = structuredClone(scanned())
-  const row = s.repos.find((r) => r.path === ROOT('shared'))
-  row.github = 'O/Shared'
-  const own = (project, at) => ({ project, clone: null, rolloutRoot: at, selfRollout: null, root: at, blockers: [], unchecked: [] })
-  row.projects = [own('Act', `${ROOT('shared')}-rollout`), own('Shared', shared)]
+  edit(s)
   const scanPath = keep(`scan-${name}.json`, JSON.stringify(s))
   const r = spawnSync('python3', [RANK, 'rank', '--scan', scanPath, '--today', TODAY, ...GRADE_FILES.flatMap((f) => ['--grades', f])],
     { encoding: 'utf8', cwd: S, env, timeout: 60000 })
   assert.equal(r.status, 0, r.stderr)
   return tracked(py(['plan', '--rank', keep(`rank-${name}.json`, r.stdout), '--scan', scanPath]))
 }
-test('D8c. plan: two projects in their own clones of one repo are both scheduled, in different batches; on one clone they contest', () => {
+function sharedPlan(name, shared) {
+  return scanPlan(name, (s) => {
+    const row = s.repos.find((r) => r.path === ROOT('shared'))
+    row.github = 'O/Shared'
+    const own = (project, at) => ({ project, clone: null, rolloutRoot: at, selfRollout: null, root: at, blockers: [], unchecked: [] })
+    row.projects = [own('Act', `${ROOT('shared')}-rollout`), own('Shared', shared)]
+  })
+}
+test('D8c. plan: two projects in their own clones of one repo are both scheduled, in different batches; on one clone the later goes after', () => {
   const j = sharedPlan('own-clones', `${ROOT('shared')}-shared-rollout`)
   const act = entryOf(j, runId('Act', 'parallel', 'shared'))
   const sh = entryOf(j, runId('Shared', 'parallel', 'shared'))
@@ -722,10 +746,35 @@ test('D8c. plan: two projects in their own clones of one repo are both scheduled
   assert.deepEqual([act.rolloutRoot, sh.rolloutRoot], [`${ROOT('shared')}-rollout`, `${ROOT('shared')}-shared-rollout`])
   assert.notEqual(act.batch, sh.batch, 'one origin: never one batch')
   batchesHold(j)
+  assert.deepEqual([act.after, sh.after], [[], []], 'their own clones: neither goes after the other')
+  // On one clone (a first pass: neither has a rollout, so both read the default free) Shared goes in a batch after
+  // Act's, so its fork's § 0 `clone` reads Act's note and picks Shared's own clone (p39-10).
   const c = sharedPlan('one-clone', `${ROOT('shared')}-rollout`)
-  const wait = waitOf(c, runId('Shared', 'parallel', 'shared'))
-  assert.equal(wait.why.kind, 'same root')
-  assert.ok(wait.why.detail.includes(`${ROOT('shared')}-rollout`), wait.why.detail)
+  const [ca, cs] = [entryOf(c, act.run), entryOf(c, sh.run)]
+  assert.deepEqual([ca.rolloutRoot, cs.rolloutRoot], [`${ROOT('shared')}-rollout`, `${ROOT('shared')}-rollout`])
+  assert.deepEqual([ca.after, cs.after], [[], [act.run]])
+  assert.ok(cs.batch > ca.batch, `Shared in batch ${cs.batch}, after Act's ${ca.batch}`)
+  batchesHold(c)
+})
+
+// D8d (p39-10): a run that goes after another on its root takes a batch after that run's, not merely another one. Crown
+// and Mira share an origin, so Mira goes in batch 2; Mirb, on Mira's clone with no origin and no key Crown's batch
+// holds, would fit batch 1, and goes in batch 3. No session starts for it from the plan alone: a lead starts only from
+// a note its fork wrote (sessions --wrote), and its fork runs after Mira's.
+test('D8d. plan: a run after another on its root takes a batch after that one\'s, whatever the origin', () => {
+  const j = scanPlan('after-floor', (s) => {
+    for (const r of s.repos) if (r.path === ROOT('crown') || r.path === ROOT('mira')) r.github = 'O/M'
+  })
+  const [crown, mira, mirb] = [runId('Crown', 'parallel', 'crown'), runId('Mira', 'parallel', 'mira'),
+    runId('Mirb', 'parallel', 'mirb')].map((id) => entryOf(j, id))
+  assert.deepEqual([crown.origin, mira.origin, mirb.origin], ['o/m', 'o/m', null])
+  assert.deepEqual([crown.batch, mira.batch], [1, 2], 'one origin: Mira after Crown')
+  assert.deepEqual(mirb.after, [mira.run])
+  assert.equal(mirb.batch, 3, 'after Mira\'s batch, though batch 1 holds no key or origin of its')
+  batchesHold(j)
+  const plan = keep('plan-after-floor.json', JSON.stringify(j))
+  const items = ok(sessions(plan)).items
+  assert.ok(!items.some((x) => x.kind === 'execute' && /mir[ab]/i.test(`${x.note} ${x.title}`)), JSON.stringify(items))
 })
 
 test('D8b. plan: entries whose names may meet on one note slug never share a batch; serial entries follow, one each', () => {
@@ -734,7 +783,7 @@ test('D8b. plan: entries whose names may meet on one note slug never share a bat
     (rootName === undefined || x.root === ROOT(rootName)))
   assert.deepEqual([e('Two', 'parallel', 'two-a').batch, e('Two', 'parallel', 'two-b').batch], [1, 2])
   assert.deepEqual(e('Two', 'parallel', 'two-a').batchKeys, ['two'])
-  for (const [a, b] of [['Dup One', 'dup-one'], ["Lachy's Tools", 'Lachys Tools'], ['Café', 'Cafe']]) {
+  for (const [a, b] of [["Lachy's Tools", 'Lachys Tools'], ['Café', 'Cafe']]) {
     assert.notEqual(e(a).batch, e(b).batch, `${a} and ${b} are batched apart`)
   }
   assert.deepEqual([e("Lachy's Tools").batchKeys, e('Lachys Tools').batchKeys], [['lachystools'], ['lachystools']])
