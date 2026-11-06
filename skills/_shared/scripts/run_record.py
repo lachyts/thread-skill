@@ -228,16 +228,22 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
-                     (ints >= 0); verdict?; status? (pending | consumed: the doc as its findings arrived, or once
+                     (ints >= 0); verdict? (legacy, a string and no enum: stop or continue, written only before
+                     fresh-review ADR 0001 and ADR 0065 retired the ledger's STOP rule; review-round.py writes none
+                     since, and no reader counts on it); status? (pending | consumed: the doc as its findings arrived, or once
                      they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
                      counts from the doc's `## Disposition`; blocking includes open, so open <= blocking when both are
-                     given); unconfirmed? (int >= 0,
-                     fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted
-                     apart from filed, which excludes them, so each finding sits in one count; with the ledger's
-                     STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
-                     reviews.jsonl.
+                     given); unconfirmed? (int >= 0, fresh-review ADR 0001: candidates its checker could not
+                     reproduce, never blocking, from the same `## Disposition`'s `Unconfirmed:` label; review-round.py
+                     writes it together with the six ADR 0058 counts, all seven or none, so a line with filed but no
+                     unconfirmed predates ADR 0001 and its unconfirmed is unknown, never 0; filed excludes them and
+                     no finding is in both, so filed + unconfirmed <= findings when findings is given, an absent one
+                     read as 0; an unconfirmed candidate still goes to the landing's follow-up task, it is only not
+                     counted in filed; a round whose checker was lost twice is an unconfirmed round as a whole
+                     (fresh-review Step 3.5), and its findings are not counted in unconfirmed). No rollout, no task;
+                     lands in reviews.jsonl.
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
                      original + regression <= findings, the rest unclassified), digest (verdict_digest of the
                      verdict and its bullets); head? (the PR head the judge judged, resolved to a full sha in the
@@ -1633,6 +1639,11 @@ def _check_fields(kind, fields):
                       % (fields["original"], fields["regression"], fields["findings"]))
     if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
         raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
+    if kind == "review-round" and "findings" in fields and ("filed" in fields or "unconfirmed" in fields):
+        filed, unconfirmed = fields.get("filed", 0), fields.get("unconfirmed", 0)
+        if filed + unconfirmed > fields["findings"]:
+            raise Refused("review-round: filed + unconfirmed (%d + %d) exceed findings (%d)"
+                          % (filed, unconfirmed, fields["findings"]))
     if kind == "tuning":
         _check_tuning(fields)
     elif kind == "watch":
