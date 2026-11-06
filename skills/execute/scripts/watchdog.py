@@ -30,23 +30,29 @@ check, in order:
       moving_verdict and --gh-bin, and prints one line, `<slug> <verdict> <cause>`.
   (d) One notification per stall, keyed on (slug, lastEvent), in the state file
       ${XDG_STATE_HOME:-~/.local/state}/thread/watchdog.json (or --state), {"v": 1, "notified": {slug: {lastEvent,
-      at}}}, written atomically and only when it changes; a corrupt file reads as empty, with one WARN. A stall whose
-      key is stored prints `already notified`. Otherwise one line goes to ntfy-push.py [--server], `see
-      /thread:status <slug> — <slug>: rollout stalled (<cause>), no life sign for <age>m`, cut to 200 characters; its
-      exit 0 records the key, any other exit records nothing. A key is dropped only when its rollout reads moving,
-      waiting or skip this run, or its note has left the tasks dir; a `recent: not read`, a lost look (moving's
-      MovingError, or any other exception moving_verdict raises, printed `<slug> not read: <type>: <why>`; the other
-      rollouts are still read) or a note still there but no candidate keeps it.
+      at}}}, written atomically when it changes or must be made valid; a corrupt file (a non-UTF-8 file included)
+      reads as empty, with one WARN, never a traceback, and is rewritten valid on that run ({"v": 1, "notified": {}}
+      when nothing was notified), so the next run reads it clean; an entry that is not an object is dropped and the
+      file rewritten the same way. A stall whose key is stored prints `already notified`. Otherwise one line goes
+      to ntfy-push.py [--server], `see /thread:status <slug> — <slug>: rollout stalled (<cause>), no life sign for
+      <age>m`, cut to 200 characters; its exit 0 records the key, any other exit records nothing. A key is dropped only
+      when its rollout reads moving, waiting or skip this run, or its note has left the tasks dir; a `recent: not read`,
+      a lost look (moving's MovingError, or any other exception moving_verdict raises, printed `<slug> not read: <type>:
+      <why>`; the other rollouts are still read) or a note still there but no candidate keeps it.
   --stall-after is moving's own: its default reconcile-rollout.py STALL_AFTER_MIN (45), its bound 1 to STALL_AFTER_MAX
   (1440), both read from that module, so the fallback and the verb never disagree.
-  --dry-run posts nothing and writes no state.
+  ntfy-push.py runs for at most NTFY_TIMEOUT (60 s): one that cannot start prints `watchdog: ntfy-push did not run:
+  <why>` on stderr and reads exit 127; one that runs past it is stopped, prints `watchdog: ntfy-push stopped: <why>`
+  on stderr and reads exit 124; whatever it printed is shown as `watchdog: <line>`.
+  --dry-run posts nothing and writes no state (a corrupt file included).
   Exit 0 whatever it finds; 1 when --tasks-dir cannot be read; 2 on usage.
 
-plist prints the launchd job (plistlib) on stdout: ProgramArguments [this python, this script's absolute path, check,
---gh-bin <shutil.which("gh")>], plus `--chorus-url <URL>` when that flag is given ('' included); with no gh on PATH,
-no --gh-bin and one WARN. EnvironmentVariables PATH is <gh's dir>:/usr/bin:/bin:/usr/sbin:/sbin, so `next`'s PR-hold
-reads find gh under launchd. StartInterval --interval (600), RunAtLoad, ProcessType Background, and --log for stdout
-and stderr. Installing it is Lachy's one-time step (README; status § The Watchdog's reading). Render it from the
+plist prints the launchd job (plistlib) on stdout: ProgramArguments [`python3` on PATH when it is this interpreter, else
+this interpreter's own path (background_job.py's job_python, the Primary refresh's rule), this script's absolute path,
+check, --gh-bin <shutil.which("gh")>], plus `--chorus-url <URL>` when that flag is given ('' included); with no gh on
+PATH, no --gh-bin and one WARN. EnvironmentVariables PATH is <gh's dir>:/usr/bin:/bin:/usr/sbin:/sbin, so `next`'s
+PR-hold reads find gh under launchd. StartInterval --interval (600), RunAtLoad, ProcessType Background, and --log for
+stdout and stderr. Installing it is Lachy's one-time step (README; status § The Watchdog's reading). Render it from the
 installed plugin's root, ${CLAUDE_PLUGIN_ROOT}, never a rollout worktree or another checkout: the job runs the script it
 was rendered from, so after each plugin update re-render it and re-bootstrap it
 (`launchctl bootout gui/$(id -u)/com.thread.watchdog`, then the two steps below). The verb names the script it baked
@@ -54,18 +60,18 @@ in on stderr (`watchdog plist: the job runs <path>: …`, no WARN). The two step
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`,
 then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist`.
 
-Stdlib only, python >= 3.9. It sets sys.dont_write_bytecode before it loads reconcile-rollout.py, so no __pycache__
-lands in the plugin directory.
+The state file, the ntfy-push call and the plist are skills/_shared/scripts/background_job.py's, the plumbing the
+Primary refresh shares, loaded from this script's own plugin root.
+
+Stdlib only, python >= 3.9. It sets sys.dont_write_bytecode before it loads reconcile-rollout.py and background_job.py
+(both in main), so no __pycache__ lands in the plugin directory.
 """
 import argparse
 import importlib.util
 import json
 import os
-import plistlib
 import shutil
-import subprocess
 import sys
-import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -75,6 +81,7 @@ sys.dont_write_bytecode = True
 
 HERE = Path(__file__).resolve().parent
 RECONCILE_PY = HERE / "reconcile-rollout.py"
+BJ_PY = HERE.parent.parent / "_shared" / "scripts" / "background_job.py"
 NTFY_PY = HERE / "ntfy-push.py"
 DEFAULT_CHORUS_URL = "http://127.0.0.1:4747/"   # Chorus's own ctl.sh URL
 DEFAULT_INTERVAL = 600
@@ -93,46 +100,20 @@ def _load_reconcile():
     return mod
 
 
-def _state_path(arg):
-    if arg:
-        return Path(os.path.expanduser(arg))
-    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    return Path(base) / "thread" / "watchdog.json"
+def _load_bj():
+    spec = importlib.util.spec_from_file_location("thread_background_job_watchdog", BJ_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def _read_state(path):
-    """{slug: {lastEvent, at}}; a missing file is empty, a corrupt one empty with one WARN."""
-    try:
-        raw = path.read_text()
-    except FileNotFoundError:
-        return {}
-    except OSError as e:
-        print(f"WARN: watchdog: state {path} unreadable ({e}): read as empty", file=sys.stderr)
-        return {}
-    try:
-        data = json.loads(raw)
-        if not isinstance(data, dict) or data.get("v") != STATE_VERSION or not isinstance(data.get("notified"), dict):
-            raise ValueError("not a v1 watchdog state")
-        return {k: v for k, v in data["notified"].items() if isinstance(k, str) and isinstance(v, dict)}
-    except ValueError as e:
-        print(f"WARN: watchdog: state {path} is corrupt ({e}): read as empty", file=sys.stderr)
-        return {}
-
-
-def _write_state(path, notified):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".watchdog-", suffix=".json", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump({"v": STATE_VERSION, "notified": notified}, f, indent=2, sort_keys=True)
-            f.write("\n")
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+def _read_state(bj, path):
+    """(notified, dirty): {slug: {lastEvent, at}}, and whether the file must be rewritten valid even with no change (it
+    read as corrupt, or an entry that is not an object was dropped). A missing file is ({}, False), a corrupt or
+    non-UTF-8 one ({}, True) with one WARN (background_job.py's read_state)."""
+    notified, dirty = bj.read_state(path, "watchdog", "notified", STATE_VERSION)
+    kept = {k: v for k, v in notified.items() if isinstance(k, str) and isinstance(v, dict)}
+    return kept, dirty or len(kept) != len(notified)
 
 
 def _stage_up(url):
@@ -182,21 +163,21 @@ def _message(v):
     return f"see /thread:status {slug} — {slug}: rollout stalled ({v.get('cause')}), {tail}"[:MESSAGE_MAX]
 
 
-def _notify(message, server):
-    argv = [sys.executable, "-B", str(NTFY_PY)] + (["--server", server] if server else [])
-    try:
-        p = subprocess.run(argv, input=message + "\n", capture_output=True, text=True, timeout=NTFY_TIMEOUT)
-    except (OSError, subprocess.SubprocessError) as e:
-        print(f"watchdog: ntfy-push did not run: {e}", file=sys.stderr)
-        return 1
-    for line in (p.stdout + p.stderr).splitlines():
+def _notify(bj, message, server):
+    """ntfy-push.py's exit (127 when it cannot start, 124 past NTFY_TIMEOUT), each line it printed shown on stdout.
+    NTFY_PY and NTFY_TIMEOUT are read at call time."""
+    n = bj.notify(NTFY_PY, message, server, timeout=NTFY_TIMEOUT)
+    if not n.ran:  # it never ran to an exit of its own: it could not start (127) or was stopped at its bound (124)
+        how = "stopped" if n.rc == 124 else "did not run"
+        print(f"watchdog: ntfy-push {how}: {n.why}", file=sys.stderr)
+    for line in n.out.splitlines() + n.err.splitlines():
         if line.strip():
             print(f"watchdog: {line.strip()}")
-    return p.returncode
+    return n.rc
 
 
 def cmd_check(args):
-    rr = args.rr
+    rr, bj = args.rr, args.bj
     if not 1 <= args.stall_after <= rr.STALL_AFTER_MAX:
         print(f"ERROR: watchdog check: usage: --stall-after must be an integer from 1 to {rr.STALL_AFTER_MAX}",
               file=sys.stderr)
@@ -214,8 +195,8 @@ def cmd_check(args):
     except OSError as e:
         print(f"ERROR: watchdog check: cannot read {tasks_dir}: {e}", file=sys.stderr)
         return 1
-    state_path = _state_path(args.state)
-    notified = _read_state(state_path)
+    state_path = bj.state_path(args.state, "watchdog.json")
+    notified, dirty = _read_state(bj, state_path)
     before = json.dumps(notified, sort_keys=True)
     for slug, path in cands:
         if _recent(rr, slug, now, args.stall_after):
@@ -241,7 +222,7 @@ def cmd_check(args):
         if args.dry_run:
             print(f"{slug} stalled {v.get('cause')}: would notify: {message}")
             continue
-        rc = _notify(message, args.ntfy_server)
+        rc = _notify(bj, message, args.ntfy_server)
         if rc == 0:
             notified[slug] = {"lastEvent": key, "at": now.isoformat(timespec="seconds")}
             print(f"{slug} stalled {v.get('cause')}: notified")
@@ -251,41 +232,30 @@ def cmd_check(args):
     for slug in list(notified):
         if not (tasks_dir / f"{slug}.md").is_file():
             notified.pop(slug, None)
-    if not args.dry_run and json.dumps(notified, sort_keys=True) != before:
+    if not args.dry_run and (dirty or json.dumps(notified, sort_keys=True) != before):
         try:
-            _write_state(state_path, notified)
+            bj.write_state(state_path, "notified", notified, STATE_VERSION)
         except OSError as e:
             print(f"WARN: watchdog: cannot write state {state_path}: {e}", file=sys.stderr)
     return 0
 
 
 def cmd_plist(args):
+    bj = args.bj
     gh = shutil.which("gh")
-    argv = [sys.executable, os.path.abspath(__file__), "check"]
-    path_dirs = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    argv = [bj.job_python(), os.path.abspath(__file__), "check"]
     if gh:
         argv += ["--gh-bin", gh]
-        path_dirs.insert(0, os.path.dirname(gh))
     else:
         print("WARN: watchdog plist: no gh on PATH: the job reads PR holds through a bare `gh`, which launchd's PATH "
               "may not find", file=sys.stderr)
     if args.chorus_url is not None:
         argv += ["--chorus-url", args.chorus_url]
-    log = os.path.expanduser(args.log)
-    job = {
-        "Label": args.label,
-        "ProgramArguments": argv,
-        "EnvironmentVariables": {"PATH": ":".join(path_dirs)},
-        "StartInterval": args.interval,
-        "RunAtLoad": True,
-        "ProcessType": "Background",
-        "StandardOutPath": log,
-        "StandardErrorPath": log,
-    }
+    plist = bj.launchd_plist(args.label, argv, bj.job_path(os.path.dirname(gh) if gh else ""), args.interval, args.log)
     # Not a WARN: it makes a wrong root (a worktree, an old cache version) visible at render time.
     print(f"watchdog plist: the job runs {argv[1]}: re-render it and re-bootstrap it after each plugin update",
           file=sys.stderr)
-    sys.stdout.write(plistlib.dumps(job).decode("utf-8"))
+    sys.stdout.write(plist.decode("utf-8"))
     return 0
 
 
@@ -293,6 +263,7 @@ def main(argv=None):
     # The bounds and the default are moving's own (reconcile-rollout.py STALL_AFTER_MIN and STALL_AFTER_MAX), so the
     # fallback and the verb never disagree on them.
     rr = _load_reconcile()
+    bj = _load_bj()
     p = argparse.ArgumentParser(prog="watchdog.py", description="The Watchdog's launchd fallback (ADR 0048): notify "
                                 "once per stalled rollout while Chorus is not running.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -307,13 +278,13 @@ def main(argv=None):
     c.add_argument("--gh-bin", default="gh", help="the gh `next`'s PR-hold reads go through")
     c.add_argument("--now", default=None, help="the time to read against, ISO (default: now)")
     c.add_argument("--dry-run", action="store_true", help="post nothing and write no state")
-    c.set_defaults(func=cmd_check, rr=rr)
+    c.set_defaults(func=cmd_check, rr=rr, bj=bj)
     pl = sub.add_parser("plist", help="print the launchd job")
     pl.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
     pl.add_argument("--label", default=DEFAULT_LABEL)
     pl.add_argument("--log", default=DEFAULT_LOG)
     pl.add_argument("--chorus-url", default=None, help="passed to check ('' installs a fallback that never probes)")
-    pl.set_defaults(func=cmd_plist)
+    pl.set_defaults(func=cmd_plist, bj=bj)
     args = p.parse_args(argv)
     return args.func(args)
 
