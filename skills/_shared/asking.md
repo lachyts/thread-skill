@@ -23,7 +23,7 @@ Label each question before it is asked:
 - A review STOP or a design gap is never his by default: it goes to the agent that can resolve it.
 - An open `fork for Lachy` stays *yours* until he rules on it.
 - The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question until p30-10 decides it: until
-  then it is asked, in the Framing.
+  then it is asked, in the Framing, except under the Backlog orient, which creates it (ADR 0071).
 
 ## 2. Decided for you
 

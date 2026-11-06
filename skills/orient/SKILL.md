@@ -28,8 +28,9 @@ preference.
 
 ## Runtime boundary
 
-Orient's audit, reshuffle and steering are portable, and orient spawns no child agents: ADR 0040
-retired the batches of ADR 0023. Hands-on pickup follows `open`'s contract.
+Orient's audit, reshuffle and steering are portable, and orient spawns no child agents outside `--backlog`: ADR 0040
+retired the batches of ADR 0023. Under `--backlog` it forks one `/thread:schedule` run per batch
+(`skills/orient/backlog.md` § B5), as orient-all's forks do. Hands-on pickup follows `open`'s contract.
 
 Both rollout shapes go through schedule and execute's runtime gate.
 
@@ -39,6 +40,8 @@ Both rollout shapes go through schedule and execute's runtime gate.
 /thread:orient Chorus                     # audit, then reshuffle (the default)
 /thread:orient Chorus --steer             # audit, then steer the work as it stands (no reshaping)
 /thread:orient Chorus --look              # audit only: stop after § 3 and write nothing
+/thread:orient Animately --backlog        # the Backlog orient: an area's whole Backlog, batched and started (ADR 0071)
+/thread:orient Animately --backlog --look # the Backlog orient's read only: print its dispositions, write nothing
 /thread:orient [[Chorus]]                 # explicit wikilink form
 /thread:orient                            # resolve the target from the session directory
 /thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
@@ -56,7 +59,7 @@ before the resolver runs: no resolver call, no question, no read and no write.
 
 The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
 runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
-orient's own flags (`--steer`, `--look`, and the words "steer only" or "look only") removed, goes
+orient's own flags (`--steer`, `--look`, `--backlog`, and the words "steer only" or "look only") removed, goes
 once to
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
 session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
@@ -120,6 +123,11 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
 
 A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
 sweep.
+
+**Under `--backlog`.** The target must be an area: a project or scoped target prints
+`--backlog takes an area: <name> is a <kind>; run /thread:orient <area> --backlog` and reads nothing, and so does
+`--steer` with it. A `candidates`, `none` or failure outcome stops with its line, never with a question; no Priorities
+card is put and no learned directory is held (`skills/orient/backlog.md` § B1).
 
 ### 2. Audit (read-only sweep)
 
@@ -210,6 +218,10 @@ and Drift and the slots for each swept project.
   supersedes the whole set.
 - **Decisions waiting**: an open task tagged `decisions` (the weekly Reflection's decision task,
   ADR 0037 d5) is Lachy's, decided at Chorus's Thursday Reflection Routine through `/thread:reflect --decide`.
+
+**Under `--backlog`.** The task sweep is `backlog-orient.py sweep`'s rows, by the Pulse's line rules, and the slots,
+drift, placement, threads and related projects run over its `projects[]` only; its `unparseable` rows go to § 4's mend
+(`skills/orient/backlog.md` § B2).
 
 ### 3. Present
 
@@ -345,6 +357,10 @@ picked option's or the re-resolved target's; it carries a `/`, so the script res
 file; never the bare name, which two projects can share), and report its one line; a refusal is
 reported and never blocks. Look only learns nothing.
 
+**Under `--backlog`.** The drift fixes and the mend run as on a default run, the mend once for each `unparseable` row
+of the sweep, and then the sweep runs once more; no learned directory is written, and `--backlog --look` writes
+nothing (`skills/orient/backlog.md` § B2, § B5).
+
 ### 5. Reshuffle
 
 Run the reshape step in `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`: the item set by reach
@@ -358,6 +374,9 @@ to Lachy. His ruling is written into the task note at R5, after the gate: the re
 carries it, and one `## Notes` line per fork, `- <UTC ISO> orient ruling: <fork> → <ruling>`, with
 `<fork>` worded as the end line words it, marks that fork decided. A fork he does not reach stays
 open. Steer only skips this step, so its open forks wait for the next Reshuffle.
+
+**Under `--backlog`.** The reshuffle has no gate: B3's dispositions stand in R1 and R2's place, the decided record in
+R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, § B4).
 
 ### 6. Route
 
@@ -434,6 +453,9 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   completes the capture, so the pointer would be dead the moment it landed.
   An ordinary task stays open there and gets the fill like any other.
 
+**Under `--backlog`.** The parallel-shaped batches go to forked schedule runs under B6's answers, and the steer is
+decided as Autonomous, with nothing put to him (`skills/orient/backlog.md` § B5).
+
 ### 7. Autonomous: a serial rollout
 
 Under Autonomous or Mixed, run `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with
@@ -469,10 +491,14 @@ Orient-graded or undecided members out with their dependants, unstamped; orient 
   sends to ruling (c)'s session lane (`serial-chains.py`'s `sessionLane`) stay unstamped: name them.
 - **Uncommitted grill docs.** § 6's hold applies to any repo a member writes.
 
+**Under `--backlog`.** Each serial fork runs under B6's answers, one per batch after every parallel batch, and its
+Leg 1 starts at B8 (`skills/orient/backlog.md` § B5, § B6).
+
 ### 8. Batches (retired)
 
-ADR 0040 retired orient's child-agent batches (ADR 0023): orient spawns no child and writes no
-prompt file, run journal, start claim, dispatch line or frontmatter stamp for one. `dispatched:`
+ADR 0040 retired orient's child-agent batches (ADR 0023): orient spawns no child outside `--backlog` and writes no
+prompt file, run journal, start claim, dispatch line or frontmatter stamp for one; under `--backlog` it forks one
+`/thread:schedule` run per batch (`skills/orient/backlog.md` § B5), never a retired batch. `dispatched:`
 stamps and orient run lines already in task notes are inert history: § 2 In flight no longer reads
 them, though an end line with an open fork still counts (§ 2 Open forks). Old run directories under
 `.scratch/orient/` are left alone.
@@ -525,6 +551,10 @@ Execute's own runtime gate still applies wherever it runs. No rollout written �
 § 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or a surface
 overlap with a live chain).
 
+**Under `--backlog`.** No handoff is made and nothing is put to him first: each parallel note is stamped by
+`stamp-start --backlog`, each serial note's Leg 1 starts through `create_thread` on the Chorus Stage, and his questions
+follow the start (`skills/orient/backlog.md` § B7, § B8, § B9).
+
 ### 10. `--debrief` (retired)
 
 `/thread:orient <target> --debrief` stops at the top of § 1, before the resolver runs or anything
@@ -557,3 +587,6 @@ given). It resolves, asks, reads and writes nothing.
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
   started); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
+- **Under `--backlog`, don't put a question before the start or stamp a serial note**: its questions come last, its
+  serial Leg 1 starts through `create_thread`, and it never runs `/thread:repair` (`skills/orient/backlog.md` § B8,
+  § B9).

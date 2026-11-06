@@ -29,8 +29,10 @@ import { root, walk, read } from '../lib/contract-text.mjs'
 // 'estate'/'Estate' is the workspaces repo's _shared/docs/adr/ (estate ADR 0008 is not this repo's 0008).
 // 'giflab'/'GifLab' is ~/repos/animately/giflab's docs/adr/ (giflab ADR 0012 is not this repo's 0012). The possessive
 // ("giflab's ADR 0012") is no qualifier, so it is checked here, and resolves against the wrong ADR: always write the
-// bare form.
-const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces', 'estate', 'Estate', 'giflab', 'GifLab']
+// bare form. 'Animately' is ~/repos/workspaces/animately-workspace/docs/adr/ (Animately ADR 0016, the Pulse feeds the
+// Backlog) and 'metrics' is ~/repos/tools/metrics/docs/adr/ (metrics ADR 0015, the Pulse's trigger file): the Backlog
+// orient's two outside sources (ADR 0071).
+const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces', 'estate', 'Estate', 'giflab', 'GifLab', 'Animately', 'metrics']
 
 // External § citations, hand-verified 2026-09-23. [path as cited (or its trailing segment), section].
 const EXTERNAL = [
