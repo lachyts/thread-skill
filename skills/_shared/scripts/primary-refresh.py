@@ -136,8 +136,11 @@ write_state(path, key, entries, version), atomic_write(path, data, mode), notify
 timeout) returning a Notified, its `run` called as run(argv, timeout, input) and read as (rc, out, err, timed_out),
 job_python(), job_path(*first), launchd_plist(label, argv, path, interval, log) and kill_group(p, grace, reap); and
 Notified's fields, rc, why, out, err, ran. Never rename, remove or reorder any of them: a new parameter goes last with
-a default, a new Notified field goes last, read_state stays a pair, and a new BJ call here joins the list
-(tests/background-job.test.mjs BJ10 pins each call's shape against the module's signatures).
+a default, a new Notified field goes last, read_state stays a pair, and a new BJ call here joins the list. An entry
+never leaves the list, even after this file stops making that call, because an installed older copy still makes it:
+retiring one is a contract change that needs a hand re-install, the same rule as I6's tokens
+(tests/background-job.test.mjs BJ10 holds every call here to the list and every listed call to the module's
+signatures; BJ10b proves a retired call stays listed and binding).
 
 The job check, on the installed copy: the self-update rewrites bundle files only; the interpreter, PATH, --log and
 --job-shape live in the plist, which only install writes and only a re-bootstrap loads. A job whose --job-shape is below

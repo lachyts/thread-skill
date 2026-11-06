@@ -41,9 +41,12 @@ removed or reordered:
     timed_out); job_python(); job_path(*first); launchd_plist(label, argv, path, interval, log); kill_group(p, grace,
     reap): each parameter by its name and in its place;
   - Notified's fields, rc, why, out, err, ran, in that order.
-A new parameter goes last with a default, a new Notified field goes last, read_state stays a pair. The rest (run_plain,
-the private helpers) is outside it. tests/background-job.test.mjs BJ10 pins it: every `BJ.<name>(...)` call in
-primary-refresh.py against a literal list, each binding to the signatures here.
+A new parameter goes last with a default, a new Notified field goes last, read_state stays a pair, and a new call in
+primary-refresh.py joins the list. An entry never leaves it, even after primary-refresh.py stops making that call,
+because an installed older copy still makes it: retiring one is a contract change that needs a hand re-install, the
+same rule as tests/primary-refresh.test.sh I6's tokens. The rest (run_plain, the private helpers) is outside it.
+tests/background-job.test.mjs BJ10 pins it: every `BJ.<name>(...)` call in primary-refresh.py is in a literal list,
+and every listed call binds to the signatures here; BJ10b proves a retired call stays listed and binding.
 
 What stays where. These stops are not kill_group, each for its own reason:
   - verify-slot.py `kill_group(pgid)` and `_end(child)`: verify-slot's stop works from a pgid after the Popen may be

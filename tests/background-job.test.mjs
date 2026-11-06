@@ -5,8 +5,10 @@
 //   BJ8 a missing or broken module is each by-path loader's own broken-install line, never a traceback
 //   BJ9 the structural pin: the TERM+KILL stops left in the tree are kill_group and the ones its docstring names
 //   BJ10 the frozen interface primary-refresh.py calls (its self-update contract): every `BJ.<name>(...)` call shape in
-//        primary-refresh.py against a literal list, each still binding to the module's signature, the parameters
+//        primary-refresh.py is in a literal list, every listed one still binds to the module's signature, the parameters
 //        additive-only, and read_state's, notify's, Notified's and the run callback's shapes
+//   BJ10b the list is additive only: a copy of primary-refresh.py that no longer makes a call still passes, its entry
+//        still listed and binding; a new or reshaped call fails until it joins
 // Hermetic: each case runs `python3 -B` with PYTHONDONTWRITEBYTECODE=1, a mkdtemp HOME and a mkdtemp cwd; BJ8 runs a
 // copy of skills/ in a mkdtemp dir. Nothing is written in the checkout.
 import { test } from 'node:test'
@@ -351,7 +353,11 @@ test('BJ9. the TERM+KILL group stops left in the tree are kill_group and the one
 // BJ call (BJ.state_path, at the top of cmd_run) never reaches the fetch or the self-update that would heal it, and
 // sends no notice (notify is the module's too): only a hand install gets it out. So this is frozen, additive only:
 // never rename, remove or reorder a function, a parameter or a Notified field; a new parameter goes last with a
-// default; read_state stays a 2-tuple. Changing CALLS or FROZEN here is changing that contract (ADR 0066 decision 7).
+// default; read_state stays a 2-tuple. A new BJ call shape in primary-refresh.py joins CALLS (and a new name joins
+// FROZEN). An entry never leaves CALLS or FROZEN, even after primary-refresh.py stops making that call, because an
+// installed older copy still makes it: retiring one is a contract change that needs a hand re-install, the same rule
+// as tests/primary-refresh.test.sh I6's tokens (ADR 0066 decision 7). So BJ10 holds primary-refresh.py's calls to a
+// subset of CALLS, never to CALLS exactly, and BJ10b proves a retired call's entry still passes and binds.
 const CALLS = [
   ['atomic_write', 2, []],
   ['atomic_write', 2, ['mode']],
@@ -376,63 +382,106 @@ const FROZEN = {
   write_state: ['path', 'key', 'entries', 'version'],
 }
 const NOTIFIED = ['rc', 'why', 'out', 'err', 'ran']
+const PR = path.join(root, 'skills', '_shared', 'scripts', 'primary-refresh.py')
+const key = (c) => JSON.stringify(c)
 
-test('BJ10. the frozen interface primary-refresh.py calls: every BJ call shape listed, each still binding, additive only', (t) => {
+// shapes(s, src): what the primary-refresh.py at `src` reads of the module, by its AST: each `BJ.<name>(...)` call's
+// shape [name, positional count, sorted keyword names], the calls that pass *args or **kwargs, any other BJ.<name>
+// read (BJ.Notified, a function passed along uncalled), and its BJ_REL.
+const SHAPES = [
+  'import ast, re',
+  'src = open(sys.argv[2], encoding="utf-8").read()',
+  'tree = ast.parse(src, sys.argv[2])',
+  'calls, funcs, unsplat = set(), set(), []',
+  'for n in ast.walk(tree):',
+  '    f = getattr(n, "func", None)',
+  '    if isinstance(n, ast.Call) and isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "BJ":',
+  '        funcs.add(id(f))',
+  '        if any(isinstance(a, ast.Starred) for a in n.args) or any(k.arg is None for k in n.keywords):',
+  '            unsplat.append(f.attr)',
+  '        calls.add((f.attr, len(n.args), tuple(sorted(k.arg for k in n.keywords if k.arg))))',
+  'other = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)',
+  '                and n.value.id == "BJ" and id(n) not in funcs})',
+  'print(json.dumps({"calls": sorted([a, n, list(k)] for a, n, k in calls), "unsplat": unsplat, "other": other,',
+  '                  "bjRel": re.findall(r"^BJ_REL = \\"([^\\"]+)\\"$", src, re.M)}))',
+].join('\n')
+const shapes = (s, src) => json(py(s, SHAPES, [src]))
+
+// The shape check, the rule BJ10 holds primary-refresh.py to: every call shape it makes is in CALLS, none passes *args
+// or **kwargs (so each shape is the whole call), it reads nothing else of the module, and BJ_REL is unchanged. The
+// answer is its breaches, [] when it holds. It never asks the reverse: a CALLS entry primary-refresh.py no longer makes
+// is no breach, since an installed older copy still makes it.
+function breaches(got) {
+  const listed = new Set(CALLS.map(key))
+  return [
+    ...got.calls.filter((c) => !listed.has(key(c))).map((c) => `BJ.${c[0]} called as ${key(c)}, not in CALLS`),
+    ...got.unsplat.map((n) => `BJ.${n} called with *args or **kwargs`),
+    ...got.other.map((n) => `BJ.${n} read uncalled`),
+    ...(key(got.bjRel) === key(['skills/_shared/scripts/background_job.py']) ? [] : [`BJ_REL is ${key(got.bjRel)}`]),
+  ]
+}
+
+// mod(s): the module's side, from the tree's background_job.py: whether each CALLS entry binds (index for index, "ok"
+// or the error), each FROZEN function's leading parameters and any later one with no default, read_state's three
+// answers, Notified's fields, notify's reading of its `run` callback, and the return types.
+const MODULE = [
+  'import inspect',
+  'binds = []',
+  'for name, npos, kws in json.loads(sys.argv[2]):',
+  '    try:',
+  '        inspect.signature(getattr(bj, name)).bind(*range(npos), **{k: None for k in kws})',
+  '        binds.append("ok")',
+  '    except (AttributeError, TypeError) as e:',
+  '        binds.append(f"{type(e).__name__}: {e}")',
+  'params = {}',
+  'for name, frozen in json.loads(sys.argv[3]).items():',
+  '    ps = list(inspect.signature(getattr(bj, name)).parameters.values())',
+  '    extra = [p.name for p in ps[len(frozen):] if p.default is inspect.Parameter.empty',
+  '             and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]',
+  '    params[name] = {"head": [p.name for p in ps[:len(frozen)]], "extraWithoutDefault": extra}',
+  // read_state's three answers, each (entries, corrupt): a missing file, a valid one and a corrupt one.
+  'here = os.getcwd()',
+  'open(os.path.join(here, "valid.json"), "w").write(json.dumps({"v": 1, "stuck": {"a": {}}}))',
+  'open(os.path.join(here, "corrupt.json"), "w").write("[]")',
+  'rs = [bj.read_state(os.path.join(here, f), "primary-refresh", "stuck", 1) for f in ("missing.json", "valid.json", "corrupt.json")]',
+  'ran = bj.notify("x.py", "m", None, run=lambda a, t, i: (3, "o1\\no2\\n", "", False), timeout=5)',
+  'cut = bj.notify("x.py", "m", None, run=lambda a, t, i: (None, "", "", True), timeout=5)',
+  'print(json.dumps({',
+  '    "binds": binds, "params": params,',
+  '    "readState": [[type(r).__name__, len(r), type(r[0]).__name__, r[1]] for r in rs],',
+  '    "fields": list(bj.Notified._fields), "isNotified": [type(ran) is bj.Notified, type(cut) is bj.Notified],',
+  '    "ran": [ran.rc, ran.why], "cut": [cut.rc, cut.why],',
+  '    "types": [isinstance(bj.state_path(None, "x.json"), os.PathLike), type(bj.job_python()).__name__,',
+  '              type(bj.job_path("/a")).__name__, type(bj.launchd_plist("l", ["/p"], "/a", 1, "/l.log")).__name__],',
+  '}))',
+].join('\n')
+const mod = (s) => json(py(s, MODULE, [JSON.stringify(CALLS), JSON.stringify(FROZEN)]))
+
+// RETIRE: write a copy of the primary-refresh.py at argv[2] to argv[3] with every `BJ.<argv[4]>(...)` call cut out of
+// the source text (replaced by None, by the AST's byte offsets, so the rest of the file is byte for byte the same), and
+// print how many it cut.
+const RETIRE = [
+  'import ast',
+  'src = open(sys.argv[2], "rb").read()',
+  'starts = [0]',
+  'for line in src.splitlines(keepends=True):',
+  '    starts.append(starts[-1] + len(line))',
+  'cuts = sorted(((starts[n.lineno - 1] + n.col_offset, starts[n.end_lineno - 1] + n.end_col_offset)',
+  '               for n in ast.walk(ast.parse(src, sys.argv[2])) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)',
+  '               and isinstance(n.func.value, ast.Name) and n.func.value.id == "BJ" and n.func.attr == sys.argv[4]), reverse=True)',
+  'for a, b in cuts:',
+  '    src = src[:a] + b"None" + src[b:]',
+  'open(sys.argv[3], "wb").write(src)',
+  'print(len(cuts))',
+].join('\n')
+
+test('BJ10. the frozen interface primary-refresh.py calls: every BJ call shape it makes is listed, every listed one still binds', (t) => {
   const s = scratch(t)
-  const PR = path.join(root, 'skills', '_shared', 'scripts', 'primary-refresh.py')
-  const code = [
-    'import ast, inspect, re',
-    'src = open(sys.argv[2], encoding="utf-8").read()',
-    'tree = ast.parse(src, sys.argv[2])',
-    'calls, funcs, unsplat = set(), set(), []',
-    'for n in ast.walk(tree):',
-    '    f = getattr(n, "func", None)',
-    '    if isinstance(n, ast.Call) and isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "BJ":',
-    '        funcs.add(id(f))',
-    '        if any(isinstance(a, ast.Starred) for a in n.args) or any(k.arg is None for k in n.keywords):',
-    '            unsplat.append(f.attr)',
-    '        calls.add((f.attr, len(n.args), tuple(sorted(k.arg for k in n.keywords if k.arg))))',
-    // Any other read of the module (BJ.Notified, a BJ.<name> passed along uncalled) is part of the interface too.
-    'other = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)',
-    '                and n.value.id == "BJ" and id(n) not in funcs})',
-    'binds = {}',
-    'for name, npos, kws in json.loads(sys.argv[3]):',
-    '    try:',
-    '        inspect.signature(getattr(bj, name)).bind(*range(npos), **{k: None for k in kws})',
-    '        binds[f"{name}/{npos}/{\',\'.join(kws)}"] = "ok"',
-    '    except (AttributeError, TypeError) as e:',
-    '        binds[f"{name}/{npos}/{\',\'.join(kws)}"] = f"{type(e).__name__}: {e}"',
-    'params = {}',
-    'for name, frozen in json.loads(sys.argv[4]).items():',
-    '    ps = list(inspect.signature(getattr(bj, name)).parameters.values())',
-    '    extra = [p.name for p in ps[len(frozen):] if p.default is inspect.Parameter.empty',
-    '             and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]',
-    '    params[name] = {"head": [p.name for p in ps[:len(frozen)]], "extraWithoutDefault": extra}',
-    // read_state's three answers, each (entries, corrupt): a missing file, a valid one and a corrupt one.
-    'here = os.getcwd()',
-    'open(os.path.join(here, "valid.json"), "w").write(json.dumps({"v": 1, "stuck": {"a": {}}}))',
-    'open(os.path.join(here, "corrupt.json"), "w").write("[]")',
-    'rs = [bj.read_state(os.path.join(here, f), "primary-refresh", "stuck", 1) for f in ("missing.json", "valid.json", "corrupt.json")]',
-    'ran = bj.notify("x.py", "m", None, run=lambda a, t, i: (3, "o1\\no2\\n", "", False), timeout=5)',
-    'cut = bj.notify("x.py", "m", None, run=lambda a, t, i: (None, "", "", True), timeout=5)',
-    'print(json.dumps({',
-    '    "calls": sorted([a, n, list(k)] for a, n, k in calls), "unsplat": unsplat, "other": other,',
-    '    "bjRel": re.findall(r"^BJ_REL = \\"([^\\"]+)\\"$", src, re.M),',
-    '    "binds": binds, "params": params,',
-    '    "readState": [[type(r).__name__, len(r), type(r[0]).__name__, r[1]] for r in rs],',
-    '    "fields": list(bj.Notified._fields), "isNotified": [type(ran) is bj.Notified, type(cut) is bj.Notified],',
-    '    "ran": [ran.rc, ran.why], "cut": [cut.rc, cut.why],',
-    '    "types": [isinstance(bj.state_path(None, "x.json"), os.PathLike), type(bj.job_python()).__name__,',
-    '              type(bj.job_path("/a")).__name__, type(bj.launchd_plist("l", ["/p"], "/a", 1, "/l.log")).__name__],',
-    '}))',
-  ].join('\n')
-  const got = json(py(s, code, [PR, JSON.stringify(CALLS), JSON.stringify(FROZEN)]))
-  assert.deepEqual(got.calls, CALLS, 'every BJ.<name>(...) call shape in primary-refresh.py is in the frozen list (a new one joins CALLS and FROZEN)')
-  assert.deepEqual(got.unsplat, [], 'no BJ call passes *args or **kwargs, so each shape above is the whole call')
-  assert.deepEqual(got.other, [], 'primary-refresh.py reads nothing of the module but the calls above')
-  assert.deepEqual([...new Set(CALLS.map(([n]) => n))].sort(), Object.keys(FROZEN).sort())
-  assert.deepEqual(got.bjRel, ['skills/_shared/scripts/background_job.py'], 'the module stays at the path an installed copy loads')
-  for (const [k, v] of Object.entries(got.binds)) assert.equal(v, 'ok', `BJ.${k} still binds to background_job.py's signature`)
+  assert.deepEqual(breaches(shapes(s, PR)), [],
+    'every BJ.<name>(...) call shape in primary-refresh.py is in CALLS, none splats, nothing else of the module is read, BJ_REL is the path an installed copy loads')
+  assert.deepEqual([...new Set(CALLS.map(([n]) => n))].sort(), Object.keys(FROZEN).sort(), 'CALLS and FROZEN name the same functions')
+  const got = mod(s)
+  CALLS.forEach((c, i) => assert.equal(got.binds[i], 'ok', `BJ.${c[0]} called as ${key(c)} still binds to background_job.py's signature`))
   for (const [name, frozen] of Object.entries(FROZEN)) {
     assert.deepEqual(got.params[name].head, frozen, `${name}'s parameters keep their names and order`)
     assert.deepEqual(got.params[name].extraWithoutDefault, [], `${name}'s new parameters come last, each with a default`)
@@ -444,4 +493,30 @@ test('BJ10. the frozen interface primary-refresh.py calls: every BJ call shape l
   assert.deepEqual(got.ran, [3, 'o2'], 'notify calls run(argv, timeout, input) positionally and reads (rc, out, err, timed_out)')
   assert.equal(got.cut[0], 124, '… timed_out is the stop at its bound')
   assert.deepEqual(got.types, [true, 'str', 'str', 'bytes'])
+})
+
+test('BJ10b. additive only: a call primary-refresh.py stops making stays listed and binding; a new or reshaped call must join', (t) => {
+  const s = scratch(t)
+  // Retire BJ.state_path, the call an installed older copy makes at the top of cmd_run, from a copy of primary-refresh.py.
+  const retired = path.join(s.dir, 'retired-primary-refresh.py')
+  const r = py(s, RETIRE, [PR, retired, 'state_path'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stdout.trim(), '1', "the copy cuts primary-refresh.py's one BJ.state_path call")
+  const before = shapes(s, PR), after = shapes(s, retired)
+  assert.ok(before.calls.some(([n]) => n === 'state_path'), 'primary-refresh.py calls BJ.state_path (the precondition)')
+  assert.deepEqual(after.calls, before.calls.filter(([n]) => n !== 'state_path'), 'the copy makes every other call as before, and no BJ.state_path')
+  assert.deepEqual(breaches(after), [], 'the shape check still passes on the copy that no longer makes the call')
+  const i = CALLS.findIndex((c) => key(c) === key(['state_path', 2, []]))
+  assert.ok(i >= 0, 'CALLS still lists BJ.state_path(arg, name)')
+  assert.deepEqual(FROZEN.state_path, ['arg', 'name'], '… FROZEN still freezes its parameters')
+  const got = mod(s)
+  assert.equal(got.binds[i], 'ok', '… and it still binds to background_job.py')
+  assert.deepEqual(got.params.state_path.head, ['arg', 'name'])
+  // A call the list does not hold, by a new name or a known name with one more positional, fails until it joins CALLS.
+  const joined = path.join(s.dir, 'joined-primary-refresh.py')
+  fs.writeFileSync(joined, `${fs.readFileSync(PR, 'utf8')}\n\ndef _bj10b():\n    BJ.brand_new(1)\n    BJ.state_path(None, "x.json", 3)\n`)
+  assert.deepEqual(breaches(shapes(s, joined)), [
+    'BJ.brand_new called as ["brand_new",1,[]], not in CALLS',
+    'BJ.state_path called as ["state_path",3,[]], not in CALLS',
+  ], 'a new call shape is a breach until it joins CALLS')
 })
