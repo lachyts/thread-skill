@@ -4,7 +4,8 @@
 // with no lead is started by the session that ends, never offered and never left for him to ask about:
 //   p1  next step 1's LAST bullet, **A rollout prepared, not started**: a note this session wrote or one the active
 //       THREAD.md names, checked read-only exactly as close step 2 checks it (its handover order, its guard for a
-//       THREAD.md-named note, whose (i) reads a carried hold, `unstarted` over the scan's dirs, its holds); only
+//       THREAD.md-named note, whose (i) reads a held step for a hold that carries as that hold again, `unstarted`
+//       over the scan's dirs, its holds); only
 //       `unstarted <slug> <root>` with no hold counts. Last in step 1, so it never sits directly after the detection
 //       bullet (N5).
 //   p2  next step 3's **A rollout prepared, not started, starts first.**, after **Compact** and before **While another
@@ -15,7 +16,7 @@
 //       sentence before what the move leaves behind and any `Carried:`, several notes, a held note's sentence and
 //       what his "hand it off" to it runs, and, with no line (the move not clear), those sentences on their own line
 //       just before the menu; the archive line's lead opens with the launch's sentence before its two parts, whose
-//       archive part then says "Nothing else is written.".
+//       archive part then says "Nothing else is written.", and a held note's sentence opens it the same way.
 //   p4  next step 5's **A launch first.**, between **Dispatch.** and **Archive this session, dispatched.**: handoff's
 //       Rollout launch with orient § 9's Fresh session continuation, § Next for this session skipped, then this
 //       session's own move in the same turn; close as the move reads the launch as a handover; carriers name the
@@ -23,8 +24,9 @@
 //       session ends with a note waiting and no lead.
 //   p5  close step 2's **Rollouts this session wrote.**: the THREAD.md-named source, item 1's thread-doc handover,
 //       item 2's `unstarted <slug> <root>` → sub-step 7.10 unless held, item 3's guard (i)-(iii), (i) reading an
-//       earlier close's held step for his not yet or orient-all's `left[]` as a hold that carries (and every other
-//       held step as the bare step), item 4's holds and the two that carry.
+//       earlier close's held step for a hold that carries (his not yet, orient-all's `left[]`, and a recorded
+//       handover, whose `(held: THREAD.md records a handover: <line>)` step reads as the handover it quotes) as that
+//       hold again, and a held step for a hold read fresh as the bare step; item 4's holds, each named carried or not.
 //   p6  close sub-step 7.10, directly after 7.9 and before § Commit hygiene and step 8: its launch, its place after
 //       every commit and 7.9, the launch doc's landing row in the banner choice, the skipped § Next and closing line,
 //       the fenced manual prompt, Codex Desktop's directive above the report, nothing asked, the resolver's
@@ -33,11 +35,16 @@
 //       `rollout handed off:` rows (the Stage's, Codex Desktop's and the manual one).
 //   p8  handoff's Invocation gate, Rollout launch, Skipped on a dispatch, Failure path carve-out and § Build name both
 //       new dispatchers, and the first three his "hand it off" to next step 4's held-note line; handoff-lifecycle
-//       § Withdrawn makes a launch's withdrawal his not yet.
+//       § Withdrawn makes a launch's withdrawal his not yet, in this session and every later one.
 //   p9  CONTEXT.md's **Execute handoff** and **Router (`next`)** entries.
-//   p10 ADR 0072's sections and d1-d5, d3's holds that carry, and its filed follow-ups; ADR 0057's Status clause.
-//   p11 close step 4's handover templates and its one held-step form, step 9's banner timing, flag read and rule (3),
-//       and the new Edge cases.
+//   p10 ADR 0072's sections and d1-d5, d3's holds that carry (a recorded handover among them) and d5's rule for a
+//       recorded handover across every later session, its rejected rewrite on withdrawal, and its filed follow-ups;
+//       ADR 0057's Status clause.
+//   p11 close step 4's handover templates and its one held-step form, written in place of the note's earlier line,
+//       step 9's banner timing, flag read and rule (3), and the new Edge cases, each holding across every later session.
+//   p12 one list of holds: the holds that carry, `(his not yet, …)`, and the holds read fresh, `(the ladder, …)`, are
+//       each one list, word for word wherever close, next, the lifecycle or ADR 0072 copies it, and close step 2's
+//       item 4, step 4, its Edge case, next step 1 and ADR 0072 d3 each carry it.
 // One pure function, check(files), returns the failed rule names; every rule has a control that fails it alone, and
 // every control asserts its swap changed the text. Phrase checks run on collapsed text. Reads files only.
 import { test } from 'node:test'
@@ -86,6 +93,9 @@ const ITEM10 = /^ {3}10\. \*\*Launch the unstarted rollout\*\*/
 const HYGIENE = '### Commit hygiene (both repos)'
 const STEP8 = /^8\. \*\*Print the "What landed" report/
 const CANONICAL = 'rollout not started: [[<slug>]]; say "hand it off" to start its lead in a fresh session, or run /thread:execute [[<slug>]] in <root>'
+// The two lists of holds (close step 2, item 4; ADR 0072 d3), word for word in every copy (p12).
+const CARRY = "(his not yet, orient-all's `left[]`, a recorded handover)"
+const FRESH = '(the ladder, no Project root line, a live session, a failed handoff scan, `/thread:open save`, a Leg)'
 
 function check(F) {
   const fails = new Map()
@@ -107,7 +117,8 @@ function check(F) {
     '— a parallel rollout note this session wrote, or one the active THREAD.md names (a **THREAD.md-named** note), that no lead runs yet',
     "exactly as close step 2's **Rollouts this session wrote.** checks it", 'its handover order',
     'its guard for a THREAD.md-named note',
-    "whose (i) reads an earlier close's held step for his not yet or orient-all's `left[]` (`/thread:execute [[<slug>]] (held: not yet)` or `(held: orient-all left it)`) as a hold",
+    "whose (i) reads an earlier close's held step `/thread:execute [[<slug>]] (held: <why>)` for a hold that carries",
+    ') as that hold again, its `unstarted` call',
     "its `unstarted` call over the handoff scan's `# scanned` dirs",
     'the scan and `unstarted` write nothing', 'and its holds', 'Only `unstarted <slug> <root>` with no hold counts',
     'While another session holds the thread, a note only THREAD.md names is not checked here.'])
@@ -140,7 +151,8 @@ function check(F) {
   need('p3', "next step 4's archive line lead", s4[at(s4, ARCHIVE_LINE)], ['After a launch (step 3)',
     'the line is exactly two parts, after the launch\'s sentence when there was a launch',
     '(**The launch, first in the line.**) opens the line, before its two parts',
-    'and the archive part\'s "Nothing is written." reads "Nothing else is written."'])
+    'and the archive part\'s "Nothing is written." reads "Nothing else is written."',
+    "A held note's sentence (**The launch, first in the line.**) opens the line the same way, after any launch's, and changes nothing the parts say"])
 
   // p4: next step 5's A launch first., and § Don't.
   const s5 = linesOf(slice(nx, DISPATCH, /^## /))
@@ -172,11 +184,13 @@ function check(F) {
   need('p5', "close step 2's item 2", rwl[items[1]], ['`unstarted <slug> <root>` → sub-step 7.10', 'unless a hold applies (item 4)',
     "step 8's `rollout not started:` row ending `(held: <why>)`", '`unstarted <slug> (no Project root line)` is such a hold'])
   need('p5', "close step 2's item 3", rwl[items[2]], ['(i) THREAD.md records no handover and no carried hold for it', '`handed [[<slug>]] to a fresh lead`',
-    "and none is a held step (step 4's one form) whose hold carries, `/thread:execute [[<slug>]] (held: not yet)` or `/thread:execute [[<slug>]] (held: orient-all left it)`",
-    "His not yet and orient-all's `left[]` live only in the transcript that saw them",
-    'A held step naming any other hold carries nothing, since each of those is read fresh here',
+    "and none is a held step (step 4's one form) whose hold carries (item 4): `/thread:execute [[<slug>]] (held: not yet)`, `/thread:execute [[<slug>]] (held: orient-all left it)` or `/thread:execute [[<slug>]] (held: THREAD.md records a handover: <line>)`",
+    "his not yet and orient-all's `left[]` live only in the transcript that saw them, and step 4 rewrites a recorded handover's line into its held step",
+    'so a `(held: THREAD.md records a handover: <line>)` step reads as the recorded handover it quotes, and carries',
+    'A held step naming a hold item 4 reads fresh carries nothing',
     '(i) reads it as the bare `/thread:execute [[<slug>]]` step it holds',
-    "A carried hold gives the row ending that held step's own `(held: not yet)` or `(held: orient-all left it)`, and launches nothing",
+    "A carried held step gives the row ending that held step's own `(held: …)`, word for word",
+    'and launches nothing, so step 4 writes the same held step again and the hold lasts in every later session until he says "hand it off"',
     '`close hands [[<slug>]] to a fresh lead`', 'a `Raised (task_id` line, start when ready, or `start: unattended`',
     "(ii) on the Chorus Stage, Chorus's `list_sessions` shows no session named for the rollout or running, waiting on, or resting after `/thread:execute [[<slug>]]`",
     'off the Stage this check is skipped',
@@ -184,13 +198,18 @@ function check(F) {
     'when `<home>/docs/handoffs` is not among the scanned dirs, re-run `unstarted` with it added, and that line decides',
     '`(held: THREAD.md records a handover: <line>)`', '`(held: <session> may hold it)`', '`(held: handoff scan failed)`'])
   need('p5', "close step 2's item 4", rwl.slice(items[3]).join('\n'), [
-    "Only his not yet and orient-all's `left[]` carry into a later session, through step 4's held step and guard (i) (item 3)",
-    'His "not yet" for that note: Not yet\'s line, or a withdrawal of its launch', 'item 1): `(held: not yet)`',
-    'or it is a pick he did not tick: `(held: orient-all left it)`',
+    'Three holds carry',
+    ': step 4 keeps each as its held step and guard (i) (item 3) reads it again, so it holds the note in every later session until he says "hand it off".',
+    'The rest are read fresh', ': the session that closes reads each anew, and a held step naming one reads as the bare step it holds.',
+    'His "not yet" for that note: Not yet\'s line, or a withdrawal of its launch', 'item 1): `(held: not yet)`. It carries.',
+    "or it is a pick he did not tick: `(held: orient-all left it)`. Close never overrides orient-all's own starts. It carries.",
+    "A THREAD.md-named note's recorded handover (guard (i)), an earlier close's `close hands [[<slug>]] …` whose launch failed or was withdrawn included: `(held: THREAD.md records a handover: <line>)`. It carries, so no later session starts a second lead.",
     '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` (read-only) exits non-zero',
     'It runs once, fresh, when any note is launchable', 'A held `Execute:` line is no hold by itself',
     '`(held: no Project root line)`', 'Orient-all § 7 left the note: its `left[]` names it, or it is a pick he did not tick',
-    'A THREAD.md-named note fails its guard (item 3)', "`/thread:open save`, and a Leg's close (§ Under a Leg): neither launches"])
+    'A live session on a THREAD.md-named note (guard (ii)): `(held: <session> may hold it)`.',
+    'A failed handoff scan, for a THREAD.md-named note (guard (iii)): `(held: handoff scan failed)`.',
+    "`/thread:open save`, and a Leg's close (§ Under a Leg): neither launches"])
 
   // p6: close sub-step 7.10.
   const cll = linesOf(cl)
@@ -232,7 +251,8 @@ function check(F) {
   need('p8', 'handoff § Build', section(h, /^## Build the handoff prompt/), [
     "Under close step 7.10 this line is not printed: close's `rollout handed off:` row says it, and close's report and banner follow. Under next step 5 it prints, and next's own move follows."])
   need('p8', 'lifecycle § Withdrawn', section(F[LIFECYCLE] ?? '', /^## Withdrawn/), [
-    'and close reads it as no handover (close step 2). That is his not yet, so close holds it: its row, never a fresh launch (ADR 0072).'])
+    'and close reads it as no handover (close step 2). That is his not yet, so close holds it, in this session and every later one: its row, never a fresh launch (ADR 0072).',
+    "A withdrawal after close's banner leaves THREAD.md's `close hands [[<slug>]] …` line, which the next close reads as a recorded handover, a hold that carries (close step 2, item 4)."])
 
   // p9: the glossary.
   const ctx = F[CONTEXT] ?? ''
@@ -254,14 +274,24 @@ function check(F) {
   need('p10', 'ADR 0072 Status', slice(adr, /^Status:/, /^\s*$/), ['thread-skill-p40-2-next-starts-a-prepared-handoff-itself'])
   need('p10', 'ADR 0072 § Decision', section(adr, /^## Decision$/), ['**d1. `next` launches first, then makes its own move.**',
     '**d2. Close ends with the launch.**', '**d3. The holds.**', '**d4. THREAD.md-named notes.**', '**d5. THREAD.md records the handover.**',
-    "Only his not yet and orient-all's `left[]` carry into a later session", '`/thread:execute [[<slug>]] (held: <why>)`',
-    '`(held: not yet)` or `(held: orient-all left it)`', 'a held step naming one reads as the bare step it holds',
-    '`· started as a Codex Desktop task (<threadId>)`', 'no carried hold (d3)'])
+    'Three holds carry into a later session', '`/thread:execute [[<slug>]] (held: <why>)`, in place of its earlier line',
+    '`(held: not yet)`, `(held: orient-all left it)` or `(held: THREAD.md records a handover: <line>)` as that hold again',
+    'never a launch, in every later session until he says "hand it off"', 'a held step naming one reads as the bare step it holds',
+    "a THREAD.md-named note's guard (d4) finds a recorded handover, a live session on the Stage, or a failed handoff scan",
+    '`· started as a Codex Desktop task (<threadId>)`', 'no carried hold (d3)',
+    'reads those lines as a recorded handover, a hold that carries (d3)',
+    'every session after it reads that step as the same recorded handover. So no later session starts a second lead',
+    "for a launch that failed or one he withdrew after close's banner as well, until he says \"hand it off\""])
+  need('p10', 'ADR 0072 § Considered options', section(adr, /^## Considered options$/), [
+    "**A launch's withdrawal rewrites THREAD.md's `close hands` line to `(held: not yet)`**",
+    'so a recorded handover has to carry by itself (d3, d5)'])
   need('p10', 'ADR 0072 § Follow-ups', section(adr, /^## Follow-ups$/), [
     'Filed as the vault task `thread-skill-followup-next-and-close-descriptions-name-the-launch`',
     'Filed as the vault task `thread-skill-followup-readme-next-and-close-rows-name-the-launch`'])
   need('p10', 'ADR 0072 § Decided for him', section(adr, /^## Decided for him/), ['Launch first, then the own move',
-    'after its commits and 7.9', 'The ladder is read fresh', 'handoff-router-dispatch-skips-next'])
+    'after its commits and 7.9', 'The ladder is read fresh', 'handoff-router-dispatch-skips-next',
+    'Three holds carry into a later session', "through close step 4's held step (d3)",
+    'a recorded handover with `unstarted` still gets a row, never a launch, in every later session (d5)'])
   need('p10', 'ADR 0057 Status', slice(F[ADR57] ?? '', /^Status:/, /^\s*$/), ['d5 and its close-row item amended by ADR 0072'])
 
   // p11: close step 4, step 9 and the edge cases.
@@ -272,15 +302,44 @@ function check(F) {
   need('p11', "close step 4's rollout bullet", s4c[iRoll], ['never keep a bare `/thread:execute [[<slug>]]` step',
     '`close hands [[<slug>]] to a fresh lead (see the step-8 row)`', 'which stays true if the launch fails',
     '`handed [[<slug>]] to a fresh lead`', 'A held note keeps its step in one fixed form, `/thread:execute [[<slug>]] (held: <why>)`',
-    "`<why>` its step-8 row's", 'reads `(held: not yet)` and `(held: orient-all left it)` as holds that carry, so it holds the note again',
-    'and reads any other `<why>` fresh'])
+    "`<why>` its step-8 row's, in place of the note's earlier line in Where we are, Next steps or the Resume instructions (a bare step, a handover line or an earlier held step)",
+    'reads a hold that carries', 'as that hold again, so it holds the note again', 'and reads any other `<why>` fresh',
+    'and the held step this bullet then writes in its place, `(held: THREAD.md records a handover: <line>)`, records the same handover, so no session after it starts one either'])
   const s9 = slice(cl, /^9\. \*\*End with the closing banner/, /^## Edge cases/) ?? ''
   need('p11', 'close step 9', s9, ["only after sub-step 7.10's launches end",
     'A `rollout handed off: … starting on the Stage` row is no follow-up; a manual one is, since its prompt is his to open',
     'the research-landing offer and the rollout row included, and so is each `rollout handed off:` row'])
-  need('p11', 'close § Edge cases', section(cl, /^## Edge cases/), ['- **A THREAD.md-named rollout note**',
-    'so his not yet outlives the session that heard it', 'and the same reply to next step 4\'s held-note line runs it the same way',
-    '- **His "not yet" after close\'s launch**', '- **A rollout an orient-all pass left unstarted**'])
+  const edges = section(cl, /^## Edge cases/)
+  need('p11', 'close § Edge cases', edges, ['- **A THREAD.md-named rollout note**',
+    'whose launch failed or was withdrawn included, gives the row `(held: THREAD.md records a handover: <line>)`, never a second lead, in this session or any later one: step 4 keeps it as its held step, which carries',
+    "gives the row in every later session through an earlier close's held step, so his not yet outlives the session that heard it",
+    'holds nothing by itself there, since its held step reads as the bare step',
+    'and the same reply to next step 4\'s held-note line runs it the same way',
+    '- **His "not yet" after close\'s launch**',
+    'its step 4 rewrites that line into the held step `/thread:execute [[<slug>]] (held: THREAD.md records a handover: <line>)`, a hold that carries, so that close and every later one holds the note (its row), never a fresh launch, until he says "hand it off".',
+    '- **A rollout an orient-all pass left unstarted**', 'keeps it held in every later session (guard (i))'])
+
+  // p12: one list of holds that carry and one of holds read fresh, word for word in every copy.
+  const nameIn = { [CLOSE]: 'close', [NEXT]: 'next', [LIFECYCLE]: 'handoff-lifecycle', [ADR]: 'ADR 0072' }
+  for (const [file, name] of Object.entries(nameIn)) {
+    for (const m of C(stripFront(F[file])).matchAll(/\((?:his not yet|the ladder),[^)]*\)/g)) {
+      const want = m[0].startsWith('(his') ? CARRY : FRESH
+      if (m[0] !== want) flag('p12', `${name} copies a list of holds as ${m[0]}, not ${want}`)
+    }
+  }
+  const holdsItem = rwl.slice(items[3] < 0 ? rwl.length : items[3]).join('\n')
+  const tmdEdge = lineOf(edges ?? '', '- **A THREAD.md-named rollout note**')
+  const d3 = slice(adr, /^\*\*d3\. /, /^\*\*d4\. /)
+  for (const [where, text, lists] of [
+    ["close step 2's item 4", holdsItem, [CARRY, FRESH]],
+    ["close step 4's rollout bullet", s4c[iRoll], [CARRY]],
+    ["close's THREAD.md-named Edge case", tmdEdge, [CARRY, FRESH]],
+    ["next step 1's prepared-rollout bullet", s1[iPrep], [CARRY]],
+    ['ADR 0072 d3', d3, [CARRY, FRESH]],
+    ['ADR 0072 § Decided for him', section(adr, /^## Decided for him/), [CARRY]],
+  ]) {
+    for (const list of lists) if (!C(text).includes(list)) flag('p12', `${where} does not carry ${list}`)
+  }
 
   return { rules: [...fails.keys()].sort(), details: [...fails.values()].flat() }
 }
@@ -321,19 +380,28 @@ test('controls: next (p1 to p4)', () => {
   // the archive line back to its pre-launch lead: "exactly two parts" unqualified, "Nothing is written." after a launch
   only(swap(NEXT, ', and the archive part\'s "Nothing is written." reads "Nothing else is written.", since the launch wrote and landed its doc', ''),
     'p3', 'archive part unqualified after a launch')
-  // the carried hold dropped from next step 1's guard
-  only(swap(NEXT, ", whose (i) reads an earlier close's held step for his not yet or orient-all's `left[]` (`/thread:execute [[<slug>]] (held: not yet)` or `(held: orient-all left it)`) as a hold", ''),
-    'p1', 'next reads no carried hold')
+  // next step 1's guard reads a held step for a hold that carries as the bare step
+  only(swap(NEXT, ') as that hold again, its `unstarted` call', ') as the bare step, its `unstarted` call'), 'p1', 'next reads no carried hold')
+  // a held note's sentence with no place in the archive line (another session holds the thread)
+  only(swap(NEXT, " A held note's sentence (**The launch, first in the line.**) opens the line the same way, after any launch's, and changes nothing the parts say.", ''),
+    'p3', 'archive line has no held-note slot')
 })
 
 test('controls: close (p5 to p7, p11)', () => {
   only(swap(CLOSE, '(i) THREAD.md records no handover and no carried hold for it', '(i) THREAD.md'), 'p5', 'guard (i)')
   // session 2 loses session 1's not yet: guard (i) reads no held step, or reads every held step as a hold
-  only(swap(CLOSE, ", and none is a held step (step 4's one form) whose hold carries, `/thread:execute [[<slug>]] (held: not yet)` or `/thread:execute [[<slug>]] (held: orient-all left it)`", ''),
+  only(swap(CLOSE, ", and none is a held step (step 4's one form) whose hold carries (item 4): `/thread:execute [[<slug>]] (held: not yet)`, `/thread:execute [[<slug>]] (held: orient-all left it)` or `/thread:execute [[<slug>]] (held: THREAD.md records a handover: <line>)`", ''),
     'p5', 'guard (i) reads no carried hold')
   only(swap(CLOSE, '(i) reads it as the bare `/thread:execute [[<slug>]]` step it holds', '(i) reads it as a hold'), 'p5', 'a fresh hold carries')
-  only(swap(CLOSE, "Only his not yet and orient-all's `left[]` carry into a later session, through step 4's held step and guard (i) (item 3); every other hold here is read fresh by the session that closes.", ''),
-    'p5', 'item 4 names no carried hold')
+  // session 3 loses the recorded handover session 2 held: its held step reads as the bare step again (round 3's gap)
+  only(swap(CLOSE, 'so a `(held: THREAD.md records a handover: <line>)` step reads as the recorded handover it quotes, and carries',
+    'so a `(held: THREAD.md records a handover: <line>)` step reads as the bare step it holds'), 'p5', 'recorded handover read fresh')
+  only(swap(CLOSE, ", `/thread:execute [[<slug>]] (held: orient-all left it)` or `/thread:execute [[<slug>]] (held: THREAD.md records a handover: <line>)`.",
+    " or `/thread:execute [[<slug>]] (held: orient-all left it)`."), 'p5', 'guard (i) without the recorded-handover step')
+  only(swap(CLOSE, '`(held: THREAD.md records a handover: <line>)`. It carries, so no later session starts a second lead.',
+    '`(held: THREAD.md records a handover: <line>)`.'), 'p5', 'item 4: a recorded handover not carried')
+  only(swap(CLOSE, ': step 4 keeps each as its held step and guard (i) (item 3) reads it again, so it holds the note in every later session until he says "hand it off".', '.'),
+    'p5', 'item 4 names no carry')
   only(swap(CLOSE, /\(ii\) on the Chorus Stage, Chorus's `list_sessions`[^;]*;/, ''), 'p5', 'guard (ii)')
   only(swap(CLOSE, '`unstarted <slug> <root>` → sub-step 7.10', '`unstarted <slug> <root>` → the `rollout not started:` row'), 'p5', 'no launch')
   const l9 = real[CLOSE].split('\n').find((l) => ITEM9.test(l))
@@ -349,6 +417,14 @@ test('controls: close (p5 to p7, p11)', () => {
   only(swap(CLOSE, 'A held note keeps its step in one fixed form, `/thread:execute [[<slug>]] (held: <why>)`', 'A held note keeps its `/thread:execute [[<slug>]]` step, with its hold named'),
     'p11', 'held-step form')
   only(swap(CLOSE, ', and so is each `rollout handed off:` row', ''), 'p11', 'rule (3)')
+  // step 4 writes the recorded handover's held step with no word that it still records the handover
+  only(swap(CLOSE, ', and the held step this bullet then writes in its place, `(held: THREAD.md records a handover: <line>)`, records the same handover, so no session after it starts one either.', '.'),
+    'p11', 'step 4: the held step drops the handover')
+  // the not-yet-after-launch Edge case back to the next session only
+  only(swap(CLOSE, ', so that close and every later one holds the note (its row), never a fresh launch, until he says "hand it off".', ', so it holds the note (its row), never a fresh launch.'),
+    'p11', 'Edge case: next session only')
+  only(swap(CLOSE, 'never a second lead, in this session or any later one: step 4 keeps it as its held step, which carries,', 'never a second lead:'),
+    'p11', 'Edge case: a recorded handover for one session')
 })
 
 test('controls: handoff, lifecycle, glossary and ADRs (p8 to p10)', () => {
@@ -358,12 +434,35 @@ test('controls: handoff, lifecycle, glossary and ADRs (p8 to p10)', () => {
   only(swap(HANDOFF, ' row or on next step 4\'s held-note line dispatched,', ' row dispatched,'), 'p8', 'gate without the held-note line')
   only(swap(HANDOFF, ' row or on next step 4\'s held-note line, or close step 7.10, or next step 5)', ' row, or close step 7.10, or next step 5)'),
     'p8', 'Rollout launch without the held-note line')
-  only(swap(LIFECYCLE, ' That is his not yet, so close holds it: its row, never a fresh launch (ADR 0072).', ''), 'p8', 'withdrawn')
+  only(swap(LIFECYCLE, ' That is his not yet, so close holds it, in this session and every later one: its row, never a fresh launch (ADR 0072).', ''), 'p8', 'withdrawn')
+  only(swap(LIFECYCLE, ", which the next close reads as a recorded handover, a hold that carries (close step 2, item 4).", '.'), 'p8', 'withdrawn after the banner')
   only(swap(CONTEXT, /For a note this session\s+wrote, or its THREAD\.md names,[^]*?row\s+instead\./,
     "Close's `rollout not started:` row names it again for a\n  note this session wrote and left with no lead."), 'p9', 'old sentence back')
   only(swap(CONTEXT, /\s+A rollout note written and\s+waiting with no lead gets its \*\*execute handoff\*\* first, before the move\s+\(ADR 0072\)\./, ''), 'p9', 'router')
   only(swap(ADR, '**d4. THREAD.md-named notes.**', '**d4.**'), 'p10', 'd4')
   only(swap(ADR57, /d5 and\s+its close-row item amended by ADR 0072/, 'unchanged'), 'p10', 'ADR 0057 status')
-  only(swap(ADR, /\nOnly his not yet and orient-all's `left\[\]` carry into a later session:[^]*?the bare step it holds\.\n/, '\n'), 'p10', 'd3 carried holds')
+  only(swap(ADR, /`\(held: not yet\)`, `\(held: orient-all left it\)` or `\(held: THREAD\.md records a handover: <line>\)` as that hold again/,
+    '`(held: not yet)` or `(held: orient-all left it)` as that hold again'), 'p10', 'd3 without the recorded handover')
+  only(swap(ADR, /a hold that\s+carries \(d3\): that session's close rewrites/, "and that session's close rewrites"), 'p10', 'd5 recorded handover not carried')
+  only(swap(ADR, /So no later session starts a second lead, for a launch that failed or one he withdrew\s+after close's banner as well, until he says "hand it off"\./, 'So the next session starts no second lead.'),
+    'p10', 'd5 for the next session only')
+  only(swap(ADR, /- \*\*A launch's withdrawal rewrites THREAD\.md's `close hands` line[^]*?\(d3, d5\)\.\n/, ''), 'p10', 'option (b) unrecorded')
   only(swap(ADR, /Filed as the vault task\s+`thread-skill-followup-readme-next-and-close-rows-name-the-launch`\./, ''), 'p10', 'README follow-up unfiled')
+})
+
+test('controls: one list of holds (p12)', () => {
+  // the Edge case's copy of the holds read fresh drifts from item 4's (round 3's three-way drift)
+  only(swap(CLOSE, 'a hold read fresh (the ladder, no Project root line, a live session, a failed handoff scan, `/thread:open save`, a Leg)',
+    'a hold read fresh (the ladder, no Project root line, `/thread:open save`, a Leg)'), 'p12', 'Edge case drifts')
+  // ADR 0072 d3 back to round 2's list, a failed guard read fresh
+  only(swap(ADR, '(the ladder, no Project root line, a live session, a failed handoff scan, `/thread:open save`, a Leg) never carry',
+    '(the ladder, no Project root line, a failed guard or scan, `/thread:open save`, a Leg) never carry'), 'p12', 'ADR drifts')
+  // next step 1's copy of the holds that carry loses the recorded handover
+  only(swap(NEXT, "(his not yet, orient-all's `left[]`, a recorded handover)", "(his not yet, orient-all's `left[]`)"), 'p12', 'next drifts')
+  // item 4 states the holds read fresh with no list
+  only(swap(CLOSE, 'The rest are read fresh (the ladder, no Project root line, a live session, a failed handoff scan, `/thread:open save`, a Leg)', 'The rest are read fresh'),
+    'p12', 'item 4 has no list')
+  // step 4 names the holds that carry by no list
+  only(swap(CLOSE, "reads a hold that carries (his not yet, orient-all's `left[]`, a recorded handover) as that hold again", 'reads a hold that carries as that hold again'),
+    'p12', 'step 4 has no list')
 })

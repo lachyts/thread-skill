@@ -64,14 +64,17 @@ note in its line; nothing is launched:
   itself;
 - `unstarted` prints `(no Project root line)`;
 - orient-all § 7 left the note: its `left[]`, or a pick he did not tick;
-- a THREAD.md-named note fails its guard (d4), or the handoff scan failed;
+- a THREAD.md-named note's guard (d4) finds a recorded handover, a live session on the Stage, or a failed handoff scan;
 - `/thread:open save`, and a Leg's close.
 
-Only his not yet and orient-all's `left[]` carry into a later session: they live only in the transcript that saw them.
-So close step 4 writes every held note's step in one fixed form, `/thread:execute [[<slug>]] (held: <why>)`, and a later
-session's guard (d4) reads `(held: not yet)` or `(held: orient-all left it)` as that hold again: close's row or next's
-line, never a launch, until he says "hand it off". The holds read fresh (the ladder, no Project root line, a failed
-guard or scan, `/thread:open save`, a Leg) never carry: a held step naming one reads as the bare step it holds.
+Three holds carry into a later session (his not yet, orient-all's `left[]`, a recorded handover). His not yet and
+orient-all's `left[]` live only in the transcript that saw them, and the close that holds a recorded handover rewrites
+its THREAD.md line (d5). So close step 4 writes every held note's step in one fixed form,
+`/thread:execute [[<slug>]] (held: <why>)`, in place of its earlier line, and a later session's guard (d4) reads
+`(held: not yet)`, `(held: orient-all left it)` or `(held: THREAD.md records a handover: <line>)` as that hold again:
+close's row or next's line, never a launch, in every later session until he says "hand it off". The holds read fresh
+(the ladder, no Project root line, a live session, a failed handoff scan, `/thread:open save`, a Leg) never carry: a
+held step naming one reads as the bare step it holds.
 
 **d4. THREAD.md-named notes.** A note counts when the active THREAD.md's Where we are, Next steps or Resume
 instructions, as they stood before this session's first write to it, carry a `[[<project-slug>-rollout-<YYYY-MM-DD>[-N]]]`
@@ -84,8 +87,11 @@ it; and `unstarted` was also run with the Project root's handoff home (`handoff-
 **d5. THREAD.md records the handover.** Close step 4 records the launch 7.10 will run as `close hands [[<slug>]] to a
 fresh lead (see the step-8 row)`, which stays true if the launch fails, and logs a handover already in the transcript
 as `handed [[<slug>]] to a fresh lead`. It never keeps a bare `/thread:execute [[<slug>]]` step for either, and writes a
-held note's step in d3's one form. A later session's guard (d4) reads those lines as a recorded handover, so it prints a
-row and never starts a second lead.
+held note's step in d3's one form. A later session's guard (d4) reads those lines as a recorded handover, a hold that
+carries (d3): that session's close rewrites the line into the held step
+`/thread:execute [[<slug>]] (held: THREAD.md records a handover: <line>)`, and every session after it reads that step
+as the same recorded handover. So no later session starts a second lead, for a launch that failed or one he withdrew
+after close's banner as well, until he says "hand it off".
 
 ## Decided for him (overturnable)
 
@@ -97,10 +103,11 @@ row and never starts a second lead.
   `landed` → B).
 - A manual 7.10 handoff is a follow-up for the Stage's flag read (its prompt is his to open); a raised card is not.
 - The ladder is read fresh at the launch; a held `Execute:` line printed earlier holds nothing by itself.
-- Only his not yet and orient-all's `left[]` carry into a later session (d3): every other hold is read fresh there, so
-  a ladder file fixed or a Project root line added since lets that session launch.
+- Three holds carry into a later session (his not yet, orient-all's `left[]`, a recorded handover), through close step
+  4's held step (d3); every other hold is read fresh there, so a ladder file fixed or a Project root line added since
+  lets that session launch.
 - A THREAD.md-named note is launched only behind the three-part guard (d4); a recorded handover with `unstarted` still
-  gets a row, never a launch, and he says "hand it off" when no lead runs.
+  gets a row, never a launch, in every later session (d5), and he says "hand it off" when no lead runs.
 - Orient-all's `left[]` is a hold, and a note this thread's own handoff doc names as its consumer's step is a handover:
   close never overrides another verb's choice.
 - A plan whose next step is a fresh session needs no new rule: next's step-3 handoff route and step-4 **Clear** clause
@@ -122,6 +129,10 @@ row and never starts a second lead.
   held primary checkout.
 - **Launch any unstarted rollout in the vault:** rejected. A note no session here wrote or named may be another
   session's, or one he set aside.
+- **A launch's withdrawal rewrites THREAD.md's `close hands` line to `(held: not yet)`** (handoff-lifecycle.md
+  § Withdrawn): rejected. A not yet said after close's banner has no close left to land that write, and a launch that
+  failed, or a card closed with no word from him, leaves the same `close hands` line, so a recorded handover has to
+  carry by itself (d3, d5).
 - **No THREAD.md source:** rejected. A fresh session that opens the thread would never start a note its predecessor
   wrote and was cut before handing off.
 
