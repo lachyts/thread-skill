@@ -29,10 +29,19 @@
 //   schedule's test-credential Planner examples read their keys (the guidance is coupled to the reader);
 // - the env-file read: a FIFO, a device, a symlink to one and a directory never block or read (isfile patched too), the
 //   1 MiB cap, the dotenv edges and the JWT edges, no value in any why; the bootstrap-refresh shapes; the credential
-//   annotation round-trips through GATE_ANNOT_RE and the engine's unapprovedGates, the gate's own parentheses kept.
+//   annotation round-trips through GATE_ANNOT_RE and the engine's unapprovedGates, the gate's own parentheses kept;
+// - p39-3 (the sweep records a declared test Login): the Verify (tests/fixtures/gated-inputs/test-login.md, the archived
+//   Steer note's credential gate, reads `{names: ["dummy"]}` with ["dummy"] and asks with []; with no logins, today's
+//   shape); the line rule (only a `credential:` gate line naming a Login reads, its `(approved …)` suffix in any case,
+//   the standing approval's own annotation, `>` markers and a CR stripped; prose, a numbered line and a Planner line get
+//   no key); APPROVED_SUFFIX_RE against GATE_ANNOT_RE (pattern, flags and an uppercase strip); schedule § 7's test-Login
+//   Planner line coupled to the reader; the CLI's lazy read of `[defaults] test_logins` (declared, none, a refused file
+//   with its one stderr line and exit 1, laziness for a note with no Login gate or one stopped at steps 1-6, stderr in
+//   note order) and its no-bytecode load (a copy of three scripts, with a control that drops the flag).
 //
 // Hermetic: python3 -I -B (no bytecode next to the module), THREAD_EVENTS_DIR in temp (reconcile-rollout.py is only
-// imported, never run). Reads files only.
+// imported, never run), and every sweep CLI spawn under a temp HOME. It writes only under mktemp dirs; test 7 of p39-3
+// copies three scripts there and runs them without -B.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -80,7 +89,12 @@ for req in json.loads(sys.argv[3]):
     elif op == "hits":
         out.append(gi.hits(req["text"], getattr(gi, req["list"])))
     elif op == "sweep":
-        out.append(gi.sweep(gi.body_of(open(req["path"], encoding="utf-8").read())))
+        out.append(gi.sweep(gi.body_of(open(req["path"], encoding="utf-8").read()), req.get("logins")))
+    elif op == "sweep_text":
+        out.append(gi.sweep(req["text"], req.get("logins")))
+    elif op == "suffix_re":
+        rr = rr or load("rr", sys.argv[2])
+        out.append([[r.pattern, r.flags] for r in (gi.APPROVED_SUFFIX_RE, rr.GATE_ANNOT_RE)])
     elif op == "lists":
         out.append({k: list(getattr(gi, k)) for k in ("UNIT_NOUNS", "PERIOD_ADVERBS")})
     elif op == "credential":
@@ -428,9 +442,13 @@ test('the currency amount marker: amounts flag as `$ amount`, code-only bare amo
   quiet.forEach((text, i) => assert.deepEqual(got[flag.length + i], [], text))
 })
 
-test('the sweep CLI prints one JSON line per note, body only, each hit with its word and an `at` holding it', () => {
+test('the sweep CLI prints one JSON line per note, body only, each hit with its word and an `at` holding it', (t) => {
+  // p39-3: every spawn under a temp HOME, so the operator's own rollouts.toml never enters the reading
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'gated-inputs-home-'))
+  t.after(() => fs.rmSync(H, { recursive: true, force: true }))
+  const env = { ...process.env, HOME: H, THREAD_EVENTS_DIR: EVENTS }
   const r = spawnSync('python3', ['-I', '-B', MODULE, 'sweep', path.join(FIXTURES, 'chorus-p18-7.md'), path.join(FIXTURES, 'shell-vars.md')],
-    { encoding: 'utf8', env: { ...process.env, THREAD_EVENTS_DIR: EVENTS } })
+    { encoding: 'utf8', env })
   assert.equal(r.status, 0, r.stderr)
   const lines = r.stdout.trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(lines.map((l) => l.slug), ['chorus-p18-7', 'shell-vars'])
@@ -440,10 +458,10 @@ test('the sweep CLI prints one JSON line per note, body only, each hit with its 
     assert.ok(h.at.toLowerCase().includes(h.word.toLowerCase()), `${h.word} in ${h.at}`)
     assert.ok(!h.at.includes('\n'), 'newlines are folded')
   }
-  const bad = spawnSync('python3', ['-I', '-B', MODULE, 'sweep', path.join(FIXTURES, 'no-such-note.md')], { encoding: 'utf8' })
+  const bad = spawnSync('python3', ['-I', '-B', MODULE, 'sweep', path.join(FIXTURES, 'no-such-note.md')], { encoding: 'utf8', env })
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /^gated_inputs: .*no-such-note\.md: /)
-  assert.equal(spawnSync('python3', ['-I', '-B', MODULE], { encoding: 'utf8' }).status, 2)
+  assert.equal(spawnSync('python3', ['-I', '-B', MODULE], { encoding: 'utf8', env }).status, 2)
 })
 
 // ---- ADR 0038: a Cap is a promise. The stdin form `exposure -` the plan judge runs, and the one-line gate ----------
@@ -780,6 +798,172 @@ test('p37-4 login_annotation: its text, one `)` last, stripped by GATE_ANNOT_RE 
   assert.match(bad.error, /an annotation part holds a '\)'/)
   assert.deepEqual(py([{ op: 'strip', gate: DUMMY, line: `${DUMMY} ${ann}` }]), [true])
   assert.deepEqual([...T.unapprovedGates([DUMMY], [`${DUMMY} ${ann}`])], [])
+})
+
+// ---- p39-3: the sweep records a declared test Login -----------------------------------------------------------------
+// schedule § 3.6 and orient reshuffle R3 (c) record a credential hit whose `login.names` the sweep set, never asking it
+// ahead; every other hit keeps today's rule. The CLI reads the declared test Logins itself, lazily (module docstring 1).
+const TEST_LOGIN = path.join(FIXTURES, 'test-login.md')
+const DUMMY_READ = { names: ['dummy'], why: '' }
+// The credential hits schedule § 3.6 would still ask ahead: those whose `login.names` the sweep did not set.
+const asked = (s) => s.credential.filter((h) => !h.login?.names)
+
+test('p39-3 the sweep records a declared test Login: recorded with ["dummy"], asked with []', () => {
+  const [rec, ask, today] = py([{ op: 'sweep', path: TEST_LOGIN, logins: ['dummy'] }, { op: 'sweep', path: TEST_LOGIN, logins: [] },
+    { op: 'sweep', path: TEST_LOGIN }])
+  for (const s of [rec, ask, today]) {
+    assert.deepEqual([s.spend, s.irreversible], [[], []], 'the fixture holds no spend or irreversible hit')
+    assert.ok(s.credential.length > 0, 'its gate is a credential hit')
+  }
+  for (const h of rec.credential) assert.deepEqual(h.login, DUMMY_READ, h.at)
+  assert.deepEqual(asked(rec), [], 'with ["dummy"] nothing is asked ahead')
+  for (const h of ask.credential) assert.deepEqual(h.login, { names: null, why: NO_LOGINS }, h.at)
+  assert.ok(asked(ask).length > 0, 'with [] it asks ahead as today')
+  for (const h of today.credential) assert.deepEqual(Object.keys(h), ['word', 'at'], "with no logins: today's shape")
+})
+
+test('p39-3 the line rule: only a `credential:` gate line naming a Login reads; its `(approved …)` suffix, `>` markers and CR stripped', () => {
+  const GATE = `- ${DUMMY}`
+  const TOKEN = { names: null, why: 'deny word: token' }
+  const cases = [
+    ['Mind the token count of the brief.', null],   // prose: no key
+    ["- credential: the dummy Claude Login's session token", TOKEN],   // both hits, one line reading
+    ['- credential: the animately Login', { names: null, why: 'animately is not a declared test Login' }],
+    [`${GATE} (approved 2026-11-03)`, DUMMY_READ],   // the verbatim Steer line, its suffix kept
+    [`${GATE} (Approved 2026-11-03)`, DUMMY_READ],
+    [`${GATE} (approved 2026-11-06 under the standing approval: test Login dummy, from file:defaults)`, DUMMY_READ],
+    [`> ${GATE}`, DUMMY_READ],
+    [`> > ${GATE} (approved 2026-11-03)\r\nthe next line`, DUMMY_READ],
+    [`  ${GATE}`, DUMMY_READ],   // an indented sub-bullet is a gate (gate_kind strips the marker)
+    ['- Credential: the Dummy Login, to run the probe', DUMMY_READ],   // the declared spelling
+    [`1. ${DUMMY}`, null],   // a numbered line is no gate: fail closed
+    ['- Planner: word each test-Login gate as `credential: the <name> Claude Login, <use>`; keep `token` off that line', null],
+    ['- credential: the dummy Login and the GitHub PAT', { names: null, why: 'another credential beside the Login: PAT' }],
+  ]
+  const got = py(cases.map(([text]) => ({ op: 'sweep_text', text, logins: LOGINS })))
+  cases.forEach(([text, want], i) => {
+    assert.ok(got[i].credential.length > 0, `${text}: a credential hit`)
+    for (const h of got[i].credential) {
+      if (want === null) assert.deepEqual(Object.keys(h), ['word', 'at'], `${text}: no login key`)
+      else assert.deepEqual(h.login, want, `${text}: ${h.word}`)
+    }
+  })
+  assert.equal(got[1].credential.length, 2, 'credential and token: both hits on the one line')
+  // control: unstripped, the standing approval's own annotation names a second Login, `test`
+  assert.deepEqual(py([{ op: 'login', gate: cases[5][0], logins: LOGINS }])[0], { names: null, why: 'test is not a declared test Login' })
+})
+
+test('p39-3 APPROVED_SUFFIX_RE is GATE_ANNOT_RE (pattern and flags), and both strip an uppercase `(Approved …)`', () => {
+  const [[gi, rr]] = py([{ op: 'suffix_re' }])
+  assert.deepEqual(gi, rr, 'the copy holds the same pattern and flags')
+  // behavioural: the annotation reads `test is not a declared test Login` unless stripped, so a case-sensitive copy fails
+  const line = `${DUMMY} (Approved 2026-11-06 under the standing approval: test Login dummy, from file:defaults)`
+  const [stripped, s] = py([{ op: 'strip', gate: DUMMY, line }, { op: 'sweep_text', text: `- ${line}`, logins: LOGINS }])
+  assert.equal(stripped, true, 'GATE_ANNOT_RE strips it')
+  assert.deepEqual(s.credential.map((h) => h.login), [DUMMY_READ], 'APPROVED_SUFFIX_RE strips it')
+})
+
+test("p39-3 schedule's test-Login Planner line is coupled to the reader: its example reads dummy; each word it keeps off asks", () => {
+  const schedule = fs.readFileSync(path.join(root, 'skills', 'schedule', 'SKILL.md'), 'utf8')
+  const s7 = schedule.slice(schedule.indexOf('### 7. '), schedule.indexOf('### 7.5. '))
+  const line = s7.split('\n').find((l) => l.startsWith('- Planner: word each test-Login gate'))
+  assert.ok(line, 'schedule § 7 has the test-Login Planner line')
+  const examples = [...line.matchAll(/`(credential: [^`]*<name>[^`]*)`/g)].map((m) => m[1])
+  assert.deepEqual(examples, ['credential: the <name> Claude Login, <use>'], 'one backticked example')
+  const fill = (use) => examples[0].replace('<name>', 'dummy').replace('<use>', use)
+  assert.deepEqual(py([{ op: 'login', gate: fill('to run the probe'), logins: LOGINS }])[0], DUMMY_READ, 'the example, filled')
+  const off = ['access', 'token', 'session token', 'OAuth', 'secret', 'live Stripe', 'prod', 'API', 'account', 'key', 'PAT', '.env',
+    'and the main Login', 'as lachy@x.com', 'STRIPE_KEY']
+  const got = py(off.map((w) => ({ op: 'login', gate: fill(`to run the probe with ${w}`), logins: LOGINS })))
+  off.forEach((w, i) => {
+    assert.equal(got[i].names, null, `${w} asks`)
+    assert.ok(got[i].why && got[i].why !== NO_LOGINS, `${w}: ${got[i].why}`)
+  })
+  assert.deepEqual(py([{ op: 'login', gate: fill('for a live probe'), logins: LOGINS }])[0], DUMMY_READ, 'control: a live probe reads dummy')
+})
+
+// The CLI's lazy settings read: every spawn under a temp HOME, so the operator's own rollouts.toml never enters.
+const DECLARED = 'schema = 5\n\n[defaults]\ntest_logins = ["dummy"]\n'
+const REFUSED = 'schema = 4\n\n[defaults]\ntest_logins = ["dummy"]\n'   // test_logins is a schema-5 key
+const REFUSED_LINE = /^gated_inputs: test_logins: .*rollouts\.toml:\d+: rollout\.test_logins is a schema-5 key but the file says schema = 4/
+function tempHome(t, toml) {
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'gated-inputs-home-'))
+  t.after(() => fs.rmSync(H, { recursive: true, force: true }))
+  if (toml != null) {
+    fs.mkdirSync(path.join(H, '.config', 'thread'), { recursive: true })
+    fs.writeFileSync(path.join(H, '.config', 'thread', 'rollouts.toml'), toml)
+  }
+  return H
+}
+const sweepCli = (H, notes, { script = MODULE, flags = ['-I', '-B'] } = {}) => spawnSync('python3', [...flags, script, 'sweep', ...notes],
+  { encoding: 'utf8', env: { ...process.env, HOME: H, THREAD_EVENTS_DIR: EVENTS } })
+const jsonLines = (r) => r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l))
+const errLines = (r) => r.stderr.split('\n').filter(Boolean)
+const logins = (r) => jsonLines(r).flatMap((l) => l.credential.map((h) => h.login))
+
+test('p39-3 the CLI reads the declared test Logins: ["dummy"] records, no file reads NO_LOGINS_WHY, both exit 0 with no stderr', (t) => {
+  const declared = sweepCli(tempHome(t, DECLARED), [TEST_LOGIN])
+  assert.deepEqual([declared.status, declared.stderr], [0, ''])
+  assert.ok(logins(declared).length > 0)
+  for (const l of logins(declared)) assert.deepEqual(l, DUMMY_READ)
+  const none = sweepCli(tempHome(t, null), [TEST_LOGIN])
+  assert.deepEqual([none.status, none.stderr], [0, ''])
+  for (const l of logins(none)) assert.deepEqual(l, { names: null, why: NO_LOGINS })
+})
+
+test('p39-3 a refused rollouts.toml: one test_logins stderr line, exit 1, and the note still printed with no login key', (t) => {
+  const r = sweepCli(tempHome(t, REFUSED), [TEST_LOGIN])
+  assert.equal(r.status, 1)
+  assert.equal(errLines(r).length, 1, r.stderr)
+  assert.match(errLines(r)[0], REFUSED_LINE)
+  assert.equal(jsonLines(r).length, 1)
+  for (const h of jsonLines(r)[0].credential) assert.deepEqual(Object.keys(h), ['word', 'at'], 'no login: every hit keeps the ask')
+})
+
+test('p39-3 the read is lazy: a refused file never errs a note with no Login gate, nor one whose reading stops at steps 1-6', (t) => {
+  const H = tempHome(t, REFUSED)
+  const plain = sweepCli(H, [path.join(FIXTURES, 'chorus-p18-7.md'), path.join(FIXTURES, 'shell-vars.md')])
+  assert.deepEqual([plain.status, plain.stderr], [0, ''], 'no credential gate: the file is never read')
+  const note = path.join(H, 'deny.md')
+  fs.writeFileSync(note, "# A probe\n\n- credential: the dummy Claude Login's session token\n")
+  const deny = sweepCli(H, [note])
+  assert.deepEqual([deny.status, deny.stderr], [0, ''], 'steps 1-6 never read the settings')
+  assert.deepEqual(logins(deny), [{ names: null, why: 'deny word: token' }, { names: null, why: 'deny word: token' }])
+})
+
+test('p39-3 stderr follows note order: an unreadable note first, then the one test_logins line, written once', (t) => {
+  const r = sweepCli(tempHome(t, REFUSED), [path.join(FIXTURES, 'no-such-note.md'), TEST_LOGIN, TEST_LOGIN])
+  assert.equal(r.status, 1)
+  const err = errLines(r)
+  assert.equal(err.length, 2, r.stderr)
+  assert.match(err[0], /^gated_inputs: .*no-such-note\.md: /)
+  assert.match(err[1], REFUSED_LINE)
+  assert.equal(jsonLines(r).length, 2, 'both readable notes printed')
+  for (const l of jsonLines(r)) for (const h of l.credential) assert.deepEqual(Object.keys(h), ['word', 'at'])
+})
+
+test('p39-3 the CLI writes no bytecode: a copy of the three scripts run with no -B leaves no __pycache__ (control: without the flag it does)', (t) => {
+  const H = tempHome(t, DECLARED)
+  const dirs = ['copy', 'ctl'].map((n) => fs.mkdtempSync(path.join(os.tmpdir(), `gated-inputs-${n}-`)))
+  t.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }) })
+  const [C, D] = dirs
+  const src = path.join(root, 'skills', '_shared', 'scripts')
+  for (const d of dirs) for (const f of ['gated_inputs.py', 'rollout-settings.py', 'ladder.py']) fs.copyFileSync(path.join(src, f), path.join(d, f))
+  const FLAG = 'sys.dont_write_bytecode = True'
+  const text = fs.readFileSync(MODULE, 'utf8')
+  assert.equal(text.split(FLAG).length, 2, 'the loader sets the flag on exactly one line')
+  fs.writeFileSync(path.join(D, 'gated_inputs.py'), text.replace(FLAG, 'pass'))
+  const caches = (dir) => fs.readdirSync(dir, { recursive: true }).filter((p) => p.split(path.sep).includes('__pycache__'))
+  // plain `python3 -I` (no -B, no pycache prefix): -I ignores PYTHONDONTWRITEBYTECODE, so the harness cannot mask it
+  const r = sweepCli(H, [TEST_LOGIN], { script: path.join(C, 'gated_inputs.py'), flags: ['-I'] })
+  assert.deepEqual([r.status, r.stderr], [0, ''])
+  assert.deepEqual(logins(r), [DUMMY_READ], 'the loader ran')
+  assert.deepEqual(caches(C), [], 'no __pycache__ beside the copied scripts')
+  const c = sweepCli(H, [TEST_LOGIN], { script: path.join(D, 'gated_inputs.py'), flags: ['-I'] })
+  assert.deepEqual([c.status, c.stderr], [0, ''])
+  const made = fs.existsSync(path.join(D, '__pycache__')) ? fs.readdirSync(path.join(D, '__pycache__')) : []
+  assert.ok(made.some((f) => /^rollout-settings\.cpython-.*\.pyc$/.test(f)), `control: rollout-settings bytecode written: ${made}`)
+  assert.ok(made.some((f) => /^ladder\.cpython-.*\.pyc$/.test(f)), `control: ladder bytecode written: ${made}`)
 })
 
 // ---- the test-credential reading (ADR 0063) -----------------------------------------------------------------------

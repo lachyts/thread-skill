@@ -669,7 +669,8 @@ ownb=$(awk '/^# ==== own-branch mode/{on=1} on{print} /^# ==== end own-branch mo
 closeout=$(awk '/^# ==== own-branch mode/{on=1} !on{print} /^# ==== end own-branch mode/{on=0}' "$LAND" | grep -v '^[[:space:]]*#')
 ok "$(printf '%s\n' "$closeout" | grep -cE 'git fetch|merge --ff-only|lc_fetch|lc_ff')" 2 "structural: the close-out route fetches and fast-forwards only in S4"
 ok "$(printf '%s\n' "$ownb" | grep -cE 'git fetch|lc_fetch')" 3 "structural: own-branch fetches origin/<d>, origin/<B> and a merged PR's head only"
-ok "$(printf '%s\n' "$ownb" | grep -c 'merge --ff-only')" 1 "structural: own-branch fast-forwards once (O9)"
+ok "$(printf '%s\n' "$ownb" | grep -cE 'merge --ff-only|lc_ff')" 1 "structural: own-branch fast-forwards once (O9)"
+has "$ownb" 'out=$(lc_ff "$top" "$B"); rc=$?' "structural: …through live-checkout.sh's lc_ff, the overlap checked first"
 ok "$(printf '%s\n' "$ownb" | grep -c 'git push')" 1 "structural: own-branch pushes once"
 has "$ownb" 'bounded git push origin "refs/heads/$B:refs/heads/$B"' "structural: …<B> to itself, no -u, no force"
 ok "$(printf '%s\n' "$ownb" | grep -c 'gh pr checks')" 0 "structural: own-branch reads checks over REST only"
@@ -1313,6 +1314,15 @@ own --; ores "case 58" 0 "pr open https://github.com/o/c58/pull/1"
 ok "$(tip)" "$(srvref c58 "$OB")" "case 58: fast-forwarded to origin/<B>"
 ok "$(cat "$W/a.txt")" "$A" "case 58: the unrelated dirty file is byte-identical"
 has "$err" "land: tree dirty: a.txt" "case 58: …and the tree line names it"
+
+echo "== 58b. own branch: after update-branch, an untracked file in the fast-forward's way"
+ghreset; mkbranch c58b; own --; R=$(tip); srvcommit c58b x.txt X
+own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+echo mine > "$W/x.txt"; L=$(tip); rm -f "$(git -C "$W" rev-parse --path-format=absolute --git-path ORIG_HEAD)"
+own --; ores "case 58b" 1 "stuck: ff refused: local changes overlap origin/$OB (x.txt)"
+ok "$(tip)|$(cat "$W/x.txt")" "$L|mine" "case 58b: HEAD and the untracked file unchanged"
+ok "$([ -e "$(git -C "$W" rev-parse --path-format=absolute --git-path ORIG_HEAD)" ] && echo written)" "" "case 58b: no merge ran: ORIG_HEAD absent"
+nopush "case 58b"
 
 echo "== 59. own branch: update-branch plus a local fix"
 ghreset; mkbranch c59; own --; R=$(tip); srvcommit c59 x.txt X

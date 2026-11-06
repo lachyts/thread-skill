@@ -203,7 +203,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
-  which writes nothing and is never a route either.
+  which writes nothing and is never a route either. A rollout note written and
+  waiting with no lead gets its **execute handoff** first, before the move
+  (ADR 0072).
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules parallel-shaped
@@ -1059,9 +1061,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (orient § 9, schedule step 8; ADR 0057): decided and never asked, it hands
   the note to a fresh session through handoff's **Rollout launch.**, whose doc
   carries `launches:` and briefs the rollout's lead, never this thread. Only his
-  words choose here, not yet or start when ready instead, and only a refused
-  ladder file holds it. Close's `rollout not started:` row names it again for a
-  note this session wrote and left with no lead. _Avoid_: execute offer.
+  words choose here, not yet or start when ready instead, and at orient § 9 and
+  schedule step 8 only a refused ladder file holds it. For a note this session
+  wrote, or its THREAD.md names, that no lead runs, `next` runs it first, before
+  this session's own move, and close ends with it (ADR 0072); only his not yet
+  or a hold close step 2 names leaves close's `rollout not started:` row
+  instead. _Avoid_: execute offer.
 - **Start when ready** — the execute handoff's fourth move, on his word
   (orient § 9, schedule step 8): it stamps `start: unattended` on the rollout note just
   written and ends, running nothing. Said after the handoff, it withdraws the
@@ -1225,7 +1230,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   second thing beside them, signs itself under the Standing approval with no
   limit, ledger or month line (p37-4, ADR 0034's 2026-11-05 amendment); a
   serial Leg signs one too. A second thing named in plain prose with none of
-  those is not seen, and signs (a residual). Only Lachy writes it.
+  those is not seen, and signs (a residual). Only Lachy writes it. Schedule
+  and orient record such a gate, never ask it ahead, on a serial chain too.
   _Avoid_: dummy account, test account.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no

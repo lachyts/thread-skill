@@ -144,7 +144,9 @@ API, PAT or `.env`), an `@` address, or a conjunction that joins a second
 thing (and, or, plus, as well as, along with, together with, `&`, `+`, `;`).
 It cannot see a second thing named in plain prose with none of these ("the
 dummy Login, to push to the npm registry"): that signs, the approval names
-only the Login, and any other use is a review failure.
+only the Login, and any other use is a review failure. Schedule and orient
+record such a gate ahead and never ask it: the planner words it as the
+standing approval reads it.
 
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a

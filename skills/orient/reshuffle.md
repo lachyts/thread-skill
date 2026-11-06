@@ -20,7 +20,9 @@ ones under Autonomous or Mixed; schedule owns them. After the gate, a declared c
 `--advance` moves its record (§ Declared check): the check writes it and owns how it lands, so
 orient still runs no git. R3 (c) reads the repo's test-credential class through `rollout-settings.py
 --repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
-script).
+script). The sweep R3 (c) runs reads `[defaults] test_logins` from the same file through
+`rollout-settings.py`'s resolve(repo=None), in process, only when a `credential:` gate line naming a
+Login needs it: read-only, with no git.
 
 **Under `--backlog`.** The write surface adds the record note, the trigger file and `wait` lines, each through
 `backlog-orient.py`, and the start stamp through `stamp-start --backlog` (`skills/orient/backlog.md` § B5, § B8).
@@ -173,15 +175,23 @@ Resolving:
   a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
   Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
   gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
-  unprompted is recorded too. A credential hit whose context names only test-mode or staging use
-  of keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
+  unprompted is recorded too. A credential hit whose context names only test-mode or staging use of
+  keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
   test-credential Planner line, and the standing approval signs its gate at the stop when its keys
   are in the class's file. The class is read once from `python3
   ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <the resolved repo>`'s
-  `test_credentials`; a non-zero exit, or no class, keeps the ask. A hit inside the recorded
-  test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the
-  recorded test-credential Planner line)`. A task that already holds that line is recorded, never
-  asked. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
+  `test_credentials`. A hit inside the recorded test-credential Planner line is dismissed and listed
+  as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`. A task that
+  already holds that line is recorded, never asked. A non-zero exit, or no class, keeps the ask, and
+  so does a hit naming live or production use, a key the class does not hold, or no mode. A
+  credential hit the sweep reads as a declared test Login (its `login.names` set) is recorded, never
+  grilled (p37-4): R5.2 writes the test-Login Planner line, and the standing approval signs its gate
+  at the stop, on a Leg too. A hit inside the recorded test-Login Planner line is dismissed and
+  listed as `swept, dismissed: [[task]] <word> (the recorded test-Login Planner line)`. A task that
+  already holds the test-Login Planner line is recorded, never asked. A hit with no `login`, or with
+  `login.names` null, keeps the ask. A `gated_inputs: test_logins:` stderr line (exit 1) means the
+  declared test Logins could not be read: those hits carry no `login` and keep the ask; every note
+  still printed. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
   schedule.
 
@@ -298,7 +308,9 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      line asking for one line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
      split in sub-bullets nested under the gate, ADR 0038); for a credential recorded in the repo's
      test-credential class, the test-credential Planner line (schedule step 7's, ADR 0063) in the
-     `## Decisions (recorded <date>)` section; and a credential or irreversible sign-off's `## Approved gates` bullet,
+     `## Decisions (recorded <date>)` section; for a credential recorded as a declared test Login, the test-Login
+     Planner line (schedule step 7's, p37-4) in the `## Decisions (recorded <date>)` section; and a credential or
+     irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
    listing. Then write all the old slugs to a file and find the files that mention any of them

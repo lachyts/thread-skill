@@ -4,7 +4,8 @@ Date: 2026-10-28
 Status: accepted. Written for the vault task `thread-skill-p30-9-schedule-ends-with-pickup-sweep-and-execute-handoff`
 (Phase 30 · Task 9); its plan was judged over three runs before the build. Removes ADR 0054's two p30-9 follow-up rows
 (the execute offer's ask at orient § 9 and schedule's **Start when ready.**). Amends ADR 0027's decision 5 (the
-execute offer becomes the execute handoff) and ADR 0017 (a Rollout launch's doc is no continuation).
+execute offer becomes the execute handoff) and ADR 0017 (a Rollout launch's doc is no continuation). Its d5 and
+its close-row item amended by ADR 0072.
 
 ## Context
 
