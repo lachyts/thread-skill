@@ -228,16 +228,23 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
-                     (ints >= 0); verdict?; status? (pending | consumed: the doc as its findings arrived, or once
+                     (ints >= 0); verdict? (legacy, a string and no enum: stop or continue, written only before
+                     fresh-review ADR 0001 and ADR 0065 retired the ledger's STOP rule; review-round.py writes none
+                     since, and no reader counts on it); status? (pending | consumed: the doc as its findings arrived, or once
                      they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
                      counts from the doc's `## Disposition`; blocking includes open, so open <= blocking when both are
-                     given); unconfirmed? (int >= 0,
-                     fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted
-                     apart from filed, which excludes them, so each finding sits in one count; with the ledger's
-                     STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
-                     reviews.jsonl.
+                     given); unconfirmed? (int >= 0, fresh-review ADR 0001: candidates its checker could not
+                     reproduce, never blocking, from the same `## Disposition`'s `Unconfirmed:` label; review-round.py
+                     writes it together with the six ADR 0058 counts, all seven or none, so a line with filed but no
+                     unconfirmed predates ADR 0001 and its unconfirmed is unknown to readers, never 0; filed excludes
+                     them and no finding is in both, so filed + unconfirmed <= findings when findings is given (for
+                     this write-time check alone, an absent count reads as 0); an unconfirmed candidate still goes to
+                     the landing's follow-up task, it is only not counted in filed; a round whose checker was lost
+                     twice (fresh-review Step 3.5) has its findings written under `Unconfirmed:` by close (its stop
+                     rule's Unconfirmed bullet), so they count in unconfirmed though no checker judged them). No
+                     rollout, no task; lands in reviews.jsonl.
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
                      original + regression <= findings, the rest unclassified), digest (verdict_digest of the
                      verdict and its bullets); head? (the PR head the judge judged, resolved to a full sha in the
@@ -582,8 +589,11 @@ Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2
 a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a grade with a rollout, a reserved
 rollout or `from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
-regression exceed its findings, a stopped, suite-ended, base-moved, time-lost or attention line that breaks its kind's
-cross-field rules, a watch carrying both ledgerClass and circling),
+regression exceed its findings, a review-round whose open exceeds its blocking or whose filed + unconfirmed exceed its
+findings, a grade whose low exceeds its decisions, an inert-proof-failed with empty readers and no error, a watch
+whose rule or shape is not stored stripped, whose id is not watch_id(rule, shape) or that carries both ledgerClass and
+circling, a tuning, proposal, stopped, suite-ended, base-moved, time-lost or attention line that breaks its kind's
+cross-field rules),
 with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
@@ -1633,6 +1643,11 @@ def _check_fields(kind, fields):
                       % (fields["original"], fields["regression"], fields["findings"]))
     if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
         raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
+    if kind == "review-round" and "findings" in fields and ("filed" in fields or "unconfirmed" in fields):
+        filed, unconfirmed = fields.get("filed", 0), fields.get("unconfirmed", 0)
+        if filed + unconfirmed > fields["findings"]:
+            raise Refused("review-round: filed + unconfirmed (%d + %d) exceed findings (%d)"
+                          % (filed, unconfirmed, fields["findings"]))
     if kind == "tuning":
         _check_tuning(fields)
     elif kind == "watch":
