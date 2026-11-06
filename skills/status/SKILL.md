@@ -196,14 +196,15 @@ fresh reads not Away at Trickle 2), `limit` the Trickle N, `awayCap` the Away ca
 lapsed, `lapsed` the same shape for those whose lease has (left out of the count, `skills/execute/away.md` § The
 Trickle), `here` this rollout's own as they count it (0 when paused, closed, never started, not directly in the
 tasks dir, or its own lease lapsed), `running` elsewhere plus here, and `lease` this rollout's own lead's lease
-(p28-4): `{state, writtenAt, lapsesAt}`, `state` `fresh`, `lapsed`, `room-stop` (lapsed, but a room stop stands, so
-it counts), `none` (no lease file: an older snapshot, still counted) or `unreadable` (still counted), `writtenAt` its
-last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where they do not apply. Status writes no
-lease. `elsewhere` and `running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The
-Trickle, *Trickle claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's
-life): while another lead's starts or seeded revises are claimed but not yet stamped, `status` shows room on the
-Mac that `next` still holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The
-Trickle, *A fair share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
+(p28-4): `{state, writtenAt, lapsesAt}`, `state` `fresh`, `lapsed`, `room-stop` (lapsed, but a room stop stands
+under its 6 h bound, so it counts; a held one past it reads `lapsed`), `none` (no lease file: an older snapshot,
+still counted) or `unreadable` (still counted), `writtenAt` its last write and `lapsesAt` when it lapses (or
+lapsed), both UTC and null where they do not apply. Status writes no lease. `elsewhere` and `running` count notes
+only, never `next`'s Trickle claims (`skills/execute/away.md` § The Trickle, *Trickle claims*), so they can trail
+`next`'s count by up to 20 minutes of unstamped claims (a claim's life): while another lead's starts or seeded
+revises are claimed but not yet stamped, `status` shows room on the Mac that `next` still holds as `trickle: N/N`.
+Nor do they read the fair share (`skills/execute/away.md` § The Trickle, *A fair share*): `status` counts notes
+only, so a place `next` keeps for a waiting rollout shows as room.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
@@ -212,8 +213,10 @@ rollout (execute § Room stop), read from the note's `## Pause log`, the one dur
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>
 ```
 
-It writes nothing. Exit 0: a room stop stands, and stdout names its stamp (`room stop stands since <stamp>`);
-exit 4: it has lapsed (`room stop since <stamp> has lapsed: …`, at or past its 6 h bound); exit 5: none stands.
+It writes nothing. Exit 0: a room stop stands, and stdout names its stamp (`room stop stands since <stamp>`, plus
+`, held by the Stage` for a held one, execute § Room stop item 11); exit 4: it has lapsed (`room stop since <stamp>
+has lapsed: …`, at or past its 6 h bound, or a held one once the Stage reads down or its hold's ceiling has passed);
+exit 5: none stands.
 Exit 1 or 2 renders `room stop unreadable: <its stderr line>` under the headline and reads as none. § 4's
 *Room stop* renders it.
 
@@ -588,7 +591,11 @@ heartbeat re-enters *Cold resume* on its next tick, which ends it and resumes th
 wait for that too. Under either, once the owner session has ended (the owner-session qualifier), nothing owes the
 resume and the room stop is no live queue: action 10's or 12's resume applies as usual, and that *Cold resume*
 ends it. A stamped pause comes first (action 8): the Stage's resume skips a paused lead, so the reinstate is
-yours, and it ends the room stop as any loop entry does.
+yours, and it ends the room stop as any loop entry does. A held one (§ 2's `stands` adds `held by the Stage`) stands
+past 6 h while the Stage lives and is waited for like any standing one: its headline adds ` · held by the Stage`,
+and once 6 h have passed its Moving line reads `stalled usage-limit`, because `moving` keeps that bound and Chorus's
+Watchdog holds that stall while the Stage owes the resume, so that line is no stalled framing either. It lapses once
+the Stage reads down or its hold's ceiling (a week) has passed.
 
 **Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`, or a
 room stop, standing or lapsed, whatever its tasks read (*Room stop* above). A Workflow run is listed in
@@ -925,8 +932,8 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
   held joins the reading and silence judges it. `quota` is the lead's Login, never the reader's: `moving` runs `next`'s
   dry run with the Login the lead's own lease names (`login`, `skills/execute/away.md` § Capacity), and only while that
-  lease holds (fresh, or a standing room stop); a lapsed, missing or loginless lease reads no quota, so a dead lead's
-  quota-held rows read as work and turn `stalled` past the bound, and the Companion recovers it;
+  lease holds (fresh, or a room stop under its 6 h bound); a lapsed, missing or loginless lease reads no quota, so a
+  dead lead's quota-held rows read as work and turn `stalled` past the bound, and the Companion recovers it;
 - never judged by silence, because it is his act or no lead runs:
   - `paused`: a stamped pause, or a soft pause `next` reads as drained (`halt: paused`). A soft pause behind a lane
     verdict is not drained (the note keeps `integrating:`) and reads `you` with the lane's reason, so the ack owed is

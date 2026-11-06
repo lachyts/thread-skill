@@ -755,13 +755,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Lease** — a lead's stamp that keeps its Rollout's running tasks in the
   Mac-wide count (the **Trickle**, the **Away cap**), rewritten at its every
   `next` and loop entry: it lapses 45 minutes after its last write, or after
-  the Mac's latest boot or wake if later, unless a room stop stands, and a
-  Rollout with no lease still counts (ADR 0049, amended). A serial chain's
-  **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims in the count
-  while **Capacity** is in force: its Leg rewrites it at its own leg.py verbs,
-  it lapses 90 minutes after its last write (180 after a waiting turn end), and
-  a Leg with no lease, or a closed one, holds nothing, so a dead Leg drops
-  out. _Avoid_: heartbeat file, lock.
+  the Mac's latest boot or wake if later, unless a room stop stands under its
+  6 h bound, and a Rollout with no lease still counts (ADR 0049, amended). A
+  serial chain's **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims
+  in the count while **Capacity** is in force: its Leg rewrites it at its own
+  leg.py verbs, it lapses 90 minutes after its last write (180 after a waiting
+  turn end), and a Leg with no lease, or a closed one, holds nothing, so a
+  dead Leg drops out. _Avoid_: heartbeat file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
   the **Away cap**) for a start, or a seeded revise, it has picked but not yet
   stamped, so every other lead counts it. The stamp consumes it, and it lapses
@@ -1339,6 +1339,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
   The line is the week's alone: the spread (Chorus ADR 0109) and the 5-hour
   line retired with Chorus ADR 0111.
+  A held one (its signal says no Login has room) stands past its 6 h bound
+  while the Stage lives, up to a week (execute § Room stop item 11).
   On an Approved queue it is no run mark.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.

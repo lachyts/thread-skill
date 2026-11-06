@@ -182,6 +182,27 @@ MNOW=2026-10-26T18:00:00Z
 ok "$(vcr)" '["stalled","usage-limit","no life sign for 420m"]' "M6b: past its bound, by silence: usage-limit"
 unset MNOW
 
+# ── M6c: a held room stop (p39-12) keeps the 6 h bound here: its hold is step-boundary.py stands' alone ─────────────
+# Past 6 h `stands` still reads a held line standing while the Stage lives (a fresh capacity.json), but `moving` reads
+# it as M6b does: Chorus's Watchdog holds that stall while the Stage owes the resume (execute § Room stop item 11).
+scen m6c
+mkro; running a
+entry 2026-10-26T10:50:00Z
+printf '\n## Pause log\n\n- 2026-10-26T11:00+00:00 room stop: held by the Stage: Login at its week'\''s line\n' >> "$D/$RO.md"
+em stopped - '{"cause":"usage-limit","inferred":false,"calls":[],"reason":"Login at its week'\''s line"}' 2026-10-26T11:00:00Z
+mkdir -p "$D/home/.config/thread"
+printf '{"capacity": 4, "written_at": "2026-10-26T17:59:00Z", "logins": {"Login": {"inside_line": false}}}\n' > "$D/home/.config/thread/capacity.json"
+MNOW=2026-10-26T18:00:00Z
+ok "$(vcr)" '["stalled","usage-limit","no life sign for 420m"]' "M6c: a held stop past 6 h, the Stage live: moving keeps the bound"
+python3 - "$D/$RO.md" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write(t.replace("- 2026-10-26T11:00+00:00 room stop: held", "- 2026-10-18T11:00+00:00 room stop: held"))
+PY
+ok "$(vcr)" '["stalled","usage-limit","no life sign for 420m"]' "M6c: an 8-day-old held line reads the same"
+unset MNOW
+
 # ── M7 family: an open halt H ────────────────────────────────────────────────────────────────────────────────
 scen m7
 mkro; mkt a open

@@ -6,7 +6,8 @@
 //
 // (a)  the journal model: open keys, the running agent, a stale key, labels, a torn line, a missing journal, usage;
 // (a2) the gap re-mark: a relaunch after a gap marks afresh, so a watch never stops an agent that started later;
-// (b)  the note verbs begin / end / stands;
+// (b)  the note verbs begin / end / stands: begin's refusals, its renewal of a standing stop and its `--held` head,
+//      and stands' bound and hold (a held line stands past 6 h while the Stage lives, up to ROOM_STOP_HOLD_MAX);
 // (c)  the task note's Verify, a fake two-call run on the real engine (tests/lib/engine.mjs): at the signal both
 //      calls stop just after a result line, the resume replays every result, and no agent re-runs past its start.
 //
@@ -307,20 +308,69 @@ test('(b) begin lands inside an existing ## Pause log and leaves ## Notes byte-e
   assert.ok(log.includes('paused: wf_1') && log.includes(r.out.trim()), log)
 })
 
-test('(b) begin refuses empty or multi-line text and writes nothing; a second begin writes nothing', () => {
+test('(b) begin refuses empty or multi-line text and writes nothing', () => {
   const p = note()
   for (const bad of ['', '\n', '   \n', 'one\ntwo\n']) {
-    const r = begin(p, bad)
-    assert.equal(r.rc, 2, `stdin ${JSON.stringify(bad)}`)
-    assert.equal(fs.readFileSync(p, 'utf8'), ROLLOUT)
+    for (const held of [[], ['--held']]) {
+      const r = sb(['begin', '--rollout', p, ...held], { input: bad })
+      assert.equal(r.rc, 2, `stdin ${JSON.stringify(bad)} ${held.join(' ')}`)
+      assert.equal(fs.readFileSync(p, 'utf8'), ROLLOUT)
+    }
   }
-  const first = begin(p, 'x at its week\'s line\n')
-  const after1 = fs.readFileSync(p, 'utf8')
-  const second = begin(p, 'x at its week\'s line\n')
-  assert.equal(second.rc, 0)
-  assert.equal(second.out, `room stop already stands since ${first.out.split(' ')[1]}\n`)
-  assert.equal(fs.readFileSync(p, 'utf8'), after1)
   assert.equal(begin(path.join(mk('b'), 'none.md'), 'x\n').rc, 1, 'a missing note')
+})
+
+test('(b) a second begin while one stands renews it, keyed on the standing line', () => {
+  const p = note()
+  const A = "x at its week's line; stopping at a step boundary: wf_a a (task); lane: none"
+  const B = "x at its week's line; stopping at a step boundary: wf_b b (revise); lane: none"
+  const first = begin(p, `${A}\n`)
+  assert.equal(first.rc, 0, first.err)
+  assert.match(first.out, STAMP)
+  const since = first.out.split(' ')[1]
+  // Different calls, so the renewal is proven to read the standing line, never to compare the text.
+  const second = begin(p, `${B}\n`)
+  assert.equal(second.rc, 0, second.err)
+  const [head, line, ...rest] = second.out.split('\n')
+  assert.equal(head, `room stop renewed (stood since ${since})`)
+  assert.match(line, STAMP)
+  assert.ok(line.endsWith(` room stop: ${B}`), line)
+  assert.deepEqual(rest, [''], 'two lines, newline-ended')
+  const t = fs.readFileSync(p, 'utf8')
+  const starts = t.split('\n').filter((l) => / room stop: /.test(l))
+  assert.deepEqual(starts, [first.out.trimEnd(), line], "the first line stays in the log and the second's is last")
+  assert.equal(stands(p).rc, 0)
+  assert.equal(sb(['end', '--rollout', p]).rc, 0)
+  const third = begin(p, `${B}\n`)
+  assert.equal(third.rc, 0, third.err)
+  assert.match(third.out, STAMP)
+  assert.ok(!third.out.includes('renewed'), 'after `end` the same text is a plain start')
+})
+
+test("(b) begin --held opens the text with the hold's head; the head is begin's alone", () => {
+  const p = note()
+  const text = "x at its week's line; stopping at a step boundary: wf_x proj-a (task); lane: none"
+  for (const head of ['held by the Stage: x\n', '  held by the Stage:x\n']) {
+    for (const held of [[], ['--held']]) {
+      const r = sb(['begin', '--rollout', p, ...held], { input: head })
+      assert.equal(r.rc, 2, `${JSON.stringify(head)} ${held.join(' ')}: ${r.err}`)
+      assert.match(r.err, /--held/)
+      assert.equal(r.out, '')
+      assert.equal(fs.readFileSync(p, 'utf8'), ROLLOUT, 'the note is byte-equal')
+    }
+  }
+  const wl = sb(['begin', '--rollout', p, '--held'], { input: text.replace('proj-a', '[[proj-a]]') + '\n' })
+  assert.equal(wl.rc, 2, 'the refusals run before the renewal and the hold')
+  assert.match(wl.err, /bare/)
+  assert.equal(fs.readFileSync(p, 'utf8'), ROLLOUT)
+  const r = sb(['begin', '--rollout', p, '--held'], { input: `${text}\n` })
+  assert.equal(r.rc, 0, r.err)
+  assert.match(r.out, STAMP)
+  assert.ok(r.out.endsWith(` room stop: held by the Stage: ${text}\n`), r.out)
+  assert.ok(fs.readFileSync(p, 'utf8').endsWith(`## Pause log\n\n${r.out}`))
+  const s = stands(p)
+  assert.equal(s.rc, 0, s.err)
+  assert.equal(s.out, `room stop stands since ${r.out.split(' ')[1]}, held by the Stage\n`)
 })
 
 test('(b) begin refuses a wikilink and writes nothing: a [[slug]] above ## Queue would reorder the queue', () => {
@@ -360,7 +410,7 @@ test('(b) end appends room stop ended; a second end, or no section, writes nothi
   assert.equal(sb(['end', '--rollout', path.join(mk('b'), 'none.md')]).rc, 1)
 })
 
-test('(b) p29-10: begin records the stop in the Run record with its calls; already stands, a refusal and end record none', () => {
+test('(b) p29-10: begin records the stop in the Run record with its calls; a renewal, a refusal and end record none', () => {
   const ev = path.join(mk('ev'), 'events')
   const env = { THREAD_EVENTS_DIR: ev }
   const RRPY = path.join(here, '..', '..', '_shared', 'scripts', 'run_record.py')
@@ -393,9 +443,95 @@ test('(b) p29-10: begin records the stop in the Run record with its calls; alrea
   assert.deepEqual([s.cause, s.inferred, s.reason, s.calls, 'at' in s, s.task],
     ['usage-limit', false, text, [{ task: 'a', runId: 'wf_a1', call: 'task' }, { task: 'b', runId: 'wf_b1', call: 'revise' }], false, null])
   const n = rec().length
-  assert.match(sb(['begin', '--rollout', p], { input: 'again at its week\'s line\n', env }).out, /already stands/)
+  assert.match(sb(['begin', '--rollout', p], { input: 'again at its week\'s line\n', env }).out, /^room stop renewed \(stood since /)
   assert.equal(sb(['end', '--rollout', p], { env }).rc, 0)
-  assert.equal(rec().length, n, '"already stands" and end record nothing')
+  assert.equal(rec().length, n, 'renewed and end record nothing')
+})
+
+// A held start line's hold (p39-12): `stands` keeps it standing past its 6 h bound while the Stage lives, that is
+// while ~/.config/thread/capacity.json reads fresh (or the Mac woke or booted inside its 10-minute stale line), up to
+// ROOM_STOP_HOLD_MAX. Every case pins its HOME, THREAD_MACHINE_TIMES and --now.
+const H = 3600e3
+const MIN = 60e3
+const T0 = Date.parse('2026-10-14T10:00:00Z')
+const iso = (ms) => new Date(ms).toISOString().replace('.000Z', 'Z')
+const pauseLog = (...lines) => note(ROLLOUT + '\n## Pause log\n\n' + lines.join('\n') + '\n')
+const HELD_LINE = "- 2026-10-14T10:00+00:00 room stop: held by the Stage: L at its week's line"
+const UNHELD_LINE = "- 2026-10-14T10:00+00:00 room stop: L at its week's line"
+// homeWith(capacity): a fresh HOME, its capacity.json the given object (as JSON) or string (as is); none when undefined.
+function homeWith(capacity) {
+  const h = mk('home')
+  if (capacity !== undefined) {
+    fs.mkdirSync(path.join(h, '.config', 'thread'), { recursive: true })
+    fs.writeFileSync(path.join(h, '.config', 'thread', 'capacity.json'), typeof capacity === 'string' ? capacity : JSON.stringify(capacity))
+  }
+  return h
+}
+const capAt = (ms, extra = {}) => ({ capacity: 4, written_at: iso(ms), ...extra })
+function standsAt(p, nowMs, { capacity, machine = {}, more = [] } = {}) {
+  return sb(['stands', '--rollout', p, ...more, '--now', iso(nowMs)], { env: { HOME: homeWith(capacity), THREAD_MACHINE_TIMES: JSON.stringify(machine) } })
+}
+
+test('(b) a held stop stands past its bound while the Stage lives, up to its ceiling', () => {
+  const held = pauseLog(HELD_LINE)
+  const now7 = T0 + 7 * H
+  // Round 3's quiet hold: the burn has decayed, so the Login reads outside its line, or is not listed at all.
+  for (const [name, extra] of [['inside_line false', { logins: { L: { inside_line: false } } }], ['no logins', {}],
+    ['inside_line true', { logins: { L: { inside_line: true } } }]]) {
+    const r = standsAt(held, now7, { capacity: capAt(now7 - MIN, extra) })
+    assert.equal(r.rc, 0, `${name}: ${r.out}${r.err}`)
+    assert.equal(r.out, 'room stop stands since 2026-10-14T10:00+00:00, held by the Stage (until 2026-10-21T10:10+00:00 at the latest)\n', name)
+  }
+  const unheld = standsAt(pauseLog(UNHELD_LINE), now7, { capacity: capAt(now7 - MIN) })
+  assert.equal(unheld.rc, 4, 'only a recorded hold extends the bound')
+  assert.match(unheld.out, /at or past its 6 h bound\n$/)
+  const stale = standsAt(held, now7, { capacity: capAt(now7 - 11 * MIN) })
+  assert.equal(stale.rc, 4, 'a stale capacity.json: the Stage reads down')
+  assert.match(stale.out, /^room stop since 2026-10-14T10:00\+00:00 has lapsed: at or past its 6 h bound, and the Stage that holds it reads down \(capacity\.json stale: .+\)\n$/)
+  assert.equal(standsAt(held, now7, { capacity: capAt(now7 - 11 * MIN), machine: { wake: iso(now7 - 3 * MIN) } }).rc, 0,
+    'a stale file just after a wake: the Stage has not written yet')
+  assert.equal(standsAt(held, now7, { capacity: capAt(now7 - 11 * MIN), machine: { boot: iso(now7 - 3 * MIN) } }).rc, 0, '… or a boot')
+  assert.equal(standsAt(held, now7, { capacity: capAt(now7 - 11 * MIN), machine: { wake: iso(now7 - 11 * MIN) } }).rc, 4, 'a wake 11 min ago')
+  const missing = standsAt(held, now7)
+  assert.equal(missing.rc, 4, 'no capacity.json')
+  assert.match(missing.out, /reads down \(capacity\.json missing: no file\)\n$/)
+  assert.equal(standsAt(held, now7, { machine: { wake: iso(now7 - 3 * MIN) } }).rc, 4, 'no capacity.json, a wake: still down')
+  assert.equal(standsAt(held, now7, { capacity: 'not json' }).rc, 4, 'an unreadable capacity.json')
+  const day = 24 * H
+  assert.equal(standsAt(held, T0 + 6 * day + 23 * H, { capacity: capAt(T0 + 6 * day + 23 * H) }).rc, 0, '6 d 23 h')
+  const past = standsAt(held, T0 + 7 * day + 11 * MIN, { capacity: capAt(T0 + 7 * day + 11 * MIN) })
+  assert.equal(past.rc, 4, '7 d 11 min: past the ceiling')
+  assert.match(past.out, /has lapsed: held past its hold's ceiling \(7 d\)\n$/)
+  assert.equal(standsAt(held, T0 + 8 * day, { capacity: capAt(T0 + 8 * day) }).rc, 4, '8 d')
+  assert.equal(standsAt(held, T0 + H).rc, 0, 'under the bound the hold is never read')
+  assert.equal(standsAt(held, T0 + H).out, 'room stop stands since 2026-10-14T10:00+00:00, held by the Stage\n')
+  assert.equal(standsAt(pauseLog(HELD_LINE, '- 2026-10-14T10:30+00:00 room stop ended'), now7, { capacity: capAt(now7) }).rc, 5, 'held, then ended')
+  const later = pauseLog(HELD_LINE, "- 2026-10-14T11:00+00:00 room stop: L at its week's line")
+  assert.equal(standsAt(later, Date.parse('2026-10-14T18:00:00Z'), { capacity: capAt(Date.parse('2026-10-14T18:00:00Z')) }).rc, 4,
+    'a later unheld start line decides')
+  assert.equal(standsAt(held, T0 + 3 * H, { capacity: capAt(T0 + 3 * H), more: ['--hours', '2'] }).rc, 0, '--hours 2 on a held 3 h line')
+})
+
+test('(b) begin reads the hold as stands does', () => {
+  const stamp = (ms) => new Date(ms).toISOString().slice(0, 16) + '+00:00'
+  const now = Date.now()
+  for (const fresh of [true, false]) {
+    const ev = path.join(mk('ev'), 'events')
+    const p = path.join(mk('b'), 'held-ro.md')
+    fs.writeFileSync(p, ROLLOUT + `\n## Pause log\n\n- ${stamp(now - 7 * H)} room stop: held by the Stage: L at its week's line\n`)
+    const env = { HOME: homeWith(fresh ? capAt(now) : undefined), THREAD_MACHINE_TIMES: '{}', THREAD_EVENTS_DIR: ev }
+    const r = sb(['begin', '--rollout', p, '--held'], { input: "L at its week's line; stopping at a step boundary: wf_x proj-a (task); lane: none\n", env })
+    assert.equal(r.rc, 0, r.err)
+    const file = path.join(ev, 'held-ro.jsonl')
+    const stops = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((d) => d.kind === 'stopped') : []
+    if (fresh) {
+      assert.match(r.out, /^room stop renewed \(stood since /, 'a held stop the live Stage holds is renewed')
+      assert.equal(stops.length, 0, 'a renewal records no stop')
+    } else {
+      assert.match(r.out, STAMP, 'the Stage reads down: the held stop has lapsed, so this is a fresh start')
+      assert.equal(stops.length, 1, 'a fresh start records its stop')
+    }
+  }
 })
 
 test('(b) stands reads the last room-stop line against its bound', () => {
@@ -419,13 +555,19 @@ test('(b) stands reads the last room-stop line against its bound', () => {
 
 test('(b) no __pycache__ is written beside the scripts', () => {
   const d = mk('nopyc')
-  for (const f of ['step-boundary.py', 'reconcile-rollout.py']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(d, f))
-  const env = baseEnv()
+  for (const f of ['step-boundary.py', 'reconcile-rollout.py', 'capacity.py']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(d, f))
+  const env = baseEnv({ THREAD_MACHINE_TIMES: '{}' })
   delete env.PYTHONDONTWRITEBYTECODE
   const p = note()
   const r = spawnSync('python3', [path.join(d, 'step-boundary.py'), 'stands', '--rollout', p], { encoding: 'utf8', env })
   assert.equal(r.status, 5, r.stderr)
-  assert.ok(!fs.existsSync(path.join(d, '__pycache__')), 'loading reconcile-rollout.py wrote bytecode')
+  // A held line past its bound loads capacity.py too (the Stage's liveness): still no bytecode.
+  const held = pauseLog(HELD_LINE)
+  const now7 = T0 + 7 * H
+  env.HOME = homeWith(capAt(now7 - MIN))
+  const h = spawnSync('python3', [path.join(d, 'step-boundary.py'), 'stands', '--rollout', held, '--now', iso(now7)], { encoding: 'utf8', env })
+  assert.equal(h.status, 0, h.stdout + h.stderr)
+  assert.ok(!fs.existsSync(path.join(d, '__pycache__')), 'loading reconcile-rollout.py or capacity.py wrote bytecode')
 })
 
 // ---- (c) the Verify: a fake two-call run ---------------------------------------------------------------------------

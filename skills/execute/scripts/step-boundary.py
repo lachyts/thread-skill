@@ -26,19 +26,24 @@ Verbs:
           exits 0 at once, so a relaunch loop always ends. On --timeout it prints `mid-step <runId> <label>` for
           each run left and exits 3. With no --timeout it polls until a run reports.
 
-  begin   --rollout <note>   (one line of text on stdin)
+  begin   --rollout <note> [--held]   (one line of text on stdin)
           Record the start: `- <stamp> room stop: <text>` inside `## Pause log`, the section created at the
-          note's end when absent. A room stop that already stands (a start line under the 6 h bound, as
-          `stands` reads it) prints `room stop already stands since <stamp>` and writes nothing. Empty or
-          multi-line text exits 2 and writes nothing, and so does text holding `[[`: slugs go in bare, because
-          reconcile-rollout.py's _schedule_positions ranks the first wikilink on ANY list line, so one on a
-          `## Pause log` line above `## Queue` would reorder the queue. This verb is the room-stop line's only
-          writer, so the rule is enforced here, not only in execute's prose. Once it wrote the line (never on "already
-          stands" or a refusal), it records the stop in the rollout's Run record (p29-10, ADR 0051): `stopped` {cause:
-          usage-limit, inferred: false, calls (reconcile-rollout.py inflight_calls: the Slots and lane the record shows
-          in flight), reason (the text, cut to 200 characters)}, best-effort: a record that cannot be read or written
-          changes no output and no exit. The entry after the Stage's re-send (reconcile-rollout.py record-entry) is the
-          resume's lead-entry.
+          note's end when absent. --held (p39-12: the Stage's signal says no Login has room, and Chorus holds the
+          Session) writes `held by the Stage: <text>` in its place (reconcile-rollout.py ROOM_STOP_HELD), the head
+          `stands` reads as the hold. The refusals come first, in this order, and each exits 2 and writes nothing:
+          empty or multi-line text; text holding `[[` (slugs go in bare, because reconcile-rollout.py's
+          _schedule_positions ranks the first wikilink on ANY list line, so one on a `## Pause log` line above
+          `## Queue` would reorder the queue); and text whose stripped form opens `held by the Stage:`, with or
+          without --held, since only --held writes that head. This verb is the room-stop line's only writer, so the
+          rules are enforced here, not only in execute's prose. A room stop that already stands (exit 0 as `stands`
+          reads it, the hold included) is renewed: the fresh start line is written all the same, so its stamp restarts
+          the bound and its --held is the hold from then on, and `room stop renewed (stood since <old stamp>)` is
+          printed above it. Otherwise, once it wrote the line (never on a renewal or a refusal), it records the stop
+          in the rollout's Run record (p29-10, ADR 0051): `stopped` {cause: usage-limit, inferred: false, calls
+          (reconcile-rollout.py inflight_calls: the Slots and lane the record shows in flight), reason (the text, cut
+          to 200 characters)}, best-effort: a record that cannot be read or written changes no output and no exit. A
+          renewal records nothing: the open stop stays, and the entry after the Stage's re-send
+          (reconcile-rollout.py record-entry) is the resume's lead-entry, which closes it.
 
   end     --rollout <note>
           When a room stop stands (the last room-stop line is a start line, lapsed or not), append
@@ -50,7 +55,15 @@ Verbs:
           The last `## Pause log` line matching `^- (\\S+) room stop(: | ended\\b)` decides: a start line under
           the bound exits 0; one at or past the bound, or with a stamp that does not parse, exits 4; an `ended`
           line, or none, exits 5. Every other line of the section (a hard pause's included) is ignored. 6 h is
-          the Stage's horizon for an owed resume (Chorus's OWED_MAX_S, 21600 s).
+          the Stage's horizon for an owed resume (Chorus's OWED_MAX_S, 21600 s). The hold (p39-12): a held start
+          line (`begin --held`'s) at or past the bound still exits 0 while the Stage lives (reconcile-rollout.py
+          _stage_alive: capacity.json reads fresh, or the Mac woke or booted within its 10-minute stale line), up to
+          ROOM_STOP_HOLD_MAX (a week and 10 minutes) from its stamp, since Chorus signals a hold once and its resume
+          waits for the earliest weekly reset. The Stage is read at most once, and only for a held line past the
+          bound. Exit 0 prints `room stop stands since <stamp>`, plus `, held by the Stage` for a held line, plus
+          ` (until <stamp + ROOM_STOP_HOLD_MAX> at the latest)` past the bound; exit 4 prints
+          `room stop since <stamp> has lapsed: <why>`, the why naming the bound, the Stage read down (with its
+          reading) for a held line, the hold's ceiling, or a stamp that does not parse.
 
 The journal (`launched`, `started`, `result` and `failed` lines). A key is judged by its last `started`, `result`
 or `failed` line and is open when that line is `started`. The running agent is the key of the journal's last
@@ -74,11 +87,12 @@ runId (BIND_RUN_ID_RE) with no `..`.
 
 Exit codes: 0 ok; 1 no journals root, an unreadable state file, or an unreadable or unwritable note; 2 usage (a
 bad runId, `mark` with no --run, a --hours or --interval that is not positive, empty or multi-line `begin` text,
-`begin` text holding `[[`; and the Engine snapshot guard, ADR 0043: `begin` and `end` on a rollout stamped with another
-snapshot than this plugin root, or a live one whose snapshot is unusable, print engine-snapshot.py's
-`engine-snapshot: ` line and write nothing, so re-run from the root it names; `stands` is a reader and exempt);
-3 `watch` timed out; 4 `stands` found a room stop at or past its bound, or one whose stamp does not parse;
-5 `stands` found no room stop standing.
+`begin` text holding `[[` or opening `held by the Stage:`; and the Engine snapshot guard, ADR 0043: `begin` and
+`end` on a rollout stamped with another snapshot than this plugin root, or a live one whose snapshot is unusable,
+print engine-snapshot.py's `engine-snapshot: ` line and write nothing, so re-run from the root it names; `stands` is
+a reader and exempt);
+3 `watch` timed out; 4 `stands` found a room stop at or past its bound (a held one past it once the Stage reads
+down or past its ceiling), or one whose stamp does not parse; 5 `stands` found no room stop standing.
 """
 
 import argparse
@@ -113,9 +127,11 @@ PAUSE_LOG = "## Pause log"
 # too (an approved queue's room stops are no run mark): this module loads that one, never a copy, and since p28-4 reads
 # the lines only through RR._last_room_stop (_last_room_line), the reader a lead's lease shares.
 ROOM_LINE = RR.ROOM_STOP_LINE_RE
-# The bound's one source is reconcile-rollout.py's ROOM_STOP_BOUND (p28-4), which a lead's lease reads too (a standing
-# room stop keeps a lapsed lease): `stands` defaults to it.
+# The bound's one source is reconcile-rollout.py's ROOM_STOP_BOUND (p28-4), which a lead's lease reads too (a room stop
+# under it keeps a lapsed lease): `stands` defaults to it. The hold's head and ceiling are its ROOM_STOP_HELD and
+# ROOM_STOP_HOLD_MAX (p39-12), read here and by `stands` and `begin` alone.
 BOUND_HOURS = RR.ROOM_STOP_BOUND.total_seconds() / 3600
+HELD = RR.ROOM_STOP_HELD
 STEP_TYPES = ("started", "result", "failed")
 
 
@@ -332,15 +348,21 @@ def _save_note(note, verb):
 
 
 def _last_room_line(note):
-    """(stamp, 'start' | 'ended') for the last room-stop line of `## Pause log`, or None: reconcile-rollout.py's
+    """(stamp, 'start' | 'ended', held) for the last room-stop line of `## Pause log`, or None: reconcile-rollout.py's
     _last_room_stop, the one reader (a lead's lease reads it too, p28-4)."""
     return RR._last_room_stop(note)
 
 
-def _standing(last, now, hours):
+def _standing(last, now, hours, alive=None):
     """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last: reconcile-rollout.py's
-    _room_standing, the rule's one copy (p29-7)."""
-    return RR._room_standing(last, now, timedelta(hours=hours))
+    _room_standing, the rule's one copy (p29-7). `alive` (p39-12) is passed through: with it a held start line past the
+    bound reads 0 while alive(now), up to ROOM_STOP_HOLD_MAX."""
+    return RR._room_standing(last, now, timedelta(hours=hours), alive=alive)
+
+
+def _stage_alive(now):
+    """reconcile-rollout.py's _stage_alive(now)[0]: the hold's one reading of the Stage, for `begin`."""
+    return RR._stage_alive(now)[0]
 
 
 def cmd_begin(args):
@@ -354,15 +376,22 @@ def cmd_begin(args):
         # reorder the queue.
         raise _usage("begin", "slugs go in bare, never as [[wikilinks]] (a wikilink on a ## Pause log line "
                               "above ## Queue reorders the queue); nothing written")
+    if text.strip().startswith(HELD.rstrip()):
+        # The hold's head is --held's alone: text that opens with it would read as a hold no signal recorded.
+        raise _usage("begin", f"text opens {HELD.rstrip()!r}, the head only --held writes; nothing written")
     note = _note(args.rollout, "begin")
     last = _last_room_line(note)
-    if _standing(last, _now(), BOUND_HOURS) == 0:
-        print(f"room stop already stands since {last[0]}")
-        return 0
-    line = f"- {RR._stamp(_now())} room stop: {text.strip()}"
+    now = _now()
+    stood = _standing(last, now, BOUND_HOURS, alive=_stage_alive) == 0
+    line = f"- {RR._stamp(now)} room stop: {HELD if args.held else ''}{text.strip()}"
     note.append_line(PAUSE_LOG, line)
     _save_note(note, "begin")
-    _record_room_stop(args.rollout, text.strip())
+    if stood:
+        # A second signal renews the standing stop (execute § Room stop item 1): the fresh line restarts its bound and
+        # carries this signal's hold; the open Run-record stop stays, so none is recorded.
+        print(f"room stop renewed (stood since {last[0]})")
+    else:
+        _record_room_stop(args.rollout, text.strip())
     print(line)
     return 0
 
@@ -400,11 +429,27 @@ def cmd_stands(args):
         if now is None:
             raise _usage("stands", f"--now {args.now!r} is not an ISO timestamp")
     last = _last_room_line(_note(args.rollout, "stands"))
-    rc = _standing(last, now, args.hours)
+    stage = []   # the Stage's one reading, (alive, why), taken only for a held line past the bound
+
+    def alive(at):
+        stage.append(RR._stage_alive(at))
+        return stage[-1][0]
+    rc = _standing(last, now, args.hours, alive=alive)
+    ts = RR._parse_ts(last[0]) if last is not None else None
     if rc == 0:
-        print(f"room stop stands since {last[0]}")
+        held = ", held by the Stage" if last[2] else ""
+        past = (f" (until {RR._stamp(ts + RR.ROOM_STOP_HOLD_MAX)} at the latest)"
+                if now - ts >= timedelta(hours=args.hours) else "")
+        print(f"room stop stands since {last[0]}{held}{past}")
     elif rc == 4:
-        why = "its stamp does not parse" if RR._parse_ts(last[0]) is None else f"at or past its {args.hours:g} h bound"
+        if ts is None:
+            why = "its stamp does not parse"
+        elif last[2] and now - ts >= RR.ROOM_STOP_HOLD_MAX:
+            why = f"held past its hold's ceiling ({RR.ROOM_STOP_HOLD_MAX.days} d)"
+        elif stage:
+            why = f"at or past its {args.hours:g} h bound, and the Stage that holds it reads down ({stage[0][1]})"
+        else:
+            why = f"at or past its {args.hours:g} h bound"
         print(f"room stop since {last[0]} has lapsed: {why}")
     else:
         print("no room stop stands")
@@ -446,6 +491,10 @@ def main(argv=None):
                            ("stands", "read whether a room stop stands (read-only)")):
         s = sub.add_parser(verb, help=helptext)
         s.add_argument("--rollout", required=True)
+        if verb == "begin":
+            s.add_argument("--held", action="store_true",
+                           help="the signal says Chorus holds this Session (no Login has room): open the text with "
+                                "the hold's head")
         if verb == "stands":
             s.add_argument("--hours", type=float, default=BOUND_HOURS)
             s.add_argument("--now")
