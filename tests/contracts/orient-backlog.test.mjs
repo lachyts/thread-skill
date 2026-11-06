@@ -13,8 +13,8 @@
 //   dispositions park, reopen, obsolete, re-home, merge and unbundle; never for size; no Drop and no rename; obsolete
 //                is not the phase retire, whose R2 bullet stays word for word;
 //   record       B7 writes the record after every task write, its sections the script's SECTIONS, in order;
-//   batches      B5's fork prompts, its root (`repos:`, else `Local:`; with neither, no fork) and orient-all § 6.2's
-//                batch rule;
+//   batches      B5's fork prompts, its root (the batch's repo as its project declares it in `repos:` or `Local:`;
+//                undeclared, no fork) and orient-all § 6.2's batch rule;
 //   answers      B6 answers schedule's questions in exactly 23 items, asking nothing, the clone with the Yes;
 //   write-back   B7's write, its one fold and its hold; B9's re-stamp is its own `--restamp` mode, skipped after a
 //                held write-back #1; the script writes as atomic_write_json does;
@@ -161,8 +161,10 @@ function check(F) {
     'serial forks run one per batch, after every parallel batch', 'never two batches at once', '/thread:schedule --regenerate --tasks <members>',
     "`Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the batch's root>; decided none`",
     '`Under the Backlog orient: <area>; decided none`', 'and **touched**, every task note it wrote',
-    "its home project's first `repos:` entry", 'else its first `Local:` path', '**A batch with no root gets no fork**',
-    '`no root: [[<project>]] declares no repos: and no Local:`', 'Its serial-shaped members still fork below'])
+    "A parallel batch is one (repo, project): the repo its members' files sit in, as its home project declares it",
+    "That declared path is the batch's root", '**A batch with no root gets no fork**',
+    '`no root: [[<project>]] declares no repos: and no Local:`', '`no root: <repo> is not declared by [[<project>]]`',
+    'Serial-shaped members still fork below'])
   need('batches', 'B9', B(F, 9), ["B5's root, grouping and batch rules", 'A decided task whose batch has no root gets `wait`'])
   need('batches', 'B10', sec(b, /^## B10\. /), ['each batch with no root with its misfit line'])
   need('batches', "the script's header", head, ['`local`, the two places B5 roots a parallel fork from'])
@@ -351,7 +353,7 @@ const CONTROLS = [
   ['dispositions', [BACK, '**Not under `--backlog`:** no **Drop**', '**Not under `--backlog`:** a **Drop**']],
   ['record', [BACK, 'Answered, waiting,\n   Folded, Write-back and Touched.', 'Answered, waiting,\n   Write-back and Touched.']],
   ['batches', [BACK, "urgent\n  members' forks go in batch 1", "urgent\n  members' forks go in batch 2"]],
-  ['batches', [BACK, '**A batch\n  with no root gets no fork**', '**A batch\n  with no root forks anyway**']],
+  ['batches', [BACK, '**A batch with no root gets\n  no fork**', '**A batch with no root forks\n  anyway**']],
   ['answers', [BACK, "18. Step 4.7's rungs: none, with the hard tasks named.\n", '']],
   ['write-back', [BACK, '4. A second exit 4, or guard 3', '4. Each exit 4, or guard 3']],
   ['write-back', [SCRIPT, 'restamp = args.restamp', 'restamp = rec.front["last_orient_at"] is not None']],

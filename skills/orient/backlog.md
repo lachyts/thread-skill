@@ -97,12 +97,14 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   hand edit; a refusal is listed, never written by hand. A merge, an unbundle and a phase retire run by reshuffle
   R5.4. R5.1 and R5.3 write nothing (no new phase, no rename).
 - **The fit test.** The three-way execution-fit test runs on each batch, as in orient § 6.
-- **The root.** A parallel batch's root is its home project's first `repos:` entry (`sweep`'s `projects[].repos`),
-  else its first `Local:` path (`projects[].local`, the `` Local: `<path>` `` line schedule § 0 reads). **A batch
-  with no root gets no fork**: its members are listed under Session lane and misfits, each with
-  `no root: [[<project>]] declares no repos: and no Local:`. An open member stays open and unstamped, an orient park
-  stays parked (it joins no batch this run schedules), and none is parked for it. Its serial-shaped members still
-  fork below, since the serial path reads no root.
+- **The root.** A parallel batch is one (repo, project): the repo its members' files sit in, as its home project
+  declares it, in `repos:` (`sweep`'s `projects[].repos`) or in a `Local:` line (`projects[].local`, the
+  `` Local: `<path>` `` line schedule § 0 reads). That declared path is the batch's root. **A batch with no root gets
+  no fork**, and each member is listed under Session lane and misfits: with
+  `no root: [[<project>]] declares no repos: and no Local:` when the home project declares neither, or
+  `no root: <repo> is not declared by [[<project>]]` when its files sit in a repo the project does not declare. An
+  open member stays open and unstamped, an orient park stays parked (it joins no batch this run schedules), and none
+  is parked for it. Serial-shaped members still fork below, since the serial path reads no root.
 - **The forks.** Each parallel batch with a root gets one forked subagent per (repo, project), with the prompt
   `/thread:schedule --regenerate --tasks <members>` and then the line
   `Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the batch's root>; decided none`.
