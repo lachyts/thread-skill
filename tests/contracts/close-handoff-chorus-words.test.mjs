@@ -20,7 +20,8 @@
 //   1. the port: Chorus's readers, copied verbatim into JS (header below names each source line);
 //   2. port self-tests: Chorus's documented behaviour, so a bad port fails here before it judges skill text;
 //   3. the skill text read THROUGH the port: close's four banners, the paraphrase counter-example, the
-//      NOT-closed form, the step-8 statement offer and rollout row (ADR 0057), rule (3)'s question line, a lead's status line, open
+//      NOT-closed form, the step-8 statement offer and rollout row (ADR 0057) and its `rollout handed off:` rows with a
+//      fenced manual prompt above the report (ADR 0072), rule (3)'s question line, a lead's status line, open
 //      save's checkpoint line and handoff's closing line, then that line followed by next step 4's archive line
 //      (two fixed lines), each extracted from the skill files themselves;
 //   4. prose and order pins through check(files), which returns named failures, each with a mutation control:
@@ -242,6 +243,7 @@ const SAMPLE = {
   slug: 'thread-skill-rollout-2026-10-28',
   root: '/Users/lachlants/repos/tools/thread-skill-rollout',
   'the other session': 'exports JSON writer (Session)',
+  'task id': 'task_01J8ZK',
 }
 function fill(s) {
   return s.replace(/<([a-z ]+)>(?:\[, <\1>…\])?/g, (_, name) => {
@@ -392,6 +394,27 @@ test('close step 8: the rollout-not-started row (ADR 0057) is a statement, so th
   assert.equal(R(t).asks, false, `the row asks: ${o}`)
   assert.equal(fastClose(t), 'closed')
   assert.equal(R(closing(`${REPORT}\nrollout not started: [[${SAMPLE.slug}]]. Shall I hand it off to a fresh session?`, BANNER)).asks, true,
+    'control: a question-form row reads as asking')
+})
+
+// Close sub-step 7.10 launches a rollout note left with no lead (ADR 0072): each `rollout handed off:` row of step 8
+// is a statement, and a manual handoff's prompt, printed fenced just above the report, asks nothing either.
+const handedRows = (t) => [...STEP8(t).matchAll(/`(rollout handed off: [^`]*)`/g)].map((m) => m[1])
+test('close step 8: the rollout-handed-off rows (ADR 0072) are statements, and a fenced manual prompt above the report asks nothing', () => {
+  const rows = handedRows(real.close)
+  assert.equal(rows.length, 2, `step 8 holds ${rows.length} \`rollout handed off:\` rows, not the Stage's and the manual one`)
+  for (const row of rows) {
+    const t = closing(`${REPORT}\n${fill(row)}`, BANNER)
+    assert.equal(R(t).asks, false, `the row asks: ${row}`)
+    assert.equal(R(t).endsClosed, true, `the row ends the close: ${row}`)
+    assert.equal(fastClose(t), 'closed', `the row misses the fast path: ${row}`)
+  }
+  const prompt = 'manual handoff:\n\n```\nYou\'re continuing "the exports 1.4 rollout" mid-stream — a live handoff?\n' +
+    `Run from: ${SAMPLE.root}\nNext move: /thread:execute [[${SAMPLE.slug}]]\n\`\`\``
+  const manual = closing(`${prompt}\n\n${REPORT}\n${fill(rows[1])}`, BANNER)
+  assert.equal(R(manual).asks, false, 'a fenced manual prompt above the report asks')
+  assert.equal(fastClose(manual), 'closed', 'a fenced manual prompt above the report misses the fast path')
+  assert.equal(R(closing(`${REPORT}\nrollout handed off: [[${SAMPLE.slug}]] · ${SAMPLE['abs doc path']} · Shall I start it?`, BANNER)).asks, true,
     'control: a question-form row reads as asking')
 })
 
