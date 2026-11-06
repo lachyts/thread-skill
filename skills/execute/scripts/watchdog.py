@@ -30,8 +30,10 @@ check, in order:
       moving_verdict and --gh-bin, and prints one line, `<slug> <verdict> <cause>`.
   (d) One notification per stall, keyed on (slug, lastEvent), in the state file
       ${XDG_STATE_HOME:-~/.local/state}/thread/watchdog.json (or --state), {"v": 1, "notified": {slug: {lastEvent,
-      at}}}, written atomically and only when it changes; a corrupt file (a non-UTF-8 file included) reads as empty,
-      with one WARN, never a traceback. A stall whose key is stored prints `already notified`. Otherwise one line goes
+      at}}}, written atomically when it changes or must be made valid; a corrupt file (a non-UTF-8 file included)
+      reads as empty, with one WARN, never a traceback, and is rewritten valid on that run ({"v": 1, "notified": {}}
+      when nothing was notified), so the next run reads it clean; an entry that is not an object is dropped and the
+      file rewritten the same way. A stall whose key is stored prints `already notified`. Otherwise one line goes
       to ntfy-push.py [--server], `see /thread:status <slug> — <slug>: rollout stalled (<cause>), no life sign for
       <age>m`, cut to 200 characters; its exit 0 records the key, any other exit records nothing. A key is dropped only
       when its rollout reads moving, waiting or skip this run, or its note has left the tasks dir; a `recent: not read`,
@@ -39,9 +41,10 @@ check, in order:
       <why>`; the other rollouts are still read) or a note still there but no candidate keeps it.
   --stall-after is moving's own: its default reconcile-rollout.py STALL_AFTER_MIN (45), its bound 1 to STALL_AFTER_MAX
   (1440), both read from that module, so the fallback and the verb never disagree.
-  ntfy-push.py runs for at most NTFY_TIMEOUT (60 s): one that cannot start or runs past it prints `watchdog: ntfy-push
-  did not run: <why>` on stderr and reads exit 127 or 124; whatever it printed is shown as `watchdog: <line>`.
-  --dry-run posts nothing and writes no state.
+  ntfy-push.py runs for at most NTFY_TIMEOUT (60 s): one that cannot start prints `watchdog: ntfy-push did not run:
+  <why>` on stderr and reads exit 127; one that runs past it is stopped, prints `watchdog: ntfy-push stopped: <why>`
+  on stderr and reads exit 124; whatever it printed is shown as `watchdog: <line>`.
+  --dry-run posts nothing and writes no state (a corrupt file included).
   Exit 0 whatever it finds; 1 when --tasks-dir cannot be read; 2 on usage.
 
 plist prints the launchd job (plistlib) on stdout: ProgramArguments [`python3` on PATH when it is this interpreter, else
@@ -105,10 +108,12 @@ def _load_bj():
 
 
 def _read_state(bj, path):
-    """{slug: {lastEvent, at}}; a missing file is empty, a corrupt or non-UTF-8 one empty with one WARN
-    (background_job.py's read_state)."""
-    notified = bj.read_state(path, "watchdog", "notified", STATE_VERSION)[0]
-    return {k: v for k, v in notified.items() if isinstance(k, str) and isinstance(v, dict)}
+    """(notified, dirty): {slug: {lastEvent, at}}, and whether the file must be rewritten valid even with no change (it
+    read as corrupt, or an entry that is not an object was dropped). A missing file is ({}, False), a corrupt or
+    non-UTF-8 one ({}, True) with one WARN (background_job.py's read_state)."""
+    notified, dirty = bj.read_state(path, "watchdog", "notified", STATE_VERSION)
+    kept = {k: v for k, v in notified.items() if isinstance(k, str) and isinstance(v, dict)}
+    return kept, dirty or len(kept) != len(notified)
 
 
 def _stage_up(url):
@@ -162,8 +167,9 @@ def _notify(bj, message, server):
     """ntfy-push.py's exit (127 when it cannot start, 124 past NTFY_TIMEOUT), each line it printed shown on stdout.
     NTFY_PY and NTFY_TIMEOUT are read at call time."""
     n = bj.notify(NTFY_PY, message, server, timeout=NTFY_TIMEOUT)
-    if not n.ran:
-        print(f"watchdog: ntfy-push did not run: {n.why}", file=sys.stderr)
+    if not n.ran:  # it never ran to an exit of its own: it could not start (127) or was stopped at its bound (124)
+        how = "stopped" if n.rc == 124 else "did not run"
+        print(f"watchdog: ntfy-push {how}: {n.why}", file=sys.stderr)
     for line in n.out.splitlines() + n.err.splitlines():
         if line.strip():
             print(f"watchdog: {line.strip()}")
@@ -190,7 +196,7 @@ def cmd_check(args):
         print(f"ERROR: watchdog check: cannot read {tasks_dir}: {e}", file=sys.stderr)
         return 1
     state_path = bj.state_path(args.state, "watchdog.json")
-    notified = _read_state(bj, state_path)
+    notified, dirty = _read_state(bj, state_path)
     before = json.dumps(notified, sort_keys=True)
     for slug, path in cands:
         if _recent(rr, slug, now, args.stall_after):
@@ -226,7 +232,7 @@ def cmd_check(args):
     for slug in list(notified):
         if not (tasks_dir / f"{slug}.md").is_file():
             notified.pop(slug, None)
-    if not args.dry_run and json.dumps(notified, sort_keys=True) != before:
+    if not args.dry_run and (dirty or json.dumps(notified, sort_keys=True) != before):
         try:
             bj.write_state(state_path, "notified", notified, STATE_VERSION)
         except OSError as e:

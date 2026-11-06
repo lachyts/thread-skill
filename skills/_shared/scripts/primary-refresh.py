@@ -113,9 +113,10 @@ skips the notices or the state.
      <tip12> failed its smoke run (<why>): the installed copy is kept`.
   5. Install, by the candidate's table: the helpers that differ, then every file of this copy's own table that the
      candidate's drops (removed, so a stale helper never shadows the primary's), then this copy, last, so a failure
-     partway leaves the old copy running with its own table: `installed <k> of <n> files, then <rel> failed (<e>): the
-     next fetched pass finishes it` (kind install-failed). Success: `the installed bundle now matches origin/<d> at
-     <tip12> (installed …; removed …)`.
+     partway leaves the old copy running with its own table (and, once background_job.py is installed, calling the new
+     module in process: the frozen interface below keeps it running): `installed <k> of <n> files, then <rel> failed
+     (<e>): the next fetched pass finishes it` (kind install-failed). Success: `the installed bundle now matches
+     origin/<d> at <tip12> (installed …; removed …)`.
   A refusal opens or continues the `self-update` spell (kind refused, install-failed or failed, with the tip and tipAt),
   under the notice rules. A helper an older copy cannot parse reads `broken:`, never moved, and the next fetched pass
   heals it.
@@ -125,6 +126,18 @@ The self-update contract is frozen: an installed copy sends every candidate `run
 <P>: <outcome>` and `self-update: current` lines back. Change any of them and every installed copy refuses every
 candidate: the self-update spell notifies after 24 h, and a hand-run install recovers (tests/primary-refresh.test.sh I6
 pins the literal tokens). `run` takes no abbreviated flag, so the smoke's rewrite names every flag one way.
+background_job.py's interface is in the contract too, additive only. Step 5 installs it as a helper before this copy,
+so an install that fails partway leaves the OLD copy calling the NEW module in process, and "the next fetched pass
+finishes it" holds only while every old call still binds. One that no longer binds raises at BJ.state_path, the top
+of cmd_run, before the fetch and the self-update, on every pass and with no notice (notify is the module's too): only
+a hand install gets out of it. Frozen: the module at BJ_REL; every BJ.<name> this file calls, its parameters by name
+and in order: state_path(arg, name), read_state(path, prog, key, version) returning (entries, corrupt),
+write_state(path, key, entries, version), atomic_write(path, data, mode), notify(script, message, server, run,
+timeout) returning a Notified, its `run` called as run(argv, timeout, input) and read as (rc, out, err, timed_out),
+job_python(), job_path(*first), launchd_plist(label, argv, path, interval, log) and kill_group(p, grace, reap); and
+Notified's fields, rc, why, out, err, ran. Never rename, remove or reorder any of them: a new parameter goes last with
+a default, a new Notified field goes last, read_state stays a pair, and a new BJ call here joins the list
+(tests/background-job.test.mjs BJ10 pins each call's shape against the module's signatures).
 
 The job check, on the installed copy: the self-update rewrites bundle files only; the interpreter, PATH, --log and
 --job-shape live in the plist, which only install writes and only a re-bootstrap loads. A job whose --job-shape is below

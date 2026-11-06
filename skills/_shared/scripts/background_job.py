@@ -27,6 +27,24 @@ The pieces:
   kill_group: SIGTERM a Popen's process group, up to `grace` seconds for it to empty, then SIGKILL, then an optional
     bounded reap.
 
+The frozen interface (ADR 0066 decision 7, the Primary refresh's self-update contract). Every other loader loads the
+copy in its own tree and moves with it, but an installed Primary refresh copy can run against a newer one: its
+self-update installs this file as a helper before the copy, so an install that fails partway leaves the old copy
+calling this module in process. A call that no longer binds raises at its first one (state_path, at the top of
+cmd_run), before the fetch and the self-update that would heal it, on every pass, and sends no notice (notify is this
+module's too); only a hand install gets out of it. So what primary-refresh.py calls is additive only, never renamed,
+removed or reordered:
+  - the file itself, at skills/_shared/scripts/background_job.py (primary-refresh.py's BJ_REL);
+  - state_path(arg, name); read_state(path, prog, key, version), returning the pair (entries, corrupt);
+    write_state(path, key, entries, version); atomic_write(path, data, mode); notify(script, message, server, run,
+    timeout), returning a Notified, with `run` called as run(argv, timeout, input) and read as (rc, out, err,
+    timed_out); job_python(); job_path(*first); launchd_plist(label, argv, path, interval, log); kill_group(p, grace,
+    reap): each parameter by its name and in its place;
+  - Notified's fields, rc, why, out, err, ran, in that order.
+A new parameter goes last with a default, a new Notified field goes last, read_state stays a pair. The rest (run_plain,
+the private helpers) is outside it. tests/background-job.test.mjs BJ10 pins it: every `BJ.<name>(...)` call in
+primary-refresh.py against a literal list, each binding to the signatures here.
+
 What stays where. These stops are not kill_group, each for its own reason:
   - verify-slot.py `kill_group(pgid)` and `_end(child)`: verify-slot's stop works from a pgid after the Popen may be
     gone, reads EPERM as a zombie-only group and polls for REAP_WAIT until the group is gone; `_end` always KILLs once

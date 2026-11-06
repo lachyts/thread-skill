@@ -4,6 +4,9 @@
 //   BJ5 the plist and PATH   BJ6 notify and run_plain   BJ7 kill_group
 //   BJ8 a missing or broken module is each by-path loader's own broken-install line, never a traceback
 //   BJ9 the structural pin: the TERM+KILL stops left in the tree are kill_group and the ones its docstring names
+//   BJ10 the frozen interface primary-refresh.py calls (its self-update contract): every `BJ.<name>(...)` call shape in
+//        primary-refresh.py against a literal list, each still binding to the module's signature, the parameters
+//        additive-only, and read_state's, notify's, Notified's and the run callback's shapes
 // Hermetic: each case runs `python3 -B` with PYTHONDONTWRITEBYTECODE=1, a mkdtemp HOME and a mkdtemp cwd; BJ8 runs a
 // copy of skills/ in a mkdtemp dir. Nothing is written in the checkout.
 import { test } from 'node:test'
@@ -115,7 +118,7 @@ test('BJ3. read_state: missing, unreadable, corrupt, the wrong shape and valid, 
   }
 })
 
-test('BJ4. write_state and atomic_write: the bytes, the mode, and nothing else left in the directory', (t) => {
+test('BJ4. write_state and atomic_write: the bytes, the mode, and a failed write leaves no temp file in the directory', (t) => {
   const s = scratch(t)
   const d = path.join(s.dir, 'w')
   const code = [
@@ -129,13 +132,32 @@ test('BJ4. write_state and atomic_write: the bytes, the mode, and nothing else l
     'bj.atomic_write(os.path.join(d, "job.plist"), b"x", mode=0o644)',
     'out["mode2"] = oct(stat.S_IMODE(os.stat(os.path.join(d, "job.plist")).st_mode))',
     'out["list2"] = sorted(os.listdir(d))',
+    // Each failing write below records the temp files mkstemp made, so the case shows which branch it reached.
+    'made = []',
+    'real_mkstemp = bj.tempfile.mkstemp',
+    'def mkstemp(*a, **k):',
+    '    r = real_mkstemp(*a, **k)',
+    '    made.append(r[1])',
+    '    return r',
+    'bj.tempfile.mkstemp = mkstemp',
+    'def failing(target):',
+    '    del made[:]',
+    '    try:',
+    '        bj.atomic_write(target, "x")',
+    '        raised = None',
+    '    except OSError as e:',
+    '        raised = type(e).__name__',
+    '    return {"raised": raised, "made": [os.path.basename(m) for m in made], "left": [os.path.lexists(m) for m in made],',
+    '            "list": sorted(os.listdir(d))}',
+    // The rename fails once the temp file exists: the target is a non-empty directory, so os.replace raises.
+    'os.mkdir(os.path.join(d, "busy.json"))',
+    'open(os.path.join(d, "busy.json", "keep"), "w").write("k")',
+    'out["rename"] = failing(os.path.join(d, "busy.json"))',
+    'out["kept"] = sorted(os.listdir(os.path.join(d, "busy.json")))',
+    // The parent's mkdir fails under a regular file, before mkstemp runs: nothing is made at all.
     'open(os.path.join(d, "f"), "w").write("a file")',
-    'try:',
-    '    bj.atomic_write(os.path.join(d, "f", "under.json"), "x")',
-    '    out["raised"] = None',
-    'except OSError as e:',
-    '    out["raised"] = type(e).__name__',
-    'out["list3"] = sorted(os.listdir(d))',
+    'out["mkdir"] = failing(os.path.join(d, "f", "under.json"))',
+    'bj.tempfile.mkstemp = real_mkstemp',
     'print(json.dumps(out))',
   ].join('\n')
   const got = json(py(s, code, [d]))
@@ -145,8 +167,18 @@ test('BJ4. write_state and atomic_write: the bytes, the mode, and nothing else l
   assert.deepEqual(got.list1, ['state.json'])
   assert.equal(got.mode2, '0o644')
   assert.deepEqual(got.list2, ['job.plist', 'state.json'])
-  assert.ok(got.raised, 'a write under a regular file raises OSError')
-  assert.deepEqual(got.list3, ['f', 'job.plist', 'state.json'])
+  const r = got.rename
+  assert.ok(r.raised, 'a rename over a non-empty directory raises OSError')
+  assert.equal(r.made.length, 1, `the temp file was made before the failure: ${JSON.stringify(r)}`)
+  assert.ok(r.made[0].startsWith('.busy.json-'), r.made[0])
+  assert.deepEqual(r.left, [false], 'the temp file is removed on the failure')
+  assert.deepEqual(r.list.filter((x) => x.startsWith('.busy.json-')), [], `no .busy.json-* temp file left: ${r.list}`)
+  assert.deepEqual(r.list, ['busy.json', 'job.plist', 'state.json'])
+  assert.deepEqual(got.kept, ['keep'], 'the target directory is left as it was')
+  const m = got.mkdir
+  assert.ok(m.raised, 'a write under a regular file raises OSError')
+  assert.deepEqual(m.made, [], 'its mkdir fails before any temp file is made')
+  assert.deepEqual(m.list, ['busy.json', 'f', 'job.plist', 'state.json'])
 })
 
 test('BJ5. the launchd plist, job_path and job_python', (t) => {
@@ -312,4 +344,104 @@ test('BJ9. the TERM+KILL group stops left in the tree are kill_group and the one
     'skills/_shared/scripts/declared-check.py', 'skills/_shared/scripts/estate-scan.py', 'skills/reflect/scripts/close-score.py']) {
     assert.ok(fs.readFileSync(path.join(root, rel), 'utf8').includes('background_job.py'), `${rel} names background_job.py`)
   }
+})
+
+// The interface an installed Primary refresh copy calls in process. A self-update that fails partway leaves the OLD copy
+// running against the NEW background_job.py (primary-refresh.py's step 5), and an old copy that raises at its first
+// BJ call (BJ.state_path, at the top of cmd_run) never reaches the fetch or the self-update that would heal it, and
+// sends no notice (notify is the module's too): only a hand install gets it out. So this is frozen, additive only:
+// never rename, remove or reorder a function, a parameter or a Notified field; a new parameter goes last with a
+// default; read_state stays a 2-tuple. Changing CALLS or FROZEN here is changing that contract (ADR 0066 decision 7).
+const CALLS = [
+  ['atomic_write', 2, []],
+  ['atomic_write', 2, ['mode']],
+  ['job_path', 2, []],
+  ['job_python', 0, []],
+  ['kill_group', 2, ['reap']],
+  ['launchd_plist', 5, []],
+  ['notify', 3, ['run', 'timeout']],
+  ['read_state', 4, []],
+  ['state_path', 2, []],
+  ['write_state', 4, []],
+]
+const FROZEN = {
+  atomic_write: ['path', 'data', 'mode'],
+  job_path: ['first'],
+  job_python: [],
+  kill_group: ['p', 'grace', 'reap'],
+  launchd_plist: ['label', 'argv', 'path', 'interval', 'log'],
+  notify: ['script', 'message', 'server', 'run', 'timeout'],
+  read_state: ['path', 'prog', 'key', 'version'],
+  state_path: ['arg', 'name'],
+  write_state: ['path', 'key', 'entries', 'version'],
+}
+const NOTIFIED = ['rc', 'why', 'out', 'err', 'ran']
+
+test('BJ10. the frozen interface primary-refresh.py calls: every BJ call shape listed, each still binding, additive only', (t) => {
+  const s = scratch(t)
+  const PR = path.join(root, 'skills', '_shared', 'scripts', 'primary-refresh.py')
+  const code = [
+    'import ast, inspect, re',
+    'src = open(sys.argv[2], encoding="utf-8").read()',
+    'tree = ast.parse(src, sys.argv[2])',
+    'calls, funcs, unsplat = set(), set(), []',
+    'for n in ast.walk(tree):',
+    '    f = getattr(n, "func", None)',
+    '    if isinstance(n, ast.Call) and isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "BJ":',
+    '        funcs.add(id(f))',
+    '        if any(isinstance(a, ast.Starred) for a in n.args) or any(k.arg is None for k in n.keywords):',
+    '            unsplat.append(f.attr)',
+    '        calls.add((f.attr, len(n.args), tuple(sorted(k.arg for k in n.keywords if k.arg))))',
+    // Any other read of the module (BJ.Notified, a BJ.<name> passed along uncalled) is part of the interface too.
+    'other = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)',
+    '                and n.value.id == "BJ" and id(n) not in funcs})',
+    'binds = {}',
+    'for name, npos, kws in json.loads(sys.argv[3]):',
+    '    try:',
+    '        inspect.signature(getattr(bj, name)).bind(*range(npos), **{k: None for k in kws})',
+    '        binds[f"{name}/{npos}/{\',\'.join(kws)}"] = "ok"',
+    '    except (AttributeError, TypeError) as e:',
+    '        binds[f"{name}/{npos}/{\',\'.join(kws)}"] = f"{type(e).__name__}: {e}"',
+    'params = {}',
+    'for name, frozen in json.loads(sys.argv[4]).items():',
+    '    ps = list(inspect.signature(getattr(bj, name)).parameters.values())',
+    '    extra = [p.name for p in ps[len(frozen):] if p.default is inspect.Parameter.empty',
+    '             and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]',
+    '    params[name] = {"head": [p.name for p in ps[:len(frozen)]], "extraWithoutDefault": extra}',
+    // read_state's three answers, each (entries, corrupt): a missing file, a valid one and a corrupt one.
+    'here = os.getcwd()',
+    'open(os.path.join(here, "valid.json"), "w").write(json.dumps({"v": 1, "stuck": {"a": {}}}))',
+    'open(os.path.join(here, "corrupt.json"), "w").write("[]")',
+    'rs = [bj.read_state(os.path.join(here, f), "primary-refresh", "stuck", 1) for f in ("missing.json", "valid.json", "corrupt.json")]',
+    'ran = bj.notify("x.py", "m", None, run=lambda a, t, i: (3, "o1\\no2\\n", "", False), timeout=5)',
+    'cut = bj.notify("x.py", "m", None, run=lambda a, t, i: (None, "", "", True), timeout=5)',
+    'print(json.dumps({',
+    '    "calls": sorted([a, n, list(k)] for a, n, k in calls), "unsplat": unsplat, "other": other,',
+    '    "bjRel": re.findall(r"^BJ_REL = \\"([^\\"]+)\\"$", src, re.M),',
+    '    "binds": binds, "params": params,',
+    '    "readState": [[type(r).__name__, len(r), type(r[0]).__name__, r[1]] for r in rs],',
+    '    "fields": list(bj.Notified._fields), "isNotified": [type(ran) is bj.Notified, type(cut) is bj.Notified],',
+    '    "ran": [ran.rc, ran.why], "cut": [cut.rc, cut.why],',
+    '    "types": [isinstance(bj.state_path(None, "x.json"), os.PathLike), type(bj.job_python()).__name__,',
+    '              type(bj.job_path("/a")).__name__, type(bj.launchd_plist("l", ["/p"], "/a", 1, "/l.log")).__name__],',
+    '}))',
+  ].join('\n')
+  const got = json(py(s, code, [PR, JSON.stringify(CALLS), JSON.stringify(FROZEN)]))
+  assert.deepEqual(got.calls, CALLS, 'every BJ.<name>(...) call shape in primary-refresh.py is in the frozen list (a new one joins CALLS and FROZEN)')
+  assert.deepEqual(got.unsplat, [], 'no BJ call passes *args or **kwargs, so each shape above is the whole call')
+  assert.deepEqual(got.other, [], 'primary-refresh.py reads nothing of the module but the calls above')
+  assert.deepEqual([...new Set(CALLS.map(([n]) => n))].sort(), Object.keys(FROZEN).sort())
+  assert.deepEqual(got.bjRel, ['skills/_shared/scripts/background_job.py'], 'the module stays at the path an installed copy loads')
+  for (const [k, v] of Object.entries(got.binds)) assert.equal(v, 'ok', `BJ.${k} still binds to background_job.py's signature`)
+  for (const [name, frozen] of Object.entries(FROZEN)) {
+    assert.deepEqual(got.params[name].head, frozen, `${name}'s parameters keep their names and order`)
+    assert.deepEqual(got.params[name].extraWithoutDefault, [], `${name}'s new parameters come last, each with a default`)
+  }
+  assert.deepEqual(got.readState, [['tuple', 2, 'dict', false], ['tuple', 2, 'dict', false], ['tuple', 2, 'dict', true]],
+    'read_state returns (entries, corrupt) for a missing, a valid and a corrupt file')
+  assert.deepEqual(got.fields.slice(0, NOTIFIED.length), NOTIFIED, 'Notified keeps its fields, in order; a new one goes last')
+  assert.deepEqual(got.isNotified, [true, true])
+  assert.deepEqual(got.ran, [3, 'o2'], 'notify calls run(argv, timeout, input) positionally and reads (rc, out, err, timed_out)')
+  assert.equal(got.cut[0], 124, '… timed_out is the stop at its bound')
+  assert.deepEqual(got.types, [true, 'str', 'str', 'bytes'])
 })

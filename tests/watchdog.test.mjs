@@ -8,7 +8,8 @@
 // up), and a closed port for a Stage that is down. The script runs through an async spawn, so the in-process servers
 // keep answering. Record mtimes are set with fs.utimesSync against a fixed --now. W14 loads watchdog.py in process
 // (python3 -c) with a moving_verdict that raises for one rollout, so a defect there is a lost look, never the whole run;
-// W17 loads it the same way with NTFY_PY a script that hangs and NTFY_TIMEOUT 2 s, so the bound is seen in seconds.
+// W17 loads it the same way with NTFY_PY a script that hangs and NTFY_TIMEOUT 2 s, so the bound is seen in seconds; W18
+// with a background_job.notify whose runner cannot start the child.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -354,6 +355,31 @@ test('W15. a state file that is not UTF-8 is one WARN, read as empty, never a tr
   assert.deepEqual(Object.keys(state(s).notified), [RO])
 })
 
+test('W15b. with no stall, a corrupt state file is still rewritten valid on that run, so the next run WARNs nothing; --dry-run leaves it', async (t) => {
+  const s = scratch(t); const n = await ntfy(t); const chorus = await closedPort()
+  fs.mkdirSync(path.dirname(s.state), { recursive: true })
+  const corrupt = Buffer.from([0o377, 0o376, 0x7b])
+  fs.writeFileSync(s.state, corrupt)
+  const dry = await check(s, chorus, n, ['--dry-run'])
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stderr, /^WARN: watchdog: state .* is corrupt/m)
+  assert.deepEqual(fs.readFileSync(s.state), corrupt, '--dry-run writes no state, a corrupt one included')
+  const first = await check(s, chorus, n)
+  assert.equal(first.status, 0, first.stderr)
+  assert.equal(first.stderr.split('\n').filter((l) => /^WARN: watchdog: state .* is corrupt/.test(l)).length, 1, first.stderr)
+  assert.deepEqual(state(s), { v: 1, notified: {} })
+  const second = await check(s, chorus, n)
+  assert.equal(second.status, 0, second.stderr)
+  assert.ok(!second.stderr.includes('WARN'), second.stderr)
+  assert.deepEqual(state(s), { v: 1, notified: {} })
+  // An entry that is not an object is dropped and the file rewritten the same way, with no change of its own.
+  fs.writeFileSync(s.state, JSON.stringify({ v: 1, notified: { gone: 5 } }) + '\n')
+  const dropped = await check(s, chorus, n)
+  assert.equal(dropped.status, 0, dropped.stderr)
+  assert.deepEqual(state(s), { v: 1, notified: {} })
+  assert.equal(posts(n).length, 0)
+})
+
 test('W16. plist: python3 on PATH that is this interpreter is the job\'s interpreter, and PATH still starts with gh\'s dir', async (t) => {
   const s = scratch(t)
   const exe = execFileSync(PY, ['-c', 'import sys; print(sys.executable)'], { env: s.env, encoding: 'utf8' }).trim()
@@ -392,7 +418,8 @@ test('W17. an ntfy-push that hangs is stopped at its bound: nothing recorded, ex
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, new RegExp(`${RO} stalled silent: not notified \\(ntfy-push exit 124\\)`))
   assert.ok(r.stdout.includes('watchdog: posting'), r.stdout)
-  assert.ok(r.stderr.includes('watchdog: ntfy-push did not run: ntfy-push ran past 2 s and was stopped'), r.stderr)
+  assert.ok(r.stderr.includes('watchdog: ntfy-push stopped: ntfy-push ran past 2 s and was stopped'), r.stderr)
+  assert.ok(!r.stderr.includes('did not run'), `a run stopped at its bound did run: ${r.stderr}`)
   for (const out of [r.stdout, r.stderr]) {
     assert.ok(!out.includes('Traceback'), out)
     assert.ok(!out.includes("b'"), out)
@@ -406,4 +433,30 @@ test('W17. an ntfy-push that hangs is stopped at its bound: nothing recorded, ex
     try { process.kill(pid, 0); await new Promise((resolve) => setTimeout(resolve, 100)) } catch { alive = false }
   }
   assert.equal(alive, false, `the hung ntfy-push (${pid}) is gone`)
+})
+
+test('W18. an ntfy-push that cannot start: `did not run`, never `stopped`, exit 127, nothing recorded', async (t) => {
+  const s = scratch(t); const n = await ntfy(t); const chorus = await closedPort()
+  stall(s)
+  // watchdog.py in process (W14's harness), its background_job.notify given a runner that cannot start the child.
+  const harness = [
+    'import importlib.util, sys',
+    'sys.dont_write_bytecode = True',
+    'spec = importlib.util.spec_from_file_location("wd", sys.argv[1]); wd = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(wd)',
+    'bj = wd._load_bj(); real = bj.notify',
+    'def cannot_start(argv, timeout, input):',
+    '    raise FileNotFoundError(2, "No such file or directory", "w18-python")',
+    'bj.notify = lambda *a, **k: real(*a, run=cannot_start, **k)',
+    'wd._load_bj = lambda: bj',
+    'sys.exit(wd.main(sys.argv[2:]))',
+  ].join('\n')
+  const r = await spawnPy(s, ['-B', '-c', harness, WD, ...checkArgs(s, chorus, n)])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, new RegExp(`${RO} stalled silent: not notified \\(ntfy-push exit 127\\)`))
+  assert.ok(r.stderr.includes("watchdog: ntfy-push did not run: [Errno 2] No such file or directory: 'w18-python'"), r.stderr)
+  assert.ok(!r.stderr.includes('ntfy-push stopped'), r.stderr)
+  assert.ok(!(r.stdout + r.stderr).includes('Traceback'), r.stderr)
+  assert.equal(posts(n).length, 0)
+  assert.equal(state(s), null, 'nothing recorded')
 })
