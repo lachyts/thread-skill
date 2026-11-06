@@ -4,15 +4,16 @@
 # (primary-refresh.py bundle's table) plus a stub primary-hold.sh (it prints $HOLD_FILE's text). install runs first, into
 # $tmp/bin, and job() runs the plist's own ProgramArguments (read with plistlib, so --log and --job-shape are in it) plus
 # --ntfy-server and each arm's flags, outside any work tree, as launchd does; run() is a checkout copy (no install
-# marker). Notices go through the real ntfy-push.py to a local http.server stub that appends each message to $NTFY_LOG
+# marker) at its repo path, with background_job.py beside it. Notices go through the real ntfy-push.py to a local http.server stub that appends each message to $NTFY_LOG
 # and answers 500 while $NTFY_FAIL exists ([notify] ntfy_topic is set in the temp HOME's rollouts.toml). The stub binds
 # through TCPServer's bind, with no reverse lookup (a name lookup in it is an error), and the suite stops if it writes
 # no port.
-#   install   I1 I5 R8 I4 (the job's flags and env pinned beside JOB_SHAPE) I3 I2
+#   install   I1 I5 R8 I4 (the job's flags and env pinned beside JOB_SHAPE) I3 I2, I7 I7b I7c I8 (background_job.py:
+#             a copy that cannot load it, and `bundle`, which never loads it)
 #   a pass    R1-R9, R4/N1-N3, F1 B1 D1 (the fetch and the ssh rule), O1 O2 (the overlap), X1 (the helper's contract)
 #   notices   P0-P2 (one per kind), U1 (an entry from before p37-7), M1 H1 N4 N5, T1 T2 (timeouts and a TERM), K1 L1 J1
-#   self-update  S1-S5, S6a-S6i (the smoke), S7 (the transition), S8 S9, S10a-S10c (the candidate's table), I6 (the
-#             frozen contract)
+#   self-update  S1-S5, S6a-S6j (the smoke; S6j a candidate whose own background_job.py is broken), S7 (the
+#             transition), S8 S9, S10a-S10c (the candidate's table), I6 (the frozen contract)
 # Origins over ssh are git@github.com:o/origin.git, served by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`. Every pid
 # an arm records is checked gone (`gone`). Hermetic: HOME, XDG_STATE_HOME and every path live under mktemp; commits carry
 # an inline identity; global/system git config is ignored; the only server is the stub on 127.0.0.1.
@@ -114,8 +115,10 @@ PY
 commit() { g -C "$tmp/seed" add -A; g -C "$tmp/seed" commit -qm "$1"; g -C "$tmp/seed" push -q origin master 2>/dev/null; }
 # real: the seed's bundle files back to this tree's
 real() { while read -r m rel irel; do cp -p "$root/$rel" "$tmp/seed/$rel"; done < "$tmp/table"; }
-mkdir -p "$tmp/run"; cp "$pr" "$tmp/run/primary-refresh.py"
-run() { (cd "$tmp/out" && python3 "$tmp/run/primary-refresh.py" run --primary "$tmp/primary" --ntfy-server "$SERVER" "$@") 2>&1; }
+# run()'s copy sits at its repo path in a mini plugin root that holds background_job.py and no other helper, so
+# live-checkout.sh and ntfy-push.py still come from the primary.
+RUNC="$tmp/run/skills/_shared/scripts"; mkdir -p "$RUNC"; cp "$pr" "$root/skills/_shared/scripts/background_job.py" "$RUNC/"
+run() { (cd "$tmp/out" && python3 "$RUNC/primary-refresh.py" run --primary "$tmp/primary" --ntfy-server "$SERVER" "$@") 2>&1; }
 head_of() { git -C "$1" rev-parse HEAD; }
 tip() { git -C "$tmp/seed" rev-parse HEAD; }
 same() { cmp -s "$1" "$2" && echo same || echo differs; }
@@ -131,8 +134,8 @@ ok "${bad:-none}" none "I1: an empty bin directory gets every bundle file, byte 
 ok "$(cd "$tmp/bin" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')" \
   "$( (cut -d' ' -f3 "$tmp/table"; echo primary-refresh.installed) | LC_ALL=C sort | tr '\n' ' ')" \
   "I5: … exactly the table's install-rels plus the marker"
-ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "6|6" \
-  "I5: primary-refresh.py bundle prints six lines in the strict form"
+ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "7|7" \
+  "I5: primary-refresh.py bundle prints seven lines in the strict form"
 has "$(head -1 "$tmp/table")" "0755 skills/_shared/scripts/primary-refresh.py primary-refresh.py" "I5: … the copy's own row first"
 JOB=(); while IFS= read -r -d '' a; do JOB+=("$a"); done < <(python3 -c 'import plistlib,sys; sys.stdout.write("\0".join(plistlib.load(open(sys.argv[1],"rb"))["ProgramArguments"]) + "\0")' "$tmp/job.plist")
 args=$(python3 -c 'import plistlib,sys; j=plistlib.load(open(sys.argv[1],"rb")); print(j["Label"], j["StartInterval"], j["RunAtLoad"], " ".join(j["ProgramArguments"][1:]))' "$tmp/job.plist")
@@ -673,6 +676,20 @@ real; echo "# s6i fixed" >> "$tmp/seed/$LCR"; commit "s6i fixed"
 has "$(job --state "$S")" "self-update: the installed bundle now matches origin/master at $(tip | cut -c1-12) (installed $LCR)" "S6i: a fixed tip then installs"
 real; commit "real again"; job >/dev/null
 
+# ---- S6j: a candidate whose own background_job.py is broken is refused, though the held primary's is good --------------
+# The primary is held, so it keeps the good module: a load that fell back to it on a broken file would pass this smoke
+# (held: is no denied outcome) and install the broken file into the bin.
+S="$tmp/s-s6j.json"; BJR=skills/_shared/scripts/background_job.py; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
+echo 'raise RuntimeError("s6j")' >> "$tmp/seed/$BJR"; commit s6j; t6j=$(tip | cut -c1-12)
+out=$(job --state "$S")
+has "$out" "primary: held: [[x-rollout]] running on it" "S6j: the primary is held, so it is not moved"
+ok "$(same "$root/$BJR" "$tmp/primary/$BJR")" same "S6j: … and keeps the good background_job.py (the arm's precondition)"
+has "$out" "self-update: origin's bundle at $t6j failed its smoke run (exit 1: ERROR: primary-refresh run: cannot load skills/_shared/scripts/backgroun): the installed copy is kept" \
+  "S6j: the candidate's own broken module is its ERROR, never the primary's good one, so the smoke refuses it"
+ok "$(same "$pr" "$tmp/bin/primary-refresh.py")|$(same "$root/$BJR" "$tmp/bin/$BJR")" "same|same" "S6j: … the copy and the bin's module unchanged"
+ok "$(sv "$S" self-update kind)" refused "S6j: … the self-update spell refused"
+rm -f "$HOLD_FILE"; real; commit "real again"; job >/dev/null
+
 # ---- S7 / S8 / S9: the transition, a held primary, and an install that fails partway --------------------------------------------------
 rm -rf "$tmp/bin/skills"; land s7 s7
 out=$(job)
@@ -797,6 +814,32 @@ ok "$(python3 -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"
   "I3: the job's PATH is git's directory, python's, then the system's, de-duplicated"
 has "$out" "launchctl bootout gui/$(id -u)/com.thread.primary-refresh 2>/dev/null; while launchctl print gui/$(id -u)/com.thread.primary-refresh >/dev/null 2>&1; do sleep 1; done; launchctl bootstrap gui/$(id -u) '$tmp/a b/job.plist'" \
   "I3: the printed line waits for the bootout, and quotes a plist path with a space"
+
+# ---- I7 / I7b / I7c / I8: a copy that cannot load background_job.py, and `bundle`, which never loads it ----------------
+# I7: a lone copy (its plugin root $tmp/lone holds nothing) pointed at a folder inside a checkout: no module beside it or
+# in the primary, so it exits 1 before it reads the primary (R7's `not a primary checkout` never prints).
+mkdir -p "$tmp/lone/x/y/z"; cp "$pr" "$tmp/lone/x/y/z/primary-refresh.py"
+tail7="run primary-refresh.py install from a checkout that holds the whole bundle"
+out=$(cd "$tmp/out" && python3 "$tmp/lone/x/y/z/primary-refresh.py" run --primary "$tmp/primary/skills" --state "$tmp/s-i7.json" 2>&1); rc=$?
+ok "$rc|$out" "1|ERROR: primary-refresh run: cannot load skills/_shared/scripts/background_job.py (no file beside the copy or in $tmp/primary/skills): $tail7" \
+  "I7: a copy with no background_job.py beside it or in the primary exits 1 with one ERROR line"
+lacks "$out" "Traceback" "I7: … no traceback"
+ok "$([ -e "$tmp/s-i7.json" ] && echo written)" "" "I7: … and no state"
+out=$(cd "$tmp/out" && python3 "$tmp/lone/x/y/z/primary-refresh.py" install --primary "$tmp/primary/skills" --bin-dir "$tmp/bin7" --plist "$tmp/bin7/j.plist" 2>&1); rc=$?
+ok "$rc|$out|$([ -e "$tmp/bin7" ] && echo wrote)" "2|ERROR: primary-refresh install: cannot load skills/_shared/scripts/background_job.py (no file beside the copy or in $tmp/primary/skills): $tail7|" \
+  "I7b: install from that copy exits 2 with the same line, writing nothing"
+# I7c: a copy whose own module is there but broken, beside a primary with a good one: the ERROR, never the primary's
+mkdir -p "$tmp/lone2/skills/_shared/scripts"; cp "$pr" "$tmp/lone2/skills/_shared/scripts/"
+echo 'raise RuntimeError("i7c")' > "$tmp/lone2/skills/_shared/scripts/background_job.py"
+ok "$(same "$root/skills/_shared/scripts/background_job.py" "$tmp/primary/skills/_shared/scripts/background_job.py")" same "I7c: (the primary holds a good module)"
+out=$(cd "$tmp/out" && python3 "$tmp/lone2/skills/_shared/scripts/primary-refresh.py" run --primary "$tmp/primary" --state "$tmp/s-i7c.json" 2>&1); rc=$?
+ok "$rc|$out" "1|ERROR: primary-refresh run: cannot load skills/_shared/scripts/background_job.py ($tmp/lone2/skills/_shared/scripts/background_job.py raised RuntimeError: i7c): $tail7" \
+  "I7c: a broken module beside the copy is one ERROR line naming it, exit 1, and the primary's is never loaded instead"
+lacks "$out" "Traceback" "I7c: … no traceback"
+ok "$([ -e "$tmp/s-i7c.json" ] && echo written)" "" "I7c: … and no state"
+# I8: `bundle` loads no helper, so the lone copy prints the whole table
+python3 "$tmp/lone/x/y/z/primary-refresh.py" bundle > "$tmp/i8.out" 2> "$tmp/i8.err"; rc=$?
+ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the seven-row table, stderr empty"
 
 ok "$(ls -a "$tmp/bin" | grep -c '^\.stage-')" 0 "no stage is left beside the copy"
 exit $fail
