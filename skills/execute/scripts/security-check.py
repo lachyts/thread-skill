@@ -27,13 +27,13 @@ Python stdlib only. Two verbs:
            uncommitted one on disk (untracked or gitignored bytes, a symlink, a directory) is `configTouched`.
            --history-only skips the disk rule: it reads committed history only.
       6-7. gitleaks runs over the task's own non-merge commits <mb>..HEAD, and over each first-parent merge's
-           resolution there, in a scratch `--shared --no-checkout` clone that holds only the merge base's scanner config,
-           so nothing the task leaves on disk silences it. A merge M's resolution is replayed in the clone: T is git's
-           automatic merge of M^1 and M^2 (`merge-tree --write-tree`, conflict markers included), P a commit of T, and
-           S a commit of M's tree on P, so S's added lines are exactly what the resolution added, at M's file and line;
-           a finding in S is reported at M with `merge: true`. A merge whose tree equals T (a clean automatic merge) is
-           skipped. An octopus merge is replayed with M^1 and M^2 only, so a third parent's changes read as the
-           resolution's. The replay needs git 2.38 or later, and runs only when the range holds a merge.
+           resolution there, in a scratch `--shared --no-checkout` clone that holds only the merge base's scanner
+           config, so nothing the task leaves on disk silences it. A merge M's resolution is replayed in the clone: T
+           is git's automatic merge of M^1 and M^2 (`merge-tree --write-tree`, conflict markers included), P a commit
+           of T, and S a commit of M's tree on P, so S's added lines are exactly what the resolution added, at M's file
+           and line; a finding in S is reported at M with `merge: true`. A merge whose tree equals T (a clean automatic
+           merge) is skipped. An octopus merge is replayed with M^1 and M^2 only, so a third parent's changes read as
+           the resolution's. The replay needs git 2.38 or later, and runs only when the range holds a merge.
       8.   Secrets: rule, file, line and commit only (never the Secret or Match fields), with `pushed` read only when
            one is found: the local remote-tracking refs, then origin's live head for the branch.
       9.   Accepts: a `security-accept <kind>:<key>` token that Lachy's recorded answer in the note's `## Repair input`
@@ -891,7 +891,8 @@ def secrets_found(gitleaks, scan_dir, tree, lo, head, anchor, tmp):
     found += run_gitleaks(gitleaks, scan_dir, opts, "report.json", tmp)
     out = []
     for s in found:
-        if (s["commit"], s["file"], s["rule"], s["line"]) not in [(x["commit"], x["file"], x["rule"], x["line"]) for x in out]:
+        key = (s["commit"], s["file"], s["rule"], s["line"])
+        if key not in [(x["commit"], x["file"], x["rule"], x["line"]) for x in out]:
             out.append(s)
     return out
 
@@ -1156,7 +1157,7 @@ def main(argv=None):
     g = s.add_mutually_exclusive_group()
     g.add_argument("--osv-url", dest="osv_url")
     g.add_argument("--no-advisories", dest="no_advisories", action="store_true")
-    s.add_argument("--anchor", help="Integration mode: the Integration anchor (ADR 0030); its commits since it are scanned")
+    s.add_argument("--anchor", help="Integration mode: the Integration anchor (ADR 0030), scanned from")
     s.add_argument("--history-only", dest="history_only", action="store_true",
                    help="with --anchor: read committed history only (the read-only Integration judge)")
     s.set_defaults(func=cmd_scan)

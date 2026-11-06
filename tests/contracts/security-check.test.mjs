@@ -1,11 +1,13 @@
 // The opt-in Security check (execute § 3 `security_checks`; task note thread-skill-verifier-security-checks). Pins the
 // prose an LLM lead and its agents follow, and the one shape two scripts share:
 //   s3-row        execute § 3's `security_checks` row: the opt-in, the entry check, what is scanned, what is Lachy's
-//                 question and how his answer clears it, what is not scanned, the serial gap, both follow-up links
+//                 question and how his answer clears it, what Integration scans and what it does not (p39-8), the
+//                 serial gap, both follow-up links
 //   exit-5        § 3's *Exit 5* paragraph, right after *Exit 4*: its ERROR line, its halt, the order of the exits
 //   pre-check     § 4's *Check verifySlot before the stamps* covers args.securityCheck: present exactly when
-//                 verify-timeout printed it, never on an integrate call, its own halt, the resume exemption
-//   args          § 4's args jsonc entry
+//                 verify-timeout printed it, on every fresh call (an integrate call's too, since p39-8), its own
+//                 halt, the resume exemption
+//   args          § 4's args jsonc entry, on every task call, seeded revise and integrate call
 //   halts         § 7's two bullets (verify-timeout's exit 5, the pre-check's mismatch), the integrate free-lane phrase
 //                 still exactly twice in § 7 (execute-args-refusal's `halts` count)
 //   kept          both reasons under *Threatens every task*, before `reason="ladder file refused"`, each matched by
@@ -84,25 +86,26 @@ const ROW = [
   '| `security_checks` | `false` (omit) | `securityCheck` (rollout-level; a task-level key is ignored).',
   "Opt-in: `security_checks: true` on a parallel rollout note, set by hand. Schedule never stamps it, and a `--regenerate` supersede's `carry` copies it onto the new note.",
   'At each entry `reconcile-rollout.py verify-timeout` reads it, runs `security-check.py preflight` and prints `securityCheck` (exit 5 otherwise, § 3).',
-  'The lead passes it verbatim on every task call and seeded revise (§ 4), never on an integrate call.',
+  'The lead passes it verbatim on every task call, seeded revise and integrate call (§ 4).',
   "The engine's code-writing agents run `security-check.py scan` after the verifier is green and before they open or update the PR, and the review judge runs it again.",
-  "a secret in the task's own non-merge commits since their merge base with `origin/<default>` (gitleaks)",
+  "a secret in the task's own commits since their merge base with `origin/<default>`, each merge's resolution included (gitleaks)",
   'a new or changed dependency, outside test fixtures, with a known advisory (OSV)',
   'A red the agent can fix fails the try like a verifier red.',
   "These are a question for Lachy: a secret already pushed or behind a merge commit; a change to the scanner's own config; an advisory with no fixed release; a finding the agent reads as no credential.",
   "His answer clears it only through the scan. Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b).",
   'A pushed secret is rotated first, then accepted or the branch recut (repair § 4), never force-pushed.',
-  "Not scanned: Integration's own commits (the integrator's conflict resolution and fix commits) and any merge commit ([[thread-skill-security-check-integration-commits]]).",
+  "Integration scans too: the integrator runs `scan --anchor <anchor>` before its push and the Integration judge runs it again (`--history-only`), over Integration's own commits and every merge's resolution since the anchor, and every finding there is Lachy's question (the row's `## Needs you`).",
+  "Integration's scan reads secrets and the scanner config only, not dependencies ([[thread-skill-security-check-integration-dependencies]]).",
   "Parallel rollouts only: a Leg never reads it, so a serial note's `security_checks:` is never read.",
   '`verify-timeout` refuses one only where it runs on a serial note (schedule § Serial path S5), which does not close that gap ([[thread-skill-security-check-serial-chains]]).',
   'A rollout on an Engine snapshot older than this key never reads it either, until a Reinstate moves it (§ 1.5).',
 ]
 const PRE_SENTENCES = [
-  "The same check covers `args.securityCheck` (§ 3's `security_checks`). On a task call or seeded revise it must equal this entry's `verify-timeout` `securityCheck`, compared as JSON: present exactly when that line printed one.",
-  "An integrate call carries none: Integration's own commits are not scanned, and the engine refuses one (an *Args refusal*).",
+  "The same check covers `args.securityCheck` (§ 3's `security_checks`). On every fresh call (a task call, a seeded revise or an integrate call) it must equal this entry's `verify-timeout` `securityCheck`, compared as JSON: present exactly when that line printed one.",
+  'An integrate call carries it too: Integration scans its own commits and merge resolutions (`scan --anchor`).',
   `A mismatch writes nothing and halts as above with \`${PRE}\`, an integrate call's lane freed as above. A resume is exempt from it too.`,
 ]
-const BULLET_PRE = `- § 4's verifySlot pre-check finds a task call's or seeded revise's \`args.securityCheck\` not this entry's \`verify-timeout\` \`securityCheck\`, or an integrate call carrying one (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a lead bug: re-invoke), or`
+const BULLET_PRE = `- § 4's verifySlot pre-check finds a fresh call's \`args.securityCheck\` (a task call, a seeded revise or an integrate call) not this entry's \`verify-timeout\` \`securityCheck\` (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a lead bug: re-invoke), or`
 const BULLET_5 = `- \`reconcile-rollout.py verify-timeout\` exits 5 at an entry (§ 3: \`${HALT5}\`: nothing is stamped, cleared or dispatched; fix or remove the rollout's \`security_checks:\`, or install gitleaks, as its ERROR line says, then re-invoke), or`
 const REPAIR_SENTENCE = "A security-check question (one that names `security-accept <kind>:<key>` answers, execute § 3 `security_checks`) offers each answer it names as its own option, each accept option's label holding its tokens verbatim (a question with several findings also names one answer that keeps them all), so record-answer's `--answer`, verbatim, carries them: the scan honours an accept only from an answer that repeats the token its own question named."
 
@@ -130,11 +133,11 @@ function check(f) {
   fail('pre-check', !PRE_SENTENCES.every((p) => pre.includes(p)) ||
     !before(pre, 'A resume is exempt: it keeps the original-args rule', PRE_SENTENCES[0]))
 
-  // args: the jsonc entry and its comment, every task call and seeded revise, never an integrate call.
+  // args: the jsonc entry and its comment, every task call, seeded revise and integrate call (p39-8).
   const s4lines = (section(f.execute, S4) ?? '').split('\n')
   const at = s4lines.findIndex((l) => l === '  "securityCheck": { "script": "<verify-timeout securityCheck.script>" },')
   const comment = at < 0 ? '' : collapse(s4lines.slice(at + 1, at + 4).map((l) => l.replace(/^\s*\/\/\s?/, '')).join(' '))
-  fail('args', at < 0 || !comment.includes("ONLY when this entry's verify-timeout printed securityCheck (§ 3), verbatim; OMIT otherwise (byte-identical prompts); every task call and seeded revise, NEVER an integrate call (the engine refuses it)"))
+  fail('args', at < 0 || !comment.includes("ONLY when this entry's verify-timeout printed securityCheck (§ 3), verbatim; OMIT otherwise (byte-identical prompts); every task call, seeded revise and integrate call (Integration scans its own commits before its push)"))
 
   // halts
   const s7 = collapse(section(f.execute, S7) ?? '')
@@ -156,7 +159,10 @@ function check(f) {
     return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
   })()
   fail('context', !term.includes('`security_checks: true`') || !term.includes('`security-accept <kind>:<key>` token the scan reads from the task note\'s `## Repair input`') ||
-    !term.includes("Integration's own commits and merge commits are not scanned ([[thread-skill-security-check-integration-commits]])") ||
+    !term.includes("each merge's resolution included") ||
+    !term.includes("Integration scans too: the integrator before its push and the Integration judge after, over Integration's own commits and merge resolutions since the anchor, every finding there Lachy's question.") ||
+    !term.includes('a secret in Integration\'s commits') ||
+    !term.includes("Integration's scan reads secrets and the scanner config only, not dependencies ([[thread-skill-security-check-integration-dependencies]])") ||
     !term.includes('no Leg ever runs it') || !term.includes('_Avoid_: secret scan (alone), audit, CI check.'))
 
   // template
@@ -226,6 +232,8 @@ test('the Security check holds every rule across execute, schedule, repair, the 
 test('control: the § 3 row without its accept sentence fails s3-row', () => {
   only('execute', "His answer clears it only through the scan. Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b). ", '', 's3-row', 'no accept')
   only('execute', ' ([[thread-skill-security-check-serial-chains]])', '', 's3-row', 'no serial follow-up link')
+  only('execute', ' ([[thread-skill-security-check-integration-dependencies]]). Parallel', '. Parallel', 's3-row', 'no integration-dependencies link')
+  only('execute', 'every task call, seeded revise and integrate call (§ 4).', 'every task call and seeded revise (§ 4), never on an integrate call.', 's3-row', 'never on integrate again')
 })
 
 test('control: Exit 5 with the old order sentence fails exit-5', () => {
@@ -233,11 +241,12 @@ test('control: Exit 5 with the old order sentence fails exit-5', () => {
 })
 
 test('control: the pre-check without its integrate clause fails pre-check', () => {
-  only('execute', "An integrate call carries none: Integration's own commits are not scanned, and the engine refuses one (an *Args refusal*). ", '', 'pre-check', 'no integrate clause')
+  only('execute', 'An integrate call carries it too: Integration scans its own commits and merge resolutions (`scan --anchor`). ', '', 'pre-check', 'no integrate clause')
 })
 
-test('control: the jsonc entry on integrate calls too fails args', () => {
-  only('execute', 'revise, NEVER an integrate call (the engine refuses it)', 'revise and every integrate call', 'args', 'integrate too')
+test('control: the jsonc entry back to never on an integrate call fails args', () => {
+  only('execute', '//   OMIT otherwise (byte-identical prompts); every task call, seeded revise\n                                          //   and integrate call (Integration scans its own commits before its push)',
+    '//   OMIT otherwise (byte-identical prompts); every task call and seeded\n                                          //   revise, NEVER an integrate call (the engine refuses it)', 'args', 'never on integrate')
 })
 
 test('control: § 7 without the exit-5 bullet, or a third free-lane phrase, fails halts', () => {
@@ -251,7 +260,7 @@ test('control: a reason off the kept list, or no pattern for it, fails kept', ()
 })
 
 test('control: the CONTEXT.md term without its follow-up link fails context', () => {
-  only('context', 'scanned ([[thread-skill-security-check-integration-commits]]), and no Leg', 'scanned, and no Leg', 'context', 'no link')
+  only('context', 'dependencies\n  ([[thread-skill-security-check-integration-dependencies]]), and no Leg', 'dependencies, and no Leg', 'context', 'no link')
 })
 
 test('control: the template line telling him to re-set it fails template', () => {
