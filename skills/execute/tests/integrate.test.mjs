@@ -16,6 +16,7 @@ const T = loadEngine([
   'reviserPrompt', 'coldEntryBlock', 'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck',
   'integrationVerify', 'markerHistory', 'GIT_ENV_SCRUB', 'ralphLoop', 'integrationMergeReads',
   'integrationBlockOf', 'INTEGRATE_RESULT', 'INTEGRATION_PRIOR_NOTE', 'INTEGRATION_CONFLICT_MARK', 'INTEGRATION_RED_MARK',
+  'INTEGRATION_PREFLIGHTS', 'INTEGRATE_RESULT_SECURED', 'INTEGRATION_REVIEW', 'INTEGRATION_REVIEW_SECURED',
 ])
 
 const ROW_KEYS = [
@@ -99,7 +100,7 @@ async function run(args, script = {}) {
     if (v instanceof Error) throw v
     return typeof v === 'function' ? v(prompt, o) : v
   })
-  const r = { ...out, unknown, opts, labels: out.calls.map((c) => c.label), row: out.result && out.result.tasks[0] }
+  const r = { ...out, args, unknown, opts, labels: out.calls.map((c) => c.label), row: out.result && out.result.tasks[0] }
   allRuns.push(r)
   return r
 }
@@ -1230,6 +1231,128 @@ test('h3: a review-blocked run (`Round N:` from its first line) parses whole, fo
   assert.equal(T.resumeArgsError({ rolloutSlug: 'r', repoPath: '/repo', task: mkTask({ resume }) }), '')
 })
 
+// ---- IS: the Security check on Integration (p39-8) -------------------------------------------------------------
+// With args.securityCheck the integrator scans its own commits and merge resolutions (`scan --anchor`) before its push,
+// and the judge scans again (`--history-only`). Every finding there is Lachy's: the integrator's stop and the judge's
+// `changes` with the scan's question are set-asides whose row carries it as needsHuman; nothing else ever does.
+
+const SECURITY = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
+const WHY = "A secret (github-pat) in a.js, commit ddddddd (a merge's resolution), line 3, is in Integration's commits, which Integration never rewrites: once it is rotated, keep it in the history (answer `security-accept secret:0123456789ab`), or have /thread:repair recut the branch?"
+const SCAN = `${T.GIT_ENV_SCRUB} python3 '${SECURITY.script}' scan --tree '${WT}' --base 'origin/main' --accepts-from '/vault/Tasks/${SLUG}.md' --anchor '${H0}'`
+const LM9 = sha('9')
+const sec = (I, over = {}, taskOver = {}) => mkArgs(I, { securityCheck: SECURITY, ...over }, taskOver)
+const secIr = (o = {}) => ({ ...ir(o), securityClean: true })
+const P1_I = () => mkI({ trouble: ['shared-file'], landed: LANDED, leadMerge: { mergeCommit: LM9, headSha: LM9, baseSha: B1, verified: true } })
+const plain = (x) => JSON.parse(JSON.stringify(x))
+const optsOf = (r, label) => r.opts.find((o) => o.label === label) || {}
+
+test('IS1: a P2 call is not refused: the integrator renders its --anchor scan after the preflights, the judge its --history-only one; P1 too', async () => {
+  const r = await run(sec(mkI({ trouble: ['conflict'] })), { [ILABEL]: secIr({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() })
+  clean(r)
+  assert.deepEqual(r.labels, [ILABEL, JLABEL(2)])
+  assert.equal(r.row.status, 'review')
+  assert.equal(r.row.needsHuman, null)
+  const ip = promptOf(r, ILABEL)
+  assert.ok(ip.includes(`${T.INTEGRATION_PREFLIGHTS}\n\nSecurity check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${SCAN}\`\n`), 'right after INTEGRATION_PREFLIGHTS')
+  assert.deepEqual(plain(optsOf(r, ILABEL).schema), plain(T.INTEGRATE_RESULT_SECURED))
+  const jp = promptOf(r, JLABEL(2))
+  assert.ok(jp.includes(`run \`${SCAN} --history-only\` yourself`), 'the judge runs it --history-only')
+  assert.deepEqual(plain(optsOf(r, JLABEL(2)).schema), plain(T.INTEGRATION_REVIEW_SECURED))
+  const p1 = await run(sec(P1_I()), { [JLABEL(2)]: jv() })
+  clean(p1)
+  assert.deepEqual(p1.labels, [JLABEL(2)])
+  assert.ok(promptOf(p1, JLABEL(2)).includes(`run \`${SCAN} --history-only\` yourself, only when \`${T.GIT_ENV_SCRUB} git -C "${WT}" rev-parse HEAD\` prints ${LM9}.`), 'P1: the judge renders it on the lead\'s head')
+  assert.deepEqual(plain(optsOf(p1, JLABEL(2)).schema), plain(T.INTEGRATION_REVIEW_SECURED))
+  // Off, the schemas are the plain ones.
+  const off = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() })
+  assert.deepEqual(plain(optsOf(off, ILABEL).schema), plain(T.INTEGRATE_RESULT))
+  assert.deepEqual(plain(optsOf(off, JLABEL(2)).schema), plain(T.INTEGRATION_REVIEW))
+  assert.ok(!promptOf(off, ILABEL).includes('security-check.py') && !promptOf(off, JLABEL(2)).includes('security-check.py'))
+})
+
+const SEC_DIAG = 'security scan exit 1: github-pat in a.js at merge ddddddd, line 3 (a resolution); pushed nothing'
+const secStop = (extra = {}) => blockedIr(SEC_DIAG, { blockKind: 'stop', needsHuman: WHY, securityClean: false, ...extra })
+
+test('IS2: the integrator\'s security stop is a set-aside whose row carries the scan\'s question; no judge (and its control)', async () => {
+  const args = sec(mkI({ trouble: ['conflict'] }))
+  const r = await run(args, { [ILABEL]: secStop() })
+  clean(r)
+  assert.deepEqual(r.labels, [ILABEL], 'no judge is dispatched')
+  setAside(r, 'IS2')
+  assert.equal(r.row.needsHuman, WHY)
+  assert.equal(r.row.integration.reason, SEC_DIAG)
+  assert.ok(r.row.blockerDiagnosis.includes(SEC_DIAG), r.row.blockerDiagnosis)
+  // Control: the `if (bad)` return without its ask leaves the row's needsHuman null.
+  const src = fs.readFileSync(enginePath, 'utf8')
+  const from = '\n        ...(bad.ask ? { ask: bad.ask } : {}),'
+  assert.ok(src.includes(from), 'control setup')
+  const m = await runTask(args, async () => secStop(), { source: src.replace(from, '') })
+  assert.equal(m.result.tasks[0].needsHuman, null, 'control: without the ask the question is lost')
+})
+
+test('IS3: an unblocked result whose security scan did not exit 0 (false or missing) is set aside; true integrates', async () => {
+  for (const [label, res] of [['false', { ...ir(), securityClean: false }], ['missing', ir()]]) {
+    const r = await run(sec(mkI()), { [ILABEL]: res })
+    clean(r)
+    setAside(r, `IS3 ${label}`)
+    assert.equal(r.row.integration.reason, 'the security scan did not exit 0 on the integrated head', label)
+    assert.equal(r.row.needsHuman, null, label)
+  }
+  const ok = await run(sec(mkI()), { [ILABEL]: secIr() })
+  clean(ok)
+  assert.equal(ok.row.status, 'review')
+})
+
+test('IS4: a judge `changes` carrying the scan\'s question is a set-aside, never a rejection, on P2 and P1 (and its control)', async () => {
+  const judged = { ...jv('changes', ['a.js: a secret (github-pat) at merge ddddddd, line 3']), needsHuman: WHY }
+  const cases = [
+    ['P2', sec(mkI({ trouble: ['conflict'] })), { [ILABEL]: secIr({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: judged }],
+    ['P1', sec(P1_I()), { [JLABEL(2)]: judged }],
+  ]
+  for (const [name, args, script] of cases) {
+    const r = await run(args, script)
+    clean(r)
+    setAside(r, `IS4 ${name}`)
+    assert.equal(r.row.reviewRoundsUsed, 1, `${name}: no review round used`)
+    assert.equal(r.row.integration.reReviewed, true, name)
+    assert.equal(r.row.needsHuman, WHY, name)
+    assert.equal(r.row.integration.reason, 'security scan: ' + WHY, name)
+    assert.deepEqual(r.row.reviewHistory, [], `${name}: no rejection round recorded`)
+  }
+  // Control: without the judge's security check the same verdict reads as a rejection.
+  const src = fs.readFileSync(enginePath, 'utf8')
+  const from = "\n  if (ask) return { outcome: 'set-aside', reason: 'security scan: ' + flattenLine(ask), ask, ...j, reReviewed: true, feedback }"
+  assert.ok(src.includes(from), 'control setup')
+  const m = await runTask(cases[1][1], async (_p, o) => cases[1][2][o.label], { source: src.replace(from, '') })
+  assert.equal(m.result.tasks[0].integration.outcome, 'rejected', 'control: the question read as a rejection')
+})
+
+test('IS5: a judge whose security scan could not run is unreadable: a set-aside naming it, no question', async () => {
+  const fb = 'cannot run the security scan: ERROR: security-check: gitleaks not found (on PATH, /opt/homebrew/bin or /usr/local/bin): install it (brew install gitleaks)'
+  const r = await run(sec(P1_I()), { [JLABEL(2)]: jv('changes', [fb], { unreadable: true }) })
+  clean(r)
+  setAside(r, 'IS5')
+  assert.equal(r.row.integration.reason, `judge could not read the integration — ${fb}`)
+  assert.equal(r.row.needsHuman, null)
+})
+
+test('IS6: a needsHuman that names no security-accept token is never taken, from either Integration agent', async () => {
+  const Q = 'Which retention window should the cache use: 7 or 30 days?'
+  const i = await run(sec(mkI()), { [ILABEL]: blockedIr('the integrator could not decide', { blockKind: 'stop', needsHuman: Q, securityClean: false }) })
+  clean(i)
+  setAside(i, 'IS6 integrator')
+  assert.equal(i.row.integration.reason, 'the integrator could not decide')
+  assert.equal(i.row.needsHuman, null)
+  const j = await run(sec(P1_I()), { [JLABEL(2)]: { ...jv('changes', ['keep their rename']), needsHuman: Q } })
+  clean(j)
+  assert.equal(j.row.integration.outcome, 'rejected', 'the judge\'s other question reads as today: a rejection')
+  assert.equal(j.row.needsHuman, null)
+  // Off, even the scan's own question is never taken.
+  const off = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: secStop() })
+  clean(off)
+  assert.equal(off.row.needsHuman, null)
+})
+
 // ---- static ----------------------------------------------------------------------------------------
 
 test('static: no force, no PR merge, approvedGates-independent prompts, the row shape and the marker literals', async () => {
@@ -1240,7 +1363,8 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
   const L3 = { source: '/home/x/.config/thread/ladder.toml', rungs: [{ name: 'solo', model: 'fable', effort: 'high', judge: 'high', review: 'max' }] }
   // The renderers themselves still take an absent slot (the entry refuses one, estate ADR 0009 d4): the last case
   // renders them unslotted.
-  for (const over of [{}, { ladder: L3 }, { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }, { verifySlot: undefined }]) {
+  for (const over of [{}, { ladder: L3 }, { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }, { verifySlot: undefined },
+    { securityCheck: SECURITY }]) {
     const I = mkI({ landed: LANDED, reviewHistory: HIST2, reviewRoundsUsed: 2, trouble: ['conflict', 'red'] })
     const a = mkArgs(I, over)
     const j = { mergeCommit: M, headSha: F1, baseSha: B1, triggers: ['conflict'], path: 'integrator' }
@@ -1264,13 +1388,22 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
     const { verifySlot: _drop, ...noSlot } = a
     assert.equal(T.integrationReviewPrompt(a.task, a, I, j), T.integrationReviewPrompt(a.task, noSlot, I, j))
   }
+  const TOKEN = /security-accept (?:secret|config|advisory):[0-9a-f]{12}/
+  let asked = 0
   for (const r of allRuns.filter((x) => x.row && x.row.integration)) {
     assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS, 'integration'].sort())
     assert.ok(STATUSES.includes(r.row.status), r.row.status)
     assert.equal(r.row.plan, null, 'an integrate row never settles the plan (p14-2)')
-    assert.equal(r.row.needsHuman, null, 'an integrate row never settles ## Needs you (p16-3)')
+    if (!(r.args && r.args.securityCheck)) assert.equal(r.row.needsHuman, null, 'an integrate row never settles ## Needs you (p16-3)')
+    else if (r.row.needsHuman !== null) {
+      // p39-8: only a security set-aside's question, the scan's own (it names a security-accept token).
+      assert.equal(r.row.integration.outcome, 'set-aside')
+      assert.match(r.row.needsHuman, TOKEN)
+      asked += 1
+    }
     assert.deepEqual(r.row.reviewVerdicts, [], 'an Integration re-review is no master-review round (p21-3)')
   }
+  assert.ok(asked >= 3, `secured runs carry the scan's question on their security set-asides (${asked})`)
   const code = src.replace(/\/\/[^\n]*/g, '')
   assert.deepEqual(code.match(/['"`]revise: [^'"`]*/g), ["'revise: rejected at Integration re-review — revise on the branch, then re-integrate"])
   assert.deepEqual(code.match(/['"`]integration: [^'"`]*/g), ["'integration: "])
