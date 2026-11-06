@@ -10,16 +10,17 @@
 //     drops keep going, handoff, stash and defer while another session holds the thread, and says why close
 //     stays offered, as the archive line's close part, although it still writes to what the other session holds;
 //   - step 4's archive line is exactly two parts, archive first (since thread-skill-p30-5 archiving is always
-//     clear, so a line and never a menu: next-decides-housekeeping.test.mjs), and every close line, part or
-//     option says what close writes; in wording Lachy reads, **session** is this chat and **thread** the
-//     durable work its THREAD.md records (CONTEXT.md's **Thread** entry records that user-facing convention);
-//   - step 5 writes nothing for it, and only Lachy archives a session;
+//     clear, so a line and never a menu: next-decides-housekeeping.test.mjs), after a rollout launch's sentence
+//     when step 5 launched one first (ADR 0072), whose archive part then says "Nothing else is written."; every
+//     close line, part or option says what close writes; in wording Lachy reads, **session** is this chat and
+//     **thread** the durable work its THREAD.md records (CONTEXT.md's **Thread** entry records that convention);
+//   - step 5 writes nothing for it apart from **A launch first.**, and only Lachy archives a session;
 //   - § Don't bans the bare "Leave it" / "Keep thread" labels.
 //
 // Two pure checks, nextFails and contextFails, each returning a failure list: the real files and the controls
 // run through them, so a control proves its pin is not vacuous. Every numbered pin has at least one control that
-// breaks it and expects its failure: P1 (M), P1b (N), P2 (E, G), P2b (H), P3 (I), P4 (A, B, C, D, L, L2), P5 (O),
-// P6 (A, B, B2), P7 (F), P8 (P, Q), P9 (J), P10 (K). A control breaks one phrase or line of its pin, not every
+// breaks it and expects its failure: P1 (M), P1b (N), P2 (E, G), P2b (H), P3 (I), P4 (A, B, C, D, L, L2, R, R2),
+// P5 (O), P6 (A, B, B2), P7 (F, S), P8 (P, Q), P9 (J), P10 (K). A control breaks one phrase or line of its pin, not every
 // phrase the pin lists. Every line pin finds its line inside its own step slice, so a moved line fails. Phrase
 // checks run on collapsed text. Reads files only.
 import { test } from 'node:test'
@@ -119,12 +120,15 @@ function nextFails(text) {
   ])
 
   // P4 — the archive line: exactly two parts, archive first, each saying what it does. The parts are every list
-  // item from the lead to the next blank line, so a third one fails wherever it sits.
+  // item from the lead to the next blank line, so a third one fails wherever it sits. After a launch (ADR 0072) the
+  // launch's sentence opens the line before the two parts, and the archive part says "Nothing else is written."
   const s4lines = s4.split('\n')
   const lead = s4lines.findIndex((l) => LINE_LEAD.test(l))
   if (lead < 0) fails.push('P4 archive line: no **The archive line.** line')
   else {
-    need(fails, 'P4 archive line lead', C(s4lines[lead]), ['exactly two parts'])
+    need(fails, 'P4 archive line lead', C(s4lines[lead]), [
+      "exactly two parts, after the launch's sentence when there was a launch", 'opens the line, before its two parts',
+    ])
     const end = s4lines.findIndex((l, i) => i > lead && l.trim() === '')
     const items = s4lines.slice(lead + 1, end < 0 ? undefined : end).filter((l) => /^\s*- /.test(l))
     const labels = items.map((l) => l.match(PART_LABEL)?.[1] ?? l.trim())
@@ -132,7 +136,8 @@ function nextFails(text) {
       fails.push(`P4 archive line parts: ${JSON.stringify(labels)}, not ${JSON.stringify(PART_LABELS)}`)
     } else {
       need(fails, 'P4 archive part', C(items[0]), [
-        ARCHIVE_LEAD, 'Nothing is written.', 'The thread stays active in', 'archive this chat on the Stage', 'Codex Desktop',
+        ARCHIVE_LEAD, 'Nothing is written.', 'After a launch, "Nothing else is written." stands in for "Nothing is written."',
+        'The thread stays active in', 'archive this chat on the Stage', 'Codex Desktop',
       ])
       need(fails, 'P4 close part', C(items[1]), [
         CLOSE_DESC, 'queues its merge', 'is building on', 'With no THREAD.md',
@@ -166,7 +171,7 @@ function nextFails(text) {
 
   // P7 — the step-5 dispatch paragraph alone: the compact clause's own "end the turn" cannot satisfy it.
   needLine(fails, 'P7 step-5 dispatch paragraph', lineOf(s5, DISPATCHED), [
-    /write nothing/i, 'run no sibling', 'stays active', 'end the turn', '`next` never archives',
+    'Apart from **A launch first.**, write nothing', 'run no sibling', 'stays active', 'end the turn', '`next` never archives',
   ])
 
   // P8 — § Don't: the banned labels, and the moves that drop while another session holds the thread.
@@ -265,6 +270,21 @@ test('control B2: the exemption is the quoted literal, never the whole rule line
   const fails = nextFails(bad)
   assert.ok(failsWith(fails, 'P6 forbidden wording'), `no P6 failure: ${fails}`)
   assert.ok(!failsWith(fails, 'P6 exemption anchor'), `the exemption anchor broke instead: ${fails}`)
+})
+
+test('control R: an archive part that says "Nothing is written." even after a launch fails the line', () => {
+  const bad = mutateLine(next, ARCHIVE_PART, 'After a launch, "Nothing else is written." stands in for "Nothing is written.".', '')
+  assert.deepEqual(nextFails(bad), ['P4 archive part: After a launch, "Nothing else is written." stands in for "Nothing is written."'])
+})
+
+test('control R2: a lead that keeps "exactly two parts" with no launch sentence before them fails the line', () => {
+  const bad = mutateLine(next, LINE_LEAD, "exactly two parts, after the launch's sentence when there was a launch,", 'exactly two parts,')
+  assert.deepEqual(nextFails(bad), ["P4 archive line lead: exactly two parts, after the launch's sentence when there was a launch"])
+})
+
+test('control S: a dispatch paragraph that writes nothing even after a launch first fails', () => {
+  const bad = mutateLine(next, DISPATCHED, 'Apart from **A launch first.**, write nothing', 'Write nothing')
+  assert.deepEqual(nextFails(bad), ['P7 step-5 dispatch paragraph: Apart from **A launch first.**, write nothing'])
 })
 
 test('control C: a close part that drops "(it stays active)" fails the line', () => {

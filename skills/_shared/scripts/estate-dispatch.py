@@ -164,7 +164,12 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   or project changes nothing of it.
   A run is scheduled when it has members left; it is parallel with a root, or serial; its repo row has no blocker
   (`unchecked` passes: schedule § 0 is the gate); it is not parked, unless unparked here (then only its Ready, unheld
-  members go); and it is the best-ranked parallel run on its root (keyed on rolloutRoot when set, else root). Before
+  members go); and no better-ranked parallel run of its projectSlug is on its root (keyed on rolloutRoot when set, else
+  root). That is the root contest: a clone holds one project's unfinished rollout, and two names of one projectSlug
+  name one clone (ADR 0064 d1), so a run whose projectSlug a better-ranked run on the root has waits `same root`. A
+  parallel run that meets only other projects' better-ranked runs there is scheduled after them (p39-10), its after[]
+  naming them: the scan read the clone free for each, but once the earlier forks' notes are written its schedule fork's
+  § 0 `clone` reads them and picks this project's own clone, or stops before writing when every clone is held. Before
   that root contest, the pre-hold: a member whose needed dependency can never go this pass, whatever the contest
   decides (undecided or held, session-lane or in no run, a member of a run that waits parked, blocker, repo unknown
   or no repo declared, or itself pre-held: transitively, to a fixpoint), is held, so the contest never hands a root to
@@ -177,19 +182,21 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   every member the dependencies took, worded from the final schedule: `dependency not scheduled` naming only the
   dependencies no entry holds, else `dependency scheduled late` naming the ones a later round scheduled; the why kinds
   also include `own session` (above).
-  Schedule entries: {run, project, note, projectSlug, batchKeys[], shape, root, rolloutRoot, origin (the scan repo row's
-  `github` at the root, lower-cased, or null), members[], args
-  ("--tasks a,b,c", never --regenerate), batch, review {pr, signOff, eyeCheck, minutes}}. projectSlug is the name
+  Schedule entries: {run, project, note, projectSlug, batchKeys[], shape, root, rolloutRoot (as the scan read it: an
+  entry with after[] takes the clone its fork's § 0 picks), origin (the scan repo row's `github` at the root,
+  lower-cased, or null), after[] (the runs, in rank order, it was scheduled after on its root; [] for most), members[],
+  args ("--tasks a,b,c", never --regenerate), batch, review {pr, signOff, eyeCheck, minutes}}. projectSlug is the name
   NFKD-folded to ASCII and lower-cased, apostrophes (' and ’) deleted, every other run outside [a-z0-9] made a `-`, the
   ends trimmed ("Lachy's Tools" -> lachys-tools). batchKeys are the name's alphanumerics-only lower-case forms, taken
   NFKD-folded to ASCII and with non-ASCII dropped ("Café" -> cafe, caf): two entries whose keys meet may name the same
   note, and schedule step 6's naming (glob, then write) is not atomic, so they never share a batch; nor do two parallel
   entries on one origin (ADR 0064: two projects' runs on one repo each read schedule § 0's `clone` before the other's
   note lands, so side by side both could pick the same clone). Parallel entries, in rank order, each take the lowest
-  batch from 1 holding no entry whose keys meet theirs and none on their origin; serial entries each take a batch of
-  their own after the last parallel one, in rank order. Listed by batch, then rank. The root contest is keyed on each
-  run's rolloutRoot (its home project's own clone, estate-rank.py), so two projects' runs on one repo in their own
-  clones are both scheduled.
+  batch from 1 holding no entry whose keys meet theirs and none on their origin, and after the batch of every run in
+  its after[] (whatever the origin: a repo with no `github` has none); serial entries each take a batch of their own
+  after the last parallel one, in rank order. Listed by batch, then rank. The root contest is keyed on each run's
+  rolloutRoot (its home project's own clone, estate-rank.py), so two projects' runs on one repo in their own clones
+  are both scheduled with no after[].
   rollouts[]: one per scan rollout, {slug, note, project (its home's name, rollout_home, or null), ownSession (its home
   is big), shape, projectRoot, pausedFor, pendingSignOffs[] (its summary's), owners? (the `owner:` tags of its open
   tasks), holds[], canExecute, canRepair, reinstate}. holds, in this order: superseded (supersededBy), lineage
@@ -1421,7 +1428,7 @@ class Plan:
             for s in lost:
                 held[s] = self.rows.get(s) or {}
                 gone.add(s)
-            why = None
+            why, after = None, []
             if big:
                 why = {"kind": OWN_SESSION, "detail": "a big project (ADR 0061): its own session schedules its work; "
                        "tick it on the pick list to open it"}
@@ -1439,11 +1446,16 @@ class Plan:
                 why = {"kind": "blocker", "detail": "; ".join("%s: %s" % (b.get("check"), b.get("why"))
                                                               for b in run["blockers"] if isinstance(b, dict))}
             elif run.get("shape") == "parallel":
+                # The root contest: one run per projectSlug on a root. Another project's run there goes after the
+                # better-ranked ones, so its fork's § 0 `clone` reads their notes and picks its own clone (p39-10).
                 key = run.get("rolloutRoot") or run.get("root")
-                if key in roots:
-                    why = {"kind": "same root", "detail": "%s goes on %s" % (roots[key], key)}
+                took, slug = roots.setdefault(key, []), project_slug(run.get("project") or "")
+                same = next((rid for rid, s in took if s == slug), None)
+                if same is not None:
+                    why = {"kind": "same root", "detail": "%s goes on %s" % (same, key)}
                 else:
-                    roots[key] = run.get("id")
+                    after = [rid for rid, _ in took]
+                    took.append((run.get("id"), slug))
             row = {"run": run.get("id"), "project": run.get("project"), "note": run.get("note"),
                    "shape": run.get("shape"), "root": run.get("root"), "rolloutRoot": run.get("rolloutRoot"),
                    "members": members}
@@ -1457,7 +1469,7 @@ class Plan:
                       for k in ("pr", "signOff", "eyeCheck", "minutes")}
             name = run.get("project") or ""
             row.update(projectSlug=project_slug(name), batchKeys=batch_keys(name), args="--tasks " + ",".join(members),
-                       batch=None, review=review, origin=self.origin_of(run.get("root")), _order=order)
+                       batch=None, review=review, origin=self.origin_of(run.get("root")), after=after, _order=order)
             entries.append(row)
         return held, undecided, entries, waiting, gone
 
@@ -1498,26 +1510,29 @@ class Plan:
                 w["why"] = {"kind": DEP_LATE, "detail": "every member left was held before its dependency was "
                             "scheduled, and goes next pass: " + ", ".join(sorted({h["slug"] for h in holds}))}
         # Batches: parallel entries take the lowest batch whose keys never meet theirs and that holds no entry on their
-        # origin (ADR 0064: two schedule forks on one origin would each read § 0's clone before the other's note lands);
+        # origin (ADR 0064: two schedule forks on one origin would each read § 0's clone before the other's note lands),
+        # and after every batch of their after[] (its runs come earlier in rank order, so they hold a batch already);
         # serial ones follow, one each.
-        batches = []
+        batches, batch_of = [], {}
         for e in (x for x in entries if x["shape"] == "parallel"):
             keys = set(e["batchKeys"]) | ({"\0origin:" + e["origin"]} if e.get("origin") else set())
+            floor = max((batch_of.get(r, 0) for r in e["after"]), default=0)
             for i, b in enumerate(batches):
-                if not keys & b:
+                if i >= floor and not keys & b:
                     b |= keys
                     e["batch"] = i + 1
                     break
             else:
                 batches.append(set(keys))
                 e["batch"] = len(batches)
+            batch_of[e["run"]] = e["batch"]
         n = len(batches)
         for e in (x for x in entries if x["shape"] != "parallel"):
             n += 1
             e["batch"] = n
         entries.sort(key=lambda e: (e["batch"], e["_order"]))
         order = ("run", "project", "note", "projectSlug", "batchKeys", "shape", "root", "rolloutRoot", "origin",
-                 "members", "args", "batch", "review")
+                 "after", "members", "args", "batch", "review")
         schedule = [{k: e[k] for k in order} for e in entries]
         rollouts = self.rollouts()
         pick = self.pick(rollouts)

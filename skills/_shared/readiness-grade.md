@@ -284,7 +284,8 @@ agent time, since Lachy is there throughout.
   `no repo declared`. Its `rolloutRoot`, `blockers` and `unchecked` are its home project's entry on that row
   (the scan's `projects[]`: that project's own rollout clone, ADR 0064), else the row's own. Other parallel runs on
   the same `rolloutRoot` (else root) are named in `sameRoot`: a clone holds one unfinished parallel rollout at a
-  time, and two projects' runs on one repo in their own clones share none (schedule § 0).
+  time, and two projects' runs on one repo in their own clones share none (schedule § 0). estate-dispatch schedules
+  another project's run on a shared one after the better-ranked run's, so its fork picks its own clone (p39-10).
 - A serial run has no root: it is one candidate chain per project, which schedule's serial path splits.
 - Session-lane and Orient tasks are in no run.
 

@@ -171,7 +171,9 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    line `Under orient-all § 6: name the note with slug <entry.projectSlug>; root <entry.root>; Pre-flight: rank $S/rank.json, scan $S/scan.json, decided <each decided slug among entry.members, or none>.`
    Run batch 1's
    entries side by side, then batch 2's, and so on, never two batches at once: `plan` keeps one parallel run per
-   root (each run's `rolloutRoot`: its home project's own rollout clone, ADR 0064), and never puts two entries whose
+   root and project slug (each run's `rolloutRoot`: its home project's own rollout clone, ADR 0064), and puts another
+   project's run on a root an earlier entry took in a batch after that entry's (its `after[]`), so its fork's § 0
+   `clone` reads the earlier fork's note and picks its own clone; it never puts two entries whose
    `batchKeys` meet into one batch, because schedule step 6 names its note by globbing for the slug's next free
    ordinal and then writing, which is not atomic; nor two parallel entries on one `origin`, because each fork's § 0
    `clone` reads the clones the other has not yet taken. Serial entries come one per
