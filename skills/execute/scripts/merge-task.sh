@@ -22,9 +22,10 @@
 #
 # Exit codes (single source for p12-9; "counter" is the base-moved cap state, see Cap):
 #   0  Merged, or already merged; verified (head = integrated head, one squash parent = integrated base).
-#      The local refresh ran, or printed a non-fatal WARN (non-base checkout, local-only commits, a dirty
-#      tree or an autostash refusal), and the in-place checkout's refresh line (a clone root only, ADR
-#      0042; it never changes the exit).                                 counter cleared    lead: mark-done
+#      The local refresh ran, or printed a non-fatal WARN or NOTE (non-base checkout, a half-applied
+#      operation, local-only commits, a dirty tree or an autostash refusal, git's own refusal, a
+#      live-checkout.sh that cannot be loaded), and the in-place checkout's refresh line (a clone root only,
+#      ADR 0042; it never changes the exit).                             counter cleared    lead: mark-done
 #   1  Definitive halt; the reason is printed (Exit 1 causes, below).   counter cleared    lead: set aside
 #                                                                                          (own run, or at
 #                                                                                          Integration when
@@ -62,8 +63,9 @@
 #      <oid> on parent <p> at head <h>, not the integrated pair (head <i>, base <b>); origin/<default> holds
 #      an unverified combination; re-verify it`.                         counter cleared    lead: never
 #                                                                                          re-call (below)
-#   6  MERGED and verified, but the local refresh failed twice (the fetch failed, or origin/<default> lacks
-#      the merge commit). Never says "fast-forwarded".                   counter cleared    lead: re-run; it
+#   6  MERGED and verified, but the local refresh failed twice (on each try the fetch failed or timed out
+#      after MERGE_TASK_FETCH_TIMEOUT seconds, or origin/<default> lacked the merge commit).
+#      Never says "fast-forwarded".                                      counter cleared    lead: re-run; it
 #                                                                                          takes the already-
 #                                                                                          merged path → 0
 #   7  Review required: BLOCKED or UNKNOWN with reviewDecision REVIEW_REQUIRED or CHANGES_REQUESTED. Prints
@@ -217,6 +219,7 @@ READ_INTERVAL=${MERGE_TASK_READ_INTERVAL:-5}
 HEAD_LAG_MAX=6         # PR re-reads while GitHub's head lags origin's branch at the integrated head
 HEAD_LAG_INTERVAL=${MERGE_TASK_HEAD_LAG_INTERVAL:-5}
 REINTEGRATE_MAX=${MERGE_TASK_REINTEGRATE_MAX:-3}         # re-integrations allowed; the next refusal sets aside
+FETCH_TIMEOUT=${MERGE_TASK_FETCH_TIMEOUT:-60}            # seconds per try of the local refresh's fetch (0 reads as 1)
 
 # ---- infra-vs-genuine failure classifier (finding #4) ----------------------
 # A red REQUIRED check can be a transient CI infra/setup flake (dependency-install timeout, network blip,
@@ -278,27 +281,52 @@ classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuin
 # reaped only after it advances. A checkout left behind is therefore still reported. Local-only commits on the
 # base (a close-out whose landing PR is queued, or one no close/… branch carries) are named with close's
 # own repo-state.sh line — one source for the wording — so they are never stranded silently.
-# One refresh attempt is `git fetch origin <base>` succeeding AND, when a SHA is given (the merge commit),
-# origin/<base> containing it; two attempts. Both failing returns 6 with `NOT refreshed` and moves nothing:
-# a fast-forward after a failed fetch would land the checkout on a stale ref and still claim a refresh
-# (p6-7). The fast-forward never autostashes: with `merge.autoStash true` a dirty overlap would be stashed,
-# applied and popped into conflict markers (or left in the stash list), so it is refused like any dirty
-# overlap. Every other refusal (a non-base checkout, local-only commits, a dirty tree) is a non-fatal WARN
-# and returns 0 (a false halt after a successful merge). Defined before the self-test hooks so
+# Every git step runs through skills/_shared/scripts/live-checkout.sh, the one primitive for a live checkout (ADR
+# 0066's amendments, p37-7 and p39-4), loaded here lazily; one that cannot be loaded is a WARN, rc 0, with nothing
+# fetched or moved. Every ref is the full refs/remotes/origin/<base>: the short origin/<base> would name a local
+# branch of that name first. In order:
+#   1. Two fetch tries. One try is lc_ssh_rule, then lc_fetch (one branch, no tags, no FETCH_HEAD) under lc_bounded
+#      (FETCH_TIMEOUT seconds; a TERM, INT or HUP to this script kills the fetch's group too), inside its own subshell
+#      so the ssh rule's two exports never reach this shell (refresh_in_place's twin reads its own core.sshCommand),
+#      AND, when a SHA is given (the merge commit), origin/<base> containing it. Both failing (`… failed`, `… timed out
+#      after <t>s`, `origin/<base> lacks merge <sha>`, the last one named) returns 6 with `NOT refreshed` and moves
+#      nothing: a fast-forward after a failed fetch would land the checkout on a stale ref and still claim a refresh
+#      (p6-7).
+#   2. A half-applied operation (lc_op: a rebase, merge, cherry-pick, revert, bisect or sequence) is a WARN that names
+#      it, before the branch is read, so a rebase's detached HEAD never reads as "on 'HEAD'".
+#   3. A checkout on another branch is the non-base NOTE.
+#   4. No merge runs unless HEAD is strictly behind origin/<base>: git 2.47 writes ORIG_HEAD on an equal no-op, an
+#      ahead no-op and a diverged ff-only, so equal or ahead says "already at or ahead" and diverged goes to the
+#      naming below, ORIG_HEAD untouched. Strictly behind is lc_ff: the overlap first (a dirty or untracked path
+#      origin's commits would overwrite is refused with its paths, no merge run), then `merge --ff-only
+#      --no-autostash` (with `merge.autoStash true` a dirty overlap would be stashed, applied and popped into
+#      conflict markers). A refusal the overlap cannot see (an index.lock, a case-only collision) is git's, with
+#      git's reason, and rewrites ORIG_HEAD: the residual.
+# Every refusal but the fetch's (a non-base checkout, an operation, local-only commits, a dirty tree, git's own) is a
+# non-fatal WARN or NOTE and returns 0 (a false halt after a successful merge). Defined before the self-test hooks so
 # --self-test-base can exercise it against a temp repo. For a rollout clone (every rollout scheduled after ADR 0042)
 # repoPath is the clone, so refresh_in_place (below) then fast-forwards its in-place twin.
 REPO_STATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../close/scripts/repo-state.sh"
+LIVE_CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/live-checkout.sh"
+refresh_bounded() { lc_bounded "$FETCH_TIMEOUT" "$@"; }   # lc_fetch's runner: one command word
 refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a SHA origin/<base> must contain]
-  local repo="$1" base="$2" must="${3:-}" cur ff=0 line='' raw='' why='' n before oh try fwhy=''
+  local repo="$1" base="$2" must="${3:-}" cur ff=0 line='' raw='' why='' n before tip oh try frc fwhy='' t m o='' orc=''
+  local reaper="        origin/$base holds the merges and later tasks' worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
   if [ -z "$base" ]; then
     echo "  WARN: could not resolve the base branch — skipped local fast-forward (non-fatal)."
     return 0
   fi
   echo "== refreshing local $base =="
+  [ "$(type -t lc_loaded)" = function ] || . "$LIVE_CHECKOUT" 2>/dev/null
+  if [ "$(type -t lc_loaded)" != function ]; then
+    echo "  WARN: local $base not refreshed (non-fatal): cannot load $LIVE_CHECKOUT; nothing was fetched or moved."
+    return 0
+  fi
+  t=$FETCH_TIMEOUT; case "$t" in ''|*[!0-9]*|0) t=1 ;; esac   # lc_bounded's own reading of the budget
   for try in 1 2; do
-    if ! git -C "$repo" fetch origin "$base" >/dev/null 2>&1; then
-      fwhy="git fetch origin $base failed"; continue
-    fi
+    ( lc_ssh_rule "$repo"; lc_fetch "$repo" "$base" refresh_bounded ) >/dev/null 2>&1; frc=$?
+    if [ "$frc" -eq 142 ]; then fwhy="git fetch origin $base timed out after ${t}s"; continue; fi
+    if [ "$frc" -ne 0 ]; then fwhy="git fetch origin $base failed"; continue; fi
     if [ -n "$must" ] && ! git -C "$repo" merge-base --is-ancestor "$must" "refs/remotes/origin/$base" >/dev/null 2>&1; then
       fwhy="origin/$base lacks merge $must"; continue
     fi
@@ -308,20 +336,35 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a
     echo "  WARN: local $base NOT refreshed: $fwhy (twice); the checkout was not moved."
     return 6
   fi
+  if m=$(lc_op "$repo"); then
+    echo "  WARN: local $base did not fast-forward: a half-applied operation ($m) is in progress; the checkout was left as it is."
+    echo "$reaper"
+    return 0
+  fi
   cur=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$cur" != "$base" ]; then
     echo "  NOTE: checkout is on '$cur', not $base — left as it is; the worktree reaper keeps zero-commit task branches until it advances."
     return 0
   fi
-  before=$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)
-  if git -C "$repo" merge --ff-only --no-autostash "origin/$base" >/dev/null 2>&1; then
-    ff=1
-    # A no-op fast-forward (origin/$base is behind the checkout) moved nothing: never claim it did.
-    if [ "$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)" = "$before" ]; then
+  before=$(git -C "$repo" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)
+  tip=$(git -C "$repo" rev-parse -q --verify "refs/remotes/origin/$base^{commit}" 2>/dev/null)
+  if [ -n "$before" ] && [ -n "$tip" ]; then
+    if [ "$before" = "$tip" ] || git -C "$repo" merge-base --is-ancestor "$tip" "$before" >/dev/null 2>&1; then
+      # Equal or ahead: nothing to move, and no merge runs (a no-op ff-only would still rewrite ORIG_HEAD).
+      ff=1
       echo "  local $base already at or ahead of origin/$base."
-    else
-      echo "  local $base fast-forwarded to origin/$base."
-    fi
+    elif git -C "$repo" merge-base --is-ancestor "$before" "$tip" >/dev/null 2>&1; then
+      o=$(lc_ff "$repo" "$base"); orc=$?
+      if [ "$orc" -eq 0 ]; then
+        ff=1
+        # Re-read HEAD: never claim a move that did not happen.
+        if [ "$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)" = "$before" ]; then
+          echo "  local $base already at or ahead of origin/$base."
+        else
+          echo "  local $base fast-forwarded to origin/$base."
+        fi
+      fi
+    fi   # diverged: no merge; the naming below says why
   fi
   # repo-state.sh's line for commits on $base that origin/$base lacks; anything else is no usable line.
   if [ -f "$REPO_STATE" ]; then
@@ -331,7 +374,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a
   fi
   case "$raw" in "on $base, "*" not on origin/$base"*) line=$raw ;; esac
   if [ "$ff" = 1 ]; then
-    # A no-op fast-forward (origin/$base is behind): the checkout can still be ahead.
+    # Already at or ahead: the checkout can still be ahead.
     [ -n "$line" ] && echo "  NOTE: $line."
     return 0
   fi
@@ -342,7 +385,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a
       *"queued in"*) echo "        It fast-forwards once GitHub merges the landing PR (every one, if several are open)." ;;
       *) echo "        No close-out branch carries them." ;;
     esac
-    echo "        origin/$base holds the merges and later tasks' worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
+    echo "$reaper"
     return 0
   fi
   # No usable line (origin/HEAD unset or stale, the script missing or failing): count them here. $base comes
@@ -358,13 +401,17 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a
       why="repo-state gave no line for $base"
     fi
   fi
-  n=$(git -C "$repo" rev-list --count "origin/$base..HEAD" 2>/dev/null)
+  n=$(git -C "$repo" rev-list --count "refs/remotes/origin/$base..HEAD" 2>/dev/null)
   case "$n" in
     ''|*[!0-9]*) echo "  WARN: local $base did not fast-forward (checkout dirty or diverged)." ;;
-    0) echo "  WARN: local $base did not fast-forward (no local-only commits: local changes in the checkout block it)." ;;
+    0) case "$orc" in
+         3) echo "  WARN: local $base did not fast-forward (no local-only commits: local changes in the checkout block it: $o)." ;;
+         1) echo "  WARN: local $base did not fast-forward (no local-only commits: git refused the fast-forward: $o)." ;;
+         *) echo "  WARN: local $base did not fast-forward (no local-only commits)." ;;
+       esac ;;
     *) echo "  WARN: local $base did not fast-forward: $n commit(s) not on origin/$base — not named ($why)." ;;
   esac
-  echo "        origin/$base holds the merges and later tasks' worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
+  echo "$reaper"
   return 0
 }
 
@@ -400,6 +447,11 @@ if [ "${1:-}" = "--self-test-base" ]; then
   sb_ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected $2 got $1"; st_fail=1; fi; }
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
+  # ORIG_HEAD (p39-4): a refused or no-op `merge --ff-only` writes it, so every refusal below starts with it removed and
+  # asserts it is still absent: no merge ran.
+  oh() { git -C "${1:-$tmp/root}" rev-parse --path-format=absolute --git-path ORIG_HEAD; }
+  noh() { rm -f "$(oh "$@")"; }
+  ohgone() { [ -e "$(oh "${2:-}")" ] && sb_ok "written" "absent" "$1: ORIG_HEAD untouched (no merge ran)" || sb_ok y y "$1: ORIG_HEAD untouched (no merge ran)"; }
   g init -q --bare "$tmp/origin.git"
   g clone -q "$tmp/origin.git" "$tmp/root" 2>/dev/null
   g -C "$tmp/root" commit -q --allow-empty -m base && g -C "$tmp/root" push -q origin master
@@ -424,9 +476,10 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g -C "$tmp/root" commit -q --allow-empty -m local-only
   held=$(git -C "$tmp/root" rev-parse HEAD)
   g -C "$tmp/other" commit -q --allow-empty -m landed3 && g -C "$tmp/other" push -q origin master
-  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  noh; out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "local-only commit: returns 0"
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "local-only commit: HEAD left where it was"
+  ohgone "(g) local-only commit (diverged)"
   sb_has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — stranded" "local-only commit, no close ref: named stranded"
   qb="close/2026-09-29-t-$(git -C "$tmp/root" rev-parse HEAD | cut -c1-12)"
   g -C "$tmp/root" push -q origin "HEAD:refs/heads/$qb"
@@ -447,9 +500,11 @@ if [ "${1:-}" = "--self-test-base" ]; then
   refresh_local_base "$tmp/root" master >/dev/null
   echo dirty > "$tmp/root/f"
   echo b > "$tmp/other/f" && g -C "$tmp/other" commit -q -am f2 && g -C "$tmp/other" push -q origin master
-  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  noh; out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "dirty overlap: returns 0"
   sb_has "$out" "no local-only commits" "dirty overlap, no local commits: says local changes block it"
+  sb_has "$out" "(no local-only commits: local changes in the checkout block it: f)." "dirty overlap: names the path in the way"
+  ohgone "dirty overlap"
   # origin/HEAD unset: repo-state cannot name them, so merge-task counts them itself.
   g -C "$tmp/root" checkout -q -- f && g -C "$tmp/root" merge -q --ff-only origin/master
   g -C "$tmp/root" symbolic-ref --delete refs/remotes/origin/HEAD
@@ -469,8 +524,9 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g -C "$tmp/root" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
   g -C "$tmp/root" reset -q --hard origin/master
   g -C "$tmp/root" commit -q --allow-empty -m local-only-3
-  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  noh; out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "no-op fast-forward: returns 0"
+  ohgone "(g) no-op fast-forward (ahead)"
   sb_has "$out" "local master already at or ahead of origin/master." "no-op fast-forward: says already at or ahead"
   case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "no-op fast-forward: never says fast-forwarded";; *) sb_ok y y "no-op fast-forward: never says fast-forwarded";; esac
   sb_has "$out" "NOTE: on master, 1 commit(s) not on origin/master — stranded." "no-op fast-forward: names the local-only commit"
@@ -481,8 +537,10 @@ if [ "${1:-}" = "--self-test-base" ]; then
   printf 'dirty\n' > "$tmp/root/f"
   echo c > "$tmp/other/f" && g -C "$tmp/other" commit -q -am f3 && g -C "$tmp/other" push -q origin master
   held=$(git -C "$tmp/root" rev-parse HEAD)
-  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  noh; out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "autoStash + dirty overlap: returns 0"
+  ohgone "autoStash + dirty overlap"
+  sb_has "$out" "(no local-only commits: local changes in the checkout block it: f)." "autoStash + dirty overlap: names the path in the way"
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "autoStash + dirty overlap: HEAD left where it was"
   sb_ok "$(cat "$tmp/root/f")" "dirty" "autoStash + dirty overlap: the dirty file is byte-unchanged (no markers)"
   sb_ok "$(git -C "$tmp/root" stash list)" "" "autoStash + dirty overlap: nothing left in the stash list"
@@ -509,6 +567,81 @@ if [ "${1:-}" = "--self-test-base" ]; then
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "origin/master lacks the merge: HEAD left where it was"
   sb_has "$out" "WARN: local master NOT refreshed: origin/master lacks merge $phantom (twice)" "origin/master lacks the merge: names it"
   case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "lacks the merge: never says fast-forwarded";; *) sb_ok y y "lacks the merge: never says fast-forwarded";; esac
+  # (g) equal: HEAD is origin's tip, so no merge runs (git writes ORIG_HEAD even on an "Already up to date" ff-only).
+  g -C "$tmp/root" merge -q --ff-only refs/remotes/origin/master
+  noh; out=$(refresh_local_base "$tmp/root" master); rc=$?
+  sb_ok "$rc" 0 "(g) equal: returns 0"
+  sb_has "$out" "local master already at or ahead of origin/master." "(g) equal: says already at or ahead"
+  ohgone "(g) equal"
+  # (d) a local branch named origin/master, at the old HEAD: the short name would resolve to it first, so every read and
+  #     the merge use refs/remotes/origin/master.
+  g -C "$tmp/root" branch origin/master 2>/dev/null
+  g -C "$tmp/other" commit -q --allow-empty -m landed6 && g -C "$tmp/other" push -q origin master
+  out=$(refresh_local_base "$tmp/root" master 2>&1); rc=$?
+  sb_ok "$rc" 0 "(d) a local branch named origin/master: returns 0"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$(git -C "$tmp/other" rev-parse HEAD)" "(d) … fast-forwarded to refs/remotes/origin/master"
+  sb_has "$out" "local master fast-forwarded to origin/master." "(d) … and says so"
+  g -C "$tmp/root" branch -q -D origin/master
+  # (h) an index.lock while strictly behind: the overlap cannot see it, git refuses, and the WARN gives git's own reason
+  #     (never "local changes"). ORIG_HEAD is not asserted: git's refusal rewrites it (the documented residual).
+  g -C "$tmp/other" commit -q --allow-empty -m landed7 && g -C "$tmp/other" push -q origin master
+  held=$(git -C "$tmp/root" rev-parse HEAD); : > "$tmp/root/.git/index.lock"
+  out=$(refresh_local_base "$tmp/root" master 2>&1); rc=$?
+  rm -f "$tmp/root/.git/index.lock"
+  sb_ok "$rc" 0 "(h) index.lock while behind: returns 0"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "(h) … HEAD left where it was"
+  sb_has "$out" "(no local-only commits: git refused the fast-forward: " "(h) … says git refused it"
+  sb_has "$out" "index.lock" "(h) … in git's own words"
+  case "$out" in *"local changes"*) sb_ok "[$out]" "no 'local changes'" "(h) … never blames local changes";; *) sb_ok y y "(h) … never blames local changes";; esac
+  # (i) a half-applied operation on the base while behind: a WARN naming it, before the non-base NOTE, so a rebase's
+  #     detached HEAD reads half-applied, never "on 'HEAD'".
+  mkdir "$tmp/root/.git/rebase-merge"
+  noh; out=$(refresh_local_base "$tmp/root" master 2>&1); rc=$?
+  sb_ok "$rc" 0 "(i) rebase-merge/ on master while behind: returns 0"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "(i) … HEAD left where it was"
+  sb_has "$out" "WARN: local master did not fast-forward: a half-applied operation (rebase-merge) is in progress; the checkout was left as it is." "(i) … names the operation"
+  ohgone "(i) rebase-merge/"
+  rmdir "$tmp/root/.git/rebase-merge"; g -C "$tmp/root" checkout -q --detach; mkdir "$tmp/root/.git/rebase-merge"
+  out=$(refresh_local_base "$tmp/root" master 2>&1); rc=$?
+  sb_ok "$rc" 0 "(i) rebase-merge/ with a detached HEAD: returns 0"
+  sb_has "$out" "a half-applied operation (rebase-merge) is in progress" "(i) … the half-applied WARN"
+  case "$out" in *"on 'HEAD'"*) sb_ok "[$out]" "no 'on HEAD'" "(i) … never the non-base NOTE";; *) sb_ok y y "(i) … never the non-base NOTE";; esac
+  rmdir "$tmp/root/.git/rebase-merge"; g -C "$tmp/root" checkout -q master
+  # (j) the primitive cannot be loaded: a WARN with rc 0, nothing fetched or moved.
+  out=$( unset -f lc_loaded; LIVE_CHECKOUT=$tmp/none.sh; refresh_local_base "$tmp/root" master 2>&1; echo "rc $?" )
+  sb_has "$out" "WARN: local master not refreshed (non-fatal): cannot load $tmp/none.sh; nothing was fetched or moved." "(j) unloadable primitive: the WARN"
+  sb_has "$out" "rc 0" "(j) … rc 0"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "(j) … HEAD left where it was"
+  # (e) a hung ssh: each try is bounded (FETCH_TIMEOUT=1), so two timeouts give 6 in about 2 s, and every ssh is gone.
+  #     The fake ssh redirects only stderr: its stdout is git's ssh pipe (not a capture pipe, refresh_local_base sends
+  #     the fetch to /dev/null), and closing it would make git read EOF and fail fast instead of hanging.
+  g init -q "$tmp/sshroot"; g -C "$tmp/sshroot" commit -q --allow-empty -m base
+  g -C "$tmp/sshroot" remote add origin git@github.com:o/r.git
+  g -C "$tmp/sshroot" update-ref refs/remotes/origin/master HEAD; held=$(git -C "$tmp/sshroot" rev-parse HEAD)
+  printf '#!/bin/sh\necho $$ >> "%s"\nexec sleep 30 2>/dev/null\n' "$tmp/ssh.pids" > "$tmp/hang-ssh"; chmod +x "$tmp/hang-ssh"
+  : > "$tmp/ssh.pids"; s0=$SECONDS
+  out=$( export GIT_SSH_COMMAND="$tmp/hang-ssh" GIT_SSH_VARIANT=ssh GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+         FETCH_TIMEOUT=1; refresh_local_base "$tmp/sshroot" master 2>&1 ); rc=$?
+  sb_ok "$rc" 6 "(e) a hung ssh: returns 6"
+  sb_has "$out" "WARN: local master NOT refreshed: git fetch origin master timed out after 1s (twice)" "(e) … timed out, twice"
+  sb_ok "$(git -C "$tmp/sshroot" rev-parse HEAD)" "$held" "(e) … HEAD left where it was"
+  sb_ok "$([ $((SECONDS - s0)) -le 20 ] && echo bounded)" bounded "(e) … within the bound, not the hang"
+  sb_ok "$(grep -c . "$tmp/ssh.pids")" 2 "(e) … one ssh per try"
+  for p in $(cat "$tmp/ssh.pids"); do
+    i=0; while kill -0 "$p" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i+1)); done
+    kill -0 "$p" 2>/dev/null && { sb_ok alive gone "(e) ssh $p is gone"; kill "$p" 2>/dev/null; } || sb_ok y y "(e) ssh $p is gone"
+  done
+  # (f) the ssh rule: with no ssh command set, each try runs under BatchMode and no prompt, inside its own subshell, so
+  #     nothing is exported into the caller (refresh_in_place's twin reads its own core.sshCommand).
+  mkdir -p "$tmp/fakebin"
+  printf '#!/bin/sh\nprintf "%%s|%%s\\n" "${GIT_TERMINAL_PROMPT-unset}" "$*" >> "%s"\nexit 255\n' "$tmp/ssh.log" > "$tmp/fakebin/ssh"
+  chmod +x "$tmp/fakebin/ssh"; : > "$tmp/ssh.log"
+  r=$( unset GIT_SSH_COMMAND GIT_SSH GIT_TERMINAL_PROMPT GIT_SSH_VARIANT
+       export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PATH="$tmp/fakebin:$PATH"
+       refresh_local_base "$tmp/sshroot" master > "$tmp/f.out" 2>&1
+       echo "$?|${GIT_SSH_COMMAND-unset}|${GIT_TERMINAL_PROMPT-unset}" )
+  sb_ok "$r" "6|unset|unset" "(f) the ssh rule: 6, and nothing exported into the caller"
+  sb_ok "$(grep -c . "$tmp/ssh.log")|$(grep -c '^0|.*-o BatchMode=yes' "$tmp/ssh.log")" "2|2" "(f) … both tries ran ssh under BatchMode with no prompt"
   echo; [ "$st_fail" -eq 0 ] && echo "base: ALL PASS" || echo "base: SOME FAILED"
   exit "$st_fail"
 fi
@@ -679,7 +812,7 @@ done
 # or abort an `$((…))` (a leading 0 reads as octal), so it is a 2 before any GitHub call.
 int_re='^(0|[1-9][0-9]{0,8})$'
 for v in MERGE_TASK_CHECK_INTERVAL MERGE_TASK_STATE_INTERVAL MERGE_TASK_CONFIRM_INTERVAL MERGE_TASK_READ_TRIES \
-         MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX; do
+         MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX MERGE_TASK_FETCH_TIMEOUT; do
   val=${!v:-}
   [ -z "$val" ] || [[ $val =~ $int_re ]] \
     || finish 2 "ERROR: $v='$val' is not a non-negative integer (at most 9 digits) — nothing was read or merged."

@@ -415,7 +415,7 @@ for v in -1 08 1.5 ' 3' 9999999999 99999999999999999999; do
   MERGE_TASK_REINTEGRATE_MAX="$v" run 5 "$I" "$B"
   ok "$rc" 2 "22. MERGE_TASK_REINTEGRATE_MAX='$v' exits 2"; ok "$(glog)" "" "22. '$v': zero gh calls"
 done
-for e in CHECK_INTERVAL STATE_INTERVAL CONFIRM_INTERVAL READ_TRIES READ_INTERVAL HEAD_LAG_INTERVAL; do
+for e in CHECK_INTERVAL STATE_INTERVAL CONFIRM_INTERVAL READ_TRIES READ_INTERVAL HEAD_LAG_INTERVAL FETCH_TIMEOUT; do
   out=$(env "MERGE_TASK_$e=x" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 5 "$I" "$B" 2>&1); rc=$?
   ok "$rc" 2 "22. MERGE_TASK_$e=x exits 2"; has "$out" "MERGE_TASK_$e='x'" "22. names MERGE_TASK_$e"
 done
