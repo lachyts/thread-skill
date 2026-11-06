@@ -22,6 +22,9 @@ orient still runs no git. R3 (c) reads the repo's test-credential class through 
 --repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
 script).
 
+**Under `--backlog`.** The write surface adds the record note, the trigger file and `wait` lines, each through
+`backlog-orient.py`, and the start stamp through `stamp-start --backlog` (`skills/orient/backlog.md` § B5, § B8).
+
 ## Scoped targets
 
 A single-note target resolves its project like this, and the gate confirms it:
@@ -98,6 +101,9 @@ target are candidates to **pull in**. Their in-flight items stay where they are.
 **Scoped target**: the item set is that source alone, plus any tasks already written from it. The
 project's roadmap is read only for numbering.
 
+**Under `--backlog`.** The item set is `backlog-orient.py sweep`'s rows, a held park among the frozen
+(`skills/orient/backlog.md` § B2).
+
 **Numbering**, from one listing of `Work/Phases/` (Archive included) and the task filenames:
 `N_max` is the highest phase number; per phase, `M` is the highest ordinal among
 `<slug>-p<N>-<M>-*` filenames (archived included) and the struck-through entries R5.2 leaves in a
@@ -143,6 +149,10 @@ inferable, omit it and let schedule resolve it. Record dependencies ("needs X", 
 `[[task]]` links. Phases: if the source **states phases**, honour them; otherwise infer them as
 dependency layers numbered from `N_max + 1` (tasks that depend on nothing form the first new
 phase, tasks depending only on those the next, and so on).
+
+**Under `--backlog`.** No **Drop**: park, reopen, **obsolete** and re-home, as defined in
+`skills/orient/backlog.md` § B3. Obsolete is a task's own `status: dropped` once it stops being true, never the phase **retire** above, which
+applies unchanged.
 
 ## R3. Grill the unclear
 
@@ -214,6 +224,9 @@ the one write the reshuffle makes before R4's gate, and it stands if he stops th
 > overturns applied, under one `Decided for you` heading. The rule in full: § 5 of
 > <plugin root>/skills/_shared/asking.md.
 
+**Under `--backlog`.** The grill runs after the start, in `skills/orient/backlog.md` § B9, cluster by cluster, each
+question holding back only its own tasks.
+
 ## R4. The gate
 
 Print the final disposition table and get a y/n (or adjustments) **before writing any file**, a Note's correction of a
@@ -236,6 +249,9 @@ The grill's Decided for you lines add a **decided-for-you footer**, at most 8 li
 A declared check with entries (§ Declared check) adds a **declared-check footer**:
 `declared check: <N> entries → <dispositions>; advance after the writes` when every entry has a
 disposition, else `declared check: hold (<unresolved>)`. He may turn advance into hold.
+
+**Under `--backlog`.** The table is never put to him: it goes into the record's Decided for you section
+(`skills/orient/backlog.md` § B4).
 
 ## R5. Write
 
@@ -322,6 +338,9 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
    lines and name its record as the check's to land. Any other status, or a non-zero exit, is that
    one line; never a blocker.
 
+**Under `--backlog`.** R5.1 and R5.3 write nothing (no new phase, no rename), R5.2 renames nothing, and R5.4's park,
+reopen, obsolete and re-home run `backlog-orient.py` (`skills/orient/backlog.md` § B5).
+
 **Report**: phases as clickable `obsidian://` links, renames, the other dispositions, surfacing
 status, misfits, out-of-vault links to fix, what the grill left unresolved, and its Decided for you list (the less
 sure first, at most 8 lines, the rest in the task notes). Orient § 6 routes
@@ -342,3 +361,5 @@ The rules above are the contract; these are the ones most easily broken.
   name; the inline shape is only the no-skills fallback.
 - **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md`,
   `add-writers/add-phase.md` and `add-writers/add-project.md`.
+- **Under `--backlog`, B4's record stands in for R4's gate** (`skills/orient/backlog.md` § B4): nothing waits on his
+  word before the start.

@@ -219,7 +219,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
   link), else from the session's directory. A directory a project declares, an
   exact name or alias, or a clear best match goes ahead; a close call or no
   match asks Lachy first (ADR 0036). A project target audits that project,
-  never its whole area. _Avoid_: inferring the area.
+  never its whole area; `--backlog` takes an area only (ADR 0071). _Avoid_: inferring the area.
+- **Backlog orient** — `/thread:orient <area> --backlog`, the orient that needs
+  nobody present (ADR 0071; `skills/orient/backlog.md`): it reads the area's whole
+  Backlog by the Pulse's line rules, decides each task's **Backlog disposition**
+  and the rest as a decided record, forks schedule runs per batch and starts their
+  rollouts, then puts his questions to him one at a time, each holding back only its
+  own tasks. A gate he holds writes nothing to its task and is put again at the next
+  Backlog orient that batches it. It writes `last_orient_at` back into the Pulse's
+  trigger file once its forks' writes are done, and re-stamps it once after his
+  answers unless that first write was held, each only while its guards pass.
+  _Avoid_: auto-orient, unattended reshuffle.
+- **Backlog disposition** — what a Backlog orient does with one task: batch it, or
+  **park** it (`status: parked`, `parked-by: backlog-orient <date>`: not worth a
+  rollout yet, never for being small or unclear), **reopen** an orient park its batch
+  takes, **obsolete** it (`status: dropped` once it stops being true, never for size;
+  not the phase **retire**, which empties an unstarted phase), **re-home** it onto
+  the area's sub-project, or mark it **wait** (answered, but its rollout already
+  runs). A **held park** is any park without `parked-by: backlog-orient` (his own, or
+  older than ADR 0071): frozen, never reopened, scheduled, obsoleted or parked again.
 - **Declared check** — a command a project names for orient to run in its
   audit. It prints what is new since its own record, and the record moves on
   only once Lachy has passed those items at the gate, so it says what he has
@@ -1050,6 +1068,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
+  The **Backlog orient** stamps each parallel note it wrote this way itself, as its
+  decided start (`stamp-start --backlog`, ADR 0071), never beside a hold.
   When he names the PR the start waits on, it is an **Approved queue**
   instead. _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
