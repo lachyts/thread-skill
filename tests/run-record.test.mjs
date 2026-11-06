@@ -589,7 +589,7 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
 
 // ADR 0058: the doc's status, its branch, the diff size and the disposition counts are optional, checked when given.
 // fresh-review ADR 0001 adds unconfirmed beside them: filed and unconfirmed never share a finding, so
-// filed + unconfirmed <= findings when findings is given (an absent one reads as 0).
+// filed + unconfirmed <= findings when findings is given (for that check alone, an absent count reads as 0).
 test('review-round (ADR 0058, fresh-review ADR 0001): status, branch, size and disposition counts are accepted; bad values are refused', (t) => {
   const home = tmpHome(t)
   const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 12 }
@@ -601,14 +601,17 @@ test('review-round (ADR 0058, fresh-review ADR 0001): status, branch, size and d
   // unconfirmed may equal findings (every finding filed or unconfirmed).
   const atCap = { ...base, blocking: 2, open: 2, filed: 9, unconfirmed: 3, reviewedAt: '2026-10-01T00:00:00.000Z' }
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(atCap)], { env: EV(home) })
-  // With no findings there is nothing to hold the counts against, and 0 is a count like any other.
+  // With no findings there is nothing to hold the counts against: a line with no findings skips the check whatever
+  // its filed and unconfirmed (e), and 0 is a count like any other (d).
   const { findings: _f, ...noFindings } = base
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...noFindings, unconfirmed: 0 })], { env: EV(home) })
-  const [a, b, c, d] = lines(path.join(ev(home), 'reviews.jsonl'))
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...noFindings, filed: 4, unconfirmed: 3 })], { env: EV(home) })
+  const [a, b, c, d, e] = lines(path.join(ev(home), 'reviews.jsonl'))
   assert.deepEqual([a.status, a.lines, a.files, 'blocking' in a], ['pending', 0, 0, false])
   for (const k of Object.keys(full)) assert.deepEqual(b[k], full[k], k)
   assert.deepEqual([c.blocking, c.open, c.filed, c.unconfirmed, c.reviewedAt], [2, 2, 9, 3, '2026-10-01T00:00:00.000Z'])
   assert.deepEqual([d.unconfirmed, 'findings' in d], [0, false])
+  assert.deepEqual([e.filed, e.unconfirmed, 'findings' in e], [4, 3, false])
   const BAD = [
     ['status "done"', { status: 'done' }], ['status ""', { status: '' }], ['branch ""', { branch: '' }],
     ['branch 3', { branch: 3 }], ['lines -1', { lines: -1 }], ['files 1.5', { files: 1.5 }],
@@ -633,7 +636,7 @@ test('review-round (ADR 0058, fresh-review ADR 0001): status, branch, size and d
   assert.match(over.stderr, /review-round: open \(2\) exceeds blocking \(1\)/)
   const unconf = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, findings: 2, unconfirmed: 7 })], { env: EV(home) })
   assert.match(unconf.stderr, /review-round: filed \+ unconfirmed \(0 \+ 7\) exceed findings \(2\)/)
-  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 4, 'no refused line was written')
+  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 5, 'no refused line was written')
 })
 
 // ---- the review-verdict kind (p21-3: reconcile-rollout.py's one line per judged master-review round) ----------
