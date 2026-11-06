@@ -172,8 +172,8 @@ Subcommands:
       6. the branch (ls-remote): absent, a commit `Revert "<M's subject>"` whose body says `This reverts commit <M>.`
          and the RACE sentence; present, its commits in origin/B..origin/<branch> must hold one saying `This reverts
          commit <M>` (else exit 1), and origin/B is merged into it (a conflict routes `conflict`);
-      7. a plain push (`HEAD:refs/heads/<branch>`, never --force or a `+`; a server error retried as push's is), read
-         back through ls-remote (refused: 8),
+      7. a plain push (`HEAD:refs/heads/<branch>`, never --force or a `+`; a server error retried as push's is, inside
+         push's PUSH_BUDGET_S, 100 s from the first try), read back through ls-remote (refused: 8),
          skipped when the branch holds the head already; then the open PR on the branch, or `gh pr create
          --body-file` (its body says `This reverts commit <M>` too): route `pr`;
       8. the tree is removed in a `finally`, after `restores` is read.
@@ -197,7 +197,12 @@ Subcommands:
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
       equal M. A push that fails on a server error (a 5xx, a connection reset, a timeout) is tried again after
       2, 5 and 15 s (PUSH_BACKOFF, p39-1); a genuine rejection (non-fast-forward, a protected branch) fails at
-      once. Prints {pushed, branch, retries}. Exit 1 when refused, the reason git's whole stderr on one line.
+      once, and so does any other failure (a missing repository, an unresolved host). Both are read from git's own
+      words, with the refspec, the branch, the tree and the remote's URL taken out, so no slug decides them. A retry
+      starts only while PUSH_BUDGET_S (100 s, from the first try) holds the time spent, its wait and a try as long as
+      the longest so far, so push ends inside the Bash tool's default 120 s and always prints its line. Prints
+      {pushed, branch, retries}. Exit 1 when refused, the reason git's whole stderr on one line (its `hint:` lines
+      dropped), after the retries spent and, when it stopped them, the budget.
 
   undo --repo R --slug S --merge M --to H
       Drop the lead's unpushed merge: only when the tree is on its branch at M, M^1 == H and origin's
@@ -524,11 +529,15 @@ def out_of(p):
     return p.stdout.strip()
 
 
+def _said_lines(text):
+    return [s for s in (ln.strip() for ln in (text or "").splitlines()) if s and not s.startswith("hint:")]
+
+
 def why(p):
-    """A failed step's reason on one line: its whole stderr (or stdout), each non-blank line kept and joined by ` | `,
-    so a push's `[rejected]` or `HTTP 502` line is not lost behind git's closing `error: failed to push` (p39-1)."""
-    lines = [ln.strip() for ln in (p.stderr.strip() or p.stdout.strip()).splitlines() if ln.strip()]
-    return " | ".join(lines) or f"exit {p.returncode}"
+    """A failed step's reason on one line: its whole stderr (or stdout), each non-blank line joined by ` | `, so a push's
+    `[rejected]` or `HTTP 502` line is not lost behind git's closing `error: failed to push` (p39-1). git's `hint:` lines
+    are advice, not the reason, and are dropped; every `error:`, `fatal:`, `remote:` and `[rejected]` line stays."""
+    return " | ".join(_said_lines(p.stderr) or _said_lines(p.stdout)) or f"exit {p.returncode}"
 
 
 def rev(cwd, ref):
@@ -1577,14 +1586,23 @@ def _remote_head(tree, br):
 # A push that a server error refused (p39-1, found in chorus-rollout-2026-11-04: GitHub 500/502 on a plain fast-forward,
 # four times) is tried again after each of these waits before it counts as refused. A genuine rejection (non-fast-forward,
 # a protected branch, a declined hook, a denied permission) is read first and fails at once, whatever else its stderr
-# says.
+# says. Both are read from what git says of itself (_push_said): never from a branch, a tree or a URL in its stderr.
 PUSH_BACKOFF = (2, 5, 15)
 PUSH_BACKOFF_ENV = "THREAD_PUSH_BACKOFF_S"   # tests only: caps each wait (0 for none); it never lengthens one
+# The push's whole budget, counted with time.monotonic() from its first try: a retry starts only while the time spent, its
+# wait and a try as long as the longest so far stay under it. SKILL.md runs `push` with the Bash tool's default 120 s (no
+# `timeout:`), so a slow failure on each try (a connect `timed out` near 75 s, a 504, a hung-up upload) still ends inside
+# it, with its refusal printed and exit 1, never a cut call with no line (p39-1 review; prepare's PROOF_BUDGET_S is the
+# same guard).
+PUSH_BUDGET_S = 100
+PUSH_BUDGET_ENV = "THREAD_PUSH_BUDGET_S"     # tests only: shortens the budget; it never lengthens it
 _PUSH_REJECTED = re.compile(r"non-fast-forward|fetch first|stale info|protected branch|hook declined|\bGH0\d\d\b|"
                             r"permission|denied|not allowed|authenticat", re.I)
 _PUSH_SERVER_ERROR = re.compile(r"\b(?:HTTP|error:?)\s*5\d\d\b|internal server error|bad gateway|service unavailable|"
                                 r"gateway time-?out|connection reset|reset by peer|timed out|time-?out|early EOF|"
                                 r"unexpected disconnect|remote end hung up|commit_refs", re.I)
+_PUSH_QUOTED = re.compile(r"'[^'\s]*'")   # a quoted URL, path or ref: `to '<url>'`, `access '<url>'`, `repository '<url>'`
+_PUSH_URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+|\S+@[\w.-]+:\S+", re.I)   # a URL, or scp-like git@host:o/r.git
 
 
 def _push_waits():
@@ -1595,26 +1613,67 @@ def _push_waits():
     return tuple(min(w, max(cap, 0)) for w in PUSH_BACKOFF)
 
 
-def _server_error(p):
-    """True when a failed push's stderr reads as a server error (a 5xx, a connection reset, a timeout) and as no genuine
-    rejection: the one failure worth trying again."""
-    text = f"{p.stderr}\n{p.stdout}"
+def _push_budget():
+    """PUSH_BUDGET_S; THREAD_PUSH_BUDGET_S (tests) may only shorten it."""
+    try:
+        v = float(os.environ.get(PUSH_BUDGET_ENV) or PUSH_BUDGET_S)
+    except ValueError:
+        v = PUSH_BUDGET_S
+    return min(v, PUSH_BUDGET_S)
+
+
+def _push_said(p, refspec, tree):
+    """What a failed push's stderr (and stdout) says of itself, with every name it carries taken out: the `To <url>` line,
+    git's `hint:` advice, any quoted URL, path or ref and any bare URL, then both sides of the refspec, the branch's short
+    name (refs/heads/ stripped) and the tree. A slug, a branch or a repo's name (`…-no-permission-…`, `…-timeout`) then
+    never decides _server_error either way (p39-1 review)."""
+    src, _, dst = refspec.partition(":")
+    short = dst[len("refs/heads/"):] if dst.startswith("refs/heads/") else dst
+    names = sorted({src, dst, short, str(tree)} - {""}, key=len, reverse=True)
+    said = []
+    for ln in f"{p.stderr or ''}\n{p.stdout or ''}".splitlines():
+        s = ln.strip()
+        if not s or s.startswith(("To ", "hint:")):
+            continue
+        s = _PUSH_URL.sub(" ", _PUSH_QUOTED.sub(" ", s))
+        for name in names:
+            s = s.replace(name, " ")
+        said.append(s)
+    return "\n".join(said)
+
+
+def _server_error(p, refspec, tree):
+    """True when a failed push's own words (_push_said) read as a server error (a 5xx, a connection reset, a timeout) and
+    as no genuine rejection: the one failure worth trying again. Anything else (a missing repository, an unresolved host)
+    is tried once."""
+    text = _push_said(p, refspec, tree)
     return not _PUSH_REJECTED.search(text) and bool(_PUSH_SERVER_ERROR.search(text))
 
 
 def _push(tree, refspec):
     """A plain `git push --quiet origin <refspec>` (never --force, never a `+`), tried again after each PUSH_BACKOFF wait
-    while it fails on a server error: (the last try's process, the retries spent)."""
-    waits = _push_waits()
+    while it fails on a server error and PUSH_BUDGET_S, from the first try, still holds the time spent, the wait and a try
+    as long as the longest so far: (the last try's process, the retries spent, whether the budget stopped them)."""
+    waits, budget = _push_waits(), _push_budget()
+    t0, longest = time.monotonic(), 0.0
     for n in range(len(waits) + 1):
+        t = time.monotonic()
         p = git(tree, "push", "--quiet", "origin", refspec)
-        if p.returncode == 0 or n == len(waits) or not _server_error(p):
-            return p, n
+        longest = max(longest, time.monotonic() - t)
+        if p.returncode == 0 or n == len(waits) or not _server_error(p, refspec, tree):
+            return p, n, False
+        if time.monotonic() - t0 + waits[n] + longest >= budget:
+            return p, n, True
         time.sleep(waits[n])
 
 
-def _retried(n):
-    return f" (after {n} retries on a server error)" if n else ""
+def _retried(n, spent):
+    """A refusal's note on its retries: nothing for a push tried once on no server error, else how many, and whether
+    PUSH_BUDGET_S ran out before the next try."""
+    said = f"after {n} {'retry' if n == 1 else 'retries'} on a server error" if n else "on a server error"
+    if spent:
+        return f" ({said}; PUSH_BUDGET_S ({_push_budget():g} s) ran out before another try)"
+    return f" ({said})" if n else ""
 
 
 def cmd_push(args):
@@ -1622,9 +1681,9 @@ def cmd_push(args):
     head = rev(tree, "HEAD")
     if head != args.head:
         raise Refused(f"the task tree {tree} is at {head or 'nothing'}, not {args.head}")
-    p, retries = _push(tree, f"{args.head}:refs/heads/{br}")
+    p, retries, spent = _push(tree, f"{args.head}:refs/heads/{br}")
     if p.returncode != 0:
-        raise Refused(f"push of {args.head} to origin/{br} refused{_retried(retries)}: {why(p)}")
+        raise Refused(f"push of {args.head} to origin/{br} refused{_retried(retries, spent)}: {why(p)}")
     got = _remote_head(tree, br)
     if got != args.head:
         raise Refused(f"origin/{br} reads {got or 'nothing'} after the push, not {args.head}")
@@ -1906,9 +1965,9 @@ def cmd_revert(args):
                 return out
         head = rev(tree, "HEAD")
         if remote != head:
-            p, retries = _push(tree, f"HEAD:refs/heads/{branch}")   # never --force, never a `+`
+            p, retries, spent = _push(tree, f"HEAD:refs/heads/{branch}")   # never --force, never a `+`
             if p.returncode != 0:
-                raise Retryable(f"push of {head[:12]} to origin's {branch} refused{_retried(retries)}: {why(p)}")
+                raise Retryable(f"push of {head[:12]} to origin's {branch} refused{_retried(retries, spent)}: {why(p)}")
             got = (out_of(git(repo, "ls-remote", "origin", f"refs/heads/{branch}")).split() or [""])[0]
             if got != head:
                 raise Retryable(f"origin's {branch} reads {got or 'nothing'} after the push, not {head}")
