@@ -855,10 +855,12 @@ copy's secret, its rule, file, commit and line). A Security check halt names its
 holds a secret the Leg cannot rewrite` is a Chain copy's: before `clear-halt`, Lachy rewrites it out of that task's own
 commits in its copy (`leg_base..HEAD` of `chain/<rollout>`, never below the task's `leg_base` sha, each commit keeping
 its `Task: [[<t>]]` line), or drops them (`git -C <copy> reset --hard <leg_base sha>`); then the next Leg inherits the
-claim and scans the same window again. That rewrite is safe: the claim is kept, `chain/<rollout>` is never pushed, and
-no later task's commits sit above the task's own. `security check: [[<t>]] could not be scanned` → move, commit or
-stash the path it names, or install or fix gitleaks, as the error says. `security check: [[<t>]] holds a secret` was
-asked in (b). Show, too, `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
+claim and scans the same window again. That rewrite is safe: the claim is kept, a Leg never pushes `chain/<rollout>`,
+and no later task's commits sit above the task's own. A line that reads `no rewrite point: origin already holds <sha7>`
+(a hand push of the chain branch) is a pushed secret: it is rotated first, then rewritten or dropped the same way.
+`security check: [[<t>]] could not be scanned` → move, commit or stash the path it names, or install or fix gitleaks,
+as the error says. `security check: [[<t>]] holds a secret` was asked in (b). Show, too,
+`git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`, then
 re-read `leg.py status`: the chain reads stalled when the halted Leg held a claim (the next Leg inherits it), else what
 its rows leave (ready, completable or stuck), and (e) restarts it.

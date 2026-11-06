@@ -981,9 +981,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `security-accept <kind>:<key>` token the scan reads from the task note's
   `## Repair input`. Integration's own commits and merge commits are not
   scanned ([[thread-skill-security-check-integration-commits]]). A serial
-  chain's Leg runs it too, before each code-writing task's review and again
-  before `leg.py done`: in a Chain copy it rewrites a secret out of its own
-  unpushed commits (one it cannot rewrite halts the chain for Lachy's own
+  chain's Leg runs it too, on each task with commits, before any review and
+  again before `leg.py done`: in a Chain copy it rewrites a secret out of its
+  own unpushed commits (one it cannot rewrite halts the chain for Lachy's own
   rewrite), and a secret in a primary checkout's history reverts the task,
   sets it aside and halts the chain; on a serial chain his answer to it is
   the rotation and the hand-back, whose re-entry starts after the revert. A

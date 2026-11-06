@@ -202,12 +202,13 @@ clear-halt, restarted, copies, land):
       set it aside with --revert, which reverts it there, and redo it in <C>`); and, for each `leg_base` checkout with
       trailered commits, that checkout is the cwd's (in a copy chain the copy holding the cwd) and a --review doc
       whose front matter has `repo:` that toplevel, `mode: code`, `effort:` xhigh or max, `status: consumed`, and a
-      `head:` that descends from the leg_base sha, is an ancestor of HEAD and holds a trailered commit. With the rollout
-      note's `security_checks:` anything but absent, empty or false (security_on: a bad value fails closed), each
-      security_tops entry (below) needs `security`'s latest `leg_scan` record to be `clean` and still cover it (covering),
-      else exit 1, nothing written: `[[t]]: the Security check (security_checks) has no clean scan covering <top> (a
-      Chain copy's must be at its HEAD; latest: <verdict> at <sha12> | none): run `leg.py security --task <t>``; done
-      runs no scan. With the key off, or no tops, it is today's path. Stamps
+      `head:` that descends from the leg_base sha, is an ancestor of HEAD and holds a trailered commit. The rollout
+      note's `security_checks:` is read through security_on: a value neither true nor false (nor absent or empty) is
+      exit 1, `security_checks: must be true or false, got '<v>': fix the note`, nothing written, whatever scan the note
+      records. With it true, each security_tops entry (below) needs `security`'s latest `leg_scan` record to be `clean`
+      and still cover it (covering), else exit 1, nothing written: `[[t]]: the Security check (security_checks) has no
+      clean scan covering <top> (a Chain copy's must be at its HEAD; latest: <verdict> at <sha12> | none): run `leg.py
+      security --task <t>``; done runs no scan. With the key off, or no tops, it is today's path. Stamps
       `status: done`, `completed:`, `leg: N`, `reviewed:` (the docs), keeps `leg_base`, and, when the task has a
       `leg_base` entry, `leg_head: ["<toplevel>@<sha40>", …]` after it (ADR 0055): per checkout, the task's own newest
       `Task:`-trailered commit (change's last commit there, never HEAD, which may be a peer's), a checkout where it
@@ -220,11 +221,13 @@ clear-halt, restarted, copies, land):
             [--revert] [--gate <gate>]...
       --reason and --scan-ask are one required, exclusive choice; --scan-ask without --revert, or with --kind gate, is
       usage (exit 2). The Security check gate (security_gate) runs after the owner checks, before any write, and only
-      for this Leg's own claim (in progress, owned leg-<n>) with security_on and a non-empty security_tops, never a gate
-      set-aside: a task with `Task:` commits (change_of) or strays and no --revert is exit 1 (`set it aside with
-      --revert, after `leg.py security --task <t>``); each top needs a covering record (none: `run `leg.py security
-      --task <t>` first`; `unscanned`: `close the Leg --outcome halt instead`, the claim stays; `secret` in a Chain copy:
-      `rewrite it out first`, since a revert keeps it in the history the next land puts on <d>). --scan-ask needs a
+      for this Leg's own claim (in progress, owned leg-<n>), never a gate set-aside. There a `security_checks:` neither
+      true nor false is exit 1 (security_on: `security_checks: must be true or false, got '<v>': fix the note`); with it
+      true and a non-empty security_tops, a task with `Task:` commits (change_of) or strays and no --revert is exit 1
+      (`set it aside with --revert, after `leg.py security --task <t>``), and each top needs a covering record (none:
+      `run `leg.py security --task <t>` first`; `unscanned`: `close the Leg --outcome halt instead`, the claim stays;
+      `secret` in a Chain copy: `rewrite it out first`, since a revert keeps it in the history the next land puts on
+      <d>). --scan-ask needs a
       covering red or secret record and the section's `Ask:` line, and records `security check: <ask>` as the reason
       (the diagnosis, the `Set-aside:` line and the log line), else exit 1 (`--scan-ask quotes the latest Security
       check question, and none covers HEAD: give --reason`). A queued or handed-back row, and every row with the key
@@ -249,7 +252,10 @@ clear-halt, restarted, copies, land):
       `<base>..HEAD` (primary false: every commit in a copy's window is the chain's own, so untrailered ones count), then
       each primary a task's `Task:` commit strayed into (stray_of; base its `leg_primary_base` sha); in place each
       `leg_base` checkout with the task's own `Task:` commits (primary true). No tops is exit 0, `tops: []`, `clean:
-      true`, nothing written. Per top, in order: under $THREAD_LEG_SECURITY_FLOOR (SCAN_FLOOR, 20 s) left is
+      true`, no scan; off --dry-run the lock step below still runs (the claim and key re-read, no HEAD to check) and
+      removes a stale `leg_scan:` and `## Security check`, an earlier run's (say before repair § 7 (c)'s `reset --hard
+      <leg_base sha>`). Per top, in order: its HEAD read (HEAD_READ, 5 s); under $THREAD_LEG_SECURITY_FLOOR (SCAN_FLOOR,
+      20 s) left is
       `unscanned`, `not scanned: the Security check's <B> s budget ran out`; a copy is scanned in place, a primary in
       scratch_tree (a detached `worktree add` at its HEAD, so his uncommitted edits and untracked files there are never
       touched; dead runs' `leg-security-<pid>-…` trees swept first; its own torn down with `worktree remove --force
@@ -262,18 +268,21 @@ clear-halt, restarted, copies, land):
       `cat-file -e` and `merge-base --is-ancestor`; never a fetch). `uncommitted`: `git status --porcelain=v1 -z
       --untracked-files=all` in the top, at most 50 paths. `rewrite` (a Chain copy's secret only, null on a primary):
       the scan's `rewriteFrom` when no merge sits at or after a secret, base is it or an ancestor, and every commit in
-      `rewriteFrom..HEAD` carries `Task: [[t]]` or touches only docs/reviews/; else null with `rewriteWhy` (`a merge sits
-      at or after it`, `the scan named no commit to rewrite from`, `<sha12> is below the task's leg_base`, `<sha12> above
-      it is not this task's (no Task: [[t]] line)`). `ask`: shell_safe(security_ask): a primary secret (`… is in <top>'s
-      history, which a Leg never rewrites`, then by `pushed`: `, and origin already holds it: rotate it`; `: rotate it,
+      `rewriteFrom..HEAD` carries `Task: [[t]]` or touches only docs/reviews/; else null with `rewriteWhy` (`origin
+      already holds <sha7>` first, for a secret whose `pushed` is true: a hand push of the chain branch is rotated, never
+      rewritten by a Leg; `a merge sits at or after it`, `the scan named no commit to rewrite from`, `<sha12> is below
+      the task's leg_base`, `<sha12> above it is not this task's (no Task: [[t]] line)`). `ask`:
+      shell_safe(security_ask): a primary secret (`… is in <top>'s history, which a Leg never rewrites`, then by
+      `pushed`: `, and origin already holds it: rotate it`; `: rotate it,
       and while origin does not hold it you may rewrite it out of that history yourself before the halt is cleared`; or
       the same after `, and whether origin holds it is unknown (<pushedWhy>)`), a scanner-config change and an advisory
       (each naming its `security-accept <kind>:<key>`), never a copy's secret or an unscanned top; null with none.
       shell_safe leaves no backtick, `$`, `\\` or `"`, so repair's record-answer carries it in double quotes. Then
       under the rollout's lock: the claim and the key read again (a change is exit 1, `run security again`) and each
       top's HEAD (5 s each: a move is exit 1, `HEAD moved in <top> since the scan`), both nothing written; then the task
-      note: `leg_scan: ["<top>@<head> <verdict>", …]` (after `leg_primary_base` or `leg_base`, replaced each run) and
-      `## Security check`, one shell_safe line per top that is not clean (`- <top> at <head12>: secret: <rule> in
+      note: `leg_scan: ["<top>@<head> <verdict>", …]` (after `leg_primary_base` or `leg_base`, replaced each run, and
+      removed with no tops) and `## Security check`, one shell_safe line per top that is not clean (`- <top> at
+      <head12>: secret: <rule> in
       <file>, commit <sha7>, line <line>[; …]; rewrite from <sha12>` | `; no rewrite point: <why>` | `; a primary
       checkout's history, which a Leg never rewrites`; `: red`; `: unscanned: <error>`), then `Ask: <ask>`; the section
       removed when every top is clean. It renews the Leg lease and writes no Leg log line. done and set-aside read the
@@ -282,12 +291,16 @@ clear-halt, restarted, copies, land):
       a peer's later commit kept out (ADR 0040). Prints {verb, rollout, task, tops [{top, primary, base, head, verdict,
       exit, error, secrets, uncommitted, rewrite, rewriteWhy, scan}], ask, clean, dryRun}; exit 0 for any completed run
       (a red one included), 1 a refusal, 5 the lock; --dry-run scans and writes nothing. The budget: the deadline
-      covers everything after the first line, scratch adds, scans and settle_pushed's ls-remote; past it run only a cut
-      scan's 10 s grace and the teardown (at most 50 s), then the lock wait (at most 30 s), 5 s per top of HEAD
-      re-reads and the note's save: 420 + 10 + 50 + 30 + 5·N + 5 < 600 (the Bash tool's foreground cap, legs.md's
-      `timeout: 600000`) for N ≤ 15. The reads before the first scan (change_of, stray_of, the copies' rev-list) take
-      git()'s 120 s per call, outside it. A call the tool cuts wrote nothing (its writes are all under the lock, after
-      the scans), and the next call sweeps its scratch tree.
+      holds every call per top but its HEAD read: each is started only with 1 s or more left, its timeout the rest of
+      the deadline at most its cap (within: the sweep's list and its teardowns, each only with TEARDOWN s left; the
+      scratch add; the scan; settle_pushed's symbolic-ref, ls-remote, cat-file and merge-base; uncommitted_paths;
+      rewrite_point's merge-base and log), and one it cannot start reads its budget ran out (`not scanned: …`, a null
+      `pushed` or `rewrite` with `not read: …`, `uncommitted` []). Past it run only a cut scan's 10 s grace, its scratch
+      tree's teardown (at most TEARDOWN, 50 s; no later top's tree is added), each top's HEAD read (5 s), then the lock
+      wait (at most 30 s), 5 s per top of HEAD re-reads and the note's save: 420 + 10 + 50 + 5·N + 30 + 5·N + 5 < 600
+      (the Bash tool's foreground cap, legs.md's `timeout: 600000`) for N ≤ 8 tops. The reads before the first scan
+      (change_of, stray_of, the copies' rev-list) take git()'s 120 s per call, outside it. A call the tool cuts wrote
+      nothing (its writes are all under the lock, after the scans), and the next call sweeps its scratch tree.
   post-items                                 (read-only, no lock)
       The `## Post-rollout` items (the top-level `- ` lines after `Rollout-specific items go here:`), indexed from
       1, each with its pointer (`→ [[f]]`) or null.
@@ -687,13 +700,17 @@ APPROVED_GATES = "## Approved gates"
 NONE_GATE_RE = re.compile(r"^none\.?$")  # execute § 3.7's exact `None`, on _norm_gate's text (task.workflow.js's /^none\.?$/i)
 # The Security check on a serial chain (execute § 3 `security_checks`; legs.md § The task loop's **Security check.**):
 # `security`'s one budget for every scan it runs, the floor a top needs to start, a cut scan's grace after its SIGINT,
-# the scratch tree's name prefix (its pid after it, so a dead run's tree is swept) and settle_pushed's ls-remote cap.
+# the scratch tree's name prefix (its pid after it, so a dead run's tree is swept), settle_pushed's ls-remote cap, the
+# cap of each short git read inside the deadline, and a top's HEAD read, the one read per top that may run past it.
 SECURITY_SECTION = "## Security check"
 SECURITY_BUDGET = 420
 SCAN_FLOOR = 20
 SCAN_GRACE = 10
 SCRATCH_PREFIX = "leg-security-"
 PUSHED_LS_TIMEOUT = 30
+SHORT_READ = 5
+HEAD_READ = 5
+TEARDOWN = 50   # _teardown's 30 + 10 + 10 s
 SCAN_VERDICTS = ("clean", "red", "secret", "unscanned")
 SCRATCH_RE = re.compile(rf"^{re.escape(SCRATCH_PREFIX)}(\d+)-")
 CAP = 5
@@ -767,8 +784,8 @@ def git(top, *args, input=None, timeout=120):
         return subprocess.CompletedProcess(args, 99, "", str(e))
 
 
-def git_out(top, *args):
-    r = git(top, *args)
+def git_out(top, *args, timeout=120):
+    r = git(top, *args, timeout=timeout)
     return r.stdout.strip() if r.returncode == 0 else None
 
 
@@ -879,6 +896,20 @@ def security_floor():
         return float(os.environ.get("THREAD_LEG_SECURITY_FLOOR") or SCAN_FLOOR)
     except ValueError:
         return float(SCAN_FLOOR)
+
+
+def within(deadline, cap=None):
+    """The timeout of a call `security` holds inside its deadline: deadline - now, at most cap; None when under 1 s is
+    left, and the caller then never starts the call, so none of them runs past the deadline."""
+    left = deadline - time.monotonic()
+    if left < 1:
+        return None
+    return left if cap is None else min(cap, left)
+
+
+def ran_out(budget):
+    """The words a call `security` could not start inside its deadline reads with (within)."""
+    return f"the Security check's {budget:g} s budget ran out"
 
 
 class Lock:
@@ -2665,9 +2696,16 @@ def cmd_file_fix(ctx, a):
 # ---- the Security check (execute § 3 `security_checks`; legs.md § The task loop's **Security check.**) -----------------
 
 def security_on(note):
-    """Whether the rollout note's `security_checks:` gates done and set-aside: any value but absent, empty or false
-    (through rr._scalar, case-folded), so one `security` refuses (a `yes`) fails closed: done refuses, never passes."""
-    return rr._scalar(note.get(rr.SECURITY_CHECKS_KEY)).lower() not in ("", "false")
+    """Whether the rollout note's `security_checks:` is on, through rr._scalar, case-folded: True for true, False for
+    absent, empty or false. Any other value (a `yes`) is exit 1, `security_checks: must be true or false, got '<v>':
+    fix the note`, so `security`, done and set-aside refuse it with that one line (legs.md's **A refused key**), done
+    whatever scan the note records."""
+    raw = rr._scalar(note.get(rr.SECURITY_CHECKS_KEY))
+    if raw.lower() in ("", "false"):
+        return False
+    if raw.lower() == "true":
+        return True
+    raise Refuse(1, f"security_checks: must be true or false, got {raw!r}: fix the note")
 
 
 def scan_records(note):
@@ -2790,7 +2828,7 @@ def run_scan(argv, timeout):
 
 def _teardown(top, wt):
     """Remove a scratch worktree of top: `worktree remove --force --force` (git locks an entry `initializing` while add
-    runs), `worktree unlock` when that fails, the directory removed, then `worktree prune`."""
+    runs), `worktree unlock` when that fails, the directory removed, then `worktree prune`: at most TEARDOWN s."""
     if git(top, "worktree", "remove", "--force", "--force", wt, timeout=30).returncode != 0:
         git(top, "worktree", "unlock", wt, timeout=10)
     shutil.rmtree(wt, ignore_errors=True)
@@ -2807,11 +2845,13 @@ def _pid_alive(pid):
     return True
 
 
-def sweep_scratch(top):
+def sweep_scratch(top, deadline):
     """Tear down each of top's registered `leg-security-<pid>-…` worktrees whose pid is dead: a `security` the tool cut
-    or killed before its own teardown ran."""
-    r = git(top, "worktree", "list", "--porcelain", timeout=30)
-    if r.returncode != 0:
+    or killed before its own teardown ran. Inside the deadline: `worktree list` within it (30 s at most), and each
+    teardown only while TEARDOWN s are left; the trees it leaves wait for the next run's sweep."""
+    t = within(deadline, 30)
+    r = git(top, "worktree", "list", "--porcelain", timeout=t) if t else None
+    if r is None or r.returncode != 0:
         return
     for line in r.stdout.split("\n"):
         if not line.startswith("worktree "):
@@ -2819,21 +2859,27 @@ def sweep_scratch(top):
         wt = line[len("worktree "):]
         m = SCRATCH_RE.match(os.path.basename(wt))
         if m and int(m.group(1)) != os.getpid() and not _pid_alive(int(m.group(1))):
+            if deadline - time.monotonic() < TEARDOWN:
+                return
             _teardown(top, wt)
 
 
 @contextlib.contextmanager
-def scratch_tree(top, deadline):
+def scratch_tree(top, deadline, budget):
     """A detached worktree of top at its HEAD, where `security` scans a primary checkout (his uncommitted edits and
     untracked files there are never touched): yields (path, None), or (None, why) when `worktree add` fails (its
-    timeout max(1, deadline - now)). Dead runs' trees are swept first (sweep_scratch); its own is always torn down
-    (_teardown). scratch_diff, set-aside's revert tree, is another."""
-    sweep_scratch(top)
+    timeout within the deadline) or cannot start (`not scanned: the Security check's <B> s budget ran out`, and no
+    tree is made). Dead runs' trees are swept first (sweep_scratch); its own, once its add started, is always torn
+    down (_teardown). scratch_diff, set-aside's revert tree, is another."""
+    sweep_scratch(top, deadline)
+    t = within(deadline)
+    if t is None:
+        yield None, f"not scanned: {ran_out(budget)}"
+        return
     wt = tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}{os.getpid()}-")
     os.rmdir(wt)
     try:
-        added = git(top, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", "--detach", wt, "HEAD",
-                    timeout=max(1, deadline - time.monotonic()))
+        added = git(top, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", "--detach", wt, "HEAD", timeout=t)
         if added.returncode != 0:
             last = (added.stderr.strip().splitlines() or [f"exit {added.returncode}"])[-1]
             yield None, f"cannot add a scratch worktree in {top}: {last[:200]}"
@@ -2845,21 +2891,27 @@ def scratch_tree(top, deadline):
 
 def _origin_head(top, deadline, budget):
     """settle_pushed's one origin read for top: (origin's live head for top's branch, None), ("", None) when origin has
-    no such branch, or (None, why)."""
-    r = git(top, "symbolic-ref", "-q", "--short", "HEAD", timeout=5)
+    no such branch, or (None, why). Each of its reads is held inside the deadline (within)."""
+    t = within(deadline, SHORT_READ)
+    if t is None:
+        return None, f"not read: {ran_out(budget)}"
+    r = git(top, "symbolic-ref", "-q", "--short", "HEAD", timeout=t)
     branch = r.stdout.strip()
     if r.returncode != 0 or not branch:
         return None, f"{top}'s HEAD is detached"
-    left = deadline - time.monotonic()
-    if left < 1:
-        return None, f"not read: the Security check's {budget:g} s budget ran out"
-    r = git(top, "ls-remote", "--exit-code", "origin", f"refs/heads/{branch}", timeout=min(PUSHED_LS_TIMEOUT, left))
+    t = within(deadline, PUSHED_LS_TIMEOUT)
+    if t is None:
+        return None, f"not read: {ran_out(budget)}"
+    r = git(top, "ls-remote", "--exit-code", "origin", f"refs/heads/{branch}", timeout=t)
     if r.returncode == 2:
         return "", None
     if r.returncode != 0 or not r.stdout.strip():
         return None, f"git ls-remote origin exited {r.returncode}"
     live = r.stdout.split()[0]
-    if git(top, "cat-file", "-e", f"{live}^{{commit}}", timeout=5).returncode != 0:
+    t = within(deadline, SHORT_READ)
+    if t is None:
+        return None, f"not read: {ran_out(budget)}"
+    if git(top, "cat-file", "-e", f"{live}^{{commit}}", timeout=t).returncode != 0:
         return None, f"origin's head {live[:7]} is not held here: fetch it, then run security again"
     return live, None
 
@@ -2867,13 +2919,14 @@ def _origin_head(top, deadline, budget):
 def settle_pushed(top, secrets, deadline, budget=None):
     """Fill each null `pushed` of a primary checkout's secrets, in the primary itself (the scan ran in a detached
     scratch tree, whose second read gives `HEAD is detached`; a true the scanner read from the remote-tracking refs is
-    kept, with no call). One origin read for top (_origin_head): `symbolic-ref -q --short HEAD` (5 s) failing is null,
-    `<top>'s HEAD is detached`; under 1 s left of the deadline is null, `not read: the Security check's <B> s budget ran
-    out`, and no ls-remote runs; else `ls-remote --exit-code origin refs/heads/<branch>` (min(PUSHED_LS_TIMEOUT,
-    deadline - now)): rc 2 is false (origin has no such branch); rc 0 with `<live>` held here (`cat-file -e`, 5 s) is
-    `merge-base --is-ancestor <commit> <live>` (5 s): rc 0 true, rc 1 false, else null `git merge-base exited <rc>`;
-    rc 0 with `<live>` not held is null `origin's head <sha7> is not held here: fetch it, then run security again`; any
-    other rc null `git ls-remote origin exited <rc>`. Writes nothing and fetches nothing. Returns secrets."""
+    kept, with no call). Every read is held inside the deadline (within): one it cannot start leaves that `pushed`
+    null, `not read: the Security check's <B> s budget ran out`. One origin read for top (_origin_head): `symbolic-ref
+    -q --short HEAD` (SHORT_READ, 5 s) failing is null, `<top>'s HEAD is detached`; else `ls-remote --exit-code origin
+    refs/heads/<branch>` (PUSHED_LS_TIMEOUT, 30 s): rc 2 is false (origin has no such branch); rc 0 with `<live>` held
+    here (`cat-file -e`, 5 s) is `merge-base --is-ancestor <commit> <live>` (5 s): rc 0 true, rc 1 false, else null
+    `git merge-base exited <rc>`; rc 0 with `<live>` not held is null `origin's head <sha7> is not held here: fetch
+    it, then run security again`; any other rc null `git ls-remote origin exited <rc>`. Writes nothing and fetches
+    nothing. Returns secrets."""
     budget = security_budget() if budget is None else budget
     read = None
     for s in secrets:
@@ -2888,7 +2941,11 @@ def settle_pushed(top, secrets, deadline, budget=None):
         if live == "":
             s["pushed"], s["pushedWhy"] = False, None
             continue
-        rc = git(top, "merge-base", "--is-ancestor", str(s["commit"]), live, timeout=5).returncode
+        t = within(deadline, SHORT_READ)
+        if t is None:
+            s["pushed"], s["pushedWhy"] = None, f"not read: {ran_out(budget)}"
+            continue
+        rc = git(top, "merge-base", "--is-ancestor", str(s["commit"]), live, timeout=t).returncode
         if rc in (0, 1):
             s["pushed"], s["pushedWhy"] = rc == 0, None
         else:
@@ -2906,7 +2963,7 @@ def shell_safe(text):
     return re.sub(r"\s+", lambda m: " " if ("\n" in m.group(0) or "\r" in m.group(0)) else m.group(0), s)
 
 
-def security_ask(entries, slug):
+def security_ask(entries):
     """The one question a serial chain's Security check leaves Lachy (`security`'s entries, each with its settled
     secrets and its scan), or None when it has no item: a primary secret (a Leg never rewrites a primary's history,
     so his answer is its rotation, and while origin does not hold it his own rewrite, before the halt is cleared), a
@@ -2955,9 +3012,11 @@ def security_ask(entries, slug):
 
 def uncommitted_paths(top, deadline):
     """The paths `git status --porcelain=v1 -z --untracked-files=all` lists in top itself (tracked edits and untracked
-    files: a primary's may be his own), at most 50; [] when it cannot run."""
-    r = git(top, "status", "--porcelain=v1", "-z", "--untracked-files=all", timeout=max(5, deadline - time.monotonic()))
-    if r.returncode != 0:
+    files: a primary's may be his own), at most 50; [] when it cannot run, or cannot start inside the deadline
+    (within)."""
+    t = within(deadline)
+    r = git(top, "status", "--porcelain=v1", "-z", "--untracked-files=all", timeout=t) if t else None
+    if r is None or r.returncode != 0:
         return []
     parts, out, i = r.stdout.split("\0"), [], 0
     while i < len(parts) and len(out) < 50:
@@ -2972,33 +3031,49 @@ def uncommitted_paths(top, deadline):
     return out
 
 
-def rewrite_point(top, base, slug, scan):
+def rewrite_point(top, base, slug, scan, deadline, budget):
     """(rewrite, why) for a Chain copy's secret: the scan's `rewriteFrom` (the first secret commit's parent) when no
-    merge sits at or after a secret (`mergeBehind` false), base is that commit or an ancestor of it, and every commit in
-    `rewriteFrom..HEAD` carries `Task: [[slug]]` or touches only docs/reviews/; else (None, why)."""
+    secret's `pushed` is true (the scanner's read: a remote-tracking ref, or origin's live head, holds it), no merge
+    sits at or after a secret (`mergeBehind` false), base is that commit or an ancestor of it, and every commit in
+    `rewriteFrom..HEAD` carries `Task: [[slug]]` or touches only docs/reviews/; else (None, why): `origin already
+    holds <sha7>` (rotated first, never rewritten by a Leg: legs.md § The task loop's **Security check.**), `a merge
+    sits at or after it`, `the scan named no commit to rewrite from`, `<sha12> is below the task's leg_base`, `<sha12>
+    above it is not this task's (no Task: [[slug]] line)`, or a read that failed or could not start inside the deadline
+    (within: `not read: the Security check's <B> s budget ran out`)."""
+    for s in scan.get("secrets") or []:
+        if isinstance(s, dict) and s.get("pushed") is True:
+            return None, f"origin already holds {str(s.get('commit'))[:7]}"
     if scan.get("mergeBehind"):
         return None, "a merge sits at or after it"
     frm = scan.get("rewriteFrom")
     if not frm:
         return None, "the scan named no commit to rewrite from"
-    if not is_ancestor(top, base, frm):
+    t = within(deadline, SHORT_READ)
+    if t is None:
+        return None, f"not read: {ran_out(budget)}"
+    rc = git(top, "merge-base", "--is-ancestor", base, frm, timeout=t).returncode
+    if rc == 1:
         return None, f"{frm[:12]} is below the task's leg_base"
-    r = git(top, "log", "--format=%H%x1f%B%x1e", f"{frm}..HEAD")
+    if rc != 0:
+        return None, f"git merge-base exited {rc}"
+    t = within(deadline)
+    if t is None:
+        return None, f"not read: {ran_out(budget)}"
+    # One read for the window: each commit's sha, body and paths (renames as both paths, as diff-tree lists them).
+    r = git(top, "log", "--no-renames", "--name-only", "--format=%x1e%H%x1f%B%x1f", f"{frm}..HEAD", timeout=t)
     if r.returncode != 0:
         return None, f"cannot list {frm[:12]}..HEAD in {top}"
     pat = re.compile(rf"^\s*Task:\s*\[\[{re.escape(slug)}(?:[|#][^\]]*)?\]\]\s*$", re.M | re.I)
     for rec in r.stdout.split("\x1e"):
-        rec = rec.strip("\n")
-        if not rec:
+        if not rec.strip():
             continue
-        sha, body = (rec.split("\x1f") + [""])[:2]
+        sha, body, names = (rec.split("\x1f", 2) + ["", ""])[:3]
         if pat.search(body):
             continue
-        paths = [p for p in (git_out(top, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha) or "")
-                 .split("\n") if p]
+        paths = [p for p in names.split("\n") if p]
         if paths and all(p.startswith(REVIEWS) for p in paths):
             continue
-        return None, f"{sha[:12]} above it is not this task's (no Task: [[{slug}]] line)"
+        return None, f"{sha.strip()[:12]} above it is not this task's (no Task: [[{slug}]] line)"
     return frm, None
 
 
@@ -3006,13 +3081,18 @@ def _scan_into(ent, r, tree, deadline, budget):
     """Run security-check.py scan over tree from ent's base (run_scan, the rest of the deadline) and fill ent's
     verdict, exit, error, secrets and scan: rc 0 clean; rc 1 secret when the scan names a secret, else red; rc 2, a cut
     or output that does not parse unscanned, its error the ERROR line after `ERROR: security-check: `, or `timed out:
-    the Security check's <B> s budget ran out in <top>`."""
+    the Security check's <B> s budget ran out in <top>`; under 1 s left (within) it never starts, `not scanned: the
+    Security check's <B> s budget ran out`."""
+    t = within(deadline)
+    if t is None:
+        ent["error"] = f"not scanned: {ran_out(budget)}"
+        return
     argv = [sys.executable, str(rr.SECURITY_CHECK_PY), "scan", "--tree", tree, "--base", ent["base"],
             "--accepts-from", str(r.path)]
-    rc, so, se, cut = run_scan(argv, max(1, deadline - time.monotonic()))
+    rc, so, se, cut = run_scan(argv, t)
     ent["exit"] = rc
     if cut:
-        ent["error"] = f"timed out: the Security check's {budget:g} s budget ran out in {ent['top']}"
+        ent["error"] = f"timed out: {ran_out(budget)} in {ent['top']}"
         return
     scan = None
     if rc in (0, 1) and so.strip():
@@ -3032,25 +3112,28 @@ def _scan_into(ent, r, tree, deadline, budget):
     ent["verdict"] = "clean" if rc == 0 else ("secret" if ent["secrets"] else "red")
 
 
-def scan_top(ctx, r, e, deadline, budget, floor):
-    """One security_tops entry scanned: `security`'s per-top step (its docstring is the rule)."""
+def scan_top(r, e, deadline, budget, floor):
+    """One security_tops entry scanned: `security`'s per-top step (its docstring is the rule). Its HEAD read (HEAD_READ,
+    5 s) is the one call that may run past the deadline; every other is held inside it (within)."""
     top = e["top"]
     ent = {"top": top, "primary": e["primary"], "base": e.get("base"), "head": None, "verdict": "unscanned",
            "exit": None, "error": None, "secrets": [], "uncommitted": [], "rewrite": None, "rewriteWhy": None,
            "scan": None}
-    ent["head"] = git_out(top, "rev-parse", "--verify", "HEAD^{commit}")
+    ent["head"] = git_out(top, "rev-parse", "--verify", "HEAD^{commit}", timeout=HEAD_READ)
     if e.get("error"):
         ent["error"] = e["error"]
     elif not ent["base"]:
         ent["error"] = f"no base sha recorded for {top}"
     elif deadline - time.monotonic() < floor:
-        ent["error"] = f"not scanned: the Security check's {budget:g} s budget ran out"
+        ent["error"] = f"not scanned: {ran_out(budget)}"
     elif e["primary"]:
-        with scratch_tree(top, deadline) as (wt, why):
+        with scratch_tree(top, deadline, budget) as (wt, why):
             if wt is None:
                 ent["error"] = why
             else:
-                ent["head"] = git_out(wt, "rev-parse", "--verify", "HEAD^{commit}") or ent["head"]
+                t = within(deadline, SHORT_READ)
+                ent["head"] = (git_out(wt, "rev-parse", "--verify", "HEAD^{commit}", timeout=t) if t else None) \
+                    or ent["head"]
                 _scan_into(ent, r, wt, deadline, budget)
     else:
         _scan_into(ent, r, top, deadline, budget)
@@ -3058,7 +3141,7 @@ def scan_top(ctx, r, e, deadline, budget, floor):
         settle_pushed(top, ent["secrets"], deadline, budget)
     ent["uncommitted"] = uncommitted_paths(top, deadline)
     if ent["verdict"] == "secret" and not ent["primary"]:
-        ent["rewrite"], ent["rewriteWhy"] = rewrite_point(top, ent["base"], r.slug, ent["scan"])
+        ent["rewrite"], ent["rewriteWhy"] = rewrite_point(top, ent["base"], r.slug, ent["scan"], deadline, budget)
     return ent
 
 
@@ -3094,19 +3177,15 @@ def cmd_security(ctx, a):
     r = task_note(chain, a.task)
     if r.state != "running" or owner_leg(r.note) != n:
         raise Refuse(1, f"[[{r.slug}]] is not Leg {n}'s in_progress claim")
-    raw = rr._scalar(chain.note.get(rr.SECURITY_CHECKS_KEY))
-    if raw.lower() in ("", "false"):
+    if not security_on(chain.note):
         raise Refuse(1, f"security_checks is not true on [[{ctx.slug}]]: nothing to scan")
-    if raw.lower() != "true":
-        raise Refuse(1, f"security_checks: must be true or false, got {raw!r}: fix the note")
+    raw = rr._scalar(chain.note.get(rr.SECURITY_CHECKS_KEY))
     tops = security_tops(ctx, chain, r.note, r.slug)
     out = {"verb": "security", "rollout": ctx.slug, "task": r.slug, "tops": [], "ask": None, "clean": True,
            "dryRun": ctx.dry}
-    if not tops:
-        return out
     floor = security_floor()
-    entries = [scan_top(ctx, r, e, deadline, budget, floor) for e in tops]
-    ask = shell_safe(security_ask(entries, r.slug))
+    entries = [scan_top(r, e, deadline, budget, floor) for e in tops]
+    ask = shell_safe(security_ask(entries))
     clean = all(x["verdict"] == "clean" for x in entries)
     if not ctx.dry:
         with Lock(ctx):
@@ -3120,12 +3199,17 @@ def cmd_security(ctx, a):
             for x in entries:
                 if x["head"] is None:
                     continue
-                now = git(x["top"], "rev-parse", "--verify", "HEAD^{commit}", timeout=5)
+                now = git(x["top"], "rev-parse", "--verify", "HEAD^{commit}", timeout=HEAD_READ)
                 if now.returncode != 0 or now.stdout.strip() != x["head"]:
                     raise Refuse(1, f"HEAD moved in {x['top']} since the scan: run security again; nothing written")
             note = rr.Note(r2.path)
-            recs = [f'"{x["top"]}@{x["head"]} {x["verdict"]}"' for x in entries if x["head"]]
-            note.set("leg_scan", "[" + ", ".join(recs) + "]", after=("leg_primary_base", "leg_base"))
+            if not entries:
+                # No tops (no commit since leg_base, say after repair § 7 (c)'s `reset --hard <leg_base sha>`): an
+                # earlier run's record and its section are stale, so they go, and done reads no scan.
+                note.remove("leg_scan")
+            else:
+                recs = [f'"{x["top"]}@{x["head"]} {x["verdict"]}"' for x in entries if x["head"]]
+                note.set("leg_scan", "[" + ", ".join(recs) + "]", after=("leg_primary_base", "leg_base"))
             if clean:
                 note.remove_section(SECURITY_SECTION)
             else:
@@ -3309,9 +3393,10 @@ def scratch_diff(top, shas, spec):
 def security_gate(ctx, chain, n, r, a):
     """set-aside's Security check gate (execute § 3 `security_checks`; legs.md § The task loop's **Security check.**),
     run after the owner checks and before any write; returns the reason the set-aside records. It reads only this Leg's
-    own claim (in progress, owned `leg-<n>`) with the key on (security_on: a bad value fails closed) and a non-empty
-    security_tops, and never a gate set-aside: a queued or handed-back row, and every row with the key off, keep
-    today's path. Refused (exit 1, nothing written): a set-aside without --revert while the task has `Task:` commits
+    own claim (in progress, owned `leg-<n>`), never a gate set-aside: there a key neither true nor false is security_on's
+    exit 1 (`security_checks: must be true or false, got '<v>': fix the note`), and the gate below runs with the key
+    true and a non-empty security_tops. A queued or handed-back row, and every row with the key off, keep today's
+    path. Refused (exit 1, nothing written): a set-aside without --revert while the task has `Task:` commits
     (change_of) or strays; a top whose latest `leg_scan` record does not cover it (covering: `run leg.py security
     first`), or covers it `unscanned` (close the Leg halt instead: the claim stays), or `secret` in a Chain copy (a
     revert keeps it in the history the next land puts on <d>: rewrite it out first). --scan-ask needs a covering red or

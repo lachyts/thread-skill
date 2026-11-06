@@ -117,7 +117,7 @@ const PRE_SENTENCES = [
 const BULLET_PRE = `- § 4's verifySlot pre-check finds a task call's or seeded revise's \`args.securityCheck\` not this entry's \`verify-timeout\` \`securityCheck\`, or an integrate call carrying one (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a lead bug: re-invoke), or`
 const BULLET_5 = `- \`reconcile-rollout.py verify-timeout\` exits 5 at an entry (§ 3: \`${HALT5}\`: nothing is stamped, cleared or dispatched; fix or remove the rollout's \`security_checks:\`, or install gitleaks, as its ERROR line says, then re-invoke), or`
 const CONTEXT_SERIAL = [
-  "A serial chain's Leg runs it too, before each code-writing task's review and again before `leg.py done`",
+  "A serial chain's Leg runs it too, on each task with commits, before any review and again before `leg.py done`",
   'in a Chain copy it rewrites a secret out of its own unpushed commits',
   "a secret in a primary checkout's history reverts the task, sets it aside and halts the chain",
   'on a serial chain his answer to it is the rotation and the hand-back, whose re-entry starts after the revert',
@@ -131,6 +131,13 @@ const LEGS_SC = [
   '`--outcome halt --reason "security check: [[<t>]] could not be scanned"`',
   '`--outcome halt --reason "security_checks refused on [[<slug>]]"`',
   'never commit, stash, restore or delete that path', 'The claim stays.',
+  // the unscanned retry's bound: a Chain copy's dirty-tree refusal with its own non-empty paths, retried once
+  "a retry only in a Chain copy (`primary: false`) whose `error` is the scanner's refusal of an uncommitted or untracked path",
+  'with a non-empty `uncommitted` every path of which is this task\'s own', 'then run `security` again, once.',
+  'and one still unscanned after that one retry, goes to the halt',
+  // a copy secret origin already holds is never the Leg's rewrite
+  'a secret origin already holds (a hand push of the chain branch reads its `pushed` true) has a null `rewrite`, `rewriteWhy` `origin already holds <sha7>`',
+  'one origin holds he rotates first',
   "never below the task's `leg_base` sha", 'the next Leg inherits the claim and scans the same window again',
 ]
 const LEGS_B0 = '`securityCheck` is there when the note sets `security_checks: true` and its preflight passed'
@@ -149,7 +156,8 @@ const LEGS_DONTS = [
 const LEGS_REPAIR_B = ["only before (c)'s `clear-halt`", 'its tokens bare in the label', 'only while origin does not hold it',
   'A secret origin holds is rotated and kept: the default branch is never force-pushed']
 const LEGS_REPAIR_C = ["never below the task's `leg_base` sha", 'the next Leg inherits the claim and scans the same window again',
-  '`git -C <copy> reset --hard <leg_base sha>`', '`security check: [[<t>]] could not be scanned`']
+  '`git -C <copy> reset --hard <leg_base sha>`', '`security check: [[<t>]] could not be scanned`',
+  'A line that reads `no rewrite point: origin already holds <sha7>` (a hand push of the chain branch) is a pushed secret: it is rotated first']
 const REPAIR_SENTENCE = "A security-check question (one that names `security-accept <kind>:<key>` answers, execute § 3 `security_checks`) offers each answer it names as its own option, each accept option's label holding its tokens verbatim (a question with several findings also names one answer that keeps them all), so record-answer's `--answer`, verbatim, carries them: the scan honours an accept only from an answer that repeats the token its own question named."
 
 // Named failures; [] means every rule holds.
@@ -332,6 +340,11 @@ test("control: legs.md's Security check or repair § 7 losing a rule fails legs"
   only('legs', ', never `git add -A` or `commit -a`', '', 'legs', 'no git add -A ban')
   only('legs', "Run it in the foreground with the Bash tool's `timeout: 600000` (on Codex, a 600 s shell timeout).", 'Run it in the foreground.', 'legs', 'no timeout')
   only('legs', "`done` needs that scan at the copy's HEAD, so", '`done` needs that scan, so', 'legs', "no copy's HEAD")
+  only('legs', 'then run `security` again, once.', 'then run `security` again.', 'legs', 'an unbounded unscanned retry')
+  only('legs', "a retry only in a Chain copy (`primary: false`) whose `error` is the scanner's refusal of an uncommitted or untracked path (`tracked changes are uncommitted in --tree: …` or `untracked files are in --tree …`), with a non-empty `uncommitted`", 'a retry when every `uncommitted`', 'legs', 'a retry on any unscanned')
+  only('legs', ', and one still unscanned after that one retry, goes to the halt', '', 'legs', 'no halt after the retry')
+  only('legs', "; a secret origin already holds (a hand push of the chain branch reads its `pushed` true) has a null `rewrite`, `rewriteWhy` `origin already holds <sha7>`", '', 'legs', 'a pushed copy secret rewritten')
+  only('repair', ' A line that reads `no rewrite point: origin already holds <sha7>`\n(a hand push of the chain branch) is a pushed secret: it is rotated first, then rewritten or dropped the same way.', '', 'legs', 'no rotation for a pushed copy secret')
   only('repair', " and only before (c)'s `clear-halt` in this same pass,", '', 'legs', 'no (b) clear-halt bound')
   only('repair', "is a Chain copy's: before `clear-halt`, Lachy rewrites it out of that task's own\ncommits in its copy (`leg_base..HEAD` of `chain/<rollout>`, never below the task's `leg_base` sha, each commit keeping\nits `Task: [[<t>]]` line), or drops them (`git -C <copy> reset --hard <leg_base sha>`); then the next Leg inherits the\nclaim and scans the same window again.", "is a Chain copy's.", 'legs', 'no (c) copy remedy')
 })

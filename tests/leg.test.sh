@@ -3090,6 +3090,37 @@ SESS=s2 leg land; ok "$(q 'd["lands"][0]["state"]')" landed "L19c7: … land"
 hasnt "$(git -C "$R" log -p master)" "$SECRET" "L19c7: … and master's history holds no secret"
 nonet L19c7
 unset CWD
+csscen l19c7b; leg claim --task a1; lb=$(git -C "$C" rev-parse HEAD); leak "$C" a1
+pcommit "$C" THREAD.md closed "📝 docs(thread): close-out"; co=$(git -C "$C" rev-parse HEAD)
+leg security --task a1; ok "$(tq verdict)|$(tq rewrite)" "secret|None" "L19c7b: the drop variant: no rewrite point"
+leg close --outcome halt --reason "security check: [[a1]] holds a secret the Leg cannot rewrite" --cwd "$C/sub/l"
+git -C "$C" reset -q --hard "$lb"
+SESS=s2 leg clear-halt --reason "a1's commits dropped"; SESS=s2 leg begin --cwd "$C/sub/l"; SESS=s2 leg claim --task a1 --inherit
+ok "$rc|$(fm a1 leg_scan)|$(grep -c '^## Security check' "$T/a1.md")" "0|[\"$C@$co secret\"]|1" \
+   "L19c7b: his reset --hard to leg_base (repair § 7 (c)), then the inherited claim: the stale record and section are still there"
+SESS=s2 leg security --task a1 --dry-run
+ok "$rc|$(q 'd["tops"]')|$(fm a1 leg_scan)|$(grep -c '^## Security check' "$T/a1.md")" "0|[]|[\"$C@$co secret\"]|1" \
+   "L19c7b: … security --dry-run: tops [], and nothing removed"
+SESS=s2 leg security --task a1
+ok "$rc|$(q 'd["tops"]')|$(q 'd["clean"]')|$(fm a1 leg_scan)|$(grep -c '^## Security check' "$T/a1.md")" "0|[]|True|<none>|0" \
+   "L19c7b: … security: tops [], and the stale leg_scan and ## Security check are removed"
+hasnt "$(cat "$T/a1.md")" "no rewrite point" "L19c7b: … no secret line is left in the task note"
+SESS=s2 leg done --task a1 --verify pass --cwd "$C/sub/l"; ok "$rc" 0 "L19c7b: … done"
+nosecret L19c7b; nonet L19c7b
+unset CWD
+csscen l19c8; leg claim --task a1; lb=$(git -C "$C" rev-parse HEAD); leak "$C" a1; sec=$(git -C "$C" rev-parse HEAD)
+leg security --task a1
+ok "$(tq verdict)|$(tq rewrite)|$(q 'd["tops"][0]["secrets"][0]["pushed"]')" "secret|$lb|False" \
+   "L19c8: control: an unpushed copy secret has its rewrite point"
+git -C "$C" push -q origin "HEAD:refs/heads/chain/$RO"
+leg security --task a1
+ok "$(git -C "$C" branch -r --contains "$sec" | tr -d ' ')|$(tq verdict)|$(q 'd["tops"][0]["secrets"][0]["pushed"]')|$(tq rewrite)|$(tq rewriteWhy)|$(q 'd["ask"]')" \
+   "origin/chain/$RO|secret|True|None|origin already holds ${sec:0:7}|None" \
+   "L19c8: a remote-tracking ref holds the copy's secret (a hand push of chain/$RO): rewrite null, origin already holds it"
+has "$(cat "$T/a1.md")" "- $C at ${sec:0:12}: secret: github-pat in cfg.py, commit ${sec:0:7}, line 1; no rewrite point: origin already holds ${sec:0:7}" \
+   "L19c8: … its section line, for the cannot-rewrite halt"
+nosecret L19c8; nonet L19c8
+unset CWD
 
 # ---- L19d: done reads the latest scan ----
 sscen l19d 5; leg begin --cwd "$R"
@@ -3117,10 +3148,19 @@ leg done --task a5 --verify pass --review "$d" --cwd "$R"
 ok "$rc|$(wc -c < "$STUB_LOG" | tr -d ' ')" "0|0" "L19d5: the key off: done as today, no scan"
 nonet L19d
 unset CWD
-sscen l19d7; leg begin --cwd "$R"; subst "$T/$RO.md" "security_checks: true" "security_checks: yes"
+sscen l19d7; leg begin --cwd "$R"
 leg claim --task a1; tcommit "$R" a1 c.txt "a1 work"; d=$(review "$R" HEAD)
-leg done --task a1 --verify pass --review "$d" --cwd "$R"; ok "$rc" 1 "L19d7: yes: done fails closed (no scan)"
+leg security --task a1; ok "$(tq verdict)" clean "L19d7: a clean scan covers a1's commit, the key true"
+subst "$T/$RO.md" "security_checks: true" "security_checks: yes"; cp "$T/a1.md" "$TMP/a1.snap"; snap
+leg done --task a1 --verify pass --review "$d" --cwd "$R"
+ok "$rc" 1 "L19d7: the key turned yes: done refuses, its clean covering scan notwithstanding"
+has "$err" "security_checks: must be true or false, got 'yes': fix the note" "L19d7: … with security's line"
+cmp -s "$T/a1.md" "$TMP/a1.snap"; ok "$?" 0 "L19d7: … the task note byte-identical"
+same "L19d7"
 leg security --task a1; ok "$rc" 1 "L19d7: … and security refuses the value"
+has "$err" "security_checks: must be true or false, got 'yes': fix the note" "L19d7: … with the same line"
+leg set-aside --task a1 --revert --reason x; ok "$rc|$(git -C "$R" log -1 --format=%s)" "1|✨ feat: a1 c.txt" "L19d7: … and set-aside --revert refuses it, nothing reverted"
+has "$err" "security_checks: must be true or false, got 'yes': fix the note" "L19d7: … with the same line"
 unset CWD
 csscen l19d8
 leg claim --task a1; tcommit "$C" a1 x.txt "a1 work"; d=$(review "$C" HEAD); leg security --task a1
@@ -3148,6 +3188,13 @@ subst "$T/$RO.md" "security_checks: true" "security_checks: yes"
 leg set-aside --task a4 --reason "preflight: mcp did not answer"; ok "$rc" 0 "L19e4: … and with yes"
 subst "$T/$RO.md" "security_checks: yes" "security_checks: true"
 leg claim --task a1; tcommit "$R" a1 c.txt "a1 work"
+subst "$T/$RO.md" "security_checks: true" "security_checks: yes"; cp "$T/a1.md" "$TMP/a1.snap"; snap
+leg set-aside --task a1 --reason x
+ok "$rc|$(fm a1 status)|$(fm a1 owner)" "1|in_progress|leg-1" "L19e4: the own claim with yes: refused"
+has "$err" "security_checks: must be true or false, got 'yes': fix the note" "L19e4: … with security's line"
+cmp -s "$T/a1.md" "$TMP/a1.snap"; ok "$?" 0 "L19e4: … the task note byte-identical"
+same "L19e4: the own claim with yes"
+subst "$T/$RO.md" "security_checks: yes" "security_checks: true"
 snap; leg set-aside --task a1 --reason x
 ok "$rc" 1 "L19e1: the own claim with commits, plain: refused"; has "$err" "set it aside with --revert, after \`leg.py security --task a1\`" "L19e1: … naming --revert"
 same "L19e1"
@@ -3261,28 +3308,28 @@ def sec(pushed, why=None):
     return {"rule": "github-pat", "file": "cfg.py", "line": 3, "commit": "abcdef1234567", "pushed": pushed, "pushedWhy": why}
 head = "A secret (github-pat) in cfg.py, commit abcdef1, line 3, is in /p/r's history, which a Leg never rewrites"
 rw = "rotate it, and while origin does not hold it you may rewrite it out of that history yourself before the halt is cleared"
-eq(leg.security_ask([ent(True, [sec(True)])], "a1"), head + ", and origin already holds it: rotate it?", "ask pushed true")
-eq(leg.security_ask([ent(True, [sec(False)])], "a1"), head + ": " + rw + "?", "ask pushed false")
-eq(leg.security_ask([ent(True, [sec(None, "git ls-remote origin exited 128")])], "a1"),
+eq(leg.security_ask([ent(True, [sec(True)])]), head + ", and origin already holds it: rotate it?", "ask pushed true")
+eq(leg.security_ask([ent(True, [sec(False)])]), head + ": " + rw + "?", "ask pushed false")
+eq(leg.security_ask([ent(True, [sec(None, "git ls-remote origin exited 128")])]),
    head + ", and whether origin holds it is unknown (git ls-remote origin exited 128): " + rw + "?", "ask pushed null")
-eq(leg.security_ask([ent(False, [sec(False)])], "a1"), None, "a copy's secret is never asked")
+eq(leg.security_ask([ent(False, [sec(False)])]), None, "a copy's secret is never asked")
 cfg = {"path": ".gitleaksignore", "cause": "uncommitted", "accept": "config:0123456789ab"}
-eq(leg.security_ask([ent(False, config=[cfg])], "a1"),
+eq(leg.security_ask([ent(False, config=[cfg])]),
    "This change leaves an uncommitted .gitleaksignore, the secret scanner's own config: keep it (answer "
    "security-accept config:0123456789ab), or drop the change?", "ask config")
 nofix = {"ecosystem": "PyPI", "name": "req", "version": "1.0", "id": "GHSA-x", "fixed": [], "accept": "advisory:0123456789ab"}
 fix = dict(nofix, fixed=["1.2", "2.0"], accept="advisory:ba9876543210")
-eq(leg.security_ask([ent(False, advs=[nofix])], "a1"),
+eq(leg.security_ask([ent(False, advs=[nofix])]),
    "PyPI req 1.0 has advisory GHSA-x with no fixed release: keep it (answer security-accept advisory:0123456789ab), "
    "name another package, or drop the need?", "ask advisory, no fixed release")
-eq(leg.security_ask([ent(False, advs=[fix])], "a1"),
+eq(leg.security_ask([ent(False, advs=[fix])]),
    "PyPI req 1.0 has advisory GHSA-x, fixed in 1.2, 2.0, that the Leg did not move past: keep it (answer "
    "security-accept advisory:ba9876543210), or move it to a fixed release?", "ask advisory, fixed")
-eq(leg.security_ask([ent(False, [sec(False)], config=[cfg], top="/c"), ent(True, [sec(True)])], "a1"),
+eq(leg.security_ask([ent(False, [sec(False)], config=[cfg], top="/c"), ent(True, [sec(True)])]),
    "The Security check found 2 things only you can settle: (1) in /c: This change leaves an uncommitted "
    ".gitleaksignore, the secret scanner's own config: keep it (answer security-accept config:0123456789ab), or drop "
    "the change; (2) in /p/r: " + head + ", and origin already holds it: rotate it?", "ask, two items over two entries")
-eq(leg.security_ask([ent(True), ent(False)], "a1"), None, "no item: no ask")
+eq(leg.security_ask([ent(True), ent(False)]), None, "no item: no ask")
 t0 = time.monotonic()
 rc, out, err, cut = leg.run_scan([sys.executable, "-c", "import time; time.sleep(60)"], 1)
 eq((cut, time.monotonic() - t0 < 1 + leg.SCAN_GRACE + 2), (True, True), "run_scan cuts a sleeping child within timeout + grace")
@@ -3313,6 +3360,43 @@ eq((got, "ls-remote" in calls), ((None, "not read: the Security check's 420 s bu
    "settle: under 1 s left, no ls-remote")
 got, calls = settle(base, pushed=True)
 eq((got[0], calls), (True, []), "settle: a scanner true is kept, with no call")
+# The budget: a call held to the deadline never starts with under 1 s left (within), so none runs past it.
+eq(leg.within(time.monotonic() + 0.5), None, "within: under 1 s left, no call")
+eq(leg.within(time.monotonic() + 100, 5), 5, "within: its cap")
+eq(leg.within(time.monotonic() + 3, 30) <= 3, True, "within: at most the rest of the deadline")
+past, OUT = time.monotonic() - 1, "the Security check's 420 s budget ran out"
+leg.git, calls = fake({})
+eq((leg.uncommitted_paths("/p/r", past), calls), ([], []), "uncommitted_paths past the deadline: [], no git call")
+leg.git, calls = fake({})
+leg.sweep_scratch("/p/r", past)
+with leg.scratch_tree("/p/r", past, 420) as got:
+    eq(got, (None, "not scanned: " + OUT), "scratch_tree past the deadline: not scanned")
+eq(calls, [], "sweep_scratch and scratch_tree past the deadline: no list, add or teardown")
+leg.git, calls = fake({"worktree": (0, "worktree /p/r\n\nworktree /tmp/leg-security-999999-x\n")})
+leg.sweep_scratch("/p/r", time.monotonic() + leg.TEARDOWN - 5)
+eq(calls, ["worktree"], "sweep_scratch: a dead tree's teardown waits while under TEARDOWN s are left")
+ent = {"top": "/p/r", "base": "c" * 40}
+leg.git, calls = fake({})
+leg._scan_into(ent, types.SimpleNamespace(path="/n.md"), "/p/r", past, 420)
+eq((ent.get("error"), calls), ("not scanned: " + OUT, []), "_scan_into past the deadline: not scanned, no scan")
+copy = {"secrets": [{"commit": "a" * 40, "pushed": False}], "rewriteFrom": "b" * 40, "mergeBehind": False}
+leg.git, calls = fake({})
+eq((leg.rewrite_point("/c", "c" * 40, "a1", copy, past, 420), calls), ((None, "not read: " + OUT), []),
+   "rewrite_point past the deadline: not read, no git call")
+held = dict(copy, secrets=[{"commit": "a" * 40, "pushed": False}, {"commit": "d" * 40, "pushed": True}], mergeBehind=True)
+leg.git, calls = fake({})
+eq((leg.rewrite_point("/c", "c" * 40, "a1", held, time.monotonic() + 100, 420), calls),
+   ((None, "origin already holds ddddddd"), []), "rewrite_point: a secret origin holds comes first, with no git call")
+log = f"\x1e{'e' * 40}\x1ffix\n\nTask: [[a1]]\n\x1f\n\ncfg.py\n\x1e{'f' * 40}\x1fdocs\n\x1f\n\ndocs/reviews/r.md\n"
+leg.git, calls = fake({"merge-base": (0, ""), "log": (0, log)})
+eq((leg.rewrite_point("/c", "c" * 40, "a1", copy, time.monotonic() + 100, 420), calls), (("b" * 40, None), ["merge-base", "log"]),
+   "rewrite_point: one log for the window, a review-doc commit above it kept")
+leg.git, calls = fake({"merge-base": (0, ""), "log": (0, log + f"\x1e{'9' * 40}\x1fpeer\n\x1f\n\na.txt\n")})
+eq(leg.rewrite_point("/c", "c" * 40, "a1", copy, time.monotonic() + 100, 420),
+   (None, "999999999999 above it is not this task's (no Task: [[a1]] line)"), "rewrite_point: a peer commit above it")
+leg.git, calls = fake({"merge-base": (1, "")})
+eq(leg.rewrite_point("/c", "c" * 40, "a1", copy, time.monotonic() + 100, 420),
+   (None, "bbbbbbbbbbbb is below the task's leg_base"), "rewrite_point: below leg_base")
 print("\n".join(bad) if bad else "all")
 PY
 ok "$(cat "$TMP/l19h.out")" all "L19h: in process: shell_safe, security_ask, run_scan's cut and settle_pushed"
