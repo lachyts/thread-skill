@@ -14,8 +14,9 @@
 //   lease      it states the code's LEG_LEASE_LAPSE (90) and LEG_WAIT_LAPSE (180) and that close deletes the lease
 //   glossary   CONTEXT.md's **Capacity** and **Rollout** entries no longer call it "not yet built"
 //   legs       legs.md names `leg.py next` at § Verify's renewal point and the `wait` kinds `capacity` and `quota`
-//   stop       § Capacity reads `signals` for the code's CAPACITY_STOP_KEY (`stop_suites`, p36-10) and no longer calls it
-//              "never read here yet"
+//   stop       § Capacity reads `signals` for the code's CAPACITY_STOP_KEY (`stop_suites`, p36-10) and `memory` and no
+//              longer calls it "never read here yet"; its row names the code's CAPACITY_MEMORY_WARN (2) as the restart
+//              hold's level (p39-7)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read } from '../lib/contract-text.mjs'
@@ -56,6 +57,7 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
   const primary = grab(cap, /^CAPACITY_PRIMARY_LOGIN = "([^"]*)"/m)
   const warn = grab(cap, /^CAPACITY_WARN = "([^"]*)"/m)
   const stopKey = grab(cap, /^CAPACITY_STOP_KEY = "([^"]*)"/m)
+  const memWarn = grab(cap, /^CAPACITY_MEMORY_WARN = (\d+)/m)
   const keys = (grab(cap, /^CAPACITY_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((k) => k.slice(1, -1)) ?? []
   const legLapse = grab(code, /^LEG_LEASE_LAPSE = timedelta\(minutes=(\d+)\)/m)
   const waitLapse = grab(code, /^LEG_WAIT_LAPSE = timedelta\(minutes=(\d+)\)/m)
@@ -83,7 +85,8 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
   if (!verify.includes('Run `leg.py next` before each re-run of the wait after a `verify-slot: still running` line') ||
     !legs.includes('- `wait` of kind `capacity` or `quota`')) fails.push('legs')
   const signalsRow = collapse(away.split('\n').find((l) => l.startsWith('| `signals` |')) ?? '')
-  if (stopKey !== 'stop_suites' || !signalsRow.includes(`Read for \`${stopKey}\` only`) ||
+  if (stopKey !== 'stop_suites' || !signalsRow.includes(`Read for \`${stopKey}\` and \`memory\` only`) ||
+    memWarn !== '2' || !signalsRow.includes(`at warning (${memWarn}) or worse`) ||
     !s.includes(`\`CAPACITY_STOP_KEY = "${stopKey}"\``) || /never read here yet/.test(s)) fails.push('stop')
   return fails
 }
@@ -123,8 +126,10 @@ test('controls: each mutation fails exactly its rule', () => {
   only('legs', 'Run `leg.py next` before each re-run of the wait after a `verify-slot: still running` line',
     'Re-run the wait after a `verify-slot: still running` line', 'legs', 'no renewal point')
   only('legs', '- `wait` of kind `capacity` or `quota`', '- `wait` of kind `room`', 'legs', 'no Capacity kinds')
-  only('away', 'Read for `stop_suites` only', 'Carried, never read here yet', 'stop', 'the row back to carried-only')
+  only('away', 'Read for `stop_suites` and `memory` only', 'Carried, never read here yet', 'stop', 'the row back to carried-only')
   only('cap', 'CAPACITY_STOP_KEY = "stop_suites"', 'CAPACITY_STOP_KEY = "suites_stop"', 'stop', 'another stop key in the code')
+  only('cap', 'CAPACITY_MEMORY_WARN = 2', 'CAPACITY_MEMORY_WARN = 3', 'stop', 'another warning level in the code')
+  only('away', 'at warning (2) or worse', 'at critical (4) only', 'stop', 'the row without the restart hold')
 })
 
 test('every rule has a control', () => {

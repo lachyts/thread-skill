@@ -29,7 +29,7 @@ Two rollouts in one rollout clone (ADR 0042) would share its worktrees, its cana
 
 7. **The Mac-wide cap is unchanged.** The Trickle and the Away cap (ADR 0049) already count every rollout's running tasks; nothing here raises them.
 
-8. **The estate pass resolves each project's clone.** estate-scan runs `clone` per declaring project, then that project's own `--resolve`, root facts and unfinished-rollout check, and reports each in the repo row's `projects[]`; the row keeps the default resolution and carries no project's unfinished-rollout refusal. estate-rank reads a run's root and blockers from its home project's entry, and keys `sameRoot` on `rolloutRoot`. estate-dispatch's root contest is per project, and two parallel entries on one origin never share a batch (each fork's § 0 `clone` reads clones the other has not yet taken).
+8. **The estate pass resolves each project's clone.** estate-scan runs `clone` per declaring project, then that project's own `--resolve`, root facts and unfinished-rollout check, and reports each in the repo row's `projects[]`; the row keeps the default resolution and carries no project's unfinished-rollout refusal. estate-rank reads a run's root and blockers from its home project's entry, and keys `sameRoot` on `rolloutRoot`. estate-dispatch's root contest is per project, and two parallel entries on one origin never share a batch (each fork's § 0 `clone` reads clones the other has not yet taken). Amended 2026-11-06 (p39-10): runs of two projects that contest one root are both scheduled, the lower-ranked in a batch after the other's (its schedule entry's `after[]`), so its fork's § 0 `clone` reads the earlier fork's note and picks its own clone; only a run whose project slug a better-ranked run on the root shares (one slug names one clone) waits `same root`.
 
 9. **Supersede, status, repair and reflect read each rollout separately.** The Reflection's Escapes sweep groups a repo's Project roots by family (a root's in-place twin), so two projects' clones of one checkout raise no flag. Its knob rule stays per repo on purpose: `rollouts.toml`'s knobs are one table per origin, shared by both projects, so landing from two rollouts' proposals in one Reflection could move one key both ways; every proposer is recorded, and the older rollout's proposal counts toward agreement at the next Reflection.
 
@@ -59,7 +59,7 @@ Two rollouts in one rollout clone (ADR 0042) would share its worktrees, its cana
 - A waiting lead learns the lane is free only from its own reads: its origin wait (about one 20 s poll plus its turn) or its heartbeat (at most 20 minutes). A waiter that stops trying idles the lane for at most 30 minutes, a crashed holder for at most 45.
 - A gated or review-required task may need a second approval when another project's merge lands during its merge hold.
 - A first-time per-project clone still asks ADR 0042's question, so under orient-all its fork stops and Lachy runs `/thread:schedule` once.
-- A root-contest loser goes in the next estate pass, never a later batch of the same one.
+- A root-contest loser of another project goes in a later batch of the same pass (p39-10); one of the winner's project slug goes in the next pass. A later batch's fork may still stop at § 0 (its own clone is new, or every clone is held), as any fork can.
 
 ## Files
 

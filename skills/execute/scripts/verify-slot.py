@@ -75,9 +75,14 @@ Contract.
    QUEUE_FRESH_POLLS x its record's poll) seconds, 10 x the poll base (10 s at the default 1 s; 5 s minimum), is
    asleep (a stopped or stalled waiter): nobody counts it, nobody reaps it while its flock is held, and once it
    touches again it counts at its old place. The entry is dropped when acquire() returns, so a heat-stop re-queue (a
-   new acquire()) goes to the back. Every poll, and `status`, reaps a `waiter-*.wait` or `.waiter-*.tmp` it can flock
-   LOCK_NB; each ordinary (non-priority) poll that is not heat-held, and `status`, reap a `queue-*.wait` or
-   `.queue-*.tmp` the same way (each inode re-checked against the path before the unlink). A line entry is read by
+   new acquire()) goes to the back. A run the restart hold holds (contract 7, p39-7) holds no line entry and no waiter
+   file: a restart-held poll drops one it holds before its waiting line, and it registers again, at the back, at its
+   next poll that hold does not hold (a line entry after that poll's miss, a priority waiter file before its try). A
+   priority acquirer's re-registration that loses its races or hits an OSError waits unregistered with a WARN
+   (`verify-slot: WARN <dir>: could not register a waiter again (<why>); waiting unregistered`), never a SlotDirError
+   (only the registration at entry raises one). Every poll, and `status`, reaps a `waiter-*.wait` or `.waiter-*.tmp`
+   it can flock LOCK_NB; each ordinary (non-priority) poll that is not heat-held, and `status`, reap a `queue-*.wait`
+   or `.queue-*.tmp` the same way (each inode re-checked against the path before the unlink). A line entry is read by
    _probe_entry, on the fd it opened: fstat for the mtime and pread for the record, accepted only while os.stat(path)
    still names that (st_dev, st_ino), so a name dropped and recreated between the open and the check is skipped for
    that scan, never misread. Priority acquirers ignore the line, and the old `waiter-` scan is unchanged, so a copy
@@ -126,27 +131,43 @@ Contract.
    (another rollout's Engine snapshot, an older plugin install) shares the pool and still runs hot.
    The Capacity stop (p36-10, ADR 0067 d8; execute away.md § Capacity): memory critical, read from a fresh
    capacity.json's `signals.stop_suites` (Chorus sets it at memory critical, or at thermal trapping) through
-   capacity_stop(), holds and stops slotted suites exactly as trapping does. While it is JSON true, no slot is free
-   (as at heavy: no slot tried, no line reaped, the heartbeat kept, the head-age clock counting, a priority waiter
-   keeping its waiter file; `waiting (<label>)`), and a running slotted suite is stopped at the same watch tick (the
-   same HEAT_SETTLE, stop() and re-queue; `verify-slot: capacity stop (<label>): ended the suite after Ns; no verdict,
-   never red: back in line to restart from the beginning once the Capacity stop clears`). The label is `memory:
-   critical` when `signals.memory` is an integer of at least 4, else `capacity: stop_suites` (Chorus saw thermal
-   trapping notifyutil did not). Its no-verdict lines name it in place of the heat: `verify-slot: no verdict:
-   stopped while the Capacity stopped suites (<label>); exit 76` and `… no verify slot within <S>s (<label>); exit
-   76`; the Run record ends its suite `heat` and lead-integrate.py's verify reads `heat` (exit 76), so the outcome
+   capacity_stop(), holds and stops slotted suites exactly as trapping does. While it is JSON true, no slot is free (as
+   at heavy: no slot tried, no line reaped, the heartbeat kept, the head-age clock counting, a priority waiter keeping
+   its waiter file; `waiting (<label>)`), and a running slotted suite is stopped at the same watch tick (the same
+   HEAT_SETTLE, stop() and re-queue; `verify-slot: capacity stop (<label>): ended the suite after Ns; no verdict, never
+   red: back in line to restart from the beginning once the Capacity stop clears and memory falls below warning`). The
+   label is `memory: critical` when `signals.memory` is an integer of at least 4, else `capacity: stop_suites` (Chorus
+   saw thermal trapping notifyutil did not). Its no-verdict lines name it in place of the heat: `verify-slot: no
+   verdict: stopped while the Capacity stopped suites (<label>); exit 76` and `… no verify slot within <S>s (<label>);
+   exit 76`; the Run record ends its suite `heat` and lead-integrate.py's verify reads `heat` (exit 76), so the outcome
    vocabulary is unchanged. The heat is read first, so at heavy or worse the heat holds the wait and at trapping or
    worse a stop is a heat stop, its lines unchanged (at heavy, below trapping, a running suite is still stopped by a
    fresh stop_suites, with the capacity stop's line); acquire() reads capacity.json once per poll that the heat does not
    hold, for both the stop and contract 10's eff. Fails open: a missing, stale or unreadable file, a flag that is
-   anything but JSON true, or a capacity.py that will not load stops nothing. Every capacity.json read (acquire()'s
-   per poll, and the watch's) and suite_stop() call runs with TERM, INT and HUP held (_stops_held), since capacity.py
-   and its callers here catch any exception: a stop that lands in it is delivered as it ends, so it still stops the
-   run (contract 4), never swallowed into a None reading. Residuals: the hold and the stop share
-   one threshold (no hysteresis, as heat has), so a suite whose own memory tips the Mac critical can cycle stop and
-   restart, each no verdict, bounded by its one slot-wait deadline (the follow-up task
-   thread-skill-capacity-stop-holds-the-restart-past-warning); and a copy of this script from before p36-10
-   shares the pool and never stops for memory.
+   anything but JSON true, or a capacity.py that will not load stops nothing. Every capacity.json read (acquire()'s per
+   poll, and the watch's) and suite_stop() call runs with TERM, INT and HUP held (_stops_held), since capacity.py and
+   its callers here catch any exception: a stop that lands in it is delivered as it ends, so it still stops the run
+   (contract 4), never swallowed into a None reading.
+   The restart hold (p39-7), the Capacity stop's hysteresis, as the heat holds a trapping stop's restart at heavy: it
+   is armed only by a Capacity stop (acquire()'s `restart`, the last stop's hold, a label), so a fresh suite, and a run
+   a heat stop put back in line, never wait on it. Armed, each poll the heat and the stop leave free is held while that
+   same reading is fresh and its `signals.memory` an integer (never a bool) of at least CAPACITY_MEMORY_WARN (2,
+   warning), on Chorus's scale (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical; capacity.py's
+   restart_hold(), called with stops held as suite_stop() is): `waiting (memory: warning, after a capacity stop)`, or
+   `memory: critical, after a capacity stop` at 4 or more (a hand-written file with stop_suites not true), said once
+   while it holds. Its no-verdict lines name that label (`verify-slot: no verdict: stopped while the Capacity stopped
+   suites (memory: warning, after a capacity stop); exit 76`, and the slot wait's), still 76, a suite ended `heat` and
+   lead-integrate.py's `heat`. It holds no place in line (contract 5), so it never holds back a fresh suite. Fails
+   open: a missing, stale or unreadable reading, a `memory` that is null, a bool, a string, a float or below 2, or a
+   capacity.py with no restart_hold (or one that raises) holds nothing. It holds only a restart: a running suite at
+   warning is never stopped by it (Guarded.watch() still stops on stop_suites alone). Residuals: a fresh suite may
+   still start at warning and tip the Mac critical (it is then stopped and restart-held); a stop Chorus raised for
+   thermal trapping (`capacity: stop_suites`) gets the memory hold only (the heat, read first here, still holds its
+   restart at heavy); `status` shows no trace of a restart-held run (it holds no entry by design, so its own waiting
+   line is the view); a priority re-queue's entry-time waiter file lives until its first poll's reading (milliseconds:
+   a fresh run that scans then waits one more poll); and a copy of this script from before p39-7 still cycles stop
+   and restart (each no verdict, bounded by its one slot-wait deadline), and one from before p36-10 shares the pool
+   and never stops for memory.
 8. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
    such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
    suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
@@ -211,7 +232,9 @@ hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat sto
 (<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
 cools`, and the exit is the last run's rc. The Capacity stop (contract 7) does the same with its label: `verify-slot:
 waiting (memory: critical)` and `verify-slot: capacity stop (memory: critical): …`, and its no-verdict lines name it
-in place of the heat. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
+in place of the heat; its restart also waits while memory is at warning or worse (the restart hold), `verify-slot:
+waiting (memory: warning, after a capacity stop)`, its no-verdict lines then naming that label. The slot wait is
+bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
 integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default
 `verify_timeout` of 1800 s, max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify
 does; a constant, never a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for
@@ -732,6 +755,24 @@ def _join_line(d, kind, base):
     return fd, path, (1, seq, os.path.basename(path))
 
 
+def _rewait(d, kind):
+    """(fd, path) of a priority acquirer's waiter file registered again after the restart hold (contract 5 and contract
+    7, p39-7), or (None, None): one that loses WAITER_TRIES races, or cannot be written (an OSError), waits unregistered
+    with a WARN, never a SlotDirError (only the registration at entry raises one). A stop's own exception passes
+    through, as _register_waiter re-raises it."""
+    try:
+        fd, path = _register_waiter(d, kind)
+        why = f"lost {WAITER_TRIES} races"
+    except OSError as e:
+        fd = path = None
+        why = e.strerror or str(e)
+    if fd is None:
+        print(f"verify-slot: WARN {d}: could not register a waiter again ({why}); waiting unregistered",
+              file=sys.stderr)
+        return None, None
+    return fd, path
+
+
 # ---- slots ----------------------------------------------------------------------------------------------------
 
 class Slot:
@@ -876,6 +917,21 @@ def _suite_stop(reading):
     return label if isinstance(label, str) and label else None
 
 
+def _restart_hold(reading):
+    """The restart hold's label (contract 7, p39-7), `memory: <warning|critical>, after a capacity stop`, from
+    capacity.py's restart_hold(reading), else None. Never raises (a capacity.py with no restart_hold, or one that
+    raises, holds nothing), but a stop that lands meanwhile is held across the call and raised as it ends
+    (_stops_held), never swallowed."""
+    if reading is None:
+        return None
+    with _stops_held():
+        try:
+            word = _CAPACITY_MOD.restart_hold(reading)
+        except Exception:  # noqa: BLE001 — a capacity.py with no restart_hold, or one that raises, holds nothing
+            return None
+    return f"memory: {word}, after a capacity stop" if isinstance(word, str) and word else None
+
+
 def capacity_stop(reading=None):
     """The Capacity stop (contract 7): None, or its label (`memory: critical`, or `capacity: stop_suites` when Chorus
     saw thermal trapping notifyutil did not) while a fresh capacity.json's `signals.stop_suites` is JSON true. With no
@@ -902,12 +958,15 @@ def while_words(h, hot="the Mac was hot"):
 
 
 def _until_words(h):
-    """When a stopped suite restarts (contract 7): once the Mac cools, or once the Capacity stop clears."""
-    return "once the Capacity stop clears" if isinstance(h, str) else "once the Mac cools"
+    """When a stopped suite restarts (contract 7): once the Mac cools, or, for a Capacity stop, once it clears and
+    memory falls below warning (the restart hold, p39-7)."""
+    if isinstance(h, str):
+        return "once the Capacity stop clears and memory falls below warning"
+    return "once the Mac cools"
 
 
 def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None,
-            head_age=HEAD_AGE):
+            head_age=HEAD_AGE, restart=None):
     """Wait for one of `slots` verify slots: a Slot, or None when max_wait seconds pass first (0: one try, which takes
     a free slot only when no awake run is ahead in line).
 
@@ -927,6 +986,14 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
     tried, no line reaped, `waiting (<label>)`, e.g. `waiting (memory: critical)`). `why`, a dict the caller keeps,
     gets "heat": the hold of each poll held, the level (an int) for the heat or the label (a str) for the Capacity
     stop (hold_why() renders either), else None. max_wait bounds the whole wait, holds included.
+    The restart hold (contract 7, p39-7): `restart` is the hold of the stop that put this caller back in line, and only
+    a Capacity stop's label (a non-empty str) arms it; None (a fresh suite) or a heat level (an int) arms nothing.
+    Armed, each poll the heat and the Capacity stop leave free reads _restart_hold() from the same reading and is held
+    while it gives a label (`waiting (memory: warning, after a capacity stop)`, kept in `why` as the stop's is). Such
+    a poll holds no place in line: before its waiting line it drops its line entry (and its place, so it joins again
+    at the back, after its next miss) or, for a priority acquirer, its waiter file, and restarts the head-age clock; at
+    the first poll the hold leaves free a priority acquirer registers its waiter file again before that poll's try
+    (_rewait: lost races or an OSError wait unregistered with a WARN, never a SlotDirError).
     The Capacity (contract 10): each poll that is not held reads eff = min(slots, C) (_capacity_slots) from that same
     reading, scans every slot, and takes one only while eff - (the slots held) >= need."""
     if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:
@@ -945,6 +1012,8 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
     qfd = qpath = place = None   # a non-priority waiter's own line entry and its place (p34-1), after its first miss
     joined = False
     head_since, aged = None, False   # the age bound: since when it has been the head; whether it has aged
+    armed = isinstance(restart, str) and bool(restart)   # the restart hold (p39-7): only after a Capacity stop
+    rejoin = False   # a priority acquirer whose waiter file a restart-held poll dropped: it registers again
     try:
         if priority:
             try:
@@ -965,6 +1034,23 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
             # The heat first; below heavy, one capacity.json reading gives both the Capacity stop and eff.
             reading = None if level >= HEAT_HOLD else _capacity_reading()
             hold = level if level >= HEAT_HOLD else _suite_stop(reading)
+            # The restart hold (p39-7): a poll the heat and the stop leave free, after a Capacity stop, at warning or
+            # worse. It holds no place in line, so a fresh suite never waits behind a run only its own stop holds.
+            rheld = False
+            if hold is None and armed:
+                hold = _restart_hold(reading)
+                rheld = hold is not None
+            if rheld:
+                _drop_waiter(qfd, qpath)
+                qfd = qpath = place = None
+                joined = False
+                _drop_waiter(wfd, wpath)
+                wfd = wpath = None
+                rejoin = priority
+                head_since, aged = None, False
+            elif rejoin:
+                rejoin = False
+                wfd, wpath = _rewait(d, kind)   # back at the back, before this poll's try, as at entry
             hot = hold is not None
             if why is not None:
                 why["heat"] = hold
@@ -1013,7 +1099,7 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
             now = time.monotonic()
             if max_wait is not None and now - start >= max_wait:
                 return None
-            if not priority and not joined:
+            if not priority and not joined and not rheld:
                 joined = True
                 qfd, qpath, place = _join_line(d, kind, base)
             reason = hold_why(hold) if hot else "slots"
@@ -1403,15 +1489,16 @@ def _default_slots():
     return n
 
 
-def _acquire_within(slots, prio, why, wait, t_end, first):
+def _acquire_within(slots, prio, why, wait, t_end, first, restart=None):
     """acquire() under `run`'s one slot-wait deadline (p32-1; lead-integrate.py verify's rule): the first pass always
     tries, with max_wait=wait (0: one try, which takes a free slot only when no awake run is ahead in line); a re-queue
     after a heat stop tries only while time is left before t_end, and with no time left makes no try at all (no
-    waiting line). A Slot, or None when none came in time; a SlotDirError passes through."""
+    waiting line). `restart` is the hold of the stop that put it back in line (acquire()'s: a Capacity stop's label
+    arms the restart hold). A Slot, or None when none came in time; a SlotDirError passes through."""
     left = wait if first else t_end - time.monotonic()
     if not first and left <= 0:
         return None
-    return acquire(slots, max_wait=max(0.0, left), priority=prio, kind="run", why=why, on_wait=_say)
+    return acquire(slots, max_wait=max(0.0, left), priority=prio, kind="run", why=why, on_wait=_say, restart=restart)
 
 
 def _no_slot(wait, why, stopped):
@@ -1444,7 +1531,7 @@ def cmd_run(argv):
         t_end, first = time.monotonic() + wait, True
         while True:
             try:
-                slot = _acquire_within(slots, prio, why, wait, t_end, first)
+                slot = _acquire_within(slots, prio, why, wait, t_end, first, restart=stopped)
             except SlotDirError as e:
                 _say(f"WARN {e}; running unslotted")
                 slot = None
@@ -1615,7 +1702,7 @@ def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
         t_end, first = time.monotonic() + wait, True
         while True:
             try:
-                slot = _acquire_within(slots, prio, why, wait, t_end, first)
+                slot = _acquire_within(slots, prio, why, wait, t_end, first, restart=stopped)
             except SlotDirError as e:
                 _say(f"WARN {e}; running unslotted")
                 slot = None
