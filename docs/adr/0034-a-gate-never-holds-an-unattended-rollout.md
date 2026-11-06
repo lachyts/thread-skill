@@ -208,7 +208,9 @@ probes without asking, always.
   conjunction that joins a second thing (`and`, `or`, `plus`, `as well as`, `along with`, `together with`, `&`, `+`,
   `;`), a plural `Logins`, a Login it cannot name or one not declared asks. It reads no limit, ledger or month line,
   is machine-wide (a Leg signs one), and is annotated `(approved <date> under the standing approval: test Login
-  <name>, from <source>)`.
+  <name>, from <source>)`. Schedule and orient record it ahead, never ask it (p39-3): the sweep's `login` field reads
+  each `credential:` gate line naming a Login with the declared test Logins, read from rollouts.toml only when a
+  reading needs them.
   The built-in is [] (off): the plugin is public, so a hard-coded `dummy` was rejected. Lachy adds `test_logins =
   ["dummy"]` (with `schema = 5`) by hand, after installing the release that knows the key and running the reader
   check rollout-settings.py's header names; until then the Login gate asks as before.
@@ -230,8 +232,8 @@ it is a verifier or review failure) and the annotation records the total exposur
 - (vi) The test-Login reading asks falsely, fail closed, on `access` or `token` beside the Login (`access to the dummy
   Claude Login`, `the dummy Claude Login's session token`), on an account, key, API, PAT or `.env` anywhere on the
   gate's line, on any conjunction or `+` (two declared Logins joined by `and` ask: a comma or `then` lists them), and
-  on a `live` before anything but a probe, run or test. Schedule and orient's Planner line (a follow-on) words the
-  gate to avoid them. Its deny list and other-credential, `@` and conjunction steps are a reject list, not a
-  whitelist, as ADR 0063 residual (i) is for the class: a second thing named in plain prose with none of them (`the
-  dummy Login, to push to the npm registry`, `the dummy Login, then Lachy's Gmail`) passes, and the annotation names
-  only the Login, so any other use is a review failure.
+  on a `live` before anything but a probe, run or test. Schedule and orient's Planner line (p39-3: schedule step 7's
+  and orient R5.2's test-Login Planner line) words the gate to avoid them. Its deny list and other-credential, `@`
+  and conjunction steps are a reject list, not a whitelist, as ADR 0063 residual (i) is for the class: a second thing
+  named in plain prose with none of them (`the dummy Login, to push to the npm registry`, `the dummy Login, then
+  Lachy's Gmail`) passes, and the annotation names only the Login, so any other use is a review failure.

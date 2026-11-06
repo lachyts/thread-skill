@@ -8,7 +8,9 @@
     EOF
 
 The single home of the readings of free text (and the one env-file read) the gate path needs. Stdlib only; it writes
-nothing and makes no network call.
+nothing and makes no network call; the sweep CLI alone also reads `~/.config/thread/rollouts.toml`'s `[defaults]
+test_logins` through rollout-settings.py's resolve(repo=None), only when a reading needs it (part 1), with no git and
+no bytecode.
 
 1. The sweep (schedule § 3.6; orient reshuffle R3 through it). `sweep(text)` finds every hit of the SPEND,
    CREDENTIAL and IRREVERSIBLE lists in a task note's body. A word matches case-insensitively where a word starts
@@ -24,10 +26,34 @@ nothing and makes no network call.
    the honest controls in tests/gated-inputs.test.mjs. The output is the RECALL FLOOR for schedule § 3.6, never its
    verdict: a hit whose context names nothing the task pays for or authorises is dismissed there, and listed.
 
+   The `login` field (p39-3: schedule § 3.6 and orient reshuffle R3 (c) record a declared test Login ahead instead of
+   asking it). `sweep(text, logins)`, with `logins` a list (possibly empty) of declared test Logins, gives each
+   credential hit whose source line is a Login gate a `"login": login_reading(<that line>, logins)` field (part 5's
+   {names, why}). The source line is the whole text line holding the hit's start. It is a Login gate when, its
+   leading `>` blockquote markers (BLOCKQUOTE_RE) and its trailing `(approved …)` suffix (APPROVED_SUFFIX_RE, any case:
+   reconcile-rollout.py's GATE_ANNOT_RE, copied, since reconcile-rollout loads this module) stripped and then its outer
+   whitespace (a CR too), gate_kind() reads `credential` and has_login_phrase() holds. Every other hit carries no
+   `login` key and keeps schedule's rule (fail closed): prose, a `- Planner:` line, a numbered `1. credential:` line,
+   a gate with no Login word, and every spend and irreversible hit. So with a list, every Login-gate credential hit
+   carries one; with None (the default), none does, and the output is the one-argument shape.
+
    CLI: `sweep <note>...` reads only the body below each note's frontmatter and prints one JSON line per note,
-   {"slug", "spend": [{"word", "at"}], "credential": [...], "irreversible": [...]}, hits in text order; `at` is the
-   hit with up to 40 characters either side, newlines folded to spaces. A note it cannot read prints one
-   `gated_inputs: <path>: <reason>` line on stderr and the run goes on; the exit is then 1 (else 0; usage 2).
+   {"slug", "spend": [{"word", "at"}], "credential": [{"word", "at"[, "login"]}], "irreversible": [...]}, hits in text
+   order; `at` is the hit with up to 40 characters either side, newlines folded to spaces. Each note is swept first
+   with `[]`: a Login reading that stops at steps 1-6 already holds its final why, since those steps never read
+   `logins`. Only when one reading reaches step 7 (NO_LOGINS_WHY) does the CLI read the declared test Logins, at most
+   once per process, reused for later notes: rollouts.toml's `[defaults] test_logins` through rollout-settings.py
+   (loaded from beside this file) and its resolve(repo=None), in process, with no git, no subprocess and no bytecode
+   written. A non-empty list re-sweeps that note with it; `[]` (the built-in, or no file) leaves the first sweep, its
+   hits reading NO_LOGINS_WHY. A note that needs no declaration never triggers the read, and prints the same under any.
+   A read that fails (a refused file, no tomllib, a loader failure) prints that note, and every later one that needs
+   the declaration, in the one-argument shape with no `login` key, so every hit keeps the ask, and writes one
+   `gated_inputs: test_logins: <why>` line on stderr, the first time only (the why in reconcile-rollout.py's
+   _machine_settings words). A note it cannot read prints one `gated_inputs: <path>: <reason>` line on stderr and the
+   run goes on. Stderr follows note order: the `test_logins` line is written while sweeping the first note that needs
+   the declaration, after the lines of the notes before it and before those of the notes after it. The exit is 1 when
+   any stderr line was written (an unreadable note, or test Logins a note needed and could not read), every readable
+   note still printed; else 0; usage 2.
 
 2. The exposure reading (execute's standing approval, `reconcile-rollout.py approve-gates --standing`).
    `exposure(gate)` returns {"usd": Decimal | None, "why": str}, the full reading; None means it cannot price the
@@ -245,15 +271,19 @@ nothing and makes no network call.
      the annotation names only the Login, and any other use is a review failure.
    - `login_annotation(date, names, source)`: the `## Approved gates` suffix, `(approved <date> under the standing
      approval: test Login <n1, n2>, from <source>)`; it raises ValueError on a `)` in any part, as annotation() does.
+   The sweep (part 1's `login` field, p39-3) is the second reader of login_reading, beside the standing approval:
+   schedule § 3.6 and orient reshuffle R3 (c) record ahead a credential hit whose reading names only declared Logins.
+   A record ahead is only a hint, never a grant: the stop re-reads the plan's declared gate in full and asks then.
 
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
 OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
 PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, covered, annotation, format_usd, gate_kind, credential_reading,
 read_env, env_proof, bootstrap_refreshes, credential_covered, credential_annotation, MAX_ENV_BYTES, DENY_NOUNS,
-has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY.
+has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY, APPROVED_SUFFIX_RE.
 """
 import base64
 import binascii
+import importlib.util
 import json
 import os
 import re
@@ -315,9 +345,9 @@ def _context(text, a, b):
     return re.sub(r"\s*\n\s*", " ", text[max(0, a - CONTEXT):b + CONTEXT]).strip()
 
 
-def hits(text, words):
-    """Every hit of a word list in the text, in text order: [{"word", "at"}]. One hit per position per word: the
-    marker's three patterns share the word `$ amount`, so a position two of them match reports once."""
+def _found(text, words):
+    """Every hit of a word list in the text, sorted: [(start, word, end)]. One hit per position per word: the marker's
+    three patterns share the word `$ amount`, so a position two of them match reports once."""
     masked = None
     found = {}
     for word, regex, prose_only in words:
@@ -328,12 +358,42 @@ def hits(text, words):
             hay = masked
         for m in regex.finditer(hay):
             found.setdefault((m.start(), word), m.end())
-    return [{"word": w, "at": _context(text, a, b)} for (a, w), b in sorted(found.items())]
+    return [(a, w, b) for (a, w), b in sorted(found.items())]
 
 
-def sweep(text):
-    """{spend, credential, irreversible}: each list's hits in the text (hits())."""
-    return {"spend": hits(text, SPEND), "credential": hits(text, CREDENTIAL), "irreversible": hits(text, IRREVERSIBLE)}
+def hits(text, words):
+    """Every hit of a word list in the text, in text order: [{"word", "at"}] (_found())."""
+    return [{"word": w, "at": _context(text, a, b)} for a, w, b in _found(text, words)]
+
+
+# A `## Approved gates` suffix, `(approved …)` in any case, last on the line: reconcile-rollout.py's GATE_ANNOT_RE,
+# copied (same pattern and flags, pinned in tests/gated-inputs.test.mjs), since reconcile-rollout loads this module.
+APPROVED_SUFFIX_RE = re.compile(r"\s*\(approved [^)]*\)\s*$", re.I)
+BLOCKQUOTE_RE = re.compile(r"^(?:\s*>)+\s*")
+
+
+def _login_gate(line):
+    """The line as a Login gate (module docstring, 1: its `>` markers, its `(approved …)` suffix and its outer
+    whitespace stripped), or None when it is none: gate_kind() must read `credential` and has_login_phrase() hold."""
+    gate = APPROVED_SUFFIX_RE.sub("", BLOCKQUOTE_RE.sub("", line)).strip()
+    return gate if gate_kind(gate) == "credential" and has_login_phrase(gate) else None
+
+
+def sweep(text, logins=None):
+    """{spend, credential, irreversible}: each list's hits in the text (hits()). With `logins` a list (possibly empty:
+    the declared test Logins), each credential hit whose source line, the whole text line holding its start, is a
+    Login gate (_login_gate()) also carries "login": login_reading(<that line, stripped>, logins); with None (the
+    default), none does, and the output is the one-argument shape."""
+    credential = []
+    for a, w, b in _found(text, CREDENTIAL):
+        hit = {"word": w, "at": _context(text, a, b)}
+        if logins is not None:
+            start, end = text.rfind("\n", 0, a) + 1, text.find("\n", a)
+            gate = _login_gate(text[start:] if end < 0 else text[start:end])
+            if gate is not None:
+                hit["login"] = login_reading(gate, logins)
+        credential.append(hit)
+    return {"spend": hits(text, SPEND), "credential": credential, "irreversible": hits(text, IRREVERSIBLE)}
 
 
 def body_of(text):
@@ -1112,6 +1172,59 @@ def _exposure_cli():
     return 0
 
 
+def _declared_logins():
+    """(logins, None) or (None, why): the machine's declared test Logins, rollouts.toml's `[defaults] test_logins`
+    through rollout-settings.py's resolve(repo=None), loaded from beside this file as reconcile-rollout.py's
+    _settings_module loads it, the why in _machine_settings' words. The sweep CLI's alone (module docstring, 1): it
+    turns bytecode writing off for the process first, so the loads leave no __pycache__ beside the scripts, and with
+    no repo resolve() runs no git and no subprocess."""
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "thread_rollout_settings", os.path.join(os.path.dirname(os.path.abspath(__file__)), "rollout-settings.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        return None, f"rollout-settings.py would not load: {e}"
+    try:
+        return list(mod.resolve(repo=None)["test_logins"]["value"]), None
+    except mod.SettingsError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"rollout-settings.py failed: {e}"
+
+
+def _sweep_cli(paths):
+    """`sweep <note>...` (module docstring, 1: CLI): one JSON line per readable note; the declared test Logins are read
+    only when a note's Login reading reaches step 7, once per process."""
+    code, declared, told = 0, None, False
+    for path in paths:
+        try:
+            with open(os.path.expanduser(path), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            sys.stderr.write(f"gated_inputs: {path}: {e}\n")
+            code = 1
+            continue
+        body = body_of(text)
+        out = sweep(body, [])   # steps 1-6 never read `logins`, so a reading that stops there is already final
+        if any(h.get("login", {}).get("why") == NO_LOGINS_WHY for h in out["credential"]):
+            if declared is None:
+                declared = _declared_logins()
+            logins, why = declared
+            if logins is None:   # unread: today's shape, no `login` key, so every hit keeps the ask
+                out = sweep(body)
+                if not told:
+                    sys.stderr.write(f"gated_inputs: test_logins: {why}\n")
+                    told = True
+                code = 1
+            elif logins:
+                out = sweep(body, logins)
+        slug = os.path.splitext(os.path.basename(path))[0]
+        sys.stdout.write(json.dumps({"slug": slug, **out}, ensure_ascii=False) + "\n")
+    return code
+
+
 def main(argv):
     if argv[:1] == ["exposure"]:
         if argv != ["exposure", "-"]:
@@ -1121,18 +1234,7 @@ def main(argv):
     if len(argv) < 2 or argv[0] != "sweep":
         sys.stderr.write(USAGE)
         return 2
-    code = 0
-    for path in argv[1:]:
-        try:
-            with open(os.path.expanduser(path), encoding="utf-8") as f:
-                text = f.read()
-        except (OSError, UnicodeDecodeError) as e:
-            sys.stderr.write(f"gated_inputs: {path}: {e}\n")
-            code = 1
-            continue
-        slug = os.path.splitext(os.path.basename(path))[0]
-        sys.stdout.write(json.dumps({"slug": slug, **sweep(body_of(text))}, ensure_ascii=False) + "\n")
-    return code
+    return _sweep_cli(argv[1:])
 
 
 if __name__ == "__main__":
