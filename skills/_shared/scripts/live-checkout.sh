@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # live-checkout.sh — the one primitive for "fast-forward a live checkout" (ADR 0066's 2026-11-05 amendment, p37-7):
 # what a half-applied operation is, the ssh rule, origin's default branch, the one-branch fetch, the dirty-overlap check
-# and the guarded fast-forward. land.sh (S1, S4, O1, O4) and self-rollout-check.sh (--ensure, --refresh,
-# --refresh-in-place) source it; primary-refresh.py runs it, `bash live-checkout.sh <mode> …`, and parses what it prints.
+# and the guarded fast-forward. land.sh (S1, S4, O1, O4, O9), self-rollout-check.sh (--ensure, --refresh,
+# --refresh-in-place) and merge-task.sh's refresh_local_base (lc_op, lc_ssh_rule, lc_fetch under lc_bounded, lc_ff;
+# ADR 0066's 2026-11-06 amendment, p39-4) source it; primary-refresh.py runs it, `bash live-checkout.sh <mode> …`, and
+# parses what it prints; leg.py's ff_primary runs its overlap mode before its own fast-forward to a local branch.
 #
 # Sourced, it sets one variable, _lc_dir (this file's directory, physical), and defines the lc_* functions below. It
 # never runs set or shopt, never scrubs the environment and never unsets anything; every function variable is local and
@@ -22,19 +24,31 @@
 #                              (skills/execute/scripts/default-branch.sh <first repo>: one ls-remote).
 #   lc_default_local <repo>    no network: the symref, else refs/remotes/origin/master, else main, each read with
 #                              `rev-parse -q --verify <ref>^{commit}`; rc 1 when none resolves.
+#   lc_bounded <secs> <argv…>  <argv> run directly (no shell) in a fresh process group with stdin from /dev/null, and
+#                              that whole group killed at <secs> (a missing, non-integer or zero <secs> reads as 1):
+#                              exit 142. Otherwise the child's rc (128 + N when a signal ended it, 127 when it cannot
+#                              exec), and the group is killed after a normal exit too, so a leftover descendant
+#                              cannot hold a pipe open. A TERM, INT or HUP to lc_bounded kills the group, then exits
+#                              143, 130 or 129, so a signal to the caller's group never orphans the call unbounded (the
+#                              child sits in its own group and never sees that signal). A KILL cannot be caught, and a
+#                              signal in the instant between the fork and the child's setpgrp misses the group. Its
+#                              perl is inline, so sourcing still sets only _lc_dir. merge-task.sh's fetch runner.
 #   lc_fetch <repo> <d> [<runner>]
 #                              `[<runner>] git -C <repo> fetch --quiet --no-tags --no-write-fetch-head origin
 #                              +refs/heads/<d>:refs/remotes/origin/<d>`, git's rc: one branch, never a tag, so an
 #                              unrelated ref conflict (a stale origin/feat against origin's feat/x) never fails it.
-#                              <runner> is land.sh's `bounded`.
-#   lc_overlap <repo> <d>      the paths a fast-forward to refs/remotes/origin/<d> would overwrite, `, `-joined, cut to
-#                              200 characters, or nothing. Changed C: `diff --no-renames --name-only HEAD
-#                              refs/remotes/origin/<d>`; dirty P: the same form for the index against HEAD and the
-#                              working tree against the index, plus `ls-files --others --exclude-standard` (an ignored
-#                              file is git's to overwrite), every list under core.quotePath=false so both sides quote a
-#                              path alike. c meets p when c = p, c starts `p/` or p starts `c/`. A listing that fails
-#                              prints nothing: the merge is still the guard. A case-only collision on a case-insensitive
-#                              filesystem slips past it, and git's own refusal (which rewrites ORIG_HEAD) catches it.
+#                              <runner>, one command word, is land.sh's `bounded` or merge-task.sh's `refresh_bounded`.
+#   lc_overlap_ref <repo> <ref>
+#                              the paths a fast-forward to the full ref <ref> would overwrite, `, `-joined, cut to 200
+#                              characters, or nothing. Changed C: `diff --no-renames --name-only HEAD <ref>`; dirty P:
+#                              the same form for the index against HEAD and the working tree against the index, plus
+#                              `ls-files --others --exclude-standard` (an ignored file is git's to overwrite), every
+#                              list under core.quotePath=false so both sides quote a path alike. c meets p when c = p,
+#                              c starts `p/` or p starts `c/`. A listing that fails (a <ref> that does not resolve
+#                              included) prints nothing: the merge is still the guard. A case-only collision on a
+#                              case-insensitive filesystem slips past it, and git's own refusal (which rewrites
+#                              ORIG_HEAD) catches it; so does an index.lock, which the overlap never reads.
+#   lc_overlap <repo> <d>      lc_overlap_ref against refs/remotes/origin/<d>.
 #   lc_ff <repo> <d>           the overlap first: one prints its paths and returns 3, running nothing, so ORIG_HEAD is
 #                              never rewritten (a refused `merge --ff-only` writes it). Else `git merge -q --ff-only
 #                              --no-autostash refs/remotes/origin/<d>`: rc 0, or rc 1 with git's output (its `hint:`
@@ -51,15 +65,20 @@
 #                                overlap <tip> <b> <paths>   behind, and lc_overlap names paths
 #                                behind <tip> <b> <head>     behind, and free to fast-forward
 #
-# Run modes, `bash live-checkout.sh <mode> <repo> [<d>]`, scrub the caller's repo-local git env (git's own list, the two
-# config channels kept) and unset CDPATH first. Their output and exit codes are a contract that primary-refresh.py
-# parses strictly (anything else reads as `broken:` there, never as current or moved), so change both together:
+# Run modes, `bash live-checkout.sh <mode> <repo> [<d> | <ref>]`, scrub the caller's repo-local git env (git's own list,
+# the two config channels kept) and unset CDPATH first. Their output and exit codes are a contract: default, fetch,
+# check and ff are primary-refresh.py's, which parses them strictly (anything else reads as `broken:` there, never as
+# current or moved), and overlap is leg.py's (ff_primary reads anything else as broken, WARNs, and lets git's own
+# refusal guard its merge), so change each together with its reader:
 #   default <repo>   lc_default_local, else lc_ssh_rule and lc_default: the branch on stdout, exit 0; exit 1 when
 #                    neither the local refs nor origin answer.
 #   fetch <repo> <d> lc_ssh_rule, then lc_fetch: git's stderr passes through, and the exit is git fetch's own rc, so a
 #                    failed fetch never exits 0.
 #   check <repo> <d> lc_check's one line, exit 0.
 #   ff <repo> <d>    exactly one line, exit 0: `moved <old40> <new40>`, `overlap <paths>` or `refused <why>`.
+#   overlap <repo> <ref>
+#                    <ref> a full ref (it starts `refs/`): exactly one line, exit 0, `overlap <paths>` (lc_overlap_ref's)
+#                    or `clear`. A <ref> that does not resolve reads `clear`, lc_overlap's fail-open rule.
 # A usage error in any mode prints `live-checkout: usage: …` on stderr and exits 2. bash 3.2-compatible (macOS).
 
 _lc_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -107,14 +126,28 @@ lc_default_local() {
   return 1
 }
 
+lc_bounded() {
+  perl -e '
+my $t=shift; $t=1 unless defined $t && $t=~/^\d+$/ && $t>=1;
+my $pid;
+my %sn=(TERM=>15, INT=>2, HUP=>1);
+for my $s (keys %sn) { my $n=$sn{$s}; $SIG{$s}=sub { kill "KILL",-$pid if $pid; exit 128+$n } }
+$pid=fork; defined $pid or exit 127;
+if(!$pid){ $SIG{$_}="DEFAULT" for keys %sn; setpgrp(0,0); exec { $ARGV[0] } @ARGV; exit 127 }
+$SIG{ALRM}=sub{ kill "KILL",-$pid; waitpid($pid,0); exit 142 };
+alarm $t; waitpid($pid,0); my $st=$?; alarm 0;
+kill "KILL",-$pid;
+exit($st & 127 ? 128+($st & 127) : $st >> 8)' "$@" </dev/null
+}
+
 lc_fetch() {
   ${3:+"$3"} git -C "${1:-}" fetch --quiet --no-tags --no-write-fetch-head origin \
     "+refs/heads/${2:-}:refs/remotes/origin/${2:-}"
 }
 
-lc_overlap() {
+lc_overlap_ref() {
   local _lc_c _lc_p _lc_q _lc_u
-  _lc_c=$(git -C "${1:-}" -c core.quotePath=false diff --no-renames --name-only HEAD "refs/remotes/origin/${2:-}" -- \
+  _lc_c=$(git -C "${1:-}" -c core.quotePath=false diff --no-renames --name-only HEAD "${2:-}" -- \
     2>/dev/null) || return 0
   [ -n "$_lc_c" ] || return 0
   _lc_p=$(git -C "${1:-}" -c core.quotePath=false diff --cached --no-renames --name-only HEAD -- 2>/dev/null) || return 0
@@ -136,6 +169,8 @@ $_lc_u"
     END { if (out != "") print substr(out, 1, 200) }' || :
   return 0
 }
+
+lc_overlap() { lc_overlap_ref "${1:-}" "refs/remotes/origin/${2:-}"; }
 
 lc_ff() {
   local _lc_o
@@ -191,7 +226,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     case $_lc_v in GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS) ;; *) unset "$_lc_v" ;; esac
   done
   unset CDPATH
-  _lc_usage="live-checkout: usage: live-checkout.sh default <repo> | fetch <repo> <branch> | check <repo> <branch> | ff <repo> <branch>"
+  _lc_usage="live-checkout: usage: live-checkout.sh default <repo> | fetch <repo> <branch> | check <repo> <branch> | ff <repo> <branch> | overlap <repo> <refs/…>"
   case "${1:-}" in
     default)
       [ $# -eq 2 ] && [ -n "$2" ] || { echo "$_lc_usage" >&2; exit 2; }
@@ -215,6 +250,12 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
         3) echo "overlap $_lc_o" ;;
         *) echo "refused ${_lc_o:-git merge --ff-only failed}" ;;
       esac
+      exit 0 ;;
+    overlap)
+      [ $# -eq 3 ] && [ -n "$2" ] || { echo "$_lc_usage" >&2; exit 2; }
+      case "$3" in refs/?*) ;; *) echo "$_lc_usage" >&2; exit 2 ;; esac
+      _lc_o=$(lc_overlap_ref "$2" "$3")
+      if [ -n "$_lc_o" ]; then echo "overlap $_lc_o"; else echo clear; fi
       exit 0 ;;
     *) echo "$_lc_usage" >&2; exit 2 ;;
   esac
