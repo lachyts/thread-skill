@@ -58,6 +58,8 @@ no stamp; `started:` and `started_unattended:` are other keys.
   8's **Start when ready.** on a standalone run. `reconcile-rollout.py approve-queue`, on Lachy's words
   naming the queue and the PR its start waits on (§ Approved queue), and `reconcile-rollout.py
   stamp-start`, schedule step 8's under the chain, on the note an approved queue's regenerate wrote. And
+  `reconcile-rollout.py stamp-start --backlog`, the Backlog orient's decided start (`skills/orient/backlog.md` § B8),
+  on each parallel note its forks wrote, its post-question round's included, never a serial or held one. And
   schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
   when the run stops before step 6 writes its note.
 - **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
