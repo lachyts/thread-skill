@@ -1131,10 +1131,10 @@ function implSchema(a) {
   return securityOf(a) ? IMPL_RESULT_SECURED : IMPL_RESULT
 }
 
-// The scan an agent and the review judge run, identical for both (the task agents and the review judge): scrubbed,
-// every value shq'd, the base named outright. Integration's integrator adds `--anchor <the anchor>` (its own commits
-// and merge resolutions since it), and Integration's judge adds `--history-only` too (its read-only run, committed
-// history only); the two-argument form is byte-identical.
+// The scan the task's code-writing agents and the review judge run, identical for both: scrubbed, every value shq'd,
+// the base named outright. Integration's integrator adds `--anchor <the anchor>` (its own commits and merge resolutions
+// since it), and Integration's judge adds `--history-only` too (its read-only run, committed history only); the
+// two-argument form is byte-identical.
 function securityScanCmd(a, task, anchor, historyOnly) {
   return `${GIT_ENV_SCRUB} python3 ${shq(securityOf(a).script)} scan --tree ${shq(worktreeDir(a.repoPath, task.slug))} --base ${shq('origin/' + defaultBranch(a))} --accepts-from ${shq(task.taskPath)}` +
     (anchor ? ` --anchor ${shq(anchor)}` : '') + (anchor && historyOnly ? ' --history-only' : '')
