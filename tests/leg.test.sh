@@ -2978,10 +2978,10 @@ head=$(git -C "$R" rev-parse HEAD); LEGENV=STUB_GIT_EXIT=3 leg security --task a
 ok "$rc|$(tq verdict)|$(tq error)" "0|unscanned|gitleaks exited 3" "L19b7: gitleaks exits 3: unscanned, its ERROR line"
 has "$(cat "$T/a1.md")" "- $R at ${head:0:12}: unscanned: gitleaks exited 3" "L19b7: … with its section line"
 ok "$(fm a1 leg_scan)" "[\"$R@$head unscanned\"]" "L19b7: … and its record"
-t0=$(date +%s)
+t0=$(date +%s); trap '' INT   # leg.py started with SIGINT ignored, as a background job is: the cut still cleans up
 LEGENV="THREAD_LEG_SECURITY_BUDGET=3 THREAD_LEG_SECURITY_FLOOR=1 STUB_SLEEP=60 STUB_PIDS=$TMP/pids" leg security --task a1
-t1=$(date +%s)
-ok "$rc|$(tq verdict)|$([ $((t1 - t0)) -lt 30 ] && echo fast)" "0|unscanned|fast" "L19b8: a 3 s budget over a sleeping gitleaks: back within 30 s, unscanned"
+t1=$(date +%s); trap - INT
+ok "$rc|$(tq verdict)|$([ $((t1 - t0)) -lt 30 ] && echo fast)" "0|unscanned|fast" "L19b8: a 3 s budget over a sleeping gitleaks, SIGINT ignored by its caller: back within 30 s, unscanned"
 has "$(tq error)" "timed out: the Security check's 3 s budget ran out in $R" "L19b8: … timed out"
 spid=$(head -n 1 "$TMP/pids"); kill -0 "$spid" 2>/dev/null; ok "$?" 1 "L19b8: … the stub ($spid) is dead"
 ok "$(scratch "$R")" "1|0|0" "L19b8: … and no scratch tree or scanner dir is left"

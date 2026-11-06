@@ -269,7 +269,7 @@ clear-halt, restarted, copies, land):
       and while origin does not hold it you may rewrite it out of that history yourself before the halt is cleared`; or
       the same after `, and whether origin holds it is unknown (<pushedWhy>)`), a scanner-config change and an advisory
       (each naming its `security-accept <kind>:<key>`), never a copy's secret or an unscanned top; null with none.
-      shell_safe leaves no backtick, `$`, `\` or `"`, so repair's record-answer carries it in double quotes. Then
+      shell_safe leaves no backtick, `$`, `\\` or `"`, so repair's record-answer carries it in double quotes. Then
       under the rollout's lock: the claim and the key read again (a change is exit 1, `run security again`) and each
       top's HEAD (5 s each: a move is exit 1, `HEAD moved in <top> since the scan`), both nothing written; then the task
       note: `leg_scan: ["<top>@<head> <verdict>", …]` (after `leg_primary_base` or `leg_base`, replaced each run) and
@@ -2755,13 +2755,20 @@ def scan_ask(note):
     return None
 
 
+def _default_sigint():
+    """run_scan's child: SIGINT back to its default before exec. A shell that starts a job in the background starts it
+    with SIGINT ignored, and python keeps an inherited ignore, so the cut's SIGINT would never reach the scanner's
+    cleanup."""
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
 def run_scan(argv, timeout):
-    """(rc, stdout, stderr, cut): argv run with stdin closed under _env(), for at most timeout seconds. Past it the
-    scanner gets SIGINT (its subprocess.run kills gitleaks, and its `finally` removes its thread-security-* dir), then
-    SCAN_GRACE seconds, then a kill; cut is True then."""
+    """(rc, stdout, stderr, cut): argv run with stdin closed under _env(), for at most timeout seconds, its SIGINT at
+    the default (_default_sigint). Past it the scanner gets SIGINT (its subprocess.run kills gitleaks, and its
+    `finally` removes its thread-security-* dir), then SCAN_GRACE seconds, then a kill; cut is True then."""
     try:
         p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True, env=_env())
+                             text=True, env=_env(), preexec_fn=_default_sigint)
     except OSError as e:
         return 99, "", str(e), False
     try:
