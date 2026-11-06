@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""security-check.py — the opt-in Security check of a parallel rollout's task (execute § 3 `security_checks`).
+"""security-check.py — the opt-in Security check of a rollout's task (execute § 3 `security_checks`).
 
 Python stdlib only. Two verbs:
 
@@ -7,12 +7,15 @@ Python stdlib only. Two verbs:
       gitleaks is found (find_gitleaks), `gitleaks version` is at least 8.19.0 (the release with the `git`
       subcommand) and `git --version` runs. Exit 0 prints {"gitleaks": <path>, "version": <v>}; exit 1 prints one
       `ERROR: security-check: <why>` line on stderr. No network call. `reconcile-rollout.py verify-timeout` runs it at
-      every loop entry of a rollout with `security_checks: true` (its exit 5 otherwise).
+      every loop entry of a rollout with `security_checks: true` (its exit 5 otherwise), and `leg.py begin` on a serial
+      note (its exit 1 otherwise).
 
   security-check.py scan --tree <wt> --base <ref> [--accepts-from <task note>] [--osv-url <base> | --no-advisories]
       The engine's code-writing agents run it once the verifier is green, before they open or update the PR, and the
-      review judge runs it again. It reads the tree and the note only, and writes only its own
-      tempfile.mkdtemp(prefix="thread-security-") directory, removed in a `finally`.
+      review judge runs it again; a serial chain's Leg runs it through `leg.py security` (a primary checkout in a
+      detached scratch worktree), before each task's review and again before `leg.py done`. It reads the tree and the
+      note only, and writes only its own tempfile.mkdtemp(prefix="thread-security-") directory, removed in a
+      `finally`.
       1-4. Refusals, each exit 2 with one ERROR line and no stdout: --tree is not its own git toplevel; tracked
            changes are uncommitted ("commit them, then run the scan again"); --base does not resolve; no merge base.
            Then an untracked file that is neither gitignored nor a watched config path (5's disk rule owns those) is

@@ -819,6 +819,16 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
     The task reads claimable, and the next Leg's claim re-enters it with his answer as its latest `## Repair input`
     (`skills/execute/legs.md` § The task loop).
   - Leave: it stays set aside, and nothing more is asked this run.
+  - A Security check set-aside (its summary reads `Set aside by Leg <N> of [[<rollout>]]: security check: …`;
+    `skills/execute/legs.md` § The task loop's **Security check.**) is asked as the needs-you flow's step 1 asks a
+    security-check question: each `security-accept <kind>:<key>` answer it names is its own option, its tokens bare in
+    the label. leg.py writes the summary with no backtick, `$`, `\` or `"`, so the record-answer above carries it, and
+    his answer, unchanged in its double quotes. A secret it names is in a primary checkout's history, never a Chain
+    copy's: the Leg reverted the task and halted the chain, and the question says whether origin holds it. His answers
+    are: rotated, hand it back (the re-entry redoes the work without it, in a window that starts after the revert);
+    rotated and rewritten out of that history by him, then hand it back; defer; or leave. The rewrite is open only
+    while origin does not hold it, and only before (c)'s `clear-halt` in this same pass, while no later task's commits
+    sit above it. A secret origin holds is rotated and kept: the default branch is never force-pushed.
 
   After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules, and
   the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck,
@@ -840,7 +850,15 @@ line, and writes no note of its own: leg.py reads each deferred row as deferred,
 § 5's footer, live or archived).
 
 **(c) A halt** (`chain` halted). Show the halted Leg's `closed: halted:` line, the held task's latest `## Blocker
-diagnosis` (if it has one), and `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
+diagnosis` (if it has one) and its `## Security check` (a scan that could not run names its error there; a Chain
+copy's secret, its rule, file, commit and line). A Security check halt names its way out. `security check: [[<t>]]
+holds a secret the Leg cannot rewrite` is a Chain copy's: before `clear-halt`, Lachy rewrites it out of that task's own
+commits in its copy (`leg_base..HEAD` of `chain/<rollout>`, never below the task's `leg_base` sha, each commit keeping
+its `Task: [[<t>]]` line), or drops them (`git -C <copy> reset --hard <leg_base sha>`); then the next Leg inherits the
+claim and scans the same window again. That rewrite is safe: the claim is kept, `chain/<rollout>` is never pushed, and
+no later task's commits sit above the task's own. `security check: [[<t>]] could not be scanned` → move, commit or
+stash the path it names, or install or fix gitleaks, as the error says. `security check: [[<t>]] holds a secret` was
+asked in (b). Show, too, `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`, then
 re-read `leg.py status`: the chain reads stalled when the halted Leg held a claim (the next Leg inherits it), else what
 its rows leave (ready, completable or stuck), and (e) restarts it.

@@ -1,8 +1,11 @@
 // The opt-in Security check (execute § 3 `security_checks`; task note thread-skill-verifier-security-checks). Pins the
 // prose an LLM lead and its agents follow, and the one shape two scripts share:
 //   s3-row        execute § 3's `security_checks` row: the opt-in, the entry check, what is scanned, what is Lachy's
-//                 question and how his answer clears it, what is not scanned, the serial gap, both follow-up links
-//   exit-5        § 3's *Exit 5* paragraph, right after *Exit 4*: its ERROR line, its halt, the order of the exits
+//                 question and how his answer clears it, what is not scanned, the Integration follow-up link, and a
+//                 serial chain's Legs honouring it (a primary never rewritten, the copy halt's way out, what a serial
+//                 chain does not scan)
+//   exit-5        § 3's *Exit 5* paragraph, right after *Exit 4*: its ERROR line, its halt, the order of the exits, and
+//                 no serial refusal
 //   pre-check     § 4's *Check verifySlot before the stamps* covers args.securityCheck: present exactly when
 //                 verify-timeout printed it, never on an integrate call, its own halt, the resume exemption
 //   args          § 4's args jsonc entry
@@ -10,8 +13,11 @@
 //                 still exactly twice in § 7 (execute-args-refusal's `halts` count)
 //   kept          both reasons under *Threatens every task*, before `reason="ladder file refused"`, each matched by
 //                 reconcile-rollout.py's WHOLE_HALT_PATTERNS (so `moving` reads the halt as a wait on Lachy)
-//   context       CONTEXT.md's **Security check** term
+//   context       CONTEXT.md's **Security check** term, a serial chain's Leg included
 //   template      rollout-template.md's commented `# security_checks:` line
+//   legs          legs.md's **Security check.** (the verb, its timeout and budget, commit by path, the copy rewrite, the
+//                 primary's `--scan-ask` halt, the three halt reasons, the copy remedy), § Begin 0 and 1, **Done or set
+//                 aside.**'s gate, the re-entry sentence and the Don'ts; repair § 7 (b)'s answers and (c)'s ways out
 //   carry-doc     schedule's step 1 preview and report, step 6's carry and template bullet, its Scope, and
 //                 vault-grammar's carry line, as schedule-supersede.test.mjs's hold-carry pins the hold's
 //   repair-accept repair's needs-you flow keeps a security question's accept token verbatim in the answer
@@ -21,7 +27,7 @@
 // exactly its rule. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collapse, read, section } from '../lib/contract-text.mjs'
+import { collapse, proseUnits, read, section, slice } from '../lib/contract-text.mjs'
 
 const FILES = {
   execute: read('skills/execute/SKILL.md'),
@@ -32,6 +38,7 @@ const FILES = {
   schedule: read('skills/schedule/SKILL.md'),
   grammar: read('skills/_shared/vault-grammar.md'),
   repair: read('skills/repair/SKILL.md'),
+  legs: read('skills/execute/legs.md'),
 }
 
 const FENCE = /^\s*(```|~~~)/
@@ -82,7 +89,7 @@ const FREE_PHRASE = 'free-lane --tasks <slug> || true` while the note keeps `int
 
 const ROW = [
   '| `security_checks` | `false` (omit) | `securityCheck` (rollout-level; a task-level key is ignored).',
-  "Opt-in: `security_checks: true` on a parallel rollout note, set by hand. Schedule never stamps it, and a `--regenerate` supersede's `carry` copies it onto the new note.",
+  "Opt-in: `security_checks: true` on a rollout note, set by hand. Schedule never stamps it, and a `--regenerate` supersede's `carry` copies it onto the new note.",
   'At each entry `reconcile-rollout.py verify-timeout` reads it, runs `security-check.py preflight` and prints `securityCheck` (exit 5 otherwise, § 3).',
   'The lead passes it verbatim on every task call and seeded revise (§ 4), never on an integrate call.',
   "The engine's code-writing agents run `security-check.py scan` after the verifier is green and before they open or update the PR, and the review judge runs it again.",
@@ -90,11 +97,16 @@ const ROW = [
   'a new or changed dependency, outside test fixtures, with a known advisory (OSV)',
   'A red the agent can fix fails the try like a verifier red.',
   "These are a question for Lachy: a secret already pushed or behind a merge commit; a change to the scanner's own config; an advisory with no fixed release; a finding the agent reads as no credential.",
-  "His answer clears it only through the scan. Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b).",
+  "His answer clears it only through the scan (on a serial chain, a secret's answer is its hand-back: below). Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b).",
   'A pushed secret is rotated first, then accepted or the branch recut (repair § 4), never force-pushed.',
   "Not scanned: Integration's own commits (the integrator's conflict resolution and fix commits) and any merge commit ([[thread-skill-security-check-integration-commits]]).",
-  "Parallel rollouts only: a Leg never reads it, so a serial note's `security_checks:` is never read.",
-  '`verify-timeout` refuses one only where it runs on a serial note (schedule § Serial path S5), which does not close that gap ([[thread-skill-security-check-serial-chains]]).',
+  "A serial chain's Legs honour it too (`skills/execute/legs.md` § The task loop's **Security check.**): `leg.py begin` runs the same preflight (exit 1 otherwise), and each task with commits runs `leg.py security` before its review and again before `leg.py done`, which refuses without a clean scan covering them (in a Chain copy, a scan at its HEAD).",
+  "A Leg never rewrites a primary checkout's history",
+  'halts the chain with the claim kept',
+  'before he clears the halt (repair § 7 (c))',
+  'only while origin does not hold it',
+  'never force-pushed (repair § 7 (b))',
+  "Not scanned on a serial chain: a Leg's commits between tasks",
   'A rollout on an Engine snapshot older than this key never reads it either, until a Reinstate moves it (§ 1.5).',
 ]
 const PRE_SENTENCES = [
@@ -104,6 +116,40 @@ const PRE_SENTENCES = [
 ]
 const BULLET_PRE = `- § 4's verifySlot pre-check finds a task call's or seeded revise's \`args.securityCheck\` not this entry's \`verify-timeout\` \`securityCheck\`, or an integrate call carrying one (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a lead bug: re-invoke), or`
 const BULLET_5 = `- \`reconcile-rollout.py verify-timeout\` exits 5 at an entry (§ 3: \`${HALT5}\`: nothing is stamped, cleared or dispatched; fix or remove the rollout's \`security_checks:\`, or install gitleaks, as its ERROR line says, then re-invoke), or`
+const CONTEXT_SERIAL = [
+  "A serial chain's Leg runs it too, before each code-writing task's review and again before `leg.py done`",
+  'in a Chain copy it rewrites a secret out of its own unpushed commits',
+  "a secret in a primary checkout's history reverts the task, sets it aside and halts the chain",
+  'on a serial chain his answer to it is the rotation and the hand-back, whose re-entry starts after the revert',
+  "A Leg's close-out commits between tasks and `leg.py land`'s merges are not scanned",
+]
+const LEGS_SC = [
+  '`leg.py security --task <t>`', "the Bash tool's `timeout: 600000`", 'one 420 s budget', 'never `git add -A` or `commit -a`',
+  '`git reset --soft <rewrite>`', "at the copy's HEAD", "a Leg never rewrites a primary's history",
+  '`leg.py set-aside --task <t> --revert --scan-ask`, then § Close `--outcome halt --reason "security check: [[<t>]] holds a secret"`',
+  '`--outcome halt --reason "security check: [[<t>]] holds a secret the Leg cannot rewrite"`',
+  '`--outcome halt --reason "security check: [[<t>]] could not be scanned"`',
+  '`--outcome halt --reason "security_checks refused on [[<slug>]]"`',
+  'never commit, stash, restore or delete that path', 'The claim stays.',
+  "never below the task's `leg_base` sha", 'the next Leg inherits the claim and scans the same window again',
+]
+const LEGS_B0 = '`securityCheck` is there when the note sets `security_checks: true` and its preflight passed'
+const LEGS_B1 = "a `security_checks:` its preflight refuses (`security_checks refused on [[<slug>]]`: fix or remove the key, or install gitleaks"
+const LEGS_DONE = [
+  "In a chain with `security_checks:` on, `done` also needs a `clean` Security check scan covering the task's commits in each checkout (in a Chain copy, at its HEAD: **Security check.**)",
+  "a set-aside of this Leg's own claim with `Task:` commits takes `--revert`, after a scan that holds no secret in a Chain copy",
+  "A copy rewrite that took the review's `head:` out of the history fails the review fit: set the task aside with `--revert` (no second round)",
+  "after a Security check set-aside, read the diagnosis's question: the re-entry restores the work without any secret it names (`git revert --no-commit <sha>`, take the secret out, commit by path)",
+]
+const LEGS_DONTS = [
+  'Never clear a Security check finding by editing `.gitleaks.toml` or `.gitleaksignore`, or by writing a `security-accept` token or a `## Repair input` entry',
+  "never rewrite a primary checkout's history (in place, or a copy's stray)", "never rewrite `chain/<rollout>` below the task's `leg_base` sha",
+  'Never type a Security check ask into `--reason`: `--scan-ask` writes it', "or a task's `## Security check`",
+]
+const LEGS_REPAIR_B = ["only before (c)'s `clear-halt`", 'its tokens bare in the label', 'only while origin does not hold it',
+  'A secret origin holds is rotated and kept: the default branch is never force-pushed']
+const LEGS_REPAIR_C = ["never below the task's `leg_base` sha", 'the next Leg inherits the claim and scans the same window again',
+  '`git -C <copy> reset --hard <leg_base sha>`', '`security check: [[<t>]] could not be scanned`']
 const REPAIR_SENTENCE = "A security-check question (one that names `security-accept <kind>:<key>` answers, execute § 3 `security_checks`) offers each answer it names as its own option, each accept option's label holding its tokens verbatim (a question with several findings also names one answer that keeps them all), so record-answer's `--answer`, verbatim, carries them: the scan honours an accept only from an answer that repeats the token its own question named."
 
 // Named failures; [] means every rule holds.
@@ -122,7 +168,7 @@ function check(f) {
   const i4 = labels.findIndex((l) => l.startsWith('**Exit 4 (verify-slot.py not found'))
   fail('exit-5', i4 < 0 || !(labels[i4 + 1] ?? '').startsWith('**Exit 5 (security_checks refused).**') ||
     !e5.includes('one `ERROR: security_checks: <why>` line on stderr and no stdout') ||
-    !e5.includes('`true` on a `shape: serial` note ("parallel rollouts only")') || !e5.includes(HALT5) ||
+    e5.includes('`true` on a `shape: serial` note') || !e5.includes(HALT5) ||
     !e5.includes('The exits are checked in the order 1, 2, 3, 4, then 5.'))
 
   // pre-check
@@ -155,14 +201,16 @@ function check(f) {
     const j = lines.findIndex((l, k) => k > i && /^- \*\*/.test(l))
     return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
   })()
-  fail('context', !term.includes('`security_checks: true`') || !term.includes('`security-accept <kind>:<key>` token the scan reads from the task note\'s `## Repair input`') ||
+  fail('context', !term.includes("the opt-in scan a rollout's hand-set `security_checks: true`") ||
+    !term.includes('`security-accept <kind>:<key>` token the scan reads from the task note\'s `## Repair input`') ||
     !term.includes("Integration's own commits and merge commits are not scanned ([[thread-skill-security-check-integration-commits]])") ||
-    !term.includes('no Leg ever runs it') || !term.includes('_Avoid_: secret scan (alone), audit, CI check.'))
+    !CONTEXT_SERIAL.every((p) => term.includes(p)) || term.includes('no Leg ever runs it') ||
+    !term.includes('_Avoid_: secret scan (alone), audit, CI check.'))
 
   // template
   const tline = f.template.split('\n').find((l) => l.startsWith('# security_checks: true')) ?? ''
-  fail('template', !tline.includes('parallel rollouts only (execute § 3)') || !tline.includes('Hand-set; carry copies it on a --regenerate') ||
-    !tline.includes("a serial note's is never read"))
+  fail('template', !tline.includes('# optional (execute § 3)') || !tline.includes('Hand-set; carry copies it on a --regenerate') ||
+    !tline.includes("a serial chain's Legs honour it too") || tline.includes('parallel rollouts only'))
 
   // carry-doc
   const scope = collapse(sectionOf(f.schedule, /^## Scope/))
@@ -208,10 +256,26 @@ function check(f) {
   // ANY_ENTRY_RE stops before the ask's opening quote; the scan's ENTRY_RE takes that quote too, so the ask starts at its end.
   fail('entry-shape', !body || !anyRe || normalised !== anyRe + '"' || split !== '" → ' || !roundTrip)
 
+  // legs: legs.md's **Security check.**, § Begin 0 and 1, **Done or set aside.**'s gate, the re-entry sentence, the
+  // Don'ts; repair § 7 (b)'s answers and (c)'s ways out.
+  const LOOP = /^## The task loop$/
+  const scp = labelled(f.legs, LOOP, 'Security check.')
+  const begin = proseUnits(section(f.legs, /^## Begin$/) ?? '')
+  const dsa = labelled(f.legs, LOOP, 'Done or set aside.')
+  const donts = collapse(section(f.legs, /^## Don'ts$/) ?? '')
+  const r7 = section(f.repair, /^### 7\. A serial chain$/) ?? ''
+  const rb = collapse(slice(r7, /^\*\*\(b\)/, /^\*\*\(c\)/) ?? '')
+  const rc = collapse(slice(r7, /^\*\*\(c\)/, /^\*\*\(d\)/) ?? '')
+  fail('legs', !LEGS_SC.every((p) => scp.includes(p)) ||
+    !(begin.find((u) => u.startsWith('- **0.**')) ?? '').includes(LEGS_B0) ||
+    !(begin.find((u) => u.startsWith('- **1.**')) ?? '').includes(LEGS_B1) ||
+    !LEGS_DONE.every((p) => dsa.includes(p)) || !LEGS_DONTS.every((p) => donts.includes(p)) ||
+    !LEGS_REPAIR_B.every((p) => rb.includes(p)) || !LEGS_REPAIR_C.every((p) => rc.includes(p)))
+
   return [...new Set(fails)]
 }
 
-const RULES = ['s3-row', 'exit-5', 'pre-check', 'args', 'halts', 'kept', 'context', 'template', 'carry-doc', 'repair-accept', 'entry-shape']
+const RULES = ['s3-row', 'exit-5', 'pre-check', 'args', 'halts', 'kept', 'context', 'template', 'carry-doc', 'repair-accept', 'entry-shape', 'legs']
 const CONTROLLED = new Set()
 function only(key, from, to, rule, label) {
   assert.equal(FILES[key].split(from).length, 2, `control setup (${label}): ${from.slice(0, 80)} must occur exactly once in ${key}`)
@@ -219,17 +283,19 @@ function only(key, from, to, rule, label) {
   CONTROLLED.add(rule)
 }
 
-test('the Security check holds every rule across execute, schedule, repair, the template, CONTEXT.md and the scripts', () => {
+test('the Security check holds every rule across execute, legs.md, schedule, repair, the template, CONTEXT.md and the scripts', () => {
   assert.deepEqual(check(FILES), [])
 })
 
 test('control: the § 3 row without its accept sentence fails s3-row', () => {
-  only('execute', "His answer clears it only through the scan. Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b). ", '', 's3-row', 'no accept')
-  only('execute', ' ([[thread-skill-security-check-serial-chains]])', '', 's3-row', 'no serial follow-up link')
+  only('execute', "His answer clears it only through the scan (on a serial chain, a secret's answer is its hand-back: below). Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b). ", '', 's3-row', 'no accept')
+  only('execute', "A Leg never rewrites a primary checkout's history: a secret there", 'A secret there', 's3-row', 'no primary rule')
+  only('execute', "Not scanned on a serial chain: a Leg's commits between tasks, which are no task's change (`/thread:close`'s close-out commits: THREAD.md, a handoff doc, METHOD.md), and every merge commit (`leg.py land`'s merge of `<d>` into `chain/<rollout>`, a hand-resolved `🔀 land: merge` included): in place they are on `<d>` at once, and in a Chain copy at the next land. ", '', 's3-row', 'no serial not-scanned sentence')
 })
 
 test('control: Exit 5 with the old order sentence fails exit-5', () => {
   only('execute', 'The exits are checked in the order 1, 2, 3, 4, then 5.', 'The exits are checked in the order 1, 2, 3, then 4.', 'exit-5', 'old order')
+  only('execute', 'a value that is neither `true` nor `false`, no `security-check.py` beside the script,', 'a value that is neither `true` nor `false`, `true` on a `shape: serial` note ("parallel rollouts only"), no `security-check.py` beside the script,', 'exit-5', 'the serial refusal back')
 })
 
 test('control: the pre-check without its integrate clause fails pre-check', () => {
@@ -250,12 +316,24 @@ test('control: a reason off the kept list, or no pattern for it, fails kept', ()
   only('rr', '    r"args\\.securityCheck is not this entry\'s verify-timeout securityCheck",\n', '', 'kept', 'no pattern')
 })
 
-test('control: the CONTEXT.md term without its follow-up link fails context', () => {
-  only('context', 'scanned ([[thread-skill-security-check-integration-commits]]), and no Leg', 'scanned, and no Leg', 'context', 'no link')
+test('control: the CONTEXT.md term without its follow-up link, or its serial not-scanned clause, fails context', () => {
+  only('context', 'scanned ([[thread-skill-security-check-integration-commits]]). A serial', 'scanned. A serial', 'context', 'no link')
+  only('context', " A\n  Leg's close-out commits between tasks and `leg.py land`'s merges are not\n  scanned.", '', 'context', 'no serial not-scanned clause')
 })
 
-test('control: the template line telling him to re-set it fails template', () => {
+test('control: the template line telling him to re-set it, or back on parallel rollouts only, fails template', () => {
   only('template', 'Hand-set; carry copies it on a --regenerate', 'Hand-set; re-set it after a --regenerate', 'template', 're-set')
+  only('template', '# optional (execute § 3)', '# optional, parallel rollouts only (execute § 3)', 'template', 'parallel only')
+})
+
+test("control: legs.md's Security check or repair § 7 losing a rule fails legs", () => {
+  only('legs', "  - `secret` in a primary (`primary: true`) → a Leg never rewrites a primary's history: `leg.py set-aside --task <t> --revert --scan-ask`, then § Close `--outcome halt --reason \"security check: [[<t>]] holds a secret\"`, pushed once with the `ask`.\n", '', 'legs', 'no primary-secret halt')
+  only('legs', '`leg.py set-aside --task <t> --revert --scan-ask`, then § Close', '`leg.py set-aside --task <t> --revert --reason "security check: <ask>"`, then § Close', 'legs', '--reason for --scan-ask')
+  only('legs', ', never `git add -A` or `commit -a`', '', 'legs', 'no git add -A ban')
+  only('legs', "Run it in the foreground with the Bash tool's `timeout: 600000` (on Codex, a 600 s shell timeout).", 'Run it in the foreground.', 'legs', 'no timeout')
+  only('legs', "`done` needs that scan at the copy's HEAD, so", '`done` needs that scan, so', 'legs', "no copy's HEAD")
+  only('repair', " and only before (c)'s `clear-halt` in this same pass,", '', 'legs', 'no (b) clear-halt bound')
+  only('repair', "is a Chain copy's: before `clear-halt`, Lachy rewrites it out of that task's own\ncommits in its copy (`leg_base..HEAD` of `chain/<rollout>`, never below the task's `leg_base` sha, each commit keeping\nits `Task: [[<t>]]` line), or drops them (`git -C <copy> reset --hard <leg_base sha>`); then the next Leg inherits the\nclaim and scans the same window again.", "is a Chain copy's.", 'legs', 'no (c) copy remedy')
 })
 
 test('control: schedule losing any of its carry sentences fails carry-doc', () => {
@@ -275,7 +353,7 @@ test('control: a changed separator in the scan, or in record-answer, fails entry
   only('scan', String.raw`(needs you|decision) \(block`, String.raw`(needs you) \(block`, 'entry-shape', 'kinds narrowed')
 })
 
-test('the rules are all named (11) and each has a control', () => {
-  assert.equal(RULES.length, 11)
+test('the rules are all named (12) and each has a control', () => {
+  assert.equal(RULES.length, 12)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

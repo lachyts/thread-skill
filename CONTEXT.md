@@ -969,7 +969,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite falls through), else the test files importing the changed modules.
   They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
   suite.
-- **Security check** — the opt-in scan a parallel rollout's hand-set
+- **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over
   the task's own non-merge commits since their merge base (secrets, by
@@ -980,8 +980,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   fixed release) is Lachy's question, and his answer clears it only as a
   `security-accept <kind>:<key>` token the scan reads from the task note's
   `## Repair input`. Integration's own commits and merge commits are not
-  scanned ([[thread-skill-security-check-integration-commits]]), and no Leg
-  ever runs it. _Avoid_: secret scan (alone), audit, CI check.
+  scanned ([[thread-skill-security-check-integration-commits]]). A serial
+  chain's Leg runs it too, before each code-writing task's review and again
+  before `leg.py done`: in a Chain copy it rewrites a secret out of its own
+  unpushed commits (one it cannot rewrite halts the chain for Lachy's own
+  rewrite), and a secret in a primary checkout's history reverts the task,
+  sets it aside and halts the chain; on a serial chain his answer to it is
+  the rotation and the hand-back, whose re-entry starts after the revert. A
+  Leg's close-out commits between tasks and `leg.py land`'s merges are not
+  scanned. _Avoid_: secret scan (alone), audit, CI check.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
