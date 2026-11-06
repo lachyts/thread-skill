@@ -26,7 +26,10 @@
 // even from its cap", ADR 0008's p37-4 line and CONTEXT.md's "even from its cap alone" (cap-only); the declared test
 // Login: § 3.7's "or a declared test Login", *Test credentials*' first sentence, the *A declared test Login* paragraph,
 // § 3's `test_logins` row, execution-fit's "and a declared test Login", engine-snapshot.md's schema-5 sentence,
-// CONTEXT.md's **Test Login** entry and the README (test-login).
+// CONTEXT.md's **Test Login** entry and the README (test-login). p39-3: schedule § 3.6, reshuffle R3 (c) and R5.2,
+// the Under the chain, orient-all and Backlog orient lists, and the docs record a declared test Login's hit, never asking
+// it ahead; in § 3.6's and R3 (c)'s paragraphs each keeps-the-ask sentence follows its re-sweep sentence (b), so (b)
+// never exempts a task's other credential hits (test-credential, test-login-sweep).
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -47,6 +50,7 @@ const real = {
   execfit: read('skills/_shared/execution-fit.md'),
   asking: read('skills/_shared/asking.md'),
   orientAll: read('skills/orient-all/SKILL.md'),
+  backlog: read('skills/orient/backlog.md'),
   adr0008: read('docs/adr/0008-a-declared-gate-always-pauses-for-a-human.md'),
   snapshot: read('skills/_shared/engine-snapshot.md'),
   grade: read('skills/_shared/readiness-grade.md'),
@@ -241,6 +245,8 @@ function checkStanding(f) {
   const tc = labelled(f.execute, S37, 'Test credentials (ADR 0063).')
   const SENT_A = 'A hit inside the recorded test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`.'
   const SENT_B = 'A task that already holds that line is recorded, never asked.'
+  // review round 2: read in order, a keeps-the-ask sentence before (b) is overridden by it, so it comes after
+  const R3_KEEP = 'A non-zero exit, or no class, keeps the ask, and so does a hit naming live or production use, a key the class does not hold, or no mode.'
   if (!tc.includes("the reading's class-independent steps") || !before(tc, "the reading's class-independent steps", 'the class is set') ||
     !before(tc, 'the class is set', 'the class-dependent steps') ||
     !before(tc, 'the class-dependent steps', "the rollout's `env_bootstrap` refreshes the declared file into the task tree with a plain, unconditional `cp`") ||
@@ -255,7 +261,7 @@ function checkStanding(f) {
     !collapse(f.schedule).includes("a spend hit, or a credential hit § 3.6 records in the repo's test-credential class") ||
     !collapse(f.orientAll).includes("and a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0063)") ||
     !r3.includes("A credential hit whose context names only test-mode or staging use of keys the repo's declared class holds is recorded, never grilled (ADR 0063)") ||
-    !r3.includes(SENT_A) || !r3.includes(SENT_B) ||
+    !r3.includes(SENT_A) || !r3.includes(SENT_B) || !before(r3, SENT_B, R3_KEEP) ||
     !r5.includes("the test-credential Planner line (schedule step 7's, ADR 0063)") ||
     !collapse(f.asking).includes("A credential in its repo's declared test-credential class is never asked ahead (ADR 0063)") ||
     !collapse(f.execfit).includes("a repo's declared test credential (ADR 0063)") ||
@@ -299,7 +305,9 @@ function checkStanding(f) {
   }
 
   // test-login-sweep (p39-3): schedule and orient record a credential hit the sweep reads as a declared test Login,
-  // never asking it ahead (on § Serial path too, a Leg signs one); the sweep's `login` field and its `test_logins`
+  // never asking it ahead (on § Serial path too, a Leg signs one), and so do the Under the chain, orient-all and
+  // Backlog orient lists, each to its Planner line; each keeps-the-ask sentence follows TL_B (review round 2), so a
+  // task holding the line still has its other credential hits asked; the sweep's `login` field and its `test_logins`
   // stderr line are worded where it is read (§ 3.6, R3 (c), readiness-grade.md); § 7's test-Login Planner line sits
   // after the test-credential one, so spend-recorded's first `- Planner:` line stays the spend one.
   const tls = labelled(f.schedule, S36, 'A declared test Login is recorded, never asked')
@@ -311,8 +319,13 @@ function checkStanding(f) {
   const scope = collapse(section(f.schedule, SCOPE) ?? '')
   const TL_A = 'A hit inside the recorded test-Login Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-Login Planner line)`.'
   const TL_B = 'A task that already holds the test-Login Planner line is recorded, never asked.'
+  // review round 2: each keeps-the-ask sentence follows TL_B, so TL_B never exempts the task's other credential hits
+  const TL_KEEP = 'A hit with no `login`, or with `login.names` null, keeps the ask-ahead above'
+  const TL_KEEP_R3 = 'A hit with no `login`, or with `login.names` null, keeps the ask.'
+  const TL_STDERR_R3 = 'A `gated_inputs: test_logins:` stderr line (exit 1) means the declared test Logins could not be read: those hits carry no `login` and keep the ask'
   if (!s36.includes('**A declared test Login is recorded, never asked** (p37-4).') ||
     !tls.includes('A credential hit whose `login.names` the sweep set') || !tls.includes(TL_A) || !tls.includes(TL_B) ||
+    !before(tls, TL_B, TL_KEEP) ||
     !tls.includes('The test Logins are machine-wide, so on § Serial path a declared test Login is recorded too: a Leg signs one.') ||
     !s36.includes('A credential hit on a `credential:` gate line naming a Login also carries its `login` reading (`{names, why}`)') ||
     !s36.includes('A `gated_inputs: test_logins:` stderr line (exit 1) means they could not be read: those hits carry no `login` and keep the ask, and every note still printed.') ||
@@ -325,10 +338,11 @@ function checkStanding(f) {
     !collapse(f.schedule).includes('or as a declared test Login, gets its Planner line as on every run') ||
     !collapse(f.schedule).includes("section for a member with a spend hit or a declared test Login's hit (the test-Login Planner line)") ||
     !scope.includes('§ 3.6 runs `gated_inputs.py sweep`, which reads task notes and, only when a `credential:` gate line naming a Login needs the declaration, `[defaults] test_logins`') ||
-    !collapse(f.orientAll).includes('or as a declared test Login (p37-4), also gets its step 7') ||
+    !collapse(f.orientAll).includes('or as a declared test Login (p37-4), also gets its step 7 `## Decisions (recorded <date>)` Planner line.') ||
+    !collapse(f.backlog).includes('A spend or a test-credential hit gets its Planner line, or a credential hit § 3.6 records as a declared test Login (p37-4), the test-Login Planner line.') ||
     !r3.includes('A credential hit the sweep reads as a declared test Login (its `login.names` set) is recorded, never grilled (p37-4)') ||
-    !r3.includes('A `gated_inputs: test_logins:` stderr line (exit 1) means the declared test Logins could not be read: those hits carry no `login` and keep the ask') ||
-    !r3.includes(TL_A) || !r3.includes(TL_B) ||
+    !r3.includes(TL_STDERR_R3) ||
+    !r3.includes(TL_A) || !r3.includes(TL_B) || !before(r3, TL_B, TL_KEEP_R3) || !before(r3, TL_B, TL_STDERR_R3) ||
     !r5.includes("for a credential recorded as a declared test Login, the test-Login Planner line (schedule step 7's, p37-4)") ||
     !collapse(f.reshuffle).includes("The sweep R3 (c) runs reads `[defaults] test_logins` from the same file through `rollout-settings.py`'s resolve(repo=None), in process") ||
     !collapse(f.asking).includes('A credential gate naming only a declared test Login (`[defaults] test_logins`) is never asked ahead (p37-4)') ||
@@ -360,6 +374,20 @@ function edit(text, from, to) {
 const only = (file, from, to, rule, label) => {
   CONTROLLED.add(rule)
   assert.deepEqual(checkStanding({ ...real, [file]: edit(real[file], from, to) }), [rule], label)
+}
+// The raw span of `phrase` in `text`, each space in it matching any run of whitespace, so a control survives a reflow.
+function span(text, phrase) {
+  const re = new RegExp(phrase.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+  const m = text.match(re)
+  assert.ok(m, `control setup: ${phrase.slice(0, 80)} not found`)
+  return m[0]
+}
+// Move `phrase` (a sentence with its leading space) to just before `anchor` in `file`, raw spans found by span().
+function movedBefore(file, phrase, anchor) {
+  const p = span(real[file], phrase)
+  const rest = real[file].replace(p, '')
+  const a = span(rest, anchor)
+  return { ...real, [file]: rest.replace(a, () => `${p.trimStart()} ${a}`) }
 }
 
 test('control: the Standing approval after the seeded revises fails step12', () => {
@@ -466,8 +494,11 @@ test('control: each test-credential pin, removed in one place, fails test-creden
   only('schedule', ", or a credential hit § 3.6 records in the repo's test-credential\n   class", '', TC, 'Under the chain 7: no class')
   only('orientAll', ", or a credential hit § 3.6 records in the repo's test-credential class (ADR 0063)", '', TC, 'orient-all 9: no class')
   only('reshuffle', 'is recorded, never grilled (ADR 0063)', 'is grilled ahead (ADR 0063)', TC, 'R3: grilled')
-  only('reshuffle', 'A hit inside the recorded\n  test-credential Planner line is dismissed', 'A hit inside the recorded\n  test-credential Planner line is asked', TC, 'R3: no sentence (a)')
-  only('reshuffle', 'A task that already holds that line is recorded, never\n  asked.', 'A task that already holds that line is asked again.', TC, 'R3: no sentence (b)')
+  only('reshuffle', span(real.reshuffle, 'A hit inside the recorded test-credential Planner line is dismissed'), 'A hit inside the recorded test-credential Planner line is asked', TC, 'R3: no sentence (a)')
+  only('reshuffle', span(real.reshuffle, 'A task that already holds that line is recorded, never asked.'), 'A task that already holds that line is asked again.', TC, 'R3: no sentence (b)')
+  CONTROLLED.add(TC)
+  assert.deepEqual(checkStanding(movedBefore('reshuffle', ' A non-zero exit, or no class, keeps the ask, and so does a hit naming live or production use, a key the class does not hold, or no mode.',
+    'A hit inside the recorded test-credential Planner line')), [TC], 'R3: the keeps-the-ask sentence before (b)')
   only('reshuffle', "the test-credential Planner line (schedule step 7's, ADR 0063)", 'nothing', TC, 'R5: no record')
   only('asking', "- A credential in its repo's declared test-credential class is never asked ahead (ADR 0063): the standing approval signs it at the stop, or asks then.\n", '', TC, 'asking.md: no bullet')
   only('execfit', "a repo's declared test credential (ADR 0063)", 'none', TC, 'execution-fit: no qualifier')
@@ -536,11 +567,20 @@ test('control: each test-login-sweep pin, removed in one place, fails test-login
   only('schedule', " or a declared test Login's hit (the test-Login Planner line)", '', TLS, 'S6: no test-Login Planner line')
   only('schedule', ", which reads task notes and, only when a `credential:` gate line naming a Login needs the declaration,", ' (it reads task notes only), and', TLS, '§ Scope: task notes only')
   only('orientAll', ' or as a declared test Login (p37-4),', ',', TLS, 'orient-all 9: no test Login')
-  only('reshuffle', 'is\n  recorded, never grilled (p37-4)', 'is\n  grilled ahead (p37-4)', TLS, 'R3: grilled')
-  only('reshuffle', 'A `gated_inputs: test_logins:` stderr line (exit 1) means the declared test Logins could\n  not be read',
-    'a `gated_inputs: test_logins:` stderr line is a broken sweep. It means the declared test Logins could\n  not be read', TLS, 'R3: the stderr line a broken sweep')
-  only('reshuffle', 'A hit inside\n  the recorded test-Login Planner line is dismissed', 'A hit inside\n  the recorded test-Login Planner line is asked', TLS, 'R3: no sentence (a)')
-  only('reshuffle', 'A task that already holds the test-Login Planner line is\n  recorded, never asked.', 'A task that already holds the test-Login Planner line is\n  asked again.', TLS, 'R3: no sentence (b)')
+  only('orientAll', ' also gets its step 7 `## Decisions (recorded <date>)` Planner line.', ' also gets its step 7 line.', TLS, 'orient-all 9: no recorded section')
+  only('backlog', span(real.backlog, ', or a credential hit § 3.6 records as a declared test Login (p37-4), the test-Login Planner line.'), '.', TLS, 'backlog 16: no test Login')
+  only('reshuffle', span(real.reshuffle, 'is recorded, never grilled (p37-4)'), 'is grilled ahead (p37-4)', TLS, 'R3: grilled')
+  only('reshuffle', span(real.reshuffle, 'A `gated_inputs: test_logins:` stderr line (exit 1) means the declared test Logins could not be read'),
+    'a `gated_inputs: test_logins:` stderr line is a broken sweep. It means the declared test Logins could not be read', TLS, 'R3: the stderr line a broken sweep')
+  only('reshuffle', span(real.reshuffle, 'A hit inside the recorded test-Login Planner line is dismissed'), 'A hit inside the recorded test-Login Planner line is asked', TLS, 'R3: no sentence (a)')
+  only('reshuffle', span(real.reshuffle, 'A task that already holds the test-Login Planner line is recorded, never asked.'), 'A task that already holds the test-Login Planner line is asked again.', TLS, 'R3: no sentence (b)')
+  // review round 2: a keeps-the-ask sentence before (b) reads as overridden by it
+  assert.deepEqual(checkStanding(movedBefore('schedule', ' A hit with no `login`, or with `login.names` null, keeps the ask-ahead above; its why (a deny word, an undeclared Login, none declared) may be named in the batch.',
+    'A hit inside the recorded test-Login Planner line')), [TLS], '§ 3.6: the keeps-the-ask sentence before (b)')
+  assert.deepEqual(checkStanding(movedBefore('reshuffle', ' A hit with no `login`, or with `login.names` null, keeps the ask.',
+    'A hit inside the recorded test-Login Planner line')), [TLS], 'R3: the keeps-the-ask sentence before (b)')
+  assert.deepEqual(checkStanding(movedBefore('reshuffle', ' A `gated_inputs: test_logins:` stderr line (exit 1) means the declared test Logins could not be read: those hits carry no `login` and keep the ask; every note still printed.',
+    'A hit inside the recorded test-Login Planner line')), [TLS], 'R3: the stderr sentence before (b)')
   only('reshuffle', 'for a credential recorded as a declared test Login, the test-Login\n     Planner line', 'for a credential recorded as a declared test Login, nothing, not the test-Login\n     Planner line', TLS, 'R5.2: no record')
   only('reshuffle', ' The sweep R3 (c) runs reads `[defaults] test_logins`', ' The sweep R3 (c) runs reads task notes only, not `[defaults] test_logins`', TLS, 'write surface: no settings read')
   only('asking', '- A credential gate naming only a declared test Login (`[defaults] test_logins`) is never asked ahead (p37-4): the standing approval signs it at the stop, or asks then.\n', '', TLS, 'asking.md: no bullet')

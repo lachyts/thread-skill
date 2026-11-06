@@ -168,7 +168,8 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
     exactly that form). Any other match drops its task, named and unstamped, never `ignore_gate`; the fork returns it
     with its matched words, and B9 puts § 3.5's question.
 16. schedule § 3.6: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead. A spend or a
-    test-credential hit gets its Planner line. A gate sets aside its task, never the rollout (ADR 0008, ADR 0034).
+    test-credential hit gets its Planner line, or a credential hit § 3.6 records as a declared test Login (p37-4),
+    the test-Login Planner line. A gate sets aside its task, never the rollout (ADR 0008, ADR 0034).
 17. Step 4.5's merges: none, with the candidates named (the Pulse keys a task by its path).
 18. Step 4.7's rungs: none, with the hard tasks named.
 19. Step 5's order, Solo and Branch check: as written; Solo is listed in step 8's Decided for you.

@@ -175,22 +175,23 @@ Resolving:
   a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
   Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
   gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
-  unprompted is recorded too. A credential hit whose context names only test-mode or staging use
-  of keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
+  unprompted is recorded too. A credential hit whose context names only test-mode or staging use of
+  keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
   test-credential Planner line, and the standing approval signs its gate at the stop when its keys
   are in the class's file. The class is read once from `python3
   ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <the resolved repo>`'s
-  `test_credentials`; a non-zero exit, or no class, keeps the ask. A hit inside the recorded
-  test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the
-  recorded test-credential Planner line)`. A task that already holds that line is recorded, never
-  asked. A credential hit the sweep reads as a declared test Login (its `login.names` set) is
-  recorded, never grilled (p37-4): R5.2 writes the test-Login Planner line, and the standing approval
-  signs its gate at the stop, on a Leg too. A hit with no `login`, or with `login.names` null, keeps
-  the ask. A `gated_inputs: test_logins:` stderr line (exit 1) means the declared test Logins could
-  not be read: those hits carry no `login` and keep the ask; every note still printed. A hit inside
-  the recorded test-Login Planner line is dismissed and listed as `swept, dismissed: [[task]] <word>
-  (the recorded test-Login Planner line)`. A task that already holds the test-Login Planner line is
-  recorded, never asked. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
+  `test_credentials`. A hit inside the recorded test-credential Planner line is dismissed and listed
+  as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`. A task that
+  already holds that line is recorded, never asked. A non-zero exit, or no class, keeps the ask, and
+  so does a hit naming live or production use, a key the class does not hold, or no mode. A
+  credential hit the sweep reads as a declared test Login (its `login.names` set) is recorded, never
+  grilled (p37-4): R5.2 writes the test-Login Planner line, and the standing approval signs its gate
+  at the stop, on a Leg too. A hit inside the recorded test-Login Planner line is dismissed and
+  listed as `swept, dismissed: [[task]] <word> (the recorded test-Login Planner line)`. A task that
+  already holds the test-Login Planner line is recorded, never asked. A hit with no `login`, or with
+  `login.names` null, keeps the ask. A `gated_inputs: test_logins:` stderr line (exit 1) means the
+  declared test Logins could not be read: those hits carry no `login` and keep the ask; every note
+  still printed. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
   schedule.
 
