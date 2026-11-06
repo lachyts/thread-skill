@@ -88,7 +88,11 @@ Subcommands:
       contract 7, p36-10: a fresh capacity.json's `signals.stop_suites` true) takes the same path, its label in place
       of the heat's: `verify: waiting (memory: critical)`, `verify: capacity stop (memory: critical) during the <step>:
       …; back in line`, and `verify: no verdict: the Capacity stopped suites (memory: critical) within Ws; …`, still
-      O.rc `heat` (exit 76) and a suite ended `heat`.
+      O.rc `heat` (exit 76) and a suite ended `heat`. After a Capacity stop the re-queue also waits while memory is at
+      warning or worse (the restart hold, p39-7: `verify: waiting (memory: warning, after a capacity stop)`), its
+      Integration waiter file dropped meanwhile so a fresh suite never waits behind it, and registered again once the
+      hold clears; when W runs out on that hold the no-verdict line names that label (`verify: no verdict: the Capacity
+      stopped suites (memory: warning, after a capacity stop) within Ws; …`), still O.rc `heat` and exit 76.
       --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
       the attempt's lock, ADR 0052) changes one thing and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
@@ -1244,8 +1248,10 @@ def cmd_verify(args):
                     tries, first = first or budget > 0, False
                     waiting = time.monotonic()
                     try:
+                        # restart=stopped: after a Capacity stop the re-queue also waits for memory below warning
+                        # (verify-slot.py contract 7's restart hold, p39-7), its waiter file dropped meanwhile.
                         slot = (VS.acquire(args.slots, max_wait=max(0.0, budget), priority=True, kind="verify", why=why,
-                                           on_wait=lambda m: note(f"verify: {m}")) if tries else None)
+                                           on_wait=lambda m: note(f"verify: {m}"), restart=stopped) if tries else None)
                     except VS.SlotDirError as e:
                         note(f"verify: WARN {e}; running unslotted")
                     else:

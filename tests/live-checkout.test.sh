@@ -3,7 +3,9 @@
 # self-rollout-check.sh and primary-refresh.py share for "fast-forward a live checkout". Every arm runs under bash on
 # PATH and under /bin/bash (3.2 on macOS). LC1 lc_op's seven markers; LC2 the ssh rule; LC3 the default branch, local
 # first; LC4 the one-branch fetch; LC5 the overlap; LC6 lc_ff; LC7 every lc_check form against primary-refresh.py's own
-# regexes; LC8 sourcing changes nothing of the caller's; LC9 the run modes' exit codes. Origins are
+# regexes; LC8 sourcing changes nothing of the caller's; LC9 the run modes' exit codes, the overlap mode's included
+# (leg.py's ff_primary, p39-4); LC10 lc_bounded: the child's rc, the budget's 142, and a TERM or HUP to it kills the
+# whole group (143, 129), as does a normal exit. Origins are
 # git@github.com:<o>/<r>.git, served from $SRV/<o>/<r>.git by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`, with
 # GIT_SSH_COMMAND unset, so the ssh rule is what reaches it. Hermetic: HOME and every path live under mktemp; commits
 # carry an inline identity; global/system git config is ignored; never the network.
@@ -111,6 +113,9 @@ rc 0" "LC3 $n: … so origin is asked, and answers trunk"
   srv o5; c5="$tmp/w/o5"; cl o5 "$c5"
   push o5 a.txt origin; fetchall "$c5"; echo mine > "$c5/a.txt"
   ok "$(src lc_overlap "$c5" master)" "a.txt" "LC5 $n: a dirty tracked file origin changes"
+  git -C "$c5" branch -q -f lb5 refs/remotes/origin/master
+  ok "$(src lc_overlap_ref "$c5" refs/heads/lb5)" "a.txt" "LC5 $n: lc_overlap_ref against a local branch at origin's tip: the same paths"
+  ok "$(src lc_overlap_ref "$c5" refs/heads/nowhere)" "" "LC5 $n: … a ref that does not resolve: nothing (the merge is still the guard)"
   git -C "$c5" add a.txt
   ok "$(src lc_overlap "$c5" master)" "a.txt" "LC5 $n: … staged too"
   git -C "$c5" reset -q --hard origin/master
@@ -186,7 +191,8 @@ PY
     printf "new:%s\n" "$(LC_ALL=C comm -13 <(printf "%s\n" "$v0") <(printf "%s\n" "$v1") | grep -v "^_$" | tr "\n" " ")"
     lc_op "$2" >/dev/null || :; lc_ssh_rule "$2"; lc_default "$2" >/dev/null || :; lc_default_local "$2" >/dev/null || :
     lc_fetch "$2" master >/dev/null 2>&1 || :; lc_overlap "$2" master >/dev/null || :; lc_ff "$2" master >/dev/null 2>&1 || :
-    lc_check "$2" master >/dev/null || :; lc_loaded
+    lc_check "$2" master >/dev/null || :; lc_overlap_ref "$2" refs/remotes/origin/master >/dev/null || :
+    lc_bounded 5 true || :; lc_loaded
     printf "vals:%s\n" "$here $d $m $e $out $rc"
     [ "$(set -o)" = "$o0" ] && echo "set -o: same"; [ "$(shopt -p)" = "$s0" ] && echo "shopt: same"
     v2=$(compgen -v | LC_ALL=C sort)
@@ -216,13 +222,51 @@ rc 0" "LC9 $n: ff: overlap <paths>, exit 0"
   out=$(mode ff "$c9" master); rc=$?
   ok "$rc|${out%% *}|$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "0|refused|1" "LC9 $n: ff: refused <why>, one line, exit 0"
   ok "$(mode default "$tmp/w/none" 2>/dev/null; echo "rc $?")" "rc 1" "LC9 $n: default with nothing resolvable exits 1"
-  for args in "" "default" "fetch $c9" "check $c9" "ff $c9" "check $c9 master extra" "bogus $c9 master"; do
+  git -C "$c9" reset -q --hard HEAD~1; push m9 a.txt again; mode fetch "$c9" master; echo mine > "$c9/a.txt"
+  ok "$(mode overlap "$c9" refs/remotes/origin/master; echo "rc $?")" "overlap a.txt
+rc 0" "LC9 $n: overlap: overlap <paths>, exit 0"
+  git -C "$c9" checkout -q -- a.txt
+  ok "$(mode overlap "$c9" refs/remotes/origin/master; echo "rc $?")" "clear
+rc 0" "LC9 $n: overlap: clear, exit 0"
+  ok "$(mode overlap "$c9" refs/heads/nowhere; echo "rc $?")" "clear
+rc 0" "LC9 $n: overlap: a ref that does not resolve reads clear"
+  g -C "$c9" commit -q --allow-empty -m local   # diverged again, for the GIT_DIR case below
+  for args in "" "default" "fetch $c9" "check $c9" "ff $c9" "check $c9 master extra" "bogus $c9 master" \
+              "overlap $c9" "overlap $c9 master" "overlap $c9 refs/heads/x extra"; do
     out=$(mode $args 2>"$tmp/err"); rc=$?
     ok "$rc|$out" "2|" "LC9 $n: usage '${args:-<none>}' exits 2, stdout empty"
     has "$(cat "$tmp/err")" "live-checkout: usage: " "LC9 $n: … with the usage line"
   done
   g init -q "$tmp/w/decoy"; g -C "$tmp/w/decoy" commit -q --allow-empty -m decoy
   ok "$(GIT_DIR="$tmp/w/decoy/.git" mode check "$c9" master | cut -d' ' -f1)" "diverged" "LC9 $n: a caller's GIT_DIR is scrubbed: the named repo is read"
+
+  # ---- LC10: lc_bounded: the child's rc, the budget, and a signal or a normal exit kills the whole group -----------
+  # gone <pgid>: polls up to ~2 s until no process of the group is left (a reaped zombie can't fake a pass)
+  gone() {
+    local i=0; case ${1:-} in ''|*[!0-9]*) echo "no pgid"; return ;; esac
+    while kill -0 -- "-$1" 2>/dev/null; do [ "$i" -ge 20 ] && { echo alive; return; }; sleep 0.1; i=$((i+1)); done; echo gone
+  }
+  ok "$(src lc_bounded 5 sh -c 'exit 3'; echo "rc $?")" "rc 3" "LC10 $n: the child's own rc"
+  ok "$(src lc_bounded 5 true; echo "rc $?")" "rc 0" "LC10 $n: … and 0"
+  ok "$(src lc_bounded x true; echo "rc $?")" "rc 0" "LC10 $n: a non-integer budget reads as 1 s"
+  ok "$(src lc_bounded 5 "$tmp/no-such-command" 2>/dev/null; echo "rc $?")" "rc 127" "LC10 $n: an argv that cannot exec: 127"
+  rm -f "$tmp/g10"; s0=$SECONDS
+  ok "$(src lc_bounded 1 sh -c 'echo $$ > "$1"; exec sleep 30' _ "$tmp/g10"; echo "rc $?")" "rc 142" "LC10 $n: over the budget: 142"
+  ok "$([ $((SECONDS - s0)) -le 10 ] && echo soon)" soon "LC10 $n: … within a few seconds"
+  ok "$(gone "$(cat "$tmp/g10" 2>/dev/null)")" gone "LC10 $n: … and the child's group is gone"
+  rm -f "$tmp/g10"
+  ok "$(src lc_bounded 5 sh -c 'echo $$ > "$1"; sleep 30 >/dev/null 2>&1 & exit 0' _ "$tmp/g10"; echo "rc $?")" "rc 0" \
+    "LC10 $n: a child that exits 0 and leaves a descendant: 0"
+  ok "$(gone "$(cat "$tmp/g10" 2>/dev/null)")" gone "LC10 $n: … and the descendant is killed with the group"
+  for sig in TERM:143 HUP:129; do
+    rm -f "$tmp/g10"
+    src lc_bounded 30 sh -c 'echo "$PPID $$" > "$1.t"; mv "$1.t" "$1"; sleep 30 | cat' _ "$tmp/g10" >/dev/null 2>&1 &
+    bg=$!; i=0; while [ ! -s "$tmp/g10" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+    pp= pg=; read -r pp pg < "$tmp/g10" 2>/dev/null
+    [ -n "$pp" ] && kill -"${sig%%:*}" "$pp"; wait "$bg"; rc=$?
+    ok "$rc" "${sig#*:}" "LC10 $n: a ${sig%%:*} to lc_bounded exits ${sig#*:}"
+    ok "$(gone "$pg")" gone "LC10 $n: … and kills the child's group (sleep 30 | cat) first"
+  done
 done
 
 exit $fail

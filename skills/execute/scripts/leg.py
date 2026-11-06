@@ -324,12 +324,18 @@ restarted, copies, land):
            `merged` and `verify` [{task, line (its **Verify:** line or null), folder (its launch folder in C)}], the
            merge kept on chain/<rollout>;
         7. d moved to the tip, by where it is checked out: in P, after the in-place peer check (below), P's HEAD read
-           again (off d, it stands, `<P> left <d> during the land (its HEAD is now <ref>)`), then `merge --ff-only
-           --no-autostash` in P (a refusal over a local change or an untracked file in the way stands, `the primary's
-           uncommitted edit on <files>`; never a stash), landed only when refs/heads/<d> is then the tip; nowhere, a
-           compare-and-swap `update-ref`; in another worktree, a stand (`<d> is checked out in <wt>`). A CAS failure, a
-           refused ff after d moved, or an ff that left d short of the tip, re-runs from 4, three tries at most, then
-           stands `<d> kept moving`. A tip already d is `current`, P untouched;
+           again (off d, it stands, `<P> left <d> during the land (its HEAD is now <ref>)`), then d and refs/heads/<br>
+           read again, and `merge --ff-only --no-autostash` in P only when d is still dm and strictly behind the
+           branch (p39-4: git rewrites ORIG_HEAD on a no-op or refused ff-only): d already the branch is landed (the
+           tip) or moved, with no merge; d moved since 4 is moved before anything else, so the re-run can ask for a
+           re-verify (a d still behind the branch re-runs, never fast-forwards at once); a branch unreadable or not
+           holding d stands, naming it; then live-checkout.sh's overlap mode against refs/heads/<br> (a local change
+           or an untracked file in the way stands, `the primary's uncommitted edit on <files>`, with no merge run;
+           never a stash; a mode that cannot run is a WARN, and git's refusal stays the guard), landed only when
+           refs/heads/<d> is then the tip; nowhere, a compare-and-swap `update-ref`; in another worktree, a stand
+           (`<d> is checked out in <wt>`). A CAS failure, a d that moved, or an ff that left d short of the tip,
+           re-runs from 4, three tries at most, then stands `<d> kept moving`. A tip already d is `current`, P
+           untouched;
         8. the repo lock released.
       Then `leg_landed: <stamp>` (after `leg_claims:`, else `leg_head:`) on each done row whose every `leg_head` entry on
       a copy is on its primary's d (git's read), the task notes first, and the Leg log: a `land:` line per copy landed,
@@ -586,6 +592,7 @@ PLUGIN = HERE.parent.parent.parent
 RR_SRC = HERE / "reconcile-rollout.py"
 SC_SRC = PLUGIN / "skills" / "_shared" / "scripts" / "serial-chains.py"
 LAND_SH = PLUGIN / "skills" / "_shared" / "scripts" / "land.sh"
+LIVE_CHECKOUT_SH = PLUGIN / "skills" / "_shared" / "scripts" / "live-checkout.sh"
 UNFINISHED_PY = PLUGIN / "skills" / "_shared" / "scripts" / "unfinished-rollout.py"
 PLUGIN_JSON = PLUGIN / ".claude-plugin" / "plugin.json"
 DEFAULT_VAULT = "~/repos/obsidian"
@@ -3153,12 +3160,46 @@ def bring_in(ctx, P, C, d, br):
     return git_out(C, "rev-parse", "--verify", "HEAD^{commit}"), dm, how, None
 
 
+def overlap_paths(P, ref):
+    """live-checkout.sh's overlap mode in P against the full ref <ref> (the paths a fast-forward to it would overwrite):
+    ("overlap", paths), ("clear", None), or ("broken", why) on a non-zero exit, a run past 60 s, an OSError or any
+    other output."""
+    try:
+        r = subprocess.run(["bash", str(LIVE_CHECKOUT_SH), "overlap", str(P), ref], env=_env(), capture_output=True,
+                           text=True, stdin=subprocess.DEVNULL, timeout=60)
+    except subprocess.TimeoutExpired:
+        return "broken", "ran past 60 s"
+    except OSError as e:
+        return "broken", f"failed: {e}"
+    if r.returncode != 0:
+        return "broken", f"exit {r.returncode}"
+    out = r.stdout.rstrip("\n")
+    if out == "clear":
+        return "clear", None
+    if out.startswith("overlap ") and "\n" not in out and out[len("overlap "):].strip():
+        return "overlap", out[len("overlap "):]
+    return "broken", f'unrecognised output "{reason_text(out, 80)}"'
+
+
 def ff_primary(ctx, P, d, br, tip, dm, notes, warns):
-    """Step 7: d moved to the tip, by where d is checked out: in P, after the in-place peer check and a re-read of P's
-    HEAD (P off d stands), `merge --ff-only --no-autostash` (never a stash: a local change or an untracked file in the
-    way stands), landed only when d is then the tip; nowhere, a compare-and-swap `update-ref`; in another worktree, a
-    stand. (result, stand): result landed|moved (d moved, or the ff moved d short of the tip: re-run from step 4)|
-    stood|plan, stand (why, waits, peer slug or None), or for --dry-run the path it would take."""
+    """Step 7: d moved to the tip, by where d is checked out: nowhere, a compare-and-swap `update-ref`; in another
+    worktree, a stand; in P, after the in-place peer check and a re-read of P's HEAD (P off d stands), d and the branch
+    read again, and a merge only when d is still dm and strictly behind the branch, its overlap clear:
+      1. d unreadable: moved;
+      2. d already the branch: no merge (a no-op ff-only rewrites ORIG_HEAD), landed when it is the tip, else moved;
+      3. d moved since step 4 (d != dm): moved, before any overlap is read, so the re-run from step 4 can ask for a
+         re-verify against the new d (a d that moved but is still behind the branch re-runs too, never fast-forwards
+         at once);
+      4. the branch unreadable, or not holding d: a stand naming it (`cannot read refs/heads/<br> in <P>`,
+         `refs/heads/<br> does not hold <d> in <P>: no fast-forward`), no merge;
+      5. live-checkout.sh's overlap mode against refs/heads/<br>: a dirty or untracked path the ff would overwrite
+         stands, `the primary's uncommitted edit on <paths>`, with no merge run, so ORIG_HEAD is untouched (never a
+         stash); a mode that cannot run is a WARN and the merge goes on, git's own refusal its only guard;
+      6. `merge --ff-only --no-autostash`, hooks off: landed only when d is then the tip. A refusal the overlap cannot
+         see (an index.lock, a case-only collision) still stands with git's words, and rewrites ORIG_HEAD.
+    The target is the local refs/heads/<br>, not origin, so lc_ff (which merges refs/remotes/origin/<d>) is not used.
+    (result, stand): result landed|moved (d moved, or the ff moved d short of the tip: re-run from step 4)|stood|plan,
+    stand (why, waits, peer slug or None), or for --dry-run the path it would take."""
     where = next((wt for wt, b in _worktree_branches(P) if b == f"refs/heads/{d}"), None)
     if where is None:
         if ctx.dry:
@@ -3176,6 +3217,25 @@ def ff_primary(ctx, P, d, br, tip, dm, notes, warns):
     head = git_out(P, "symbolic-ref", "-q", "HEAD")
     if head != f"refs/heads/{d}":
         return "stood", (f"{P} left {d} during the land (its HEAD is now {head or 'detached'})", True, None)
+    # No merge unless d is strictly behind the branch: git writes ORIG_HEAD on a no-op or refused ff-only.
+    cur = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")
+    if not cur:
+        return "moved", None
+    want = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{br}^{{commit}}")
+    if want and cur == want:
+        return ("landed", None) if cur == tip else ("moved", None)
+    if cur != dm:
+        return "moved", None
+    if not want:
+        return "stood", (f"cannot read refs/heads/{br} in {P}", False, None)
+    if not is_ancestor(P, cur, want):
+        return "stood", (f"refs/heads/{br} does not hold {d} in {P}: no fast-forward", False, None)
+    kind, said = overlap_paths(P, f"refs/heads/{br}")
+    if kind == "overlap":
+        return "stood", (f"the primary's uncommitted edit on {said}", False, None)
+    if kind == "broken":
+        warns.append(f"WARN: {P}: live-checkout.sh overlap {said}: the fast-forward ran with git's own refusal as its "
+                     "only guard")
     r = git(P, "-c", "core.hooksPath=/dev/null", "-c", "merge.autoStash=false", "merge", "--ff-only", "--no-autostash",
             "-q", f"refs/heads/{br}")
     now = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")

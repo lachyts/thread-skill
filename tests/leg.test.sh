@@ -54,7 +54,10 @@
 #        (L17h); the stands that run no git, the refusals and the in-place peer (L17i); --red (L17j); the verified tip
 #        (L17m); Complete's Land first before the completion verify, and a land that waits closes stopped (L17o); a
 #        claim stand still brings in what other chains landed, so the claim it unblocks passes (L17q); the ff in P
-#        re-reads P's branch after the peer check, and lands only when <d> is the tip (L17r).
+#        re-reads P's branch after the peer check, and lands only when <d> is the tip (L17r); it merges only when <d> is
+#        strictly behind the chain branch and unmoved since step 4, after live-checkout.sh's overlap mode, so a stand
+#        or a no-op leaves R's ORIG_HEAD absent (L17s: s1 in L17c, s2 a moved <d> before the overlap, s3 <d> already
+#        the tip, s4 the branch at <d>, s5 the branch unreadable, s6 the overlap mode unrunnable).
 #   L18  same-file waits go by rank, wait-die at claim (ADR 0067 d9): order_key and first_by (L18a); a higher-ranked chain
 #        waits on a running lower-ranked holder, then goes first (L18b), its reservation sets a third chain's row aside
 #        (L18c); a lower-ranked chain sets its row aside and claims another (L18d); aging lifts a waiter, and only its open
@@ -1551,6 +1554,10 @@ mkcopies() { RO=$RO2; CWD="$R" leg copies; RO=$RO1; CWD="$R" leg copies; }
 # lands — the last land's `lands` as `state|why|waits` per copy, `;`-joined
 lands() { q '";".join("%s|%s|%s" % (e["state"], e["why"], e["waits"]) for e in d["lands"])'; }
 master() { git -C "$R" rev-parse master; }
+# ohR / nohR — the primary's ORIG_HEAD, absent or written / removed: a refused or no-op `merge --ff-only` writes it, so a
+# land that ran no merge leaves it absent (p39-4)
+ohR() { [ -e "$(git -C "$R" rev-parse --path-format=absolute --git-path ORIG_HEAD)" ] && echo written || echo absent; }
+nohR() { rm -f "$(git -C "$R" rev-parse --path-format=absolute --git-path ORIG_HEAD)"; }
 
 # ---- L17a: two chains land in turn, by merge ----
 lscen l17a
@@ -1634,16 +1641,18 @@ unset CWD
 lscen l17c
 mkro '' "a1~cc-r~$R~\`repo:$R//b.txt\`" "a2~cc-r~$R~\`repo:$R//n.txt\`"; mkt a1; mkt a2; mkcopies
 CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 b.txt "a1's b"
-echo "peer's b" > "$R/b.txt"; m0=$(master)
+echo "peer's b" > "$R/b.txt"; m0=$(master); nohR
 CWD="$C1" leg land
 ok "$rc|$(lands)" "0|stood|the primary's uncommitted edit on b.txt|False" "L17c: a peer's uncommitted edit on b.txt stands the land"
 ok "$(master)|$(cat "$R/b.txt")|$(git -C "$R" stash list | wc -l | tr -d ' ')|$(fm a1 leg_landed)" "$m0|peer's b|0|<none>" \
    "L17c: … master unchanged, the edit intact, nothing stashed, nothing stamped"
+ok "$(ohR)" absent "L17s1: … and no merge ran: R's ORIG_HEAD absent (the overlap stood it first)"
 git -C "$R" checkout -q -- b.txt
-CWD="$C1" work "$C1" a2 n.txt "a2's n"; echo "untracked" > "$R/n.txt"
+CWD="$C1" work "$C1" a2 n.txt "a2's n"; echo "untracked" > "$R/n.txt"; nohR
 CWD="$C1" leg land
 ok "$rc|$(lands)" "0|stood|the primary's uncommitted edit on n.txt|False" "L17c: an untracked file in the ff's way stands it too"
 ok "$(master)|$(cat "$R/n.txt")" "$m0|untracked" "L17c: … the file intact"
+ok "$(ohR)" absent "L17s1: … and R's ORIG_HEAD absent"
 rm "$R/n.txt"; CWD="$C1" leg land
 ok "$rc|$(lands)|$(fm a1 leg_landed)|$(fm a2 leg_landed)" "0|landed|None|None|$NOW|$NOW" "L17c: once cleared, both land"
 unset CWD
@@ -1881,6 +1890,78 @@ m.git = git'
 ok "$rc|$(lands)|$(master)" "0|landed|None|None|$tip" \
    "L17r: an ff that moved w2, not master, is moved, never landed: the next try lands master by update-ref"
 ok "$(logn "Leg 1 land: \[\[a1\]\] on master in $R (${tip:0:12})\$")|$(fm a1 leg_landed)" "1|$NOW" "L17r: … logged once, a1 stamped"
+unset CWD
+
+# ---- L17s: the ff in P runs only when <d> is strictly behind the chain branch, and the overlap first (p39-4) ----
+# Each case patches A's land once, from a wrapped peer_stand (between step 4 and the re-read), as L17r does.
+# s2: <d> moves on and an untracked file lands in R's way: moved first (re-run from step 4), never the overlap's stand
+rscen l17s2; nohR
+pland '
+real, fired = m.peer_stand, []
+def peer_stand(*a, **k):
+    if not fired:
+        fired.append(1)
+        subprocess.run(["git", "-C", R, "commit", "-q", "--allow-empty", "-m", "peer moves master"], check=True)
+        open(os.path.join(R, "a1.txt"), "w").write("peer a1\n")
+    return real(*a, **k)
+m.peer_stand = peer_stand'
+ok "$rc|$(lands)" "0|verify|None|None" \
+   "L17s2: master moved during the peer check: moved, then the next try asks for the re-verify, never the overlap's stand"
+ok "$(git -C "$R" log -1 --format=%s master)|$(cat "$R/a1.txt")|$(ohR)|$(fm a1 leg_landed)" "peer moves master|peer a1|absent|<none>" \
+   "L17s2: … master is the moved commit, a1.txt intact, R's ORIG_HEAD absent, nothing stamped"
+rm -f "$R/a1.txt"; unset CWD
+# s3: R's master is already the chain's tip at the re-read (moved there by hand): landed, and no no-op merge ran
+rscen l17s3
+pland '
+real, fired = m.peer_stand, []
+def peer_stand(*a, **k):
+    if not fired:
+        fired.append(1)
+        br = "refs/heads/chain/" + os.path.basename(note)[:-3]
+        subprocess.run(["git", "-C", R, "merge", "-q", "--ff-only", br], check=True)
+        oh = subprocess.run(["git", "-C", R, "rev-parse", "--path-format=absolute", "--git-path", "ORIG_HEAD"],
+                            capture_output=True, text=True).stdout.strip()
+        if os.path.exists(oh):
+            os.remove(oh)
+    return real(*a, **k)
+m.peer_stand = peer_stand'
+ok "$rc|$(lands)|$(master)|$(ohR)" "0|landed|None|None|$tip|absent" \
+   "L17s3: master already at the chain's tip: landed with no merge run (R's ORIG_HEAD absent)"
+unset CWD
+# s4: the chain branch is moved back to master: d equals it, so moved with no merge, then the next try is current
+rscen l17s4; nohR
+pland '
+real, fired = m.peer_stand, []
+def peer_stand(*a, **k):
+    if not fired:
+        fired.append(1)
+        br = "refs/heads/chain/" + os.path.basename(note)[:-3]
+        subprocess.run(["git", "-C", R, "update-ref", br, "refs/heads/master"], check=True)
+    return real(*a, **k)
+m.peer_stand = peer_stand'
+ok "$rc|$(lands)|$(master)|$(ohR)" "0|current|None|None|$m0|absent" \
+   "L17s4: chain/<RO> moved to master: moved with no merge run, then current, R's ORIG_HEAD absent"
+unset CWD
+# s5: the chain branch is gone at the re-read, d unmoved: it stands, naming the branch, and no merge runs
+rscen l17s5; nohR
+pland '
+real, fired = m.peer_stand, []
+def peer_stand(*a, **k):
+    if not fired:
+        fired.append(1)
+        br = "refs/heads/chain/" + os.path.basename(note)[:-3]
+        subprocess.run(["git", "-C", R, "update-ref", "-d", br], check=True)
+    return real(*a, **k)
+m.peer_stand = peer_stand'
+ok "$rc|$(lands)|$(master)|$(ohR)" "0|stood|cannot read refs/heads/chain/$RO in $R|False|$m0|absent" \
+   "L17s5: chain/<RO> unreadable with master unmoved: it stands, naming it, no merge run"
+unset CWD
+# s6: the overlap mode cannot run: a WARN, and the merge goes on with git's own refusal as its only guard
+rscen l17s6
+pland 'm.LIVE_CHECKOUT_SH = m.Path("/nonexistent/live-checkout.sh")'
+ok "$rc|$(lands)|$(master)" "0|landed|None|None|$tip" "L17s6: live-checkout.sh overlap cannot run: the ff still lands"
+has "$(q 'd["warns"]')" "WARN: $R: live-checkout.sh overlap exit 127: the fast-forward ran with git's own refusal as its only guard" \
+   "L17s6: … with a WARN naming it"
 unset CWD
 
 # ---- L17h: the per-repo lock ----

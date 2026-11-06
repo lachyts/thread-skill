@@ -559,10 +559,10 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
 - Suites pair by `suite`. A suite-started with no suite-ended never finished (killed with its wrapper, the lead or the
   Mac); a suite-ended with no suite-started is a noslot or a heat (the suite never got a slot, so it never started).
   A heat stop ends its run's suite `heat`, and the restart once the Mac cools is a suite of its own; so does a
-  Capacity stop (verify-slot.py contract 7: memory critical), its restart once the stop clears. Writers:
-  skills/execute/scripts/verify-slot.py `run` (an agent's suite, runner agent, the task read from a cwd under
-  `<repo>/.claude/worktrees/<slug>`) and lead-integrate.py `verify --rollout` (the lead's Integration, RACE and
-  completion suites, runner lead). `running` is absent on a stop by signal (no vault scan on that path).
+  Capacity stop (verify-slot.py contract 7: memory critical), its restart once the stop clears and memory falls below
+  warning. Writers: skills/execute/scripts/verify-slot.py `run` (an agent's suite, runner agent, the task read from a
+  cwd under `<repo>/.claude/worktrees/<slug>`) and lead-integrate.py `verify --rollout` (the lead's Integration, RACE
+  and completion suites, runner lead). `running` is absent on a stop by signal (no vault scan on that path).
 - base-moved: one line per newly counted merge-task exit-3 refusal (merge-task.sh's record_base_moved, through
   lead-integrate.py `base-moved`), its movers the first-parent commits base..main, oldest first: a rollout's merge
   (source record: a `merged` line in any rollout's record names its PR; source note: its task note carries
