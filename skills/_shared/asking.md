@@ -20,6 +20,7 @@ Label each question before it is asked:
 - A gated input (ADR 0008) is never a *gate*: a credential, an irreversible step or a sign-off is *yours*.
 - Spend under the standing approval is never asked (Chorus ADR 0108 d4): a fork about spend alone is *priorities*.
 - A credential in its repo's declared test-credential class is never asked ahead (ADR 0063): the standing approval signs it at the stop, or asks then.
+- A credential gate naming only a declared test Login (`[defaults] test_logins`) is never asked ahead (p37-4): the standing approval signs it at the stop, or asks then.
 - A review STOP or a design gap is never his by default: it goes to the agent that can resolve it.
 - An open `fork for Lachy` stays *yours* until he rules on it.
 - The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question until p30-10 decides it: until
