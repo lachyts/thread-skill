@@ -20,7 +20,12 @@ ones under Autonomous or Mixed; schedule owns them. After the gate, a declared c
 `--advance` moves its record (§ Declared check): the check writes it and owns how it lands, so
 orient still runs no git. R3 (c) reads the repo's test-credential class through `rollout-settings.py
 --repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
-script).
+script). The sweep R3 (c) runs reads `[defaults] test_logins` from the same file through
+`rollout-settings.py`'s resolve(repo=None), in process, only when a `credential:` gate line naming a
+Login needs it: read-only, with no git.
+
+**Under `--backlog`.** The write surface adds the record note, the trigger file and `wait` lines, each through
+`backlog-orient.py`, and the start stamp through `stamp-start --backlog` (`skills/orient/backlog.md` § B5, § B8).
 
 ## Scoped targets
 
@@ -98,6 +103,9 @@ target are candidates to **pull in**. Their in-flight items stay where they are.
 **Scoped target**: the item set is that source alone, plus any tasks already written from it. The
 project's roadmap is read only for numbering.
 
+**Under `--backlog`.** The item set is `backlog-orient.py sweep`'s rows, a held park among the frozen
+(`skills/orient/backlog.md` § B2).
+
 **Numbering**, from one listing of `Work/Phases/` (Archive included) and the task filenames:
 `N_max` is the highest phase number; per phase, `M` is the highest ordinal among
 `<slug>-p<N>-<M>-*` filenames (archived included) and the struck-through entries R5.2 leaves in a
@@ -144,6 +152,10 @@ inferable, omit it and let schedule resolve it. Record dependencies ("needs X", 
 dependency layers numbered from `N_max + 1` (tasks that depend on nothing form the first new
 phase, tasks depending only on those the next, and so on).
 
+**Under `--backlog`.** No **Drop**: park, reopen, **obsolete** and re-home, as defined in
+`skills/orient/backlog.md` § B3. Obsolete is a task's own `status: dropped` once it stops being true, never the phase **retire** above, which
+applies unchanged.
+
 ## R3. Grill the unclear
 
 An interview of Lachy's questions only (Owner *yours*, `_shared/asking.md` § 5), one at a time, each in the Framing,
@@ -163,15 +175,23 @@ Resolving:
   a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
   Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
   gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
-  unprompted is recorded too. A credential hit whose context names only test-mode or staging use
-  of keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
+  unprompted is recorded too. A credential hit whose context names only test-mode or staging use of
+  keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
   test-credential Planner line, and the standing approval signs its gate at the stop when its keys
   are in the class's file. The class is read once from `python3
   ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <the resolved repo>`'s
-  `test_credentials`; a non-zero exit, or no class, keeps the ask. A hit inside the recorded
-  test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the
-  recorded test-credential Planner line)`. A task that already holds that line is recorded, never
-  asked. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
+  `test_credentials`. A hit inside the recorded test-credential Planner line is dismissed and listed
+  as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`. A task that
+  already holds that line is recorded, never asked. A non-zero exit, or no class, keeps the ask, and
+  so does a hit naming live or production use, a key the class does not hold, or no mode. A
+  credential hit the sweep reads as a declared test Login (its `login.names` set) is recorded, never
+  grilled (p37-4): R5.2 writes the test-Login Planner line, and the standing approval signs its gate
+  at the stop, on a Leg too. A hit inside the recorded test-Login Planner line is dismissed and
+  listed as `swept, dismissed: [[task]] <word> (the recorded test-Login Planner line)`. A task that
+  already holds the test-Login Planner line is recorded, never asked. A hit with no `login`, or with
+  `login.names` null, keeps the ask. A `gated_inputs: test_logins:` stderr line (exit 1) means the
+  declared test Logins could not be read: those hits carry no `login` and keep the ask; every note
+  still printed. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
   schedule.
 
@@ -214,6 +234,9 @@ the one write the reshuffle makes before R4's gate, and it stands if he stops th
 > overturns applied, under one `Decided for you` heading. The rule in full: § 5 of
 > <plugin root>/skills/_shared/asking.md.
 
+**Under `--backlog`.** The grill runs after the start, in `skills/orient/backlog.md` § B9, cluster by cluster, each
+question holding back only its own tasks.
+
 ## R4. The gate
 
 Print the final disposition table and get a y/n (or adjustments) **before writing any file**, a Note's correction of a
@@ -236,6 +259,9 @@ The grill's Decided for you lines add a **decided-for-you footer**, at most 8 li
 A declared check with entries (§ Declared check) adds a **declared-check footer**:
 `declared check: <N> entries → <dispositions>; advance after the writes` when every entry has a
 disposition, else `declared check: hold (<unresolved>)`. He may turn advance into hold.
+
+**Under `--backlog`.** The table is never put to him: it goes into the record's Decided for you section
+(`skills/orient/backlog.md` § B4).
 
 ## R5. Write
 
@@ -282,7 +308,9 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      line asking for one line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
      split in sub-bullets nested under the gate, ADR 0038); for a credential recorded in the repo's
      test-credential class, the test-credential Planner line (schedule step 7's, ADR 0063) in the
-     `## Decisions (recorded <date>)` section; and a credential or irreversible sign-off's `## Approved gates` bullet,
+     `## Decisions (recorded <date>)` section; for a credential recorded as a declared test Login, the test-Login
+     Planner line (schedule step 7's, p37-4) in the `## Decisions (recorded <date>)` section; and a credential or
+     irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
    listing. Then write all the old slugs to a file and find the files that mention any of them
@@ -322,6 +350,9 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
    lines and name its record as the check's to land. Any other status, or a non-zero exit, is that
    one line; never a blocker.
 
+**Under `--backlog`.** R5.1 and R5.3 write nothing (no new phase, no rename), R5.2 renames nothing, and R5.4's park,
+reopen, obsolete and re-home run `backlog-orient.py` (`skills/orient/backlog.md` § B5).
+
 **Report**: phases as clickable `obsidian://` links, renames, the other dispositions, surfacing
 status, misfits, out-of-vault links to fix, what the grill left unresolved, and its Decided for you list (the less
 sure first, at most 8 lines, the rest in the task notes). Orient § 6 routes
@@ -342,3 +373,5 @@ The rules above are the contract; these are the ones most easily broken.
   name; the inline shape is only the no-skills fallback.
 - **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md`,
   `add-writers/add-phase.md` and `add-writers/add-project.md`.
+- **Under `--backlog`, B4's record stands in for R4's gate** (`skills/orient/backlog.md` § B4): nothing waits on his
+  word before the start.
