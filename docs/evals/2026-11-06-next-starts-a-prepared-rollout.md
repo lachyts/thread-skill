@@ -85,5 +85,11 @@ Both cases pass on their first invocation, so the task's Verify ("`next` dispatc
 continuation and no AskUserQuestion; `close` ends with the same handoff; the evals pass") is met at `ef416bf`. No
 grader or skill fix followed, and the reserve invocation was not spent.
 
+Review rounds 2 and 3 then changed skill text these cases read, after `ef416bf`: next steps 4 and 5 (the overturn
+sentence before a menu, the held-note reply, the archive line's qualifiers), close sub-step 7.10 and step 8 (the Codex
+Desktop row), and close step 2's guard and holds, step 4's held step and the Edge cases (a hold that carries into every
+later session). Neither case nor any grader changed. Those edits are not re-scored here: neither fixture holds a note,
+and the gate leaves one invocation of one case.
+
 The six kept sandboxes (`/private/tmp/e-hrp3wa`, `e-FWBARJ`, `e-izDiHo`, `e-cEg4QY`, `e-AyXcFr`, `e-diV6wG`) and the
 scratch directory were removed by their literal paths once this record had read them.
