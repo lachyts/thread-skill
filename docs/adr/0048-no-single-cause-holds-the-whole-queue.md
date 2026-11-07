@@ -2,6 +2,8 @@
 
 Date: 2026-10-21
 Status: accepted. Ruled with Lachy in the re-grill of PR #202, after the audit of where rollout time went (§ Context). Generalises ADR 0046 (a git-env trip holds only the lane) and ADR 0034 (a gate sets its task aside, never halts the rollout). Built by p29-7 (2026-10-28). Amends ADR 0030 (merge-task 2/70 halts) and ADR 0033 (an invalid budget stamp; a cool-down over an UNVERIFIED task).
+*(Amended by ADR 0075, 2026-11-07: the launchd fallback (in How p29-7 built it) is superseded, so the Watchdog is
+Chorus's alone and nothing notifies Lachy when Chorus is not running; `moving` also reads a serial note's waiting Leg.)*
 
 ## Context
 

@@ -2,6 +2,9 @@
 
 Date: 2026-11-02
 Status: accepted (2026-11-04: d1, d4's tokens and predicted claims, and d5 built by p36-2; d2 by p36-3; d3, and d4's actual claims and backstop, by p36-4; d6 by p36-6; d7 needs no build (ADR 0064 kept); d9 built by p36-5; d8's reader built by p36-7 (the writer is Chorus's, chorus-p96-28; d8's memory-critical suite stop built by p36-10, reading Chorus's `signals.stop_suites`)). Ruled with Lachy in two grills on 2026-11-02: the first in the ops-workspace orient-all session, the second in the spike session (`docs/spikes/2026-11-02-every-rollout-at-once.md`). Built in Thread Skill's Phase 36. The technical calls below were decided for him from the spike's evidence and are listed at the end so he can overturn them. Supersedes ADR 0040's ruling "a chain that writes a repo checkout owns that checkout". Amends ADR 0059 (the project place becomes a prediction, and d5's accepted collision becomes a warned, recorded Note overlap) and ADR 0060 (its yield rule now sits beside rank). Leaves ADR 0064's one-clone-per-(repo, project) rule as it is.
+*(Amended by ADR 0075, 2026-11-07: d2's in-place branch survives only as the reader for a note written before
+it: schedule makes every serial chain's Chain copies, and a bare `repo:<toplevel>` cell in a copied chain stands
+against an in-place peer only.)*
 
 ## Context
 

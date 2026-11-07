@@ -328,7 +328,12 @@ grade to what followed it.
   `0039` — a code project's thread lives in its repo; one live THREAD.md per
   project; the placement check (amends 0017). `0040` — a rollout is parallel or
   serial: a three-way execution-fit test, and orient's child-agent batches
-  retire (amends 0023).
+  retire (amends 0023). (0041–0074 are not yet listed here: read the
+  directory.) `0075` — a rollout waits instead of stopping, and never
+  notifies: the Begin wait, no push of any kind, the Companion's lead the only
+  signal, every chain in its Chain copies, and `moving` watching waiting Legs
+  (supersedes 0038 d3, 0048's launchd fallback and 0066's notices; amends
+  0034 and 0067).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 

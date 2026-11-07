@@ -661,6 +661,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is bounded at 180 minutes. Nobody is stopped mid-task. Only code files and
   `any` rank-wait: the vault and `ext:` never do (d6). _Avoid_: lock, lease,
   preemption.
+- **Begin wait** — a Leg that cannot begin yet waiting, then beginning itself
+  (ADR 0075 d1). Two causes: a surface re-check left unanswered on a busy Mac,
+  and another rollout's hold on a place this Leg would write (a surface stand,
+  ADR 0060). `leg.py begin` ends `state=waiting reason="begin wait: …"` with
+  nothing written, never `halted`; the session polls the check and runs begin
+  again once it passes, and its only record is a marker outside the vault. A
+  Leg never begins without a passing check: a check still unanswered after its
+  longer retry reads `unanswered`, never a pass and never a refusal. Every
+  other begin refusal stays a halt. `reconcile-rollout.py moving` reads a Begin
+  wait as `waiting` while its marker is fresh, so the **Watchdog** can recover
+  one whose session died (d5). Parallel execute's § 4.5 Surface re-check waits
+  the same way. Not a **Rank wait** (two begun chains meeting at a claim).
+  _Avoid_: begin halt, surface halt, retry loop.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -1262,13 +1275,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
-  report's `Needs you:` block and pushes it once (falling back to ntfy when
-  the push does not reach him), deduped on its line in the rollout note's
-  `## Needs-you log`, the lead's push record; an item whose delivery failed
-  on every channel is retried at most once more, at the next loop entry, then
-  deduped (ADR 0038). The log also holds the Standing approval's
-  `signed under the standing approval:` lines, the month line's ledger, never
-  a push record. That log is never the task note's `## Needs you` (p16-3),
+  report's `Needs you:` block and in the rollout note, for a sitting Lachy
+  chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Only a
+  halt that stops the whole rollout leads anywhere, and only through Chorus's
+  Companion while he is at the Stage (d3); a single set-aside stays listed.
+  Until P41-5 builds that, execute § 6.5 still pushes each item once (falling
+  back to ntfy when the push does not reach him), deduped on its line in the
+  rollout note's `## Needs-you log`; an item whose delivery failed on every
+  channel is retried at most once more, at the next loop entry, then deduped
+  (ADR 0038 d3, superseded). The log also holds the Standing approval's
+  `signed under the standing approval:` lines, the month line's ledger, which
+  is all it keeps once the push lines retire. That log is never the task note's `## Needs you` (p16-3),
   which holds the question the engine stopped on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
@@ -1381,9 +1398,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Slot can be idle in a moving rollout).
 - **Watchdog** — what acts on a Stalled rollout from outside its session,
   reading it from the **Situational report** (`reconcile-rollout.py moving`):
-  Chorus's Companion, or a launchd fallback (`watchdog.py`) that only notifies
-  when Chorus is not running (ADR 0048). Its `stalled` is a reason to look,
-  never by itself a reason to start a second lead.
+  Chorus's Companion, alone (ADR 0048, ADR 0075 d2). It recovers without
+  asking and never notifies; with Chorus not running nothing watches, and a
+  stall is read when Lachy runs `/thread:status`. The launchd `watchdog.py`,
+  which only notified, is retired (removed by P41-5). It also watches a serial
+  note's waiting Leg (a **Begin wait**, a Capacity or review wait), `stalled`
+  once its session is gone or it goes stale (ADR 0075 d5). Its `stalled` is a
+  reason to look, never by itself a reason to start a second lead.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.
   _Avoid_: monitor, heartbeat.
@@ -1551,12 +1572,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   at each loop entry. That read validates the whole file, so a refused file
   halts every rollout on the machine at its next entry; the file carries its
   schema version, and a snapshot ignores a key newer than itself while still
-  refusing a typo (ADR 0043). The machine-wide `[notify]` table holds
-  `ntfy_topic`, read by two scripts and never stamped: execute's needs-you
-  fallback publishes to it (ADR 0038), and tune.py refuses a Tuning whose
-  edit would change it.
-  `rollout-settings.py`'s JSON says only whether a topic is set, never the
-  topic. _Avoid_: hardcoded defaults, config.
+  refusing a typo (ADR 0043). The `[notify]` table is retired (ADR 0075 d2):
+  from P41-5 it is tolerated with one warning and never refused.
+  _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 
