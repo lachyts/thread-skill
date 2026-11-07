@@ -91,15 +91,19 @@ export const meta = {
 //                                    //   as absent, never an error.
 //   securityCheck : object,          // optional (execute § 3 `security_checks`, the rollout's hand-set opt-in); { script }:
 //                                    //   the absolute path of skills/execute/scripts/security-check.py, this entry's
-//                                    //   verify-timeout `securityCheck`, copied verbatim on every task call and seeded
-//                                    //   revise. Set ⇒ the implementer, the approved-plan implementer and the reviser
-//                                    //   carry securityCheckBlock right after FLAKE_CHECK_TASK (the scan once the
-//                                    //   verifier is green, before any PR or push) and return IMPL_RESULT_SECURED (its
-//                                    //   required newDependencies, the scan's brief lines); the review judge carries
-//                                    //   securityReviewBlock (the agent's copy of the brief and its own run of the same
-//                                    //   scan). Absent/null ⇒ every prompt and schema byte-identical. Any other shape is
-//                                    //   refused before any dispatch (securityCheckArgsError, argsRefused), and a value
-//                                    //   on mode 'integrate' is refused too: Integration's own commits are not scanned.
+//                                    //   verify-timeout `securityCheck`, copied verbatim on every task call, seeded
+//                                    //   revise and integrate call. Set ⇒ the implementer, the approved-plan implementer
+//                                    //   and the reviser carry securityCheckBlock right after FLAKE_CHECK_TASK (the scan
+//                                    //   once the verifier is green, before any PR or push) and return
+//                                    //   IMPL_RESULT_SECURED (its required newDependencies, the scan's brief lines); the
+//                                    //   review judge carries securityReviewBlock (the agent's copy of the brief and its
+//                                    //   own run of the same scan). On mode 'integrate' (p39-8) the integrator carries
+//                                    //   integrationSecurityBlock right after INTEGRATION_PREFLIGHTS (`scan --anchor`,
+//                                    //   before its push) and returns INTEGRATE_RESULT_SECURED, and the Integration judge
+//                                    //   carries integrationSecurityReviewBlock (its own `--history-only` run) and returns
+//                                    //   INTEGRATION_REVIEW_SECURED. Absent/null ⇒ every prompt and schema byte-identical.
+//                                    //   Any other shape is refused before any dispatch (securityCheckArgsError,
+//                                    //   argsRefused), in both modes.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
@@ -296,8 +300,9 @@ export const meta = {
 // retry, no further plan or review round (a plan judge's ends plan-blocked, a review judge's review-blocked).
 // Unapproved gates still win (gate-pending), and a blocked result's question rides along. A value on an
 // approve verdict, a verified result (gate-pending or not) or a one-shot red (escalate) is ignored; a review
-// row always carries ''. A mode 'integrate' row carries null, like plan: reconcile upserts the note's
-// "## Needs you" on a non-empty string, removes it on '', and leaves it on null.
+// row always carries ''. A mode 'integrate' row carries null, like plan, except on a security set-aside (p39-8), where it
+// carries the security scan's question (securityAskOf): reconcile upserts the note's "## Needs you" on a non-empty
+// string, removes it on '', and leaves it on null.
 // reviewVerdicts (p21-3) is [{ round, verdict, head, feedback }]: every master-review round this call judged, in
 // order, each with its own bullets (an approve's are []), recorded as the judge returned, before any exit, so a
 // call that stops after a `changes` round still carries that round; head is the PR head the judge returned (7-40
@@ -1094,8 +1099,12 @@ const FLAKE_CHECK_INTEGRATION = flakeCheck("the merge step's `task file:` lines,
 // securityReviewBlock after reviewTests, with the agent's copy of the brief and its own run of the same scan. A red the
 // agent can fix fails the try like a verifier red; a red no commit can clear is the scan's question for Lachy
 // (needsHuman), and his answer clears it only as a `security-accept` token the scan reads from the task note's
-// `## Repair input`. Integration's own commits and merge commits are not scanned. Absent ⇒ '' and IMPL_RESULT, so every
-// prompt and schema is byte-identical; set ⇒ a deliberate resume-cache break for the implement and revise calls.
+// `## Repair input`. Integration scans too (p39-8): the integrator carries integrationSecurityBlock right after
+// INTEGRATION_PREFLIGHTS (`scan --anchor <anchor>`, its own commits and every merge's resolution since the anchor, before
+// its push) and returns INTEGRATE_RESULT_SECURED; the Integration judge carries integrationSecurityReviewBlock (its own
+// `--history-only` run) and returns INTEGRATION_REVIEW_SECURED. Every finding there is Lachy's question, which rides the
+// row's needsHuman. Absent ⇒ '' and IMPL_RESULT (INTEGRATE_RESULT, INTEGRATION_REVIEW), so every prompt and schema is
+// byte-identical; set ⇒ a deliberate resume-cache break for the implement, revise and Integration calls.
 
 // args.securityCheck: '' when absent (or null) or usable, else why not. Exactly { script }: the absolute, single-line path
 // of security-check.py, never under a bare /skills/ (an unexported plugin root). A bad value is a lead bug, refused before
@@ -1122,9 +1131,21 @@ function implSchema(a) {
   return securityOf(a) ? IMPL_RESULT_SECURED : IMPL_RESULT
 }
 
-// The scan an agent and the review judge run, identical for both: scrubbed, every value shq'd, the base named outright.
-function securityScanCmd(a, task) {
-  return `${GIT_ENV_SCRUB} python3 ${shq(securityOf(a).script)} scan --tree ${shq(worktreeDir(a.repoPath, task.slug))} --base ${shq('origin/' + defaultBranch(a))} --accepts-from ${shq(task.taskPath)}`
+// The scan the task's code-writing agents and the review judge run, identical for both: scrubbed, every value shq'd,
+// the base named outright. Integration's integrator adds `--anchor <the anchor>` (its own commits and merge resolutions
+// since it), and Integration's judge adds `--history-only` too (its read-only run, committed history only); the
+// two-argument form is byte-identical.
+function securityScanCmd(a, task, anchor, historyOnly) {
+  return `${GIT_ENV_SCRUB} python3 ${shq(securityOf(a).script)} scan --tree ${shq(worktreeDir(a.repoPath, task.slug))} --base ${shq('origin/' + defaultBranch(a))} --accepts-from ${shq(task.taskPath)}` +
+    (anchor ? ` --anchor ${shq(anchor)}` : '') + (anchor && historyOnly ? ' --history-only' : '')
+}
+
+// The security scan's question an Integration agent returned: askOf(r) when it names a `security-accept` token (every
+// scan `why` names one), else ''. So an integrate row only ever carries the scan's question, never another needsHuman.
+const SECURITY_ACCEPT_TOKEN = /security-accept (?:secret|config|advisory):[0-9a-f]{12}/
+function securityAskOf(r) {
+  const q = askOf(r)
+  return SECURITY_ACCEPT_TOKEN.test(q) ? q : ''
 }
 
 // The code-writing agents' side, its own leading "\n" ('' when off), right after FLAKE_CHECK_TASK. It never renders a
@@ -1145,6 +1166,40 @@ Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${se
 - The command reads the task note's \`## Repair input\` itself: never write a \`## Repair input\` entry or a \`security-accept\` token yourself, anywhere.
 - Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try. Any other exit 2 is blocked, with its ERROR line.
 - Set verified=true only when the verifier is green AND this scan exited 0 on that head.`
+}
+
+// Integration's side (p39-8), the integrator's own scan, its own leading "\n\n" ('' when off): rendered right after
+// INTEGRATION_PREFLIGHTS (their sibling-site fix can add a commit) and before Step 4's push. Every finding there is
+// Lachy's (Integration never rewrites a commit): the integrator pushes nothing and returns the scan's `why` as
+// needsHuman, which integrationCheck carries to the row (securityAskOf). Every git span is scrubbed.
+function integrationSecurityBlock(a, task, I) {
+  if (!securityOf(a)) return ''
+  const wt = worktreeDir(a.repoPath, task.slug)
+  return `
+
+Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${securityScanCmd(a, task, I.headSha)}\`
+- It reads Integration's own commits and every merge's resolution since the anchor ${I.headSha}. Run it after Step 3 (whether or not the verify was required) and after the preflights above, before Step 4's push. Its last run must be on the head you push: after any later commit (a preflight's sibling fix included), run Step 3's verifier and this scan again.
+- Exit 0: securityClean=true.
+- Exit 1: every finding here is Lachy's (its \`action\` is human): Integration never rewrites a commit. Push nothing. Return blocked=true with blockKind "stop" and securityClean=false, its \`why\`, verbatim, as needsHuman, and a blockerDiagnosis naming each secret's rule, file and commit, never a value.
+- Exit 2 whose ERROR line says "tracked changes are uncommitted": a change that is part of your resolution or fix is committed as a fix commit (list it in fixCommits), then run Step 3's verifier and this scan again; a tracked file the verifier or the env bootstrap rewrote is restored with \`${GIT_ENV_SCRUB} git -C "${wt}" restore --staged --worktree -- <path>\`. Never \`commit -a\`, and never \`add -A\` a stray.
+- Exit 2 whose ERROR line says "untracked files": a new file that is part of your resolution or fix is added by its path and committed as a fix commit (then Step 3's verifier and this scan again); a file the verifier or the bootstrap left (this call's, or the lead's verify before it) is removed by its literal path (the removal rule above), never committed. Then run this scan again.
+- Any other exit 2, or a "commit them" you cannot settle that way: push nothing, and return blocked=true with blockKind "stop", securityClean=false and its ERROR line as blockerDiagnosis.
+- Never create, edit or leave an uncommitted \`.gitleaks.toml\` or \`.gitleaksignore\`. The command reads the task note's \`## Repair input\` itself: never write a \`## Repair input\` entry or a \`security-accept\` token yourself, anywhere.`
+}
+
+// Integration's judge side (p39-8), its own leading "\n\n" ('' when off): rendered after Step 2's reads and the
+// history, before Step 3. Its run is --history-only, so what a verifier left in the tree (P1's lead verify included)
+// never stops it; its read rule is only that the tree's HEAD is the integrated head. It fails closed: a scan that
+// could not run is unreadable, never an approve.
+function integrationSecurityReviewBlock(a, task, I, j) {
+  if (!securityOf(a)) return ''
+  const wt = worktreeDir(a.repoPath, task.slug)
+  return `
+
+Security check (execute § 3 \`security_checks\`, this rollout's opt-in): run \`${securityScanCmd(a, task, I.headSha, true)}\` yourself, only when \`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` prints ${j.headSha}. It reads Integration's own commits and every merge's resolution since the anchor ${I.headSha}, from committed history only (\`--history-only\`), so what a verifier left in the tree never stops it. It is read-only.
+- Exit 0: decide Step 3 as written.
+- Exit 1: verdict "changes", with its \`why\`, verbatim, in needsHuman, and one bullet naming each secret's rule, file and commit, never a value.
+- Exit 2, or a HEAD that is not ${j.headSha}: verdict "changes", unreadable=true, and one bullet "cannot run the security scan: <its ERROR line, or the HEAD you read>". This overrides Step 3's unreadable=false. Never approve what the scan did not read.`
 }
 
 // The agent's newDependencies as the judge sees them: strings only, each on one line of at most DEP_LINE_MAX characters,
@@ -2664,6 +2719,36 @@ const INTEGRATION_REVIEW = {
   required: ['verdict', 'feedback', 'unreadable', 'finishedAt'],
 }
 
+// Integration's schemas while args.securityCheck is set (p39-8; integrateSchema, integrationReviewSchema): the
+// integrator's result gains the scan's question (needsHuman, only its `why`) and a required securityClean, which
+// integrationCheck reads; the judge's gains needsHuman, and its unreadable names the scan that could not run.
+// Off, both keep their own schema, so every Integration call's opts are byte-identical.
+const SECURITY_WHY_DESCRIPTION = "ONLY the security scan's `why`, verbatim, when it exited 1; empty otherwise"
+const INTEGRATE_RESULT_SECURED = {
+  ...INTEGRATE_RESULT,
+  properties: {
+    ...INTEGRATE_RESULT.properties,
+    blocked: { type: 'boolean', description: 'true on a merge-step STOP, an unresolvable conflict, a red verifier at the ceiling, a rejected push or an unsafe tree, or the security scan stopped you' },
+    needsHuman: { type: 'string', description: SECURITY_WHY_DESCRIPTION },
+    securityClean: { type: 'boolean', description: 'true only when the security scan exited 0 on headSha, its last run before the push; false otherwise, a block before it ran included' },
+  },
+  required: [...INTEGRATE_RESULT.required, 'securityClean'],
+}
+const INTEGRATION_REVIEW_SECURED = {
+  ...INTEGRATION_REVIEW,
+  properties: {
+    ...INTEGRATION_REVIEW.properties,
+    unreadable: { type: 'boolean', description: 'true ONLY when the judge check printed FAIL — you could not read the integration — or the security scan could not run (exit 2, or the tree\'s HEAD is not the integrated head)' },
+    needsHuman: { type: 'string', description: SECURITY_WHY_DESCRIPTION },
+  },
+}
+function integrateSchema(a) {
+  return securityOf(a) ? INTEGRATE_RESULT_SECURED : INTEGRATE_RESULT
+}
+function integrationReviewSchema(a) {
+  return securityOf(a) ? INTEGRATION_REVIEW_SECURED : INTEGRATION_REVIEW
+}
+
 // ---- Integration: markers and history ----
 
 function flattenLine(s) {
@@ -3205,7 +3290,7 @@ ${FLAKE_CHECK_INTEGRATION}
 A verifier still red when the loop ends: return blocked=true with blockKind "red" (the engine records
 \`${INTEGRATION_RED_MARK}<why>\`).
 
-${INTEGRATION_PREFLIGHTS}
+${INTEGRATION_PREFLIGHTS}${integrationSecurityBlock(a, task, I)}
 
 Step 4 — push and read back. Push plainly with \`${GIT_ENV_SCRUB} git -C "${wt}" push origin "${I.branch}"\`, then
 read \`${GIT_ENV_SCRUB} git -C "${wt}" ls-remote origin "refs/heads/${I.branch}"\`: its sha is pushedSha, and
@@ -3280,7 +3365,7 @@ On \`judge check: FAIL <why>\`: read nothing else, and return verdict "changes",
 bullet "cannot read the integration: <why>". Never approve what you could not read.
 
 Step 2 — read the integration (merge ${M || '(none)'}, head ${j.headSha}, base ${j.baseSha}, anchor ${I.headSha}):
-${reads.join('\n')}${history}
+${reads.join('\n')}${history}${integrationSecurityReviewBlock(a, task, I, j)}
 
 Step 3 — decide ONE question, not a fresh review of the task: was anything of theirs (the landed PRs)
 dropped or contradicted, or anything of ours (this task's approved change) lost? Verdict "approve" if
@@ -3336,18 +3421,21 @@ function integrationBlockEvidence(I, r) {
   return { block: '' }
 }
 
-// Checks the integrator's result (pure). null when it is usable, else { reason, gates?, block?, files?, base? } — a
-// set-aside; block (integrationBlockEvidence) names an Integration conflict or a verifier red, and a gate wins.
+// Checks the integrator's result (pure). null when it is usable, else { reason, gates?, block?, files?, base?, ask? } —
+// a set-aside; block (integrationBlockEvidence) names an Integration conflict or a verifier red, and a gate wins.
+// With the Security check on (a's securityCheck, p39-8), a blocked result's question rides along as ask only when it is
+// the security scan's (securityAskOf), and an unblocked one also needs securityClean: the scan exited 0 on the head.
 // A verify is required unless the base is unmoved, nothing is red, the branch has not moved and nothing
 // was committed: then (the race case) the result integrates with no verifier run.
-function integrationCheck(I, r, approved) {
+function integrationCheck(I, r, approved, a) {
   if (!r || r.__dead) return { reason: TRANSIENT_DIAGNOSIS }
   const gates = unapprovedGates(r.gatedInputs, approved)
   if (gates.length) return { reason: gateDiagnosis(gates), gates }
   if (r.blocked) {
     const reason = r.blockerDiagnosis || 'the integrator returned blocked with no diagnosis'
     const ev = integrationBlockEvidence(I, r)
-    return ev.block ? { reason, ...ev } : { reason }
+    const ask = securityOf(a) ? securityAskOf(r) : ''
+    return { reason, ...(ev.block ? ev : {}), ...(ask ? { ask } : {}) }
   }
   const log = parseMergeLog(r.mergeLog)
   if (log.anchor === null) return { reason: 'the merge log has no `anchor:` line — the merge step did not run as rendered' }
@@ -3373,6 +3461,7 @@ function integrationCheck(I, r, approved) {
   if (r.pushedSha !== r.headSha) return { reason: `origin has ${r.pushedSha}, not the integrated head ${r.headSha} — the push did not land` }
   const verifyRequired = merged || I.trouble.includes('red') || r.taskHead !== I.headSha || r.headSha !== r.taskHead
   if (verifyRequired && !r.verified) return { reason: 'the full verifier was required but did not go green in this call' }
+  if (securityOf(a) && r.securityClean !== true) return { reason: 'the security scan did not exit 0 on the integrated head' }
   return null
 }
 
@@ -3428,29 +3517,34 @@ async function integrate(task, a, trace) {
   } else {
     trace.path = 'integrator'
     const ri = record('integrator', ilabel)
-    const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT, 'integrator'))
+    const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, integrateSchema(a), 'integrator'))
     finished(ri, r)
     // p29-9: the integrator's Flakes (its own verifier runs' Flake check), kept whatever the outcome, a set-aside too.
     if (!r.__dead) trace.flakes = flakesOf(r, trace.flakes || [], ilabel)
-    const bad = integrationCheck(I, r, task.approvedGates)
+    const bad = integrationCheck(I, r, task.approvedGates, a)
     // A named Integration conflict carries triggers ['conflict'] (the Run record's lane-freed reads conflict: true);
     // integration.baseSha stays '' for every integrator set-aside (the only kind this branch returns), so their
-    // Integration log's base=- is unchanged.
+    // Integration log's base=- is unchanged. A security stop's question (bad.ask, p39-8) rides to the row's needsHuman.
     if (bad) {
       return {
         outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [], block: bad.block || '', files: bad.files || [],
         briefBase: bad.base || '', ...(bad.block === 'conflict' ? { triggers: ['conflict'] } : {}),
+        ...(bad.ask ? { ask: bad.ask } : {}),
       }
     }
     j = { mergeCommit: r.mergeState === 'up-to-date' ? '' : r.mergeCommit, headSha: r.headSha, baseSha: r.baseSha, triggers: integrationTriggers(I, r), path: trace.path }
     if (!j.triggers.length) return { outcome: 'integrated', ...j, reReviewed: false }
   }
   const rj = record('judge', jlabel)
-  const v = await runAgent(integrationReviewPrompt(task, a, I, j), opts(jlabel, INTEGRATION_REVIEW, 'judge'))
+  const v = await runAgent(integrationReviewPrompt(task, a, I, j), opts(jlabel, integrationReviewSchema(a), 'judge'))
   finished(rj, v)
   if (v.__dead) return { outcome: 'set-aside', reason: TRANSIENT_DIAGNOSIS, ...j, reReviewed: false }
   const feedback = (v.feedback || []).map(flattenLine).filter((f) => f)
   if (v.unreadable) return { outcome: 'set-aside', reason: `judge could not read the integration — ${feedback[0] || 'no reason given'}`, ...j, reReviewed: true, feedback }
+  // The judge's security scan found what only Lachy can settle (p39-8): set aside with its question, never rejected —
+  // a revise cannot rewrite pushed history, so no review round is used.
+  const ask = securityOf(a) ? securityAskOf(v) : ''
+  if (ask) return { outcome: 'set-aside', reason: 'security scan: ' + flattenLine(ask), ask, ...j, reReviewed: true, feedback }
   if (v.verdict === 'approve') return { outcome: 'integrated', ...j, reReviewed: true }
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
@@ -3508,8 +3602,9 @@ function integrationResult(task, out, a, trace) {
     reviewFeedback,
     reviewHistory,
     approvedAtCeiling: false,
-    // p16-3: null, like `plan` — an integrate row never settles the note's `## Needs you`.
-    needsHuman: null,
+    // p16-3: null, like `plan`, so an integrate row leaves the note's `## Needs you`, except on a security set-aside
+    // (p39-8): then the security scan's question (o.ask, securityAskOf), which reconcile upserts there.
+    needsHuman: o.ask || null,
     gatedInputs,
     summary: o.outcome === 'integrated'
       ? `integrated ${head} onto ${o.baseSha} (${trace.path}${o.reReviewed ? ', re-reviewed' : ', no re-review'})`
@@ -3587,6 +3682,7 @@ if (badLadder) throw argsRefused('args.ladder: ' + badLadder)
 const badSlot = verifySlotArgsError(a.verifySlot)
 if (badSlot) throw argsRefused('args.verifySlot: ' + badSlot)
 // args.securityCheck (execute § 3 `security_checks`): optional; a malformed one is a lead bug, refused here in both modes.
+// A usable one is taken in both modes too: Integration scans its own commits and merge resolutions (p39-8).
 const badSecurity = securityCheckArgsError(a.securityCheck)
 if (badSecurity) throw argsRefused('args.securityCheck: ' + badSecurity)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
@@ -3600,9 +3696,6 @@ if (mode === 'integrate') {
   const bad = integrationArgsError(a)
   if (bad) throw argsRefused('args.integration: ' + bad)
   if (a.task.resume !== undefined) throw argsRefused("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
-  if (a.securityCheck !== undefined && a.securityCheck !== null) {
-    throw argsRefused("args.securityCheck: never on mode 'integrate': Integration's own commits are not scanned")
-  }
 } else if (a.integration !== undefined) {
   throw argsRefused("args.integration: only with args.mode 'integrate'")
 }

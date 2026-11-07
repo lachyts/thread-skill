@@ -79,15 +79,17 @@ Each row is one ask unit (a paragraph, list item or table row) in `skills/`, fou
 unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
 ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
-only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 68
-rows: 43 cited, 13 follow-up (p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 69
+rows: 44 cited, 13 follow-up (p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
 p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved queue) removed its 14 rows. Orient
 § 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row. p30-9 (ADR 0057) removed its 2 rows and
 added orient § 9's cited *gate* row: the execute handoff, decided and never asked. p29-7 (ADR 0048) added repair
 § 3g's cited row: Lachy's ack of a Lane hold. p35-1 (ADR 0061) added orient-all § 7's cited row: the pick list.
+p40-1 (ADR 0071) added the Backlog orient's § B9 cited row: his questions, put one at a time after the start.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
+| skills/orient/backlog.md | § B9 | `` puts each of his questions through AskUserQuestion, one at a time `` | *yours* | cited | — |
 | skills/_shared/readiness-grade.md | § Each decision | `` orient-all asks the One calls (only his) through AskUserQuestion `` | *yours* | cited | — |
 | skills/_shared/task-writer.md | § 1 | `` else `AskUserQuestion` offering those matches `` | *yours* | cited | — |
 | skills/_shared/task-writer.md | § 1 | `` **Still ambiguous** → ask via `AskUserQuestion` `` | *yours* | cited | — |

@@ -1,6 +1,7 @@
 // skills/execute/scripts/security-check.py — the opt-in Security check (execute § 3 `security_checks`): a scan of the
-// task's own non-merge commits for secrets (gitleaks) and of the dependencies its diff adds or changes for advisories
-// (OSV), before the PR, read by the engine's agents and the review judge.
+// task's own commits and each merge's resolution for secrets (gitleaks) and of the dependencies its diff adds or changes
+// for advisories (OSV), before the PR, read by the engine's agents and the review judge; and, with --anchor, of
+// Integration's own commits and merge resolutions since the anchor, read by the integrator and the Integration judge.
 //
 // Hermetic: each case builds its own mktemp repo whose only remote is a local bare repo (its upload-pack wrapped, so a
 // case sees whether origin was read), a stub gitleaks (THREAD_GITLEAKS: a python script that emulates the github-pat
@@ -51,6 +52,7 @@ function fakeToken(seed = 'thread-security-fixture') {
 }
 const TOKEN = fakeToken()
 const TOKEN2 = fakeToken('thread-security-fixture-2')
+const TOKEN3 = fakeToken('thread-security-fixture-3')
 
 const STUB = (py) => `#!${py}
 import json, os, re, subprocess, sys
@@ -178,7 +180,7 @@ async function scan(s, { real = false, base = `origin/${s.def}`, note, osv = CLO
   if (osv === null) argv.push('--no-advisories')
   else if (osv) argv.push('--osv-url', osv)
   const r = await runPy([...argv, ...extra], e)
-  for (const tok of [TOKEN, TOKEN2, TOKEN.slice(4), TOKEN2.slice(4)]) {
+  for (const tok of [TOKEN, TOKEN2, TOKEN3, TOKEN.slice(4), TOKEN2.slice(4), TOKEN3.slice(4)]) {
     assert.ok(!r.stdout.includes(tok) && !r.stderr.includes(tok), 'S14: the secret value never reaches stdout or stderr')
   }
   r.json = r.stdout.trim() ? JSON.parse(r.stdout) : null
@@ -456,6 +458,239 @@ test('S5c: two secrets behind a merge are both named; a third after it stays the
   assert.deepEqual(r2.json.secrets.map((x) => x.file), ['late.py'])
   assert.equal(r2.json.rewriteFrom, merge)
   assert.equal(r2.json.mergeBehind, false)
+})
+
+// ---- M1-M3, I1-I6: merge resolutions, and Integration's scan (--anchor) -------------------------------------------
+
+// feat and main both add app.py (an add/add conflict, so git's automatic merge holds conflict markers); main also adds
+// theirs.py holding o.theirs when given. feat merges origin/<def> and resolves app.py as `body`; returns the merge.
+function conflictMerge(s, body, o = {}) {
+  s.write('app.py', 'OURS = 1\n'); s.commit('ours adds app.py')
+  if (o.pushOurs) s.git('push', '-q', 'origin', 'feat')
+  const ours = s.head()
+  s.git('checkout', '-q', s.def)
+  s.write('app.py', 'THEIRS = 2\n')
+  if (o.theirs) s.write('theirs.py', `TOKEN = "${o.theirs}"\n`)
+  s.commit('theirs adds app.py'); s.git('push', '-q', 'origin', s.def)
+  s.git('checkout', '-q', 'feat')
+  const m = spawnSync(GIT, ['-C', s.tree, 'merge', '-q', `origin/${s.def}`], { env: s.env, encoding: 'utf8' })
+  assert.equal(m.status, 1, 'setup: the merge conflicts')
+  s.write('app.py', body)
+  s.git('add', '-A'); s.git('commit', '-q', '--no-edit')
+  return { ours, merge: s.head() }
+}
+const RESOLVED = 'OURS = 1\nTHEIRS = 2\n'
+const LEAKED = `OURS = 1\nTHEIRS = 2\nTOKEN = "${TOKEN}"\n`
+const noWalk = (rec) => rec.argv.find((x) => x.startsWith('--log-opts=--no-walk '))
+
+for (const real of [false, true]) {
+  const tag = real ? 'real gitleaks' : 'stub'
+  test(`M1 (${tag}): a conflict resolved with a secret in the merge commit is found at the merge, merge: true, human (and its control)`, { skip: real && realSkip }, async (t) => {
+    const s = box(t)
+    const { merge } = conflictMerge(s, LEAKED)
+    const r = await scan(s, { real })
+    assert.equal(r.status, 1, r.stderr)
+    assert.equal(r.json.action, 'human')
+    assert.deepEqual(r.json.secrets.map((x) => [x.file, x.commit, x.line, x.merge, x.pushed]), [['app.py', merge, 3, true, false]])
+    assert.match(r.json.why, /sits at or before a merge commit, so the task cannot rewrite it/)
+    assert.ok(r.json.why.startsWith(`A secret (github-pat) in app.py, commit ${merge.slice(0, 7)} (a merge's resolution), line 3, `), r.json.why)
+    assert.equal(r.json.mergeBehind, true)
+    if (!real) {
+      // Control: a finding in the replay left at its synthetic commit names no commit of the branch.
+      const m = await scan(s, { script: mutant(s, 'found.append({**s, "commit": replays[s["commit"]], "merge": True})', 'found.append({**s, "merge": True})') })
+      assert.notEqual(m.json.secrets[0].commit, merge, 'control: without the S→M mapping the commit is not the merge')
+    }
+  })
+}
+
+test('M2: a clean --no-ff merge is no replay: one gitleaks run, the range, and no --no-walk call', async (t) => {
+  const s = box(t)
+  s.leak()
+  mainMoves(s)
+  s.git('merge', '-q', '--no-ff', '-m', 'merge main', 'origin/main')
+  const r = await scan(s)
+  assert.equal(r.status, 1)
+  assert.equal(r.json.action, 'human')
+  const recs = s.stubLog()
+  assert.equal(recs.length, 1, 'one gitleaks run')
+  assert.equal(noWalk(recs[0]), undefined)
+})
+
+test('M3: an evil-merge edit to a file with no conflict is found at the merge', async (t) => {
+  const s = box(t)
+  mainMoves(s)
+  assert.equal(spawnSync(GIT, ['-C', s.tree, 'merge', '-q', '--no-ff', '--no-commit', 'origin/main'], { env: s.env }).status, 0, 'setup: a clean merge, not committed')
+  s.write('README.md', `hello\nTOKEN = "${TOKEN}"\n`)
+  s.git('add', '-A'); s.git('commit', '-q', '--no-edit')
+  const merge = s.head()
+  assert.equal(s.git('rev-list', '--count', '--no-merges', 'origin/main..HEAD'), '0', 'setup: the merge is the branch\'s only commit')
+  const r = await scan(s)
+  assert.equal(r.status, 1, r.stderr)
+  assert.deepEqual(r.json.secrets.map((x) => [x.file, x.commit, x.line, x.merge]), [['README.md', merge, 2, true]])
+  assert.equal(r.json.action, 'human')
+})
+
+// Integration's tree: feat's own commit (the anchor, pushed), then a conflict merge of main (theirs.py holds TOKEN3)
+// resolved as `body`, then, with o.fix (a file → its text), one fix commit F.
+function integrated(s, body, o = {}) {
+  const { ours: anchor, merge } = conflictMerge(s, body, { theirs: TOKEN3, pushOurs: true })
+  let fix = null
+  if (o.fix) {
+    for (const [f, text] of Object.entries(o.fix)) s.write(f, text)
+    fix = s.commit('an Integration fix')
+  }
+  return { anchor, merge, fix }
+}
+const anchorArgs = (anchor, ...more) => ['--anchor', anchor, ...more]
+const PKG = JSON.stringify({ dependencies: { 'left-pad': '^1.3.0' } })
+
+for (const real of [false, true]) {
+  const tag = real ? 'real gitleaks' : 'stub'
+  test(`I1a (${tag}): --anchor reads the resolution and the fix commit, never main's own commits; every secret is Lachy's, origin never read, no dependencies (and its controls)`, { skip: real && realSkip }, async (t) => {
+    const s = box(t)
+    const o = await osvStub(t, { 'npm|left-pad': [vuln('GHSA-test-0007', 'npm', 'left-pad', [eco([{ introduced: '0' }, { fixed: '1.3.1' }])])] })
+    const { anchor, merge, fix } = integrated(s, LEAKED, { fix: { 'fix.py': `TOKEN = "${TOKEN2}"\n`, 'package.json': PKG } })
+    const r = await scan(s, { real, osv: o.url, extra: anchorArgs(anchor) })
+    assert.equal(r.status, 1, r.stderr)
+    assert.equal(r.json.action, 'human')
+    assert.deepEqual(r.json.secrets.map((x) => [x.file, x.commit, x.line, !!x.merge]), [['app.py', merge, 3, true], ['fix.py', fix, 1, false]])
+    for (const sec of r.json.secrets) assert.ok(!('pushed' in sec) && !('pushedWhy' in sec), JSON.stringify(sec))
+    assert.equal(s.packed(), '', 'origin is never read')
+    const by = Object.fromEntries(r.json.secrets.map((x) => [x.file, x.accept]))
+    assert.ok(r.json.why.startsWith('The scan found 2 things only you can settle: (1) A secret (github-pat) in app.py, commit '), r.json.why)
+    for (const f of ['app.py', 'fix.py']) assert.ok(r.json.why.includes(`, is in Integration's commits, which Integration never rewrites: once it is rotated, keep it in the history (answer \`security-accept ${by[f]}\`)`), r.json.why)
+    assert.ok(r.json.why.includes(`commit ${merge.slice(0, 7)} (a merge's resolution), line 3`), r.json.why)
+    assert.ok(!r.json.why.includes('already on origin'), r.json.why)
+    assert.equal(r.json.anchor, anchor)
+    assert.equal(r.json.rewriteFrom, null)
+    assert.equal(r.json.mergeBehind, true)
+    assert.deepEqual(r.json.dependencies, [])
+    assert.deepEqual(r.json.advisories, [])
+    assert.equal(r.json.advisoriesChecked, false)
+    assert.ok(r.json.brief.includes('dependencies not checked: an Integration scan (--anchor) reads secrets and the scanner config only'), r.json.brief.join('\n'))
+    assert.equal(o.seen.length, 0, 'no OSV request')
+    if (!real) {
+      // Control: the anchor range without --first-parent walks into main's commits through the merge's second parent.
+      const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: mutant(s, 'f"--first-parent --no-merges {lo}..{head}" if anchor', 'f"--no-merges {lo}..{head}" if anchor') })
+      assert.ok(m.json.secrets.some((x) => x.file === 'theirs.py'), 'control: without --first-parent main\'s own secret is read')
+      // Control: --anchor read as a task scan builds Pushed and the task's items.
+      const m2 = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: mutant(s, 'integration = anchor is not None', 'integration = False') })
+      assert.ok(m2.json.secrets.some((x) => 'pushed' in x), 'control: a task-mode reading carries pushed')
+      assert.ok(!m2.json.why.includes("is in Integration's commits"), 'control: a task-mode reading words it otherwise')
+    }
+  })
+}
+
+test('I1b: a fix commit\'s secret alone is still human with --anchor, rewriteFrom null, mergeBehind false; a task-mode scan of the same tree is the fix', async (t) => {
+  const s = box(t)
+  const { anchor, merge, fix } = integrated(s, RESOLVED, { fix: { 'fix.py': `TOKEN = "${TOKEN2}"\n` } })
+  const r = await scan(s, { extra: anchorArgs(anchor) })
+  assert.equal(r.status, 1, r.stderr)
+  assert.equal(r.json.action, 'human')
+  assert.deepEqual(r.json.secrets.map((x) => [x.file, x.commit]), [['fix.py', fix]])
+  assert.equal(r.json.rewriteFrom, null)
+  assert.equal(r.json.mergeBehind, false)
+  assert.equal(r.json.why, `A secret (github-pat) in fix.py, commit ${fix.slice(0, 7)}, line 1, is in Integration's commits, which Integration never rewrites: once it is rotated, keep it in the history (answer \`security-accept ${r.json.secrets[0].accept}\`), or have /thread:repair recut the branch?`)
+  const task = await scan(s)
+  assert.equal(task.status, 1, task.stderr)
+  assert.equal(task.json.action, 'fix')
+  assert.equal(task.json.rewriteFrom, merge)
+  assert.equal(task.json.secrets[0].accept, r.json.secrets[0].accept, 'the accept key is the same in both modes')
+  assert.ok(!('anchor' in task.json), 'a task scan carries no anchor')
+})
+
+test('I2: an --anchor that is no commit, or not an ancestor of HEAD, and --history-only without --anchor: exit 2', async (t) => {
+  const s = box(t)
+  s.leak()
+  const r = await scan(s, { extra: anchorArgs('no-such-ref') })
+  assert.equal(r.status, 2)
+  assert.match(r.stderr, /^ERROR: security-check: --anchor no-such-ref does not resolve to a commit in --tree\n$/)
+  mainMoves(s)
+  const other = s.git('rev-parse', 'origin/main')
+  const r2 = await scan(s, { extra: anchorArgs(other) })
+  assert.equal(r2.status, 2)
+  assert.match(r2.stderr, /^ERROR: security-check: --anchor [0-9a-f]{7} is not an ancestor of HEAD [0-9a-f]{7}\n$/)
+  const r3 = await scan(s, { extra: ['--history-only'] })
+  assert.equal(r3.status, 2)
+  assert.equal(r3.stderr, "ERROR: security-check: --history-only goes with --anchor (the Integration judge's read-only run)\n")
+  const head = await scan(s, { extra: anchorArgs(s.head()) })
+  assert.equal(head.status, 0, 'an --anchor at HEAD is an empty range: clean')
+})
+
+test('I3: an accept token for a resolution secret, recorded as Lachy answers it, exits 0 and is named', async (t) => {
+  const s = box(t)
+  const { anchor } = integrated(s, LEAKED)
+  const r = await scan(s, { extra: anchorArgs(anchor) })
+  assert.equal(r.json.action, 'human')
+  const acc = r.json.secrets[0].accept
+  const note = s.note([entry(r.json.why, `rotated; keep it (security-accept ${acc})`)])
+  const r2 = await scan(s, { note, extra: anchorArgs(anchor) })
+  assert.equal(r2.status, 0, r2.stdout)
+  assert.deepEqual(r2.json.accepted.map((x) => x.token), [acc])
+  assert.deepEqual(r2.json.secrets, [])
+  const task = await scan(s, { note })
+  assert.equal(task.status, 0, 'the same accept clears the task-mode reading of the resolution')
+})
+
+test('I4: the argv: --anchor runs the replay, then the first-parent range last; a task scan keeps its range last', async (t) => {
+  const s = box(t)
+  const { anchor, merge } = integrated(s, LEAKED, { fix: { 'fix.py': 'x = 1\n' } })
+  const head = s.head()
+  await scan(s, { extra: anchorArgs(anchor) })
+  const recs = s.stubLog()
+  assert.equal(recs.length, 2)
+  assert.ok(recs[1].argv.includes(`--log-opts=--first-parent --no-merges ${anchor}..${head}`), recs[1].argv.join(' '))
+  const nw = noWalk(recs[0])
+  assert.match(nw || '', /^--log-opts=--no-walk [0-9a-f]{40}$/)
+  assert.ok(!nw.includes(merge) && !nw.includes(head), 'the replay is its own commit')
+  await scan(s)
+  const mb = s.git('merge-base', 'HEAD', 'origin/main')
+  const task = s.stubLog()
+  assert.equal(task.length, 4)
+  assert.ok(noWalk(task[2]), 'a task scan replays the merge too')
+  assert.ok(task[3].argv.includes(`--log-opts=--no-merges ${mb}..${head}`), task[3].argv.join(' '))
+})
+
+test('I5: a replay writes nothing to the tree\'s repo: its objects and refs are unchanged, TMPDIR left empty', async (t) => {
+  const s = box(t)
+  const { anchor } = integrated(s, LEAKED)
+  const objects = s.git('count-objects', '-v')
+  const refs = s.git('for-each-ref')
+  const r = await scan(s, { extra: anchorArgs(anchor) })
+  assert.equal(r.status, 1)
+  const r2 = await scan(s)
+  assert.equal(r2.status, 1)
+  assert.equal(s.git('count-objects', '-v'), objects)
+  assert.equal(s.git('for-each-ref'), refs)
+  assert.deepEqual(fs.readdirSync(s.tmp), [])
+})
+
+test('I6: --history-only reads committed history alone: a verifier\'s untracked file, a rewritten tracked file and an untracked .gitleaks.toml never stop it (and its control)', async (t) => {
+  const s = box(t)
+  s.write('src/own.py', 'x = 1\n')
+  const anchor = s.commit('own')
+  s.git('push', '-q', 'origin', 'feat')
+  mainMoves(s)
+  s.git('merge', '-q', '--no-ff', '-m', 'merge main', 'origin/main')
+  const fix = s.leak('fix.py', TOKEN2)
+  s.write('out/report.xml', '<testsuite/>\n')
+  s.write('README.md', 'rewritten by the verifier\n')
+  s.write('.gitleaks.toml', "[extend]\nuseDefault = true\n[allowlist]\npaths = ['''fix\\.py''']\n")
+  const r = await scan(s, { extra: anchorArgs(anchor, '--history-only') })
+  assert.equal(r.status, 1, r.stderr)
+  assert.deepEqual(r.json.secrets.map((x) => [x.file, x.commit]), [['fix.py', fix]])
+  assert.deepEqual(r.json.configTouched, [])
+  assert.equal(r.json.action, 'human')
+  const full = await scan(s, { extra: anchorArgs(anchor) })
+  assert.equal(full.status, 2)
+  assert.match(full.stderr, /tracked changes are uncommitted/)
+  s.git('checkout', '--', 'README.md')
+  const untrackedRun = await scan(s, { extra: anchorArgs(anchor) })
+  assert.equal(untrackedRun.status, 2)
+  assert.match(untrackedRun.stderr, /untracked files are in --tree \(1; git status lists them\)/)
+  // Control: the untracked refusal without its --history-only guard stops the judge's run.
+  const m = await scan(s, { extra: anchorArgs(anchor, '--history-only'), script: mutant(s, 'loose = [] if args.history_only else untracked(', 'loose = untracked(') })
+  assert.equal(m.status, 2, 'control: dropping the guard must fail the case')
 })
 
 // ---- S6: the scanner's own config ---------------------------------------------------------------------------------

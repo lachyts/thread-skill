@@ -33,7 +33,7 @@ sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, asks a project's Priorities card once when its note has none (how robust, who it is for, what matters most, where Lachy steers), then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute handoff. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, asks a project's Priorities card once when its note has none (how robust, who it is for, what matters most, where Lachy steers), then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing; `--backlog` (ADR 0071) runs an area's whole Backlog with nobody present: it parks, re-homes and batches tasks, schedules and starts the rollouts, and puts its questions to Lachy only after the start. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute handoff. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041, ADR 0061): orient across every project at once, sweeping up the work that needs little of Lachy's thinking. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks a small project's sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the small projects' runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1 and repair as a visible Chorus session, or prints paste-ready prompts off the Stage. A big project keeps its own session: it reaches him only through one pick list at the end, and only the projects he ticks start their orient. Never reshapes a project; `--dry-run` writes nothing. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
@@ -55,7 +55,8 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 ## Runtime support
 
 Orient's audit, reshuffle and steering are portable, and orient spawns no child
-agents (ADR 0040 retired the ADR 0023 batches). The rollout executor still
+agents outside `--backlog` (ADR 0040 retired the ADR 0023 batches); under `--backlog` it forks one `/thread:schedule`
+run per batch (`skills/orient/backlog.md` § B5), as the estate pass does. The rollout executor still
 requires its canonical Workflow runtime; shared source and skill discovery do not
 provide that runtime. The estate pass (`/thread:orient-all`) grades through read-only agents and schedules through
 forked subagents, and starts its sessions as visible Chorus sessions on the Stage; anywhere else it ends with
@@ -143,7 +144,9 @@ API, PAT or `.env`), an `@` address, or a conjunction that joins a second
 thing (and, or, plus, as well as, along with, together with, `&`, `+`, `;`).
 It cannot see a second thing named in plain prose with none of these ("the
 dummy Login, to push to the npm registry"): that signs, the approval names
-only the Login, and any other use is a review failure.
+only the Login, and any other use is a review failure. Schedule and orient
+record such a gate ahead and never ask it: the planner words it as the
+standing approval reads it.
 
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a
@@ -171,7 +174,7 @@ on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the
 Mac is back at 2. Each lead also keeps a lease, `~/.config/thread/leases/<rollout>.json`,
 rewritten at its every `next` and loop entry; a rollout whose lease has lapsed (45
 minutes after its last write, or after the Mac's latest boot or wake if later,
-unless a room stop stands) stops holding room in the count.
+unless a room stop stands under its 6 h bound) stops holding room in the count.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
@@ -469,7 +472,8 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
   orient's Priorities card, asked once when a project note has none and read by every later ask
   (`orient-priorities-card.test.mjs`, Chorus ADR 0110 d5),
-  orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
+  the Backlog orient's one file, its pointers, its start, its questions and its write-back (`orient-backlog.test.mjs`,
+  ADR 0071), orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
   orient's retired batches (`execution-fit-shapes.test.mjs`, ADR 0040), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread wording in the line and the menu
@@ -507,6 +511,9 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, now, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
+- **Backlog orient script** — `tests/backlog-orient.test.mjs`: `backlog-orient.py` against a fixture vault — `sweep`
+  equal to an oracle of the Pulse's line rules, the byte-exact park, reopen, obsolete, re-home and wait writes and
+  their refusals, the record, and the trigger write-back's format, guards and fold, through every disposition.
 - **Target resolver** — `tests/resolve-target.test.mjs`: `resolve-target.py` against a fixture vault of real
   names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
   the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal

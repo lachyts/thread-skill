@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""security-check.py — the opt-in Security check of a parallel rollout's task (execute § 3 `security_checks`).
+"""security-check.py — the opt-in Security check of a rollout's task (execute § 3 `security_checks`).
 
 Python stdlib only. Two verbs:
 
@@ -7,22 +7,36 @@ Python stdlib only. Two verbs:
       gitleaks is found (find_gitleaks), `gitleaks version` is at least 8.19.0 (the release with the `git`
       subcommand) and `git --version` runs. Exit 0 prints {"gitleaks": <path>, "version": <v>}; exit 1 prints one
       `ERROR: security-check: <why>` line on stderr. No network call. `reconcile-rollout.py verify-timeout` runs it at
-      every loop entry of a rollout with `security_checks: true` (its exit 5 otherwise).
+      every loop entry of a rollout with `security_checks: true` (its exit 5 otherwise), and `leg.py begin` on a serial
+      note (its exit 1 otherwise).
 
   security-check.py scan --tree <wt> --base <ref> [--accepts-from <task note>] [--osv-url <base> | --no-advisories]
+                        [--anchor <sha> [--history-only]]
       The engine's code-writing agents run it once the verifier is green, before they open or update the PR, and the
-      review judge runs it again. It reads the tree and the note only, and writes only its own
-      tempfile.mkdtemp(prefix="thread-security-") directory, removed in a `finally`.
-      1-4. Refusals, each exit 2 with one ERROR line and no stdout: --tree is not its own git toplevel; tracked
-           changes are uncommitted ("commit them, then run the scan again"); --base does not resolve; no merge base.
+      review judge runs it again; a serial chain's Leg runs it through `leg.py security` (a primary checkout in a
+      detached scratch worktree), before each task's review and again before `leg.py done`; with --anchor,
+      Integration's integrator runs it before its push and the Integration judge again (--history-only). It reads the
+      tree and the note only, and writes only its own tempfile.mkdtemp(prefix="thread-security-") directory, removed
+      in a `finally`.
+      1-4. Refusals, each exit 2 with one ERROR line and no stdout: --history-only without --anchor; --tree is not its
+           own git toplevel; tracked changes are uncommitted ("commit them, then run the scan again"); --base does not
+           resolve; no merge base; --anchor does not resolve to a commit that is an ancestor of HEAD.
            Then an untracked file that is neither gitignored nor a watched config path (5's disk rule owns those) is
            refused too ("commit them (or remove them if they are not part of the change), then run the scan again"):
-           6-7 read commits only, so a new file a `commit -a` left out would be pushed unscanned.
+           6-7 read commits only, so a new file a `commit -a` left out would be pushed unscanned. --history-only skips
+           the tracked-changes and untracked refusals.
       5.   The config watch: the root `.gitleaks.toml` and `.gitleaksignore` (and the relative in-repo `[extend] path`
            of the merge base's `.gitleaks.toml`). A committed change in <mb>..HEAD (root-level pathspecs only) or an
            uncommitted one on disk (untracked or gitignored bytes, a symlink, a directory) is `configTouched`.
-      6-7. gitleaks runs over the task's own non-merge commits <mb>..HEAD in a scratch `--shared --no-checkout` clone
-           that holds only the merge base's scanner config, so nothing the task leaves on disk silences it.
+           --history-only skips the disk rule: it reads committed history only.
+      6-7. gitleaks runs over the task's own non-merge commits <mb>..HEAD, and over each first-parent merge's
+           resolution there, in a scratch `--shared --no-checkout` clone that holds only the merge base's scanner
+           config, so nothing the task leaves on disk silences it. A merge M's resolution is replayed in the clone: T
+           is git's automatic merge of M^1 and M^2 (`merge-tree --write-tree`, conflict markers included), P a commit
+           of T, and S a commit of M's tree on P, so S's added lines are exactly what the resolution added, at M's file
+           and line; a finding in S is reported at M with `merge: true`. A merge whose tree equals T (a clean automatic
+           merge) is skipped. An octopus merge is replayed with M^1 and M^2 only, so a third parent's changes read as
+           the resolution's. The replay needs git 2.38 or later, and runs only when the range holds a merge.
       8.   Secrets: rule, file, line and commit only (never the Secret or Match fields), with `pushed` read only when
            one is found: the local remote-tracking refs, then origin's live head for the branch.
       9.   Accepts: a `security-accept <kind>:<key>` token that Lachy's recorded answer in the note's `## Repair input`
@@ -34,6 +48,14 @@ Python stdlib only. Two verbs:
            `advisoriesChecked: false`, never a red, and a failed GET leaves only its own advisory not checked.
       12.  The brief lines; 13. `action` (fix | human | null) and `why`, one question naming every human item's
            accept token.
+      Integration mode (--anchor <sha>, the Integration anchor, ADR 0030): the range is Integration's own commits,
+      `--first-parent --no-merges <anchor>..HEAD` (the integrator's conflict resolutions and fix commits, with the
+      task's commits since the anchor), plus each first-parent merge's resolution in <anchor>..HEAD, never main's
+      commits a merge brought in. Integration never rewrites a commit, so every secret is a human item ("is in
+      Integration's commits, which Integration never rewrites"), `pushed` is never read (no secret carries `pushed`
+      or `pushedWhy`) and `rewriteFrom` is null; `mergeBehind` is read as in task mode. Steps 10-11 never run there
+      (`dependencies` and `advisories` [], `advisoriesChecked` false, one brief line says so), and the output gains
+      `anchor`. --history-only is the read-only Integration judge's run: no refusal or rule reads the working tree.
       One JSON line on stdout; exit 0 clean (accepted items included), 1 red. Neither stdout nor stderr ever holds a
       secret value.
 """
@@ -123,10 +145,14 @@ def _scrubbed_env():
     return dict(env)
 
 
-def _git(tree, *args, timeout=GIT_TIMEOUT, check=True, text=True):
-    """`git -C <tree> <args>` under the scrubbed env: (rc, stdout, stderr); a failure with check is a Refusal."""
+def _git(tree, *args, timeout=GIT_TIMEOUT, check=True, text=True, env=None):
+    """`git -C <tree> <args>` under the scrubbed env (plus `env`, when given): (rc, stdout, stderr); a failure with
+    check is a Refusal."""
+    run_env = _scrubbed_env()
+    if env:
+        run_env.update(env)
     try:
-        r = subprocess.run(["git", "-C", str(tree), *args], capture_output=True, text=text, env=_scrubbed_env(),
+        r = subprocess.run(["git", "-C", str(tree), *args], capture_output=True, text=text, env=run_env,
                            timeout=timeout)
     except subprocess.TimeoutExpired:
         if check:
@@ -747,7 +773,9 @@ def disk_drift(tree, mb, head, paths, committed):
     return out
 
 
-def config_watch(tree, mb, head):
+def config_watch(tree, mb, head, disk=True):
+    """(paths, touched): rule (a), a committed change in <mb>..<head>, and rule (b), the disk comparison, unless
+    `disk` is False (--history-only reads committed history only)."""
     paths = watched_paths(tree, mb)
     committed = []
     for p in paths:
@@ -758,7 +786,7 @@ def config_watch(tree, mb, head):
     for p in committed:
         content = _blob(tree, head, p) or "deleted"
         touched.append({"path": p, "cause": "committed", "accept": config_accept(p, "committed", content)})
-    drift = disk_drift(tree, mb, head, paths, committed)  # the disk comparison
+    drift = disk_drift(tree, mb, head, paths, committed) if disk else []  # the disk comparison
     for p, content in drift:
         touched.append({"path": p, "cause": "uncommitted", "accept": config_accept(p, "uncommitted", content)})
     touched.sort(key=lambda t: (t["path"], t["cause"]))
@@ -779,9 +807,46 @@ def scratch_clone(tree, mb, paths, tmp):
     return scan
 
 
-def run_gitleaks(gitleaks, scan, mb, head, tmp):
-    report = os.path.join(tmp, "report.json")
-    argv = [gitleaks, "git", scan, f"--log-opts=--no-merges {mb}..{head}", "--redact", "--ignore-gitleaks-allow",
+# The synthetic commits of a merge's replay (merge_resolutions): a fixed identity and date, so they are deterministic,
+# and never signed, so no commit-tree prompts or reads a key.
+REPLAY_ENV = {
+    "GIT_AUTHOR_NAME": "thread-security-check", "GIT_AUTHOR_EMAIL": "security-check@thread.invalid",
+    "GIT_AUTHOR_DATE": "@0 +0000", "GIT_COMMITTER_NAME": "thread-security-check",
+    "GIT_COMMITTER_EMAIL": "security-check@thread.invalid", "GIT_COMMITTER_DATE": "@0 +0000",
+}
+OID_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def merge_resolutions(tree, scan_dir, lo, head):
+    """{S: M}: each first-parent merge M in <lo>..<head> whose committed tree differs from git's automatic merge T of
+    M^1 and M^2, replayed in the scratch clone as S, a commit of M's tree on P, a commit of T. S's added lines are
+    exactly what M's resolution added (an edit to a file with no conflict included), at M's file and line. A merge
+    whose tree equals T (a clean automatic merge) is skipped, so it costs no gitleaks run. The objects are written to
+    scan_dir only (its own object store; the tree's is its alternate). An octopus merge is replayed with M^1 and M^2."""
+    _rc, out, _err = _git(tree, "rev-list", "--first-parent", "--merges", f"{lo}..{head}")
+    replays = {}
+    for m in out.split():
+        rc, out, _err = _git(scan_dir, "merge-tree", "--write-tree", "--no-messages", f"{m}^1", f"{m}^2", check=False)
+        auto = out.split("\n", 1)[0].strip()
+        if rc not in (0, 1) or not OID_RE.fullmatch(auto):
+            raise Refusal("git merge-tree --write-tree failed: replaying a merge's resolution needs git 2.38 or later")
+        rc, _out, _err = _git(scan_dir, "diff", "--quiet", auto, f"{m}^{{tree}}", check=False)
+        if rc == 0:
+            continue   # a clean automatic merge: no resolution to read
+        if rc != 1:
+            raise Refusal(f"git diff of merge {_sha7(m)} against its automatic merge failed (exit {rc})")
+        _rc, p, _err = _git(scan_dir, "commit-tree", "--no-gpg-sign", "-m", f"automatic merge of {m}", auto,
+                            env=REPLAY_ENV)
+        _rc, s, _err = _git(scan_dir, "commit-tree", "--no-gpg-sign", "-p", p.strip(), "-m", f"resolution of {m}",
+                            f"{m}^{{tree}}", env=REPLAY_ENV)
+        replays[s.strip()] = m
+    return replays
+
+
+def run_gitleaks(gitleaks, scan, log_opts, report_name, tmp):
+    """One gitleaks run over `git log -p <log_opts>` in the scratch clone: its findings, rule, file, line and commit."""
+    report = os.path.join(tmp, report_name)
+    argv = [gitleaks, "git", scan, f"--log-opts={log_opts}", "--redact", "--ignore-gitleaks-allow",
             "--no-banner", "--report-format", "json", "--report-path", report, "--exit-code", "0",
             "--log-level", "error"]
     cfg = os.path.join(scan, ".gitleaks.toml")
@@ -810,10 +875,29 @@ def run_gitleaks(gitleaks, scan, mb, head, tmp):
         rule, file, line, commit = f.get("RuleID"), f.get("File"), f.get("StartLine"), f.get("Commit")
         if not isinstance(rule, str) or not isinstance(file, str) or not isinstance(commit, str):
             continue
-        key = (commit, file, rule, line)
-        if key not in [(s["commit"], s["file"], s["rule"], s["line"]) for s in found]:
-            found.append({"rule": rule, "file": file, "line": line, "commit": commit})
+        found.append({"rule": rule, "file": file, "line": line, "commit": commit})
     return found
+
+
+def secrets_found(gitleaks, scan_dir, tree, lo, head, anchor, tmp):
+    """Every finding of steps 6-7, deduped by (commit, file, rule, line): first each merge's resolution in <lo>..<head>
+    (its replay S mapped back to M, `merge: true`; that run only when a replay exists), then the range itself, the
+    task's own non-merge commits (`--no-merges <lo>..<head>`) or, with --anchor, Integration's own commits
+    (`--first-parent --no-merges <anchor>..<head>`)."""
+    found = []
+    replays = merge_resolutions(tree, scan_dir, lo, head)
+    if replays:
+        for s in run_gitleaks(gitleaks, scan_dir, "--no-walk " + " ".join(replays), "merges.json", tmp):
+            if s["commit"] in replays:
+                found.append({**s, "commit": replays[s["commit"]], "merge": True})   # S back to its merge
+    opts = f"--first-parent --no-merges {lo}..{head}" if anchor else f"--no-merges {lo}..{head}"
+    found += run_gitleaks(gitleaks, scan_dir, opts, "report.json", tmp)
+    out = []
+    for s in found:
+        key = (s["commit"], s["file"], s["rule"], s["line"])
+        if key not in [(x["commit"], x["file"], x["rule"], x["line"]) for x in out]:
+            out.append(s)
+    return out
 
 
 class Pushed:
@@ -870,13 +954,16 @@ def _sha7(s):
 
 
 def scan(args):
+    if args.history_only and not args.anchor:
+        raise Refusal("--history-only goes with --anchor (the Integration judge's read-only run)")
     tree = os.path.realpath(args.tree)
     rc, top, _err = _git(tree, "rev-parse", "--show-toplevel", check=False) if os.path.isdir(tree) else (1, "", "")
     if rc != 0 or os.path.realpath(top.strip()) != tree:
         raise Refusal(f"--tree {args.tree} is not its own git toplevel")
-    _rc, dirty, _err = _git(tree, "status", "--porcelain", "--untracked-files=no")
-    if dirty.strip():
-        raise Refusal("tracked changes are uncommitted in --tree: commit them, then run the scan again")
+    if not args.history_only:
+        _rc, dirty, _err = _git(tree, "status", "--porcelain", "--untracked-files=no")
+        if dirty.strip():
+            raise Refusal("tracked changes are uncommitted in --tree: commit them, then run the scan again")
     base = _rev(tree, f"{args.base}^{{commit}}")
     if not base:
         raise Refusal(f"--base {args.base} does not resolve to a commit in --tree")
@@ -887,7 +974,18 @@ def scan(args):
     mb = mb.strip()
     if rc != 0 or not mb:
         raise Refusal(f"no merge base between HEAD and {args.base}")
-    loose = untracked(tree, watched_paths(tree, mb))  # the untracked refusal
+    anchor = None
+    if args.anchor:
+        anchor = _rev(tree, f"{args.anchor}^{{commit}}")
+        if not anchor:
+            raise Refusal(f"--anchor {args.anchor} does not resolve to a commit in --tree")
+        rc, _out, _err = _git(tree, "merge-base", "--is-ancestor", anchor, head, check=False)
+        if rc != 0:
+            raise Refusal(f"--anchor {_sha7(anchor)} is not an ancestor of HEAD {_sha7(head)}")
+    # Integration mode: every secret is Lachy's, origin is never read, and steps 10-11 never run.
+    integration = anchor is not None
+    lo = anchor or mb
+    loose = [] if args.history_only else untracked(tree, watched_paths(tree, mb))  # the untracked refusal
     if loose:
         raise Refusal(f"untracked files are in --tree ({len(loose)}; git status lists them): commit them (or remove "
                       f"them if they are not part of the change), then run the scan again")
@@ -902,9 +1000,9 @@ def scan(args):
 
     tmp = tempfile.mkdtemp(prefix="thread-security-")
     try:
-        paths, config = config_watch(tree, mb, head)
+        paths, config = config_watch(tree, mb, head, disk=not args.history_only)
         scan_dir = scratch_clone(tree, mb, paths, tmp)
-        found = run_gitleaks(gitleaks, scan_dir, mb, head, tmp)
+        found = secrets_found(gitleaks, scan_dir, tree, lo, head, anchor, tmp)
         accepted = []
 
         def take(accept, detail):
@@ -915,33 +1013,39 @@ def scan(args):
 
         secrets = []
         if found:
-            pushed = Pushed(tree, scan_dir)
+            pushed = None if integration else Pushed(tree, scan_dir)
             for s in found:
                 s["accept"] = secret_accept(s["commit"], s["file"], s["rule"], s["line"])
                 if take(s["accept"], f"secret {s['rule']} in {s['file']}, commit {_sha7(s['commit'])}, line {s['line']}"):
                     continue
-                s["pushed"], why = pushed.of(s["commit"])
-                if s["pushed"] is None:
-                    s["pushedWhy"] = why
-                secrets.append({k: s[k] for k in ("rule", "file", "line", "commit", "pushed", "pushedWhy", "accept")
-                                if k in s})
+                if pushed is not None:
+                    s["pushed"], why = pushed.of(s["commit"])
+                    if s["pushed"] is None:
+                        s["pushedWhy"] = why
+                secrets.append({k: s[k] for k in ("rule", "file", "line", "commit", "merge", "pushed", "pushedWhy",
+                                                  "accept") if k in s})
         rewrite_from, behind = None, {}
         if secrets:
-            _rc, order, _err = _git(tree, "rev-list", "--reverse", "--topo-order", f"{mb}..{head}")
+            _rc, order, _err = _git(tree, "rev-list", "--reverse", "--topo-order", f"{lo}..{head}")
             order = order.split()
             at = {c: i for i, c in enumerate(order)}
             secrets.sort(key=lambda s: (at.get(s["commit"], len(order)), s["file"], s["line"] or 0))
             first = secrets[0]["commit"]
-            rewrite_from = _rev(tree, f"{first}^")
+            rewrite_from = None if integration else _rev(tree, f"{first}^")
             for c in dict.fromkeys(s["commit"] for s in secrets):   # does a merge sit at or after this secret's commit?
                 _rc, merges, _err = _git(tree, "rev-list", "--merges", f"{c}^..{head}", check=False)
                 behind[c] = bool(merges.strip())
         merge_behind = any(behind.values())
         config = [c for c in config if not take(c["accept"], f"config {c['path']} ({c['cause']})")]
 
-        deps = dependencies(tree, mb, head, brief_tail)
-        osv_url = None if args.no_advisories else (args.osv_url or os.environ.get("THREAD_OSV_URL") or OSV_DEFAULT)
-        advs, checked = advisories(deps, osv_url, brief_tail)
+        if integration:
+            deps, advs, checked = [], [], False
+            brief_tail.append("dependencies not checked: an Integration scan (--anchor) reads secrets and the scanner "
+                              "config only")
+        else:
+            deps = dependencies(tree, mb, head, brief_tail)
+            osv_url = None if args.no_advisories else (args.osv_url or os.environ.get("THREAD_OSV_URL") or OSV_DEFAULT)
+            advs, checked = advisories(deps, osv_url, brief_tail)
         open_advs = [a for a in advs
                      if not take(a["accept"], f"advisory {a['id']} on {a['ecosystem']} {a['name']} {a['version']}")]
     finally:
@@ -952,7 +1056,8 @@ def scan(args):
     items = []
 
     def where(s):
-        return f"A secret ({s['rule']}) in {s['file']}, commit {_sha7(s['commit'])}, line {s['line']}"
+        merge = " (a merge's resolution)" if s.get("merge") else ""
+        return f"A secret ({s['rule']}) in {s['file']}, commit {_sha7(s['commit'])}{merge}, line {s['line']}"
 
     def keep(s):
         return (f"once it is rotated, keep it in the history (answer `{token(s['accept'])}`), or have /thread:repair "
@@ -965,11 +1070,16 @@ def scan(args):
                       f"keep it (answer {' and '.join(f'`{token(t)}`' for t in toks)}), or drop the change", toks))
     named = set()
     for s in secrets:
-        if s["pushed"] is True:
+        if integration:
+            items.append((f"{where(s)}, is in Integration's commits, which Integration never rewrites: {keep(s)}",
+                          [s["accept"]]))
+            named.add(s["accept"])
+    for s in secrets:
+        if s.get("pushed") is True:
             items.append((f"{where(s)}, is already on origin: {keep(s)}", [s["accept"]]))
             named.add(s["accept"])
     for s in secrets:
-        if s["pushed"] is None:
+        if "pushed" in s and s["pushed"] is None:
             items.append((f"{where(s)}, was found, and origin could not be read to say whether it is pushed "
                           f"({s['pushedWhy']}): {keep(s)}", [s["accept"]]))
             named.add(s["accept"])
@@ -1018,6 +1128,8 @@ def scan(args):
                        for a in open_advs],
         "advisoriesChecked": checked, "accepted": accepted, "brief": brief,
     }
+    if integration:
+        out["anchor"] = anchor
     print(json.dumps(out))
     return 1 if action else 0
 
@@ -1048,6 +1160,9 @@ def main(argv=None):
     g = s.add_mutually_exclusive_group()
     g.add_argument("--osv-url", dest="osv_url")
     g.add_argument("--no-advisories", dest="no_advisories", action="store_true")
+    s.add_argument("--anchor", help="Integration mode: the Integration anchor (ADR 0030), scanned from")
+    s.add_argument("--history-only", dest="history_only", action="store_true",
+                   help="with --anchor: read committed history only (the read-only Integration judge)")
     s.set_defaults(func=cmd_scan)
     args = p.parse_args(argv)
     return args.func(args)

@@ -65,7 +65,11 @@ writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy
 - The code each task names.
 - The gate sweep, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...`: its hits
   are the recall floor for `gates`, never the verdict. A hit whose context names nothing the task pays for or
-  authorises is dismissed.
+  authorises is dismissed. The sweep reads only the notes, and `[defaults] test_logins` from
+  `~/.config/thread/rollouts.toml` (read-only, no git) when a `credential:` gate line naming a Login needs it. A hit's
+  `login` field changes nothing in `gates`: a credential hit schedule would record is still a `credential` gate. A
+  `gated_inputs: test_logins:` stderr line (exit 1) means only that the declared test Logins could not be read: every
+  note still printed, so the hits stand as read (fail closed), never a sweep failure.
 
 ## The grade
 
@@ -280,7 +284,8 @@ agent time, since Lachy is there throughout.
   `no repo declared`. Its `rolloutRoot`, `blockers` and `unchecked` are its home project's entry on that row
   (the scan's `projects[]`: that project's own rollout clone, ADR 0064), else the row's own. Other parallel runs on
   the same `rolloutRoot` (else root) are named in `sameRoot`: a clone holds one unfinished parallel rollout at a
-  time, and two projects' runs on one repo in their own clones share none (schedule § 0).
+  time, and two projects' runs on one repo in their own clones share none (schedule § 0). estate-dispatch schedules
+  another project's run on a shared one after the better-ranked run's, so its fork picks its own clone (p39-10).
 - A serial run has no root: it is one candidate chain per project, which schedule's serial path splits.
 - Session-lane and Orient tasks are in no run.
 

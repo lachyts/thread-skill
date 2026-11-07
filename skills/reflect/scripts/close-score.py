@@ -57,19 +57,19 @@ scored`. With window.activeStart null (no Leg began) it prints `not recorded: no
 no tune call. (s2) `tune.py --scores <f> --record-only --close completion`, read as step 5 reads it: the line is
 stamped `shape: serial` with `repo: null`.
 
-Time. Each step runs in its own process group (start_new_session; SIGTERM, SIGINT and SIGHUP held across the
-start), stdin closed, from the scratch dir, with git's repo-local variables (GIT_DIR & co., as `git rev-parse
+Time. Each step runs in its own process group (start_new_session; SIGTERM, SIGINT and SIGHUP held across the start),
+stdin closed, from the scratch dir, with git's repo-local variables (GIT_DIR & co., as `git rev-parse
 --local-env-vars` names them) dropped from the env, as declared-check.py does: an inherited GIT_DIR reaches no step.
 Python steps run as `sys.executable <script>`; land.sh as `bash <land.sh>`, `bash` found on that env's PATH. Each
 step has a cap (CAPS; --timeout S sets every one to S), clipped to the time left of an overall DEADLINE measured
 from the start (--deadline S overrides it, for tests and by hand; callers under the Bash tool keep the default).
 With under a second left before a step: `not scored: overall deadline <D>s reached before <step>`. On expiry the
-whole group is killed (SIGTERM, KILL_GRACE, SIGKILL; land.sh's git and score.py's `git blame` go with it), the pipes
-closed and the child reaped for at most REAP_WAIT: `not scored: <step> timed out after <S>s`, with ` (overall
-deadline <D>s)` when the deadline clipped the cap. So the worst case is DEADLINE + KILL_GRACE + REAP_WAIT, about
-547 s, under the Bash tool's 600 s foreground ceiling: the caller always gets the one line, and neither the ceremony
-nor the Stop driver stalls on it. Signalled itself (SIGTERM, SIGINT, SIGHUP), it kills the live step's group,
-removes the scratch dir and exits 128 + the signal number, stdout empty.
+whole group is killed (SIGTERM, KILL_GRACE, SIGKILL: background_job.py's kill_group; land.sh's git and score.py's
+`git blame` go with it), the pipes closed and the child reaped for at most REAP_WAIT: `not scored: <step> timed out
+after <S>s`, with ` (overall deadline <D>s)` when the deadline clipped the cap. So the worst case is DEADLINE +
+KILL_GRACE + REAP_WAIT, about 547 s, under the Bash tool's 600 s foreground ceiling: the caller always gets the one
+line, and neither the ceremony nor the Stop driver stalls on it. Signalled itself (SIGTERM, SIGINT, SIGHUP), it
+kills the live step's group, removes the scratch dir and exits 128 + the signal number, stdout empty.
 
 Output: stdout is exactly one line (none on a signal), `close-score: <slug>: ` and then one of
     recorded <id> (<kind>)
@@ -130,6 +130,7 @@ LAND_SH = os.path.join(SKILLS, "_shared", "scripts", "land.sh")
 SCORE_PY = os.path.join(HERE, "score.py")
 SERIAL_PY = os.path.join(HERE, "serial-score.py")
 TUNE_PY = os.path.join(HERE, "tune.py")
+BACKGROUND_JOB_PY = os.path.join(SKILLS, "_shared", "scripts", "background_job.py")
 
 # DEADLINE + KILL_GRACE + REAP_WAIT must stay under the Bash tool's 600 s foreground ceiling, with a margin, so the
 # caller's `timeout: 600000` never cuts the one stdout line (tests/reflect-close-score.test.mjs pins the sum).
@@ -165,6 +166,7 @@ try:  # one copy of each rule: the slug and the events dir, the close line, the 
     TUNE = _load("thread_tune", TUNE_PY)
     REC = _load("thread_reconcile_rollout", RECONCILE_PY)
     PROJECT_ROOT_RE = REC.PROJECT_ROOT_RE
+    BJ = _load("thread_background_job", BACKGROUND_JOB_PY)  # kill_group, the stop the background jobs share
 except Exception as e:  # a broken install: report it as this script, never as a traceback
     sys.stdout.write("close-score: not scored: cannot load its helpers: %s\n" % e)
     sys.exit(1)
@@ -193,24 +195,9 @@ _live = {"proc": None, "scratch": None}
 
 
 def kill_group(proc):
-    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it."""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        proc.poll()
-        return
-    end = time.monotonic() + KILL_GRACE
-    while time.monotonic() < end:
-        proc.poll()
-        try:
-            os.killpg(proc.pid, 0)
-        except (ProcessLookupError, PermissionError):
-            return
-        time.sleep(0.05)
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
+    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it: background_job.py's, with
+    KILL_GRACE (run_step reaps the step itself, for REAP_WAIT)."""
+    BJ.kill_group(proc, KILL_GRACE)
 
 
 def remove_scratch():

@@ -8,7 +8,9 @@
 #   C2  main moved: the lead merges, verifies (the SKILL.md verify line), pushes, logs and merges — no agent.
 #   C3  a shared file   C4  a conflict   C5  red, undo   C6  case (ii) from an engine line   C7  the own run merged
 #   main; a stale anchor ref   C8  a missing, detached or unpushed tree (merge while main is unmoved, trouble once
-#   it moved), leftovers, a gone branch   C9  push refused   C10 landed   C11 engine pins   C12 inputs parity (and
+#   it moved), leftovers, a gone branch   C9  push refused (C9b: a server error retried on its backoff, p39-1; read with
+#   the branch and the URL taken out, inside PUSH_BUDGET_S)
+#   C10 landed   C11 engine pins   C12 inputs parity (and
 #   the rung record from inputs)   C13a exit-4 plumbing   C13b a dead integrate call   C13c lead-written own and
 #   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
@@ -59,7 +61,8 @@
 #   beside it   R4d a refused rollouts.toml   R4e no --verifier   R5 a conflict   R6 the target guard's refusals (a)–(g)
 #   and a two-parent M   R6h another PR's RACE line under the slug is skipped   R7 origin unreachable (8)   R8 the tail
 #   through reconcile frees the lane   R9 a stale open revert PR, noop   R10 an Engine snapshot mismatch (2)   R11
-#   merge-task's exit 3 on the revert PR   R12 the crash tail   R13 merge-task's exit 5 on the revert PR.
+#   merge-task's exit 3 on the revert PR   R12 the crash tail   R13 merge-task's exit 5 on the revert PR   R14 the revert's
+#   push retried on a server error (p39-1): two 502s then pr, a 502 on every try 8.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -437,6 +440,105 @@ python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
 ok "$?" 1 "C9: a non-fast-forward push is refused (exit 1), never forced"
 python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M" --to "$H0" >/dev/null 2>&1
 ok "$?|$(git -C "$WT" rev-parse HEAD)" "0|$H0" "C9: undo restores H"
+
+# C9b (p39-1): a GitHub 5xx is retried on its backoff before push reports it refused; a genuine rejection fails at once,
+# and the refusal shows git's whole stderr (but its hint: lines), not only its last line. pushshim <fails> <stderr> [<s>]:
+# a git whose first <fails> pushes print <stderr> and exit 1, each after the first only once it has slept <s> seconds
+# (every push counted in $F/pushes), then the real git. THREAD_PUSH_BACKOFF_S=0 (tests only) shrinks each wait to
+# nothing; THREAD_PUSH_BUDGET_S (tests only) shortens PUSH_BUDGET_S.
+pushshim() {
+  mkdir -p "$F/pshim"; : > "$F/pushes"; printf '%s\n' "$2" > "$F/pshim.err"
+  printf '#!/bin/sh\ncase " $* " in *" push "*) echo x >> "%s"; n=$(wc -l < "%s")\n  if [ "$n" -le %s ]; then [ "$n" -le 1 ] || sleep %s; cat "%s" >&2; exit 1; fi ;; esac\nexec "%s" "$@"\n' \
+    "$F/pushes" "$F/pushes" "$1" "${3:-0}" "$F/pshim.err" "$(command -v git)" > "$F/pshim/git"
+  chmod +x "$F/pshim/git"
+}
+pushes() { wc -l < "$F/pushes" | tr -d ' '; }
+GH502=$(printf "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nsend-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly\nerror: failed to push some refs to 'https://github.com/o/r.git'")
+fx c9b
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 2 "$GH502"
+O=$(PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" 2>"$F/push.err"); rc=$?
+ok "$rc|$(pushes)|$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "0|3|$M" "C9b: two HTTP 502s, then the push lands (exit 0, three pushes, origin at M)"
+ok "$(j "$O" 'd["retries"]')" 2 "C9b: … the verdict counts the two retries"
+fx c9b2
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 99 "$GH502"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)|$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "1|4|$H0" "C9b: a 5xx on every try → refused after three retries (exit 1, four pushes, origin unmoved)"
+E=$(cat "$F/push.err")
+has "$E" "after 3 retries on a server error" "C9b: … the refusal names its retries"
+has "$E" "HTTP 502 curl 22" "C9b: … and shows the whole stderr: its first line"
+has "$E" "error: failed to push some refs" "C9b: … and its last"
+fx c9b3
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 99 "$(printf "remote: Internal Server Error\nTo https://github.com/o/r.git\n ! [remote rejected] %s -> %s (Internal Server Error)\nerror: failed to push some refs to 'https://github.com/o/r.git'" "$M" "$BR")"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; rc=$?
+ok "$rc|$(pushes)" "1|4" "C9b: GitHub's [remote rejected] (Internal Server Error) is a server error: retried"
+pushshim 99 "$(printf "remote: error: GH006: Protected branch update failed for refs/heads/%s.\nTo https://github.com/o/r.git\n ! [remote rejected] %s -> %s (protected branch hook declined)\nerror: failed to push some refs to 'https://github.com/o/r.git'" "$BR" "$M" "$BR")"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)" "1|1" "C9b: a protected-branch rejection fails at once (one push, no retry)"
+has "$(cat "$F/push.err")" "GH006: Protected branch update failed" "C9b: … its refusal shows the whole stderr, not only the last line"
+onbranch commit -q --allow-empty -m "a repair pushed meanwhile"
+pushshim 0 ""
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)" "1|1" "C9b: a real non-fast-forward fails at once (one push, no retry)"
+has "$(cat "$F/push.err")" "[rejected]" "C9b: … its refusal names git's [rejected] line, not only the last line"
+lacks "$(cat "$F/push.err")" "hint:" "C9b: … and none of git's hint: lines"
+# The budget: the first 502 comes at once, the second only after 3 s. PUSH_BUDGET_S, shortened to 2.5 s, holds the first
+# retry (its wait 0 and a try as long as the first) but not a third try after a 3 s one, so push stops at two of the four
+# tries the backoff allows, and still exits 1 with its refusal line.
+fx c9b4
+main m.txt "theirs"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+pushshim 99 "$GH502" 3
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 THREAD_PUSH_BUDGET_S=2.5 python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>"$F/push.err"; rc=$?
+ok "$rc|$(pushes)|$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "1|2|$H0" "C9b: a slow 5xx spends PUSH_BUDGET_S → refused after one retry (exit 1, two pushes, origin unmoved)"
+has "$(cat "$F/push.err")" "refused (after 1 retry on a server error; PUSH_BUDGET_S (2.5 s) ran out before another try): error: RPC failed; HTTP 502" \
+  "C9b: … its refusal line names the retry and the spent budget, then git's stderr"
+# What a push's stderr says is read with the refspec, the branch, the tree and the URL taken out (_push_said), so a slug
+# never decides the retry: _push run on a fake git (one CompletedProcess per try), its tries counted.
+PS=$(THREAD_PUSH_BACKOFF_S=0 python3 - "$LI" <<'PY2'
+import importlib.util, json, subprocess, sys
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+sha, url = "a" * 40, "https://github.com/o/r.git"
+def tries(refspec, err):
+    calls = []
+    def git(cwd, *argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(["git", *argv], 1, "", err)
+    m.git = git
+    m._push("/w/.claude/worktrees/chorus-p11-6-leaderboard-chain-timeout", refspec)
+    return len(calls)
+def rejected(br, why, to=url):
+    return f"To {to}\n ! [remote rejected] {sha} -> {br} ({why})\nerror: failed to push some refs to \x27{to}\x27\n"
+nop = "audit-fix/p93-6-no-permission-asks-from-a-plan"
+tmo = "audit-fix/p11-6-leaderboard-chain-timeout"
+rv = "thread-revert/chorus-p93-6-no-permission-asks-from-a-plan-0123456789ab"
+print(json.dumps({
+    "nop500": tries(f"{sha}:refs/heads/{nop}", "remote: Internal Server Error\n" + rejected(nop, "Internal Server Error")),
+    "tmoRef": tries(f"{sha}:refs/heads/{tmo}", rejected(tmo, "failed to update ref")),
+    "rv500": tries(f"HEAD:refs/heads/{rv}", "remote: Internal Server Error\n" + rejected(rv, "Internal Server Error")),
+    "url502": tries(f"{sha}:refs/heads/{tmo}", "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\n"
+                    "fatal: the remote end hung up unexpectedly\n"
+                    "error: failed to push some refs to \x27https://github.com/o/no-permission-kit.git\x27\n"),
+    "scpRef": tries(f"{sha}:refs/heads/{tmo}", rejected(tmo, "failed to update ref", "git@github.com:o/timeout-kit.git")),
+    "notFound": tries(f"{sha}:refs/heads/{tmo}", "fatal: repository \x27https://github.com/o/r.git/\x27 not found\n"),
+    "noHost": tries(f"{sha}:refs/heads/{tmo}", "fatal: unable to access \x27https://github.com/o/r.git/\x27: Could not resolve host: github.com\n"),
+    "why": m.why(subprocess.CompletedProcess([], 1, "", "To x\n ! [rejected]        a -> b (fetch first)\nerror: failed to push some refs to \x27x\x27\n"
+                                             "hint: Updates were rejected because the remote contains work that you do not\nhint: have locally.\n")),
+}))
+PY2
+)
+ok "$(j "$PS" '[d["nop500"], d["rv500"], d["url502"]]')" "[4,4,4]" "C9b: an Internal Server Error on a …-no-permission-… branch (push's, the revert's) or a 502 from a …-no-permission-… repo is retried"
+ok "$(j "$PS" '[d["tmoRef"], d["scpRef"]]')" "[1,1]" "C9b: a genuine (failed to update ref) on a …-timeout branch, tree or repo is tried once"
+ok "$(j "$PS" '[d["notFound"], d["noHost"]]')" "[1,1]" "C9b: neither a rejection nor a server error (repository not found, Could not resolve host): one push, no retry"
+ok "$(j "$PS" 'd["why"]')" "To x | ! [rejected]        a -> b (fetch first) | error: failed to push some refs to 'x'" "C9b: why() drops git's hint: lines, keeps the rest"
+ok "$(python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("li", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m); print(m.PUSH_BACKOFF)' "$LI")" "(2, 5, 15)" "C9b: the backoff is 2, 5, 15 s"
+ok "$(THREAD_PUSH_BUDGET_S=1000 python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("li", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m); print(m.PUSH_BUDGET_S, m._push_budget())' "$LI")" "100 100" \
+  "C9b: PUSH_BUDGET_S is 100 s, and THREAD_PUSH_BUDGET_S never lengthens it"
 
 # ======== C10: landed ===============================================================================
 fx c10
@@ -2057,7 +2159,7 @@ bm
 ok "$(mq '[ls[2]["inertOnly"], ls[2]["error"][:12], ls[2]["moversTotal"]]')" '[null,"inert test: ",2]' "M4: a refused rollouts.toml: inertOnly null beside its error"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
-# ======== R1–R13: the RACE revert (lead-integrate.py revert, ADR 0046) ===========================================
+# ======== R1–R14: the RACE revert (lead-integrate.py revert, ADR 0046) ===========================================
 # A RACE red after the Flake check is reverted on main through a revert PR that merges only through merge-task. rvfx is
 # fx (or ifx, for the Inert cases R4b–R4e) plus M, the task's squash merge on origin's master (PR #5 MERGED as M), the
 # rollout's RACE line and `revert started: M`, and a queued proj-t6. srv refuses a non-fast-forward push, the fake gh's
@@ -2260,6 +2362,20 @@ ok "$(j "$N" '[d["laneHold"], d["halt"], d["mainRed"]]')" "[[{\"slug\":\"$SLUG\"
 ok "$(grep -c 'revert did not land:' "$V/ro.md")|$(grep -c "RACE: PR #$RPR" "$V/ro.md")" "0|0" "R13: no revert did not land: line, and no RACE: PR #R line"
 HOME="$RVHOME" python3 "$RR" resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$tmp/bin/gh" >/dev/null 2>&1
 ok "$(fm "$V/$SLUG.md" status)" "status: blocked" "R13: resume never flips it"
+
+# R14 (p39-1): the revert's push goes through push's own retry (C9b's pushshim, every wait 0): two HTTP 502s, then it
+# lands; a 502 on every try is exit 8 after three retries, nothing on origin and no PR opened.
+rvfx r14
+pushshim 2 "$GH502"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 rv
+ok "$rrc|$(j "$J" 'd["route"]')|$(pushes)|$(npc)" "0|pr|3|1" "R14: two HTTP 502s on the revert's push, then it lands → route pr (three pushes, one pr create)"
+ok "$(git --git-dir "$MT_SRV" rev-parse "refs/heads/thread-revert/$SLUG-${M:0:12}")" "$(j "$J" 'd["head"]')" "R14: … the revert branch on origin at the head"
+rvfx r14b
+pushshim 99 "$GH502"
+PATH="$F/pshim:$PATH" THREAD_PUSH_BACKOFF_S=0 rv
+ok "$rrc|$(pushes)|$(npc)" "8|4|0" "R14: a 502 on every try → exit 8 (Retryable) after four pushes, no PR opened"
+has "$(cat "$F/rv.err")" "after 3 retries on a server error" "R14: … its stderr names the three retries"
+ok "$(git --git-dir "$MT_SRV" rev-parse -q --verify "refs/heads/thread-revert/$SLUG-${M:0:12}" || echo none)|$(gone)" "none|removed" "R14: … nothing on origin, the tree removed"
 
 # R4b–R4e: restores by ADR 0045's Inert check (ifx: the ssh origin o/r, HOME's rollouts.toml, the Run record).
 rvfx r4b '["THREAD.md"]'

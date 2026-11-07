@@ -1,17 +1,19 @@
 // A Chorus room stop (p18-1; Chorus ADR 0071, the lead's half): execute § Room stop and every site it reaches. At a
 // Login's week's line (the only line since Chorus ADR 0111), the lead starts nothing, frees the lane, stops each
 // Workflow call at a step boundary (skills/execute/scripts/step-boundary.py, executed by
-// skills/execute/tests/room-stop.test.mjs), records the stop on the rollout note, never pauses, and resumes every stopped call at the next loop entry. A transient row after a usage limit is a
-// Lost call, never reconciled. Every Cold resume reads a believed-live call against /workflows, a room stop or not; a
-// tripped integrate check drops the call for `prepare`; status and repair read a room stop, standing or lapsed, as a
-// live queue while its owner session lives, whatever its tasks read. This pins the prose an LLM lead follows, in
-// execute, legs.md, status, handoff, repair and CONTEXT.md.
+// skills/execute/tests/room-stop.test.mjs), records the stop on the rollout note, never pauses, and resumes every
+// stopped call at the next loop entry. A second signal renews the stop, and a held one (no Login has room) stands past
+// its 6 h bound while the Stage lives (p39-12). A transient row after a usage limit is a Lost call, never reconciled.
+// Every Cold resume reads a believed-live call against /workflows, a room stop or not; a tripped integrate check drops
+// the call for `prepare`; status and repair read a room stop, standing or lapsed, as a live queue while its owner
+// session lives, whatever its tasks read. This pins the prose an LLM lead follows, in execute, legs.md, status,
+// handoff, repair and CONTEXT.md.
 //
-// Every rule lives in one function, checkRoomStop({ skill, status, handoff, repair, context, legs }), that returns named
-// failures, so the real files and the controls run through identical logic: each control mutates the real text in one
-// place and must fail with exactly its rule. The status lines are parsed with the Stop hook's own STATUS_RE. Reads
-// files only, apart from the Stop hook's STATUS_RE and one week's-line fixture run through step-boundary.py on a note
-// under its tmp dir.
+// Every rule lives in one function, checkRoomStop({ skill, status, handoff, repair, context, legs }), that returns
+// named failures, so the real files and the controls run through identical logic: each control mutates the real text
+// in one place and must fail with exactly its rule. The status lines are parsed with the Stop hook's own STATUS_RE.
+// Reads files only, apart from the Stop hook's STATUS_RE and the week's-line fixtures (item 2's template, filled,
+// plain and held) run through step-boundary.py on notes under its tmp dir.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -78,6 +80,8 @@ const sentences = (text) => text.split(/(?<=\.)\s+/)
 const trigOf = (skill) => sentences(item(skill, 1)).find((s) => s.includes('The trigger is')) ?? ''
 // Item 2's `## Pause log` line opens with the week's line, the only line (Chorus ADR 0111).
 const WEEK_LINE = `"<Login> at its week's line; stopping at a step boundary: `
+// The retired wording (Chorus ADR 0111): a 5-hour form in any spelling, or the spread, as whole words.
+const RETIRED = /\b(?:5|five)[\s‐-―-]?hours?\b|\bspread(?:s|ing)?\b/i
 // A bold-labelled paragraph of a section: from its label line to the next blank line, collapsed.
 function para(text, label) {
   const lines = (text ?? '').split('\n')
@@ -159,15 +163,27 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   if (!(iP >= 0 && iP < iR && iR < iD) || nextHeading !== iD ||
     JSON.stringify(nums) !== JSON.stringify([...Array(13).keys()])) fails.push('section')
 
-  // trigger: a `Chorus: ` Prompt or Steer at the week's line, in item 1's trigger sentence; item 2's line and a Leg's
-  // `<text>` open with it; no 5-hour form or spread anywhere in the section or the Leg's (Chorus ADR 0111).
+  // trigger: a `Chorus: ` Prompt or Steer at the week's line, or at the bare `is at its line` (Chorus's own word for a
+  // line of any other window), in item 1's trigger sentence; item 2's line and a Leg's `<text>` open with the week's
+  // line whatever the signal's wording.
   const trig = trigOf(skill)
   const legsRoom = collapse(slice(legs, /^## Room stop$/, /^## /) ?? '')
-  if (!['`Chorus: `', "`is at its week's line`"].every((k) => trig.includes(k)) || !it(2).includes(WEEK_LINE) ||
-    !legsRoom.includes("`<text>` opens as execute item 2's line does: `<Login> at its week's line`.") ||
-    [sec, legsRoom].some((t) => /5-hour|spread/.test(t))) {
+  if (!['`Chorus: `', "`is at its week's line`", '`is at its line`'].every((k) => trig.includes(k)) || !it(2).includes(WEEK_LINE) ||
+    !legsRoom.includes("`<text>` opens as execute item 2's line does: `<Login> at its week's line`.")) {
     fails.push('trigger')
   }
+
+  // retired-wording: no 5-hour form (any spelling) or spread anywhere in the section or the Leg's (Chorus ADR 0111),
+  // as whole words, so `widespread` or `spreadsheet` never trips it.
+  if ([sec, legsRoom].some((t) => RETIRED.test(t))) fails.push('retired-wording')
+
+  // hold: item 2 adds `--held` on Chorus's hold sentence, whose head only `begin` writes; item 11 keeps a held stop
+  // standing while the Stage lives, up to its ceiling, and the lease and `moving` keep the 6 h bound; status says a
+  // held one past 6 h reads `stalled usage-limit` and is no stall.
+  const stRoomHold = para(section(status, /^### 4\. /) ?? '', 'Room stop.')
+  if (!['`Chorus holds this Session`', 'add `--held`', '`held by the Stage: `'].every((k) => it(2).includes(k)) ||
+    !["item 2's `--held`", 'while the Stage lives', '`ROOM_STOP_HOLD_MAX`', "The lease and the Watchdog's `moving` keep the 6 h bound"].every((k) => it(11).includes(k)) ||
+    !['A held one', '`stalled usage-limit`'].every((k) => stRoomHold.includes(k))) fails.push('hold')
 
   // record-first: `begin` before any `mark`; no `paused:` stamp, no `record-pause`; bare slugs, which `begin` itself
   // enforces (exit 2, nothing written), so its exit 2 is re-run bare, never carried on as a non-durable stop.
@@ -213,7 +229,8 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   }
 
   // durable: the stop lives on the note. Every entry ends it once its gates and check-all pass; item 1 reads it after a
-  // compaction; Lost call reads it; clause (2) reads it unguarded and goes on when none stands.
+  // compaction, renews it on a second signal, and never re-runs `begin` after a compaction; Lost call reads it; clause
+  // (2) reads it unguarded and goes on when none stands.
   const END = 'step-boundary.py end'
   const VT = "§ 3's `verify_timeout` check"
   const withStands = sentences(hb).find((x) => x.includes('step-boundary.py stands')) ?? ''
@@ -221,6 +238,8 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
     !cold.includes("once the entry's `check-all` (*Landing-register re-check*) has exited 0") ||
     !before(rein, VT, END) || !before(rein, END, 'clear-pause') ||
     !it(1).includes('after a compaction') || !it(1).includes('exit 0 or 4') || !lost.includes('(§ Room stop; `step-boundary.py stands` exits 0 or 4)') ||
+    !it(1).includes('A second signal while one stands renews it') ||
+    !it(1).includes('`begin` runs only on a Chorus signal (item 2), never again after a compaction to re-record a stop') ||
     withStands.includes('ROLLOUT-STATUS') || !hb.includes('On any other exit no room stop stands: go on to the next clause.')) fails.push('durable')
 
   // never-pause: item 7 names every never, and `paused:` only as one.
@@ -418,50 +437,76 @@ test('execute § Room stop and every site it reaches hold every rule', () => {
 
 // ---- a week's line, executed ----------------------------------------------------------------------------------
 // The Stage's Prompts as Chorus's logins.boundary_prompt and room_prompt word them, with fixed times: a week's line
-// (switched and held) and two resumes, each with its heartbeat sentence left out (it carries the heartbeat's older
-// name, which queue-only keeps out of this file). These pin the skill's acceptance, not Chorus's output.
+// (switched and held), a bare line (line_words() for any other window), a forecast, and two resumes, each with its
+// heartbeat sentence left out (it carries the heartbeat's older name, which queue-only keeps out of this file). These
+// pin the skill's acceptance, not Chorus's output.
 const DRAIN = " Start no new agent step, task or Integration. TaskStop each running Workflow call the moment its running agent's result line is in that run's journal.jsonl, so no finished step is lost, and end this Turn once no call is mid-step. Do not hand off. This is a drain, not a pause: do not stamp `paused:` and do not delete the heartbeat. "
 const SWITCH = 'Chorus then switches this Session to the next Login by the Login pick (the soonest weekly reset with room) and sends the resume.'
 const RESUME = " Re-enter /thread:execute [[demo-rollout]] §4.5 resume in this Session. Resume every Workflow call you stopped by resumeFromRunId with its same args — every finished agent replays from the run's journal."
 const WEEK = "Chorus: L is at its week's line (17:20) — about 12 minutes of room left." + DRAIN + SWITCH
 const HELD = "Chorus: L is at its week's line (17:20) — about 12 minutes of room left." + DRAIN +
   'No Login has room: Chorus holds this Session on this Login until a window resets (19:00) or a Login has room, and then sends the resume.'
+const BARE = 'Chorus: L is at its line (17:20) — about 12 minutes of room left.' + DRAIN + SWITCH
+const WOULD = "Chorus: L would reach its week's line ~17:51 at the current burn."
 const RESUME_MOVED = "Chorus: L reached its week's line at 17:51, so Chorus moved this Session to M." + RESUME
 const RESUME_RESET = "Chorus: L's week reset." + RESUME
 
-test("a week's-line Prompt meets the trigger and writes its line through begin", () => {
-  // Item 1's trigger phrases decide which Prompts open a room stop.
-  const phrases = [...trigOf(real.skill).matchAll(/`([^`]*)`/g)].map((m) => m[1]).filter((k) => /^is at /.test(k))
-  assert.deepEqual(phrases, ["is at its week's line"])
-  const meets = (p) => p.startsWith('Chorus: ') && phrases.some((k) => p.includes(k))
-  for (const [name, p] of Object.entries({ WEEK, HELD })) assert.ok(meets(p), `${name} meets the trigger`)
-  for (const [name, p] of Object.entries({ RESUME_MOVED, RESUME_RESET })) assert.ok(!meets(p), `${name} is item 9's entry, never a trigger`)
+test("a week's-line Prompt meets the trigger and writes item 2's line, filled, through begin", () => {
+  // Item 1's trigger phrases decide which Prompts open a room stop: every backticked span of its trigger sentence.
+  const phrases = [...trigOf(real.skill).matchAll(/`([^`]*)`/g)].map((m) => m[1])
+  assert.deepEqual(phrases, ['Chorus: ', "is at its week's line", 'is at its line'])
+  const [head, ...lines] = phrases
+  const meets = (p) => p.startsWith(head) && lines.some((k) => p.includes(k))
+  for (const [name, p] of Object.entries({ WEEK, HELD, BARE })) assert.ok(meets(p), `${name} meets the trigger`)
+  for (const [name, p] of Object.entries({ WOULD, RESUME_MOVED, RESUME_RESET })) assert.ok(!meets(p), `${name} is never a trigger`)
+  // Item 2's hold sentence: Chorus's own words, in the held signal alone.
+  const spans2 = [...item(real.skill, 2).matchAll(/`([^`]*)`/g)].map((m) => m[1])
+  const HOLDS = spans2.find((k) => k === 'Chorus holds this Session')
+  assert.ok(HOLDS, "item 2 names Chorus's hold sentence")
+  assert.ok(HELD.includes(HOLDS) && !WEEK.includes(HOLDS) && !BARE.includes(HOLDS), 'only the held signal carries it')
+  const HEAD = spans2.find((k) => k.startsWith('held by the Stage'))
+  assert.equal(HEAD, 'held by the Stage: ', "item 2 names begin's hold head")
 
-  // Item 2's line, filled, through step-boundary.py begin on a rollout note under this file's tmp dir: written,
-  // standing, ended.
-  const line = "L at its week's line; stopping at a step boundary: wf_x proj-a (task); lane: none"
+  // Item 2's own template, filled: no placeholder may remain, so a template `begin` refuses ships red.
   assert.ok(item(real.skill, 2).includes(WEEK_LINE), "item 2 carries the week's line")
-  const p = path.join(tmp, 'week-rollout.md')
-  fs.writeFileSync(p, '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n\n## Notes\n\nProject root: `/repo`\n\n## Queue\n\n- [[A]]\n')
+  const tpl = item(real.skill, 2).match(/printf '%s\\n' "([^"]+)" \| python3/)?.[1]
+  assert.ok(tpl, "item 2's printf template")
+  const filled = tpl.replace('<Login>', 'L').replace('<runId> <slug> (<task|revise|integrate>), …', 'wf_x proj-a (task)')
+    .replace('<slug> <verify|race-verify|merge-task|backoff|integrate call|between steps>|none', 'none')
+  assert.ok(!/[<>…|]/.test(filled), `a placeholder is left: ${filled}`)
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const want = (body) => new RegExp(`^- \\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d[+-]\\d\\d:\\d\\d room stop: ${esc(body)}$`)
   const env = { ...process.env, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(tmp, 'events'), TZ: 'UTC' }
   for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CONFIG_DIR']) delete env[k]
   const SB = path.join(root, 'skills', 'execute', 'scripts', 'step-boundary.py')
-  const sb = (verb, input = '') => spawnSync('python3', [SB, verb, '--rollout', p], { input, encoding: 'utf8', env })
-  const b = sb('begin', line + '\n')
+  const fresh = (name) => {
+    const p = path.join(tmp, name)
+    fs.writeFileSync(p, '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n\n## Notes\n\nProject root: `/repo`\n\n## Queue\n\n- [[A]]\n')
+    return p
+  }
+  const sb = (p, verb, input = '', more = []) => spawnSync('python3', [SB, verb, '--rollout', p, ...more], { input, encoding: 'utf8', env })
+  // Plain: written, standing, ended.
+  const p = fresh('week-rollout.md')
+  const b = sb(p, 'begin', filled + '\n')
   assert.equal(b.status, 0, b.stderr)
-  const WANT = /^- \d{4}-\d\d-\d\dT\d\d:\d\d[+-]\d\d:\d\d room stop: L at its week's line; stopping at a step boundary: wf_x proj-a \(task\); lane: none$/
-  assert.match(b.stdout.trimEnd(), WANT)
-  assert.match(fs.readFileSync(p, 'utf8').trimEnd().split('\n').pop(), WANT)
-  const s = sb('stands')
+  assert.match(b.stdout.trimEnd(), want(filled))
+  assert.match(fs.readFileSync(p, 'utf8').trimEnd().split('\n').pop(), want(filled))
+  const s = sb(p, 'stands')
   assert.equal(s.status, 0, s.stdout + s.stderr)
-  const e = sb('end')
+  const e = sb(p, 'end')
   assert.deepEqual([e.status, e.stdout], [0, `room stop ended (stood since ${b.stdout.split(' ')[1]})\n`])
-  assert.equal(sb('stands').status, 5)
+  assert.equal(sb(p, 'stands').status, 5)
+  // Held: `begin --held` opens the text with item 2's head.
+  const q = fresh('held-rollout.md')
+  const h = sb(q, 'begin', filled + '\n', ['--held'])
+  assert.equal(h.status, 0, h.stderr)
+  assert.match(h.stdout.trimEnd(), want(HEAD + filled))
+  assert.equal(sb(q, 'stands').status, 0)
 })
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------------------
 
-const RULES = ['section', 'trigger', 'record-first', 'start-nothing', 'lane', 'stopped-verify', 'stop-at-boundary', 'durable',
+const RULES = ['section', 'trigger', 'retired-wording', 'hold', 'record-first', 'start-nothing', 'lane', 'stopped-verify', 'stop-at-boundary', 'durable',
   'never-pause', 'status-lines', 'resume-entry', 'resume-live', 'git-env-hold', 'lost-call-room', 'usage-limit', 'transient-routing',
   'lost-handle', 'bound', 'step12-pointer', 'guardrail', 'donts', 'handoff', 'repair', 'context', 'live-check', 'integrate-trip',
   'status', 'repair-live']
@@ -491,13 +536,24 @@ test('control: the section before Pausing fails section', () => {
   only({ skill: moved }, 'section', 'before Pausing')
 })
 
-test("control: no week's line, a 5-hour form or a spread back, or a Leg without the line fails trigger", () => {
+test("control: no week's line, no bare line, a line that follows the signal, or a Leg without the line fails trigger", () => {
   only(sk("says this Session's Login `is at its week's line`", "says this Session's Login is at its line"), 'trigger', 'no week line')
-  only(sk("`is at its week's line` (Chorus ADR 0111", "`is at its week's line` or `is at its 5-hour line` (Chorus ADR 0111"), 'trigger', '5-hour form back')
-  only(sk('"<Login> at its week\'s line; stopping', '"<Login> at <its week\'s line|its 5-hour line>; stopping'), 'trigger', '5-hour line recorded')
+  only(sk(' or, with no window named, `is at its line`.', '.'), 'trigger', 'no bare line')
+  only(sk('"<Login> at its week\'s line; stopping', '"<Login> at <its week\'s line|its line>; stopping'), 'trigger', 'the line follows the signal')
   only(sk('"<Login> at its week\'s line; stopping', '"<Login> at its line; stopping'), 'trigger', 'no week line recorded')
-  only({ legs: edit(real.legs, "(execute § Room stop, item 1)", "(execute § Room stop, item 1, a spread's included)") }, 'trigger', 'Leg spread back')
   only({ legs: edit(real.legs, " `<text>` opens as execute item 2's line does: `<Login> at its week's line`.", '') }, 'trigger', 'Leg text')
+})
+
+test('control: a 5-hour form in any spelling, or a spread, back in the section or the Leg fails retired-wording', () => {
+  only(sk("`is at its week's line` (Chorus ADR 0111", "`is at its week's line` or `is at its 5-hour line` (Chorus ADR 0111"), 'retired-wording', '5-hour form back')
+  only(sk("`is at its week's line` (Chorus ADR 0111", "`is at its week's line` or `is at its five-hour line` (Chorus ADR 0111"), 'retired-wording', 'five-hour')
+  only(sk("`is at its week's line` (Chorus ADR 0111", "`is at its week's line` or `is at its 5 hour line` (Chorus ADR 0111"), 'retired-wording', '5 hour')
+  only(sk('**Start nothing while it stands.**', '**Start nothing while it stands.** Spread the stop over the Logins.'), 'retired-wording', 'Spread')
+  only({ legs: edit(real.legs, "(execute § Room stop, item 1)", "(execute § Room stop, item 1, a spread's included)") }, 'retired-wording', 'Leg spread back')
+  // Whole words only: a word that merely holds one is no retired wording.
+  for (const word of ['widespread', 'spreadsheet', '15 hours', '25-hour']) {
+    assert.deepEqual(checkRoomStop({ ...real, ...sk('**Start nothing while it stands.**', `**Start nothing while it stands.** A ${word} note.`) }), [], word)
+  }
 })
 
 test('control: begin after the mark, or no bare slugs, fails record-first', () => {
@@ -554,6 +610,9 @@ test('control: an entry that never ends the stop, ends it before its gates, or a
   only(sk('never resume a paused rollout. Otherwise run `python3', 'never resume a paused rollout. Otherwise, while the last ROLLOUT-STATUS reason starts `room stop:`, run `python3'),
     'durable', 'clause (2) guarded')
   only(sk('On any other exit no room stop stands: go on to the next clause.', 'On any other exit re-enter *Cold resume*.'), 'durable', 'last exit re-enters')
+  only(sk("A second signal while one stands renews it: `begin` writes a fresh start line, whose stamp restarts item 11's bound and whose `--held` (item 2) is the hold from then on, records no second stop, and a running watch is not relaunched.",
+    'A second signal changes nothing: `begin` writes nothing, and a running watch is not relaunched.'), 'durable', 'no renewal')
+  only(sk(' `begin` runs only on a Chorus signal (item 2), never again after a compaction to re-record a stop: `stands` reads it.', ''), 'durable', 'no compaction rule')
 })
 
 test('control: a paused: stamp in item 7 fails never-pause', () => {
@@ -717,6 +776,16 @@ test('control: status with no stands read, no ROOM STOP headline, a resume under
   only(stat(', and never under a room stop, standing or lapsed, while its owner session is alive, whatever `/workflows` shows and whatever its tasks read (§ 4\'s *Room stop*), a stamped pause\'s reinstate excepted (action 8)', ''), 'status', "Don'ts")
   only(stat('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume and the room stop is no live queue: action 10\'s or 12\'s resume applies as usual, and that *Cold resume* ends it.', ''),
     'status', 'a dead owner waited on forever')
+})
+
+test("control: no `--held` in item 2, no lease or moving bound, no ceiling, or no held stop in status fails hold", () => {
+  only(sk(" When the signal also says `Chorus holds this Session` (no Login has room: Chorus ADR 0099 d2), add `--held`: `begin` then opens the line's text with `held by the Stage: `, the hold item 11 reads, and refuses text that already opens so (exit 2, nothing written), since only `--held` writes it.", ''),
+    'hold', 'no --held')
+  only(sk(" The lease and the Watchdog's `moving` keep the 6 h bound: past it Chorus's Watchdog holds a lead the Stage still owes a resume and recovers one it no longer does.", ''),
+    'hold', 'no lease or moving bound')
+  only(sk(', up to `ROOM_STOP_HOLD_MAX`, a week and a few minutes from its stamp, since no weekly reset is further off', ''), 'hold', 'no ceiling')
+  only(stat(" A held one (§ 2's `stands` adds `held by the Stage`) stands past 6 h while the Stage lives and is waited for like any standing one: its headline adds ` · held by the Stage`, and once 6 h have passed its Moving line reads `stalled usage-limit`, because `moving` keeps that bound and Chorus's Watchdog holds that stall while the Stage owes the resume, so that line is no stalled framing either. It lapses once the Stage reads down or its hold's ceiling (a week) has passed.", ''),
+    'hold', 'no held stop in status')
 })
 
 test('control: repair that reads a room stop as no lead live, or a hand-off that never ends it, fails repair-live', () => {

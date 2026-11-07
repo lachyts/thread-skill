@@ -588,6 +588,10 @@ Subcommands:
               line, nothing written): not found, serial, incomplete (so it runs after step 7.5, which closes the prior),
               closed, superseded, paused or pause-requested, not never started, a valued `started_unattended:`, or no
               `supersedes:`.
+              `--backlog` (ADR 0071): the Backlog orient's decided start (skills/orient/backlog.md § B8) on a parallel
+              note its forks wrote. It drops only the `supersedes:` refusal and adds one: a rollout-scope `hold_until`
+              (readable or not) is refused, `… carries hold_until <pr>: a held queue starts on Lachy's word`. Its undo
+              line ends `the Backlog orient stamped it`.
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
@@ -611,9 +615,8 @@ Subcommands:
               found`, exit 4, no stdout. The note's hand-set `security_checks:` (execute § 3, the opt-in Security
               check; read as `parallel_ceiling` is, case-folded; absent, empty or false is off): true adds
               `"securityCheck": {"script": <abs security-check.py>}` after `namedRerun`, once `security-check.py
-              preflight` exits 0; any other value, true on a `shape: serial` note ("parallel rollouts only"), no
-              security-check.py beside this script or a failed preflight is one `ERROR: security_checks: <why>` line,
-              exit 5, no stdout (checked after exit 4).
+              preflight` exits 0; any other value, no security-check.py beside this script or a failed preflight is
+              one `ERROR: security_checks: <why>` line, exit 5, no stdout (checked after exit 4).
 
   record-verify  The lead's record of one Integration verify or RACE re-verify (ADR 0050, 0051; execute § 4.5 step 3
               and the RACE procedure), run only once that verify's canary check exited 0: `--rollout <note> --tasks
@@ -1071,7 +1074,8 @@ merge gate reads; the mark printed before an infra rerun that a later `ERROR:` l
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
-string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
+string, never the note's `## Needs you`, so a lead row, or an integrate row, which carries null, never reads it,
+except an integrate row's security set-aside, which carries the security scan's question (p39-8); a
 question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
 a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR), then an
 integrate row's set-aside by its diagnosis's first line (integration_block, p27-4): integration-conflict (an
@@ -1469,7 +1473,8 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     judge, implementer, investigator or reviser stopped on one: a non-empty string upserts
                     "## Needs you" (the question, stripped and neutralised like a gate-pending section, so a
                     `## ` line in it never splits the section); '' or whitespace removes it (an own-call row
-                    with no question settles an older one); null or no key leaves it (an integrate row, a
+                    with no question settles an older one); null or no key leaves it (an integrate row, which
+                    carries one only on a security set-aside, the security scan's question (p39-8); a
                     lead-written set-aside row). Anything else is an error (exit 1) and leaves the section;
                     the rest of the row is still written. needs_human() reads it back, normalised, for `next`,
                     `status` and lead-integrate.py.
@@ -1639,8 +1644,18 @@ ON_MERGE_BAD = "on_merge must be regenerate"
 ROOM_STOP_LINE_RE = re.compile(r"^- (\S+) room stop(: | ended\b)")
 # A room stop's start line stands under this bound (step-boundary.py's `stands` default, whose BOUND_HOURS is read from
 # here; the Stage's horizon for an owed resume, Chorus's OWED_MAX_S, 21600 s), and while it stands a lead's lease never
-# lapses (p28-4, _Leases) and `moving` reads a meant wait (p29-7). _room_standing is the rule's one copy.
+# lapses (p28-4, _Leases) and `moving` reads a meant wait (p29-7). _room_standing is the rule's one copy. A held start
+# line (p39-12: its text opens ROOM_STOP_HELD, which step-boundary.py `begin --held` alone writes, on a signal that says
+# no Login has room) stands past this bound in step-boundary.py's `stands` and `begin` alone, while _stage_alive, up to
+# ROOM_STOP_HOLD_MAX from its stamp: Chorus signals a hold once and then sends nothing until the resume, which waits for
+# the earliest weekly reset. The lease (_Leases) and `moving` keep this bound (_room_stop_stands reads no hold).
 ROOM_STOP_BOUND = timedelta(hours=6)
+# The machine-only head `begin --held` writes at the start of a held start line's text, after `room stop: `.
+ROOM_STOP_HELD = "held by the Stage: "
+# A held room stop's ceiling: no weekly reset is more than a week off the line; the 10 minutes cover Chorus's
+# RESET_GRACE_S (60 s), the stamp's minute precision, and the Stage's room read and send after the reset. Past it the
+# week has reset, so a heartbeat resume lands on a Login with room.
+ROOM_STOP_HOLD_MAX = timedelta(days=7, minutes=10)
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1890,16 +1905,23 @@ def _parse_ts(value):
         return None
 
 
-def _room_standing(last, now, bound=ROOM_STOP_BOUND):
+def _room_standing(last, now, bound=ROOM_STOP_BOUND, alive=None):
     """The room-stop rule's one copy (p29-7), on a _last_room_stop result: 0 under the bound, 4 at or past it (or an
-    unparseable stamp), 5 with no start line last (step-boundary.py stands' exits). _room_stop_stands, step-boundary.py
-    (begin, end, stands) and `moving` (through _room_stop_stands) read it."""
+    unparseable stamp), 5 with no start line last (step-boundary.py stands' exits). The hold (p39-12): with `alive` (a
+    callable on `now`, step-boundary.py's _stage_alive reading), a held start line (last[2]) at or past the bound still
+    reads 0 while its stamp is under ROOM_STOP_HOLD_MAX old and alive(now) is true; `alive` is called only for such a
+    line, so a reading under the bound never reads the Stage. With no `alive` the hold is never read: _room_stop_stands
+    (the lease, `moving`) passes none, step-boundary.py (begin, stands) passes _stage_alive's."""
     if last is None or last[1] == "ended":
         return 5
     ts = _parse_ts(last[0])
-    if ts is None or now - ts >= bound:
+    if ts is None:
         return 4
-    return 0
+    if now - ts < bound:
+        return 0
+    if alive is not None and last[2] and now - ts < ROOM_STOP_HOLD_MAX and alive(now):
+        return 0
+    return 4
 
 
 # The engine's isoMinutes / wholeMinutes (task.workflow.js), ported byte for byte so the lead's own log
@@ -3972,7 +3994,8 @@ def cmd_reconcile(args) -> int:
         # p16-3: the question a person must answer, the same three states as the plan. A non-empty string is the
         # question this row stopped on (upserted, neutralised by upsert_section, so it can never split the
         # section); '' (or whitespace) is a row with no question, so an older one is settled and removed; null or
-        # an absent key (an integrate row, a lead-written set-aside row) leaves the section as it is.
+        # an absent key (an integrate row, a lead-written set-aside row) leaves the section as it is. An integrate
+        # row carries a string only on a security set-aside (p39-8): the security scan's question, upserted the same way.
         ask = task.get("needsHuman")
         if isinstance(ask, str) and ask.strip():
             note.upsert_section(NEEDS_HUMAN_SECTION, ask.strip())
@@ -4052,8 +4075,9 @@ TRICKLE_WAKE_EXIT = 75            # trickle-wait timed out: no place kept for th
 TRICKLE_WAKE_NONE = 3             # trickle-wait has nothing to wait for (no live own record, an unreadable file)
 # A lead's lease (p28-4; execute away.md § The Trickle): ~/.config/thread/leases/<rollout stem>.json under the home dir
 # at call time, {rollout, written_at, by}, rewritten by every `next` off --dry-run once its refusals pass and by every
-# record-entry. A rollout whose lease has lapsed leaves the Mac-wide count unless a room stop stands; a rollout with no
-# lease file (an older engine snapshot, ADR 0043) or an unreadable one still counts.
+# record-entry. A rollout whose lease has lapsed leaves the Mac-wide count unless a room stop stands under its 6 h
+# bound (ROOM_STOP_BOUND); a rollout with no lease file (an older engine snapshot, ADR 0043) or an unreadable one still
+# counts.
 LEASE_DIR_REL = ".config/thread/leases"
 LEASE_LAPSE = timedelta(minutes=45)       # two */20 heartbeat ticks and 5 minutes, from the last write or a later wake
 LEASE_MAX_BYTES = 4 * 1024
@@ -4315,21 +4339,59 @@ def _cap_in_force(away, capacity=None) -> dict:
 
 
 def _last_room_stop(note):
-    """(stamp, 'start' | 'ended') for the last room-stop line (ROOM_STOP_LINE_RE) of the note's PAUSE_LOG_SECTION, or
-    None: step-boundary.py's begin, end and stands read it, and so do the lease (_room_stop_stands) and `moving`."""
+    """(stamp, 'start' | 'ended', held) for the last room-stop line (ROOM_STOP_LINE_RE) of the note's PAUSE_LOG_SECTION,
+    or None: step-boundary.py's begin, end and stands read it, and so do the lease (_room_stop_stands) and `moving`.
+    `held` (p39-12) is true only for a start line whose text after `room stop: ` opens ROOM_STOP_HELD (`begin --held`'s
+    head); _room_standing alone reads it, and only when its caller passes `alive`."""
     last = None
     for line in note.section_text(PAUSE_LOG_SECTION).split("\n"):
-        m = ROOM_STOP_LINE_RE.match(line.strip())
+        text = line.strip()
+        m = ROOM_STOP_LINE_RE.match(text)
         if m:
-            last = (m.group(1), "start" if m.group(2) == ": " else "ended")
+            start = m.group(2) == ": "
+            last = (m.group(1), "start" if start else "ended", start and text[m.end():].startswith(ROOM_STOP_HELD))
     return last
 
 
 def _room_stop_stands(note, now) -> bool:
-    """Whether a room stop stands on the rollout note at `now`, as step-boundary.py `stands` exits 0: its last room-stop
-    line is a start line whose stamp parses and is under ROOM_STOP_BOUND old. An `ended` line last, none, an unparseable
-    stamp or one at or past the bound: False."""
+    """Whether a room stop stands on the rollout note at `now` under its bound: its last room-stop line is a start line
+    whose stamp parses and is under ROOM_STOP_BOUND old. An `ended` line last, none, an unparseable stamp or one at or
+    past the bound: False. It reads no hold (p39-12): a held start line past the bound, which step-boundary.py `stands`
+    may still read standing while the Stage lives, is False here, so the lease (_Leases) and `moving` keep
+    ROOM_STOP_BOUND."""
     return _room_standing(_last_room_stop(note), now) == 0
+
+
+def _stage_alive(now):
+    """(alive, why) for a held room stop past its bound (p39-12; step-boundary.py's `stands` and `begin`): whether the
+    Chorus Stage lives at `now`. capacity.json (capacity.py read) reading fresh is a live Stage, whatever it holds (its
+    `logins` and `inside_line` are never read: a burn that decays is no end to a hold), since only the live Stage
+    rewrites the file every minute and one that is down, asleep or without a sample leaves it stale. A stale file with
+    a boot or wake of the Mac (machine_times(now, now): sysctl only, THREAD_MACHINE_TIMES in its place) at or before now
+    and within capacity.py's CAPACITY_STALE_AFTER of it reads alive too, the lease's boot-or-wake rule, so a tick right
+    after a wake never races the Stage's first write. Anything else (a missing, unreadable or older stale file, or a
+    capacity.py that will not load) is not alive, with `why` naming the reading. Never raises: it fails toward not
+    alive."""
+    mod = _capacity_module()
+    if mod is None:
+        return False, "capacity.py would not load"
+    try:
+        reading = mod.read(now)
+    except Exception as e:  # noqa: BLE001 — read() never raises; a reading that does fails toward not alive
+        return False, f"capacity.py failed ({type(e).__name__})"
+    if reading["file"] == "fresh":
+        return True, None
+    why = f"capacity.json {reading['file']}: {reading['why']}"
+    if reading["file"] != "stale":
+        return False, why
+    try:
+        mt = machine_times(now, now)
+        ups = [t for t in (mt["boot"], mt["wake"]) if t is not None and t <= now]
+        if any(now - t <= mod.CAPACITY_STALE_AFTER for t in ups):
+            return True, None
+    except Exception:  # noqa: BLE001 — no evidence of the Mac is no wake
+        pass
+    return False, why
 
 
 def _lease_path(stem) -> Path:
@@ -4442,11 +4504,12 @@ class _Leases:
         return self._up
 
     def state(self, stem, note, leg=False) -> dict:
-        """{state, writtenAt, lapsesAt} for the rollout `stem` (its note `note`, for a standing room stop). state is
-        `fresh`, `lapsed`, `room-stop`, `none` (no file) or `unreadable` (_lease_read's, or a `written_at` more than
-        AWAY_FUTURE_SKEW ahead of now). writtenAt is the lease's `written_at` (UTC Z), null for none and unreadable;
-        lapsesAt is start + the lapse for fresh and lapsed, else null. `leg`: a Leg lease (the class docstring), whose
-        lapse is LEG_LEASE_LAPSE, or LEG_WAIT_LAPSE when it reads `waiting: true`, and which never reads room-stop."""
+        """{state, writtenAt, lapsesAt} for the rollout `stem` (its note `note`, for a room stop under its bound).
+        state is `fresh`, `lapsed`, `room-stop`, `none` (no file) or `unreadable` (_lease_read's, or a `written_at`
+        more than AWAY_FUTURE_SKEW ahead of now). writtenAt is the lease's `written_at` (UTC Z), null for none and
+        unreadable; lapsesAt is start + the lapse for fresh and lapsed, else null. `leg`: a Leg lease (the class
+        docstring), whose lapse is LEG_LEASE_LAPSE, or LEG_WAIT_LAPSE when it reads `waiting: true`, and which never
+        reads room-stop."""
         state, written, _by, waiting, _login, _why = _lease_read(stem)
         if state == "ok" and written - self.now > AWAY_FUTURE_SKEW:
             state = "unreadable"
@@ -4530,9 +4593,9 @@ def _running_by_rollout(tasks_dir: Path, index, exclude=None, leases=None, lapse
     serial rollout's Leg. Each n is _counted_running's, the count `status` reads for its own rollout too
     (_counted_by_rollout's sets). Then the lease (p28-4): a rollout with n > 0 whose lease reads lapsed (`leases`, a
     _Leases; by default one at the clock's now) is left out, and put in `lapsed` instead when a dict is given (sorted
-    in place); no lease file, an unreadable one or a standing room stop still counts. `legs` (p36-7, ADR 0067 d8: only
-    while Capacity is in force): a serial rollout counts too, its n its Leg claims (_leg_tasks), behind its Leg lease
-    (_Leases' `leg`): a fresh or unreadable one counts, a lapsed one goes to `lapsed`, and none holds nothing."""
+    in place); no lease file, an unreadable one or a room stop under its bound still counts. `legs` (p36-7, ADR 0067
+    d8: only while Capacity is in force): a serial rollout counts too, its n its Leg claims (_leg_tasks), behind its Leg
+    lease (_Leases' `leg`): a fresh or unreadable one counts, a lapsed one goes to `lapsed`, and none holds nothing."""
     this = exclude.resolve() if exclude is not None else None
     if leases is None:
         leases = _Leases(datetime.now().astimezone())
@@ -8756,8 +8819,9 @@ def _merge_gate_stop(reason) -> bool:
 
 def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked) -> str:
     """Why a task was set aside (the module docstring's reasonClass table, first match). `asked` is the row's own
-    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: an integrate or lead row
-    carries null, so its class is unchanged."""
+    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: a lead row carries null, so
+    its class is unchanged, and so does an integrate row, but for a security set-aside (p39-8), which carries the
+    security scan's question and so reads needs-human."""
     first = reason.split("\n", 1)[0].strip().lower()
     if failed and QUOTA_RE.search(first):
         return "quota"
@@ -10206,7 +10270,8 @@ RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "
 LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
 VERIFY_SLOT_PY = Path(__file__).resolve().parent / "verify-slot.py"
 # The opt-in Security check (execute § 3 `security_checks`): verify-timeout runs its preflight at every entry and prints
-# its path as `securityCheck`, which the lead passes to the engine verbatim (args.securityCheck).
+# its path as `securityCheck`, which the lead passes to the engine verbatim (args.securityCheck); leg.py begin runs the
+# same preflight (_security_check) for a serial chain, whose Legs run `leg.py security`.
 SECURITY_CHECK_PY = Path(__file__).resolve().parent / "security-check.py"
 SECURITY_CHECKS_KEY = "security_checks"
 SECURITY_PREFLIGHT_TIMEOUT = 30
@@ -11253,7 +11318,9 @@ def cmd_stamp_start(args) -> int:
     """Under the chain (schedule step 8, after step 7.5): stamp `start: unattended` on the note the approved queue's
     regenerate just wrote, and print the one undo line. Refuses (exit 1, one ERROR line, nothing written) a note that
     is not found, serial, incomplete, closed, superseded, paused, not never started, already started by the Stage (a
-    valued `started_unattended:`) or that supersedes nothing. A stamp already there is not rewritten."""
+    valued `started_unattended:`) or that supersedes nothing. A stamp already there is not rewritten.
+    With `--backlog` (ADR 0071, skills/orient/backlog.md § B8) the note need supersede nothing, and a rollout-scope
+    `hold_until` (readable or not) refuses instead: a held queue starts on Lachy's word, never the Backlog orient's."""
     def refuse(msg):
         print(f"ERROR: stamp-start: {msg}", file=sys.stderr)
         return 1
@@ -11283,7 +11350,12 @@ def cmd_stamp_start(args) -> int:
         return refuse(f"{stem} carries started_unattended: {_scalar(note.get('started_unattended'))}: the Stage "
                       "already started it")
     prior = _link_slug(note, "supersedes")
-    if not prior:
+    backlog = getattr(args, "backlog", False)
+    if backlog:
+        own = _hold_until(note, None)
+        if own is not None:
+            return refuse(f"{stem} carries {HOLD_KEY} {own['pr'] or '<unreadable>'}: a held queue starts on Lachy's word")
+    elif not prior:
         return refuse(f"{stem} supersedes nothing: only an approved queue's regenerate stamps its new note here")
     if not _start_unattended(note):
         note.set(START_KEY, START_UNATTENDED, after=("status",))
@@ -11291,6 +11363,10 @@ def cmd_stamp_start(args) -> int:
         note.save()
     except OSError as e:
         return refuse(f"{stem}: cannot write {path}: {e}; nothing written")
+    if backlog:
+        print(f"undo: remove {START_KEY}: {START_UNATTENDED} from [[{stem}]] before the Stage starts it, or pause "
+              f"[[{stem}]] once it runs; the Backlog orient stamped it")
+        return 0
     entry = index.get(prior)
     hold = (_hold_until(entry[1], None) if entry is not None else None) or _hold_until(note, None)
     prior_name = entry[0].stem if entry is not None else _wikilink_slug(_scalar(note.get("supersedes")))
@@ -11954,9 +12030,8 @@ def cmd_verify_timeout(args) -> int:
     `ERROR: rollout settings refused: …`, exit 3. No sibling verify-slot.py (p32-1): `ERROR: verify-timeout: <path>
     not found`, exit 4. The opt-in `security_checks:` (execute § 3; _security_check): true adds `"securityCheck":
     {"script": <this script's sibling security-check.py>}` after `namedRerun`, the engine's args.securityCheck; a value
-    that is neither true nor false, true on a `shape: serial` note, no sibling security-check.py or a failed
-    `security-check.py preflight` is one `ERROR: security_checks: <why>` line, exit 5 (checked last). Either way the
-    lead's entry writes nothing."""
+    that is neither true nor false, no sibling security-check.py or a failed `security-check.py preflight` is one
+    `ERROR: security_checks: <why>` line, exit 5 (checked last). Either way the lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
@@ -12003,18 +12078,15 @@ def cmd_verify_timeout(args) -> int:
 
 def _security_check(note):
     """(securityCheck | None, why | None) for the rollout's hand-set `security_checks:` (execute § 3): absent, empty or
-    false (through _scalar, case-folded) is off; true is {"script": SECURITY_CHECK_PY}, once the key is on a parallel
-    note (a serial chain's Legs never read it, so no scan would run there), the sibling script exists and its preflight
-    exits 0 (its ERROR line relayed). Anything else is refused."""
+    false (through _scalar, case-folded) is off; true is {"script": SECURITY_CHECK_PY}, once the sibling script exists
+    and its preflight exits 0 (its ERROR line relayed). Anything else is refused. leg.py begin runs this same check for
+    a serial chain."""
     raw = _scalar(note.get(SECURITY_CHECKS_KEY))
     value = raw.lower()
     if value in ("", "false"):
         return None, None
     if value != "true":
         return None, f"must be true or false, got {raw!r}"
-    if _shape(note) == SHAPES[1]:
-        return None, ("parallel rollouts only: a serial chain's Legs never read it, so no scan runs there; remove "
-                      "the key")
     if not SECURITY_CHECK_PY.is_file():
         return None, f"{SECURITY_CHECK_PY} not found"
     try:
@@ -13609,6 +13681,8 @@ def _parser():
     ss = sub.add_parser("stamp-start", help="under an approved queue's chain (schedule step 8): stamp start: unattended "
                                             "on the note its regenerate wrote, print one undo line; exit 1 refused")
     ss.add_argument("--rollout", required=True, help="path to the new rollout note (it supersedes the approved queue)")
+    ss.add_argument("--backlog", action="store_true", help="the Backlog orient's decided start (ADR 0071): the note "
+                                                            "need supersede nothing, and a rollout hold_until refuses")
     ss.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ss.set_defaults(func=cmd_stamp_start)
 

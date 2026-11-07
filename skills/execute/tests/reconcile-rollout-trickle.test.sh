@@ -754,6 +754,21 @@ unlog ro-a; pause_log ro-a "$(printf -- '- 2026-10-02T12:05+00:00 room stop: lea
 ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L4: a room stop that ended keeps nothing: the lease lapses"
 ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]["state"]')" '"lapsed"' "L4: … and status reads it lapsed"
 
+# ── L4b: a held room stop (p39-12) keeps a lapsed lease only under the 6 h bound ──────────────────────────────────
+# The hold is step-boundary.py stands' alone: past 6 h, with the Stage live, the lease lapses all the same, so a hold
+# that waits days for a weekly reset holds no room on this Mac meanwhile (the accepted Trickle cost).
+scen l4b-held-room-stop
+two_rollouts
+lease ro-a 2026-10-02T13:19:59Z
+pause_log ro-a '- 2026-10-02T12:05+00:00 room stop: held by the Stage: lead-a at its week'\''s line'
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L4b: a held room stop 2 h old stands: ro-a's lapsed lease still counts"
+ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]["state"]')" '"room-stop"' "L4b: … and status reads the lease held by the room stop"
+unlog ro-a; pause_log ro-a '- 2026-10-02T08:05+00:00 room stop: held by the Stage: lead-a at its week'\''s line'
+mkdir -p "$D/home/.config/thread"
+printf '{"capacity": 4, "written_at": "%s"}\n' "$NOW" > "$D/home/.config/thread/capacity.json"
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L4b: a held room stop exactly 6 h old, the Stage live: the lease lapses"
+ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]["state"]')" '"lapsed"' "L4b: … and status reads it lapsed"
+
 # ── L5: no lease, or an unreadable one, still counts ────────────────────────────────────────────────────────────────
 scen l5-none-or-unreadable
 two_rollouts

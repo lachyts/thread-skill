@@ -38,13 +38,17 @@
 //   - the Flake check (p29-9) → FLAKE_CHECK_TASK follows the verification block of every implementer, approved-plan
 //                               implementer and reviser, FLAKE_CHECK_INTEGRATION follows integrationVerify in the
 //                               integrator, once each and nowhere else; the whole-call pins swap them out (P29_9).
-//   - the Security check      → args.securityCheck (execute § 3 `security_checks`): unset, every builder and both blocks
-//                               are byte-identical ('' fragments, IMPL_RESULT; the whole-call pins hold); set, the
-//                               implementers and the reviser carry securityCheckBlock right after FLAKE_CHECK_TASK and
-//                               the review judge securityReviewBlock right after reviewTests, once each and nowhere
-//                               else, with their pinned phrases (P1-P4, each phrase rule with a mutation control); the
-//                               implement and revise dispatches use IMPL_RESULT_SECURED (P5); the agent's
-//                               newDependencies reach the judge sanitised (P6).
+//   - the Security check      → args.securityCheck (execute § 3 `security_checks`): unset, every builder and all four
+//                               blocks are byte-identical ('' fragments, IMPL_RESULT, INTEGRATE_RESULT and
+//                               INTEGRATION_REVIEW; the whole-call pins hold); set, the implementers and the reviser
+//                               carry securityCheckBlock right after FLAKE_CHECK_TASK, the review judge
+//                               securityReviewBlock right after reviewTests, the integrator integrationSecurityBlock
+//                               right after INTEGRATION_PREFLIGHTS and the Integration judge
+//                               integrationSecurityReviewBlock right before Step 3 (p39-8), once each and nowhere
+//                               else, with their pinned phrases (P1-P4, P7, P8, each phrase rule with a mutation
+//                               control); the implement and revise dispatches use IMPL_RESULT_SECURED, and the
+//                               Integration schemas their _SECURED variants (P5); the agent's newDependencies reach the
+//                               judge sanitised (P6).
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -1820,12 +1824,16 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // before the scan, which refuses an untracked one). P4: the review judge's block, after reviewTests, with four controls
 // (one on the cross-check covering changed dependencies, which the scan lists whenever an entry as written or its
 // section changes; one on the lines the engine cut). P5: the schemas (runTask). P6: dependencyLines, which shows the
-// scan's whole brief (MAX_DEPS dependency lines and 50 more), with its control.
+// scan's whole brief (MAX_DEPS dependency lines and 50 more), with its control. P7: Integration's integrator block
+// (p39-8), right after INTEGRATION_PREFLIGHTS, its pinned phrases each with a control; P8: the Integration judge's block,
+// right before Step 3, its phrases with their controls.
 await (async () => {
   const NAMES = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt', 'plannerPrompt',
     'readOnlyPrompt', 'planJudgePrompt', 'planReviserPrompt', 'integratorPrompt', 'integrationReviewPrompt', 'reviewTests', 'touchedOf',
     'rungState', 'escalate', 'FLAKE_CHECK_TASK', 'GIT_ENV_SCRUB', 'securityCheckBlock', 'securityReviewBlock', 'securityScanCmd',
-    'dependencyLines', 'DEPS_SHOWN', 'DEP_LINE_MAX', 'IMPL_RESULT', 'IMPL_RESULT_SECURED', 'implSchema']
+    'dependencyLines', 'DEPS_SHOWN', 'DEP_LINE_MAX', 'IMPL_RESULT', 'IMPL_RESULT_SECURED', 'implSchema',
+    'integrationSecurityBlock', 'integrationSecurityReviewBlock', 'integrateSchema', 'integrationReviewSchema', 'INTEGRATE_RESULT',
+    'INTEGRATE_RESULT_SECURED', 'INTEGRATION_REVIEW', 'INTEGRATION_REVIEW_SECURED', 'INTEGRATION_PREFLIGHTS', 'securityAskOf']
   const E = loadEngine(NAMES)
   const SEC = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
   const tk = { slug: 'proj-fix-x', taskPath: "/vault/Lachy's task.md", maxIterations: 3, scope: 'cross-cutting' }
@@ -1852,18 +1860,29 @@ await (async () => {
   const I = { prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: 'a'.repeat(40), taskBase: 'b'.repeat(40), mainSha: 'c'.repeat(40),
     trouble: ['red'], landed: [], reviewHistory: [], reviewRoundsUsed: 1, rung: { startRung: '', rung: '', climbs: [] } }
   const J = { mergeCommit: 'd'.repeat(40), headSha: 'e'.repeat(40), baseSha: 'c'.repeat(40), triggers: ['conflict'], path: 'integrator' }
+  const J1 = { mergeCommit: 'f'.repeat(40), headSha: 'f'.repeat(40), baseSha: 'c'.repeat(40), triggers: ['shared-file'], path: 'judge-only' }
   const others = (a) => [
     ['plannerPrompt', E.plannerPrompt(tk, a, ST.bottom, '')], ['planJudgePrompt', E.planJudgePrompt(tk, 'PLAN', a)],
     ['planReviserPrompt', E.planReviserPrompt(tk, 'PLAN', hist.slice(0, 1), 2, a)], ['readOnlyPrompt', E.readOnlyPrompt(tk, a, ST.bottom, '')],
-    ['integratorPrompt', E.integratorPrompt({ ...tk, approvedGates: [] }, a, I)], ['integrationReviewPrompt', E.integrationReviewPrompt(tk, a, I, J)],
   ]
+  const tkI = { ...tk, approvedGates: [] }
+  const integrator = (a) => E.integratorPrompt(tkI, a, I)
+  const judges = (a) => [J, J1].map((j) => [j.path, E.integrationReviewPrompt(tk, a, I, j), j])
 
   // P1: off is '' and byte-identical.
   for (const off of [base, { ...base, securityCheck: null }]) {
+    const kind = off.securityCheck === null ? 'null' : 'absent'
     ok(E.securityCheckBlock(off, tk) === '' && E.securityReviewBlock(off, tk, im) === '' && E.implSchema(off) === E.IMPL_RESULT,
-      `security P1: off (${off.securityCheck === null ? 'null' : 'absent'}) both blocks are '' and the schema is IMPL_RESULT`)
+      `security P1: off (${kind}) both blocks are '' and the schema is IMPL_RESULT`)
     ok(coders(off).every(([, p], i) => p === coders(base)[i][1]) && E.reviewJudgePrompt(tk, im, off, []) === E.reviewJudgePrompt(tk, im, base, []),
-      `security P1: off (${off.securityCheck === null ? 'null' : 'absent'}) every code-writing prompt and the review judge render their unset bytes`)
+      `security P1: off (${kind}) every code-writing prompt and the review judge render their unset bytes`)
+    ok(E.integrationSecurityBlock(off, tk, I) === '' && E.integrationSecurityReviewBlock(off, tk, I, J) === '' &&
+      E.integrateSchema(off) === E.INTEGRATE_RESULT && E.integrationReviewSchema(off) === E.INTEGRATION_REVIEW,
+    `security P1: off (${kind}) both Integration blocks are '' and the schemas are INTEGRATE_RESULT and INTEGRATION_REVIEW`)
+    const { securityCheck: _drop, ...bare } = off
+    ok(integrator(off) === integrator(bare) && judges(off).every(([, p], i) => p === judges(bare)[i][1]) && !integrator(off).includes('security-check.py') &&
+      judges(off).every(([, p]) => !p.includes('security-check.py')),
+    `security P1: off (${kind}) the integrator and the Integration judge render their unset bytes`)
   }
 
   // P2: placement.
@@ -1874,7 +1893,18 @@ await (async () => {
     times(p, E.FLAKE_CHECK_TASK + block) === 1 && times(p, 'Security check (execute § 3') === 1),
   'security P2: every implementer (bottom, climbed, top), approved-plan implementer and reviser (in-run and seeded) is its unset bytes plus exactly the fragment, right after FLAKE_CHECK_TASK, once')
   ok(others(on).every(([, p], i) => p === others(base)[i][1] && !p.includes('security-check.py')),
-    'security P2: no planner, plan judge, plan reviser, investigator, integrator or Integration review renders it')
+    'security P2: no planner, plan judge, plan reviser or investigator renders it')
+  const iBlock = E.integrationSecurityBlock(on, tkI, I)
+  ok(iBlock.startsWith('\n\nSecurity check (execute § 3 `security_checks`') && integrator(on) === integrator(base).replace(E.INTEGRATION_PREFLIGHTS, E.INTEGRATION_PREFLIGHTS + iBlock) &&
+    times(integrator(on), E.INTEGRATION_PREFLIGHTS + iBlock + '\n\nStep 4 — push') === 1 && times(integrator(on), 'Security check (execute § 3') === 1 &&
+    times(integrator(on), 'security-check.py') === 1,
+  'security P2: the integrator is its unset bytes plus exactly its block, right after INTEGRATION_PREFLIGHTS and before Step 4, once')
+  const STEP3 = '\n\nStep 3 — decide'
+  ok(judges(on).every(([, p, j], i) => {
+    const b = E.integrationSecurityReviewBlock(on, tk, I, j)
+    return b.startsWith('\n\nSecurity check (execute § 3 `security_checks`') && p === judges(base)[i][1].replace(STEP3, b + STEP3) &&
+      times(p, b + STEP3) === 1 && times(p, 'Security check (execute § 3') === 1 && times(p, 'security-check.py') === 1
+  }), 'security P2: the Integration judge (P2 and P1 paths) is its unset bytes plus exactly its block, right before Step 3, once')
 
   // P3: the fragment's text.
   const shq = (x) => `'${String(x).replace(/'/g, "'\\''")}'`
@@ -1995,6 +2025,110 @@ await (async () => {
   ok(a0.seen.filter((x) => /^(implement|revise):/.test(x.label)).every((x) => !secured(x)), 'security P5: unset, they use IMPL_RESULT')
   const ro = await runWith(mk('read-only', { securityCheck: SEC }))
   ok(ro.seen.length > 0 && ro.seen.every((x) => x.label.startsWith('investigate:') && !secured(x)), 'security P5: the investigator always uses IMPL_RESULT')
+
+  // P5 (p39-8): Integration's schemas. The plain ones keep no needsHuman (the p16-3 check above holds); the _SECURED ones
+  // carry an optional needsHuman, the scan's `why` only, and the integrator's a required securityClean.
+  ok(!('needsHuman' in E.INTEGRATE_RESULT.properties) && !('needsHuman' in E.INTEGRATION_REVIEW.properties) &&
+    !('securityClean' in E.INTEGRATE_RESULT.properties), 'security P5: INTEGRATE_RESULT and INTEGRATION_REVIEW are unchanged')
+  ok(E.INTEGRATE_RESULT_SECURED.properties.needsHuman.type === 'string' && !E.INTEGRATE_RESULT_SECURED.required.includes('needsHuman') &&
+    E.INTEGRATE_RESULT_SECURED.properties.needsHuman.description.includes("ONLY the security scan's `why`, verbatim, when it exited 1") &&
+    E.INTEGRATE_RESULT_SECURED.properties.securityClean.type === 'boolean' &&
+    JSON.stringify(E.INTEGRATE_RESULT_SECURED.required) === JSON.stringify([...E.INTEGRATE_RESULT.required, 'securityClean']) &&
+    E.INTEGRATE_RESULT_SECURED.properties.securityClean.description.includes('true only when the security scan exited 0 on headSha, its last run before the push') &&
+    E.INTEGRATE_RESULT_SECURED.properties.blocked.description.endsWith('or the security scan stopped you'),
+  'security P5: INTEGRATE_RESULT_SECURED is INTEGRATE_RESULT plus an optional needsHuman (the scan\'s why) and a required securityClean')
+  ok(E.INTEGRATION_REVIEW_SECURED.properties.needsHuman.type === 'string' && !E.INTEGRATION_REVIEW_SECURED.required.includes('needsHuman') &&
+    JSON.stringify(E.INTEGRATION_REVIEW_SECURED.required) === JSON.stringify(E.INTEGRATION_REVIEW.required) &&
+    E.INTEGRATION_REVIEW_SECURED.properties.unreadable.description.includes('or the security scan could not run (exit 2, or the tree\'s HEAD is not the integrated head)'),
+  'security P5: INTEGRATION_REVIEW_SECURED is INTEGRATION_REVIEW plus an optional needsHuman, its unreadable naming the scan')
+  ok(E.integrateSchema(on) === E.INTEGRATE_RESULT_SECURED && E.integrationReviewSchema(on) === E.INTEGRATION_REVIEW_SECURED, 'security P5: set, the Integration schemas are the _SECURED ones')
+  const tokQ = 'A secret (github-pat) in a.py, commit abc1234, line 1, is in Integration\'s commits, which Integration never rewrites: keep it (answer `security-accept secret:0123456789ab`)?'
+  ok(E.securityAskOf({ needsHuman: ` ${tokQ} ` }) === tokQ && E.securityAskOf({ needsHuman: 'Which value should it use?' }) === '' &&
+    E.securityAskOf({ needsHuman: 'security-accept secret:0123' }) === '' && E.securityAskOf({}) === '' && E.securityAskOf(null) === '',
+  'security P5: securityAskOf takes only a question naming a security-accept token')
+
+  // P7: Integration's integrator block.
+  const wtI = "/re po/it's/.claude/worktrees/proj-fix-x"
+  const CMD_I = `${CMD} --anchor '${I.headSha}'`
+  const P7 = [
+    'It reads Integration\'s own commits and every merge\'s resolution since the anchor ' + I.headSha,
+    'Run it after Step 3 (whether or not the verify was required) and after the preflights above, before Step 4\'s push',
+    'Its last run must be on the head you push: after any later commit (a preflight\'s sibling fix included), run Step 3\'s verifier and this scan again',
+    '- Exit 0: securityClean=true.',
+    'every finding here is Lachy\'s (its `action` is human): Integration never rewrites a commit',
+    'Integration never rewrites a commit. Push nothing.',
+    'its `why`, verbatim, as needsHuman',
+    'a blockerDiagnosis naming each secret\'s rule, file and commit, never a value',
+    'a change that is part of your resolution or fix is committed as a fix commit (list it in fixCommits), then run Step 3\'s verifier and this scan again',
+    `\`${E.GIT_ENV_SCRUB} git -C "${wtI}" restore --staged --worktree -- <path>\``,
+    'Never `commit -a`, and never `add -A` a stray',
+    'a new file that is part of your resolution or fix is added by its path and committed as a fix commit',
+    'is removed by its literal path (the removal rule above), never committed',
+    'Any other exit 2, or a "commit them" you cannot settle that way: push nothing, and return blocked=true with blockKind "stop", securityClean=false and its ERROR line as blockerDiagnosis',
+    'Never create, edit or leave an uncommitted `.gitleaks.toml` or `.gitleaksignore`',
+    'never write a `## Repair input` entry or a `security-accept` token yourself',
+  ]
+  const p7Fails = (b) => {
+    const out = []
+    if (!b.includes('`' + CMD_I + '`')) out.push('the scan command')
+    for (const ph of P7) if (!b.includes(ph)) out.push(ph.slice(0, 50))
+    const spans = [...b.matchAll(/`([^`\n]*)`/g)].map((m) => m[1]).filter((x) => /(^|[\s;&|(])git\s/.test(x))
+    if (!spans.length || !spans.every((x) => x.startsWith(E.GIT_ENV_SCRUB))) out.push('every git span scrubbed')
+    return out
+  }
+  ok(E.securityScanCmd(on, tk, I.headSha) === CMD_I && E.securityScanCmd(on, tk, I.headSha, true) === CMD_I + ' --history-only' &&
+    E.securityScanCmd(on, tk) === CMD, 'security P7: the scan command gains --anchor (and --history-only) only when asked; the two-argument form is unchanged')
+  ok(JSON.stringify(p7Fails(iBlock)) === '[]', `security P7: the integrator's block holds every pinned phrase ${JSON.stringify(p7Fails(iBlock))}`)
+  const P7_CONTROLS = [
+    ["Run it after Step 3 (whether or not the verify was required) and after the preflights above, before Step 4's push.", 'Run it before Step 3.', 'the scan run before the verify'],
+    [" Its last run must be on the head you push: after any later commit (a preflight's sibling fix included), run Step 3's verifier and this scan again.", '', 'the last-run clause dropped'],
+    ["every finding here is Lachy's (its \\`action\\` is human)", 'a finding you can fix is yours', 'a finding read as the integrator\'s'],
+    ['Integration never rewrites a commit. Push nothing.', 'Integration never rewrites a commit.', 'push nothing dropped'],
+    ['its \\`why\\`, verbatim, as needsHuman, and a blockerDiagnosis', 'a question of your own as needsHuman, and a blockerDiagnosis', 'a question of its own'],
+    ["naming each secret's rule, file and commit, never a value.", "naming each secret.", 'never a value dropped'],
+    ["is committed as a fix commit (list it in fixCommits), then run Step 3's verifier and this scan again;", 'is committed;', 'a fix commit with no verify or scan after it'],
+    ['; a tracked file the verifier or the env bootstrap rewrote is restored with \\`${GIT_ENV_SCRUB} git -C "${wt}" restore --staged --worktree -- <path>\\`.', '.', 'the restore clause dropped'],
+    ['Never \\`commit -a\\`, and never \\`add -A\\` a stray.', 'Commit it with \\`commit -a\\`.', 'commit -a allowed'],
+    ['is removed by its literal path (the removal rule above), never committed.', 'is committed as a fix commit.', 'leftovers committed'],
+    ['- Never create, edit or leave an uncommitted \\`.gitleaks.toml\\` or \\`.gitleaksignore\\`. The command', '- The command', 'the config clause dropped'],
+    [' never write a \\`## Repair input\\` entry or a \\`security-accept\\` token yourself, anywhere.\`\n}', ' read it.\`\n}', 'the token clause dropped'],
+  ]
+  for (const [from, to, label] of P7_CONTROLS) {
+    ok(src.includes(from), `security P7 control setup: ${label}`)
+    const M = loadEngine(['integrationSecurityBlock'], { source: src.replace(from, to) })
+    ok(p7Fails(M.integrationSecurityBlock(on, tkI, I)).length > 0, `security P7 control: ${label} fails P7`)
+  }
+
+  // P8: Integration's judge block.
+  const p8Fails = (b, j) => {
+    const out = []
+    if (!b.includes('run `' + CMD_I + ' --history-only` yourself')) out.push('the --history-only command')
+    if (!b.includes(`only when \`${E.GIT_ENV_SCRUB} git -C "${wtI}" rev-parse HEAD\` prints ${j.headSha}.`)) out.push('the HEAD rule')
+    if (!b.includes('from committed history only (`--history-only`), so what a verifier left in the tree never stops it. It is read-only.')) out.push('history only')
+    if (!b.includes('- Exit 0: decide Step 3 as written.')) out.push('exit 0')
+    if (!b.includes('- Exit 1: verdict "changes", with its `why`, verbatim, in needsHuman, and one bullet naming each secret\'s rule, file and commit, never a value.')) out.push('exit 1')
+    if (!b.includes(`- Exit 2, or a HEAD that is not ${j.headSha}: verdict "changes", unreadable=true, and one bullet "cannot run the security scan: <its ERROR line, or the HEAD you read>".`)) out.push('unreadable')
+    if (!b.includes("This overrides Step 3's unreadable=false.")) out.push('override')
+    if (!b.includes('Never approve what the scan did not read.')) out.push('never approve')
+    const spans = [...b.matchAll(/`([^`\n]*)`/g)].map((m) => m[1]).filter((x) => /(^|[\s;&|(])git\s/.test(x))
+    if (!spans.length || !spans.every((x) => x.startsWith(E.GIT_ENV_SCRUB))) out.push('every git span scrubbed')
+    return out
+  }
+  for (const j of [J, J1]) {
+    const b = E.integrationSecurityReviewBlock(on, tk, I, j)
+    ok(JSON.stringify(p8Fails(b, j)) === '[]', `security P8 (${j.path}): the judge's block holds every pinned phrase ${JSON.stringify(p8Fails(b, j))}`)
+  }
+  for (const [from, to, label, rule] of [
+    ['run \\`${securityScanCmd(a, task, I.headSha, true)}\\` yourself', 'run \\`${securityScanCmd(a, task, I.headSha)}\\` yourself', '--history-only dropped', 'the --history-only command'],
+    [', only when \\`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\\` prints ${j.headSha}.', '.', 'the HEAD rule dropped', 'the HEAD rule'],
+    ['verdict "changes", unreadable=true, and one bullet "cannot run', 'verdict "changes", and one bullet "cannot run', 'unreadable dropped', 'unreadable'],
+    [" This overrides Step 3's unreadable=false.", '', 'the override dropped', 'override'],
+    [' Never approve what the scan did not read.', '', 'never approve dropped', 'never approve'],
+  ]) {
+    ok(src.includes(from), `security P8 control setup: ${label}`)
+    const M = loadEngine(['integrationSecurityReviewBlock'], { source: src.replace(from, to) })
+    ok(p8Fails(M.integrationSecurityReviewBlock(on, tk, I, J), J).includes(rule), `security P8 control: ${label} fails P8 (${rule})`)
+  }
 
   // P6: the agent's lines, sanitised.
   const MAX_DEPS = Number(/^MAX_DEPS = (\d+)$/m.exec(fs.readFileSync(path.join(here, '..', 'scripts', 'security-check.py'), 'utf8'))[1])

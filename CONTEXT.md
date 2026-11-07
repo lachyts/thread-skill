@@ -203,7 +203,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
-  which writes nothing and is never a route either.
+  which writes nothing and is never a route either. A rollout note written and
+  waiting with no lead gets its **execute handoff** first, before the move
+  (ADR 0072).
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules parallel-shaped
@@ -219,7 +221,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
   link), else from the session's directory. A directory a project declares, an
   exact name or alias, or a clear best match goes ahead; a close call or no
   match asks Lachy first (ADR 0036). A project target audits that project,
-  never its whole area. _Avoid_: inferring the area.
+  never its whole area; `--backlog` takes an area only (ADR 0071). _Avoid_: inferring the area.
+- **Backlog orient** — `/thread:orient <area> --backlog`, the orient that needs
+  nobody present (ADR 0071; `skills/orient/backlog.md`): it reads the area's whole
+  Backlog by the Pulse's line rules, decides each task's **Backlog disposition**
+  and the rest as a decided record, forks schedule runs per batch and starts their
+  rollouts, then puts his questions to him one at a time, each holding back only its
+  own tasks. A gate he holds writes nothing to its task and is put again at the next
+  Backlog orient that batches it. It writes `last_orient_at` back into the Pulse's
+  trigger file once its forks' writes are done, and re-stamps it once after his
+  answers unless that first write was held, each only while its guards pass.
+  _Avoid_: auto-orient, unattended reshuffle.
+- **Backlog disposition** — what a Backlog orient does with one task: batch it, or
+  **park** it (`status: parked`, `parked-by: backlog-orient <date>`: not worth a
+  rollout yet, never for being small or unclear), **reopen** an orient park its batch
+  takes, **obsolete** it (`status: dropped` once it stops being true, never for size;
+  not the phase **retire**, which empties an unstarted phase), **re-home** it onto
+  the area's sub-project, or mark it **wait** (answered, but its rollout already
+  runs). A **held park** is any park without `parked-by: backlog-orient` (his own, or
+  older than ADR 0071): frozen, never reopened, scheduled, obsoleted or parked again.
 - **Declared check** — a command a project names for orient to run in its
   audit. It prints what is new since its own record, and the record moves on
   only once Lachy has passed those items at the gate, so it says what he has
@@ -716,7 +736,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   new (the quota hold); a missing, stale or unreadable reading falls back to
   them, never to open (ADR 0067 d8; execute away.md § Capacity). A fresh
   reading's `stop_suites` (memory critical) also holds and stops slotted
-  suites, as the **Heat hold** does. A Leg's wait for room is a `wait` of
+  suites, as the **Heat hold** does, and a stopped suite restarts only once
+  memory falls below warning. A Leg's wait for room is a `wait` of
   kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
   mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
@@ -737,13 +758,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Lease** — a lead's stamp that keeps its Rollout's running tasks in the
   Mac-wide count (the **Trickle**, the **Away cap**), rewritten at its every
   `next` and loop entry: it lapses 45 minutes after its last write, or after
-  the Mac's latest boot or wake if later, unless a room stop stands, and a
-  Rollout with no lease still counts (ADR 0049, amended). A serial chain's
-  **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims in the count
-  while **Capacity** is in force: its Leg rewrites it at its own leg.py verbs,
-  it lapses 90 minutes after its last write (180 after a waiting turn end), and
-  a Leg with no lease, or a closed one, holds nothing, so a dead Leg drops
-  out. _Avoid_: heartbeat file, lock.
+  the Mac's latest boot or wake if later, unless a room stop stands under its
+  6 h bound, and a Rollout with no lease still counts (ADR 0049, amended). A
+  serial chain's **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims
+  in the count while **Capacity** is in force: its Leg rewrites it at its own
+  leg.py verbs, it lapses 90 minutes after its last write (180 after a waiting
+  turn end), and a Leg with no lease, or a closed one, holds nothing, so a
+  dead Leg drops out. _Avoid_: heartbeat file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
   the **Away cap**) for a start, or a seeded revise, it has picked but not yet
   stamped, so every other lead counts it. The stamp consumes it, and it lapses
@@ -948,19 +969,30 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite falls through), else the test files importing the changed modules.
   They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
   suite.
-- **Security check** — the opt-in scan a parallel rollout's hand-set
+- **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over
-  the task's own non-merge commits since their merge base (secrets, by
-  gitleaks) and the dependencies its diff adds or changes outside test
-  fixtures (advisories, by OSV), and the review judge runs it again. A red the
-  agent can fix fails the try like a verifier red; one no commit can clear (a
-  pushed secret, a change to the scanner's own config, an advisory with no
-  fixed release) is Lachy's question, and his answer clears it only as a
-  `security-accept <kind>:<key>` token the scan reads from the task note's
-  `## Repair input`. Integration's own commits and merge commits are not
-  scanned ([[thread-skill-security-check-integration-commits]]), and no Leg
-  ever runs it. _Avoid_: secret scan (alone), audit, CI check.
+  the task's own commits since their merge base, each merge's resolution
+  included (secrets, by gitleaks), and the dependencies its diff adds or
+  changes outside test fixtures (advisories, by OSV), and the review judge
+  runs it again. Integration scans too: the integrator before its push and
+  the Integration judge after, over Integration's own commits and merge
+  resolutions since the anchor, every finding there Lachy's question. A red
+  the agent can fix fails the try like a verifier red; one no commit can clear
+  (a pushed secret, a secret in Integration's commits, a change to the
+  scanner's own config, an advisory with no fixed release) is Lachy's
+  question, and his answer clears it only as a `security-accept <kind>:<key>`
+  token the scan reads from the task note's `## Repair input`. Integration's
+  scan reads secrets and the scanner config only, not dependencies
+  ([[thread-skill-security-check-integration-dependencies]]). A serial
+  chain's Leg runs it too, on each task with commits, before any review and
+  again before `leg.py done`: in a Chain copy it rewrites a secret out of its
+  own unpushed commits (one it cannot rewrite halts the chain for Lachy's own
+  rewrite), and a secret in a primary checkout's history reverts the task,
+  sets it aside and halts the chain; on a serial chain his answer to it is
+  the rotation and the hand-back, whose re-entry starts after the revert. A
+  Leg's close-out commits between tasks and `leg.py land`'s merges are not
+  scanned. _Avoid_: secret scan (alone), audit, CI check.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -1040,9 +1072,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (orient § 9, schedule step 8; ADR 0057): decided and never asked, it hands
   the note to a fresh session through handoff's **Rollout launch.**, whose doc
   carries `launches:` and briefs the rollout's lead, never this thread. Only his
-  words choose here, not yet or start when ready instead, and only a refused
-  ladder file holds it. Close's `rollout not started:` row names it again for a
-  note this session wrote and left with no lead. _Avoid_: execute offer.
+  words choose here, not yet or start when ready instead, and at orient § 9 and
+  schedule step 8 only a refused ladder file holds it. For a note this session
+  wrote, or its THREAD.md names, that no lead runs, `next` runs it first, before
+  this session's own move, and close ends with it (ADR 0072); only his not yet
+  or a hold close step 2 names leaves close's `rollout not started:` row
+  instead. _Avoid_: execute offer.
 - **Start when ready** — the execute handoff's fourth move, on his word
   (orient § 9, schedule step 8): it stamps `start: unattended` on the rollout note just
   written and ends, running nothing. Said after the handoff, it withdraws the
@@ -1050,6 +1085,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
+  The **Backlog orient** stamps each parallel note it wrote this way itself, as its
+  decided start (`stamp-start --backlog`, ADR 0071), never beside a hold.
   When he names the PR the start waits on, it is an **Approved queue**
   instead. _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
@@ -1204,7 +1241,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   second thing beside them, signs itself under the Standing approval with no
   limit, ledger or month line (p37-4, ADR 0034's 2026-11-05 amendment); a
   serial Leg signs one too. A second thing named in plain prose with none of
-  those is not seen, and signs (a residual). Only Lachy writes it.
+  those is not seen, and signs (a residual). Only Lachy writes it. Schedule
+  and orient record such a gate, never ask it ahead, on a serial chain too.
   _Avoid_: dummy account, test account.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
@@ -1319,6 +1357,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
   The line is the week's alone: the spread (Chorus ADR 0109) and the 5-hour
   line retired with Chorus ADR 0111.
+  A held one (its signal says no Login has room) stands past its 6 h bound
+  while the Stage lives, up to a week (execute § Room stop item 11).
   On an Approved queue it is no run mark.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.

@@ -9,6 +9,7 @@
 #   A0 approve-queue        A1-A2g the verdict (OPEN, MERGED, I8, nothing left, closed, a PR task, an Integration, the clear)
 #   A3 the chain's script half and the superseded tail      A4-A4f pauses and room stops      A5 an unreadable on_merge
 #   A6 stamp-start's refusals      A7 status      A8 no on_merge and mixed case      A9 one room-stop regex
+#   A10 stamp-start --backlog (ADR 0071): a never-started note with no prior, refused beside a hold
 # Usage: bash reconcile-rollout-approved-queue.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -520,6 +521,47 @@ for form in same drifted; do
   ok "$(grep -c '^ROOM_LINE = re.compile' "$D/mut/step-boundary.py")" 1 "A9: control [$form]: the mutated copy keeps its own regex"
   python3 -c "$chk" "$D/mut/step-boundary.py" >/dev/null 2>&1; ok "$?" 1 "A9: control [$form]: a copy with its own regex fails the check"
 done
+
+# ── A10 (ADR 0071): stamp-start --backlog stamps a never-started parallel note with no prior, refused beside a hold ──
+scen a10
+sb() { HOME="$EH" python3 "$SCRIPT" stamp-start --backlog --tasks-dir "$D" "$@"; }
+mkro ro "" ; mkt x-p29-1-a ro open "$X"
+out=$(sb --rollout "$D/ro.md" 2>"$D/err"); rc=$?
+ok "$rc|$out" "0|undo: remove start: unattended from [[ro]] before the Stage starts it, or pause [[ro]] once it runs; the Backlog orient stamped it" \
+  "A10: --backlog stamps a note that supersedes nothing, with its one undo line"
+ok "$(cat "$D/err")" "" "A10: … nothing on stderr"
+ok "$(grep -A1 '^status:' "$D/ro.md")" "status: open
+start: unattended" "A10: … start: unattended just below status:"
+cp "$D/ro.md" "$D/ro.once"
+ok "$(sb --rollout "$D/ro.md")" "$out" "A10: a re-run prints the same line"
+cmp -s "$D/ro.md" "$D/ro.once"; ok "$?" 0 "A10: … and writes nothing"
+rm "$D/x-p29-1-a.md"
+bref() {  # bref <label>: --backlog refuses ro-2 with one ERROR line and writes nothing
+  cp "$D/ro-2.md" "$D/ro-2.before" 2>/dev/null
+  sb --rollout "$D/ro-2.md" >"$D/out" 2>"$D/err"; rc=$?
+  ok "$rc|$(cat "$D/out")|$(grep -c '^ERROR: stamp-start: ' "$D/err")|$(grep -c . "$D/err")" "1||1|1" "A10: --backlog refuses $1 with one ERROR line"
+  [ -f "$D/ro-2.before" ] && { cmp -s "$D/ro-2.md" "$D/ro-2.before"; ok "$?" 0 "A10: … $1 writes nothing"; }
+  rm -f "$D/ro-2.before"
+}
+mkro ro-2 "" 'shape: serial'; bref "a serial note"
+mkro ro-3 "" ; mkro ro-2 "" 'supersedes: "[[ro-3]]"'; bref "an incomplete note (its prior still open)"; rm "$D/ro-3.md"
+mkro ro-2 ""; sed -i.bak 's/^status: open$/status: dropped/' "$D/ro-2.md"; bref "a closed note"
+mkro ro-2 "" 'status_note: x'; sed -i.bak 's/^status: open$/status: done/' "$D/ro-2.md"; bref "a done note"
+mkro ro-2 "" 'superseded_by: "[[ro-4]]"'; bref "a superseded note"
+mkro ro-2 "" 'pause_requested: true'; bref "a pause-requested note"
+mkro ro-2 "" 'paused: 2026-10-02T10:00+00:00'; bref "a paused note"
+mkro ro-2 ""; mkt x-p29-1-a ro-2 in_progress "$X" 'owner: lead-2'; bref "a note that has run"; rm "$D/x-p29-1-a.md"
+mkro ro-2 "" 'started_unattended: 2026-10-02T12:00+00:00'; bref "a note the Stage started"
+mkro ro-2 "" "$OM"; bref "a note beside a rollout hold_until"
+ok "$(grep -c 'a held queue starts on Lachy' "$D/err")" 1 "A10: … the hold's refusal says a held queue starts on Lachy's word"
+mkro ro-2 "" 'hold_until: {pr: , merged: true}'; bref "a note beside an unreadable hold_until"
+# Without --backlog, A6's refusal (no prior) and A3's stamp beside a carried hold both stand.
+mkro ro-2 ""
+ss --rollout "$D/ro-2.md" >/dev/null 2>"$D/err"; ok "$?|$(grep -c 'supersedes nothing' "$D/err")" "1|1" "A10: without --backlog a note with no prior is still refused"
+mkro ro "" "${APPROVED[@]}"; sed -i.bak 's/^status: open$/status: done/' "$D/ro.md"
+mkro ro-2 "" 'supersedes: "[[ro]]"' "$OM"
+out=$(ss --rollout "$D/ro-2.md" 2>"$D/err"); rc=$?
+ok "$rc|$(grep -c '^start: unattended$' "$D/ro-2.md")" "0|1" "A10: without --backlog the chain still stamps beside its carried hold"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-approved-queue: ALL PASS"; else echo "reconcile-rollout-approved-queue: FAILED"; fi
