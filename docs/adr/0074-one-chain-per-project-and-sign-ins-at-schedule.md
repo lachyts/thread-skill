@@ -2,9 +2,15 @@
 
 Date: 2026-11-07
 Status: proposed. Grilled 2026-11-07 in the SEO orient session, after its audit of `seo-rollout-2026-11-07` … `-4`;
-built by Phase 42 (`thread-skill-p42-2` … `-4`). Amends ADR 0067 d4's "chains whose surfaces are disjoint run side by
-side" for one project's serial work. Sits beside Phase 41 (a rollout waits instead of stopping, and never notifies):
-this ADR moves the waits it can foresee into the sitting, where he is present.
+built by Phase 42 (`thread-skill-p42-2` … `-4`). For one project's serial work, d1 amends ADR 0040's p24-2 mechanic
+*One chain per serial note* ("A serial set that splits into surface-disjoint groups gets one note per group") and ADR
+0067 d4's predicted claims, which "group, order and wait": disjoint surfaces no longer split a project's members into
+chains. d3 amends ADR 0059 d4, "A code row never opens where its Leg cannot finish it": its refusal of "an alias-less
+member that writes two or more checkouts" widens to every member that commits to a checkout other than its launch
+folder's, and its exemption, "An aliased member in checkout A that also claims checkout B (a workspace `--add-dir`, a
+project `Local:`)", now holds only while B is reach the row does not commit to. Sits beside Phase 41 (a rollout
+waits instead of stopping, and never notifies): this ADR moves the waits it can foresee into the sitting, where he is
+present.
 
 ## Context
 
@@ -17,7 +23,8 @@ and nothing checked it from the Legs' launch before they started (only each Leg'
 Preflight, sets such a row aside). The fourth stopped because a row that wrote `~/repos/tools/metrics` launched from
 the workspaces seo launcher, a surface the orient added: its Leg made the edit, Verify was green, but a review
 subagent cannot leave the Session's cwd (`legs.md` § Review), so the Leg reverted its own commit and set the task
-aside. The plan refuses a cross-checkout row only when it has no launch alias.
+aside. The plan refuses a cross-checkout row only when it has no launch alias, or launches from the vault (ADR 0059
+d4).
 
 His words: "it looks like you launched a bunch of rollout legs, like four different legs, and each of them failed in
 different ways … Why then do we need to create four different serial chains that are each named 'leg'? It creates
@@ -29,36 +36,66 @@ each chain is run by Legs, each a visible Session (ADR 0040). The admin he names
 ## Decision
 
 **d1. One chain per project.** Schedule's serial path writes at most one chain note per project per run: every
-serial-shaped member whose first `projects:` link is that project goes in it, in dependency order, and one Leg
-Session works its rows in turn. A row set aside (a gate, a sign-in, a block) never holds the rows after it that do not
-depend on it: the Leg sets it aside and claims the next, as `legs.md` already does. Disjoint surfaces no longer split
-a project's chain. Two projects' chains still run side by side, taking turns by rank where they overlap (ADR 0067 d4,
-d9). A launch change between two rows stays a Leg boundary inside the one chain.
+serial-shaped member whose first `projects:` link is that project goes in it, in dependency order, and its rows are
+worked by one Leg Session at a time. Grouping keeps its two edges, a surface overlap and an in-set dependency, and
+adds a third, a shared first project, so disjoint surfaces no longer split a project's chain. A member with no
+`projects:` link is grouped as before, by surface and dependency alone: it gets a chain of its own unless one of those
+edges joins it to another member. Two projects' members still give two chains unless a surface overlap or an in-set
+dependency joins them, as today, and separate chains run side by side, taking turns by rank on a place they share
+(ADR 0067 d4, d9). A row set aside (a gate, a sign-in, a block) never holds the rows after it that do not depend on
+it: the Leg sets it aside and claims the next, as `legs.md` already does. A Leg still hands over to a fresh Session at
+a launch change between two rows (ADR 0040) and after at most five fresh claims (CONTEXT.md **Leg**), so one chain can
+be worked by several Legs, one after another, never side by side.
 
 **d2. Sign-ins are settled at schedule, before any Leg starts.** For each member, schedule reads the MCP namespaces
 its `## Launch` names as required and checks each answers from the row's launch profile. A server only Lachy can sign
 in to that reads signed out raises one `hands_steps` list on his screen (each server, where to sign in, the evidence
 that ticks it) while he is still in the sitting, and the chain's Leg 1 starts only once every needed server reads
 signed in. A server he will not sign in to now, or a check that cannot run, leaves the rows that need it out of the
-chain, unstamped, each named with what to sign in to; a later `/thread:orient --steer` takes them. The Leg's own
-preflight stays as the backstop.
+chain, unstamped, each named with what to sign in to; a later `/thread:orient --steer` takes them. A member that
+depends on a row left out (its `depends-on:` or `blocked-by:`, directly or through another member) is left out with
+it, unstamped, and named the same way: the row it waits on, and what to sign in to. Kept in, it would be held
+`depends on [[<row>]]`, and once nothing else was claimable its chain would close `stuck`: a row launched to wait. The
+Leg's own preflight stays as the backstop.
 
-**d3. A row works only the checkout it launches from.** `serial-chains.py plan` refuses any member, aliased or not,
-whose writes sit in a checkout other than its launch folder's, and names that checkout's launcher as the remedy when
-the launch catalogue has one. A surface added for a member at schedule obeys the same rule.
+**d3. A row commits only to the checkout it launches from.** `serial-chains.py plan` refuses any member, aliased or
+not, that commits to a checkout other than its launch folder's. The checkouts it commits to are those of its `repo:`
+surfaces (a keyed `repo:<toplevel>//<path>` token, or a bare `repo:<toplevel>` that is a git toplevel), declared,
+derived or added for it at schedule. The remedy names that checkout's launcher when the launch-folders file
+(`launch-folders.json`) has one, else a launch from that checkout, or one task per checkout chained by `depends-on:`
+(under d1 those tasks stay in the one chain, with a Leg boundary between them). Reach is not refused: a launch
+command's `--add-dir` and `cd` paths and the first project's `Local:` predict nothing (schedule § Serial path), and
+the read-only reach ADR 0059 d4 named (a workspace `--add-dir`, a project `Local:`) stays allowed as it ruled, so a
+workspace chain that reaches other repos still schedules. `works_of` counts that reach too, so the refusal reads the
+surfaces' checkouts, not a member's `works`. The reason is a write's alone: a review cannot leave the Session's cwd,
+so a row that commits elsewhere can never finish, and a read needs no review. A row that commits to a checkout it only
+reaches, naming no path there, predicts no claim and is not caught here; its Leg's review stays the backstop, as on
+11-07.
 
 ## Consequences
 
-- An orient's serial steer opens one Leg Session per project, never one per task.
+- An orient's serial steer opens one Leg Session at a time per project, never one per task.
+- A chain whose rows launch from several checkouts, which d3 now forces whenever a project's rows commit to several,
+  still hands over to a new Session at each launch change: the 11-07 SEO set (rows in workspaces,
+  `~/repos/tools/metrics` and the MCP fork's repo) still opens at least three Leg Sessions, one after another. The
+  plan's order puts a row with the previous row's launch next among those ready in the same phase, which keeps those
+  boundaries few.
 - A day-shaped deadline is met by a sign-in in the sitting, not by a later repair.
 - A project's serial work runs slower end to end, its rows in turn: he chose that over the Session count.
 - A vault note's claim that a service is signed in ("re-authed 11-03") is no longer the evidence: d2's live check is.
 
 ## Decided for him (overturnable)
 
-- A cross-checkout row → refused, or relaunched from its own checkout (technical: a review cannot leave the
-  Session's cwd, so such a row can never finish; d3).
+- A row that commits to a checkout other than its launch's → refused, or relaunched from its own checkout (technical:
+  a review cannot leave the Session's cwd, so such a row can never finish; d3).
+- Read-only reach into another checkout (a workspace `--add-dir`, a project `Local:`) → still allowed, as ADR 0059 d4
+  ruled (technical: it commits nothing, so no review has to leave the cwd, and refusing it would refuse real workspace
+  chains).
 - The sign-in check runs from each row's launch profile, not from the scheduling session's (technical: MCP auth is
   per Session and per profile).
 - Rows needing a server he will not sign in to now are left out, never launched to wait (priorities: Phase 41's "fix
   all rollouts when I sit down intentionally", and his pick here, "ask at schedule time").
+- A member that depends on a row left out is left out with it (follows from the bullet above: kept in, it would wait
+  on that row and close its chain `stuck`).
+- A member with no `projects:` link is grouped as before, by surface and dependency alone (technical: no project names
+  what it shares with the rest, and d1 adds only the shared-project edge).
