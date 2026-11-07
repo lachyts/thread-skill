@@ -615,9 +615,8 @@ Subcommands:
               found`, exit 4, no stdout. The note's hand-set `security_checks:` (execute § 3, the opt-in Security
               check; read as `parallel_ceiling` is, case-folded; absent, empty or false is off): true adds
               `"securityCheck": {"script": <abs security-check.py>}` after `namedRerun`, once `security-check.py
-              preflight` exits 0; any other value, true on a `shape: serial` note ("parallel rollouts only"), no
-              security-check.py beside this script or a failed preflight is one `ERROR: security_checks: <why>` line,
-              exit 5, no stdout (checked after exit 4).
+              preflight` exits 0; any other value, no security-check.py beside this script or a failed preflight is
+              one `ERROR: security_checks: <why>` line, exit 5, no stdout (checked after exit 4).
 
   record-verify  The lead's record of one Integration verify or RACE re-verify (ADR 0050, 0051; execute § 4.5 step 3
               and the RACE procedure), run only once that verify's canary check exited 0: `--rollout <note> --tasks
@@ -10271,7 +10270,8 @@ RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "
 LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
 VERIFY_SLOT_PY = Path(__file__).resolve().parent / "verify-slot.py"
 # The opt-in Security check (execute § 3 `security_checks`): verify-timeout runs its preflight at every entry and prints
-# its path as `securityCheck`, which the lead passes to the engine verbatim (args.securityCheck).
+# its path as `securityCheck`, which the lead passes to the engine verbatim (args.securityCheck); leg.py begin runs the
+# same preflight (_security_check) for a serial chain, whose Legs run `leg.py security`.
 SECURITY_CHECK_PY = Path(__file__).resolve().parent / "security-check.py"
 SECURITY_CHECKS_KEY = "security_checks"
 SECURITY_PREFLIGHT_TIMEOUT = 30
@@ -12030,9 +12030,8 @@ def cmd_verify_timeout(args) -> int:
     `ERROR: rollout settings refused: …`, exit 3. No sibling verify-slot.py (p32-1): `ERROR: verify-timeout: <path>
     not found`, exit 4. The opt-in `security_checks:` (execute § 3; _security_check): true adds `"securityCheck":
     {"script": <this script's sibling security-check.py>}` after `namedRerun`, the engine's args.securityCheck; a value
-    that is neither true nor false, true on a `shape: serial` note, no sibling security-check.py or a failed
-    `security-check.py preflight` is one `ERROR: security_checks: <why>` line, exit 5 (checked last). Either way the
-    lead's entry writes nothing."""
+    that is neither true nor false, no sibling security-check.py or a failed `security-check.py preflight` is one
+    `ERROR: security_checks: <why>` line, exit 5 (checked last). Either way the lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
@@ -12079,18 +12078,15 @@ def cmd_verify_timeout(args) -> int:
 
 def _security_check(note):
     """(securityCheck | None, why | None) for the rollout's hand-set `security_checks:` (execute § 3): absent, empty or
-    false (through _scalar, case-folded) is off; true is {"script": SECURITY_CHECK_PY}, once the key is on a parallel
-    note (a serial chain's Legs never read it, so no scan would run there), the sibling script exists and its preflight
-    exits 0 (its ERROR line relayed). Anything else is refused."""
+    false (through _scalar, case-folded) is off; true is {"script": SECURITY_CHECK_PY}, once the sibling script exists
+    and its preflight exits 0 (its ERROR line relayed). Anything else is refused. leg.py begin runs this same check for
+    a serial chain."""
     raw = _scalar(note.get(SECURITY_CHECKS_KEY))
     value = raw.lower()
     if value in ("", "false"):
         return None, None
     if value != "true":
         return None, f"must be true or false, got {raw!r}"
-    if _shape(note) == SHAPES[1]:
-        return None, ("parallel rollouts only: a serial chain's Legs never read it, so no scan runs there; remove "
-                      "the key")
     if not SECURITY_CHECK_PY.is_file():
         return None, f"{SECURITY_CHECK_PY} not found"
     try:

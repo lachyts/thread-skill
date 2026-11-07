@@ -16,18 +16,17 @@ the vault, PyYAML or a sibling script is missing.
 What it reuses. Loaded by path: resolve-target.py (RT: `done_flag`/`dead_why`, its "Live targets" rule, and
 `flatten`/`unlink`), and through it next-action.py (RT.NA: Note, Vault and its link resolution, tags_of, status_of,
 as_list, links_in, read_slots, DEAD_STATUSES and OPEN_STATUSES), so the vault keeps one frontmatter reader;
-reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE_N. The statuses read per
-`_shared/vault-grammar.md` § Statuses: Landed and Active are next-action's sets; Review is the one literal here,
-REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight, stated once in
-three module-level helpers that estate-dispatch.py's `record` loads too: first_link (a `rollout:` value's first link),
-link_live (it resolves to a note directly in Work/Tasks) and in_flight (live, `in_progress` or Review, on a status
-already read by status_of), with its one exception, still_to_start (a carried task still queued, open and linked to
-the rollout being superseded: schedule's Pre-flight grades it, ADR 0047), loaded by estate-rank.py and `record` too;
-a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
-children, never copied: self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check,
-unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection
-(SKILL.md prose, nothing to import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers,
-**Pushed base**).
+reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE_N; background_job.py for kill_group.
+The statuses read per `_shared/vault-grammar.md` § Statuses: Landed and Active are next-action's sets; Review is the one
+literal here, REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight,
+stated once in three module-level helpers that estate-dispatch.py's `record` loads too: first_link (a `rollout:` value's
+first link), link_live (it resolves to a note directly in Work/Tasks) and in_flight (live, `in_progress` or Review, on a
+status already read by status_of), with its one exception, still_to_start (a carried task still queued, open and linked
+to the rollout being superseded: schedule's Pre-flight grades it, ADR 0047), loaded by estate-rank.py and `record` too;
+a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as children, never copied:
+self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check, unfinished-rollout.py check and
+reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection (SKILL.md prose, nothing to
+import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers, **Pushed base**).
 
 The vault (pure Python, never under the deadline):
 - Projects: notes under Work/Projects outside Archive/, tagged `project`, with RT.dead_why None (not the `archived`
@@ -114,7 +113,7 @@ that fails still scrubs a hook's GIT_DIR), plus land.sh's no-prompt set (GIT_TER
 GCM_INTERACTIVE=never, GH_PROMPT_DISABLED=1) and PYTHONDONTWRITEBYTECODE=1; git also gets LC_ALL=C, and ls-remote
 gets `GIT_SSH_COMMAND='ssh -o BatchMode=yes'` only when GIT_SSH_COMMAND, GIT_SSH and the repo's core.sshCommand are
 all unset (land.sh's rule). Each waits min(--timeout, time left to the deadline); at expiry its whole process group
-gets SIGTERM, a 1 s grace, then SIGKILL (declared-check.py's kill_group), then its pipes close and it is reaped
+gets SIGTERM, a 1 s grace, then SIGKILL (background_job.py's kill_group), then its pipes close and it is reaped
 within 2 s (rollout-settings.py _origin_slug's pattern). The deadline is absolute from process start: no probe starts
 after it, and every probe in flight at it is killed, so the run ends within about the deadline plus 3 s. --deadline 0
 starts no subprocess at all. SIGINT or SIGTERM kills every live probe group, then exits 130.
@@ -193,6 +192,8 @@ SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check
 LAND_SH = os.path.join(HERE, "land.sh")
 LANDING_REGISTER_PY = os.path.join(HERE, "landing-register.py")
 UNFINISHED_ROLLOUT_PY = os.path.join(HERE, "unfinished-rollout.py")
+BACKGROUND_JOB_PY = os.path.join(HERE, "background_job.py")
+BJ = None  # background_job.py, loaded by main (load_siblings); a module that loads this one in process never needs it
 
 SCHEMA = 1
 VAULT_DEFAULT = "~/repos/obsidian"
@@ -257,7 +258,8 @@ def _load(name, path):
 def load_siblings():
     out = []
     for name, path in (("thread_resolve_target", RESOLVE_TARGET_PY), ("thread_reconcile_rollout", RECONCILE_ROLLOUT_PY),
-                       ("thread_reconcile_project", RECONCILE_PROJECT_PY)):
+                       ("thread_reconcile_project", RECONCILE_PROJECT_PY),
+                       ("thread_background_job", BACKGROUND_JOB_PY)):
         try:
             out.append(_load(name, path))
         except SystemExit:  # resolve-target's own exit 3 (next-action.py would not load), already on stderr
@@ -423,25 +425,9 @@ class Ran:
 
 
 def kill_group(proc):
-    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it. Copied from
-    declared-check.py's kill_group (loading that script would install its signal handlers)."""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        proc.poll()
-        return
-    end = time.monotonic() + KILL_GRACE
-    while time.monotonic() < end:
-        proc.poll()
-        try:
-            os.killpg(proc.pid, 0)
-        except (ProcessLookupError, PermissionError):
-            return
-        time.sleep(0.05)
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
+    """SIGTERM the process group, wait up to KILL_GRACE for it to empty, then SIGKILL it: background_job.py's, with
+    KILL_GRACE."""
+    BJ.kill_group(proc, KILL_GRACE)
 
 
 def decode(data):
@@ -536,6 +522,7 @@ class Runner:
 
     def interrupt(self, signum, _frame):
         """SIGINT/SIGTERM: kill every live probe group (TERM, the grace, then KILL), then exit 130."""
+        # Not kill_group: every live group shares one grace, and this handler ends the process (background_job.py).
         for s in (signal.SIGINT, signal.SIGTERM):
             signal.signal(s, signal.SIG_IGN)
         self._lock.acquire(timeout=2)
@@ -1394,8 +1381,9 @@ def parse(argv):
 
 
 def main(argv):
+    global BJ
     args = parse(argv)
-    RT, RR, RP = load_siblings()
+    RT, RR, RP, BJ = load_siblings()
     if RT.NA.yaml is None:
         fail(3, "PyYAML is required: python3 -m pip install pyyaml")
     vroot = os.path.expanduser(args.vault)

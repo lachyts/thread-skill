@@ -588,20 +588,30 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
 })
 
 // ADR 0058: the doc's status, its branch, the diff size and the disposition counts are optional, checked when given.
-test('review-round (ADR 0058): status, branch, size and disposition counts are accepted; bad values are refused', (t) => {
+// fresh-review ADR 0001 adds unconfirmed beside them: filed and unconfirmed never share a finding, so
+// filed + unconfirmed <= findings when findings is given (for that check alone, an absent count reads as 0).
+test('review-round (ADR 0058, fresh-review ADR 0001): status, branch, size and disposition counts are accepted; bad values are refused', (t) => {
   const home = tmpHome(t)
   const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 12 }
   const full = { ...base, status: 'consumed', branch: 'feat/x', lines: 77, files: 3, blocking: 2, open: 1, filed: 8,
-    recurring: 3, reversal: 1, rejected: 2 }
+    unconfirmed: 3, recurring: 3, reversal: 1, rejected: 2 }
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...base, status: 'pending', lines: 0, files: 0 })], { env: EV(home) })
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(full)], { env: EV(home) })
-  // p34-5: open may equal blocking (every blocking finding still open), and reviewedAt is a UTC Z stamp.
-  const atCap = { ...base, blocking: 2, open: 2, reviewedAt: '2026-10-01T00:00:00.000Z' }
+  // p34-5: open may equal blocking (every blocking finding still open), and reviewedAt is a UTC Z stamp; filed +
+  // unconfirmed may equal findings (every finding filed or unconfirmed).
+  const atCap = { ...base, blocking: 2, open: 2, filed: 9, unconfirmed: 3, reviewedAt: '2026-10-01T00:00:00.000Z' }
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(atCap)], { env: EV(home) })
-  const [a, b, c] = lines(path.join(ev(home), 'reviews.jsonl'))
+  // With no findings there is nothing to hold the counts against: a line with no findings skips the check whatever
+  // its filed and unconfirmed (e), and 0 is a count like any other (d).
+  const { findings: _f, ...noFindings } = base
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...noFindings, unconfirmed: 0 })], { env: EV(home) })
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...noFindings, filed: 4, unconfirmed: 3 })], { env: EV(home) })
+  const [a, b, c, d, e] = lines(path.join(ev(home), 'reviews.jsonl'))
   assert.deepEqual([a.status, a.lines, a.files, 'blocking' in a], ['pending', 0, 0, false])
   for (const k of Object.keys(full)) assert.deepEqual(b[k], full[k], k)
-  assert.deepEqual([c.blocking, c.open, c.reviewedAt], [2, 2, '2026-10-01T00:00:00.000Z'])
+  assert.deepEqual([c.blocking, c.open, c.filed, c.unconfirmed, c.reviewedAt], [2, 2, 9, 3, '2026-10-01T00:00:00.000Z'])
+  assert.deepEqual([d.unconfirmed, 'findings' in d], [0, false])
+  assert.deepEqual([e.filed, e.unconfirmed, 'findings' in e], [4, 3, false])
   const BAD = [
     ['status "done"', { status: 'done' }], ['status ""', { status: '' }], ['branch ""', { branch: '' }],
     ['branch 3', { branch: 3 }], ['lines -1', { lines: -1 }], ['files 1.5', { files: 1.5 }],
@@ -610,6 +620,12 @@ test('review-round (ADR 0058): status, branch, size and disposition counts are a
     ['reviewedAt "yesterday"', { reviewedAt: 'yesterday' }],
     ['reviewedAt with an offset', { reviewedAt: '2026-10-01T00:00:00+10:00' }],
     ['open over blocking', { blocking: 1, open: 2 }],
+    ['unconfirmed -1', { unconfirmed: -1 }], ['unconfirmed 1.5', { unconfirmed: 1.5 }],
+    ['unconfirmed "2"', { unconfirmed: '2' }], ['unconfirmed null', { unconfirmed: null }],
+    ['unconfirmed true', { unconfirmed: true }],
+    ['unconfirmed over findings', { findings: 2, unconfirmed: 7 }],
+    ['filed + unconfirmed over findings', { filed: 8, unconfirmed: 5 }],
+    ['filed over findings, no unconfirmed', { findings: 2, filed: 3 }],
   ]
   for (const [label, bad] of BAD) {
     const r = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, ...bad })], { env: EV(home) })
@@ -618,7 +634,9 @@ test('review-round (ADR 0058): status, branch, size and disposition counts are a
   }
   const over = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, blocking: 1, open: 2 })], { env: EV(home) })
   assert.match(over.stderr, /review-round: open \(2\) exceeds blocking \(1\)/)
-  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 3, 'no refused line was written')
+  const unconf = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, findings: 2, unconfirmed: 7 })], { env: EV(home) })
+  assert.match(unconf.stderr, /review-round: filed \+ unconfirmed \(0 \+ 7\) exceed findings \(2\)/)
+  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 5, 'no refused line was written')
 })
 
 // ---- the review-verdict kind (p21-3: reconcile-rollout.py's one line per judged master-review round) ----------
@@ -670,7 +688,6 @@ test('the docstring carries the review-verdict and review-round reader rules and
   const doc = JSON.parse(r.stdout).replace(/\s+/g, ' ')
   assert.match(doc, /- review-verdict: one line per verdict_key, \(task, round, head\) when the line carries a head, else \(task, round, digest\)\. Keep the first line per key\. The writer \(reconcile\) skips an entry whose key the record already holds/)
   assert.match(doc, /- review-round: dedupe on \(repo, doc\) when doc is present, else on \(repo, head, digest\), keeping the latest line/)
-  assert.match(doc, /unconfirmed\? \(int >= 0, fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted apart from filed, which excludes them, so each finding sits in one count;/)
   assert.match(doc, /an Integration re-review rejection uses a review round but writes no line, so `round` skips it \(r1, r2, r4\)/)
   assert.match(doc, /verdict_digest\(verdict, feedback\) -> str/)
   assert.match(doc, /verdict_key\(line\) -> tuple/)
@@ -1577,25 +1594,6 @@ test('a call-journal fold whose lock stays busy past 5 s warns, exits 0 and writ
       } catch (e) { reject(e) }
     })
   })
-})
-
-// ADR 0001 (fresh-review): the checker's unconfirmed count rides beside the disposition counts, and the line no
-// longer needs a verdict now the ledger's STOP rule is retired.
-test('review-round (fresh-review ADR 0001): unconfirmed is accepted with no verdict; bad values are refused', (t) => {
-  const home = tmpHome(t)
-  const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 9 }
-  const line = { ...base, status: 'consumed', blocking: 1, open: 0, filed: 5, unconfirmed: 3 }
-  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(line)], { env: EV(home) })
-  const [a] = lines(path.join(ev(home), 'reviews.jsonl'))
-  assert.equal(a.unconfirmed, 3)
-  assert.equal('verdict' in a, false)
-  for (const [label, bad] of [['unconfirmed -1', { unconfirmed: -1 }], ['unconfirmed 1.5', { unconfirmed: 1.5 }],
-    ['unconfirmed "2"', { unconfirmed: '2' }], ['unconfirmed null', { unconfirmed: null }]]) {
-    const r = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, ...bad })], { env: EV(home) })
-    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
-    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, label)
-  }
-  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 1, 'no refused line was written')
 })
 
 // ---- 8. review-round is not deduped ---------------------------------------------------------------------------

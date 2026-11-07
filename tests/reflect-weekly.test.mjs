@@ -933,7 +933,7 @@ test('span: freshReview reads the checker\'s verdicts (unconfirmed, checkedRound
     rr(W(7, '03:00'), 's1', { branch: 'feat/o', mode: 'simplify', effort: 'xhigh', verdict: 'continue', ...D(5, 0, 5) }),
     // a branchless round with no mode (a code round) and no effort, and a round reviewed before the window
     rr(W(8, '01:00'), 'n1', { ...D(4, 0, 3, { rejected: 1, unconfirmed: 0 }) }),
-    rr('2026-09-01T00:00:00Z', 'p1', { branch: 'feat/c', ...code('xhigh'), ...D(10, 0, 10, { unconfirmed: 9 }) }),
+    rr('2026-09-01T00:00:00Z', 'p1', { branch: 'feat/c', ...code('xhigh'), ...D(10, 0, 1, { unconfirmed: 9 }) }),
   ])
   const s = span(h)
   // candidates: Σblocking + Σunconfirmed over the checked rounds alone (feat/m's old round, blocking 2, is none of
