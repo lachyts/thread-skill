@@ -1130,14 +1130,20 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
 snapshot_once() { local READ_TRIES=1; pr_snapshot "$1"; }   # one attempt (dynamic scope reaches gh_read)
 
 # ---- the default branch's required gate (ADR 0069 d1) ------------------------------------------------------
-# Whether $BASE can carry a required check at all: `some` (protected by branch protection or a ruleset, or a ruleset
-# with a rule beyond RULES_NOT_CHECKS), `none` (two clean GitHub answers both deny any gate) or `unknown` (anything
+# Whether $BASE can carry a required check at all: `some` (branch protection lists a required check, or a ruleset
+# holds a rule beyond RULES_NOT_CHECKS), `none` (two clean GitHub answers both deny any gate) or `unknown` (anything
 # else). Read at most once per run, and only off the CLEAN path. Two whole-object reads, the branch percent-encoded
 # whole (merge-gate.py's reads, ADR 0068):
-#   1. branches/<b>: 200 `protected: true` → some, with no rules read; 200 `protected: false` → read 2; anything else
-#      (any 404 or 403 whatever its text, a 200 with no boolean `protected`, no answer in READ_TRIES) → unknown.
+#   1. branches/<b>: 200 `protected: false` → read 2; 200 `protected: true` reads the body's own `protection`
+#      object's `required_status_checks`: a context or check in its `contexts` or `checks` lists → some, with no rules
+#      read; both lists empty → read 2 (Animately/optimizer's develop, 2026-11-07: protected, `contexts: []`,
+#      `checks: []`; and a branch a ruleset alone protects, whose classic protection reads `enabled: false` with
+#      both lists empty: lachyts/thread-skill's master); either not a list, or no such object → unknown. Anything
+#      else (any 404 or 403 whatever its text, a 200 with no boolean `protected`, no answer in READ_TRIES) → unknown.
 #      Not branches/<b>/protection: that 404s on a branch a ruleset alone protects (lachyts/thread-skill's master,
-#      2026-11-05), a false none; branches/<b> needs only read access.
+#      2026-11-05) and needs admin rights; branches/<b> needs only read access. `strict: true` with no context asks
+#      only that the head be up to date with $BASE, which the base pin already holds: merge-task merges only onto
+#      the base its Integration used (check_base, ADR 0064 d5).
 #   2. rules/branches/<b>?per_page=100: 200, a list of under 100 rules each of a RULES_NOT_CHECKS type → none; a
 #      list with any other type → some; 100 or more, or no list → unknown. A failed read whose stderr holds
 #      `Upgrade to GitHub Pro` and `HTTP 403` and no `rate limit` → none (a private repo on the free plan, which can
@@ -1158,7 +1164,8 @@ gate_read() {  # gate_read <out> <endpoint> — 0 on rc 0; 1 on an HTTP 4xx answ
     sleep "$READ_INTERVAL"
   done
 }
-gate_body() {  # gate_body <branches|rules> <file> — what a 200 body says: some | none | open (read the rules) | unknown
+gate_body() {  # gate_body <branches|rules> <file> — what a 200 body says: some | none | unknown, or for branches
+               # open (not protected) | bare (protected, no required check): read the rules
   python3 - "$1" "$2" <<'PY'
 import json, sys
 # Rule types that never require a check: the branch's lifecycle, its history, signatures, and pull_request, whose
@@ -1172,7 +1179,19 @@ except Exception:
     d = None
 if kind == "branches":
     p = d.get("protected") if isinstance(d, dict) else None
-    print("unknown" if not isinstance(p, bool) else "some" if p else "open")
+    prot = d.get("protection") if isinstance(d, dict) else None
+    rsc = prot.get("required_status_checks") if isinstance(prot, dict) else None
+    ctx, chk = (rsc.get("contexts"), rsc.get("checks")) if isinstance(rsc, dict) else (None, None)
+    if not isinstance(p, bool):
+        print("unknown")
+    elif not p:
+        print("open")
+    elif not isinstance(ctx, list) or not isinstance(chk, list):
+        print("unknown")      # protected, but its protection's required checks are not visible
+    elif ctx or chk:
+        print("some")
+    else:
+        print("bare")         # protected, but its protection requires no check: the rules decide
 elif not isinstance(d, list) or len(d) >= 100:
     print("unknown")
 elif all(isinstance(r, dict) and r.get("type") in RULES_NOT_CHECKS for r in d):
@@ -1183,31 +1202,35 @@ PY
 }
 required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per run; never exits
   [ -n "$REQ_GATE" ] && return 0
-  local enc rc g
+  local enc rc g lead
   enc=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$BASE")
   gate_read "$tmp/gate-branch.json" "repos/$OWNER/$REPO/branches/$enc"; rc=$?
   g=unknown
   [ "$rc" -eq 0 ] && g=$(gate_body branches "$tmp/gate-branch.json")
   case "$g" in
-    some) REQ_GATE=some; REQ_WHY="$BASE is protected" ;;
-    open)
+    some) REQ_GATE=some; REQ_WHY="$BASE is protected with a required check" ;;
+    open|bare)
+      if [ "$g" = open ]; then lead="not protected"; else lead="protected but requiring no check"; fi
       gate_read "$tmp/gate-rules.json" "repos/$OWNER/$REPO/rules/branches/$enc?per_page=100"; rc=$?
       if [ "$rc" -eq 0 ]; then
         REQ_GATE=$(gate_body rules "$tmp/gate-rules.json")
         case "$REQ_GATE" in
-          none) REQ_WHY="not protected, and no ruleset rule requires a check" ;;
-          some) REQ_WHY="not protected, but a ruleset rule may require a check" ;;
+          none) REQ_WHY="$lead, and no ruleset rule requires a check" ;;
+          some) REQ_WHY="$lead, but a ruleset rule may require a check" ;;
           *) REQ_GATE=unknown; REQ_WHY="rules/branches/$BASE: not a whole list of rules" ;;
         esac
       elif [ "$rc" -eq 1 ] && grep -q 'Upgrade to GitHub Pro' "$tmp/gate.err" 2>/dev/null \
            && grep -q 'HTTP 403' "$tmp/gate.err" 2>/dev/null && ! grep -qi 'rate limit' "$tmp/gate.err" 2>/dev/null; then
-        REQ_GATE=none; REQ_WHY="not protected, and this plan holds no rulesets"
+        REQ_GATE=none; REQ_WHY="$lead, and this plan holds no rulesets"
       else
         REQ_GATE=unknown; REQ_WHY="rules/branches/$BASE: $GATE_ERR"
       fi ;;
     *)
       REQ_GATE=unknown
-      if [ "$rc" -eq 0 ]; then REQ_WHY="branches/$BASE: no protected flag"; else REQ_WHY="branches/$BASE: $GATE_ERR"; fi ;;
+      if [ "$rc" -ne 0 ]; then REQ_WHY="branches/$BASE: $GATE_ERR"
+      elif python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(d.get("protected"), bool) else 1)' \
+           "$tmp/gate-branch.json" 2>/dev/null; then REQ_WHY="branches/$BASE: protected, its required checks not visible"
+      else REQ_WHY="branches/$BASE: no protected flag"; fi ;;
   esac
   echo "  $BASE's required gate: $REQ_GATE ($REQ_WHY)."
 }

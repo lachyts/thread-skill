@@ -229,8 +229,8 @@ ok "$rc" 1 "12c. BLOCKED, no review pending, green checks exits 1"; has "$out" "
 ok "$(sent)" "failed:1" "12c. failed:1, never 8"
 ok "$(awk '/^pr checks/{c=1} c && /^pr view/{v=1} END{print v ? "y" : "n"}' "$MT_STATE/gh.log")" y "12c. the PR is re-read after the checks wait"
 lacks "$(glog)" "--admin" "12c. no --admin in any argv"
-ok "$(grep -c '^api repos/o/r/branches/master$' "$MT_STATE/gh.log")" 1 "12c. one required-gate read (ADR 0069): protected, so some"
-lacks "$(glog)" "rules/" "12c. protected needs no rules read"
+ok "$(grep -c '^api repos/o/r/branches/master$' "$MT_STATE/gh.log")" 1 "12c. one required-gate read (ADR 0069): protected with a required check, so some"
+lacks "$(glog)" "rules/" "12c. a protection listing a required check needs no rules read"
 fresh; pair; mkpr 5 "$I" BLOCKED
 fo=$(MT_STATE="$MT_STATE" "$tmp/bin/gh" pr merge 5 -R o/r --squash 2>&1); frc=$?
 ok "$frc" 1 "12d. (fake fidelity) BLOCKED without --admin is refused"
@@ -485,11 +485,42 @@ echo '[{"type":"deletion"},{"type":"required_status_checks","parameters":{"requi
 run 5 "$I" "$B"
 ok "$rc" 1 "25e. a required_status_checks rule: exits 1 (12c)"; has "$out" "NON-check gate" "25e. NON-check gate"
 has "$(glog)" "pr checks" "25e. waits on the required checks"
-# (e2) thread-skill's shape: protected by a ruleset (classic protection off): some, with no rules read
-fresh; pair; mkpr 5 "$I" BLOCKED; echo ruleset > "$MT_STATE/branch"
+# (e2) thread-skill's shape: protected by a ruleset (classic protection off, both lists empty), its live rules, one a
+#      required_status_checks rule: the rules read decides some
+TSRULES='[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"make test (ubuntu-latest)"}]}}]'
+fresh; pair; mkpr 5 "$I" BLOCKED; echo ruleset > "$MT_STATE/branch"; echo "$TSRULES" > "$MT_STATE/rules"
 run 5 "$I" "$B"
 ok "$rc" 1 "25e2. protected by a ruleset: exits 1 (12c)"; has "$(glog)" "pr checks" "25e2. waits on the required checks"
-lacks "$(glog)" "rules/" "25e2. protected true needs no rules read"
+ok "$(nlog '^api repos/o/r/rules/branches/master')" 1 "25e2. an empty classic protection reads the rules"
+has "$out" "protected but requiring no check, but a ruleset rule may require a check" "25e2. says the ruleset decides"
+# (e3) Animately/optimizer's develop (the 2026-11-07 incident): protected, `contexts: []` and `checks: []`, no rules.
+#      The gate is none, so an UNSTABLE PR (red only on optional checks) merges at once, never 'never appeared'.
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo nochecks > "$MT_STATE/branch"
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e3. protected with empty contexts, UNSTABLE: merges"; ok "$(sent)" "ok" "25e3. ok"; ok "$(nmerge)" 1 "25e3. one merge"
+lacks "$(glog)" "pr checks" "25e3. no checks wait"; lacks "$out" "never appeared" "25e3. never 'never appeared'"
+ok "$(nlog '^api repos/o/r/rules/branches/master')" 1 "25e3. the rules read once"
+has "$out" "required gate: none (protected but requiring no check, and no ruleset rule requires a check)" "25e3. says none, and why"
+# (e4) the same protection, but a ruleset rule requires a check: some, today's wait
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo nochecks > "$MT_STATE/branch"; echo "$TSRULES" > "$MT_STATE/rules"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e4. empty protection, a check-requiring rule, green required checks: merges"
+has "$(glog)" "pr checks" "25e4. waits on the required checks"; has "$out" "required gate: some" "25e4. some"
+# (e5) the same protection on a free private repo (rules need GitHub Pro): none, UNSTABLE merges at once
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo nochecks > "$MT_STATE/branch"; echo 403-plan > "$MT_STATE/rules"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e5. empty protection, no rulesets on this plan, UNSTABLE: merges"; lacks "$(glog)" "pr checks" "25e5. no checks wait"
+# (e6) protected, its required checks not visible (no protection object, or a contexts that is no list): unknown, so
+#      today's wait; absent checks with nothing in flight → 8, never 1 and never none
+for v in hidden badchecks; do
+  fresh; pair; mkpr 5 "$I" UNSTABLE; echo "$v" > "$MT_STATE/branch"
+  chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+  run 5 "$I" "$B"
+  ok "$rc" 8 "25e6. branch $v reads unknown: absent checks exit 8"; ok "$(nmerge)" 0 "25e6. branch $v: nothing merged"
+  has "$(glog)" "pr checks" "25e6. branch $v: waits on the required checks"; lacks "$(glog)" "rules/" "25e6. branch $v: no rules read"
+  has "$out" "protected, its required checks not visible" "25e6. branch $v: says why"
+done
 # (f) the branch read fails transiently: unknown, so today's wait; checks absent with nothing in flight → 8, not 1
 fresh; pair; mkpr 5 "$I" BLOCKED; echo "gh: Server Error (HTTP 502)" > "$MT_STATE/err.branch"
 chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
