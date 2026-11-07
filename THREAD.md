@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-06
+last_touched: 2026-11-07
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -10,7 +10,14 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
-**2026-11-06 (latest): orient reshuffled Thread Skill into P39 and P40, scheduled [[thread-skill-rollout-2026-11-06]] (13 Ready tasks) and handed it to a fresh lead (Stage task_bf17ab55, launch doc landed by #311); a grill on Lachy's Note gave ADR 0070, the Overrun, in PR #312 (merge queued).**
+**2026-11-07 (latest): [[thread-skill-rollout-2026-11-06]] finished 13/13 merged in 25h 52m; P40 closed, P39 left open (p39-13, p39-14, p39-15 were not in it). Two tasks were set aside at merge by a CI timeout, not a code fault; repaired after #327, and a grill on the cause gave ADR 0073 (proposed, unpushed).**
+- **Landed:** #313 p39-1, #315 p40-1, #316 p39-12, #317 p40-2, #318 p39-3, #319 p39-4, #320 p39-7, #321 p39-6, #322 p39-10, #323 p39-11, #325 p39-5, #326 p39-9 (0016179), #324 p39-8 (51761d4; the integrator resolved its 4-file conflict with p39-9, re-reviewed). Plus #327 (b1e6fa0): `make test`'s `timeout-minutes` 40 → 60. Completion log in the archived note; close-score `t-20261107T010205Z-7eeaaf`.
+- **The set-asides:** p39-8 (#324) and p39-9 (#326) stopped as `merge-task: … a NON-check gate is blocking it` and went to Lachy. The real cause: the required macOS `make test` job was CANCELLED at 40 min with no test failing (7 of the last 40 macOS jobs, 3 on master), and gh 2.43.1 reads a cancelled required check as green. Lachy picked "Timeout PR, then finish": #327, then `/thread:repair` relabelled both at Integration and handed them back; Integration re-merged the new master, so no CI re-run was needed.
+- **ADR 0073 (proposed), from `/grill-with-docs`:** merges verify a declared Fast tier, the full suite runs as `completion_verifier:` and on master (Lachy: "Fast tier at merge"); the full suite gets faster too, held to the Suite budget (his note: "any time spent on speeding that up will help down the track"); PR checks run the fast tier on both OSes, full suite split across parallel jobs on master; a CI timeout is the engine's (one re-run, then an infra set-aside), never his; CI headroom recorded per merge and read by the Reflection. CONTEXT.md gained **Fast tier**, **Suite budget**, **CI headroom**. Commit 260b680 on branch `docs/fast-tier-at-merge`, in the rollout clone's worktree `.claude/worktrees/fast-tier-adr`, not pushed and not reviewed.
+- **Follow-ons filed:** [[thread-skill-reflect-p39-p40-rollout]], [[thread-skill-merge-task-reads-a-cancelled-check-as-a-timeout]], [[chorus-tell-a-lead-when-its-room-switch-became-a-hold]] (PR #316's Risk 1). #327's 9 review findings were filed by its landing.
+- **Next:** land ADR 0073 (push the branch, `/fresh-review`, PR) and plan it into a phase; then the Reflection, and p39-13 to p39-15.
+
+**2026-11-06: orient reshuffled Thread Skill into P39 and P40, scheduled [[thread-skill-rollout-2026-11-06]] (13 Ready tasks) and handed it to a fresh lead (Stage task_bf17ab55, launch doc landed by #311); a grill on Lachy's Note gave ADR 0070, the Overrun, in PR #312 (merge queued).**
 - **Reshuffle** (Lachy: "Write it"): P39 ([[thread-skill-p39-a-rollouts-loose-ends-close]]) gathers 13 follow-ups of the P36/P37 runs and reviews, renamed `thread-skill-p39-1…13-*`; P40 ([[thread-skill-p40-the-next-move-starts-by-itself]]) holds p40-1 orient backlog mode and p40-2 `next`/`close` start a prepared handoff. Backlinks rewritten in 13 vault files; path-form mentions outside the vault (CONTEXT.md, THREAD.md, execute SKILL.md, `_shared/threads/animately-pulse.md`) name old slugs only as history.
 - **Rollout:** 13 tasks on snapshot `3e9f86cfeb70` from `~/repos/tools/thread-skill-rollout`, verifier `make test` (covers the merge gate). Pre-flight: 13 Ready, 6 calls written as Decided for you. Left out: p39-13 (its One call became the grill), p39-2 (already landed by #281; closed done), p11-7 (session lane: a live launchd install).
 - **ADR 0070 (proposed), the Overrun:** once a landing's or a rollout task's budget is spent, up to three extra runs by itself (Lachy: "3 extra runs"), then taken out, listed and never alerted (Lachy: "Listed, no alert"); his own decisions still stop it. Priorities card gained his Note: approving another round or run is never his question. Two clean-room review rounds on #312 (15 findings each, all filed by the checker as prose) → [[thread-skill-p39-15-adr-0070-settles-its-review-findings]], a grill holding four of his questions (#3 no-cause failures, #5 dependants, #6 repeated take-outs, #15 is "3" fixed). p39-13 and new p39-14 (the engine half) depend on it.
@@ -864,6 +871,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **gh 2.43.1 reads a CANCELLED required check as green** (2026-11-07). `gh pr checks --required` exits 0 and prints the cancelled check as `fail`, so merge-task's wait returns and it reads the still-BLOCKED PR as "a NON-check gate", a human's: a CI timeout reaches Lachy as a set-aside. Fix: [[thread-skill-merge-task-reads-a-cancelled-check-as-a-timeout]]. A re-run of the cancelled jobs uses the workflow file at that PR's head, so a raised `timeout-minutes` reaches a set-aside PR only through a re-Integration onto the new master.
+- **The full suite is the rollout's floor** (2026-11-07). Local Integration verify median 17 min (max 31) per merge, task-side 18; GitHub macOS `make test` 31 to 39 min, ubuntu 31 to 33. ADR 0073 is the plan.
 - **A Login switch does not lose a stopped Workflow call** (2026-11-04). After Chorus moved the lead from main to fauxmuse, `resumeFromRunId` with the same args replayed every finished agent from the run's journal under the new profile's `projects/` dir, and the call converged.
 - **This Mac's gh 2.43.1 has no `pr checks --json`** (2026-11-04), so merge-task's infra-flake re-run never fires and every red reads genuine: [[thread-skill-p37-2-merge-task-reads-checks-on-any-gh]].
 - **An unstamped rollout note holds the Primary for its whole life** (2026-11-03). `move_rule()` returns `due: False` for a note with no `engine_snapshot:`, so a Reinstate never stamps it, and a stuck serial chain can live for days. Until [[thread-skill-p36-1-unstamped-rollout-snapshot-at-reinstate]] lands, the fix by hand is one `engine-snapshot.py cut --verb execute --prose-id <execute SKILL.md $Id hex>` (options after the verb), then `<snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout <note>` per idle note; `primary-hold.sh <repo>` then prints nothing.
@@ -1149,6 +1158,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-07 (P39/P40 rollout done):** land ADR 0073: in `~/repos/tools/thread-skill-rollout/.claude/worktrees/fast-tier-adr` push `docs/fast-tier-at-merge`, run `/fresh-review`, open the PR; then plan it into a phase (fast tier + `Completion verifier:` in CLAUDE.md, `tests/run.sh` fast mode, CI split with aggregator jobs under the two required-check names, [[thread-skill-merge-task-reads-a-cancelled-check-as-a-timeout]], CI headroom in the Run record, the Reflection's readings, the suite audit; #327's filed findings join it). Then [[thread-skill-reflect-p39-p40-rollout]], and `/thread:orient Thread Skill --steer` for p39-13 to p39-15. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open: this rollout's two needs-you pushes failed for want of it.
+
 **From 2026-11-06 (P37 rollout done):** first [[thread-skill-reinstall-the-primary-refresh-job]] (the launchd job still runs the pre-#308 copy), then [[thread-skill-close-superseded-pr-292]]. Next work: [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] from `~/repos/workspaces` once its checkout is free (they close P36 with [[thread-skill-p36-12-check-the-spike-review-against-adr-0067]], a session task), then [[thread-skill-reflect-p37-rollout-2026-11-05]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open.
 
 **From 2026-11-05 (orient, P37 scheduled):** [[thread-skill-rollout-2026-11-05]] runs in its own lead session: check it with `/thread:status [[thread-skill-rollout-2026-11-05]]`, never a second lead. Next by hand: [[thread-skill-set-up-ntfy-rollout-alerts]] (five minutes of Lachy's phone). Then schedule [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] from `~/repos/workspaces` once its checkout is free, and run [[thread-skill-p36-12-check-the-spike-review-against-adr-0067]] as a session.
@@ -1188,6 +1199,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-07 (close, execute + repair): led [[thread-skill-rollout-2026-11-06]] to 13/13 merged (25h 52m); diagnosed the two merge set-asides as a 40-min CI timeout misread by gh 2.43.1, landed #327 (limit 60) and repaired both; grilled the suite's cost into ADR 0073 (proposed, unpushed); P40 closed, P39 open.
 - 2026-11-06 (close, orient): reshuffled Thread Skill into P39 (13) and P40 (2), scheduled and handed off [[thread-skill-rollout-2026-11-06]] (13 Ready); grilled the over-budget rule into ADR 0070 (the Overrun, PR #312, two clean review rounds, 15 findings filed to p39-15).
 - 2026-11-06 (close, execute): led [[thread-skill-rollout-2026-11-05]] to 11/11 merged (15h 15m, no halt); P37 and P38 closed; #308's macOS red fixed by an automatic retry; three follow-ons filed.
 - 2026-11-05 (close, orient): reshuffled Thread Skill (P36 +4, new P37 and P38, 13 renames, 3 merges) and scheduled [[thread-skill-rollout-2026-11-05]] (11 Ready tasks), handed to a fresh lead; ntfy left for later.
