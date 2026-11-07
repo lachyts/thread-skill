@@ -8,8 +8,10 @@
 // - the edit-noop-repro diagnostic scrubs every git command its probe runs.
 // - with args.verifySlot (p23-4), the wrapped verifier line starts with the scrub too, and SLOT_TEXT holds no git span.
 // - the touched-tests text (p31-1) scrubs its git grep span, with and without the rollout's `touched:` pin.
-// - with args.securityCheck (execute § 3 `security_checks`), the four prompts it reaches (implementer, approved-plan
-//   implementer, reviser, review judge) keep every git span scrubbed, and the scan command itself starts with the scrub.
+// - with args.securityCheck (execute § 3 `security_checks`), the six prompts it reaches (implementer, approved-plan
+//   implementer, reviser, review judge, and since p39-8 the integrator and the Integration judge) keep every git span
+//   scrubbed, and each scan command itself (the task's, Integration's --anchor and the judge's --history-only) starts
+//   with the scrub.
 // tests/git-env-scrub.test.sh executes the rendered verifier (bare and wrapped) and the lead's § 4 check under a real
 // GIT_DIR.
 import { test } from 'node:test'
@@ -229,21 +231,34 @@ test('(g) the edit-noop-repro diagnostic scrubs every git command its probe runs
   for (const h of hits) assert.equal(rest.slice(h.index - SCRUB.length - 1, h.index), SCRUB + ' ', `scrubbed at ${h.index}`)
 })
 
-test('(h) with securityCheck: every git span of the four prompts it reaches is scrubbed, the scan command too', () => {
+test('(h) with securityCheck: every git span of the six prompts it reaches is scrubbed, each scan command too', () => {
   const SEC = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
   for (const a of [{ repoPath: '/repo', verifier: 'make test', verifySlot: VERIFY_SLOT, securityCheck: SEC },
     { repoPath: "/re po/it's", verifier: 'git status && make test', verifySlot: VERIFY_SLOT, defaultBranch: 'master', securityCheck: SEC }]) {
     const all = builders(a)
     assert.equal(Object.keys(all).length, 10)
-    const cmd = T.securityScanCmd(a, task)
-    assert.ok(cmd.startsWith(`${SCRUB} python3 `), cmd)
-    for (const name of ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt']) {
+    const cmds = {
+      task: T.securityScanCmd(a, task), integrate: T.securityScanCmd(a, task, I.headSha), judge: T.securityScanCmd(a, task, I.headSha, true),
+    }
+    for (const cmd of Object.values(cmds)) assert.ok(cmd.startsWith(`${SCRUB} python3 `), cmd)
+    assert.ok(cmds.integrate.endsWith(` --anchor '${I.headSha}'`) && cmds.judge === cmds.integrate + ' --history-only', cmds.judge)
+    const which = { integratorPrompt: cmds.integrate, integrationReviewPrompt: cmds.judge }
+    for (const name of ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt']) {
+      const cmd = which[name] || cmds.task
       for (const p of all[name]) {
         assert.ok(p.includes('`' + cmd + '`'), `${name}: renders the scan command as one span`)
+        assert.equal(p.split('security-check.py').length - 1, 1, `${name}: one scan command`)
         assert.equal(count(p, T.GIT_ENV_RULE), 1, `${name}: GIT_ENV_RULE once`)
         assert.ok(p.indexOf(T.GIT_ENV_RULE) < p.indexOf(cmd), `${name}: the rule precedes the scan command`)
         for (const [, span] of p.matchAll(/`([^`\n]*)`/g)) {
           if (/(^|[\s;&|(])git\s/.test(span)) assert.ok(span.startsWith(SCRUB), `${name}: \`${span}\``)
+        }
+        // The Integration blocks' own git spans (p39-8): the integrator's restore, the judge's HEAD read.
+        const own = { integratorPrompt: ' restore --staged --worktree -- <path>', integrationReviewPrompt: ' rev-parse HEAD` prints ' }[name]
+        if (own) {
+          const at = p.indexOf(own, p.indexOf('Security check (execute § 3'))
+          assert.ok(at > 0, `${name}: its block's own git span`)
+          assert.equal(p.slice(p.lastIndexOf('`', at - 1) + 1, at).split(' git -C ')[0], SCRUB, `${name}: its block's own git span is scrubbed`)
         }
       }
     }

@@ -1074,7 +1074,8 @@ merge gate reads; the mark printed before an infra rerun that a later `ERROR:` l
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
-string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
+string, never the note's `## Needs you`, so a lead row, or an integrate row, which carries null, never reads it,
+except an integrate row's security set-aside, which carries the security scan's question (p39-8); a
 question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
 a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR), then an
 integrate row's set-aside by its diagnosis's first line (integration_block, p27-4): integration-conflict (an
@@ -1472,7 +1473,8 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     judge, implementer, investigator or reviser stopped on one: a non-empty string upserts
                     "## Needs you" (the question, stripped and neutralised like a gate-pending section, so a
                     `## ` line in it never splits the section); '' or whitespace removes it (an own-call row
-                    with no question settles an older one); null or no key leaves it (an integrate row, a
+                    with no question settles an older one); null or no key leaves it (an integrate row, which
+                    carries one only on a security set-aside, the security scan's question (p39-8); a
                     lead-written set-aside row). Anything else is an error (exit 1) and leaves the section;
                     the rest of the row is still written. needs_human() reads it back, normalised, for `next`,
                     `status` and lead-integrate.py.
@@ -3992,7 +3994,8 @@ def cmd_reconcile(args) -> int:
         # p16-3: the question a person must answer, the same three states as the plan. A non-empty string is the
         # question this row stopped on (upserted, neutralised by upsert_section, so it can never split the
         # section); '' (or whitespace) is a row with no question, so an older one is settled and removed; null or
-        # an absent key (an integrate row, a lead-written set-aside row) leaves the section as it is.
+        # an absent key (an integrate row, a lead-written set-aside row) leaves the section as it is. An integrate
+        # row carries a string only on a security set-aside (p39-8): the security scan's question, upserted the same way.
         ask = task.get("needsHuman")
         if isinstance(ask, str) and ask.strip():
             note.upsert_section(NEEDS_HUMAN_SECTION, ask.strip())
@@ -8816,8 +8819,9 @@ def _merge_gate_stop(reason) -> bool:
 
 def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked) -> str:
     """Why a task was set aside (the module docstring's reasonClass table, first match). `asked` is the row's own
-    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: an integrate or lead row
-    carries null, so its class is unchanged."""
+    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: a lead row carries null, so
+    its class is unchanged, and so does an integrate row, but for a security set-aside (p39-8), which carries the
+    security scan's question and so reads needs-human."""
     first = reason.split("\n", 1)[0].strip().lower()
     if failed and QUOTA_RE.search(first):
         return "quota"

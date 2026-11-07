@@ -346,7 +346,8 @@ test('p14-2: no plan outcome gives plan null (plan-blocked, planLoop gate-pendin
 
 // ---- p16-3: needsHuman. A plan judge, a review judge, an implementer, an investigator or a reviser may return
 // the exact question a person must answer. It is a stop that is never evidence of hardness: no climb, no
-// in-call retry, no further round. The row carries it ('' when there is none; null on an integrate row).
+// in-call retry, no further round. The row carries it ('' when there is none; null on an integrate row, but for a
+// security set-aside's question, p39-8).
 const Q = 'Which retention window should the cache use: 7 or 30 days?'
 const BLOCKED_Q = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '', blockerDiagnosis: Q, summary: '', needsHuman: '  ' + Q + '  ' }
 
@@ -945,7 +946,7 @@ test("E3: the scan's question stops the implementer blocked with needsHuman: no 
   assert.deepEqual(row.ran.map((x) => x.label), ['implement:proj-fix-a'])
 })
 
-test("E4: mode 'integrate' with a securityCheck is refused before any dispatch", async () => {
+test("E4: mode 'integrate' with a securityCheck is not refused: the integrator scans its own commits (--anchor) on the secured schema", async () => {
   const sha = (c) => c.repeat(40)
   const args = mkArgs(mkTask('proj-fix-a'), {
     mode: 'integrate', securityCheck: SECURITY,
@@ -954,8 +955,14 @@ test("E4: mode 'integrate' with a securityCheck is refused before any dispatch",
       rung: { startRung: '', rung: '', climbs: [] } },
   })
   const r = await run(args)
-  assert.match(String(r.error && r.error.message), /^thread:args-refused: args\.securityCheck: never on mode 'integrate'/)
-  assert.equal(r.calls.length, 0)
+  assert.equal(r.error, undefined, String(r.error && r.error.message))
+  assert.deepEqual(r.labels, ['integrate:proj-fix-a'])
+  assert.deepEqual(r.unknown, ['integrate:proj-fix-a'], 'this stub knows no integrator: its throw is a set-aside')
+  const cmd = `python3 '${SECURITY.script}' scan --tree '/repo/.claude/worktrees/proj-fix-a' --base 'origin/main' --accepts-from '/vault/Tasks/proj-fix-a.md' --anchor '${sha('a')}'`
+  assert.ok(r.calls[0].prompt.includes(cmd), 'the integrator renders the --anchor scan')
+  const schema = r.opts[0].opts.schema
+  assert.ok(schema.required.includes('securityClean') && 'needsHuman' in schema.properties, 'INTEGRATE_RESULT_SECURED')
+  assert.equal(r.result.tasks[0].integration.outcome, 'set-aside')
 })
 
 test('E5: a seeded revise with the key set: the reviser carries the fragment, the judge the scan', async () => {
