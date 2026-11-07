@@ -511,6 +511,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a declared `completion_verifier:` on the chain checkout's HEAD (ADR 0055).
   _Avoid_: relay
   (Chorus's word for sending a command to a session).
+- **Serial chain** — the rows of one serial rollout note, worked in order by its Legs. One per project per
+  schedule run (ADR 0074): a project's serial members share one chain and one Leg Session, a set-aside row never
+  holds the rows that do not depend on it, and two projects' chains still run side by side (ADR 0067 d4, d9).
+  A row works only the checkout it launches from.
 - **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
   In order: execute's git-env check, `leg.py begin`, the preflight (the
   launch's required tools answer), the smoke test (the Verify line of every
