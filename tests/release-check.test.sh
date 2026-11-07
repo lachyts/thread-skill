@@ -33,9 +33,13 @@ run_rc() { out=$(cd "$tree" && env -u MAKEFLAGS -u MAKELEVEL PATH="${RC_PATH:-$P
 
 # A `diff` that prints what GNU diffutils 3.12 prints (ubuntu-latest from 2026-11-08): a directory name holding a
 # space is shell-quoted in an `Only in` line. Put first on PATH, it makes any recipe that parses diff's
-# human-readable output meet that form, whatever diff the host ships.
+# human-readable output meet that form, whatever diff the host ships. A name the host's diff already quoted
+# (GNU 3.12 itself) holds a `'`, so the sed leaves it alone rather than quoting it twice.
 shim="$tmp/shim"; mkdir -p "$shim"; real_diff=$(type -P diff)
-printf '#!/usr/bin/env bash\n"%s" "$@" | sed -E "s/^Only in ([^:]* [^:]*): /Only in '"'"'\\\\1'"'"': /"; exit "${PIPESTATUS[0]}"\n' "$real_diff" > "$shim/diff"
+cat > "$shim/diff" <<EOF
+#!/usr/bin/env bash
+"$real_diff" "\$@" | sed -E "s/^Only in ([^':]* [^':]*): /Only in '\\1': /"; exit "\${PIPESTATUS[0]}"
+EOF
 chmod +x "$shim/diff"
 mkdir -p "$tmp/q a" "$tmp/q b"; : > "$tmp/q a/only"
 has "$("$shim/diff" -rq "$tmp/q a" "$tmp/q b")" "Only in '$tmp/q a': only" "the diff shim prints the quoted form"
