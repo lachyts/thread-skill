@@ -1286,9 +1286,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   channel is retried at most once more, at the next loop entry, then deduped
   (ADR 0038 d3, superseded). The log also holds the Standing approval's
   `signed under the standing approval:` lines, the month line's ledger, which
-  is all it keeps once the push lines retire. That log is never the task
-  note's `## Needs you` (p16-3), which holds the question the engine stopped
-  on; an item whose entry carries
+  is all it keeps once the push lines retire. That log is
+  never the task note's `## Needs you` (p16-3), which holds the question the
+  engine stopped on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
   queue runs on without the answer (execute § 6.5).
