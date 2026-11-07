@@ -29,7 +29,8 @@ State (a missing file takes the default in brackets):
                           unquotes to the default branch, else rc 99). Absent ⇒ protected with a required `ci` check;
                           `unprotected` ⇒ lachyts/chorus's live shape (private, free plan: protected false, enforcement
                           off); `ruleset` ⇒ lachyts/thread-skill's (protected true by a ruleset, classic protection off);
-                          `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form; `404-branch` ⇒ "Branch
+                          `nochecks` ⇒ Animately/optimizer's develop (protected, enforcement everyone, `contexts: []`,
+                          `checks: []`); `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form; `404-branch` ⇒ "Branch
                           not found"; `403-integration` ⇒ "Resource not accessible by integration"; `403-rate` ⇒ the
                           primary rate limit. err.branch: its text, rc 1, on every read.
   rules                   rules/branches/<b>, read 2 (the same segment check). Absent ⇒ []; a JSON array literal ⇒
@@ -444,6 +445,9 @@ if args[:1] == ["api"]:
             elif mode == "ruleset":
                 print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": False,
                                                                                     "required_status_checks": off}}))
+            elif mode == "nochecks":
+                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": True, "required_status_checks": {
+                    "enforcement_level": "everyone", "contexts": [], "checks": []}}}))
             elif mode == "noflag":
                 print(json.dumps({"name": DEFAULT}))
             elif mode == "404-notfound":

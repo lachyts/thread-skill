@@ -871,6 +871,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **branches/<b>'s `protection` object hides every non-check gate** (2026-11-07). It holds only `enabled` and `required_status_checks`, never conversation resolution, required deployments or a branch lock. So a protected branch with empty check lists is not "nothing gates it", and merge-task's gate read keeps `protected: true` as `some` (ADR 0069, amended). A protected base that requires no check (Animately/optimizer's develop) is cleared in the checks wait instead: no required check reported and UNSTABLE merges, as CLEAN does.
 - **gh 2.43.1 reads a CANCELLED required check as green** (2026-11-07). `gh pr checks --required` exits 0 and prints the cancelled check as `fail`, so merge-task's wait returns and it reads the still-BLOCKED PR as "a NON-check gate", a human's: a CI timeout reaches Lachy as a set-aside. Fix: [[thread-skill-merge-task-reads-a-cancelled-check-as-a-timeout]]. A re-run of the cancelled jobs uses the workflow file at that PR's head, so a raised `timeout-minutes` reaches a set-aside PR only through a re-Integration onto the new master.
 - **The full suite is the rollout's floor** (2026-11-07). Local Integration verify median 17 min (max 31) per merge, task-side 18; GitHub macOS `make test` 31 to 39 min, ubuntu 31 to 33. ADR 0073 is the plan.
 - **A Login switch does not lose a stopped Workflow call** (2026-11-04). After Chorus moved the lead from main to fauxmuse, `resumeFromRunId` with the same args replayed every finished agent from the run's journal under the new profile's `projects/` dir, and the call converged.
@@ -1199,6 +1200,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-07 (close, build): merge-task merges an UNSTABLE PR when no required check is reported (Animately/optimizer's develop stalled five of seven PRs in [[animately-app-rollout-2026-11-07]]); first tried reading the protection object as `none`, withdrawn after review round 1 reproduced a hidden non-check gate; two dev review rounds, round 2 clean, 10 findings filed to [[thread-skill-merge-task-unstable-guard-follow-ups]].
 - 2026-11-07 (close, execute + repair): led [[thread-skill-rollout-2026-11-06]] to 13/13 merged (25h 52m); diagnosed the two merge set-asides as a 40-min CI timeout misread by gh 2.43.1, landed #327 (limit 60) and repaired both; grilled the suite's cost into ADR 0073 (proposed, unpushed); P40 closed, P39 open.
 - 2026-11-06 (close, orient): reshuffled Thread Skill into P39 (13) and P40 (2), scheduled and handed off [[thread-skill-rollout-2026-11-06]] (13 Ready); grilled the over-budget rule into ADR 0070 (the Overrun, PR #312, two clean review rounds, 15 findings filed to p39-15).
 - 2026-11-06 (close, execute): led [[thread-skill-rollout-2026-11-05]] to 11/11 merged (15h 15m, no halt); P37 and P38 closed; #308's macOS red fixed by an automatic retry; three follow-ons filed.

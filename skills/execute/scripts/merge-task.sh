@@ -1214,7 +1214,7 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
 
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed)
-  local absent=0 rc infra_reruns=0
+  local absent=0 rc infra_reruns=0 mss
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
     gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" \
@@ -1237,13 +1237,27 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
       # reports the failure, not absence), so BLOCKED semantics are untouched. One CLEAN sample is not
       # GitHub settled: when the state machine's next read is UNKNOWN again, it re-polls it lazily
       # (settle_repoll, ADR 0069 d2), never the NON-check gate's exit 1.
-      if snapshot_once "$tmp/clean.json" && [ "$S_MSS" = "CLEAN" ]; then
+      mss=''
+      snapshot_once "$tmp/clean.json" && mss=$S_MSS
+      if [ "$mss" = "CLEAN" ]; then
         echo "  PR #$PR — no required checks and mergeStateStatus=CLEAN — nothing to wait for."
         return 0
       fi
       if ci_runs_in_flight; then
         absent=0
         echo "  PR #$PR — required checks not created yet; CI in flight on head — waiting…"
+      elif [ "$mss" = "UNSTABLE" ]; then
+        # UNSTABLE with no required check reported and nothing running on the head: nothing left to wait for, as
+        # CLEAN. GitHub gives UNSTABLE only once every required check has passed (a pending, failing or
+        # not-yet-reported required check reads BLOCKED); only a non-required check is red or pending. Taken only
+        # once no run is in flight, so a required check its CI has yet to create is still waited on (16b). Without
+        # it a protected base requiring no check (Animately/optimizer's develop: `contexts: []`, `checks: []`)
+        # held every PR red only on optional jobs here until "never appeared" (animately-app-rollout-2026-11-07,
+        # five of seven PRs). The gate read stays `some` for any protected base: branches/<b> never shows a
+        # classic protection's non-check gates (conversation resolution, deployments, a lock), so a BLOCKED PR
+        # there keeps its exit 1 (ADR 0069, amended 2026-11-07).
+        echo "  PR #$PR — no required checks, nothing in flight on head, and mergeStateStatus=UNSTABLE — nothing to wait for."
+        return 0
       else
         absent=$((absent+1))
         if [ "$absent" -gt "$CHECK_RETRY_MAX" ]; then
