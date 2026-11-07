@@ -29,7 +29,17 @@ cache="$config/plugins/cache/thread/thread/$v"
 mkdir -p "$cache"
 (cd "$tree" && tar cf - --exclude .git .) | (cd "$cache" && tar xf -)
 
-run_rc() { out=$(cd "$tree" && env -u MAKEFLAGS -u MAKELEVEL make -s release-check CLAUDE_CONFIG_DIR="$config" 2>&1); rc=$?; }
+run_rc() { out=$(cd "$tree" && env -u MAKEFLAGS -u MAKELEVEL PATH="${RC_PATH:-$PATH}" make -s release-check CLAUDE_CONFIG_DIR="$config" 2>&1); rc=$?; }
+
+# A `diff` that prints what GNU diffutils 3.12 prints (ubuntu-latest from 2026-11-08): a directory name holding a
+# space is shell-quoted in an `Only in` line. Put first on PATH, it makes any recipe that parses diff's
+# human-readable output meet that form, whatever diff the host ships.
+shim="$tmp/shim"; mkdir -p "$shim"; real_diff=$(type -P diff)
+printf '#!/usr/bin/env bash\n"%s" "$@" | sed -E "s/^Only in ([^:]* [^:]*): /Only in '"'"'\\\\1'"'"': /"; exit "${PIPESTATUS[0]}"\n' "$real_diff" > "$shim/diff"
+chmod +x "$shim/diff"
+mkdir -p "$tmp/q a" "$tmp/q b"; : > "$tmp/q a/only"
+has "$("$shim/diff" -rq "$tmp/q a" "$tmp/q b")" "Only in '$tmp/q a': only" "the diff shim prints the quoted form"
+rm -rf "$tmp/q a" "$tmp/q b"
 nz() { [ "$1" -ne 0 ] && echo nonzero || echo zero; }
 
 # (a) matching cache
@@ -55,6 +65,16 @@ echo real > "$cache/skills/x/real.md"
 run_rc; ok "$(nz "$rc")" nonzero "(c2) a real file in a new cache dir exits non-zero"
 has "$out" "holds files this tree does not track" "(c2) reported by the stray check"
 has "$out" "skills/x/real.md" "(c2) names the file"
+
+# (c3) the same two cases where diff quotes the cache's `config dir` path: the cache-only dir is still the stray
+# check's alone (PR #332's ubuntu-latest run failed (c) and (c2) on exactly this form)
+rm "$cache/skills/x/real.md"
+RC_PATH="$shim:$PATH" run_rc; ok "$rc" 0 "(c3) quoted diff output: .DS_Store and __pycache__/ still exit 0"
+[ "$rc" -eq 0 ] || printf '%s\n' "$out"
+echo real > "$cache/skills/x/real.md"
+RC_PATH="$shim:$PATH" run_rc; ok "$(nz "$rc")" nonzero "(c3) quoted diff output: a real file in a new cache dir exits non-zero"
+has "$out" "holds files this tree does not track" "(c3) quoted diff output: reported by the stray check"
+ok "$(printf %s "$out" | grep -c 'differs from the tree')" 0 "(c3) quoted diff output: not reported by the cache diff"
 rm -rf "$cache/skills/x" "$cache/.DS_Store"
 
 # (d) a cache file that differs from the tree
@@ -68,6 +88,12 @@ rm "$cache/skills/status/SKILL.md"
 run_rc; ok "$(nz "$rc")" nonzero "(d2) a file missing from the cache exits non-zero"
 has "$out" "Only in skills/status: SKILL.md" "(d2) keeps the tree-side Only-in line"
 cp -p "$tree/skills/status/SKILL.md" "$cache/skills/status/SKILL.md"
+
+# (d3) a whole cache sub-dir missing
+mv "$cache/hooks" "$tmp/hooks.aside"
+run_rc; ok "$(nz "$rc")" nonzero "(d3) a missing cache sub-dir exits non-zero"
+has "$out" "No $cache/hooks" "(d3) names the missing sub-dir"
+mv "$tmp/hooks.aside" "$cache/hooks"
 
 # (e) no version dir
 mv "$cache" "$cache.aside"
