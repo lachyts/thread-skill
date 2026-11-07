@@ -86,6 +86,6 @@ Calls made in his place, each overturnable:
 - A rollout merge waits minutes on its verify and its required checks, not most of an hour, so the
   Integration lane stops being the rollout's floor.
 - A slow-tier break can reach master and is found within one master run or at completion, then filed.
-- Thread Skill's own `CLAUDE.md` gains a `Completion verifier:` line and a Tests line for the fast tier, so
-  schedule stamps both (schedule steps 2.5 and 6).
+- Thread Skill's own `CLAUDE.md` gains a `Verifier:` line naming the fast tier and a `Completion verifier:`
+  line naming the full suite, so schedule stamps both (schedule steps 2.5 and 6).
 - A future timeout reaches Lachy only after the automatic retries are spent.

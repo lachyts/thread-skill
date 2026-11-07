@@ -957,12 +957,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot", lock,
   semaphore.
 - **Checkpoint** — one of the two moments per task where the rollout's
-  `verifier:` runs (the full suite, or a project's declared **Fast tier**): a code-writing agent's last check before it
-  opens or updates its PR (the implementer's, and each reviser's), and
-  Integration before the merge (estate ADR 0009 d1; the estate's own
-  `CONTEXT.md` § The Mac's load). The engine renders the verifier there, and
-  elsewhere only when a task brief asks for the full suite. Not the
-  **Cursor** (a saved position). _Avoid_: final run, full check.
+  `verifier:` runs (the full suite, or a project's declared **Fast tier**): a
+  code-writing agent's last check before it opens or updates its PR (the
+  implementer's, and each reviser's), and Integration before the merge (estate
+  ADR 0009 d1; the estate's own `CONTEXT.md` § The Mac's load). The engine
+  renders the verifier there, and elsewhere only when a task brief asks for a
+  full-suite run (under a Fast tier this renders the tier). Not the **Cursor**
+  (a saved position). _Avoid_: final run, full check.
 - **Touched tests** — the test files that reach what a change touched, run
   between Checkpoints: each Ralph try of an implementer or a reviser (touched
   tests, then the verifier once before it hands back), a reviewer's own check
@@ -988,10 +989,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   0011 d2). A breach files that project's suite audit. _Avoid_: test timeout,
   `verify_timeout` (a deadline, not a budget).
 - **CI headroom** — how far a required GitHub check's job runs below its time
-  limit (`timeout-minutes`), per merge and on the week's median. A job past 80 %
-  of its limit is a finding; a job cancelled at its limit is a CI timeout, a stop
-  on GitHub's side, never a red check and never a gate for Lachy (ADR 0073).
-  _Avoid_: CI timeout (the event, not the margin), runner speed.
+  limit (`timeout-minutes`), per merge and on the week's median. A job whose
+  week's median runs past 80 % of its limit is a finding; a job cancelled at
+  its limit is a CI timeout, a stop on GitHub's side, never a red check and
+  never a gate for Lachy (ADR 0073). _Avoid_: CI timeout (the event, not the
+  margin), runner speed.
 - **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over
