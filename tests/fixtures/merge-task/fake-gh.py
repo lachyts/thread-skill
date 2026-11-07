@@ -30,8 +30,7 @@ State (a missing file takes the default in brackets):
                           `unprotected` ⇒ lachyts/chorus's live shape (private, free plan: protected false, enforcement
                           off); `ruleset` ⇒ lachyts/thread-skill's (protected true by a ruleset, classic protection off);
                           `nochecks` ⇒ Animately/optimizer's develop (protected, enforcement everyone, `contexts: []`,
-                          `checks: []`); `hidden` ⇒ protected true with no `protection` object; `badchecks` ⇒
-                          protected, `contexts` not a list; `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form; `404-branch` ⇒ "Branch
+                          `checks: []`); `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form; `404-branch` ⇒ "Branch
                           not found"; `403-integration` ⇒ "Resource not accessible by integration"; `403-rate` ⇒ the
                           primary rate limit. err.branch: its text, rc 1, on every read.
   rules                   rules/branches/<b>, read 2 (the same segment check). Absent ⇒ []; a JSON array literal ⇒
@@ -449,11 +448,6 @@ if args[:1] == ["api"]:
             elif mode == "nochecks":
                 print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": True, "required_status_checks": {
                     "enforcement_level": "everyone", "contexts": [], "checks": []}}}))
-            elif mode == "hidden":
-                print(json.dumps({"name": DEFAULT, "protected": True}))
-            elif mode == "badchecks":
-                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": True, "required_status_checks": {
-                    "enforcement_level": "everyone", "contexts": None, "checks": []}}}))
             elif mode == "noflag":
                 print(json.dumps({"name": DEFAULT}))
             elif mode == "404-notfound":
