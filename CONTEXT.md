@@ -662,12 +662,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `any` rank-wait: the vault and `ext:` never do (d6). _Avoid_: lock, lease,
   preemption.
 - **Begin wait** — a Leg that cannot begin yet waiting, then beginning itself
-  (ADR 0075 d1). Two causes: a surface re-check left unanswered on a busy Mac,
-  and another rollout's hold on a place this Leg would write (a surface stand,
-  ADR 0060). `leg.py begin` ends `state=waiting reason="begin wait: …"` with
-  nothing written, never `halted`; the session polls the check and runs begin
-  again once it passes, and its only record is a marker outside the vault. A
-  Leg never begins without a passing check: a check still unanswered after its
+  (ADR 0075 d1; built by P41-3, and `moving`'s reading of it by P41-4). Two
+  causes: a surface re-check left unanswered on a busy Mac, and another
+  rollout's hold on a place this Leg would write (a surface stand, ADR 0060).
+  `leg.py begin` ends `state=waiting reason="begin wait: …"` with nothing
+  written, never `halted`; the session polls the check and runs begin again
+  once it passes, and its only record is a marker outside the vault. A Leg
+  never begins without a passing check: a check still unanswered after its
   longer retry reads `unanswered`, never a pass and never a refusal. Every
   other begin refusal stays a halt. `reconcile-rollout.py moving` reads a Begin
   wait as `waiting` while its marker is fresh, so the **Watchdog** can recover
@@ -1285,8 +1286,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   channel is retried at most once more, at the next loop entry, then deduped
   (ADR 0038 d3, superseded). The log also holds the Standing approval's
   `signed under the standing approval:` lines, the month line's ledger, which
-  is all it keeps once the push lines retire. That log is never the task note's `## Needs you` (p16-3),
-  which holds the question the engine stopped on; an item whose entry carries
+  is all it keeps once the push lines retire. That log is never the task
+  note's `## Needs you` (p16-3), which holds the question the engine stopped
+  on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
   queue runs on without the answer (execute § 6.5).
@@ -1401,10 +1403,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Chorus's Companion, alone (ADR 0048, ADR 0075 d2). It recovers without
   asking and never notifies; with Chorus not running nothing watches, and a
   stall is read when Lachy runs `/thread:status`. The launchd `watchdog.py`,
-  which only notified, is retired (removed by P41-5). It also watches a serial
-  note's waiting Leg (a **Begin wait**, a Capacity or review wait), `stalled`
-  once its session is gone or it goes stale (ADR 0075 d5). Its `stalled` is a
-  reason to look, never by itself a reason to start a second lead.
+  which only notified when Chorus was not running, is retired by ADR 0075 and
+  removed by P41-5. From P41-4 it also watches a serial note's waiting Leg (a
+  **Begin wait**, a Capacity or review wait), `stalled` once its session is
+  gone or it goes stale (ADR 0075 d5). Its `stalled` is a reason to look,
+  never by itself a reason to start a second lead.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.
   _Avoid_: monitor, heartbeat.
