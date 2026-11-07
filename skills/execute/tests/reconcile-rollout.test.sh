@@ -713,13 +713,14 @@ want="3|y|1|"
 
 # security_checks (execute § 3, the opt-in Security check): verify-timeout reads the hand-set key, runs
 # `security-check.py preflight` (gitleaks found, at least 8.19.0; THREAD_GITLEAKS pins a stub here) and prints
-# `securityCheck` after `namedRerun`; any value but true or false, true on a serial note, no sibling security-check.py or a
-# failed preflight is exit 5 with one `ERROR: security_checks:` line, checked after exit 4. Every line above stays byte-equal.
+# `securityCheck` after `namedRerun`, on a serial note too (its Legs honour it: leg.py begin runs the same check); any
+# value but true or false, no sibling security-check.py or a failed preflight is exit 5 with one `ERROR: security_checks:`
+# line, checked after exit 4. Every line above stays byte-equal.
 SCP="$(cd "$(dirname "$SCRIPT")" && pwd -P)/security-check.py"
 GLS="$TMP/gitleaks-stub"; printf '#!/bin/sh\n[ "$1" = version ] && { echo "${STUB_VERSION:-8.30.1}"; exit 0; }\nexit 1\n' > "$GLS"; chmod +x "$GLS"
 [ -f "$SCP" ] && echo "ok   - verify-timeout: its sibling security-check.py exists ($SCP)" || { echo "FAIL - verify-timeout: no security-check.py at $SCP"; fail=1; }
 SEC=', "securityCheck": {"script": "'"$SCP"'"}'
-vt_sec() {  # vt_sec <label> <frontmatter line(s)> <expected stdout> [extra env assignments...] (V1-V4, V6b, V9)
+vt_sec() {  # vt_sec <label> <frontmatter line(s)> <expected stdout> [extra env assignments...] (V1-V4, V6, V6b, V9)
   local label="$1" fm="$2" want="$3"; shift 3
   mkvt "$fm"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
   got=$(env THREAD_GITLEAKS="$GLS" HOME="$EH" "$@" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
@@ -743,7 +744,7 @@ vt_sec "V2: security_checks: false -> no key" 'security_checks: false' "$VT0}"
 vt_sec "V3: a commented-out security_checks -> no key" '# security_checks: true' "$VT0}"
 vt_sec 'V4: a quoted "true" (and a trailing comment) -> on' 'security_checks: "true"  # opted in' "$VT0$SEC}"
 vt_sec5 "V5: security_checks: yes -> exit 5" 'security_checks: yes' "must be true or false, got 'yes'"
-vt_sec5 "V6: true on a serial note -> exit 5, parallel rollouts only" "$(printf 'shape: serial\nsecurity_checks: true')" "parallel rollouts only"
+vt_sec "V6: true on a serial note -> securityCheck (a serial chain's Legs honour it)" "$(printf 'shape: serial\nsecurity_checks: true')" "$VT0$SEC}"
 vt_sec "V6b: false on a serial note -> exit 0, no key" "$(printf 'shape: serial\nsecurity_checks: false')" "$VT0}"
 vt_sec5 "V7: gitleaks older than 8.19.0 -> exit 5, preflight's line relayed" 'security_checks: true' "older than 8.19.0" STUB_VERSION=8.18.0
 printf 'x' > "$TMP/gitleaks-plain"; chmod 644 "$TMP/gitleaks-plain"
