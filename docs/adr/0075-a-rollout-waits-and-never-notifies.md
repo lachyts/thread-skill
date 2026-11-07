@@ -5,9 +5,10 @@ Status: accepted, not built. Grilled with Lachy on 2026-11-07 in the Leg 1 sessi
 `reference-loop-rollout-2026-11-06-2`, after that Leg's begin stopped on a surface re-check that timed out and its
 needs-you push reached nobody. Written by Phase 41 · Task 1 (`thread-skill-p41-1-adr-0075-rollouts-wait-and-never-notify`);
 P41-2 to P41-6 and one Chorus task build it. Supersedes ADR 0038 d3 (the ntfy fallback), ADR 0048's launchd fallback
-(its *How p29-7 built it*) and the notices of ADR 0066 (d2's Notice, and its 2026-11-05 amendment's items 5 and 6 as
-far as they send or bundle a notice). Amends ADR 0034 d3 ("pushed once") and ADR 0067 d2 (a note without
-`chain_copies:` no longer works in place).
+(its *How p29-7 built it*) and every notice of ADR 0066 (d2's Notice, and each notice its 2026-11-05 amendment sends
+or bundles: item 4's timeout notice, item 5's cadence, item 6's refused-tip notice and `ntfy-push.py` bundle row, and
+item 9's job-spell notice). Amends ADR 0034 d3 ("pushed once") and ADR 0067 d2 (a note without `chain_copies:` no
+longer works in place).
 
 ## Context
 
@@ -59,10 +60,11 @@ foreground loop), and its only record outside the vault is a marker under `~/.co
 written until begin runs. Parallel execute's § 4.5 Surface re-check takes the same rule: a hold or an unanswered check
 ends the turn `waiting`, and the heartbeat re-enters, never § 7.
 
-**d2. No rollout ever pushes.** No verb, script or job of this plugin sends Lachy a notification about a rollout: no
-PushNotification, no ntfy publish, no notify-only launchd job, no mail. This supersedes ADR 0038 d3 (an undelivered
-push falls back to ntfy), ADR 0048's launchd fallback (`watchdog.py check` notifies when Chorus is not running) and
-ADR 0066's notices (d2's 24-hour Notice, and its 2026-11-05 amendment's notice cadence and its refused-tip notice). It
+**d2. No rollout ever pushes.** No verb, script or job of this plugin sends Lachy a notification about a rollout or
+the checkouts it runs from: no PushNotification, no ntfy publish, no notify-only launchd job, no mail. This supersedes
+ADR 0038 d3 (an undelivered push falls back to ntfy), ADR 0048's launchd fallback (`watchdog.py check` notifies when
+Chorus is not running) and every notice of ADR 0066 (d2's 24-hour Notice, and its 2026-11-05 amendment's timeout
+notice, notice cadence, refused-tip notice and job-spell notice). It
 amends ADR 0034 d3: a gate found mid-run is set aside and listed, never pushed. A Needs-you item stays in the report's
 `Needs you:` block and in the rollout note, for a sitting he chooses. A Primary checkout that stays stuck stays in
 `primary-refresh.py`'s state file and in `/thread:status`. The `[notify]` table is retired: `rollout-settings.py`
