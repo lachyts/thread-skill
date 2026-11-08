@@ -2,10 +2,12 @@
 // every push to master runs the full suite as a matrix of shards, split by tests/lib/shard.py.
 // - W1: test.yml's job `test` expands, over its matrix, to exactly the two required-check names, carries no job-level
 //   `if:` (a skipped required job reports success), and runs on pull_request only.
-// - W2: that job runs `make test-fast` with THREAD_VERIFY_BASE the PR's base sha, on a full-history checkout.
+// - W2: that job runs `make test-fast` with THREAD_VERIFY_BASE the PR's base sha, on a full-history checkout, under one
+//   plain timeout-minutes (merge-task's CI headroom record reads only a whole number; the value is p43-6's audit's).
 // - W3: no other job in any workflow takes a required-check name, by expansion or by merge-gate.py's rules 1-3; and
 //   full-suite.yml runs on push to master only.
-// - W4: full-suite.yml's shard matrix and its run line agree on N.
+// - W4: full-suite.yml's shard matrix and its run line agree on N, and each OS has its own timeout-minutes (p43-6's
+//   audit: about twice that OS's slowest shard).
 // - W5: every .github/workflows/*.yml parses (PyYAML) to a mapping with `jobs` (check-workflow-parse.sh covers only
 //   the *.workflow.js scripts).
 // - S1: `bash tests/run.sh --shard-plan N` on the real tree puts every collected test (fast-tier.py's COLLECTED, which
@@ -100,7 +102,7 @@ test('W2: the PR job runs the fast tier against the PR\'s base, on a full-histor
   assert.equal(last.env.THREAD_VERIFY_BASE, '${{ github.event.pull_request.base.sha }}')
   assert.equal(last.env.THREAD_TEST_JOBS, '4')
   assert.equal(checkout(job)?.with?.['fetch-depth'], 0, 'fetch-depth: 0, so the base sha and merge-base resolve')
-  assert.equal(job['timeout-minutes'], 60)
+  assert.equal(job['timeout-minutes'], 55)
 })
 
 test('W3: no other job takes a required-check name; full-suite.yml runs on push to master only', () => {
@@ -126,6 +128,16 @@ const shardJob = () => {
   return jobs[0]
 }
 const shardN = () => shardJob().strategy.matrix.shard.length
+// limits(job): each OS's timeout-minutes. A whole number holds for both OSes; the one other form is
+// `${{ matrix.os == '<os>' && <a> || <b> }}`, <a> for <os> and <b> for the other. Anything else fails, showing the value.
+const LIMIT_EXPR = /^\$\{\{\s*matrix\.os\s*==\s*'([^']+)'\s*&&\s*(\d+)\s*\|\|\s*(\d+)\s*\}\}$/
+const limits = (job) => {
+  const v = job['timeout-minutes']
+  if (Number.isInteger(v)) return Object.fromEntries(OSES.map((os) => [os, v]))
+  const m = typeof v === 'string' ? LIMIT_EXPR.exec(v) : null
+  assert.ok(m && OSES.includes(m[1]), `timeout-minutes is a whole number or the matrix.os form: ${JSON.stringify(v)}`)
+  return Object.fromEntries(OSES.map((os) => [os, Number(os === m[1] ? m[2] : m[3])]))
+}
 
 test('W4: the shard matrix covers both OSes and shards 1..N, and the run line names the same N', () => {
   const job = shardJob()
@@ -134,7 +146,7 @@ test('W4: the shard matrix covers both OSes and shards 1..N, and the run line na
   assert.deepEqual(job.strategy.matrix.os, OSES)
   assert.deepEqual(job.strategy.matrix.shard, Array.from({ length: n }, (_, i) => i + 1))
   assert.equal(job.strategy['fail-fast'], false)
-  assert.equal(job['timeout-minutes'], 60)
+  assert.deepEqual(limits(job), { 'ubuntu-latest': 20, 'macos-latest': 35 })
   assert.equal(job['runs-on'], '${{ matrix.os }}')
   const last = runSteps(job).at(-1)
   assert.equal(last.run.trim(), `bash tests/run.sh --shard \${{ matrix.shard }}/${n}`)

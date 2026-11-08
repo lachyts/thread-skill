@@ -4,10 +4,15 @@
 # its own verdict.
 #
 # Each job runs one shard: `bash tests/run.sh --shard K/N` runs the part of the suite tests/lib/shard.py gives shard K
-# (its docstring holds the rules). The split is by test file and never trims: the N shards together run every test
-# file exactly once (p43-6's audit decides what to trim, and measures whether N and the size weighting fit). N in the
-# run line must equal the length of the shard matrix; tests/ci-workflows.test.mjs pins both, and that no job here
-# takes a required-check name (`make test (...)`, ADR 0025).
+# (its docstring holds the rules: each entry's load is its measured seconds, from tests/shard-weights.tsv). The split
+# is by test file and never trims: the N shards together run every test file exactly once. N in the run line must
+# equal the length of the shard matrix; tests/ci-workflows.test.mjs pins both, and that no job here takes a
+# required-check name (`make test (...)`, ADR 0025).
+#
+# timeout-minutes is per OS, about twice that OS's slowest shard (docs/audits/2026-11-09-test-suite.md § 4 holds the
+# numbers and the rule), so a hang reports red in minutes, not an hour. Nothing but GitHub reads it: no required check
+# runs in this file, so merge-task never waits on it. A shard cut at its limit shows every suite that ended (run.sh's
+# `<label>: ok|FAILED (<N>s)` lines); a suite with no line was still running.
 name: full suite
 
 on:
@@ -26,7 +31,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 35 || 20 }}
     steps:
       # Default depth: the full suite diffs nothing.
       - uses: actions/checkout@v5
@@ -36,7 +41,7 @@ jobs:
         with:
           node-version: 22
       # next-action.py reads frontmatter with PyYAML; neither runner image guarantees it (test.yml says why).
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python3 -m pip install pyyaml
