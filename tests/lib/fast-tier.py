@@ -258,14 +258,16 @@ def unquote(s):
 
 
 class Line:
-    def __init__(self, no, pattern, kind, words, comment):
-        self.no, self.pattern, self.kind, self.words, self.comment = no, pattern, kind, words, comment
-        self.entries = set()   # resolved: collected test paths and SELF_TESTS
+    """One map line: its number, pattern, kind (PLACE, PLAIN, FULL, NONE or ALSO) and resolved entries."""
+    def __init__(self, no, pattern, kind):
+        self.no, self.pattern, self.kind = no, pattern, kind
+        self.entries = set()   # collected test paths and SELF_TESTS
 
 
 class Repo:
     def __init__(self):
         rc, out = git("ls-files", "-z", "-co", "--exclude-standard")
+        self.git_ok = rc == 0
         listed = sorted({p for p in out.decode("utf-8", "replace").split("\0") if p and not p.startswith(".claude/")})
         self.files = [p for p in listed if os.path.isfile(os.path.join(ROOT, p))]
         rc, out = git("ls-files", "-z")
@@ -274,14 +276,8 @@ class Repo:
         test_set = set(self.tests)
         never = test_set | {RUNNER, SELF}
         self.carriers = [p for p in self.files if p.endswith(CARRIER_SUFFIXES) and p not in never]
-        self.text = {}
-        self.naming = {}
-        for p in self.carriers:
-            t = read(p)
-            self.text[p] = t
-            self.naming[p] = naming_text(p, t)
-        for p in self.tests:
-            self.text[p] = read(p)
+        self.naming = {p: naming_text(p, read(p)) for p in self.carriers}   # a carrier's naming text
+        self.text = {p: read(p) for p in self.tests}                        # a test's whole text
         self.carrier_index = {}
         for p in self.carriers:
             for tok in tokens(self.naming[p]):
@@ -292,18 +288,21 @@ class Repo:
                 self.test_index.setdefault(tok, set()).add(p)
         # The runner map: test -> the collected tests it runs; ran_by is its inverse.
         self.runs, self.ran_by = {}, {}
+        by_base = {}
+        for t in self.tests:
+            by_base.setdefault(os.path.basename(t), []).append(t)
         for p in self.tests:
             body = sh_code(self.text[p]) if p.endswith(".sh") else self.text[p]
             got = set()
             for m in RUN_FORM.finditer(body):
                 op = unquote(m.group(1))
-                for t in self.tests:
+                for t in by_base.get(os.path.basename(op), ()):
                     if t != p and (op == t or op.endswith("/" + t)):
                         got.add(t)
             self.runs[p] = got
             for t in got:
                 self.ran_by.setdefault(t, set()).add(p)
-        self.map_lines, self.foreign, self.own, self.own_comments, self.parse_problems = parse_map(self)
+        self.map_lines, self.foreign, self.own, self.parse_problems = parse_map(self)
         self._matching = {}
 
     # ---- naming ----
@@ -390,13 +389,13 @@ class Repo:
 
 
 def parse_map(repo):
-    """(lines, foreign names, own-listings, own comments, problems) of tests/fast-tier.map; entries resolved."""
-    lines, foreign, own, own_comments, problems = [], set(), [], {}, []
+    """(lines, FOREIGN names, OWN-LISTINGS (line, test) pairs, problems) of tests/fast-tier.map, entries resolved."""
+    lines, foreign, own, problems = [], set(), [], []
     try:
         with open(os.path.join(ROOT, MAP), encoding="utf-8") as f:
             raw = f.read().split("\n")
     except OSError:
-        return lines, foreign, own, own_comments, [f"{MAP} is missing"]
+        return lines, foreign, own, [f"{MAP} is missing"]
     for no, text in enumerate(raw, 1):
         body, _, comment = text.partition("#")
         words = body.split()
@@ -415,9 +414,7 @@ def parse_map(repo):
             if not re.match(r"\s*\((?:i|ii)\)", comment):
                 problems.append(f"{where}: an OWN-LISTINGS line ends with a `# (i) ...` or `# (ii) ...` comment saying "
                                 f"which kind it is and what it lists (check a)")
-            for t in rest:
-                own.append((no, t))
-                own_comments[t] = comment.strip()
+            own.extend((no, t) for t in rest)
             continue
         if KEYWORD.match(head):
             problems.append(f"{where}: unknown keyword {head} (check a)")
@@ -434,7 +431,7 @@ def parse_map(repo):
                 problems.append(f"{where}: ALSO lists no entry (check a)")
         elif rest:
             kind = "PLAIN"
-        line = Line(no, head, kind, rest, comment.strip())
+        line = Line(no, head, kind)
         for w in rest:
             if KEYWORD.match(w):
                 problems.append(f"{where}: {w} is not an entry; FULL, NONE and ALSO come first on a line (check a)")
@@ -456,7 +453,7 @@ def parse_map(repo):
                 else:
                     line.entries.add(w)
         lines.append(line)
-    return lines, foreign, own, own_comments, problems
+    return lines, foreign, own, problems
 
 
 # ---- check (f): directory listings ------------------------------------------------------------------------------
@@ -545,6 +542,8 @@ def fixture_form(text, d):
 # ---- check ------------------------------------------------------------------------------------------------------
 
 def check(repo):
+    if not repo.git_ok:
+        return [f"git ls-files failed in {ROOT}: the map is checked against a git checkout"], ""
     problems = list(repo.parse_problems)
     by_pattern = {}
     for l in repo.map_lines:
@@ -675,7 +674,7 @@ def changed_paths(base):
     rc, diff = git("diff", "-z", "--name-only", "--no-renames", mb)
     if rc != 0:
         return f"git diff from {mb[:12]} failed", None, None, []
-    rc2, others = git("ls-files", "-z", "--others", "--exclude-standard")
+    _rc, others = git("ls-files", "-z", "--others", "--exclude-standard")
     paths = {p for p in (diff + b"\0" + others).decode("utf-8", "replace").split("\0") if p}
     return None, mb, source, paths
 
