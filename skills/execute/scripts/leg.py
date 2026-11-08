@@ -611,20 +611,19 @@ note locks, and no cycle forms with `next` (trickle lock, then note locks). A ca
 alone for its record write, its reads taken first the same way.
 
 The Capacity (ADR 0067 d8; execute away.md § Capacity, its spec). While a fresh capacity.json is in force (rr's
-_capacity_state), a Leg's claims count on the Mac behind its Leg lease (at least 1 while it is fresh: an open
-Leg counts from its session's start, ADR 0076 d3, read by rr._running_by_rollout), and its fresh claims are gated by
-the room
-(rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps
-for other waiters, less this chain's own places, its claims or 1 for its session, so a session's first claim needs no
-new place; waiting Legs with no claim take turns by their waiting records' `since`, p44-2; the Heat hold and the quota
-hold too). begin writes the lease before its gate, so its own next reads that place too. leg_gate turns a held
-`claim` into the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity
-alone); begin's launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The
-Leg lease is ~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from
-`next --waiting`, written off --dry-run on the open Leg by begin (any begin that runs it), next (its own session only),
-claim, wait, smoke, done, security, set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90
-min) after its last write, or LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the
-fallback nothing is gated and nothing counts; the lease is still written.
+_capacity_state), a Leg's claims count on the Mac behind its Leg lease (at least 1 while it is fresh: an open Leg counts
+from its session's start, ADR 0076 d3, read by rr._running_by_rollout), and its fresh claims are gated by the room
+(rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps for
+other waiters, less this chain's own places, its claims or 1 for its session, so a session's first claim needs no new
+place; waiting Legs with no claim take turns by their waiting records' `since`, p44-2; the Heat hold and the quota hold
+too). begin writes the lease before its gate, so its own next reads that place too. leg_gate turns a held `claim` into
+the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity alone); begin's
+launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The Leg lease is
+~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from `next --waiting`,
+written off --dry-run on the open Leg by begin (any begin that runs it), next (its own session only), claim, wait,
+smoke, done, security, set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its
+last write, or LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback
+nothing is gated and nothing counts; the lease is still written.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later

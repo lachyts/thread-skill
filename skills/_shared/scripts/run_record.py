@@ -347,9 +347,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      completion), runner (agent | lead), sha (the tree's HEAD), dirty (a bool: tracked changes on
                      it); load? (exactly 3 finite numbers >= 0: the 1, 5 and 15 minute load average), diff? (12 hex:
                      the first of the sha256 of `git diff HEAD --binary`, only on a dirty tree), waited? (seconds >= 0:
-                     the verify-slot wait), running? (an int >= 0: the Mac-wide count of running Rollout tasks, a
-                     serial chain's counted Leg claims included while Capacity is in force (p36-9)). A task is
-                     optional: a completion suite has none.
+                     the verify-slot wait), running? (an int >= 0: the Mac-wide count of running Rollout tasks; while
+                     Capacity is in force (p36-9) each open serial chain counts too, its Leg claims behind its Leg
+                     lease, or 1 for its session behind a fresh one (ADR 0076 d3: a Leg counts from its session's
+                     start), so an idle Leg between claims adds 1 with no task running). A task is optional: a
+                     completion suite has none.
   suite-ended        suite, by, runner (as suite-started), outcome (green | red | timeout | stopped | unrun | noslot |
                      heat: the Heat hold, verify-slot.py contract 7, or its Capacity stop (memory critical, a fresh
                      capacity.json's signals.stop_suites, p36-10), stopped the run, no verdict, or held it past the

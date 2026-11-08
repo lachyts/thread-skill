@@ -797,11 +797,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   6 h bound, and a Rollout with no lease still counts (ADR 0049, amended). A
   serial chain's **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims
   in the count while **Capacity** is in force, and an open Leg counts at least
-  one from its session's start, before its first claim (ADR 0076 d3): its Leg
-  rewrites it at its own
-  leg.py verbs, it lapses 90 minutes after its last write (180 after a waiting
-  turn end), and a Leg with no lease, or a closed one, holds nothing, so a
-  dead Leg drops out. _Avoid_: heartbeat file, lock.
+  one from its session's start, before its first claim (ADR 0076 d3). Its Leg
+  rewrites the lease at its own leg.py verbs; the lease lapses 90 minutes
+  after its last write (180 after a waiting turn end), and a Leg with no
+  lease, or a closed one, holds nothing, so a dead Leg drops out. _Avoid_:
+  heartbeat file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
   the **Away cap**) for a start, or a seeded revise, it has picked but not yet
   stamped, so every other lead counts it. The stamp consumes it, and it lapses

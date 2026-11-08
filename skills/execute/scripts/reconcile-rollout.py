@@ -1195,16 +1195,16 @@ one walk of --tasks-dir (off --dry-run a fresh one, _note_index, taken under the
 --dry-run the call's own, _scan's index) plus every other lead's live Trickle claims. In the walk (_elsewhere_running)
 each other rollout note directly in --tasks-dir, tagged `rollout`, not done or dropped, parallel, with no `paused:`
 stamp and started (never_started), counts its `status: in_progress` notes less the ones its own undecided RACE or
-UNVERIFIED holds. Review and integrating notes never count, nor do serial rollouts but while Capacity is in force
-(their Leg claims, behind the Leg lease: Capacity, below). This rollout's own use is counted the same
-way, every in_progress row of its own, live or stalled, so a new start fits only while elsewhere + the places kept + its
-own in_progress + this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned
-leads each waiting on the other's stalled notes). `status` and every progress line count notes only. Nothing here
-writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle`
-block and its last starts (p28-7: M for `lastStarts` and each queued row's `lastStart`, read as `next` reads it, never
-through `next`; The last starts, below), and every progress line (_progress_for, `next`, `status`) for the ETA's
-width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold
-and the places kept aside); all of them read it silently, and only `next` prints the WARN.
+UNVERIFIED holds. Review and integrating notes never count, nor do serial rollouts but while Capacity is in force (an
+open Leg's claims behind its Leg lease, or 1 for its session behind a fresh one: Capacity, below). This rollout's own
+use is counted the same way, every in_progress row of its own, live or stalled, so a new start fits only while
+elsewhere + the places kept + its own in_progress + this call's starts < the cap; a restart waits on the ceiling alone
+(no state leaves two respawned leads each waiting on the other's stalled notes). `status` and every progress line count
+notes only. Nothing here writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above),
+`status` for its `trickle` block and its last starts (p28-7: M for `lastStarts` and each queued row's `lastStart`, read
+as `next` reads it, never through `next`; The last starts, below), and every progress line (_progress_for, `next`,
+`status`) for the ETA's width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count
+elsewhere)), the Heat hold and the places kept aside); all of them read it silently, and only `next` prints the WARN.
 
 Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
 would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
@@ -1288,21 +1288,21 @@ the Trickle's machinery stays as it is: the trickle claim lock and the claims, t
 the prefixes `trickle:` and `away cap:` and the last starts. A missing reading (silent), a stale or unreadable one, or
 a capacity_max that will not resolve (each one CAPACITY_WARN line from `next`) falls back to today's Trickle and Away
 cap exactly, never to open. While in force: the count elsewhere (and mac_running's, the Run record's suite `running`,
-p36-9) also counts each open serial rollout's Leg claims (_leg_tasks: its `status: in_progress` notes owned
-`leg-<n>`) behind its Leg lease (the same lease file, `by: leg`,
-written by leg.py on its own open Leg; _Leases with `leg`: a lapse of LEG_LEASE_LAPSE, LEG_WAIT_LAPSE after a `waiting:
-true` turn end, from the latest boot or wake if later; fresh and unreadable count, a lapsed one goes to `lapsed`, none
-holds nothing; a fresh one counts at least 1, so an open Leg holds a place from its session's start, before its first
-claim, ADR 0076 d3), and a waiting Leg's record keeps its place (_trickle_waiting_judge's `legs`), asking one place
-fewer while its session already holds one (_waiters, p44-2). The quota hold: while
-in force, a caller whose Login (capacity.py login(): a Claude Code session's CLAUDE_ACCOUNT_PINNED, else CLAUDE_CONFIG_DIR's
-basename, else `dummy`) is inside its line starts nothing new: `slotLimit` 0, a row it holds reads `quota: <login> is
-inside its line` (QUOTA_PREFIX; after the ceiling and the heat, before the cap), it never halts, it writes no waiting
-record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits on the ceiling alone. The
-Login is always the lead's own: its lease names it (`login`), `status` reads no quota, and `moving`, which runs in the
-Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run --quota-login`), never its
-own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy leg.py reads; the reads it
-takes that may run a child process (capacity_reads) a caller holding the trickle claim lock takes before the lock.
+p36-9) also counts each open serial rollout's Leg claims (_leg_tasks: its `status: in_progress` notes owned `leg-<n>`)
+behind its Leg lease (the same lease file, `by: leg`, written by leg.py on its own open Leg; _Leases with `leg`: a lapse
+of LEG_LEASE_LAPSE, LEG_WAIT_LAPSE after a `waiting: true` turn end, from the latest boot or wake if later; fresh and
+unreadable count, a lapsed one goes to `lapsed`, none holds nothing; a fresh one counts at least 1, so an open Leg holds
+a place from its session's start, before its first claim, ADR 0076 d3), and a waiting Leg's record keeps its place
+(_trickle_waiting_judge's `legs`), asking one place fewer while its session already holds one (_waiters, p44-2). The
+quota hold: while in force, a caller whose Login (capacity.py login(): a Claude Code session's CLAUDE_ACCOUNT_PINNED,
+else CLAUDE_CONFIG_DIR's basename, else `dummy`) is inside its line starts nothing new: `slotLimit` 0, a row it holds
+reads `quota: <login> is inside its line` (QUOTA_PREFIX; after the ceiling and the heat, before the cap), it never
+halts, it writes no waiting record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits
+on the ceiling alone. The Login is always the lead's own: its lease names it (`login`), `status` reads no quota, and
+`moving`, which runs in the Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run
+--quota-login`), never its own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy
+leg.py reads; the reads it takes that may run a child process (capacity_reads) a caller holding the trickle claim lock
+takes before the lock.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -4604,8 +4604,8 @@ def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index, leases=None, 
                        unclaimed=None) -> dict:
     """{<rollout stem>: n} for every other open, started, parallel Rollout on the Mac running n > 0 tasks whose lead's
     lease has not lapsed, sorted (execute away.md § The Trickle): _running_by_rollout with this rollout excluded, its
-    `leases`, `lapsed`, `legs` (p36-7: the serial chains' Leg claims too, while Capacity is in force) and `unclaimed`
-    (p44-2: the Legs counted for their session alone) passed through."""
+    `leases`, `lapsed`, `legs` (p36-7: the serial chains too while Capacity is in force, each its Leg claims or 1 for
+    its session, ADR 0076 d3) and `unclaimed` (p44-2: the Legs counted for their session alone) passed through."""
     return _running_by_rollout(tasks_dir, index, exclude=rollout_path, leases=leases, lapsed=lapsed, legs=legs,
                                unclaimed=unclaimed)
 
@@ -4622,10 +4622,11 @@ def mac_running(tasks_dir, reraise=()):
     record's suite `running`, p29-10), from one walk of `tasks_dir`, each rollout's lease read at the clock's now (a
     lapsed one leaves the count, p28-4); None when it cannot be walked. While a Capacity reading is in force
     (_capacity_state at the same now, read silently with no quota and with stops held across it, _signals_held below,
-    since its readers catch any exception), a serial chain's Leg claims count too, behind their Leg lease (p36-9: the
-    count the Capacity bounds); under the fallback the count is unchanged. An exception in `reraise` (the caller's stop
-    signal, raised by its handler mid-walk, the lease's sysctl read included, or as the Capacity read's hold ends)
-    propagates: the count never swallows a stop."""
+    since its readers catch any exception), each open serial chain counts too: its Leg claims behind its Leg lease, or 1
+    for its session behind a fresh one (p36-9: the count the Capacity bounds; ADR 0076 d3: a Leg counts from its
+    session's start, so an idle Leg between claims holds 1 here with no task running); under the fallback the count is
+    unchanged. An exception in `reraise` (the caller's stop signal, raised by its handler mid-walk, the lease's sysctl
+    read included, or as the Capacity read's hold ends) propagates: the count never swallows a stop."""
     try:
         tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
         if not tasks_dir.is_dir():
@@ -5830,16 +5831,16 @@ def cmd_next(args) -> int:
     (_capacity_state; a stale or unreadable file, or a capacity_max that will not resolve, prints one CAPACITY_WARN line
     on stderr and reads as the Trickle). While a fresh reading is in force its C is the cap in force, Away or not (the
     prefixes stay `trickle:` and `away cap:`), `trickle.limit` and `trickle.awayCap` read C, `trickle.capacity` reports
-    the reading, the count elsewhere counts the serial chains' Leg claims behind their Leg lease (_leg_tasks; a fresh
-    lease counts at least 1, ADR 0076 d3; `trickle.lapsed` names a lapsed one) and a waiting Leg's record keeps its
-    place; and when the caller's Login is
-    inside its line (the quota hold) `slotLimit` is 0, a row it holds reads `quota: <login> is inside its line` (after
-    the ceiling and the heat, before the cap), it never halts, it writes no waiting record (removing an earlier one),
-    and idle-slots reads `hold-quota`. Anything else reads exactly as before. The caller's Login is its own
-    (_capacity_state's, capacity.py login(os.environ)), and off --dry-run the lease names it (_caller_login), so
-    `moving` reads the lead's; the hidden `--quota-login NAME`, read only with --dry-run (exit 2 without it, nothing
-    read), reads NAME's line instead ("" reads no quota): `moving`'s dry run passes the lead's Login off its lease
-    (_lead_login), never its reader's."""
+    the reading, the count elsewhere counts each open serial chain's Leg claims behind its Leg lease, or 1 for its
+    session behind a fresh one (_leg_tasks, ADR 0076 d3; `trickle.lapsed` names a lapsed one), and a waiting Leg's
+    record keeps its place, asking one place fewer while its session is counted (_waiters, p44-2: that place is its
+    session's, never kept a second time); and when the caller's Login is inside its line (the quota hold) `slotLimit` is
+    0, a row it holds reads `quota: <login> is inside its line` (after the ceiling and the heat, before the cap), it
+    never halts, it writes no waiting record (removing an earlier one), and idle-slots reads `hold-quota`. Anything else
+    reads exactly as before. The caller's Login is its own (_capacity_state's, capacity.py login(os.environ)), and off
+    --dry-run the lease names it (_caller_login), so `moving` reads the lead's; the hidden `--quota-login NAME`, read
+    only with --dry-run (exit 2 without it, nothing read), reads NAME's line instead ("" reads no quota): `moving`'s dry
+    run passes the lead's Login off its lease (_lead_login), never its reader's."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     quota_login = getattr(args, "quota_login", None)
     if quota_login is not None and not args.dry_run:
@@ -7385,7 +7386,8 @@ def cmd_status(args) -> int:
     # other rollouts a lapsed lease leaves out, and `lease` is this rollout's own ({state, writtenAt, lapsesAt}). The
     # Capacity (p36-7) is read as `next` reads it, silently and without the quota (status runs in a session that is not
     # the lead's): `capacity` reports it, and while it is in force `limit` and `awayCap` read its C and the count
-    # elsewhere counts the serial chains' Leg claims behind their Leg lease.
+    # elsewhere counts each open serial chain's Leg claims behind its Leg lease, or 1 for its session behind a fresh
+    # one (ADR 0076 d3), as `next` counts it.
     away = _away_state(now)
     capacity = _capacity_state(now, quota=False)
     leases, lapsed = _Leases(now), {}

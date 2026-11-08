@@ -20,7 +20,8 @@
 #   L15 a Leg counts from its session's start (ADR 0076 d3, p44-2): a begun Leg with no claim counts 1 behind a fresh
 #       Leg lease, a lapsed or missing lease 0, and its first claim still counts 1
 #   L16 a Leg's session holds its own place against a lead waiting ahead of it, and waiting Legs with no claim take
-#       turns by their waiting records' `since` (then stem), so more Legs than places never stand still
+#       turns by their waiting records' `since` (then stem), so more Legs than places never stand still; a Leg that is
+#       not waiting, or has a claim, always counts
 # Temp vaults only; HOME, the lock dirs and the Run record are temp; --now and --session pinned. bash 3.2-compatible.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -506,6 +507,13 @@ leg next; ok "$(q 'd["action"]')" claim "L16b: waiting since the same moment, th
 wrecs "$RO@2026-10-20T09:00:00+00:00"
 leg next
 ok "$(q 'd["action"]')|$(q 'd["capacity"]["elsewhere"]')" "wait|{'other': 1}" "L16b: a Leg that is not waiting is never passed over: its session counts"
+# Only a Leg counted for its session alone takes turns: [[other]] now works a claim (o1 in progress, owned leg-1) and
+# waits behind this Leg (a later `since`), yet its claim still counts, so this Leg waits rather than pass over a task.
+printf -- '---\ntags: [task]\nstatus: in_progress\nowner: leg-1\nrollout: "[[other]]"\n---\n' > "$T/o1.md"
+wrecs "$RO@2026-10-20T09:00:00+00:00" "other@2026-10-20T09:30:00+00:00"
+leg next
+ok "$(q 'd["action"]')|$(q 'd["kind"]')|$(q 'd["capacity"]["elsewhere"]')" "wait|capacity|{'other': 1}" "L16b: a Leg with a claim is never passed over, even waiting behind this one: its claim counts"
+ok "$(q 'd["why"]')" "trickle: 1/1 tasks running on this Mac" "L16b: … on the Capacity"
 
 echo
 [ "$fail" -eq 0 ] && echo "leg-capacity.test.sh: ALL PASS" || echo "leg-capacity.test.sh: FAILED"
