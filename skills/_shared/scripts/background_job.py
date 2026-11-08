@@ -1,13 +1,11 @@
 """background_job.py — the plumbing the background jobs share (p39-6; ADR 0066's 2026-11-06 note): the Primary refresh
-(skills/_shared/scripts/primary-refresh.py) and the Watchdog's launchd fallback (skills/execute/scripts/watchdog.py),
-plus the one TERM-grace-KILL stop of a child's process group that lead-integrate.py, declared-check.py, estate-scan.py
-and close-score.py run too.
+(skills/_shared/scripts/primary-refresh.py), plus the one TERM-grace-KILL stop of a child's process group that
+lead-integrate.py, declared-check.py, estate-scan.py and close-score.py run too.
 
 Loaded by path only (importlib's spec_from_file_location), never imported by name or put on sys.path:
-  - primary-refresh.py main(), for `run` and `install` only (never `bundle`), from its own bundle, else the primary's
-    when its own bundle has no file. It ships as a row of primary-refresh.py's BUNDLE table, so the self-update stages,
-    smokes and installs it like any other helper;
-  - watchdog.py main(), beside its reconcile-rollout.py load, from the plugin root it was rendered from;
+  - primary-refresh.py main(), for `run`, `install` and `stuck` only (never `bundle`), from its own bundle, else the
+    primary's when its own bundle has no file. It ships as a row of primary-refresh.py's BUNDLE table, so the
+    self-update stages, smokes and installs it like any other helper;
   - lead-integrate.py at its module top, declared-check.py and close-score.py inside their broken-install guards, and
     estate-scan.py's load_siblings(), each from this directory.
 Importing it installs no signal handler, starts no subprocess and no thread, reads no environment variable and writes
@@ -18,9 +16,11 @@ The pieces:
     (or its --state), {"v": <version>, <key>: {...}}. A missing file reads as empty; an unreadable one, or one that is
     not UTF-8 JSON in that shape, reads as empty with one WARN, never a traceback. A write is atomic (a temp file
     beside it, then a rename), so a reader never sees half a file.
-  notify, run_plain, Notified: one line to skills/execute/scripts/ntfy-push.py on stdin, `--server` passed through,
-    bounded by `timeout`: (rc, why, out, err, ran). rc 127 when it cannot start, 124 when it ran past its bound; `why`
-    is its last stderr line, else stdout's. out and err are always text.
+  notify, run_plain, Notified: one line to a notifier script on stdin, `--server` passed through, bounded by `timeout`:
+    (rc, why, out, err, ran). rc 127 when it cannot start, 124 when it ran past its bound; `why` is its last stderr
+    line, else stdout's. out and err are always text. Unused since ADR 0075 d2 (no rollout code notifies, and
+    primary-refresh.py no longer calls it), but frozen (ADR 0066 decision 7): an installed older Primary refresh copy
+    still calls it in process, so notify and Notified stay, unchanged.
   job_python, job_path, launchd_plist: the launchd job. The interpreter is `python3` on PATH when it is this
     interpreter, else this interpreter's own path, so a stable alias survives an upgrade; PATH is the dirs given, then
     /usr/bin, /bin, /usr/sbin and /sbin, de-duplicated.
@@ -29,11 +29,10 @@ The pieces:
 
 The frozen interface (ADR 0066 decision 7, the Primary refresh's self-update contract). Every other loader loads the
 copy in its own tree and moves with it, but an installed Primary refresh copy can run against a newer one: its
-self-update installs this file as a helper before the copy, so an install that fails partway leaves the old copy
-calling this module in process. A call that no longer binds raises at its first one (state_path, at the top of
-cmd_run), before the fetch and the self-update that would heal it, on every pass, and sends no notice (notify is this
-module's too); only a hand install gets out of it. So what primary-refresh.py calls is additive only, never renamed,
-removed or reordered:
+self-update installs this file as a helper before the copy, so an install that fails partway leaves the old copy calling
+this module in process. A call that no longer binds raises at its first one (state_path, at the top of cmd_run), before
+the fetch and the self-update that would heal it, on every pass; only a hand install gets out of it. So what
+primary-refresh.py calls is additive only, never renamed, removed or reordered:
   - the file itself, at skills/_shared/scripts/background_job.py (primary-refresh.py's BJ_REL);
   - state_path(arg, name); read_state(path, prog, key, version), returning the pair (entries, corrupt);
     write_state(path, key, entries, version); atomic_write(path, data, mode); notify(script, message, server, run,
