@@ -496,9 +496,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   per note (schedule § Serial path): its `surfaces:` predicts the **Surface**s
   the chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. A row that writes a
-  checkout never opens in the vault, and an alias-less row writing two
-  checkouts is refused (ADR 0059), since a Leg finishes only its own
-  checkout's commits. Each repo it writes is worked in its own **Chain copy**
+  checkout never opens in the vault, and a row commits only to the checkout
+  it launches from: one whose `repo:` surfaces name another checkout, or an
+  alias-less one naming two, is refused (ADR 0059, ADR 0074 d3), since a Leg
+  finishes only its own checkout's commits and its review cannot leave the
+  Session's cwd. Each repo it writes is worked in its own **Chain copy**
   (ADR 0067 d2: `chain_copies:` on the note, which schedule stamps on every
   note it writes, ADR 0075 d4; only a note written before that, without it,
   works in place), whose commits `leg.py land` puts on the primary checkout's
@@ -798,10 +800,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the Mac's latest boot or wake if later, unless a room stop stands under its
   6 h bound, and a Rollout with no lease still counts (ADR 0049, amended). A
   serial chain's **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims
-  in the count while **Capacity** is in force: its Leg rewrites it at its own
-  leg.py verbs, it lapses 90 minutes after its last write (180 after a waiting
-  turn end), and a Leg with no lease, or a closed one, holds nothing, so a
-  dead Leg drops out. _Avoid_: heartbeat file, lock.
+  in the count while **Capacity** is in force, and an open Leg counts at least
+  one from its session's start, before its first claim (ADR 0076 d3). Its Leg
+  rewrites the lease at its own leg.py verbs; the lease lapses 90 minutes
+  after its last write (180 after a waiting turn end), and a Leg with no
+  lease, or a closed one, holds nothing, so a dead Leg drops out. _Avoid_:
+  heartbeat file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
   the **Away cap**) for a start, or a seeded revise, it has picked but not yet
   stamped, so every other lead counts it. The stamp consumes it, and it lapses
@@ -1025,8 +1029,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   limit (`timeout-minutes`), per merge and on the week's median. A job whose
   week's median runs past 80 % of its limit is a finding; a job cancelled at
   its limit is a CI timeout, a stop on GitHub's side, never a red check and
-  never a gate for Lachy (ADR 0073). _Avoid_: CI timeout (the event, not the
-  margin), runner speed.
+  never a gate for Lachy (ADR 0073). Each merge records one `ci-headroom`
+  Run-record line per required job (merge-task, through lead-integrate.py
+  ci-headroom); the weekly Reflection reads them in span's `suite` block, and a
+  breach on Thread Skill's repo files its suite audit (`reflect.py
+  suite-audit`). _Avoid_: CI timeout (the event, not the margin), runner speed.
 - **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over

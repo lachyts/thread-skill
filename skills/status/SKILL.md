@@ -460,9 +460,11 @@ lease lapsed at <lapsesAt>: its in_progress tasks hold no room` when `lease.stat
 room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing. The Capacity (ADR 0067 d8;
 `skills/execute/away.md` § Capacity), from `trickle.capacity`: while it is in force (`inForce`), `limit` and `awayCap`
 are its C, so the line reads `Capacity <limit>` in place of `N <limit>` (and of `the Away cap <awayCap>` Away), its
-count elsewhere naming each serial chain's counted Leg claims too, and appends `· capacity.json fresh (C <limit> of
-max <max>)`; a `stale` or `unreadable` reading, or a fresh one with `maxWhy`, appends `· capacity.json <file>: <why>,
-read as the Trickle`; a missing one adds nothing. Status reads no quota (its session is not the lead's).
+count elsewhere naming each open serial chain too, its Leg claims behind its Leg lease, or 1 for its session behind a
+fresh one (ADR 0076 d3: a Leg counts from its session's start, so a Leg between claims reads 1), and appends
+`· capacity.json fresh (C <limit> of max <max>)`; a `stale` or `unreadable` reading, or a fresh one with `maxWhy`,
+appends `· capacity.json <file>: <why>, read as the Trickle`; a missing one adds nothing. Status reads no quota (its
+session is not the lead's).
 
 **The Moving line**, right under the Trickle line, from § 2's *Moving*: `Moving: <verdict> <cause> (<ageMinutes>m since
 the last life sign)` (no cause for `moving`; `no life sign` when `ageMinutes` is null), then ` · until <until>` when it

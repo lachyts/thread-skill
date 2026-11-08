@@ -82,6 +82,9 @@
 #        record-answer run from /bin/bash, with its controls (L19f); an unscannable checkout halts with the claim kept
 #        (L19g); in process: shell_safe, security_ask, run_scan's cut and settle_pushed (L19h). A stub gitleaks
 #        (THREAD_GITLEAKS), local bare origins and a closed OSV port: no network, and no token sits in this file.
+#   L20  begin's `mcp` (ADR 0074 d2): the required namespaces of this launch's unlanded rows, read by serial-chains.py's
+#        required_mcp: the optional part dropped, a line with no `required` word read, `required none` read as nothing,
+#        and another launch's rows left out
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -3404,6 +3407,20 @@ eq(leg.rewrite_point("/c", "c" * 40, "a1", copy, time.monotonic() + 100, 420),
 print("\n".join(bad) if bad else "all")
 PY
 ok "$(cat "$TMP/l19h.out")" all "L19h: in process: shell_safe, security_ask, run_scan's cut and settle_pushed"
+
+# ════ L20: begin's mcp, through serial-chains.py's required_mcp (ADR 0074 d2) ══════════════════════════════════════
+scen l20
+mkdir -p "$S/other"
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3) $(rows cc-other "$S/other" '`ext:y`' t4)
+for t in t1 t2 t3 t4; do mkt "$t"; done
+printf '\n## Launch\n\n- **MCP:** required `mcp__a__*`; optional `mcp__b__*`\n' >> "$T/t1.md"
+printf '\n## Launch\n\n- **MCP:** `mcp__c__*`, `mcp__a__*`\n' >> "$T/t2.md"
+printf '\n## Launch\n\n- **MCP:** required none; optional `mcp__x__*`\n' >> "$T/t3.md"
+printf '\n## Launch\n\n- **MCP:** required `mcp__z__*`\n' >> "$T/t4.md"
+git -C "$V" add -A && git -C "$V" commit -qm vault
+leg begin --cwd "$F"
+ok "$rc|$(q 'd["mcp"]')" "0|['mcp__a__*', 'mcp__c__*']" \
+   "L20: begin's mcp: the optional part dropped, a line with no required word read, required none nothing, another launch's row left out"
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi
 exit "$fail"

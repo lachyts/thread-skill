@@ -156,6 +156,27 @@ Subcommands:
       prints one JSON line ({written, why, rollout, task, the fields}). Exit 0 always; 2 on usage. Not guarded:
       merge-task.sh ran engine-snapshot.py guard-pr first.
 
+  ci-headroom --repo R --pr N --head SHA [--merge SHA] [--tasks-dir T] [--gh-bin GH]
+      CI headroom (ADR 0073 d5): merge-task.sh calls it on every merged exit path (its land_and_finish), after the
+      merge is verified. With origin no github.com remote it stops there (nothing read, no vault walk); else it finds
+      the task note whose `pr:` names N, as base-moved does (none, or one naming no rollout: nothing read or written,
+      no gh call), then reads each required check once, bounded, never a live poll: `gh pr checks N --required` (the
+      plain table, so any gh reads it: its link column names each Actions job's run and job id), then `gh run view
+      <run> --json jobs,workflowName` once per run holding a job not yet recorded (at most CI_MAX_RUNS; fields gh
+      2.43.1 serves, so any gh reads them), each call cut at CI_GH_TIMEOUT seconds. A job whose run was not read (gh
+      failed or timed out, its JSON did not parse, or its run is past CI_MAX_RUNS) writes no line and is named in
+      `why`, so a re-run on the already-merged path fills it. Per required Actions job of a read run, one ci-headroom
+      line in the task's rollout record: the job's name (its first CI_JOB_MAX characters, the form a re-run
+      compares), its seconds (completedAt - startedAt; null when either is missing), its conclusion, and its time
+      limit, read from the workflow file the run ran (the run's workflowName, or a file path, matched under
+      .github/workflows/ at --head, else --merge, through git, no network): the job whose `name:` (a `${{ }}`
+      expression matches any text, and a name with none may carry GitHub's ` (<matrix values>)` suffix) or, with no
+      name, whose key matches the check's name; its `timeout-minutes` (limitSource workflow), GitHub's 360 when it
+      declares none (default), or null when no file, job or plain number matched (unread). A check that is no Actions
+      job (no `/actions/runs/<run>/job/<job>` link) writes none. A job already recorded for this task and PR (a re-run
+      taking the already-merged path) is never written twice. Prints one JSON line ({written, why, rollout, task,
+      jobs}); exit 0 always (2 on usage). Recording never changes merge-task's exit.
+
   revert --repo R --slug S --default B --merge M --note N --rollout RN [--verifier CMD] [--bootstrap CMD]
          [--tasks-dir T] [--gh-bin GH]
       The RACE revert (ADR 0046; execute § 4.5 *The RACE revert*): a RACE whose re-verify stayed red after the Flake
@@ -296,7 +317,7 @@ prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
-push, undo, base-moved and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
+push, undo, base-moved, ci-headroom and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
 or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
 76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
@@ -1567,6 +1588,223 @@ def cmd_base_moved(args):
     return 0
 
 
+# ---- ci-headroom: each required job's time against its limit (ADR 0073 d5) -------------------------------------------
+
+CI_GH_TIMEOUT = 20      # seconds per gh call: a bounded read, never a live poll
+CI_MAX_RUNS = 4         # workflow runs read per merge: the worst case is 5 calls of CI_GH_TIMEOUT
+GH_DEFAULT_TIMEOUT_MINUTES = 360   # GitHub's own limit for a job that declares no timeout-minutes
+JOB_LINK_RE = re.compile(r"/actions/runs/([0-9]+)/job/([0-9]+)")
+WORKFLOW_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?:#.*)?$")
+WORKFLOW_FIELD_RE = re.compile(r"(name|timeout-minutes)\s*:\s*(.*)$")
+
+
+def _yaml_scalar(text):
+    """A one-line YAML scalar: its comment cut and its quotes taken off ("" for none)."""
+    v = text.strip()
+    if v[:1] in ("'", '"'):
+        end = v.find(v[0], 1)
+        return v[1:end] if end > 0 else v[1:]
+    return re.split(r"\s+#", v, 1)[0].strip()
+
+
+def _workflow_jobs(text):
+    """(the workflow's top-level name or None, [{key, name, timeout}]) of one workflow file, read line by line (stdlib
+    only, no YAML parser): the keys one level under a top-level `jobs:`, and each job's own `name:` and
+    `timeout-minutes:` (the first level under its key; a step's are deeper, so never read)."""
+    name, jobs, in_jobs, job_indent, child_indent, cur = None, [], False, None, None, None
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent == 0:
+            in_jobs, job_indent, cur = bool(re.match(r"jobs\s*:\s*(?:#.*)?$", s)), None, None
+            m = re.match(r"name\s*:\s*(.*)$", s)
+            if m:
+                name = _yaml_scalar(m.group(1)) or None
+            continue
+        if not in_jobs:
+            continue
+        if job_indent is None:
+            job_indent = indent
+        if indent == job_indent:
+            m = WORKFLOW_KEY_RE.match(s)
+            cur = {"key": m.group(1), "name": None, "timeout": None} if m else None
+            if cur is not None:
+                jobs.append(cur)
+            child_indent = None
+            continue
+        if cur is None or indent < job_indent:
+            continue
+        if child_indent is None:
+            child_indent = indent
+        if indent == child_indent:
+            m = WORKFLOW_FIELD_RE.match(s)
+            if m:
+                cur["name" if m.group(1) == "name" else "timeout"] = _yaml_scalar(m.group(2))
+    return name, jobs
+
+
+def _job_matches(job, check):
+    """Whether a workflow job is the one a check names: its `name:` with each `${{ }}` expression matching any text,
+    else its key; a name holding no expression may carry GitHub's ` (<matrix values>)` suffix."""
+    parts = re.split(r"\$\{\{.*?\}\}", job["name"] or job["key"])
+    body = ".+?".join(re.escape(x) for x in parts)
+    return re.fullmatch(body + ("" if len(parts) > 1 else r"(?: \(.*\))?"), check) is not None
+
+
+def _job_limit(job):
+    """(timeoutMinutes, limitSource) for a matched workflow job: its own plain number, GitHub's default when it declares
+    none, else (None, unread): an expression, or a value that is no whole number >= 1."""
+    t = job["timeout"]
+    if t is None or t == "":
+        return GH_DEFAULT_TIMEOUT_MINUTES, "default"
+    if re.fullmatch(r"[0-9]+", t) and int(t) >= 1:
+        return int(t), "workflow"
+    return None, "unread"
+
+
+def _workflows(repo, shas):
+    """[(name, path, jobs)] for each .github/workflows/*.yml|yaml at the first of shas this repo holds, the name
+    GitHub shows (the file's `name:`, else its path); None when no sha resolves."""
+    for sha in shas:
+        if not sha or git(repo, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
+            continue
+        p = git(repo, "ls-tree", "--name-only", sha, "--", ".github/workflows/")
+        out = []
+        for path in out_of(p).splitlines() if p.returncode == 0 else []:
+            if not path.endswith((".yml", ".yaml")):
+                continue
+            t = git(repo, "show", f"{sha}:{path}")
+            if t.returncode == 0:
+                name, jobs = _workflow_jobs(t.stdout)
+                out.append((name or path, path, jobs))
+        return out
+    return None
+
+
+def _gh(gh_bin, *argv):
+    """One bounded gh read: (rc, stdout); a timeout or an unrunnable gh reads as rc None."""
+    try:
+        p = subprocess.run([gh_bin, *argv], capture_output=True, text=True, env=ENV, timeout=CI_GH_TIMEOUT,
+                           stdin=subprocess.DEVNULL)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None, ""
+
+
+def _job_seconds(job):
+    """A job's seconds, completedAt - startedAt, or None when either is missing (GitHub's zero time included)."""
+    try:
+        a = datetime.fromisoformat(str(job.get("startedAt")).replace("Z", "+00:00"))
+        b = datetime.fromisoformat(str(job.get("completedAt")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if a.year < 2000 or b.year < 2000 or b < a:
+        return None
+    return int((b - a).total_seconds())
+
+
+def cmd_ci_headroom(args):
+    """merge-task.sh's CI headroom record (ADR 0073 d5): one ci-headroom line per required Actions job of a merged PR in
+    its task's rollout record (the module docstring's ci-headroom). Prints one JSON line; exit 0 always (2 on usage)."""
+    repo = Path(os.path.expanduser(args.repo))
+    out = {"written": 0, "why": "", "jobs": []}
+    try:
+        url = out_of(git(repo, "remote", "get-url", "origin"))
+        m = re.search(r"github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$", url)
+        owner_repo = m.group(1) if m else ""
+        if not owner_repo:   # before the vault walk: with no owner/repo, any repo's PR URL of this number would match
+            out["why"] = "no GitHub origin"
+            print(json.dumps(out))
+            return 0
+        tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else rr.DEFAULT_TASKS_DIR
+        path = _pr_index(tasks_dir, owner_repo).get(str(args.pr))
+        note = rr.Note(Path(path)) if path else None
+        rollout = rr._note_rollout(note) if note is not None else None
+        if not rollout:
+            out["why"] = (f"no task note's pr: names #{args.pr}" if note is None
+                          else f"{Path(path).stem} names no rollout")
+            print(json.dumps(out))
+            return 0
+        task = Path(path).stem.lower()
+        out.update(rollout=rollout.lower(), task=task)
+        rc, table = _gh(args.gh_bin, "pr", "checks", str(args.pr), "-R", owner_repo, "--required")
+        rows = []   # (check name, run id, job id): gh's table off a TTY is name, state, elapsed, link, description
+        for line in table.splitlines():
+            cols = line.split("\t")
+            link = JOB_LINK_RE.search(cols[3]) if len(cols) > 3 else None
+            if cols[0].strip() and link:
+                rows.append((cols[0].strip(), int(link.group(1)), int(link.group(2))))
+        if not rows:
+            out["why"] = f"no required Actions job read (gh pr checks rc {rc})"
+            print(json.dumps(out))
+            return 0
+        run_record = rr._run_record()
+        try:
+            seen = {d.get("job") for d in rr._record_lines(run_record.record_path(rollout))[0]
+                    if d.get("kind") == "ci-headroom" and d.get("task") == task and str(d.get("pr")) == str(args.pr)}
+        except (OSError, ValueError):
+            seen = set()
+        workflows = _workflows(repo, [args.head, args.merge])
+        runs, unread_why = {}, {}   # run id -> its JSON; run id -> why it was not read
+        # Only a run with a job not yet recorded is read, so a re-run reads none once all are, and reaches the runs
+        # an earlier pass left past CI_MAX_RUNS.
+        for i, run_id in enumerate(sorted({r for c, r, _j in rows if c[:run_record.CI_JOB_MAX] not in seen})):
+            if i >= CI_MAX_RUNS:
+                unread_why[run_id] = f"past CI_MAX_RUNS ({CI_MAX_RUNS})"
+                continue
+            # jobs and workflowName only: gh 2.43.1 (merge-task's gh) refuses a field it lacks (`attempt`), rc 1.
+            rc, text = _gh(args.gh_bin, "run", "view", str(run_id), "-R", owner_repo, "--json", "jobs,workflowName")
+            try:
+                run = json.loads(text) if rc == 0 else None
+            except ValueError:
+                run = None
+            if isinstance(run, dict):
+                runs[run_id] = run
+            else:
+                unread_why[run_id] = ("gh timed out or did not run" if rc is None else f"gh rc {rc}" if rc != 0
+                                      else "its JSON did not parse")
+        unread = []   # a job of an unread run: no line, so a re-run on the already-merged path can fill it
+        for check, run_id, job_id in rows:
+            key = check[:run_record.CI_JOB_MAX]   # the name as the line stores it, on both sides of the re-run test
+            if key in seen:
+                continue
+            run = runs.get(run_id)
+            if run is None:
+                unread.append(f"{key} (run {run_id}: {unread_why.get(run_id, 'not read')})")
+                continue
+            jobs = [j for j in run.get("jobs") or [] if isinstance(j, dict)]
+            job = next((j for j in jobs if j.get("databaseId") == job_id), None) or \
+                next((j for j in jobs if j.get("name") == check), None) or {}
+            wf_name = run.get("workflowName")
+            limit, source = None, "unread"
+            for name, wpath, wjobs in workflows or []:
+                if wf_name and wf_name not in (name, wpath):
+                    continue
+                hit = next((j for j in wjobs if _job_matches(j, check)), None)
+                if hit is not None:
+                    limit, source = _job_limit(hit)
+                    break
+            conclusion = job.get("conclusion")
+            fields = {"repo": owner_repo, "pr": args.pr, "job": key,
+                      "seconds": _job_seconds(job), "timeoutMinutes": limit, "limitSource": source,
+                      "conclusion": str(conclusion).lower()[:40] if conclusion else None, "runId": run_id}
+            if isinstance(wf_name, str) and wf_name:
+                fields["workflow"] = wf_name
+            if rr._event(rollout, "ci-headroom", task, fields):
+                out["written"] += 1
+            seen.add(key)
+            out["jobs"].append(fields)
+        if unread:
+            out["why"] = (f"{len(unread)} required job(s) of an unread run not recorded, left for a re-run: "
+                          + "; ".join(unread))
+    except Exception as e:  # noqa: BLE001 — recording never changes merge-task's exit
+        out["why"] = f"{type(e).__name__}: {e}"
+    print(json.dumps(out))
+    return 0
+
+
 # ---- push / undo ---------------------------------------------------------------------------------------
 
 def _remote_head(tree, br):
@@ -2657,6 +2895,15 @@ def main(argv=None):
     bm.add_argument("--refusal", default=None, type=int, help="merge-task's refusal count")
     bm.add_argument("--tasks-dir", default=None, help="the vault's task notes (default: reconcile's DEFAULT_TASKS_DIR)")
 
+    ch = sub.add_parser("ci-headroom", help="record each required job's time, conclusion and limit at a merge (ADR 0073 "
+                        "d5): exit 0 always")
+    ch.add_argument("--repo", required=True)
+    ch.add_argument("--pr", required=True, type=_pr_number, help="the merged PR's number")
+    ch.add_argument("--head", required=True, help="the integrated head: its workflow files give each job's limit")
+    ch.add_argument("--merge", default=None, help="the merge commit, read when the head is not in this repo")
+    ch.add_argument("--tasks-dir", default=None, help="the vault's task notes (default: reconcile's DEFAULT_TASKS_DIR)")
+    ch.add_argument("--gh-bin", default="gh")
+
     pu = sub.add_parser("push", help="a plain push of the tree's merge commit; the read-back must equal it")
     pu.add_argument("--repo", required=True)
     pu.add_argument("--slug", required=True)
@@ -2711,6 +2958,8 @@ def main(argv=None):
             return cmd_verify(args)
         if args.cmd == "base-moved":
             return cmd_base_moved(args)
+        if args.cmd == "ci-headroom":
+            return cmd_ci_headroom(args)
         handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs,
                    "plan": cmd_plan, "set-aside": cmd_set_aside, "revert": cmd_revert}[args.cmd]
         emit(handler(args))

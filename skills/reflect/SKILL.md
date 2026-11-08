@@ -362,6 +362,13 @@ while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours
 reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
 rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed cycle named); and `trend`.
 
+Its `suite` block is the **Suite budget** and **CI headroom** (ADR 0073 d5; `reflect.py`'s header holds the rules),
+each on the week's median over the window's rows: `local`, each repo's suites by tier (`integration`, a rollout's
+verifier, against 5 minutes; `full`, the completion verifier, against 20) from the `suite-ended` lines; `ci`, each
+required GitHub job's time against its `timeout-minutes` from the `ci-headroom` lines merge-task writes at each merge
+(`share`, its median over its limit; `cancelled`, the runs GitHub cut at the limit); `breaches`; and `audit`, whether a
+breach on Thread Skill's repo makes step 13's suite audit due, and the open audit if one is.
+
 A flag starting `window: ` is the reading checking itself (`reflect.py`'s header, *The window check*): a reported
 block holds a row outside its window, so a reader read past it. It is a Thread Skill bug, never friction: read that
 block's numbers as unreliable this week. When the flag names `rollouts[<slug>]`, file it in step 13 with `bug` and
@@ -598,6 +605,17 @@ Pass `--fixes <landed task>` when the bug fixes work that already landed, so the
 (task-writer § 4). An open bug task with the same rule and shape prints `exists <slug>` and files nothing. On `path
 exists`, call again with other slug words; never edit, move or remove the existing note.
 
+Then, once, the suite audit (ADR 0073 d5), whatever span's `suite` block holds:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py suite-audit --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
+```
+
+It files Thread Skill's suite audit when the block breaches on Thread Skill's own repo (a local suite's week's median
+past the **Suite budget**, or a required CI job's past 80 % of its time limit: **CI headroom**), and only then. One is
+open at a time: an open audit prints `cites <slug>` and files nothing. A breach on another repo is reported in step 17,
+never filed here.
+
 ### 13a. The Time-lost ledger
 
 Once, before step 14 (tune.py's load hold reads the line it writes), with `--audit` exactly when step 10a ran:
@@ -719,7 +737,8 @@ accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySi
 unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
 confirm-rate risk included), the precision per level (`freshReviewLevels`), the late /fresh-review rounds' count, the
 Note overlaps (`noteOverlaps`: the warnings, notes and runs, or `none`, ADR 0067 d6's trigger when step 11 named it, and
-unread when the block is null), the Watches written (and any `extended` line), the bugs filed or found, the Time-lost
+unread when the block is null), the Watches written (and any `extended` line), the bugs filed or found, the suite
+block's breaches (each repo's, with the suite audit filed, cited or not due), the Time-lost
 ledger (its top class and hours, each class against last week, the trend, any Watch it opened, any ceiling raise it
 held), the Monthly audit's row when one ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or

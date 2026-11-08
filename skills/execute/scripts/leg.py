@@ -14,7 +14,7 @@ incomplete, _stamp, PHASED_STEM_RE, _norm_gate, _fm_block; _leg_tops, the one pa
 the completion verify's _completion_config, _completion_state, _completion_summary, _find_note,
 COMPLETION_DECIDED, COMPLETION_RED_PREFIX and CompletionValueError; and the Security check's _security_check,
 SECURITY_CHECKS_KEY and SECURITY_CHECK_PY), as serial-chains.py and unfinished-rollout.py
-do, and serial-chains.py for norm_origin and the surface grammar. begin and status run unfinished-rollout.py's
+do, and serial-chains.py for norm_origin, the surface grammar and required_mcp. begin and status run unfinished-rollout.py's
 read-only `check --shape serial --resume` (the surface re-check, ADR 0060), and unfinished-rollout.py loads this file
 in turn for hold_of, order_key and first_by (no recursion: none of them spawns). estate-dispatch.py's rank-stamp loads it
 for order_key and parse_log.
@@ -105,7 +105,8 @@ clear-halt, restarted, copies, land):
       Leg's, and an earlier Leg's that a lost, stopped or halted Leg never smoke-tested; every done task a not-done
       fix names in `verifies:`; every task whose latest smoke result is `fail` with no fix filed for it since; each
       with its `**Verify:**` line or null), the not-done fix tasks, the required MCP namespaces of this launch's
-      unlanded rows (their `## Launch` `**MCP:** required …` items), `next` and `progress`.
+      unlanded rows (their `## Launch` `**MCP:**` items, as serial-chains.py's `required_mcp` reads them), `next` and
+      `progress`.
   next [--waiting <reason>]                  (no lock; writes only this Leg's lease, ADR 0067 d8, never under --dry-run)
       The Leg's next act: `finish` (a task this Leg owns, or an inherited claim of a closed Leg: `inherit: true`),
       else `handoff` at five fresh claims (distinct tasks with a `claimed` line in this Leg, so a task re-claimed
@@ -611,16 +612,19 @@ note locks, and no cycle forms with `next` (trickle lock, then note locks). A ca
 alone for its record write, its reads taken first the same way.
 
 The Capacity (ADR 0067 d8; execute away.md § Capacity, its spec). While a fresh capacity.json is in force (rr's
-_capacity_state), a Leg's claims count on the Mac behind its Leg lease, and its fresh claims are gated by the room
-(rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps
-for other waiters, less this chain's own counted rows; the Heat hold and the quota hold too). leg_gate turns a held
-`claim` into the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity
-alone); begin's launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The
-Leg lease is ~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from
-`next --waiting`, written off --dry-run on the open Leg by begin (any begin that runs it), next (its own session only),
-claim, wait, smoke, done, security, set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90
-min) after its last write, or LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the
-fallback nothing is gated and nothing counts; the lease is still written.
+_capacity_state), a Leg's claims count on the Mac behind its Leg lease (at least 1 while it is fresh: an open Leg counts
+from its session's start, ADR 0076 d3, read by rr._running_by_rollout), and its fresh claims are gated by the room
+(rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps for
+other waiters, less this chain's own places, its claims or 1 for its session, so a session's first claim needs no new
+place; waiting Legs with no claim take turns by their waiting records' `since`, p44-2; the Heat hold and the quota hold
+too). begin writes the lease before its gate, so its own next reads that place too. leg_gate turns a held `claim` into
+the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity alone); begin's
+launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The Leg lease is
+~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from `next --waiting`,
+written off --dry-run on the open Leg by begin (any begin that runs it), next (its own session only), claim, wait,
+smoke, done, security, set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its
+last write, or LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback
+nothing is gated and nothing counts; the lease is still written.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
@@ -721,7 +725,6 @@ REVIEWS = "docs/reviews/"
 SET_ASIDE = {"blocked", "review-blocked", "plan-blocked", "gate-pending"}
 LAUNCH_RE = re.compile(r"^`([^`]+)`\s+from\s+`([^`]+)`$")
 VERIFY_RE = re.compile(r"^\s*\*\*Verify:\*\*.*$", re.M)
-MCP_RE = re.compile(r"\*\*MCP:\*\*\s*required\s+(.*?)(?:;\s*optional\b.*)?$", re.I)
 LOG_RE = re.compile(r"^- (?P<stamp>\S+) Leg (?P<n>\d+) (?P<rest>.*)$")
 CLEARED_RE = re.compile(r"^- (?P<stamp>\S+) halt cleared: (?P<reason>.*)$")
 RESTART_RE = re.compile(r"^- (\S+) restart: Leg (\d+) (pending \(session (\S+)\)|started (\S+)|manual \((.*)\))$")
@@ -1848,12 +1851,9 @@ def launch_mcp(chain, alias, folder):
     for r in chain.rows:
         if r.note is None or r.state == "done" or not r.same_launch(alias, folder):
             continue
-        for line in r.note.section_text("## Launch").split("\n"):
-            m = MCP_RE.search(line)
-            if m:
-                for item in re.findall(r"`([^`]+)`", m.group(1)) or [x.strip() for x in m.group(1).split(",")]:
-                    if item and item not in req:
-                        req.append(item)
+        for item in sc.required_mcp(r.note.section_text("## Launch")):
+            if item not in req:
+                req.append(item)
     return req
 
 
@@ -1982,8 +1982,10 @@ def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None, c
     alias = g.get("alias") or alias
     folder = g.get("folder") or folder
     chain.contend = rank_contention(ctx, chain, n)
+    # Every begin that runs the Leg writes its lease (fresh, take-over, --resume, silent resume), before the gate, so the
+    # gate reads this session's own place as every other caller does from here on (ADR 0076 d3, p44-2).
+    leg_lease(ctx, chain.legs.get(n))
     plan, _g = leg_gate(ctx, chain, plan_next(chain, n, alias, folder))   # the Capacity (p36-7)
-    leg_lease(ctx, chain.legs.get(n))   # every begin that runs the Leg: fresh, take-over, --resume, silent resume
     inherited = [r.slug for r in chain.rows if r.state == "running" and r.note is not None
                  and owner_leg(r.note) not in (None, n)
                  and (chain.legs.get(owner_leg(r.note)) is None or chain.legs[owner_leg(r.note)]["closed"] is not None)]

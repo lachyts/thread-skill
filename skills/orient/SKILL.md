@@ -468,6 +468,10 @@ and surfaces (ADR 0040). The steering answer authorises every call, and § 9 fol
 note written. A project with nothing left gets no call, and orient says so. Schedule's Pre-flight (its serial
 path's S3.5, schedule § Serial path) may ask its decision round here too (decisions, never a confirm) and leave
 Orient-graded or undecided members out with their dependants, unstamped; orient reports them from schedule's summary.
+Schedule's sign-ins (its serial path's S3.7, ADR 0074 d2) may put one `hands_steps` sign-in list and its check-again
+question here, before any note is written: a sign-in, never a confirm. A server he will not sign in to now, or a
+check that cannot run, leaves the rows needing it out with their dependants, unstamped. Orient reports each from
+schedule's summary with its `sign in to <server>, then /thread:orient --steer` line.
 
 - **Exclusions** (kept out of every `--tasks`; the fit test already sends most of them to the
   session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or

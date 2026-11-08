@@ -9,8 +9,9 @@ the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. 
 split (ADR 0047): which candidates queue, which leave with their Dependent closure, and the decision round for one
 rollout's tasks. `decided-for-you` writes the calls a grade ruled for Lachy, never asked (ADR 0054), into the tasks a
 schedule run queues. `rank-stamp` stamps the pass's estate rank on each rollout note it dispatches and re-stamps the
-live ones (ADR 0067 d9; CONTEXT.md **Estate rank**). Two callers: skills/orient-all/SKILL.md (§ 7 runs `rank-stamp`
-before its first `sessions`), and skills/schedule/SKILL.md § 1.5 (and its serial
+live ones (ADR 0067 d9; CONTEXT.md **Estate rank**). Two callers: skills/orient-all/SKILL.md (§ 6's sign-in pass runs
+`preflight`, read-only, per serial entry; § 7 runs `rank-stamp` before its first `sessions`), and
+skills/schedule/SKILL.md § 1.5 (and its serial
 path's S3.5), which runs `slices`, `log`, `preflight`, `record` (`record --by schedule`) and `decided-for-you --by
 schedule --write`, and under orient-all only `preflight` and `decided-for-you --by orient-all --write`; orient's
 reshuffle R5.2 runs `record --owner --by orient`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
