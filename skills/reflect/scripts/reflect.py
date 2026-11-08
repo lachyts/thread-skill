@@ -13,6 +13,7 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
         [--confirmed | --declined] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py bug --span F --rule R --shape H --slug <words> \\
         --title T --why W --rollout S [--rollout S2 ...] [--fixes <landed task>] [--tasks-dir D] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py suite-audit --span F [--tasks-dir D] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span F [--audit F] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span F [--owners F] [--rest-unknown] \\
         [--dry-run]
@@ -26,8 +27,9 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
 
 Writes. reflect.py is the only writer of reflections.jsonl (run_record.py's REFLECTIONS file, through run_record.emit:
 the kinds watch, watch-raised, proposal, reflection, time-lost and attention; run_record's docstring holds their schema,
-the Watch rule, the Agreement rule and the cadence rule) and of two kinds of vault task: a bug task
-(Work/Tasks/thread-skill-bug-<words>.md) and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
+the Watch rule, the Agreement rule and the cadence rule) and of three kinds of vault task: a bug task
+(Work/Tasks/thread-skill-bug-<words>.md), the suite audit (Work/Tasks/thread-skill-suite-audit-<date>.md, through bug's
+path) and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
 never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and `--auto`),
 never commits, and never touches git. `span --fold` runs reconcile-rollout.py fold-journals, whose call-journal lines
 are span's only write outside --out's directory (the Time-lost ledger's intervals file, <dir of F>/ledger-intervals.json,
@@ -265,6 +267,23 @@ parallel with no note). For each:
   rollout's entry reads it. cannotShow always names what the hook cannot see: a script's or shell write, or a Codex
   Leg's; and two tasks of one rollout in one note (another run is another rollout), or an edit by a session that is no
   run's task.
+- suite (ADR 0073 d5): the Suite budget and CI headroom, each on the week's median, over the window's rows alone (a row
+  by its ts in [since, until], and only those: CLAUDE.md's review rule). local: each suite-ended line of every record
+  (the ledger's kept lines) whose outcome has a verdict (green, red or timeout: a timeout's seconds are its deadline, a
+  floor) and whose `by` places it, grouped by (repo, tier): the repo its record's rollout note's Project root's origin
+  (owner/name, lowercased; null with none), the tier `integration` for task, integration and race (a rollout's verifier,
+  the Fast tier at every Checkpoint and at Integration, ADR 0073 d1) and `full` for completion (the completion verifier).
+  Each group: repo, tier, runs, medianSeconds, budgetSeconds (estate ADR 0011 d2: 300 for integration, 1200 for full;
+  no project sets its own yet), breach (the median past the budget), first, last (its rows' stamps) and rollouts. ci:
+  each ci-headroom line of every record, grouped by (repo, job): runs, timed (the rows with seconds), medianSeconds (over
+  the timed rows; null with none), timeoutMinutes and limitSource (the group's latest row's), share (the median over the
+  limit, 2 places; null when either is unknown), breach (the median past CI_SHARE, 80 %, of the limit; never with no
+  limit), cancelled (the rows GitHub cancelled: at the limit, a CI timeout, whose set-aside is merge-task's reasonClass
+  ci-timeout, ADR 0073 d4, read with the set-aside friction), first, last and rollouts. breaches: one line per breaching
+  group, `<repo>: ...`. audit: {repo (THREAD_SKILL_REPO, the one repo whose breach files Thread Skill's suite audit;
+  another's is reported alone), key (watch_id(SUITE_RULE, SUITE_SHAPE): the audit's bug_key), due (a breach on that
+  repo), open ({slug, status} of the open task carrying that key, else null)}. Reported for the reading; suite-audit
+  files from it.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
@@ -278,7 +297,8 @@ rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring,
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
 ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
 overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
-warnings} | null} | null, cannotShow[], flags[]}. stderr gets one summary line.
+warnings} | null} | null, suite{budget, local[], ci[], breaches[], audit} (above), cannotShow[], flags[]}. stderr gets
+one summary line.
 
 The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
 blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
@@ -294,8 +314,9 @@ and, on a serial chain, `rollouts[<slug>].score.merges` (each merge's at in [win
 score's merges.tasks carries task names alone); then `freshReview` (an entry is one row: its first and last both in
 [since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
 until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
-`nights.nights` (each morning) and `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
-first and last both in [since, until], the one outside printed). span calls score.py with no --since, so a score's
+`nights.nights` (each morning), `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
+first and last both in [since, until], the one outside printed), and `suite.local` and `suite.ci` (a group is one row,
+the same way). span calls score.py with no --since, so a score's
 window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
 ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
 read the run start instead. Not checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly
@@ -347,6 +368,14 @@ follow-up name); else it creates the task by exclusive create in task-writer § 
 captured; launch cc-thread; bug_key; fixes: when --fixes names landed work; no scheduled:) with `## Notes`, `## Launch`
 and `## Resume prompt`. The file goes first, then one `proposal` line per (Reflection, key): altitude bug, vaultTask,
 filed, and auto: true only when filed. A repeat call prints the first outcome.
+
+suite-audit (ADR 0073 d5). Once, at SKILL step 13, after the bugs. With no group of span's suite block breaching on
+THREAD_SKILL_REPO it prints `no suite budget breach on <repo>: no audit task` and writes nothing. Else it files the suite
+audit through bug's path (its dedupe, its proposal line and its task shape) with the fixed SUITE_RULE and SUITE_SHAPE, so
+its bug_key is suite.audit.key and one is open at a time: an open task with that key is cited (`cites <slug>`, the line
+filed: false), never filed twice; a new one is thread-skill-suite-audit-<Melbourne date of until>, its why the
+breaching lines. Its rollouts are the breaching groups' that the span read (none: exit 2, report the breach). A span
+with no suite block (one from before ADR 0073 d5) is exit 2.
 
 ledger (p29-11, ADR 0051). Once, at SKILL step 13a, before step 14's tune.py calls. It refuses a closed Reflection and a
 span with no ledger block (one from before p29-11). Every line is checked first (run_record.check), then only the missing
@@ -555,6 +584,17 @@ TRADE_TEXT_MAX = 200
 GAP_LINE_RE = re.compile(r"^- gap (\d+) (\d{4}-\d\d): ")
 AUDIT_LEAD = ("Monthly audit %s (ADR 0051 d4): what the Run record should have carried, read past it from %s to %s; a yes "
               "to a gap files a task that makes the record carry it, a no is recorded when this task is done:")
+# The suite readings (ADR 0073 d5; the module docstring's suite): estate ADR 0011 d2's Suite budget in seconds, on the
+# week's median, each local suite's tier by its `by` (a rollout's verifier is the Fast tier at every Checkpoint and at
+# Integration, ADR 0073 d1; the completion verifier the full suite), the suites with a verdict, and CI headroom's share.
+SUITE_BUDGET = {"integration": 300, "full": 1200}
+SUITE_TIERS = {"task": "integration", "integration": "integration", "race": "integration", "completion": "full"}
+SUITE_TIMED = ("green", "red", "timeout")
+CI_SHARE = 0.8
+THREAD_SKILL_REPO = "lachyts/thread-skill"   # the repo whose breach files Thread Skill's suite audit
+SUITE_RULE = "a suite's week's median within its Suite budget, a CI job's within 80 % of its limit (ADR 0073 d5)"
+SUITE_SHAPE = "Thread Skill's suite or CI ran past its budget on the week's median"
+SUITE_AUDIT_TITLE = "Thread Skill: the suite audit (the Suite budget or CI headroom breached)"
 TRADE_LEAD = ("Trades for Lachy (ADR 0037 d1: a knob that trades one headline against the other, or a caution, is his "
               "call; a yes runs the by-hand Reflection, a no is recorded when this task is done):")
 
@@ -2010,6 +2050,77 @@ class Span:
 
     # -- the whole span -------------------------------------------------------------------------------------------------
 
+    def suite(self, records, since, until):
+        """The Suite budget and CI headroom readings (ADR 0073 d5; the module docstring's suite), over the window's rows
+        alone: each suite-ended (self.ledger_lines) and each ci-headroom line by its ts in [since, until]."""
+        repos = {}
+
+        def repo_of(slug):
+            if slug not in repos:
+                note = self.vault.rollout_note(slug)
+                root = project_root(note) if note is not None else None
+                o = self.quiet_origin(root) if root else None
+                repos[slug] = o.lower() if o else None
+            return repos[slug]
+
+        def median(xs):
+            xs = sorted(xs)
+            k = len(xs) // 2
+            return float(xs[k]) if len(xs) % 2 else (xs[k - 1] + xs[k]) / 2.0
+
+        local, ci = {}, {}
+        for slug, lines in sorted(self.ledger_lines.items()):
+            for t, _n, d in lines:
+                if d.get("kind") != "suite-ended" or not since <= t <= until or d.get("outcome") not in SUITE_TIMED:
+                    continue
+                tier, secs = SUITE_TIERS.get(d.get("by")), d.get("seconds")
+                if tier is None or not isinstance(secs, (int, float)) or isinstance(secs, bool):
+                    continue
+                local.setdefault((repo_of(slug), tier), []).append((t, secs, slug))
+        for slug, lines in sorted(records.items()):
+            for t, _n, d in lines:
+                if d.get("kind") != "ci-headroom" or not since <= t <= until or not isinstance(d.get("job"), str):
+                    continue
+                repo = str(d.get("repo")).lower() if isinstance(d.get("repo"), str) else None
+                ci.setdefault((repo, d["job"]), []).append((t, d, slug))
+        out_local, out_ci, breaches = [], [], []
+        for (repo, tier), rows in sorted(local.items(), key=lambda kv: (kv[0][0] or "", kv[0][1])):
+            m, budget = median([r[1] for r in rows]), SUITE_BUDGET[tier]
+            g = {"repo": repo, "tier": tier, "runs": len(rows), "medianSeconds": round(m, 1), "budgetSeconds": budget,
+                 "breach": m > budget, "first": fmt(min(r[0] for r in rows)), "last": fmt(max(r[0] for r in rows)),
+                 "rollouts": sorted({r[2] for r in rows})}
+            out_local.append(g)
+            if g["breach"]:
+                breaches.append("%s: the %s suite's week's median %s s is past its %d s Suite budget (%d run(s))"
+                                % (repo or "no repo", tier, hfmt(g["medianSeconds"]), budget, len(rows)))
+        for (repo, job), rows in sorted(ci.items(), key=lambda kv: (kv[0][0] or "", kv[0][1])):
+            rows.sort(key=lambda r: r[0])
+            timed = [r[1]["seconds"] for r in rows if isinstance(r[1].get("seconds"), int)
+                     and not isinstance(r[1].get("seconds"), bool)]
+            last = rows[-1][1]
+            limit = last.get("timeoutMinutes") if isinstance(last.get("timeoutMinutes"), int) else None
+            m = median(timed) if timed else None
+            share = round(m / (limit * 60.0), 2) if m is not None and limit else None
+            g = {"repo": repo, "job": job, "runs": len(rows), "timed": len(timed),
+                 "medianSeconds": round(m, 1) if m is not None else None, "timeoutMinutes": limit,
+                 "limitSource": last.get("limitSource"), "share": share,
+                 "breach": m is not None and bool(limit) and m > CI_SHARE * limit * 60,
+                 "cancelled": sum(1 for r in rows if r[1].get("conclusion") == "cancelled"),
+                 "first": fmt(rows[0][0]), "last": fmt(rows[-1][0]), "rollouts": sorted({r[2] for r in rows})}
+            out_ci.append(g)
+            if g["breach"]:
+                breaches.append("%s: %s's week's median %s s is %d %% of its %d min limit, past %d %% (%d run(s))"
+                                % (repo or "no repo", job, hfmt(g["medianSeconds"]), round(100 * m / (limit * 60.0)),
+                                   limit, round(100 * CI_SHARE), len(timed)))
+        due = any(g["breach"] and g["repo"] == THREAD_SKILL_REPO for g in out_local + out_ci)
+        key = RR.watch_id(SUITE_RULE, SUITE_SHAPE)
+        open_task = next(({"slug": p.stem, "status": rec.status} for p, rec in self.vault.open_root_notes(self.flag)
+                          if rec.scalar("bug_key") == key), None)
+        return {"budget": {"integrationSeconds": SUITE_BUDGET["integration"], "fullSeconds": SUITE_BUDGET["full"],
+                           "ciShare": CI_SHARE},
+                "local": out_local, "ci": out_ci, "breaches": breaches,
+                "audit": {"repo": THREAD_SKILL_REPO, "key": key, "due": due, "open": open_task}}
+
     def run(self):
         ev = events_dir()
         reflections = read_reflections()
@@ -2086,6 +2197,7 @@ class Span:
         nights = SCORE.night_record(records, since, until)
         for f in nights["flags"]:
             self.flag(f)
+        suite = self.suite(records, since, until)
         overlaps, overlap_flags = note_overlaps(ev, since, until, reflections)
         for f in overlap_flags:
             self.flag(f)
@@ -2095,7 +2207,8 @@ class Span:
                "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
-               "attention": attention, "nights": nights, "noteOverlaps": overlaps, "cannotShow": self.cannot,
+               "attention": attention, "nights": nights, "noteOverlaps": overlaps, "suite": suite,
+               "cannotShow": self.cannot,
                "flags": self.flags}
         for f in window_flags(doc, scores):  # the window check: doc["flags"] is self.flags, so each lands in span.json
             self.flag(f)
@@ -2199,6 +2312,8 @@ def window_flags(doc, scores):
     nights = items(part(doc, "nights", "nights"))
     report("nights.nights", [(_row_in(n.get("morning"), S, U), n.get("morning")) for n in nights], ss, us)
     report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
+    report("suite.local", spans(items(part(doc, "suite", "local"))), ss, us)
+    report("suite.ci", spans(items(part(doc, "suite", "ci"))), ss, us)
     return out
 
 
@@ -2321,6 +2436,18 @@ def cmd_bug(a):
         fixes = _wikilink_slug(a.fixes)
         if not fixes:
             raise Stop("--fixes %s names no task" % a.fixes, 2)
+    slug, filed = file_bug(a, span, rollouts, rule, shape, "thread-skill-bug-%s" % a.slug, a.title.strip(), a.why,
+                           fixes, "exists")
+    if filed:
+        done(a, "filed %s" % slug)
+    return 0
+
+
+def file_bug(a, span, rollouts, rule, shape, new_slug, title, why, fixes, found_word):
+    """bug's dedupe and write (the module docstring's bug), shared with suite-audit: (slug, filed). An open task with
+    the key that this Reflection did not file prints `<found_word> <slug>`; a repeat for this Reflection prints its first
+    outcome and returns (slug, False)."""
+    rid = span["reflection"]
     key = RR.watch_id(rule, shape)
     lines = read_reflections()
     refuse_closed(lines, rid)
@@ -2328,8 +2455,8 @@ def cmd_bug(a):
              and d.get("reflection") == rid]
     if prior:
         p = prior[0]
-        print("%s %s" % ("filed" if p.get("filed") else "exists", p.get("vaultTask")))
-        return 0
+        print("%s %s" % ("filed" if p.get("filed") else found_word, p.get("vaultTask")))
+        return p.get("vaultTask"), False
     vault = Vault(a.tasks_dir)
     found = None
     for path, rec in vault.open_root_notes():
@@ -2341,9 +2468,9 @@ def cmd_bug(a):
         mine = ("Found by Reflection %s" % rid) in (read_note(path).section_text(NOTES_SECTION) if read_note(path) else "")
         filed, slug = mine, path.stem
         if not mine:
-            print("exists %s" % slug)
+            print("%s %s" % (found_word, slug))
     else:
-        slug, filed = "thread-skill-bug-%s" % a.slug, True
+        slug, filed = new_slug, True
     fields = {"id": key, "altitude": "bug", "reflection": rid, "rollouts": rollouts, "rule": rule, "shape": shape,
               "vaultTask": slug, "filed": filed}
     if filed:
@@ -2356,11 +2483,41 @@ def cmd_bug(a):
         if held is not None:
             raise Stop("path exists: %s (%s); choose other slug words" % (slug, status_of(held)), 2)
         zone()
-        text = bug_text(slug, a.title.strip(), a.why, rule, shape, key, rid, rollouts, fixes, mdate(now_ms()))
+        text = bug_text(slug, title, why, rule, shape, key, rid, rollouts, fixes, mdate(now_ms()))
         if not vault.root.is_dir():
             raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
         create(str(vault.root / ("%s.md" % slug)), text, a.dry_run)
     write_line("proposal", fields, a.dry_run)
+    return slug, filed
+
+
+def cmd_suite_audit(a):
+    """suite-audit (the module docstring's): a breach of Thread Skill's Suite budget or CI headroom in span's suite
+    block files its suite audit through bug's path, fixed rule and shape; an open one is cited, never filed twice."""
+    span = read_span(a.span)
+    suite = span.get("suite")
+    if not isinstance(suite, dict):
+        raise Stop("--span %s has no suite block (a span from before ADR 0073 d5): a new span is a new Reflection" % a.span, 2)
+    groups = [g for g in (suite.get("local") or []) + (suite.get("ci") or []) if isinstance(g, dict)]
+    mine = [g for g in groups if g.get("breach") is True and g.get("repo") == THREAD_SKILL_REPO]
+    if not mine:
+        done(a, "no suite budget breach on %s: no audit task" % THREAD_SKILL_REPO)
+        return 0
+    read = span_rollouts(span)
+    rollouts = sorted({r for g in mine for r in (g.get("rollouts") or []) if r in read})
+    if not rollouts:
+        raise Stop("no rollout the span read ran a breaching suite or job: report the breach, file nothing", 2)
+    breaches = [b for b in suite.get("breaches") or [] if isinstance(b, str) and b.startswith(THREAD_SKILL_REPO + ":")]
+    why = ("This week's median broke Thread Skill's budget: %s. ADR 0073 d5 reads local suites against the Suite budget "
+           "(estate ADR 0011: %d s for an Integration verify, %d s for the full suite) and each required CI job against "
+           "%d %% of its time limit; a breach files this audit. Measure `make test` (its wall time, the slowest tests, "
+           "each CI job against its limit) and rank what to split or trim, highest saving first (estate ADR 0011 d4's "
+           "method)." % ("; ".join(breaches) or "see span's suite block", SUITE_BUDGET["integration"],
+                         SUITE_BUDGET["full"], round(100 * CI_SHARE)))
+    zone()
+    day = mdate(to_ms(span.get("until"), "the span's until"))
+    slug, filed = file_bug(a, span, rollouts, SUITE_RULE, SUITE_SHAPE, "thread-skill-suite-audit-%s" % day,
+                           SUITE_AUDIT_TITLE, why, None, "cites")
     if filed:
         done(a, "filed %s" % slug)
     return 0
@@ -3208,6 +3365,10 @@ def main(argv):
     b.add_argument("--fixes")
     b.add_argument("--tasks-dir")
     b.add_argument("--dry-run", action="store_true")
+    sa = sub.add_parser("suite-audit")
+    sa.add_argument("--span", required=True)
+    sa.add_argument("--tasks-dir")
+    sa.add_argument("--dry-run", action="store_true")
     k = sub.add_parser("knobs")
     k.add_argument("--span", required=True)
     k.add_argument("--dry-run", action="store_true")
@@ -3241,6 +3402,7 @@ def main(argv):
     sub.add_parser("rung")
     a = p.parse_args(argv)
     verbs = {"span": lambda x: Span(x).run(), "watch": cmd_watch, "raised": cmd_raised, "bug": cmd_bug,
+             "suite-audit": cmd_suite_audit,
              "ledger": cmd_ledger, "attention": cmd_attention, "knobs": cmd_knobs, "decide": cmd_decide,
              "close": cmd_close, "moot": cmd_moot, "rung": cmd_rung}
     if a.verb not in verbs:
