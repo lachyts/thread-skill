@@ -2,6 +2,10 @@
 
 Date: 2026-11-02
 Status: accepted. Lachy asked for it on 2026-11-02: "some sort of automation where it detects that no rollouts are running and then automatically updates it (rather than me having to remember when those rollouts are running or not)". The plan was approved the same day. The technical calls below were decided for him. Amends ADR 0031 and ADR 0043. It is the first task of the every-rollout-at-once build (the 2026-11-02 spike). *(Amended 2026-11-05, p37-7; 2026-11-06, p39-4: see the Amendment sections below.)*
+*(Amended by ADR 0075, 2026-11-07: no notice is sent. Decision 2's 24-hour Notice and every notice of the 2026-11-05
+amendment (item 4's timeout notice, item 5, item 6's refused-tip notice and `ntfy-push.py` bundle row, and item 9's
+job-spell notice) are superseded; a stuck checkout stays in the state file, and `/thread:status` reads it there
+once P41-5 adds its Primary refresh line.)*
 
 ## Context
 
