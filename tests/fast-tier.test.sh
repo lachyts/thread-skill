@@ -1,0 +1,466 @@
+#!/usr/bin/env bash
+# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S13) and `check` (C1-C3) on throwaway
+# repos, its results on the real tree (R1-R6), and tests/run.sh's --fast and --only modes on a fixture checkout
+# (F1-F9). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
+# temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
+set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+cd "$(dirname "$0")/.."
+. tests/lib/assert.sh
+root=$(pwd -P)
+SEL="$root/tests/lib/fast-tier.py"
+TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
+TMP=$(cd "$TMP" && pwd -P)
+trap 'rm -rf "$TMP"' EXIT
+# The fixture checkout binds scripts/merge-task.sh (a stub) and its run.sh copy reaches a verify-slot pool's knobs, so
+# the Run record, the verify slots and the Heat hold's reading stay in temp even when this suite runs alone.
+export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"
+export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"
+export THREAD_HEAT_LEVEL=0
+export HOME="$TMP/home"; mkdir -p "$HOME"
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
+unset $(git rev-parse --local-env-vars)
+git config --global user.name "fast-tier-tests"; git config --global user.email "fast-tier-tests@example.invalid"
+git config --global init.defaultBranch main
+
+# mkrepo <dir>: an empty repo whose origin is a local bare repo, holding a copy of the selector.
+mkrepo() {
+  rm -rf "$1" "$1.git"; mkdir -p "$1/tests/lib"
+  git init -q --bare "$1.git"; git -C "$1" init -q; git -C "$1" remote add origin "$1.git"
+  cp "$SEL" "$1/tests/lib/fast-tier.py"
+}
+# holds <text> <sub> <yes> <no>: <yes> when <text> holds <sub>, else <no> (a function: bash 3.2 misparses a case in $(...)).
+holds() { case "$1" in *"$2"*) printf '%s' "$3" ;; *) printf '%s' "$4" ;; esac; }
+# put <dir> <path> <text>: one file, its parents made.
+put() { mkdir -p "$(dirname "$1/$2")"; printf '%s\n' "$3" > "$1/$2"; }
+# map <dir> <line>...: the repo's tests/fast-tier.map.
+map() { local d="$1"; shift; printf '%s\n' "$@" > "$d/tests/fast-tier.map"; }
+# sel <dir> <arg>...: the select output on one line, tabs as |, lines joined by a space.
+sel() { local d="$1"; shift; python3 "$d/tests/lib/fast-tier.py" select "$@" 2>&1 | tr '\t\n' '| ' | sed 's/ $//'; }
+# chk <dir>: index the repo's files, then check (its output; $? is check's).
+chk() { git -C "$1" add -A >/dev/null 2>&1; python3 "$1/tests/lib/fast-tier.py" check 2>&1; }
+# push <dir> <msg>: commit everything and push it to origin's main, which origin/HEAD then names.
+push() {
+  git -C "$1" add -A && git -C "$1" commit -qm "$2" && git -C "$1" push -q origin HEAD:main 2>/dev/null &&
+    git -C "$1" remote set-head origin main >/dev/null 2>&1
+}
+
+# ════ select ════════════════════════════════════════════════════════════════════════════════════════════════════
+echo "== select"
+D="$TMP/s1"; mkrepo "$D"
+put "$D" skills/x/scripts/zzleaf.py 'X = 1'
+put "$D" tests/zzleaf-a.test.sh 'python3 skills/x/scripts/zzleaf.py'
+put "$D" tests/zzother.test.sh 'echo other'
+put "$D" tests/zzextra.test.mjs '// extra'
+map "$D" 'skills/**' 'skills/x/scripts/zzleaf.py tests/zzextra.test.mjs' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf.py)" "FAST|-|-|1 tests/zzextra.test.mjs tests/zzleaf-a.test.sh" \
+  "S1: a leaf script selects the tests that name it plus its lines' entries, nothing else"
+
+D="$TMP/s2"; mkrepo "$D"
+put "$D" skills/x/scripts/zzleaf.py 'X = 1'
+put "$D" skills/x/scripts/zzloader.py 'import os
+HERE = os.path.dirname(os.path.abspath(__file__))
+LEAF = os.path.join(HERE, "zzleaf.py")'
+put "$D" tests/zzsuite-loader.test.mjs "// drives skills/x/scripts/zzloader.py"
+put "$D" skills/x/scripts/zzleaf2.py 'Y = 2'
+put "$D" skills/x/scripts/zzmid.py 'MID = "zzleaf2.py"'
+put "$D" skills/x/scripts/zztop.sh 'python3 "$(dirname "$0")/zzmid.py"'
+put "$D" tests/zztop.test.sh 'bash skills/x/scripts/zztop.sh'
+map "$D" 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf.py)" "FAST|-|-|1 tests/zzsuite-loader.test.mjs" \
+  "S2: a script loaded by path reaches its loader's suite, which never names it"
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf2.py)" "FAST|-|-|1 tests/zztop.test.sh" \
+  "S2: a chain of three (zzleaf2 <- zzmid <- zztop) selects the top's suite"
+
+D="$TMP/s3"; mkrepo "$D"
+put "$D" skills/x/scripts/zzleaf3.py 'Z = 3'
+put "$D" tests/zzleaf3.test.sh 'python3 skills/x/scripts/zzleaf3.py'
+put "$D" skills/x/scripts/zzdoc.py '"""Reads zzleaf3.py."""
+# and zzleaf3.py again, in a comment
+def f():
+    """zzleaf3.py once more."""
+    return 1'
+put "$D" tests/zzdoc.test.sh 'python3 skills/x/scripts/zzdoc.py'
+put "$D" skills/x/scripts/zzc.sh '# runs zzleaf3.py
+echo c'
+put "$D" tests/zzc.test.sh 'bash skills/x/scripts/zzc.sh'
+put "$D" skills/x/scripts/zzj.js '// reads zzleaf3.py
+export const j = 1'
+put "$D" tests/zzj.test.mjs '// imports skills/x/scripts/zzj.js'
+put "$D" skills/x/scripts/zzmsg.py 'print("see zzleaf3.py")'
+put "$D" tests/zzmsg.test.sh 'python3 skills/x/scripts/zzmsg.py'
+map "$D" 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf3.py)" "FAST|-|-|1 tests/zzj.test.mjs tests/zzleaf3.test.sh tests/zzmsg.test.sh" \
+  "S3: a docstring, a # comment and a shell comment line never propagate; a .js // comment and a message string do"
+
+D="$TMP/s4"; mkrepo "$D"
+put "$D" skills/x/scripts/zzleaf4.py 'W = 4'
+put "$D" tests/zzleaf4.test.sh 'python3 skills/x/scripts/zzleaf4.py'
+put "$D" skills/x/scripts/zzhub.py 'LEAF = "zzleaf4.py"'
+put "$D" tests/zzhub.test.sh 'python3 skills/x/scripts/zzhub.py'
+map "$D" 'skills/x/scripts/zzhub.py FULL' 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf4.py)" "FULL|skills/x/scripts/zzleaf4.py: reaches skills/x/scripts/zzhub.py, marked FULL" \
+  "S4: reaching a FULL carrier is FULL, both paths in the reason"
+ok "$(sel "$D" --paths skills/x/scripts/zzhub.py)" "FULL|skills/x/scripts/zzhub.py: marked FULL" "S4: a FULL path itself"
+ok "$(sel "$D" --ignore-full --paths skills/x/scripts/zzleaf4.py)" "FAST|-|-|1 tests/zzhub.test.sh tests/zzleaf4.test.sh" \
+  "S4: --ignore-full lists the reached tests instead"
+
+D="$TMP/s5"; mkrepo "$D"
+put "$D" skills/x/scripts/zzleaf5.py 'V = 5'
+put "$D" tests/lib/zzh.sh 'zzrun() { python3 skills/x/scripts/zzleaf5.py; }'
+put "$D" tests/zzt.test.sh '. tests/lib/zzh.sh; zzrun'
+map "$D" 'skills/**' 'tests/lib/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf5.py)" "FAST|-|-|1 tests/zzt.test.sh" "S5: a tests/lib helper naming the script selects the suites that source it"
+
+D="$TMP/s6"; mkrepo "$D"
+put "$D" skills/x/scripts/zzleaf6.py 'U = 6'
+put "$D" tests/zzleaf6.test.sh 'python3 skills/x/scripts/zzleaf6.py'
+put "$D" zzorphan.py 'L = "zzleaf6.py"'
+put "$D" zznone/a.md 'none'
+put "$D" zzalso/a.md 'also'
+map "$D" 'skills/**' 'tests/*.test.*' 'zznone/** NONE' 'zzalso/** ALSO tests/zzleaf6.test.sh'
+ok "$(sel "$D" --paths zzloose.txt)" "FULL|zzloose.txt: not in the map" "S6: an unmapped path is FULL"
+ok "$(sel "$D" --paths zznone/a.md)" "FAST|-|-|1" "S6: a path placed only by NONE selects nothing when the map has no \`** ALSO\` line"
+ok "$(sel "$D" --paths zzalso/a.md)" "FULL|zzalso/a.md: not in the map" "S6: a path matched only by an ALSO line is not placed"
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf6.py)" "FULL|skills/x/scripts/zzleaf6.py: reaches zzorphan.py, not in the map" \
+  "S6: a reached carrier no line places is FULL"
+put "$D" tests/zzw.test.mjs '// a walker'
+put "$D" tests/zzv.test.mjs '// reads zzr/'
+put "$D" skills/x/scripts/zzleaf6b.py 'B = 6'
+put "$D" tests/zzleaf6b.test.sh 'python3 skills/x/scripts/zzleaf6b.py'
+put "$D" zzr/zzr.sh 'python3 skills/x/scripts/zzleaf6b.py'
+put "$D" tests/zzrr.test.sh 'bash zzr/zzr.sh'
+map "$D" '** ALSO tests/zzw.test.mjs' 'skills/**' 'tests/*.test.*' 'zznone/** NONE' 'zzr/** NONE' 'zzr/** ALSO tests/zzv.test.mjs'
+ok "$(sel "$D" --paths zznone/a.md)" "FAST|-|-|1 tests/zzw.test.mjs" \
+  "S6: a path placed only by NONE still selects the walkers (its ALSO entries), and only them"
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf6b.py)" "FAST|-|-|1 tests/zzleaf6b.test.sh tests/zzv.test.mjs tests/zzw.test.mjs" \
+  "S6: a reached carrier placed only by NONE adds its lines' ALSO entries, never the tests that name it"
+
+D="$TMP/s7"; mkrepo "$D"
+put "$D" skills/x/scripts/zznobody.py 'T = 7'
+put "$D" tests/zzw.test.mjs '// a walker'
+map "$D" '** ALSO tests/zzw.test.mjs' 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zznobody.py)" "FULL|skills/x/scripts/zznobody.py: reaches no test" \
+  "S7: a placed path nothing names is FULL, walkers or not"
+
+D="$TMP/s8"; mkrepo "$D"
+put "$D" tests/zzt1.test.sh 'python3 skills/x/scripts/zzleaf8.py'
+put "$D" skills/x/scripts/zzleaf8.py 'S = 8'
+put "$D" tests/zzw.test.mjs '// a walker'
+put "$D" tests/zzpeer.test.mjs '// runs beside zzt1 on its line'
+map "$D" '** ALSO tests/zzw.test.mjs' 'tests/zzt1.test.sh tests/zzpeer.test.mjs' 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths tests/zzt1.test.sh)" "FAST|-|-|1 tests/zzpeer.test.mjs tests/zzt1.test.sh tests/zzw.test.mjs" \
+  "S8a: a changed test selects itself, its lines' entries and the walkers"
+put "$D" tests/zzt2.test.sh 'bash tests/zzt1.test.sh'
+has "$(sel "$D" --paths tests/zzt1.test.sh)" "tests/zzt2.test.sh" "S8b: a test that runs the changed test is selected"
+put "$D" tests/zzt3.test.sh 'bash "$root/tests/zzt2.test.sh"'
+has "$(sel "$D" --paths tests/zzt1.test.sh)" "tests/zzt3.test.sh" "S8c: … and the runner of that runner (rule 5)"
+put "$D" tests/zzt4.test.mjs "const t1 = fs.readFileSync(path.join(root, 'tests/zzt1.test.sh'), 'utf8')"
+has "$(sel "$D" --paths tests/zzt1.test.sh)" "tests/zzt4.test.mjs" "S8d: a test that reads the changed test's text is selected"
+put "$D" tests/zzt5.test.sh '# usage: bash tests/zzt5.test.sh
+echo "rerun with: bash tests/zzt5.test.sh"'
+edges=$(python3 - "$D/tests/lib/fast-tier.py" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ft", sys.argv[1]); ft = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ft)
+r = ft.Repo()
+print(" ".join(f"{a}>{b}" for a in sorted(r.runs) for b in sorted(r.runs[a])))
+PY
+)
+ok "$edges" "tests/zzt2.test.sh>tests/zzt1.test.sh tests/zzt3.test.sh>tests/zzt2.test.sh" \
+  "S8g: the runner edges are exactly zzt2>zzt1 and zzt3>zzt2 (a test that runs itself adds none)"
+got=$(sel "$D" --paths skills/x/scripts/zzleaf8.py)
+ok "$(for t in zzt1.test.sh zzt2.test.sh zzt3.test.sh zzt4.test.mjs; do holds "$got" "tests/$t" "$t " ""; done)" \
+  "zzt1.test.sh zzt2.test.sh zzt3.test.sh " "S8f: a script named only by zzt1 selects zzt1 and its runners, never zzt4 (zzt1's text did not change)"
+rm "$D/tests/zzt1.test.sh"
+got=$(sel "$D" --paths tests/zzt1.test.sh)
+ok "$(holds "$got" tests/zzt1.test.sh has-t1 no-t1)|$(holds "$got" tests/zzt2.test.sh y n)$(holds "$got" tests/zzt3.test.sh y n)" \
+  "no-t1|yy" "S8e: a deleted test selects its runners (they now fail) but never itself"
+
+D="$TMP/s9"; mkrepo "$D"
+put "$D" skills/x/ZZNOTE.md 'a note'
+put "$D" skills/x/scripts/zzreader.py 'NOTE = "ZZNOTE.md"'
+put "$D" tests/zzreader.test.sh 'python3 skills/x/scripts/zzreader.py'
+put "$D" tests/lib/zzlib.sh 'zznote() { cat "skills/x/ZZNOTE.md"; }'
+put "$D" tests/zzlibuser.test.sh '. tests/lib/zzlib.sh'
+put "$D" tests/zznote.test.mjs "// reads skills/x/ZZNOTE.md"
+map "$D" 'FOREIGN ZZNOTE.md' 'skills/**' 'tests/lib/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzlibuser.test.sh tests/zznote.test.mjs" \
+  "S9: a FOREIGN name selects its naming tests and a tests/lib helper's, never a script's"
+
+D="$TMP/s10"; mkrepo "$D"
+put "$D" tests/zzmd.test.mjs '// reads the skills prose'
+put "$D" tests/zzdocs.test.mjs '// reads docs'
+put "$D" tests/zzdocs2.test.mjs '// reads docs too'
+map "$D" 'skills/**/*.md tests/zzmd.test.mjs' 'docs/*.md tests/zzdocs.test.mjs' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/zz.md)" "FAST|-|-|1 tests/zzmd.test.mjs" "S10: skills/**/*.md matches at depth 1 (** is zero segments)"
+ok "$(sel "$D" --paths skills/a/b/zz.md)" "FAST|-|-|1 tests/zzmd.test.mjs" "S10: … and at depth 3"
+ok "$(sel "$D" --paths docs/zz/y.md)" "FULL|docs/zz/y.md: not in the map" "S10: docs/*.md never crosses a /"
+map "$D" 'docs/*.md tests/zzdocs.test.mjs' 'docs/** tests/zzdocs2.test.mjs' 'tests/*.test.*'
+ok "$(sel "$D" --paths docs/zz.md)" "FAST|-|-|1 tests/zzdocs.test.mjs tests/zzdocs2.test.mjs" "S10: two matching lines give their union"
+
+D="$TMP/s11"; mkrepo "$D"
+put "$D" skills/execute/scripts/merge-task.sh '. "$(dirname "$0")/zzmtlib.sh"'
+put "$D" skills/execute/scripts/zzmtlib.sh 'zzmt() { :; }'
+map "$D" 'skills/execute/scripts/merge-task.sh @merge-task-self-tests' 'skills/**'
+ok "$(sel "$D" --paths skills/execute/scripts/merge-task.sh)" "FAST|-|-|1 @merge-task-self-tests" "S11: @merge-task-self-tests is selected directly"
+ok "$(sel "$D" --paths skills/execute/scripts/zzmtlib.sh)" "FAST|-|-|1 @merge-task-self-tests" "S11: … and through a lib merge-task.sh sources"
+
+D="$TMP/s13"; mkrepo "$D"
+put "$D" skills/execute/scripts/merge-task.sh 'echo self-test'
+put "$D" tests/run.sh 'bash skills/execute/scripts/merge-task.sh --self-test-base'
+printf '\nSELF_TEST_SCRIPT = "skills/execute/scripts/merge-task.sh"\n' >> "$D/tests/lib/fast-tier.py"
+map "$D" 'tests/run.sh FULL' 'tests/lib/fast-tier.py FULL' 'skills/execute/scripts/merge-task.sh @merge-task-self-tests' 'skills/**'
+ok "$(sel "$D" --paths skills/execute/scripts/merge-task.sh)" "FAST|-|-|1 @merge-task-self-tests" \
+  "S13: run.sh and the selector name merge-task.sh in code, yet are never carriers: FAST, never naming either"
+
+# S12: the changed paths from git.
+D="$TMP/s12"; mkrepo "$D"
+for x in zza zzb zzc; do put "$D" "skills/x/scripts/$x.py" "N = '$x'"; put "$D" "tests/$x.test.sh" "python3 skills/x/scripts/$x.py"; done
+put "$D" tests/zzdocs.test.mjs '// reads docs'
+put "$D" tests/zzspace.test.mjs '// reads docs/a b.md by name'
+put "$D" tests/zzr.test.sh 'python3 skills/x/scripts/zzr.py'
+map "$D" 'skills/**' 'tests/*.test.*' 'docs/** tests/zzdocs.test.mjs'
+push "$D" base
+B=$(git -C "$D" rev-parse HEAD)
+ok "$(sel "$D")" "FULL|no changed paths from $B" "S12: an empty diff from origin/HEAD is FULL"
+ok "$(sel "$D" --base nope)" "FULL|base nope does not resolve" "S12: an unresolvable base is FULL"
+mkdir -p "$D/.claude"; : > "$D/.claude/settings.json"; : > "$D/.claude/merge-task.status"
+ok "$(sel "$D" --base HEAD)" "FULL|no changed paths from HEAD" "S12: untracked .claude/ files add nothing"
+echo "M = 1" >> "$D/skills/x/scripts/zza.py"; git -C "$D" commit -qam one; C1=$(git -C "$D" rev-parse HEAD)
+echo "M = 2" >> "$D/skills/x/scripts/zzb.py"; git -C "$D" commit -qam two
+ok "$(sel "$D")" "FAST|$B|origin/HEAD|2 tests/zza.test.sh tests/zzb.test.sh" "S12: no --base reads origin/HEAD's merge base"
+ok "$(sel "$D" --base "$C1")" "FAST|$C1|--base|1 tests/zzb.test.sh" "S12: --base wins when given"
+git -C "$D" push -q origin "$B:refs/heads/master" 2>/dev/null; git -C "$D" remote set-head origin -d >/dev/null 2>&1
+ok "$(sel "$D" | cut -d' ' -f1)" "FAST|$B|origin/master|2" "S12: no origin/HEAD falls back to origin/master"
+H=$(git -C "$D" rev-parse HEAD)
+echo "M = 3" >> "$D/skills/x/scripts/zza.py"; git -C "$D" add skills/x/scripts/zza.py
+echo "M = 4" >> "$D/skills/x/scripts/zzb.py"
+put "$D" tests/zznew.test.sh 'echo new'
+ok "$(sel "$D" --base HEAD)" "FAST|$H|--base|3 tests/zza.test.sh tests/zzb.test.sh tests/zznew.test.sh" \
+  "S12: staged, unstaged and untracked edits all count (.claude/ still ignored)"
+git -C "$D" reset -q --hard && rm -f "$D/tests/zznew.test.sh"
+git -C "$D" mv skills/x/scripts/zza.py skills/x/scripts/zzr.py; git -C "$D" commit -qm rename
+ok "$(sel "$D" --base HEAD~1)" "FAST|$H|--base|2 tests/zza.test.sh tests/zzr.test.sh" "S12: a rename counts both paths"
+put "$D" "docs/a b.md" 'spaced'
+ok "$(sel "$D" --base HEAD)" "FAST|$(git -C "$D" rev-parse HEAD)|--base|1 tests/zzdocs.test.mjs tests/zzspace.test.mjs" \
+  "S12: docs/a b.md survives the -z parse, and a basename that is no token matches as a substring"
+
+# ════ check ═════════════════════════════════════════════════════════════════════════════════════════════════════
+echo "== check"
+t0=$(python3 -c 'import time; print(time.time())')
+out=$(python3 "$SEL" check 2>&1); rc=$?
+t1=$(python3 -c 'import time; print(time.time())')
+ok "$rc" 0 "C1: check passes on the real repo ($(python3 -c "print(f'{$t1 - $t0:.1f}')") s)"
+[ "$rc" -eq 0 ] || printf '%s\n' "$out"
+
+# The base fixture check passes on; each control copies it, changes one thing and must name its problem.
+CB="$TMP/cbase"; mkrepo "$CB"
+put "$CB" skills/x/scripts/zza.py 'A = 1'
+put "$CB" tests/zza.test.sh 'python3 skills/x/scripts/zza.py'
+map "$CB" 'skills/**' 'tests/*.test.*'
+out=$(chk "$CB"); rc=$?
+ok "$rc|$(holds "$out" "fast-tier map: ok (" ok "$out")" "0|ok" "C2: the base fixture passes check"
+# ctl <label> <expected text> <setup...>: a copy of the base fixture, the setup run in it, check exits 1 naming it.
+ctl() {
+  local label="$1" want="$2" out rc; shift 2
+  D="$TMP/ctl"; rm -rf "$D"; cp -R "$CB" "$D"
+  ( cd "$D" && eval "$@" )
+  out=$(chk "$D"); rc=$?
+  ok "$rc|$(holds "$out" "$want" named "$(echo "$out" | head -3)")" "1|named" "C2: $label"
+}
+# pass <label> <setup...>: the same, and check passes.
+pass() {
+  local label="$1" out rc; shift
+  D="$TMP/ctl"; rm -rf "$D"; cp -R "$CB" "$D"
+  ( cd "$D" && eval "$@" )
+  out=$(chk "$D"); rc=$?
+  ok "$rc|$(echo "$out" | head -2)" "0|$(echo "$out" | grep '^fast-tier map: ok' | head -1)" "C2 pass: $label"
+}
+ml() { printf '%s\n' "$@" >> tests/fast-tier.map; }   # append map lines, inside a control's setup
+ctl "an unplaced script" "hooks/zzhook.py: not placed" 'put . hooks/zzhook.py "H = 1"'
+ctl "a script that reaches no test" "skills/x/scripts/zzlonely.py: reaches no test" 'put . skills/x/scripts/zzlonely.py "L = 1"'
+ctl "a stale exact path" "skills/x/scripts/zzgone.py does not exist (check b)" 'ml "skills/x/scripts/zzgone.py tests/zza.test.sh"'
+ctl "an uncollected entry" "the entry tests/lib/zzhelp.sh is not a collected test (check c)" \
+  'put . tests/lib/zzhelp.sh ":"; ml "tests/lib/** tests/lib/zzhelp.sh"'
+ctl "an empty glob" "the glob zzempty/** matches no tracked file (check b)" 'ml "zzempty/** tests/zza.test.sh"'
+ctl "a second @ word" "@zzother-tests: @merge-task-self-tests is the only @ entry" 'ml "skills/x/scripts/zza.py @zzother-tests"'
+ctl "a fixture dir with no line" "tests/fixtures/zzfx/: no \`tests/fixtures/zzfx/** <test>...\` line" 'put . tests/fixtures/zzfx/data.txt d'
+ctl "a fixture line missing a helper's sourcing test" \
+  "tests/zzsrc.test.sh names tests/lib/zzenv.sh, which holds fixtures/zzfx but is missing from the tests/fixtures/zzfx/** line" \
+  'put . tests/fixtures/zzfx/data.txt d; put . tests/lib/zzenv.sh "FX=\"\$root/tests/fixtures/zzfx\""
+   put . tests/zzsrc.test.sh ". tests/lib/zzenv.sh"; ml "tests/lib/**" "tests/fixtures/zzfx/** tests/zza.test.sh"'
+ctl "a fixture consumer named only through path.join segments" \
+  "tests/zzpj.test.mjs holds 'fixtures', 'zzfx' but is missing from the tests/fixtures/zzfx/** line" \
+  "put . tests/fixtures/zzfx/data.txt d; put . tests/zzpj.test.mjs \"const fx = path.join(root, 'tests', 'fixtures', 'zzfx')\"
+   ml 'tests/fixtures/zzfx/** tests/zza.test.sh'"
+PJ2="const fx = path.join(root, 'tests/fixtures', \"zzfx\", 'data.txt')"
+ctl "… with 'tests/fixtures' as one segment and a double-quoted dir" "tests/zzpj2.test.mjs holds 'fixtures', 'zzfx' but is missing" \
+  'put . tests/fixtures/zzfx/data.txt d; put . tests/zzpj2.test.mjs "$PJ2"; ml "tests/fixtures/zzfx/** tests/zza.test.sh"'
+pass "fixture dirs zz and zz-long: a test holding only fixtures/zz-long/a.md is no consumer of zz" \
+  'put . tests/fixtures/zz/a.txt a; put . tests/fixtures/zz-long/a.txt a; put . tests/zzlong.test.sh "cat tests/fixtures/zz-long/a.md"
+   ml "tests/fixtures/zz/** tests/zza.test.sh" "tests/fixtures/zz-long/** tests/zzlong.test.sh"'
+ctl "a FOREIGN name with no file" "the FOREIGN name ZZNOPE.md is the basename of no tracked file (check g)" 'ml "FOREIGN ZZNOPE.md"'
+ctl "(h) a script run.sh runs, neither FULL nor self-tests" "tests/run.sh names skills/x/scripts/zza.py; mark it FULL" \
+  'put . tests/run.sh "python3 skills/x/scripts/zza.py"; ml "tests/run.sh FULL"'
+pass "(h) a script named only in a run.sh comment line" 'put . tests/run.sh "# runs skills/x/scripts/zza.py"; ml "tests/run.sh FULL"'
+ctl "an unknown keyword" "unknown keyword ZZKEY (check a)" 'ml "ZZKEY skills/x/scripts/zza.py"'
+ctl "FULL beside an entry" "FULL stands alone on its line (check a)" 'ml "skills/x/scripts/zza.py FULL tests/zza.test.sh"'
+ctl "an OWN-LISTINGS line without its kind" "an OWN-LISTINGS line ends with a" 'put . tests/zzls.test.sh "ls tests/*.test.sh"; ml "OWN-LISTINGS tests/zzls.test.sh"'
+# (f): one unclassified test per directory-listing form.
+f_ctl() { ctl "(f) $1" "$2: lists a directory" "put . $2 $(printf '%q' "$3")"; }
+# CT is built, so this suite's own text never holds the import it plants (it would walk the tree through contract-text).
+CT=contract-text
+f_ctl "a contract-text textFiles import" tests/zzct.test.mjs "import { read, textFiles } from './lib/$CT.mjs'"
+f_ctl "readdirSync(" tests/zzrd.test.mjs "const names = fs.readdirSync(dir)"
+f_ctl "ls-files" tests/zzlsf.test.mjs "execFileSync('git', ['ls-files'])"
+f_ctl ".sh ls tests/*.test.sh" tests/zzls.test.sh 'for t in $(ls tests/*.test.sh); do :; done'
+f_ctl ".sh git grep -l x" tests/zzgg.test.sh 'n=$(git grep -l x | wc -l)'
+f_ctl "node spawnSync('grep', ['-rn', 'x', 'skills'])" tests/zzsg.test.mjs "const r = spawnSync('grep', ['-rn', 'x', 'skills'])"
+f_ctl ".sh cp -R \"\$root/skills\"" tests/zzcp.test.sh 'cp -R "$root/skills" "$tmp/p"'
+f_ctl "node cpSync(path.join(root, 'skills'))" tests/zzcps.test.mjs "fs.cpSync(path.join(root, 'skills'), d, { recursive: true })"
+f_ctl ".sh find . with no cd" tests/zzfind.test.sh 'n=$(find . -name x | wc -l)'
+f_ctl ".sh (cd \"\$root\" && find .)" tests/zzfcd.test.sh 'files=$(cd "$root" && find . -type f)'
+ctl "(f) .sh grep -rn over skills hooks names both lines" "OWN-LISTINGS" \
+  'put . tests/zzgr.test.sh "ok \"\$(grep -rn x skills hooks)\" \"\" none"'
+ctl "(f) … and the walkers line" "\`** ALSO\` walkers line" 'put . tests/zzgr.test.sh "ok \"\$(grep -rn x skills hooks)\" \"\" none"'
+pass "(f) grep -c over one named file (no r flag)" 'put . tests/zzgc.test.sh "n=\$(grep -c x tests/one.txt)"'
+pass "(f) grep -rn over \"\$tmp\" (a temp operand) needs no line" 'put . tests/zzgt.test.sh "n=\$(grep -rn x \"\$tmp\")"'
+ctl "(f) … and on OWN-LISTINGS it lists nothing" "the OWN-LISTINGS entry tests/zzgt.test.sh lists nothing" \
+  'put . tests/zzgt.test.sh "n=\$(grep -rn x \"\$tmp\")"; ml "OWN-LISTINGS tests/zzgt.test.sh  # (i) a temp dir"'
+pass "(f) (cd \"\$tmp\" && find . -type f)" 'put . tests/zzft.test.sh "files=\$(cd \"\$tmp\" && find . -type f)"'
+W_SETUP='put . tests/zzw.test.sh "ls tests/*.test.sh"; put . tests/zzrun.test.sh "bash tests/zzw.test.sh"; ml "** ALSO tests/zzw.test.sh"'
+ctl "(f) a runner of a walker on OWN-LISTINGS" "tests/zzrun.test.sh: runs the walker tests/zzw.test.sh" \
+  "$W_SETUP; ml 'OWN-LISTINGS tests/zzrun.test.sh  # (i) runs zzw'"
+pass "(f) a runner of a walker on the walkers line" "$W_SETUP; ml '** ALSO tests/zzrun.test.sh'"
+ctl "(f) a contract-text importer on OWN-LISTINGS" "walks the tree through contract-text.mjs" \
+  "put . tests/zzct.test.mjs \"import { walk } from './lib/$CT.mjs'\"; ml 'OWN-LISTINGS tests/zzct.test.mjs  # (i) x'"
+
+# C3: the selector collects exactly what run.sh runs.
+globs=$(python3 - "$SEL" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ft", sys.argv[1]); ft = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ft)
+print(" ".join(sorted(ft.COLLECTED)))
+PY
+)
+run_globs=$(sed -n -e 's/^node_tests=(\(.*\))$/\1/p' -e 's/^sh_tests=(\$(ls -S \(.*\)))$/\1/p' tests/run.sh | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+ok "$globs" "$run_globs" "C3: the selector's COLLECTED globs equal run.sh's node_tests and sh_tests globs"
+
+# ════ the real tree ═════════════════════════════════════════════════════════════════════════════════════════════
+echo "== the real tree"
+r1=$(python3 "$SEL" select --paths skills/reflect/scripts/attention.py)
+ok "$(holds "${r1:0:4}" FULL y "$(holds "$r1" tests/reflect-weekly.test.mjs y "$(echo "$r1" | head -1)")")" y \
+  "R1: attention.py is FULL or reaches tests/reflect-weekly.test.mjs (reflect.py loads it by path)"
+r2=$(python3 "$SEL" select --ignore-full --paths skills/reflect/scripts/attention.py)
+has "$r2" "tests/reflect-weekly.test.mjs" "R2: with --ignore-full, attention.py reaches tests/reflect-weekly.test.mjs through reflect.py"
+r3=$(python3 "$SEL" select --paths skills/execute/scripts/merge-task.sh)
+ok "$(echo "$r3" | head -1 | cut -f1)|$(printf '%s\n' "$r3" | grep -cx '@merge-task-self-tests')|$(printf '%s\n' "$r3" | grep -c 'fast-tier.py')" \
+  "FAST|1|0" "R3: merge-task.sh is FAST with @merge-task-self-tests (if this turns FULL, re-judge the FULL list: what does it reach?)"
+r4=$(python3 "$SEL" select --paths docs/adr/0073-thread-skill-verifies-a-fast-tier-at-merge.md)
+ok "$(printf '%s\n' "$r4" | head -1 | cut -f1)|$(printf '%s\n' "$r4" | grep -cxE 'tests/(verify-slot|release-check-quoting-diff)\.test\.sh')" "FAST|2" \
+  "R4: a docs-only change is FAST and runs the walkers (verify-slot, release-check-quoting-diff)"
+d=landing-register   # built, so this suite reads no fixture dir
+r5=$(python3 "$SEL" select --paths "tests/fixtures/$d/register.md")
+ok "$(printf '%s\n' "$r5" | grep -cxE 'tests/(landing-register\.test\.mjs|execution-fit-remote\.test\.sh)')" 2 \
+  "R5: a landing-register fixture reaches its path.join consumer and its literal one"
+has "$(python3 "$SEL" select --paths tests/release-check.test.sh)" "tests/release-check-quoting-diff.test.sh" \
+  "R5: a change to release-check.test.sh runs its runner, release-check-quoting-diff"
+has "$(python3 "$SEL" select --paths tests/reflect-weekly.test.mjs)" "tests/fast-tier.test.sh" \
+  "R5: a change to a test this suite names selects this suite (rule 1), its OWN-LISTINGS (ii) reason"
+r6=$(python3 "$SEL" select --paths tests/e2e/parallel-rollouts-one-repo.live.sh)
+ok "$(printf '%s\n' "$r6" | head -1 | cut -f1)|$(printf '%s\n' "$r6" | grep -cxE 'tests/contracts/(queue-only|rung-vocabulary|no-single-cause)\.test\.mjs')" \
+  "FAST|3" "R6: a tests/e2e/ change (NONE) still runs the walkers that read it (queue-only, rung-vocabulary, no-single-cause)"
+
+# ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
+echo "== run.sh"
+F="$TMP/f"; mkrepo "$F"
+cp "$root/tests/run.sh" "$F/tests/run.sh"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$F/tests/lib/"
+put "$F" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
+put "$F" skills/x/scripts/zza.py 'print("a")'
+put "$F" skills/x/scripts/zzb.py 'print("b")'
+put "$F" skills/x/zz.workflow.js 'export const meta = {}
+return 1'
+put "$F" tests/zza.test.sh 'echo "zzmarker-a zza.py"'
+put "$F" tests/zzb.test.sh 'echo "zzmarker-b zzb.py zz.workflow.js"'
+put "$F" tests/contracts/zzc.test.mjs "console.log('zzmarker-c'); if (process.env.ZZ_C_OK !== '1') process.exit(1)"
+put "$F" docs/zzreadme.md 'notes'
+map "$F" 'tests/run.sh FULL' 'tests/fast-tier.map FULL' 'tests/lib/** FULL' \
+  'skills/execute/scripts/merge-task.sh @merge-task-self-tests' 'skills/**' 'tests/*.test.*' 'tests/contracts/*.test.mjs' 'docs/** NONE'
+push "$F" base
+FB=$(git -C "$F" rev-parse HEAD)
+# run <shell> <arg>...: tests/run.sh in the fixture; output in $out, exit in $rc.
+run() { local sh="$1"; shift; out=$(cd "$F" && "$sh" tests/run.sh "$@" 2>&1); rc=$?; }
+markers() { printf '%s\n' "$out" | grep -oE 'zzmarker-[a-z-]+( --self-test-[a-z]+)?' | grep -v '^zzmarker-self-test$' | LC_ALL=C sort -u | tr '\n' ' '; }
+porc() { git -C "$F" status --porcelain; }
+
+echo 'B = 1' >> "$F/skills/x/scripts/zza.py"; git -C "$F" commit -qam "a only"
+p0=$(porc)
+THREAD_VERIFY_BASE=$FB run bash --fast
+ok "$rc|$(markers)" "0|zzmarker-a " "F1: a commit touching only zza.py runs only zza's suite"
+for s in "== bash syntax" "== python syntax" "== workflow parse" "== fast-tier map check" "== node tests: none selected" \
+  "== fast tier: base ${FB:0:12} (--base), 1 changed paths, 1 test files" "make test: ALL PASS"; do
+  has "$out" "$s" "F1: … prints '$s'"
+done
+ok "$(porc)" "$p0" "F8: the fast run left the fixture's git status unchanged"
+
+put "$F" new.txt 'loose'
+ZZ_C_OK=1 THREAD_VERIFY_BASE=$FB run bash --fast
+ok "$rc|$(markers)" "0|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F2: an unmapped path runs everything"
+has "$out" "== fast tier: full suite (new.txt: not in the map)" "F2: … and says why"
+rm -f "$F/new.txt"
+
+git -C "$F" reset -q --hard "$FB"
+put "$F" docs/zz.md 'notes'; git -C "$F" add -A; git -C "$F" commit -qm docs
+shells=("$(command -v bash)"); [ -x /bin/bash ] && ! [ /bin/bash -ef "${shells[0]}" ] && shells+=(/bin/bash)
+for sh in "${shells[@]}"; do
+  v=$("$sh" -c 'echo ${BASH_VERSINFO[0]}')
+  THREAD_VERIFY_BASE=$FB run "$sh" --fast
+  ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== tests/')" "0||0" "F3 ($sh, bash $v): a NONE-only diff in a fixture with no \`** ALSO\` line selects nothing: no suite spawned, no node, the run passes"
+  has "$out" "== node tests: none selected" "F3 ($sh, bash $v): … node is never run"
+  has "$out" "0 test files" "F3 ($sh, bash $v): … and the fast-tier line says 0 test files"
+done
+git -C "$F" reset -q --hard "$FB"
+ZZ_C_OK=1 THREAD_VERIFY_BASE=$FB run bash --only tests/contracts/zzc.test.mjs
+ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== tests/')" "0|zzmarker-c |0" "F3: a node-only run spawns no shell suite and no self-test"
+
+run bash --only tests/zzb.test.sh
+ok "$rc|$(markers)" "0|zzmarker-b " "F4: --only runs only the named file, in the harness"
+has "$out" "== fast-tier map check" "F4: … after the always-run steps"
+for args in "--fast --only tests/zzb.test.sh" "--zzbogus" "--only" "--only tests/zznope.test.sh" "--only tests/run.sh"; do
+  # shellcheck disable=SC2086
+  run bash $args
+  ok "$rc|$(markers)" "2|" "F4: run.sh $args exits 2 and runs nothing"
+done
+
+ZZ_C_OK=1 run bash
+ok "$rc|$(markers)" "0|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F5: a bare run runs everything"
+has "$out" "== fast-tier map check" "F5: … the map check included"
+ok "$(printf '%s\n' "$out" | grep -c '== fast tier')" 0 "F5: … and reads no selection"
+
+printf '%s\n' 'skills/x/scripts/zzgone.py tests/zza.test.sh' >> "$F/tests/fast-tier.map"
+for mode in --fast bare; do
+  if [ "$mode" = bare ]; then ZZ_C_OK=1 run bash; else ZZ_C_OK=1 THREAD_VERIFY_BASE=$FB run bash --fast; fi
+  ok "$rc|$(printf '%s\n' "$out" | grep -c 'zzgone.py does not exist')" "1|1" "F6 ($mode): a stale map line turns the run red"
+  has "$out" "  - fast-tier map check" "F6 ($mode): … through the map check step"
+done
+git -C "$F" checkout -q -- tests/fast-tier.map
+
+echo 'B = 2' >> "$F/skills/x/scripts/zza.py"; git -C "$F" commit -qam one
+echo 'B = 3' >> "$F/skills/x/scripts/zzb.py"; git -C "$F" commit -qam two
+p0=$(porc)
+THREAD_VERIFY_BASE=$(git -C "$F" rev-parse HEAD~2) run bash --fast
+ok "$rc|$(markers)" "0|zzmarker-a zzmarker-b " "F7: a base two commits back selects both commits' suites (captured before the unset)"
+ok "$(porc)" "$p0" "F8: … and the run left the fixture's git status unchanged"
+
+git -C "$F" reset -q --hard "$FB"
+echo '# touched' >> "$F/skills/execute/scripts/merge-task.sh"; git -C "$F" commit -qam mt
+THREAD_VERIFY_BASE=$FB run bash --fast
+ok "$rc|$(markers)" "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F9: a change to merge-task.sh runs both self-tests and nothing else"
+
+echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
+exit "$fail"

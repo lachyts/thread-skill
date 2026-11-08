@@ -1,5 +1,23 @@
 # thread-skill
 
+## Tests
+
+Verifier: `make test-fast`
+Completion verifier: `make test`
+Tests: one test file, hermetic: `bash tests/run.sh --only <test file>...`
+
+`make test-fast` is the fast tier: the always-run checks, then only the test files the diff reaches. That reach is
+declared in tests/fast-tier.map, and tests/lib/fast-tier.py's header holds its rules. A changed path the map cannot
+place runs the full suite (ADR 0073 d1). Every run, `make test` included, checks the map and names what is missing:
+
+- A new script under skills/*/scripts/ or hooks/ is already placed by `skills/**` or `hooks/**`; it needs only a
+  test that names it (check d). It needs a map line only when it should be FULL or no test names it.
+- A new tests/fixtures/<d>/ needs a `tests/fixtures/<d>/** <consumers>` line (check e).
+- A new test that lists a directory joins the walkers' `** ALSO` line or an OWN-LISTINGS line (check f).
+
+tests/fast-tier.map is itself FULL, so a diff that edits it runs the full suite at both Checkpoints and at
+Integration: edit it only when a check names a missing line.
+
 ## Review rule: a reading holds only its window's rows
 
 Some outputs here are read by no script: span.json's reported blocks, a score's sums, the claims a docstring
