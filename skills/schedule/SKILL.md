@@ -1003,8 +1003,9 @@ chains in Chain copies while the holder's Leg is open. Each chain
 works every git checkout it writes in its own **Chain copy** (ADR 0067 d2): S5's `leg.py copies` makes a git
 worktree of that checkout on `chain/<note>` under `~/.local/state/thread/chains/` and records it on the note as
 `chain_copies:`, so two chains in one repo share no index or HEAD and meet only file to file; `leg.py land` lands each
-finished task's commits on the checkout's default branch as it finishes (ADR 0067 d3). A note written before
-Chain copies (no `chain_copies:`) still works each checkout in place, a chain at a time. A
+finished task's commits on the checkout's default branch as it finishes (ADR 0067 d3). S5 gives every note it writes
+its Chain copies (ADR 0075 d4); only a note written before them (no `chain_copies:`) still works each checkout in
+place, a chain at a time. A
 member predicts each path its `## Launch` names below a checkout's toplevel, each of its `touches:` (a relative one
 in its one checkout) and each surface added for it, or exactly what it declares in `surfaces:`. Its reach paths name
 the checkout it works and predict nothing there: its launch folder, its launch commands' `--add-dir` and `cd` paths
@@ -1022,8 +1023,14 @@ profile's other Working roots (a workspace launcher's `add_dirs`), another proje
 why the default's WARN says to declare `surfaces:` for them (`serial-chains.py`'s header is the one statement of
 the surface grammar). Nor does it claim a `## Launch` path that is `/` or the home directory (a bare `cd ~` or
 `--add-dir ~`), which would contain every repo: a WARN names it. A code row's Leg finishes only commits in its own
-checkout, so an alias-less row that works one checkout opens from it, and an alias-less row working two checkouts, or
-one whose launch opens in the vault while it works a checkout, is refused (ADR 0059); a session-lane member never is.
+checkout, and its review cannot leave the Session's cwd, so a row commits only to the checkout it launches from (ADR
+0074 d3): the checkouts it commits to are those of its `repo:` surfaces, declared, derived or added. An alias-less row
+opens from the one checkout its surfaces name, whatever else it reaches, and is refused when they name two; naming
+none, it opens from the one checkout it works, and is refused when it works two (ADR 0059 d4). An aliased row is
+refused when its surfaces name a checkout other than its launch folder's, or when its launch opens in the vault while
+it works a checkout. Reach (an `--add-dir`, a `cd`, a where-label value, a project's `Local:`) is never refused; a
+path in another checkout named outside a **Read...** item is a prediction, so it is refused like a commit. A
+session-lane member is never refused.
 
 **S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
 linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are
@@ -1041,11 +1048,18 @@ declared `surfaces:`: a declaration is the member's whole claim. Pass the narrow
 never a checkout's toplevel, which claims the whole checkout. For a vault write read in a member's body, pass
 the narrowest vault path it names, never the vault root, `vault` or a path under `Work/Tasks`: an added vault-root
 path narrows to the member's project place with a WARN, an added `Work/Tasks` path is dropped with a WARN, and only
-the literal token `vault` claims the whole vault. Exit 3 (an unknown, null or missing launch folder, a missing
-launch-folders file an alias needs, a dependency cycle, a malformed declared token, a code row whose Leg would open
-outside the checkout it works: an alias-less row working two checkouts, or a vault launch working one) or exit 2
-stops the run before anything is written: print its stderr verbatim. Name each `sessionLane` member, with its
-`why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
+the literal token `vault` claims the whole vault. An added path obeys ADR 0074 d3 as a declared or derived one
+does: one in a checkout other than its member's launch folder's refuses that member. Exit 3 (an unknown, null or
+missing launch folder, a missing launch-folders file an alias needs, a dependency cycle, a malformed declared token,
+a code row whose Leg would open outside the checkout it works: an alias-less row whose surfaces name two checkouts or,
+naming none, that works two, a vault launch working one, or a row whose `repo:` surfaces name a checkout other than
+its launch folder's) or exit 2 stops the run before anything is written: print its stderr verbatim. A cross-checkout
+refusal names its remedies in turn: only when every checkout the row commits to is that one checkout, launch it with
+that checkout's launcher (from `launch-folders.json`), else from that checkout (a row committing to two checkouts is
+refused from any one launch, so its remedies start at the split); split it into one task per checkout chained by
+`depends-on:` (they stay in the one chain, a Leg boundary between them); or, for a checkout it only reads, declare
+`surfaces:` without that checkout, or move the path under a **Read...** item. Name each `sessionLane` member, with
+its `why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
 Carry the `warns` to the confirm and to S7.
 
 **S3. Live chains.** For every chain, run
@@ -1120,7 +1134,7 @@ Then stamp each note written with the Engine snapshot, as step 6 does: `python3 
 
 After the adopt, a note it stamped `completion_verifier:` on gets step 6's *Check the stamped commands*: `python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>` (from `${CLAUDE_PLUGIN_ROOT}` after a cut exit 4), read-only, which reads the stamped keys with the completion verify's own reader. Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`.
 
-Then each note's Chain copies (ADR 0067 d2): `python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>` (from `${CLAUDE_PLUGIN_ROOT}` after a cut exit 4), after the adopt and any `verify-timeout`. It makes a git worktree of each checkout the chain writes, on `chain/<the note's slug>`, under `~/.local/state/thread/chains/` (cut from the checkout's local default branch), links each gitignored `.mcp.json` and `.claude/settings.local.json` into it, and stamps `chain_copies:` on the note. Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true` (a re-run of `copies` on it keeps the copies it made); carry its `warns` to S7.
+Then each note's Chain copies (ADR 0067 d2): `python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>` (from `${CLAUDE_PLUGIN_ROOT}` after a cut exit 4), after the adopt and any `verify-timeout`. It makes a git worktree of each checkout the chain writes, on `chain/<the note's slug>`, under `~/.local/state/thread/chains/` (cut from the checkout's local default branch), links each gitignored `.mcp.json` and `.claude/settings.local.json` into it, and stamps `chain_copies:` on the note. It runs for every note written, unconditionally (ADR 0075 d4: no serial chain works in place), so a vault-only chain's note gets `chain_copies: []`. Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true` (a re-run of `copies` on it keeps the copies it made); carry its `warns` to S7.
 
 **S6. Stamp.** Each member of each note written gets `rollout: "[[<its note>]]"`, step 7's clear (its second
 bullet), its `depends-on:` entries from S4, on every run step 7's `## Decisions (recorded <date>)` Planner

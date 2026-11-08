@@ -138,7 +138,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
   ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
-                     not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
+                     not checked as an enum; reconcile-rollout.py's table writes quota | call-failed | ci-timeout |
                      merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
                      needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
@@ -148,8 +148,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      Integration, `integration: verifier red: …`, and merge-gate (ADR 0068) is a merge-task stop
                      whose own cause (the reason from its last `ERROR:` line to the end) is a red required check
                      after the verifier passed, which reflect traces to schedule step 2.5 when the check runs a
-                     class the verifier never runs); setAsideAt? (run | integration | gate); stamp?; reconciledAt?
-                     (as slot-freed)
+                     class the verifier never runs, and ci-timeout (ADR 0073 d4) is a merge-task stop whose own
+                     cause is a CANCELLED required check, a CI timeout on GitHub's side); setAsideAt? (run |
+                     integration | gate); stamp?; reconciledAt? (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt | origin: mark-integrating's origin-lane refusal, ADR
                      0064, the lead yielding its lane to another rollout's Integration on the same origin); path?;
@@ -408,6 +409,12 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
                      note); nonInert? (at most 20 paths), pathsTotal? (an int >= 0), globs? (at most 64: the Inert
                      globs read), refusal? (an int >= 1: merge-task's refusal count), error? (at most 200 characters).
+  ci-headroom     T  repo (owner/name), pr, job (at most 200 characters: the required check's job name), seconds (an int
+                     >= 0, or null when the job never started or never finished), conclusion (GitHub's, lowercased:
+                     success, failure, cancelled ...; or null), timeoutMinutes (an int >= 1, or null when unread),
+                     limitSource (workflow: the job's own `timeout-minutes` | default: none declared, GitHub's 360 |
+                     unread: no workflow file, job or plain number matched); runId? (an int >= 1), workflow? (str).
+                     ADR 0073 d5, **CI headroom**: one line per required job of a read run at each merge.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -570,6 +577,11 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   (source record: a `merged` line in any rollout's record names its PR; source note: its task note carries
   `rollout:`) or a peer's push (anything else, a PR-less commit included). "This base was already counted" writes
   none.
+- ci-headroom (ADR 0073 d5): one line per required GitHub Actions job of a merged PR (merge-task.sh's land_and_finish,
+  through lead-integrate.py `ci-headroom`, after every merged exit path: bounded reads, no live poll, a job already
+  recorded for that task and PR never twice), its time against its job's time limit. A required check that is no
+  Actions job (an external status) writes none, and nor does a job whose run gh could not read (a re-run on the
+  already-merged path fills it). reflect.py's span reads them on the week's median (its suite block).
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -1350,6 +1362,17 @@ def _bool_or_null(v):
     return None if v is None or isinstance(v, bool) else "true, false or null"
 
 
+def _or_null(check):
+    """A field check that also takes null (ci-headroom's seconds, conclusion and timeoutMinutes)."""
+    def wrapped(v):
+        return None if v is None else (None if check(v) is None else check(v) + ", or null")
+    return wrapped
+
+
+CI_LIMIT_SOURCES = ("workflow", "default", "unread")   # ci-headroom's limitSource
+CI_JOB_MAX = 200
+
+
 def _z_time(v):
     """A UTC Z stamp (UTC_Z_RE) as an aware datetime, for the cross-field order checks."""
     s = v[:-1]
@@ -1493,6 +1516,11 @@ KINDS = {
                           "moversTotal": _int(0), "movers": _movers},
                    {"nonInert": _capped(MAX_NON_INERT), "pathsTotal": _int(0), "globs": _capped(MAX_GLOBS),
                     "refusal": _int(1), "error": _error}),
+    # ADR 0073 d5, CI headroom: lead-integrate.py ci-headroom (merge-task.sh's land_and_finish), one line per required job.
+    "ci-headroom": (True, {"repo": _str, "pr": _pr, "job": _short(CI_JOB_MAX), "seconds": _or_null(_int(0)),
+                           "conclusion": _or_null(_short(40)), "timeoutMinutes": _or_null(_int(1)),
+                           "limitSource": _enum(*CI_LIMIT_SOURCES)},
+                    {"runId": _int(1), "workflow": _str}),
 }
 
 

@@ -496,11 +496,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   per note (schedule § Serial path): its `surfaces:` predicts the **Surface**s
   the chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. A row that writes a
-  checkout never opens in the vault, and an alias-less row writing two
-  checkouts is refused (ADR 0059), since a Leg finishes only its own
-  checkout's commits. Each repo it writes is worked in its own **Chain copy**
-  (ADR 0067 d2: `chain_copies:` on the note; a note without it works in
-  place), whose commits `leg.py land` puts on the primary checkout's
+  checkout never opens in the vault, and a row commits only to the checkout
+  it launches from: one whose `repo:` surfaces name another checkout, or an
+  alias-less one naming two, is refused (ADR 0059, ADR 0074 d3), since a Leg
+  finishes only its own checkout's commits and its review cannot leave the
+  Session's cwd. Each repo it writes is worked in its own **Chain copy**
+  (ADR 0067 d2: `chain_copies:` on the note, which schedule stamps on every
+  note it writes, ADR 0075 d4; only a note written before that, without it,
+  works in place), whose commits `leg.py land` puts on the primary checkout's
   default branch task by task, after each `done` and at each close (ADR 0067
   d3).
   execute runs its Legs
@@ -589,8 +592,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   path is in no checkout. Predicted surfaces group, order and wait, and never
   refuse a schedule: two chains predicting one place both run, the first to
   begin going first. Two chains in their own **Chain copy**s meet only file
-  to file, while a chain that works a checkout in place (no `chain_copies:`)
-  still takes its checkout turn: the one that comes first (the first to
+  to file (a bare `repo:<toplevel>` cell in one stands only an in-place
+  peer, never another copied chain's begin, ADR 0075 d4), while a chain
+  that works a checkout in place (no `chain_copies:`) still takes its checkout turn: the one that comes first (the first to
   begin, else by slug) lands every unlanded row it has there before the other
   begins a Leg in it (ADR 0067 d4). A stuck chain holds only
   its unlanded rows' surfaces (**Unfinished rollout**, ADR 0060), and works
@@ -1025,8 +1029,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   limit (`timeout-minutes`), per merge and on the week's median. A job whose
   week's median runs past 80 % of its limit is a finding; a job cancelled at
   its limit is a CI timeout, a stop on GitHub's side, never a red check and
-  never a gate for Lachy (ADR 0073). _Avoid_: CI timeout (the event, not the
-  margin), runner speed.
+  never a gate for Lachy (ADR 0073). Each merge records one `ci-headroom`
+  Run-record line per required job (merge-task, through lead-integrate.py
+  ci-headroom); the weekly Reflection reads them in span's `suite` block, and a
+  breach on Thread Skill's repo files its suite audit (`reflect.py
+  suite-audit`). _Avoid_: CI timeout (the event, not the margin), runner speed.
 - **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over

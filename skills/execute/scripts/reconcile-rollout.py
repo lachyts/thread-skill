@@ -1071,6 +1071,8 @@ lowercased; its own cause is _merge_task_cause, the reason from its last `ERROR:
 prefix allowed, to the end, or the whole reason with no `ERROR:` line, and lead-integrate.py's MERGE_TASK_FIXABLE
 check reads the same cause: merge-task.sh's red required check is the stop's own cause, which schedule step 2.5's
 merge gate reads; the mark printed before an infra rerun that a later `ERROR:` line follows stays merge-task);
+ci-timeout (ADR 0073 d4: a reason starting `merge-task` whose own cause is a CANCELLED required check,
+_merge_task_ci_timeout: a CI timeout, a stop on GitHub's side that retries as infra);
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
@@ -8939,6 +8941,8 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "call-failed"
     if lead and first.startswith("merge-task") and _merge_gate_stop(reason):
         return "merge-gate"
+    if lead and first.startswith("merge-task") and _merge_task_ci_timeout(reason):
+        return "ci-timeout"
     if lead and (first.startswith("merge-task") or first.startswith("base moved")
                  or first.startswith("head moved after integration")):
         return "merge-task"
@@ -10355,10 +10359,14 @@ MERGE_GATE_MARK = "a REQUIRED check FAILED on PR"
 # any future wording, is a human's), read in the reason's own cause (_merge_task_cause). Each is pinned against
 # merge-task.sh by the auto-retry suite.
 MERGE_TASK_FIXABLE = ("has a MERGE CONFLICT with", MERGE_GATE_MARK)
+# merge-task.sh's CANCELLED required check (ADR 0073 d4): a CI timeout (its job hit `timeout-minutes`) or another stop on
+# GitHub's side, after its one re-run of the failed jobs; no test failed. The set-aside's reasonClass ci-timeout
+# (_merge_task_ci_timeout), and one of MERGE_TASK_INFRA. Pinned against merge-task.sh by the auto-retry suite.
+MERGE_TASK_CI_TIMEOUT_MARK = "a REQUIRED check was CANCELLED on PR"
 # merge-task.sh's exit-1 texts no code fix clears (ADR 0069 d3): GitHub's side, a stop that is no human's either. Read in
 # the reason's own cause with no red check there (_merge_task_infra_stop), they retry as `infra`. Pinned against
 # merge-task.sh by the auto-retry suite.
-MERGE_TASK_INFRA = ("required checks never appeared for PR",)
+MERGE_TASK_INFRA = ("required checks never appeared for PR", MERGE_TASK_CI_TIMEOUT_MARK)
 # The mark each of merge-task.sh's exit-8 texts carries while GitHub settles a PR's mergeability (ADR 0069 d2): a third
 # exit 8 with it retries as `infra`. Pinned against merge-task.sh by the auto-retry suite.
 MERGE_TASK_SETTLING_MARK = "GitHub has not settled its mergeability"
@@ -10459,6 +10467,14 @@ def _merge_task_infra_stop(reason) -> bool:
     cause = _merge_task_cause(reason)
     return (any(t in cause for t in MERGE_TASK_INFRA) and MERGE_GATE_MARK.lower() not in cause.lower()
             and not FAIL_CELL_RE.search(cause))
+
+
+def _merge_task_ci_timeout(reason) -> bool:
+    """Whether merge-task's own stop was a CANCELLED required check (ADR 0073 d4): a _merge_task_infra_stop whose own
+    cause holds MERGE_TASK_CI_TIMEOUT_MARK. The set-aside's reasonClass ci-timeout (_reason_class), a class of its own
+    beside merge-task, so a Reflection reads CI timeouts apart; its retry class is infra, as every stop on GitHub's
+    side."""
+    return MERGE_TASK_CI_TIMEOUT_MARK in _merge_task_cause(reason) and _merge_task_infra_stop(reason)
 
 
 def _retry_class(note) -> str:
