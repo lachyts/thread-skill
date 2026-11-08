@@ -3,11 +3,12 @@
 // The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the seven rollout keys: the four
 // Tuning keys, execute's `auto_retries`, p16-4, the standing approval's `spend_approval_usd`, ADR 0034, and the
 // machine-wide `verify_slots`, p23-4, which a repo table may not hold),
-// `[guardrails]` (the Reflection's bounds), `[notify]` (ADR 0038 d3: `ntfy_topic`, the needs-you push's ntfy fallback,
-// machine-wide like the guardrails) and `[repo."owner/name"]` tables keyed by the GitHub origin that
+// `[guardrails]` (the Reflection's bounds) and `[repo."owner/name"]` tables keyed by the GitHub origin that
 // `land.sh --origin-slug` reads from the local clone. No file gives the built-in values. A present file that
 // does not validate is refused with one `rollout-settings: <path>[:<line>]: <reason>` line (ADR 0016's typo
-// rule), never a silent fall back to the built-ins.
+// rule), never a silent fall back to the built-ins. A `[notify]` table, retired by ADR 0075 d2 (no rollout notifies), is
+// tolerated in any form, ignored and warned about once: `WARN: [notify] is retired (ADR 0075)` on the CLI's stderr, and
+// `"retired": ["notify"]` in the JSON.
 //
 // Hermetic: each case gets its own HOME under mkdtemp, so the script's `~` resolves there, and its own temp git
 // repos. python3 runs with -B and PYTHONDONTWRITEBYTECODE so no __pycache__ lands next to the script. Fixtures
@@ -40,18 +41,14 @@ const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3,
   verify_slots: 2, capacity_max: 6 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0,
   review_churn_pct: 40, hours_per_task: 1.5 }
-// [notify] (ADR 0038 d3): the ntfy topic the needs-you fallback publishes to; unset (null) means no fallback. resolve()
-// holds the topic; the CLI prints only whether it is set (redacted()), since on ntfy.sh a topic is its own read and
-// publish credential and the CLI runs in schedule's, execute's, status' and repair's transcripts.
-const NOTIFY_KEYS = ['ntfy_topic']
-const NOTIFY_BUILT_IN = { ntfy_topic: null }
-const UNSET = { ntfy_topic: { set: false, source: 'built-in' } }
-const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
+// [notify] (ADR 0038 d3, retired by ADR 0075 d2): tolerated in any form, never refused, ignored, and named once on the
+// CLI's stderr; the JSON lists it in `retired`.
+const RETIRED_WARN = 'WARN: [notify] is retired (ADR 0075)\n'
 const TABLES_LINE = 'rollouts.toml holds only a top-level schema and [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
 // The JSON's top-level keys: the repo's Inert paths (p29-3, ADR 0045) and its test-credential class (ADR 0063) follow the
-// three tables, then the schema pair and the ignored keys (ADR 0043, p29-1).
+// two tables, then the schema pair and the ignored keys (ADR 0043, p29-1), then the retired tables (ADR 0075 d2).
 // The machine's declared test Logins (p37-4) follow the class, outside settings too.
-const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'inert_paths', 'test_credentials', 'test_logins', 'schema', 'ignored']
+const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'inert_paths', 'test_credentials', 'test_logins', 'schema', 'ignored', 'retired']
 const NO_INERT = { value: [], source: 'built-in' }
 const NO_CREDS = { value: null, source: 'built-in' }
 const NO_LOGINS = { value: [], source: 'built-in' }
@@ -99,7 +96,20 @@ function resolves(home, args = [], opts = {}) {
   return JSON.parse(r.stdout)
 }
 
-// The importable resolve(repo, None) in process, as ntfy-push.py and tune.py call it: the topic itself, unredacted.
+// A file holding a retired `[notify]`: exit 0, one JSON line, and exactly one WARN on stderr naming it.
+function tolerated(home, args = [], opts = {}) {
+  const r = run(home, args, opts)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, RETIRED_WARN, 'one WARN, naming the retired table')
+  assert.match(r.stdout, /^\{.*\}\n$/, 'exactly one JSON line on stdout')
+  const out = JSON.parse(r.stdout)
+  assert.deepEqual(out.retired, ['notify'])
+  assert.ok(!('notify' in out), 'no notify key')
+  return out
+}
+
+// The importable resolve(repo, None) in process, as tune.py and reflect.py call it. It prints nothing on stderr, a
+// retired [notify] included: only the CLI warns.
 function resolvedInProcess(home, repo = null) {
   const r = run(home, [], {
     argv: ['-B', '-c', `import importlib.util, json, sys
@@ -107,6 +117,7 @@ spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.
 print(json.dumps(m.resolve(repo=sys.argv[2] if len(sys.argv) > 2 else None)))`, SCRIPT, ...(repo ? [repo] : [])],
   })
   assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '', 'resolve() in process writes nothing on stderr')
   return JSON.parse(r.stdout)
 }
 
@@ -137,8 +148,7 @@ function assertAllBuiltIn(out) {
   assert.deepEqual(Object.keys(out.guardrails), GUARDRAIL_KEYS)
   for (const k of SETTING_KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
   for (const k of GUARDRAIL_KEYS) assert.deepEqual(out.guardrails[k], { value: GUARDRAILS_BUILT_IN[k], source: 'built-in' })
-  // An absent [notify] table resolves to no topic: the needs-you push has no ntfy fallback.
-  assert.deepEqual(out.notify, UNSET)
+  assert.deepEqual(out.retired, [])
   assert.deepEqual(out.inert_paths, NO_INERT)
   assert.deepEqual(out.test_credentials, NO_CREDS)
   assert.deepEqual(out.test_logins, NO_LOGINS)
@@ -351,19 +361,11 @@ const REFUSALS = [
   ['an inline table with a bad nested key names the repo = line', ['# settings', 'repo = { "o/r" = { paralel_ceiling = 5 } }'], 2,
     /unknown key "paralel_ceiling"/],
   ['a TOML syntax error', ['[defaults]', 'parallel_ceiling = '], 2, /invalid TOML/],
-  // [notify] (ADR 0038 d3): a table holding only ntfy_topic, an ntfy topic (1 to 64 of A-Z, a-z, 0-9, - and _). A refused
-  // string is described, never echoed, so a near-miss topic never reaches a transcript.
-  ['notify as a scalar', ['notify = 5'], 1, /notify must be a table \(\[notify\]\), got 5/],
-  ['an unknown key in [notify]', ['[notify]', 'topic = "x"'], 2, /\[notify\]: unknown key "topic" \(\[notify\] holds ntfy_topic\)/],
-  ['an empty ntfy_topic', ['[notify]', 'ntfy_topic = ""'], 2, /\[notify\] ntfy_topic must be an ntfy topic .*, got an empty string/],
-  ['a URL as ntfy_topic (the topic alone, never the server)', ['# settings', '[notify]', 'ntfy_topic = "https://ntfy.sh/x"'], 3,
-    /\[notify\] ntfy_topic must be an ntfy topic .*, got a string holding another character$/m],
-  ['a boolean ntfy_topic', ['[notify]', 'ntfy_topic = true'], 2, /ntfy_topic must be an ntfy topic .*, got a boolean/],
-  ['a number as ntfy_topic', ['[notify]', 'ntfy_topic = 3'], 2, /ntfy_topic must be an ntfy topic .*, got 3/],
-  ['a 65-character ntfy_topic', ['[notify]', `ntfy_topic = "${'a'.repeat(65)}"`], 2, /ntfy_topic must be an ntfy topic .*, got a string of 65 characters/],
-  ['ntfy_topic in [defaults] (it is machine-wide, under [notify])', ['[defaults]', 'ntfy_topic = "x"'], 2, /\[defaults\]: unknown key "ntfy_topic"/],
+  // [notify] is retired (ADR 0075 d2) and tolerated (R11'), but `ntfy_topic` in [defaults] or a repo table was never a
+  // rollout key: it stays an unknown key there, refused.
+  ['ntfy_topic in [defaults]', ['[defaults]', 'ntfy_topic = "x"'], 2, /\[defaults\]: unknown key "ntfy_topic"/],
   ['ntfy_topic in a repo table', ['[repo."o/r"]', 'ntfy_topic = "x"'], 2, /\[repo\."o\/r"\]: unknown key "ntfy_topic"/],
-  ['a dotted bad ntfy_topic', ['notify.ntfy_topic = "a b"'], 1, /\[notify\] ntfy_topic must be an ntfy topic/],
+  ['a near-miss of the retired table (notfy) is still a typo', ['[notfy]', 'ntfy_topic = "x"'], 1, /unknown top-level key "notfy"/],
 ]
 
 for (const [name, lines, line, reason] of REFUSALS) {
@@ -505,18 +507,17 @@ test('R7 hours_per_task (p21-2) takes an integer or a float > 0, as file:guardra
 
 // ---- R8: the importable resolve() --------------------------------------------------------------------------
 
-test('R8 the importable resolve() and constants agree with the CLI, which prints resolve() redacted', (t) => {
+test('R8 the importable resolve() and constants agree with the CLI, which prints resolve() whole', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['[defaults]', 'max_iterations = 2', '[notify]', 'ntfy_topic = "t-1"', '[repo."o/r"]', 'parallel_ceiling = 6'])
+  writeSettings(home, ['[defaults]', 'max_iterations = 2', '[repo."o/r"]', 'parallel_ceiling = 6'])
   const repo = gitRepo(home, 'r', 'https://github.com/o/r')
   const cli = resolves(home, ['--repo', repo])
-  assert.deepEqual(cli.notify, SET)
   const r = run(home, [], {
     argv: ['-B', '-c', `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 out = m.resolve(repo=sys.argv[2])
-print(json.dumps({'out': out, 'view': m.redacted(out), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
-  'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM, 'nkeys': list(m.NOTIFY_KEYS), 'nbuilt': m.NOTIFY_BUILT_IN,
+print(json.dumps({'out': out, 'gone': [n for n in ('redacted', 'NOTIFY_KEYS', 'NOTIFY_BUILT_IN', 'TOPIC_RE') if hasattr(m, n)],
+  'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS), 'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM,
   'built': m.BUILT_IN, 'gbuilt': m.GUARDRAILS_BUILT_IN, 'timeout': m.ORIGIN_TIMEOUT, 'path': m.default_path()}))
 try:
     m.resolve(repo='/nonexistent/x')
@@ -525,18 +526,15 @@ except m.SettingsError as e:
   })
   assert.equal(r.status, 0, r.stderr)
   const [first, second] = r.stdout.trim().split('\n').map((l) => JSON.parse(l))
-  // resolve() keeps the topic for its in-process readers; redacted() is exactly the CLI's line, and only notify differs.
-  assert.deepEqual(first.out.notify, { ntfy_topic: { value: 't-1', source: 'file:notify' } })
-  assert.deepEqual(first.view, cli)
-  assert.deepEqual({ ...first.out, notify: cli.notify }, cli)
+  // The CLI's line is resolve()'s object, whole: no notify key, nothing redacted (ADR 0075 d2 retired the topic).
+  assert.deepEqual(first.out, cli)
+  assert.deepEqual(first.gone, [], 'redacted(), NOTIFY_KEYS, NOTIFY_BUILT_IN and TOPIC_RE are gone')
   assert.deepEqual(first.keys, KEYS)
   assert.deepEqual(first.skeys, SETTING_KEYS)
   assert.deepEqual(first.min, MINIMUM)
   assert.deepEqual(first.gkeys, GUARDRAIL_KEYS)
   assert.deepEqual(first.built, BUILT_IN)
   assert.deepEqual(first.gbuilt, GUARDRAILS_BUILT_IN)
-  assert.deepEqual(first.nkeys, NOTIFY_KEYS)
-  assert.deepEqual(first.nbuilt, NOTIFY_BUILT_IN)
   assert.equal(first.timeout, 20)
   assert.equal(first.path, settingsPath(home))
   assert.deepEqual(second, ['--repo /nonexistent/x: not a directory', 2, null])
@@ -594,43 +592,56 @@ except m.SettingsError as e:
   assert.equal(left.stdout.trim(), '', 'no sleep child survives')
 })
 
-// ---- R11: [notify] (ADR 0038 d3) ------------------------------------------------------------------------------
+// ---- R11': [notify], retired (ADR 0075 d2) -------------------------------------------------------------------
+// A `[notify]` in any form is skipped whole: never validated, never refused, never resolved. The CLI writes exactly one
+// `WARN: [notify] is retired (ADR 0075)` line on stderr and exits 0; the JSON carries `"retired": ["notify"]` and no
+// `notify` key; resolve() in process prints nothing, so its in-process readers stay quiet.
 
-test('R11 [notify] ntfy_topic resolves as file:notify beside [defaults] and a repo table; the rest is unchanged', (t) => {
+test("R11' [notify] beside [defaults] and a repo table: tolerated with one WARN, the rest resolved as ever", (t) => {
   const home = tmpHome(t)
   writeSettings(home, ['[defaults]', 'parallel_ceiling = 2', '', '[notify]', 'ntfy_topic = "thread-needs-you"   # a dedicated topic',
     '', '[repo."o/r"]', 'max_iterations = 5'])
   const repo = gitRepo(home, 'r', 'https://github.com/o/r')
-  const out = resolves(home, ['--repo', repo])
+  const out = tolerated(home, ['--repo', repo])
   assert.deepEqual(Object.keys(out), OUT_KEYS)
-  assert.deepEqual(out.notify, SET)
-  assert.deepEqual(resolvedInProcess(home, repo).notify, { ntfy_topic: { value: 'thread-needs-you', source: 'file:notify' } })
   expectValues(out, { parallel_ceiling: 2, max_iterations: 5 }, { parallel_ceiling: 'file:defaults', max_iterations: 'file:repo' })
   for (const k of GUARDRAIL_KEYS) assert.equal(out.guardrails[k].source, 'built-in')
+  const inp = resolvedInProcess(home, repo)
+  assert.deepEqual(inp.retired, ['notify'])
+  assert.ok(!('notify' in inp), 'no notify key in process either')
 })
 
-test('R11 [notify] in dotted and inline-table form resolves like table form; an empty [notify] is no topic', (t) => {
-  for (const [lines, want] of [
-    [['notify.ntfy_topic = "x"'], { value: 'x', source: 'file:notify' }],
-    [['notify = { ntfy_topic = "A_b-9" }'], { value: 'A_b-9', source: 'file:notify' }],
-    [['[notify]', `ntfy_topic = "${'z'.repeat(64)}"`], { value: 'z'.repeat(64), source: 'file:notify' }],
-    [['[notify]', '# set once ntfy-noise-audit names a topic'], { value: null, source: 'built-in' }],
-  ]) {
+// Every form that was refused before ADR 0075 is tolerated now, and so is every form that resolved.
+const TOLERATED = [
+  ['notify as a scalar', ['notify = 5']],
+  ['an unknown key in [notify]', ['[notify]', 'topic = "x"']],
+  ['an empty ntfy_topic', ['[notify]', 'ntfy_topic = ""']],
+  ['a URL as ntfy_topic', ['# settings', '[notify]', 'ntfy_topic = "https://ntfy.sh/x"']],
+  ['a boolean ntfy_topic', ['[notify]', 'ntfy_topic = true']],
+  ['a number as ntfy_topic', ['[notify]', 'ntfy_topic = 3']],
+  ['a 65-character ntfy_topic', ['[notify]', `ntfy_topic = "${'a'.repeat(65)}"`]],
+  ['a dotted bad ntfy_topic', ['notify.ntfy_topic = "a b"']],
+  ['a dotted valid ntfy_topic', ['notify.ntfy_topic = "x"']],
+  ['an inline table', ['notify = { ntfy_topic = "A_b-9" }']],
+  ['an empty [notify]', ['[notify]']],
+  ['a comment-only [notify]', ['[notify]', '# set once ntfy-noise-audit names a topic']],
+]
+for (const [name, lines] of TOLERATED) {
+  test(`R11' tolerated: ${name}`, (t) => {
     const home = tmpHome(t)
     writeSettings(home, lines)
-    assert.deepEqual(resolvedInProcess(home).notify, { ntfy_topic: want }, lines.join(' | '))
-    assert.deepEqual(resolves(home).notify, want.value === null ? UNSET : SET, lines.join(' | '))
-  }
-})
+    const out = tolerated(home)
+    expectValues(out, {}, {})
+  })
+}
 
-test('R11 the CLI never prints the topic: stdout carries `set`, never the topic string or a `value` under notify', (t) => {
+test("R11' the topic is never printed: neither stdout nor the WARN carries it", (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['[notify]', 'ntfy_topic = "a-topic-only-resolve-sees"'])
+  writeSettings(home, ['[notify]', 'ntfy_topic = "a-topic-nobody-reads"'])
   const r = run(home)
   assert.equal(r.status, 0, r.stderr)
-  assert.ok(!r.stdout.includes('a-topic-only-resolve-sees') && !r.stderr.includes('a-topic-only-resolve-sees'), 'the topic is unprinted')
-  assert.deepEqual(JSON.parse(r.stdout).notify, SET)
-  assert.equal(resolvedInProcess(home).notify.ntfy_topic.value, 'a-topic-only-resolve-sees')
+  assert.ok(!r.stdout.includes('a-topic-nobody-reads') && !r.stderr.includes('a-topic-nobody-reads'), 'the topic is unprinted')
+  assert.equal(r.stderr, RETIRED_WARN)
 })
 
 // ---- K2-K10: the file's schema (ADR 0043, p29-1) --------------------------------------------------------------
@@ -679,16 +690,15 @@ test('K4 under a schema above SCHEMA an unknown key is ignored and listed, at ev
   const home = tmpHome(t)
   writeSettings(home, ['schema = 6', '', '[defaults]', 'merge_train = 3', 'parallel_ceiling = 3', '', '[guardrails]',
     'away_hours = 2', '', '[notify]', 'chorus_topic = "x"', '', '[away]', 'cap = 1', '', '[repo."o/r"]', 'merge_train = 1'])
-  const out = resolves(home)
-  assert.deepEqual(out.ignored, ['away', 'defaults.merge_train', 'guardrails.away_hours', 'notify.chorus_topic', 'repo."o/r".merge_train'])
+  // [notify] is retired (ADR 0075 d2): skipped whole, so its unknown key is never read, nor listed as ignored.
+  const out = tolerated(home)
+  assert.deepEqual(out.ignored, ['away', 'defaults.merge_train', 'guardrails.away_hours', 'repo."o/r".merge_train'])
   assert.deepEqual(out.schema, { file: 6, engine: 5 })
   expectValues(out, { parallel_ceiling: 3 }, { parallel_ceiling: 'file:defaults' })
-  assert.deepEqual(out.notify, UNSET)
 })
 
 test('K5 a near-miss by case or _/- is refused even under a newer schema', (t) => {
-  for (const [table, key] of [['defaults', 'Parallel_Ceiling'], ['defaults', 'parallel-ceiling'], ['guardrails', 'quotastalls'],
-    ['notify', 'NTFY_TOPIC']]) {
+  for (const [table, key] of [['defaults', 'Parallel_Ceiling'], ['defaults', 'parallel-ceiling'], ['guardrails', 'quotastalls']]) {
     const home = tmpHome(t)
     writeSettings(home, ['schema = 6', `[${table}]`, `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${escapeRe(key)}".*a near-miss of`) })
@@ -696,6 +706,10 @@ test('K5 a near-miss by case or _/- is refused even under a newer schema', (t) =
   const home = tmpHome(t)
   writeSettings(home, ['schema = 6', '[Defaults]', 'parallel_ceiling = 1'])
   refused(home, { line: 2, reason: /unknown top-level key "Defaults".*a near-miss of "defaults"/ })
+  // The retired [notify] stays a known top-level key, so its near-miss is still a typo under a newer schema.
+  const home2 = tmpHome(t)
+  writeSettings(home2, ['schema = 6', '[notfy]', 'ntfy_topic = "x"'])
+  refused(home2, { line: 2, reason: /unknown top-level key "notfy".*a near-miss of "notify"/ })
 })
 
 test('K6 a near-miss within OSA distance 2 is refused; a key three edits away is ignored', (t) => {
@@ -757,7 +771,7 @@ const SCHEMA_1 = [
   ...['defaults', 'guardrails', 'notify', 'repo', 'schema'].map((k) => `top.${k}`),
   ...SETTING_KEYS.filter((k) => k !== 'capacity_max').map((k) => `rollout.${k}`),   // capacity_max is schema 4
   ...GUARDRAIL_KEYS.map((k) => `guardrails.${k}`),
-  ...NOTIFY_KEYS.map((k) => `notify.${k}`),
+  'notify.ntfy_topic',   // retired by ADR 0075 d2, still registered: the schema-1 set is frozen
 ].sort()
 
 test('K10 the schema-1 key set is frozen, and SCHEMA is the highest registered schema', () => {

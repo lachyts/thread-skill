@@ -9,7 +9,7 @@
 //             check-all and still before resume, clear-pause, next or any stamp (the *Landing-register re-check* names it
 //             next), the check's --resume form, exit 3 and exit 2 halting; § 7 lists the halt and *Whole-rollout halts
 //             kept* keeps it
-//   legs      legs.md § Begin's exit 3 names the surface stand: push it once, end on its status_line, no create_thread
+//   legs      legs.md § Begin's exit 3 names the surface stand: list it, end on its status_line, no create_thread
 //   status    status § 5's **Hold** block, S12's "holds only", the restart's `surface held by` blocker and § 4's Hold
 //             line from `unfinished-rollout.py hold`
 //   repair    repair § 7 (e) step 1's `surface held by` branch (never restart), (b)'s reclaim note and the refusal
@@ -80,7 +80,7 @@ function check(f) {
 
   // legs
   const begin = collapse(section(f.legs, /^## Begin/, /^## (?!Begin)/))
-  fail('legs', !all(begin, ['- **3, a surface stand** (ADR 0060', 'the chain waits its turn', 'push it once (§ Needs you), and end on its `status_line`',
+  fail('legs', !all(begin, ['- **3, a surface stand** (ADR 0060', 'the chain waits its turn', 'list it (§ Needs you), and end on its `status_line`',
     '`halted reason="surface held: [[<B>]] holds <token>"`', 'Never call `create_thread` on it']))
 
   // status

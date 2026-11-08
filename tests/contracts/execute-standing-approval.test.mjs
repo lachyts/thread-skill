@@ -113,7 +113,7 @@ function checkStanding(f) {
     !sub2.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --standing --tasks <slug> --rollout <rollout-note>`') ||
     !sub2.includes('it counts as "sub-step 2 launched"') ||
     !sub2.includes("Exit 3: the gates it left stay (a) items (§ 6.5), each with its `ASK:` reason as the item's `→` detail") ||
-    !sub2.includes("It runs before this turn's needs-you items are derived from `next`, so a covered gate is never pushed")) {
+    !sub2.includes("It runs before this turn's needs-you items are derived from `next`, so a covered gate is never listed")) {
     fails.push('step12')
   }
 
@@ -219,9 +219,11 @@ function checkStanding(f) {
     fails.push('reshuffle')
   }
 
-  // month-line (p30-8): § 6.5 says the standing approval's log lines are the month line's ledger, never a push record;
-  // step 1.2's left gates name the month line among their reasons; the Don't forbids writing the log line by hand.
-  if (!logLives.includes('`reconcile-rollout.py approve-gates --standing` also appends') || !logLives.includes('never a push record') ||
+  // month-line (p30-8; ADR 0075 d2): § 6.5 says the log's one writer is approve-gates --standing, whose lines are the
+  // month line's ledger; step 1.2's left gates name the month line among their reasons; the Don't forbids writing the
+  // log line by hand.
+  if (!logLives.includes('Its one writer is `reconcile-rollout.py approve-gates --standing`, which appends') ||
+    !logLives.includes("the month line's ledger (§ 3.7)") ||
     !sub2.includes('past the month line') ||
     !donts.includes('nor its `signed under the standing approval:` Needs-you log line')) {
     fails.push('month-line')
@@ -462,9 +464,10 @@ test('control: R3 grilling a spend smell, or R5.2 without the step-7 write, fail
 
 test('control: § 6.5 without the standing lines, or step 1.2 without the month line, fails month-line', () => {
   const l = real.execute.split('\n').find((x) => x.startsWith('**Where the log lives.**')) ?? ''
-  const from = l.slice(l.indexOf(' `reconcile-rollout.py approve-gates --standing` also appends'))
-  assert.ok(from.length > 1 && from.includes('never a push record'), 'control setup: the standing-lines sentence')
-  const sentence = from.slice(0, from.indexOf('never a push record') + from.slice(from.indexOf('never a push record')).indexOf('.') + 1)
+  const END = "the month line's ledger (§ 3.7)."
+  const from = l.slice(l.indexOf(' Its one writer is `reconcile-rollout.py approve-gates --standing`'))
+  assert.ok(from.length > 1 && from.includes(END), 'control setup: the standing-lines sentence')
+  const sentence = from.slice(0, from.indexOf(END) + END.length)
   only('execute', sentence, '', 'month-line', 'no standing lines')
   only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable even from its cap,",
     "the item's `→` detail (over the limit, unpriceable even from its cap,", 'month-line', 'no month line in step 1.2')

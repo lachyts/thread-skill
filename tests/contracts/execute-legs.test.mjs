@@ -13,14 +13,14 @@
 //   e5  fix tasks: `verifies:` on every fix, `fixes:` names the culprit (own: the task; chain: the later chain task;
 //       outside and drift: none), the task stays done, its dependants held through `verifies:`;
 //   e6  the hand-over and status: create_thread's fields (no brief, report_back on), a report per *closed* Leg, the §
-//       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and pushed manual
+//       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and listed manual
 //       hand-over; a Chain copy's launch line (ADR 0067 d2) in § Begin 4 and § Hand over, never the alias itself, and §
 //       The task loop's commit in the copy, never in the primary; the land (ADR 0067 d3): § Begin 0's `landFirst` land
 //       before the first claim, § The task loop's **Land** paragraph (never a rebase, --verified, --red, a null line,
 //       `waits: true`) and the slotted Verify rule; the rank (ADR 0067 d9): § The task loop's `wait` action, its six
 //       steps in order (land, `leg.py wait`, the stalled close, landFirst's remedies and stopped close, cleared, next)
 //       and its two Leg log forms;
-//   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
+//   e7  the close order (leg.py close before create_thread → lists → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
 //       Complete step 4), the lock and exit 5's retry-once, the repo land lock (never nested) and the in-place peer
 //       stand, the rank lock (ADR 0067 d9), no question tool, and the push Don't as the landing route reads it (ADR
@@ -189,7 +189,7 @@ function check(f, product = tree) {
   // ---- e6: hand-over and status ----
   const ho = sec(legs, 'Hand over')
   need('e6', 'legs.md § Hand over', ho, ['call `create_thread`', '`title`', '`prompt`', '`tldr`', '`cwd`', 'Pass no `brief`',
-    'leave `report_back` at its default (on)', 'labelled `manual handoff`, and pushes it once', 'leg.py handed --started <id>',
+    'leave `report_back` at its default (on)', 'labelled `manual handoff`, and lists it as a needs-you item', 'leg.py handed --started <id>',
     'leg.py handed --manual "<why>"'])
   // ADR 0067 d2: a Chain copy's manual line never runs the alias (its `cd` opens the primary), and a task commits in its
   // copy only.
@@ -211,8 +211,8 @@ function check(f, product = tree) {
   need('e6', 'legs.md § The task loop\'s `wait`', C(waitBlock), ['CONTEXT.md **Rank wait**', 'Nobody is stopped mid-task',
     '`leg.py wait --task <t>` in the foreground (`timeout: 600000`)', '`Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)`',
     '`Leg <N> rank retry: [[t]] on [[X]] (<token>; [[X]] ranks above)`',
-    'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, pushed once',
-    'When `landFirst` is non-empty', '§ Close `--outcome stopped --reason "rank wait: own land stood: <why>"`, pushed once',
+    'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, listed (§ Needs you)',
+    'When `landFirst` is non-empty', '§ Close `--outcome stopped --reason "rank wait: own land stood: <why>"`, listed (§ Needs you)',
     'On `cleared: true`: run `leg.py land` again in a copy chain, then `next`'])
   const ws = [/^ {2}1\. In a copy chain, run `leg\.py land`/, /^ {2}2\. Run `leg\.py wait --task <t>`/, /^ {2}3\. On `stalled: true`/,
     /^ {2}4\. When `landFirst` is non-empty/, /^ {2}5\. On `cleared: true`/, /^ {2}6\. Otherwise: `next`/]
@@ -227,7 +227,7 @@ function check(f, product = tree) {
 
   // ---- e7: close order, concurrency, no question tool ----
   const cl = items(sec(legs, 'Close'))
-  const ci = [/^1\. `leg\.py close .*before any `create_thread`/, /^2\. Push each `needs_you` item once/,
+  const ci = [/^1\. `leg\.py close .*before any `create_thread`/, /^2\. List each `needs_you` item in the report/,
     /^3\. `\/thread:close`.*runs between sub-step 7 and step 8/, /^4\. `leg\.py handed`/,
     /^5\. close's banner, then the `ROLLOUT-STATUS:` line/].map((re) => cl.findIndex((x) => re.test(x)))
   if (ci.some((i, k) => i !== k)) flag('e7', `§ Close's steps are out of order: ${ci}`)
@@ -413,7 +413,7 @@ test('control: § Begin 0 without the landFirst land fails e6', () => {
     'then go on.', ['e6'], 'landFirst')
 })
 test('control: a rank wait whose stall goes on waiting fails e6', () => {
-  only('legs', 'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, pushed once.',
+  only('legs', 'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, listed (§ Needs you).',
     'On `stalled: true`: wait again.', ['e6'], 'stalled')
 })
 test('control: the rank wait steps out of order fails e6', () => {
@@ -473,7 +473,7 @@ test('control: a pointer written into the archived note fails e9', () => {
   only('close', 'files the task with no pointer and no log line', 'files the task with a pointer in the archived note', ['e9'], 'archived')
 })
 test('control: a retired close:asks phrase in § Under a Leg fails e9', () => {
-  only('close', 'and is pushed once (execute § 6.5).', 'and is pushed once (execute § 6.5). Close never asks: it pushes.', ['e9'], 'asks')
+  only('close', 'and is listed as a needs-you item (execute § 6.5).', 'and is listed as a needs-you item (execute § 6.5). Close never asks: it pushes.', ['e9'], 'asks')
 })
 test('control: § Under a Leg without its land bullet fails e9', () => {
   const l = real.close.split('\n').find((x) => x.startsWith('- **The land.**'))

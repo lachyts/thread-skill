@@ -64,7 +64,7 @@ parallel with no note). For each:
 - note (Work/Tasks/<slug>.md, then Work/Tasks/Archive/Rollouts/<slug>.md) and, for a parallel one (a serial chain:
   below), its ``Project root:`` line, the repo
   (rollout-settings.py's _origin_slug, cached per root), the settings (rollout-settings.py's resolve(repo=root,
-  path=--config), redacted as the CLI prints it and written to <dir of F>/<slug>.settings.json), --fold's
+  path=--config), as the CLI prints it, written to <dir of F>/<slug>.settings.json), --fold's
   fold-journals, and score.py (--rollout --note --settings --repo-slug --repo --tasks-dir --until --out
   <dir of F>/<slug>.score.json). A missing note, a refused settings file or no origin: scored by slug, flagged, and
   never a knob candidate. No single rollout stops the span.
@@ -1187,7 +1187,7 @@ class Span:
                 doc = RS.resolve(repo=entry["root"], path=expand(self.a.config) if self.a.config else None)
                 settings = os.path.join(self.out_dir, "%s.settings.json" % slug)
                 with open(settings, "w", encoding="utf-8") as f:
-                    json.dump(RS.redacted(doc), f)  # the CLI's own JSON: whether an ntfy topic is set, never the topic
+                    json.dump(doc, f)  # the CLI's own JSON
                 entry["settingsFile"] = settings
             except RS.SettingsError as e:
                 entry["flags"].append("rollout-settings refused (%s): scored without settings, never a knob candidate" % e)

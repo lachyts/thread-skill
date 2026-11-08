@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# ADR 0066 as amended 2026-11-05 (p37-7), executed: skills/_shared/scripts/primary-refresh.py, the Primary refresh. A bare
-# "origin" and clones of it stand for the primary and an --also checkout. The seed commits the real bundle files
-# (primary-refresh.py bundle's table) plus a stub primary-hold.sh (it prints $HOLD_FILE's text). install runs first, into
-# $tmp/bin, and job() runs the plist's own ProgramArguments (read with plistlib, so --log and --job-shape are in it) plus
-# --ntfy-server and each arm's flags, outside any work tree, as launchd does; run() is a checkout copy (no install
-# marker) at its repo path, with background_job.py beside it. Notices go through the real ntfy-push.py to a local http.server stub that appends each message to $NTFY_LOG
-# and answers 500 while $NTFY_FAIL exists ([notify] ntfy_topic is set in the temp HOME's rollouts.toml). The stub binds
-# through TCPServer's bind, with no reverse lookup (a name lookup in it is an error), and the suite stops if it writes
-# no port.
+# ADR 0066 as amended 2026-11-05 (p37-7) and by ADR 0075 d2 (P41-5: no notice is ever sent), executed:
+# skills/_shared/scripts/primary-refresh.py, the Primary refresh. A bare "origin" and clones of it stand for the primary
+# and an --also checkout. The seed commits the real bundle files (primary-refresh.py bundle's table) plus a stub
+# primary-hold.sh (it prints $HOLD_FILE's text). install runs first, into $tmp/bin, and job() runs the plist's own
+# ProgramArguments (read with plistlib, so --log and --job-shape are in it) plus each arm's flags, outside any work tree,
+# as launchd does; run() is a checkout copy (no install marker) at its repo path, with background_job.py beside it. A
+# stuck spell is read by the `stuck` verb (/thread:status's Primary refresh line); no pass prints `notified` or
+# `would notify`.
 #   install   I1 I5 R8 I4 (the job's flags and env pinned beside JOB_SHAPE) I3 I2, I7 I7b I7c I8 (background_job.py:
-#             a copy that cannot load it, and `bundle`, which never loads it)
+#             a copy that cannot load it, and `bundle`, which never loads it), Q1-Q4 (the prune at install)
 #   a pass    R1-R9, R4/N1-N3, F1 B1 D1 (the fetch and the ssh rule), O1 O2 (the overlap), X1 (the helper's contract)
-#   notices   P0-P2 (one per kind), U1 (an entry from before p37-7), M1 H1 N4 N5, T1 T2 (timeouts and a TERM), K1 L1 J1
+#   spells    P0-P2 (since, kindSince, outcome), U1 (an entry from before p37-7), M1 H1 N5, T1 T2 (timeouts and a TERM),
+#             K1 L1 J1
+#   stuck     ST1-ST7 (the read-only verb: its due rule, its line, no write, no freshness check)
 #   self-update  S1-S5, S6a-S6j (the smoke; S6j a candidate whose own background_job.py is broken), S7 (the
 #             transition), S8 S9, S10a-S10c (the candidate's table), I6 (the frozen contract)
 # Origins over ssh are git@github.com:o/origin.git, served by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`. Every pid
 # an arm records is checked gone (`gone`). Hermetic: HOME, XDG_STATE_HOME and every path live under mktemp; commits carry
-# an inline identity; global/system git config is ignored; the only server is the stub on 127.0.0.1.
+# an inline identity; global/system git config is ignored; no server runs.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -29,18 +30,16 @@ SELF=skills/_shared/scripts/primary-refresh.py
 LCR=skills/_shared/scripts/live-checkout.sh
 
 tmp=$(mktemp -d); tmp=$(cd "$tmp" && pwd -P)
-stub_pid=
-cleanup() { [ -z "$stub_pid" ] || { kill "$stub_pid"; wait "$stub_pid"; } 2>/dev/null; rm -rf "$tmp"; }
+cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
-export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state" HOLD_FILE="$tmp/hold" NTFY_LOG="$tmp/ntfy.log" NTFY_FAIL="$tmp/ntfy.fail"
+export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state" HOLD_FILE="$tmp/hold"
 export SRV="$tmp/srv" LOG_SSH="$tmp/ssh.log" HOOK_PID="$tmp/hook.pid"
-mkdir -p "$HOME/.config/thread" "$tmp/out" "$tmp/sshbin" "$tmp/countbin" "$SRV/o"; : > "$LOG_SSH"; : > "$NTFY_LOG"
-printf '[notify]\nntfy_topic = "thread-test"\n' > "$HOME/.config/thread/rollouts.toml"
+mkdir -p "$HOME/.config/thread" "$tmp/out" "$tmp/sshbin" "$tmp/countbin" "$SRV/o"; : > "$LOG_SSH"
+DS="$XDG_STATE_HOME/thread/primary-refresh.json"   # the default state file: the job's, and install's prune's
 cp tests/fixtures/land/fake-ssh.sh "$tmp/sshbin/ssh"; chmod +x "$tmp/sshbin/ssh"
 export PATH="$tmp/sshbin:$PATH"
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
 lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
-posts() { wc -l < "$NTFY_LOG" | tr -d ' '; }
 gone() {  # gone <pid> <label>: the pid is gone within 5 s (reaping included); no pid recorded is a FAIL, never a pass
   [ -n "$1" ] || { ok "no pid recorded" gone "$2"; return; }
   local i=0
@@ -53,42 +52,10 @@ at() { python3 -c 'import sys, datetime as d; print((d.datetime.fromisoformat(sy
 # sv <state file> <key> <field>: one field of one entry (None when absent)
 sv() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["stuck"].get(sys.argv[2], {}).get(sys.argv[3]))' "$@" 2>/dev/null; }
 skeys() { python3 -c 'import json,sys; print(" ".join(sorted(json.load(open(sys.argv[1]))["stuck"])))' "$1" 2>/dev/null; }
+# stk <stuck args>: the `stuck` verb's whole output; sline: its line alone (None when null)
+stk() { python3 "$pr" stuck "$@" 2>&1; }
+sline() { python3 "$pr" stuck "$@" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["line"])'; }
 mode_of() { python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:].zfill(4))' "$1"; }
-
-# ---- the ntfy stub ----------------------------------------------------------------------------------------------
-cat > "$tmp/ntfy-stub.py" <<'PY'
-import http.server, json, os, socket, socketserver, sys
-# The stub makes no name lookup: HTTPServer's own server_bind runs getfqdn (a reverse lookup of 127.0.0.1) before the port
-# is written, and on the macOS runner that lookup outlasted the port wait (PR #308, twice), so every notice arm saw no
-# POST. A lookup anywhere in the stub is an error on every platform, not only in CI.
-def no_lookup(*a):
-    raise RuntimeError("ntfy stub: a name lookup of %r" % (a,))
-socket.getfqdn = socket.gethostbyaddr = no_lookup
-class H(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        if os.path.exists(os.environ["NTFY_FAIL"]):
-            self.send_response(500); self.end_headers(); return
-        with open(os.environ["NTFY_LOG"], "a") as f:
-            f.write(json.loads(body)["message"] + "\n")
-        self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
-    def log_message(self, *a):
-        pass
-class S(http.server.HTTPServer):
-    def server_bind(self):  # TCPServer's bind, without HTTPServer's getfqdn
-        socketserver.TCPServer.server_bind(self)
-        self.server_name, self.server_port = self.server_address[:2]
-s = S(("127.0.0.1", 0), H)
-open(sys.argv[1] + ".tmp", "w").write(str(s.server_address[1])); os.replace(sys.argv[1] + ".tmp", sys.argv[1])
-s.serve_forever()
-PY
-python3 "$tmp/ntfy-stub.py" "$tmp/port" & stub_pid=$!
-i=0; while [ ! -s "$tmp/port" ] && kill -0 "$stub_pid" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done
-[ -s "$tmp/port" ] || {
-  echo "FAIL - the ntfy stub wrote no port ($(kill -0 "$stub_pid" 2>/dev/null && echo 'still starting after 30 s' || echo 'it exited')): every notice arm needs it"
-  exit 1
-}
-SERVER="http://127.0.0.1:$(cat "$tmp/port")"
 
 # ---- fixtures -------------------------------------------------------------------------------------------------------
 g init -q --bare "$tmp/origin.git"; ln -s "$tmp/origin.git" "$SRV/o/origin.git"
@@ -116,9 +83,9 @@ commit() { g -C "$tmp/seed" add -A; g -C "$tmp/seed" commit -qm "$1"; g -C "$tmp
 # real: the seed's bundle files back to this tree's
 real() { while read -r m rel irel; do cp -p "$root/$rel" "$tmp/seed/$rel"; done < "$tmp/table"; }
 # run()'s copy sits at its repo path in a mini plugin root that holds background_job.py and no other helper, so
-# live-checkout.sh and ntfy-push.py still come from the primary.
+# live-checkout.sh still comes from the primary.
 RUNC="$tmp/run/skills/_shared/scripts"; mkdir -p "$RUNC"; cp "$pr" "$root/skills/_shared/scripts/background_job.py" "$RUNC/"
-run() { (cd "$tmp/out" && python3 "$RUNC/primary-refresh.py" run --primary "$tmp/primary" --ntfy-server "$SERVER" "$@") 2>&1; }
+run() { (cd "$tmp/out" && python3 "$RUNC/primary-refresh.py" run --primary "$tmp/primary" "$@") 2>&1; }
 head_of() { git -C "$1" rev-parse HEAD; }
 tip() { git -C "$tmp/seed" rev-parse HEAD; }
 same() { cmp -s "$1" "$2" && echo same || echo differs; }
@@ -134,8 +101,9 @@ ok "${bad:-none}" none "I1: an empty bin directory gets every bundle file, byte 
 ok "$(cd "$tmp/bin" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')" \
   "$( (cut -d' ' -f3 "$tmp/table"; echo primary-refresh.installed) | LC_ALL=C sort | tr '\n' ' ')" \
   "I5: … exactly the table's install-rels plus the marker"
-ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "7|7" \
-  "I5: primary-refresh.py bundle prints seven lines in the strict form"
+ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "6|6" \
+  "I5: primary-refresh.py bundle prints six lines in the strict form"
+lacks "$(cat "$tmp/table")" "ntfy-push" "I5: … and no ntfy-push.py row (ADR 0075 d2: a self-update removes the installed copy)"
 has "$(head -1 "$tmp/table")" "0755 skills/_shared/scripts/primary-refresh.py primary-refresh.py" "I5: … the copy's own row first"
 JOB=(); while IFS= read -r -d '' a; do JOB+=("$a"); done < <(python3 -c 'import plistlib,sys; sys.stdout.write("\0".join(plistlib.load(open(sys.argv[1],"rb"))["ProgramArguments"]) + "\0")' "$tmp/job.plist")
 args=$(python3 -c 'import plistlib,sys; j=plistlib.load(open(sys.argv[1],"rb")); print(j["Label"], j["StartInterval"], j["RunAtLoad"], " ".join(j["ProgramArguments"][1:]))' "$tmp/job.plist")
@@ -151,9 +119,9 @@ print(m.JOB_SHAPE, " ".join(flags), " ".join(sorted(j["EnvironmentVariables"])))
 PY
 )" "1 run --primary --also --log --job-shape PATH" \
   "I4: the job's flags and env keys are pinned beside JOB_SHAPE 1: change either and bump JOB_SHAPE with this pin"
-job() { (cd "$tmp/out" && "${JOB[@]}" --ntfy-server "$SERVER" "$@") 2>&1; }
+job() { (cd "$tmp/out" && "${JOB[@]}" "$@") 2>&1; }
 JOB0=(); for a in "${JOB[@]}"; do JOB0+=("$a"); done; JOB0=("${JOB0[@]:0:$((${#JOB0[@]}-2))}")   # less --job-shape 1
-job0() { (cd "$tmp/out" && "${JOB0[@]}" --ntfy-server "$SERVER" "$@") 2>&1; }
+job0() { (cd "$tmp/out" && "${JOB0[@]}" "$@") 2>&1; }
 
 # ---- R3 / R1 / R9 / R2 / R5 / R6: one pass ---------------------------------------------------------------------------
 has "$(job)" "primary: current" "R3: a primary at origin's tip reads current"
@@ -198,7 +166,7 @@ echo note > "$tmp/primary/untouched.txt"
 has "$(job)" "primary: moved" "R6: an uncommitted file origin never touches does not stop a move"
 rm -f "$tmp/primary/untouched.txt"
 
-# ---- R4 / N1-N3: ahead, then diverged; the spell and its notice ----------------------------------------------------------
+# ---- R4 / N1-N3: ahead, then diverged; the spell and its reading ---------------------------------------------------------
 echo local > "$tmp/primary/b.txt"; g -C "$tmp/primary" add b.txt; g -C "$tmp/primary" commit -qm local
 has "$(job)" "primary: ahead 1: left to its landing route" "R4: a primary ahead of origin is left to its landing route"
 land a.txt four
@@ -207,34 +175,37 @@ has "$(job --now 2026-11-01T10:00:00+11:00)" "diverged (ahead 1, behind 1)" "R4:
 rm -f "$HOLD_FILE"
 ok "$(git -C "$tmp/primary" log -1 --format=%s)" "local" "R4: … its HEAD stays its own"
 land a.txt five   # N1: origin moves on during the spell
-job --now 2026-11-01T20:00:00+11:00 >/dev/null
-ok "$(posts)" 0 "R4: no notice inside 24 h"
+out=$(job --now 2026-11-01T20:00:00+11:00)
+ok "$(sline --now 2026-11-01T20:00:00+11:00)" None "R4: inside 24 h the stuck read names nothing"
+ok "$(sv "$DS" "$tmp/primary" since)|$(sv "$DS" "$tmp/primary" kind)" "2026-11-01T10:00:00+11:00|diverged" "R4: … the spell dated from its first diverged pass"
 g -C "$tmp/primary" remote set-url origin "$tmp/nowhere.git"   # N2: a blip (the fetch fails) mid-spell
 has "$(job --now 2026-11-02T06:00:00+11:00)" "primary: fetch failed: " "N2: a fetch that fails reads fetch failed"
+ok "$(sv "$DS" "$tmp/primary" since)|$(sv "$DS" "$tmp/primary" kind)|$(sv "$DS" "$tmp/primary" kindSince)" \
+  "2026-11-01T10:00:00+11:00|fetch-failed|2026-11-02T06:00:00+11:00" "N2: … its since kept, its kind and kindSince the new kind's"
 g -C "$tmp/primary" remote set-url origin "$tmp/origin.git"
 land a.txt six
-has "$(job --now 2026-11-02T10:30:00+11:00)" "primary: notified" "N1/N2: one notice once the spell is 24 h old, though origin moved and a fetch failed within it"
-ok "$(posts)" 1 "N1: … one POST"
-has "$(tail -1 "$NTFY_LOG")" "primary: diverged (ahead 1, behind 3): never integrated here (stuck since 2026-11-01T10:00; git -C $tmp/primary status)" \
-  "N1: … through the real ntfy-push, outcome first, then dated from the spell's start"
-job --now 2026-11-03T10:30:00+11:00 >/dev/null
-ok "$(posts)" 1 "R4: … and never again for that kind"
+out=$(job --now 2026-11-02T10:30:00+11:00)
+lacks "$out" "notif" "N1: no pass notifies, nor says it would"
+ok "$(sline --now 2026-11-02T10:30:00+11:00)" \
+  "Primary refresh: primary: diverged (ahead 1, behind 3): never integrated here (stuck since 2026-11-01T10:00; git -C $tmp/primary status)" \
+  "N1/N2: once the spell is 24 h old the stuck read names it, though origin moved and a fetch failed within it: outcome first, then dated from the spell's start"
 g -C "$tmp/primary" reset -q --hard origin/master
 job >/dev/null
-ok "$(skeys "$XDG_STATE_HOME/thread/primary-refresh.json")" "" "R4: a checkout back to current ends its spell"
+ok "$(skeys "$DS")" "" "R4: a checkout back to current ends its spell"
 touch "$tmp/primary/.git/index.lock"; echo "[[w-rollout]] running on it" > "$HOLD_FILE"
 has "$(job --now 2026-11-03T12:00:00+11:00)" "primary: current" "N3: a primary at origin's tip reads current, lock and hold or not"
 job --now 2026-11-04T13:00:00+11:00 >/dev/null
-ok "$(posts)" 1 "N3: … so a day at origin's tip under a hold starts no spell"
+ok "$(skeys "$DS")" "" "N3: … so a day at origin's tip under a hold starts no spell"
 rm -f "$HOLD_FILE"; land a.txt seven
 has "$(job --now 2026-11-04T09:00:00+11:00)" "primary: busy: index.lock present" "N3: behind origin with an index.lock reads busy"
 rm -f "$tmp/primary/.git/index.lock"; echo "[[y-rollout]] running on it" > "$HOLD_FILE"
 has "$(job --now 2026-11-04T21:00:00+11:00)" "primary: held: [[y-rollout]]" "N3: a held pass reads held"
-ok "$(posts)" 1 "N3: … and inside 24 h nothing is sent"
-has "$(job --now 2026-11-05T09:30:00+11:00)" "primary: notified" "N3: a spell begun busy and held a day later notifies (a new kind never restarts the first notice's clock)"
-has "$(tail -1 "$NTFY_LOG")" "primary: held: [[y-rollout]] running on it (stuck since 2026-11-04T09:00" "N3: … naming the then-current kind and its holders"
+ok "$(sline --now 2026-11-04T21:00:00+11:00)" None "N3: … and inside 24 h the stuck read names nothing"
+lacks "$(job --now 2026-11-05T09:30:00+11:00)" "notif" "N3: a day later the pass notifies nothing"
+has "$(sline --now 2026-11-05T09:30:00+11:00)" "Primary refresh: primary: held: [[y-rollout]] running on it (stuck since 2026-11-04T09:00" \
+  "N3: … and the stuck read names the then-current kind and its holders, dated from the busy pass (a new kind never restarts the 24 h)"
 rm -f "$HOLD_FILE"; job >/dev/null
-ok "$(skeys "$XDG_STATE_HOME/thread/primary-refresh.json")" "" "N3: a current pass ends the spell"
+ok "$(skeys "$DS")" "" "N3: a current pass ends the spell"
 
 # ---- R7: never a linked worktree or a Rollout clone -----------------------------------------------------------------
 g -C "$tmp/primary" worktree add -q --detach "$tmp/wt" 2>/dev/null
@@ -244,128 +215,104 @@ has "$(run --primary "$tmp/primary-rollout" --state "$tmp/s-r7.json")" "not a pr
 has "$(run --primary "$tmp/primary/skills" --state "$tmp/s-r7.json")" "not its own toplevel" "R7: a folder inside a checkout is no primary"
 g -C "$tmp/primary" worktree remove --force "$tmp/wt"
 
-# ---- P0-P2: one notice per kind ------------------------------------------------------------------------------------------
-# P0: a fresh spell that changes kind sends nothing before 24 h
-S="$tmp/s-p.json"; n0=$(posts)
+# ---- P0-P2: the spell's since, kindSince and outcome ------------------------------------------------------------------------
+# P0: a fresh spell that changes kind keeps its since; its kindSince and outcome are the new kind's
+S="$tmp/s-p.json"
 land p0.txt p0; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
 has "$(job --state "$S" --now "$(at 0)")" "primary: held:" "P0: held at T0"
 rm -f "$HOLD_FILE"; land p.txt "origin p"; echo mine > "$tmp/primary/p.txt"
 has "$(job --state "$S" --now "$(at 120)")" "primary: refused: local changes overlap origin/master (p.txt)" "P0: … refused at T0+2h"
-job --state "$S" --now "$(at 180)" >/dev/null
-ok "$(posts)" "$n0" "P0: … and at T0+3h nothing has been sent"
+ok "$(sv "$S" "$tmp/primary" since)|$(sv "$S" "$tmp/primary" kind)|$(sv "$S" "$tmp/primary" kindSince)|$(sv "$S" "$tmp/primary" outcome)" \
+  "$(at 0)|refused|$(at 120)|refused: local changes overlap origin/master (p.txt)" "P0: … since kept at T0, kindSince the refusal's, outcome the latest"
+out=$(job --state "$S" --now "$(at 180)")
+lacks "$out" "notif" "P0: … and at T0+3h nothing notifies"
+ok "$(sv "$S" "$tmp/primary" kindSince)" "$(at 120)" "P0: … a pass of the same kind keeps kindSince"
+ok "$(sv "$S" "$tmp/primary" notifiedKinds)" None "P0: … and a spell holds no notifiedKinds"
 rm -f "$tmp/primary/p.txt"; job --state "$S" >/dev/null
-# P1: held for a day and notified, then refused once the hold clears, re-notified an hour after
-S="$tmp/s-p1.json"; n0=$(posts)
+# P1: held for a day, named by the stuck read; refused once the hold clears, named as refused at once (the spell is old)
+S="$tmp/s-p1.json"
 land p1a p1a; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
 job --state "$S" --now "$(at 0)" >/dev/null
-has "$(job --state "$S" --now "$(at 1440)")" "primary: notified" "P1: held from T0: one notice at T0+24h"
-ok "$(posts)" $((n0+1)) "P1: … one POST"
+lacks "$(job --state "$S" --now "$(at 1440)")" "notif" "P1: held from T0: at T0+24h no pass notifies"
+has "$(sline --state "$S" --now "$(at 1440)")" "Primary refresh: primary: held: [[x-rollout]] running on it (stuck since $(at 0 | cut -c1-16)" "P1: … and the stuck read names it"
 rm -f "$HOLD_FILE"; land p1.txt "origin p1"; echo mine > "$tmp/primary/p1.txt"
 has "$(job --state "$S" --now "$(at 1800)")" "primary: refused: local changes overlap origin/master (p1.txt)" "P1: the hold clears at T0+30h, and the overlap reads refused"
-job --state "$S" --now "$(at 1859)" >/dev/null
-ok "$(posts)" $((n0+1)) "P1: no POST at T0+30h or T0+30h59m"
-job --state "$S" --now "$(at 1860)" >/dev/null
-ok "$(posts)" $((n0+2)) "P1: one POST at T0+31h, the new kind having stood an hour"
-has "$(tail -1 "$NTFY_LOG")" "primary: refused: local changes overlap origin/master (p1.txt) (stuck since $(at 0 | cut -c1-16)" "P1: … naming the refusal"
-# P2: a kind already notified never sends again; a third kind does, after its hour
+has "$(sline --state "$S" --now "$(at 1800)")" "Primary refresh: primary: refused: local changes overlap origin/master (p1.txt) (stuck since $(at 0 | cut -c1-16)" \
+  "P1: … the stuck read names the refusal at once, dated from the spell's start"
+# P2: back to held, then busy: each pass's outcome is the latest; since never moves
 echo "[[x-rollout]] running on it" > "$HOLD_FILE"
 has "$(job --state "$S" --now "$(at 1920)")" "primary: held:" "P2: back to held at T0+32h"
-rm -f "$HOLD_FILE"; job --state "$S" --now "$(at 2040)" >/dev/null
-ok "$(posts)" $((n0+2)) "P2: held at T0+32h and refused at T0+34h send nothing"
-touch "$tmp/primary/.git/index.lock"
+rm -f "$HOLD_FILE"; touch "$tmp/primary/.git/index.lock"
 has "$(job --state "$S" --now "$(at 2100)")" "primary: busy: index.lock present" "P2: busy at T0+35h"
-ok "$(posts)" $((n0+2)) "P2: … sends nothing then"
-job --state "$S" --now "$(at 2160)" >/dev/null
-ok "$(posts)" $((n0+3)) "P2: … and one POST at T0+36h"
-ok "$(sv "$S" "$tmp/primary" notifiedKinds)" "['held', 'refused', 'busy']" "P2: the spell remembers every kind it notified"
+ok "$(sv "$S" "$tmp/primary" since)|$(sv "$S" "$tmp/primary" kind)|$(sv "$S" "$tmp/primary" kindSince)|$(sv "$S" "$tmp/primary" outcome)" \
+  "$(at 0)|busy|$(at 2100)|busy: index.lock present" "P2: … since still T0, the kind, kindSince and outcome the busy pass's"
 rm -f "$tmp/primary/.git/index.lock" "$tmp/primary/p1.txt"
 has "$(job --state "$S")" "primary: moved" "P2: cleared, the primary moves"
 ok "$(skeys "$S")" "" "P2: … and the spell ends"
 
-# ---- U1: an entry in the shape before p37-7 ----------------------------------------------------------------------------
-S="$tmp/s-u1.json"; n0=$(posts)
+# ---- U1: an entry in the shape before p37-7, and one an earlier copy notified -------------------------------------------------
+S="$tmp/s-u1.json"
 printf '{"v": 1, "stuck": {"%s": {"since": "%s", "notified": "%s"}}}\n' "$tmp/primary" "$(at 0)" "$(at 1440)" > "$S"
+has "$(sline --state "$S" --now "$(at 1450)")" "Primary refresh: primary: stuck (kind not yet read) (stuck since $(at 0 | cut -c1-16); git -C $tmp/primary status)" \
+  "U1: an old entry with no kind is named at 24 h as stuck (kind not yet read)"
 land u1a u1a; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
-job --state "$S" --now "$(at 1500)" >/dev/null
-ok "$(posts)" "$n0" "U1: an already-notified old entry's held pass at T0+25h sends nothing"
-ok "$(sv "$S" "$tmp/primary" kind)|$(sv "$S" "$tmp/primary" kindSince)|$(sv "$S" "$tmp/primary" notifiedKinds)|$(sv "$S" "$tmp/primary" since)" \
-  "held|$(at 1500)|['held']|$(at 0)" "U1: … and takes that pass's kind, already notified, its since kept"
-rm -f "$HOLD_FILE"; land u1.txt "origin u1"; echo mine > "$tmp/primary/u1.txt"
-job --state "$S" --now "$(at 1560)" >/dev/null
-ok "$(posts)" "$n0" "U1: refused at T0+26h sends nothing"
-job --state "$S" --now "$(at 1620)" >/dev/null
-ok "$(posts)" $((n0+1)) "U1: … and one POST at T0+27h"
-rm -f "$tmp/primary/u1.txt"; job --state "$S" >/dev/null
-S="$tmp/s-u1b.json"; n0=$(posts)
-printf '{"v": 1, "stuck": {"%s": {"since": "%s"}}}\n' "$tmp/primary" "$(at -1500)" > "$S"
-land u1b u1b; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
-has "$(job --state "$S" --now "$(at 0)")" "primary: notified" "U1: an un-notified old entry 25 h old sends its notice on the next held pass"
-ok "$(posts)" $((n0+1)) "U1: … one POST"
+lacks "$(job --state "$S" --now "$(at 1500)")" "notif" "U1: its held pass at T0+25h notifies nothing"
+ok "$(sv "$S" "$tmp/primary" kind)|$(sv "$S" "$tmp/primary" kindSince)|$(sv "$S" "$tmp/primary" notified)|$(sv "$S" "$tmp/primary" since)|$(sv "$S" "$tmp/primary" notifiedKinds)" \
+  "held|$(at 1500)|$(at 1440)|$(at 0)|None" "U1: … it takes that pass's kind, its since kept, its old notified kept exactly, no notifiedKinds written"
+has "$(sline --state "$S" --now "$(at 1500)")" "Primary refresh: primary: held: [[x-rollout]] running on it (stuck since $(at 0 | cut -c1-16)" "U1: … and the stuck read names it by its kind now"
 rm -f "$HOLD_FILE"; job --state "$S" >/dev/null
+ok "$(skeys "$S")" "" "U1: a current pass ends it"
 
-# ---- M1: the five-holder notice keeps its last holder ----------------------------------------------------------------------
+# ---- M1: the five-holder spell keeps every holder ---------------------------------------------------------------------------
 mkdir -p "$tmp/m1"; g clone -q "$tmp/origin.git" "$tmp/m1/thread-skill" 2>/dev/null
 land m1 m1; S="$tmp/s-m1.json"
 hs=""; for d in 2026-10-29 2026-10-30 2026-10-31 2026-11-01 2026-11-02; do hs="$hs[[mac-data-mcp-rollout-$d]] "; done
 echo "${hs}running on it" > "$HOLD_FILE"
 job --primary "$tmp/m1/thread-skill" --state "$S" --now "$(at 0)" >/dev/null
-has "$(job --primary "$tmp/m1/thread-skill" --state "$S" --now "$(at 1440)")" "thread-skill: notified" "M1: a five-holder hold notifies at 24 h"
-m=$(tail -1 "$NTFY_LOG")
-has "$m" "thread-skill: held: [[mac-data-mcp-rollout-2026-10-29]]" "M1: … outcome first"
-has "$m" "[[mac-data-mcp-rollout-2026-11-02]]" "M1: … and the last holder stays whole"
-ok "$(printf '%s' "$m" | python3 -c 'import sys; m=sys.stdin.read(); print(len(m) <= 200, m.rindex("]]") + 2)')" "True 199" "M1: … within 200 characters, its last ]] at character 199"
+job --primary "$tmp/m1/thread-skill" --state "$S" --now "$(at 1440)" >/dev/null
+m=$(sline --state "$S" --now "$(at 1440)")
+has "$m" "Primary refresh: thread-skill: held: [[mac-data-mcp-rollout-2026-10-29]]" "M1: a five-holder hold is named at 24 h, outcome first"
+ok "$(printf '%s' "$m" | grep -o '\[\[mac-data-mcp-rollout-[0-9-]*\]\]' | grep -c .)" 5 "M1: … all five holders whole, with no cut"
+has "$m" "running on it (stuck since $(at 0 | cut -c1-16); git -C $tmp/m1/thread-skill status)" "M1: … and its tail"
 rm -f "$HOLD_FILE"
 
-# ---- H1: a multi-line hold error is one line, and ntfy-push takes it --------------------------------------------------------
-S="$tmp/s-h1.json"; n0=$(posts)
+# ---- H1: a multi-line hold error is one line ----------------------------------------------------------------------------------
+S="$tmp/s-h1.json"
 printf 'echo "line one" >&2\necho "line two" >&2\nexit 3\n' > "$tmp/primary/skills/_shared/scripts/primary-hold.sh"
 land h1 h1
 has "$(job --state "$S" --now "$(at 0)")" "primary: held: the hold check exited 3: line one line two" "H1: two stderr lines and exit 3 read as one held: line"
-job --state "$S" --now "$(at 1440)" >/dev/null
-ok "$(posts)" $((n0+1)) "H1: … and ntfy-push accepts its notice"
-has "$(tail -1 "$NTFY_LOG")" "primary: held: the hold check exited 3: line one line two" "H1: … one line"
+ok "$(sline --state "$S" --now "$(at 1440)" | grep -c .)" 1 "H1: … and the stuck read's line is one line"
+has "$(sline --state "$S" --now "$(at 1440)")" "primary: held: the hold check exited 3: line one line two (stuck since" "H1: … naming it"
 g -C "$tmp/primary" checkout -q -- skills/_shared/scripts/primary-hold.sh; job --state "$S" >/dev/null
 
-# ---- N4: a failed send says why, and waits an hour --------------------------------------------------------------------------
-S="$tmp/s-n4.json"; n0=$(posts)
-land n4 n4; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
-job --state "$S" --now "$(at 0)" >/dev/null
-touch "$NTFY_FAIL"
-has "$(job --state "$S" --now "$(at 1440)")" "primary: not notified (ntfy-push exit 1: ntfy-push: delivery failed: curl exit 22" "N4: the stub's 500 is logged with ntfy-push's reason"
-rm -f "$NTFY_FAIL"
-job --state "$S" --now "$(at 1470)" >/dev/null
-ok "$(posts)" "$n0" "N4: no retry inside the hour"
-has "$(job --state "$S" --now "$(at 1501)")" "primary: notified" "N4: … and one after it"
-ok "$(posts)|$(sv "$S" "$tmp/primary" notifyFailed)" "$((n0+1))|None" "N4: … one POST, the failure cleared"
-rm -f "$HOLD_FILE"; job --state "$S" >/dev/null
-
-# ---- N5: a primary that has gone is still reported ---------------------------------------------------------------------------
-S="$tmp/s-n5.json"; n0=$(posts)
+# ---- N5: a primary that has gone is still named --------------------------------------------------------------------------------
+S="$tmp/s-n5.json"
 mv "$tmp/primary" "$tmp/primary.away"
 has "$(job --state "$S" --now "$(at 0)")" "primary: not a primary checkout: not a git checkout" "N5: a primary moved away reads not a primary checkout"
-has "$(job --state "$S" --now "$(at 1440)")" "primary: notified" "N5: … a day later it is reported, through the bundle's own ntfy-push"
-has "$(tail -1 "$NTFY_LOG")" "primary: not a primary checkout: not a git checkout (stuck since" "N5: … naming it"
+ok "$(sline --state "$S" --now "$(at 1439)")" None "N5: … not named before 24 h"
+has "$(sline --state "$S" --now "$(at 1440)")" "Primary refresh: primary: not a primary checkout: not a git checkout (stuck since" "N5: … and named at 24 h"
 mv "$tmp/primary.away" "$tmp/primary"; job --state "$S" >/dev/null
 
-# ---- T1: the fast-forward is bounded, and its timeout is urgent ----------------------------------------------------------------
+# ---- T1: the fast-forward is bounded, and its timeout is named at once ---------------------------------------------------------
 printf '#!/bin/sh\necho $$ > "$HOOK_PID"\nexec sleep 60\n' > "$tmp/primary/.git/hooks/post-merge"; chmod +x "$tmp/primary/.git/hooks/post-merge"
-S="$tmp/s-t1.json"; n0=$(posts); land t1 t1; rm -f "$HOOK_PID"
+S="$tmp/s-t1.json"; land t1 t1; rm -f "$HOOK_PID"
 out=$(job --state "$S" --now "$(at 0)" --ff-timeout 2)
 has "$out" "primary: timed out: git merge --ff-only ran past 2 s and was stopped: the working tree may be partly updated (git -C $tmp/primary status)" "T1: a hung merge is stopped at --ff-timeout"
-ok "$(posts)" $((n0+1)) "T1: … and notified on that pass, in a fresh spell"
+lacks "$out" "notif" "T1: … and nothing is sent"
+has "$(sline --state "$S" --now "$(at 0)")" "Primary refresh: primary: timed out: git merge --ff-only ran past 2 s" "T1: … the stuck read names a timed-out spell at once"
 gone "$(cat "$HOOK_PID")" "T1: … the hook it ran is gone"
-S="$tmp/s-t1b.json"; n0=$(posts); land t1b t1b; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
-job --state "$S" --now "$(at 0)" >/dev/null; job --state "$S" --now "$(at 1440)" >/dev/null
-ok "$(posts)" $((n0+1)) "T1: (a spell notified as held)"
+S="$tmp/s-t1b.json"; land t1b t1b; echo "[[x-rollout]] running on it" > "$HOLD_FILE"
+job --state "$S" --now "$(at 0)" >/dev/null
 rm -f "$HOLD_FILE" "$HOOK_PID"
-has "$(job --state "$S" --now "$(at 1445)" --ff-timeout 2)" "primary: timed out:" "T1: … then the hold clears and the merge hangs"
-ok "$(posts)" $((n0+2)) "T1: … notified at once, though the spell is already notified"
+has "$(job --state "$S" --now "$(at 5)" --ff-timeout 2)" "primary: timed out:" "T1: a spell held 5 minutes, then the hold clears and the merge hangs"
+has "$(sline --state "$S" --now "$(at 5)")" "primary: timed out: git merge --ff-only ran past 2 s and was stopped: the working tree may be partly updated (git -C $tmp/primary status) (stuck since $(at 0 | cut -c1-16)" \
+  "T1: … named at once, dated from the spell's start"
 gone "$(cat "$HOOK_PID")" "T1: … the hook is gone"
 job --state "$S" >/dev/null
 
 # ---- T2: a TERM to a pass stops its live child -------------------------------------------------------------------------------
 land t2 t2; rm -f "$HOOK_PID"
-(cd "$tmp/out" && exec "${JOB[@]}" --ntfy-server "$SERVER" --state "$tmp/s-t2.json" > "$tmp/t2.out" 2>&1) & ppid=$!
+(cd "$tmp/out" && exec "${JOB[@]}" --state "$tmp/s-t2.json" > "$tmp/t2.out" 2>&1) & ppid=$!
 i=0; while [ ! -s "$HOOK_PID" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done
 ok "$([ -s "$HOOK_PID" ] && echo started || echo 'not started in 30 s')" started "T2: the merge's post-merge hook started (the TERM lands mid-merge)"
 t0=$SECONDS; kill -TERM "$ppid"; wait "$ppid"; rc=$?; dt=$((SECONDS - t0))
@@ -391,41 +338,109 @@ for c in bytes list since5 sincex; do
   ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["v"], d["stuck"])' "$S")" "1 {}" "K1 $c: … and the state is rewritten valid"
 done
 # K1b: a stored self-update spell whose notifiedKinds is no list, on a pass whose fetch fails (so nothing touches it)
-S="$tmp/s-k1b.json"; n0=$(posts)
+S="$tmp/s-k1b.json"
 printf '{"v": 1, "stuck": {"self-update": {"since": "%s", "kind": "refused", "kindSince": "%s", "outcome": "x", "notifiedKinds": 5, "tip": "%s", "tipAt": "%s"}}}\n' \
   "$(at 0)" "$(at 0)" "$(tip)" "$(at 0)" > "$S"
 g -C "$tmp/primary" remote set-url origin "$tmp/nowhere.git"
 out=$(job --state "$S" --now "$(at 1500)")
 lacks "$out" "Traceback" "K1b: a malformed notifiedKinds on a spell this pass never touched is no traceback"
-has "$out" "primary: self-update: notified" "K1b: … the spell still notifies at 24 h"
-ok "$(posts)|$(sv "$S" self-update notifiedKinds)" "$((n0+1))|['refused']" "K1b: … once, and the list is rewritten"
+lacks "$out" "WARN" "K1b: … and no WARN: an old notice field is never read"
+ok "$(sv "$S" self-update notifiedKinds)|$(sv "$S" self-update since)" "5|$(at 0)" "K1b: … the entry kept as read"
+has "$(sline --state "$S" --now "$(at 1500)")" "primary-refresh self-update: x (stuck since $(at 0 | cut -c1-16))" "K1b: … and the stuck read names it at 24 h"
 g -C "$tmp/primary" remote set-url origin "$tmp/origin.git"
+# K1c: old notice fields, malformed or not, are never a reason to rewrite: a pass that changes nothing leaves the file as it was
+S="$tmp/s-k1c.json"
+printf '{"v": 1, "stuck": {"%s": {"since": "%s", "kind": "held", "kindSince": "%s", "outcome": "x", "notifiedKinds": 5, "notified": "not a time", "notifyFailed": 7, "notifyWhy": "w"}}}\n' \
+  "$tmp/gone" "$(at 0)" "$(at 0)" > "$S"
+cp -p "$S" "$tmp/k1c.before"
+has "$(job --state "$S")" "primary: current" "K1c: (a pass that reads current)"
+ok "$(same "$tmp/k1c.before" "$S")" same "K1c: … leaves a file holding old notify fields byte for byte"
 
 # ---- L1: the log rotates at 1 MiB, never under --dry-run ------------------------------------------------------------------------
 L="$tmp/big.log"; head -c 1048577 /dev/zero | tr '\0' x > "$L"
 job --log "$L" --dry-run >/dev/null
 ok "$(wc -c < "$L" | tr -d ' ')|$([ -e "$L.1" ] && echo rotated)" "1048577|" "L1: a --dry-run pass never rotates"
-(cd "$tmp/out" && "${JOB[@]}" --ntfy-server "$SERVER" --log "$L" >> "$L" 2>&1)
+(cd "$tmp/out" && "${JOB[@]}" --log "$L" >> "$L" 2>&1)
 ok "$(wc -c < "$L.1" | tr -d ' ')" 1048577 "L1: a log over 1 MiB moves to .1"
 has "$(cat "$L")" "primary-refresh $tmp/primary: current" "L1: … and the pass writing to it carries on in a fresh log"
 mkdir -p "$tmp/nolog"; rmdir "$tmp/nolog"
 lacks "$(job --log "$tmp/nolog/x.log")" "Traceback" "L1: a missing log directory skips rotation"
 
-# ---- J1: a job older than the copy is reported -----------------------------------------------------------------------------------
-S="$tmp/s-j1.json"; n0=$(posts)
+# ---- J1: a job older than the copy is recorded, and named at 24 h -----------------------------------------------------------------
+S="$tmp/s-j1.json"
 has "$(job0 --state "$S" --now "$(at 0)")" "primary: job: the launchd job predates this copy (job shape 0, wants 1): re-run primary-refresh.py install and the launchctl line it prints" \
   "J1: the installed copy run without --job-shape logs the job line"
 lacks "$(job0 --state "$S" --now "$(at 60)")" "job: the launchd job" "J1: … on its first pass only"
-ok "$(posts)" "$n0" "J1: … and sends nothing inside 24 h"
+ok "$(sline --state "$S" --now "$(at 60)")" None "J1: … and the stuck read names nothing inside 24 h"
 out=$(job0 --state "$S" --now "$(at 1440)")
-ok "$(posts)" $((n0+1)) "J1: one POST 24 h later"
-has "$(tail -1 "$NTFY_LOG")" "primary-refresh job: the launchd job predates this copy (job shape 0, wants 1)" "J1: … naming the job"
-has "$out" "primary: job: the launchd job predates" "J1: … and the line logged again on its notice pass"
+lacks "$out" "job: the launchd job" "J1: no pass logs it again, a day on"
+lacks "$out" "notif" "J1: … and nothing is sent"
+ok "$(sline --state "$S" --now "$(at 1440)")" \
+  "Primary refresh: primary-refresh job: the launchd job predates this copy (job shape 0, wants 1): re-run primary-refresh.py install and the launchctl line it prints (stuck since $(at 0 | cut -c1-16))" \
+  "J1: the stuck read names the job at 24 h, with no git tail"
 has "$(job --state "$S" --now "$(at 1500)")" "primary: job: current" "J1: a pass with the plist's argv clears it"
 ok "$(skeys "$S")" "" "J1: … the spell gone"
 has "$(job0 --state "$tmp/s-j1b.json" --dry-run)" "job: the launchd job predates" "J1: --dry-run only prints"
 ok "$([ -e "$tmp/s-j1b.json" ] && echo written)" "" "J1: … and writes no state"
 lacks "$(run --state "$tmp/s-j1c.json")" "job:" "J1: the checkout copy (no marker) never checks the job"
+
+# ---- ST1-ST7: the stuck read (status's Primary refresh line): read-only, point in time --------------------------------------------
+mkdir -p "$tmp/st"; S="$tmp/st/s-st.json"; rm -f "$S"
+out=$(stk --state "$S"); rc=$?
+ok "$rc|$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["stuck"], d["line"])')" "0|[] None" "ST1: an absent file reads no spell and a null line, exit 0"
+ok "$([ -e "$S" ] && echo written)" "" "ST1: … and writes none"
+seed() {  # seed <file> <key> <since> <kind> <outcome>: one entry
+  python3 - "$@" <<'PY'
+import json, sys
+p, key, since, kind, outcome = sys.argv[1:]
+try:
+    d = json.load(open(p))
+except (OSError, ValueError):
+    d = {"v": 1, "stuck": {}}
+d["stuck"][key] = {"since": since, "kind": kind, "kindSince": since, "outcome": outcome}
+json.dump(d, open(p, "w"))
+PY
+}
+seed "$S" "$tmp/primary" "$(at 0)" held "held: [[q-rollout]] running on it"
+ok "$(sline --state "$S" --now "$(at 1380)")" None "ST2: a spell 23 h old is not named"
+ok "$(sline --state "$S" --now "$(at 1500)")" "Primary refresh: primary: held: [[q-rollout]] running on it (stuck since $(at 0 | cut -c1-16); git -C $tmp/primary status)" \
+  "ST2: … at 25 h it is, with its git tail"
+S3="$tmp/s-st3.json"; rm -f "$S3"
+seed "$S3" "$tmp/agents" "$(at 0)" timed-out "timed out: git merge --ff-only ran past 600 s and was stopped"
+has "$(sline --state "$S3" --now "$(at 1)")" "Primary refresh: agents: timed out:" "ST3: a timed-out spell 1 minute old is named at once"
+ok "$(sline --state "$S3" --now "$(at -60)")" None "ST3: … a since in the future is not due, timed-out or not"
+# order and names: oldest first; self-update and job named as the copy's, no git tail; any other key as itself
+seed "$S" self-update "$(at -600)" refused "origin's bundle at abc failed its smoke run (x): the installed copy is kept"
+seed "$S" job "$(at -300)" stale-job "the launchd job predates this copy"
+seed "$S" junk "$(at -100)" held "h"
+ok "$(sline --state "$S" --now "$(at 1500)")" \
+  "Primary refresh: primary-refresh self-update: origin's bundle at abc failed its smoke run (x): the installed copy is kept (stuck since $(at -600 | cut -c1-16)) · primary-refresh job: the launchd job predates this copy (stuck since $(at -300 | cut -c1-16)) · junk: h (stuck since $(at -100 | cut -c1-16)) · primary: held: [[q-rollout]] running on it (stuck since $(at 0 | cut -c1-16); git -C $tmp/primary status)" \
+  "ST3: spells oldest first, joined with ' · '; the copy's own named as such with no git tail; a junk key named as itself"
+ok "$(stk --state "$S" --now "$(at 1500)" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sorted(d), [s["key"] for s in d["stuck"]], sorted(d["stuck"][0]))')" \
+  "['line', 'state', 'stuck'] ['self-update', 'job', 'junk', '$tmp/primary'] ['key', 'kind', 'name', 'outcome', 'since']" \
+  "ST7: the JSON's keys are exactly state, stuck and line, each spell {key, name, kind, since, outcome}"
+S4="$tmp/s-st4.json"; printf '{not json' > "$S4"
+out=$(stk --state "$S4" --now "$(at 1500)"); rc=$?
+ok "$rc|$(printf '%s\n' "$out" | grep -c '^WARN: ')|$(printf '%s\n' "$out" | grep -c Traceback)" "0|1|0" "ST4: a corrupt file is one WARN, no traceback, exit 0"
+has "$out" '"line": null' "ST4: … and a null line"
+ok "$(cat "$S4")" "{not json" "ST4: … the file left as it was"
+out=$(stk --state "$S" --now yesterday); rc=$?
+ok "$rc" 2 "ST5: a bad --now exits 2"
+has "$out" "ERROR: primary-refresh stuck: usage: --now 'yesterday' is not an ISO timestamp" "ST5: … with a usage ERROR"
+out=$(run --ntfy-server x --state "$tmp/s-st5.json"); rc=$?
+ok "$rc" 2 "ST5: run --ntfy-server is no longer an option (exit 2)"
+cp -p "$S" "$tmp/st6.before"; ls -a "$(dirname "$S")" > "$tmp/st6.ls.before"
+stk --state "$S" --now "$(at 1500)" >/dev/null
+ok "$(same "$tmp/st6.before" "$S")" same "ST6: stuck leaves the state file byte for byte"
+ls -a "$(dirname "$S")" > "$tmp/st6.ls.after"
+ok "$(same "$tmp/st6.ls.before" "$tmp/st6.ls.after")" same "ST6: … and no temp file beside it"
+S7="$tmp/s-st7.json"; rm -f "$S7"
+old=$(python3 -c 'import datetime as d; print((d.datetime.now().astimezone() - d.timedelta(days=30)).isoformat(timespec="seconds"))')
+seed "$S7" "$tmp/agents" "$old" diverged "diverged (ahead 1, behind 9): never integrated here"
+touch -t "$(python3 -c 'import datetime as d; print((d.datetime.now() - d.timedelta(days=30)).strftime("%Y%m%d%H%M"))')" "$S7"
+has "$(sline --state "$S7")" "Primary refresh: agents: diverged (ahead 1, behind 9): never integrated here (stuck since ${old:0:16}" \
+  "ST7: a 30-day-old spell in a file last written 30 days ago is still named: no window, no freshness check"
+grep -q "no freshness check" "$pr"; ok "$?" 0 "ST7: the docstring says the read has no freshness check"
 
 # ---- F1 / B1 / D1: the fetch -----------------------------------------------------------------------------------------------------
 git -C "$tmp/primary" update-ref refs/remotes/origin/feat HEAD; g -C "$tmp/seed" push -q origin HEAD:refs/heads/feat/x 2>/dev/null
@@ -552,7 +567,7 @@ real; commit "real again"; job >/dev/null
 ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "S5: (the copy is this tree's script again)"
 
 # ---- S6a-S6d: a candidate that fails its smoke run is refused once per tip, and reported at 24 h ---------------------------------------
-S="$tmp/s-s6.json"; n0=$(posts); export SMOKE_MARK="$tmp/smoke.mark"; : > "$SMOKE_MARK"
+S="$tmp/s-s6.json"; export SMOKE_MARK="$tmp/smoke.mark"; : > "$SMOKE_MARK"
 edit "$SELF" 'def main(argv=None):' 'if "bundle" not in sys.argv:
     if os.environ.get("SMOKE_MARK"):
         open(os.environ["SMOKE_MARK"], "a").write("x\n")
@@ -582,14 +597,13 @@ has "$out" "self-update: origin's bundle at $t6c failed its smoke run (fetch fai
 has "$out" "primary: moved" "S6c: … (the parent's own pass moved)"
 ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "S6c: … the copy unchanged"
 job --state "$S" --now "$(at 1380)" >/dev/null
-ok "$(posts)" "$n0" "S6d: a refusal standing since+23h has sent nothing"
-has "$(job --state "$S" --now "$(at 1440)")" "primary: self-update: notified" "S6d: … at since+24h it notifies"
-ok "$(posts)" $((n0+1)) "S6d: … one POST"
-has "$(tail -1 "$NTFY_LOG")" "primary-refresh self-update: origin's bundle at $t6c failed its smoke run (fetch failed: exit 0): the installed copy is kept (since $(at 0 | cut -c1-16))" "S6d: … naming the bundle and the spell's start"
+ok "$(sline --state "$S" --now "$(at 1380)")" None "S6d: a refusal standing since+23h is not named"
+lacks "$(job --state "$S" --now "$(at 1440)")" "notif" "S6d: … at since+24h no pass notifies"
+ok "$(sline --state "$S" --now "$(at 1440)")" "Primary refresh: primary-refresh self-update: origin's bundle at $t6c failed its smoke run (fetch failed: exit 0): the installed copy is kept (stuck since $(at 0 | cut -c1-16))" \
+  "S6d: … and the stuck read names the bundle and the spell's start"
 real; edit "$SELF" '    if frc != 0:' '    if frc == 0:'; echo "# s6d, a second refused tip" >> "$tmp/seed/$SELF"; commit s6d
 has "$(job --state "$S" --now "$(at 1500)")" "failed its smoke run" "S6d: a second refused tip in the spell is refused"
-job --state "$S" --now "$(at 1620)" >/dev/null
-ok "$(posts)" $((n0+1)) "S6d: … and sends nothing more"
+ok "$(sv "$S" self-update since)" "$(at 0)" "S6d: … and the spell keeps its since"
 real; echo "# s6d fixed" >> "$tmp/seed/$SELF"; commit "s6d fixed"
 has "$(job --state "$S" --now "$(at 1680)")" "self-update: the installed bundle now matches" "S6d: a fixed bundle installs"
 ok "$(sv "$S" self-update kind)" None "S6d: … and the self-update entry is removed"
@@ -613,7 +627,7 @@ exec "$tmp/sshbin/ssh" "\$@"
 EOF
 chmod +x "$tmp/countbin/ssh"; export SSH_COUNT="$tmp/ssh.count"
 g -C "$tmp/primary" remote set-url origin git@github.com:o/origin.git
-S="$tmp/s-s6f.json"; n0=$(posts); echo "# s6f" >> "$tmp/seed/$SELF"; commit s6f; t6f=$(tip | cut -c1-12)
+S="$tmp/s-s6f.json"; echo "# s6f" >> "$tmp/seed/$SELF"; commit s6f; t6f=$(tip | cut -c1-12)
 rm -f "$SSH_COUNT"; out=$(PATH="$tmp/countbin:$PATH" SSH_OK=1 job --state "$S" --now "$(at 0)")
 has "$out" "primary: moved" "S6f: origin over ssh: the parent's fetch passes"
 has "$out" "self-update: origin's bundle at $t6f failed its smoke run (fetch failed: " "S6f: … the smoke's own fetch fails, so the candidate is refused"
@@ -623,7 +637,7 @@ lacks "$out" "self-update" "S6f: the next pass on the same tip smokes nothing"
 ok "$(cat "$SSH_COUNT")" 1 "S6f: … its one connection the parent's fetch"
 rm -f "$SSH_COUNT"; out=$(PATH="$tmp/countbin:$PATH" SSH_OK=2 job --state "$S" --now "$(at 1440)")
 has "$out" "self-update: the installed bundle now matches origin/master at $t6f" "S6f: at tipAt+24h, origin answering, it smokes again and installs"
-ok "$(posts)|$(sv "$S" self-update kind)" "$n0|None" "S6f: … and nothing was sent: the retry ran before the due rule"
+ok "$(sv "$S" self-update kind)" None "S6f: … and the spell is cleared"
 g -C "$tmp/primary" remote set-url origin "$tmp/origin.git"
 real; commit "real again"; job >/dev/null
 
@@ -648,12 +662,12 @@ has "$(job)" "self-update: the installed bundle now matches" "S6h: a candidate t
 argv_is() { python3 -c 'import sys; print(" ".join(open(sys.argv[1], "rb").read().decode().split("\0")))' "$SMOKE_ARGV"; }
 got=$(argv_is); stage=$(printf '%s\n' "$got" | sed -n 's|.* --log \([^ ]*\)/smoke\.log .*|\1|p')
 has "$stage" "$tmp/bin/.stage-" "S6h: (the stage is beside the copy)"
-ok "$got" "${JOB[*]:2:5} --log $stage/smoke.log --job-shape 1 --ntfy-server $SERVER --state $stage/smoke-state.json --dry-run" \
+ok "$got" "${JOB[*]:2:5} --log $stage/smoke.log --job-shape 1 --state $stage/smoke-state.json --dry-run" \
   "S6h: … its argv is the plist's own, --log replaced in place, --state and --dry-run added, nothing else changed"
 echo "# s6h, with --now" >> "$tmp/seed/$SELF"; commit "s6h now"
 job --now 2026-11-12T10:00:00+11:00 >/dev/null
 got=$(argv_is); stage=$(printf '%s\n' "$got" | sed -n 's|.* --log \([^ ]*\)/smoke\.log .*|\1|p')
-ok "$got" "${JOB[*]:2:5} --log $stage/smoke.log --job-shape 1 --ntfy-server $SERVER --now 2026-11-12T10:00:00+11:00 --state $stage/smoke-state.json --dry-run" \
+ok "$got" "${JOB[*]:2:5} --log $stage/smoke.log --job-shape 1 --now 2026-11-12T10:00:00+11:00 --state $stage/smoke-state.json --dry-run" \
   "S6h: a run with --now carries the pass's stamp in its place"
 unset SMOKE_ARGV; real; commit "real again"; job >/dev/null
 ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "S6h: (the copy is this tree's script again)"
@@ -815,6 +829,49 @@ ok "$(python3 -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"
 has "$out" "launchctl bootout gui/$(id -u)/com.thread.primary-refresh 2>/dev/null; while launchctl print gui/$(id -u)/com.thread.primary-refresh >/dev/null 2>&1; do sleep 1; done; launchctl bootstrap gui/$(id -u) '$tmp/a b/job.plist'" \
   "I3: the printed line waits for the bootout, and quotes a plist path with a space"
 
+# ---- Q1-Q4: install drops the spells of checkouts the job does not watch; a pass never prunes ------------------------------
+# The default state file is the job's (the plist names no --state); I3's install above is the last that touched it, and no
+# arm after this one reads it.
+qseed() {
+  python3 - "$DS" "$tmp" "$(at 0)" <<'PY'
+import json, os, sys
+p, t, since = sys.argv[1:]
+e = lambda kind, **x: dict({"since": since, "kind": kind, "kindSince": since, "outcome": kind}, **x)
+d = {"v": 1, "stuck": {f"{t}/primary": e("held"), f"{t}/agents": e("diverged", notified=since, notifiedKinds=["diverged"]),
+                       "self-update": e("refused"), "job": e("stale-job"), f"{t}/gone": e("busy")}}
+os.makedirs(os.path.dirname(p), exist_ok=True)
+json.dump(d, open(p, "w"))
+PY
+}
+entry() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["stuck"].get(sys.argv[2]), sort_keys=True))' "$1" "$2"; }
+qseed; for k in "$tmp/primary" "$tmp/agents" self-update job; do entry "$DS" "$k"; done > "$tmp/q1.kept.before"
+out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
+ok "$(skeys "$DS")" "$(printf '%s\n' "$tmp/agents" "$tmp/primary" job self-update | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" \
+  "Q1: install keeps the spells of the checkouts it watches, self-update and job, and drops the rest"
+has "$out" "primary-refresh install: dropped spell: $tmp/gone (not watched by this job)" "Q1: … one line per dropped spell"
+ok "$(printf '%s\n' "$out" | grep -c 'dropped spell:')" 1 "Q1: … and only that one"
+for k in "$tmp/primary" "$tmp/agents" self-update job; do entry "$DS" "$k"; done > "$tmp/q1.kept.after"
+ok "$(same "$tmp/q1.kept.before" "$tmp/q1.kept.after")" same "Q1: … each kept entry exactly as seeded, an old notified field included"
+has "$(printf '%s\n' "$out" | tail -1)" "next: launchctl bootout" "Q1: … before install's next: line, still last"
+qseed
+(cd "$tmp/out" && python3 "$tmp/binq/primary-refresh.py" run --primary "$tmp/primary" >/dev/null 2>&1)
+ok "$(skeys "$DS" | tr ' ' '\n' | grep -cxF -e "$tmp/agents" -e "$tmp/gone")" 2 "Q2: a hand-run of the installed copy with only --primary keeps the agents and gone spells: a pass never prunes"
+qseed; run >/dev/null
+ok "$(skeys "$DS" | tr ' ' '\n' | grep -cxF -e "$tmp/agents" -e "$tmp/gone")" 2 "Q2: … nor does a run of the repo copy"
+qseed; python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" >/dev/null 2>&1
+cp -p "$DS" "$tmp/q3.before"
+out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
+lacks "$out" "dropped spell:" "Q3: an install with nothing to drop drops nothing"
+ok "$(same "$tmp/q3.before" "$DS")" same "Q3: … and leaves the file byte for byte"
+rm -f "$DS"
+out=$(python3 "$pr" install --primary "$tmp/primary" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
+ok "$([ -e "$DS" ] && echo written)" "" "Q4: an install with no state file creates none"
+printf '{not json' > "$DS"
+out=$(python3 "$pr" install --primary "$tmp/primary" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
+ok "$(cat "$DS")" "{not json" "Q4: … and leaves a corrupt one as it was, for the job's next pass"
+lacks "$out" "dropped spell:" "Q4: … printing no dropped spell"
+grep -q "One job per state file" "$pr"; ok "$?" 0 "Q4: the docstring names one job per state file"
+
 # ---- I7 / I7b / I7c / I8: a copy that cannot load background_job.py, and `bundle`, which never loads it ----------------
 # I7: a lone copy (its plugin root $tmp/lone holds nothing) pointed at a folder inside a checkout: no module beside it or
 # in the primary, so it exits 1 before it reads the primary (R7's `not a primary checkout` never prints).
@@ -839,7 +896,7 @@ lacks "$out" "Traceback" "I7c: … no traceback"
 ok "$([ -e "$tmp/s-i7c.json" ] && echo written)" "" "I7c: … and no state"
 # I8: `bundle` loads no helper, so the lone copy prints the whole table
 python3 "$tmp/lone/x/y/z/primary-refresh.py" bundle > "$tmp/i8.out" 2> "$tmp/i8.err"; rc=$?
-ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the seven-row table, stderr empty"
+ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the six-row table, stderr empty"
 
 ok "$(ls -a "$tmp/bin" | grep -c '^\.stage-')" 0 "no stage is left beside the copy"
 exit $fail

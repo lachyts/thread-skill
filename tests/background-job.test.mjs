@@ -1,5 +1,6 @@
-// skills/_shared/scripts/background_job.py — the plumbing the background jobs share (p39-6): the Primary refresh's and the
-// Watchdog's state file, ntfy-push call and launchd job, and the one TERM-grace-KILL stop of a child's process group.
+// skills/_shared/scripts/background_job.py — the plumbing the background jobs share (p39-6): the Primary refresh's state
+// file and launchd job, its frozen (no longer called, ADR 0075 d2) notify, and the one TERM-grace-KILL stop of a child's
+// process group.
 //   BJ0 python 3.8 syntax   BJ1 importing it changes nothing   BJ2 state_path   BJ3 read_state   BJ4 the writes
 //   BJ5 the plist and PATH   BJ6 notify and run_plain   BJ7 kill_group
 //   BJ8 a missing or broken module is each by-path loader's own broken-install line, never a traceback
@@ -342,7 +343,7 @@ test('BJ9. the TERM+KILL group stops left in the tree are kill_group and the one
   assert.equal(r.status, 0, r.stderr)
   assert.deepEqual(r.stdout.trim().split('\n'), ['background_job.py:kill_group', 'estate-scan.py:interrupt', 'verify-slot.py:_end',
     'verify-slot.py:kill_group'])
-  for (const rel of ['skills/_shared/scripts/primary-refresh.py', 'skills/execute/scripts/watchdog.py', 'skills/execute/scripts/lead-integrate.py',
+  for (const rel of ['skills/_shared/scripts/primary-refresh.py', 'skills/execute/scripts/lead-integrate.py',
     'skills/_shared/scripts/declared-check.py', 'skills/_shared/scripts/estate-scan.py', 'skills/reflect/scripts/close-score.py']) {
     assert.ok(fs.readFileSync(path.join(root, rel), 'utf8').includes('background_job.py'), `${rel} names background_job.py`)
   }
@@ -350,8 +351,8 @@ test('BJ9. the TERM+KILL group stops left in the tree are kill_group and the one
 
 // The interface an installed Primary refresh copy calls in process. A self-update that fails partway leaves the OLD copy
 // running against the NEW background_job.py (primary-refresh.py's step 5), and an old copy that raises at its first
-// BJ call (BJ.state_path, at the top of cmd_run) never reaches the fetch or the self-update that would heal it, and
-// sends no notice (notify is the module's too): only a hand install gets it out. So this is frozen, additive only:
+// BJ call (BJ.state_path, at the top of cmd_run) never reaches the fetch or the self-update that would heal it: only a
+// hand install gets it out. So this is frozen, additive only:
 // never rename, remove or reorder a function, a parameter or a Notified field; a new parameter goes last with a
 // default; read_state stays a 2-tuple. A new BJ call shape in primary-refresh.py joins CALLS (and a new name joins
 // FROZEN). An entry never leaves CALLS or FROZEN, even after primary-refresh.py stops making that call, because an

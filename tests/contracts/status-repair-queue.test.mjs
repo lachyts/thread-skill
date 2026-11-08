@@ -407,7 +407,7 @@ function buildE() {
 // retried, `hand-back --answer` acts once (a second call, the lead's or repair's, exits 1), every hand-back spends the
 // answer so an identical re-block is a fresh ask (`ask 2`), a later run or automatic retry outdates it, the descope verb
 // refuses an answered block, an `awaiting repair`, a `left` and a refused-descope block each read their Human fix, and a
-// `left` answer to a `## Needs you` question changes the item's text (so execute skips its push by the form).
+// `left` answer to a `## Needs you` question changes the item's text (execute lists it like any other item).
 const RF = 'proj-rollout-2026-10-04'
 const RF2 = 'proj-rollout-2026-10-04-2'
 const F = {
@@ -775,7 +775,7 @@ function answerF(d0, fpOf) {
     v10.answerRecorded?.form !== 'awaiting repair') fails.push(`(x) awaiting repair: ${JSON.stringify([v10.autoRetryWhy, v10.humanFix])}`)
 
   // (xi) A `left` answer on a block whose cause names a fix keeps that act and label, its detail prefixed; execute § 6.5
-  // (c) lists it and never pushes it, by its form.
+  // (c) lists it like any other item (ADR 0075 d2: no item is pushed).
   const lf = copyDir(d0, path.join(tmp, 'F-left'))
   const before11 = inputsAt(lf, spent).humanFix
   must0(fRecord(lf, spent, ['--kind', 'decision', '--ask', F_ASK, '--answer', 'leave it', '--fingerprint', spentFp, '--form', 'left']), '(xi) record-answer')
@@ -850,10 +850,10 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 // resolver, § 2's room-stop read, `step-boundary.py stands` (p18-1), and § 5's serial-chain read, `leg.py status`
 // (p24-4; the grep reads are no command).
 // engine-snapshot.py resolve (ADR 0043, status § 1): the read-only engine-root read every rollout verb makes first.
-// watchdog.py plist (p29-7, status § The Watchdog's reading): Lachy's one-time install render, named with its root; it
-// prints the launchd job on stdout and writes nothing itself.
+// primary-refresh.py stuck (ADR 0075 d2, status § 4's Primary refresh line): a read of the job's state file that writes
+// nothing.
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
-  'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'watchdog.py plist',
+  'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'primary-refresh.py stuck',
   'unfinished-rollout.py hold']   // § 4's Hold line (ADR 0060): read-only, one JSON line
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep

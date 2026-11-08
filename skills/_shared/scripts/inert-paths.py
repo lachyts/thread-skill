@@ -3794,7 +3794,7 @@ def _write_edit(a, slug, new_globs_for, check):
             sys.stderr.write("inert-paths: the edit does not validate (%s): nothing written\n" % e)
             return 2
         got = ((after or {}).get("repo") or {}).get(slug.lower(), {}).get("inert_paths", [])
-        same = all((before or {}).get(k, {}) == (after or {}).get(k, {}) for k in ("defaults", "guardrails", "notify"))
+        same = all((before or {}).get(k, {}) == (after or {}).get(k, {}) for k in ("defaults", "guardrails"))
         others = {s: t for s, t in ((before or {}).get("repo") or {}).items() if s != slug.lower()} == \
             {s: t for s, t in ((after or {}).get("repo") or {}).items() if s != slug.lower()}
         mine = {k: v for k, v in table.items() if k != "inert_paths"} == \
