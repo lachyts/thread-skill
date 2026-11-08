@@ -1105,7 +1105,7 @@ step 1.5's final `preflight` with `--dep`. Under orient § 7 or orient-all § 6 
 are listed in S7. Steps 2, 2.5–2.9, 4, 4.5, 4.7 and Solo are skipped on this path, and `plan_approval:`, `scope:`,
 `rung:` and `solo:` are never proposed.
 
-**S5. Write.** One note per chain, so one per project (ADR 0074 d1), from `${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`. Naming
+**S5. Write.** One note per chain, so at most one per project (ADR 0074 d1), from `${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`. Naming
 follows step 6: the first chain takes the next free `<slug>-rollout-<YYYY-MM-DD>` name and each further chain the
 next ordinal (`-2`, `-3`, …), never **Overwrite**. The shared placeholders (`{{PROJECT_NAME}}`, `{{DATE}}`,
 `{{THREAD_LINE}}`, `{{QUEUE_RATIONALE}}`, `{{POST_ROLLOUT_ITEMS}}`) are substituted as step 6's bullets say, and
