@@ -41,10 +41,14 @@ State (a missing file takes the default in brackets):
                           sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
                           A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
                           checks as they stand. `pr checks --json` is gh 2.43.1's "unknown flag: --json", rc 1,
-                          unless checks.json is present (a newer gh), which prints `links`.
-  links, steps            the infra-classify reads; `run rerun` is logged, rc 0. `run view <id>` serves
-                          steps.<id> when that file exists (an empty one: a run with no failed step),
-                          else steps.
+                          unless checks.json is present (a newer gh): with -q it prints `links`; without -q (merge-task's
+                          conclusion read, ADR 0073 d4) a JSON array of checks.cur's table rows, each {name, bucket (the
+                          row's 2nd cell: pass | fail | cancel | pending | skipping), link (its 4th)} with the --json
+                          fields asked for.
+  links, steps            the infra-classify reads; `run rerun` is logged, rc 0 (rerun.fail present: rc 1). `run view
+                          <id>` with -q serves steps.<id> when that file exists (an empty one: a run with no failed
+                          step), else steps; without -q (`--json jobs`, the whole object: merge-task's job conclusion
+                          read) it serves jobs.<id>, else an "HTTP 404" error, rc 1.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
   merge.queue             rc 0, autoMergeRequest set, stays OPEN.   merge.noop: rc 0, nothing changed.
@@ -273,10 +277,22 @@ if args[:2] == ["pr", "list"]:
 # ---- pr checks ------------------------------------------------------------------------------------------
 if args[:2] == ["pr", "checks"]:
     guard_num()
-    if "--json" in args:  # infra_flake_rerun's failed-required-links read: gh 2.43.1 has no --json on pr checks
+    if "--json" in args:  # the failed-required-links and conclusion reads: gh 2.43.1 has no --json on pr checks
         if not has("checks.json"):
             die("unknown flag: --json\n\nUsage:  gh pr checks [<number> | <url> | <branch>] [flags]\n")
-        print(rd(p("links"), ""))
+        if "-q" in args or "--jq" in args:
+            print(rd(p("links"), ""))
+            sys.exit(0)
+        table = json.loads(rd(p("checks.cur"))).get("out", "") if has("checks.cur") else ""
+        fields = opt("--json").split(",")
+        rows = []
+        for line in table.split("\n"):
+            cells = line.split("\t")
+            if len(cells) < 2:
+                continue
+            full = {"name": cells[0], "bucket": cells[1], "link": cells[3] if len(cells) > 3 else ""}
+            rows.append({f: full.get(f, "") for f in fields})
+        print(json.dumps(rows))
         sys.exit(0)
     e = {"rc": 0, "out": "ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n", "err": ""}
     if "--watch" not in args:  # a one-shot read: the checks as they stand, the last watch's result
@@ -295,10 +311,19 @@ if args[:2] == ["pr", "checks"]:
 
 # ---- run view / run rerun -------------------------------------------------------------------------------
 if args[:2] == ["run", "view"]:
+    if "-q" not in args and "--jq" not in args:  # the whole --json jobs object
+        own = "jobs.%s" % args[2] if len(args) > 2 else ""
+        if not (own and has(own)):
+            not_found()
+        print(rd(p(own)))
+        sys.exit(0)
     own = "steps.%s" % args[2] if len(args) > 2 else ""
     print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:
+    if has("rerun.fail"):
+        die("HTTP 403: This workflow run cannot be rerun (https://api.github.com/repos/o/r/actions/runs/%s/rerun-failed-jobs)"
+            % (args[2] if len(args) > 2 else ""))
     sys.exit(0)
 
 # ---- pr merge -------------------------------------------------------------------------------------------

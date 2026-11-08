@@ -17,9 +17,9 @@
 //       S4 stores it only for exactly one `checkouts` entry that is a git toplevel, by its `git -C <entry> rev-parse
 //       --show-toplevel` (ADR 0067 d4: a chain's checkouts, never one `repo:` token, since a claim is a file), S5
 //       stamps it and checks the note with `verify-timeout`, and Scope and the Don'ts' no-git line name S4's probe
-//       (Scope S5's check too); S5 makes each note's Chain copies (ADR 0067 d2) with `leg.py copies`, a failure keeping
-//       `incomplete: true`, and Scope and the no-git line name its git calls; and the Don'ts let S6's last write remove
-//       `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
+//       (Scope S5's check too); S5 makes each note's Chain copies (ADR 0067 d2) with `leg.py copies`, for every note
+//       unconditionally (ADR 0075 d4), a failure keeping `incomplete: true`, and Scope and the no-git line name its
+//       git calls; and the Don'ts let S6's last write remove `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
 //   t4  § 0's first check span is the parallel one, with `--shape parallel` and `--regenerate`, and a supersede
 //       never crosses shapes; § 0, S3 and ADR 0040 say a clone root never overlaps an in-place chain (ADR 0042);
 //   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
@@ -160,6 +160,8 @@ function check(files) {
     'Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`',
     // ADR 0067 d2: the Chain copies, made at S5 after the adopt; a failure keeps the note incomplete.
     '`python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>`',
+    // ADR 0075 d4: no serial chain works in place, so S5 makes them for every note, a vault-only one's `[]` too.
+    'It runs for every note written, unconditionally (ADR 0075 d4: no serial chain works in place), so a vault-only chain\'s note gets `chain_copies: []`',
     'Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`'])
   const scope = C(section(schedule, /^## Scope$/) ?? '')
   need('t3', `${SCHEDULE} § Scope`, scope, ["a read-only `git -C <entry> rev-parse --show-toplevel` and a read of that checkout's `CLAUDE.md`",
@@ -435,6 +437,11 @@ test('control: an S5 that never makes the Chain copies fails t3', () => {
   const s5 = real[SCHEDULE].split('\n').find((l) => l.startsWith("Then each note's Chain copies (ADR 0067 d2):")) ?? ''
   assert.ok(s5, 'control setup: S5\'s Chain copies sentence')
   only(swap(SCHEDULE, `${s5}\n`, ''), ['t3'], 'S5 copies')
+})
+
+test('control: an S5 that makes the Chain copies only for some chains fails t3', () => {
+  only(swap(SCHEDULE, 'It runs for every note written, unconditionally (ADR 0075 d4: no serial chain works in place)',
+    'It runs for a note whose chain writes a git checkout'), ['t3'], 'S5 unconditional')
 })
 
 test('control: an S5 that never checks the stamped note fails t3', () => {

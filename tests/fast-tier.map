@@ -106,6 +106,7 @@ tests/fixtures/landing-register/** tests/execution-fit-remote.test.sh tests/land
 tests/fixtures/merge-gate/** tests/merge-gate.test.mjs
 tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integrated.test.sh tests/parallel-rollouts-one-repo.test.sh
 tests/fixtures/merge-task/** tests/merge-task-bare-blocked.test.sh tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh
+tests/fixtures/merge-task/** tests/merge-task-cancelled.test.sh
 tests/fixtures/merge-task/** tests/contracts/run-record-hermetic.test.mjs tests/contracts/verify-slot-hermetic.test.mjs
 tests/fixtures/note-overlap/** tests/contracts/note-overlap-opener.test.mjs tests/vault-note-overlap.test.sh
 tests/fixtures/reconcile/** tests/contracts/queue-only.test.mjs tests/reconcile-project.test.sh

@@ -65,7 +65,9 @@
 #   T19     two copied chains (ADR 0067 d9): ADR 0060's yield still comes first, ahead of rank (T19a); an `any` meeting
 #           still waits at begin (T19b); a code file with the holder's Leg open meets at claim, not begin (T19c); (O)'s
 #           holder half: an earlier holder with no open Leg holds a later chain's begin, never the reverse (T19d), and
-#           a later chain held so is no free chain to yield to (T19e)
+#           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
+#           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
+#           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -1469,7 +1471,41 @@ ok "$out|$rc" "refuse sa|3" "T19e: the later chain waits on the earlier one's un
 has "$err" "and has no open Leg to finish or land it" "T19e: … in the holder half's words"
 chs --resume sa --surface "repo:$W//f.py" --surface "repo:$W//x.py"
 ok "$out|$rc" "none|0" "T19e: … and the earlier one never yields its smoke row's place to a chain that waits on it (the free test)"
-unset COPIES
+# T19f-T19g (ADR 0075 d4): a bare `repo:<toplevel>` cell in a copied chain stands only an in-place peer, never another
+# copied chain's begin: ADR 0060's yield, earlier-ward (T19f) and later-ward (T19g), skips a `repo:`-`repo:` pair with a
+# bare toplevel on either side; their files meet at claim and at land. A bare path in no checkout still meets (T19f).
+SA_LOG="- $D28 Leg 1 began: leg-1 session s in cc-x from $W
+- $D28 Leg 1 closed: chain stuck: 1 set aside"
+tscen t19f
+LOG="$SA_LOG" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W\`"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc|$err" "none|0|" "T19f: an earlier stuck copied chain's bare repo cell on its set-aside row never stands a later copied chain's begin"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W"
+ok "$out|$rc" "none|0" "T19f: … nor the later one the earlier's"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" COPIES= mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse sa|3" "T19f: control: the later chain in place: the bare cell still stands its begin"
+has "$err" "holds \`repo:$W\` for an unlanded row and began first" "T19f: … on the bare repo:\$W"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+LOG="$SA_LOG" LFOLD="$W" COPIES= mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse sa|3" "T19f: control: the bare cell's chain in place: it still stands a copied chain's begin"
+PLAIN="$S/plain"; mkrepo "$PLAIN" -
+LOG="$SA_LOG" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$PLAIN\`"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$PLAIN/g\`" b2~open~"\`repo:$W//f.py\`"
+chs --resume sb --surface "repo:$PLAIN/g" --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse sa|3" "T19f: control: a bare path in no checkout is no Chain copy: it still stands a copied chain's begin (ADR 0060)"
+has "$err" "holds \`repo:$PLAIN\` for an unlanded row, which this chain writes as \`repo:$PLAIN/g\` (ADR 0060)" "T19f: … by the yield"
+tscen t19g
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+LOG="- $D29 Leg 1 began: leg-1 session s in cc-x from $W
+- $D29 Leg 1 closed: chain stuck: 1 set aside" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc|$err" "none|0|" "T19g: an earlier copied chain never yields to a later stuck copied chain's bare repo cell (the later-ward yield)"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W"
+ok "$out|$rc" "none|0" "T19g: … and the later one begins too: they meet file to file at claim"
+unset COPIES SA_LOG PLAIN
 
 # ── P1-P13: two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4) ──────────────────────
 # $R in place (origin demo/repo), with $R-rollout (D), $R-other-rollout and $R-third-rollout, all clones of it.
