@@ -146,7 +146,7 @@ test('W4: the shard matrix covers both OSes and shards 1..N, and the run line na
   assert.deepEqual(job.strategy.matrix.os, OSES)
   assert.deepEqual(job.strategy.matrix.shard, Array.from({ length: n }, (_, i) => i + 1))
   assert.equal(job.strategy['fail-fast'], false)
-  assert.deepEqual(limits(job), { 'ubuntu-latest': 20, 'macos-latest': 35 })
+  assert.deepEqual(limits(job), { 'ubuntu-latest': 30, 'macos-latest': 35 })
   assert.equal(job['runs-on'], '${{ matrix.os }}')
   const last = runSteps(job).at(-1)
   assert.equal(last.run.trim(), `bash tests/run.sh --shard \${{ matrix.shard }}/${n}`)

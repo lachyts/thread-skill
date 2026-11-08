@@ -4,7 +4,8 @@ Audited at `0030168` (master `8b767dd` plus p43-6's per-suite lines in `tests/ru
 [[thread-skill-p43-6-the-suite-audit-and-ci-time-limits]] (ADR 0073 d2: the full suite is held to the Suite budget;
 estate ADR 0011 d4's method; Chorus ADR 0107). Four timed local full runs in a verify slot, the CI job history since
 #327 landed, the Run records, and static reading. The fixes that are plainly safe land in the same PR; each larger one
-is a filed task (§ 9).
+is a filed task (§ 9). CI was re-read at 2026-11-08T18:37Z, after #348 (p43-5) and #349 had landed on master; the branch
+merges onto `a0675f3` without conflict, and the shard predictions in § 3 are read on that merge.
 
 **Why:** the completion verifier, master's CI and Lachy's own sessions still run the full suite, and CI's
 `timeout-minutes` was raised to 60 on 2026-11-07 (#327) as headroom until the fast tier and the shards were measured.
@@ -22,8 +23,8 @@ is a filed task (§ 9).
   |---|---:|---:|---|
   | `make test (macos-latest)` (test.yml, a PR's required check) | 60 | **55** | 50.9 min (a full run) |
   | `make test (ubuntu-latest)` | 60 | **55** | 34.2 min |
-  | `full suite (macos-latest, shard K/4)` (full-suite.yml, master) | 60 | **35** | 15.7 min |
-  | `full suite (ubuntu-latest, shard K/4)` | 60 | **20** | 9.7 min |
+  | `full suite (macos-latest, shard K/4)` (full-suite.yml, master) | 60 | **35** | 16.6 min |
+  | `full suite (ubuntu-latest, shard K/4)` | 60 | **30** | 14.1 min |
 
 - **#327 finding 2 is fixed:** each suite and step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut at its
   limit names every suite that finished. All four macOS jobs cut at 40 min on 2026-11-06 died in the node phase with
@@ -164,58 +165,71 @@ shard 1. Each shard's predicted shell time at 4 slots is the larger of its sum o
 | 3 | 475 s, `unfinished-rollout` 112 s → about 119 s | 674 s, `lead-integrate` 244 s → about 244 s |
 | 4 | 540 s, `git-env-canary` 154 s → about 154 s | 674 s, `git-env-canary` 154 s → about 168 s |
 
+(The table is this branch's tree. On its merge with master at `a0675f3` the split is the same in shape: 668 to 675 s
+per shard, `leg` in shard 2, `lead-integrate` in shard 3, and #348's new `tests/merge-task-ci-headroom.test.sh` weighted
+by the per-byte fallback.)
+
 The sums now balance, but **`tests/leg.test.sh` alone sets the floor**: whatever N, the shard that holds it cannot end
-its shell phase before that suite ends (527 s here; on CI's first full-suite run the macOS shard holding it ran its
-shell phase 13.9 min, the others 2.3 to 8.1). So the weights move no time off the slowest shard today; they balance
-the others and make the split ready for the day that suite is split
+its shell phase before that suite ends (527 s here; in CI's three full-suite runs the shard holding it ran its shell
+phase 10.0 to 15.0 min on macOS and 8.7 to 13.0 on ubuntu, the others 2.3 to 8.6). So the weights move no time off
+the slowest shard today; they balance the others and make the split ready for the day that suite is split
 ([[thread-skill-followup-suite-audit-split-the-leg-suite]]). N stays 4: more shards cannot cut below that floor.
 
 The node phase is still split by size, because no reporter output names a node test's file (node 22's TAP on CI, 23's
-spec on the Mac). Size is a poor proxy there: the four shards' equal byte shares took 1.5, 2.2, 4.2 and 3.9 min on
-macOS ([[thread-skill-followup-suite-audit-node-file-weights]]). Moving `leg.test.sh` from shard 1 to shard 2 puts it
-beside shard 2's node files (2.2 min on macOS against shard 1's 1.5), so the slowest macOS shard is predicted at about
-16 min, within a minute of today's 15.7: the limits below are set on today's run and hold for that.
+spec on the Mac). Size is a poor proxy there: on equal byte shares, shard 3's node phase took 4.2 to 8.2 min across the
+three runs and the others 0.6 to 2.8 ([[thread-skill-followup-suite-audit-node-file-weights]]); after #348 added node
+tests, shard 3 was ubuntu's slowest shard once (12.8 min). The shell weights leave the node split exactly as it is.
+On the merge with master, `leg.test.sh` moves from shard 1 to shard 2, beside node files that took 1.1 to 2.8 min (shard
+1's took 0.6 to 1.5), and shard 3 takes `lead-integrate` (244 s) beside the heavy node files. Scaled by the CI-to-local
+ratio of the leg shard, the slowest shard is predicted at about 15 to 18 min on macOS and 13 to 15 on ubuntu, a minute
+or so above today's: the limits below sit at about twice that and hold for it.
 
 ## 4. CI
 
 ### Each job against its limit
 
 **test.yml, a PR's two required checks** (`make test (<os>)`). Every completed run since #327 landed
-(2026-11-06T23:11:47Z): 84 runs, 170 jobs (run 42421273174's second attempt included), on three UTC days
-(2026-11-06, 07, 08: 4, 38 and 128 jobs). 16 red (14 ubuntu, 2 macOS, § 6), 0 cancelled.
+(2026-11-06T23:11:47Z) to the re-read: 85 runs, 172 jobs (run 42421273174's second attempt included), on three UTC
+days (2026-11-06, 07, 08: 4, 38 and 130 jobs). 16 red (14 ubuntu, 2 macOS, § 6), 0 cancelled.
 
 | OS | Passing jobs | Range | Median | Slowest vs 60 (before) | Slowest vs 55 (after) | Over 80 % of 55 (44 min) |
 |---|---:|---|---:|---:|---:|---:|
-| macOS | 83 | 19.3 to 50.9 min | 35.1 | 85 % | 93 % | 1 (50.9, run 42343030831, a push on 2026-11-07) |
-| ubuntu | 71 | 19.2 to 34.2 min | 28.4 | 57 % | 62 % | 0 |
+| macOS | 84 | 19.3 to 50.9 min | 35.2 | 85 % | 93 % | 1 (50.9, run 42343030831, a push on 2026-11-07) |
+| ubuntu | 72 | 19.2 to 34.2 min | 28.3 | 57 % | 62 % | 0 |
 
-**FAST and FULL.** 82 of the 84 runs predate #351, so each ran the full suite. The two that came after it (42501773707
-and 42501896289) print `== fast tier: full suite (...)` (a workflow file and `run_record.py`): 0 FAST runs have
-completed yet. So every number above is a full run in the one required job, unsharded.
+**FAST and FULL.** 82 of the 85 runs predate #351, so each ran the full suite. The three that came after it
+(42501773707, 42501896289 and 42506560612) print `== fast tier: full suite (...)` (a workflow file, `run_record.py`,
+`serial-chains.py`): 0 FAST runs have completed yet. So every number above is a full run in the one required job, unsharded.
 
-**full-suite.yml** (master's shards). One run so far, 42498536545 at `8b767dd`. Phases from the log timestamps:
+**full-suite.yml** (master's shards). Every run so far, all green: 42498536545 at `8b767dd` (#351), 42504957830 at
+`f0ef8da` (#348) and 42509716600 at `a0675f3` (#349). Job minutes, with the phases (shell + node) from the log
+timestamps:
 
-| Shard | macOS job (shell + node) | ubuntu job (shell + node) |
+| Shard | macOS: run 1, 2, 3 | ubuntu: run 1, 2, 3 |
 |---:|---|---|
-| 1 | 15.7 min (13.9 + 1.5) | 9.7 min (8.7 + 0.9) |
-| 2 | 8.8 (6.4 + 2.2) | 4.6 (3.4 + 1.1) |
-| 3 | 6.7 (2.3 + 4.2) | 7.7 (2.9 + 4.6) |
-| 4 | 12.4 (8.1 + 3.9) | 5.8 (3.0 + 2.6) |
+| 1 | 15.7 (13.9 + 1.5), 16.6 (15.0 + 1.4), 10.9 (10.0 + 0.6) | 9.7 (8.7 + 0.9), 11.7 (10.7 + 0.7), 14.1 (13.0 + 0.9) |
+| 2 | 8.8 (6.4 + 2.2), 10.0 (7.3 + 2.3), 11.3 (8.1 + 2.8) | 4.6 (3.4 + 1.1), 5.9 (4.2 + 1.5), 7.0 (5.0 + 1.8) |
+| 3 | 6.7 (2.3 + 4.2), 12.2 (4.6 + 7.3), 8.9 (3.1 + 5.6) | 7.7 (2.9 + 4.6), 12.8 (4.4 + 8.2), 8.4 (2.7 + 5.4) |
+| 4 | 12.4 (8.1 + 3.9), 11.4 (8.6 + 2.5), 11.1 (8.3 + 2.4) | 5.8 (3.0 + 2.6), 4.7 (3.2 + 1.4), 6.2 (4.1 + 1.8) |
+| slowest | 15.7, 16.6, 11.3 | 9.7, 12.8, 14.1 |
 
-Against the new limits the slowest shard sits at 45 % (macOS, 15.7 of 35) and 49 % (ubuntu, 9.7 of 20).
+The same shard swings by up to 1.5x between runs (ubuntu shard 1's shell phase 8.7, 10.7, 13.0 min): runner speed,
+as on test.yml. Against the new limits the slowest shard so far sits at 47 % (macOS, 16.6 of 35) and 47 % (ubuntu,
+14.1 of 30).
 
 ### The rules, and the numbers they give
 
 - **full-suite.yml, per OS:** T is twice M, M the median over the runs of each run's slowest shard on that OS, rounded
-  up to a multiple of 5, at least 15, below 60, and above the slowest passing shard. One run: macOS 2 × 15.7 = 31.4 →
-  **35**; ubuntu 2 × 9.7 = 19.4 → **20**. Written as `${{ matrix.os == 'macos-latest' && 35 || 20 }}` (actionlint
-  1.7.12 accepts it). Nothing but GitHub reads it: no required check runs in this file. Only one run exists, so the
-  limits also rest on the local shard prediction in § 3; the next runs re-read them.
+  up to a multiple of 5, at least 15, below 60, and above the slowest passing shard. Three runs: macOS M = 15.7
+  (15.7, 16.6, 11.3), 2 × 15.7 = 31.4 → **35**; ubuntu M = 12.8 (9.7, 12.8, 14.1), 2 × 12.8 = 25.6 → **30**. Written
+  as `${{ matrix.os == 'macos-latest' && 35 || 30 }}` (actionlint 1.7.12 accepts it). Nothing but GitHub reads it: no
+  required check runs in this file. Three runs is few, so the limits also rest on the shard prediction in § 3; the
+  next runs re-read them. (At planning, with one run, the rule gave 20 for ubuntu; the two runs since raised it.)
 - **test.yml (a departure from "twice the median"):** this required job runs the whole unsharded suite whenever the
   selector says FULL, so twice its median (70 min on macOS) would sit far above 60. Instead T is 1.15 × M, M the slowest
   passing FULL job on either OS in the window, rounded up to a multiple of 5, capped at 55, and above M: 1.15 × 50.9 =
   58.5 → 60 → capped to **55**. One plain number, because p43-5's CI headroom reader (`lead-integrate.py`
-  `_job_limit`, PR #348) reads only a whole number from the workflow file: an expression is recorded as `unread`, and
+  `_job_limit`, landed in #348) reads only a whole number from the workflow file: an expression is recorded as `unread`, and
   the Reflection's share and 80 % breach would then be null on both required jobs. Per-OS values for test.yml wait on
   that reader ([[thread-skill-followup-suite-audit-per-os-ci-limits]]; ubuntu would take 40).
 - **The backstop:** a FULL run on a slow macOS day can be cut at 55. ADR 0073 d4 re-runs a cancelled required check's
@@ -326,10 +340,10 @@ The review of #327 (`docs/reviews/2026-11-07-6e8773c-9102f4.md`, consumed in tha
 |---:|---|---|
 | 1 | 60 treats the symptom; nothing tracks the split | Resolved by p43-3 (#351): PRs run the fast tier, master runs the full suite in shards; this PR brings the limits down |
 | 2 | Shell results print only after node, so a cut job shows none | **Fixed here**: each suite's line as it ends, every block before node (`tests/fast-tier.test.sh` F15 to F17) |
-| 3 | Nothing measures a job nearing its limit | Owned by p43-5 (#348): CI headroom in the Run record, the Reflection's 80 % breach |
+| 3 | Nothing measures a job nearing its limit | Owned by p43-5 (#348, landed 2026-11-08): CI headroom in the Run record, the Reflection's 80 % breach |
 | 4 | The "over 12 min, raise THREAD_TEST_JOBS before timeout-minutes" rule contradicts itself | **Fixed here**: test.yml's comment rewritten |
 | 5 | The comment's job times are wrong, and ubuntu's were deleted | **Fixed here**: measured ranges for both OSes |
-| 6 | One job-wide limit loosens ubuntu | **Adopted for full-suite.yml** (35 and 20); for test.yml filed ([[thread-skill-followup-suite-audit-per-os-ci-limits]]), waiting on p43-5's reader |
+| 6 | One job-wide limit loosens ubuntu | **Adopted for full-suite.yml** (35 and 30); for test.yml filed ([[thread-skill-followup-suite-audit-per-os-ci-limits]]): p43-5's reader takes only a plain number |
 | 7 | THREAD.md's quirk still says 40 min and 14 to 25 | **Fixed here**: today's limits, ranges and shards |
 | 8 | "while the suite is split" reads as if it already is | **Fixed here**: the phrase is gone |
 | 9 | `actions/setup-python@v5` runs on the deprecated Node 20 | **Fixed here**: `@v6` in both workflows |
@@ -340,9 +354,9 @@ The review of #327 (`docs/reviews/2026-11-07-6e8773c-9102f4.md`, consumed in tha
 |---:|---|---|---|
 | 1 | Narrow the fast tier's reach, so fewer PRs run the full suite in the required job | The largest: for each commit that turns FULL → FAST, a PR's checks drop from a full run (macOS median 35 min, ubuntu 28) to a FAST one, unmeasured on CI yet (no FAST run has completed; a FAST selection runs a median 99 of 187 files). 44 of the last 60 commits are FULL | Filed before this audit: [[thread-skill-followup-fast-tier-narrow-the-reach]], [[thread-skill-followup-fast-tier-over-selection]] |
 | 2 | Split `tests/leg.test.sh` (527 s, 20 % of the shell seconds) into two or three files | About 5 to 6 min off master's macOS full-suite wall (the slowest shard from about 16 to about 10), and the macOS shard limit down to about 20 to 25; about nothing locally at the default cap of 4 (the shell phase is bound by total work), about 2.5 min at a cap of 8 (§ 3) | Filed: [[thread-skill-followup-suite-audit-split-the-leg-suite]] |
-| 3 | Weigh the node files by measured seconds in the shard split | About 1 to 2 min off the slowest shard once (2) lands (the node phases ran 1.5 to 4.2 min on equal byte shares) | Filed: [[thread-skill-followup-suite-audit-node-file-weights]] |
+| 3 | Weigh the node files by measured seconds in the shard split | About 2 to 4 min off the node-heavy shard (shard 3's node phase ran 4.2 to 8.2 min, the others 0.6 to 2.8, on equal byte shares); it sets the slowest shard once (2) lands, and set ubuntu's once already | Filed: [[thread-skill-followup-suite-audit-node-file-weights]] |
 | 4 | Weigh the shell suites by measured seconds | 0 on the slowest shard today (the leg floor); balances the shard sums (671 to 674 s each, from 475 to 958), and makes (2) pay in full | **Applied in this PR** (`tests/lib/shard.py`, `tests/shard-weights.tsv`) |
-| 5 | Bring `timeout-minutes` down | 0 on a passing run; a hang reports red 5 min sooner on a PR check (55, from 60) and 25 to 40 min sooner on a shard (35 and 20, from 60) | **Applied in this PR** |
+| 5 | Bring `timeout-minutes` down | 0 on a passing run; a hang reports red 5 min sooner on a PR check (55, from 60) and 25 to 30 min sooner on a shard (35 and 30, from 60) | **Applied in this PR** |
 | 6 | A per-suite liveness bound and node `--test-timeout` | 0 on a passing run; a hang reports in minutes instead of at the job's limit, and a local run ends | Filed: [[thread-skill-followup-suite-audit-liveness-bounds]] |
 | 7 | Per-OS limits for test.yml | 0 on a passing run; an ubuntu hang reports at about 40 instead of 55 | Filed: [[thread-skill-followup-suite-audit-per-os-ci-limits]] (after p43-5) |
 | 8 | Print each suite's line and seconds as it ends | 0; a cut job is diagnosable, and every run measures itself | **Applied in this PR** (`tests/run.sh`) |
@@ -387,7 +401,7 @@ If that growth goes on, next week's median passes 20 min. What would move it, me
   `outcome: green`.
 - **The node phase by file** is a name match (93 % of the seconds placed) and is only read for "where", never as a
   weight.
-- **CI is three days of data,** and only one full-suite.yml run. The shard limits rest on that run and the local
-  prediction; this PR's own CI run (FULL on both OSes) prints per-suite seconds there, a cross-check, never the weights.
+- **CI is three days of data,** and three full-suite.yml runs. The shard limits rest on those runs and the shard
+  prediction; this PR's own CI run (FULL on both OSes) prints per-suite seconds, a cross-check, never the weights.
 - **The research note** is dated 2026-10-22, 18 days before this audit, inside estate ADR 0011 d5's six months; it was
   not refreshed.
