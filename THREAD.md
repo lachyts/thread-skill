@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-07
+last_touched: 2026-11-08
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-11-08 (latest): ubuntu-latest moved to GNU diffutils 3.12 and broke `make test` on every PR (release-check (c)/(c2)); fixed in PR #335 (`fix/release-check-quoted-diff`), queued by close after a three-round review. Built in its own session for the Animately rollout lead, which waits on #332.**
+- **Cause:** 3.12 shell-quotes a path holding a space in `diff -rq`'s `Only in` lines; `Makefile`'s release-check dropped the cache's own lines by an exact `Only in $c/` prefix, and the test's cache sits under `config dir`. Master's last green run was 2026-11-07 05:30Z.
+- **Fix:** the cache diff no longer parses diff: it walks the tree's files under skills/ and hooks/ with `find -L` + `cmp`, its stderr captured (a missing tree sub-dir fails), symlinked dirs followed as `diff -r` did. New cases (c3) (a quoting `diff` shim, red on the old recipe on any host) and (d3); the checker's reproductions became `tests/release-check-{quoting-diff,missing-tree-dir,symlinked-dir}.test.sh`. Confirmed on ubuntu by PR #335's first run: (c)/(c2) passed on real 3.12.
+- **Review:** 3 xhigh rounds (11, 12, 15 findings); the checker blocked 3 (the shim double-quoting on a 3.12 host, the walk failing open on a find error, dir symlinks read as differing), all fixed with reproductions; the rest filed in [[thread-skill-release-check-review-follow-ups]] (main item: replace the shim stack with a never-calls-diff guard and fold the two small suites in, to win back suite time).
+- **Next:** once #335 merges, merge master into #332 (`fix/merge-task-empty-required-checks`, auto-merge on) so its CI re-runs; the step-8 report says whether that was done.
 
 **2026-11-07 (latest): orient reshuffled Thread Skill into P41, P42 and new P43, scheduled [[thread-skill-rollout-2026-11-07]] (17 tasks, all Ready) and handed it to a fresh lead (Stage task_e2209ea6; launch doc landing by #330).**
 - **Reshuffle** (Lachy: "Write it"):
@@ -886,6 +892,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **GNU diffutils 3.12 shell-quotes file names in `diff -rq` output** (2026-11-08, ubuntu-latest). A path holding a space prints as `Only in '/tmp/…/config dir/…': x`; Apple's diff on macOS does not, so a recipe that parses diff's human-readable output passes locally and fails on Linux CI. release-check no longer parses it (PR #335).
 - **gh 2.43.1 reads a CANCELLED required check as green** (2026-11-07). `gh pr checks --required` exits 0 and prints the cancelled check as `fail`, so merge-task's wait returns and it reads the still-BLOCKED PR as "a NON-check gate", a human's: a CI timeout reaches Lachy as a set-aside. Fix: [[thread-skill-merge-task-reads-a-cancelled-check-as-a-timeout]]. A re-run of the cancelled jobs uses the workflow file at that PR's head, so a raised `timeout-minutes` reaches a set-aside PR only through a re-Integration onto the new master.
 - **The full suite is the rollout's floor** (2026-11-07). Local Integration verify median 17 min (max 31) per merge, task-side 18; GitHub macOS `make test` 31 to 39 min, ubuntu 31 to 33. ADR 0073 is the plan.
 - **A Login switch does not lose a stopped Workflow call** (2026-11-04). After Chorus moved the lead from main to fauxmuse, `resumeFromRunId` with the same args replayed every finished agent from the run's journal under the new profile's `projects/` dir, and the call converged.
@@ -1173,6 +1180,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-08 (release-check fix):** PR #335 is queued; once it merges, #332 needs master merged in if this close did not do it. Then [[thread-skill-release-check-review-follow-ups]] when suite time matters.
+
 **From 2026-11-07 (orient, P41 to P43 scheduled):** [[thread-skill-rollout-2026-11-07]] is handed to a fresh lead (Stage task_e2209ea6); `/thread:status [[thread-skill-rollout-2026-11-07]]` reads where it is. Once #312 merges, `/thread:orient Thread Skill --steer` grills p39-15's four Overrun questions and schedules p39-13 and p39-14. After p43-2 lands, the next rollout's schedule stamps the Fast tier and the `Completion verifier:`. Remove the stale worktree `~/repos/tools/thread-skill-rollout/.claude/worktrees/fast-tier-adr` once p43-1 merges. Then [[thread-skill-reflect-p39-p40-rollout]].
 
 **From 2026-11-06 (P37 rollout done):** first [[thread-skill-reinstall-the-primary-refresh-job]] (the launchd job still runs the pre-#308 copy), then [[thread-skill-close-superseded-pr-292]]. Next work: [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] from `~/repos/workspaces` once its checkout is free (they close P36 with [[thread-skill-p36-12-check-the-spike-review-against-adr-0067]], a session task), then [[thread-skill-reflect-p37-rollout-2026-11-05]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open.
@@ -1214,6 +1223,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-08 (close): ubuntu-latest's GNU diffutils 3.12 broke release-check (c)/(c2) on every PR; rewrote the cache diff as a find -L + cmp walk (PR #335), three xhigh review rounds, 3 blocking fixed, rest filed.
 - 2026-11-07 (close, orient): reshuffled Thread Skill into P41 (+p41-7), P42 and new P43 (ADR 0073, Fast tier at merge); renumbered P41's ADR to 0075; scheduled and handed off [[thread-skill-rollout-2026-11-07]] (17 Ready).
 - 2026-11-07 (close, execute + repair): led [[thread-skill-rollout-2026-11-06]] to 13/13 merged (25h 52m); diagnosed the two merge set-asides as a 40-min CI timeout misread by gh 2.43.1, landed #327 (limit 60) and repaired both; grilled the suite's cost into ADR 0073 (proposed, unpushed); P40 closed, P39 open.
 - 2026-11-06 (close, orient): reshuffled Thread Skill into P39 (13) and P40 (2), scheduled and handed off [[thread-skill-rollout-2026-11-06]] (13 Ready); grilled the over-budget rule into ADR 0070 (the Overrun, PR #312, two clean review rounds, 15 findings filed to p39-15).
