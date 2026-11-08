@@ -39,10 +39,12 @@
 //       checks on the fresh shell's account (this session's tools only when its MCP config matches, else `claude mcp
 //       list`, also when ToolSearch loads no tool), raises one `hands_steps` list and its question (the gate's cite),
 //       never checks a `cx-*` launch, and leaves out with `--signed-out` keyed by alias or `claude` plus folder, each
-//       row in `leftOut` with its line, legs.md § Preflight its backstop; S2 names `mcp` and `leftOut` and carries
-//       every flag; S4 reads its chain-level values from the last S2 JSON and asks nothing again; S7's Sign-ins line;
+//       row in `leftOut` with its line (only `✓ Connected` reads signed in), legs.md § Preflight its backstop; S2
+//       names `mcp` and `leftOut` and carries every `--signed-out`, but a `--surface` or `--dep` only while its member
+//       is in `--tasks`; S4 reads its chain-level values from the last S2 JSON and asks nothing again; S7's Sign-ins line;
 //       Scope; orient § 7; orient-all § 6's **Sign-ins first** before batch 1 and answer 15's flags; the Backlog
-//       orient's item 23, B5 and B9; and legs.md § Preflight names itself the backstop.
+//       orient's item 23, B5 and B9 (its list over signed-out pairs alone); and legs.md § Preflight names itself the
+//       backstop.
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text.
 // __pycache__, .DS_Store and any file holding a NUL byte are skipped. Reads files only.
 import { test } from 'node:test'
@@ -256,10 +258,12 @@ function check(files) {
     '`claude mcp list`', 'env -u CLAUDECODE -u CLAUDE_ACCOUNT_PINNED', '--strict-mcp-config', 'loads no tool',
     '--signed-out <namespace>@<alias>', '<namespace>@claude:<folder>', '`cx-*`', 'not checked: Codex launch', '`leftOut`',
     '`sign in to <server>, then /thread:orient --steer`', '`skills/execute/legs.md` § Preflight', 'Chain copy', 'nothing is written',
-    '_shared/asking.md'])
-  need('t11', 'S2', s2, ['`mcp`', '`leftOut`', 'every flag an earlier run passed'])
+    '_shared/asking.md', 'only `✓ Connected` reads signed in'])
+  need('t11', 'S2', s2, ['`mcp`', '`leftOut`', 'every `--signed-out` an earlier run passed',
+    'whose member (the dependant, for `--dep`) is still in `--tasks`'])
   need('t11', 'S4', para(serialPath, '**S4. '), ['from the last S2 JSON', 'asks nothing again'])
-  need('t11', 'S7', para(serialPath, '**S7. Summary.**'), ['Sign-ins', '`leftOut`', 'not checked: Codex launch'])
+  need('t11', 'S7', para(serialPath, '**S7. Summary.**'), ['Sign-ins', '`leftOut`', 'not checked: Codex launch',
+    'not named signed in by the orient-all pass'])
   need('t11', `${SCHEDULE} § Scope`, scope, ['`claude mcp list`'])
   need('t11', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['S3.7', '`hands_steps`'])
   const oa6 = section(files[ORIENT_ALL], /^### 6\. /) ?? ''
@@ -268,7 +272,8 @@ function check(files) {
   need('t11', `${ORIENT_ALL} answer 15`, C(slice(oa6, /^ {3}15\. /, /^ {3}16\. /)), ['--signed-out'])
   need('t11', `${BACKLOG} item 23`, C(slice(section(files[BACKLOG], /^## B6\. /), /^23\. /, null)), ['S3.7', '`signIns`', '--signed-out'])
   need('t11', `${BACKLOG} § B5`, C(section(files[BACKLOG], /^## B5\. /)), ['`signIns`'])
-  need('t11', `${BACKLOG} § B9`, C(section(files[BACKLOG], /^## B9\. /)), ['`hands_steps`', '`signIns`'])
+  need('t11', `${BACKLOG} § B9`, C(section(files[BACKLOG], /^## B9\. /)), ['`hands_steps`', '`signIns`', 'a pair that reads signed out',
+    'a pair whose check could not run is in neither'])
   need('t11', `${LEGS} § Preflight`, C(section(files[LEGS], /^## Preflight$/)), ['backstop', 'S3.7', '`required_mcp`', 'Chain copy',
     'Login', '`cx-*`'])
 
@@ -514,5 +519,18 @@ test('control: a Backlog item 23 without S3.7 fails t11', () => {
 })
 
 test('control: a Backlog B9 without the hands_steps list fails t11', () => {
-  only(swap(BACKLOG, '`hands_steps` list over every such server', 'list over every such server'), ['t11'], 'B9 list')
+  only(swap(BACKLOG, '`hands_steps` list over every server such a pair names', 'list over every server such a pair names'), ['t11'], 'B9 list')
+})
+
+test('control: an S2 whose re-run carries every flag, a left member\'s --surface or --dep too, fails t11', () => {
+  only(swap(SCHEDULE, 'plus each earlier `--surface`\nor `--dep` whose member (the dependant, for `--dep`) is still in `--tasks`',
+    'plus every earlier `--surface`\nor `--dep`'), ['t11'], 'S2 carve-out')
+})
+
+test('control: an S3.7 that reads any Connected line as signed in fails t11', () => {
+  only(swap(SCHEDULE, 'only\n`✓ Connected` reads signed in', '`Connected`\nreads signed in'), ['t11'], 'Connected')
+})
+
+test('control: a Backlog B9 whose list holds a pair whose check could not run fails t11', () => {
+  only(swap(BACKLOG, 'a pair whose check could not run is in neither', 'a pair whose check could not run is in both'), ['t11'], 'B9 cannot run')
 })

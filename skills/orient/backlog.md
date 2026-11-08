@@ -237,8 +237,10 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 
 The run puts each of his questions through AskUserQuestion, one at a time, after the start (Owner *yours*, each in
 the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`, the recommendation first). In order: first the
-sign-ins, when any fork's `signIns` holds a pair that does not read signed in: schedule § Serial path S3.7's one
-`hands_steps` list over every such server, from this session's check, and its check-again question; then each fork's
+sign-ins, when any fork's `signIns` holds a pair that reads signed out: schedule § Serial path S3.7's one
+`hands_steps` list over every server such a pair names, from this session's check, and its check-again question, both
+over those pairs alone (a pair whose check could not run is in neither, as S3.7 keeps one out of its list, and its
+rows stay out with their Left out rows and lines); then each fork's
 `asks[i]`, verbatim; then one § 3.5 question per task a fork dropped at answer 15, worded
 `§ 3.5 gate: does "<the matched words>" hold this task out of a rollout?`, with the options
 `No: keep it, it holds nothing` and `Yes: keep it out, it is a gate` (No recommended when the note only quotes or

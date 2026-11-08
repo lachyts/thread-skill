@@ -1035,7 +1035,9 @@ or orient-all § 6 nothing is asked.
 It prints one JSON line: `chains` (each with its `tasks` in order, its `surfaces`, its `checkouts`, its `members`
 with each one's `surfaces`, `source`, `added`, `launch`, `works` and `mcp`, the required MCP namespaces of its
 `## Launch`, and its `externalDeps`), `sessionLane`, `leftOut` (the rows S3.7's flags leave out, each with its line)
-and `warns`. Every re-run passes every flag an earlier run passed, S3.7's `--signed-out` included. A chain's
+and `warns`. Every re-run passes every `--signed-out` an earlier run passed (S3.7's), plus each earlier `--surface`
+or `--dep` whose member (the dependant, for `--dep`) is still in `--tasks`: one whose member left (at S3.5, or at S4's
+final `preflight`) is dropped, since it would exit 2 (`… is not one of --tasks`). A chain's
 `checkouts` are the checkouts its surfaces and its rows' launch folders name, exactly what its note
 records; S3 and S4 read them. Pass a path the
 agent reads in a member's body (outside `## Launch`) as `--surface <slug>=<path>` only for a member with no
@@ -1118,19 +1120,21 @@ and signed out when it is refused for auth. Otherwise, and for any namespace the
 for, or whose call fails for any reason but auth, run
 `(cd <folder> && env -u CLAUDECODE -u CLAUDE_ACCOUNT_PINNED -u CLAUDE_CONFIG_DIR zsh -c 'claude mcp list')`,
 read-only, once per distinct launch folder: only that `claude mcp list` reading then decides. Its line for the server
-counts (a `claude_ai_<Name>` namespace is the `claude.ai <Name>` line, its underscores read as spaces): `Connected`
-reads signed in, `Needs authentication` reads signed out, and anything else is a check that cannot run: a failed or
-`Pending approval` server, a server absent from the list (one only an alias's own `--mcp-config` file names), or a
-command that fails. A project `.mcp.json` server is read at the primary launch folder, while the Leg opens in its
+counts (a `claude_ai_<Name>` namespace is the `claude.ai <Name>` line, its underscores read as spaces): only
+`✓ Connected` reads signed in, `Needs authentication` reads signed out, and anything else is a check that cannot run,
+which goes as `--signed-out` and never in the list: any other `Connected` line (`! Connected · tools fetch failed`), a
+failed or `Pending approval` server, a server absent from the list (one only an alias's own `--mcp-config` file
+names), or a command that fails. A project `.mcp.json` server is read at the primary launch folder, while the Leg opens in its
 Chain copy (S5), a new path whose per-path approval can read pending there; `skills/execute/legs.md` § Preflight is the backstop for
 that, for a sign-in that lapses after this step, and for a Leg the Stage opens on another Login. A Codex session has
 no ToolSearch, so the own check never applies there.
 
 Two kinds of pair go as `--signed-out <namespace>@<alias>` (`<namespace>@claude:<folder>` for an alias-less row,
 each quoted as one shell word, since a namespace holds `*`): each pair still signed out after `Leave those rows out`,
-and each pair whose check cannot run. They go on a re-run of S2 with every earlier flag, then S3. S2's `leftOut`
+and each pair whose check cannot run. They go on a re-run of S2 with the earlier flags S2 carries, then S3. S2's `leftOut`
 names, each with its line (`sign in to <server>, then /thread:orient --steer`), every row left out and every member
-depending on one, directly or through another member. Those rows stay unstamped, since S6 stamps only the members of
+depending on one, directly or through another member (a session-lane member on that path stays in the lane, never
+left out). Those rows stay unstamped, since S6 stamps only the members of
 notes written, and their `## Decisions` and `## Decided for you` bullets from S3.5 stay in their notes, as § 1.5 keeps
 a dropped task's. S4 then reads every chain-level value from that re-run's JSON. A member that a later S4 dependency
 leaves out the same way drops its § 3.5 kept gates and § 3.6 ask-ahead answers unstamped, and S7 names them. With
@@ -1203,7 +1207,7 @@ credential or irreversible ask-ahead and dismissals, as step 8 lists them). Then
 it checked, with its launch, the account (the config dir's basename, or `dummy`), how it was read (this session's
 ToolSearch and call, or `claude mcp list` from the folder) and what it read; each `cx-*` pair as
 `not checked: Codex launch`; under orient-all, the prompt's `signed in` part, and each pair it did not name as "not
-checked by the orient-all pass"; each `leftOut` row with its line, and any § 3.5 or § 3.6 answer dropped unstamped;
+named signed in by the orient-all pass" (the parent's own readings are in orient-all § 8's report); each `leftOut` row with its line, and any § 3.5 or § 3.6 answer dropped unstamped;
 and the unmatched `--signed-out` WARNs. Then one line: "Leg 1 opens in row 1's launch folder inside its Chain copy, as `leg.py status` prints it (`restart.launch`, never the alias itself, whose `cd` opens the primary), and runs `/thread:execute [[<note>]]`;
 no execute handoff, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
 is dropped (`status: dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060), so a
