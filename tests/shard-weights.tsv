@@ -1,0 +1,82 @@
+# Measured seconds per shell suite, read by tests/lib/shard.py (its docstring holds the format and the rules): each
+# entry's load in the full suite's shard split (ADR 0073 d3), so the shards balance on time, not file size.
+# Source: the per-suite `<label>: ok (<N>s)` lines of two local `make test` runs (2026-11-09, p43-6's audit,
+# docs/audits/2026-11-09-test-suite.md), at the default cap of 4 on a 12-core Mac, load 3 to 5; each value is the
+# median of the two. @merge-task-self-tests is its two self-tests summed. A suite that ended within its first
+# second (0 s) is written as 0.5, since a weight must be positive.
+# Regenerate: run `make test` twice, take each suite's median from those lines, sum the two self-tests, and rewrite
+# this file whole. A suite added since falls back to its size times the median seconds per byte (shard.py).
+# Node files (*.mjs) keep their size weight: no node --test reporter output names a test's file, so there is no
+# per-file time to read.
+9	@merge-task-self-tests
+0.5	skills/execute/tests/integration-inputs.test.sh
+3.5	skills/execute/tests/note-save.test.sh
+19.5	skills/execute/tests/reconcile-rollout-approved-queue.test.sh
+62	skills/execute/tests/reconcile-rollout-auto-retry.test.sh
+10	skills/execute/tests/reconcile-rollout-capacity.test.sh
+7.5	skills/execute/tests/reconcile-rollout-churn.test.sh
+93.5	skills/execute/tests/reconcile-rollout-completion.test.sh
+25.5	skills/execute/tests/reconcile-rollout-descope.test.sh
+4.5	skills/execute/tests/reconcile-rollout-flake.test.sh
+4	skills/execute/tests/reconcile-rollout-fold.test.sh
+4	skills/execute/tests/reconcile-rollout-heat.test.sh
+15	skills/execute/tests/reconcile-rollout-hold.test.sh
+53.5	skills/execute/tests/reconcile-rollout-human-fix.test.sh
+15	skills/execute/tests/reconcile-rollout-last-starts.test.sh
+11	skills/execute/tests/reconcile-rollout-lead.test.sh
+41.5	skills/execute/tests/reconcile-rollout-moving.test.sh
+24.5	skills/execute/tests/reconcile-rollout-origin-lane.test.sh
+35.5	skills/execute/tests/reconcile-rollout-queue.test.sh
+14	skills/execute/tests/reconcile-rollout-ready-at.test.sh
+55.5	skills/execute/tests/reconcile-rollout-record.test.sh
+21	skills/execute/tests/reconcile-rollout-runs.test.sh
+20	skills/execute/tests/reconcile-rollout-standing.test.sh
+9.5	skills/execute/tests/reconcile-rollout-stops.test.sh
+31	skills/execute/tests/reconcile-rollout-trickle-claim.test.sh
+22	skills/execute/tests/reconcile-rollout-trickle-share.test.sh
+21.5	skills/execute/tests/reconcile-rollout-trickle-wake.test.sh
+27.5	skills/execute/tests/reconcile-rollout-trickle.test.sh
+18	skills/execute/tests/reconcile-rollout.test.sh
+2	skills/execute/tests/rollout-stop-driver.test.sh
+2	tests/default-branch.test.sh
+37	tests/engine-snapshot.test.sh
+4	tests/execution-fit-remote.test.sh
+24	tests/fast-tier.test.sh
+153.5	tests/git-env-canary.test.sh
+2.5	tests/git-env-scrub.test.sh
+2	tests/handoff-home.test.sh
+3.5	tests/handoff-scan.test.sh
+50.5	tests/integration-tree.test.sh
+62	tests/land.test.sh
+244	tests/lead-integrate.test.sh
+34	tests/leg-capacity.test.sh
+527	tests/leg.test.sh
+20.5	tests/live-checkout.test.sh
+2.5	tests/merge-task-bare-blocked.test.sh
+5	tests/merge-task-base-moved.test.sh
+35.5	tests/merge-task-base.test.sh
+8	tests/merge-task-cancelled.test.sh
+92	tests/merge-task-integrated.test.sh
+27	tests/parallel-rollouts-one-repo.test.sh
+0.5	tests/peer-guard.test.sh
+9	tests/pickups.test.sh
+19.5	tests/pinned-tree.test.sh
+145.5	tests/primary-refresh.test.sh
+59	tests/pushed-base.test.sh
+15	tests/reconcile-project.test.sh
+6.5	tests/release-check-missing-tree-dir.test.sh
+11	tests/release-check-quoting-diff.test.sh
+6.5	tests/release-check-symlinked-dir.test.sh
+10	tests/release-check.test.sh
+6.5	tests/repo-state.test.sh
+6.5	tests/repo-threads.test.sh
+4	tests/schedule-queue.test.sh
+45.5	tests/self-rollout-check.test.sh
+33	tests/serial-chains.test.sh
+1	tests/test-jobs.test.sh
+112	tests/unfinished-rollout.test.sh
+9.5	tests/vault-note-overlap.test.sh
+79.5	tests/verify-slot-heat.test.sh
+34.5	tests/verify-slot-own.test.sh
+9.5	tests/verify-slot-wait.test.sh
+50.5	tests/verify-slot.test.sh

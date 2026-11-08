@@ -24,7 +24,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 55
     steps:
       # Full history, so the PR's base sha and `git merge-base` resolve: at depth 1 the selector reads FULL.
       - uses: actions/checkout@v5
@@ -36,24 +36,23 @@ jobs:
           node-version: 22
       # next-action.py reads frontmatter with PyYAML; neither runner image guarantees it. setup-python
       # gives a pip that may install (the images' system pythons are externally managed).
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python3 -m pip install pyyaml
-      # tests/run.sh caps its background suites (p23-4) at max(2, ceil(cores / 3)), which is 2 on these 3- and
-      # 4-vCPU runners and models about 2 to 2.5 min slower than today. 4 keeps both runners saturated (land.test.sh
-      # fans out to 8 shards), so the shell phase models no longer than the uncapped run. If either job runs
-      # over 12 min, raise this (8, or drop it for all at once) before touching timeout-minutes again; the job
-      # names and the matrix stay as they are (ADR 0025). On 2026-10-28 that was tried: 8 made the 3-vCPU macOS
-      # runner slower (shell suites 16.5 min against 8 min at 4), while runner speed alone swung a passing macOS
-      # job between 14 and over 25 min, cutting off master and five PRs with no test failing. So the cap stays 4.
-      # timeout-minutes was 40 until 2026-11-07: by then the suite had grown so a passing macOS job took 31 to 39
-      # min, and 7 of the last 40 macOS jobs (3 on master) were cancelled at exactly 40 with no test failing. 60 is
-      # headroom while the suite is split across parallel jobs; it is no target, so a job near it is a finding.
-      # p43-6 brings it back down once the fast tier and the split have been measured.
+      # THREAD_TEST_JOBS is 4: tests/run.sh's own cap (p23-4) would give these 3- and 4-vCPU runners 2, and on
+      # 2026-10-28 8 made the 3-vCPU macOS runner slower (shell suites 16.5 min against 8 at 4), so it stays 4.
+      # timeout-minutes sits where it does because a diff that touches a FULL path runs the whole suite, unsharded, in
+      # this one job. Passing jobs from 2026-11-06 to 08 (all full runs, none cancelled) took 19 to 51 min on macOS
+      # and 19 to 34 on ubuntu. The rule (docs/audits/2026-11-09-test-suite.md § 4): 1.15 times the slowest passing
+      # FULL job (50.9 min) is 58.5, rounded up to a multiple of 5 that is 60, then capped at 55 to stay below the 60
+      # it was raised to on 2026-11-07. It is one number for both OSes because merge-task's CI headroom record reads
+      # only a plain whole number from this file (p43-5). The job names and the matrix stay as they are (ADR 0025).
+      # A job whose week's median runs past 80 % of it (44 min) is a finding (CONTEXT.md's CI headroom, ADR 0073 d5);
+      # a job cut at it is re-run once, then set aside as infra (ADR 0073 d4).
       # THREAD_VERIFY_BASE is the PR's base sha. The checkout is the PR's merge ref, so its merge base with the base sha
       # is that sha and the diff is exactly what the PR lands; a base that moved after the event only grows the diff
-      # (slower, never wrong). A diff that touches a FULL path runs the full suite here, inside the same 60 minutes.
+      # (slower, never wrong). A FULL diff runs the full suite here, inside the same 55 minutes.
       - run: make test-fast
         env:
           THREAD_TEST_JOBS: "4"
