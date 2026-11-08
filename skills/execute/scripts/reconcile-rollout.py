@@ -2754,27 +2754,91 @@ def _landed(note) -> bool:
 
 # ---- the rollout's linked tasks ----------------------------------------------
 
+class _Walk:
+    """One walk of a tasks dir (p41-2): every `*.md` under it, Archive included, read once. `paths` is every such
+    path in sorted order; `entries` the (path, Note) of each that parses, in that order; `errors` the (path,
+    OSError) of each that could not be read, in that order (a ValueError, no frontmatter or not UTF-8, is no
+    entry and no error); `notes` path -> Note for each entry; `stems` stem (lowercased) -> [(path, Note)], in walk
+    order; `index` stem (lowercased)
+    -> (path, Note), a root copy preferred over an archived one; `by_rollout` the lowercased slug a note's
+    `rollout:` names -> [(path, Note)], in walk order."""
+
+    def __init__(self, tasks_dir: Path):
+        self.tasks_dir = tasks_dir
+        self.paths = sorted(tasks_dir.rglob("*.md"))  # rglob to catch already-archived done tasks too
+        self.entries, self.errors, self.notes, self.stems, self.index, self.by_rollout = [], [], {}, {}, {}, {}
+        for path in self.paths:
+            try:
+                note = Note(path)
+            except ValueError:
+                continue  # not a frontmatter note (or not UTF-8)
+            except OSError as e:
+                self.errors.append((path, e))
+                continue
+            entry = (path, note)
+            self.entries.append(entry)
+            self.notes[path] = note
+            key = path.stem.lower()
+            self.stems.setdefault(key, []).append(entry)
+            prev = self.index.get(key)
+            if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
+                self.index[key] = entry
+            slug = (_wikilink_slug(note.get("rollout")) or "").lower()
+            if slug:
+                self.by_rollout.setdefault(slug, []).append(entry)
+
+
+# The per-process walk share (p41-2): None (the default) walks the tasks dir afresh on every read; a dict, once
+# _share_walks() turned it on, keeps each tasks dir's _Walk (keyed by the Path as given) for the rest of the process,
+# and nothing outlives it. Only a process that writes no note turns it on (unfinished-rollout.py, every verb read-only):
+# a process that saves or moves a note and then reads again would read the vault as it stood before.
+_WALKS = None
+
+
+def _share_walks():
+    """From now on, every _scan (and _walk_of) of one tasks dir in this process reads one walk of it."""
+    global _WALKS
+    if _WALKS is None:
+        _WALKS = {}
+
+
+def _walk_of(tasks_dir: Path) -> "_Walk":
+    """tasks_dir's _Walk: the shared one while _share_walks() is on (made on first read), else a fresh one."""
+    if _WALKS is None:
+        return _Walk(tasks_dir)
+    walk = _WALKS.get(tasks_dir)
+    if walk is None:
+        walk = _WALKS[tasks_dir] = _Walk(tasks_dir)
+    return walk
+
+
 def _scan(rollout_path: Path, tasks_dir: Path):
     """(linked, index): linked = (path, Note) for every task note carrying `rollout: [[<slug>]]` for this
     rollout (glob-by-backlink — captures read-only tasks the `## File-sets` block omits); index = stem
     (lowercased) -> (path, Note) for every note under tasks_dir, Archive included, preferring a root
-    copy over an archived one (dependency lookups)."""
+    copy over an archived one (dependency lookups). The rollout note itself is in neither: only a note whose stem
+    matches the rollout's is resolved and compared with it, so a symlinked or differently spelt vault path still
+    leaves it out. Both are fresh containers over tasks_dir's _Walk (_walk_of), whose Notes they share. A note that
+    could not be read (an OSError) raises, as it did when _scan read each note itself."""
     rollout_slug = rollout_path.stem.lower()
-    rollout_real = rollout_path.resolve()
-    linked, index = [], {}
-    for path in sorted(tasks_dir.rglob("*.md")):  # rglob to catch already-archived done tasks too
-        if path.resolve() == rollout_real:
-            continue
-        try:
-            note = Note(path)
-        except ValueError:
-            continue  # not a frontmatter note (or not UTF-8)
-        key = path.stem.lower()
-        prev = index.get(key)
-        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
-            index[key] = (path, note)
-        if (_wikilink_slug(note.get("rollout")) or "").lower() == rollout_slug:
-            linked.append((path, note))
+    walk = _walk_of(tasks_dir)
+    same, own, errs = walk.stems.get(rollout_slug, ()), set(), walk.errors
+    if same or any(p.stem.lower() == rollout_slug for p, _e in errs):
+        rollout_real = rollout_path.resolve()
+        own = {p for p, _n in same if p.resolve() == rollout_real}
+        errs = [(p, e) for p, e in errs if p.stem.lower() != rollout_slug or p.resolve() != rollout_real]
+    if errs:
+        raise errs[0][1]
+    index = dict(walk.index)
+    if own:
+        index.pop(rollout_slug, None)
+        for path, note in same:
+            if path in own:
+                continue
+            prev = index.get(rollout_slug)
+            if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
+                index[rollout_slug] = (path, note)
+    linked = [(p, n) for p, n in walk.by_rollout.get(rollout_slug, ()) if p not in own]
     return linked, index
 
 
@@ -4544,18 +4608,9 @@ def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index, leases=None, 
 
 def _note_index(tasks_dir: Path) -> dict:
     """_scan's index with no rollout left out: stem (lowercased) -> (path, Note) for every note under tasks_dir, Archive
-    included, a root copy preferred over an archived one."""
-    index = {}
-    for path in sorted(tasks_dir.rglob("*.md")):
-        try:
-            note = Note(path)
-        except (OSError, ValueError):
-            continue
-        key = path.stem.lower()
-        prev = index.get(key)
-        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
-            index[key] = (path, note)
-    return index
+    included, a root copy preferred over an archived one (a note that cannot be read is left out). A fresh dict over
+    tasks_dir's _Walk (_walk_of)."""
+    return dict(_walk_of(tasks_dir).index)
 
 
 def mac_running(tasks_dir, reraise=()):

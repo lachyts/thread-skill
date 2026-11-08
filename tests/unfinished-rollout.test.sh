@@ -66,6 +66,8 @@
 #           still waits at begin (T19b); a code file with the holder's Leg open meets at claim, not begin (T19c); (O)'s
 #           holder half: an earlier holder with no open Leg holds a later chain's begin, never the reverse (T19d), and
 #           a later chain held so is no free chain to yield to (T19e)
+#   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
+#           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 #   P1-P13  two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4): check's step 2c
@@ -2480,6 +2482,106 @@ mkdir -p "$S/plug"; cp -R "$root/skills" "$S/plug/skills"; printf 'raise Runtime
 python3 "$S/plug/skills/_shared/scripts/unfinished-rollout.py" running --tasks-dir "$T" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err")
 ok "$rc|$out" "0|running ca" "R7d: a copy whose leg.py raises on import still counts the chain as running (fails closed)"
 has "$err" "WARN: ca: its chain is unreadable (leg.py would not load (exit 2)): counted as running" "R7d: … with the WARN"
+
+# W1-W3 (p41-2): one walk of the vault per check process. The surface re-check (leg.py begin's, 60 s) once read every
+# task note twice per unfinished serial note (note_state's _scan and leg.py's Chain): ~7.7 s on a busy Mac.
+# wcount <args...> -> $out "<walks>|<rc>|<stdout>": the check run in-process, counting rglob walks of the tasks dir.
+wcount() {
+  out=$(python3 - "$CHECK" "$T" "$@" 2> "$S.err" <<'PY'
+import contextlib, importlib.util, io, pathlib, sys
+check, tasks, args = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3:]
+walks = []
+real_rglob = pathlib.Path.rglob
+def rglob(self, pattern, *a, **k):
+    if self == tasks:
+        walks.append(pattern)
+    return real_rglob(self, pattern, *a, **k)
+pathlib.Path.rglob = rglob
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("ur", check); ur = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ur)
+sys.argv = ["unfinished-rollout.py", "check", "--tasks-dir", str(tasks)] + args
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    try:
+        rc = ur.main()
+    except SystemExit as e:
+        rc = e.code
+print(f"{len(walks)}|{rc}|{buf.getvalue().strip()}")
+PY
+)
+}
+scen w1
+stuck5 ca
+LOG=- mkchain cb "$OTHER" u1~open~"$VA"
+LOG=- mkchain cc "$OTHER" v1~open~"$VC" v2~open~"$VC"
+mkro ro-p.md "$R" "$DEMO"; mkt p1.md ro-p in_progress
+mkdir -p "$T/Archive"; mkt Archive/old.md cb done
+chs --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/B
+cli="$out|$rc"
+wcount --shape serial --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/B
+ok "$out" "1|${cli#*|}|${cli%|*}" "W1: a resuming chain's check walks the vault once, three serial notes and a parallel one read, its verdict the CLI's"
+chs --surface vault:Work/Projects/C --project Other
+cli="$out|$rc"
+wcount --shape serial --surface vault:Work/Projects/C --project Other
+ok "$out" "1|${cli#*|}|${cli%|*}" "W1: … and so does the serial schedule check"
+chk --repo "$R" --project Other
+cli="$out|$rc"
+wcount --repo "$R" --project Other
+ok "$out" "1|${cli#*|}|${cli%|*}" "W1: … and the parallel check"
+# W2: _scan over the shared walk keeps its old read: the rollout note in neither list (by stem, then its resolved path),
+# a same-stem copy elsewhere kept in the index, a root copy preferred, fresh containers per call; off, each read walks.
+mkt Archive/cb.md - done
+out=$(python3 - "$RR" "$T" <<'PY'
+import importlib.util, pathlib, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+T = pathlib.Path(sys.argv[2])
+out = []
+def read(rollout):
+    linked, index = rr._scan(rollout, T)
+    return sorted(p.stem for p, _ in linked), str(index["cb"][0].relative_to(T)) if "cb" in index else None, index
+# spelt through a `..` so only the resolved path matches the walk's own
+odd = T / "Archive" / ".." / "cb.md"
+out.append(read(odd)[:2])
+rr._share_walks()
+first = read(T / "cb.md")
+first[2].clear()
+out.append(read(T / "cb.md")[:2])
+out.append(sorted(read(T / "ca.md")[0]))
+(T / "u2.md").write_text('---\ntags: [task]\nstatus: open\nrollout: "[[cb]]"\n---\n')
+out.append(read(T / "cb.md")[0])
+rr._WALKS = None
+out.append(read(T / "cb.md")[0])
+print(out)
+PY
+)
+ok "$out" "[(['old', 'u1'], 'Archive/cb.md'), (['old', 'u1'], 'Archive/cb.md'), ['t1', 't2', 't3', 't4', 't5'], ['old', 'u1'], ['old', 'u1', 'u2']]" \
+  "W2: _scan leaves the rollout note out (a same-stem archived copy kept), shared reads match, and off it walks afresh"
+# W3: a note the walk cannot read raises from _scan as it always did, unless it is the rollout note itself
+out=$(python3 - "$RR" "$T" <<'PY'
+import importlib.util, pathlib, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+T = pathlib.Path(sys.argv[2])
+real = rr.Note
+def note(path, *a):
+    if path.stem in ("u1", "cc"):
+        raise PermissionError(13, "denied", str(path))
+    return real(path, *a)
+rr.Note = note
+out = []
+for r in ("ca", "cc"):
+    try:
+        out.append(len(rr._scan(T / f"{r}.md", T)[0]))
+    except PermissionError as e:
+        out.append(pathlib.Path(e.filename).stem)
+print(out)
+PY
+)
+ok "$out" "['cc', 'u1']" "W3: the first unreadable note raises from _scan, in walk order, the rollout note itself never read"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
