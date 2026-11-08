@@ -29,7 +29,7 @@ merges onto `a0675f3` without conflict, and the shard predictions in § 3 are re
 - **#327 finding 2 is fixed:** each suite and step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut at its
   limit names every suite that finished. All four macOS jobs cut at 40 min on 2026-11-06 died in the node phase with
   no shell verdict in their logs (§ 4).
-- **The shards balance on measured seconds now** (`tests/shard-weights.tsv`): each shard's shell sum is 671 to 674 s
+- **The shards balance on measured seconds now** (`tests/shard-weights.tsv`): each shard's shell sum is 673 to 673.5 s
   instead of 475 to 958 s by size. The slowest shard does not move, because `tests/leg.test.sh` alone sets its floor
   (§ 3); its split is the top filed recommendation.
 - **No CI flake in the window; 2 local flakes in a week, recorded as 3** (one test filed twice, § 6).
@@ -125,7 +125,8 @@ files, 45 python files, 2 workflow scripts, the fast-tier map check). The fast t
 - **16 FAST and 44 FULL.** By the first FULL path each FULL commit reaches: `run_record.py` 8, `unfinished-rollout.py`
   4 and `reconcile-rollout.py` 4, `skills/execute/legs.md` 3, `skills/_shared/readiness-grade.md` 3, the `Makefile`,
   `background_job.py`, `land.sh`, `asking.md`, `lead-integrate.py`, `engine-snapshot.md`, `execution-fit.md` and
-  `reflect.py` 2 each, and 7 more once each (both workflows among them).
+  `reflect.py` 2 each, and 6 more once each (`verify-slot.py`, `serial-chains.py`, `rollout-settings.py`,
+  `next-action.py` and both workflows).
 - **A FAST commit still runs a median 99 files** (84 to 147), most of them node files: a docs-only commit runs 94
   files, 10 of them shell suites, because the contract tests that read docs are walkers.
 - The open tasks [[thread-skill-followup-fast-tier-narrow-the-reach]] (FULL → FAST) and
@@ -156,16 +157,18 @@ files, 45 python files, 2 workflow scripts, the fast-tier map check). The fast t
 
 `tests/lib/shard.py` split each kind by file size; the merge-task self-tests counted 0. p43-6 weighs each shell suite
 by its measured seconds (`tests/shard-weights.tsv`, the medians of M1 and M2) and lets the self-tests' weight seed
-shard 1. Each shard's predicted shell time at 4 slots is the larger of its sum over 4 and its longest suite:
+shard 1. Each shard's predicted shell time at 4 slots is the larger of its sum over 4 and its longest suite. The
+measured-seconds column is shard.py's split over `tests/shard-weights.tsv` as committed (each value the median of two
+whole-second runs, so some end in .5), and shard 1's sum includes the self-tests' 9 s:
 
 | Shard (N = 4) | By size: shell sum, longest | By measured seconds: shell sum, longest |
 |---:|---|---|
-| 1 | 958 s, `leg` 527 s → about 527 s | 671 s, `primary-refresh` 146 s → about 168 s |
-| 2 | 719 s, `lead-integrate` 244 s → about 244 s | 674 s, `leg` 527 s → about 527 s |
-| 3 | 475 s, `unfinished-rollout` 112 s → about 119 s | 674 s, `lead-integrate` 244 s → about 244 s |
-| 4 | 540 s, `git-env-canary` 154 s → about 154 s | 674 s, `git-env-canary` 154 s → about 168 s |
+| 1 | 958 s, `leg` 527 s → about 527 s | 673.5 s, `primary-refresh` 145.5 s → about 168 s |
+| 2 | 719 s, `lead-integrate` 244 s → about 244 s | 673 s, `leg` 527 s → about 527 s |
+| 3 | 475 s, `unfinished-rollout` 112 s → about 119 s | 673 s, `lead-integrate` 244 s → about 244 s |
+| 4 | 540 s, `git-env-canary` 154 s → about 154 s | 673 s, `git-env-canary` 153.5 s → about 168 s |
 
-(The table is this branch's tree. On its merge with master at `a0675f3` the split is the same in shape: 668 to 675 s
+(The table is this branch's tree. On its merge with master at `a0675f3` the split is the same in shape: 674.8 to 675 s
 per shard, `leg` in shard 2, `lead-integrate` in shard 3, and #348's new `tests/merge-task-ci-headroom.test.sh` weighted
 by the per-byte fallback.)
 
@@ -355,7 +358,7 @@ The review of #327 (`docs/reviews/2026-11-07-6e8773c-9102f4.md`, consumed in tha
 | 1 | Narrow the fast tier's reach, so fewer PRs run the full suite in the required job | The largest: for each commit that turns FULL → FAST, a PR's checks drop from a full run (macOS median 35 min, ubuntu 28) to a FAST one, unmeasured on CI yet (no FAST run has completed; a FAST selection runs a median 99 of 187 files). 44 of the last 60 commits are FULL | Filed before this audit: [[thread-skill-followup-fast-tier-narrow-the-reach]], [[thread-skill-followup-fast-tier-over-selection]] |
 | 2 | Split `tests/leg.test.sh` (527 s, 20 % of the shell seconds) into two or three files | About 5 to 6 min off master's macOS full-suite wall (the slowest shard from about 16 to about 10), and the macOS shard limit down to about 20 to 25; about nothing locally at the default cap of 4 (the shell phase is bound by total work), about 2.5 min at a cap of 8 (§ 3) | Filed: [[thread-skill-followup-suite-audit-split-the-leg-suite]] |
 | 3 | Weigh the node files by measured seconds in the shard split | About 2 to 4 min off the node-heavy shard (shard 3's node phase ran 4.2 to 8.2 min, the others 0.6 to 2.8, on equal byte shares); it sets the slowest shard once (2) lands, and set ubuntu's once already | Filed: [[thread-skill-followup-suite-audit-node-file-weights]] |
-| 4 | Weigh the shell suites by measured seconds | 0 on the slowest shard today (the leg floor); balances the shard sums (671 to 674 s each, from 475 to 958), and makes (2) pay in full | **Applied in this PR** (`tests/lib/shard.py`, `tests/shard-weights.tsv`) |
+| 4 | Weigh the shell suites by measured seconds | 0 on the slowest shard today (the leg floor); balances the shard sums (673 to 673.5 s each, from 475 to 958), and makes (2) pay in full | **Applied in this PR** (`tests/lib/shard.py`, `tests/shard-weights.tsv`) |
 | 5 | Bring `timeout-minutes` down | 0 on a passing run; a hang reports red 5 min sooner on a PR check (55, from 60) and 25 to 30 min sooner on a shard (35 and 30, from 60) | **Applied in this PR** |
 | 6 | A per-suite liveness bound and node `--test-timeout` | 0 on a passing run; a hang reports in minutes instead of at the job's limit, and a local run ends | Filed: [[thread-skill-followup-suite-audit-liveness-bounds]] |
 | 7 | Per-OS limits for test.yml | 0 on a passing run; an ubuntu hang reports at about 40 instead of 55 | Filed: [[thread-skill-followup-suite-audit-per-os-ci-limits]] (after p43-5) |
