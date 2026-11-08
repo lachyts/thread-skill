@@ -5,7 +5,9 @@ Status: proposed. Grilled 2026-11-07 in the SEO orient session, after its audit 
 built by Phase 42 (`thread-skill-p42-2` … `-4`). For one project's serial work, d1 amends ADR 0040's p24-2 mechanic
 *One chain per serial note* ("A serial set that splits into surface-disjoint groups gets one note per group") and ADR
 0067 d4's predicted claims, which "group, order and wait": disjoint surfaces no longer split a project's members into
-chains. d3 amends ADR 0059 d4, "A code row never opens where its Leg cannot finish it": its refusal of "an alias-less
+chains. d3 amends the next sentence of that d4, "They never refuse a schedule" (serial-chains.py's docstring repeats it
+word for word): a predicted `repo:` claim outside its launch folder's checkout now refuses its member, aliased or not.
+d3 also amends ADR 0059 d4, "A code row never opens where its Leg cannot finish it": its refusal of "an alias-less
 member that writes two or more checkouts" widens to every member that commits to a checkout other than its launch
 folder's, and its exemption, "An aliased member in checkout A that also claims checkout B (a workspace `--add-dir`, a
 project `Local:`)", now holds only while B is reach the row does not commit to. Sits beside Phase 41 (a rollout
@@ -53,24 +55,41 @@ in to that reads signed out raises one `hands_steps` list on his screen (each se
 that ticks it) while he is still in the sitting, and the chain's Leg 1 starts only once every needed server reads
 signed in. A server he will not sign in to now, or a check that cannot run, leaves the rows that need it out of the
 chain, unstamped, each named with what to sign in to; a later `/thread:orient --steer` takes them. A member that
-depends on a row left out (its `depends-on:` or `blocked-by:`, directly or through another member) is left out with
-it, unstamped, and named the same way: the row it waits on, and what to sign in to. Kept in, it would be held
+depends on a row left out, by any dependency the plan reads (its `depends-on:` or `blocked-by:`, or a body dependency
+schedule § 3 passes as `--dep <dependant>=<dependency>`), directly or through another member, is left out with it,
+unstamped, and named the same way: the row it waits on, and what to sign in to. Kept in, it would be held
 `depends on [[<row>]]`, and once nothing else was claimable its chain would close `stuck`: a row launched to wait. The
 Leg's own preflight stays as the backstop.
 
 **d3. A row commits only to the checkout it launches from.** `serial-chains.py plan` refuses any member, aliased or
 not, that commits to a checkout other than its launch folder's. The checkouts it commits to are those of its `repo:`
 surfaces (a keyed `repo:<toplevel>//<path>` token, or a bare `repo:<toplevel>` that is a git toplevel), declared,
-derived or added for it at schedule. The remedy names that checkout's launcher when the launch-folders file
-(`launch-folders.json`) has one, else a launch from that checkout, or one task per checkout chained by `depends-on:`
-(under d1 those tasks stay in the one chain, with a Leg boundary between them). Reach is not refused: a launch
-command's `--add-dir` and `cd` paths and the first project's `Local:` predict nothing (schedule § Serial path), and
-the read-only reach ADR 0059 d4 named (a workspace `--add-dir`, a project `Local:`) stays allowed as it ruled, so a
-workspace chain that reaches other repos still schedules. `works_of` counts that reach too, so the refusal reads the
-surfaces' checkouts, not a member's `works`. The reason is a write's alone: a review cannot leave the Session's cwd,
-so a row that commits elsewhere can never finish, and a read needs no review. A row that commits to a checkout it only
-reaches, naming no path there, predicts no claim and is not caught here; its Leg's review stays the backstop, as on
-11-07.
+derived or added for it at schedule. The plan cannot tell a commit from a read: a `## Launch` path below another
+checkout's toplevel outside a **Read...** item (a **Files:** span, an unlabelled line) is a prediction, so a row that
+names a file there only to read it is refused too. The remedy names, in turn: that checkout's launcher when the
+launch-folders file (`launch-folders.json`) has one, else a launch from that checkout; one task per checkout chained
+by `depends-on:` (under d1 those tasks stay in the one chain, with a Leg boundary between them); and, for a checkout
+the row only reads, ADR 0059 d4's third remedy, a `surfaces:` declaration without that checkout, or the path moved
+under a **Read...** item, which derivation skips.
+
+An alias-less member opens with `claude` from the one checkout its `repo:` surfaces name, whatever else it reaches.
+Naming none, it opens as today: from its one `works` checkout when it has exactly one, refused when it has two or more
+(ADR 0059 d4), and with none from its one path-only `repo:` token, else the vault root. Naming two or more, it is
+refused. So the build changes the launch pick as well as the refusal: today the pick reads `works`, reach included,
+and opens from the vault when `works` holds two, so a member that commits to checkout A while its first project's
+`Local:` is checkout B would still be refused.
+
+Reach beside a launch in a checkout is not refused: a launch command's `--add-dir` and `cd` paths and the first
+project's `Local:` predict nothing (schedule § Serial path), and the read-only reach ADR 0059 d4 named (a workspace
+`--add-dir`, a project `Local:`) stays allowed as it ruled, so a workspace chain that reaches other repos still
+schedules. `works_of` counts that reach too, so d3's refusal reads the surfaces' checkouts, not a member's `works`, and
+so does the alias-less pick until its surfaces name none. ADR 0059 d4's two refusals, which the plan reads from
+`works` today, stay as they are, each for a member with no checkout to open in: the alias-less one above, and an
+aliased one launched from the vault while it works any checkout, reach included. The reason is a commit's alone: a review cannot leave the Session's cwd, so a row
+that commits elsewhere can never finish. A read needs no review, but the plan sees only what a row names: a read it
+predicts is refused like a commit until one of the remedies above takes the path out of the prediction. A row that
+commits to a checkout it only reaches, naming no path there, predicts no claim and is not caught here; its Leg's
+review stays the backstop, as on 11-07.
 
 ## Consequences
 
@@ -88,6 +107,9 @@ reaches, naming no path there, predicts no claim and is not caught here; its Leg
 
 - A row that commits to a checkout other than its launch's → refused, or relaunched from its own checkout (technical:
   a review cannot leave the Session's cwd, so such a row can never finish; d3).
+- A path a row names in another checkout only to read it, outside a **Read...** item → refused like a commit, until a
+  `surfaces:` declaration leaves that checkout out or the path moves under **Read...** (technical: the plan cannot
+  tell a read from a commit, and either remedy is one line; d3).
 - Read-only reach into another checkout (a workspace `--add-dir`, a project `Local:`) → still allowed, as ADR 0059 d4
   ruled (technical: it commits nothing, so no review has to leave the cwd, and refusing it would refuse real workspace
   chains).
@@ -95,7 +117,8 @@ reaches, naming no path there, predicts no claim and is not caught here; its Leg
   per Session and per profile).
 - Rows needing a server he will not sign in to now are left out, never launched to wait (priorities: Phase 41's "fix
   all rollouts when I sit down intentionally", and his pick here, "ask at schedule time").
-- A member that depends on a row left out is left out with it (follows from the bullet above: kept in, it would wait
-  on that row and close its chain `stuck`).
+- A member that depends on a row left out, by any dependency the plan reads (`depends-on:`, `blocked-by:`, or a body
+  dependency passed as `--dep`), is left out with it (follows from the bullet above: kept in, it would wait on that
+  row and close its chain `stuck`).
 - A member with no `projects:` link is grouped as before, by surface and dependency alone (technical: no project names
   what it shares with the rest, and d1 adds only the shared-project edge).
