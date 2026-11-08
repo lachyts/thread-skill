@@ -2,9 +2,11 @@
 """serial-chains.py — schedule § Serial path's plan: a serial set's chains, surfaces and launches (ADR 0040).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/serial-chains.py plan --tasks <a,b,...>
-        [--surface <slug>=<raw>]... [--dep <slug>=<slug>]... [--vault <dir>] [--launch-folders <json>]
+        [--surface <slug>=<raw>]... [--dep <slug>=<slug>]... [--signed-out <namespace>@<alias>[:<folder>]]...
+        [--vault <dir>] [--launch-folders <json>]
 
-/thread:schedule § Serial path runs it at S2 (and again at S4 after a confirmed dependency or an added surface).
+/thread:schedule § Serial path runs it at S2, again at S3.7 with `--signed-out`, and at S4 after a confirmed dependency
+or an added surface.
 Stdlib only, python >= 3.9. No network, and it writes nothing. Git runs only as `git rev-parse --local-env-vars`
 (to scrub repo-local env vars such as a hook's GIT_DIR, landing-register.py's rule), `git -C <dir> rev-parse
 --show-toplevel`, `git -C <toplevel> rev-parse --path-format=absolute --git-common-dir` (a checkout's key, below) and
@@ -147,6 +149,32 @@ project notes' bodies and their `repos:` entries. A match sends the member to `s
 source (the first match, in that order: a reach span reads `its ## Launch path <p>`). Ruling (c) runs before the
 launch refusals, so a session-lane member is never refused for its launch.
 
+Sign-ins (ADR 0074 d2; schedule § Serial path S3.7). A member's `mcp` is required_mcp of its `## Launch`: per
+`**MCP:**` line, a body that opens `none` or `optional` (after spaces, `*`, `_` or a backtick) gives nothing, and any
+other gives every `mcp__...` token of its first `;` clause, deduped in first-seen order. So ``required `mcp__a__*`;
+optional `mcp__b__*` `` and a line with no `required` word, `` `mcp__a__*` (required) ``, both read `mcp__a__*`, and a
+conditional namespace in the first clause reads as required (write it after `; optional`). mcp_server names a
+namespace's server: `mcp__webflow__*` is `webflow`, and a token with no `mcp__<server>__` part is itself. Each
+`--signed-out <namespace>@<alias>[:<folder>]` is one launch's sign-in that did not read signed in. It matches a member
+when the namespace is in its `mcp`, the alias is its launch alias (case-folded; `claude` for an alias-less member) and,
+with a folder part, its launch folder is that folder (realpaths, case-folded). A member whose launch folder is None (an
+aliased launch that refused) never matches a key with a folder part. The folder part is required for `claude`, since
+alias-less rows differ by folder (project `.mcp.json` servers and their per-path approvals), while an alias fixes its
+folder and its `--mcp-config`; a `cx-*` alias is refused, since a Codex Leg's sign-ins are never checked at schedule
+(ADR 0074). The leave-out runs after ruling (c) and each launch's resolution, and before grouping: each non-lane member
+a key matches is left out, needing its matched namespaces; then, to a fixpoint in notes order, each non-lane member any
+of whose in-set dependencies (`depends-on:`, `blocked-by:`, --dep) is left out, or is a waiting lane member, leaves
+too, by its first such one (its `via`). A session-lane member is never left out, but one with such a dependency waits:
+it carries the closure, so a member depending on it, directly or through another waiting lane member, still leaves
+(ADR 0074 d2's "through another member"; kept in, it would wait on a row that waits on a left-out one). A left-out
+member is in no chain and no `externalDeps`, and goes in `leftOut` with its line: a direct one `<slug>: needs <ns>[,
+...], which did not read signed in from its launch <alias> from <folder>: sign in to <server>[, ...], then
+/thread:orient --steer`, a dependant `<slug>: depends on [[<via>]], left out: sign in to <server>[, ...], then
+/thread:orient --steer`, with its `via` row's servers, and one whose `via` is a waiting lane member `<slug>: depends on
+[[<via>]], a session-lane row waiting on [[<row>]], left out: sign in to <server>[, ...], then /thread:orient
+--steer`, `<row>` the first left-out member that lane member reaches, and its servers. Its refusals and WARNs are any
+member's. A key that leaves out no member adds `WARN: --signed-out <key>: it leaves out no chain member`.
+
 Grouping (ADR 0074 d1): connected components over surface overlap, `depends-on:` / `blocked-by:` / --dep edges inside
 the set, and a shared first project: every member whose first `projects:` wikilink names one project (case-folded) is
 in that project's one chain, whatever its surfaces, so a run gives at most one chain per project. A member with no
@@ -159,8 +187,10 @@ is listed in the chain's `externalDeps`.
 
 Output: one JSON line on stdout, exit 0, nothing on stderr:
   {"chains": [{"tasks": [...], "surfaces": [...], "checkouts": [...], "members": {slug: {"surfaces": [...],
-   "source": ..., "added": [...], "launch": {"alias": ..., "folder": ...}, "works": [...]}}, "externalDeps":
-   [{"task": ..., "dependsOn": ...}]}], "sessionLane": [{"slug": ..., "why": ...}], "warns": ["WARN: ...", ...]}
+   "source": ..., "added": [...], "launch": {"alias": ..., "folder": ...}, "works": [...], "mcp": [...]}},
+   "externalDeps": [{"task": ..., "dependsOn": ...}]}], "sessionLane": [{"slug": ..., "why": ...}],
+   "leftOut": [{"slug": ..., "why": ...}], "warns": ["WARN: ...", ...]}
+`leftOut` is always present, in notes order (the Sign-ins paragraph above).
 A chain's `checkouts` is checkouts_of over its `surfaces` and its members' launch folders, the vault excluded: exactly
 what its note records (`surfaces:` and the Queue's Launch cells), so S3's `--checkout`, S4 and reconcile-rollout.py's
 `_serial_root` read the same list. A member's `works` also counts the `--add-dir` and `Local:` reach no Leg commits to.
@@ -170,8 +200,9 @@ a null folder, a launch folder that is missing, a launch-folders file missing or
 Leg would open outside the checkout it works (an alias-less row whose `repo:` surfaces name two checkouts, or, naming
 none, that works two; a vault launch working one; an aliased row whose `repo:` surfaces name a checkout other than
 its launch folder's; never a session-lane member). Exit 2 prints
-one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, reconcile-rollout.py
-unloadable, or plugin.json unreadable (ruling (c) cannot be checked, so the plan fails closed).
+one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, a malformed
+`--signed-out`, an alias-less one with no folder, or a `cx-*` one, reconcile-rollout.py unloadable, or plugin.json
+unreadable (ruling (c) cannot be checked, so the plan fails closed).
 
 Chain copies (ADR 0067 d2). A serial note that carries `chain_copies:` works each git checkout it writes in its own
 Chain copy: a git worktree of that checkout on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`, which
@@ -189,11 +220,12 @@ rank-stamp). read_estate_rank is the one parser of the pair, and rank_tokens the
 between two chains in Chain copies: `repo:` (a code file) and `any`, never vault or `ext:` (d6).
 
 The pure helpers (parse_token, fmt_token, repo_parts, checkout_of, overlaps, overlap_pairs, read_list, read_surfaces,
-read_chain_copies, fmt_chain_copies, copy_name, rank_tokens, norm_origin, and read_estate_rank given its stamp parser)
-touch neither the filesystem nor git; checkouts_of,
+read_chain_copies, fmt_chain_copies, copy_name, rank_tokens, norm_origin, required_mcp, mcp_server, and read_estate_rank
+given its stamp parser) touch neither the filesystem nor git; checkouts_of,
 copy_folder and primary_folder read it only through realpath (and checkouts_of through the toplevel resolver it is
 given). unfinished-rollout.py imports them (rank_tokens for its (O) holder half), leg.py loads the surface grammar, the
-Chain copy helpers and the rank's two, estate-dispatch.py read_chain_copies, copy_folder and read_estate_rank (rank-stamp),
+Chain copy helpers, the rank's two and required_mcp (begin's `mcp`), estate-dispatch.py read_chain_copies, copy_folder
+and read_estate_rank (rank-stamp),
 and reconcile-rollout.py read_surfaces, checkouts_of and read_chain_copies:
 repo_parts, checkout_of and checkouts_of are this file's one statement of a chain's checkouts. overlaps
 and overlap_pairs take an optional toplevel resolver (Git.checkout) for the nested-checkout rule, and are purely
@@ -915,6 +947,35 @@ def phase_key(slug: str):
     return (1, 0.0, 0)
 
 
+# ---- sign-ins (pure) -----------------------------------------------------------------------------
+
+MCP_LINE_RE = re.compile(r"\*\*MCP:\*\*(.*)$", re.I)
+MCP_NONE_RE = re.compile(r"[\s*_\x60]*(?:none|optional)\b", re.I)
+MCP_NS_RE = re.compile(r"mcp__[\w-]+\*?")
+
+
+def required_mcp(text) -> list:
+    """The required MCP namespaces of one note's `## Launch` text, deduped in first-seen order (the header's Sign-ins
+    paragraph): per `**MCP:**` line, nothing when its body opens `none` or `optional`, else every `mcp__...` token of its
+    first `;` clause. cmd_plan reads each member's `mcp` through it, and leg.py begin's `mcp` list too."""
+    out = []
+    for line in (text or "").split("\n"):
+        m = MCP_LINE_RE.search(line)
+        if not m or MCP_NONE_RE.match(m.group(1)):
+            continue
+        for ns in MCP_NS_RE.findall(m.group(1).split(";", 1)[0]):
+            if ns not in out:
+                out.append(ns)
+    return out
+
+
+def mcp_server(ns) -> str:
+    """The server a namespace names: `mcp__webflow__*` is `webflow`; a token with no `mcp__<server>__` part is
+    itself."""
+    m = re.match(r"mcp__(.+?)__", ns)
+    return m.group(1) if m else ns
+
+
 # ---- the plan ------------------------------------------------------------------------------------
 
 def split_pair(flag, value):
@@ -1132,6 +1193,21 @@ def cmd_plan(args) -> int:
         surface_pairs.append((v, slug, raw))
     for v in args.dep or []:
         dep_pairs.append((v,) + split_pair("--dep", v))
+    signed_out = []
+    for v in args.signed_out or []:
+        ns, sep, rest = v.partition("@")
+        al, _, fo = rest.partition(":")
+        ns, al, fo = ns.strip(), al.strip(), fo.strip()
+        if not sep or not ns or not al:
+            die(f"--signed-out {v}: write it as <namespace>@<launch alias>, or <namespace>@claude:<folder> for an "
+                "alias-less row")
+        if al.casefold() == "claude" and not fo:
+            die(f"--signed-out {v}: an alias-less row's launch is its folder: write it as <namespace>@claude:<folder>")
+        if al.casefold().startswith("cx-"):
+            die(f"--signed-out {v}: a cx-* launch is a Codex Leg's, never checked at schedule (ADR 0074): drop the "
+                "flag")
+        signed_out.append((v, ns, al.casefold(),
+                           os.path.realpath(os.path.expanduser(fo)).casefold() if fo else None))
     rr = load_rr()
     norm = lambda s: (rr._wikilink_slug(s) or s).lower()  # noqa: E731
     members = {norm(s) for s in slugs}
@@ -1386,14 +1462,56 @@ def cmd_plan(args) -> int:
                      if os.path.isdir(d) and git.origin(d) == porigin), None)
         deps = list(rr._dep_entries(note)) + extra_deps.get(slug.lower(), [])
         info[slug] = {"surfaces": canon, "source": source, "added": sorted(set(added)), "launch": launch,
-                      "works": works, "deps": deps, "project": proj_names[0].casefold() if proj_names else None}
+                      "works": works, "deps": deps, "project": proj_names[0].casefold() if proj_names else None,
+                      "mcp": required_mcp(note.section_text("## Launch"))}
         if lane:
             session.append({"slug": slug, "why": lane})
         elif pending:
             refusals.append(pending)
 
     lane_slugs = {s["slug"] for s in session}
-    chained = [s for s in notes if s not in lane_slugs]
+    # Sign-ins (ADR 0074 d2): a --signed-out key leaves out each non-lane member needing its namespace from its launch,
+    # then each in-set dependant of a left-out member, directly or through a session-lane member that waits on one
+    # (never left out itself), to a fixpoint in notes order (the header's Sign-ins paragraph).
+    left, hit = {}, set()
+    for s in notes:
+        if s in lane_slugs:
+            continue
+        launch, f = info[s]["launch"], info[s]["launch"]["folder"]
+        needs = []
+        for v, ns, al, fo in signed_out:
+            if ns in info[s]["mcp"] and launch["alias"].casefold() == al and (
+                    fo is None or (f is not None and os.path.realpath(f).casefold() == fo)):
+                hit.add(v)
+                if ns not in needs:
+                    needs.append(ns)
+        if needs:
+            servers = list(dict.fromkeys(mcp_server(n) for n in needs))
+            left[s] = (servers, f"{s}: needs {', '.join(needs)}, which did not read signed in from its launch "
+                                f"{launch['alias']} from {f}: sign in to {', '.join(servers)}, then /thread:orient --steer")
+    waits = {}  # a session-lane member that waits on a left-out one -> the first left-out member it reaches
+    grew = bool(left)
+    while grew:
+        grew = False
+        for s in notes:
+            if s in left or s in waits:
+                continue
+            via = next((k for k in (by_key.get(d.lower()) for d in info[s]["deps"]) if k in left or k in waits), None)
+            if not via:
+                continue
+            grew = True
+            row = via if via in left else waits[via]
+            if s in lane_slugs:
+                waits[s] = row
+                continue
+            servers = left[row][0]
+            link = "" if via in left else f", a session-lane row waiting on [[{row}]]"
+            left[s] = (servers, f"{s}: depends on [[{via}]]{link}, left out: sign in to {', '.join(servers)}, then "
+                                "/thread:orient --steer")
+    for v, *_ in signed_out:
+        if v not in hit:
+            warns.append(f"WARN: --signed-out {v}: it leaves out no chain member")
+    chained = [s for s in notes if s not in lane_slugs and s not in left]
     # Union-find over surface overlap, in-set dependency and shared-first-project edges (ADR 0074 d1).
     parent = {s: s for s in chained}
 
@@ -1443,7 +1561,8 @@ def cmd_plan(args) -> int:
             "surfaces": sorted({t for m in rows for t in info[m]["surfaces"]}),
             "checkouts": checkouts_of(sorted({t for m in rows for t in info[m]["surfaces"]}),
                                       [info[m]["launch"]["folder"] for m in rows], git.toplevel, vault_real),
-            "members": {m: {k: info[m][k] for k in ("surfaces", "source", "added", "launch", "works")} for m in rows},
+            "members": {m: {k: info[m][k] for k in ("surfaces", "source", "added", "launch", "works", "mcp")}
+                        for m in rows},
             "externalDeps": [e for m in rows for e in ext[m]],
         })
     if refusals:
@@ -1454,7 +1573,9 @@ def cmd_plan(args) -> int:
         warns.append(f"WARN: {lf_path} is missing or unreadable ({lf_err}): no member names a launch alias, so "
                      "none needs it")
     chains.sort(key=lambda c: (phase_key(c["tasks"][0]), c["tasks"][0].lower()))
-    out = {"chains": chains, "sessionLane": session, "warns": list(dict.fromkeys(warns))}
+    out = {"chains": chains, "sessionLane": session,
+           "leftOut": [{"slug": s, "why": left[s][1]} for s in notes if s in left],
+           "warns": list(dict.fromkeys(warns))}
     print(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     return 0
 
@@ -1469,6 +1590,10 @@ def main() -> int:
                    help="<slug>=<path or token>: a surface added for that member (repeatable; always unions in)")
     c.add_argument("--dep", action="append", default=None,
                    help="<slug>=<slug>: the first depends on the second (a dependency confirmed at S4; repeatable)")
+    c.add_argument("--signed-out", action="append", default=None,
+                   help="<namespace>@<alias>, or <namespace>@claude:<folder> for an alias-less row: a sign-in that did "
+                        "not read signed in from that launch (S3.7); leaves out its members and their dependants "
+                        "(repeatable)")
     c.add_argument("--vault", default=DEFAULT_VAULT, help="the vault root (tasks at Work/Tasks, projects under "
                                                           "Work/Projects)")
     c.add_argument("--launch-folders", default=DEFAULT_LAUNCH_FOLDERS, help="the launch-folders JSON")
