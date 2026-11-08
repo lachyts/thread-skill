@@ -14,6 +14,9 @@ root=$(pwd)
 unset $(git rev-parse --local-env-vars)
 tmp=$(mktemp -d); trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 . tests/lib/merge-task-env.sh
+# reads() imports reconcile-rollout.py: run alone (outside tests/run.sh) it must leave no __pycache__ in the tree,
+# which the no-bytecode checks read as a failure.
+export HOME="$tmp/home" PYTHONDONTWRITEBYTECODE=1; mkdir -p "$HOME"
 RR="$root/skills/execute/scripts/reconcile-rollout.py"
 chk() {  # chk <rc> <stdout> — append one `pr checks --watch` result
   python3 -c 'import json,sys; print(json.dumps({"rc": int(sys.argv[1]), "out": sys.argv[2], "err": ""}))' "$@" >> "$MT_STATE/checks.seq"
