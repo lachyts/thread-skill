@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S13) and `check` (C1-C3) on throwaway
 # repos, its results on the real tree (R1-R6), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
-# fixture checkout (F1-F14; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
+# fixture checkout (F1-F19; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
 # temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
@@ -500,6 +500,33 @@ ZZ_C_OK=1 run bash --shard 1/2
 ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no test"
 has "$out" "  - shard split" "F14: … through the shard split step"
 git -C "$F" checkout -q -- tests/lib/shard.py
+
+# F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
+# mid-run still shows every suite that finished; the grouped blocks print before node; the verdict carries the seconds.
+# lnum <ERE>: the number of the first line of $out that matches <ERE>, else 0. lines <ERE>: how many lines match.
+lnum() { local l; l=$(printf '%s\n' "$out" | grep -nE "$1" | head -1 | cut -d: -f1); echo "${l:-0}"; }
+lines() { printf '%s\n' "$out" | grep -cE "$1"; }
+ZZ_C_OK=1 run bash; rc15=$rc
+blk=$(lnum '^== (merge-task (classifier|base) self-test|tests/zz[ab]\.test\.sh)$')
+lastblk=$(printf '%s\n' "$out" | grep -nE '^== (merge-task (classifier|base) self-test|tests/zz[ab]\.test\.sh)$' | tail -1 | cut -d: -f1)
+nodel=$(lnum '^== node tests \(')
+early=""
+for l in 'tests/zza\.test\.sh' 'tests/zzb\.test\.sh' 'merge-task classifier self-test' 'merge-task base self-test'; do
+  e=$(lnum "^$l: ok \([0-9]+s\)$"); [ "$e" -gt 0 ] && [ "$e" -lt "$blk" ] && early="${early}y" || early="${early}n"
+done
+ok "$rc15|$early" "0|yyyy" "F15: each shell suite and self-test prints its own ok line, all before the first grouped block (printed before wait returned)"
+ok "$([ "$blk" -gt 0 ] && [ "${lastblk:-0}" -lt "$nodel" ] && echo y || echo "blocks $blk..${lastblk:-0}, node $nodel")" y \
+  "F15: … and every grouped block prints before node runs"
+ok "$(lines '^fast-tier map check: ok \([0-9]+s\)$')|$(lines '^node tests \(1 files\): ok \([0-9]+s\)$')" "1|1" \
+  "F17: a step ends with its own line"
+ok "$(lines '^make test: ALL PASS \([0-9]+s\)$')" 1 "F17: … and the verdict carries the run's seconds"
+
+put "$F" tests/zzb.test.sh 'exit 1'
+run bash --only tests/zzb.test.sh
+ok "$rc|$(lines '^tests/zzb\.test\.sh: FAILED \([0-9]+s\)$')|$(lines '^  - tests/zzb\.test\.sh$')" "1|1|1" \
+  "F16: a failing suite prints its FAILED line, fails the run and is in the failure list"
+ok "$(lines '^make test: FAILED \([0-9]+s\)$')" 1 "F17: … and the red verdict carries the run's seconds"
+git -C "$F" checkout -q -- tests/zzb.test.sh
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"

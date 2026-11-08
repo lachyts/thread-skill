@@ -20,13 +20,17 @@
 #
 # Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
 # and plain exit-code scripts both run under `node --test`; shell suites and the merge-task self-tests
-# run concurrently; output is printed grouped per suite in spawn order. New suites join by filename —
-# including the protocol 4 branch's, unchanged.
+# run concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
+#
+# Reporting (p43-6, #327 finding 2). Each suite and each step prints one `<label>: ok (<N>s)` or `<label>: FAILED
+# (<N>s)` line the moment it ends, N its own seconds, so a run cut part-way (a CI job at its timeout-minutes) still
+# shows every suite that finished, and its times; a suite with no line was still running. Once every background suite
+# has ended, each one's output prints grouped under `== <label>`, in spawn order, and only then does node run. The
+# verdict line carries the whole run's seconds.
 #
 # Capped (p23-4): at most `suite_cap` background suites run at once (tests/lib/test-jobs.sh: THREAD_TEST_JOBS,
 # else max(2, ceil(cores / 3)), 4 on 12 cores), and node runs that many test files at once. The suites spawn
-# roughly longest-first: the two merge-task self-tests (reported before node, as always), then the shell suites
-# by file size, largest first (`ls -S`; no suite path holds a space, tests/test-jobs.test.sh pins it), so no
+# roughly longest-first: the two merge-task self-tests, then the shell suites by file size, largest first (`ls -S`; no suite path holds a space, tests/test-jobs.test.sh pins it), so no
 # static list can drift. THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot
 # (verify-slot.py) never waits on the machine's pool, nor an inner `make test` on its outer wrapper's slot.
 set -uo pipefail
@@ -136,19 +140,25 @@ max_jobs=$(suite_cap) || { echo "make test: THREAD_TEST_JOBS must be a positive 
 
 fail=0
 failed=""
+# ended <label> <rc> <start>: the line that says <label> ended, ok or FAILED, and its seconds since <start> (bash's
+# SECONDS: no fork, and bash 3.2 has it). One short echo, so two suites ending at once never interleave in a line.
+ended() { local w=ok; [ "$2" = 0 ] || w=FAILED; echo "$1: $w ($((SECONDS - $3))s)"; }
 step() {  # step <label> <cmd...>
-  local label="$1"; shift
+  local label="$1" s=$SECONDS rc; shift
   echo "== $label"
-  if "$@"; then :; else fail=1; failed="$failed
-  - $label"; fi
+  "$@"; rc=$?
+  ended "$label" "$rc" "$s"
+  [ "$rc" = 0 ] || { fail=1; failed="$failed
+  - $label"; }
 }
 
 n=0; labels=()
-spawn() {  # spawn <label> <cmd...> — run in background once there is room, capture output + exit code by index
+spawn() {  # spawn <label> <cmd...> — run in background once there is room, capture output + exit code by index,
+  # then print its `ended` line from the background, as it ends
   wait_for_room "$max_jobs"
   local label="$1"; shift
   labels[$n]=$label
-  { "$@" > "$scratch/$n.out" 2>&1; echo $? > "$scratch/$n.rc"; } &
+  { s=$SECONDS; "$@" > "$scratch/$n.out" 2>&1; rc=$?; echo "$rc" > "$scratch/$n.rc"; ended "$label" "$rc" "$s"; } &
   n=$((n+1))
 }
 report() {  # report <i> — print that suite's block; a non-zero or missing rc fails the run
@@ -255,24 +265,23 @@ elif [ "$mode" = shard ]; then
   fi
 fi
 
-# Independent suites run concurrently (each builds under its own mktemp), at most $max_jobs at a time; node runs
-# once they finish, at the same concurrency. The self-tests report before node, as always; the shell suites after.
+# Independent suites run concurrently (each builds under its own mktemp), at most $max_jobs at a time, each printing
+# its line as it ends. Once all have ended, every block (the self-tests', then the shell suites') prints in spawn
+# order, before node, which runs at the same concurrency.
 echo "== suites: at most $max_jobs at a time"
 if [ "$self_tests" = 1 ]; then
   spawn "merge-task classifier self-test"      bash skills/execute/scripts/merge-task.sh --self-test-classify
   spawn "merge-task base self-test"            bash skills/execute/scripts/merge-task.sh --self-test-base
 fi
-pre=$n
 for t in ${run_sh[@]+"${run_sh[@]}"}; do spawn "$t" bash "$t"; done
 wait
-i=0; while [ "$i" -lt "$pre" ]; do report "$i"; i=$((i+1)); done
+i=0; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 # A bare `node --test` walks the whole tree, so node runs only when a file is selected.
 if [ "${#run_node[@]}" -gt 0 ]; then
   step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" "${run_node[@]}"
 else
   echo "== node tests: none selected"
 fi
-i=$pre; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 
 # A run must leave the checkout exactly as it found it (no bytecode, no stray state files).
 tree_unchanged() {
@@ -283,5 +292,5 @@ tree_unchanged() {
 step "run wrote nothing into the checkout" tree_unchanged
 
 echo
-if [ "$fail" -eq 0 ]; then echo "make test: ALL PASS"; else echo "make test: FAILED$failed"; fi
+if [ "$fail" -eq 0 ]; then echo "make test: ALL PASS (${SECONDS}s)"; else echo "make test: FAILED (${SECONDS}s)$failed"; fi
 exit "$fail"
