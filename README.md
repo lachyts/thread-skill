@@ -148,16 +148,14 @@ only the Login, and any other use is a review failure. Schedule and orient
 record such a gate ahead and never ask it: the planner words it as the
 standing approval reads it.
 
-A needs-you push that does not reach you (any "not sent" but you at the
-terminal, such as Remote Control inactive or notifications turned off, a
-push-tool error, or no push tool at all, as in Codex) falls back to ntfy once
-`~/.config/thread/rollouts.toml` sets `[notify] ntfy_topic = "<topic>"`.
-`rollout-settings.py` prints only whether a topic is set, never the topic.
-Unset, there is no fallback, and an undelivered push is logged `push failed:`
-in the rollout note's `## Needs-you log` and retried once at the next loop
-entry. Install a release that knows the table before writing it: an older
-`rollout-settings.py` refuses the table, and every rollout's settings with it.
-`skills/execute/scripts/ntfy-push.py` sends the item (execute § 6.5, ADR 0038).
+Needs-you items are listed, never pushed (ADR 0075 d2): each stays in the
+report's `Needs you:` block and in the rollout and task notes, for
+`/thread:status`, `/thread:repair` and orient-all to read when you sit down to
+fix rollouts (execute § 6.5). No rollout sends a push, a message or a mail. A
+`[notify]` table left in `~/.config/thread/rollouts.toml` (the old push
+fallback's topic, ADR 0038 d3) is ignored, with one
+`WARN: [notify] is retired (ADR 0075)` line from `rollout-settings.py`, and
+never refused.
 
 By day the whole Mac runs at most a few rollout tasks at once, the Trickle
 (Chorus ADR 0104): `reconcile-rollout.py next` counts the tasks every open
@@ -212,22 +210,10 @@ as a stop, as the Stop hook records each halt (ADR 0051).
 moving, stalled, or in a meant wait and which, from its Run record and notes. No
 single cause holds the whole queue: a cause that reaches every merge holds only
 the Integration lane (`reconcile-rollout.py lane-hold`, released by Lachy's ack,
-`lane-ack`, through `/thread:repair`). Chorus's Companion polls `moving`; when
-Chorus is not running, `skills/execute/scripts/watchdog.py` reads the same verdict
-and only notifies (ntfy), once per stall. ADR 0075 d2 retires that fallback and
-P41-5 deletes the script; until P41-5, an installed job still notifies through
-ntfy-push.py. Installing it is a one-time step, run
-from the installed plugin's root (`${CLAUDE_PLUGIN_ROOT}`, the root the release
-paragraph under § Tests describes; in a terminal, export it first), never a
-rollout worktree or another checkout:
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`,
-then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist`.
-The job runs the script it was rendered from, so after each plugin update
-re-render it and re-bootstrap it (`launchctl bootout gui/$(id -u)/com.thread.watchdog`
-first).
-Until the Chorus task that consumes `moving` lands, a running Stage silences the
-fallback, so a stall then goes unnotified; `watchdog.py plist --chorus-url ''`
-installs a fallback that never probes, for the meantime.
+`lane-ack`, through `/thread:repair`). Chorus's Companion polls `moving` and
+recovers a stalled rollout: it is the Watchdog, alone (ADR 0075 d5). Nothing
+runs outside Chorus: with Chorus not running nothing watches, and a stall is
+read when you run `/thread:status`.
 The **Primary refresh** (ADR 0066) keeps the Primary checkout current: a launchd
 job that fast-forwards it to origin every 5 minutes whenever no rollout without
 an Engine snapshot runs on it, and keeps `~/.agents` (/fresh-review and the
@@ -237,10 +223,14 @@ helpers it runs), which updates itself after a smoke run. Installing it is a
 one-time step, with python 3.11 or newer:
 `python3 skills/_shared/scripts/primary-refresh.py install --primary ~/repos/tools/thread-skill --also ~/.agents`,
 then the one line it prints (a `launchctl bootout`, a wait, then the
-`launchctl bootstrap`). After an update whose job notice says the job predates
-the copy (this one included, ADR 0066's 2026-11-05 amendment), re-run install
-and its line: the self-update never rewrites the plist. Its log is
-`~/Library/Logs/thread-primary-refresh.log`.
+`launchctl bootstrap`). Install also drops the state file's spells for
+checkouts the job no longer watches. A checkout the job cannot catch up for a
+day (or at once, when its fast-forward timed out) shows on `/thread:status`'s
+Primary refresh line (`primary-refresh.py stuck`, a read that writes nothing)
+and never notifies (ADR 0075 d2). After an update whose Primary refresh line or
+the job's log says the job predates the copy (ADR 0066's 2026-11-05
+amendment), re-run install and its line: the self-update never rewrites the
+plist. Its log is `~/Library/Logs/thread-primary-refresh.log`.
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema. Its
 writers include the suites' (`verify-slot.py run`, `lead-integrate.py verify`),
@@ -446,9 +436,27 @@ squash merge tags a commit that never reaches master.
 ## Tests
 
 ```sh
-make test            # = bash tests/run.sh — the one entrypoint, and the self-rollout verifier
+make test            # = bash tests/run.sh — the full suite, and the self-rollout's completion verifier
+make test-fast       # = bash tests/run.sh --fast — the fast tier, and the self-rollout's verifier
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
+
+**The fast tier** (ADR 0073 d1). `make test-fast` runs the always-run checks, then only the test files the diff
+from `THREAD_VERIFY_BASE` (ADR 0062's verify base; else `origin/HEAD`) reaches. The reach is declared in
+`tests/fast-tier.map`, and `tests/lib/fast-tier.py`'s header holds its rules: a script reaches the tests that name
+it and, transitively, the tests of every script that names it, and the walkers (tests that read the whole tree)
+run on every diff. A changed path the map cannot place, or one that reaches a path marked FULL, runs the full
+suite, so the fast tier is only ever slower than it could be, never wrong. Every run, `make test` included, checks
+the map first (`fast-tier.py check`) and names what is missing: a script under `skills/*/scripts/` or `hooks/`
+that no test names (`skills/**` and `hooks/**` already place it, so a test that names it is all it needs; a map
+line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` without its `tests/fixtures/<d>/**`
+consumers line, or a test that lists a directory but sits on neither the walkers' `** ALSO` line nor OWN-LISTINGS.
+The map is itself FULL, so a diff that edits it runs the full suite: edit it only when the check names a missing
+line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. CI still runs the
+full `make test` until p43-3 moves it. Most code diffs still go FULL today, through the five hubs the map marks
+FULL (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`) and
+the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`, and the
+over-selection from message strings and FOREIGN names is `thread-skill-followup-fast-tier-over-selection`.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third

@@ -97,16 +97,17 @@ function taskNote(h, slug, { status = 'open', tags = '[task, ai]', captured = '2
 }
 
 // One task's life: a Slot from..to, ready, then a lane holding and its merge.
-// The settings file span hands score.py is rollout-settings.py's CLI JSON, redacted as the CLI prints it (ADR 0038 d3):
-// whether an ntfy topic is set, never the topic, which on ntfy.sh is its own read and publish credential.
-test('span writes each settings file redacted, as the CLI prints it: the ntfy topic set, never the topic itself', (t) => {
+// The settings file span hands score.py is rollout-settings.py's CLI JSON, resolve()'s object as the CLI prints it. A
+// retired [notify] (ADR 0075 d2) is named in `retired`, never read, so its topic reaches no settings file.
+test('span writes each settings file as the CLI prints it: a retired [notify] named, never read, its topic nowhere', (t) => {
   const h = setup(t)
   fs.writeFileSync(path.join(h.home, 'rollouts.toml'), '[defaults]\nparallel_ceiling = 3\n\n[notify]\nntfy_topic = "span-topic-7"\n')
   emitAll(h, 'week-a', saturated('a', 10, 3))
   rolloutNote(h, 'week-a')
   const e = entryOf(span(h, [], { since: KSINCE, until: KUNTIL }), 'week-a')
   const text = fs.readFileSync(e.settingsFile, 'utf8')
-  assert.deepEqual(JSON.parse(text).notify, { ntfy_topic: { set: true, source: 'file:notify' } })
+  assert.deepEqual(JSON.parse(text).retired, ['notify'])
+  assert.ok(!('notify' in JSON.parse(text)), 'no notify key')
   assert.equal(JSON.parse(text).settings.parallel_ceiling.value, 3, 'the rest is resolve()\'s, unchanged')
   assert.ok(!text.includes('span-topic-7'), 'the topic is in no settings file')
 })

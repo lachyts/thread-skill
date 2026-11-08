@@ -16,6 +16,7 @@
 #   L11 an inherited finish is never gated; L12 the gate never overrides a rank wait
 #   L13 the Run record's suite `running` (mac_running, p36-9) counts a live Leg claim while Capacity is in force;
 #       no capacity.json, a stale one, a lapsed Leg lease or none reads today's parallel-only count
+#   L14 a Capacity wait holds through a changing count until --for, or until room, and reports the minutes it waited
 # Temp vaults only; HOME, the lock dirs and the Run record are temp; --now and --session pinned. bash 3.2-compatible.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -360,6 +361,75 @@ cap 2 "$(ago 0)"; rm -f "${HOME:?}/.config/thread/leases/$RO.json"
 ok "$(suite started)" "suite-started|1" "L13e: Capacity in force, no Leg lease: none holds nothing"
 cap 2 "$(ago 0)"; setlease "$(ago 0)"
 ok "$(suite ended)" "suite-ended|2" "L13f: suite-ended (scan) carries the same count while Capacity is in force"
+
+# ════ L14: a Capacity wait holds until it clears or --for runs out, and reports the minutes it waited (p41-7) ═══════
+# fwait <for> [<sec>:<act>]…: `leg.py wait --task t1 --for <for>` in-process on a fake clock (each poll's sleep advances
+# it; the capacity tick rewrites capacity.json's written_at to the fake now, so the reading stays fresh). An act fires on
+# the first sleep that reaches <sec>: busy (par gains p2 in progress), idle (p2 done), free (p1 done: room).
+# Prints the wait's JSON line, then `<elapsed seconds>|<polls>`.
+fwait() {
+  (cd "$F" && python3 - "$LEG" "$T" "$HOME/.config/thread/capacity.json" "$NOW" "$RO" "$@" <<'PY'
+import importlib.util, json, sys, time as real
+from datetime import datetime, timedelta
+leg_src, tasks, capf, now, ro, for_, *acts = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("leg_under_test", leg_src)
+leg = importlib.util.module_from_spec(spec); spec.loader.exec_module(leg)
+base = datetime.fromisoformat(now)
+acts = [(float(a.split(":")[0]), a.split(":")[1]) for a in acts]
+
+def setstatus(slug, old, new):
+    p = f"{tasks}/{slug}.md"; t = open(p).read(); open(p, "w").write(t.replace(f"status: {old}", f"status: {new}", 1))
+
+def act(name):
+    if name == "busy":
+        open(f"{tasks}/p2.md", "w").write('---\ntags: [task]\nstatus: in_progress\nowner: lead-par\nrollout: "[[par]]"\n---\n')
+        open(f"{tasks}/par.md", "a").write("- [[p2]]\n")
+    elif name == "idle":
+        setstatus("p2", "in_progress", "done")
+    elif name == "free":
+        setstatus("p1", "in_progress", "done")
+
+class Clock:
+    t0 = t = 5000.0
+    polls = 0
+    def monotonic(self):
+        return self.t
+    def sleep(self, s):
+        self.t += s; self.polls += 1
+        el = self.t - self.t0
+        d = json.load(open(capf)); d["written_at"] = (base + timedelta(seconds=el)).isoformat()
+        json.dump(d, open(capf, "w"))
+        while acts and acts[0][0] <= el:
+            act(acts.pop(0)[1])
+    def __getattr__(self, name):
+        return getattr(real, name)
+
+clock = leg.time = Clock()
+rc = leg.main(["wait", "--task", "t1", "--for", for_, "--rollout", f"{tasks}/{ro}.md", "--tasks-dir", tasks,
+               "--vault", str(__import__("pathlib").Path(tasks).parent.parent), "--now", now, "--session", "s1"])
+sys.stdout.flush()
+print(f"{int(clock.t - clock.t0)}|{clock.polls}")
+sys.exit(rc)
+PY
+  ) 2>"$TMP/err"
+}
+scen l14
+mkro t1 t2; mkpar 1 0; cap 1
+leg begin --cwd "$F"
+res=$(fwait 1200 300:busy 600:idle 900:busy); rc=$?
+out=$(printf '%s\n' "$res" | head -1); tail=$(printf '%s\n' "$res" | tail -1)
+ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["flipped"]')|$(q 'd["stalled"]')" "0|capacity|False|False|False" \
+   "L14a: the running count changes (1/1, 2/1, 1/1, 2/1) but never drops below capacity: the wait is still capacity at --for"
+ok "$tail" "1200|80" "L14a: … it held the whole --for (1200 s), polling every RANK_POLL_SECONDS (80 polls)"
+ok "$(q 'd["waitedMinutes"]')" 20 "L14a: … and reports the 20 minutes it really waited"
+ok "$(q 'd["why"]')" "trickle: 2/1 tasks running on this Mac" "L14a: … its why the last poll's count"
+scen l14b
+mkro t1 t2; mkpar 1 0; cap 1
+leg begin --cwd "$F"
+res=$(fwait 1200 300:free); rc=$?
+out=$(printf '%s\n' "$res" | head -1); tail=$(printf '%s\n' "$res" | tail -1)
+ok "$rc|$(q 'd["cleared"]')|$(q 'd["next"]["action"]')|$(q 'd["flipped"]')" "0|True|claim|False" "L14b: room at 5 minutes: the wait clears and next is claim"
+ok "$tail|$(q 'd["waitedMinutes"]')" "300|20|5" "L14b: … at the poll that saw it, reporting the 5 minutes it waited"
 
 echo
 [ "$fail" -eq 0 ] && echo "leg-capacity.test.sh: ALL PASS" || echo "leg-capacity.test.sh: FAILED"

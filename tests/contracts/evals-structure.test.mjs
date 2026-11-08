@@ -1,6 +1,7 @@
 // Behaviour-eval suite shape: what `claude plugin eval .` (run by a human via `make evals`) will load
 // from evals/, checked here for free and without ever running it. Scored runs make real model calls, so
-// this file also proves that neither `make test` nor a bare `make` can reach the `evals` target.
+// this file also proves that neither `make test` (the full suite, the self-rollout's completion verifier), `make
+// test-fast` (the fast tier, its verifier, ADR 0073 d1) nor a bare `make` can reach the `evals` target.
 //
 // Read-only: no fs writes and no child processes (tests/run.sh fails a run that changes the checkout).
 // The validators are pure functions over { relPath: text }, so the controls below feed them in-memory
@@ -463,23 +464,28 @@ function checkMakefile(text, file = 'Makefile') {
     if (REACHES_EVALS.some((re) => re.test(x))) err(`${name} (${value}) mentions claude, evals or make; it wraps every recipe make test runs`)
   }
 
-  // Walk everything `make test` can reach.
-  const seen = new Set()
-  const walk = (t, via) => {
-    if (seen.has(t)) return
-    seen.add(t)
-    if (t === 'evals') { err(`test reaches evals (via ${via.join(' -> ')})`); return }
-    const r = rules.get(t)
-    if (!r) { err(`${t} (reached from test via ${via.join(' -> ')}) has no rule`); return }
-    for (const line of r.recipes) {
-      const unresolved = []
-      const x = expandMake(line, vars, unresolved)
-      for (const u of unresolved) err(`the ${t} recipe (reached from test) references ${u}, which this check cannot resolve`)
-      if (REACHES_EVALS.some((re) => re.test(x))) err(`the ${t} recipe (reached from test) mentions claude, evals or make: ${x}`)
+  // Walk everything `make test` can reach, and `make test-fast` when that rule exists (the self-rollout's two
+  // verifiers). Each message names the goal it was reached from.
+  const walkFrom = (goal) => {
+    const seen = new Set()
+    const walk = (t, via) => {
+      if (seen.has(t)) return
+      seen.add(t)
+      if (t === 'evals') { err(`${goal} reaches evals (via ${via.join(' -> ')})`); return }
+      const r = rules.get(t)
+      if (!r) { err(`${t} (reached from ${goal} via ${via.join(' -> ')}) has no rule`); return }
+      for (const line of r.recipes) {
+        const unresolved = []
+        const x = expandMake(line, vars, unresolved)
+        for (const u of unresolved) err(`the ${t} recipe (reached from ${goal}) references ${u}, which this check cannot resolve`)
+        if (REACHES_EVALS.some((re) => re.test(x))) err(`the ${t} recipe (reached from ${goal}) mentions claude, evals or make: ${x}`)
+      }
+      for (const p of r.prereqs) walk(p, [...via, p])
     }
-    for (const p of r.prereqs) walk(p, [...via, p])
+    walk(goal, [goal])
   }
-  walk('test', ['test'])
+  walkFrom('test')
+  if (rules.has('test-fast')) walkFrom('test-fast')
 
   const phony = rules.get('.PHONY')?.prereqs || []
   if (!phony.includes('evals')) err('.PHONY lacks evals')
@@ -757,6 +763,8 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['SHELL through a variable', mk({ pre: 'C = claude\nSHELL = $(C)\n' }), 'SHELL ($(C)) mentions claude'],
     ['grouped targets test evals &:', mk({ post: 'test evals &:\n' }), 'grouped targets'],
     ['claude plugin eval without .', mk({ evals: MK_EVALS.replace('eval . ', 'eval ') }), 'not exactly'],
+    ['test-fast: evals', mk({ mid: 'test-fast: evals\n\t@bash tests/run.sh --fast\n' }), 'test-fast reaches evals'],
+    ['test-fast inline recipe', mk({ mid: 'test-fast: ; claude plugin eval .\n' }), 'mentions claude'],
   ]
   // The clean baseline has no errors, so every error a row reports comes from that row's change.
   const base = checkMakefile(mk(), 'M')
@@ -770,6 +778,7 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['.PHONY: evals test, test first, evals last', mk({ phony: '.PHONY: evals test\n' })],
     ['SHELL := /bin/bash, .SHELLFLAGS := -ec', mk({ pre: 'SHELL := /bin/bash\n.SHELLFLAGS := -ec\n' })],
     ['@ and ${EVAL_ARGS}', mk({ evals: `evals:\n\t@${EVALS_RECIPE.replace('$(EVAL_ARGS)', '${EVAL_ARGS}')}\n` })],
+    ['test-fast running the fast tier', mk({ mid: 'test-fast:\n\t@bash tests/run.sh --fast\n' })],
   ]
   for (const [name, text] of positive) assert.deepEqual(checkMakefile(text, 'M'), [], name)
 })

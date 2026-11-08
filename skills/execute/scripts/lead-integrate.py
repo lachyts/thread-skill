@@ -2228,7 +2228,7 @@ def human_fix_label(note):
     """humanFix's label: `(<status>, <section> run <n>)`, the section the status writes and its top run (a legacy section
     with no run: `(<status>, <section>)`); `(review, no PR)` for a code-writing review note with no pr:; `(gate-pending)`
     for a gate. When k answers to the current block were spent by a hand-back it adds `, ask <k+1>`, so an identical
-    re-block after a spent answer is a new item, pushed again (ADR 0035 decision 3)."""
+    re-block after a spent answer is a new item, listed again (ADR 0035 decision 3)."""
     status = rr._status(note)
     if status == rr.GATE_PENDING_STATUS:
         return "(gate-pending)"

@@ -37,9 +37,6 @@ of the file format:
                                  # whose Slot or lane holding overlaps the scored window, so an overnight run still
                                  # lands by morning
 
-    [notify]                     # machine-wide only (ADR 0038 d3)
-    ntfy_topic = "thread-needs-you"  # the ntfy topic execute's needs-you push falls back to; unset = no fallback
-
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
     inert_paths = ["THREAD.md"]  # schema 2 (p29-3, ADR 0045): this repo's Inert paths; a repo table only
@@ -47,18 +44,17 @@ of the file format:
     [repo."Animately/optimizer"]  # schema 3 (ADR 0063): the repo's test-credential class, ONE line in its repo table
     test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
 
-The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
-`verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`,
-`spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and `capacity_max`, which are
-machine-wide and refused under a `[repo."o/r"]` label), plus
-`inert_paths` and `test_credentials` (REPO_ONLY: each refused under `[defaults]` with `<key> is per repo: set it under
+The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` (retired, below) and `repo`. A repo table
+holds every rollout key but `verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus
+`auto_retries`, `spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and
+`capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths` and
+`test_credentials` (REPO_ONLY: each refused under `[defaults]` with `<key> is per repo: set it under
 [repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
 `[repo."o/r"]` label as MACHINE_ONLY's keys are, and kept out of `settings`). Dotted keys
-(`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table
-form, with two exceptions: `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table, and
-`test_logins` only from a key line whose value closes on that line, never from inside an inline table (both below),
-because inert-paths.py and reflect's tune.py edit this file line by line and treat any other form as a hand edit they
-refuse.
+(`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form, with two exceptions:
+`test_credentials` is read only as ONE line inside its `[repo."o/r"]` table, and `test_logins` only from a key line
+whose value closes on that line, never from inside an inline table (both below), because inert-paths.py and
+reflect's tune.py edit this file line by line and treat any other form as a hand edit they refuse.
 
 `inert_paths` (p29-3, ADR 0045; schema 2, the first key above schema 1) is the repo's Inert paths: a list of at most 64
 distinct git pathspec globs (matched as `:(glob)<glob>`), empty by default (built-in []), so a repo nobody has checked
@@ -112,23 +108,28 @@ serial note (no Project root) signs one too. A schema-4 reader ignores it under 
 below), so that rollout asks every Login gate, as before; a pre-P29 reader refuses the `schema` line itself, so the
 operator installs the release that knows the key first and runs the reader check below.
 
-`[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
-is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
-skills/execute/scripts/ntfy-push.py publishes to the topic (§ 6.5 *The ntfy fallback*), and reflect's tune.py refuses
-an edit whose result resolves another `[notify]` (a Tuning never touches the table). The CLI prints only whether a
-topic is set (see Output), never the topic: on ntfy.sh a topic is its own read and publish credential.
+`[notify]` is retired (ADR 0075 d2: no rollout code notifies Lachy, so nothing reads the ntfy topic it held, ADR 0038
+d3). A top-level `notify`, in any form (a table, a scalar, dotted or inline, valid or not), is skipped whole: never
+validated, never refused and never resolved, only recorded, so `_validate` returns `retired: ["notify"]`, load_tables
+carries it and resolve() reports it as its own top-level `retired` (Output). The CLI writes one stderr line for it,
+`WARN: [notify] is retired (ADR 0075)`, and still exits 0; resolve() prints nothing, so its in-process readers stay
+quiet. `notify` stays in TOP_KEYS, so a near-miss such as `notfy` is still refused as a typo, and `notify.ntfy_topic`
+stays registered in KEY_SCHEMA at schema 1 (K10 freezes that set). An older snapshot's rollout-settings.py still
+validates and accepts a valid `[notify]`. `ntfy_topic` was never a rollout key: in `[defaults]` or a repo table it is
+an unknown key, refused.
 
 The schema (ADR 0043: two rollouts can run on two Engine snapshots, so an older reader meets a newer file). The
 top-level `schema` is an integer >= 1 (a boolean, float or string is refused); an absent line reads as 1. SCHEMA is
 this reader's own version, and KEY_SCHEMA registers every key it knows, keyed by (scope, key), with the schema that
 introduced it; the scopes are `top` (the top-level keys), `rollout` (a `[defaults]` or `[repo."o/r"]` table),
-`guardrails` and `notify`. Under a file whose `schema` is above SCHEMA, an unknown key (a top-level table included)
-is ignored and listed in `ignored`, unless it is a near-miss of a key known at its scope (near_miss(): equal once
-lower-cased with `_` and `-` dropped, or within optimal-string-alignment distance 2), which is still refused as a
-typo. Under any other file an unknown key is refused, as ever. A known key whose KEY_SCHEMA is above the file's
-`schema` is refused with `<scope>.<key> is a schema-<N> key but the file says schema = <M>: raise the file's
-top-level `schema` line to <N> in the same edit`. A top-level `schema` needs a P29+ reader: a pre-P29
-rollout-settings.py refuses it as an unknown top-level key, so install a P29+ release before writing one.
+`guardrails` and `notify` (retired: its one registered key is never read). Under a file whose `schema` is above
+SCHEMA, an unknown key (a top-level table included) is ignored and listed in `ignored`, unless it is a near-miss of
+a key known at its scope (near_miss(): equal once lower-cased with `_` and `-` dropped, or within
+optimal-string-alignment distance 2), which is still refused as a typo. Under any other file an unknown key is
+refused, as ever. A known key whose KEY_SCHEMA is above the file's `schema` is refused with `<scope>.<key> is a
+schema-<N> key but the file says schema = <M>: raise the file's top-level `schema` line to <N> in the same edit`. A
+top-level `schema` needs a P29+ reader: a pre-P29 rollout-settings.py refuses it as an unknown top-level key, so
+install a P29+ release before writing one.
 
 Adding a key (the recipe; tests/rollout-settings.test.mjs K10 fails with it): bump SCHEMA; register the key in
 KEY_SCHEMA at the new number; keep it no near-miss of any key registered at its scope (K8); and every writer that
@@ -149,7 +150,7 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
-`file:guardrails` or `built-in`; `ntfy_topic`'s are `file:notify` or `built-in` (resolve()'s value null: no topic). Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
+`file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
 max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2, capacity_max 6; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
@@ -179,9 +180,6 @@ schema rule above):
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
-- a `notify` that is not a table, an unknown key under it, or an `ntfy_topic` that is not an ntfy topic (a string of
-  1 to 64 of A-Z, a-z, 0-9, `-` and `_`, TOPIC_RE: an empty string, a URL, a boolean or a number is refused). A refused
-  topic string is described, never echoed, so a near-miss topic never lands in a transcript;
 - a bad or case-duplicate repo key.
 No file (nothing at the path, a missing directory on the way, a plain file as a step on the way) gives the
 built-ins, and so does an empty or comment-only file. The file is read by ladder.py's read_toml(), so a
@@ -198,35 +196,34 @@ Output. Exit 0 and one JSON line on stdout:
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
                   "spend_approval_usd": {...}, "verify_slots": {...}, "capacity_max": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
-     "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}},
      "inert_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},   # built-in []
      "test_credentials": {"value": {"file": "<path>", "keys": [{"name": "<NAME>", "prefix": "<p>"}
                                     | {"name": "<NAME>", "supabase_project": "<ref>"}, ...]} | null,
                           "source": "file:repo"|"built-in"},                        # built-in null: no class
      "test_logins": {"value": ["<name>", ...], "source": "file:defaults"|"built-in"},  # built-in []: none
      "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
-     "ignored": ["<scope path of each ignored key>", ...]}     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
+     "ignored": ["<scope path of each ignored key>", ...],     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
+     "retired": ["notify"] | []}                               # a retired table the file holds (ADR 0075 d2)
 
-`notify` is redacted (redacted()): `set` says whether a topic resolved, and the topic itself is never printed, since
-schedule, execute, status and repair run this CLI in a transcript and the Reflection keeps its JSON in a scratch file.
-resolve() returns the same object with `"value": "<topic>"|null` in place of `set`, for the in-process readers above.
+The CLI prints resolve()'s object whole (the retired `[notify]` is never read, so no topic reaches stdout).
 `test_credentials` is printed whole: key names, prefixes, project refs and a path are no secrets (no value is ever read
 here; the standing approval reads the file itself).
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
 no `--repo`, no file, no repo table, or no GitHub origin (no repo, no origin, another host: land.sh exit 4).
 
-Exit 2 when the file is refused, `--repo` is not a directory, the origin cannot be read (land.sh will not
+Exit 0 also when the file holds a retired `[notify]`, with the one WARN line above on stderr. Exit 2 when the file is
+refused, `--repo` is not a directory, the origin cannot be read (land.sh will not
 start, exits other than 0 or 4, or times out), or on a usage error. Exit 3 when a present file needs tomllib
 and this python has none. On failure stdout is empty and stderr carries one line:
 `rollout-settings: <path>:<line>: <reason>`, `rollout-settings: <path>: <reason>` when no line applies, or
 `rollout-settings: --repo <p>: <reason>`.
 
-Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
+Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
 `spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY,
 DEFAULTS_ONLY, MINIMUM,
-GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
+GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
 credential_problem(value) (why a test_credentials value is refused, or None), logins_problem(value) (the same for
 test_logins),
@@ -289,11 +286,8 @@ GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rat
                   "review_churn_pct", "hours_per_task")
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
                        "quota_stalls": 0, "review_churn_pct": 40, "hours_per_task": 1.5}
-# [notify] (ADR 0038 d3): machine-wide, read in process by execute's ntfy-push.py and reflect's tune.py; no topic (None)
-# means no ntfy fallback. The CLI prints only whether it is set (redacted()).
-NOTIFY_KEYS = ("ntfy_topic",)
-NOTIFY_BUILT_IN = {"ntfy_topic": None}
-TOPIC_RE = re.compile(r"[-_A-Za-z0-9]{1,64}\Z")  # ntfy's own topic rule
+# A retired top-level table (ADR 0075 d2 retires [notify]): skipped whole, in any form, and reported in `retired`.
+RETIRED = ("notify",)
 TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
@@ -303,7 +297,7 @@ KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k != "capacity_max"})
 KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
-KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
+KEY_SCHEMA[("notify", "ntfy_topic")] = 1   # retired (ADR 0075 d2), still registered: K10 freezes the schema-1 set
 KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
 KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0063: the first schema-3 key
 KEY_SCHEMA[("rollout", "capacity_max")] = 4   # p36-7 (ADR 0067 d8): the first schema-4 key
@@ -491,17 +485,6 @@ def _describe(value):
     return "a date or time"
 
 
-def _topic_problem(value):
-    """What a refused ntfy_topic is, never the string itself (a near-miss topic stays out of every transcript)."""
-    if not isinstance(value, str):
-        return _describe(value)
-    if not value:
-        return "an empty string"
-    if len(value) > 64:
-        return "a string of %d characters" % len(value)
-    return "a string holding another character"
-
-
 def _osa(a, b):
     """The optimal-string-alignment distance (Levenshtein plus adjacent transpositions)."""
     d = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
@@ -653,8 +636,8 @@ def file_schema(doc):
 
 
 def _validate(text, doc, path):
-    """{"defaults": {...}, "guardrails": {...}, "notify": {...}, "repo": {slug: {...}}, "schema": N, "ignored": [...]}
-    from a parsed file, or SettingsError."""
+    """{"defaults": {...}, "guardrails": {...}, "repo": {slug: {...}}, "schema": N, "ignored": [...], "retired": [...]}
+    from a parsed file, or SettingsError. A retired table (RETIRED) is skipped whole, never validated."""
     idx = _Lines(text)
 
     def refuse(reason, at):
@@ -749,7 +732,8 @@ def _validate(text, doc, path):
             kept[key] = value
         return kept
 
-    out = {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}, "schema": schema, "ignored": ignored}
+    out = {"defaults": {}, "guardrails": {}, "repo": {}, "schema": schema, "ignored": ignored,
+           "retired": [k for k in RETIRED if k in doc]}
     defaults = doc.get("defaults", {})
     if not isinstance(defaults, dict):
         refuse("defaults must be a table ([defaults]), got %s" % _describe(defaults), ("defaults",))
@@ -778,23 +762,6 @@ def _validate(text, doc, path):
               or (isinstance(value, float) and not math.isfinite(value))):
             refuse("[guardrails] %s must be a non-negative number, got %s" % (key, _describe(value)), at)
     out["guardrails"] = kept
-
-    notify = doc.get("notify", {})
-    if not isinstance(notify, dict):
-        refuse("notify must be a table ([notify]), got %s" % _describe(notify), ("notify",))
-    kept = {}
-    for key, value in notify.items():
-        at = ("notify", key)
-        if key not in NOTIFY_KEYS:
-            unknown("notify", key, "notify." + key, at,
-                    "[notify]: unknown key %s ([notify] holds %s)" % (json.dumps(key), ", ".join(NOTIFY_KEYS)))
-            continue
-        newer("notify", key, at)
-        if not isinstance(value, str) or not TOPIC_RE.match(value):
-            refuse("[notify] ntfy_topic must be an ntfy topic (1 to 64 of A-Z, a-z, 0-9, - and _), got %s"
-                   % _topic_problem(value), at)
-        kept[key] = value
-    out["notify"] = kept
 
     repos = doc.get("repo", {})
     if not isinstance(repos, dict):
@@ -916,7 +883,7 @@ def resolve(repo=None, path=None):
     except ladder.LadderError as e:
         raise SettingsError(e.reason, line=e.line, code=e.code, subject=path)
     tables = (_validate(read[0], read[1], path) if read is not None
-              else {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}, "schema": 1, "ignored": []})
+              else {"defaults": {}, "guardrails": {}, "repo": {}, "schema": 1, "ignored": [], "retired": []})
 
     slug, overrides = None, {}
     if repo is not None and tables["repo"]:
@@ -938,12 +905,6 @@ def resolve(repo=None, path=None):
             guardrails[key] = {"value": tables["guardrails"][key], "source": "file:guardrails"}
         else:
             guardrails[key] = {"value": GUARDRAILS_BUILT_IN[key], "source": "built-in"}
-    notify = {}
-    for key in NOTIFY_KEYS:
-        if key in tables["notify"]:
-            notify[key] = {"value": tables["notify"][key], "source": "file:notify"}
-        else:
-            notify[key] = {"value": NOTIFY_BUILT_IN[key], "source": "built-in"}
     inert = ({"value": list(overrides["inert_paths"]), "source": "file:repo"} if "inert_paths" in overrides
              else {"value": [], "source": "built-in"})
     creds = overrides.get("test_credentials")
@@ -952,16 +913,9 @@ def resolve(repo=None, path=None):
     logins = ({"value": list(tables["defaults"]["test_logins"]), "source": "file:defaults"}
               if "test_logins" in tables["defaults"] else {"value": [], "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "notify": notify, "inert_paths": inert, "test_credentials": creds, "test_logins": logins,
-            "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"])}
-
-
-def redacted(out):
-    """resolve()'s object as the CLI prints it: each [notify] value replaced by whether it is set, so the topic (a read
-    and publish credential on ntfy.sh) never reaches stdout or a transcript. The rest is resolve()'s, unchanged."""
-    view = dict(out)
-    view["notify"] = {key: {"set": v["value"] is not None, "source": v["source"]} for key, v in out["notify"].items()}
-    return view
+            "inert_paths": inert, "test_credentials": creds, "test_logins": logins,
+            "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"]),
+            "retired": list(tables["retired"])}
 
 
 class _Parser(argparse.ArgumentParser):
@@ -980,7 +934,9 @@ def main(argv):
     except SettingsError as e:
         sys.stderr.write("rollout-settings: %s\n" % e)
         return e.code
-    sys.stdout.write(json.dumps(redacted(out)) + "\n")
+    if "notify" in out["retired"]:
+        sys.stderr.write("WARN: [notify] is retired (ADR 0075)\n")
+    sys.stdout.write(json.dumps(out) + "\n")
     return 0
 
 

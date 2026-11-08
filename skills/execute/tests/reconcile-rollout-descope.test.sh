@@ -508,7 +508,7 @@ rec "$(row "$A" plan-blocked "$FEEDBACK")" 2026-10-03T10:00:00Z
 ok "$(grep -c '^### Run ' "$D/$A.md")" 1 "R8: (an identical re-block writes no run)"
 I=$(INOW=2026-10-03T10:00:00Z inp "$A")
 ok "$(j "$I" 'd["answerRecorded"]')|$(hf "$I")" 'null|["decide scope or defer",true,"(plan-blocked, Plan-blocked feedback run 1, ask 2)"]' \
-  "R8: the identical re-block after the spent answer is H5 again, ask 2 (pushed again)"
+  "R8: the identical re-block after the spent answer is H5 again, ask 2 (a new item)"
 
 scen r9
 base
