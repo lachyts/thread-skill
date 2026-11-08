@@ -16,13 +16,14 @@
 //   moving-doc    the docstring's `moving` paragraph: sign-off before paused, regenerate before stall-after, paused in
 //                 12(b) only on `halt: paused`
 //   wait-clauses  step 1.5's *The wait clauses (ADR 0048)*: its arms, its four clauses in order, never § 7, an
-//                 UNVERIFIED task included, the arm's item pushed; no UNVERIFIED exception on the cool-down; § 7's
+//                 UNVERIFIED task included, the arm's item listed; no UNVERIFIED exception on the cool-down; § 7's
 //                 bullets name the clauses
 //   exit2         *lead-integrate's exit 2*: its routes in order, § 7's bullet, step 3's exit 2, the marker raised
 //                 twice, the no-flag clause at four sites
 //   watchdog      status § The Watchdog's reading: the verb, the verdicts, the bounds, the safety wording, *Which waits
-//                 silence judges* bound to SILENCE_JUDGED, the fallback's probe and *The interim gap*; README, status and
-//                 watchdog.py's docstring render the plist from ${CLAUDE_PLUGIN_ROOT} and re-render after each plugin update
+//                 silence judges* bound to SILENCE_JUDGED; the Companion is the Watchdog alone (ADR 0075 d5): with
+//                 Chorus not running nothing watches, and the section names no launchd fallback, no watchdog.py and no
+//                 notice to Lachy (ADR 0075 d2)
 //   reason-table  its table covers every `reason="…"` of steps 1.5 and 1.6, *Merge hold*, *Lane hold*, *lead-integrate's
 //                 exit 2* and § Room stop item 8
 //   repair-adrs   repair § 3g writes `lane-ack`; ADR 0048 says how p29-7 built it; ADRs 0033 and 0030 are amended
@@ -40,8 +41,6 @@ const FILES = {
   adr48: read('docs/adr/0048-no-single-cause-holds-the-whole-queue.md'),
   adr33: read('docs/adr/0033-execute-retries-agent-fixable-set-asides.md'),
   adr30: read('docs/adr/0030-a-rollout-is-a-queue-that-integrates-at-merge.md'),
-  readme: read('README.md'),
-  wd: read('skills/execute/scripts/watchdog.py'),
 }
 const RULES = ['s7', 'kept', 'narrowed', 'lane-hold', 'needs-you', 'merge-task', 'task-scoped', 'moving-doc', 'wait-clauses',
   'exit2', 'watchdog', 'reason-table', 'repair-adrs']
@@ -182,7 +181,7 @@ function check(f) {
     '(iii) it held one only for want of `slotLimit`', '(iv) for the `git-env`, `race` and `lane` arms only, a `holdUntil` entry with `held: true` and `waits: merge`']
   fail('wait-clauses', !arms.every((a) => waitP.includes(a)) || !clauses.every((c, i) => waitP.includes(c) && (i === 0 || before(waitP, clauses[i - 1], c))) ||
     !waitP.includes('ends the turn `waiting`, never § 7, whatever else is set aside, an UNVERIFIED task included') ||
-    !waitP.includes("The arm's own item is still pushed on that turn") ||
+    !waitP.includes("The arm's own item is still listed on that turn") ||
     /no UNVERIFIED task among/.test(s15) || !s15.includes('An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033)') ||
     !s15.includes('*the wait clauses* below are read first') ||
     !bullet7('- `next` reports `halt: race`').includes("step 1.5's *wait clauses* find no wait") ||
@@ -211,13 +210,6 @@ function check(f) {
   // watchdog
   const wd = section(f.status, /^## The Watchdog's reading \(ADR 0048\)/, /^## Loopable/)
   const wdc = collapse(wd)
-  // The plist render: one root (the installed plugin's) in README, watchdog.py's docstring and status, each saying to
-  // re-render after a plugin update, since the job runs the script it was rendered from.
-  const RENDER = 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist'
-  const docAt = f.wd.indexOf('"""')
-  const wdDoc = docAt < 0 ? '' : collapse(f.wd.slice(docAt, f.wd.indexOf('"""', docAt + 3)))
-  const readme = collapse(f.readme)
-  const renders = [readme, wdDoc, wdc].every((txt) => txt.includes(RENDER) && txt.includes('after each plugin update'))
   const silenceJudged = pyTuple(f.rr, 'SILENCE_JUDGED')
   const group = (from, to) => collapse(section(wd, from, to))
   const bySilence = group(/^- judged by silence/, /^- judged by its own bound/)
@@ -230,7 +222,9 @@ function check(f) {
     !['`moving`', '`stalled`', '`waiting`', '`skip`'].every((v) => wdc.includes(v)) ||
     !wdc.includes('is **45** minutes') || !wdc.includes('is **120** minutes') ||
     !wdc.includes('The suggested Companion poll is every 5 minutes') || !wdc.includes("a halt stall's notice (the Stop hook's fresh halt line) can be delayed by up to the threshold") ||
-    !wdc.includes('confirms that the Session has no running Turn') || !wdc.includes('the launchd fallback only notifies') ||
+    !wdc.includes('confirms that the Session has no running Turn') ||
+    !wdc.includes('The Watchdog is Chorus\'s Companion alone: with Chorus not running nothing watches, and a stall is read when Lachy runs /thread:status') ||
+    /launchd|watchdog\.py|ntfy|only notif|notif(?:y|ies) (?:Lachy|him)/i.test(wdc) ||
     /a live lead never reads/i.test(wdc) ||
     JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating']) ||
     JSON.stringify(named(bySilence).sort()) !== JSON.stringify([...silenceJudged].sort()) ||
@@ -238,9 +232,7 @@ function check(f) {
     !['paused', 'sign-off', 'not-started', 'you'].every((c) => named(never).includes(c)) ||
     !bySilence.includes('judged in place of stall-after whatever else runs beside it') ||
     !never.includes('A soft pause behind a lane verdict is not drained') ||
-    !wdc.includes('***The interim gap*.**') || !wdc.includes('as Chorus\'s ctl.sh status does') ||
-    /takes? (the )?(Stage's )?host\.lock/.test(wdc) ||
-    !renders || readme.includes('python3 skills/execute/scripts/watchdog.py plist'))
+    /takes? (the )?(Stage's )?host\.lock/.test(wdc))
 
   // reason-table
   const table = wd.split('\n').filter((l) => l.startsWith('| ')).join('\n')
@@ -345,13 +337,14 @@ test('control: a lane-site exit 2 routed to § 7, or the marker clause dropped, 
   only('execute', ' (none when N is invalid, § 3; an exit 2: *lead-integrate\'s exit 2*)', '', 'exit2')
 })
 
-test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, no interim gap, or a root-less render, fails watchdog', () => {
+test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, a launchd fallback back, or nothing-watches dropped, fails watchdog', () => {
   only('status', 'So `stalled` is a reason to look', 'So a live lead never reads `stalled`; it is a reason to look', 'watchdog')
   only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating")', 'SILENCE_JUDGED = ("merge-hold",)', 'watchdog')
   only('status', '  - `merge-hold` (at `--stall-after`:', '  - `pr-hold`, and `merge-hold` (at `--stall-after`:', 'watchdog')
-  only('status', '***The interim gap*.**', '**Meanwhile.**', 'watchdog')
+  only('status', 'The Watchdog is Chorus\'s Companion alone: with Chorus not', 'The Watchdog is Chorus\'s Companion, and a launchd job when Chorus is not running: with Chorus not', 'watchdog')
+  only('status', 'with Chorus not\nrunning nothing watches, and a stall is read when Lachy runs /thread:status', 'with Chorus not\nrunning a job watches', 'watchdog')
   only('status', 'judged in place of stall-after whatever else runs beside it', 'judged beside stall-after', 'watchdog')
-  only('readme', 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist >', 'python3 skills/execute/scripts/watchdog.py plist >', 'watchdog')
+  only('status', '(Chorus `list_sessions`); no rollout\nnotifies (ADR 0075 d2)', '(Chorus `list_sessions`); the job\nnotifies Lachy (ADR 0075 d2)', 'watchdog')
 })
 
 test('control: a reason the table leaves out fails reason-table', () => {

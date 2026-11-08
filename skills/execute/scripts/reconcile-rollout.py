@@ -885,7 +885,7 @@ Subcommands:
               claims file is written, and no bytecode. Exit 0 any verdict; 1 `ERROR: moving: <why> (a lost look, never
               a stall)` when the note, the Run record or `next` cannot be read (MovingError); 2 usage (--stall-after
               outside 1 to 1440; default STALL_AFTER_MIN 45, two missed 20-minute heartbeat ticks and some slack).
-              moving_verdict is the body; watchdog.py calls it in-process. The algorithm's one copy, first match wins:
+              moving_verdict is the body; Chorus's Companion polls it. The algorithm's one copy, first match wins:
               1. skip: _ledger_skip (serial, superseded, done or dropped), or the note not directly in --tasks-dir
                  (archived).
               2. The Run record (_record_read, _record_state): either unreadable is a MovingError.
@@ -10790,7 +10790,7 @@ def _fresh_dash_answer(note) -> bool:
 
 def _spent_count(note, fp) -> int:
     """How many answers for block `fp` a hand-back spent: the `ask <k+1>` in humanFix's label, so an identical re-block
-    after a spent answer is a new Needs-you item, pushed again (ADR 0035 decision 3)."""
+    after a spent answer is a new Needs-you item, listed again (ADR 0035 decision 3)."""
     if not fp:
         return 0
     needle = f"(block {fp}; handed back "

@@ -34,7 +34,7 @@ notes lack it. Either read of the settings file runs land.sh's `--origin-slug` r
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
 execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*), and
 `reconcile-rollout.py moving`, the Watchdog's reading (§ 2's *Moving*; § The Watchdog's reading), which runs `next`'s
-dry run in-process and writes nothing. On a
+dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
 read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
@@ -435,7 +435,19 @@ names, once, then ` — lane only`, or ` — whole rollout` when an entry reads 
 
 **The engine line**, right under the headline, from § 1's resolve: `Engine: snapshot <sha12> (<a> ahead, <b> behind the Primary checkout at <head12>)` (its `sha`, `ahead`, `behind` and `primaryHead`: the counts are the snapshot's own, its commits the Primary's HEAD lacks and the Primary's commits it lacks, so a snapshot one commit behind a pulled Primary reads `0 ahead, 1 behind`), `Engine: Primary checkout (no snapshot)` for an unstamped note with a git Primary, or `Engine: plugin cache <root> (no snapshot)` with none (`primary` null).
 
-**The Trickle line**, right under the engine line, from `trickle` (execute away.md: one Mac-wide cap, its value by
+**The Primary refresh line**, under the engine line (ADR 0075 d2: no rollout notifies Lachy, so a checkout the Primary
+refresh cannot catch up is seen here, at a sitting). Run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py stuck` with `<root>` in place, as every command
+here runs. Print its JSON's `line` verbatim when it is not null, on a line of its own. Print nothing when it is null
+(no state file, or no spell old enough). A non-zero exit prints `Primary refresh: not read (<its last stderr line>)`.
+The line is the Primary refresh job's last recorded state, a point-in-time read with no freshness check: a spell stands
+as the job's last pass wrote it until a pass clears it, so with the job unloaded or dead it can be old. In plain words,
+it names each stuck checkout (a spell a day old, or one whose fast-forward timed out, at once), its outcome, since when,
+and for a checkout the git command that shows its state. This section never quotes the line, nor any part of it (an
+outcome, its advice, the git command), in a code span or a fenced block, and shows no example line: status's read-only
+rule reads every span as a command status runs.
+
+**The Trickle line**, under the engine line (and the Primary refresh line when it prints), from `trickle` (execute away.md: one Mac-wide cap, its value by
 Away state). Not Away: `Trickle: not Away · N <limit> · <running>/<limit> tasks running on this Mac (<here> here[,
 <n> in [[<r>]]…]) · away.json <fresh until <until> | missing: the default | stale: <why>, read as not Away, Trickle
 2 | unreadable: <why>, read as not Away, Trickle 2>`. Away: `Trickle: Away until <until> · the Away cap <awayCap>
@@ -890,8 +902,8 @@ checked before anything starts another, so two Legs never run one chain.
 A dead lead, a dead session, a Mac restart and a usage limit hold nothing: they simply stop. The Watchdog notices a
 rollout with work it could do and nothing moving, from outside the rollout's session. It has two layers: this repo
 ships the reading, and Chorus's Companion polls it and recovers (resuming the lead, a Login with headroom, a cold
-resume, `/thread:repair`: Recoveries and Logins are Chorus's). When Chorus is not running, a launchd job reads the same
-verdict and only notifies Lachy.
+resume, `/thread:repair`: Recoveries and Logins are Chorus's). The Watchdog is Chorus's Companion alone: with Chorus not
+running nothing watches, and a stall is read when Lachy runs /thread:status (ADR 0075 d2, d5).
 
 **The verb.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py moving --rollout <rollout-note>
 [--tasks-dir D] [--now ISO] [--stall-after MIN] [--gh-bin gh]` prints one compact JSON line, `{rollout, verdict, cause,
@@ -949,8 +961,8 @@ single foreground turn ends within 120 min of the last life sign; 120 min is one
 route. What does not hold: the route past 120 min, a lead blocked on an open question, and a Codex session-driven
 `--gated` run (no heartbeat; its verify and merge-task run in the foreground): each reads `stalled` against a live
 session. So `stalled` is a reason to look, never by itself a reason to start a second lead. The Companion first
-confirms that the Session has no running Turn and is not waiting on the listener (Chorus `list_sessions`); the launchd
-fallback only notifies, and status starts nothing. A meant wait the verdict fails to name changes only `waiting`'s
+confirms that the Session has no running Turn and is not waiting on the listener (Chorus `list_sessions`); no rollout
+notifies (ADR 0075 d2), and status starts nothing. A meant wait the verdict fails to name changes only `waiting`'s
 cause, never `moving` or `stalled`.
 
 **Reason → verdict.** Each `reason="…"` execute's halt guard and turn end write (execute § 4.5 steps 1.5 and 1.6, its
@@ -977,23 +989,8 @@ reads beside it:
 | lead-integrate.py failed on [[slug]], lane hold not written on [[<slug>]]: <its ERROR line> (kept whole) | `waiting you`, work or none |
 
 **Polling.** The suggested Companion poll is every 5 minutes; the cadence is Chorus's. A poller may skip a rollout whose
-Run record changed within the threshold, as the fallback does: a silence stall is never held back by that, but a halt
-stall's notice (the Stop hook's fresh halt line) can be delayed by up to the threshold.
-
-**The launchd fallback.** `skills/execute/scripts/watchdog.py`, its check verb, reads every rollout in the tasks dir
-behind that mtime gate and notifies once per stall (keyed on the rollout and its `lastEvent`) through ntfy-push.py; it
-only notifies, and never writes the vault or a Run record. It first probes the Stage as Chorus's ctl.sh status does (GET
-`http://127.0.0.1:4747/api/logins`, 1 s), never through the Stage's host.lock, and stays silent on a 2xx. Lachy installs
-it once (README), from the installed plugin's root, never a rollout worktree or another checkout:
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`
-renders the job, then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist` loads it
-(every 10 minutes; the job's `--gh-bin` is the `gh` found at render time). The job runs the script it was rendered from,
-so after each plugin update he re-renders it and re-bootstraps it (`launchctl bootout gui/$(id -u)/com.thread.watchdog`
-first), or it keeps reading rollouts with the old engine's `moving`; the plist verb names that script on stderr.
-
-***The interim gap*.** Until [[chorus-the-companion-recovers-a-stalled-rollout]] lands, nothing consumes `moving` while
-the Stage is up. A 2xx on `api/logins` silences the fallback, so a stall then goes unnotified. The fallback's plist
-verb with `--chorus-url ''` installs one that never probes, for the meantime.
+Run record changed within the threshold: a silence stall is never held back by that, but a halt stall's notice (the Stop
+hook's fresh halt line) can be delayed by up to the threshold.
 
 ## Loopable
 
@@ -1017,8 +1014,9 @@ session reads `reconcile-rollout.py moving` instead (§ The Watchdog's reading).
   `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
   `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `reconcile-rollout.py moving` (§ 2's
   *Moving*, `next`'s dry run in-process: it writes nothing), `leg.py status` (§ 5, a serial
-  note's one read), `lead-integrate.py inputs` and `rollout-settings.py`
-  (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
+  note's one read), `engine-snapshot.py resolve` (§ 1, a read), `unfinished-rollout.py hold` (§ 4's Hold line, a
+  read), `primary-refresh.py stuck` (§ 4's Primary refresh line, a read that writes nothing), `lead-integrate.py inputs`
+  and `rollout-settings.py` (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
   the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
   `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
   or `update-ref`: of `gh` and `git`, only § 3's reads.

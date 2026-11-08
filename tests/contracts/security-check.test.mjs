@@ -343,7 +343,7 @@ test('control: the template line telling him to re-set it, or back on parallel r
 })
 
 test("control: legs.md's Security check or repair § 7 losing a rule fails legs", () => {
-  only('legs', "  - `secret` in a primary (`primary: true`) → a Leg never rewrites a primary's history: `leg.py set-aside --task <t> --revert --scan-ask`, then § Close `--outcome halt --reason \"security check: [[<t>]] holds a secret\"`, pushed once with the `ask`.\n", '', 'legs', 'no primary-secret halt')
+  only('legs', "  - `secret` in a primary (`primary: true`) → a Leg never rewrites a primary's history: `leg.py set-aside --task <t> --revert --scan-ask`, then § Close `--outcome halt --reason \"security check: [[<t>]] holds a secret\"`, listed (§ Needs you) with the `ask`.\n", '', 'legs', 'no primary-secret halt')
   only('legs', '`leg.py set-aside --task <t> --revert --scan-ask`, then § Close', '`leg.py set-aside --task <t> --revert --reason "security check: <ask>"`, then § Close', 'legs', '--reason for --scan-ask')
   only('legs', ', never `git add -A` or `commit -a`', '', 'legs', 'no git add -A ban')
   only('legs', "Run it in the foreground with the Bash tool's `timeout: 600000` (on Codex, a 600 s shell timeout).", 'Run it in the foreground.', 'legs', 'no timeout')

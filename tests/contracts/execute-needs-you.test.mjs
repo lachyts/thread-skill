@@ -7,15 +7,17 @@
 // only a person moves on, a merge hold's release, any other § 7 halt), a set-aside's act and label read from
 // `inputs`' `humanFix` (ADR 0035: the script names the one fix, so the prose re-derives no cause and keeps no rule
 // list), the answered set-asides (under a pause, `awaiting repair`, `left`), and
-// a halt's fixed act (so two sessions word one item alike and the dedupe holds), the engine's needs-human
-// question shown on the item's detail line and carried by its push, one push per item
-// deduped on a `## Needs-you log` line and led by its act, its ntfy fallback when the push does not reach Lachy (ADR 0038
-// decision 3: `pushed via push`, `pushed via ntfy`, `push failed`) and the one retry of a failed delivery at the next
-// loop entry, where that log lives in the rollout note, the turn
+// a halt's fixed act (so two sessions word one item alike), the engine's needs-human question shown on the item's
+// detail line, every item's act shown in the block (an act the item text lacks is its first `→` line), where the
+// `## Needs-you log` lives in the rollout note and that it is the Standing approval's ledger alone, the turn
 // ending `waiting`, the report's `Needs you:` block, the answers' existing routes, § 3.7's and § 7's sign-off,
 // the § 8 guardrail and the Don't, CONTEXT.md's glossary entry, and no other ask site outside § 6.5, § 8 and the
 // Don'ts but the exact exemptions below. p30-3 adds (f): a PR hold (`next`'s `holdUntil`) that waits on Lachy, an item
 // on every turn whatever the halt, never also (e).
+//
+// ADR 0075 d2 (P41-5): no rollout notifies Lachy. A needs-you item is listed, never pushed: no PushNotification, no
+// ntfy, no *Push once* dedupe, retry or not-sent rule, in execute, its Legs (legs.md) or close's Leg close; the
+// `## Needs-you log`'s push lines an earlier engine wrote are inert history.
 //
 // A separate file from execute-queue.test.mjs (p12-9's rule count stays its own), the same shape as
 // execute-signed-gate.test.mjs: every rule lives in one function, checkNeedsYou(skill, context), that returns
@@ -28,6 +30,8 @@ import { collapse, read, section, slice } from '../lib/contract-text.mjs'
 
 const real = read('skills/execute/SKILL.md')
 const realContext = read('CONTEXT.md')
+const realLegs = read('skills/execute/legs.md')
+const realClose = read('skills/close/SKILL.md')
 
 const S1 = /^### 1\. /
 const S37 = /^### 3\.7\. /
@@ -37,6 +41,7 @@ const S65 = /^### 6\.5\. /
 const S7 = /^### 7\. /
 const S8 = /^### 8\. /
 const DONTS = /^## Don'ts/
+const COMPLETE = /^## Complete/
 
 // A bold-labelled paragraph inside a section: from its label line to the next bold label at column 0 (its list
 // items and fenced lines included), collapsed.
@@ -48,14 +53,6 @@ function labelled(text, sectionRe, label) {
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
 const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.indexOf(a) < hay.indexOf(b)
-
-// One bullet of the collapsed *Push once* paragraph: from its `- **…**` head to the next bullet's head, or ''.
-function bullet(push, head) {
-  const i = push.indexOf(head)
-  if (i < 0) return ''
-  const j = push.indexOf(' - **', i + head.length)
-  return push.slice(i, j < 0 ? undefined : j)
-}
 
 // One kind of the collapsed *Needs-you items* list: from its `- (x) **…**` head to the next kind's head, or ''.
 function kind(items, head) {
@@ -77,6 +74,38 @@ const EXEMPT = [
 ]
 const ASKS = [/AskUserQuestion/g, /in-conversation/gi,
   /\bask(?:s|ed|ing)?\s+(?:the user|the human|lachy|him|for|which)\b/gi, /question tool/gi]
+
+// The one span of the three files allowed to name a push channel or a push record: the inert history of the
+// `## Needs-you log`, exactly. Lines an earlier engine wrote, read by nothing.
+const INERT = 'Lines an earlier engine wrote (`pushed via push:`, `pushed via ntfy:`, `push failed:`, `pushed:`) stay as inert history that nothing reads.'
+// The phrases that promise a needs-you push (ADR 0075 d2 removes every one).
+const PUSH_PHRASES = [/PushNotification/, /ntfy/i, /\*Push once\*/, /\bpushed once\b/i, /\bpush it once\b/i, /\bone push\b/i,
+  /\bpushes it once\b/i, /\bstill pushed\b/i, /\bpushed again\b/i, /needs-you push/i, /\bpushes its outcome\b/i, /\bprinted and pushed\b/i]
+// legs § Complete's git-sense pushes, exactly: every `push`, `pushes` or `pushed` there lies inside one of these.
+const COMPLETE_GIT_PUSHES = ['the chain never pushes', 'open a PR from them, or push them']
+
+// Every promised push in `text` (collapsed), outside the exact inert-history sentence.
+function pushPromises(text) {
+  const flat = collapse(text).split(INERT).join(' ')
+  return PUSH_PHRASES.filter((re) => re.test(flat)).map(String)
+}
+
+// Every push word in legs § Complete that lies in neither of its git-sense spans.
+function strayCompletePushes(legs) {
+  const complete = collapse(section(legs, COMPLETE) ?? '')
+  const spans = COMPLETE_GIT_PUSHES.flatMap((e) => {
+    const out = []
+    for (let i = complete.indexOf(e); i >= 0; i = complete.indexOf(e, i + 1)) out.push([i, i + e.length])
+    return out
+  })
+  const hits = []
+  for (const m of complete.matchAll(/\bpush(?:es|ed)?\b/gi)) {
+    const at = m.index
+    const end = at + m[0].length
+    if (!spans.some(([s, e]) => s <= at && end <= e)) hits.push(complete.slice(Math.max(0, at - 40), end + 40))
+  }
+  return hits
+}
 
 // Every ask outside § 6.5, § 8 and the Don'ts that no exemption covers.
 function strayAsks(skill) {
@@ -103,16 +132,18 @@ function strayAsks(skill) {
 }
 
 // Named failures for the needs-you prose; [] means every rule holds.
-function checkNeedsYou(skill, context = realContext) {
+function checkNeedsYou(skill, context = realContext, legs = realLegs, close = realClose) {
   const fails = []
+  const s65 = section(skill, S65) ?? ''
+  const lead = collapse(s65.split('\n').slice(1).find((l) => l.trim()) ?? '')
   const rule = labelled(skill, S65, 'The rule.')
   const items = labelled(skill, S65, 'Needs-you items.')
-  const push = labelled(skill, S65, 'Push once.')
   const log = labelled(skill, S65, 'Where the log lives.')
   const turn = labelled(skill, S65, 'The turn.')
   const answers = labelled(skill, S65, 'Answers.')
   const kindB = kind(items, '- (b) **An undecided RACE or UNVERIFIED**')
   const kindC = kind(items, '- (c) **A set-aside only a person moves on**')
+  const kindD = kind(items, "- (d) **A merge hold's release**")
   const kindE = kind(items, '- (e) **Any other § 7 halt**')
   const kindG = kind(items, '- (g) **An unacked git-env trip**')
   const kindF = kind(items, '- (f) **A PR hold that waits on Lachy**')
@@ -138,76 +169,33 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('no-ask-in-flight')
   }
 
-  // push-dedupe: the push goes through PushNotification (loaded with ToolSearch, status "proactive"), only when no
-  // `## Needs-you log` line (`pushed via push:`, `pushed via ntfy:`, `push failed:` or a legacy `pushed:`) names the
-  // same slug and question, and is logged `pushed via push:` after the call returns; an item is never pushed again but
-  // for its one retry, a legacy `pushed:` line matches for good (the log cannot tell an undelivered one), and nothing
-  // pushes on every turn or report. Which not-sent counts as pushed is not-sent's; the `push failed:` line a failed
-  // delivery appends is ntfy-fallback's.
-  if (!push.includes('ToolSearch `select:PushNotification`') || !push.includes('`PushNotification`') ||
-    !push.includes('`status: "proactive"`') || !push.includes('`## Needs-you log`') ||
-    !push.includes('any of `pushed via push:`, `pushed via ntfy:`, `push failed:` or a legacy `pushed:`, with the same `[[<slug>]]` and question') ||
-    !push.includes('never push it again, on any later turn, heartbeat tick or session, but for *Retry once* below') ||
-    !push.includes('A legacy `pushed:` line matches for good, even one written after "not sent (Remote Control inactive)"') ||
-    !before(push, 'PushNotification', 'pushed via push: <question>') || /on every (turn|report)/i.test(push)) {
-    fails.push('push-dedupe')
+  // no-push (ADR 0075 d2): § 6.5's lead-in lists each item and never pushes it; execute, legs.md and close hold no push
+  // channel (PushNotification, ntfy), no *Push once* and no phrase that promises a needs-you push, outside the one
+  // exact inert-history sentence; and every push word in legs § Complete is one of its two git-sense spans.
+  if (!lead.includes("it is listed in the report's `Needs you:` block for a sitting Lachy, its state stays in the rollout and task notes, and it is never pushed (ADR 0075 d2); the queue runs on without his answer.") ||
+    pushPromises(skill).length || pushPromises(legs).length || pushPromises(close).length ||
+    strayCompletePushes(legs).length) {
+    fails.push('no-push')
   }
 
-  // ntfy-fallback (ADR 0038 d3): the push falls back to ntfy when the tool reports an error or a not-sent of any cause
-  // (Remote Control inactive among them), never when it reports Lachy at the terminal, and a run with no push tool
-  // tries ntfy too. The lead runs ntfy-push.py with the same message in a quoted heredoc (nothing in the message
-  // expands), logs `pushed via ntfy:` on exit 0 and `push failed:` on every other exit (no topic, exit 4, included), so
-  // no report claims Lachy was told.
-  // The old "no push tool: nothing is logged" bullet is gone.
-  const ntfy = bullet(push, '- **The ntfy fallback.**')
-  if (!ntfy.includes('When `PushNotification` reports an error or a not-sent of any cause') ||
-    !ntfy.includes('never when it reports Lachy at the terminal') ||
-    !ntfy.includes('and when there is no push tool (a Codex run, or ToolSearch cannot load it)') ||
-    !ntfy.includes("```bash python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/ntfy-push.py <<'NEEDS_YOU_ITEM' <the one-line message> NEEDS_YOU_ITEM ```") ||
-    !ntfy.includes('Exit 0 appends `- <now> [[<slug>]] pushed via ntfy: <question>`') ||
-    !ntfy.includes('Any other exit appends `- <now> [[<slug>]] push failed: <question>`, so no report claims Lachy was told') ||
-    !ntfy.includes('4, no topic set, the fallback skipped;') ||
-    !ntfy.includes('a refused rollouts.toml here never halts the rollout') ||
-    /nothing is logged/.test(push)) {
-    fails.push('ntfy-fallback')
-  }
-
-  // not-sent (ADR 0038 d3): a not-sent because Lachy is at the terminal is the only not-sent that counts as pushed
-  // (logged `pushed via push:`, never a fallback); every other not-sent (Remote Control inactive, notifications turned
-  // off, nowhere to send it, however the tool words it) reached nobody and takes the ntfy fallback, so no undelivered
-  // push is logged as delivered: the false `pushed:` record of 2026-10-10 and 2026-10-17 that ADR 0038 removes.
-  const notSent = bullet(push, '- **"Not sent"**')
-  if (!notSent.includes('- **"Not sent"** because Lachy is at the terminal is the only not-sent that counts as pushed:') ||
-    !notSent.includes('it is logged `pushed via push:` and it never falls back.') ||
-    !notSent.includes('Every other not-sent (Remote Control inactive, notifications turned off, nowhere to send it, however the tool words it) reached nobody, so it takes *The ntfy fallback*.') ||
-    /any other reason|still counts as pushed/i.test(notSent)) {
-    fails.push('not-sent')
-  }
-
-  // push-retry (ADR 0038 d3): a `push failed:` item is retried at most once more, at the next loop entry, before
-  // anything new is pushed, through the whole push (PushNotification first, then the fallback); a second failure
-  // matches for good; on every other turn one `push failed:` line still blocks a re-push; a legacy `push failed:`
-  // (the old tool-error rule) gets the one retry; the log is the counter, so the bound survives the sign-off pause. No
-  // interval is named: the retry rides the loop entries, never a heartbeat tick's 20 minutes.
-  const retry = bullet(push, '- **Retry once.**')
-  if (!retry.includes('such an item is retried at most once more, at the next loop entry') ||
-    !retry.includes("At each loop entry (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off and a room stop's resume)") ||
-    !retry.includes('exactly one `push failed:` line and no `pushed via` or `pushed:` line') ||
-    !retry.includes('before anything new is pushed') ||
-    !retry.includes('the whole push again: `PushNotification` first, then *The ntfy fallback*') ||
-    !retry.includes('two `push failed:` lines match for good') ||
-    !retry.includes('On any other turn, a heartbeat tick that does not re-enter *Cold resume* included, a single `push failed:` line is a match and the item is never re-pushed') ||
-    !retry.includes('A `push failed:` line logged under the old rule (a tool error, with no fallback) is a single failure too and gets this one retry') ||
-    !retry.includes('The log is the counter') || !retry.includes('survives the pause') ||
-    /every heartbeat tick|20 min|\*\/20/i.test(retry)) {
-    fails.push('push-retry')
+  // ledger: the `## Needs-you log` is the Standing approval's ledger alone. Its one writer is approve-gates --standing,
+  // which appends its `signed under the standing approval:` lines under the note lock (the month line's ledger); the
+  // lead writes nothing there; the push lines an earlier engine wrote stay as inert history nothing reads.
+  if (!log.includes("`## Needs-you log` is the Standing approval's ledger") ||
+    !log.includes('Its one writer is `reconcile-rollout.py approve-gates --standing`') ||
+    !log.includes('signed under the standing approval:') || !log.includes("the month line's ledger (§ 3.7)") ||
+    !log.includes('The lead writes nothing there.') || !log.includes(INERT) ||
+    /lead-written|append(?:s)? `- <now> \[\[<slug>\]\] pushed/.test(log)) {
+    fails.push('ledger')
   }
 
   // kinds: (a) a gate sign-off from `## Gated inputs (awaiting sign-off)`; (b) an undecided RACE or UNVERIFIED from
   // `raceHold` (not one whose re-verify still runs here); (c) every set-aside at its run or at Integration whose
   // `inputs` reports a non-null `humanFix` (ADR 0035: the script names the cause's one fix), a gate (a), a RACE (b) and
-  // an `autoRetryError` (e) placed, and a null `humanFix` named the lead's own re-entry; (d) a merge hold's release;
-  // (e) any other § 7 halt. (c) keeps no list of the causes it includes: `humanFix` is the membership.
+  // an `autoRetryError` (e) placed, and a null `humanFix` named the lead's own re-entry; (d) a merge hold's release,
+  // whose gated item names no act, so its act is its first `→` line; (e) any other § 7 halt. (c) keeps no list of the
+  // causes it includes: `humanFix` is the membership. Every item names what Lachy does: an act the item text lacks is
+  // its first `→` line.
   if (!items.includes('`## Gated inputs (awaiting sign-off)`') || !items.includes('`[[<slug>]] sign off gated input: <gate>`') ||
     !items.includes("(`next`'s `raceHold`, except a RACE whose re-verify this session still runs") ||
     !items.includes('`[[<slug>]] RACE undecided: decide with /thread:repair [[<rollout>]]`') ||
@@ -218,7 +206,10 @@ function checkNeedsYou(skill, context = realContext) {
     !kindC.includes("A null `humanFix` is the lead's own re-entry") ||
     /It includes:|plan-blocked with `max_plan_rounds` spent|blocked at its run with `autoRevise/.test(kindC) ||
     !items.includes('`[[<slug>]] gated: awaiting merge approval for [[<slug>]] (PR #N)`') ||
-    !items.includes('`[[<slug>]] review required: approve PR #N (<url>)`') || !items.includes('**Any other § 7 halt**')) {
+    !items.includes('`[[<slug>]] review required: approve PR #N (<url>)`') || !items.includes('**Any other § 7 halt**') ||
+    !kindD.includes('The gated item names no act, so its first `→` line is its act, `→ go ahead or decline the merge`; the review-required item names its own, `approve PR #N (<url>)`.') ||
+    !items.includes("An act the item text lacks ((d)'s gated hold and every (f) item) is its first `→` line, above any other detail") ||
+    /\bAct `[^`]*`; what\b/.test(items)) {
     fails.push('kinds')
   }
 
@@ -231,13 +222,13 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('turn-waiting')
   }
 
-  // report-block: § 6's template lists `Needs you (` before the approve-gates line, before `Held:`; the old
-  // gate-pending heading is gone; the Integration set-aside ([[task-i]], merge-task's exit-4 text) has its
-  // needs-you line inside the block, and [[task-h]]'s Set aside line says why it has none (a plain rejection,
+  // report-block: § 6's template lists `Needs you (listed until resolved; …)` before the approve-gates line, before
+  // `Held:`; the old gate-pending heading is gone; the Integration set-aside ([[task-i]], merge-task's exit-4 text) has
+  // its needs-you line inside the block, and [[task-h]]'s Set aside line says why it has none (a plain rejection,
   // autoRevise); a review-blocked needs-human stop ([[task-n]], round 1, below the cap) reads `humanFix`'s `answer the
-  // question` with the engine's question on the `→` line under it, never a raise; a turn that adds an item prints the
-  // report; the block is derived from the current state on every turn, never rebuilt from the log, and a resolved
-  // item drops out of it.
+  // question` with the engine's question on the `→` line under it, never a raise; the gated merge hold's item
+  // ([[task-g]]) carries its act on the `→` line under it; a turn that adds an item prints the report; the block is
+  // derived from the current state on every turn, never rebuilt from the log, and a resolved item drops out of it.
   const lines6 = s6raw.split('\n')
   const iNeeds = lines6.findIndex((l) => l.startsWith('Needs you ('))
   const iGate = lines6.findIndex((l) => l.includes('approve-gates --tasks task-k'))
@@ -246,9 +237,12 @@ function checkNeedsYou(skill, context = realContext) {
   const iTaskH = lines6.findIndex((l) => l.startsWith('- at its run: [[task-h]] — blocked (plain rejection, autoRevise'))
   const iTaskN = lines6.indexOf('- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): answer the question with /thread:repair [[<rollout-slug>]]')
   const iAsideN = lines6.indexOf('- review-blocked: [[task-n]] — a needs-human question (see "## Needs you")')
+  const iTaskG = lines6.indexOf('- [[task-g]] gated: awaiting merge approval for [[task-g]] (PR #9)')
   if (!(iNeeds >= 0 && iNeeds < iGate && iGate < iHeld) || s6raw.includes('Gate-pending (awaiting YOUR sign-off') ||
+    lines6[iNeeds] !== 'Needs you (listed until resolved; the queue runs on without your answer — § 6.5):' ||
     !(iNeeds < iTaskI && iTaskI < iHeld) || !(iTaskH >= 0 && iTaskH < iNeeds) ||
     !(iNeeds < iTaskN && iTaskN < iHeld) || lines6[iTaskN + 1] !== '  → asks: <its needsHuman question, verbatim>' ||
+    !(iNeeds < iTaskG && iTaskG < iHeld) || lines6[iTaskG + 1] !== '  → go ahead or decline the merge' ||
     !(iAsideN >= 0 && iAsideN < iNeeds) ||
     !s6.includes('(at a halt, a merge hold, completion, or a turn that adds a needs-you item, § 6.5)') ||
     !items.includes('from the current state, never from `## Needs-you log`') || !items.includes('drops out of the block')) {
@@ -266,9 +260,11 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('sign-off')
   }
 
-  // guardrails: the § 8 bullet and the Don't.
-  if (!s8.includes('- **No question tool while work is in flight** (§ 6.5): an open question holds the turn, so neither the Stop hook nor the heartbeat runs and every notification queues; needs-you items go in the report with one push each.') ||
-    !donts.includes("- Never call the question tool (`AskUserQuestion`, or the harness's own ask tool) while a task call, an integrate call, a background Integration command or a merge hold is live, and never push a needs-you item a `## Needs-you log` line already names, but for its one retry at a loop entry after a single `push failed:` line (§ 6.5).")) {
+  // guardrails: the § 8 bullet and the Don't. The Don't bars every route to Lachy (a push, a message, a mail), naming
+  // no tool, and the old dedupe Don't is gone.
+  if (!s8.includes("- **No question tool while work is in flight** (§ 6.5): an open question holds the turn, so neither the Stop hook nor the heartbeat runs and every notification queues; needs-you items go in the report's `Needs you:` block.") ||
+    !donts.includes("- Never call the question tool (`AskUserQuestion`, or the harness's own ask tool) while a task call, an integrate call, a background Integration command or a merge hold is live, and never send Lachy a push, a message or a mail about a rollout, by any route: a needs-you item is listed (§ 6.5, ADR 0075 d2).") ||
+    /a `## Needs-you log` line already names/.test(donts)) {
     fails.push('guardrails')
   }
 
@@ -285,7 +281,7 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('log-placement')
   }
 
-  // set-aside-fix: (c)'s question is read, never chosen, so the exact-text dedupe holds across sessions: <where> from
+  // set-aside-fix: (c)'s question is read, never chosen, so two sessions word one block alike: <where> from
   // `setAsideAt`, then `humanFix`'s label and act verbatim (ADR 0035: lead-integrate.py's one fix per cause, so the
   // lead never re-derives a cause, never picks an act and keeps no numbered rule list), its `→` detail `humanFix.detail`,
   // and a new block (a new run, or `ask <k>` after a spent answer) a new item.
@@ -294,48 +290,34 @@ function checkNeedsYou(skill, context = realContext) {
     !kindC.includes("`<where>` is `at Integration` when the entry's `setAsideAt` is `integration`, else `at its run`") ||
     !kindC.includes("the label and the act are `humanFix`'s, verbatim") ||
     !kindC.includes('so the lead never re-derives a cause or chooses a fix') ||
-    !kindC.includes('Its `→` detail is `humanFix.detail`.') || !kindC.includes('`ask <k>`') ||
+    !kindC.includes('Its `→` detail is `humanFix.detail`.') ||
+    !kindC.includes('its `ask <k>` makes an identical re-block after a spent answer a new item too.') ||
     /the first of these that applies|<fix>|`raise <field>, hand back or defer`|writes nothing, so it changes no item text/.test(kindC) ||
-    /^ {4}[1-4]\. /m.test(kind(section(skill, S65) ?? '', '- (c) **A set-aside only a person moves on**'))) {
+    /^ {4}[1-4]\. /m.test(kind(s65, '- (c) **A set-aside only a person moves on**'))) {
     fails.push('set-aside-fix')
   }
 
   // needs-human-shown: the question the engine stopped on (p16-3's `needsHuman`, the task note's `## Needs you`)
   // reaches Lachy. It goes verbatim on a `→` line under the item whenever the entry carries one, never on the
-  // item line (the item text is the dedupe key and stays fixed), because a review judge's stop opens its section
-  // with a feedback bullet; and a (c) push for such an entry takes the question as its what, so the push carries
-  // it and a cut shortens it, never the act.
+  // item line (the item text stays fixed), because a review judge's stop opens its section with a feedback bullet;
+  // (c) says so for such an entry, so the block carries the question the engine stopped on.
   if (!items.includes('never on the item line, so the item text stays fixed') ||
     !items.includes("an entry's `needsHuman` question, verbatim, on its own `→` line whenever the entry carries one") ||
     !items.includes("for a review judge's stop the section's first line is a feedback bullet, never the question") ||
-    !kindC.includes("For an entry that carries `needsHuman`, the what is that question, verbatim, in place of `set aside …`: the push carries the question the engine stopped on, and a cut shortens it, never the act.")) {
+    !kindC.includes('For an entry that carries `needsHuman`, that question shows verbatim on its own `→` line (below), so the block carries the question the engine stopped on.')) {
     fails.push('needs-human-shown')
   }
 
-  // halt-act: (e)'s act is fixed per halt, never taken from § 7's prose (whose remedies are prose, not commands);
-  // a red RACE re-verify's halt is (b), never also (e), so it is one item with one push.
+  // halt-act: (e)'s act is fixed per halt and stays in its item text, never taken from § 7's prose (whose remedies are
+  // prose, not commands); a red RACE re-verify's halt is (b), never also (e), so it is one item.
   if (!kindE.includes('`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`') ||
     !kindE.includes("never taken from § 7's prose") ||
     !kindE.includes('`decide with /thread:repair [[<rollout>]]` for `git-env canary failed`') ||
     !kindE.includes("not a git-env trip's halt, which is (g)") ||
     !kindE.includes('`see /thread:status [[<rollout>]], fix it and re-invoke` for every other') ||
     !kindE.includes("the red re-verify's included, which is (b)") || kindE.includes('the command § 7 names') ||
-    !kindB.includes("A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`")) {
+    !kindB.includes("A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`: its `## Race log` line keeps the task in `raceHold`, so it is one item.")) {
     fails.push('halt-act')
-  }
-
-  // push-message: the push leads with the act (its command included), then the slug, then the what, every
-  // wikilink bare, so the 200-character cut shortens the what, never the command; each kind names its act and what.
-  if (!push.includes('the message `<act> — <slug>: <what>`') ||
-    !push.includes('every wikilink written bare (`[[x]]` becomes `x`)') ||
-    !push.includes('The act, its command included, leads and the what comes last, so a cut shortens the what first') ||
-    push.includes('`<rollout-slug>: <slug> <question>`') ||
-    !items.includes('Act `sign off gated input`; what `<gate>`.') ||
-    !kindB.includes('Act `decide with /thread:repair [[<rollout>]]`; what `RACE undecided` or `UNVERIFIED undecided`.') ||
-    !kindC.includes('Act `<humanFix.act> with /thread:repair [[<rollout>]]`; what `set aside <where> <humanFix.label>`') ||
-    !items.includes('Act `go ahead or decline the merge` or `approve PR #N (<url>)`; what `gated hold (PR #N)` or `review required`.') ||
-    !kindE.includes('Act `<act>`; what `halted (<YYYY-MM-DD>): <reason>`.')) {
-    fails.push('push-message')
   }
 
   // answers: an answer takes the route that already exists for it; a declined gate (§ 3.7), a declined `--gated`
@@ -351,28 +333,27 @@ function checkNeedsYou(skill, context = realContext) {
 
   // answered-items (ADR 0035): an answered set-aside is treated by its form. Under a pause step 1.2 is skipped, so an
   // entry whose way back is the lead's own (a null `humanFix`, a `hand-back` answer included) waits for the reinstate and
-  // is never listed; an `awaiting repair` answer is an item (`finish the recorded answer`), pushed once; a `left` one is
-  // listed and never pushed, by its form (*Push once* skips it, logging nothing), never by the dedupe: its item text can
-  // change once answered (a `## Needs you` question's what becomes `set aside …`, and its act the cause's).
+  // is never listed; an `awaiting repair` answer is an item (`finish the recorded answer`); a `left` one is listed like
+  // any other, though its item text can change once answered (a `## Needs you` question's text becomes `set aside …`).
   if (!kindC.includes('under a pause step 1.2 is skipped, so such an entry waits for the reinstate and stays excluded, a `hand-back` answer included') ||
-    !kindC.includes('An `awaiting repair` answer is an item whose act is `finish the recorded answer`, pushed once') ||
-    !kindC.includes('an item whose `answerRecorded.form` is `left` is listed but never pushed') ||
-    !kindC.includes('so *Push once* skips it and logs nothing') ||
-    !push.includes('- **A `left` answer** ((c)): never pushed and never logged, whatever its text; the report still lists it.')) {
+    !kindC.includes('An `awaiting repair` answer is an item whose act is `finish the recorded answer`;') ||
+    !kindC.includes('an item whose `answerRecorded.form` is `left` is listed like any other: Lachy said leave it') ||
+    !kindC.includes('its text is not always the item he answered')) {
     fails.push('answered-items')
   }
 
   // hold-until (p30-3; vault-grammar § Hold until): every `holdUntil` entry that holds and waits on Lachy (a CLOSED PR,
-  // an unreadable hold) is an (f) item on every turn, whatever the halt, with fixed item text and act, so the dedupe
-  // holds; § 6.5's lead-in derives it from `next`'s `holdUntil`, step 1.1 names it, (e) excludes the hold_until halt (one
-  // item, one push), and (c)'s null-humanFix entries wait for the release under a PR hold, as for the reinstate under a
-  // pause.
+  // an unreadable hold) is an (f) item on every turn, whatever the halt, with fixed item text and its act as its first
+  // `→` line; an approved queue released as a plain hold names its act the same way; § 6.5's lead-in derives it from
+  // `next`'s `holdUntil`, step 1.1 names it, (e) excludes the hold_until halt (one item), and (c)'s null-humanFix
+  // entries wait for the release under a PR hold, as for the reinstate under a pause.
   const step11 = collapse(s45raw.split('\n').find((l) => /^ {3}1\. Run `python3/.test(l)) ?? '')
   if (!kindF.includes('every `holdUntil` entry with `held: true` and `waits: you`, on every turn, whatever the halt') ||
     !kindF.includes('`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR') ||
     !kindF.includes('`[[<note>]] hold_until needs you: unreadable` for an unreadable hold') ||
-    !kindF.includes('A step 1.5 halt on it is this item, never (e), so it is one item with one push') ||
-    !kindF.includes('Act `remove or fix hold_until on [[<note>]]`') ||
+    !kindF.includes('A step 1.5 halt on it is this item, never (e), so it is one item.') ||
+    !kindF.includes('Its first `→` line is its act, `→ remove or fix hold_until on [[<note>]]`, and the entry\'s `url` (CLOSED) or `error` (unreadable) is the `→` line under it') ||
+    !kindF.includes('its first `→` line its act, `→ leave it, or pause [[<rollout>]] and run /thread:schedule <project> --regenerate` (it has run) or `→ run /thread:schedule <project> for the tasks filed since` (nothing of its own left)') ||
     !items.includes("this turn's `next` output (its `setAside` entries, `raceHold` and `holdUntil`;") ||
     !kindE.includes('not a hold_until halt, which is (f)') ||
     !kindC.includes('and under a PR hold (step 1.2) it waits for the release') ||
@@ -385,28 +366,27 @@ function checkNeedsYou(skill, context = realContext) {
   // git-env trip's halt is this item, never (e), and no item carries the trip mark.
   if (!kindG.includes("while `gitEnvHold` is non-empty, on every turn, whatever the halt") ||
     !kindG.includes("`[[<rollout>]] the shared checkout changed (<the stamp of the hold's first unacked trip line>): decide with /thread:repair [[<rollout>]]`") ||
-    !kindG.includes('The stamp keys it: a trip after an ack is a new item, pushed again') ||
-    !kindG.includes("A git-env trip's halt (§ 7) is this item, never (e)") ||
-    !kindG.includes('Act `decide with /thread:repair [[<rollout>]]`')) {
+    !kindG.includes('The stamp keys it: a trip after an ack is a new item.') ||
+    !kindG.includes("A git-env trip's halt (§ 7) is this item, never (e)")) {
     fails.push('git-env-item')
   }
 
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
-  // and tells the rollout note's `## Needs-you log` (the lead's push record) apart from the task note's
-  // `## Needs you` (p16-3, the engine's question), two near-identical section names; it names the ntfy fallback and
-  // the bounded retry (ADR 0038 d3), with no interval.
+  // says the lead never pushes it (ADR 0075 d2), names the log as the Standing approval's ledger, and tells the rollout
+  // note's `## Needs-you log` apart from the task note's `## Needs you` (p16-3, the engine's question), two near-identical
+  // section names; no ntfy, no bounded retry and no interim P41-5 clause stand.
   const entry = collapse(slice(context, /^- \*\*Needs-you item\*\*/, /^(- \*\*|#)/) ?? '')
   if (!['`Needs you:` block', '`## Needs-you log`', 'execute § 6.5', '_Avoid_: pending question, ask item',
-    'falling back to ntfy', 'retried at most once more, at the next loop entry'].every((k) => entry.includes(k)) ||
-    /every heartbeat tick|20 min|\*\/20/i.test(entry) ||
+    'never pushes it (ADR 0075 d2)', 'signed under the standing approval:'].every((k) => entry.includes(k)) ||
+    /ntfy|retried at most once more|Until P41-5/i.test(entry) ||
     !entry.includes("never the task note's `## Needs you` (p16-3), which holds the question the engine stopped on")) {
     fails.push('glossary')
   }
   return [...new Set(fails)]
 }
 
-test('execute § 1, § 3.7, § 4.5, § 6, § 6.5, § 7, § 8, the Don\'ts and CONTEXT.md hold every needs-you rule', () => {
-  assert.deepEqual(checkNeedsYou(real), [], `stray asks: ${JSON.stringify(strayAsks(real), null, 1)}`)
+test('execute § 1, § 3.7, § 4.5, § 6, § 6.5, § 7, § 8, the Don\'ts, legs.md, close and CONTEXT.md hold every needs-you rule', () => {
+  assert.deepEqual(checkNeedsYou(real), [], `stray asks: ${JSON.stringify(strayAsks(real), null, 1)}; push promises: ${JSON.stringify([pushPromises(real), pushPromises(realLegs), pushPromises(realClose), strayCompletePushes(realLegs)])}`)
 })
 
 // lead-integrate.py's _raise_field (the Human fix's H9, ADR 0035) names each budget by what its source run is, so each
@@ -461,9 +441,9 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'not-sent', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
-  'guardrails', 'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
-  'answered-items', 'glossary', 'hold-until', 'git-env-item']
+const RULES = ['no-ask-in-flight', 'no-push', 'ledger', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
+  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'answers', 'answered-items', 'glossary',
+  'hold-until', 'git-env-item']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -477,9 +457,9 @@ function lineIn(text, sectionRe, prefix) {
   assert.ok(l, `control setup: no line starting ${prefix}`)
   return `${l}\n`
 }
-const only = (skill, rule, label, context = realContext) => {
+const only = (skill, rule, label, context = realContext, legs = realLegs, close = realClose) => {
   CONTROLLED.add(rule)
-  assert.deepEqual(checkNeedsYou(skill, context), [rule], label)
+  assert.deepEqual(checkNeedsYou(skill, context, legs, close), [rule], label)
 }
 
 test('control: the rule removed, narrowed, or barred by the turn\'s state fails no-ask-in-flight', () => {
@@ -497,64 +477,44 @@ test('control: the rule removed, narrowed, or barred by the turn\'s state fails 
     'no-ask-in-flight', 'The turn drops the in-loop scope')
 })
 
-test('control: the push dedupe removed, a push on every report, the log line first, or legacy lines re-pushed fails push-dedupe', () => {
-  only(edit(real, lineIn(real, S65, '- **A matching line exists:**'), ''), 'push-dedupe', 'push dedupe removed')
-  only(edit(real, 'on any later turn, heartbeat tick or session, but for *Retry once* below.',
-    'on any later turn, heartbeat tick or session, but for *Retry once* below. Re-push every open item on every report.'),
-  'push-dedupe', 'push on every report')
-  only(edit(real, 'load the deferred tool with ToolSearch `select:PushNotification`, then call',
-    'append `- <now> [[<slug>]] pushed via push: <question>` to the log, then load the deferred tool with ToolSearch `select:PushNotification`, then call'),
-  'push-dedupe', 'logged before the push')
-  only(edit(real, ' A legacy `pushed:` line matches for good, even one written after "not sent (Remote Control inactive)": the log cannot tell which push it recorded.', ''),
-    'push-dedupe', 'the legacy pushed: clause deleted')
+test('control: a push channel, a Push once bullet or a promised push back in execute, legs or close fails no-push', () => {
+  only(edit(real, '**Where the log lives.**', '**Push once.** For each open item, the lead calls `PushNotification` once.\n\n**Where the log lives.**'),
+    'no-push', 'a Push once bullet re-inserted')
+  only(edit(real, 'a needs-you item is listed (§ 6.5, ADR 0075 d2).',
+    'a needs-you item is listed (§ 6.5, ADR 0075 d2). A halt alone goes through `PushNotification`.'), 'no-push', 'PushNotification in the Don\'t')
+  only(edit(real, 'a needs-you item is listed (§ 6.5, ADR 0075 d2).',
+    'a needs-you item is listed (§ 6.5, ADR 0075 d2). Away, it goes through ntfy-push.py.'), 'no-push', 'ntfy in the Don\'t')
+  only(edit(real, 'a cause with no fix reads `hand back or defer`).', 'a cause with no fix reads `hand back or defer`), and each is pushed once.'),
+    'no-push', '(c) pushed once')
+  only(edit(real, 'it is never pushed (ADR 0075 d2); the queue runs on', 'it is pushed once; the queue runs on'), 'no-push', 'the lead-in pushes')
+  only(real, 'no-push', 'a legs push it once restored', realContext,
+    edit(realLegs, 'Print its `error`, list it (§ Needs you)', 'Print its `error`, push it once (§ Needs you)'))
+  only(real, 'no-push', 'legs :196 printed and pushed restored', realContext,
+    edit(realLegs, 'its ERROR line printed and listed.', 'its ERROR line printed and pushed.'))
+  only(real, 'no-push', 'close\'s Left for Lachy pushed once', realContext, realLegs,
+    edit(realClose, 'and is listed as a needs-you item (execute § 6.5).', 'and is pushed once (execute § 6.5).'))
 })
 
-test('control: a fallback at the terminal, one narrowed to Remote Control inactive, no topic read as delivered, the old no-push-tool bullet, or an unquoted heredoc fails ntfy-fallback', () => {
-  only(edit(real, ', never when it reports Lachy at the terminal,', ','), 'ntfy-fallback', 'falls back at the terminal')
-  only(edit(real, 'When `PushNotification` reports an error or a not-sent of any cause,', 'When `PushNotification` reports Remote Control inactive or an error,'),
-    'ntfy-fallback', 'narrowed back to Remote Control inactive')
-  only(edit(real, '4, no topic set, the fallback skipped; ', ''), 'ntfy-fallback', 'the exit-4 clause deleted')
-  only(edit(real, '- **Retry once.**',
-    "- **No push tool** (a Codex run, or ToolSearch cannot load it): nothing is logged, and the report's block carries the item.\n- **Retry once.**"),
-  'ntfy-fallback', 'the no-push-tool bullet restored')
-  only(edit(real, "ntfy-push.py <<'NEEDS_YOU_ITEM'", 'ntfy-push.py <<NEEDS_YOU_ITEM'), 'ntfy-fallback', 'the heredoc unquoted')
+test('control: the inert-history sentence gone, or a lead-appended push line back, fails ledger', () => {
+  only(edit(real, ` ${INERT}`, ''), 'ledger', 'the inert-history sentence dropped')
+  only(edit(real, 'The lead writes nothing there.', 'The lead appends `- <now> [[<slug>]] pushed via push: <question>` there for each item it lists.'),
+    'ledger', 'a lead-appended push line')
 })
 
-test('control: the not-sent parenthetical widened back, its no-fallback clause or its every-other-not-sent sentence gone, or another not-sent counted as pushed fails not-sent', () => {
-  only(edit(real, '**"Not sent"** because Lachy is at the terminal is the only not-sent that counts as pushed: it is logged `pushed via push:` and it never falls back.',
-    '**"Not sent"** (Lachy is at the terminal, or any other reason but Remote Control inactive) still counts as pushed and is logged `pushed via push:`; it never falls back.'),
-  'not-sent', 'the parenthetical widened back to any other reason')
-  only(edit(real, ' and it never falls back.', '.'), 'not-sent', 'it never falls back deleted')
-  only(edit(real, ' Every other not-sent (Remote Control inactive, notifications turned off, nowhere to send it, however the tool words it) reached nobody, so it takes *The ntfy fallback*.', ''),
-    'not-sent', 'the every-other-not-sent sentence deleted')
-  only(edit(real, 'however the tool words it) reached nobody, so it takes *The ntfy fallback*.',
-    'however the tool words it) reached nobody, so it takes *The ntfy fallback*. A not-sent because notifications are turned off still counts as pushed.'),
-  'not-sent', 'a turned-off not-sent counted as pushed')
-})
-
-test('control: an unbounded retry, one off loop entries, a re-push on ordinary turns, ntfy alone, or the legacy, counter or ordering sentence gone fails push-retry', () => {
-  only(edit(real, 'exactly one `push failed:` line', 'a `push failed:` line'), 'push-retry', 'unbounded')
-  only(edit(real, "At each loop entry (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry",
-    "At every heartbeat tick (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry"), 'push-retry', 'off loop entries')
-  only(edit(real, 'a single `push failed:` line is a match and the item is never re-pushed',
-    'an item whose only line is a single `push failed:` is pushed again'), 'push-retry', 'ordinary turns re-push after one failure')
-  only(edit(real, '`PushNotification` first, then *The ntfy fallback*', 'ntfy-push.py alone'), 'push-retry', 'ntfy only')
-  only(edit(real, ' A `push failed:` line logged under the old rule (a tool error, with no fallback) is a single failure too and gets this one retry.', ''),
-    'push-retry', 'the legacy sentence deleted')
-  only(edit(real, ' The log is the counter: the rollout note stays in `Work/Tasks/` through the sign-off pause (§ 4.5 step 5), so the count survives the pause and any new session.', ''),
-    'push-retry', 'the counter sentence deleted')
-  only(edit(real, ', before anything new is pushed,', ','), 'push-retry', 'the ordering deleted')
-})
-
-test('control: an item kind dropped, or (c) re-deriving its causes, fails kinds', () => {
+test('control: an item kind dropped, (c) re-deriving its causes, (d) without its act line, or an Act/what clause back fails kinds', () => {
   only(edit(real, ', or `[[<slug>]] UNVERIFIED undecided: decide with /thread:repair [[<rollout>]]`', ''), 'kinds', 'no UNVERIFIED item')
   only(edit(real, ", except a RACE whose re-verify this session still runs: a green one lands it with no decision)", ')'),
-    'kinds', 'a RACE pushed while its re-verify runs')
+    'kinds', 'a RACE listed while its re-verify runs')
   only(edit(real, 'reports a non-null `humanFix`. The script', 'reports `autoRetry: false`. The script'), 'kinds', 'membership by autoRetry')
   only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (c) too, through its `humanFix` H12 (ADR 0048: no halt).', ''),
     'kinds', 'a, b and e unplaced')
-  only(edit(real, 'skips it and logs nothing.\n', 'skips it and logs nothing. It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n'),
+  only(edit(real, "a cause with no fix reads `hand back or defer`).\n", "a cause with no fix reads `hand back or defer`). It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n"),
     'kinds', 'the old includes list back')
+  only(edit(real, ' The gated item names no act, so its first `→` line is its act, `→ go ahead or decline the merge`; the review-required item names its own, `approve PR #N (<url>)`.', ''),
+    'kinds', '(d) without its act sentence')
+  only(edit(real, " An act the item text lacks ((d)'s gated hold and every (f) item) is its first `→` line, above any other detail, so every item in the block names what Lachy does.", ''),
+    'kinds', 'the detail paragraph without the act rule')
+  only(edit(real, ' A changed cap is a new item.', ' A changed cap is a new item. Act `sign off gated input`; what `<gate>`.'), 'kinds', 'an Act/what clause back')
 })
 
 test('control: a needs-you turn that halts, or step 1.6 without its clause, fails turn-waiting', () => {
@@ -562,9 +522,11 @@ test('control: a needs-you turn that halts, or step 1.6 without its clause, fail
   only(edit(real, ', never on an open question (§ 6.5).', '.'), 'turn-waiting', 'step 1.6 bare')
 })
 
-test('control: the old heading, a block rebuilt from the log, or the Integration item left out fails report-block', () => {
-  only(edit(real, 'Needs you (each pushed once; the queue runs on without your answer — § 6.5):',
+test('control: the old heading, a block rebuilt from the log, an item left out, or the gated act line dropped fails report-block', () => {
+  only(edit(real, 'Needs you (listed until resolved; the queue runs on without your answer — § 6.5):',
     'Gate-pending (awaiting YOUR sign-off — a declared gate always pauses, ADR 0008):'), 'report-block', 'old heading')
+  only(edit(real, 'Needs you (listed until resolved; the queue runs on without your answer — § 6.5):',
+    'Needs you (the queue runs on without your answer — § 6.5):'), 'report-block', 'the header without listed until resolved')
   only(edit(real, 'derived from the current state, never from `## Needs-you log`', 'rebuilt from `## Needs-you log`'),
     'report-block', 'rebuilt from the log')
   only(edit(real, lineIn(real, S6, '- [[task-i]] set aside at Integration'), ''), 'report-block', 'no Integration item')
@@ -574,18 +536,21 @@ test('control: the old heading, a block rebuilt from the log, or the Integration
   only(edit(real, lineIn(real, S6, '  → asks: <its needsHuman question'), ''), 'report-block', 'the needs-human question left off')
   only(edit(real, '- at its run: [[task-h]] — blocked (plain rejection, autoRevise: its seeded revise waits for a free slot)',
     '- at its run: [[task-h]] — blocked, see "## Blocker diagnosis"'), 'report-block', 'task-h unexplained')
+  only(edit(real, lineIn(real, S6, '  → go ahead or decline the merge'), ''), 'report-block', 'the gated item without its act line')
 })
 
 test('control: § 3.7 or § 7 without the needs-you sign-off fails sign-off', () => {
-  only(edit(real, 'Present each gate **verbatim** as a needs-you item (§ 6.5): its line in the report\'s `Needs you:` block and one push, never the question tool while anything is live —',
+  only(edit(real, 'Present each gate **verbatim** as a needs-you item (§ 6.5): its line in the report\'s `Needs you:` block, never the question tool while anything is live —',
     'Present each gate **verbatim** in the report —'), 'sign-off', '§ 3.7 reworded')
   only(edit(real, ' Unlike a § 7 halt, **the sign-off form never calls the question tool**, live work or not: the turn ends on', ' The turn ends on'),
     'sign-off', "the form's question-tool sentence removed")
 })
 
-test('control: the Don\'t or the § 8 bullet removed fails guardrails', () => {
+test('control: the Don\'t or the § 8 bullet removed, or the old dedupe Don\'t restored, fails guardrails', () => {
   only(edit(real, lineIn(real, DONTS, '- Never call the question tool'), ''), 'guardrails', 'no Don\'t')
   only(edit(real, lineIn(real, S8, '- **No question tool while work is in flight**'), ''), 'guardrails', 'no § 8 bullet')
+  only(edit(real, ', and never send Lachy a push, a message or a mail about a rollout, by any route: a needs-you item is listed (§ 6.5, ADR 0075 d2).',
+    ', and never list a needs-you item a `## Needs-you log` line already names (§ 6.5).'), 'guardrails', 'the old dedupe Don\'t restored')
 })
 
 test('control: an ask outside § 6.5, or an inexact exemption, fails no-other-ask', () => {
@@ -614,27 +579,21 @@ test('control: a (c) rule list reinstated, or an act the lead chooses, fails set
   only(edit(real, ' Its `→` detail is `humanFix.detail`.', ' Its `→` detail is `autoRetryWhy`.'), 'set-aside-fix', 'detail re-derived')
   only(edit(real, '`[[<slug>]] set aside <where> <humanFix.label>: <humanFix.act> with /thread:repair [[<rollout>]]`',
     '`[[<slug>]] set aside <where> (<status>, <section> run <n>): <fix> with /thread:repair [[<rollout>]]`'), 'set-aside-fix', 'the old template')
+  only(edit(real, 'a spent answer a new item too.', 'a spent answer the same item.'), 'set-aside-fix', 'a re-block after a spent answer kept as the old item')
 })
 
-test('control: the needs-human question kept off the detail line or the push fails needs-human-shown', () => {
+test('control: the needs-human question kept off the detail line or out of (c) fails needs-human-shown', () => {
   only(edit(real, "an entry's `needsHuman` question, verbatim, on its own `→` line whenever the entry carries one", "a stop's first line"),
     'needs-human-shown', 'the question left off the detail line')
-  only(edit(real, " For an entry that carries `needsHuman`, the what is that question, verbatim, in place of `set aside …`: the push carries the question the engine stopped on, and a cut shortens it, never the act.", ''),
-    'needs-human-shown', 'the question left out of the push')
+  only(edit(real, ' For an entry that carries `needsHuman`, that question shows verbatim on its own `→` line (below), so the block carries the question the engine stopped on.', ''),
+    'needs-human-shown', 'the question left out of (c)')
 })
 
 test('control: (e) naming § 7\'s prose, or a red RACE re-verify in both (b) and (e), fails halt-act', () => {
   only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for `git-env canary failed` (repair's step 3e shows the evidence), `/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5 (§ 4.5's **Approved queue** route, step 6: the new note is unstamped, and a re-invocation here ends `superseded`), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
     '`[[<rollout>]] halted (<YYYY-MM-DD>): <the reason text>: <the command § 7 names for it>`.'), 'halt-act', 'the command § 7 names')
-  only(edit(real, " A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`: its `## Race log` line keeps the task in `raceHold`, so it is one item with one push.", ''),
+  only(edit(real, " A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`: its `## Race log` line keeps the task in `raceHold`, so it is one item.", ''),
     'halt-act', 'red re-verify unplaced')
-})
-
-test('control: slugs first, bracketed links, or a kind without its act fails push-message', () => {
-  only(edit(real, 'the message `<act> — <slug>: <what>`', 'the message `<rollout-slug>: <slug> <question>`'), 'push-message', 'slugs first')
-  only(edit(real, ', every wikilink written bare (`[[x]]` becomes `x`)', ''), 'push-message', 'brackets kept')
-  only(edit(real, ' Act `<humanFix.act> with /thread:repair [[<rollout>]]`; what `set aside <where> <humanFix.label>`.', ''),
-    'push-message', '(c) without its act')
 })
 
 test('control: an answer route that drops a decline, or the Recorded answer, fails answers', () => {
@@ -645,21 +604,23 @@ test('control: an answer route that drops a decline, or the Recorded answer, fai
     'answers', 'merge decline to repair')
 })
 
-test('control: an answered set-aside pushed under a pause, re-pushed, or unlisted fails answered-items', () => {
+test('control: an answered set-aside listed under a pause, an awaiting-repair answer unlisted, or a left one unlisted fails answered-items', () => {
   only(edit(real, ', a `hand-back` answer included. An', '. An'), 'answered-items', 'a hand-back answer under a pause')
-  only(edit(real, 'whose act is `finish the recorded answer`, pushed once', 'whose act is `finish the recorded answer`'), 'answered-items', 'awaiting repair re-pushed')
-  only(edit(real, 'an item whose `answerRecorded.form` is `left` is listed but never pushed', 'a `left` answer is no item'), 'answered-items', 'left unlisted')
-  only(edit(real, ', so *Push once* skips it and logs nothing', ', so the dedupe keeps it from being pushed again'), 'answered-items', 'left left to the dedupe')
-  only(edit(real, lineIn(real, S65, '- **A `left` answer** ((c))'), ''), 'answered-items', 'Push once pushes a left answer')
+  only(edit(real, 'An `awaiting repair` answer is an item whose act is `finish the recorded answer`;', 'An `awaiting repair` answer is no item;'),
+    'answered-items', 'awaiting repair unlisted')
+  only(edit(real, 'an item whose `answerRecorded.form` is `left` is listed like any other: Lachy said leave it', 'a `left` answer is no item: Lachy said leave it'),
+    'answered-items', 'left unlisted')
 })
 
-test('control: CONTEXT.md without the entry, or without its Avoid list, fails glossary', () => {
+test('control: CONTEXT.md without the entry, its Avoid list or its ledger, or an interim clause back, fails glossary', () => {
   const entry = slice(realContext, /^- \*\*Needs-you item\*\*/, /^(- \*\*|#)/)
   assert.ok(entry, 'control setup: no Needs-you item entry')
   only(real, 'glossary', 'no entry', edit(realContext, `${entry}\n`, ''))
   only(real, 'glossary', 'no Avoid list', edit(realContext, '_Avoid_: pending question, ask item,', ''))
   only(real, 'glossary', 'the two sections not told apart', edit(realContext, "never the task note's `## Needs you` (p16-3)", "the task note's `## Needs you` (p16-3)"))
-  only(real, 'glossary', 'the bounded retry removed', edit(realContext, 'retried at most once more, at the next loop entry', 'retried'))
+  only(real, 'glossary', 'an ntfy fallback back', edit(realContext, 'and never pushes it (ADR 0075 d2)', 'and never pushes it (ADR 0075 d2), falling back to ntfy'))
+  only(real, 'glossary', 'the interim clause back', edit(realContext, 'and never pushes it (ADR 0075 d2)', 'and never pushes it (ADR 0075 d2). Until P41-5 it is retried at most once more'))
+  only(real, 'glossary', 'the never-pushes clause dropped', edit(realContext, 'and never pushes it (ADR 0075 d2)', 'and pushes it'))
 })
 
 test('control: (g) keyed by no stamp, or its halt read as (e), fails git-env-item', () => {
@@ -668,18 +629,20 @@ test('control: (g) keyed by no stamp, or its halt read as (e), fails git-env-ite
   only(edit(real, " A git-env trip's halt (§ 7) is this item, never (e).", ''), 'git-env-item', 'the halt unplaced')
 })
 
-test('control: (f) without its item, its every-turn rule or its act, or its sites without it, fails hold-until', () => {
+test('control: (f) without its item, its every-turn rule or its act line, or its sites without it, fails hold-until', () => {
   only(edit(real, '`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR, or', 'a CLOSED PR, or'), 'hold-until', 'no CLOSED item text')
   only(edit(real, 'and `waits: you`, on every turn, whatever the halt:', 'and `waits: you`, at a halt:'), 'hold-until', 'only at a halt')
-  only(edit(real, 'Act `remove or fix hold_until on [[<note>]]`', 'Act `see /thread:status`'), 'hold-until', 'another act')
-  only(edit(real, ' A step 1.5 halt on it is this item, never (e), so it is one item with one push.', ''), 'hold-until', 'also (e)')
+  only(edit(real, 'Its first `→` line is its act, `→ remove or fix hold_until on [[<note>]]`,', 'Its first `→` line is its act, `→ see /thread:status`,'), 'hold-until', 'another act')
+  only(edit(real, ' A step 1.5 halt on it is this item, never (e), so it is one item.', ''), 'hold-until', 'also (e)')
+  only(edit(real, ', its first `→` line its act, `→ leave it, or pause [[<rollout>]] and run /thread:schedule <project> --regenerate` (it has run) or `→ run /thread:schedule <project> for the tasks filed since` (nothing of its own left),', ','),
+    'hold-until', 'the approved-queue acts dropped')
   only(edit(real, '(its `setAside` entries, `raceHold` and `holdUntil`;', '(its `setAside` entries and `raceHold`;'), 'hold-until', 'lead-in without holdUntil')
   only(edit(real, '; not a hold_until halt, which is (f)', ''), 'hold-until', '(e) without its exclusion')
   only(edit(real, ', and under a PR hold (step 1.2) it waits for the release', ''), 'hold-until', '(c) without the release')
   only(edit(real, 'is an (f) needs-you item on this turn (§ 6.5), whatever the halt', 'is reported'), 'hold-until', 'step 1.1 without (f)')
 })
 
-test('the rules are all named (21) and each has a control', () => {
-  assert.equal(RULES.length, 21)
+test('the rules are all named (18) and each has a control', () => {
+  assert.equal(RULES.length, 18)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
