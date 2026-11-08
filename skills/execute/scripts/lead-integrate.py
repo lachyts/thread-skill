@@ -158,12 +158,16 @@ Subcommands:
 
   ci-headroom --repo R --pr N --head SHA [--merge SHA] [--tasks-dir T] [--gh-bin GH]
       CI headroom (ADR 0073 d5): merge-task.sh calls it on every merged exit path (its land_and_finish), after the
-      merge is verified. It finds the task note whose `pr:` names N, as base-moved does (none, or one naming no
-      rollout: nothing read or written, no gh call), then reads each required check once, bounded, never a live poll:
-      `gh pr checks N --required` (the plain table, so any gh reads it: its link column names each Actions job's run
-      and job id), then `gh run view <run> --json jobs,workflowName,attempt` once per run (at most CI_MAX_RUNS), each
-      call cut at CI_GH_TIMEOUT seconds. Per required Actions job, one ci-headroom line in the task's rollout record:
-      the job's name, its seconds (completedAt - startedAt; null when either is missing), its conclusion, and its time
+      merge is verified. With origin no github.com remote it stops there (nothing read, no vault walk); else it finds
+      the task note whose `pr:` names N, as base-moved does (none, or one naming no rollout: nothing read or written,
+      no gh call), then reads each required check once, bounded, never a live poll: `gh pr checks N --required` (the
+      plain table, so any gh reads it: its link column names each Actions job's run and job id), then `gh run view
+      <run> --json jobs,workflowName` once per run (at most CI_MAX_RUNS; fields gh 2.43.1 serves, so any gh reads
+      them), each call cut at CI_GH_TIMEOUT seconds. A job whose run was not read (gh failed or timed out, its JSON
+      did not parse, or its run is past CI_MAX_RUNS) writes no line and is named in `why`, so a re-run on the
+      already-merged path fills it. Per required Actions job of a read run, one ci-headroom line in the task's
+      rollout record: the job's name (its first CI_JOB_MAX characters, the form a re-run compares), its seconds
+      (completedAt - startedAt; null when either is missing), its conclusion, and its time
       limit, read from the workflow file the run ran (the run's workflowName, or a file path, matched under
       .github/workflows/ at --head, else --merge, through git, no network): the job whose `name:` (a `${{ }}`
       expression matches any text, and a name with none may carry GitHub's ` (<matrix values>)` suffix) or, with no
@@ -1710,12 +1714,16 @@ def cmd_ci_headroom(args):
         url = out_of(git(repo, "remote", "get-url", "origin"))
         m = re.search(r"github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$", url)
         owner_repo = m.group(1) if m else ""
+        if not owner_repo:   # before the vault walk: with no owner/repo, any repo's PR URL of this number would match
+            out["why"] = "no GitHub origin"
+            print(json.dumps(out))
+            return 0
         tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else rr.DEFAULT_TASKS_DIR
         path = _pr_index(tasks_dir, owner_repo).get(str(args.pr))
         note = rr.Note(Path(path)) if path else None
         rollout = rr._note_rollout(note) if note is not None else None
-        if not rollout or not owner_repo:
-            out["why"] = ("no GitHub origin" if not owner_repo else f"no task note's pr: names #{args.pr}" if note is None
+        if not rollout:
+            out["why"] = (f"no task note's pr: names #{args.pr}" if note is None
                           else f"{Path(path).stem} names no rollout")
             print(json.dumps(out))
             return 0
@@ -1739,18 +1747,31 @@ def cmd_ci_headroom(args):
         except (OSError, ValueError):
             seen = set()
         workflows = _workflows(repo, [args.head, args.merge])
-        runs = {}
-        for run_id in sorted({r for _c, r, _j in rows})[:CI_MAX_RUNS]:
-            rc, text = _gh(args.gh_bin, "run", "view", str(run_id), "-R", owner_repo, "--json",
-                           "jobs,workflowName,attempt")
-            try:
-                runs[run_id] = json.loads(text) if rc == 0 else None
-            except ValueError:
-                runs[run_id] = None
-        for check, run_id, job_id in rows:
-            if check in seen:
+        runs, unread_why = {}, {}   # run id -> its JSON; run id -> why it was not read
+        for i, run_id in enumerate(sorted({r for _c, r, _j in rows})):
+            if i >= CI_MAX_RUNS:
+                unread_why[run_id] = f"past CI_MAX_RUNS ({CI_MAX_RUNS})"
                 continue
-            run = runs.get(run_id) if isinstance(runs.get(run_id), dict) else {}
+            # jobs and workflowName only: gh 2.43.1 (merge-task's gh) refuses a field it lacks (`attempt`), rc 1.
+            rc, text = _gh(args.gh_bin, "run", "view", str(run_id), "-R", owner_repo, "--json", "jobs,workflowName")
+            try:
+                run = json.loads(text) if rc == 0 else None
+            except ValueError:
+                run = None
+            if isinstance(run, dict):
+                runs[run_id] = run
+            else:
+                unread_why[run_id] = ("gh timed out or did not run" if rc is None else f"gh rc {rc}" if rc != 0
+                                      else "its JSON did not parse")
+        unread = []   # a job of an unread run: no line, so a re-run on the already-merged path can fill it
+        for check, run_id, job_id in rows:
+            key = check[:run_record.CI_JOB_MAX]   # the name as the line stores it, on both sides of the re-run test
+            if key in seen:
+                continue
+            run = runs.get(run_id)
+            if run is None:
+                unread.append(f"{key} (run {run_id}: {unread_why.get(run_id, 'not read')})")
+                continue
             jobs = [j for j in run.get("jobs") or [] if isinstance(j, dict)]
             job = next((j for j in jobs if j.get("databaseId") == job_id), None) or \
                 next((j for j in jobs if j.get("name") == check), None) or {}
@@ -1764,17 +1785,18 @@ def cmd_ci_headroom(args):
                     limit, source = _job_limit(hit)
                     break
             conclusion = job.get("conclusion")
-            fields = {"repo": owner_repo, "pr": args.pr, "job": check[:run_record.CI_JOB_MAX],
+            fields = {"repo": owner_repo, "pr": args.pr, "job": key,
                       "seconds": _job_seconds(job), "timeoutMinutes": limit, "limitSource": source,
                       "conclusion": str(conclusion).lower()[:40] if conclusion else None, "runId": run_id}
-            if isinstance(run.get("attempt"), int) and run["attempt"] >= 1:
-                fields["attempt"] = run["attempt"]
             if isinstance(wf_name, str) and wf_name:
                 fields["workflow"] = wf_name
             if rr._event(rollout, "ci-headroom", task, fields):
                 out["written"] += 1
-            seen.add(check)
+            seen.add(key)
             out["jobs"].append(fields)
+        if unread:
+            out["why"] = (f"{len(unread)} required job(s) of an unread run not recorded, left for a re-run: "
+                          + "; ".join(unread))
     except Exception as e:  # noqa: BLE001 — recording never changes merge-task's exit
         out["why"] = f"{type(e).__name__}: {e}"
     print(json.dumps(out))

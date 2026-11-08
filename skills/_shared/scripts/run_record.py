@@ -410,8 +410,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      >= 0, or null when the job never started or never finished), conclusion (GitHub's, lowercased:
                      success, failure, cancelled ...; or null), timeoutMinutes (an int >= 1, or null when unread),
                      limitSource (workflow: the job's own `timeout-minutes` | default: none declared, GitHub's 360 |
-                     unread: no workflow file, job or plain number matched); runId? (an int >= 1), attempt? (an int >=
-                     1), workflow? (str). ADR 0073 d5, **CI headroom**: one line per required job at each merge.
+                     unread: no workflow file, job or plain number matched); runId? (an int >= 1), workflow? (str).
+                     ADR 0073 d5, **CI headroom**: one line per required job of a read run at each merge.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -577,7 +577,8 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
 - ci-headroom (ADR 0073 d5): one line per required GitHub Actions job of a merged PR (merge-task.sh's land_and_finish,
   through lead-integrate.py `ci-headroom`, after every merged exit path: bounded reads, no live poll, a job already
   recorded for that task and PR never twice), its time against its job's time limit. A required check that is no
-  Actions job (an external status) writes none. reflect.py's span reads them on the week's median (its suite block).
+  Actions job (an external status) writes none, and nor does a job whose run gh could not read (a re-run on the
+  already-merged path fills it). reflect.py's span reads them on the week's median (its suite block).
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -1516,7 +1517,7 @@ KINDS = {
     "ci-headroom": (True, {"repo": _str, "pr": _pr, "job": _short(CI_JOB_MAX), "seconds": _or_null(_int(0)),
                            "conclusion": _or_null(_short(40)), "timeoutMinutes": _or_null(_int(1)),
                            "limitSource": _enum(*CI_LIMIT_SOURCES)},
-                    {"runId": _int(1), "attempt": _int(1), "workflow": _str}),
+                    {"runId": _int(1), "workflow": _str}),
 }
 
 

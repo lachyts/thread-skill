@@ -46,7 +46,10 @@ State (a missing file takes the default in brackets):
                           steps.<id> when that file exists (an empty one: a run with no failed step),
                           else steps.
   run.<id>.json           lead-integrate.py ci-headroom's read (ADR 0073 d5): a `run view <id> --json ...` with no
-                          -q prints it whole (its jobs, workflowName, attempt); absent ⇒ the steps behaviour above.
+                          -q prints it whole (its jobs, workflowName); absent ⇒ the steps behaviour above.
+                          run.<id>.err: its text on stderr, rc 1, nothing printed, for that `run view <id> --json`.
+                          Any `run view --json` field outside gh 2.43.1's RUN_VIEW_FIELDS is its
+                          `Unknown JSON field: "<f>"` and field list on stderr, rc 1, before anything is served.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
   merge.queue             rc 0, autoMergeRequest set, stays OPEN.   merge.noop: rc 0, nothing changed.
@@ -296,9 +299,21 @@ if args[:2] == ["pr", "checks"]:
     sys.exit(int(e.get("rc", 0)))
 
 # ---- run view / run rerun -------------------------------------------------------------------------------
+# gh 2.43.1's `run view --json` fields (`gh run view --json` with none lists them): it refuses any other, `attempt`
+# included, with rc 1 before any API call.
+RUN_VIEW_FIELDS = ("conclusion", "createdAt", "databaseId", "displayTitle", "event", "headBranch", "headSha", "jobs",
+                   "name", "number", "startedAt", "status", "updatedAt", "url", "workflowDatabaseId", "workflowName")
 if args[:2] == ["run", "view"]:
     own = "steps.%s" % args[2] if len(args) > 2 else ""
     whole = "run.%s.json" % args[2] if len(args) > 2 else ""
+    if "--json" in args:
+        i = args.index("--json")
+        for f in (args[i + 1] if i + 1 < len(args) else "").split(","):
+            if f.strip() not in RUN_VIEW_FIELDS:
+                die('Unknown JSON field: "%s"\nAvailable fields:\n' % f.strip()
+                    + "\n".join("  " + x for x in RUN_VIEW_FIELDS))
+        if has("run.%s.err" % args[2]):
+            die(rd(p("run.%s.err" % args[2]), ""))
     if "--json" in args and not any(a in args for a in ("-q", "--jq")) and whole and has(whole):
         print(rd(p(whole)))
         sys.exit(0)
