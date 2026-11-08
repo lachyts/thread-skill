@@ -2585,10 +2585,11 @@ ok "$out" "['cc', 'u1']" "W3: the first unreadable note raises from _scan, in wa
 
 # ── WL1-WL7 (p44-1, ADR 0076): `waiting`, the Waiting list: which chain starts next, read in one process ─────────────
 # wl [args...] -> $out, $err, $rc: the verb at $WNOW, HOME pinned to $S/home (its capacity.json from capf; no Away file,
-# so the fallback is the Trickle, 2). wj <expr> reads $out's JSON as d.
+# so the fallback is the Trickle, 2), and no boot or wake of the Mac (a lease lapses on its own stamp alone). wj <expr>
+# reads $out's JSON as d.
 WNOW=2026-11-08T10:00:00+00:00
 UN=$'\nstart: unattended'
-wl() { HOME="$S/home" python3 "$CHECK" waiting --tasks-dir "$T" --now "$WNOW" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+wl() { HOME="$S/home" THREAD_MACHINE_TIMES='{}' python3 "$CHECK" waiting --tasks-dir "$T" --now "$WNOW" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
 wj() { python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(eval(sys.argv[2]))' "$out" "$1"; }
 # capf <capacity> [written_at] — Chorus's capacity.json in $S/home (capacity_max: the built-in 6)
 capf() { mkdir -p "$S/home/.config/thread"; printf '{"capacity": %s, "written_at": "%s"}\n' "$1" "${2:-$WNOW}" > "$S/home/.config/thread/capacity.json"; }
@@ -2667,6 +2668,43 @@ ok "$rc|$(cat "$S.out")" "2|" "WL7: a missing tasks dir is exit 2, with no stdou
 python3 "$CHECK" waiting --tasks-dir "$T" --now yesterday > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc|$(cat "$S.out")" "2|" "WL7: … and so is a --now that is no ISO time"
 has "$(cat "$S.err")" "unfinished-rollout: --now yesterday" "WL7: … with one line saying so"
+tscen wl8
+LOG="$(LFOLD="$W" lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wz "$OTHER$UN" z1~done~'`vault:Work/Projects/Z`'
+capf 3
+wl
+ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wz']|wz" \
+  "WL8: an in-place chain with every row done and its last Leg handed off waits for its Complete Leg"
+ok "$(wj '[(w["title"], w["cwd"], w["harness"], w["held_by"]) for w in d["waiting"]]')" "[('Leg 2: wz', '$W', 'claude', None)]" \
+  "WL8: … in the last Leg's folder, on claude (a Complete Leg's restart names no harness), its empty write set never held"
+has "$(wj 'd["waiting"][0]["prompt"]')" "/thread:execute [[wz]]"$'\n'"Leg 2 of the serial chain" "WL8: … its prompt the Leg prompt for Leg 2"
+LOG="$(LFOLD="$W" lg $D28 open)"$'\n'"- $D29 Leg 1 closed: stopped: land waits" mkchain wy "$OTHER$UN"$'\n'"$(rk 1)" y1~done~'`vault:Work/Projects/Y`'
+wl
+ok "$(wj '[(w["slug"], w["title"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wy', 'Leg 2: wy'), ('wz', 'Leg 2: wz')]|wy" \
+  "WL8: … and so does a completable one whose last Leg stopped, in order_key's order"
+has "$err" "WARN: wz: every task merged but its completion ceremony never ran" "WL8: … serial_notes' ceremony WARN still on stderr"
+tscen wl9
+LOG=$(lg $D29 open) mkchain wd "$OTHER$UN" d1~open~'`vault:Work/Projects/D`'
+LOG=- mkchain wo "$OTHER$UN" o1~open~'`vault:Work/Projects/O`'
+# lease <stem> <written_at> — a Leg lease (by: leg) in $S/home, as leg.py begin writes it
+lease() { mkdir -p "$S/home/.config/thread/leases"; printf '{"rollout": "%s", "written_at": "%s", "by": "leg"}\n' "$1" "$2" > "$S/home/.config/thread/leases/$1.json"; }
+capf 1
+wl
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "1|0|None" "WL9: an open Leg with no lease file holds its place"
+lease wd 2026-11-08T09:00:00Z
+wl
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "1|0" "WL9: … and so does one whose Leg lease is 60 minutes old"
+lease wd 2026-11-08T08:00:00Z
+wl
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "0|1|wo" \
+  "WL9: an open Leg whose Leg lease is over 90 minutes old adds nothing to running: its session died, so the room frees"
+hasnt "$out" '"wd"' "WL9: … and that chain is still off the list (its Leg is open)"
+tscen wl10
+LOG=- mkchain wo "$OTHER$UN" o1~open~'`vault:Work/Projects/O`'
+capf 4
+printf '[defaults]\ncapacity_max = "lots"\n' > "$S/home/.config/thread/rollouts.toml"
+wl
+ok "$(wj 'd["cap"]["n"]')|$(wj 'd["cap"]["by"]')" "2|trickle" "WL10: a fresh Capacity whose capacity_max will not resolve falls back to the Trickle"
+has "$(wj 'd["cap"]["why"]')" "rollouts.toml" "WL10: … and why names the refused file, never null"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

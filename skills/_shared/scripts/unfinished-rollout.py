@@ -386,10 +386,11 @@ re-check, a child each, is what timed out under the 2026-11-06 start-up herd): o
 leg.py read per serial note (chain_read_of), and begin's re-check run in-process per listed chain (serial_resume_hits, the
 one copy `check --resume` runs too). It writes nothing and runs git only as the re-check does. --now (an ISO time; a
 naive one reads local) is the clock for the Capacity, Away and lease reads; default the clock's now.
-- On the list: each unfinished serial note (serial_notes: root-level, neither done nor dropped, not complete) stamped
-  `start: unattended` (reconcile-rollout.py's _start_unattended) whose chain and hold leg.py reads (an unreadable one
-  is WARNed by serial_notes and left off, as begin's re-check would fail closed on it), and that has no Leg session
-  and no stop needing Lachy: its chain state (leg.py's chain_read) is `not-started`, `ready`, `awaiting-successor` or
+- On the list: each root-level serial note neither done nor dropped (one whose rows are all merged too: serial_notes
+  drops it with the ceremony WARN, yet its Complete Leg still waits for a place) stamped `start: unattended`
+  (reconcile-rollout.py's _start_unattended) whose chain and hold leg.py reads (an unreadable one is WARNed by
+  serial_notes and left off, as begin's re-check would fail closed on it), and that has no Leg session and no stop
+  needing Lachy: its chain state (leg.py's chain_read) is `not-started`, `ready`, `awaiting-successor` or
   `completable` (WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`, `stuck`,
   `incomplete`, `superseded`, `complete` or `dropped`; and leg.py's restart_of, from the contention-free plan for its
   next Leg, is a finish, claim, wait or complete with no blockedBy (a started hand-over, a malformed `chain_copies:` or
@@ -398,18 +399,24 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   rank, then the first to begin or the earlier `captured:`, then the slug). `rank` is the chain's 1-based place.
 - Held (ADR 0076 d2): `held_by` is the first holder, by case-folded slug, that begin's surface re-check would name for
   its next Leg's write set (leg.py's write_set, as surface_recheck passes it, no --checkout): another serial chain by
-  serial_waits, or a parallel rollout's Project root that write set or its checkouts meet; else null (an empty write
-  set is never held). A held chain keeps its place and is passed over.
+  serial_waits (over serial_notes, so a chain whose rows are all merged holds nothing), or a parallel rollout's Project
+  root that write set or its checkouts meet; else null (an empty write set, a Complete Leg's, is never held). A held
+  chain keeps its place and is passed over.
 - Room: the Mac-wide cap in force (reconcile-rollout.py's _capacity_state over capacity.py's read, then _cap_in_force:
   a fresh Capacity's C, else the Trickle, or the Away cap while Away; `cap` {n, by: capacity | trickle | away cap, why:
-  the Capacity reading's why when it fell back, else null}) less `running`: the Mac-wide running Rollout tasks
-  (_running_by_rollout, leases read at --now, Leg claims never) plus every unfinished serial note's Leg session (a Leg
-  counts from its start, ADR 0076 d3: an open Leg, a standing restart `pending` or `started`, or a last Leg handed off
-  to a `started` session), floored at 0.
+  the Capacity reading's why when it fell back, or its `maxWhy` when the reading is fresh but capacity_max will not
+  resolve, else null}) less `running`: the Mac-wide running Rollout tasks (_running_by_rollout, leases read at --now,
+  Leg claims never) plus every root serial note's Leg session, done and dropped ones aside (a Leg counts from its
+  start, ADR 0076 d3: an open Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started`
+  session), floored at 0. An open Leg whose Leg lease reads lapsed at --now (_Leases' Leg rule, the Capacity count's:
+  90 min after its last write, 180 for a waiting one) holds no place: its session died without `leg.py close`, and
+  counting it would leave the room 0 until a repair; no lease file, or an unreadable one, still counts.
 stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"n", "by", "why"}, "waiting": [{"slug",
 "rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null}; cwd, title, prompt and harness are
-restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain). `next` is the first unheld chain, or
-null when room is 0 or every chain is held. `WARN:` lines (serial_notes', the re-check's) go to stderr, each once.
+restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain), but a Complete Leg's harness, which
+restart_of leaves null (anyLaunch: begin takes any), reads `claude`, so every entry names one the Stage can start.
+`next` is the first unheld chain, or null when room is 0 or every chain is held. `WARN:` lines (serial_notes', the
+re-check's) go to stderr, each once.
 Exit 0, or 2 (no stdout, one `unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or
 reconcile-rollout.py, serial-chains.py or leg.py unloadable.
 """
@@ -437,7 +444,8 @@ SELF_ROLLOUT_SH = Path(__file__).resolve().parent.parent.parent / "execute/scrip
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
             "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
-            "_record_read", "_stop_state", "_truthy_flag", "_parse_ts", "_share_walks", "_walk_of", "_note_index")
+            "_record_read", "_stop_state", "_truthy_flag", "_parse_ts", "_share_walks", "_walk_of", "_note_index",
+            "_capacity_state", "_cap_in_force", "_away_state", "_running_by_rollout", "_Leases")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -2006,12 +2014,15 @@ def cmd_unstarted(args, rr) -> int:
 
 # ---- the Waiting list (ADR 0076) --------------------------------------------------------------------------------------
 
-def leg_session(leg, chain, read) -> bool:
+def leg_session(leg, ctx, chain, read, leases=None) -> bool:
     """Whether a serial chain has a Leg session, which holds a place from its start (ADR 0076 d3): an open Leg, a
     standing restart `pending` or `started` (a manual one starts none), or a last Leg handed off to a `started`
-    session that has not begun."""
+    session that has not begun. With `leases` (a reconcile-rollout.py _Leases, the room's count), an open Leg whose
+    Leg lease reads lapsed is none (its session died without `leg.py close`: the Capacity count's rule,
+    _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a later boot or wake
+    restarting it); no lease file or an unreadable one still counts (a Leg on an older snapshot writes none)."""
     if read["open_leg"] is not None:
-        return True
+        return leases is None or leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
     restarted = read["restarted"]
     if restarted is not None and restarted["how"] in ("pending", "started"):
         return True
@@ -2037,33 +2048,36 @@ def cmd_waiting(args, rr) -> int:
     warns, warned = [], set()
     vault = vault_root(tasks_dir)
     notes = list(rollout_notes(rr, tasks_dir, archive=False))
+    # Every root serial note neither done nor dropped, read once: the room counts their Leg sessions, and the list is
+    # taken from them. Never from serial_notes, which drops a chain whose rows are all merged (the ceremony WARN), yet
+    # such a chain's Complete Leg still waits for a place (a `completable` chain, or one whose last Leg handed off).
+    chains = []
+    for path, note, where in notes:
+        if where != "root" or rr._status(note) in CLOSED or rr._shape(note) != "serial":
+            continue
+        ctx, chain, read, _why = chain_read_of(rr, path, tasks_dir)
+        if read is not None:
+            chains.append((path, ctx, chain, read))
 
     # Room: the cap in force less the Rollout tasks running and every Leg session.
     capacity = rr._capacity_state(now, quota=False)
     cap = rr._cap_in_force(rr._away_state(now), capacity)
     by = "capacity" if cap.get("by") == "capacity" else "away cap" if cap["away"] else "trickle"
-    tasks = sum(rr._running_by_rollout(tasks_dir, rr._note_index(tasks_dir), leases=rr._Leases(now)).values())
-    legs = 0
-    for path, note, _ in notes:
-        if rr._status(note) in CLOSED or rr._shape(note) != "serial":
-            continue
-        _ctx, chain, read, _why = chain_read_of(rr, path, tasks_dir)
-        if read is not None and leg_session(load_leg(rr), chain, read):
-            legs += 1
+    leases = rr._Leases(now)
+    tasks = sum(rr._running_by_rollout(tasks_dir, rr._note_index(tasks_dir), leases=leases).values())
+    legs = sum(1 for _path, ctx, chain, read in chains if leg_session(load_leg(rr), ctx, chain, read, leases))
     running = tasks + legs
     room = max(0, cap["n"] - running)
 
-    serials = serial_notes(rr, notes, tasks_dir, warns, set(), warned)
+    serials = serial_notes(rr, notes, tasks_dir, warns, set(), warned)   # the hold reads only: what may hold a chain
     parallels = parallel_roots(rr, notes, tasks_dir, vault, set(), warns, warned)
-    git = SC.Git() if serials else None
+    git = SC.Git() if chains else None
     listed = []
-    for s in serials:
-        path = tasks_dir / f"{s['slug']}.md"
-        ctx, chain, read, _why = chain_read_of(rr, path, tasks_dir)
-        if chain is None or not rr._start_unattended(chain.note):
+    for path, ctx, chain, read in chains:
+        if not rr._start_unattended(chain.note):
             continue
         leg = load_leg(rr)
-        if read["state"] not in WAITING_STATES or leg_session(leg, chain, read):
+        if read["state"] not in WAITING_STATES or leg_session(leg, ctx, chain, read):
             continue
         restart = leg.restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"],
                                  read["restarted"])
@@ -2071,21 +2085,22 @@ def cmd_waiting(args, rr) -> int:
             continue
         hold, _why = chain_hold(rr, path, tasks_dir)
         if hold is None:
-            continue   # serial_notes WARNed it unreadable: begin's re-check would fail closed on it too
+            continue   # its hold will not read (serial_notes WARNs it): begin's re-check would fail closed on it too
         toks = [SC.parse_token(t) for t in hold["ws"]]
-        held = serial_resume_hits(rr, s["slug"], hold, toks, [], notes, tasks_dir, git, vault, set(), warns, warned,
+        held = serial_resume_hits(rr, ctx.slug, hold, toks, [], notes, tasks_dir, git, vault, set(), warns, warned,
                                   serials, parallels) if toks else {}
-        listed.append((order_key(rr, s["slug"], s["began"], s["rank"], s["captured"]), s["slug"],
+        listed.append((order_key(rr, ctx.slug, hold["began"], hold["rank"], hold["captured"]), ctx.slug,
                        min(held, key=str.lower) if held else None, restart))
     listed.sort(key=lambda x: x[0])
+    # A Complete Leg's restart carries no harness (it works no row, so begin takes any): the Stage starts it on claude.
     waiting = [{"slug": slug, "rank": k, "held_by": held_by, "cwd": r["cwd"], "title": r["title"],
-                "prompt": r["prompt"], "harness": r["harness"]}
+                "prompt": r["prompt"], "harness": r["harness"] or "claude"}
                for k, (_key, slug, held_by, r) in enumerate(listed, 1)]
     nxt = next((w["slug"] for w in waiting if w["held_by"] is None), None) if room > 0 else None
     for w in dict.fromkeys(warns):
         print(w, file=sys.stderr)
-    print(json.dumps({"room": room, "running": running,
-                      "cap": {"n": cap["n"], "by": by, "why": None if by == "capacity" else capacity["why"]},
+    why = None if by == "capacity" else capacity["why"] or capacity["maxWhy"]
+    print(json.dumps({"room": room, "running": running, "cap": {"n": cap["n"], "by": by, "why": why},
                       "waiting": waiting, "next": nxt}, ensure_ascii=False))
     return 0
 
