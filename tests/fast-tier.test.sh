@@ -528,5 +528,27 @@ ok "$rc|$(lines '^tests/zzb\.test\.sh: FAILED \([0-9]+s\)$')|$(lines '^  - tests
 ok "$(lines '^make test: FAILED \([0-9]+s\)$')" 1 "F17: … and the red verdict carries the run's seconds"
 git -C "$F" checkout -q -- tests/zzb.test.sh
 
+# F18-F19 (p43-6): shard.py reads measured weights from tests/shard-weights.tsv beside run.sh (its docstring holds the
+# rules). splan: the two shell suites' shards from --shard-plan 2, as `<k>:<entry>` words.
+W="$F/tests/shard-weights.tsv"
+splan() { run bash --shard-plan 2; printf '%s\n' "$rc"; printf '%s\n' "$out" | grep -E 'zz[ab]\.test\.sh$' | tr '\t' ':'; }
+ok "$(splan | tr '\n' ' ')" "0 1:tests/zzb.test.sh 2:tests/zza.test.sh " "F18: with no weights file, the larger suite (zzb) leads shard 1"
+printf '%s\t%s\n' 100 tests/zza.test.sh 1 tests/zzb.test.sh > "$W"
+ok "$(splan | tr '\n' ' ')" "0 2:tests/zzb.test.sh 1:tests/zza.test.sh " "F18: … a weight beats the size: zza (100 s) now leads shard 1"
+printf '%s\t%s\n' 1000 @merge-task-self-tests >> "$W"
+ok "$(splan | tr '\n' ' ')" "0 2:tests/zzb.test.sh 2:tests/zza.test.sh " "F18: … the self-tests' weight seeds shard 1, so both suites go to shard 2"
+before=$(splan); printf '# a comment\n\n%s\t%s\n' 5 tests/zzgone.test.sh >> "$W"
+ok "$(splan)" "$before" "F18: … a weights line for a test that is not in the input, a comment and a blank line change nothing"
+printf '%s\t%s\n' 100 tests/zza.test.sh > "$W"
+ok "$(splan | tr '\n' ' ')" "0 1:tests/zzb.test.sh 2:tests/zza.test.sh " \
+  "F18: … an unweighted suite's load is its size times its kind's median seconds per byte, so zzb (larger) leads shard 1 again"
+for bad in "nottab tests/zza.test.sh" "0${tab}tests/zza.test.sh" "3${tab}tests/zza.test.sh${nl}4${tab}tests/zza.test.sh"; do
+  printf '%s\n' "$bad" > "$W"
+  so=$(cd "$F" && printf '%s\n' tests/zza.test.sh tests/zzb.test.sh | python3 tests/lib/shard.py 2 2>"$TMP/shard.err"); src=$?
+  ok "$src|$so|$(grep -c '^shard: tests/shard-weights\.tsv:[0-9][0-9]*: ' "$TMP/shard.err")|$(wc -l < "$TMP/shard.err" | tr -d ' ')" "2||1|1" \
+    "F19: a bad weights file ($(printf '%s' "$bad" | tr '\t\n' '>/')) exits 2 with one shard: tests/shard-weights.tsv:<n>: line and no stdout"
+done
+rm -f "$W"
+
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"
