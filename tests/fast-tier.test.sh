@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S13) and `check` (C1-C3) on throwaway
-# repos, its results on the real tree (R1-R6), and tests/run.sh's --fast and --only modes on a fixture checkout
-# (F1-F9). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
+# repos, its results on the real tree (R1-R6), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
+# fixture checkout (F1-F14; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
 # temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
@@ -376,7 +376,7 @@ ok "$(printf '%s\n' "$r6" | head -1 | cut -f1)|$(printf '%s\n' "$r6" | grep -cxE
 echo "== run.sh"
 F="$TMP/f"; mkrepo "$F"
 cp "$root/tests/run.sh" "$F/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$F/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$F/tests/lib/"
 put "$F" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$F" skills/x/scripts/zza.py 'print("a")'
 put "$F" skills/x/scripts/zzb.py 'print("b")'
@@ -461,6 +461,45 @@ echo '# touched' >> "$F/skills/execute/scripts/merge-task.sh"; git -C "$F" commi
 THREAD_VERIFY_BASE=$FB run bash --fast
 ok "$rc|$(markers)" "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
   "F9: a change to merge-task.sh runs both self-tests and nothing else"
+
+# --shard K/N and --shard-plan N (p43-3, ADR 0073 d3): tests/lib/shard.py's split, run one shard at a time.
+git -C "$F" reset -q --hard "$FB"
+nl=$'\n'; tab=$'\t'
+# allmarkers: every marker the run printed, one per run of a suite (not deduplicated), sorted.
+allmarkers() { printf '%s\n' "$1" | grep -oE 'zzmarker-[a-z-]+( --self-test-[a-z]+)?' | grep -v '^zzmarker-self-test$' | LC_ALL=C sort | tr '\n' ' '; }
+ZZ_C_OK=1 run bash --shard 1/2; rc1=$rc; out1=$out
+ZZ_C_OK=1 run bash --shard 2/2; rc2=$rc; out2=$out
+ok "$rc1|$rc2|$(allmarkers "$out1$nl$out2")" \
+  "0|0|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F10: --shard 1/2 and --shard 2/2 together run every suite and both self-tests exactly once, and both pass"
+ok "$(printf '%s\n' "$out1" | grep -c 'zzmarker-self-test --self-test-')|$(printf '%s\n' "$out2" | grep -c 'zzmarker-self-test')" "2|0" \
+  "F10: … the self-tests run in shard 1 only"
+has "$out1" "== shard 1/2: " "F10: … shard 1 names itself and its file count"
+has "$out1" "   the merge-task self-tests" "F10: … and lists the self-tests"
+
+run bash --shard-plan 2
+ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== ')" "0||0" "F11: --shard-plan 2 exits 0, starts no suite and runs no always-run step"
+ok "$(printf '%s\n' "$out" | grep -cE '^[12]'"$tab"'')|$(printf '%s\n' "$out" | cut -f2 | LC_ALL=C sort | tr '\n' ' ')" \
+  "4|@merge-task-self-tests tests/contracts/zzc.test.mjs tests/zza.test.sh tests/zzb.test.sh " \
+  "F11: … and prints <k><TAB><entry> for each entry once"
+
+for args in "--shard 0/2" "--shard 3/2" "--shard x" "--shard 1/2 extra" "--shard" "--shard 1/2/3" "--shard /2" \
+  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--fast --shard 1/2" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2"; do
+  # shellcheck disable=SC2086
+  run bash $args
+  ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== ')" "2||0" "F12: run.sh $args exits 2 and runs nothing"
+done
+
+run bash --shard 4/4
+ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== tests/')" "0||0" "F13: an empty shard (--shard 4/4 on the small fixture) passes and spawns no suite"
+has "$out" "== shard 4/4: 0 test files" "F13: … says 0 test files"
+has "$out" "== node tests: none selected" "F13: … and never runs node"
+
+put "$F" tests/lib/shard.py 'import sys; sys.exit(1)'
+ZZ_C_OK=1 run bash --shard 1/2
+ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no test"
+has "$out" "  - shard split" "F14: … through the shard split step"
+git -C "$F" checkout -q -- tests/lib/shard.py
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"
