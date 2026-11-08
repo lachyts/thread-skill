@@ -162,12 +162,12 @@ Subcommands:
       the task note whose `pr:` names N, as base-moved does (none, or one naming no rollout: nothing read or written,
       no gh call), then reads each required check once, bounded, never a live poll: `gh pr checks N --required` (the
       plain table, so any gh reads it: its link column names each Actions job's run and job id), then `gh run view
-      <run> --json jobs,workflowName` once per run (at most CI_MAX_RUNS; fields gh 2.43.1 serves, so any gh reads
-      them), each call cut at CI_GH_TIMEOUT seconds. A job whose run was not read (gh failed or timed out, its JSON
-      did not parse, or its run is past CI_MAX_RUNS) writes no line and is named in `why`, so a re-run on the
-      already-merged path fills it. Per required Actions job of a read run, one ci-headroom line in the task's
-      rollout record: the job's name (its first CI_JOB_MAX characters, the form a re-run compares), its seconds
-      (completedAt - startedAt; null when either is missing), its conclusion, and its time
+      <run> --json jobs,workflowName` once per run holding a job not yet recorded (at most CI_MAX_RUNS; fields gh
+      2.43.1 serves, so any gh reads them), each call cut at CI_GH_TIMEOUT seconds. A job whose run was not read (gh
+      failed or timed out, its JSON did not parse, or its run is past CI_MAX_RUNS) writes no line and is named in
+      `why`, so a re-run on the already-merged path fills it. Per required Actions job of a read run, one ci-headroom
+      line in the task's rollout record: the job's name (its first CI_JOB_MAX characters, the form a re-run
+      compares), its seconds (completedAt - startedAt; null when either is missing), its conclusion, and its time
       limit, read from the workflow file the run ran (the run's workflowName, or a file path, matched under
       .github/workflows/ at --head, else --merge, through git, no network): the job whose `name:` (a `${{ }}`
       expression matches any text, and a name with none may carry GitHub's ` (<matrix values>)` suffix) or, with no
@@ -1748,7 +1748,9 @@ def cmd_ci_headroom(args):
             seen = set()
         workflows = _workflows(repo, [args.head, args.merge])
         runs, unread_why = {}, {}   # run id -> its JSON; run id -> why it was not read
-        for i, run_id in enumerate(sorted({r for _c, r, _j in rows})):
+        # Only a run with a job not yet recorded is read, so a re-run reads none once all are, and reaches the runs
+        # an earlier pass left past CI_MAX_RUNS.
+        for i, run_id in enumerate(sorted({r for c, r, _j in rows if c[:run_record.CI_JOB_MAX] not in seen})):
             if i >= CI_MAX_RUNS:
                 unread_why[run_id] = f"past CI_MAX_RUNS ({CI_MAX_RUNS})"
                 continue

@@ -111,10 +111,11 @@ ok "$(rec '[[d["task"], d["pr"], d["repo"], d["job"], d["seconds"], d["conclusio
 ok "$(glog | grep -c '^run view 11 ')" 1 "1. run 11 read once, for all three jobs"
 ok "$(glog | grep '^run view 11 ')" "run view 11 -R o/r --json jobs,workflowName" "1. … asking only fields gh 2.43.1 serves"
 
-# 2. the same PR again, on the already-merged path: no second line
+# 2. the same PR again, on the already-merged path: no second line, and no run read (each of its jobs is recorded)
 run 5 "$I" "$B"
 ok "$rc" 0 "2. already merged: exit 0"
 ok "$(rec 'len(L)')" 3 "2. no job recorded twice"
+ok "$(glog | grep -c '^run view')" 0 "2. … and no run read again"
 
 # 3. an unwritable record changes no exit and no line of output. The same merge from the same state (a snapshot of the
 #    fake GitHub, its bare repo and the clone, restored between the two, every commit date pinned so each sha matches),
@@ -174,7 +175,8 @@ ok "$(rec '[[d["job"], d["seconds"], d["conclusion"]] for d in L]')" \
 run 5 "$I" "$B"
 ok "$(rec 'len(L)')" 3 "6. a third run adds none"
 
-# 7. a run past CI_MAX_RUNS (4) is never read: its job writes no line and is named in why
+# 7. a run past CI_MAX_RUNS (4) is not read: its job writes no line and is named in why, and the next pass, which reads
+#    no run whose jobs are all recorded, reads it
 fresh; pair; wfhead; mkpr 5 "$I"; checks
 for r in 12 13 14 15; do onejob "$r" "$((r * 10))" "job $r"; done
 rm -f "$THREAD_EVENTS_DIR/ro.jsonl"
@@ -183,6 +185,10 @@ ok "$(rec '[d["job"] for d in L if d["runId"] != 11]')" '["job 12","job 13","job
   "7. runs 11 to 14 read; run 15's job writes none"
 ok "$(glog | grep -c '^run view 15 ')" 0 "7. … run 15 never asked for"
 has "$(jf 'J["why"]')" "job 15 (run 15: past CI_MAX_RUNS (4))" "7. … and named in why"
+li 5 "$tmp/repo"
+ok "$(glog | grep '^run view' | cut -d' ' -f1-3)" "run view 15" "7. the next pass reads run 15 alone"
+ok "$(rec '[d["job"] for d in L if d["runId"] != 11]')|$(jf 'J["why"]')" '["job 12","job 13","job 14","job 15"]|""' \
+  "7. … and writes its job, with nothing left unread"
 
 # 8. a required check named past CI_JOB_MAX (200) is stored cut to it, and the re-run compares the cut name: one line
 fresh; pair; wfhead; mkpr 5 "$I"; checks
