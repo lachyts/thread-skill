@@ -1409,14 +1409,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Slot can be idle in a moving rollout).
 - **Watchdog** — what acts on a Stalled rollout from outside its session,
   reading it from the **Situational report** (`reconcile-rollout.py moving`):
-  Chorus's Companion, alone (ADR 0048, ADR 0075 d2). It recovers without
-  asking and never notifies; with Chorus not running nothing watches, and a
-  stall is read when Lachy runs `/thread:status`. The launchd `watchdog.py`,
-  which only notified when Chorus was not running, is retired by ADR 0075 and
-  removed by P41-5. From P41-4 it also watches a serial note's waiting Leg (a
-  **Begin wait**, a Capacity or review wait), `stalled` once its session is
-  gone or it goes stale (ADR 0075 d5). Its `stalled` is a reason to look,
-  never by itself a reason to start a second lead.
+  Chorus's Companion, alone (ADR 0048, ADR 0075 d5). It recovers without
+  asking and sends no push (ADR 0075 d2); its only signal to Lachy is the
+  Companion's lead at the Stage, which is Chorus's reading (d3). From P41-4
+  it also watches a serial note's waiting Leg (a **Begin wait**, a Capacity
+  or review wait), `stalled` once its session is gone or it goes stale (ADR
+  0075 d5). Its `stalled` is a reason to look, never by itself a reason to
+  start a second lead. From P41-5, with Chorus not running nothing watches,
+  and a stall is read when Lachy runs `/thread:status`. Until P41-5, an
+  installed `watchdog.py` (ADR 0048's launchd fallback, which ADR 0075
+  retires) still notifies through ntfy-push.py when Chorus is not running,
+  once per stall; P41-5 deletes it.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.
   _Avoid_: monitor, heartbeat.

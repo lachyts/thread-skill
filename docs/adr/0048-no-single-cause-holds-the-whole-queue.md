@@ -6,7 +6,9 @@ Status: accepted. Ruled with Lachy in the re-grill of PR #202, after the audit o
 sentence of the Decision bullet "Catch what is not a hold" ("When Chorus is not running, a launchd job reads it
 instead and only notifies Lachy") and "The launchd fallback" in How p29-7 built it; and the Considered option "The
 watchdog in one place", rejected here, is now the rule. The Watchdog is Chorus's alone, nothing notifies Lachy when
-Chorus is not running, and `moving` also reads a serial note's waiting Leg.)*
+Chorus is not running, and `moving` also reads a serial note's waiting Leg. Amended by ADR 0075 d2 and d3: in the
+Decision bullet "The Companion recovers first", "It notifies Lachy only when a recovery fails twice or what is left
+is a decision" now means only the Companion's lead at the Stage, which is Chorus's reading (d3), never a push (d2).)*
 
 ## Context
 
