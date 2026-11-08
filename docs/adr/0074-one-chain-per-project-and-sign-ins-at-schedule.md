@@ -120,6 +120,10 @@ review stays the backstop, as on 11-07.
 - A member that depends on a row left out, by any dependency the plan reads (`depends-on:`, `blocked-by:`, or a body
   dependency passed as `--dep`), is left out with it (follows from the bullet above: kept in, it would wait on that
   row and close its chain `stuck`).
+- A session-lane member that depends on a row left out is never left out itself, but a member depending on it is,
+  directly or through another such lane member (technical: a lane row is never stamped, so leaving it out changes
+  nothing, while a chained row depending on it would wait on a row that waits on a left-out one; d2's "through another
+  member").
 - A member with no `projects:` link is grouped as before, by surface and dependency alone (technical: no project names
   what it shares with the rest, and d1 adds only the shared-project edge).
 - The sign-in step sits after Pre-flight and before the gates, as schedule § Serial path S3.7 (technical: S4's gates

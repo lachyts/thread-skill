@@ -147,13 +147,17 @@ alias-less rows differ by folder (project `.mcp.json` servers and their per-path
 folder and its `--mcp-config`; a `cx-*` alias is refused, since a Codex Leg's sign-ins are never checked at schedule
 (ADR 0074). The leave-out runs after ruling (c) and each launch's resolution, and before grouping: each non-lane member
 a key matches is left out, needing its matched namespaces; then, to a fixpoint in notes order, each non-lane member any
-of whose in-set dependencies (`depends-on:`, `blocked-by:`, --dep) is left out leaves too, by its first left-out one
-(its `via`). A session-lane member is never left out. A left-out member is in no chain and no `externalDeps`, and goes
-in `leftOut` with its line: a direct one `<slug>: needs <ns>[, ...], which did not read signed in from its launch
-<alias> from <folder>: sign in to <server>[, ...], then /thread:orient --steer`, a dependant `<slug>: depends on
-[[<via>]], left out: sign in to <server>[, ...], then /thread:orient --steer`, with its `via` row's servers. Its
-refusals and WARNs are any member's. A key that leaves out no member adds `WARN: --signed-out <key>: it leaves out no
-chain member`.
+of whose in-set dependencies (`depends-on:`, `blocked-by:`, --dep) is left out, or is a waiting lane member, leaves
+too, by its first such one (its `via`). A session-lane member is never left out, but one with such a dependency waits:
+it carries the closure, so a member depending on it, directly or through another waiting lane member, still leaves
+(ADR 0074 d2's "through another member"; kept in, it would wait on a row that waits on a left-out one). A left-out
+member is in no chain and no `externalDeps`, and goes in `leftOut` with its line: a direct one `<slug>: needs <ns>[,
+...], which did not read signed in from its launch <alias> from <folder>: sign in to <server>[, ...], then
+/thread:orient --steer`, a dependant `<slug>: depends on [[<via>]], left out: sign in to <server>[, ...], then
+/thread:orient --steer`, with its `via` row's servers, and one whose `via` is a waiting lane member `<slug>: depends on
+[[<via>]], a session-lane row waiting on [[<row>]], left out: sign in to <server>[, ...], then /thread:orient
+--steer`, `<row>` the first left-out member that lane member reaches, and its servers. Its refusals and WARNs are any
+member's. A key that leaves out no member adds `WARN: --signed-out <key>: it leaves out no chain member`.
 
 Grouping (ADR 0074 d1): connected components over surface overlap, `depends-on:` / `blocked-by:` / --dep edges inside
 the set, and a shared first project: every member whose first `projects:` wikilink names one project (case-folded) is
@@ -1381,7 +1385,8 @@ def cmd_plan(args) -> int:
 
     lane_slugs = {s["slug"] for s in session}
     # Sign-ins (ADR 0074 d2): a --signed-out key leaves out each non-lane member needing its namespace from its launch,
-    # then each in-set dependant of a left-out member, to a fixpoint in notes order (the header's Sign-ins paragraph).
+    # then each in-set dependant of a left-out member, directly or through a session-lane member that waits on one
+    # (never left out itself), to a fixpoint in notes order (the header's Sign-ins paragraph).
     left, hit = {}, set()
     for s in notes:
         if s in lane_slugs:
@@ -1398,18 +1403,25 @@ def cmd_plan(args) -> int:
             servers = list(dict.fromkeys(mcp_server(n) for n in needs))
             left[s] = (servers, f"{s}: needs {', '.join(needs)}, which did not read signed in from its launch "
                                 f"{launch['alias']} from {f}: sign in to {', '.join(servers)}, then /thread:orient --steer")
+    waits = {}  # a session-lane member that waits on a left-out one -> the first left-out member it reaches
     grew = bool(left)
     while grew:
         grew = False
         for s in notes:
-            if s in lane_slugs or s in left:
+            if s in left or s in waits:
                 continue
-            via = next((k for k in (by_key.get(d.lower()) for d in info[s]["deps"]) if k in left), None)
-            if via:
-                servers = left[via][0]
-                left[s] = (servers, f"{s}: depends on [[{via}]], left out: sign in to {', '.join(servers)}, then "
-                                    "/thread:orient --steer")
-                grew = True
+            via = next((k for k in (by_key.get(d.lower()) for d in info[s]["deps"]) if k in left or k in waits), None)
+            if not via:
+                continue
+            grew = True
+            row = via if via in left else waits[via]
+            if s in lane_slugs:
+                waits[s] = row
+                continue
+            servers = left[row][0]
+            link = "" if via in left else f", a session-lane row waiting on [[{row}]]"
+            left[s] = (servers, f"{s}: depends on [[{via}]]{link}, left out: sign in to {', '.join(servers)}, then "
+                                "/thread:orient --steer")
     for v, *_ in signed_out:
         if v not in hit:
             warns.append(f"WARN: --signed-out {v}: it leaves out no chain member")

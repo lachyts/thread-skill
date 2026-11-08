@@ -43,9 +43,11 @@
 #        `optional`, a path span and another label as nothing; mcp_server names a namespace's server
 #   P11  sign-ins at S3.7 (ADR 0074 d2): each member's `mcp`; `--signed-out <namespace>@<alias>` leaves out the members
 #        needing that namespace from that launch (case-folded, one launch apart from another) and their in-set
-#        dependants (depends-on, blocked-by, --dep, transitively), each in `leftOut` with its line; an alias-less row
-#        keys on its folder (realpath, so a symlink matches); a session-lane member is never left out; a key that
-#        matches nothing WARNs; a refused alias (no folder) never matches a folder key, and exits 3 with no traceback
+#        dependants (depends-on, blocked-by, --dep, transitively, a dependant listed before its dependency too), each
+#        in `leftOut` with its line; an alias-less row keys on its folder (realpath, so a symlink matches); a
+#        session-lane member is never left out, but carries the closure to a member depending on it (directly or
+#        through another lane member); a key that matches nothing WARNs; a refused alias (no folder) never matches a
+#        folder key, and exits 3 with no traceback
 #   P6   exit 2, a malformed, folder-less alias-less or cx-* --signed-out included
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -929,6 +931,29 @@ for k in 'mcp__nowhere__*@cc-a-seo:/elsewhere' 'mcp__unused__*@cc-a-seo'; do
 done
 plan --tasks sw1,sw2 --signed-out 'mcp__nowhere__*@cc-a-seo'
 ok "$rc|$(j "$chains")|$(j "$left")" '0|[]|["sw1","sw2"]' "P11: every member left out gives no chain, exit 0"
+plan --tasks sw3,sw2,sw1,sw4 --signed-out 'mcp__nowhere__*@cc-a-seo'
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[["sw4"]]|["sw3","sw2","sw1"]' \
+   "P11: a dependant listed before its dependency still leaves (the fixpoint's second pass), leftOut in notes order"
+ok "$(why sw3)" "sw3: depends on [[sw2]], left out: sign in to nowhere, then /thread:orient --steer" "P11: … sw3 by sw2"
+# A session-lane row is never left out, but carries the closure: sw12 (lane) waits on sw1, sw13 (lane) on sw12, so
+# sw15 (on sw12) and sw14 (on sw13, through two lane rows) leave; listed dependants first, so it takes three passes.
+mkt sw12 'projects: ["[[PA]]"]' 'launch: cc-ts' 'surfaces: ["ext:sw12"]' 'depends-on: ["[[sw1]]"]'
+mkt sw13 'projects: ["[[PA]]"]' 'launch: cc-ts' 'surfaces: ["ext:sw13"]' 'depends-on: ["[[sw12]]"]'
+mkt sw14 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw14"]' 'depends-on: ["[[sw13]]"]'
+mkt sw15 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw15"]' 'depends-on: ["[[sw12]]"]'
+LANE=(--tasks sw14,sw15,sw13,sw12,sw1,sw4)
+lane='[s["slug"] for s in d["sessionLane"]]'
+plan "${LANE[@]}"
+ok "$rc|$(j "$lane")|$(j "$left")|$(j 'sorted(e["task"] + ">" + e["dependsOn"] for c in d["chains"] for e in c["externalDeps"])')" \
+   '0|["sw13","sw12"]|[]|["sw14>sw13","sw15>sw12"]' "P11: with no --signed-out, a chain row's dependency on a lane row is an external one"
+plan "${LANE[@]}" --signed-out 'mcp__nowhere__*@cc-a-seo'
+ok "$rc|$(j "$chains")|$(j "$lane")|$(j "$left")" '0|[["sw4"]]|["sw13","sw12"]|["sw14","sw15","sw1"]' \
+   "P11: a member depending on a lane row that waits on a left-out one leaves, directly or through another lane row; the lane rows stay in the lane"
+ok "$(why sw15)" "sw15: depends on [[sw12]], a session-lane row waiting on [[sw1]], left out: sign in to nowhere, then /thread:orient --steer" \
+   "P11: … its line names the lane row and the left-out row it waits on"
+ok "$(why sw14)" "sw14: depends on [[sw13]], a session-lane row waiting on [[sw1]], left out: sign in to nowhere, then /thread:orient --steer" \
+   "P11: … through two lane rows, the first left-out row reached"
+ok "$(j '[e for c in d["chains"] for e in c["externalDeps"]]')|$(j 'd["warns"]')" '[]|[]' "P11: … no external dependency is left on a lane row"
 plan --tasks sw8,sw9
 ok "$rc|$(j "$chains")|$(mem sw8 launch)" "0|[[\"sw8\"],[\"sw9\"]]|{\"alias\":\"claude\",\"folder\":\"$G\"}" "P11: two alias-less rows in two folders"
 plan --tasks sw8,sw9 --signed-out "mcp__nowhere__*@claude:$G"
