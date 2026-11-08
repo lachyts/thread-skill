@@ -583,7 +583,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // § 7's stuck halt waits for the retries; § 8 names the lead's verb and its route to repair; a Don't forbids a
   // hand-written retry, a hand-resolved budget and hand-written markers. Every block whose way back is Lachy's (its
   // `humanFix`, ADR 0035) and a recorded answer are never retried, the why only a log line; and § 6.5 (c) counts a null
-  // `humanFix` as the lead's own re-entry, so a task the lead re-enters is never pushed (p16-1).
+  // `humanFix` as the lead's own re-entry, so a task the lead re-enters is never listed (p16-1).
   const ar = s2t.slice(Math.max(0, s2t.indexOf('**Automatic retry')))
   const arRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `auto_retries` |')) ?? ''
   const arStuck = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
@@ -600,7 +600,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !ar.includes('each of its retries first waits a short cool-down, 15, then 60, then 240 minutes') ||
     !ar.includes('If any retry ran, re-run `next --running <the live slugs>`') ||
     !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down) ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
-    !guard.includes('An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still pushed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.') ||
+    !guard.includes('An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still listed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.') ||
     !guard.includes('A gate-pending task never stops a cool-down') ||
     !s6all.includes('`reason` appears only on `halted`, on a hold and on a retry cool-down') ||
     !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
@@ -1375,7 +1375,7 @@ test('control: a cool-down that halts fails auto-retry', () => {
   only(sk('(a quota or infra cool-down) ends the turn `waiting` with `reason="<autoRetryClass> cool-down', '(a quota or infra cool-down) halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
 })
 test("control: a cool-down that never routes an UNVERIFIED to § 7 fails auto-retry", () => {
-  only(sk(" An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still pushed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.", ''),
+  only(sk(" An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still listed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.", ''),
     'auto-retry', 'no § 7 route')
 })
 test('control: a gate-pending task that stops a cool-down fails auto-retry', () => {
@@ -1406,8 +1406,8 @@ test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
   only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
     'auto-retry', 'no § 8 sentence')
 })
-test('control: a needs-you block that pushes a task the lead re-enters fails auto-retry', () => {
-  only(sk("(step 1.2's seeded revise, its *Automatic retry* now or once a cool-down ends, its", "(step 1.2's seeded revise, its"), 'auto-retry', 'retried task pushed')
+test('control: a needs-you block that lists a task the lead re-enters fails auto-retry', () => {
+  only(sk("(step 1.2's seeded revise, its *Automatic retry* now or once a cool-down ends, its", "(step 1.2's seeded revise, its"), 'auto-retry', 'retried task listed')
 })
 test("control: an Automatic retry that reads its why as Lachy's reason fails auto-retry", () => {
   only(sk("; its `autoRetryWhy` is the log line only, never Lachy's reason.", '; its `autoRetryWhy` is the reason to give Lachy.'), 'auto-retry', 'why as reason')

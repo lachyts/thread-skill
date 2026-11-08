@@ -99,7 +99,7 @@ refused (edit it by hand). With no newer key the text is exactly as before. The 
 backstop: an edit that forgets the raise does not validate, and nothing is written. No file, or a comment-only one, is created
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
-`file:repo`, every other key and Guardrail unchanged, `[notify]` (ADR 0038 d3, machine-wide) unchanged too, and every
+`file:repo`, every other key and Guardrail unchanged, and every
 repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers),
 every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) and the resolved `[defaults]
 test_logins` (p37-4: the operator's declared test Logins, no automated writer) unchanged.
@@ -696,8 +696,6 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
                 raise Stop("the edit resolves %s to %s, not %s: nothing written" % (k, after["settings"][k], want), 2)
         if after["guardrails"] != before["guardrails"]:
             raise Stop("the edit changes the Guardrails: nothing written", 2)
-        if after["notify"] != before["notify"]:  # machine-wide (ADR 0038 d3): a Tuning never drops the ntfy topic
-            raise Stop("the edit changes [notify]: nothing written", 2)
         # p29-3 (ADR 0045) and ADR 0063: a Tuning never touches any repo's Inert paths or test-credential class.
         for key in ("inert_paths", "test_credentials"):
             if _repo_tables(tmp, key) != _repo_tables(config, key):

@@ -3,11 +3,11 @@
 current with origin.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py run [--primary DIR] [--also DIR]...
-        [--state F] [--log F] [--ntfy-server URL] [--now ISO] [--dry-run] [--job-shape N] [--ff-timeout N]
-        [--smoke-timeout N]
+        [--state F] [--log F] [--now ISO] [--dry-run] [--job-shape N] [--ff-timeout N] [--smoke-timeout N]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py install [--primary DIR] [--also DIR]...
         [--bin-dir DIR] [--plist F] [--interval 300] [--label com.thread.primary-refresh]
         [--log ~/Library/Logs/thread-primary-refresh.log]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py stuck [--state F] [--now ISO]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py bundle
 
 Every session loads this plugin live from its primary checkout (the directory-source install). land.sh S4 and
@@ -21,7 +21,7 @@ run, one pass, in this order:
   1. --log F: a log over 1 MiB moves to F.1 first, one generation kept (a pass whose stdout or stderr is that file
      carries on in a fresh F); never under --dry-run, and a missing log directory skips it.
   2. The state is read. 3. Each checkout's pass (below). 4. The self-update and 5. the job check, on the installed copy
-     only. 6. The notices. 7. The state is written, when it changed or read as corrupt, never under --dry-run.
+     only. 6. The state is written, when it changed or read as corrupt, never under --dry-run.
 
 One checkout's pass, the primary first, one log line each, `<ISO time> primary-refresh <dir>: <outcome>`, stopping at
 the first step that says no. Every git step runs through skills/_shared/scripts/live-checkout.sh, the one primitive
@@ -55,35 +55,48 @@ never current or moved, and never leads to a merge.
      against what the helper said), `refused: <git's reason>`, or `timed out: git merge --ff-only ran past <N> s and was
      stopped: the working tree may be partly updated (git -C <d> status)`.
 
-The notices. A stuck spell runs from the first pass whose kind is stuck (not-primary, busy, fetch-failed, broken,
-unreadable, diverged, held, refused, timed-out) to the next that reads current, moved or ahead (would move changes
-nothing). Its entry is {since, kind, kindSince, outcome, notifiedKinds, notified?, notifyFailed?, notifyWhy?}: `since`
-never moves within the spell, a change of kind restarts only `kindSince`, `outcome` is the latest pass's. The first
-notice is due once the spell is 24 h old from `since`, whatever its kinds meanwhile, or at once for timed-out (a merge
-stopped mid-checkout may have left the live-loaded tree half updated). After it, one re-notice per kind not yet
-notified in this spell, once that kind has stood an hour (timed-out at once); a kind already notified never sends
-again, so the notices are bounded by the kinds. A failed send is retried no sooner than an hour later, and its reason
-is logged: `not notified (ntfy-push exit <rc>: <its last line>)`. One due-rule pass runs over every spell this pass
-touched, plus the installed copy's own `self-update` and `job` spells whenever they stand. The message is one line,
-outcome first, `<name>: <outcome>` cut to 200 characters, then the longest tail that fits (` (stuck since <since16>;
-git -C <d> status)`, else ` (since <MM-DDTHH:MM>)`, else none; ` (since <since16>)` for the copy's own spells), so a
-hold naming five rollouts keeps its last holder. It goes through skills/execute/scripts/ntfy-push.py, the bundle's copy
-first, then the primary's, so a primary that has gone is still reported. The spells live in the state file
+The spells. A pass sends no notice (ADR 0075 d2: no rollout code notifies Lachy); a stuck checkout is read at a sitting,
+on /thread:status's Primary refresh line (`stuck`, below). A stuck spell runs from the first pass whose kind is stuck
+(not-primary, busy, fetch-failed, broken, unreadable, diverged, held, refused, timed-out) to the next that reads
+current, moved or ahead (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
+moves within the spell, a change of kind restarts only `kindSince`, `outcome` is the latest pass's. The installed copy's
+own `self-update` and `job` spells are entries of the same shape. The spells live in the state file
 ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json (or --state), {"v": 1, "stuck": {<checkout path, or
 `self-update` or `job`>: entry}}, written atomically. A corrupt file, an entry whose `since` will not parse (dropped)
-or a bad field (kindSince read as now; notified, notifyFailed, a non-40-hex `tip`, a non-ISO `tipAt` read as absent)
-is one WARN, never a traceback, and the file is rewritten valid. An entry in the shape before p37-7, {since,
-notified?}, takes its first stuck pass's kind: notified, that kind counts as notified, so its next notice needs a new
-kind that has stood an hour. STATE_VERSION stays 1: the fields are additive, and the copy before p37-7 keeps unknown
-keys and fields and never re-sends an entry with `notified`.
+or a bad field (kindSince read as now; a non-40-hex `tip`, a non-ISO `tipAt` read as absent) is one WARN, never a
+traceback, and the file is rewritten valid. The fields an earlier copy wrote for its notices (notified, notifyFailed,
+notifyWhy, notifiedKinds) are kept exactly as read, malformed or not, never read for anything and never a reason to
+rewrite, so a rolled-back older copy still sees what it notified. An entry in the shape before p37-7, {since,
+notified?}, takes its first stuck pass's kind. STATE_VERSION stays 1: the fields are additive, and every older copy
+keeps unknown keys and fields.
 
-The bundle: install writes BUNDLE's seven files beside each other in --bin-dir, with the marker
+A pass never prunes: it drops only the key of a checkout it read as current, moved or ahead, so a hand-run of either
+copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
+checkout the job does not watch stands until a pass on that checkout clears it or the next install drops it (below).
+
+stuck, a read that writes nothing (no rotation, no prune, no fetch, no temp file): the spells due now, for
+/thread:status's Primary refresh line. It prints one JSON line, {"state": <path>, "stuck": [{key, name, kind, since,
+outcome}], "line": <str or null>}. A spell is due once it is 24 h old from `since` (STUCK_AFTER, ADR 0066's first
+notice), or at once when its kind is timed-out (a merge stopped mid-checkout may have left the live-loaded tree half
+updated); a `since` in the future is never due. Due spells are ordered oldest first. A path key is named by its
+directory's name, with the tail `; git -C <key> status`; `self-update` reads `primary-refresh self-update` and `job`
+`primary-refresh job`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
+joined with ` · `, each `<name>: <outcome> (stuck since <since16>[; git -C <key> status])`, never cut; null when none is
+due (no file included). An entry with no kind (before p37-7) reads the outcome `stuck (kind not yet read)`. It is a
+point-in-time read with no window, only --now, and no freshness check: a spell stands as the job's last pass wrote it
+until a pass clears it, so with the job unloaded or dead it can be old, and a pass writes the file only when the map
+changes, so its mtime says nothing about the job's health. A corrupt file is one WARN and a null line. Exit 0 for any
+read; 1 when background_job.py cannot be loaded; 2 on usage (a bad --now).
+
+The bundle: install writes BUNDLE's six files beside each other in --bin-dir, with the marker
 primary-refresh.installed: this copy (its install-rel primary-refresh.py, the plist's path), and live-checkout.sh,
-default-branch.sh, ntfy-push.py, background_job.py, rollout-settings.py and ladder.py each at its repo path below the
-copy's directory (a mirrored mini plugin root, so ntfy-push.py's and live-checkout.sh's own sibling lookups work
-unchanged). `bundle` prints the table, one `<mode> <repo-rel> <install-rel>` line per file. background_job.py holds the
-plumbing the Watchdog shares (the state file, the ntfy-push call, the launchd job, the process-group stop). `run` and
-`install` load the copy's own bundle's, else the primary's when the copy's bundle has no file; a file that is there but
+default-branch.sh, background_job.py, rollout-settings.py and ladder.py each at its repo path below the copy's
+directory (a mirrored mini plugin root, so live-checkout.sh's own sibling lookups work unchanged). `bundle` prints the
+table, one `<mode> <repo-rel> <install-rel>` line per file. The ntfy-push.py row an earlier table carried is dropped
+(ADR 0075 d2), so a self-update's step 5 removes an installed ntfy-push.py as a file the candidate's table drops.
+background_job.py holds the plumbing the background jobs share (the state file, the launchd job, the process-group
+stop). `run`, `install` and `stuck` load the copy's own bundle's, else the primary's when the copy's bundle has no
+file; a file that is there but
 raises is the ERROR below, never the primary's, so a smoke refuses a candidate whose own module is broken. `bundle`
 loads nothing: an installed copy runs a candidate's `bundle` before any helper is staged. When it cannot be loaded the
 verb prints one line, `ERROR: primary-refresh <verb>: cannot load skills/_shared/scripts/background_job.py (no file
@@ -93,7 +106,7 @@ holds the whole bundle`, and runs no further (no log rotation, no state).
 The self-update, on the installed copy (the marker beside it) only, on every pass whose primary fetch succeeded,
 whatever the primary read, at the tip that fetch read (`git cat-file blob <tip>:<rel>`: one sha, never a short name,
 never the working tree). Its exceptions are caught (`self-update: failed (<Type>: <msg>)`, kind failed), so it never
-skips the notices or the state.
+skips the job check or the state.
   1. origin's primary-refresh.py at the tip equal to this copy: compare every row of this copy's own table (bytes and
      mode) with the copy's directory. Nothing differs: current, which clears the self-update spell (printed only under
      --dry-run, which otherwise prints `would install …` and stops there).
@@ -118,33 +131,34 @@ skips the notices or the state.
      (<e>): the next fetched pass finishes it` (kind install-failed). Success: `the installed bundle now matches
      origin/<d> at <tip12> (installed …; removed …)`.
   A refusal opens or continues the `self-update` spell (kind refused, install-failed or failed, with the tip and tipAt),
-  under the notice rules. A helper an older copy cannot parse reads `broken:`, never moved, and the next fetched pass
-  heals it.
+  read by `stuck` like any spell. A helper an older copy cannot parse reads `broken:`, never moved, and the next
+  fetched pass heals it.
 
 The self-update contract is frozen: an installed copy sends every candidate `run`, --state, --log, --now and
 --dry-run, the `bundle` subcommand, and reads its `<mode> <repo-rel> <install-rel>` lines and the `primary-refresh
 <P>: <outcome>` and `self-update: current` lines back. Change any of them and every installed copy refuses every
-candidate: the self-update spell notifies after 24 h, and a hand-run install recovers (tests/primary-refresh.test.sh I6
-pins the literal tokens). `run` takes no abbreviated flag, so the smoke's rewrite names every flag one way.
-background_job.py's interface is in the contract too, additive only. Step 5 installs it as a helper before this copy,
-so an install that fails partway leaves the OLD copy calling the NEW module in process, and "the next fetched pass
-finishes it" holds only while every old call still binds. One that no longer binds raises at BJ.state_path, the top
-of cmd_run, before the fetch and the self-update, on every pass and with no notice (notify is the module's too): only
-a hand install gets out of it. Frozen: the module at BJ_REL; every BJ.<name> this file calls, its parameters by name
+candidate: the self-update spell shows on /thread:status's Primary refresh line after 24 h, and a hand-run install
+recovers (tests/primary-refresh.test.sh I6 pins the literal tokens). `run` takes no abbreviated flag, so the smoke's
+rewrite names every flag one way. background_job.py's interface is in the contract too, additive only. Step 5 installs
+it as a helper before this copy, so an install that fails partway leaves the OLD copy calling the NEW module in
+process, and "the next fetched pass finishes it" holds only while every old call still binds. One that no longer binds
+raises at BJ.state_path, the top of cmd_run, before the fetch and the self-update, on every pass: only a hand install
+gets out of it. Frozen: the module at BJ_REL; every BJ.<name> this file calls or once called, its parameters by name
 and in order: state_path(arg, name), read_state(path, prog, key, version) returning (entries, corrupt),
 write_state(path, key, entries, version), atomic_write(path, data, mode), notify(script, message, server, run,
 timeout) returning a Notified, its `run` called as run(argv, timeout, input) and read as (rc, out, err, timed_out),
 job_python(), job_path(*first), launchd_plist(label, argv, path, interval, log) and kill_group(p, grace, reap); and
-Notified's fields, rc, why, out, err, ran. Never rename, remove or reorder any of them: a new parameter goes last with
-a default, a new Notified field goes last, read_state stays a pair, and a new BJ call here joins the list. An entry
-never leaves the list, even after this file stops making that call, because an installed older copy still makes it:
-retiring one is a contract change that needs a hand re-install, the same rule as I6's tokens
+Notified's fields, rc, why, out, err, ran. notify is no longer called here (ADR 0075 d2), but an installed older copy
+still calls it, so it stays listed. Never rename, remove or reorder any of them: a new parameter goes last with a
+default, a new Notified field goes last, read_state stays a pair, and a new BJ call here joins the list. An entry never
+leaves the list, even after this file stops making that call, because an installed older copy still makes it: retiring
+one is a contract change that needs a hand re-install, the same rule as I6's tokens
 (tests/background-job.test.mjs BJ10 holds every call here to the list and every listed call to the module's
 signatures; BJ10b proves a retired call stays listed and binding).
 
 The job check, on the installed copy: the self-update rewrites bundle files only; the interpreter, PATH, --log and
 --job-shape live in the plist, which only install writes and only a re-bootstrap loads. A job whose --job-shape is below
-JOB_SHAPE (an absent one reads 0) opens the `job` spell (kind stale-job), logged once and again on its notice pass:
+JOB_SHAPE (an absent one reads 0) opens the `job` spell (kind stale-job), logged once, when it opens:
 `job: the launchd job predates this copy (job shape <N>, wants <JOB_SHAPE>): re-run primary-refresh.py install and the
 launchctl line it prints`. The first pass at JOB_SHAPE clears it, `job: current`. --dry-run only prints.
 
@@ -154,11 +168,11 @@ left as it was; a signal during a spawn is held until the child is recorded. A s
 same way and stops its own child first (SMOKE_GRACE, 10 s, > KILL_GRACE), so nothing it started is orphaned. A pass
 stops inside launchd's 20 s.
 
---dry-run fetches, then says what it would do: it moves nothing, installs nothing, notifies nothing, rotates nothing
-and writes no state. --now pins the clock (tests). Exit 0 whatever it finds; 1 when background_job.py cannot be loaded
-(install: 2); 2 on usage; 128 + N on a signal.
+--dry-run fetches, then says what it would do: it moves nothing, installs nothing, rotates nothing and writes no state.
+--now pins the clock (tests). Exit 0 whatever it finds; 1 when background_job.py cannot be loaded (install: 2); 2 on
+usage; 128 + N on a signal.
 
-install (python >= 3.11, else exit 2: ntfy-push.py needs tomllib) writes the bundle into --bin-dir
+install (python >= 3.11, else exit 2: the bundled rollout-settings.py needs tomllib) writes the bundle into --bin-dir
 (~/.local/state/thread/bin) from this checkout (or from the installed copy's own bundle, run from there), exit 2 naming
 a missing source, and leaves anything else there alone. It writes the launchd job to --plist
 (~/Library/LaunchAgents/<label>.plist): ProgramArguments [python, the copy, run, --primary <dir>, --also <dir>...,
@@ -166,10 +180,22 @@ a missing source, and leaves anything else there alone. It writes the launchd jo
 interpreter's own path; PATH git's directory, python's, /usr/bin, /bin, /usr/sbin, /sbin; StartInterval --interval
 (300), RunAtLoad, ProcessType Background, --log for stdout and stderr. It runs the copy, never the primary's file, so
 the job exists before the primary holds this script, its path never moves, and it updates itself. Then it prints `the
-job runs <python>` and the one line left to Lachy's shell: `launchctl bootout gui/<uid>/<label> 2>/dev/null; while
-launchctl print gui/<uid>/<label> >/dev/null 2>&1; do sleep 1; done; launchctl bootstrap gui/<uid> <plist>`.
+job runs <python>`, prunes (below), and prints the one line left to Lachy's shell: `launchctl bootout gui/<uid>/<label>
+2>/dev/null; while launchctl print gui/<uid>/<label> >/dev/null 2>&1; do sleep 1; done; launchctl bootstrap gui/<uid>
+<plist>`.
 
-Stdlib only; `run` and `bundle` run on python >= 3.9. Never writes the vault, a rollout note or a Run record.
+The prune at install, the only moment the watched set changes: install reads the job's state file (the default path,
+which the job reads because the plist names no --state) and drops every spell whose key is not `self-update`, `job`,
+the primary or an --also checkout (the keys a pass of this job writes), one line each, `primary-refresh install:
+dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read. It writes the file only
+when it dropped one. A missing or corrupt file is left for the job's next pass, and a write that fails is one WARN
+(install still exits 0). A checkout dropped from --also, a moved primary or a junk key is dropped by the next install;
+an install not followed by its launchctl line leaves the old job running with its old targets, whose next pass reopens
+any spell of its own that install dropped, with a fresh since. One job per state file: a second job installed under
+another --label shares the default file and its `self-update` and `job` keys, so its install drops the first job's
+checkout spells once, and that job's next pass reopens them with a fresh since.
+
+Stdlib only; `run`, `stuck` and `bundle` run on python >= 3.9. Never writes the vault, a rollout note or a Run record.
 """
 import argparse
 import importlib.util
@@ -195,7 +221,6 @@ INSTALLED = (HERE / MARKER).is_file()
 BUNDLE_ROOT = HERE if INSTALLED else PLUGIN_ROOT
 HOLD_REL = "skills/_shared/scripts/primary-hold.sh"
 LC_REL = "skills/_shared/scripts/live-checkout.sh"
-NTFY_REL = "skills/execute/scripts/ntfy-push.py"
 BJ_REL = "skills/_shared/scripts/background_job.py"
 SELF_REL = "skills/_shared/scripts/primary-refresh.py"
 COPY = "primary-refresh.py"  # the copy's install-rel: the plist's path, part of the self-update contract
@@ -204,7 +229,6 @@ BUNDLE = (
     ("0755", SELF_REL, COPY),
     ("0755", LC_REL, LC_REL),
     ("0755", "skills/execute/scripts/default-branch.sh", "skills/execute/scripts/default-branch.sh"),
-    ("0755", NTFY_REL, NTFY_REL),
     ("0644", BJ_REL, BJ_REL),
     ("0644", "skills/_shared/scripts/rollout-settings.py", "skills/_shared/scripts/rollout-settings.py"),
     ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
@@ -217,17 +241,14 @@ DEFAULT_LABEL = "com.thread.primary-refresh"
 DEFAULT_LOG = "~/Library/Logs/thread-primary-refresh.log"
 DEFAULT_BIN = "~/.local/state/thread/bin"
 STATE_VERSION = 1
-NOTIFY_AFTER = timedelta(hours=24)     # a spell's first notice
-RENOTIFY_SETTLE = timedelta(hours=1)   # a new kind stands this long before its re-notice
-NOTIFY_RETRY = timedelta(hours=1)      # a failed send waits this long
-SMOKE_RETRY = timedelta(hours=24)      # a refused tip is smoked again after this (= NOTIFY_AFTER, by design)
+STUCK_AFTER = timedelta(hours=24)      # a spell is due on the Primary refresh line (`stuck`) this long from its since
+SMOKE_RETRY = timedelta(hours=24)      # a refused tip is smoked again after this (= STUCK_AFTER, by design)
 GIT_TIMEOUT = 60
 HOLD_TIMEOUT = 120
-NTFY_TIMEOUT = 60
 BUNDLE_TIMEOUT = 60
 FF_TIMEOUT = 600
 SMOKE_TIMEOUT = 300
-KILL_GRACE = 5    # every leaf child: git, the bash helpers, the hold, ntfy-push
+KILL_GRACE = 5    # every leaf child: git, the bash helpers, the hold
 SMOKE_GRACE = 10  # a smoke's candidate, which stops its own child (KILL_GRACE) first
 LOG_MAX = 1 << 20
 TABLE_MAX = 32
@@ -254,7 +275,7 @@ ROW_RE = re.compile(rf"^(0[0-7]{{3}}) ({_SEG}(?:/{_SEG})*) ({_SEG}(?:/{_SEG})*)$
 SMOKE_DENIED = ("fetch failed:", "not a primary checkout:", "broken:", "unreadable")
 _STAMP = ""  # the pass's time, for the lines it prints
 _ARGV = []   # the argv main parsed: the smoke runs the job's own
-BJ = None    # background_job.py, loaded by main for run and install (_load_bj); importing this file loads nothing
+BJ = None    # background_job.py, loaded by main for run, install and stuck (_load_bj); importing this loads nothing
 
 
 class _Signalled(BaseException):
@@ -522,7 +543,7 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout=FF_TIMEOUT):
     return f"broken: live-checkout.sh ff: {_said(rc, out)}", "broken", tip, branch
 
 
-# ---- state and notify -----------------------------------------------------------------------------------------------
+# ---- state and the stuck read ---------------------------------------------------------------------------------------
 
 def _parse_iso(s):
     """A tz-aware datetime for an ISO string, else None (a non-string, empty or unparseable value)."""
@@ -535,10 +556,17 @@ def _parse_iso(s):
     return t if t.tzinfo else t.astimezone()
 
 
+def _state_file(arg):
+    """The state file: --state, else ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json, the job's own (its
+    plist names no --state), read by run, stuck and install's prune alike."""
+    return BJ.state_path(arg, "primary-refresh.json")
+
+
 def _read_state(path, stamp):
     """(stuck, dirty): the entries, each field checked, and whether the file read as corrupt or anything was dropped or
-    read as something else (so the file is rewritten valid). background_job.py's read_state reads the file. Never
-    raises."""
+    read as something else (so the file is rewritten valid). background_job.py's read_state reads the file. The fields
+    an earlier copy wrote for its notices (notified, notifyFailed, notifyWhy, notifiedKinds) are kept exactly as read,
+    never checked, so they are never a reason to rewrite. Never raises."""
     stuck, dirty = BJ.read_state(path, "primary-refresh", "stuck", STATE_VERSION)
     out = {}
     for k, v in stuck.items():
@@ -552,71 +580,62 @@ def _read_state(path, stamp):
             e.pop("kindSince", None)
         elif _parse_iso(e.get("kindSince")) is None:
             e["kindSince"] = stamp
-        for key in ("notified", "notifyFailed", "tipAt"):
-            if key in e and _parse_iso(e[key]) is None:
-                e.pop(key)
+        if "tipAt" in e and _parse_iso(e["tipAt"]) is None:
+            e.pop("tipAt")
         if "tip" in e and not (isinstance(e["tip"], str) and HEX40.match(e["tip"])):
             e.pop("tip")
-        kinds = e.get("notifiedKinds")
-        if "notifiedKinds" in e and not (isinstance(kinds, list) and all(isinstance(x, str) for x in kinds)):
-            e.pop("notifiedKinds")
         dirty = dirty or e != v
         out[k] = e
     return out, dirty
 
 
 def _spell(stuck, key, kind, outcome, stamp, **extra):
-    """Open or continue key's stuck spell: since never moves; a new kind restarts kindSince only. An entry in the shape
-    before p37-7 takes this pass's kind, already notified for it when it was notified."""
+    """Open or continue key's stuck spell: since never moves; a new kind (or none yet, an entry in the shape before
+    p37-7) restarts kindSince only. Any other field an entry holds is kept as it is."""
     e = stuck.get(key)
     if e is None:
-        e = stuck[key] = {"since": stamp, "kind": kind, "kindSince": stamp, "outcome": outcome, "notifiedKinds": []}
+        e = stuck[key] = {"since": stamp, "kind": kind, "kindSince": stamp, "outcome": outcome}
     else:
-        if not isinstance(e.get("kind"), str):
+        if e.get("kind") != kind:
             e["kind"], e["kindSince"] = kind, stamp
-            e["notifiedKinds"] = [kind] if e.get("notified") else []
-        elif e["kind"] != kind:
-            e["kind"], e["kindSince"] = kind, stamp
-        if not isinstance(e.get("notifiedKinds"), list):
-            e["notifiedKinds"] = [e["kind"]] if e.get("notified") else []
         e["outcome"] = outcome
     e.update(extra)
     return e
 
 
+def _stuck_name(key):
+    """A spell's name on the Primary refresh line, and whether it takes the git tail (a checkout path only)."""
+    if key == "self-update":
+        return "primary-refresh self-update", False
+    if key == "job":
+        return "primary-refresh job", False
+    if os.path.isabs(key):
+        return (Path(key).name or key), True
+    return key, False
+
+
+def _stuck_outcome(e):
+    """A spell's outcome on the Primary refresh line: its latest pass's, or `stuck (kind not yet read)` for an entry
+    with no kind (before p37-7)."""
+    if isinstance(e.get("kind"), str):
+        return _flat(e.get("outcome") or e["kind"])
+    return "stuck (kind not yet read)"
+
+
+def _stuck_text(key, e):
+    """`<name>: <outcome> (stuck since <since16>[; git -C <key> status])`, one line, never cut."""
+    name, path = _stuck_name(key)
+    tail = f"; git -C {key} status" if path else ""
+    return f"{name}: {_stuck_outcome(e)} (stuck since {str(e.get('since') or '')[:16]}{tail})"
+
+
 def _due(e, now):
-    """The notice rules: a first notice at 24 h from since (timed-out at once); then one per kind not yet notified,
-    once it has stood an hour (timed-out at once); never twice for a kind."""
-    kinds, kind = e.get("notifiedKinds") or [], e.get("kind")
-    if not kinds:
-        since = _parse_iso(e.get("since"))
-        return kind == "timed-out" or (since is not None and now - since >= NOTIFY_AFTER)
-    if kind in kinds:
+    """A spell on the Primary refresh line: 24 h from since (STUCK_AFTER), or at once for timed-out; never a since in
+    the future."""
+    since = _parse_iso(e.get("since"))
+    if since is None or since > now:
         return False
-    ks = _parse_iso(e.get("kindSince"))
-    return kind == "timed-out" or (ks is not None and now - ks >= RENOTIFY_SETTLE)
-
-
-def _notice(name, e, d=None):
-    """One line, outcome first, cut to 200, then the longest tail that still fits."""
-    head = f"{name}: {_flat(e.get('outcome') or '')}"[:200].rstrip()
-    since = str(e.get("since") or "")
-    tails = ([f" (stuck since {since[:16]}; git -C {d} status)", f" (since {since[5:16]})"] if d is not None
-             else [f" (since {since[:16]})"])
-    for t in tails + [""]:
-        if len(head) + len(t) <= 200:
-            return head + t
-    return head
-
-
-def _notify(primary, message, server):
-    """(rc, reason): ntfy-push.py's exit and its last line; the bundle's copy first, then the primary's. The call is
-    background_job.py's notify, through _run (its own session, stopped with its group)."""
-    script = _helper(NTFY_REL, primary)
-    if script is None:
-        return 127, f"no {NTFY_REL} beside the copy or in {primary}"
-    n = BJ.notify(script, message, server, run=lambda a, t, i: _run(a, t, input=i), timeout=NTFY_TIMEOUT)
-    return n.rc, n.why
+    return e.get("kind") == "timed-out" or now - since >= STUCK_AFTER
 
 
 def _parse_now(s):
@@ -737,8 +756,7 @@ def _smoke(stage, primary, stamp, smoke_timeout):
     else:
         pre = f" primary-refresh {primary}: "
         said = [ln.split(pre, 1)[1] for ln in out.splitlines() if pre in ln]
-        outcomes = [s for s in said if not s.startswith(("self-update:", "job:", "would notify:", "notified",
-                                                         "not notified"))]
+        outcomes = [s for s in said if not s.startswith(("self-update:", "job:"))]
         if not outcomes:
             why = f"no primary-refresh line for {primary}"
         elif outcomes[0].startswith(SMOKE_DENIED):
@@ -919,10 +937,9 @@ def cmd_run(args):
     for a in args.also:
         if _real(a) not in [d for d, _ in targets]:
             targets.append((_real(a), False))
-    state_path = BJ.state_path(args.state, "primary-refresh.json")
+    state_path = _state_file(args.state)
     stuck, dirty = _read_state(state_path, stamp)
     before = json.dumps(stuck, sort_keys=True)
-    touched = []
     tip, branch = None, None
     for d, is_primary in targets:
         outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout)
@@ -933,11 +950,10 @@ def cmd_run(args):
             stuck.pop(str(d), None)
         elif kind != "dry":
             _spell(stuck, str(d), kind, outcome, stamp)
-            touched.append(d)
     if INSTALLED and tip is not None:
         try:
             line, kind = self_update(primary, branch, tip, args, stuck, now, stamp)
-        except Exception as e:  # noqa: BLE001 — the self-update never skips the notices or the state
+        except Exception as e:  # noqa: BLE001 — the self-update never skips the job check or the state
             line, kind = f"self-update: failed ({type(e).__name__}: {_flat(e)[:160]})", "failed"
         if line:
             _line(primary, line)
@@ -947,41 +963,48 @@ def cmd_run(args):
             _spell(stuck, "self-update", kind, line[len("self-update: "):], stamp, tip=tip, tipAt=stamp)
     if INSTALLED:
         job_check(args, stuck, stamp, primary)
-    spells = [(str(d), d.name, d, d) for d in touched]
-    if INSTALLED:
-        spells += [("self-update", "primary-refresh self-update", None, f"{primary}: self-update"),
-                   ("job", "primary-refresh job", None, f"{primary}: job")]
-    for key, name, d, label in spells:
-        e = stuck.get(key)
-        if not isinstance(e, dict) or not isinstance(e.get("kind"), str) or not _due(e, now):
-            continue
-        failed = _parse_iso(e.get("notifyFailed"))
-        if failed is not None and now - failed < NOTIFY_RETRY:
-            continue
-        message = _notice(name, e, d)
-        if args.dry_run:
-            _line(label, f"would notify: {message}")
-            continue
-        if key == "job":
-            _line(primary, f"job: {e.get('outcome')}")
-        rc, why = _notify(primary, message, args.ntfy_server)
-        if rc == 0:
-            kinds = e.setdefault("notifiedKinds", [])  # an untouched copy spell may have lost a malformed list
-            if e["kind"] not in kinds:
-                kinds.append(e["kind"])
-            e["notified"] = stamp
-            e.pop("notifyFailed", None)
-            e.pop("notifyWhy", None)
-            _line(label, "notified")
-        else:
-            e["notifyFailed"], e["notifyWhy"] = stamp, why
-            _line(label, f"not notified (ntfy-push exit {rc}: {why})")
     if not args.dry_run and (dirty or json.dumps(stuck, sort_keys=True) != before):
         try:
             BJ.write_state(state_path, "stuck", stuck, STATE_VERSION)
         except OSError as e:
             print(f"WARN: primary-refresh: cannot write state {state_path}: {e}", file=sys.stderr)
     return 0
+
+
+def cmd_stuck(args):
+    """The read-only `stuck` verb (the module docstring's stuck): the due spells as one JSON line."""
+    now = _parse_now(args.now)
+    if now is None:
+        print(f"ERROR: primary-refresh stuck: usage: --now {args.now!r} is not an ISO timestamp", file=sys.stderr)
+        return 2
+    path = _state_file(args.state)
+    stuck, _ = _read_state(path, now.isoformat(timespec="seconds"))
+    due = sorted(((_parse_iso(e["since"]), k, e) for k, e in stuck.items() if _due(e, now)), key=lambda x: (x[0], x[1]))
+    spells = [{"key": k, "name": _stuck_name(k)[0], "kind": e.get("kind") if isinstance(e.get("kind"), str) else None,
+               "since": e.get("since"), "outcome": _stuck_outcome(e)} for _, k, e in due]
+    line = ("Primary refresh: " + " · ".join(_stuck_text(k, e) for _, k, e in due)) if due else None
+    print(json.dumps({"state": str(path), "stuck": spells, "line": line}, ensure_ascii=False))
+    return 0
+
+
+def _prune(primary, also):
+    """install's prune of the job's state file: drop every spell this job's passes never write (the module docstring's
+    prune at install). Writes only when it dropped one; a missing or corrupt file is left for the job's next pass."""
+    path = _state_file(None)
+    entries, corrupt = BJ.read_state(path, "primary-refresh", "stuck", STATE_VERSION)
+    if corrupt:
+        return
+    watched = {"self-update", "job", str(primary)} | {str(_real(a)) for a in also}
+    dropped = [k for k in entries if k not in watched]
+    if not dropped:
+        return
+    for k in dropped:
+        print(f"primary-refresh install: dropped spell: {k} (not watched by this job)")
+    kept = {k: v for k, v in entries.items() if k in watched}
+    try:
+        BJ.write_state(path, "stuck", kept, STATE_VERSION)
+    except OSError as e:
+        print(f"WARN: primary-refresh install: cannot write state {path}: {e}", file=sys.stderr)
 
 
 def cmd_bundle(_args):
@@ -993,8 +1016,8 @@ def cmd_bundle(_args):
 def cmd_install(args):
     if sys.version_info < (3, 11):
         have = ".".join(str(x) for x in tuple(sys.version_info)[:3])
-        print(f"ERROR: primary-refresh install: python {have} is older than 3.11 (ntfy-push.py needs tomllib): run "
-              "install with python 3.11 or newer", file=sys.stderr)
+        print(f"ERROR: primary-refresh install: python {have} is older than 3.11 (the bundled rollout-settings.py "
+              "needs tomllib): run install with python 3.11 or newer", file=sys.stderr)
         return 2
     primary = _real(args.primary or PLUGIN_ROOT)
     why = checkout_problem(primary)
@@ -1024,6 +1047,7 @@ def cmd_install(args):
     uid = os.getuid()
     print(f"primary-refresh install: wrote the bundle to {bin_dir} and the job to {plist}")
     print(f"the job runs {python}")
+    _prune(primary, args.also)
     print(f"next: launchctl bootout gui/{uid}/{args.label} 2>/dev/null; while launchctl print gui/{uid}/{args.label}"
           f" >/dev/null 2>&1; do sleep 1; done; launchctl bootstrap gui/{uid} {shlex.quote(str(plist))}")
     return 0
@@ -1072,9 +1096,8 @@ def main(argv=None):
     r.add_argument("--state", default=None, help="the state file (default ${XDG_STATE_HOME:-~/.local/state}/thread/"
                                                  "primary-refresh.json)")
     r.add_argument("--log", default=None, help="the job's log, rotated at 1 MiB before the pass")
-    r.add_argument("--ntfy-server", default=None, help="ntfy-push.py's --server")
     r.add_argument("--now", default=None, help="the time to read against, ISO (default: now)")
-    r.add_argument("--dry-run", action="store_true", help="move nothing, notify nothing, write no state")
+    r.add_argument("--dry-run", action="store_true", help="move nothing, install nothing, write no state")
     r.add_argument("--job-shape", type=int, default=0, help="the shape install wrote into the job (absent: 0)")
     r.add_argument("--ff-timeout", type=_positive, default=FF_TIMEOUT, help="the fast-forward's bound, seconds")
     r.add_argument("--smoke-timeout", type=_positive, default=SMOKE_TIMEOUT, help="the smoke run's bound, seconds")
@@ -1088,13 +1111,19 @@ def main(argv=None):
     i.add_argument("--label", default=DEFAULT_LABEL)
     i.add_argument("--log", default=DEFAULT_LOG)
     i.set_defaults(func=cmd_install)
+    st = sub.add_parser("stuck", allow_abbrev=False, help="the spells due now, for /thread:status's Primary refresh "
+                        "line (a read that writes nothing)")
+    st.add_argument("--state", default=None, help="the state file (default ${XDG_STATE_HOME:-~/.local/state}/thread/"
+                                                  "primary-refresh.json)")
+    st.add_argument("--now", default=None, help="the time to read against, ISO (default: now)")
+    st.set_defaults(func=cmd_stuck)
     b = sub.add_parser("bundle", allow_abbrev=False, help="print the bundle table: <mode> <repo-rel> <install-rel>")
     b.set_defaults(func=cmd_bundle)
     args = p.parse_args(argv)
-    if args.cmd in ("run", "install"):  # never `bundle`, which a candidate runs before any helper is staged
-        BJ = _load_bj(args.cmd, _real(args.primary or PLUGIN_ROOT))
+    if args.cmd in ("run", "install", "stuck"):  # never `bundle`, which a candidate runs before any helper is staged
+        BJ = _load_bj(args.cmd, _real(getattr(args, "primary", None) or PLUGIN_ROOT))
         if BJ is None:
-            return 1 if args.cmd == "run" else 2
+            return 2 if args.cmd == "install" else 1
     try:
         return args.func(args)
     except _Signalled as e:
