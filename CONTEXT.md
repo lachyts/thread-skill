@@ -496,9 +496,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   per note (schedule § Serial path): its `surfaces:` predicts the **Surface**s
   the chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. A row that writes a
-  checkout never opens in the vault, and an alias-less row writing two
-  checkouts is refused (ADR 0059), since a Leg finishes only its own
-  checkout's commits. Each repo it writes is worked in its own **Chain copy**
+  checkout never opens in the vault, and a row commits only to the checkout
+  it launches from: one whose `repo:` surfaces name another checkout, or an
+  alias-less one naming two, is refused (ADR 0059, ADR 0074 d3), since a Leg
+  finishes only its own checkout's commits and its review cannot leave the
+  Session's cwd. Each repo it writes is worked in its own **Chain copy**
   (ADR 0067 d2: `chain_copies:` on the note; a note without it works in
   place), whose commits `leg.py land` puts on the primary checkout's
   default branch task by task, after each `done` and at each close (ADR 0067

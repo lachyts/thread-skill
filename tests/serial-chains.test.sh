@@ -25,12 +25,16 @@
 #        or not, its surface, its launch folder, its project's `Local:` or `repos:`) goes to the session lane
 #   P5   launch: by_alias then plain_aliases, the null, missing and unknown refusals, the project's `launch:`, the
 #        alias-less member (from its one repo, its project's `Local:` included; refused when it writes two
-#        checkouts), a missing launch-folders file
+#        checkouts), a missing launch-folders file; a row commits only to the checkout it launches from (ADR 0074
+#        d3): a `repo:` surface in another checkout (added, declared, `touches:`, a **Files:** span) refuses an
+#        aliased row with its remedies, a launcher there named first; a **Read...** path, `--add-dir` and `Local:`
+#        reach do not; an alias-less row opens from the one checkout its surfaces name, whatever else it reaches
 #   P7   vault chains claim their own project places (ADR 0059): a vault-root launch or path narrows to the first
 #        project's place (a folder note's folder, else the note and its would-be folder) and the member's own task
 #        note; Work/Tasks is bookkeeping; the whole-vault fallbacks; --surface adds; a code row never opens where its
-#        Leg cannot finish it (ruling (c) first, read through `works`); the serial check schedules every chain, a
-#        shared place WARNing that they take turns by rank (ADR 0067 d4, d9)
+#        Leg cannot finish it (ruling (c) first, read through `works`; an added surface in another checkout than its
+#        launch's refuses, ADR 0074 d3); the serial check schedules every chain, a shared place WARNing that they take
+#        turns by rank (ADR 0067 d4, d9)
 #   P8   the 2026-11-02 replan fixture (docs/spikes/2026-11-02-replan.py) over a synthetic estate: only the same-file
 #        pair and the declared-bare pairs clash, and no workspaces or Projects pair appears
 #   P9   the Chain copy helpers (ADR 0067 d2, pure): read_chain_copies (absent, [], inline and block lists, quoted
@@ -81,7 +85,8 @@ cat > "$LF" <<EOF
 {"schema_version": 1,
  "by_alias": {"cc-a-seo": "$W/aw/launchers/seo", "cc-a-web": "$W/aw/launchers/web", "cc-o": "$W/ow/launchers/full",
               "cx-a-seo": "$W/aw/launchers/seo", "cc-gone": "$TMP/gone"},
- "plain_aliases": {"cc-w": "$W", "cc-g": "$G", "cc-gsub": "$G/sub", "cc-ts": "$TS", "cc-null": null}}
+ "plain_aliases": {"cc-w": "$W", "cc-g": "$G", "cc-gsub": "$G/sub", "cc-ts": "$TS", "cc-null": null, "cc-n": "$N",
+                   "cc-gwt": "$TMP/gw-wt"}}
 EOF
 
 S=""; V=""; T=""
@@ -219,9 +224,9 @@ LAUNCH="- **Repo:** \`$G\`" mkt d15 'surfaces: []'
 plan --tasks d15
 ok "$(mem d15 surfaces)|$(mem d15 source)|$(mem d15 works)" "[\"vault:Work/Tasks/d15.md\"]|\"derived\"|[\"$G\"]" "P2: an empty surfaces: [] reads as absent"
 # touches: are predicted file tokens: a relative item keyed to the member's one checkout, an absolute one claimed.
-mkt d18 'launch: cc-g' 'touches:' '  - sub/file.txt' '  - "sub/a/"' "  - $H/x.py"
+mkt d18 'launch: cc-g' 'touches:' '  - sub/file.txt' '  - "sub/a/"' "  - $G/sub/b/x.py"
 plan --tasks d18
-ok "$(mem d18 surfaces)|$(mem d18 works)" "[\"repo:$G//sub/a/\",\"repo:$G//sub/file.txt\",\"repo:$H//x.py\"]|[\"$G\",\"$H\"]" "P2: touches: relative items keyed to its one checkout, an absolute one claimed"
+ok "$rc|$(mem d18 surfaces)|$(mem d18 works)" "0|[\"repo:$G//sub/a/\",\"repo:$G//sub/b/x.py\",\"repo:$G//sub/file.txt\"]|[\"$G\"]" "P2: touches: relative items keyed to its one checkout, an absolute one claimed (in another checkout it refuses, P5)"
 LAUNCH="\`\`\`
 cc-g --add-dir $H
 \`\`\`" mkt d19 'launch: cc-g' "touches: [sub/file.txt]"
@@ -555,6 +560,52 @@ PBODY="Local: \`$H\`" mkp HLocal
 mkt l11 'projects: ["[[HLocal]]"]'
 plan --tasks l11
 ok "$(mem l11 launch)|$(mem l11 works)|$(mem l11 surfaces)" "{\"alias\":\"claude\",\"folder\":\"$H\"}|[\"$H\"]|[\"vault:Work/Tasks/l11.md\"]" "P5: an alias-less row whose project's Local: is its one repo opens claude from it"
+# A row commits only to the checkout it launches from (ADR 0074 d3): the checkouts of its `repo:` surfaces, declared,
+# derived or added, aliased or not. Reach (an --add-dir, a project's Local:) and a **Read...** path predict nothing.
+mkt l13 'launch: cc-g'
+plan --tasks l13 --surface "l13=$H/x.py"
+ok "$rc|$out" "3|" "P5: an aliased row whose added surface sits in another checkout exits 3 (ADR 0074 d3)"
+has "$err" "REFUSE: l13: its launch cc-g opens in $G, in the checkout $G, but it commits to the checkout $H: a review cannot leave the Session's cwd, so its Leg could never finish it (ADR 0074 d3)" "P5: … naming its launch, the other checkout and why"
+has "$err" "; launch it from $H, split it into one task per checkout chained by \`depends-on:\`" "P5: … with no launcher in that checkout, the remedy names a launch from it, then the split"
+has "$err" "or, for a checkout it only reads, declare \`surfaces:\` without that checkout or move the path under a **Read...** item" "P5: … and the read-only remedy"
+plan --tasks l13 --surface "l13=$G/sub/file.txt"
+ok "$rc|$(mem l13 launch)|$(mem l13 surfaces)" "0|{\"alias\":\"cc-g\",\"folder\":\"$G\"}|[\"repo:$G//sub/file.txt\"]" "P5: a row whose only checkout is its launch's passes"
+mkt l14 'launch: cc-a-seo'
+plan --tasks l14 --surface "l14=$G/sub/file.txt"
+ok "$rc|$out" "3|" "P5: a workspace launch committing to another repo exits 3 (the 11-07 metrics row)"
+has "$err" "REFUSE: l14: its launch cc-a-seo opens in $W/aw/launchers/seo, in the checkout $W, but it commits to the checkout $G" "P5: … naming both"
+has "$err" "; launch it with \`cc-g\` (its folder $G is in $G), split it" "P5: … its remedy naming that checkout's launcher, its toplevel's before a deeper one's"
+mkt l15 'launch: cc-g' "surfaces: [\"repo:$H//x.py\"]"
+mkt l16 'launch: cc-g' "touches: [\"$H/x.py\"]"
+LAUNCH="- **Files:** \`$H/x.py\`" mkt l17 'launch: cc-g'
+for t in "l15 a declared" "l16 a touches:" "l17 a **Files:**"; do
+  plan --tasks ${t%% *}
+  ok "$rc|$out" "3|" "P5: ${t#* } path in another checkout refuses an aliased row too"
+  has "$err" "REFUSE: ${t%% *}: its launch cc-g opens in $G, in the checkout $G, but it commits to the checkout $H" "P5: … naming it"
+done
+plan --tasks l13,l15
+ok "$(printf '%s\n' "$err" | grep -c '^REFUSE:')" 1 "P5: … one refusal per row (l13 alone passes)"
+LAUNCH="- **Read first:** \`$H/x.py\`" mkt l18 'launch: cc-g'
+plan --tasks l18
+ok "$rc|$(mem l18 works)" "0|[\"$G\"]" "P5: a path in another checkout under a **Read...** item is no prediction, so no refusal"
+F='```'
+LAUNCH="$F""bash
+cc-g --add-dir $H
+$F" mkt l19 'launch: cc-g' 'projects: ["[[HLocal]]"]'
+plan --tasks l19
+ok "$rc|$(mem l19 works)" "0|[\"$G\",\"$H\"]" "P5: --add-dir and Local: reach into another checkout is not refused (ADR 0059 d4's read-only reach)"
+mkt l20 'launch: cc-n'
+plan --tasks l20 --surface "l20=$G/sub/file.txt"
+ok "$rc|$out" "3|" "P5: a launch folder in no checkout committing to one exits 3"
+has "$err" "REFUSE: l20: its launch cc-n opens in $N, in no checkout, but it commits to the checkout $G" "P5: … saying so"
+mkt l21 'launch: cc-gwt'
+plan --tasks l21 --surface "l21=$TMP/gw/a.txt"
+ok "$rc|$(mem l21 surfaces)" "0|[\"repo:$TMP/gw//a.txt\"]" "P5: a launch in a linked worktree commits to its main worktree's key, so it passes"
+LAUNCH="- **Files:** \`$G/sub/file.txt\`" mkt l22 'projects: ["[[HLocal]]"]'
+plan --tasks l22
+ok "$rc|$(mem l22 launch)|$(mem l22 works)" "0|{\"alias\":\"claude\",\"folder\":\"$G\"}|[\"$G\",\"$H\"]" "P5: an alias-less row opens from the one checkout its surfaces name, whatever else it reaches"
+plan --tasks l12
+has "$err" "REFUSE: l12: it writes the checkouts $G, $H and has no launch alias" "P5: an alias-less row whose surfaces name two checkouts is refused, naming them"
 LFX="$TMP/none.json" plan --tasks l2
 ok "$rc|$out" "3|" "P5: a missing launch-folders file while an alias needs it exits 3"
 has "$err" "l2: launch alias cc-g needs $TMP/none.json, which is missing or unreadable" "P5: … naming the path"
@@ -703,6 +754,13 @@ fi
 LAUNCH="- **Repos:** \`$G\`, \`$N\`" mkt r4
 LFX="$LFX7" plan --tasks r4
 ok "$rc|$(mem r4 launch)" "0|{\"alias\":\"claude\",\"folder\":\"$G\"}" "P7: an alias-less row with one checkout and a path-only place opens from the checkout"
+LAUNCH="- **Repo:** \`$G\`" mkt r6 'launch: cc-g'
+LFX="$LFX7" plan --tasks r6 --surface "r6=$H/x.py"
+ok "$rc|$out" "3|" "P7: an aliased row whose added surface sits in another checkout exits 3 (ADR 0074 d3)"
+has "$err" "REFUSE: r6: its launch cc-g opens in $G, in the checkout $G, but it commits to the checkout $H" "P7: … naming its launch and that checkout"
+has "$err" "; launch it from $H, split it into one task per checkout" "P7: … the remedy a launch from that checkout (no launcher there)"
+LFX="$LFX7" plan --tasks r6 --surface "r6=$G/sub/file.txt"
+ok "$rc|$(mem r6 surfaces)|$(mem r6 launch)" "0|[\"repo:$G//sub/file.txt\"]|{\"alias\":\"cc-g\",\"folder\":\"$G\"}" "P7: a row whose only checkout is its launch's passes"
 # 10. Ruling (c) comes first: a session-lane member is never refused for its launch.
 LAUNCH="- **Repos:** \`$TS\`, \`$G\`" mkt t1
 mkt t2 'launch: cc-v' 'projects: ["[[TSProj7]]"]'
@@ -719,8 +777,9 @@ has "$cerr" "WARN: [[legacy-rollout]] (no project; never started) also predicts 
 # ── P8: the 2026-11-02 replan fixture (ADR 0067 d4) ───────────────────────────────────────────────────
 # A synthetic estate in the 2026-11-02 shape, re-planned through docs/spikes/2026-11-02-replan.py (read-only), with
 # HOME holding the default --vault and launch-folders file: a workspaces monorepo with three launchers whose tasks name
-# it only as where they work (five as `**Repo:** <toplevel>`, one at depth); an .agents-like checkout reached by
-# --add-dir whose tasks name distinct files (a **Files:** span, `touches:`, declared surfaces), and one `**Repo:**
+# it only as where they work (five as `**Repo:** <toplevel>`, one at depth); an .agents-like checkout whose tasks
+# launch from it (ADR 0074 d3), one reaching the workspaces by --add-dir, and name distinct files (a **Files:** span,
+# `touches:`, declared surfaces), and one `**Repo:**
 # ~/.agents/skills/` (reach at depth); a Projects monorepo reached by `Local:`; two chains naming one file, two naming
 # sibling files of one folder, and one declaring the bare .agents toplevel.
 echo "== p8"
@@ -731,7 +790,7 @@ mkdir -p "$PW/_shared/state"
 cat > "$PW/_shared/state/launch-folders.json" <<EOF
 {"schema_version": 1,
  "by_alias": {"cc-a-seo": "$PW/aw/launchers/seo", "cc-a-web": "$PW/aw/launchers/web", "cc-o": "$PW/ow/launchers/full"},
- "plain_aliases": {}}
+ "plain_aliases": {"cc-ag": "$PH/.agents"}}
 EOF
 PA="$PH/.agents"; mkrepo "$PA" https://github.com/demo/agents.git; mkdir -p "$PA/skills/x" "$PA/skills/w" "$PA/skills/z"
 PP="$PH/Projects"; mkrepo "$PP" https://github.com/demo/projects.git; mkdir -p "$PP/narc"
@@ -752,15 +811,15 @@ LAUNCH='- **Repo:** `~/repos/workspaces`' p8t web1 Web 'launch: cc-a-web'
 # Three projects of one launcher, so they stay three chains (one project's members are one chain, ADR 0074 d1).
 for x in "ops1 Ops" "ops2 Ops2" "ops3 Ops3"; do LAUNCH='- **Repo:** `~/repos/workspaces`' p8t ${x%% *} ${x#* } 'launch: cc-o'; done
 LAUNCH="$F""bash
-cc-o --add-dir ~/.agents
+cc-ag --add-dir ~/repos/workspaces
 $F
-- **Files:** \`~/.agents/skills/x/SKILL.md\`" p8t ag1 AgA 'launch: cc-o'
-LAUNCH='- **Files:** `~/.agents/skills/x/SKILL.md`' p8t sf1 SameA 'launch: cc-o'
+- **Files:** \`~/.agents/skills/x/SKILL.md\`" p8t ag1 AgA 'launch: cc-ag'
+LAUNCH='- **Files:** `~/.agents/skills/x/SKILL.md`' p8t sf1 SameA 'launch: cc-ag'
 LAUNCH='- **Repo:** `~/.agents`' p8t ag2 AgB 'touches: [skills/y/run.py]'
 p8t ag3 AgC 'surfaces:' '  - "repo:~/.agents/skills/z/"'
 LAUNCH='- **Repo:** `~/.agents/skills/`' p8t ag4 AgD
-LAUNCH='- **Files:** `~/.agents/skills/w/a.md`' p8t sib1 SibA 'launch: cc-o'
-LAUNCH='- **Files:** `~/.agents/skills/w/b.md`' p8t sib2 SibB 'launch: cc-o'
+LAUNCH='- **Files:** `~/.agents/skills/w/a.md`' p8t sib1 SibA 'launch: cc-ag'
+LAUNCH='- **Files:** `~/.agents/skills/w/b.md`' p8t sib2 SibB 'launch: cc-ag'
 p8t dclr Decl 'surfaces: ["repo:~/.agents"]'
 p8t pa1 ProjA; p8t pb1 ProjB
 cat > "$TMP/p8-args.txt" <<'EOF'
