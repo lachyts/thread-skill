@@ -43,7 +43,8 @@ The index, built once per run:
 
 The map (tests/fast-tier.map). A line matches a path when its pattern does; a matching line that is not ALSO places
 the path. Lines: `<pattern>` alone places the path and leaves the result to its reach; `<pattern> FULL` is the full
-suite; `<pattern> NONE` places it and selects nothing; `<pattern> <entry>...` places it and selects the entries;
+suite; `<pattern> NONE` places it and selects nothing of its own (a path only NONE lines place selects only the ALSO
+entries of its lines, the walkers); `<pattern> <entry>...` places it and selects the entries;
 `<pattern> ALSO <entry>...` selects the entries on top and never places. An entry is a collected test path, a glob
 over collected tests, or `@merge-task-self-tests` (run.sh's two merge-task.sh self-tests, plain lines only).
 `FOREIGN <basename>...` names files the scripts read in other roots (a vault's notes, another repo's docs): such a
@@ -58,12 +59,14 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
   (2) No line places p: FULL (`<p>: not in the map`).
   (3) Otherwise a worklist from p, breadth-first in sorted order. For each item q:
       - a FULL line places q: FULL (`<p>: marked FULL`, or `<p>: reaches <q>, marked FULL`);
-      - only NONE lines place q: q adds nothing;
       - no line places q, a reached carrier: FULL (`<p>: reaches <q>, not in the map`);
-      - otherwise q adds, as reach, the plain entries of its placing lines and every collected test that names
-        basename(q), and the ALSO entries of its matching lines on top (never reach); then every carrier that names
-        basename(q) is pushed (a FOREIGN basename pushes only tests/lib carriers). A carrier's own text changes what
-        it names, never who names it, so reach follows names from the changed path outward.
+      - otherwise q adds the ALSO entries of its matching lines on top (never reach), and then
+        - only NONE lines place q: q adds nothing more and pushes nothing, so a path only NONE lines place selects
+          only the ALSO entries of its lines (the walkers: a diff under tests/e2e/ still changes text they read);
+        - else q adds, as reach, the plain entries of its placing lines and every collected test that names
+          basename(q); then every carrier that names basename(q) is pushed (a FOREIGN basename pushes only tests/lib
+          carriers). A carrier's own text changes what it names, never who names it, so reach follows names from the
+          changed path outward.
   (4) p is placed, not only by NONE lines, and its reach is empty: FULL (`<p>: reaches no test`).
   (5) Once every path is read and the result is FAST, the selection is closed over runners: every collected test
       that runs a selected test (the runner map) is added, until nothing new is. `@merge-task-self-tests` is no file
@@ -326,12 +329,10 @@ class Repo:
         """Rule (3) from p: (full reason | None, reach, also, none_only)."""
         def kind(l):
             return "PLACE" if (ignore_full and l.kind == "FULL") else l.kind
-        lines = self.matching(p)
-        placing = [l for l in lines if l.kind != "ALSO"]
+        placing = [l for l in self.matching(p) if l.kind != "ALSO"]
         if not placing:
             return f"{p}: not in the map", set(), set(), False
-        if all(kind(l) == "NONE" for l in placing):
-            return None, set(), set(), True
+        none_only = all(kind(l) == "NONE" for l in placing)
         seen, level, reach, also = {p}, [p], set(), set()
         while level:
             nxt = []
@@ -340,17 +341,19 @@ class Repo:
                 placing = [l for l in lines if l.kind != "ALSO"]
                 if any(kind(l) == "FULL" for l in placing):
                     return (f"{p}: marked FULL" if q == p else f"{p}: reaches {q}, marked FULL"), reach, also, False
-                if placing and all(kind(l) == "NONE" for l in placing):
-                    continue
                 if not placing:
                     return f"{p}: reaches {q}, not in the map", reach, also, False
+                # Every placed item adds its lines' ALSO entries (the walkers), a NONE-only one too: a diff to a NONE
+                # path, tests/e2e/ say, still changes text a walker reads.
+                for l in lines:
+                    if l.kind == "ALSO":
+                        also |= l.entries
+                if all(kind(l) == "NONE" for l in placing):
+                    continue
                 base = os.path.basename(q)
                 for l in placing:
                     reach |= l.entries
                 reach |= self.namers(base, "tests")
-                for l in lines:
-                    if l.kind == "ALSO":
-                        also |= l.entries
                 pushed = self.namers(base, "carriers")
                 if base in self.foreign:
                     pushed = {c for c in pushed if c.startswith(LIB)}
@@ -359,7 +362,7 @@ class Repo:
                         seen.add(c)
                         nxt.append(c)
             level = nxt
-        return None, reach, also, False
+        return None, reach, also, none_only
 
     def select(self, paths, ignore_full=False):
         """(full reason | None, selected entries)."""

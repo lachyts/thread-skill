@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S13) and `check` (C1-C3) on throwaway
-# repos, its results on the real tree (R1-R5), and tests/run.sh's --fast and --only modes on a fixture checkout
+# repos, its results on the real tree (R1-R6), and tests/run.sh's --fast and --only modes on a fixture checkout
 # (F1-F9). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
 # temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -120,10 +120,21 @@ put "$D" zznone/a.md 'none'
 put "$D" zzalso/a.md 'also'
 map "$D" 'skills/**' 'tests/*.test.*' 'zznone/** NONE' 'zzalso/** ALSO tests/zzleaf6.test.sh'
 ok "$(sel "$D" --paths zzloose.txt)" "FULL|zzloose.txt: not in the map" "S6: an unmapped path is FULL"
-ok "$(sel "$D" --paths zznone/a.md)" "FAST|-|-|1" "S6: a path placed only by NONE selects nothing"
+ok "$(sel "$D" --paths zznone/a.md)" "FAST|-|-|1" "S6: a path placed only by NONE selects nothing when the map has no \`** ALSO\` line"
 ok "$(sel "$D" --paths zzalso/a.md)" "FULL|zzalso/a.md: not in the map" "S6: a path matched only by an ALSO line is not placed"
 ok "$(sel "$D" --paths skills/x/scripts/zzleaf6.py)" "FULL|skills/x/scripts/zzleaf6.py: reaches zzorphan.py, not in the map" \
   "S6: a reached carrier no line places is FULL"
+put "$D" tests/zzw.test.mjs '// a walker'
+put "$D" tests/zzv.test.mjs '// reads zzr/'
+put "$D" skills/x/scripts/zzleaf6b.py 'B = 6'
+put "$D" tests/zzleaf6b.test.sh 'python3 skills/x/scripts/zzleaf6b.py'
+put "$D" zzr/zzr.sh 'python3 skills/x/scripts/zzleaf6b.py'
+put "$D" tests/zzrr.test.sh 'bash zzr/zzr.sh'
+map "$D" '** ALSO tests/zzw.test.mjs' 'skills/**' 'tests/*.test.*' 'zznone/** NONE' 'zzr/** NONE' 'zzr/** ALSO tests/zzv.test.mjs'
+ok "$(sel "$D" --paths zznone/a.md)" "FAST|-|-|1 tests/zzw.test.mjs" \
+  "S6: a path placed only by NONE still selects the walkers (its ALSO entries), and only them"
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf6b.py)" "FAST|-|-|1 tests/zzleaf6b.test.sh tests/zzv.test.mjs tests/zzw.test.mjs" \
+  "S6: a reached carrier placed only by NONE adds its lines' ALSO entries, never the tests that name it"
 
 D="$TMP/s7"; mkrepo "$D"
 put "$D" skills/x/scripts/zznobody.py 'T = 7'
@@ -357,6 +368,9 @@ has "$(python3 "$SEL" select --paths tests/release-check.test.sh)" "tests/releas
   "R5: a change to release-check.test.sh runs its runner, release-check-quoting-diff"
 has "$(python3 "$SEL" select --paths tests/reflect-weekly.test.mjs)" "tests/fast-tier.test.sh" \
   "R5: a change to a test this suite names selects this suite (rule 1), its OWN-LISTINGS (ii) reason"
+r6=$(python3 "$SEL" select --paths tests/e2e/parallel-rollouts-one-repo.live.sh)
+ok "$(printf '%s\n' "$r6" | head -1 | cut -f1)|$(printf '%s\n' "$r6" | grep -cxE 'tests/contracts/(queue-only|rung-vocabulary|no-single-cause)\.test\.mjs')" \
+  "FAST|3" "R6: a tests/e2e/ change (NONE) still runs the walkers that read it (queue-only, rung-vocabulary, no-single-cause)"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
@@ -404,7 +418,7 @@ shells=("$(command -v bash)"); [ -x /bin/bash ] && ! [ /bin/bash -ef "${shells[0
 for sh in "${shells[@]}"; do
   v=$("$sh" -c 'echo ${BASH_VERSINFO[0]}')
   THREAD_VERIFY_BASE=$FB run "$sh" --fast
-  ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== tests/')" "0||0" "F3 ($sh, bash $v): a NONE-only diff selects nothing: no suite spawned, no node, the run passes"
+  ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== tests/')" "0||0" "F3 ($sh, bash $v): a NONE-only diff in a fixture with no \`** ALSO\` line selects nothing: no suite spawned, no node, the run passes"
   has "$out" "== node tests: none selected" "F3 ($sh, bash $v): … node is never run"
   has "$out" "0 test files" "F3 ($sh, bash $v): … and the fast-tier line says 0 test files"
 done

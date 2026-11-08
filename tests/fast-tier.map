@@ -7,7 +7,7 @@
 #   - An entry is a collected test path, a glob over collected tests, or @merge-task-self-tests.
 #   - Every line that matches a path counts. A matching line that is not ALSO places the path; any FULL is the full
 #     suite. Otherwise the result is the union of the plain entries and the reach; ALSO entries are added on top and
-#     never count as reach. A path placed only by NONE lines selects nothing.
+#     never count as reach. A path placed only by NONE lines selects only the ALSO entries of its lines (the walkers).
 #   - The same pattern may repeat on several lines.
 # Patterns are repo-relative and matched segment by segment, fnmatchcase on each segment, so `*`, `?` and `[...]`
 # never cross a `/`; a whole `**` segment matches zero or more segments.
@@ -54,7 +54,7 @@ OWN-LISTINGS tests/unfinished-rollout.test.sh  # (i) an rglob counter on a temp 
 OWN-LISTINGS tests/pushed-base.test.sh  # (i) copies $root/skills as the primary's plugin root (15b)
 OWN-LISTINGS tests/self-rollout-check.test.sh  # (i) copies $root/skills into a seed repo
 OWN-LISTINGS tests/lead-integrate.test.sh  # (i) C35's fixture verifier string `find . ...`, read by the inert proof
-OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R5 read the real tree through the selector's index; C1 is every run's map check, and R1-R5 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)
+OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R6 read the real tree through the selector's index; C1 is every run's map check, and R1-R6 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)
 
 # ---- FULL: the harness and the repo's config ----
 tests/run.sh FULL
