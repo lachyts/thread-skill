@@ -42,7 +42,7 @@ merge, and files a fix task (ADR 0055) instead of blocking.
 **d2. The full suite gets faster too.** His note on the pick: "speed up the full suite as well … any time
 spent on speeding that up will help down the track." The completion verifier, master's CI and Lachy's
 own sessions still run it, so it is held to estate ADR 0011's **Suite budget** (20 minutes, week's median),
-and Thread Skill's suite audit (ADR 0011 d4's method) runs now rather than waiting for the estate skill.
+and Thread Skill's suite audit (estate ADR 0011 d4's method) runs now rather than waiting for the estate skill.
 
 **d3. The merge gate follows the tier.** A PR's required checks run the fast tier on both OSes, keeping the
 two required-check names (ADR 0025), so a merge never waits on the full suite remotely either. The full
@@ -76,7 +76,7 @@ Calls made in his place, each overturnable:
   (a `sed` form that works on ubuntu fails on macOS, met in this very rollout).
 - **CI's full suite is split, not trimmed, first.** Why: splitting keeps every test and is reversible; the
   audit (d2) decides what to trim.
-- **The 80 % flag and the week's median** follow ADR 0011's own reading rule (one run's time is mostly its
+- **The 80 % flag and the week's median** follow estate ADR 0011 d1's reading rule (one run's time is mostly its
   load). Why: one slow runner must not file an audit.
 - **The timeout raise to 60 (#327) stays** as headroom until d1 and d3 land, then comes back down to fit the
   split jobs. Why: a hang should report red quickly.

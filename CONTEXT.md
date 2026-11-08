@@ -985,9 +985,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   smoke tests, partial verify.
 - **Suite budget** — how long a project's suite may take, read on the week's
   median, never one run: an Integration verify within 5 minutes and a full
-  suite within 20 unless the project sets its own and says why (estate ADR
-  0011 d2). A breach files that project's suite audit. _Avoid_: test timeout,
-  `verify_timeout` (a deadline, not a budget).
+  suite within 20 unless the project sets its own (a looser one only with its
+  reason stated; estate ADR 0011 d2). A breach files that project's suite
+  audit. _Avoid_: test timeout, `verify_timeout` (a deadline, not a budget).
 - **CI headroom** — how far a required GitHub check's job runs below its time
   limit (`timeout-minutes`), per merge and on the week's median. A job whose
   week's median runs past 80 % of its limit is a finding; a job cancelled at
