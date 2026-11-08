@@ -27,14 +27,16 @@
 #        alias-less member (from its one repo, its project's `Local:` included; refused when it writes two
 #        checkouts), a missing launch-folders file; a row commits only to the checkout it launches from (ADR 0074
 #        d3): a `repo:` surface in another checkout (added, declared, `touches:`, a **Files:** span) refuses an
-#        aliased row with its remedies, a launcher there named first; a **Read...** path, `--add-dir` and `Local:`
-#        reach do not; an alias-less row opens from the one checkout its surfaces name, whatever else it reaches
+#        aliased row with its remedies, a launcher there named first (its toplevel's before a deeper one's) only
+#        when that one checkout is all it commits to, a row committing to two starting at the split; a **Read...**
+#        path, `--add-dir` and `Local:` reach do not; an alias-less row opens from the one checkout its surfaces
+#        name, whatever else it reaches
 #   P7   vault chains claim their own project places (ADR 0059): a vault-root launch or path narrows to the first
 #        project's place (a folder note's folder, else the note and its would-be folder) and the member's own task
 #        note; Work/Tasks is bookkeeping; the whole-vault fallbacks; --surface adds; a code row never opens where its
 #        Leg cannot finish it (ruling (c) first, read through `works`; an added surface in another checkout than its
-#        launch's refuses, ADR 0074 d3); the serial check schedules every chain, a shared place WARNing that they take
-#        turns by rank (ADR 0067 d4, d9)
+#        launch's refuses, ADR 0074 d3; a vault launch committing to two checkouts is offered no relaunch); the serial
+#        check schedules every chain, a shared place WARNing that they take turns by rank (ADR 0067 d4, d9)
 #   P8   the 2026-11-02 replan fixture (docs/spikes/2026-11-02-replan.py) over a synthetic estate: only the same-file
 #        pair and the declared-bare pairs clash, and no workspaces or Projects pair appears
 #   P9   the Chain copy helpers (ADR 0067 d2, pure): read_chain_copies (absent, [], inline and block lists, quoted
@@ -552,10 +554,10 @@ ok "$(mem l8 launch)" "{\"alias\":\"claude\",\"folder\":\"$G\"}" "P5: an alias-l
 ok "$(mem l9 launch)" "{\"alias\":\"claude\",\"folder\":\"$V\"}" "P5: … or from the vault root with zero repos"
 plan --tasks l10
 ok "$rc|$out" "3|" "P5: an alias-less row writing two checkouts exits 3 (its Leg could finish only one)"
-has "$err" "REFUSE: l10: it writes the checkouts $G, $H and has no launch alias" "P5: … naming them (its works)"
+has "$err" "REFUSE: l10: it writes the checkouts $G, $H and has no launch alias" "P5: … naming them, read from its surfaces' checkouts (ADR 0074 d3)"
 mkt l12 "surfaces: [\"repo:$G//sub/file.txt\", \"repo:$H//x.py\"]"
 plan --tasks l12
-ok "$rc|$out" "3|" "P5: … and so do file tokens in two checkouts (works reads their checkouts)"
+ok "$rc|$out" "3|" "P5: … and so do file tokens in two checkouts, read from the surfaces' checkouts (ADR 0074 d3)"
 PBODY="Local: \`$H\`" mkp HLocal
 mkt l11 'projects: ["[[HLocal]]"]'
 plan --tasks l11
@@ -574,7 +576,34 @@ mkt l14 'launch: cc-a-seo'
 plan --tasks l14 --surface "l14=$G/sub/file.txt"
 ok "$rc|$out" "3|" "P5: a workspace launch committing to another repo exits 3 (the 11-07 metrics row)"
 has "$err" "REFUSE: l14: its launch cc-a-seo opens in $W/aw/launchers/seo, in the checkout $W, but it commits to the checkout $G" "P5: … naming both"
-has "$err" "; launch it with \`cc-g\` (its folder $G is in $G), split it" "P5: … its remedy naming that checkout's launcher, its toplevel's before a deeper one's"
+has "$err" "; launch it with \`cc-g\` (its folder $G is in $G), split it" "P5: … its remedy naming that checkout's launcher"
+# launcher_for: a launcher at the checkout's toplevel comes before a deeper one, whatever the file order (here the
+# deeper one is first, as by_alias is read before plain_aliases).
+LFD="$TMP/lf-deeper.json"
+cat > "$LFD" <<EOF
+{"schema_version": 1,
+ "by_alias": {"cc-gdeep": "$G/sub", "cc-a-seo": "$W/aw/launchers/seo"},
+ "plain_aliases": {"cc-g": "$G"}}
+EOF
+LFX="$LFD" plan --tasks l14 --surface "l14=$G/sub/file.txt"
+ok "$rc|$out" "3|" "P5: … with a deeper launcher listed first in that checkout"
+has "$err" "; launch it with \`cc-g\` (its folder $G is in $G), split it" "P5: … its remedy names the toplevel's launcher before the deeper one's"
+hasnt "$err" "cc-gdeep" "P5: … and never the deeper one"
+# A relaunch fixes a row only when every checkout it commits to is one checkout (ADR 0074 d3's "that checkout"):
+# a row committing to two is refused from any launch, so its remedies start at the split.
+mkt l23 'launch: cc-g' 'touches:' '  - sub/file.txt' "  - $H/x.py"
+plan --tasks l23
+ok "$rc|$out" "3|" "P5: an aliased row committing to its launch's checkout and another exits 3"
+has "$err" "REFUSE: l23: its launch cc-g opens in $G, in the checkout $G, but it commits to the checkouts $G, $H: a review cannot leave the Session's cwd, so no one launch could finish it (ADR 0074 d3): split it into one task per checkout chained by \`depends-on:\`" "P5: … naming both checkouts, its remedy starting at the split"
+has "$err" "or, for a checkout it only reads, declare \`surfaces:\` without that checkout or move the path under a **Read...** item" "P5: … then the read-only remedy"
+hasnt "$err" "launch it with" "P5: … offering no launcher (a launch from $H would still be refused for $G)"
+hasnt "$err" "launch it from" "P5: … nor a launch from either checkout"
+mkt l24 'launch: cc-g' "surfaces: [\"repo:$H//x.py\", \"repo:$W//_shared/x/\"]"
+plan --tasks l24
+ok "$rc|$out" "3|" "P5: an aliased row committing to two other checkouts exits 3"
+has "$err" "REFUSE: l24: its launch cc-g opens in $G, in the checkout $G, but it commits to the checkouts $H, $W: a review cannot leave the Session's cwd, so no one launch could finish it (ADR 0074 d3): split it" "P5: … naming both, its remedy starting at the split"
+hasnt "$err" "launch it with" "P5: … offering no launcher, though $W has one (cc-w)"
+hasnt "$err" "launch it from" "P5: … nor a launch from either checkout"
 mkt l15 'launch: cc-g' "surfaces: [\"repo:$H//x.py\"]"
 mkt l16 'launch: cc-g' "touches: [\"$H/x.py\"]"
 LAUNCH="- **Files:** \`$H/x.py\`" mkt l17 'launch: cc-g'
@@ -605,7 +634,8 @@ LAUNCH="- **Files:** \`$G/sub/file.txt\`" mkt l22 'projects: ["[[HLocal]]"]'
 plan --tasks l22
 ok "$rc|$(mem l22 launch)|$(mem l22 works)" "0|{\"alias\":\"claude\",\"folder\":\"$G\"}|[\"$G\",\"$H\"]" "P5: an alias-less row opens from the one checkout its surfaces name, whatever else it reaches"
 plan --tasks l12
-has "$err" "REFUSE: l12: it writes the checkouts $G, $H and has no launch alias" "P5: an alias-less row whose surfaces name two checkouts is refused, naming them"
+has "$err" "REFUSE: l12: it writes the checkouts $G, $H and has no launch alias: a review cannot leave the Session's cwd, so its Leg could finish only one (ADR 0074 d3): split it" "P5: an alias-less row whose surfaces name two checkouts is refused by d3, naming them"
+hasnt "$err" "leg.py done finishes only commits" "P5: … not by ADR 0059 d4's works-based refusal (r1 pins that one)"
 LFX="$TMP/none.json" plan --tasks l2
 ok "$rc|$out" "3|" "P5: a missing launch-folders file while an alias needs it exits 3"
 has "$err" "l2: launch alias cc-g needs $TMP/none.json, which is missing or unreadable" "P5: … naming the path"
@@ -740,6 +770,12 @@ LAUNCH="- **Repo:** \`$G\`" mkt r2 'launch: cc-v'
 LFX="$LFX7" plan --tasks r2
 ok "$rc|$out" "3|" "P7: a vault launch writing a checkout exits 3"
 has "$err" "REFUSE: r2: its launch cc-v opens in $V, inside the vault, but it writes the checkout $G" "P7: … naming the launch and the checkout"
+has "$err" "so give it a \`launch:\` whose folder is in that checkout, split it" "P7: … its remedy a launch from that checkout first"
+mkt r7 'launch: cc-v' "surfaces: [\"repo:$G//sub/file.txt\", \"repo:$H//x.py\"]"
+LFX="$LFX7" plan --tasks r7
+ok "$rc|$out" "3|" "P7: a vault launch committing to two checkouts exits 3"
+has "$err" "REFUSE: r7: its launch cc-v opens in $V, inside the vault, but it writes the checkouts $G, $H: leg.py done finishes only commits in the Leg's own checkout, so split it into one task per checkout" "P7: … its remedy starting at the split (ADR 0074 d3 refuses it from any one launch)"
+hasnt "$err" "give it a \`launch:\`" "P7: … offering no relaunch"
 LAUNCH="- **Repo:** \`$G\`" mkt r3 'launch: cc-vl'
 LFX="$LFX7" plan --tasks r3
 ok "$rc" 3 "P7: … and so does a symlinked vault launch"
@@ -779,9 +815,9 @@ has "$cerr" "WARN: [[legacy-rollout]] (no project; never started) also predicts 
 # HOME holding the default --vault and launch-folders file: a workspaces monorepo with three launchers whose tasks name
 # it only as where they work (five as `**Repo:** <toplevel>`, one at depth); an .agents-like checkout whose tasks
 # launch from it (ADR 0074 d3), one reaching the workspaces by --add-dir, and name distinct files (a **Files:** span,
-# `touches:`, declared surfaces), and one `**Repo:**
-# ~/.agents/skills/` (reach at depth); a Projects monorepo reached by `Local:`; two chains naming one file, two naming
-# sibling files of one folder, and one declaring the bare .agents toplevel.
+# `touches:`, declared surfaces), and one `**Repo:** ~/.agents/skills/` (reach at depth); a Projects monorepo reached
+# by `Local:`; two chains naming one file, two naming sibling files of one folder, and one declaring the bare .agents
+# toplevel.
 echo "== p8"
 PH="$TMP/p8home"; PV="$PH/repos/obsidian"; PT="$PV/Work/Tasks"; mkdir -p "$PT" "$PV/Work/Projects"
 PW="$PH/repos/workspaces"; mkrepo "$PW" https://github.com/demo/workspaces.git

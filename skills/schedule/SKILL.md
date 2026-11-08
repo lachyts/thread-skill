@@ -1053,11 +1053,12 @@ missing launch folder, a missing launch-folders file an alias needs, a dependenc
 a code row whose Leg would open outside the checkout it works: an alias-less row whose surfaces name two checkouts or,
 naming none, that works two, a vault launch working one, or a row whose `repo:` surfaces name a checkout other than
 its launch folder's) or exit 2 stops the run before anything is written: print its stderr verbatim. A cross-checkout
-refusal names its remedies in turn: launch it with that checkout's launcher (from `launch-folders.json`), else from
-that checkout; split it into one task per checkout chained by `depends-on:` (they stay in the one chain, a Leg
-boundary between them); or, for a checkout it only reads, declare `surfaces:` without that checkout, or move the path
-under a **Read...** item. Name each `sessionLane` member, with its
-`why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
+refusal names its remedies in turn: only when every checkout the row commits to is that one checkout, launch it with
+that checkout's launcher (from `launch-folders.json`), else from that checkout (a row committing to two checkouts is
+refused from any one launch, so its remedies start at the split); split it into one task per checkout chained by
+`depends-on:` (they stay in the one chain, a Leg boundary between them); or, for a checkout it only reads, declare
+`surfaces:` without that checkout, or move the path under a **Read...** item. Name each `sessionLane` member, with
+its `why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
 Carry the `warns` to the confirm and to S7.
 
 **S3. Live chains.** For every chain, run
