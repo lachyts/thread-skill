@@ -611,7 +611,9 @@ note locks, and no cycle forms with `next` (trickle lock, then note locks). A ca
 alone for its record write, its reads taken first the same way.
 
 The Capacity (ADR 0067 d8; execute away.md § Capacity, its spec). While a fresh capacity.json is in force (rr's
-_capacity_state), a Leg's claims count on the Mac behind its Leg lease, and its fresh claims are gated by the room
+_capacity_state), a Leg's claims count on the Mac behind its Leg lease (at least 1 while it is fresh: an open
+Leg counts from its session's start, ADR 0076 d3, read by rr._running_by_rollout), and its fresh claims are gated by
+the room
 (rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps
 for other waiters, less this chain's own counted rows; the Heat hold and the quota hold too). leg_gate turns a held
 `claim` into the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity

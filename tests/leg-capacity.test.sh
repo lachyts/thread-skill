@@ -17,6 +17,8 @@
 #   L13 the Run record's suite `running` (mac_running, p36-9) counts a live Leg claim while Capacity is in force;
 #       no capacity.json, a stale one, a lapsed Leg lease or none reads today's parallel-only count
 #   L14 a Capacity wait holds through a changing count until --for, or until room, and reports the minutes it waited
+#   L15 a Leg counts from its session's start (ADR 0076 d3, p44-2): a begun Leg with no claim counts 1 behind a fresh
+#       Leg lease, a lapsed or missing lease 0, and its first claim still counts 1
 # Temp vaults only; HOME, the lock dirs and the Run record are temp; --now and --session pinned. bash 3.2-compatible.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -430,6 +432,37 @@ res=$(fwait 1200 300:free); rc=$?
 out=$(printf '%s\n' "$res" | head -1); tail=$(printf '%s\n' "$res" | tail -1)
 ok "$rc|$(q 'd["cleared"]')|$(q 'd["next"]["action"]')|$(q 'd["flipped"]')" "0|True|claim|False" "L14b: room at 5 minutes: the wait clears and next is claim"
 ok "$tail|$(q 'd["waitedMinutes"]')" "300|20|5" "L14b: … at the poll that saw it, reporting the 5 minutes it waited"
+
+# ════ L15: a Leg counts from its session's start (ADR 0076 d3, p44-2) ════════════════════════════════════════════════
+scen l15
+mkro t1 t2; mkpar 1 1; cap 2
+leg begin --cwd "$F"; ok "$rc|$(fm t1 status)|$(LEASE)" '0|open|["leg","2026-10-20T10:00:00Z",false]' "L15: (the Leg begins, claims nothing, writes its lease)"
+par
+ok "$(pq 'd["trickle"]["elsewhere"]')|$(pq 'd["start"]')" "{\"$RO\":1}|[]" "L15a: a begun Leg with no claim counts 1, so par holds its second start"
+ok "$(pq 'd["hold"][0]["reason"]')" '"trickle: 2/2 tasks running on this Mac"' "L15a: … on the Capacity"
+setlease 2026-10-20T08:30:00Z; par
+ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15b: its lease exactly 90:00 old still counts"
+setlease 2026-10-20T08:29:00Z; par
+ok "$(pq '[d["trickle"]["elsewhere"], d["trickle"]["lapsed"], d["start"]]')" '[{},{},["q1"]]' "L15c: 91 minutes old it lapses: the empty Leg counts 0 (no task to name) and the room is par's"
+rm -f "${HOME:?}/.config/thread/leases/${RO:?}.json"; par
+ok "$(pq '[d["trickle"]["elsewhere"], d["start"]]')" '[{},["q1"]]' "L15d: no Leg lease: the empty chain holds nothing"
+setlease 2026-10-20T08:00:00Z '"waiting": true'; par
+ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15e: a waiting lease (120 minutes old, inside its 180) still counts the empty Leg"
+uncap; setlease "$NOW"; par
+ok "$(pq '[d["trickle"]["elsewhere"], d["start"]]')" '[{},["q1"]]' "L15f: no capacity.json: the empty Leg counts nothing (the fallback)"
+cap 3; leg claim --task t1; ok "$rc|$(fm t1 owner)" "0|leg-1" "L15g: (the Leg claims t1 under capacity 3)"
+par; ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15g: … and still counts 1, never its session plus its claim"
+leg done --task t1 --verify none 2>/dev/null; ok "$(fm t1 status)" done "L15h: (t1 done: the Leg is between claims)"
+par; ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15h: … its session still counts 1"
+leg close --outcome stopped --reason "Lachy stopped it"; par
+ok "$(LEASE)|$(pq 'd["trickle"]["elsewhere"]')" "none|{}" "L15i: close drops the lease, so the closed Leg counts no more"
+scen l15m
+mkro t1 t2; mkpar 1 0; cap 2 "$(ago 0)"
+leg begin --cwd "$F"
+setlease "$(ago 0)"
+ok "$(suite started)" "suite-started|2" "L15j: the Run record's running counts par's task and the empty Leg's session"
+setlease "$(ago 91)"
+ok "$(suite started)" "suite-started|1" "L15j: … and a lapsed Leg lease leaves it out"
 
 echo
 [ "$fail" -eq 0 ] && echo "leg-capacity.test.sh: ALL PASS" || echo "leg-capacity.test.sh: FAILED"
