@@ -1284,7 +1284,8 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
       (Y) ADR 0060's yield, smoke(X) meets own(Y): toward an earlier Y always; toward a later Y only when Y is free,
           waiting on no chain by (M), (O), a (Y) toward an earlier chain or an unreadable note, so a yield always
           lands on a chain that can run (R yields to a free H; else R goes first, and H, once free, meets R's open
-          Leg by (M)'s file half).
+          Leg by (M)'s file half). Between two copied chains a `repo:` pair with a bare toplevel on either side never
+          meets here (meet_yield, ADR 0075 d4): a whole-checkout cell stands only an in-place peer.
     An unreadable Y holds its whole claim against ws(X) and T(X), whatever the order (fail closed), and is a sink: it
     cannot begin. No cycle forms, for any number of chains: (O) and an earlier-ward (Y) point down the total order;
     a later-ward (Y) lands only on a free chain, whose own waits can only climb on, so no path that climbs turns
@@ -1322,6 +1323,24 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
         rank, while its holder has an open Leg."""
         return next((p for p in SC.overlap_pairs(a, b, top) if not (p[0][0] == "repo" and p[1][0] == "repo")), None)
 
+    def whole_checkout(t):
+        """A bare `repo:` token that is a checkout's toplevel (the whole checkout), not a path in none."""
+        if t[0] != "repo" or SC.repo_parts(t[1])[1] is not None:
+            return False
+        c = top(t[1])
+        return bool(c) and c.casefold() == t[1].casefold()
+
+    def meet_yield(x, a, y, b):
+        """ADR 0060's yield meeting, smoke(x)'s tokens a against own(y)'s b: plain meet, save that between two copied
+        chains a `repo:`-`repo:` pair with a bare toplevel on either side never meets (ADR 0075 d4): a whole-checkout
+        cell stands only an in-place peer, since copied chains share no index or HEAD, and their files meet at claim,
+        by rank, and at land. A bare path in no checkout is no Chain copy and still meets."""
+        if not (x["copied"] and y["copied"]):
+            return meet(a, b)
+        return next((p for p in SC.overlap_pairs(a, b, top)
+                     if not (p[0][0] == "repo" and p[1][0] == "repo" and (whole_checkout(p[0]) or whole_checkout(p[1])))),
+                    None)
+
     def holder_half(x, y):
         """(O)'s holder half (ADR 0067 d9): y has no open Leg, so it is not running and never waited on at claim; its
         rows in progress and its done rows not yet landed (hold_of's `holding`, the tokens claim reads) hold x's own
@@ -1358,7 +1377,7 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
             p = holder_half(x, y) if both else None
             if p:
                 return ("O-held", p)
-            p = meet(x["smoke"], y["own"])
+            p = meet_yield(x, x["smoke"], y, y["own"])
             if p:
                 return ("Y", p)
         return None
@@ -1368,7 +1387,7 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
         s = h["s"]
         w = wait_on(r, h)
         if w is None and h["readable"] and r["open"] is None and r["key"] < h["key"]:
-            p = meet(r["smoke"], h["own"])
+            p = meet_yield(r, r["smoke"], h, h["own"])
             if p and not any(wait_on(h, k) for k in chains if k is not h):
                 w = ("Y", p)
         if w is None:
