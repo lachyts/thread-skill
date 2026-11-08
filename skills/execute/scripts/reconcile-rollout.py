@@ -4547,6 +4547,101 @@ def _lease_drop(stem):
         pass
 
 
+# A surface wait (P41-3; execute § 4.5 *Surface re-check*): the parallel lead's own Surface re-check refused (exit 3) or
+# went unanswered (exit 4), so the rollout launches nothing until a check passes. Its marker,
+# ~/.config/thread/leases/<rollout stem>.surface-wait.json beside the lease, {rollout, written_at, since, why, holders,
+# live}, is written and deleted only by `unfinished-rollout.py check --surface-wait`; it never lapses (a rollout with
+# one launches nothing, so it holds only its calls in flight, `live`, and an Integration already begun).
+SURFACE_WAIT_PREFIX = "surface wait:"                        # next's hold reason for a row held by a surface wait
+SURFACE_WAIT_MAX_BYTES = 64 * 1024
+
+
+def _surface_wait_path(stem) -> Path:
+    """The rollout's surface-wait marker (P41-3): `<stem>.surface-wait.json` under LEASE_DIR_REL in the home dir at call
+    time, beside its lease."""
+    return Path.home() / LEASE_DIR_REL / f"{stem}.surface-wait.json"
+
+
+def _surface_wait_read(stem):
+    """(state, data, why) for the rollout's surface-wait marker (_surface_wait_path), in _lease_read's shape: state
+    `none` (no file), `unreadable` (any other OSError, a directory at the path included; over SURFACE_WAIT_MAX_BYTES,
+    not UTF-8, not JSON, not an object, a `live` that is not a list of strings) or `ok`, with data the parsed object
+    (else None) and why how it is not ok (else None). Every reader fails closed on `unreadable`: it holds as a surface
+    wait does."""
+    try:
+        with open(_surface_wait_path(stem), "rb") as f:
+            raw = f.read(SURFACE_WAIT_MAX_BYTES + 1)
+    except (FileNotFoundError, NotADirectoryError):
+        return "none", None, None
+    except (OSError, RuntimeError) as e:
+        return "unreadable", None, f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})"
+    if len(raw) > SURFACE_WAIT_MAX_BYTES:
+        return "unreadable", None, "over 64 KiB"
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return "unreadable", None, "not UTF-8"
+    except (ValueError, RecursionError):
+        return "unreadable", None, "not JSON"
+    if not isinstance(data, dict):
+        return "unreadable", None, "not a JSON object"
+    live = data.get("live")
+    if not isinstance(live, list) or not all(isinstance(x, str) for x in live):
+        return "unreadable", None, "its `live` is not a list of strings"
+    return "ok", data, None
+
+
+def _surface_wait_live(data):
+    """The marker's `live`, lowercased: the task-call and seeded-revise slugs in flight when its check ran."""
+    live = (data or {}).get("live")
+    return [x.strip().lower() for x in live if isinstance(x, str) and x.strip()] if isinstance(live, list) else []
+
+
+def _surface_wait_why(sw):
+    """A marker read's why as next and the readers print it: the marker's `why`, or `unreadable: <why>`."""
+    state, data, why = sw
+    if state == "ok":
+        return str((data or {}).get("why") or "a surface wait stands")
+    return f"unreadable: {why}"
+
+
+def _surface_wait_write(stem, data):
+    """Write the rollout's surface-wait marker through a temp file beside it and os.replace (a reader never sees a torn
+    file). None, or why it could not (no home directory, an OSError)."""
+    tmp = None
+    try:
+        path = _surface_wait_path(stem)
+        if not Path.home().is_dir():
+            return "no home directory"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        os.replace(tmp, path)
+        tmp = None
+        return None
+    except (OSError, RuntimeError, ValueError) as e:
+        return (e.strerror if isinstance(e, OSError) else None) or str(e) or type(e).__name__
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def _surface_wait_drop(stem):
+    """Delete the rollout's surface-wait marker: None (a missing file is fine), or why it could not (a directory at the
+    path, any other OSError, no home to resolve)."""
+    try:
+        _surface_wait_path(stem).unlink()
+        return None
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except (OSError, RuntimeError) as e:
+        return (e.strerror if isinstance(e, OSError) else None) or str(e) or type(e).__name__
+
+
 class _Leases:
     """The leases one call reads (p28-4; execute away.md § The Trickle), at `now`. A lease lapses 45 minutes
     (LEASE_LAPSE) after its last write, or after the Mac's latest boot or wake if later: its start is the latest of
@@ -4697,17 +4792,18 @@ def _counted_by_rollout(tasks_dir: Path, index, legs=False) -> dict:
     that is no countable rollout). `index` is one walk of `tasks_dir`. Read by _running_by_rollout for its counts and
     by _trickle_claims_judge, which consumes a Trickle claim once its task is in its rollout's set. No lease is read
     here (p28-4): _running_by_rollout applies it to the counts, and a claim is consumed whatever its rollout's lease.
-    `legs` (p36-7): a serial rollout's set is its Leg claims (_leg_tasks) instead of empty."""
+    `legs` (p36-7): a serial rollout's set is its Leg claims (_leg_tasks) instead of empty. Each parallel set is read
+    with its rollout's stem, so a surface wait's marker narrows it to the calls in flight (_counted_tasks, P41-3)."""
     by_rollout = {}
     for path, note in index.values():
         target = (_wikilink_slug(note.get("rollout")) or "").lower()
         if target:
             by_rollout.setdefault(target, []).append((path, note))
 
-    def counted(note, linked):
-        return _leg_tasks(note, linked) if legs and _leg_eligible(note) else _counted_tasks(note, linked)
+    def counted(note, linked, stem):
+        return _leg_tasks(note, linked) if legs and _leg_eligible(note) else _counted_tasks(note, linked, stem)
 
-    return {path.stem.lower(): (path, note, set(counted(note, by_rollout.get(path.stem.lower(), []))))
+    return {path.stem.lower(): (path, note, set(counted(note, by_rollout.get(path.stem.lower(), []), path.stem)))
             for path, note in index.values() if path.parent == tasks_dir}
 
 
@@ -4737,25 +4833,32 @@ def _trickle_eligible(note) -> bool:
     return _shape(note) == "parallel" and not _valued(note.get("paused"))
 
 
-def _counted_tasks(note, linked) -> list:
+def _counted_tasks(note, linked, stem=None) -> list:
     """The tasks a rollout note runs as the Mac-wide count reads them, one lowercased slug per counted note in
     `linked` order: none unless it is _trickle_eligible and has started (never_started over `linked`, the notes whose
     `rollout:` names it); else its `status: in_progress` notes less the ones its own undecided RACE or UNVERIFIED
-    holds (_race_holds)."""
+    holds (_race_holds). With its rollout's `stem`, a surface wait (P41-3, _surface_wait_read: `next` launches and
+    restarts nothing while it stands) narrows that: under a readable marker only the in_progress notes its `live`
+    lists count, less the race holds; under an unreadable one every in_progress note counts (fail closed)."""
     if not _trickle_eligible(note) or never_started(note, linked)[0]:
         return []
+    sw = _surface_wait_read(stem) if stem else ("none", None, None)
+    if sw[0] == "unreadable":
+        return [p.stem.lower() for p, t in linked if _status(t) == "in_progress"]
     held = _race_holds(note, linked)
-    return [p.stem.lower() for p, t in linked if _status(t) == "in_progress" and p.stem.lower() not in held]
+    live = set(_surface_wait_live(sw[1])) if sw[0] == "ok" else None
+    return [p.stem.lower() for p, t in linked if _status(t) == "in_progress" and p.stem.lower() not in held
+            and (live is None or p.stem.lower() in live)]
 
 
-def _counted_running(note, linked) -> int:
+def _counted_running(note, linked, stem=None) -> int:
     """The number of tasks a rollout note runs as the Mac-wide count reads them (_counted_tasks). Read by `status` for
     its own rollout (the Trickle line's `here`); every other rollout's n (_elsewhere_running's and mac_running's count,
     each with the Legs too while Capacity is in force, p36-7/p36-9) is the same count, through _counted_by_rollout,
     which also checks the note sits directly in `tasks_dir`. The
     lease is never read here: each caller applies it (p28-4), _running_by_rollout to every rollout with n > 0 and
-    `status` to its own `here`."""
-    return len(_counted_tasks(note, linked))
+    `status` to its own `here`. `stem` (the rollout's) reads its surface-wait marker (P41-3)."""
+    return len(_counted_tasks(note, linked, stem))
 
 
 # ---- the Trickle claims (p28-3; execute away.md § The Trickle, *Trickle claims*) -----------------------------------
@@ -7396,7 +7499,7 @@ def cmd_status(args) -> int:
     elsewhere = _elsewhere_running(rollout_path, tasks_dir, index, leases, lapsed, legs=capacity["inForce"])
     lease = leases.state(rollout_path.stem, rollout_note)
     direct = rollout_path.resolve().parent == tasks_dir.resolve()
-    here = _counted_running(rollout_note, [(r["path"], r["note"]) for r in rows]) \
+    here = _counted_running(rollout_note, [(r["path"], r["note"]) for r in rows], rollout_path.stem) \
         if direct and lease["state"] != "lapsed" else 0
     in_force = capacity["inForce"]
     trickle = {"away": away["away"], "file": away["file"], "why": away["why"],
