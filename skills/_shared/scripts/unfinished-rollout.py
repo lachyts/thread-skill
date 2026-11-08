@@ -400,7 +400,7 @@ SELF_ROLLOUT_SH = Path(__file__).resolve().parent.parent.parent / "execute/scrip
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
             "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
-            "_record_read", "_stop_state", "_truthy_flag", "_parse_ts")
+            "_record_read", "_stop_state", "_truthy_flag", "_parse_ts", "_share_walks", "_walk_of", "_note_index")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -622,14 +622,18 @@ def tags_of(rr, note):
 
 def rollout_notes(rr, tasks_dir: Path, archive: bool):
     """(path, note, "root" | "archive") for each note tagged `rollout` directly in the tasks dir and, with
-    archive, directly in Archive/. A missing folder or an unreadable note yields nothing."""
+    archive, directly in Archive/. A missing folder or an unreadable note yields nothing. Each note is the process's
+    one walk's (reconcile-rollout.py's _walk_of, p41-2), read afresh only when that walk did not parse it."""
     folders = (("root", tasks_dir), ("archive", tasks_dir / "Archive")) if archive else (("root", tasks_dir),)
+    walked = rr._walk_of(tasks_dir).notes
     for where, folder in folders:
         for path in sorted(folder.glob("*.md")):
-            try:
-                note = rr.Note(path)
-            except (ValueError, OSError):
-                continue
+            note = walked.get(path)
+            if note is None:
+                try:
+                    note = rr.Note(path)
+                except (ValueError, OSError):
+                    continue
             if "rollout" in tags_of(rr, note):
                 yield path, note, where
 
@@ -987,7 +991,7 @@ def cmd_check(args, rr) -> int:
             continue
         rel = path.name if where == "root" else f"Archive/{path.name}"
         if stems is None:
-            stems = {p.stem.lower() for p in tasks_dir.rglob("*.md")}
+            stems = {p.stem.lower() for p in rr._walk_of(tasks_dir).paths}
         if target not in stems:
             warns.append(f"WARN: {path.stem}: superseded but filed at {rel}, and its superseded_by names no note "
                          f"([[{target}]]): resolve it by hand")
@@ -1606,17 +1610,8 @@ def phase_key(rr, note):
 
 def build_index(rr, tasks_dir: Path):
     """stem (lower-cased) -> (path, Note) for every note under the tasks dir, Archive included, a root copy preferred
-    (reconcile-rollout.py's _scan builds its dependency index the same way)."""
-    index = {}
-    for path in sorted(tasks_dir.rglob("*.md")):
-        try:
-            note = rr.Note(path)
-        except (ValueError, OSError):
-            continue
-        prev = index.get(path.stem.lower())
-        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
-            index[path.stem.lower()] = (path, note)
-    return index
+    (reconcile-rollout.py's _note_index, over the process's one walk)."""
+    return rr._note_index(tasks_dir)
 
 
 def first_project(rr, note, mine):
@@ -2124,6 +2119,9 @@ def main() -> int:
     u.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
     rr = load_rr()
+    # Every verb here writes no note, so one walk of the tasks dir serves the whole process (p41-2): each serial note's
+    # _scan, leg.py's Chain (sharing this rr) and this script's own reads share it, and nothing outlives the process.
+    rr._share_walks()
     verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
              "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches}
     return verbs[args.cmd](args, rr)
