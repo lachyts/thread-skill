@@ -18,6 +18,8 @@ exposure reading cannot price is priced from its readable cap and signed within 
 `per`/`each` is a rate only before a unit. A credential gate naming only a declared test Login (`[defaults]
 test_logins`) passes the standing approval too, so the 2026-11-01 line's "every other credential, are unchanged" no
 longer holds for a declared test Login.)*
+*(Amended by ADR 0075, 2026-11-07: decision 3's gate found mid-run is set aside and listed, never pushed; no
+rollout ever pushes, and the ntfy fallback ADR 0038 added is superseded.)*
 
 ## Context
 

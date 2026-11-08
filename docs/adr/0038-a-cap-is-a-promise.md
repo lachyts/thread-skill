@@ -16,6 +16,8 @@ refuses is priced from its readable cap, in a form that keeps both of this ADR's
 bounced still signs nothing, and the per-Login gate behind a comma still asks (rule 7(ix)). A judge-less mid-run gate
 now signs at its cap plus its USD amounts. `exposure -` prints that standing reading, so the judge never bounces a
 gate whose cap reads.)*
+*(Superseded in part by ADR 0075, 2026-11-07: d3 is superseded. No rollout ever pushes, so an undelivered needs-you
+push has nothing to fall back from; the `[notify]` table is retired, tolerated with one warning and never refused.)*
 
 ## Context
 

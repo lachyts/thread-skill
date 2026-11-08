@@ -214,7 +214,9 @@ single cause holds the whole queue: a cause that reaches every merge holds only
 the Integration lane (`reconcile-rollout.py lane-hold`, released by Lachy's ack,
 `lane-ack`, through `/thread:repair`). Chorus's Companion polls `moving`; when
 Chorus is not running, `skills/execute/scripts/watchdog.py` reads the same verdict
-and only notifies (ntfy), once per stall. Installing it is a one-time step, run
+and only notifies (ntfy), once per stall. ADR 0075 d2 retires that fallback and
+P41-5 deletes the script; until P41-5, an installed job still notifies through
+ntfy-push.py. Installing it is a one-time step, run
 from the installed plugin's root (`${CLAUDE_PLUGIN_ROOT}`, the root the release
 paragraph under § Tests describes; in a terminal, export it first), never a
 rollout worktree or another checkout:
@@ -319,16 +321,22 @@ grade to what followed it.
   alias; amends 0009). `0031` — the primary checkout holds while a rollout
   runs (amends 0030). `0032` — rollouts keep a Run record and tune by Retro.
   `0033` — execute retries agent-fixable set-asides itself (amends 0004 and
-  0030). `0034` — a gate never holds an unattended rollout (amends 0008).
-  `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
-  its target before it reads, then reshuffles without asking (amends 0026 and
-  0027). `0037` — Reflections run on their own and tune for hands-off quality
-  (amends 0032). `0038` — a Cap is a promise: a spend gate is one line, its split
-  in sub-bullets, and an undelivered push falls back to ntfy (amends 0034).
+  0030). `0034` — a gate never holds an unattended rollout (amends 0008;
+  amended by 0075). `0035` — one human fix per refusal (amends 0033).
+  `0036` — orient resolves its target before it reads, then reshuffles
+  without asking (amends 0026 and 0027). `0037` — Reflections run on their
+  own and tune for hands-off quality (amends 0032). `0038` — a Cap is a
+  promise: a spend gate is one line, its split in sub-bullets, and an
+  undelivered push falls back to ntfy (amends 0034; d3 superseded by 0075).
   `0039` — a code project's thread lives in its repo; one live THREAD.md per
   project; the placement check (amends 0017). `0040` — a rollout is parallel or
   serial: a three-way execution-fit test, and orient's child-agent batches
-  retire (amends 0023).
+  retire (amends 0023). (0041–0074 are not yet listed here: read the
+  directory.) `0075` — a rollout waits instead of stopping, and never
+  notifies: the Begin wait, no push of any kind, the Companion's lead the only
+  signal, every chain in its Chain copies, and `moving` watching waiting Legs
+  (supersedes 0038 d3, 0048's launchd fallback and 0066's notices; amends
+  0034, 0048's *The Companion recovers first* and 0067).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
