@@ -32,7 +32,7 @@
 #        never), and status's hold carries the order's began stamp and the open Leg (ADR 0067 d2, d4)
 #   L16  Chain copies (ADR 0067 d2): `copies` makes each checkout's worktree on chain/<rollout> under the copy dir, cut
 #        from the default branch, links the gitignored config (the toplevel's and a launch folder's; never a tracked or
-#        un-ignored file), stamps chain_copies: after shape:, and refuses a copy dir under ~/repos, an occupied path, a
+#        un-ignored file), stamps chain_copies: after shape: (a vault-only chain's [], ADR 0075 d4), and refuses a copy dir under ~/repos, an occupied path, a
 #        malformed key, one repository twice, this plugin's own checkout and the chain branch checked out in another
 #        worktree (L16a); begin remakes a deleted copy on its branch, exit 4 naming the copy line, and logs the
 #        primary folder (L16b, L16g); begin fast-forwards a clean copy to the primary's default branch, whatever the
@@ -1249,6 +1249,10 @@ mkdir -p "$RT/.claude"; echo '{}' > "$RT/.claude/settings.local.json"
 mkro '' "t1~cc-rt~$RT~\`repo:$RT//a.txt\`"; leg copies
 ok "$rc|$(test -L "$S/chains/rt-$RO/.mcp.json" && echo link || echo own)|$(test -e "$S/chains/rt-$RO/.claude/settings.local.json" && echo y || echo n)" \
    "0|own|n" "L16a: a tracked .mcp.json is the copy's own, and an un-ignored settings.local.json is never linked"
+# ADR 0075 d4: no serial chain works in place, so S5 stamps every note it writes, a vault-only chain's with []
+mkro '' "t1~cc-v~$V~\`vault:Work/Projects/A\`"; leg copies
+ok "$rc|$(q 'd["stamped"]')|$(q 'd["copies"]')|$(fmline)" "0|True|[]|chain_copies: []" \
+   "L16a: a vault-only chain's copies stamps chain_copies: [] after shape: (ADR 0075 d4), with no copy"
 # refusals: an occupied copy path, a malformed key; the note unwritten
 cscen l16a2
 R="$S/r"; crepo "$R" https://github.com/o/r16b.git; C="$S/chains/r-$RO"
