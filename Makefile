@@ -19,8 +19,13 @@ test:
 #   a bump (the old version dir, copy and all, stays on disk); the cache diff covers only skills/ and
 #   hooks/, so the stray check then passes at the same version.
 # - .DS_Store and anything under __pycache__/ are exempt everywhere.
-# - Cache-only files are reported once, by the stray check (the diff's cache-side `Only in` lines are
-#   dropped); tree-side `Only in`, differing files and a missing cache sub-dir still fail the diff.
+# - The cache diff walks the tree's own files under skills/ and hooks/ (find + cmp, never diff): a file
+#   missing from the cache (`Only in <dir>: <name>`), one that differs, or a missing cache sub-dir fails it,
+#   and so does any error the walk prints (a tree sub-dir missing or unreadable): its stderr is captured
+#   too. `find -L` follows a symlinked dir into its files, as `diff -r` did, so cmp never meets a dir.
+#   Cache-only files are reported once, by the stray check. It never parses diff's human-readable output:
+#   GNU diffutils 3.12 (ubuntu-latest, 2026-11-08) shell-quotes a path holding a space in its `Only in`
+#   lines, so the old filter dropping the cache's own lines by an exact path prefix let them through.
 # - A file tracked at release time but deleted since (a consumed review doc, say) reads as stray, so run
 #   this right after the plugin update, on the released commit.
 CONFIG := $(or $(CLAUDE_CONFIG_DIR),$(HOME)/.claude)
@@ -34,7 +39,10 @@ release-check:
 	v=$$(node -p 'require("./.claude-plugin/plugin.json").version') || exit 1; \
 	c="$(CACHE)/$$v"; \
 	[ -d "$$c" ] || { echo "FAIL - no $$c (run the plugin update)"; exit 1; }; \
-	d=$$(for sub in skills hooks; do diff -rq -x .DS_Store -x __pycache__ "$$c/$$sub" $$sub 2>&1; done | P="Only in $$c/" awk 'index($$0, ENVIRON["P"]) != 1'); \
+	d=$$({ for sub in skills hooks; do [ -d "$$c/$$sub" ] || { echo "No $$c/$$sub"; continue; }; \
+	  find -L $$sub -name __pycache__ -prune -o ! -type d ! -name .DS_Store -print | LC_ALL=C sort | while IFS= read -r f; do \
+	    if [ ! -e "$$c/$$f" ]; then echo "Only in $${f%/*}: $${f##*/}"; elif ! cmp -s "$$c/$$f" "$$f"; then echo "Files $$c/$$f and $$f differ"; fi; \
+	  done; done; } 2>&1); \
 	[ -z "$$d" ] || { echo "FAIL - cache $$v differs from the tree:"; echo "$$d"; exit 1; }; \
 	s=$$({ git -c core.quotePath=false ls-files; cd "$$c" && find . -name __pycache__ -prune -o ! -type d ! -name .DS_Store -print; } | awk '!/^\.\//{t[$$0]=1; next} !(substr($$0,3) in t){print substr($$0,3)}' | LC_ALL=C sort); \
 	[ -z "$$s" ] || { echo "FAIL - cache $$v holds files this tree does not track:"; echo "$$s"; exit 1; }; \
