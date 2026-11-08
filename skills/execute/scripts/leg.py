@@ -615,7 +615,9 @@ _capacity_state), a Leg's claims count on the Mac behind its Leg lease (at least
 Leg counts from its session's start, ADR 0076 d3, read by rr._running_by_rollout), and its fresh claims are gated by
 the room
 (rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps
-for other waiters, less this chain's own counted rows; the Heat hold and the quota hold too). leg_gate turns a held
+for other waiters, less this chain's own places, its claims or 1 for its session, so a session's first claim needs no
+new place; waiting Legs with no claim take turns by their waiting records' `since`, p44-2; the Heat hold and the quota
+hold too). begin writes the lease before its gate, so its own next reads that place too. leg_gate turns a held
 `claim` into the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity
 alone); begin's launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The
 Leg lease is ~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from
@@ -1984,8 +1986,10 @@ def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None, c
     alias = g.get("alias") or alias
     folder = g.get("folder") or folder
     chain.contend = rank_contention(ctx, chain, n)
+    # Every begin that runs the Leg writes its lease (fresh, take-over, --resume, silent resume), before the gate, so the
+    # gate reads this session's own place as every other caller does from here on (ADR 0076 d3, p44-2).
+    leg_lease(ctx, chain.legs.get(n))
     plan, _g = leg_gate(ctx, chain, plan_next(chain, n, alias, folder))   # the Capacity (p36-7)
-    leg_lease(ctx, chain.legs.get(n))   # every begin that runs the Leg: fresh, take-over, --resume, silent resume
     inherited = [r.slug for r in chain.rows if r.state == "running" and r.note is not None
                  and owner_leg(r.note) not in (None, n)
                  and (chain.legs.get(owner_leg(r.note)) is None or chain.legs[owner_leg(r.note)]["closed"] is not None)]
