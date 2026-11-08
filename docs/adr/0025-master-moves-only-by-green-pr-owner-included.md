@@ -2,6 +2,9 @@
 
 Date: 2026-09-26
 Status: accepted
+*(Amended by ADR 0073 d3, 2026-11-09 (p43-3): the two required jobs run the fast tier (`make test-fast` against the
+PR's base) on pull requests only, and the full suite runs on every push to master in `full-suite.yml`, split into
+shards. The ruleset and its two contexts are unchanged.)*
 
 ## Context
 

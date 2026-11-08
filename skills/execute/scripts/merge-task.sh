@@ -108,7 +108,10 @@
 # cross-repository PR or a deleted branch); the head does not contain the base; DIRTY, or BEHIND after a
 # bounded re-poll, on an unmoved base; a red required check on a genuine step; required checks that never
 # appeared while something is required (the lead sets it aside at Integration, GitHub-side: no code fix
-# clears it, ADR 0069 d3); a non-check gate (checks green, still BLOCKED, no review pending); a merge queue
+# clears it, ADR 0069 d3); a required check CANCELLED (a CI timeout or another stop on GitHub's side, no test
+# failed) again after one re-run of its failed jobs, or whose re-run cannot start (GitHub-side too, its own
+# reasonClass ci-timeout, ADR 0073 d4; gh exits 0 on it, so a 0 with a red cell is never read as green); a
+# non-check gate (checks green, still BLOCKED, no review pending); a merge queue
 # is required, or `isMergeQueueEnabled` is absent from the schema; GitHub refused the merge with a known
 # text (`is not mergeable|HTTP 405|HTTP 409|HTTP 422|
 # Required status check|protected branch|merges are not allowed|Repository rule violations found`: a repo
@@ -214,6 +217,7 @@ LAZY_REPOLL_MAX=6      # re-polls of a PR GitHub has not settled (ADR 0069 d2), 
 # LAZY_REPOLL_MAX lazy re-polls before its final pass, so "did not converge" never pre-empts the settling 8.
 STATE_GUARD_MAX=$((BEHIND_REPOLL_MAX + LAZY_REPOLL_MAX + 2))
 INFRA_RERUN_MAX=2      # finding #4: transient-infra reruns of a failed required job before halting
+CANCEL_RERUN_MAX=1     # ADR 0073 d4: re-runs of a CANCELLED required check's failed jobs before its GitHub-side exit 1
 MERGE_CONFIRM_MAX=5    # re-reads of state (after gh merge) and of mergeCommit (verify) before giving up
 CONFIRM_INTERVAL=${MERGE_TASK_CONFIRM_INTERVAL:-2}
 READ_TRIES=${MERGE_TASK_READ_TRIES:-3}                   # attempts per GitHub read (and per ls-remote)
@@ -1130,6 +1134,94 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
   [ "$reran" -eq 1 ] && return 0 || return 1
 }
 
+# ---- a CANCELLED required check (ADR 0073 d4) --------------------------------------------------------------------
+# gh exits 0 from `pr checks --required --watch` when a required check is CANCELLED (its `cancel` bucket counts neither
+# as failed nor as pending), and gh 2.43.1's table prints that row as `fail`. A cancelled required check is a CI timeout
+# (its job hit `timeout-minutes`: PRs #324 and #326 at 40 minutes) or another stop on GitHub's side (a person's cancel,
+# a newer run in its concurrency group); no test failed in any of them, and merge-task cannot tell them apart without
+# the run's annotations. So a 0 from the wait with a red cell is never green: cancelled_required reads each red
+# required check's conclusion. A gh with `pr checks --json` gives it as the bucket (`cancel`); gh 2.43.1 has no --json
+# there, so its table's red rows are read by their job: `gh run view <run> --json jobs`, the job its link names, its
+# conclusion `cancelled`. Fail-closed: a red row that is no proven cancellation (a `fail` bucket, a job concluded any
+# other way, a link that names no run and job, a read that failed) is the red path's, never a timeout's.
+CANCEL_RUNS=''; CANCEL_NAMES=''; CANCEL_WHY=''
+red_rows() {  # red_rows <json|table> <file> — `<bucket>\t<run>\t<job>\t<name>` per red row, or NONE; exit 1 = not proven
+  python3 - "$1" "$2" <<'PY'
+import json, re, sys
+mode, path = sys.argv[1:]
+try:
+    text = open(path).read()
+except Exception:
+    sys.exit(1)
+if mode == "json":
+    try:
+        rows = [(r.get("bucket"), r.get("link") or "", r.get("name") or "") for r in json.loads(text)]
+    except Exception:
+        sys.exit(1)
+else:
+    rows = [(c[1], c[3] if len(c) > 3 else "", c[0]) for c in (l.split("\t") for l in text.split("\n")) if len(c) > 1]
+    if not rows:
+        sys.exit(1)  # nothing read: no proof either way
+out = []
+for bucket, link, name in rows:
+    if bucket not in ("fail", "cancel"):
+        continue
+    if mode == "json" and bucket == "fail":
+        sys.exit(1)  # FAILURE, ERROR, TIMED_OUT or ACTION_REQUIRED: a red check, never a cancellation
+    m = re.search(r"/runs/([0-9]+)(?:/job/([0-9]+))?", link)
+    if not m or (bucket == "fail" and not m.group(2)):
+        sys.exit(1)  # no run to re-run, or no job whose conclusion would tell
+    out.append("%s\t%s\t%s\t%s" % (bucket, m.group(1), m.group(2) or "-", name.replace("\t", " ") or "-"))
+print("\n".join(out) if out else "NONE")
+PY
+}
+job_conclusion() {  # job_conclusion <run view jobs json> <job id> — that job's conclusion, lowercased ("" if absent)
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+try:
+    jobs = json.load(open(sys.argv[1])).get("jobs") or []
+except Exception:
+    jobs = []
+print(next((str(j.get("conclusion") or "").lower() for j in jobs
+            if isinstance(j, dict) and str(j.get("databaseId")) == sys.argv[2]), ""))
+PY
+}
+cancelled_required() {  # 0 every red required check is CANCELLED (CANCEL_RUNS, CANCEL_NAMES); 1 not proven; 2 none red
+  local rows b run jid name
+  CANCEL_RUNS=''; CANCEL_NAMES=''
+  if gh pr checks "$PR" -R "$OWNER/$REPO" --required --json name,bucket,link >"$tmp/req.out" 2>/dev/null; then
+    rows=$(red_rows json "$tmp/req.out") || return 1
+  else
+    gh pr checks "$PR" -R "$OWNER/$REPO" --required >"$tmp/req.out" 2>/dev/null   # gh 2.43.1: its exit says nothing
+    rows=$(red_rows table "$tmp/req.out") || return 1
+  fi
+  [ "$rows" = NONE ] && return 2
+  while IFS=$'\t' read -r b run jid name; do
+    [ -n "$run" ] || continue
+    if [ "$b" = fail ]; then
+      gh run view "$run" -R "$OWNER/$REPO" --json jobs >"$tmp/jobs.json" 2>/dev/null || return 1
+      [ "$(job_conclusion "$tmp/jobs.json" "$jid")" = cancelled ] || return 1
+    fi
+    case " $CANCEL_RUNS " in *" $run "*) ;; *) CANCEL_RUNS="${CANCEL_RUNS:+$CANCEL_RUNS }$run" ;; esac
+    CANCEL_NAMES="${CANCEL_NAMES:+$CANCEL_NAMES, }$name (run $run)"
+  done <<EOF
+$rows
+EOF
+  [ -n "$CANCEL_RUNS" ] || return 1
+  return 0
+}
+rerun_cancelled() {  # `gh run rerun --failed` per cancelled run (GitHub re-runs its cancelled jobs too); 1 if one failed
+  local run
+  for run in $CANCEL_RUNS; do
+    if ! gh run rerun "$run" --failed -R "$OWNER/$REPO" >/dev/null 2>"$tmp/rerun.err"; then
+      CANCEL_WHY="its re-run could not start (gh run rerun $run --failed: $(head -1 "$tmp/rerun.err" 2>/dev/null))"
+      return 1
+    fi
+    echo "    re-ran the failed jobs of run $run." >&2
+  done
+  return 0
+}
+
 snapshot_once() { local READ_TRIES=1; pr_snapshot "$1"; }   # one attempt (dynamic scope reaches gh_read)
 
 # ---- the default branch's required gate (ADR 0069 d1) ------------------------------------------------------
@@ -1217,12 +1309,34 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
 
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed)
-  local absent=0 rc infra_reruns=0 mss
+  local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
     gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" \
       >"$tmp/checks.out" 2>"$tmp/checks.err"; rc=$?
-    [ $rc -eq 0 ] && return 0
+    if [ $rc -eq 0 ]; then
+      # A 0 with no red cell is green. A 0 with one is a CANCELLED required check (above): one re-run of its failed
+      # jobs, then the GitHub-side exit 1 the lead sets aside at Integration and the infra retry takes (ADR 0073 d4),
+      # never green and never "a NON-check gate". A red row that is no proven cancellation takes the red path below.
+      awk -F'\t' '{for(i=1;i<=NF;i++) if($i=="fail" || $i=="cancel") f=1} END{exit !f}' "$tmp/checks.out" || return 0
+      cancelled_required; crc=$?
+      [ "$crc" -eq 2 ] && return 0   # no red row as they stand: the red cell was an earlier refresh of the watch
+      if [ "$crc" -eq 0 ]; then
+        echo "  PR #$PR — required check CANCELLED, a CI timeout or another stop on GitHub's side: $CANCEL_NAMES." >&2
+        if [ "$cancel_reruns" -lt "$CANCEL_RERUN_MAX" ]; then
+          if rerun_cancelled; then
+            cancel_reruns=$((cancel_reruns+1))
+            echo "  cancelled-check rerun $cancel_reruns/$CANCEL_RERUN_MAX triggered — re-watching required checks…" >&2
+            sleep "$CHECK_INTERVAL"
+            continue
+          fi
+        else
+          CANCEL_WHY="cancelled again after $CANCEL_RERUN_MAX re-run of its failed jobs"
+        fi
+        echo "ERROR: a REQUIRED check was CANCELLED on PR #$PR: a CI timeout or another stop on GitHub's side, no test failed; $CANCEL_WHY: $CANCEL_NAMES. Nothing was merged (ADR 0073 d4: GitHub-side, the automatic retry takes it)." >&2
+        return 1
+      fi
+    fi
     # Required checks ABSENT — either not created YET (late roll-up check; CI still in flight on the
     # head) or genuinely never coming. While anything is running, wait — same trust semantics as
     # --watch on a visible pending check, bounded in practice by GitHub's own job timeouts. The

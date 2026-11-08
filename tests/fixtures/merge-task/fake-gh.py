@@ -41,12 +41,17 @@ State (a missing file takes the default in brackets):
                           sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
                           A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
                           checks as they stand. `pr checks --json` is gh 2.43.1's "unknown flag: --json", rc 1,
-                          unless checks.json is present (a newer gh), which prints `links`.
-  links, steps            the infra-classify reads; `run rerun` is logged, rc 0. `run view <id>` serves
-                          steps.<id> when that file exists (an empty one: a run with no failed step),
-                          else steps.
-  run.<id>.json           lead-integrate.py ci-headroom's read (ADR 0073 d5): a `run view <id> --json ...` with no
-                          -q prints it whole (its jobs, workflowName); absent ⇒ the steps behaviour above.
+                          unless checks.json is present (a newer gh): with -q it prints `links`; without -q (merge-task's
+                          conclusion read, ADR 0073 d4) a JSON array of checks.cur's table rows, each {name, bucket (the
+                          row's 2nd cell: pass | fail | cancel | pending | skipping), link (its 4th)} with the --json
+                          fields asked for.
+  links, steps            the infra-classify reads; `run rerun` is logged, rc 0 (rerun.fail present: rc 1). `run view
+                          <id>` with -q serves steps.<id> when that file exists (an empty one: a run with no failed
+                          step), else steps; without -q (the whole --json object: merge-task's job conclusion read,
+                          `--json jobs`, and lead-integrate.py ci-headroom's, `--json jobs,workflowName`) it serves
+                          run.<id>.json, else jobs.<id>, else an "HTTP 404" error, rc 1.
+  run.<id>.json           lead-integrate.py ci-headroom's read (ADR 0073 d5): the whole run object (its jobs,
+                          workflowName), served first by a `run view <id>` with no -q.
                           run.<id>.err: its text on stderr, rc 1, nothing printed, for that `run view <id> --json`.
                           Any `run view --json` field outside gh 2.43.1's RUN_VIEW_FIELDS is its
                           `Unknown JSON field: "<f>"` and field list on stderr, rc 1, before anything is served.
@@ -278,10 +283,22 @@ if args[:2] == ["pr", "list"]:
 # ---- pr checks ------------------------------------------------------------------------------------------
 if args[:2] == ["pr", "checks"]:
     guard_num()
-    if "--json" in args:  # infra_flake_rerun's failed-required-links read: gh 2.43.1 has no --json on pr checks
+    if "--json" in args:  # the failed-required-links and conclusion reads: gh 2.43.1 has no --json on pr checks
         if not has("checks.json"):
             die("unknown flag: --json\n\nUsage:  gh pr checks [<number> | <url> | <branch>] [flags]\n")
-        print(rd(p("links"), ""))
+        if "-q" in args or "--jq" in args:
+            print(rd(p("links"), ""))
+            sys.exit(0)
+        table = json.loads(rd(p("checks.cur"))).get("out", "") if has("checks.cur") else ""
+        fields = opt("--json").split(",")
+        rows = []
+        for line in table.split("\n"):
+            cells = line.split("\t")
+            if len(cells) < 2:
+                continue
+            full = {"name": cells[0], "bucket": cells[1], "link": cells[3] if len(cells) > 3 else ""}
+            rows.append({f: full.get(f, "") for f in fields})
+        print(json.dumps(rows))
         sys.exit(0)
     e = {"rc": 0, "out": "ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n", "err": ""}
     if "--watch" not in args:  # a one-shot read: the checks as they stand, the last watch's result
@@ -304,22 +321,28 @@ if args[:2] == ["pr", "checks"]:
 RUN_VIEW_FIELDS = ("conclusion", "createdAt", "databaseId", "displayTitle", "event", "headBranch", "headSha", "jobs",
                    "name", "number", "startedAt", "status", "updatedAt", "url", "workflowDatabaseId", "workflowName")
 if args[:2] == ["run", "view"]:
-    own = "steps.%s" % args[2] if len(args) > 2 else ""
-    whole = "run.%s.json" % args[2] if len(args) > 2 else ""
+    rid = args[2] if len(args) > 2 else ""
     if "--json" in args:
         i = args.index("--json")
         for f in (args[i + 1] if i + 1 < len(args) else "").split(","):
             if f.strip() not in RUN_VIEW_FIELDS:
                 die('Unknown JSON field: "%s"\nAvailable fields:\n' % f.strip()
                     + "\n".join("  " + x for x in RUN_VIEW_FIELDS))
-        if has("run.%s.err" % args[2]):
-            die(rd(p("run.%s.err" % args[2]), ""))
-    if "--json" in args and not any(a in args for a in ("-q", "--jq")) and whole and has(whole):
-        print(rd(p(whole)))
-        sys.exit(0)
+        if rid and has("run.%s.err" % rid):
+            die(rd(p("run.%s.err" % rid), ""))
+    if "-q" not in args and "--jq" not in args:  # the whole --json object: run.<id>.json, else jobs.<id>, else a 404
+        for own in ("run.%s.json" % rid, "jobs.%s" % rid):
+            if rid and has(own):
+                print(rd(p(own)))
+                sys.exit(0)
+        not_found()
+    own = "steps.%s" % rid if rid else ""
     print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:
+    if has("rerun.fail"):
+        die("HTTP 403: This workflow run cannot be rerun (https://api.github.com/repos/o/r/actions/runs/%s/rerun-failed-jobs)"
+            % (args[2] if len(args) > 2 else ""))
     sys.exit(0)
 
 # ---- pr merge -------------------------------------------------------------------------------------------

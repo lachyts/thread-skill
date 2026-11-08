@@ -6,7 +6,8 @@
 #                        prints nothing; an empty value is unset), else max(2, ceil(cores / 3)), cores defaulting to
 #                        the machine's (getconf _NPROCESSORS_ONLN, then sysctl -n hw.ncpu, then 3). 12 cores give 4.
 #   wait_for_room <cap>  block until fewer than <cap> of this shell's background jobs are running.
-# CI pins THREAD_TEST_JOBS (.github/workflows/test.yml): its 3- and 4-vCPU runners would get the floor, 2.
+# CI pins THREAD_TEST_JOBS (.github/workflows/test.yml and full-suite.yml): its 3- and 4-vCPU runners would get the
+# floor, 2.
 
 _test_cores() {
   local c

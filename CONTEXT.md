@@ -499,8 +499,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   checkout never opens in the vault, and an alias-less row writing two
   checkouts is refused (ADR 0059), since a Leg finishes only its own
   checkout's commits. Each repo it writes is worked in its own **Chain copy**
-  (ADR 0067 d2: `chain_copies:` on the note; a note without it works in
-  place), whose commits `leg.py land` puts on the primary checkout's
+  (ADR 0067 d2: `chain_copies:` on the note, which schedule stamps on every
+  note it writes, ADR 0075 d4; only a note written before that, without it,
+  works in place), whose commits `leg.py land` puts on the primary checkout's
   default branch task by task, after each `done` and at each close (ADR 0067
   d3).
   execute runs its Legs
@@ -589,8 +590,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   path is in no checkout. Predicted surfaces group, order and wait, and never
   refuse a schedule: two chains predicting one place both run, the first to
   begin going first. Two chains in their own **Chain copy**s meet only file
-  to file, while a chain that works a checkout in place (no `chain_copies:`)
-  still takes its checkout turn: the one that comes first (the first to
+  to file (a bare `repo:<toplevel>` cell in one stands only an in-place
+  peer, never another copied chain's begin, ADR 0075 d4), while a chain
+  that works a checkout in place (no `chain_copies:`) still takes its checkout turn: the one that comes first (the first to
   begin, else by slug) lands every unlanded row it has there before the other
   begins a Leg in it (ADR 0067 d4). A stuck chain holds only
   its unlanded rows' surfaces (**Unfinished rollout**, ADR 0060), and works

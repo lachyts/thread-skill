@@ -65,7 +65,9 @@
 #   T19     two copied chains (ADR 0067 d9): ADR 0060's yield still comes first, ahead of rank (T19a); an `any` meeting
 #           still waits at begin (T19b); a code file with the holder's Leg open meets at claim, not begin (T19c); (O)'s
 #           holder half: an earlier holder with no open Leg holds a later chain's begin, never the reverse (T19d), and
-#           a later chain held so is no free chain to yield to (T19e)
+#           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
+#           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
+#           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -1469,7 +1471,41 @@ ok "$out|$rc" "refuse sa|3" "T19e: the later chain waits on the earlier one's un
 has "$err" "and has no open Leg to finish or land it" "T19e: … in the holder half's words"
 chs --resume sa --surface "repo:$W//f.py" --surface "repo:$W//x.py"
 ok "$out|$rc" "none|0" "T19e: … and the earlier one never yields its smoke row's place to a chain that waits on it (the free test)"
-unset COPIES
+# T19f-T19g (ADR 0075 d4): a bare `repo:<toplevel>` cell in a copied chain stands only an in-place peer, never another
+# copied chain's begin: ADR 0060's yield, earlier-ward (T19f) and later-ward (T19g), skips a `repo:`-`repo:` pair with a
+# bare toplevel on either side; their files meet at claim and at land. A bare path in no checkout still meets (T19f).
+SA_LOG="- $D28 Leg 1 began: leg-1 session s in cc-x from $W
+- $D28 Leg 1 closed: chain stuck: 1 set aside"
+tscen t19f
+LOG="$SA_LOG" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W\`"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc|$err" "none|0|" "T19f: an earlier stuck copied chain's bare repo cell on its set-aside row never stands a later copied chain's begin"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W"
+ok "$out|$rc" "none|0" "T19f: … nor the later one the earlier's"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" COPIES= mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse sa|3" "T19f: control: the later chain in place: the bare cell still stands its begin"
+has "$err" "holds \`repo:$W\` for an unlanded row and began first" "T19f: … on the bare repo:\$W"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+LOG="$SA_LOG" LFOLD="$W" COPIES= mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse sa|3" "T19f: control: the bare cell's chain in place: it still stands a copied chain's begin"
+PLAIN="$S/plain"; mkrepo "$PLAIN" -
+LOG="$SA_LOG" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$PLAIN\`"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$PLAIN/g\`" b2~open~"\`repo:$W//f.py\`"
+chs --resume sb --surface "repo:$PLAIN/g" --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse sa|3" "T19f: control: a bare path in no checkout is no Chain copy: it still stands a copied chain's begin (ADR 0060)"
+has "$err" "holds \`repo:$PLAIN\` for an unlanded row, which this chain writes as \`repo:$PLAIN/g\` (ADR 0060)" "T19f: … by the yield"
+tscen t19g
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain sb "$OTHER" b1~done~"\`repo:$W//g.py\`" b2~open~"\`repo:$W//f.py\`"
+LOG="- $D29 Leg 1 began: leg-1 session s in cc-x from $W
+- $D29 Leg 1 closed: chain stuck: 1 set aside" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W\`"
+chs --resume sb --surface "repo:$W//g.py" --surface "repo:$W//f.py"
+ok "$out|$rc|$err" "none|0|" "T19g: an earlier copied chain never yields to a later stuck copied chain's bare repo cell (the later-ward yield)"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W"
+ok "$out|$rc" "none|0" "T19g: … and the later one begins too: they meet file to file at claim"
+unset COPIES SA_LOG PLAIN
 
 # ── P1-P13: two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4) ──────────────────────
 # $R in place (origin demo/repo), with $R-rollout (D), $R-other-rollout and $R-third-rollout, all clones of it.
@@ -2582,6 +2618,129 @@ print(out)
 PY
 )
 ok "$out" "['cc', 'u1']" "W3: the first unreadable note raises from _scan, in walk order, the rollout note itself never read"
+
+# ── WL1-WL7 (p44-1, ADR 0076): `waiting`, the Waiting list: which chain starts next, read in one process ─────────────
+# wl [args...] -> $out, $err, $rc: the verb at $WNOW, HOME pinned to $S/home (its capacity.json from capf; no Away file,
+# so the fallback is the Trickle, 2), and no boot or wake of the Mac (a lease lapses on its own stamp alone). wj <expr>
+# reads $out's JSON as d.
+WNOW=2026-11-08T10:00:00+00:00
+UN=$'\nstart: unattended'
+wl() { HOME="$S/home" THREAD_MACHINE_TIMES='{}' python3 "$CHECK" waiting --tasks-dir "$T" --now "$WNOW" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+wj() { python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(eval(sys.argv[2]))' "$out" "$1"; }
+# capf <capacity> [written_at] — Chorus's capacity.json in $S/home (capacity_max: the built-in 6)
+capf() { mkdir -p "$S/home/.config/thread"; printf '{"capacity": %s, "written_at": "%s"}\n' "$1" "${2:-$WNOW}" > "$S/home/.config/thread/capacity.json"; }
+HO=$'\n'"- $D29 Leg 1 closed: handoff to Leg 2 in cc-x from /x"
+tscen wl1
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 2)" a1~open~"\`repo:$W//a.py\`"
+LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 1)" b1~open~"\`repo:$W2//b.py\`"
+LOG=- mkchain wc "$OTHER" c1~open~"$VC"
+LOG=$(lg $D29 open) mkchain wd "$OTHER$UN" d1~open~'`vault:Work/Projects/D`'
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: started sess-9" mkchain we "$OTHER$UN" e1~open~'`vault:Work/Projects/E`'
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wf "$OTHER$UN"$'\n'"$(rk 3)" f1~open~'`vault:Work/Projects/F`'
+capf 4
+wl
+ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')" "0|['wf', 'wb', 'wa']" "WL1: stamped chains with no Leg wait in order_key's order (one that has begun, then estate rank 1, 2)"
+ok "$(wj '[w["rank"] for w in d["waiting"]]')|$(wj '[w["held_by"] for w in d["waiting"]]')" "[1, 2, 3]|[None, None, None]" "WL1: … each its place on the list, none held"
+ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next']" "WL1: … the JSON's keys, in order"
+ok "$(wj 'd["running"]')|$(wj 'd["cap"]')|$(wj 'd["room"]')" "2|{'n': 4, 'by': 'capacity', 'why': None}|2" \
+  "WL1: an open Leg and a started hand-over each hold a place: Capacity 4, 2 running, room 2"
+ok "$(wj 'd["next"]')" "wf" "WL1: … and next is the first chain on the list"
+ok "$(wj '[(w["title"], w["cwd"], w["harness"], w["prompt"].split(chr(10))[0]) for w in d["waiting"][1:2]]')" \
+  "[('Leg 1: wb', '$W2', 'claude', '/thread:execute [[wb]]')]" "WL1: … with the Leg's title, launch folder, harness and prompt"
+has "$(wj 'd["waiting"][0]["prompt"]')" "Leg 2 of the serial chain" "WL1: a manual hand-over is on the list, for its next Leg"
+hasnt "$out" '"wc"' "WL1: an unstamped chain is absent"
+hasnt "$out" '"wd"' "WL1: … a chain with an open Leg too"
+hasnt "$out" '"we"' "WL1: … and one handed over to a started session"
+capf 2
+wl
+ok "$(wj 'd["room"]')|$(wj 'd["next"]')|$(wj 'len(d["waiting"])')" "0|None|3" "WL2: no room: next is null, and the list still reads whole"
+capf 5 2026-11-08T09:00:00+00:00
+wl
+ok "$(wj 'd["cap"]["n"]')|$(wj 'd["cap"]["by"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "2|trickle|0|None" \
+  "WL2: a stale Capacity falls back to the Trickle (2), so 2 running leave no room"
+has "$(wj 'd["cap"]["why"]')" "is over 10 minutes old" "WL2: … saying why"
+rm -f "$S/home/.config/thread/capacity.json"; fmset wd.md status dropped
+wl
+ok "$(wj 'd["cap"]')|$(wj 'd["running"]')|$(wj 'd["next"]')" "{'n': 2, 'by': 'trickle', 'why': 'no file'}|1|wf" \
+  "WL2: no Capacity file: the Trickle too; a dropped chain's open Leg no longer counts"
+tscen wl3
+LOG=$(LFOLD="$W" lg $D29 open) LFOLD="$W" mkchain hh "$OTHER" h1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)" a1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 2)" b1~open~"\`repo:$W2//g.py\`"
+capf 4
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')" "[('wa', 'hh'), ('wb', None)]" \
+  "WL3: a held front chain keeps its place, held by the chain whose open Leg writes its file"
+ok "$(wj 'd["next"]')|$(wj 'd["running"]')" "wb|1" "WL3: … and is passed over: next is the second"
+fmset hh.md status dropped
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wa', None), ('wb', None)]|wa" \
+  "WL3: once the hold clears, the front chain is next again"
+tscen wl4
+mkro ro-p.md "$W" "$DEMO"; mkt p1.md ro-p in_progress "owner: lead-1"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)" a1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 2)" b1~open~"\`repo:$W2//g.py\`"
+capf 3
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wa', 'ro-p'), ('wb', None)]|wb" \
+  "WL4: a parallel rollout with a call in flight holds its Project root: the chain there is passed over"
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "1|2" "WL4: … and its running task holds a place"
+scen wl5
+LOG=- mkchain wp "$DEMO$UN"$'\n'"$PAUSED" p1~open~'`vault:Work/Projects/P`'
+mkchain ws "$DEMO$UN" s1~done~"$VB" s2~blocked~"$VC"
+LOG=- mkchain wi "$DEMO$UN"$'\nincomplete: true' i1~open~'`vault:Work/Projects/A/i.md`'
+LOG="$(lg $D28 open)"$'\n'"- $D29 Leg 1 closed: halted: surface held" mkchain wh "$DEMO$UN" h1~open~'`vault:Work/Projects/A/h.md`'
+LOG=- mkchain wo "$DEMO$UN" o1~open~'`vault:Work/Projects/A/o.md`'
+capf 3
+wl
+ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wo']|wo" \
+  "WL5: a paused, stuck, incomplete or halted chain needs Lachy: off the list"
+scen wl6
+wl
+ok "$rc|$out" '0|{"room": 2, "running": 0, "cap": {"n": 2, "by": "trickle", "why": "no file"}, "waiting": [], "next": null}' \
+  "WL6: an empty vault waits on nothing"
+python3 "$CHECK" waiting --tasks-dir "$S/none" > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "WL7: a missing tasks dir is exit 2, with no stdout"
+python3 "$CHECK" waiting --tasks-dir "$T" --now yesterday > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "WL7: … and so is a --now that is no ISO time"
+has "$(cat "$S.err")" "unfinished-rollout: --now yesterday" "WL7: … with one line saying so"
+tscen wl8
+LOG="$(LFOLD="$W" lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wz "$OTHER$UN" z1~done~'`vault:Work/Projects/Z`'
+capf 3
+wl
+ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wz']|wz" \
+  "WL8: an in-place chain with every row done and its last Leg handed off waits for its Complete Leg"
+ok "$(wj '[(w["title"], w["cwd"], w["harness"], w["held_by"]) for w in d["waiting"]]')" "[('Leg 2: wz', '$W', 'claude', None)]" \
+  "WL8: … in the last Leg's folder, on claude (a Complete Leg's restart names no harness), its empty write set never held"
+has "$(wj 'd["waiting"][0]["prompt"]')" "/thread:execute [[wz]]"$'\n'"Leg 2 of the serial chain" "WL8: … its prompt the Leg prompt for Leg 2"
+LOG="$(LFOLD="$W" lg $D28 open)"$'\n'"- $D29 Leg 1 closed: stopped: land waits" mkchain wy "$OTHER$UN"$'\n'"$(rk 1)" y1~done~'`vault:Work/Projects/Y`'
+wl
+ok "$(wj '[(w["slug"], w["title"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wy', 'Leg 2: wy'), ('wz', 'Leg 2: wz')]|wy" \
+  "WL8: … and so does a completable one whose last Leg stopped, in order_key's order"
+has "$err" "WARN: wz: every task merged but its completion ceremony never ran" "WL8: … serial_notes' ceremony WARN still on stderr"
+tscen wl9
+LOG=$(lg $D29 open) mkchain wd "$OTHER$UN" d1~open~'`vault:Work/Projects/D`'
+LOG=- mkchain wo "$OTHER$UN" o1~open~'`vault:Work/Projects/O`'
+# lease <stem> <written_at> — a Leg lease (by: leg) in $S/home, as leg.py begin writes it
+lease() { mkdir -p "$S/home/.config/thread/leases"; printf '{"rollout": "%s", "written_at": "%s", "by": "leg"}\n' "$1" "$2" > "$S/home/.config/thread/leases/$1.json"; }
+capf 1
+wl
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "1|0|None" "WL9: an open Leg with no lease file holds its place"
+lease wd 2026-11-08T09:00:00Z
+wl
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "1|0" "WL9: … and so does one whose Leg lease is 60 minutes old"
+lease wd 2026-11-08T08:00:00Z
+wl
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "0|1|wo" \
+  "WL9: an open Leg whose Leg lease is over 90 minutes old adds nothing to running: its session died, so the room frees"
+hasnt "$out" '"wd"' "WL9: … and that chain is still off the list (its Leg is open)"
+tscen wl10
+LOG=- mkchain wo "$OTHER$UN" o1~open~'`vault:Work/Projects/O`'
+capf 4
+printf '[defaults]\ncapacity_max = "lots"\n' > "$S/home/.config/thread/rollouts.toml"
+wl
+ok "$(wj 'd["cap"]["n"]')|$(wj 'd["cap"]["by"]')" "2|trickle" "WL10: a fresh Capacity whose capacity_max will not resolve falls back to the Trickle"
+has "$(wj 'd["cap"]["why"]')" "rollouts.toml" "WL10: … and why names the refused file, never null"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
