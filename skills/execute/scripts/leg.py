@@ -173,7 +173,8 @@ clear-halt, restarted, copies, land):
       its earlier record; it polls read-only every RANK_POLL_SECONDS, re-recording and renewing the lease every
       CAPACITY_WAIT_REFRESH (600 s), and ends cleared (room), flipped (another kind) or at --for, never stalled.
       Every wait writes the Leg lease at its start. Prints {verb, task, kind, cleared, flipped, stalled, why, on,
-      token, landFirst, waitedMinutes, lifts, logged, capacity, warns, next}.
+      token, landFirst, waitedMinutes, lifts, logged, capacity, warns, next}; waitedMinutes is t's standing line's age,
+      or the call's own minutes from its start to its return when longer (p41-7: a Capacity wait has no standing line).
   change --task <t> [--top <toplevel>]       (read-only, no lock)
       Per `leg_base` checkout: the commits in `<sha>..HEAD` whose message has a `Task: [[<t>]]` line, their paths
       minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit on the range's first-parent line with no
@@ -2051,7 +2052,8 @@ def cmd_wait(ctx, a):
     keeps changing between calls never returns at once. It polls read-only every RANK_POLL_SECONDS, recomputing the
     contention and the plan, until it clears, the kind flips from the one this call logged or read, the hold is
     stalled, or --for runs out (--for 0: one check). A Capacity wait (kinds `capacity` and `quota`, p36-7) is
-    capacity_wait's: no rank line, its own waiting record instead."""
+    capacity_wait's: no rank line, its own waiting record instead. waitedMinutes is t's standing line's age, or this
+    call's own minutes from its start to its return when that is longer (p41-7)."""
     if a.for_ < 0:
         raise Usage("--for takes seconds, 0 or more")
     chain = Chain(ctx)
@@ -2078,8 +2080,12 @@ def cmd_wait(ctx, a):
            "dryRun": ctx.dry}
 
     def done(ch, plan, **kw):
+        # waitedMinutes (p41-7): t's standing line's age, or this call's own start-to-return minutes when longer; a
+        # Capacity wait has no standing line, and a rank wait's line is gone once it clears.
         st = (ch.contend.get("standing") or {}).get(r.slug.lower()) or {}
-        out.update(kw, lifts=ch.contend.get("lifts", 0), waitedMinutes=int(st.get("age", 0)), next=next_json(plan))
+        own = int((time.monotonic() - t0) // 60)
+        out.update(kw, lifts=ch.contend.get("lifts", 0), waitedMinutes=max(int(st.get("age", 0)), own),
+                   next=next_json(plan))
         if on_t(plan):
             out.update(kind=plan["kind"], stalled=plan["stalled"], why=plan["why"], on=plan["on"], token=plan["token"],
                        landFirst=plan["landFirst"], capacity=plan.get("capacity"))
