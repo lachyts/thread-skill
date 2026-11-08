@@ -1023,8 +1023,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   limit (`timeout-minutes`), per merge and on the week's median. A job whose
   week's median runs past 80 % of its limit is a finding; a job cancelled at
   its limit is a CI timeout, a stop on GitHub's side, never a red check and
-  never a gate for Lachy (ADR 0073). _Avoid_: CI timeout (the event, not the
-  margin), runner speed.
+  never a gate for Lachy (ADR 0073). Each merge records one `ci-headroom`
+  Run-record line per required job (merge-task, through lead-integrate.py
+  ci-headroom); the weekly Reflection reads them in span's `suite` block, and a
+  breach on Thread Skill's repo files its suite audit (`reflect.py
+  suite-audit`). _Avoid_: CI timeout (the event, not the margin), runner speed.
 - **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over

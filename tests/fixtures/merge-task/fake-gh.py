@@ -45,6 +45,8 @@ State (a missing file takes the default in brackets):
   links, steps            the infra-classify reads; `run rerun` is logged, rc 0. `run view <id>` serves
                           steps.<id> when that file exists (an empty one: a run with no failed step),
                           else steps.
+  run.<id>.json           lead-integrate.py ci-headroom's read (ADR 0073 d5): a `run view <id> --json ...` with no
+                          -q prints it whole (its jobs, workflowName, attempt); absent ⇒ the steps behaviour above.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
   merge.queue             rc 0, autoMergeRequest set, stays OPEN.   merge.noop: rc 0, nothing changed.
@@ -296,6 +298,10 @@ if args[:2] == ["pr", "checks"]:
 # ---- run view / run rerun -------------------------------------------------------------------------------
 if args[:2] == ["run", "view"]:
     own = "steps.%s" % args[2] if len(args) > 2 else ""
+    whole = "run.%s.json" % args[2] if len(args) > 2 else ""
+    if "--json" in args and not any(a in args for a in ("-q", "--jq")) and whole and has(whole):
+        print(rd(p(whole)))
+        sys.exit(0)
     print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:

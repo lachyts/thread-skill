@@ -25,7 +25,9 @@
 #      The local refresh ran, or printed a non-fatal WARN or NOTE (non-base checkout, a half-applied
 #      operation, local-only commits, a dirty tree or an autostash refusal, git's own refusal, a
 #      live-checkout.sh that cannot be loaded), and the in-place checkout's refresh line (a clone root only,
-#      ADR 0042; it never changes the exit).                             counter cleared    lead: mark-done
+#      ADR 0042; it never changes the exit). Every merged path (0, 5, 6 and an UNVERIFIED 8) first records each
+#      required job's CI headroom (ADR 0073 d5: lead-integrate.py ci-headroom, best-effort, never an exit).
+#                                                                        counter cleared    lead: mark-done
 #   1  Definitive halt; the reason is printed (Exit 1 causes, below).   counter cleared    lead: set aside
 #                                                                                          (own run, or at
 #                                                                                          Integration when
@@ -850,7 +852,8 @@ PR=$PR_NUM
 # guard-pr (this tree's) exits 2 with its `engine-snapshot: ` line for a wrong root: that is this script's exit 2,
 # before any GitHub call or counter. Any other failure of the guard is a WARN, and the merge goes on.
 ES_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/engine-snapshot.py"
-# Why main moved (p29-10, ADR 0051): record_base_moved's Run-record line, through lead-integrate.py base-moved.
+# Why main moved (p29-10, ADR 0051): record_base_moved's Run-record line, through lead-integrate.py base-moved; and
+# land_and_finish's CI headroom lines (ADR 0073 d5), through lead-integrate.py ci-headroom.
 LI_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lead-integrate.py"
 ES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 gp_err=$(python3 "$ES_PY" guard-pr --pr-url "https://github.com/$OWNER/$REPO/pull/$PR" --root "$ES_ROOT" \
@@ -1357,6 +1360,10 @@ land_and_finish() {  # land_and_finish <fresh 1|0> — verify, clean up, refresh
   if [ -n "$M" ]; then refresh_local_base "$REPO_PATH" "$BASE" "$M"; rrc=$?
   else refresh_local_base "$REPO_PATH" "$BASE"; rrc=$?; fi
   refresh_in_place "$REPO_PATH"
+  # CI headroom (ADR 0073 d5): each required job's time, conclusion and time limit, one Run-record line per job, through
+  # lead-integrate.py ci-headroom (bounded reads, no live poll; a job already recorded is never written twice, so a
+  # re-run on the already-merged path adds none). Best-effort: its output is dropped and it never changes this exit.
+  python3 "$LI_PY" ci-headroom --repo "$REPO_PATH" --pr "$PR" --head "$IHEAD" ${M:+--merge "$M"} >/dev/null 2>&1 || true
   case "$VERDICT" in
     race) printf '%s\n' "$VMSG"; finish 5 "$VMSG" ;;
     unverified) finish 8 "$VMSG" ;;
