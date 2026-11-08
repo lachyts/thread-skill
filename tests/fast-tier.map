@@ -35,7 +35,7 @@ FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
 ** ALSO tests/background-job.test.mjs tests/engine-ladder.test.mjs
 ** ALSO tests/engine-snapshot.test.sh tests/release-check.test.sh tests/release-check-missing-tree-dir.test.sh
 ** ALSO tests/release-check-symlinked-dir.test.sh tests/release-check-quoting-diff.test.sh tests/test-jobs.test.sh
-** ALSO tests/verify-slot.test.sh
+** ALSO tests/verify-slot.test.sh tests/ci-workflows.test.mjs
 
 # ---- OWN-LISTINGS: tests excused from check (f) ----
 OWN-LISTINGS skills/execute/tests/reconcile-rollout-moving.test.sh  # (i) os.walk of $D; copies $PLUGIN/skills as a plugin root
@@ -62,6 +62,7 @@ tests/fast-tier.map FULL
 tests/lib/fast-tier.py FULL
 tests/lib/test-jobs.sh FULL
 tests/lib/check-workflow-parse.sh FULL
+tests/lib/shard.py FULL
 Makefile FULL
 .github/** FULL
 .claude-plugin/** FULL
@@ -105,7 +106,7 @@ tests/fixtures/landing-register/** tests/execution-fit-remote.test.sh tests/land
 tests/fixtures/merge-gate/** tests/merge-gate.test.mjs
 tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integrated.test.sh tests/parallel-rollouts-one-repo.test.sh
 tests/fixtures/merge-task/** tests/merge-task-bare-blocked.test.sh tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh
-tests/fixtures/merge-task/** tests/merge-task-cancelled.test.sh
+tests/fixtures/merge-task/** tests/merge-task-cancelled.test.sh tests/merge-task-ci-headroom.test.sh
 tests/fixtures/merge-task/** tests/contracts/run-record-hermetic.test.mjs tests/contracts/verify-slot-hermetic.test.mjs
 tests/fixtures/note-overlap/** tests/contracts/note-overlap-opener.test.mjs tests/vault-note-overlap.test.sh
 tests/fixtures/reconcile/** tests/contracts/queue-only.test.mjs tests/reconcile-project.test.sh

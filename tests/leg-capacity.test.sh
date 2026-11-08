@@ -17,6 +17,11 @@
 #   L13 the Run record's suite `running` (mac_running, p36-9) counts a live Leg claim while Capacity is in force;
 #       no capacity.json, a stale one, a lapsed Leg lease or none reads today's parallel-only count
 #   L14 a Capacity wait holds through a changing count until --for, or until room, and reports the minutes it waited
+#   L15 a Leg counts from its session's start (ADR 0076 d3, p44-2): a begun Leg with no claim counts 1 behind a fresh
+#       Leg lease, a lapsed or missing lease 0, and its first claim still counts 1
+#   L16 a Leg's session holds its own place against a lead waiting ahead of it, and waiting Legs with no claim take
+#       turns by their waiting records' `since` (then stem), so more Legs than places never stand still; a Leg that is
+#       not waiting, or has a claim, always counts
 # Temp vaults only; HOME, the lock dirs and the Run record are temp; --now and --session pinned. bash 3.2-compatible.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -430,6 +435,85 @@ res=$(fwait 1200 300:free); rc=$?
 out=$(printf '%s\n' "$res" | head -1); tail=$(printf '%s\n' "$res" | tail -1)
 ok "$rc|$(q 'd["cleared"]')|$(q 'd["next"]["action"]')|$(q 'd["flipped"]')" "0|True|claim|False" "L14b: room at 5 minutes: the wait clears and next is claim"
 ok "$tail|$(q 'd["waitedMinutes"]')" "300|20|5" "L14b: … at the poll that saw it, reporting the 5 minutes it waited"
+
+# ════ L15: a Leg counts from its session's start (ADR 0076 d3, p44-2) ════════════════════════════════════════════════
+scen l15
+mkro t1 t2; mkpar 1 1; cap 2
+leg begin --cwd "$F"; ok "$rc|$(fm t1 status)|$(LEASE)" '0|open|["leg","2026-10-20T10:00:00Z",false]' "L15: (the Leg begins, claims nothing, writes its lease)"
+par
+ok "$(pq 'd["trickle"]["elsewhere"]')|$(pq 'd["start"]')" "{\"$RO\":1}|[]" "L15a: a begun Leg with no claim counts 1, so par holds its second start"
+ok "$(pq 'd["hold"][0]["reason"]')" '"trickle: 2/2 tasks running on this Mac"' "L15a: … on the Capacity"
+setlease 2026-10-20T08:30:00Z; par
+ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15b: its lease exactly 90:00 old still counts"
+setlease 2026-10-20T08:29:00Z; par
+ok "$(pq '[d["trickle"]["elsewhere"], d["trickle"]["lapsed"], d["start"]]')" '[{},{},["q1"]]' "L15c: 91 minutes old it lapses: the empty Leg counts 0 (no task to name) and the room is par's"
+rm -f "${HOME:?}/.config/thread/leases/${RO:?}.json"; par
+ok "$(pq '[d["trickle"]["elsewhere"], d["start"]]')" '[{},["q1"]]' "L15d: no Leg lease: the empty chain holds nothing"
+setlease 2026-10-20T08:00:00Z '"waiting": true'; par
+ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15e: a waiting lease (120 minutes old, inside its 180) still counts the empty Leg"
+uncap; setlease "$NOW"; par
+ok "$(pq '[d["trickle"]["elsewhere"], d["start"]]')" '[{},["q1"]]' "L15f: no capacity.json: the empty Leg counts nothing (the fallback)"
+cap 3; leg claim --task t1; ok "$rc|$(fm t1 owner)" "0|leg-1" "L15g: (the Leg claims t1 under capacity 3)"
+par; ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15g: … and still counts 1, never its session plus its claim"
+leg done --task t1 --verify none 2>/dev/null; ok "$(fm t1 status)" done "L15h: (t1 done: the Leg is between claims)"
+par; ok "$(pq 'd["trickle"]["elsewhere"]')" "{\"$RO\":1}" "L15h: … its session still counts 1"
+leg close --outcome stopped --reason "Lachy stopped it"; par
+ok "$(LEASE)|$(pq 'd["trickle"]["elsewhere"]')" "none|{}" "L15i: close drops the lease, so the closed Leg counts no more"
+scen l15m
+mkro t1 t2; mkpar 1 0; cap 2 "$(ago 0)"
+leg begin --cwd "$F"
+setlease "$(ago 0)"
+ok "$(suite started)" "suite-started|2" "L15j: the Run record's running counts par's task and the empty Leg's session"
+setlease "$(ago 91)"
+ok "$(suite started)" "suite-started|1" "L15j: … and a lapsed Leg lease leaves it out"
+
+# ════ L16: a Leg's session holds its own place, and waiting Legs take turns by how long they have waited ═══════════
+# wrecs <rollout>@<since>…: the trickle claims file holds exactly these waiting records (want 1, at $NOW, never served).
+wrecs() { mkdir -p "$THREAD_NOTE_LOCK_DIR"; python3 - "$THREAD_NOTE_LOCK_DIR/trickle-claims.json" "$T" "$NOW" "$@" <<'PY'
+import json, os, sys
+path, tasks, now, *recs = sys.argv[1:]
+w = [{"tasksDir": os.path.realpath(tasks), "rollout": r.split("@")[0], "since": r.split("@")[1], "at": now,
+      "served": None, "want": 1} for r in recs]
+json.dump({"version": 1, "claims": [], "waiting": w, "woken": []}, open(path, "w"))
+PY
+}
+# A lead waiting ahead of the Leg in the fair share (never served, waiting since 09:00) takes nothing from the Leg's own
+# session: the lead counts that session, so if the Leg yielded too the two would wait on each other for ever.
+scen l16
+mkro t1 t2; mkpar 0 1; cap 1
+wrecs "par@2026-10-20T09:00:00+00:00"
+leg begin --cwd "$F"
+ok "$rc|$(q 'd["next"]["action"]')" "0|claim" "L16a: C 1 and a lead waiting ahead: begin's next reads its own session's place and claims"
+leg next; ok "$(q 'd["action"]')" claim "L16a: … and so does next"
+par
+ok "$(pq '[d["trickle"]["elsewhere"], d["slotLimit"], d["start"]]')" "[{\"$RO\":1},0,[]]" "L16a: … while the lead counts that session and starts nothing: one holds the place, never both waiting"
+# Two waiting Legs with no claim at C 1 (more Legs than places): the one waiting longer goes first, the other waits
+# behind it, so they never each count the other and stand still. [[other]] is a second chain with a fresh Leg lease.
+scen l16b
+mkro t1 t2; mkpar 0 0; cap 1
+leg begin --cwd "$F"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nsurfaces:\n  - "ext:y"\n---\n\n## Queue\n\n| # | Task | Launch | Surfaces |\n|---|---|---|---|\n| 1 | [[o1\\|o1]] | `cc-demo` from `%s` | `ext:y` |\n' "$F" > "$T/other.md"
+printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[other]]"\n---\n' > "$T/o1.md"
+printf '{"rollout": "other", "written_at": "%s", "by": "leg"}' "$NOW" > "$HOME/.config/thread/leases/other.json"
+wrecs "$RO@2026-10-20T09:00:00+00:00" "other@2026-10-20T09:30:00+00:00"
+leg next
+ok "$(q 'd["action"]')" claim "L16b: C 1, two waiting Legs with no claim: the one waiting longer finds room, the other's session behind it"
+wrecs "$RO@2026-10-20T09:30:00+00:00" "other@2026-10-20T09:00:00+00:00"
+leg next
+ok "$(q 'd["action"]')|$(q 'd["kind"]')|$(q 'd["capacity"]["elsewhere"]')" "wait|capacity|{'other': 1}" "L16b: … and the one behind waits, counting the other's session ahead of it"
+ok "$(q 'd["why"]')" "trickle: 1/1 tasks running on this Mac" "L16b: … on the Capacity"
+wrecs "$RO@2026-10-20T09:00:00+00:00" "other@2026-10-20T09:00:00+00:00"
+leg next; ok "$(q 'd["action"]')" claim "L16b: waiting since the same moment, the lower stem goes first ($RO before other)"
+wrecs "$RO@2026-10-20T09:00:00+00:00"
+leg next
+ok "$(q 'd["action"]')|$(q 'd["capacity"]["elsewhere"]')" "wait|{'other': 1}" "L16b: a Leg that is not waiting is never passed over: its session counts"
+# Only a Leg counted for its session alone takes turns: [[other]] now works a claim (o1 in progress, owned leg-1) and
+# waits behind this Leg (a later `since`), yet its claim still counts, so this Leg waits rather than pass over a task.
+printf -- '---\ntags: [task]\nstatus: in_progress\nowner: leg-1\nrollout: "[[other]]"\n---\n' > "$T/o1.md"
+wrecs "$RO@2026-10-20T09:00:00+00:00" "other@2026-10-20T09:30:00+00:00"
+leg next
+ok "$(q 'd["action"]')|$(q 'd["kind"]')|$(q 'd["capacity"]["elsewhere"]')" "wait|capacity|{'other': 1}" "L16b: a Leg with a claim is never passed over, even waiting behind this one: its claim counts"
+ok "$(q 'd["why"]')" "trickle: 1/1 tasks running on this Mac" "L16b: … on the Capacity"
 
 echo
 [ "$fail" -eq 0 ] && echo "leg-capacity.test.sh: ALL PASS" || echo "leg-capacity.test.sh: FAILED"

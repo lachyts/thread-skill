@@ -236,7 +236,7 @@ uncap
 J=$(CLAUDE_CODE_SESSION_ID=s1 CLAUDE_ACCOUNT_PINNED=login-a nx ro --dry-run)
 ok "$(q "$J" '[d["slotLimit"], d["start"]]')" '[2,["r1"]]' "C8: with no Capacity no quota hold (the Trickle 2: r0 and one start)"
 
-# ── C9: a waiting Leg keeps its place in line ────────────────────────────────────────────────────────────────────
+# ── C9: a waiting Leg keeps its place in line: its session's, once (ADR 0076 d3), else a kept one ────────────────────
 scen c9-share
 six; mkserial chain; mkt c1 chain open
 cap 3 "$MIN_AGO"
@@ -244,7 +244,12 @@ here=$(cd "$D" && pwd -P)
 wait_rec() { printf '{"version": 1, "claims": [], "waiting": [{"tasksDir": "%s", "rollout": "chain", "since": "2026-10-02T14:00:00+00:00", "at": "2026-10-02T14:04:00+00:00", "served": null, "want": 1}], "woken": []}\n' "$here" > "$THREAD_NOTE_LOCK_DIR/trickle-claims.json"; }
 mkdir -p "$THREAD_NOTE_LOCK_DIR"; wait_rec; leglease chain "$MIN_AGO"
 J=$(nx ro)
-ok "$(q "$J" '[d["slotLimit"], d["trickle"]["kept"], len(d["start"])]')" '[2,{"chain":1},2]' "C9: the lead keeps 1 for [[chain]] and lowers slotLimit"
+ok "$(q "$J" '[d["slotLimit"], d["trickle"]["elsewhere"], d["trickle"]["kept"], len(d["start"])]')" '[2,{"chain":1},{},2]' "C9: a waiting Leg with a fresh lease holds its place through its session (chain 1), never a kept place on top: slotLimit 2"
+ok "$(q "$J" 'd["hold"][0]["reason"]')" '"trickle: 3/3 tasks running on this Mac"' "C9: … its hold counts the Leg's session and keeps nothing"
+ok "$(claims '[[w["rollout"], w["by"]] for w in d["woken"]]')" '[]' "C9: … and writes no wake (the place is already its own)"
+six; wait_rec; lease_raw chain '{"rollout": "chain", "written_at": "2026-10-02T14:20:00Z", "by": "leg"}'
+J=$(nx ro)
+ok "$(q "$J" '[d["slotLimit"], d["trickle"]["elsewhere"], d["trickle"]["kept"], len(d["start"])]')" '[2,{},{"chain":1},2]' "C9: an unreadable Leg lease holds no session place, so the lead keeps 1 for [[chain]] in line and lowers slotLimit"
 ok "$(q "$J" 'd["hold"][0]["reason"]')" '"trickle: 2/3 tasks running on this Mac, 1 kept for [[chain]]"' "C9: … its hold names it"
 ok "$(claims '[[w["rollout"], w["by"]] for w in d["woken"]]')" '[["chain","ro"]]' "C9: … and writes chain a wake"
 six; wait_rec; leglease chain 2026-10-02T11:00:00Z
@@ -270,19 +275,22 @@ J=$(CLAUDE_CODE_SESSION_ID=s1 st ro)
 ok "$(q "$J" '[d["trickle"]["limit"], d["trickle"]["elsewhere"], d["trickle"]["capacity"]["file"], d["trickle"]["capacity"]["quota"]]')" '[5,{"chain":1},"fresh",null]' "C11: status reads C 5, counts the Leg and reads no quota"
 ok "$(lines)" 0 "C11: status prints no WARN"
 
-# ── C12: only a live Leg claim adds to the count ─────────────────────────────────────────────────────────────────
+# ── C12: an open Leg counts its session, and only a live Leg claim adds to it (ADR 0076 d3) ───────────────────────
 scen c12-window
 six; mkserial chain
 mkt c1 chain done 'owner: leg-1'; mkt c2 chain in_progress 'owner: lead-x'; mkt c3 chain blocked 'owner: leg-1'
 cap 5 "$MIN_AGO"; leglease chain "$MIN_AGO"
 J=$(nx ro --dry-run)
-ok "$(q "$J" '[d["trickle"]["elsewhere"], d["slotLimit"]]')" '[{},5]' "C12: a done, a lead-owned and a set-aside row add nothing"
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["slotLimit"]]')" '[{"chain":1},4]' "C12: a done, a lead-owned and a set-aside row add no claim: the open Leg counts 1, its session"
 mkt c4 chain in_progress 'owner: leg-1'
 mkdir -p "$D/Archive"; mkserial old; mv "$D/old.md" "$D/Archive/old.md"
 printf -- '---\ntags: [task]\nstatus: in_progress\nowner: leg-1\nrollout: "[[old]]"\n---\n' > "$D/o1.md"
 leglease old "$MIN_AGO"
 J=$(nx ro --dry-run)
-ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"chain":1}' "C12: one Leg claim counts once; an archived chain never counts"
+ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"chain":1}' "C12: one Leg claim counts once, in its session's place; an archived chain never counts"
+mkt c5 chain in_progress 'owner: leg-2'
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"chain":2}' "C12: two Leg claims count 2, the session adding nothing on top"
 
 # ── C13: the lead's lease names its Login; --quota-login (moving's dry run) reads a named Login ──────────────────────
 scen c13-login

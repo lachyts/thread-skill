@@ -1,0 +1,46 @@
+# The full suite on every push to master (ADR 0073 d3), split into shards so no one job runs it end to end. A PR's
+# required checks run only the fast tier (test.yml), so this run is where a break only the slow tests catch shows:
+# master's red is that run's, read by the Reflection, never a PR's. No concurrency cancel, so each master commit keeps
+# its own verdict.
+#
+# Each job runs one shard: `bash tests/run.sh --shard K/N` runs the part of the suite tests/lib/shard.py gives shard K
+# (its docstring holds the rules). The split is by test file and never trims: the N shards together run every test
+# file exactly once (p43-6's audit decides what to trim, and measures whether N and the size weighting fit). N in the
+# run line must equal the length of the shard matrix; tests/ci-workflows.test.mjs pins both, and that no job here
+# takes a required-check name (`make test (...)`, ADR 0025).
+name: full suite
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  shard:
+    name: full suite (${{ matrix.os }}, shard ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        shard: [1, 2, 3, 4]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      # Default depth: the full suite diffs nothing.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # next-action.py reads frontmatter with PyYAML; neither runner image guarantees it (test.yml says why).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install pyyaml
+      # THREAD_TEST_JOBS as in test.yml: 4 keeps these 3- and 4-vCPU runners saturated (its comment holds the history).
+      - run: bash tests/run.sh --shard ${{ matrix.shard }}/4
+        env:
+          THREAD_TEST_JOBS: "4"

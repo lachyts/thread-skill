@@ -16,7 +16,8 @@ launch-folders file and its own tree's `.claude-plugin/plugin.json`; it never re
 --vault ~/repos/obsidian, --launch-folders ~/repos/workspaces/_shared/state/launch-folders.json.
 
 Surfaces (CONTEXT.md **Surface**; ADR 0067 d4). A surface is a place a chain is predicted to write, as a canonical
-token of one of six kinds. Predicted claims group, order and wait; they never refuse a schedule.
+token of one of six kinds. Predicted claims group, order and wait; they never refuse a schedule, save one rule (ADR
+0074 d3, under Launch below): a `repo:` claim in a checkout other than its member's launch folder's refuses that member.
   repo:<key>//<path>    a file in a git checkout, or a folder with a trailing `/` (`repo:<key>//<dir>/`): <key> is the
                         checkout's in-place twin (Git.primary: a linked worktree's main worktree), so the token reads
                         the same from any copy, and <path> is relative to it (no leading `/`, no `..`; an empty one
@@ -118,13 +119,28 @@ the estate (too_broad).
 Launch, per member. Alias: the task's `launch:`, else the `launch:` of its first project note (the `projects:`
 wikilink's file under `<vault>/Work/Projects/**`, a match outside Archive/ first). Folder: `by_alias[alias]`, else
 `plain_aliases[alias]`. `works` is the checkouts a member works (works_of): the key of each keyed `repo:` token, each
-bare one that is a git toplevel, and each reach checkout. A member with no alias (or `claude`) opens with `claude`
-from its one `works` checkout when it has exactly one; with none, from its one bare `repo:` token in no checkout when
-it has exactly one, else from the vault root. A code row never opens where its Leg cannot finish it (leg.py done
-finishes only commits in the Leg's own checkout; ADR 0059): an alias-less member working two checkouts or more is
-refused, and so is an aliased one whose launch folder is in the vault (realpaths, case-folded, as claim compares)
-while it works a checkout. Each row keeps its own launch: a launch change between two rows is a Leg boundary (ADR
-0040).
+bare one that is a git toplevel, and each reach checkout. Its commit checkouts are the same read without the reach:
+the checkouts of its `repo:` surfaces, declared, derived or added (ADR 0074 d3). A code row never opens where its Leg
+cannot finish it (leg.py done finishes only commits in the Leg's own checkout, and a review cannot leave the
+Session's cwd; ADR 0059 d4, ADR 0074 d3), so a row commits only to the checkout it launches from:
+  - A member with no alias (or `claude`) opens with `claude` from the one checkout its `repo:` surfaces name,
+    whatever else it reaches, and is refused when they name two or more. Naming none, it opens from its one `works`
+    checkout when it has exactly one, is refused when it has two or more (ADR 0059 d4), and with none opens from its
+    one bare `repo:` token in no checkout when it has exactly one, else from the vault root.
+  - An aliased member whose launch folder is in the vault (realpaths, case-folded, as claim compares) is refused
+    while it works any checkout, reach included (ADR 0059 d4). Any other aliased member is refused when a checkout
+    its `repo:` surfaces name is not its launch folder's (launch_checkout: the key of the folder's realpath, or none
+    when it is in no checkout), keys compared case-folded, so a launch in a linked worktree commits to its main
+    worktree's checkout. The remedy names, in turn: only when every checkout its `repo:` surfaces name is one
+    checkout, not its launch folder's, that checkout's launcher when the launch-folders file has one (launcher_for),
+    else a launch from that checkout (a row that commits to two checkouts is refused from any one launch, so its
+    remedy starts at the split); one task per checkout chained by `depends-on:`; and, for a checkout the row only
+    reads, a `surfaces:` declaration without it or the path moved under a **Read...** item.
+  Reach is never refused by this rule: a launch command's `--add-dir` and `cd` paths, a where-label value, a toplevel
+  span and the first project's `Local:` predict nothing, and the read-only reach ADR 0059 d4 named stays allowed. The
+  plan cannot tell a commit from a read: a `## Launch` path below another checkout's toplevel outside a **Read...**
+  item is a prediction, so it refuses like a commit.
+Each row keeps its own launch: a launch change between two rows is a Leg boundary (ADR 0040).
 
 Ruling (c), no serial self-rollouts: plugin.json's `repository`, normalised (norm_origin), against the origin of
 each launch-command path in a member's `## Launch` and each reach path span there (its checkout; declared member or
@@ -181,8 +197,9 @@ what its note records (`surfaces:` and the Queue's Launch cells), so S3's `--che
 Exit 3 prints no stdout and one `REFUSE:` line per refusal, with its remedy: an alias in neither map, an alias with
 a null folder, a launch folder that is missing, a launch-folders file missing or unreadable while an alias needs it
 (an unreadable file no alias needs is only a WARN), a dependency cycle, a malformed declared token, a code row whose
-Leg would open outside the checkout it works (an alias-less row working two checkouts, or a vault launch working
-one; never a session-lane member). Exit 2 prints
+Leg would open outside the checkout it works (an alias-less row whose `repo:` surfaces name two checkouts, or, naming
+none, that works two; a vault launch working one; an aliased row whose `repo:` surfaces name a checkout other than
+its launch folder's; never a session-lane member). Exit 2 prints
 one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, a malformed
 `--signed-out`, an alias-less one with no folder, or a `cx-*` one, reconcile-rollout.py unloadable, or plugin.json
 unreadable (ruling (c) cannot be checked, so the plan fails closed).
@@ -212,9 +229,10 @@ and read_estate_rank (rank-stamp),
 and reconcile-rollout.py read_surfaces, checkouts_of and read_chain_copies:
 repo_parts, checkout_of and checkouts_of are this file's one statement of a chain's checkouts. overlaps
 and overlap_pairs take an optional toplevel resolver (Git.checkout) for the nested-checkout rule, and are purely
-textual without one. locate (claim), the grouping's nested-checkout read, the `checkouts` read and the ruling-(c)
-origin read are the only code that runs git; of it, only the Git class is exported, for unfinished-rollout.py's own
-nested-checkout and launch-folder reads. Importing this file has no side effects.
+textual without one. locate (claim), the grouping's nested-checkout read, the `checkouts` read, the ruling-(c)
+origin read and d3's launch-checkout reads (launch_checkout, launcher_for) are the only code that runs git; of it,
+only the Git class is exported, for unfinished-rollout.py's own nested-checkout and launch-folder reads. Importing
+this file has no side effects.
 """
 import argparse
 import importlib.util
@@ -1062,6 +1080,59 @@ def in_vault(folder, vault_real) -> bool:
     return r == vf or r.startswith(vf + "/")
 
 
+def launch_checkout(folder, git):
+    """The key (Git.primary) of the checkout a launch folder is in, read from its realpath, or None when it is in
+    none: the side of ADR 0074 d3's comparison that a member's `repo:` surfaces' checkouts are held to."""
+    top = git.toplevel(os.path.realpath(os.path.expanduser(folder)))
+    return git.primary(top) if top else None
+
+
+def launcher_for(checkout, lf, git):
+    """(alias, folder) of a launcher whose folder is in `checkout` (a key, case-folded), or None: d3's first remedy.
+    by_alias is read before plain_aliases, each in file order, and an alias whose folder is the checkout's toplevel
+    comes before a deeper one; a null or missing folder is skipped."""
+    if lf is None:
+        return None
+    found = []
+    for amap in lf:
+        for alias, folder in amap.items():
+            if not isinstance(folder, str) or not folder.strip():
+                continue
+            f = os.path.expanduser(folder.strip())
+            if not os.path.isdir(f):
+                continue
+            key = launch_checkout(f, git)
+            if key is not None and key.casefold() == checkout.casefold():
+                found.append((os.path.realpath(f).casefold() != key.casefold(), len(found), alias, f))
+    return min(found)[2:] if found else None
+
+
+D3_SPLIT = ("split it into one task per checkout chained by `depends-on:` (they stay in one chain, a Leg boundary "
+            "between them), or, for a checkout it only reads, declare `surfaces:` without that checkout or move the "
+            "path under a **Read...** item")
+
+
+def cross_checkout_refusal(slug, alias, folder, commits, lf, git):
+    """ADR 0074 d3's refusal line for an aliased member whose `repo:` surfaces' checkouts (`commits`, keys) are not
+    all its launch folder's (launch_checkout, a key or None), or None when they are. Its remedies, in turn: a relaunch
+    only when every commit checkout is one checkout, not the launch folder's (that checkout's launcher, else a launch
+    from it), since from any one launch a row committing to two would still be refused; one task per checkout; and,
+    for a checkout it only reads, a `surfaces:` declaration without it or a **Read...** item (D3_SPLIT)."""
+    home = launch_checkout(folder, git)
+    if home is not None and all(c.casefold() == home.casefold() for c in commits):
+        return None
+    where = f"in the checkout {home}" if home else "in no checkout"
+    head = f"{slug}: its launch {alias} opens in {folder}, {where}, "
+    if len(commits) > 1:
+        return (head + f"but it commits to the checkouts {', '.join(commits)}: a review cannot leave the Session's "
+                "cwd, so no one launch could finish it (ADR 0074 d3): " + D3_SPLIT)
+    c = commits[0]
+    hit = launcher_for(c, lf, git)
+    move = f"launch it with `{hit[0]}` (its folder {hit[1]} is in {c})" if hit else f"launch it from {c}"
+    return (head + f"but it commits to the checkout {c}: a review cannot leave the Session's cwd, so its Leg could "
+            f"never finish it (ADR 0074 d3); {move}, " + D3_SPLIT)
+
+
 def load_launch_folders(path):
     try:
         data = json.loads(Path(path).read_text())
@@ -1330,14 +1401,24 @@ def cmd_plan(args) -> int:
         warns.extend(cw)
         canon = sorted({fmt_token(t) for t in tokens})
         # A code row's Leg finishes only commits in its own checkout, so it never opens outside the one it writes
-        # (ADR 0059 d4); the refusal waits for ruling (c), which sends a session-lane member away unrefused. `works`:
-        # the checkouts its tokens name and those it reaches; a bare token in no checkout is the path-only fallback.
-        works = works_of([parse_token(t) for t in canon], reach_tops, git)
-        pathonly = [v for k, v in (parse_token(t) for t in canon)
+        # (ADR 0059 d4, ADR 0074 d3); the refusal waits for ruling (c), which sends a session-lane member away
+        # unrefused. `commits`: the checkouts its `repo:` surfaces name, declared, derived or added (d3); `works`:
+        # those and the checkouts it reaches; a bare token in no checkout is the path-only fallback.
+        parsed = [parse_token(t) for t in canon]
+        commits = works_of(parsed, [], git)
+        works = works_of(parsed, reach_tops, git)
+        pathonly = [v for k, v in parsed
                     if k == "repo" and repo_parts(v)[1] is None and v.casefold() not in {w.casefold() for w in works}]
         pending = None
         if not alias:
-            if len(works) == 1:
+            if len(commits) == 1:
+                folder = commits[0]
+            elif commits:
+                folder = vault_real
+                pending = (f"{slug}: it writes the checkouts {', '.join(commits)} and has no launch alias: a review "
+                           "cannot leave the Session's cwd, so its Leg could finish only one (ADR 0074 d3): "
+                           + D3_SPLIT)
+            elif len(works) == 1:
                 folder = works[0]
             elif works:
                 folder = vault_real
@@ -1349,10 +1430,15 @@ def cmd_plan(args) -> int:
                 folder = pathonly[0] if len(pathonly) == 1 else vault_real
         elif folder and works and in_vault(folder, vault_real):
             which = f"checkout {works[0]}" if len(works) == 1 else f"checkouts {', '.join(works)}"
+            # A relaunch fixes it only while its `repo:` surfaces name one checkout at most: committing to two, it
+            # would be refused from any launch by d3 (cross_checkout_refusal's rule).
+            relaunch = "give it a `launch:` whose folder is in that checkout, " if len(commits) < 2 else ""
             pending = (f"{slug}: its launch {alias} opens in {folder}, inside the vault, but it writes the {which}: "
-                       "leg.py done finishes only commits in the Leg's own checkout, so give it a `launch:` whose "
-                       "folder is in that checkout, split it into one task per checkout chained by `depends-on:`, or "
-                       "declare `surfaces:` without a checkout it only reads")
+                       f"leg.py done finishes only commits in the Leg's own checkout, so {relaunch}split it into one "
+                       "task per checkout chained by `depends-on:`, or declare `surfaces:` without a checkout it only "
+                       "reads")
+        elif folder and commits:
+            pending = cross_checkout_refusal(slug, alias, folder, commits, lf, git)
         launch = {"alias": alias or "claude", "folder": folder}
 
         # Ruling (c): no serial self-rollouts. A reach path is a source of its own: it leaves no token behind.
