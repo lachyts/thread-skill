@@ -988,7 +988,11 @@ swept, dismissed: [[task-u]] token (an LLM token count: "~31.5k tokens")
 
 An all-serial set (§ 0: no member parallel-shaped, at least one serial-shaped) runs here instead of steps 1–8, and
 writes one **serial rollout** note per chain (ADR 0040): `shape: serial`, the chain's tasks in order, each row with
-the launch its Leg opens in, and the chain's surfaces. A chain's surfaces are its predicted file or folder claims
+the launch its Leg opens in, and the chain's surfaces. A run writes at most one chain per project (ADR 0074 d1): every
+member whose first `projects:` link names one project goes in that project's chain, in dependency order, whatever its
+surfaces, and a launch change between two of its rows stays a Leg boundary inside it. A member with no `projects:`
+link is grouped by surface overlap and in-set dependency alone, and two projects' members give two chains unless an
+overlap or a dependency joins them. A chain's surfaces are its predicted file or folder claims
 (ADR 0067 d4): inside a git checkout a claim is `repo:<toplevel>//<path in it>`, with a trailing `/` for a folder,
 the toplevel being the in-place twin's, and a bare `repo:<toplevel>` covers the whole checkout. Chains whose
 surfaces are disjoint run side by side, and chains whose surfaces overlap are both scheduled: sharing a checkout or
@@ -1048,7 +1052,9 @@ Carry the `warns` to the confirm and to S7.
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape serial --surface <token>… --checkout <dir>… (--project <target> | --tasks <the chain's members>)`,
 one `--surface` per token of the chain's `surfaces` and one `--checkout` per entry of its `checkouts`, passed verbatim
 from S2's JSON (and `--regenerate` when this run has it, which only WARNs: a serial run supersedes nothing).
-Every chain is checked, even after one is refused. A live serial chain never refuses one (ADR 0067 d4): a predicted
+Every chain is checked, even after one is refused. Two chains of one run never overlap (an overlap joins them at S2),
+so each WARN below names a note an earlier run wrote: another project's chain, or this project's from an earlier run.
+A live serial chain never refuses one (ADR 0067 d4): a predicted
 overlap with what it holds prints `WARN: [[<s>]] … also predicts <b>, which this chain predicts as <a>: they take
 turns on it by rank (ADR 0067 d4, d9)` (the first chain's finished rows hold the place until
 `leg.py land` puts them on the primary's default branch, so the second begins with that work in its copy: begin's
@@ -1099,7 +1105,7 @@ step 1.5's final `preflight` with `--dep`. Under orient § 7 or orient-all § 6 
 are listed in S7. Steps 2, 2.5–2.9, 4, 4.5, 4.7 and Solo are skipped on this path, and `plan_approval:`, `scope:`,
 `rung:` and `solo:` are never proposed.
 
-**S5. Write.** One note per chain, from `${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`. Naming
+**S5. Write.** One note per chain, so one per project (ADR 0074 d1), from `${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`. Naming
 follows step 6: the first chain takes the next free `<slug>-rollout-<YYYY-MM-DD>` name and each further chain the
 next ordinal (`-2`, `-3`, …), never **Overwrite**. The shared placeholders (`{{PROJECT_NAME}}`, `{{DATE}}`,
 `{{THREAD_LINE}}`, `{{QUEUE_RATIONALE}}`, `{{POST_ROLLOUT_ITEMS}}`) are substituted as step 6's bullets say, and
@@ -1183,8 +1189,8 @@ Then the fresh session the handoff started (or, by hand, a session started in th
 
 ### Serial regression (§ Serial path)
 
-- Two serial-shaped tasks that declare disjoint `surfaces:` give two notes, `<slug>-rollout-<date>` and `-2`, each `shape: serial` with one chain, and no task stamped with a `surfaces:`.
-- Two tasks naming one file give one chain; when their aliases differ, its `## Queue` rows carry two launches, a Leg boundary between them. Two naming different files of one checkout give two notes; a live chain working that checkout in place (no `chain_copies:`) WARNs `works <checkout> in place too` at S3, and one in its own Chain copies never does.
+- Two serial-shaped tasks of two projects (or of none) that declare disjoint `surfaces:` give two notes, `<slug>-rollout-<date>` and `-2`, each `shape: serial` with one chain, and no task stamped with a `surfaces:`; two of one project give one note, its rows in dependency order (ADR 0074 d1).
+- Two tasks naming one file give one chain; when their aliases differ, its `## Queue` rows carry two launches, a Leg boundary between them. Two of two projects (or of none) naming different files of one checkout give two notes; a live chain working that checkout in place (no `chain_copies:`) WARNs `works <checkout> in place too` at S3, and one in its own Chain copies never does.
 - Each note written carries `chain_copies:` after `shape:`, one pair per checkout its chain writes, each copy a worktree on `chain/<note>` under `~/.local/state/thread/chains/` cut from the checkout's default branch with its gitignored config linked; a vault-only chain's is `[]`, and `leg.py status` prints Leg 1's `restart.launch` inside the copy.
 - A chain whose surface overlaps a live serial note's is scheduled at S3 with the takes-turns WARN, and its Leg waits its turn at begin; only an unfinished parallel rollout's Project root refuses it, and then nothing is written.
 - A chain on one checkout whose `CLAUDE.md` declares a `Completion verifier:` gives a note with a quoted `completion_verifier:` (ADR 0055), which `verify-timeout` reads cleanly; zero, two or a non-toplevel `checkouts` entry give none.

@@ -131,11 +131,15 @@ project notes' bodies and their `repos:` entries. A match sends the member to `s
 source (the first match, in that order: a reach span reads `its ## Launch path <p>`). Ruling (c) runs before the
 launch refusals, so a session-lane member is never refused for its launch.
 
-Grouping: connected components over surface overlap, plus `depends-on:` / `blocked-by:` / --dep edges inside the
-set. Each chain is ordered topologically (Kahn's); among the ready tasks the next row is the lowest phase N of
-`-p<N>-<M>` (a slug without it sorts after every numbered one), then one whose launch equals the previous row's,
-then the lowest M, then the slug. A dependency outside the set (or on a session-lane member) is listed in the
-chain's `externalDeps`.
+Grouping (ADR 0074 d1): connected components over surface overlap, `depends-on:` / `blocked-by:` / --dep edges inside
+the set, and a shared first project: every member whose first `projects:` wikilink names one project (case-folded) is
+in that project's one chain, whatever its surfaces, so a run gives at most one chain per project. A member with no
+`projects:` link is grouped by surface and dependency alone, and members of two projects give two chains unless a
+surface overlap or an in-set dependency joins them. A session-lane member is in no chain. Each chain is ordered
+topologically (Kahn's); among the ready tasks the next row is the lowest phase N of `-p<N>-<M>` (a slug without it
+sorts after every numbered one), then one whose launch equals the previous row's, then the lowest M, then the slug, so
+a launch change stays a Leg boundary inside the one chain. A dependency outside the set (or on a session-lane member)
+is listed in the chain's `externalDeps`.
 
 Output: one JSON line on stdout, exit 0, nothing on stderr:
   {"chains": [{"tasks": [...], "surfaces": [...], "checkouts": [...], "members": {slug: {"surfaces": [...],
@@ -1296,7 +1300,7 @@ def cmd_plan(args) -> int:
                      if os.path.isdir(d) and git.origin(d) == porigin), None)
         deps = list(rr._dep_entries(note)) + extra_deps.get(slug.lower(), [])
         info[slug] = {"surfaces": canon, "source": source, "added": sorted(set(added)), "launch": launch,
-                      "works": works, "deps": deps}
+                      "works": works, "deps": deps, "project": proj_names[0].casefold() if proj_names else None}
         if lane:
             session.append({"slug": slug, "why": lane})
         elif pending:
@@ -1304,7 +1308,7 @@ def cmd_plan(args) -> int:
 
     lane_slugs = {s["slug"] for s in session}
     chained = [s for s in notes if s not in lane_slugs]
-    # Union-find over surface overlap and in-set dependency edges.
+    # Union-find over surface overlap, in-set dependency and shared-first-project edges (ADR 0074 d1).
     parent = {s: s for s in chained}
 
     def find(x):
@@ -1322,6 +1326,11 @@ def cmd_plan(args) -> int:
         for b in chained[i + 1:]:
             if overlap_pairs(info[a]["surfaces"], info[b]["surfaces"], git.checkout):
                 union(a, b)
+    first_of_project = {}
+    for s in chained:
+        pk = info[s]["project"]
+        if pk is not None:
+            union(first_of_project.setdefault(pk, s), s)
     in_deps, ext = {}, {}
     for s in chained:
         in_deps[s], ext[s] = [], []

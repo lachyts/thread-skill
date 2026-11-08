@@ -3,7 +3,8 @@
 # chains (surface overlap and dependencies), each member's surfaces and where they came from, its launch, and
 # ruling (c)'s session lane:
 #   P1   grouping and order: disjoint chains, overlap and dependency edges, the phase / launch / M / slug tie-break,
-#        a cycle refused, an outside dependency listed
+#        a cycle refused, an outside dependency listed; one chain per first project (ADR 0074 d1), two projects or
+#        a member with no project apart
 #   P2   derivation and sources: the real `## Launch` shapes, Read and MCP items skipped, non-path spans skipped,
 #        the vault, a path in no checkout, --surface (always unions in), the added-only member, an empty `surfaces:`
 #   P2b  reach (a launch folder, a where-label value at any depth, a toplevel span) names only the checkout a member
@@ -135,6 +136,30 @@ has "$err" "REFUSE: dependency cycle among [[cy1]], [[cy2]]" "P1: … naming the
 mkt ex1 'surfaces: ["ext:x1"]' 'depends-on: ["[[outside]]"]'
 plan --tasks ex1
 ok "$(j 'd["chains"][0]["externalDeps"]')" '[{"dependsOn":"outside","task":"ex1"}]' "P1: a dependency outside the set is listed in externalDeps"
+# One chain per project (ADR 0074 d1): a shared first `projects:` link joins members whatever their surfaces.
+mkp PA; mkp PB
+mkt pa1 'projects: ["[[PA]]"]' 'surfaces: ["ext:pa1"]' 'depends-on: ["[[pa3]]"]'
+mkt pa2 'projects: ["[[PA]]"]' 'surfaces: ["ext:pa2"]'
+mkt pa3 'projects: ["[[PA]]"]' 'surfaces: ["ext:pa3"]'
+plan --tasks pa1,pa2,pa3
+ok "$rc|$(j "$chains")|$err" '0|[["pa2","pa3","pa1"]]|' "P1: three same-project members with disjoint surfaces give one chain, in dependency order"
+mkt pb1 'projects: ["[[PB]]"]' 'surfaces: ["ext:pb1"]'
+plan --tasks pa2,pb1
+ok "$(j "$chains")" '[["pa2"],["pb1"]]' "P1: members of two projects with disjoint surfaces give two chains"
+mkt pa4 'projects: ["[[pa]]"]' 'surfaces: ["ext:pa4"]'
+plan --tasks pa2,pa4
+ok "$(j "$chains")" '[["pa2","pa4"]]' "P1: the first project compares case-folded"
+mkt pn1 'surfaces: ["ext:pn1"]'
+plan --tasks pa2,pn1
+ok "$(j "$chains")" '[["pa2"],["pn1"]]' "P1: a member with no projects: link is grouped by surface and dependency alone"
+mkt pc1 'projects: ["[[PB]]", "[[PA]]"]' 'surfaces: ["ext:pc1"]'
+plan --tasks pa2,pc1
+ok "$(j "$chains")" '[["pa2"],["pc1"]]' "P1: only the first projects: link groups"
+mkt pl-p1-1 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:pl1"]'
+mkt pl-p1-2 'projects: ["[[PA]]"]' 'launch: cc-a-web' 'surfaces: ["ext:pl2"]'
+mkt pl-p1-3 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:pl3"]'
+plan --tasks pl-p1-2,pl-p1-3,pl-p1-1
+ok "$(j "$chains")|$(mem pl-p1-2 launch)" "[[\"pl-p1-1\",\"pl-p1-3\",\"pl-p1-2\"]]|{\"alias\":\"cc-a-web\",\"folder\":\"$W/aw/launchers/web\"}" "P1: one project's rows of two launches are one chain, each row keeping its launch (a Leg boundary inside it)"
 
 # ── P2: derivation and sources ────────────────────────────────────────────────────────────────────────
 scen p2
@@ -718,13 +743,14 @@ p8t() {
     printf -- '---\n\n## Notes\n\nbody\n'
     [ -z "${LAUNCH:-}" ] || printf '\n## Launch\n\n%s\n' "$LAUNCH"; } > "$PT/$s.md"
 }
-for p in SEO Web Ops AgA SameA AgB AgC AgD SibA SibB Decl; do printf -- '---\ntags: [project]\n---\n' > "$PV/Work/Projects/$p.md"; done
+for p in SEO Web Ops Ops2 Ops3 AgA SameA AgB AgC AgD SibA SibB Decl; do printf -- '---\ntags: [project]\n---\n' > "$PV/Work/Projects/$p.md"; done
 for p in ProjA ProjB; do printf -- '---\ntags: [project]\n---\n\nLocal: `~/Projects`\n' > "$PV/Work/Projects/$p.md"; done
 F='```'
 LAUNCH='- **Repo:** `~/repos/workspaces`' p8t seo1 SEO 'launch: cc-a-seo'
 LAUNCH='- **Repo:** `~/repos/workspaces/aw/`' p8t seo2 SEO 'launch: cc-a-seo'
 LAUNCH='- **Repo:** `~/repos/workspaces`' p8t web1 Web 'launch: cc-a-web'
-for t in ops1 ops2 ops3; do LAUNCH='- **Repo:** `~/repos/workspaces`' p8t $t Ops 'launch: cc-o'; done
+# Three projects of one launcher, so they stay three chains (one project's members are one chain, ADR 0074 d1).
+for x in "ops1 Ops" "ops2 Ops2" "ops3 Ops3"; do LAUNCH='- **Repo:** `~/repos/workspaces`' p8t ${x%% *} ${x#* } 'launch: cc-o'; done
 LAUNCH="$F""bash
 cc-o --add-dir ~/.agents
 $F
@@ -762,9 +788,9 @@ AgB#0 <-> Decl#0 checkout
 AgC#0 <-> Decl#0 checkout
 SibA#0 <-> Decl#0 checkout
 SibB#0 <-> Decl#0 checkout" "P8: only the same-file pair and the declared-bare pairs clash"
-ok "$(printf '%s\n' "$rp" | tail -1)" "chains 16 with any clash 7 (checkout-wide 1)" "P8: … and only the declared-bare chain is checkout-wide"
+ok "$(printf '%s\n' "$rp" | tail -1)" "chains 15 with any clash 7 (checkout-wide 1)" "P8: … and only the declared-bare chain is checkout-wide"
 hasnt "$ov" "SEO" "P8: no workspaces pair (five **Repo:** toplevels and one at depth name where they work)"
-hasnt "$ov" "Ops" "P8: … nor between two members of one launcher"
+hasnt "$ov" "Ops" "P8: … nor between the chains of one launcher's three projects"
 hasnt "$ov" "Proj" "P8: no Projects pair (a Local: reach predicts nothing)"
 hasnt "$ov" "AgD" "P8: a **Repo:** ~/.agents/skills/ value predicts nothing, not even beside the declared toplevel"
 has "$rp" "AgB#0 ['repo:$PA//skills/y/run.py']" "P8: a relative touches: item keyed to the member's one checkout"
