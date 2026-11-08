@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # The one test entrypoint. `make test` is the full suite (the self-rollout's completion verifier); `make test-fast`
-# (`--fast`) is the fast tier (its verifier, ADR 0073 d1); `--only <test file>...` runs the named files. bash
-# 3.2-compatible (macOS).
+# (`--fast`) is the fast tier (its verifier, ADR 0073 d1); `--only <test file>...` runs the named files; `--shard K/N`
+# runs shard K of the full suite split N ways (CI's full-suite.yml, ADR 0073 d3) and `--shard-plan N` prints that
+# split and runs nothing. bash 3.2-compatible (macOS).
 #
 # Modes. Every mode runs the always-run steps (bash and python syntax, the workflow parse, the fast-tier map check)
 # and ends with the check that the run wrote nothing into the checkout. Full mode then runs every suite. --fast runs
 # only the test files tests/lib/fast-tier.py selects for the diff from THREAD_VERIFY_BASE (ADR 0062), read through
 # tests/fast-tier.map, and the full suite when the selector cannot place a changed path (its FULL line). --only runs
-# the named collected files, and never the merge-task self-tests.
+# the named collected files, and never the merge-task self-tests. --shard K/N runs shard K of the split
+# tests/lib/shard.py makes of the merge-task self-tests and every collected test (its docstring holds the rules; the
+# self-tests run in shard 1), so the N shards together run the full suite exactly once; a shard.py failure is a red
+# `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's `<k><TAB><entry>` lines for the
+# same entries and exits before any step, writing nothing.
 #
 # Hermetic by construction: HOME and the global git config point into a temp dir, so any stray default
 # (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
@@ -29,12 +34,23 @@ cd "$(dirname "$0")/.."
 root=$(pwd)
 shopt -s nullglob
 
-usage() { echo "usage: bash tests/run.sh [--fast | --only <test file>...]" >&2; exit 2; }
-mode=full; only=()
+usage() { echo "usage: bash tests/run.sh [--fast | --only <test file>... | --shard K/N | --shard-plan N]" >&2; exit 2; }
+mode=full; only=(); shard_k=; shard_n=
 case "${1:-}" in
   '') ;;
   --fast) mode=fast; shift; [ "$#" -eq 0 ] || usage ;;
   --only) mode=only; shift; [ "$#" -gt 0 ] || usage; only=("$@") ;;
+  --shard)
+    mode=shard; shift; [ "$#" -eq 1 ] || usage
+    case "$1" in */*) shard_k=${1%%/*}; shard_n=${1#*/} ;; *) usage ;; esac
+    case "$shard_k" in ''|*[!0-9]*) usage ;; esac
+    case "$shard_n" in ''|*[!0-9]*) usage ;; esac
+    shard_k=$((10#$shard_k)); shard_n=$((10#$shard_n))
+    [ "$shard_k" -ge 1 ] && [ "$shard_k" -le "$shard_n" ] || usage ;;
+  --shard-plan)
+    mode=plan; shift; [ "$#" -eq 1 ] || usage
+    case "$1" in ''|*[!0-9]*) usage ;; esac
+    shard_n=$((10#$1)); [ "$shard_n" -ge 1 ] || usage ;;
   *) usage ;;
 esac
 
@@ -160,6 +176,15 @@ if [ "$mode" = only ]; then
   done
 fi
 
+# shard_split <N>: tests/lib/shard.py's `<k><TAB><entry>` line for the merge-task self-tests and every collected test,
+# in run.sh's order (the self-tests, the shell suites largest first, the node files).
+shard_split() {
+  printf '%s\n' @merge-task-self-tests ${sh_tests[@]+"${sh_tests[@]}"} ${node_tests[@]+"${node_tests[@]}"} \
+    | python3 tests/lib/shard.py "$1"
+}
+# --shard-plan: the dry run. It prints the split and exits before any step; the trap removes scratch.
+if [ "$mode" = plan ]; then shard_split "$shard_n"; exit $?; fi
+
 syntax_sh() { local f r=0; for f in "$@"; do bash -n "$f" || r=1; done; return $r; }
 # Warnings are errors: an invalid escape such as '\`' in a non-raw string is a silent DeprecationWarning on python
 # 3.11 but a SyntaxWarning on stderr on every run from 3.12 (CI's), which breaks each suite that pins an empty
@@ -209,6 +234,25 @@ if [ "$mode" = fast ]; then
   fi
 elif [ "$mode" = only ]; then
   keep "$(printf '%s\n' "${only[@]}")"; self_tests=0
+elif [ "$mode" = shard ]; then
+  # shard_pick: this shard's entries into $mine. A shard.py failure fails the step, and the run then runs no test.
+  shard_pick() {
+    local split sk se
+    split=$(shard_split "$shard_n") || { echo "shard.py failed, so this shard runs no test"; return 1; }
+    mine=""
+    while IFS=$tab read -r sk se; do [ "$sk" = "$shard_k" ] && mine="$mine$se$nl"; done <<< "$split"
+    shard_ok=1
+  }
+  run_sh=(); run_node=(); self_tests=0; shard_ok=0
+  step "shard split" shard_pick
+  if [ "$shard_ok" = 1 ]; then
+    keep "$mine"
+    case "$nl$mine" in *"$nl@merge-task-self-tests$nl"*) self_tests=1 ;; esac
+    k=$(( ${#run_sh[@]} + ${#run_node[@]} ))
+    echo "== shard $shard_k/$shard_n: $k test files"
+    [ "$self_tests" = 1 ] && echo "   the merge-task self-tests"
+    for t in ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"}; do echo "   $t"; done
+  fi
 fi
 
 # Independent suites run concurrently (each builds under its own mktemp), at most $max_jobs at a time; node runs

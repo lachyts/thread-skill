@@ -438,6 +438,8 @@ squash merge tags a commit that never reaches master.
 ```sh
 make test            # = bash tests/run.sh — the full suite, and the self-rollout's completion verifier
 make test-fast       # = bash tests/run.sh --fast — the fast tier, and the self-rollout's verifier
+bash tests/run.sh --shard K/N    # shard K of the full suite split N ways (CI's full-suite.yml on master)
+bash tests/run.sh --shard-plan N # the dry run: prints every test file's shard, runs nothing
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 
@@ -452,8 +454,11 @@ that no test names (`skills/**` and `hooks/**` already place it, so a test that 
 line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` without its `tests/fixtures/<d>/**`
 consumers line, or a test that lists a directory but sits on neither the walkers' `** ALSO` line nor OWN-LISTINGS.
 The map is itself FULL, so a diff that edits it runs the full suite: edit it only when the check names a missing
-line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. CI still runs the
-full `make test` until p43-3 moves it. Most code diffs still go FULL today, through the five hubs the map marks
+line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. In CI (ADR 0073
+d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-latest)`, ADR 0025) run
+`make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
+(`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
+in exactly one shard; `--shard-plan N` is the dry run). Most code diffs still go FULL today, through the five hubs the map marks
 FULL (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`) and
 the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`, and the
 over-selection from message strings and FOREIGN names is `thread-skill-followup-fast-tier-over-selection`.
