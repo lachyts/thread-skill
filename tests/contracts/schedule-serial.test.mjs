@@ -1,6 +1,6 @@
 // Schedule writes serial rollouts (ADR 0040, p24-2): the prose and templates around serial-chains.py and the
 // serial check (their behaviour is pinned by tests/serial-chains.test.sh and tests/unfinished-rollout.test.sh S1-S12).
-// Ten rules, one pure function, check(files), over { relPath: text }:
+// Eleven rules, one pure function, check(files), over { relPath: text }:
 //   t1  the templates: the parallel template says `shape: parallel`; the serial one says `shape: serial`,
 //       `protocol_version: 5`, `incomplete: true` and `surfaces:` + `{{SURFACES}}`, holds none of the parallel
 //       engine's keys (the completion verifier's three commented lines aside, ADR 0055, which it must hold), and its
@@ -34,7 +34,15 @@
 //       together;
 //   t9  the schedule description names the parallel refusal and the serial notes;
 //   t10 status (§ 1's **Incomplete** and § 4's item 5) and repair (its `incomplete` stop) give a `shape: serial`
-//       note's incomplete stamp its own remedy, `status: dropped`, since `--regenerate` never ends it.
+//       note's incomplete stamp its own remedy, `status: dropped`, since `--regenerate` never ends it;
+//   t11 the sign-ins (ADR 0074 d2): S3.7 sits between S3.5 and S4 and reads each member's `mcp` (`required_mcp`),
+//       checks on the fresh shell's account (this session's tools only when its MCP config matches, else `claude mcp
+//       list`, also when ToolSearch loads no tool), raises one `hands_steps` list and its question (the gate's cite),
+//       never checks a `cx-*` launch, and leaves out with `--signed-out` keyed by alias or `claude` plus folder, each
+//       row in `leftOut` with its line, legs.md § Preflight its backstop; S2 names `mcp` and `leftOut` and carries
+//       every flag; S4 reads its chain-level values from the last S2 JSON and asks nothing again; S7's Sign-ins line;
+//       Scope; orient § 7; orient-all § 6's **Sign-ins first** before batch 1 and answer 15's flags; the Backlog
+//       orient's item 23, B5 and B9; and legs.md § Preflight names itself the backstop.
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text.
 // __pycache__, .DS_Store and any file holding a NUL byte are skipped. Reads files only.
 import { test } from 'node:test'
@@ -53,6 +61,9 @@ const GRAMMAR = 'skills/_shared/vault-grammar.md'
 const CONTEXT = 'CONTEXT.md'
 const STATUS = 'skills/status/SKILL.md'
 const REPAIR = 'skills/repair/SKILL.md'
+const ORIENT_ALL = 'skills/orient-all/SKILL.md'
+const BACKLOG = 'skills/orient/backlog.md'
+const LEGS = 'skills/execute/legs.md'
 const INTERIM = 'no serial writer yet'
 
 const SKILL_TESTS = /^skills\/[^/]+\/tests\//
@@ -236,6 +247,31 @@ function check(files) {
   need('t10', `${STATUS} § 4 item 5`, C(slice(files[STATUS], /^5\. `incomplete` → /, /^6\. /)), serialRemedy)
   need('t10', `${REPAIR} incomplete stop`, C(slice(files[REPAIR], /^- `incomplete` → /, /^(?! {2})/)), serialRemedy)
 
+  // ---- t11: the sign-ins (ADR 0074 d2): schedule S3.7, its readers, its callers and its backstop ----
+  const iS35 = serialPath.indexOf('**S3.5. Pre-flight.**')
+  const iS37 = serialPath.indexOf('**S3.7. Sign-ins.**')
+  const iS4 = serialPath.indexOf('**S4. Gates.**')
+  if (iS35 < 0 || iS37 < 0 || iS4 < 0 || !(iS35 < iS37 && iS37 < iS4)) flag('t11', `S3.7 is not between S3.5 and S4 (${iS35}, ${iS37}, ${iS4})`)
+  need('t11', 'S3.7', C(slice(serialPath, /^\*\*S3\.7\. /, /^\*\*S4\. /)), ['ADR 0074 d2', '`required_mcp`', '`hands_steps`',
+    '`claude mcp list`', 'env -u CLAUDECODE -u CLAUDE_ACCOUNT_PINNED', '--strict-mcp-config', 'loads no tool',
+    '--signed-out <namespace>@<alias>', '<namespace>@claude:<folder>', '`cx-*`', 'not checked: Codex launch', '`leftOut`',
+    '`sign in to <server>, then /thread:orient --steer`', '`skills/execute/legs.md` § Preflight', 'Chain copy', 'nothing is written',
+    '_shared/asking.md'])
+  need('t11', 'S2', s2, ['`mcp`', '`leftOut`', 'every flag an earlier run passed'])
+  need('t11', 'S4', para(serialPath, '**S4. '), ['from the last S2 JSON', 'asks nothing again'])
+  need('t11', 'S7', para(serialPath, '**S7. Summary.**'), ['Sign-ins', '`leftOut`', 'not checked: Codex launch'])
+  need('t11', `${SCHEDULE} § Scope`, scope, ['`claude mcp list`'])
+  need('t11', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['S3.7', '`hands_steps`'])
+  const oa6 = section(files[ORIENT_ALL], /^### 6\. /) ?? ''
+  need('t11', `${ORIENT_ALL} § 6`, C(oa6), ['**Sign-ins first (ADR 0074 d2).**', 'Before batch 1', 'no route to the question tool',
+    '; signed in <'])
+  need('t11', `${ORIENT_ALL} answer 15`, C(slice(oa6, /^ {3}15\. /, /^ {3}16\. /)), ['--signed-out'])
+  need('t11', `${BACKLOG} item 23`, C(slice(section(files[BACKLOG], /^## B6\. /), /^23\. /, null)), ['S3.7', '`signIns`', '--signed-out'])
+  need('t11', `${BACKLOG} § B5`, C(section(files[BACKLOG], /^## B5\. /)), ['`signIns`'])
+  need('t11', `${BACKLOG} § B9`, C(section(files[BACKLOG], /^## B9\. /)), ['`hands_steps`', '`signIns`'])
+  need('t11', `${LEGS} § Preflight`, C(section(files[LEGS], /^## Preflight$/)), ['backstop', 'S3.7', '`required_mcp`', 'Chain copy',
+    'Login', '`cx-*`'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -247,7 +283,9 @@ test('schedule writes serial rollouts: templates, the Serial path, § 0, execute
 })
 
 test('the scan reads every file the rules need', () => {
-  for (const f of [SCHEDULE, TEMPLATE, SERIAL, EXECUTE, ORIENT, GRAMMAR, CONTEXT, STATUS, REPAIR, 'README.md']) assert.ok(f in real, `${f} is not scanned`)
+  for (const f of [SCHEDULE, TEMPLATE, SERIAL, EXECUTE, ORIENT, GRAMMAR, CONTEXT, STATUS, REPAIR, ORIENT_ALL, BACKLOG, LEGS, 'README.md']) {
+    assert.ok(f in real, `${f} is not scanned`)
+  }
 })
 
 // ---- controls: each mutates the real files in memory and must fail with exactly its rule ----------------
@@ -440,4 +478,41 @@ test('control: an S5 that never makes the Chain copies fails t3', () => {
 test('control: an S5 that never checks the stamped note fails t3', () => {
   only(swap(SCHEDULE, '`python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>`', 'nothing'),
     ['t3'], 'S5 check')
+})
+
+test('control: an S3.7 that moved past S5 fails t11', () => {
+  only(swap(SCHEDULE, '**S3.7. Sign-ins.**', '**S5.5. Sign-ins.**'), ['t11'], 'S3.7 renamed')
+})
+
+test('control: an S3.7 whose alias-less key carries no folder fails t11', () => {
+  assert.ok(real[SCHEDULE].includes('<namespace>@claude:<folder>'), 'control setup: the alias-less key')
+  only({ [SCHEDULE]: real[SCHEDULE].replaceAll('<namespace>@claude:<folder>', '<namespace>@claude') }, ['t11'], 'no folder')
+})
+
+test('control: an S3.7 that checks a Codex launch fails t11', () => {
+  only(swap(SCHEDULE, 'S7 names it\n`not checked: Codex launch`', 'S7 names it'), ['t11'], 'codex')
+})
+
+test('control: an S3.7 that never falls back when ToolSearch loads no tool fails t11', () => {
+  only(swap(SCHEDULE, 'loads no tool', 'finds nothing'), ['t11'], 'loads no tool')
+})
+
+test('control: an S4 that keeps its first S2 reads after a re-run fails t11', () => {
+  only(swap(SCHEDULE, 'from the last S2 JSON', 'from the first S2 JSON'), ['t11'], 'S4 reads')
+})
+
+test('control: a legs.md Preflight that is no longer the backstop fails t11', () => {
+  only(swap(LEGS, 'This preflight is the backstop (ADR 0074 d2). ', ''), ['t11'], 'backstop')
+})
+
+test('control: an orient-all that raises the sign-ins after batch 1 fails t11', () => {
+  only(swap(ORIENT_ALL, 'Before batch 1, this session', 'After batch 1, this session'), ['t11'], 'before batch 1')
+})
+
+test('control: a Backlog item 23 without S3.7 fails t11', () => {
+  only(swap(BACKLOG, 'S3.7 checks each pair from its launch', 'The sign-in step checks each pair from its launch'), ['t11'], 'item 23')
+})
+
+test('control: a Backlog B9 without the hands_steps list fails t11', () => {
+  only(swap(BACKLOG, '`hands_steps` list over every such server', 'list over every such server'), ['t11'], 'B9 list')
 })

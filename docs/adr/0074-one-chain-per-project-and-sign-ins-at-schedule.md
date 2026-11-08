@@ -122,3 +122,26 @@ review stays the backstop, as on 11-07.
   row and close its chain `stuck`).
 - A member with no `projects:` link is grouped as before, by surface and dependency alone (technical: no project names
   what it shares with the rest, and d1 adds only the shared-project edge).
+- The sign-in step sits after Pre-flight and before the gates, as schedule § Serial path S3.7 (technical: S4's gates
+  and its `checkouts`-keyed reads then see only the rows that stay, and every S2 re-run carries `--signed-out`, so
+  S4's `--dep` edges still widen the closure).
+- orient-all's parent raises the one sign-in list before batch 1, whatever the budget (technical: a fork asks nothing
+  and has no route to the question tool or the Stage's list, orient-all § 6 step 3, and one list replaces a pause
+  between serial batches).
+- The Backlog orient's forks check and leave rows out, and its § B9 raises the list after the start, its
+  post-question round scheduling each row whose server then reads signed in (technical: a fork asks nothing, ADR
+  0071, and § B9 is the run's sitting).
+- `--signed-out` keys a row's launch as its alias, or `claude` plus its folder for an alias-less row (technical: an
+  alias fixes its folder and its `--mcp-config`, while alias-less rows differ by folder through project `.mcp.json`
+  servers and their per-path approvals).
+- The check reads the account a fresh shell resolves, never this session's pinned one and never every Login. This
+  session's tools stand in only when its account, folder and MCP config match the row's launch, and a namespace they
+  lack is read from `claude mcp list` (technical: a Stage Leg's Login is picked at its start by weekly room, Chorus
+  ADR 0103 d1 as amended by Chorus ADR 0111, which schedule cannot know; checking each Login would ask one sign-in per Login;
+  and a session opened with `--strict-mcp-config` holds a set the row's Leg would not. `legs.md` § Preflight
+  backstops all of it).
+- A Codex launch's (`cx-*`) sign-ins are not checked at schedule and never leave a row out, and S7 names them. This
+  departs from d2's "a check that cannot run leaves the rows out" (technical: `claude mcp list` and this session's
+  tools read Claude Code's config, never the Codex profile a `cx-*` alias opens; `codex mcp list` lists that
+  profile's servers without calling one; and a `cx-*` Leg is a manual hand-over, `legs.md` § Hand over, whose
+  preflight checks them).

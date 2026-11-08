@@ -19,7 +19,11 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
 
 ## Scope
 
-- **Reads**: the vault, the repos (only through `estate-scan.py`'s read-only probes) and the Stage's session list.
+- **Reads**: the vault, the repos (only through `estate-scan.py`'s read-only probes, and § 6's sign-in pass) and the
+  Stage's session list. The sign-in pass (§ 6 step 2) runs `estate-dispatch.py preflight` and `serial-chains.py plan`
+  (read-only `git rev-parse` and `git remote get-url`), ToolSearch loads and one read-only call per namespace, a `ps`
+  read of this session's command line, the fresh-shell probe and `claude mcp list` once per launch folder (schedule
+  § Serial path S3.7), and writes nothing.
 - **Writes**, only through scripts:
   - `estate-dispatch.py record`, each answer into its task note;
   - `estate-dispatch.py log`, the grades into the Grade log (never on a dry run);
@@ -179,6 +183,18 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    `clone` reads the clones the other has not yet taken. Serial entries come one per
    batch, after every parallel batch. With no fork in the harness, run the entries one at a time here, under the
    same answers.
+
+   **Sign-ins first (ADR 0074 d2).** Before batch 1, this session settles every serial entry's sign-ins at once,
+   whatever the budget: a fork asks nothing (step 3) and has no route to the question tool or the Stage's
+   `hands_steps` list, and one list here replaces a pause between serial batches. For each `plan.schedule[]` entry
+   with `shape: serial`, run
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank "$S/rank.json" --scan "$S/scan.json" --tasks <entry.members> [--decided <each decided slug among entry.members>]`,
+   then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/serial-chains.py plan --tasks <its queue[]>`, both
+   read-only; a non-zero exit or an empty `queue[]` skips the entry. Then schedule § Serial path S3.7's check, its one
+   `hands_steps` list and its check-again question (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`)
+   run once over every entry's pairs, `cx-*` launches aside. Each serial entry's prompt line then ends
+   `; signed in <each of its pairs that read signed in, in backticks, comma-separated, or none>.` in place of its
+   closing `.`. A dry run runs none of it.
 3. **Schedule's questions, answered.** The list schedule's **Under orient-all.** paragraph cites. A fork asks
    nothing: the decision round authorised its member set. A `## Decided for you` bullet is an agent's call: it
    never settles a § 3.5 match (answer 8) or a decision.
@@ -210,7 +226,9 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        wikilink, apostrophes dropped), never a scope slug, and a taken name is Advance.
    14. Step 8: no execute handoff, and no Start when ready.
    15. Serial S1 and S4 ask nothing, as under orient § 7; S2's `sessionLane` members are returned as answer 2's
-       misfits are.
+       misfits are. S3.7 checks nothing and raises no list: each pair the prompt line's `signed in` part names reads
+       signed in, and every other pair S3.7 would check goes as `--signed-out`. S2's `leftOut` rows are returned
+       with their lines.
    16. schedule's Pre-flight (schedule § 1.5, and S3.5 on the serial path) takes this pass's grades and answers as they
        stand: no grading agent, no round and no Grade log line (§ 2 step 7 logged them). Its `--tasks` is the fork's
        step 1 candidates, and its `--decided` the prompt line's decided slugs among them. A member not
@@ -335,6 +353,8 @@ One message of statements, no question:
 - the estate rank: `rank-stamp`'s `stamped` count, and after a second exit 1 its `failed` note and `notReached[]` as a
   caveat ("they keep their old stamps; the order stands");
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;
+- the sign-in pass's readings (§ 6 step 2: each pair, its launch, the account and what it read), and each fork's
+  `leftOut` rows with their lines;
 - the fit disagreements: the task, the grader's shape, schedule's outcome;
 - the sessions raised (title → task id: the Stage starts it unless its card says why it waits), relayed (title → the
   Session's name and id), or held (title → the Session's name, id and state; for two or more roster leads, every one
@@ -376,7 +396,7 @@ plan: each batch's schedule args with the execute or Leg 1 each would start, the
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
 It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `approve-gates`,
-`estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, `list_sessions`, `read_session`, `relay_session` or
+`estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, the sign-in pass (§ 6 step 2), `list_sessions`, `read_session`, `relay_session` or
 `create_thread`.
 
 ## Don't
@@ -394,5 +414,6 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 - Schedule a run that waits, run two batches at once, route a fork's misfits, or run its follow-up line.
 - Supersede anything: no `--regenerate`.
 - Write `start: unattended`.
-- Ask past the budget, sign-offs and the pick list aside.
+- Ask past the budget, sign-offs and the pick list aside. § 6 step 2's sign-in list is raised whatever the budget too:
+  a sign-in is his hands, not a decision (ADR 0074 d2).
 - Call the question tool from a fork or an agent.

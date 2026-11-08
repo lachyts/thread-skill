@@ -116,8 +116,9 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   by side, then batch 2's, never two batches at once. With no fork in the harness, the forks run one at a time here,
   under the same answers.
 - **A fork returns** schedule's summary verbatim and each note's path; its misfits; Pre-flight's `out[]` with each
-  why, and its `asks[]` and `index[]` verbatim; its § 3.5 drops, each with its matched words; its Decided for you
-  block; its stop line; and **touched**, every task note it wrote.
+  why, and its `asks[]` and `index[]` verbatim; its § 3.5 drops, each with its matched words; its S3.7 `signIns` and
+  S2's `leftOut` rows, each with its line; its Decided for you block; its stop line; and **touched**, every task note
+  it wrote.
 - A reopened task whose fork stopped is parked again with the reason `its batch waits: <stop line>`.
 - Uncommitted grill docs hold that repo, as in orient § 6.
 
@@ -178,7 +179,10 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 22. Step 8: no To-execute block, no handoff and no Start when ready, because B8 owns the start. The summary is
     returned.
 23. The serial path: S1 and S4 ask nothing. S2's `sessionLane` members are returned as answer 2's misfits are. S3.5
-    is answer 8, and S4's gates are answers 15 and 16. S7 is returned, and no Leg is started.
+    is answer 8, and S4's gates are answers 15 and 16. S3.7 checks each pair from its launch, raises no `hands_steps`
+    list and puts no question: every pair that does not read signed in goes as `--signed-out`, and the fork returns
+    those pairs as `signIns` (each with its server, launch, account and reading), with S2's `leftOut` rows and their
+    lines, for B7's Left out section and B9's sign-in list. S7 is returned, and no Leg is started.
 
 ## B7. The record, then write-back #1
 
@@ -232,7 +236,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 ## B9. The questions, last
 
 The run puts each of his questions through AskUserQuestion, one at a time, after the start (Owner *yours*, each in
-the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`, the recommendation first). In order: each fork's
+the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`, the recommendation first). In order: first the
+sign-ins, when any fork's `signIns` holds a pair that does not read signed in: schedule § Serial path S3.7's one
+`hands_steps` list over every such server, from this session's check, and its check-again question; then each fork's
 `asks[i]`, verbatim; then one § 3.5 question per task a fork dropped at answer 15, worded
 `§ 3.5 gate: does "<the matched words>" hold this task out of a rollout?`, with the options
 `No: keep it, it holds nothing` and `Yes: keep it out, it is a gate` (No recommended when the note only quotes or
@@ -255,14 +261,21 @@ cluster by cluster. Each question holds only its tasks.
 - **An answer that defers or drops the work** → recorded, and the task stays undecided, under Held by his answer.
 - **A grilled item** → respecced by R5.2, its Decided for you lines through `record --owner … --by orient`, then
   decided.
+- **Sign-ins** → on `Signed in, check again`, every open step is checked again and each that reads signed in is
+  ticked; the same question comes again while one stays open. On `Leave those rows out`, or once none stays open, the
+  list is cleared. Each fork whose `signIns` now holds a pair that reads signed in puts its `leftOut` rows in the
+  post-question round: in that project's serial fork's `--tasks`, never in `decided`. That round's own S3.7 leaves
+  out again any row whose server still does not read signed in, and a row that stays out keeps its Left out row and
+  line, with no `wait`.
 - Every answer then gets `record --append` of its Questions asked row. Questions left open (his "stop", or no reply)
   go under Questions waiting; the rollouts already run.
 
-**Then one post-question round** over the decided tasks: B5's root, grouping and batch rules, without
-`--regenerate`, with the line
+**Then one post-question round** over the decided tasks and the rows the sign-ins let back in: B5's root, grouping
+and batch rules, without `--regenerate`, with the line
 `Under the Backlog orient: <area>; name the note with slug <projectSlug>; root <the batch's root>; decided <slugs>`
 (serial: `Under the Backlog orient: <area>; decided <slugs>`). A decided task whose batch has no root gets `wait`
-and an `## Answered, waiting` row, as a fork that stopped.
+and an `## Answered, waiting` row, as a fork that stopped. A row the sign-ins let back in never gets `wait`: one the
+round does not queue keeps its Left out row.
 
 - **A fork that wrote a note** → `record --append` of its Batches row and its touched; then § B8 on that note; then its
   Rollouts started row. Each decided member that note does not queue gets
