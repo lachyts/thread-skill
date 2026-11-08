@@ -1,0 +1,113 @@
+# The Fast tier's map (ADR 0073 d1, p43-2): which test files a changed path reaches. tests/lib/fast-tier.py reads it
+# (its docstring holds the reach rules); `bash tests/run.sh --fast` (`make test-fast`) runs what it selects, and every
+# run checks it (`fast-tier.py check`).
+#
+# A line is `<pattern> [FULL | NONE | ALSO <entry>... | <entry>...]`; `#` starts a comment.
+#   - A bare pattern places the path and leaves the result to its reach.
+#   - An entry is a collected test path, a glob over collected tests, or @merge-task-self-tests.
+#   - Every line that matches a path counts. A matching line that is not ALSO places the path; any FULL is the full
+#     suite. Otherwise the result is the union of the plain entries and the reach; ALSO entries are added on top and
+#     never count as reach. A path placed only by NONE lines selects nothing.
+#   - The same pattern may repeat on several lines.
+# Patterns are repo-relative and matched segment by segment, fnmatchcase on each segment, so `*`, `?` and `[...]`
+# never cross a `/`; a whole `**` segment matches zero or more segments.
+# `FOREIGN <basename>...` declares names the scripts read in other roots. `OWN-LISTINGS <test>...` excuses tests from
+# check (f) on one of the two kinds the selector's docstring defines; each line's trailing comment says which kind
+# applies and what it lists.
+
+FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
+
+# ---- The walkers: tests that read the whole tree, so every changed path selects them ----
+** ALSO tests/contracts/continuity-shared.test.mjs tests/contracts/execute-archive-move.test.mjs
+** ALSO tests/contracts/handoff-one-writer.test.mjs tests/contracts/lean-capture.test.mjs
+** ALSO tests/contracts/next-action.test.mjs tests/contracts/no-single-cause.test.mjs
+** ALSO tests/contracts/orient-backlog.test.mjs tests/contracts/orient-launch-model.test.mjs
+** ALSO tests/contracts/orient-reshuffle.test.mjs tests/contracts/plugin-root-rule.test.mjs
+** ALSO tests/contracts/question-gate.test.mjs tests/contracts/reflect.test.mjs tests/contracts/refs.test.mjs
+** ALSO tests/contracts/run-record-hermetic.test.mjs tests/contracts/run-record-writers.test.mjs
+** ALSO tests/contracts/rung-vocabulary.test.mjs tests/contracts/schedule-queue.test.mjs
+** ALSO tests/contracts/skill-positional-args.test.mjs tests/contracts/templates.test.mjs
+** ALSO tests/contracts/verify-slot-hermetic.test.mjs tests/contracts/evals-structure.test.mjs
+** ALSO tests/contracts/execute-handoff.test.mjs tests/contracts/execute-legs.test.mjs
+** ALSO tests/contracts/execution-fit-shapes.test.mjs tests/contracts/handoff-ends-with-next.test.mjs
+** ALSO tests/contracts/manifest.test.mjs tests/contracts/queue-only.test.mjs tests/contracts/schedule-serial.test.mjs
+** ALSO tests/contracts/thread-placement-wiring.test.mjs
+** ALSO tests/background-job.test.mjs tests/engine-ladder.test.mjs
+** ALSO tests/engine-snapshot.test.sh tests/release-check.test.sh tests/release-check-missing-tree-dir.test.sh
+** ALSO tests/release-check-symlinked-dir.test.sh tests/release-check-quoting-diff.test.sh tests/test-jobs.test.sh
+** ALSO tests/verify-slot.test.sh
+
+# ---- OWN-LISTINGS: tests excused from check (f) ----
+OWN-LISTINGS skills/execute/tests/reconcile-rollout-moving.test.sh  # (i) os.walk of $D; copies $PLUGIN/skills as a plugin root
+OWN-LISTINGS skills/execute/tests/room-stop.test.mjs  # (i) lists its temp dirs
+OWN-LISTINGS tests/backlog-orient.test.mjs tests/declared-check.test.mjs tests/estate-dispatch.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/estate-rank.test.mjs tests/estate-scan.test.mjs tests/gated-inputs.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/inert-paths.test.mjs tests/next-action.test.mjs tests/ntfy-push.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/reflect-attention.test.mjs tests/reflect-close-score.test.mjs tests/reflect-ledger.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/reflect-score.test.mjs tests/reflect-tune.test.mjs tests/reflect-weekly.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/resolve-target.test.mjs tests/run-record.test.mjs tests/security-check-scan.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/thread-placement.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/contracts/execute-phase-close.test.mjs  # (i) lists its temp vault
+OWN-LISTINGS tests/land.test.sh  # (i) ls-files of temp repos; copies $root/skills as a primary checkout's plugin
+OWN-LISTINGS tests/contracts/status-repair-queue.test.mjs  # (i) a spawned grep over fixture D
+OWN-LISTINGS tests/unfinished-rollout.test.sh  # (i) an rglob counter on a temp tasks dir (#340); a skills copy with a raising leg.py
+OWN-LISTINGS tests/pushed-base.test.sh  # (i) copies $root/skills as the primary's plugin root (15b)
+OWN-LISTINGS tests/self-rollout-check.test.sh  # (i) copies $root/skills into a seed repo
+OWN-LISTINGS tests/lead-integrate.test.sh  # (i) C35's fixture verifier string `find . ...`, read by the inert proof
+OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R5 read the real tree through the selector's index; C1 is every run's map check, and R1-R5 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)
+
+# ---- FULL: the harness and the repo's config ----
+tests/run.sh FULL
+tests/fast-tier.map FULL
+tests/lib/fast-tier.py FULL
+tests/lib/test-jobs.sh FULL
+tests/lib/check-workflow-parse.sh FULL
+Makefile FULL
+.github/** FULL
+.claude-plugin/** FULL
+.gitattributes FULL
+.gitignore FULL
+
+# ---- FULL: the hubs (named by most suites; narrowing them is the reach follow-up's) ----
+skills/execute/scripts/reconcile-rollout.py FULL
+skills/execute/scripts/lead-integrate.py FULL
+skills/_shared/scripts/run_record.py FULL
+skills/execute/scripts/verify-slot.py FULL
+skills/_shared/scripts/rollout-settings.py FULL  # run.sh seeds the refused rollouts.toml it alone reads (check h)
+
+# ---- run.sh's two merge-task.sh self-tests ----
+skills/execute/scripts/merge-task.sh @merge-task-self-tests
+
+# ---- Placing lines: the result is the path's reach ----
+skills/**
+hooks/**
+tests/lib/**
+tests/*.test.*
+tests/contracts/*.test.mjs
+skills/execute/tests/*.test.*
+
+# ---- Prose and records: the contract tests read them ----
+skills/**/*.md tests/contracts/*.test.mjs
+CONTEXT.md tests/contracts/*.test.mjs
+README.md tests/contracts/*.test.mjs
+CLAUDE.md tests/contracts/*.test.mjs
+THREAD.md tests/contracts/*.test.mjs
+docs/** tests/contracts/*.test.mjs
+evals/** tests/contracts/*.test.mjs
+
+# ---- Fixture dirs: every consumer (check e) ----
+tests/fixtures/away-state/** skills/execute/tests/reconcile-rollout-trickle.test.sh tests/contracts/away-state.test.mjs
+tests/fixtures/gated-inputs/** tests/gated-inputs.test.mjs
+tests/fixtures/land/** tests/git-env-canary.test.sh tests/land.test.sh tests/lead-integrate.test.sh tests/live-checkout.test.sh
+tests/fixtures/land/** tests/merge-task-base.test.sh tests/parallel-rollouts-one-repo.test.sh tests/primary-refresh.test.sh
+tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh
+tests/fixtures/landing-register/** tests/execution-fit-remote.test.sh tests/landing-register.test.mjs
+tests/fixtures/merge-gate/** tests/merge-gate.test.mjs
+tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integrated.test.sh tests/parallel-rollouts-one-repo.test.sh
+tests/fixtures/merge-task/** tests/merge-task-bare-blocked.test.sh tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh
+tests/fixtures/merge-task/** tests/contracts/run-record-hermetic.test.mjs tests/contracts/verify-slot-hermetic.test.mjs
+tests/fixtures/note-overlap/** tests/contracts/note-overlap-opener.test.mjs tests/vault-note-overlap.test.sh
+tests/fixtures/reconcile/** tests/contracts/queue-only.test.mjs tests/reconcile-project.test.sh
+
+# ---- make test never runs these ----
+tests/e2e/** NONE

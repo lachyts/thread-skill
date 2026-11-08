@@ -1,5 +1,16 @@
 # thread-skill
 
+## Tests
+
+Verifier: `make test-fast`
+Completion verifier: `make test`
+Tests: one test file, hermetic: `bash tests/run.sh --only <test file>...`
+
+`make test-fast` is the fast tier: the always-run checks, then only the test files the diff reaches. That reach is
+declared in tests/fast-tier.map, and tests/lib/fast-tier.py's header holds its rules. A changed path the map cannot
+place runs the full suite (ADR 0073 d1). A new script, fixture dir or directory-listing test needs its map line, and
+every run, `make test` included, checks the map and names the line that is missing.
+
 ## Review rule: a reading holds only its window's rows
 
 Some outputs here are read by no script: span.json's reported blocks, a score's sums, the claims a docstring
