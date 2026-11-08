@@ -1,8 +1,13 @@
-# thread plugin — test and release checks, and behaviour evals (a human step). `make test` is also the self-rollout verifier.
-.PHONY: test release-check evals
+# thread plugin — test and release checks, and behaviour evals (a human step). `make test` is the full suite (the self-rollout's completion verifier); `make test-fast` is the fast tier (its verifier, ADR 0073 d1).
+.PHONY: test test-fast release-check evals
 
 test:
 	@bash tests/run.sh
+
+# The fast tier: the always-run checks, then only the test files the diff from THREAD_VERIFY_BASE reaches
+# (tests/fast-tier.map), or the full suite when a changed path is not in the map.
+test-fast:
+	@bash tests/run.sh --fast
 
 # After `claude plugin update thread@thread`: both manifests agree, and the version-keyed cache the
 # engine and hooks run from (${CLAUDE_PLUGIN_ROOT}) holds exactly what this tree ships. A same-version
@@ -50,8 +55,9 @@ release-check:
 
 # Behaviour evals: `claude plugin eval .` scores the evals/ suite. Every run makes real model calls on
 # Lachy's account, is nondeterministic and spawns nested claude sessions, so it is a human step, never
-# part of `make test` (the self-rollout verifier) or of a bare `make` (this target stays last, and test
-# is the default goal). tests/contracts/evals-structure.test.mjs checks the suite's shape there for free.
+# part of `make test` or `make test-fast` (the self-rollout's verifiers) or of a bare `make` (this
+# target stays last, and test is the default goal). tests/contracts/evals-structure.test.mjs checks the
+# suite's shape there for free.
 # - The recipe line has three parts. The CLI keeps a repeated option's last value, so the order is the
 #   design:
 #   1. Defaults, first, so EVAL_ARGS may override them: --runs 1, --max-cost-usd 30, --threshold 0.
