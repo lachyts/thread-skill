@@ -38,7 +38,15 @@
 #        checkout to the inner one) and its inverse primary_folder, read_surfaces through read_list
 #   R1-R5 the estate rank (ADR 0067 d9, pure): read_estate_rank reads a valid pair and nothing malformed (R1-R4), and
 #        rank_tokens keeps `repo:` and `any`, never vault or `ext:` (R5)
-#   P6   exit 2
+#   P10  the sign-in helpers (ADR 0074 d2, pure): required_mcp reads every `**MCP:**` line's first clause (a required
+#        list, backticked or bare, and a line with no `required` word), drops the optional part, and reads `none`,
+#        `optional`, a path span and another label as nothing; mcp_server names a namespace's server
+#   P11  sign-ins at S3.7 (ADR 0074 d2): each member's `mcp`; `--signed-out <namespace>@<alias>` leaves out the members
+#        needing that namespace from that launch (case-folded, one launch apart from another) and their in-set
+#        dependants (depends-on, blocked-by, --dep, transitively), each in `leftOut` with its line; an alias-less row
+#        keys on its folder (realpath, so a symlink matches); a session-lane member is never left out; a key that
+#        matches nothing WARNs; a refused alias (no folder) never matches a folder key, and exits 3 with no traceback
+#   P6   exit 2, a malformed, folder-less alias-less or cx-* --signed-out included
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -853,6 +861,89 @@ ok "$(er $'estate_rank: 1\nestate_rank_at: "yesterday"')|$(er $'estate_rank: 1\n
 ok "$(pc 'print([m.fmt_token(x) for x in m.rank_tokens(["repo:/x//a.py", "vault", "vault:Work/A", "ext:cms", "any", "repo:/x//a.py", "bogus:z", ("repo", "/y")])])')" \
    "['repo:/x//a.py', 'any', 'repo:/y']" "R5: rank_tokens keeps repo: and any, in order, once each; vault, ext: and a malformed token never"
 
+# ── P10: the sign-in helpers (ADR 0074 d2; pure) ──────────────────────────────────────────────────────
+echo "== p10 (sign-in helpers)"
+# rq <## Launch text> — required_mcp over it, as compact JSON
+rq() { L="$1" pc 'import json, os; print(json.dumps(m.required_mcp(os.environ["L"]), separators=(",", ":")))'; }
+ok "$(rq '- **MCP:** required `mcp__a__*`, `mcp__b__*`')" '["mcp__a__*","mcp__b__*"]' "P10: a backticked required list"
+ok "$(rq '- **MCP:** required `mcp__a__*`, `mcp__b__*`; optional `mcp__c__*`')" '["mcp__a__*","mcp__b__*"]' \
+   "P10: … with its optional part dropped"
+ok "$(rq '- **MCP:** required mcp__a__*, mcp__b__*')|$(rq '- **MCP:** required mcp__a__* (needs A), mcp__b__*')" \
+   '["mcp__a__*","mcp__b__*"]|["mcp__a__*","mcp__b__*"]' "P10: bare items, a parenthesis between them"
+ok "$(rq '- **MCP:** `mcp__gsc__*`, `mcp__webflow__*`')" '["mcp__gsc__*","mcp__webflow__*"]' \
+   "P10: the 11-07 row, with no required word, reads its first clause as required"
+ok "$(rq '- **MCP:** `mcp__fal-ai__*` (required)')|$(rq '- **MCP:** `mcp__webflow__*`, `mcp__playwright__*`; optional `mcp__posthog__*`')" \
+   '["mcp__fal-ai__*"]|["mcp__webflow__*","mcp__playwright__*"]' "P10: a trailing (required), and a later optional clause dropped"
+ok "$(rq '- **MCP:** none required')|$(rq '- **MCP:** none')|$(rq '- **MCP:** none required; optional `mcp__gsc__*`')|$(rq '- **MCP:** None required (`mcp__codex__codex` optional)')|$(rq '- **MCP:** required none; optional `mcp__x__*`')|$(rq '- **MCP:** optional `mcp__eagle__*`')|$(rq '- **MCP:** `/tmp/h`')" \
+   '[]|[]|[]|[]|[]|[]|[]' "P10: none, optional-first, required none and a path span read as nothing"
+ok "$(rq '- **MCP:** required `mcp__gsc__*` (`enhanced_search_analytics`); GA4 optional context.')|$(rq '- **MCP:** required `mcp__gsc__*`; `mcp__webflow__*` optional')" \
+   '["mcp__gsc__*"]|["mcp__gsc__*"]' "P10: only the first clause is read"
+ok "$(rq $'- **MCP:** required `mcp__a__*`\n- **Repo:** `/x`\n- **MCP:** required `mcp__a__*`, `mcp__b__*`')" '["mcp__a__*","mcp__b__*"]' \
+   "P10: two lines, a repeat read once, in first-seen order"
+ok "$(rq '- **MCP:** required `mcp__codex__codex`')|$(rq '- **Repo:** `mcp__x__*`')" '["mcp__codex__codex"]|[]' \
+   "P10: a tool name is a namespace too; another label's mcp__ token is not"
+ok "$(pc 'print(m.mcp_server("mcp__webflow__*"), m.mcp_server("mcp__claude_ai_Linear__*"), m.mcp_server("mcp__fal-ai__*"), m.mcp_server("mcp__codex__codex"), m.mcp_server("odd"))')" \
+   "webflow claude_ai_Linear fal-ai codex odd" "P10: mcp_server names the server, and a token with none as itself"
+
+# ── P11: sign-ins leave out at S3.7 (ADR 0074 d2) ─────────────────────────────────────────────────────
+scen p11
+mkp PA
+NEED='- **MCP:** required `mcp__nowhere__*`'
+LAUNCH='- **MCP:** required `mcp__nowhere__*`; optional `mcp__opt__*`' mkt sw1 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw1"]'
+mkt sw2 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw2"]' 'depends-on: ["[[sw1]]"]'
+mkt sw3 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw3"]' 'blocked-by: ["[[sw2]]"]'
+mkt sw4 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw4"]'
+mkt sw5 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw5"]'
+mkt sw6 'projects: ["[[PA]]"]' 'launch: cc-a-seo' 'surfaces: ["ext:sw6"]'
+LAUNCH='- **MCP:** `mcp__nowhere__*`, `mcp__other__*`' mkt sw7 'projects: ["[[PA]]"]' 'launch: cc-a-web' 'surfaces: ["ext:sw7"]'
+LAUNCH="- **Repo:** \`$G\`
+$NEED" mkt sw8
+LAUNCH="- **Repo:** \`$H\`
+$NEED" mkt sw9
+LAUNCH="$NEED" mkt sw10 'launch: cc-ts' 'surfaces: ["ext:sw10"]'
+LAUNCH="$NEED" mkt sw11 'launch: cc-gone' 'surfaces: ["ext:sw11"]'
+SEVEN=(--tasks sw1,sw2,sw3,sw4,sw5,sw6,sw7 --dep sw5=sw4 --dep sw6=sw2)
+left='[x["slug"] for x in d["leftOut"]]'
+# why <slug> — the last plan's leftOut line for it, raw
+why() { printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(next((x["why"] for x in d["leftOut"] if x["slug"] == sys.argv[1]), "<none>"))' "$1"; }
+plan "${SEVEN[@]}"
+ok "$rc|$(mem sw1 mcp)|$(mem sw7 mcp)|$(mem sw4 mcp)|$(j 'd["leftOut"]')" '0|["mcp__nowhere__*"]|["mcp__nowhere__*","mcp__other__*"]|[]|[]' \
+   "P11: each member's mcp is its required list (the optional part dropped), and with no --signed-out nothing is left out"
+plan "${SEVEN[@]}" --signed-out 'mcp__nowhere__*@cc-a-seo'
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[["sw4","sw5","sw7"]]|["sw1","sw2","sw3","sw6"]' \
+   "P11: a signed-out namespace leaves out the row needing it from that launch, and every member depending on it (depends-on, blocked-by, --dep, transitively)"
+ok "$(why sw1)" "sw1: needs mcp__nowhere__*, which did not read signed in from its launch cc-a-seo from $W/aw/launchers/seo: sign in to nowhere, then /thread:orient --steer" \
+   "P11: … the direct row's line names the namespace, its launch and folder, and the server to sign in to"
+has "$(why sw2)" "sw2: depends on [[sw1]], left out: sign in to nowhere, then /thread:orient --steer" "P11: … a dependant's names the row it waits on"
+ok "$(why sw3)|$(why sw6)" "sw3: depends on [[sw2]], left out: sign in to nowhere, then /thread:orient --steer|sw6: depends on [[sw2]], left out: sign in to nowhere, then /thread:orient --steer" \
+   "P11: … through blocked-by and --dep, by its first left-out dependency"
+ok "$(j '[e for c in d["chains"] for e in c["externalDeps"]]')|$(j 'd["warns"]')" '[]|[]' "P11: … a left-out member is no external dependency, and a matched key WARNs nothing"
+plan "${SEVEN[@]}" --signed-out 'mcp__nowhere__*@CC-A-SEO'
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[["sw4","sw5","sw7"]]|["sw1","sw2","sw3","sw6"]' "P11: the alias is case-folded"
+plan "${SEVEN[@]}" --signed-out 'mcp__nowhere__*@cc-a-web'
+ok "$rc|$(j "$left")" '0|["sw7"]' "P11: one namespace on two launches: only the launch that did not read signed in loses its rows"
+for k in 'mcp__nowhere__*@cc-a-seo:/elsewhere' 'mcp__unused__*@cc-a-seo'; do
+  plan "${SEVEN[@]}" --signed-out "$k"
+  ok "$rc|$(j "$left")" '0|[]' "P11: $k leaves nothing out"
+  has "$(j 'd["warns"]')" "WARN: --signed-out $k: it leaves out no chain member" "P11: … and WARNs"
+done
+plan --tasks sw1,sw2 --signed-out 'mcp__nowhere__*@cc-a-seo'
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[]|["sw1","sw2"]' "P11: every member left out gives no chain, exit 0"
+plan --tasks sw8,sw9
+ok "$rc|$(j "$chains")|$(mem sw8 launch)" "0|[[\"sw8\"],[\"sw9\"]]|{\"alias\":\"claude\",\"folder\":\"$G\"}" "P11: two alias-less rows in two folders"
+plan --tasks sw8,sw9 --signed-out "mcp__nowhere__*@claude:$G"
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[["sw9"]]|["sw8"]' "P11: an alias-less key leaves out only the row launched from its folder"
+has "$(why sw8)" "from its launch claude from $G: sign in to nowhere" "P11: … its line naming claude and the folder"
+plan --tasks sw8,sw9 --signed-out "mcp__nowhere__*@claude:$TMP/links/g"
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[["sw9"]]|["sw8"]' "P11: … matched by realpath (a symlink to the folder)"
+plan --tasks sw4,sw10 --signed-out 'mcp__nowhere__*@cc-ts'
+ok "$rc|$(j '[s["slug"] for s in d["sessionLane"]]')|$(j "$left")" '0|["sw10"]|[]' "P11: a session-lane member is never left out"
+has "$(j 'd["warns"]')" "WARN: --signed-out mcp__nowhere__*@cc-ts: it leaves out no chain member" "P11: … so its key WARNs"
+plan --tasks sw11 --signed-out "mcp__nowhere__*@cc-gone:$TMP/gone"
+ok "$rc|$out" "3|" "P11: a refused alias (no launch folder) never matches a folder key: the run exits 3 on its refusal"
+has "$err" "REFUSE: sw11: launch folder $TMP/gone for cc-gone is missing" "P11: … naming it"
+hasnt "$err" "Traceback" "P11: … with no traceback"
+
 # ── P6: exit 2────────────────────────────────────────────────────────────────────────────────────────
 scen p6
 mkt a 'surfaces: ["ext:a"]'
@@ -869,6 +960,13 @@ usage "a --surface of an unknown kind" "$SC" plan --vault "$V" --launch-folders 
 usage "a relative repo: --surface" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --surface a=repo:rel
 usage "a --surface for a non-member" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --surface zz=ext:x
 usage "a --dep with no =" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --dep a
+usage "a --signed-out with no @" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --signed-out 'mcp__x__*'
+usage "a --signed-out with no alias" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --signed-out 'mcp__x__*@'
+usage "a --signed-out with no namespace" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --signed-out '@cc-a-seo'
+usage "an alias-less --signed-out with no folder" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --signed-out 'mcp__x__*@claude'
+has "$(cat "$S.err")" "<namespace>@claude:<folder>" "P6: … naming the folder form"
+usage "a cx-* --signed-out" "$SC" plan --vault "$V" --launch-folders "$LF" --tasks a --signed-out 'mcp__x__*@cx-a-seo'
+has "$(cat "$S.err")" "cx-*" "P6: … naming cx-*"
 mkdir -p "$S/alone/skills/_shared/scripts"; cp "$SC" "$S/alone/skills/_shared/scripts/"
 usage "reconcile-rollout.py unloadable" "$S/alone/skills/_shared/scripts/serial-chains.py" plan --vault "$V" --launch-folders "$LF" --tasks a
 has "$(cat "$S.err")" "serial-chains: cannot load" "P6: … says so"
