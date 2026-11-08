@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """unfinished-rollout.py — at most one unfinished parallel rollout per repo and project, each project's in its own
 rollout clone; serial chains ordered by their predicted surfaces (schedule § 0 and § Serial path; ADR 0027, ADR 0030,
-ADR 0040, ADR 0060, ADR 0064, ADR 0067).
+ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of ready chains (ADR 0076).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel] --repo <path>
         (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
@@ -15,6 +15,7 @@ ADR 0040, ADR 0060, ADR 0064, ADR 0067).
         [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py branches --repo <path> --tasks <slug,...>
         [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
 
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
@@ -376,6 +377,41 @@ directly in each --handoffs dir; it writes nothing and runs no git. It prints on
   unstarted <slug> <Project root>       none of the above: no lead has started it
 Exit 0, or 2 (no stdout, one `unfinished-rollout:` line) when no note is found, on a usage error, or when
 reconcile-rollout.py or run_record.py will not load.
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
+
+`waiting` answers ADR 0076 d3's *which chain starts next* for the whole estate (CONTEXT.md **Waiting list**), read-only,
+for the Chorus Stage and a terminal alike. It runs in one process, never a child per chain (begin's per-chain surface
+re-check, a child each, is what timed out under the 2026-11-06 start-up herd): one walk of the tasks dir (p41-2), one
+leg.py read per serial note (chain_read_of), and begin's re-check run in-process per listed chain (serial_resume_hits, the
+one copy `check --resume` runs too). It writes nothing and runs git only as the re-check does. --now (an ISO time; a
+naive one reads local) is the clock for the Capacity, Away and lease reads; default the clock's now.
+- On the list: each unfinished serial note (serial_notes: root-level, neither done nor dropped, not complete) stamped
+  `start: unattended` (reconcile-rollout.py's _start_unattended) whose chain and hold leg.py reads (an unreadable one
+  is WARNed by serial_notes and left off, as begin's re-check would fail closed on it), and that has no Leg session
+  and no stop needing Lachy: its chain state (leg.py's chain_read) is `not-started`, `ready`, `awaiting-successor` or
+  `completable` (WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`, `stuck`,
+  `incomplete`, `superseded`, `complete` or `dropped`; and leg.py's restart_of, from the contention-free plan for its
+  next Leg, is a finish, claim, wait or complete with no blockedBy (a started hand-over, a malformed `chain_copies:` or
+  a missing Chain copy keeps it off). A manual hand-over is on the list, for its next Leg (ADR 0076 d4).
+- Order: leg.py's order_key (rank-led, ADR 0067 d9: a chain that has begun before one that has not, then the estate
+  rank, then the first to begin or the earlier `captured:`, then the slug). `rank` is the chain's 1-based place.
+- Held (ADR 0076 d2): `held_by` is the first holder, by case-folded slug, that begin's surface re-check would name for
+  its next Leg's write set (leg.py's write_set, as surface_recheck passes it, no --checkout): another serial chain by
+  serial_waits, or a parallel rollout's Project root that write set or its checkouts meet; else null (an empty write
+  set is never held). A held chain keeps its place and is passed over.
+- Room: the Mac-wide cap in force (reconcile-rollout.py's _capacity_state over capacity.py's read, then _cap_in_force:
+  a fresh Capacity's C, else the Trickle, or the Away cap while Away; `cap` {n, by: capacity | trickle | away cap, why:
+  the Capacity reading's why when it fell back, else null}) less `running`: the Mac-wide running Rollout tasks
+  (_running_by_rollout, leases read at --now, Leg claims never) plus every unfinished serial note's Leg session (a Leg
+  counts from its start, ADR 0076 d3: an open Leg, a standing restart `pending` or `started`, or a last Leg handed off
+  to a `started` session), floored at 0.
+stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"n", "by", "why"}, "waiting": [{"slug",
+"rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null}; cwd, title, prompt and harness are
+restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain). `next` is the first unheld chain, or
+null when room is 0 or every chain is held. `WARN:` lines (serial_notes', the re-check's) go to stderr, each once.
+Exit 0, or 2 (no stdout, one `unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or
+reconcile-rollout.py, serial-chains.py or leg.py unloadable.
 """
 import argparse
 import importlib.util
@@ -386,6 +422,7 @@ import re
 import subprocess
 import sys
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -405,12 +442,15 @@ SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfa
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
-LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by")
+LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by", "restart_of",
+             "leg_outcome")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
 SC = None   # serial-chains.py, loaded by cmd_check and cmd_pickups (load_sc)
 LEG = None  # leg.py, loaded once the first unfinished serial note is read (load_leg)
+CHAINS = {}  # chain_read_of's reads: one leg.py read per serial note per process (every verb here writes no note)
+WAITING_STATES = ("not-started", "ready", "awaiting-successor", "completable")   # `waiting`: chain states on the list
 
 
 def die(msg):
@@ -700,10 +740,10 @@ def chain_hold(rr, path, tasks_dir):
     and `openWs`, what its open Leg writes (write_set for that Leg; [] with none), which serial_waits' (M) meets; and
     hold_of's own `rank`, `captured` (the rank-led order's inputs) and `holding` ((O)'s holder half, ADR 0067 d9)."""
     leg = load_leg(rr)
-    ctx = SimpleNamespace(rollout=path, tasks=tasks_dir, vault=tasks_dir.parent.parent, slug=path.stem, archived=False)
+    _ctx, chain, read, why = chain_read_of(rr, path, tasks_dir)
+    if why is not None:
+        return None, why
     try:
-        chain = leg.Chain(ctx)
-        read = leg.chain_read(ctx, chain)
         hold = leg.hold_of(chain, read)
         hold["ws"] = leg.write_set(chain, read["n_next"])
         hold["wsFolders"] = [r.folder for r in leg.write_rows(chain, read["n_next"]) if r.folder]
@@ -714,6 +754,25 @@ def chain_hold(rr, path, tasks_dir):
         return None, e.msg
     except Exception as e:  # noqa: BLE001 — any unreadable chain fails closed to its whole claim
         return None, f"{type(e).__name__}: {e}"
+
+
+def chain_read_of(rr, path, tasks_dir):
+    """leg.py's Chain and chain_read for one serial note, read once per process and kept in CHAINS (every verb here
+    writes no note, so a second read would read the same, as the shared walk's p41-2 rule): (ctx, chain, read, None), or
+    (None, None, None, <why>) when leg.py cannot read the chain. chain_hold and `waiting` read it."""
+    key = (os.path.realpath(path), os.path.realpath(tasks_dir))
+    if key not in CHAINS:
+        leg = load_leg(rr)
+        ctx = SimpleNamespace(rollout=path, tasks=tasks_dir, vault=tasks_dir.parent.parent, slug=path.stem,
+                              archived=False)
+        try:
+            chain = leg.Chain(ctx)
+            CHAINS[key] = (ctx, chain, leg.chain_read(ctx, chain), None)
+        except leg.Refuse as e:
+            CHAINS[key] = (None, None, None, e.msg)
+        except Exception as e:  # noqa: BLE001 — any unreadable chain fails closed to its whole claim
+            CHAINS[key] = (None, None, None, f"{type(e).__name__}: {e}")
+    return CHAINS[key]
 
 
 def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
@@ -1218,13 +1277,12 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
     git = SC.Git()
     top = git.checkout
     hits = {}
-    reach = list(toks)
     if args.shape == "serial":
         hold, why = chain_hold(rr, tasks_dir / f"{me}.md", tasks_dir)
         if hold is None:
             die(f"--resume {me}: its chain is unreadable ({why}): the re-check fails closed")
-        hits.update(serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned))
-        reach = union(toks, launch_checkouts(hold["wsFolders"], git, vault), turn(toks), checkouts)
+        hits.update(serial_resume_hits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns,
+                                       warned))
     else:
         for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
             # Only its rows not yet done: a Chain copy's done row awaiting leg.py land holds no parallel rollout, whose
@@ -1237,35 +1295,61 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
                                    f"[[{me}]] waits its turn: re-run once [[{s['slug']}]] lands its rows there "
                                    f"({serial_remedy(s)})")
         hits.update(clone_holders(args, rr, tasks_dir, me, mine, toks[0], notes, vault, warns, warned))
-    if args.shape == "serial":
-        for path, note, _ in notes:
-            if path.stem.lower() == me.lower() or rr._status(note) in CLOSED or \
-                    shape_of(rr, path.stem, note, warns, warned) == "serial":
-                continue
-            c = note_state(rr, path, note, tasks_dir, mine)
-            root = rr._project_root(note)
-            if c["complete"] or root is None:
-                continue
-            rtok = path_token(root, vault)
-            a = next((x for x in reach if SC.overlaps(x, rtok, top)), None)
-            if a is None:
-                continue
-            ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
-            # Skipped only while it writes nothing: released, or idle and paused or halted (one halted by its own entry
-            # re-check launched nothing, so the chain it waits on never waits on it). A call still in flight after a
-            # halt, or in a pause's drain, writes the root, so a rollout with one holds it.
-            if ph["released"] or (ph["busy"] == 0 and (ph["paused"] or ph["halt"] is not None)):
-                continue
-            hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) holds `{SC.fmt_token(rtok)}`, its "
-                               f"Project root, which this chain writes as `{SC.fmt_token(a)}` (ADR 0060): [[{me}]] waits "
-                               f"its turn: re-run once [[{c['slug']}]] finishes or stops (/thread:status [[{c['slug']}]])")
     if hits:
         keys = sorted(hits, key=str.lower)
         return finish(warns, "refuse " + ",".join(keys), 3, [hits[k] for k in keys])
     return finish(warns, "none", 0)
 
 
-def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned) -> dict:
+def serial_resume_hits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned,
+                       serials=None, parallels=None) -> dict:
+    """A serial resume R's holders, {slug: line} (check_resume's serial half, its one copy, which `waiting` runs per
+    listed chain in-process): every other unfinished serial note by serial_waits, then every unfinished, not complete
+    parallel rollout whose Project root R's write set (`toks`), its launch folders' checkouts, the checkouts its tokens
+    name or --checkout meet, unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting
+    Integration) and paused or halted. `serials` (serial_notes over `notes`, all of them) and `parallels`
+    (parallel_roots over `notes`) are read once by a caller that re-checks many chains; R's own entry is skipped in
+    each."""
+    top = git.checkout
+    hits = serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned, serials)
+    reach = union(toks, launch_checkouts(hold["wsFolders"], git, vault), turn(toks), checkouts)
+    if parallels is None:
+        parallels = parallel_roots(rr, notes, tasks_dir, vault, mine, warns, warned)
+    for c, rtok, path, note in parallels:
+        if c["slug"].lower() == me.lower():
+            continue
+        a = next((x for x in reach if SC.overlaps(x, rtok, top)), None)
+        if a is None:
+            continue
+        ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
+        # Skipped only while it writes nothing: released, or idle and paused or halted (one halted by its own entry
+        # re-check launched nothing, so the chain it waits on never waits on it). A call still in flight after a
+        # halt, or in a pause's drain, writes the root, so a rollout with one holds it.
+        if ph["released"] or (ph["busy"] == 0 and (ph["paused"] or ph["halt"] is not None)):
+            continue
+        hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) holds `{SC.fmt_token(rtok)}`, its "
+                           f"Project root, which this chain writes as `{SC.fmt_token(a)}` (ADR 0060): [[{me}]] waits "
+                           f"its turn: re-run once [[{c['slug']}]] finishes or stops (/thread:status [[{c['slug']}]])")
+    return hits
+
+
+def parallel_roots(rr, notes, tasks_dir, vault, mine, warns, warned):
+    """[(state, Project root token, path, note)] for each unfinished, not complete parallel rollout in `notes` that has
+    a Project root: what a serial resume's write set may meet (serial_resume_hits)."""
+    out = []
+    for path, note, _ in notes:
+        if rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) == "serial":
+            continue
+        c = note_state(rr, path, note, tasks_dir, mine)
+        root = rr._project_root(note)
+        if c["complete"] or root is None:
+            continue
+        out.append((c, path_token(root, vault), path, note))
+    return out
+
+
+def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned,
+                 serials=None) -> dict:
     """A resuming chain R against every other unfinished serial note H (ADR 0067 d4), {slug: line}; each line keeps
     `holds `<token>``, which leg.py's HELD_RE reads. own(C) is a chain's unlanded rows' tokens, ws(R) its write set
     (--surface), smoke(C) = ws(C) - own(C), U and T the checkouts it has work in and its next Leg works in
@@ -1291,7 +1375,8 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
     back down; and (M) lands only on an open Leg, whose chain waits only by (M), and between two open Legs only from
     the one opened first, since the later begin passed (M) against it and a chain's write set and checkouts only
     shrink as its rows land. The holder half is an edge of (O), down the order, so this argument covers it as it
-    stands, and a chain it holds is no free chain to yield to."""
+    stands, and a chain it holds is no free chain to yield to. `serials`: serial_notes over `notes`, read once by a
+    caller that re-checks many chains (serial_resume_hits); R's own entry is skipped."""
     top = git.checkout
     meet = lambda a, b: (SC.overlap_pairs(a, b, top) or [None])[0]  # noqa: E731
     parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
@@ -1313,7 +1398,8 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
     others = [chain_of(s["slug"], s["readable"], s["unlanded"], s["ws"], s["open"], s["openWs"],
                        next_works(s, git, vault), works_in(s, git, vault), s["began"], s, s["copied"], s["rank"],
                        s["captured"], s["holding"])
-              for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me)]
+              for s in (serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me) if serials is None else
+                        [x for x in serials if x["slug"].lower() != me.lower()])]
     chains = [r] + others
 
     def meet_off_repo(a, b):
@@ -1918,6 +2004,92 @@ def cmd_unstarted(args, rr) -> int:
     return 0
 
 
+# ---- the Waiting list (ADR 0076) --------------------------------------------------------------------------------------
+
+def leg_session(leg, chain, read) -> bool:
+    """Whether a serial chain has a Leg session, which holds a place from its start (ADR 0076 d3): an open Leg, a
+    standing restart `pending` or `started` (a manual one starts none), or a last Leg handed off to a `started`
+    session that has not begun."""
+    if read["open_leg"] is not None:
+        return True
+    restarted = read["restarted"]
+    if restarted is not None and restarted["how"] in ("pending", "started"):
+        return True
+    last = chain.legs.get(chain.last_n()) if chain.legs else None
+    return (last is not None and leg.leg_outcome(last["closed"]) == "handoff"
+            and (last["handover"] or "").startswith("started "))
+
+
+def cmd_waiting(args, rr) -> int:
+    """`waiting` (ADR 0076 d3): the Waiting list and its room, one JSON line (the module docstring)."""
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        die(f"tasks dir {tasks_dir} not found")
+    if args.now:
+        try:
+            now = datetime.fromisoformat(args.now.strip().replace("Z", "+00:00"))
+        except ValueError:
+            die(f"--now {args.now}: not an ISO time")
+        now = now if now.tzinfo else now.astimezone()
+    else:
+        now = datetime.now().astimezone()
+    load_sc()
+    warns, warned = [], set()
+    vault = vault_root(tasks_dir)
+    notes = list(rollout_notes(rr, tasks_dir, archive=False))
+
+    # Room: the cap in force less the Rollout tasks running and every Leg session.
+    capacity = rr._capacity_state(now, quota=False)
+    cap = rr._cap_in_force(rr._away_state(now), capacity)
+    by = "capacity" if cap.get("by") == "capacity" else "away cap" if cap["away"] else "trickle"
+    tasks = sum(rr._running_by_rollout(tasks_dir, rr._note_index(tasks_dir), leases=rr._Leases(now)).values())
+    legs = 0
+    for path, note, _ in notes:
+        if rr._status(note) in CLOSED or rr._shape(note) != "serial":
+            continue
+        _ctx, chain, read, _why = chain_read_of(rr, path, tasks_dir)
+        if read is not None and leg_session(load_leg(rr), chain, read):
+            legs += 1
+    running = tasks + legs
+    room = max(0, cap["n"] - running)
+
+    serials = serial_notes(rr, notes, tasks_dir, warns, set(), warned)
+    parallels = parallel_roots(rr, notes, tasks_dir, vault, set(), warns, warned)
+    git = SC.Git() if serials else None
+    listed = []
+    for s in serials:
+        path = tasks_dir / f"{s['slug']}.md"
+        ctx, chain, read, _why = chain_read_of(rr, path, tasks_dir)
+        if chain is None or not rr._start_unattended(chain.note):
+            continue
+        leg = load_leg(rr)
+        if read["state"] not in WAITING_STATES or leg_session(leg, chain, read):
+            continue
+        restart = leg.restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"],
+                                 read["restarted"])
+        if restart is None or restart["blockedBy"] is not None:
+            continue
+        hold, _why = chain_hold(rr, path, tasks_dir)
+        if hold is None:
+            continue   # serial_notes WARNed it unreadable: begin's re-check would fail closed on it too
+        toks = [SC.parse_token(t) for t in hold["ws"]]
+        held = serial_resume_hits(rr, s["slug"], hold, toks, [], notes, tasks_dir, git, vault, set(), warns, warned,
+                                  serials, parallels) if toks else {}
+        listed.append((order_key(rr, s["slug"], s["began"], s["rank"], s["captured"]), s["slug"],
+                       min(held, key=str.lower) if held else None, restart))
+    listed.sort(key=lambda x: x[0])
+    waiting = [{"slug": slug, "rank": k, "held_by": held_by, "cwd": r["cwd"], "title": r["title"],
+                "prompt": r["prompt"], "harness": r["harness"]}
+               for k, (_key, slug, held_by, r) in enumerate(listed, 1)]
+    nxt = next((w["slug"] for w in waiting if w["held_by"] is None), None) if room > 0 else None
+    for w in dict.fromkeys(warns):
+        print(w, file=sys.stderr)
+    print(json.dumps({"room": room, "running": running,
+                      "cap": {"n": cap["n"], "by": by, "why": None if by == "capacity" else capacity["why"]},
+                      "waiting": waiting, "next": nxt}, ensure_ascii=False))
+    return 0
+
+
 # ---- the clone verb and the branch check (ADR 0064) -------------------------------------------------------------------
 
 def cmd_clone(args, rr) -> int:
@@ -2117,13 +2289,16 @@ def main() -> int:
     u.add_argument("--handoffs", action="append", default=None,
                    help="a docs/handoffs dir close's scan read (repeatable): a doc there with `launches:` names a launch")
     u.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    wl = sub.add_parser("waiting", help="the Waiting list (ADR 0076): which serial chain starts next, and the room")
+    wl.add_argument("--now", default=None, help="the clock for the Capacity, Away and lease reads (an ISO time)")
+    wl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
     rr = load_rr()
     # Every verb here writes no note, so one walk of the tasks dir serves the whole process (p41-2): each serial note's
     # _scan, leg.py's Chain (sharing this rr) and this script's own reads share it, and nothing outlives the process.
     rr._share_walks()
     verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
-             "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches}
+             "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting}
     return verbs[args.cmd](args, rr)
 
 

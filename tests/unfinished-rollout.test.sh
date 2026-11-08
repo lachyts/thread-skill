@@ -2583,6 +2583,91 @@ PY
 )
 ok "$out" "['cc', 'u1']" "W3: the first unreadable note raises from _scan, in walk order, the rollout note itself never read"
 
+# ── WL1-WL7 (p44-1, ADR 0076): `waiting`, the Waiting list: which chain starts next, read in one process ─────────────
+# wl [args...] -> $out, $err, $rc: the verb at $WNOW, HOME pinned to $S/home (its capacity.json from capf; no Away file,
+# so the fallback is the Trickle, 2). wj <expr> reads $out's JSON as d.
+WNOW=2026-11-08T10:00:00+00:00
+UN=$'\nstart: unattended'
+wl() { HOME="$S/home" python3 "$CHECK" waiting --tasks-dir "$T" --now "$WNOW" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+wj() { python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(eval(sys.argv[2]))' "$out" "$1"; }
+# capf <capacity> [written_at] — Chorus's capacity.json in $S/home (capacity_max: the built-in 6)
+capf() { mkdir -p "$S/home/.config/thread"; printf '{"capacity": %s, "written_at": "%s"}\n' "$1" "${2:-$WNOW}" > "$S/home/.config/thread/capacity.json"; }
+HO=$'\n'"- $D29 Leg 1 closed: handoff to Leg 2 in cc-x from /x"
+tscen wl1
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 2)" a1~open~"\`repo:$W//a.py\`"
+LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 1)" b1~open~"\`repo:$W2//b.py\`"
+LOG=- mkchain wc "$OTHER" c1~open~"$VC"
+LOG=$(lg $D29 open) mkchain wd "$OTHER$UN" d1~open~'`vault:Work/Projects/D`'
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: started sess-9" mkchain we "$OTHER$UN" e1~open~'`vault:Work/Projects/E`'
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wf "$OTHER$UN"$'\n'"$(rk 3)" f1~open~'`vault:Work/Projects/F`'
+capf 4
+wl
+ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')" "0|['wf', 'wb', 'wa']" "WL1: stamped chains with no Leg wait in order_key's order (one that has begun, then estate rank 1, 2)"
+ok "$(wj '[w["rank"] for w in d["waiting"]]')|$(wj '[w["held_by"] for w in d["waiting"]]')" "[1, 2, 3]|[None, None, None]" "WL1: … each its place on the list, none held"
+ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next']" "WL1: … the JSON's keys, in order"
+ok "$(wj 'd["running"]')|$(wj 'd["cap"]')|$(wj 'd["room"]')" "2|{'n': 4, 'by': 'capacity', 'why': None}|2" \
+  "WL1: an open Leg and a started hand-over each hold a place: Capacity 4, 2 running, room 2"
+ok "$(wj 'd["next"]')" "wf" "WL1: … and next is the first chain on the list"
+ok "$(wj '[(w["title"], w["cwd"], w["harness"], w["prompt"].split(chr(10))[0]) for w in d["waiting"][1:2]]')" \
+  "[('Leg 1: wb', '$W2', 'claude', '/thread:execute [[wb]]')]" "WL1: … with the Leg's title, launch folder, harness and prompt"
+has "$(wj 'd["waiting"][0]["prompt"]')" "Leg 2 of the serial chain" "WL1: a manual hand-over is on the list, for its next Leg"
+hasnt "$out" '"wc"' "WL1: an unstamped chain is absent"
+hasnt "$out" '"wd"' "WL1: … a chain with an open Leg too"
+hasnt "$out" '"we"' "WL1: … and one handed over to a started session"
+capf 2
+wl
+ok "$(wj 'd["room"]')|$(wj 'd["next"]')|$(wj 'len(d["waiting"])')" "0|None|3" "WL2: no room: next is null, and the list still reads whole"
+capf 5 2026-11-08T09:00:00+00:00
+wl
+ok "$(wj 'd["cap"]["n"]')|$(wj 'd["cap"]["by"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "2|trickle|0|None" \
+  "WL2: a stale Capacity falls back to the Trickle (2), so 2 running leave no room"
+has "$(wj 'd["cap"]["why"]')" "is over 10 minutes old" "WL2: … saying why"
+rm -f "$S/home/.config/thread/capacity.json"; fmset wd.md status dropped
+wl
+ok "$(wj 'd["cap"]')|$(wj 'd["running"]')|$(wj 'd["next"]')" "{'n': 2, 'by': 'trickle', 'why': 'no file'}|1|wf" \
+  "WL2: no Capacity file: the Trickle too; a dropped chain's open Leg no longer counts"
+tscen wl3
+LOG=$(LFOLD="$W" lg $D29 open) LFOLD="$W" mkchain hh "$OTHER" h1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)" a1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 2)" b1~open~"\`repo:$W2//g.py\`"
+capf 4
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')" "[('wa', 'hh'), ('wb', None)]" \
+  "WL3: a held front chain keeps its place, held by the chain whose open Leg writes its file"
+ok "$(wj 'd["next"]')|$(wj 'd["running"]')" "wb|1" "WL3: … and is passed over: next is the second"
+fmset hh.md status dropped
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wa', None), ('wb', None)]|wa" \
+  "WL3: once the hold clears, the front chain is next again"
+tscen wl4
+mkro ro-p.md "$W" "$DEMO"; mkt p1.md ro-p in_progress "owner: lead-1"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)" a1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 2)" b1~open~"\`repo:$W2//g.py\`"
+capf 3
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wa', 'ro-p'), ('wb', None)]|wb" \
+  "WL4: a parallel rollout with a call in flight holds its Project root: the chain there is passed over"
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "1|2" "WL4: … and its running task holds a place"
+scen wl5
+LOG=- mkchain wp "$DEMO$UN"$'\n'"$PAUSED" p1~open~'`vault:Work/Projects/P`'
+mkchain ws "$DEMO$UN" s1~done~"$VB" s2~blocked~"$VC"
+LOG=- mkchain wi "$DEMO$UN"$'\nincomplete: true' i1~open~'`vault:Work/Projects/A/i.md`'
+LOG="$(lg $D28 open)"$'\n'"- $D29 Leg 1 closed: halted: surface held" mkchain wh "$DEMO$UN" h1~open~'`vault:Work/Projects/A/h.md`'
+LOG=- mkchain wo "$DEMO$UN" o1~open~'`vault:Work/Projects/A/o.md`'
+capf 3
+wl
+ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wo']|wo" \
+  "WL5: a paused, stuck, incomplete or halted chain needs Lachy: off the list"
+scen wl6
+wl
+ok "$rc|$out" '0|{"room": 2, "running": 0, "cap": {"n": 2, "by": "trickle", "why": "no file"}, "waiting": [], "next": null}' \
+  "WL6: an empty vault waits on nothing"
+python3 "$CHECK" waiting --tasks-dir "$S/none" > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "WL7: a missing tasks dir is exit 2, with no stdout"
+python3 "$CHECK" waiting --tasks-dir "$T" --now yesterday > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "WL7: … and so is a --now that is no ISO time"
+has "$(cat "$S.err")" "unfinished-rollout: --now yesterday" "WL7: … with one line saying so"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
 exit "$fail"
