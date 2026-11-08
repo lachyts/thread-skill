@@ -30,9 +30,10 @@
 #
 # Capped (p23-4): at most `suite_cap` background suites run at once (tests/lib/test-jobs.sh: THREAD_TEST_JOBS,
 # else max(2, ceil(cores / 3)), 4 on 12 cores), and node runs that many test files at once. The suites spawn
-# roughly longest-first: the two merge-task self-tests, then the shell suites by file size, largest first (`ls -S`; no suite path holds a space, tests/test-jobs.test.sh pins it), so no
-# static list can drift. THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot
-# (verify-slot.py) never waits on the machine's pool, nor an inner `make test` on its outer wrapper's slot.
+# roughly longest-first: the two merge-task self-tests, then the shell suites by file size, largest first (`ls -S`;
+# no suite path holds a space, tests/test-jobs.test.sh pins it), so no static list can drift.
+# THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot (verify-slot.py) never waits on
+# the machine's pool, nor an inner `make test` on its outer wrapper's slot.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
