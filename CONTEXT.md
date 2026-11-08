@@ -763,6 +763,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   memory falls below warning. A Leg's wait for room is a `wait` of
   kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
   mechanism), throttle.
+- **Waiting list** — the one estate-wide list of serial chains that are ready
+  to run but have no Leg session yet, because **Capacity** has no room or
+  another rollout holds their files. A chain on it has no session on the Stage;
+  it gets one only when it reaches the front and there is room, best
+  **Estate rank** first. He sees it as one quiet line on the Stage (how many
+  wait, which is next, how much room) that opens into the ordered list with a
+  click, never as a command or a notification. Ruled with Lachy 2026-11-08,
+  after `orient-all` left about 30 chains open as idle or stopped sessions
+  with room for 2. _Avoid_:
+  begin queue, backlog, queue (a parallel rollout's **Queue** is another
+  thing).
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
   Chorus sets another (Chorus ADR 0104 d2); while **Capacity** is in force its
