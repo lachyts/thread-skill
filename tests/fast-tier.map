@@ -42,7 +42,7 @@ OWN-LISTINGS skills/execute/tests/reconcile-rollout-moving.test.sh  # (i) os.wal
 OWN-LISTINGS skills/execute/tests/room-stop.test.mjs  # (i) lists its temp dirs
 OWN-LISTINGS tests/backlog-orient.test.mjs tests/declared-check.test.mjs tests/estate-dispatch.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
 OWN-LISTINGS tests/estate-rank.test.mjs tests/estate-scan.test.mjs tests/gated-inputs.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
-OWN-LISTINGS tests/inert-paths.test.mjs tests/next-action.test.mjs tests/ntfy-push.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
+OWN-LISTINGS tests/inert-paths.test.mjs tests/next-action.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
 OWN-LISTINGS tests/reflect-attention.test.mjs tests/reflect-close-score.test.mjs tests/reflect-ledger.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
 OWN-LISTINGS tests/reflect-score.test.mjs tests/reflect-tune.test.mjs tests/reflect-weekly.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
 OWN-LISTINGS tests/resolve-target.test.mjs tests/run-record.test.mjs tests/security-check-scan.test.mjs  # (i) a temp vault, a temp HOME, a plugin copy of named files, or fixture strings
