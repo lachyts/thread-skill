@@ -967,13 +967,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   verdict inside its turn (`verify-slot.py wait`, p31-3), never by ending it.
   Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot", lock,
   semaphore.
-- **Checkpoint** — one of the two moments per task where the full suite (the
-  rollout's `verifier:`) runs: a code-writing agent's last check before it
-  opens or updates its PR (the implementer's, and each reviser's), and
-  Integration before the merge (estate ADR 0009 d1; the estate's own
-  `CONTEXT.md` § The Mac's load). The engine renders the verifier there, and
-  elsewhere only when a task brief asks for the full suite. Not the
-  **Cursor** (a saved position). _Avoid_: final run, full check.
+- **Checkpoint** — one of the two moments per task where the rollout's
+  `verifier:` runs (the full suite, or a project's declared **Fast tier**): a
+  code-writing agent's last check before it opens or updates its PR (the
+  implementer's, and each reviser's), and Integration before the merge (estate
+  ADR 0009 d1; the estate's own `CONTEXT.md` § The Mac's load). The engine
+  renders the verifier there, and elsewhere only when a task brief asks for a
+  full-suite run (under a Fast tier this renders the tier). Not the **Cursor**
+  (a saved position). _Avoid_: final run, full check.
 - **Touched tests** — the test files that reach what a change touched, run
   between Checkpoints: each Ralph try of an implementer or a reviser (touched
   tests, then the verifier once before it hands back), a reviewer's own check
@@ -984,6 +985,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite falls through), else the test files importing the changed modules.
   They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
   suite.
+- **Fast tier** — the part of a project's suite its rollouts verify at each
+  merge, declared as the rollout's `verifier:`: the tests a change reaches from
+  its **Verify base**, plus a small set that always runs, and the full suite
+  whenever a change cannot be placed. The full suite then runs as the
+  **Completion verifier** and on the default branch's own runs, so a break only
+  the slow tests catch, in code the change did not reach, is found there and
+  filed, not at its merge (estate ADR 0009 d6, ADR 0073). Not **Touched
+  tests**, which an agent runs between Checkpoints. _Avoid_: quick suite,
+  smoke tests, partial verify.
+- **Suite budget** — how long a project's suite may take, read on the week's
+  median, never one run: an Integration verify within 5 minutes and a full
+  suite within 20 unless the project sets its own (a looser one only with its
+  reason stated; estate ADR 0011 d2). A breach files that project's suite
+  audit. _Avoid_: test timeout, `verify_timeout` (a deadline, not a budget).
+- **CI headroom** — how far a required GitHub check's job runs below its time
+  limit (`timeout-minutes`), per merge and on the week's median. A job whose
+  week's median runs past 80 % of its limit is a finding; a job cancelled at
+  its limit is a CI timeout, a stop on GitHub's side, never a red check and
+  never a gate for Lachy (ADR 0073). _Avoid_: CI timeout (the event, not the
+  margin), runner speed.
 - **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over
