@@ -1197,16 +1197,16 @@ one walk of --tasks-dir (off --dry-run a fresh one, _note_index, taken under the
 --dry-run the call's own, _scan's index) plus every other lead's live Trickle claims. In the walk (_elsewhere_running)
 each other rollout note directly in --tasks-dir, tagged `rollout`, not done or dropped, parallel, with no `paused:`
 stamp and started (never_started), counts its `status: in_progress` notes less the ones its own undecided RACE or
-UNVERIFIED holds. Review and integrating notes never count, nor do serial rollouts but while Capacity is in force
-(their Leg claims, behind the Leg lease: Capacity, below). This rollout's own use is counted the same
-way, every in_progress row of its own, live or stalled, so a new start fits only while elsewhere + the places kept + its
-own in_progress + this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned
-leads each waiting on the other's stalled notes). `status` and every progress line count notes only. Nothing here
-writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle`
-block and its last starts (p28-7: M for `lastStarts` and each queued row's `lastStart`, read as `next` reads it, never
-through `next`; The last starts, below), and every progress line (_progress_for, `next`, `status`) for the ETA's
-width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold
-and the places kept aside); all of them read it silently, and only `next` prints the WARN.
+UNVERIFIED holds. Review and integrating notes never count, nor do serial rollouts but while Capacity is in force (an
+open Leg's claims behind its Leg lease, or 1 for its session behind a fresh one: Capacity, below). This rollout's own
+use is counted the same way, every in_progress row of its own, live or stalled, so a new start fits only while
+elsewhere + the places kept + its own in_progress + this call's starts < the cap; a restart waits on the ceiling alone
+(no state leaves two respawned leads each waiting on the other's stalled notes). `status` and every progress line count
+notes only. Nothing here writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above),
+`status` for its `trickle` block and its last starts (p28-7: M for `lastStarts` and each queued row's `lastStart`, read
+as `next` reads it, never through `next`; The last starts, below), and every progress line (_progress_for, `next`,
+`status`) for the ETA's width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count
+elsewhere)), the Heat hold and the places kept aside); all of them read it silently, and only `next` prints the WARN.
 
 Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
 would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
@@ -1290,19 +1290,21 @@ the Trickle's machinery stays as it is: the trickle claim lock and the claims, t
 the prefixes `trickle:` and `away cap:` and the last starts. A missing reading (silent), a stale or unreadable one, or
 a capacity_max that will not resolve (each one CAPACITY_WARN line from `next`) falls back to today's Trickle and Away
 cap exactly, never to open. While in force: the count elsewhere (and mac_running's, the Run record's suite `running`,
-p36-9) also counts each open serial rollout's Leg claims (_leg_tasks: its `status: in_progress` notes owned
-`leg-<n>`) behind its Leg lease (the same lease file, `by: leg`,
-written by leg.py on its own open Leg; _Leases with `leg`: a lapse of LEG_LEASE_LAPSE, LEG_WAIT_LAPSE after a `waiting:
-true` turn end, from the latest boot or wake if later; fresh and unreadable count, a lapsed one goes to `lapsed`, none
-holds nothing), and a waiting Leg's record keeps its place (_trickle_waiting_judge's `legs`). The quota hold: while in
-force, a caller whose Login (capacity.py login(): a Claude Code session's CLAUDE_ACCOUNT_PINNED, else CLAUDE_CONFIG_DIR's
-basename, else `dummy`) is inside its line starts nothing new: `slotLimit` 0, a row it holds reads `quota: <login> is
-inside its line` (QUOTA_PREFIX; after the ceiling and the heat, before the cap), it never halts, it writes no waiting
-record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits on the ceiling alone. The
-Login is always the lead's own: its lease names it (`login`), `status` reads no quota, and `moving`, which runs in the
-Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run --quota-login`), never its
-own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy leg.py reads; the reads it
-takes that may run a child process (capacity_reads) a caller holding the trickle claim lock takes before the lock.
+p36-9) also counts each open serial rollout's Leg claims (_leg_tasks: its `status: in_progress` notes owned `leg-<n>`)
+behind its Leg lease (the same lease file, `by: leg`, written by leg.py on its own open Leg; _Leases with `leg`: a lapse
+of LEG_LEASE_LAPSE, LEG_WAIT_LAPSE after a `waiting: true` turn end, from the latest boot or wake if later; fresh and
+unreadable count, a lapsed one goes to `lapsed`, none holds nothing; a fresh one counts at least 1, so an open Leg holds
+a place from its session's start, before its first claim, ADR 0076 d3), and a waiting Leg's record keeps its place
+(_trickle_waiting_judge's `legs`), asking one place fewer while its session already holds one (_waiters, p44-2). The
+quota hold: while in force, a caller whose Login (capacity.py login(): a Claude Code session's CLAUDE_ACCOUNT_PINNED,
+else CLAUDE_CONFIG_DIR's basename, else `dummy`) is inside its line starts nothing new: `slotLimit` 0, a row it holds
+reads `quota: <login> is inside its line` (QUOTA_PREFIX; after the ceiling and the heat, before the cap), it never
+halts, it writes no waiting record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits
+on the ceiling alone. The Login is always the lead's own: its lease names it (`login`), `status` reads no quota, and
+`moving`, which runs in the Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run
+--quota-login`), never its own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy
+leg.py reads; the reads it takes that may run a child process (capacity_reads) a caller holding the trickle claim lock
+takes before the lock.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -4600,12 +4602,14 @@ class _Leases:
         return state in ("fresh", "unreadable") if leg else state != "lapsed"
 
 
-def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index, leases=None, lapsed=None, legs=False) -> dict:
+def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index, leases=None, lapsed=None, legs=False,
+                       unclaimed=None) -> dict:
     """{<rollout stem>: n} for every other open, started, parallel Rollout on the Mac running n > 0 tasks whose lead's
     lease has not lapsed, sorted (execute away.md § The Trickle): _running_by_rollout with this rollout excluded, its
-    `leases`, `lapsed` and `legs` (p36-7: the serial chains' Leg claims too, while Capacity is in force) passed
-    through."""
-    return _running_by_rollout(tasks_dir, index, exclude=rollout_path, leases=leases, lapsed=lapsed, legs=legs)
+    `leases`, `lapsed`, `legs` (p36-7: the serial chains too while Capacity is in force, each its Leg claims or 1 for
+    its session, ADR 0076 d3) and `unclaimed` (p44-2: the Legs counted for their session alone) passed through."""
+    return _running_by_rollout(tasks_dir, index, exclude=rollout_path, leases=leases, lapsed=lapsed, legs=legs,
+                               unclaimed=unclaimed)
 
 
 def _note_index(tasks_dir: Path) -> dict:
@@ -4620,10 +4624,11 @@ def mac_running(tasks_dir, reraise=()):
     record's suite `running`, p29-10), from one walk of `tasks_dir`, each rollout's lease read at the clock's now (a
     lapsed one leaves the count, p28-4); None when it cannot be walked. While a Capacity reading is in force
     (_capacity_state at the same now, read silently with no quota and with stops held across it, _signals_held below,
-    since its readers catch any exception), a serial chain's Leg claims count too, behind their Leg lease (p36-9: the
-    count the Capacity bounds); under the fallback the count is unchanged. An exception in `reraise` (the caller's stop
-    signal, raised by its handler mid-walk, the lease's sysctl read included, or as the Capacity read's hold ends)
-    propagates: the count never swallows a stop."""
+    since its readers catch any exception), each open serial chain counts too: its Leg claims behind its Leg lease, or 1
+    for its session behind a fresh one (p36-9: the count the Capacity bounds; ADR 0076 d3: a Leg counts from its
+    session's start, so an idle Leg between claims holds 1 here with no task running); under the fallback the count is
+    unchanged. An exception in `reraise` (the caller's stop signal, raised by its handler mid-walk, the lease's sysctl
+    read included, or as the Capacity read's hold ends) propagates: the count never swallows a stop."""
     try:
         tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
         if not tasks_dir.is_dir():
@@ -4639,7 +4644,8 @@ def mac_running(tasks_dir, reraise=()):
         return None
 
 
-def _running_by_rollout(tasks_dir: Path, index, exclude=None, leases=None, lapsed=None, legs=False) -> dict:
+def _running_by_rollout(tasks_dir: Path, index, exclude=None, leases=None, lapsed=None, legs=False,
+                        unclaimed=None) -> dict:
     """{<rollout stem>: n} for every open, started, parallel Rollout on the Mac running n > 0 tasks whose lead's lease
     has not lapsed, sorted, but the rollout note `exclude` names (execute away.md § The Trickle). `index` is one walk
     of `tasks_dir` (_scan's, or _note_index's). A rollout note counts only when it sits directly in `tasks_dir` (never
@@ -4652,22 +4658,36 @@ def _running_by_rollout(tasks_dir: Path, index, exclude=None, leases=None, lapse
     _Leases; by default one at the clock's now) is left out, and put in `lapsed` instead when a dict is given (sorted
     in place); no lease file, an unreadable one or a room stop under its bound still counts. `legs` (p36-7, ADR 0067
     d8: only while Capacity is in force): a serial rollout counts too, its n its Leg claims (_leg_tasks), behind its Leg
-    lease (_Leases' `leg`): a fresh or unreadable one counts, a lapsed one goes to `lapsed`, and none holds nothing."""
+    lease (_Leases' `leg`): a fresh or unreadable one counts, a lapsed one goes to `lapsed`, and none holds nothing. A
+    Leg counts from its session's start, not its first claim (ADR 0076 d3, p44-2): a fresh Leg lease reads n at least
+    1, so a begun Leg between claims (begin_out writes its lease) holds its place, and its first claim takes that
+    place (1, never 2); an unreadable, lapsed or missing lease adds nothing for it (a chain with no claim is never put
+    in `lapsed`: it has no task to name). `unclaimed`, when a set is given, is cleared and filled with the stems
+    counted for their session alone (n 1 with no claim behind it): a fair share reads such a Leg's waiting record as
+    already holding one place (cmd_next, capacity_gate)."""
     this = exclude.resolve() if exclude is not None else None
     if leases is None:
         leases = _Leases(datetime.now().astimezone())
-    out, left = {}, {}
+    out, left, bare = {}, {}, set()
     for path, note, counted in _counted_by_rollout(tasks_dir, index, legs=legs).values():
-        if counted and (this is None or path.resolve() != this):
-            leg = legs and _leg_eligible(note)
+        leg = legs and _leg_eligible(note)
+        if (counted or leg) and (this is None or path.resolve() != this):
             state = leases.state(path.stem, note, leg)["state"]
+            n = max(len(counted), 1) if leg and state == "fresh" else len(counted)
+            if not n:
+                continue
             if state in ("fresh", "unreadable") or (not leg and state != "lapsed"):
-                out[path.stem] = len(counted)
+                out[path.stem] = n
+                if not counted:
+                    bare.add(path.stem)
             elif state == "lapsed":
-                left[path.stem] = len(counted)
+                left[path.stem] = n
     if lapsed is not None:
         lapsed.clear()
         lapsed.update(sorted(left.items()))
+    if unclaimed is not None:
+        unclaimed.clear()
+        unclaimed.update(bare)
     return dict(sorted(out.items()))
 
 
@@ -4700,7 +4720,9 @@ def _leg_eligible(note) -> bool:
 def _leg_tasks(note, linked) -> list:
     """A serial rollout's Leg claims as the Mac-wide count reads them (p36-7), one lowercased slug per note in `linked`
     order: none unless _leg_eligible; else the notes at `status: in_progress` whose `owner:` is `leg-<n>` (a Leg's
-    claim; a row in progress under another owner is no Leg's). The Leg lease is applied by _running_by_rollout."""
+    claim; a row in progress under another owner is no Leg's). The Leg lease is applied by _running_by_rollout, which
+    also reads a fresh one as at least 1 (ADR 0076 d3: a Leg counts from its session's start, so an empty list behind
+    a fresh lease still holds one place)."""
     if not _leg_eligible(note):
         return []
     return [p.stem.lower() for p, t in linked
@@ -5040,6 +5062,16 @@ def _fair_share(free: int, contenders, now) -> dict:
     return dict(sorted((c["name"], c["got"]) for c in pool if c["got"] > 0))
 
 
+def _waiters(waiting_live, held_by, bare) -> list:
+    """The fair share's contenders for the live waiting records (_trickle_waiting_judge's `live`), each {name, held,
+    served, since, demand}: held its count elsewhere (`held_by`, keyed by lowercased stem), demand its record's `want`,
+    less the one place a Leg counted for its session alone already holds (`bare`, lowercased stems: ADR 0076 d3, p44-2;
+    _running_by_rollout's `unclaimed`). So a waiting Leg's place is counted once, through its session, never kept for
+    it a second time. cmd_next and capacity_gate read it, the one copy."""
+    return [{"name": w["name"], "held": held_by.get(k, 0), "served": w["served"], "since": w["since"],
+             "demand": max(0, w["want"] - (1 if k in bare else 0))} for k, w in waiting_live.items()]
+
+
 def _trickle_claims_write(path: Path, claims, waiting, woken):
     """Write the Trickle claims file whole, {"version": 1, "claims": [...], "waiting": [...], "woken": [...]}: a temp
     file beside it (TRICKLE_CLAIMS.<pid>.tmp), fsynced, then renamed over it, so no reader sees half a file. None, or
@@ -5100,15 +5132,23 @@ def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, read
     Returns {inForce, held, kind, why, capacity, warns, write}. Not in force (a missing, stale or unreadable reading,
     or an unresolved capacity_max): inForce false, held false, the Leg claims as before, and nothing is read but the
     reading. In force, from one fresh walk of `tasks_dir`: the count elsewhere is _elsewhere_running's with the Legs
-    (every other chain's Leg claims behind its Leg lease, every open parallel rollout's notes behind its lead's lease)
-    plus every lead's live Trickle claims; the fair share (_fair_share) gives the free places (C, less the count
-    elsewhere, less `mine`) among the live waiting records (a waiting Leg's kept while its Leg lease reads fresh or
-    unreadable) and this chain; the room is C less the count elsewhere, less the places kept for others, less `mine`.
-    held, first match: the Heat hold (kind `capacity`, why `heat: the Mac is hot (<name>)`); the quota hold (kind
-    `quota`, why `quota: <login> is inside its line`); room below `want` (kind `capacity`, why `trickle: <running>/<C>
-    tasks running on this Mac[, <k> kept for [[R]], …]`, `away cap:` while Away, running the count elsewhere plus
-    `mine`). `capacity` reports {file, why, suggested, limit, max, maxSource, away, elsewhere, lapsed, running, kept,
-    quota, heat}. `warns` are the reading's CAPACITY_WARN lines and the claims file's TRICKLE_WARN line.
+    (every other chain's Leg claims behind its Leg lease, or 1 for its session behind a fresh one, ADR 0076 d3; every
+    open parallel rollout's notes behind its lead's lease) plus every lead's live Trickle claims, less each other Leg
+    counted for its session alone whose waiting record waits behind this chain's (a later `since`, then a higher
+    lowercased stem; this chain's `since` is now with no record of its own): so of more waiting Legs than places the
+    ones waiting longest claim, never each counting the others and standing still (p44-2). This chain's own places
+    (`placed`) are `mine`, or 1 for its session while `mine` is 0 and its own Leg lease reads fresh, as every other
+    caller counts them, and its claim needs `mine` + `want` less `placed` more (0 for a session's first claim). The fair
+    share (_fair_share) gives the free places (C, less the count elsewhere, less `placed`) among the live waiting
+    records (a waiting Leg's kept while its Leg lease reads fresh or unreadable, asking one fewer while its session is
+    counted: _waiters) and this chain (asking its need); the room is C less the count elsewhere, less the places kept
+    for others, less `placed`. So a place every lead counts as this Leg's session is never kept here for a rival that,
+    counting it, could not use it. held, first match: the Heat hold (kind `capacity`, why `heat: the Mac is hot
+    (<name>)`); the quota hold (kind `quota`, why `quota: <login> is inside its line`); room below the need (kind
+    `capacity`, why `trickle: <running>/<C> tasks running on this Mac[, <k> kept for [[R]], …]`, `away cap:` while
+    Away, running the count elsewhere plus `mine`). `capacity` reports {file, why, suggested, limit, max, maxSource,
+    away, elsewhere, lapsed, running, kept, quota, heat}, elsewhere the count this gate read. `warns` are the reading's
+    CAPACITY_WARN lines and the claims file's TRICKLE_WARN line.
 
     write(mode) rewrites the Trickle claims file from this same read (the caller holds the trickle claim lock), every
     other entry kept as the judges keep it and this chain's own wake dropped (consumed), with one wake per rollout
@@ -5127,8 +5167,8 @@ def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, read
     stem = rollout_path.stem
     away, heat, leases = reads["away"], reads["heat"], reads["leases"]
     walk = _note_index(tasks_dir)
-    lapsed = {}
-    notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk, leases, lapsed, legs=True)
+    lapsed, unclaimed = {}, set()
+    notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk, leases, lapsed, legs=True, unclaimed=unclaimed)
     _lock_path, claims_path = _trickle_paths()
     claims_read, waiting_raw, woken_raw, claims_why, writable = _trickle_claims_read(claims_path)
     if claims_why:
@@ -5139,33 +5179,45 @@ def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, read
     waiting_live, waiting_kept, own_wait = _trickle_waiting_judge(waiting_raw or [], tasks_dir, stem, walk, now, wall,
                                                                   legs=True, leases=leases)
     _own_wake, woken_kept = _trickle_woken_judge(woken_raw or [], tasks_dir, stem, now, wall)
-    elsewhere = _trickle_merge(notes_elsewhere, claimed)
+    my_since = own_wait["since"] if own_wait else now
+    # Legs take turns (p44-2): another Leg counted for its session alone whose waiting record waits behind this chain's
+    # (a later `since`, then a higher lowercased stem; no record of its own reads `since` now) is left out of this
+    # count, so of more waiting Legs than places the ones waiting longest claim, and none stands still counting the
+    # others. A Leg that is not waiting, or one with a claim, always counts. `next` counts every Leg's session.
+    behind = {s for s in unclaimed if s.lower() in waiting_live
+              and (waiting_live[s.lower()]["since"], s.lower()) > (my_since, stem.lower())}
+    elsewhere = _trickle_merge({s: n for s, n in notes_elsewhere.items() if s not in behind}, claimed)
     running_elsewhere = sum(elsewhere.values())
     cap = state["limit"]
     prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
     started = [{"started": _scalar(n.get("started")) or None} for _p, n in walk.values()
                if (_wikilink_slug(n.get("rollout")) or "").lower() == stem.lower()]
-    my_since = own_wait["since"] if own_wait else now
     my_served = max((x for x in (own_wait and own_wait["served"], _latest_started(started)) if x is not None),
                     default=None)
     quota_on = _quota_held(state)
+    # This chain's own places as every other caller counts them (_running_by_rollout, ADR 0076 d3): its claims, or 1
+    # for its session behind a fresh Leg lease. Its claim asks only for what its session does not already hold, so a
+    # place another caller sees as this Leg's is never kept for a rival here (each would wait on the other).
+    own = walk.get(stem.lower())
+    placed = mine or int(own is not None and own[0].parent == tasks_dir and _leg_eligible(own[1])
+                         and leases.state(own[0].stem, own[1], leg=True)["state"] == "fresh")
+    need = max(0, mine + want - placed)
     held_by = {k.lower(): n for k, n in elsewhere.items()}
-    waiters = [{"name": w["name"], "held": held_by.get(k, 0), "served": w["served"], "since": w["since"],
-                "demand": w["want"]} for k, w in waiting_live.items()]
-    free = cap - running_elsewhere - mine
+    waiters = _waiters(waiting_live, held_by, {s.lower() for s in unclaimed - behind})
+    free = cap - running_elsewhere - placed
     kept = {}
     if free > 0 and not heat["held"] and waiters:
-        me = [{"name": stem, "held": mine, "served": my_served, "since": my_since, "demand": want}] \
-            if want > 0 and not quota_on else []
+        me = [{"name": stem, "held": placed, "served": my_served, "since": my_since, "demand": need}] \
+            if need > 0 and not quota_on else []
         kept = {n: k for n, k in _fair_share(free, waiters + me, now).items() if n != stem}
-    room = cap - running_elsewhere - sum(kept.values()) - mine
+    room = cap - running_elsewhere - sum(kept.values()) - placed
     running = running_elsewhere + mine
     kept_for = _kept_for(kept)
     if heat["held"]:
         out.update(held=True, kind="capacity", why=f"{HEAT_PREFIX} the Mac is hot ({heat['name']})")
     elif quota_on:
         out.update(held=True, kind="quota", why=_quota_why(state))
-    elif room < want:
+    elif room < need:
         out.update(held=True, kind="capacity", why=f"{prefix} {running}/{cap} tasks running on this Mac{kept_for}")
     out["capacity"] = {"file": state["file"], "why": state["why"], "suggested": state["suggested"], "limit": cap,
                        "max": state["max"], "maxSource": state["maxSource"], "away": away["away"],
@@ -5781,15 +5833,16 @@ def cmd_next(args) -> int:
     (_capacity_state; a stale or unreadable file, or a capacity_max that will not resolve, prints one CAPACITY_WARN line
     on stderr and reads as the Trickle). While a fresh reading is in force its C is the cap in force, Away or not (the
     prefixes stay `trickle:` and `away cap:`), `trickle.limit` and `trickle.awayCap` read C, `trickle.capacity` reports
-    the reading, the count elsewhere counts the serial chains' Leg claims behind their Leg lease (_leg_tasks;
-    `trickle.lapsed` names a lapsed one) and a waiting Leg's record keeps its place; and when the caller's Login is
-    inside its line (the quota hold) `slotLimit` is 0, a row it holds reads `quota: <login> is inside its line` (after
-    the ceiling and the heat, before the cap), it never halts, it writes no waiting record (removing an earlier one),
-    and idle-slots reads `hold-quota`. Anything else reads exactly as before. The caller's Login is its own
-    (_capacity_state's, capacity.py login(os.environ)), and off --dry-run the lease names it (_caller_login), so
-    `moving` reads the lead's; the hidden `--quota-login NAME`, read only with --dry-run (exit 2 without it, nothing
-    read), reads NAME's line instead ("" reads no quota): `moving`'s dry run passes the lead's Login off its lease
-    (_lead_login), never its reader's."""
+    the reading, the count elsewhere counts each open serial chain's Leg claims behind its Leg lease, or 1 for its
+    session behind a fresh one (_leg_tasks, ADR 0076 d3; `trickle.lapsed` names a lapsed one), and a waiting Leg's
+    record keeps its place, asking one place fewer while its session is counted (_waiters, p44-2: that place is its
+    session's, never kept a second time); and when the caller's Login is inside its line (the quota hold) `slotLimit` is
+    0, a row it holds reads `quota: <login> is inside its line` (after the ceiling and the heat, before the cap), it
+    never halts, it writes no waiting record (removing an earlier one), and idle-slots reads `hold-quota`. Anything else
+    reads exactly as before. The caller's Login is its own (_capacity_state's, capacity.py login(os.environ)), and off
+    --dry-run the lease names it (_caller_login), so `moving` reads the lead's; the hidden `--quota-login NAME`, read
+    only with --dry-run (exit 2 without it, nothing read), reads NAME's line instead ("" reads no quota): `moving`'s dry
+    run passes the lead's Login off its lease (_lead_login), never its reader's."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     quota_login = getattr(args, "quota_login", None)
     if quota_login is not None and not args.dry_run:
@@ -5961,9 +6014,9 @@ def cmd_next(args) -> int:
     # other lead's live claims (_trickle_claims_judge), per rollout. Each other rollout's lease is read at `now` (p28-4):
     # one whose lease has lapsed holds no room through its notes and is named under `lapsed` instead; its live claims
     # still count.
-    lapsed = {}
+    lapsed, unclaimed = {}, set()
     leases = _Leases(now)
-    notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk, leases, lapsed, legs=legs)
+    notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk, leases, lapsed, legs=legs, unclaimed=unclaimed)
     claims_read, waiting_raw, woken_raw, claims_why, claims_writable = _trickle_claims_read(claims_path)
     if claims_why:
         print(f"{TRICKLE_WARN} {claims_path} unreadable: {claims_why} — read as none" if claims_writable else
@@ -6008,14 +6061,15 @@ def cmd_next(args) -> int:
     # `held` its own count and its `since` and `served` as its waiting record carries them, the values every other lead
     # reads in that record: `since` its own record's inside the TTL, else now; `served` the later of its own record's
     # and its latest `started:` stamp, so a start that no record saw (a call that could not take the lock writes none)
-    # still moves it. Nothing is kept with no free place, under the heat (slot_limit is 0) or with no live record.
+    # still moves it. Nothing is kept with no free place, under the heat (slot_limit is 0) or with no live record. A
+    # waiting Leg counted for its session alone already holds its place in the count elsewhere (ADR 0076 d3, p44-2), so
+    # its record asks for one place fewer (_waiters): its place is counted once, never kept a second time.
     my_since = own_wait["since"] if own_wait else now
     my_served = max((t for t in (own_wait and own_wait["served"], _latest_started(rows)) if t is not None),
                     default=None)
     free_places = cap - running_elsewhere - mine
     held_by = {k.lower(): n for k, n in elsewhere.items()}
-    waiters = [{"name": w["name"], "held": held_by.get(k, 0), "served": w["served"], "since": w["since"],
-                "demand": w["want"]} for k, w in waiting_live.items()]
+    waiters = _waiters(waiting_live, held_by, {s.lower() for s in unclaimed})
 
     def fair_limit(demand):
         """(slot_limit, kept) for this call, its own demand `demand` (0 contends nothing; the quota hold contends
@@ -7334,7 +7388,8 @@ def cmd_status(args) -> int:
     # other rollouts a lapsed lease leaves out, and `lease` is this rollout's own ({state, writtenAt, lapsesAt}). The
     # Capacity (p36-7) is read as `next` reads it, silently and without the quota (status runs in a session that is not
     # the lead's): `capacity` reports it, and while it is in force `limit` and `awayCap` read its C and the count
-    # elsewhere counts the serial chains' Leg claims behind their Leg lease.
+    # elsewhere counts each open serial chain's Leg claims behind its Leg lease, or 1 for its session behind a fresh
+    # one (ADR 0076 d3), as `next` counts it.
     away = _away_state(now)
     capacity = _capacity_state(now, quota=False)
     leases, lapsed = _Leases(now), {}
