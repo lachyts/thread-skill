@@ -490,6 +490,29 @@ fresh; pair; mkpr 5 "$I" BLOCKED; echo ruleset > "$MT_STATE/branch"
 run 5 "$I" "$B"
 ok "$rc" 1 "25e2. protected by a ruleset: exits 1 (12c)"; has "$(glog)" "pr checks" "25e2. waits on the required checks"
 lacks "$(glog)" "rules/" "25e2. protected true needs no rules read"
+# (e3) Animately/optimizer's develop (the 2026-11-07 incident): protected with `contexts: []` and `checks: []`, so the
+#      gate reads some (branches/<b> cannot show a non-check gate). An UNSTABLE PR (red only on optional checks) with no
+#      required check reported and nothing in flight merges on the checks wait's first pass, never 'never appeared'.
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo nochecks > "$MT_STATE/branch"
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e3. protected with empty contexts, UNSTABLE: merges"; ok "$(sent)" "ok" "25e3. ok"; ok "$(nmerge)" 1 "25e3. one merge"
+has "$out" "required gate: some" "25e3. the gate stays some"; lacks "$out" "never appeared" "25e3. never 'never appeared'"
+has "$out" "no required checks, nothing in flight on head, and mergeStateStatus=UNSTABLE — nothing to wait for" "25e3. the guard takes UNSTABLE"
+ok "$(nlog '^pr checks')" 1 "25e3. one checks wait, no absent-poll budget spent"
+# (e4) the same with the gate unreadable (a 502 on the branch read): UNSTABLE with no required check still merges
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo "gh: Server Error (HTTP 502)" > "$MT_STATE/err.branch"
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e4. unknown gate, UNSTABLE, no required check: merges"; ok "$(nmerge)" 1 "25e4. one merge"
+lacks "$out" "$SETTLE" "25e4. never the settling 8"
+# (e5) the guard's sample reads BLOCKED (a required check GitHub has not reported yet): never merged by the guard;
+#      absent checks with nothing in flight stay 25g's exit 1
+fresh; pair; mkpr 5 "$I"; echo nochecks > "$MT_STATE/branch"; mss UNSTABLE UNSTABLE BLOCKED
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 1 "25e5. the guard reads BLOCKED: exits 1"; ok "$(nmerge)" 0 "25e5. nothing merged"
+has "$out" "required checks never appeared for PR #5" "25e5. the never-appeared text"
 # (f) the branch read fails transiently: unknown, so today's wait; checks absent with nothing in flight → 8, not 1
 fresh; pair; mkpr 5 "$I" BLOCKED; echo "gh: Server Error (HTTP 502)" > "$MT_STATE/err.branch"
 chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"

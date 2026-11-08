@@ -670,6 +670,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is bounded at 180 minutes. Nobody is stopped mid-task. Only code files and
   `any` rank-wait: the vault and `ext:` never do (d6). _Avoid_: lock, lease,
   preemption.
+- **Begin wait** — a Leg that cannot begin yet waiting, then beginning itself
+  (ADR 0075 d1; built by P41-3, and `moving`'s reading of it by P41-4). Two
+  causes: a surface re-check left unanswered on a busy Mac, and another
+  rollout's hold on a place this Leg would write (a surface stand, ADR 0060).
+  `leg.py begin` ends `state=waiting reason="begin wait: …"` with nothing
+  written, never `halted`; the session polls the check and runs begin again
+  once it passes, and its only record is a marker outside the vault. A Leg
+  never begins without a passing check: a check still unanswered after its
+  longer retry reads `unanswered`, never a pass and never a refusal. Every
+  other begin refusal stays a halt. `reconcile-rollout.py moving` reads a Begin
+  wait as `waiting` while its marker is fresh, so the **Watchdog** can recover
+  one whose session died (d5). Parallel execute's § 4.5 Surface re-check waits
+  the same way. Not a **Rank wait** (two begun chains meeting at a claim).
+  _Avoid_: begin halt, surface halt, retry loop.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -961,13 +975,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   verdict inside its turn (`verify-slot.py wait`, p31-3), never by ending it.
   Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot", lock,
   semaphore.
-- **Checkpoint** — one of the two moments per task where the full suite (the
-  rollout's `verifier:`) runs: a code-writing agent's last check before it
-  opens or updates its PR (the implementer's, and each reviser's), and
-  Integration before the merge (estate ADR 0009 d1; the estate's own
-  `CONTEXT.md` § The Mac's load). The engine renders the verifier there, and
-  elsewhere only when a task brief asks for the full suite. Not the
-  **Cursor** (a saved position). _Avoid_: final run, full check.
+- **Checkpoint** — one of the two moments per task where the rollout's
+  `verifier:` runs (the full suite, or a project's declared **Fast tier**): a
+  code-writing agent's last check before it opens or updates its PR (the
+  implementer's, and each reviser's), and Integration before the merge (estate
+  ADR 0009 d1; the estate's own `CONTEXT.md` § The Mac's load). The engine
+  renders the verifier there, and elsewhere only when a task brief asks for a
+  full-suite run (under a Fast tier this renders the tier). Not the **Cursor**
+  (a saved position). _Avoid_: final run, full check.
 - **Touched tests** — the test files that reach what a change touched, run
   between Checkpoints: each Ralph try of an implementer or a reviser (touched
   tests, then the verifier once before it hands back), a reviewer's own check
@@ -978,6 +993,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite falls through), else the test files importing the changed modules.
   They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
   suite.
+- **Fast tier** — the part of a project's suite its rollouts verify at each
+  merge, declared as the rollout's `verifier:`: the tests a change reaches from
+  its **Verify base**, plus a small set that always runs, and the full suite
+  whenever a change cannot be placed. The full suite then runs as the
+  **Completion verifier** and on the default branch's own runs, so a break only
+  the slow tests catch, in code the change did not reach, is found there and
+  filed, not at its merge (estate ADR 0009 d6, ADR 0073). Not **Touched
+  tests**, which an agent runs between Checkpoints. _Avoid_: quick suite,
+  smoke tests, partial verify.
+- **Suite budget** — how long a project's suite may take, read on the week's
+  median, never one run: an Integration verify within 5 minutes and a full
+  suite within 20 unless the project sets its own (a looser one only with its
+  reason stated; estate ADR 0011 d2). A breach files that project's suite
+  audit. _Avoid_: test timeout, `verify_timeout` (a deadline, not a budget).
+- **CI headroom** — how far a required GitHub check's job runs below its time
+  limit (`timeout-minutes`), per merge and on the week's median. A job whose
+  week's median runs past 80 % of its limit is a finding; a job cancelled at
+  its limit is a CI timeout, a stop on GitHub's side, never a red check and
+  never a gate for Lachy (ADR 0073). _Avoid_: CI timeout (the event, not the
+  margin), runner speed.
 - **Security check** — the opt-in scan a rollout's hand-set
   `security_checks: true` turns on (execute § 3): once the verifier is green
   and before its PR, a code-writing agent runs `security-check.py scan` over
@@ -1026,12 +1061,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
   Fast-forward only: a diverged checkout, or one with an uncommitted edit
   origin would overwrite, is left as it is (an edit origin never touches rides
-  along; `refused` only once the hold is clear), and Lachy hears when one stays
-  unable to catch up for a day, a rollout's hold included, then once more for
+  along; `refused` only once the hold is clear). One that stays unable to
+  catch up, a rollout's hold included, stays in the job's state file and sends
+  no notice (ADR 0075 d2); from P41-5 `/thread:status` reads it there. Until
+  P41-5, primary-refresh.py still sends its notices through ntfy-push.py:
+  Lachy hears when one stays unable to catch up for a day, then once more for
   each new cause (ADR 0066, as amended 2026-11-05). It runs an installed bundle
   that updates itself only after a smoke run with the job's own argv and a real
-  fetch, and it reports a launchd job an update left stale. _Avoid_: auto-update,
-  plugin update (Claude Code's own verb).
+  fetch, and it records a launchd job an update left stale in the same state
+  file (until P41-5, one of its notices). _Avoid_: auto-update, plugin update
+  (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never
   the **Primary checkout**'s working state) and named on it: the
@@ -1271,14 +1310,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
-  report's `Needs you:` block and pushes it once (falling back to ntfy when
-  the push does not reach him), deduped on its line in the rollout note's
-  `## Needs-you log`, the lead's push record; an item whose delivery failed
-  on every channel is retried at most once more, at the next loop entry, then
-  deduped (ADR 0038). The log also holds the Standing approval's
-  `signed under the standing approval:` lines, the month line's ledger, never
-  a push record. That log is never the task note's `## Needs you` (p16-3),
-  which holds the question the engine stopped on; an item whose entry carries
+  report's `Needs you:` block and in the rollout note, for a sitting Lachy
+  chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Only a
+  halt that stops the whole rollout can lead anywhere, and only through
+  Chorus's Companion while he is at the Stage, when Chorus reads it as his
+  (d3); a single set-aside stays listed.
+  Until P41-5 builds that, execute § 6.5 still pushes each item once (falling
+  back to ntfy when the push does not reach him), deduped on its line in the
+  rollout note's `## Needs-you log`; an item whose delivery failed on every
+  channel is retried at most once more, at the next loop entry, then deduped
+  (ADR 0038 d3, superseded). The log also holds the Standing approval's
+  `signed under the standing approval:` lines, the month line's ledger, which
+  is all it keeps once the push lines retire. That log is
+  never the task note's `## Needs you` (p16-3), which holds the question the
+  engine stopped on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
   queue runs on without the answer (execute § 6.5).
@@ -1390,9 +1435,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Slot can be idle in a moving rollout).
 - **Watchdog** — what acts on a Stalled rollout from outside its session,
   reading it from the **Situational report** (`reconcile-rollout.py moving`):
-  Chorus's Companion, or a launchd fallback (`watchdog.py`) that only notifies
-  when Chorus is not running (ADR 0048). Its `stalled` is a reason to look,
-  never by itself a reason to start a second lead.
+  Chorus's Companion, alone (ADR 0048, ADR 0075 d5). It recovers without
+  asking and sends no push (ADR 0075 d2); its only signal to Lachy is the
+  Companion's lead at the Stage, which is Chorus's reading (d3). From P41-4
+  it also watches a serial note's waiting Leg (a **Begin wait**, a Capacity
+  or review wait), `stalled` once its session is gone or it goes stale (ADR
+  0075 d5). Its `stalled` is a reason to look, never by itself a reason to
+  start a second lead. From P41-5, with Chorus not running nothing watches,
+  and a stall is read when Lachy runs `/thread:status`. Until P41-5, an
+  installed `watchdog.py` (ADR 0048's launchd fallback, which ADR 0075
+  retires) still notifies through ntfy-push.py when Chorus is not running,
+  once per stall; P41-5 deletes it.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.
   _Avoid_: monitor, heartbeat.
@@ -1560,11 +1613,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   at each loop entry. That read validates the whole file, so a refused file
   halts every rollout on the machine at its next entry; the file carries its
   schema version, and a snapshot ignores a key newer than itself while still
-  refusing a typo (ADR 0043). The machine-wide `[notify]` table holds
-  `ntfy_topic`, read by two scripts and never stamped: execute's needs-you
-  fallback publishes to it (ADR 0038), and tune.py refuses a Tuning whose
-  edit would change it.
-  `rollout-settings.py`'s JSON says only whether a topic is set, never the
+  refusing a typo (ADR 0043). The `[notify]` table is retired by ADR 0075 d2:
+  from P41-5 it is tolerated with one warning and never refused. Until P41-5,
+  its `ntfy_topic` still feeds execute § 6.5's ntfy fallback (the **Needs-you
+  item**), tune.py's guard still refuses a Tuning whose edit would change it,
+  and `rollout-settings.py`'s JSON says only whether a topic is set, never the
   topic. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
