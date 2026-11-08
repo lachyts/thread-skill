@@ -457,11 +457,15 @@ from `THREAD_VERIFY_BASE` (ADR 0062's verify base; else `origin/HEAD`) reaches. 
 it and, transitively, the tests of every script that names it, and the walkers (tests that read the whole tree)
 run on every diff. A changed path the map cannot place, or one that reaches a path marked FULL, runs the full
 suite, so the fast tier is only ever slower than it could be, never wrong. Every run, `make test` included, checks
-the map first (`fast-tier.py check`), so a new script, fixture dir or directory-listing test without its line
-turns the run red and names the line. `bash tests/run.sh --only <test file>...` runs named files in the same
-hermetic harness. CI still runs the full `make test` until p43-3 moves it. Most code diffs still go FULL today,
-through the four hubs (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`) and the
-scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`, and the
+the map first (`fast-tier.py check`) and names what is missing: a script under `skills/*/scripts/` or `hooks/`
+that no test names (`skills/**` and `hooks/**` already place it, so a test that names it is all it needs; a map
+line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` without its `tests/fixtures/<d>/**`
+consumers line, or a test that lists a directory but sits on neither the walkers' `** ALSO` line nor OWN-LISTINGS.
+The map is itself FULL, so a diff that edits it runs the full suite: edit it only when the check names a missing
+line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. CI still runs the
+full `make test` until p43-3 moves it. Most code diffs still go FULL today, through the five hubs the map marks
+FULL (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`) and
+the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`, and the
 over-selection from message strings and FOREIGN names is `thread-skill-followup-fast-tier-over-selection`.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
