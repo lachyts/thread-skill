@@ -512,13 +512,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: relay
   (Chorus's word for sending a command to a session).
 - **Serial chain** — the rows of one serial rollout note, worked in order by
-  its Legs. ADR 0074 (proposed, to be built by Phase 42) makes it one per
-  project per schedule run: a project's serial members share one chain,
-  worked by one Leg at a time; a set-aside row never holds the rows that do
-  not depend on it; and two projects' chains still run side by side (ADR 0067
-  d4, d9). Its plan also refuses any row that commits to a checkout other
-  than the one it launches from, read-only reach still allowed. Until Phase 42
-  lands, a set still splits into surface-disjoint chains, and only the
+  its Legs. ADR 0074 d1 makes it one per project per schedule run: a
+  project's serial members (by their first `projects:` link) share one chain
+  whatever their surfaces, worked by one Leg at a time; a member with no
+  project is grouped by surface and dependency alone; a set-aside row never
+  holds the rows that do not depend on it; and two projects' chains still run
+  side by side (ADR 0067 d4, d9). ADR 0074 d3 (proposed, to be built by Phase
+  42) also refuses any row that commits to a checkout other than the one it
+  launches from, read-only reach still allowed; until it lands, only the
   refusals **Serial rollout** names apply.
 - **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
   In order: execute's git-env check, `leg.py begin`, the preflight (the
