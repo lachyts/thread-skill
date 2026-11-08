@@ -26,8 +26,10 @@
 #        smoke list (L13g, L13o); restarted: its checks, in order
 #   L14  the hold (ADR 0060): live and ready hold the whole claim, stuck only its set-aside row's surface; begin's
 #        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
-#        row's surface, and status's restart names it as its blocker; a re-check that fails is exit 3 too and status's
-#        blocker (L14f); a stuck chain with a row in progress, or no Queue rows, holds its whole claim with a warn (L14h)
+#        row's surface, and status's restart names it as its blocker; a held begin is a begin wait (`waiting`,
+#        beginWait held, P41-3), and so is a re-check unanswered after its retry, which status reads with no retry
+#        (L14u); a re-check that fails is exit 3 too, still halted, and status's blocker (L14f); a stuck chain with a row
+#        in progress, or no Queue rows, holds its whole claim with a warn (L14h)
 #   L15  claim stamps one leg_base per checkout the row works (a file token's checkout, its launch folder's; the vault
 #        never), and status's hold carries the order's began stamp and the open Leg (ADR 0067 d2, d4)
 #   L16  Chain copies (ADR 0067 d2): `copies` makes each checkout's worktree on chain/<rollout> under the copy dir, cut
@@ -1131,13 +1133,29 @@ snap; SESS=s2 leg begin --cwd "$F" --dry-run
 ok "$rc|$(q 'd["exit"]')" "3|3" "L14: begin --dry-run runs the re-check too: exit 3"; same "L14: --dry-run"
 snap; SESS=s2 leg begin --cwd "$F"
 ok "$rc|$(q 'd["held"]')" "3|[{'rollout': '$B', 'token': 'vault:Work/Projects/A'}]" "L14: begin is exit 3, naming what holds it"
-ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=halted reason=\"surface held: [[$B]] holds vault:Work/Projects/A\"" \
-   "L14: … its status line"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=waiting reason=\"begin wait: surface held: [[$B]] holds vault:Work/Projects/A\"" \
+   "L14: … its status line is a begin wait (waiting, never halted: P41-3)"
+ok "$(q 'd["beginWait"]')" "held" "L14: … beginWait held"
 has "$(q 'd["error"]')" "this chain waits its turn" "L14: … and its error says it waits its turn"
 same "L14: a held begin writes nothing"
 subst "$T/$B.md" 'status: open' 'status: dropped'
 SESS=s2 leg begin --cwd "$F"
 ok "$rc|$(q 'd["leg"]')|$(q '[x["task"] for x in d["smoke"]]')" "0|2|['t1']" "L14: once that chain is dropped, Leg 2 begins"
+# A re-check that never answers is a begin wait too (P41-3): 60 s, then once more at 180 s, then `unanswered`
+scen l14u
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2
+snap; cp "$T/t1.md" "$TMP/snap-t1"; THREAD_LEG_RECHECK_TIMEOUT=0.001 THREAD_LEG_RECHECK_RETRY=0.001 leg begin --cwd "$F"
+ok "$rc|$(q 'd["exit"]')|$(q 'd["beginWait"]')" "3|3|unanswered" "L14u: a re-check unanswered after its retry is exit 3, beginWait unanswered"
+has "$(q 'd["status_line"]')" "state=waiting reason=\"begin wait: surface re-check unanswered: no answer in " \
+   "L14u: … its status line is a begin wait, never halted"
+ok "$(q 'd["error"].startswith("surface re-check unanswered: no answer in 0.001+0.001 s")')" True "L14u: … its error names both runs"
+same "L14u: an unanswered begin writes nothing"
+cmp -s "$T/t1.md" "$TMP/snap-t1"; ok "$?" 0 "L14u: … and its first row's task is byte-identical"
+THREAD_LEG_RECHECK_TIMEOUT=0.001 leg status
+ok "$(q 'd["restart"]["blockedBy"].startswith("surface re-check unanswered: no answer in 0.001 s")')" True \
+   "L14u: status's own read runs once, with no retry, and names it as the restart's blocker"
+THREAD_LEG_RECHECK_TIMEOUT=0.001 THREAD_LEG_RECHECK_RETRY=60 leg begin --cwd "$F"
+ok "$rc|$(q 'd["leg"]')" "0|1" "L14u: a first run that times out and a retry that answers: Leg 1 begins"
 # The re-check fails closed: a --rollout outside --tasks-dir gives a --resume naming no note there, so the check exits 2
 scen l14f
 mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2
@@ -2607,6 +2625,7 @@ ok "$(q 'd["restart"]["task"]')|$(q 'd["restart"]["blockedBy"]')" "b1|surface he
 snap; CWD="$C2" leg begin --cwd "$C2"
 ok "$rc|$(q 'd["held"]')" "3|[{'rollout': '$RO1', 'token': 'repo:$R//f.txt'}]" "L18k (k3): B's begin is exit 3"
 has "$(q 'd["status_line"]')" "surface held: [[$RO1]] holds repo:$R//f.txt" "L18k (k3): … surface held"; same "L18k (k3): … nothing written"
+has "$(q 'd["status_line"]')" "state=waiting reason=\"begin wait: " "L18k (k3): … a begin wait, never a halt"
 RO=$RO1; CWD="$C1" leg status
 ok "$(q 'd["restart"]["task"]')|$(q 'd["restart"]["blockedBy"]')" "x1|None" "L18k (k3): X's restart is the finish of x1, unblocked"
 CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" leg claim --task x1 --inherit; ok "$rc" 0 "L18k (k4): X's Leg 2 takes x1"
