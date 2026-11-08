@@ -2473,8 +2473,9 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if status == "blocked" and kind == "own" and first.lower().startswith("merge-task"):
         # The reason's own cause (ADR 0068 d4), the same text the Run record's reasonClass reads: a red-check line
         # printed before an infra rerun that a later `ERROR:` line follows is no fixable text of this stop.
-        # A stop on GitHub's side (ADR 0069 d3: required checks that never appeared, no red check in the cause) is no
-        # human's either: it falls through to the budget and the infra cool-down (_retry_class reads it infra).
+        # A stop on GitHub's side (ADR 0069 d3: required checks that never appeared, or ADR 0073 d4: a CANCELLED
+        # required check, no red check in the cause) is no human's either: it falls through to the budget and the infra
+        # cool-down (_retry_class reads it infra).
         cause = rr._merge_task_cause(reason)
         if not any(f in cause for f in rr.MERGE_TASK_FIXABLE) and not rr._merge_task_infra_stop(reason):
             stop = cause.split("\n", 1)[0].strip()

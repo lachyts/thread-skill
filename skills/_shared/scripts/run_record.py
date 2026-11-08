@@ -138,7 +138,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
   ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
-                     not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
+                     not checked as an enum; reconcile-rollout.py's table writes quota | call-failed | ci-timeout |
                      merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
                      needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
@@ -148,8 +148,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      Integration, `integration: verifier red: …`, and merge-gate (ADR 0068) is a merge-task stop
                      whose own cause (the reason from its last `ERROR:` line to the end) is a red required check
                      after the verifier passed, which reflect traces to schedule step 2.5 when the check runs a
-                     class the verifier never runs); setAsideAt? (run | integration | gate); stamp?; reconciledAt?
-                     (as slot-freed)
+                     class the verifier never runs, and ci-timeout (ADR 0073 d4) is a merge-task stop whose own
+                     cause is a CANCELLED required check, a CI timeout on GitHub's side); setAsideAt? (run |
+                     integration | gate); stamp?; reconciledAt? (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt | origin: mark-integrating's origin-lane refusal, ADR
                      0064, the lead yielding its lane to another rollout's Integration on the same origin); path?;
