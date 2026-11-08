@@ -5,10 +5,14 @@ Status: accepted, not built. Grilled with Lachy on 2026-11-07 in the Leg 1 sessi
 `reference-loop-rollout-2026-11-06-2`, after that Leg's begin stopped on a surface re-check that timed out and its
 needs-you push reached nobody. Written by Phase 41 · Task 1 (`thread-skill-p41-1-adr-0075-rollouts-wait-and-never-notify`);
 P41-2 to P41-6 and one Chorus task build it. Supersedes ADR 0038 d3 (the ntfy fallback), ADR 0048's launchd fallback
-(its *How p29-7 built it*) and every notice of ADR 0066 (d2's Notice, and each notice its 2026-11-05 amendment sends
-or bundles: item 4's timeout notice, item 5's cadence, item 6's refused-tip notice and `ntfy-push.py` bundle row, and
-item 9's job-spell notice). Amends ADR 0034 d3 ("pushed once") and ADR 0067 d2 (a note without `chain_copies:` no
-longer works in place).
+(the last sentence of its Decision bullet *Catch what is not a hold*, "When Chorus is not running, a launchd job reads
+it instead and only notifies Lachy", and *The launchd fallback* in its *How p29-7 built it*) and every notice of ADR
+0066 (d2's Notice, and each notice its 2026-11-05 amendment sends or bundles: item 4's timeout notice, item 5's
+cadence, item 6's refused-tip notice and `ntfy-push.py` bundle row, and item 9's job-spell notice). Overturns ADR
+0048's rejection of its Considered option *The watchdog in one place*: the Watchdog is Chorus's alone (d5). Amends
+ADR 0034 d3 ("pushed once"), ADR 0067 d2 (schedule gives every new chain its Chain copies; d2's in-place branch, for
+a note without `chain_copies:`, survives only as the reader for a note written before this ADR, d4) and ADR 0067 d4's
+token rule (a bare `repo:<toplevel>` cell in a copied chain stands against an in-place peer only, d4).
 
 ## Context
 
@@ -64,17 +68,20 @@ ends the turn `waiting`, and the heartbeat re-enters, never § 7.
 the checkouts it runs from: no PushNotification, no ntfy publish, no notify-only launchd job, no mail. This supersedes
 ADR 0038 d3 (an undelivered push falls back to ntfy), ADR 0048's launchd fallback (`watchdog.py check` notifies when
 Chorus is not running) and every notice of ADR 0066 (d2's 24-hour Notice, and its 2026-11-05 amendment's timeout
-notice, notice cadence, refused-tip notice and job-spell notice). It
-amends ADR 0034 d3: a gate found mid-run is set aside and listed, never pushed. A Needs-you item stays in the report's
-`Needs you:` block and in the rollout note, for a sitting he chooses. A Primary checkout that stays stuck stays in
-`primary-refresh.py`'s state file and in `/thread:status`. The `[notify]` table is retired: `rollout-settings.py`
-tolerates it with one warning and never refuses a file for it, since removing a key must never halt every rollout.
+notice, notice cadence, refused-tip notice and job-spell notice). It amends ADR 0034 d3: a gate found mid-run is set
+aside and listed, never pushed. A Needs-you item stays in the report's `Needs you:` block and in the rollout note, for
+a sitting he chooses. A Primary checkout that stays stuck stays in `primary-refresh.py`'s state file, and
+`/thread:status` reads it there: P41-5 adds a Primary refresh line under its engine line, so a sitting sees it. The
+`[notify]` table is retired: `rollout-settings.py` tolerates it with one warning and never refuses a file for it,
+since removing a key must never halt every rollout.
 
 **d3. The only signal is Chorus's Companion lead, read off an honest `halted` line.** When Lachy is at the Mac in
 Chorus, the Companion leads him to a rollout that has stopped as a whole and needs him; that is the one signal, and it
-is Chorus's. This repo's part is to keep the line it reads honest. A turn ends `state=halted` only for a stop that is
-Lachy's to clear and that stops the whole rollout or chain. A Begin wait ends `waiting` (d1). A single set-aside never
-ends a turn `halted`: it stays listed in the rollout note and the report for a sitting he chooses, and leads nowhere.
+is Chorus's. This repo's part is to keep the line it reads honest. A turn ends `state=halted` only when the rollout
+or chain has really stopped as a whole, never for a wait (a Begin wait ends `waiting`, d1) or a single set-aside.
+Which halt leads him is Chorus's reading (its `halts.py`, `HIS_HEADS`), and every other halt goes to Upkeep for
+repair. A single set-aside stays listed in the rollout note and the report for a sitting he chooses, and leads
+nowhere.
 
 **d4. No serial chain works in place.** Every serial note gets `chain_copies:` when it is scheduled: schedule's
 Serial path S5 runs `leg.py copies` for every chain, unconditionally. The in-place branch that ADR 0067 d2 left for a
@@ -100,6 +107,8 @@ Chorus's alone.
   `/thread:status` already hold everything it would say.
 - **Keep the launchd fallback for rollouts run outside Chorus:** declined. It only notified, and d2 removes the
   notice; with nothing to send it has nothing to do. A rollout outside Chorus is read when he runs `/thread:status`.
+  That gap was ADR 0048's reason to reject *The watchdog in one place*; with no notice left to send, it no longer
+  holds.
 - **Skip the check on a timeout:** declined. A Leg that begins without a passing check can write a place another chain
   holds.
 
@@ -117,11 +126,12 @@ Chorus's alone.
 
 - The build is P41-2 (the check scans the vault once), P41-3 (the Begin wait in `leg.py`, legs.md and execute § 4.5),
   P41-4 (`moving` reads waiting Legs), P41-5 (every rollout notification removed: `ntfy-push.py`, `watchdog.py` and
-  their tests deleted, execute § 6.5's push rules dropped, `primary-refresh.py`'s notices dropped, `[notify]` ignored
-  with a warning) and P41-6 (no chain works in place). One Chorus task follows P41-4: its Watchdog takes `moving`'s
-  serial verdicts.
-- Until P41-5 lands, execute § 6.5 still pushes and falls back to ntfy, and CONTEXT.md's **Needs-you item** says so
-  beside this decision.
+  their tests deleted, execute § 6.5's push rules dropped, `primary-refresh.py`'s notices dropped and its state file's
+  stuck spells read by a Primary refresh line in `/thread:status`, `[notify]` ignored with a warning) and P41-6 (no
+  chain works in place). One Chorus task follows P41-4: its Watchdog takes `moving`'s serial verdicts.
+- Until P41-5 lands, execute § 6.5 still pushes and falls back to ntfy, and `primary-refresh.py` still sends its
+  notices; CONTEXT.md's **Needs-you item**, **Primary refresh** and **Rollout settings** entries say so beside this
+  decision, and P41-5 drops those interim clauses.
 - `primary-refresh.py`'s self-update contract (ADR 0066's 2026-11-05 amendment, items 6 and 7) still holds. Dropping
   `ntfy-push.py` from its bundle table is a table drop, which the installed copy removes on its next fetched pass;
   `background_job.py`'s interface is frozen additive only, so its ntfy call may stay in the module, unused.

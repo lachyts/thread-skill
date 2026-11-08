@@ -1031,12 +1031,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
   Fast-forward only: a diverged checkout, or one with an uncommitted edit
   origin would overwrite, is left as it is (an edit origin never touches rides
-  along; `refused` only once the hold is clear), and Lachy hears when one stays
-  unable to catch up for a day, a rollout's hold included, then once more for
+  along; `refused` only once the hold is clear). One that stays unable to
+  catch up, a rollout's hold included, stays in the job's state file and sends
+  no notice (ADR 0075 d2); from P41-5 `/thread:status` reads it there. Until
+  P41-5, primary-refresh.py still sends its notices through ntfy-push.py:
+  Lachy hears when one stays unable to catch up for a day, then once more for
   each new cause (ADR 0066, as amended 2026-11-05). It runs an installed bundle
   that updates itself only after a smoke run with the job's own argv and a real
-  fetch, and it reports a launchd job an update left stale. _Avoid_: auto-update,
-  plugin update (Claude Code's own verb).
+  fetch, and it records a launchd job an update left stale in the same state
+  file (until P41-5, one of its notices). _Avoid_: auto-update, plugin update
+  (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never
   the **Primary checkout**'s working state) and named on it: the
@@ -1278,8 +1282,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   moves on, a merge hold's release, or a halt. The lead lists it in the
   report's `Needs you:` block and in the rollout note, for a sitting Lachy
   chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Only a
-  halt that stops the whole rollout leads anywhere, and only through Chorus's
-  Companion while he is at the Stage (d3); a single set-aside stays listed.
+  halt that stops the whole rollout can lead anywhere, and only through
+  Chorus's Companion while he is at the Stage, when Chorus reads it as his
+  (d3); a single set-aside stays listed.
   Until P41-5 builds that, execute § 6.5 still pushes each item once (falling
   back to ntfy when the push does not reach him), deduped on its line in the
   rollout note's `## Needs-you log`; an item whose delivery failed on every
@@ -1575,9 +1580,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   at each loop entry. That read validates the whole file, so a refused file
   halts every rollout on the machine at its next entry; the file carries its
   schema version, and a snapshot ignores a key newer than itself while still
-  refusing a typo (ADR 0043). The `[notify]` table is retired (ADR 0075 d2):
-  from P41-5 it is tolerated with one warning and never refused.
-  _Avoid_: hardcoded defaults, config.
+  refusing a typo (ADR 0043). The `[notify]` table is retired by ADR 0075 d2:
+  from P41-5 it is tolerated with one warning and never refused. Until P41-5,
+  its `ntfy_topic` still feeds execute § 6.5's ntfy fallback (the **Needs-you
+  item**), tune.py's guard still refuses a Tuning whose edit would change it,
+  and `rollout-settings.py`'s JSON says only whether a topic is set, never the
+  topic. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 
