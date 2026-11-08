@@ -1,16 +1,17 @@
-# `make test` on every PR and every push to master. ADR 0025 makes both jobs required status checks
-# on master (strict), so a PR re-tests against the updated base before it can merge.
+# The fast tier on every PR (ADR 0073 d3): `make test-fast` against the PR's base, on both OSes (macOS stays in the
+# gate for BSD vs GNU tools). ADR 0025 makes both jobs required status checks on master (strict), so a PR re-tests
+# against the updated base before it can merge. The full suite runs on every push to master, split into shards, in
+# full-suite.yml; master's red is that run's, never a PR's.
 #
 # The job names ARE the required-check contexts: "make test (ubuntu-latest)" and
 # "make test (macos-latest)". Renaming the job, or changing a matrix value, leaves the old contexts
 # unreported and every PR waiting forever. Change the protection in the same breath (ADR 0025 records
-# the payload and the command).
+# the payload and the command). No job-level `if:` either: a skipped required job reports success.
+# tests/ci-workflows.test.mjs pins all of this.
 name: test
 
 on:
   pull_request:
-  push:
-    branches: [master]
 
 permissions:
   contents: read
@@ -25,9 +26,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
+      # Full history, so the PR's base sha and `git merge-base` resolve: at depth 1 the selector reads FULL.
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -47,6 +50,11 @@ jobs:
       # timeout-minutes was 40 until 2026-11-07: by then the suite had grown so a passing macOS job took 31 to 39
       # min, and 7 of the last 40 macOS jobs (3 on master) were cancelled at exactly 40 with no test failing. 60 is
       # headroom while the suite is split across parallel jobs; it is no target, so a job near it is a finding.
-      - run: make test
+      # p43-6 brings it back down once the fast tier and the split have been measured.
+      # THREAD_VERIFY_BASE is the PR's base sha. The checkout is the PR's merge ref, so its merge base with the base sha
+      # is that sha and the diff is exactly what the PR lands; a base that moved after the event only grows the diff
+      # (slower, never wrong). A diff that touches a FULL path runs the full suite here, inside the same 60 minutes.
+      - run: make test-fast
         env:
           THREAD_TEST_JOBS: "4"
+          THREAD_VERIFY_BASE: ${{ github.event.pull_request.base.sha }}

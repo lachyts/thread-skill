@@ -402,6 +402,19 @@ setfm "$A" auto_retries_used 2
 I=$(INOW=2026-10-03T12:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["humanFix"]["act"]]')" '[false,"budget: 2/2 used","hand back or defer"]' \
   "A5c-int: the budget still bounds it (H10 once spent)"
+# A5c-cancel (ADR 0073 d4): merge-task's CANCELLED required check (a CI timeout, after its one re-run) is GitHub's stop
+# too: set aside at Integration with the GitHub-side opening, it retries as infra after the cool-down, never a human's.
+GH_CANCEL="ERROR: a REQUIRED check was CANCELLED on PR #5: a CI timeout or another stop on GitHub's side, no test failed; cancelled again after 1 re-run of its failed jobs: ci (run 7). Nothing was merged (ADR 0073 d4: GitHub-side, the automatic retry takes it)."
+scen a5c-int-cancel
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration "merge-task exit 1, GitHub-side: $GH_CANCEL"
+I=$(INOW=2026-10-03T08:05:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"], d["humanFix"]]')" '["infra",false,"2026-10-03T08:15+00:00",null]' \
+  "A5c-cancel: a cancelled required check at Integration → infra, cooling 15 minutes, no human fix"
+ANOW=2026-10-03T08:15:00Z ar "$A"
+ok "$rc|$(fm "$A" status)" "0|status: review" "A5c-cancel: past the cool-down → review"
+ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","infra"]' \
+  "A5c-cancel: stage integrate, setAsideAt integration, retryClass infra"
 # The second control: a `ci<TAB>fail` cell after the never-appeared line, as the flattened one-line reason carries it.
 GH_FAIL="$GH_NEVER ci"$'\t'"fail"$'\t'"1m"$'\t'"https://github.com/o/r/actions/runs/7/job/8"
 for c in "gate|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate is in the way" \

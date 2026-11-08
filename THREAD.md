@@ -751,7 +751,9 @@ scheduled 2026-07-15.
   2026-09-25; both were withdrawn by Lachy, not approved).
 - **2026-09-23:**
   - **Tests:** `make test` is the one test entrypoint and the self-rollout verifier. New suites join by
-    filename. `make release-check` verifies the version-keyed cache after a release.
+    filename. `make release-check` verifies the version-keyed cache after a release. (since 2026-11-08, p43-2:
+    the self-rollout's verifier is `make test-fast`, the fast tier; `make test` is its completion verifier; ADR
+    0073 d1)
   - **Base branch:** the rollout base is the repo's GitHub default. The argument is
     `defaultBranch`, never `baseBranch`, which protocol 4 owns. The resolver stops rather than assume
     `main`.

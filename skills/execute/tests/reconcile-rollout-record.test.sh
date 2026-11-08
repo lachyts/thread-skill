@@ -422,13 +422,22 @@ mgok mg8 117 "$GATE" merge-task "the mark, a rerun, then a non-check gate: the l
 out=$(mgc mg9 118 'merge-task exit 1, GitHub-side: ERROR: required checks never appeared for PR #118 — no CI runs in flight on its head SHA, nothing is coming' integration)
 ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg9 set-aside:mg9" "mg9 the GitHub-side exit 1 at Integration: lane-freed, set-aside"
 ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","merge-task","integration"]' "mg9 the GitHub-side exit 1 at Integration: integrate, merge-task, integration"
+# mg10 (ADR 0073 d4): a CANCELLED required check (a CI timeout) set aside at Integration reads reasonClass ci-timeout, a
+# class of its own; mg11, the same cause with a `fail` cell after it, is no GitHub-side stop and stays merge-task.
+CANCEL="ERROR: a REQUIRED check was CANCELLED on PR #119: a CI timeout or another stop on GitHub's side, no test failed; cancelled again after 1 re-run of its failed jobs: ci (run 7)."
+out=$(mgc mg10 119 "merge-task exit 1, GitHub-side: $CANCEL" integration)
+ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg10 set-aside:mg10" "mg10 a cancelled required check at Integration: lane-freed, set-aside"
+ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","ci-timeout","integration"]' "mg10 a cancelled required check at Integration: integrate, ci-timeout, integration"
+out=$(mgc mg11 120 "merge-task exit 1, GitHub-side: $CANCEL ci"$'\t'"fail"$'\t'"40m" integration)
+ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","merge-task","integration"]' "mg11 a fail cell in its cause: merge-task, never ci-timeout"
 ok "$(python3 - "$SCRIPT" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(m.MERGE_GATE_MARK in m.MERGE_TASK_FIXABLE, m.MERGE_GATE_MARK)
 PY
 )" "True a REQUIRED check FAILED on PR" "MERGE_GATE_MARK is MERGE_TASK_FIXABLE's red-check text"
-for frag in "a REQUIRED check FAILED on PR" "triggered — re-watching required checks" "required checks never appeared for PR #" "a NON-check gate"; do
+for frag in "a REQUIRED check FAILED on PR" "triggered — re-watching required checks" "required checks never appeared for PR #" "a NON-check gate" \
+            "a REQUIRED check was CANCELLED on PR #"; do
   ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "12d: \"$frag\" is merge-task.sh's text"
 done
 

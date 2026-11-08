@@ -1270,6 +1270,92 @@ test('declines: a no closes the cycle; one later rollout is neither new nor offe
   assert.deepEqual([c3.counts.rules, c3.quiet], [1, false])
 })
 
+// ---- the suite readings (ADR 0073 d5): the Suite budget and CI headroom, on the week's median ------------------------
+
+const TS_ORIGIN = 'https://github.com/lachyts/thread-skill.git'
+let suiteN = 0
+// One suite-ended line: a completion suite names no task.
+const suiteEnded = (ts, by, seconds, outcome = 'green') => [ts, 'suite-ended', by === 'completion' ? null : 't1',
+  { suite: `s-${(++suiteN).toString(16).padStart(16, '0')}`, by, runner: by === 'task' ? 'agent' : 'lead', outcome, seconds }]
+// One ci-headroom line (lead-integrate.py ci-headroom's shape).
+const ciRow = (ts, job, seconds, { limit = 60, conclusion = 'success', repo = 'lachyts/thread-skill' } = {}) =>
+  [ts, 'ci-headroom', 't1', { repo, pr: 7, job, seconds, conclusion, timeoutMinutes: limit, limitSource: 'workflow', runId: 11 }]
+const MAC = 'make test (macos-latest)'
+const UBU = 'make test (ubuntu-latest)'
+// A week of suites and CI jobs, each reader's row planted outside the window too (2026-08-20): absent from every group.
+const suiteWeek = () => byTs([
+  ...life('t1', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] }),
+  suiteEnded(W(4, '00:30'), 'task', 400), suiteEnded(W(4, '01:05'), 'integration', 200), suiteEnded(W(5, '00:00'), 'race', 260),
+  suiteEnded(W(5, '01:00'), 'integration', 9000, 'stopped'),          // no verdict: no time
+  suiteEnded(W(6, '00:00'), 'completion', 1500),
+  suiteEnded('2026-08-20T00:00:00Z', 'integration', 5000),             // outside: the median would be 330, past 300
+  ciRow(W(4, '01:08'), MAC, 2880), ciRow(W(5, '02:00'), MAC, 3000), ciRow(W(6, '02:00'), MAC, 2950),
+  ciRow(W(4, '01:08'), UBU, 1800), ciRow(W(5, '02:00'), UBU, 1850), ciRow(W(6, '02:00'), UBU, 3600, { conclusion: 'cancelled' }),
+  ciRow('2026-08-20T00:00:00Z', MAC, 10),                              // outside: the median would be 2915
+])
+
+test('span: suite reads local suites against the Suite budget and CI jobs against 80 % of their limit, the window\'s rows alone', (t) => {
+  const h = setup(t, { origin: TS_ORIGIN })
+  emitAll(h, 'suite-a', suiteWeek())
+  rolloutNote(h, 'suite-a')
+  const s = span(h)
+  const at = (ts) => new Date(ts).toISOString()
+  assert.deepEqual(s.suite.local.map((g) => [g.repo, g.tier, g.runs, g.medianSeconds, g.budgetSeconds, g.breach, g.first, g.last, g.rollouts]), [
+    ['lachyts/thread-skill', 'full', 1, 1500, 1200, true, at(W(6, '00:00')), at(W(6, '00:00')), ['suite-a']],
+    ['lachyts/thread-skill', 'integration', 3, 260, 300, false, at(W(4, '00:30')), at(W(5, '00:00')), ['suite-a']],
+  ], JSON.stringify(s.suite.local))
+  assert.deepEqual(s.suite.ci.map((g) => [g.job, g.runs, g.timed, g.medianSeconds, g.timeoutMinutes, g.share, g.breach, g.cancelled, g.first]), [
+    [MAC, 3, 3, 2950, 60, 0.82, true, 0, at(W(4, '01:08'))],
+    [UBU, 3, 3, 1850, 60, 0.51, false, 1, at(W(4, '01:08'))],
+  ], JSON.stringify(s.suite.ci))
+  assert.deepEqual(s.suite.breaches, [
+    'lachyts/thread-skill: the full suite\'s week\'s median 1500 s is past its 1200 s Suite budget (1 run(s))',
+    `lachyts/thread-skill: ${MAC}'s week's median 2950 s is 82 % of its 60 min limit, past 80 % (3 run(s))`,
+  ])
+  assert.deepEqual([s.suite.audit.repo, s.suite.audit.due, s.suite.audit.open], ['lachyts/thread-skill', true, null])
+  assert.deepEqual(s.suite.budget, { integrationSeconds: 300, fullSeconds: 1200, ciShare: 0.8 })
+})
+
+test('span: a median at exactly 80 % of the limit, or within the budget, breaches nothing; another repo\'s breach is reported, never due', (t) => {
+  const h = setup(t)   // origin o/r: not Thread Skill's
+  emitAll(h, 'suite-o', byTs([...life('t1', W(4, '00:00'), W(4, '01:00')), ciRow(W(4, '01:08'), MAC, 2880, { repo: 'o/r' }),
+    ciRow(W(4, '02:00'), UBU, 3500, { repo: 'o/r' }), suiteEnded(W(4, '00:30'), 'integration', 300)]))
+  rolloutNote(h, 'suite-o')
+  const s = span(h)
+  assert.deepEqual(s.suite.ci.map((g) => [g.repo, g.job, g.share, g.breach]), [['o/r', MAC, 0.8, false], ['o/r', UBU, 0.97, true]])
+  assert.deepEqual(s.suite.local.map((g) => [g.repo, g.tier, g.breach]), [['o/r', 'integration', false]])
+  assert.equal(s.suite.audit.due, false, 'o/r is not Thread Skill\'s repo')
+  assert.equal(ok(h, ['suite-audit', '--span', path.join(h.out, 'span.json'), '--tasks-dir', h.tasks]).stdout,
+    'no suite budget breach on lachyts/thread-skill: no audit task\n')
+  assert.deepEqual(listing(h.tasks).filter((f) => f.endsWith('.md')), ['suite-o.md'], 'no task filed')
+})
+
+test('suite-audit: a week whose median crosses 80 % files one audit task; the next week cites it, never filing twice', (t) => {
+  const h = setup(t, { origin: TS_ORIGIN })
+  emitAll(h, 'suite-a', suiteWeek())
+  rolloutNote(h, 'suite-a')
+  const s1 = span(h)
+  const sp1 = path.join(h.out, 'span-week1.json')
+  fs.copyFileSync(path.join(h.out, 'span.json'), sp1)
+  const slug = 'thread-skill-suite-audit-2026-09-10'
+  assert.equal(ok(h, ['suite-audit', '--span', sp1, '--tasks-dir', h.tasks]).stdout, `filed ${slug}\n`)
+  const p = path.join(h.tasks, `${slug}.md`)
+  const text = fs.readFileSync(p, 'utf8')
+  assert.ok(text.includes(`\nbug_key: ${s1.suite.audit.key}\n`), text)
+  assert.ok(text.includes(`${MAC}'s week's median 2950 s is 82 % of its 60 min limit`), 'its why names the breach')
+  assert.equal(ok(h, ['suite-audit', '--span', sp1, '--tasks-dir', h.tasks]).stdout, `filed ${slug}\n`, 'a repeat prints the first outcome')
+  // the next week: the macOS job is past 80 % again
+  emitAll(h, 'suite-a', [ciRow('2026-09-11T00:00:00Z', MAC, 3100), ciRow('2026-09-12T00:00:00Z', MAC, 3050)])
+  const s2 = span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })
+  assert.deepEqual(s2.suite.ci.map((g) => [g.job, g.runs, g.breach]), [[MAC, 2, true]], 'last week\'s rows are not this week\'s')
+  assert.deepEqual(s2.suite.audit.open, { slug, status: 'open' })
+  assert.equal(ok(h, ['suite-audit', '--span', path.join(h.out, 'span.json'), '--tasks-dir', h.tasks]).stdout, `cites ${slug}\n`)
+  assert.deepEqual(listing(h.tasks).filter((f) => f.startsWith('thread-skill-suite-audit-')), [`${slug}.md`], 'one audit task')
+  assert.equal(fs.readFileSync(p, 'utf8'), text, 'the open audit is untouched')
+  const lines = rlines(h).filter((l) => l.kind === 'proposal' && l.id === s1.suite.audit.key)
+  assert.deepEqual(lines.map((l) => [l.reflection, l.filed, l.vaultTask]), [[s1.reflection, true, slug], [s2.reflection, false, slug]])
+})
+
 // ---- bug ---------------------------------------------------------------------------------------------------------------
 
 const bugArgs = (h, sp, { slug = 'grill-misses-gates', rollouts = ['a', 'b'], fixes, rule = RULE, shape = SHAPE } = {}) =>

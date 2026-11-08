@@ -1003,8 +1003,9 @@ chains in Chain copies while the holder's Leg is open. Each chain
 works every git checkout it writes in its own **Chain copy** (ADR 0067 d2): S5's `leg.py copies` makes a git
 worktree of that checkout on `chain/<note>` under `~/.local/state/thread/chains/` and records it on the note as
 `chain_copies:`, so two chains in one repo share no index or HEAD and meet only file to file; `leg.py land` lands each
-finished task's commits on the checkout's default branch as it finishes (ADR 0067 d3). A note written before
-Chain copies (no `chain_copies:`) still works each checkout in place, a chain at a time. A
+finished task's commits on the checkout's default branch as it finishes (ADR 0067 d3). S5 gives every note it writes
+its Chain copies (ADR 0075 d4); only a note written before them (no `chain_copies:`) still works each checkout in
+place, a chain at a time. A
 member predicts each path its `## Launch` names below a checkout's toplevel, each of its `touches:` (a relative one
 in its one checkout) and each surface added for it, or exactly what it declares in `surfaces:`. Its reach paths name
 the checkout it works and predict nothing there: its launch folder, its launch commands' `--add-dir` and `cd` paths
@@ -1133,7 +1134,7 @@ Then stamp each note written with the Engine snapshot, as step 6 does: `python3 
 
 After the adopt, a note it stamped `completion_verifier:` on gets step 6's *Check the stamped commands*: `python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>` (from `${CLAUDE_PLUGIN_ROOT}` after a cut exit 4), read-only, which reads the stamped keys with the completion verify's own reader. Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`.
 
-Then each note's Chain copies (ADR 0067 d2): `python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>` (from `${CLAUDE_PLUGIN_ROOT}` after a cut exit 4), after the adopt and any `verify-timeout`. It makes a git worktree of each checkout the chain writes, on `chain/<the note's slug>`, under `~/.local/state/thread/chains/` (cut from the checkout's local default branch), links each gitignored `.mcp.json` and `.claude/settings.local.json` into it, and stamps `chain_copies:` on the note. Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true` (a re-run of `copies` on it keeps the copies it made); carry its `warns` to S7.
+Then each note's Chain copies (ADR 0067 d2): `python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>` (from `${CLAUDE_PLUGIN_ROOT}` after a cut exit 4), after the adopt and any `verify-timeout`. It makes a git worktree of each checkout the chain writes, on `chain/<the note's slug>`, under `~/.local/state/thread/chains/` (cut from the checkout's local default branch), links each gitignored `.mcp.json` and `.claude/settings.local.json` into it, and stamps `chain_copies:` on the note. It runs for every note written, unconditionally (ADR 0075 d4: no serial chain works in place), so a vault-only chain's note gets `chain_copies: []`. Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true` (a re-run of `copies` on it keeps the copies it made); carry its `warns` to S7.
 
 **S6. Stamp.** Each member of each note written gets `rollout: "[[<its note>]]"`, step 7's clear (its second
 bullet), its `depends-on:` entries from S4, on every run step 7's `## Decisions (recorded <date>)` Planner
