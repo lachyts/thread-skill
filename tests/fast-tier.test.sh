@@ -502,7 +502,8 @@ has "$out" "  - shard split" "F14: … through the shard split step"
 git -C "$F" checkout -q -- tests/lib/shard.py
 
 # F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
-# mid-run still shows every suite that finished; the grouped blocks print before node; the verdict carries the seconds.
+# mid-run still shows every suite that finished (F15's sentinel case: one suite's line while another still runs); the
+# grouped blocks print before node; the verdict carries the seconds.
 # lnum <ERE>: the number of the first line of $out that matches <ERE>, else 0. lines <ERE>: how many lines match.
 lnum() { local l; l=$(printf '%s\n' "$out" | grep -nE "$1" | head -1 | cut -d: -f1); echo "${l:-0}"; }
 lines() { printf '%s\n' "$out" | grep -cE "$1"; }
@@ -514,12 +515,33 @@ early=""
 for l in 'tests/zza\.test\.sh' 'tests/zzb\.test\.sh' 'merge-task classifier self-test' 'merge-task base self-test'; do
   e=$(lnum "^$l: ok \([0-9]+s\)$"); [ "$e" -gt 0 ] && [ "$e" -lt "$blk" ] && early="${early}y" || early="${early}n"
 done
-ok "$rc15|$early" "0|yyyy" "F15: each shell suite and self-test prints its own ok line, all before the first grouped block (printed before wait returned)"
+ok "$rc15|$early" "0|yyyy" "F15: each shell suite and self-test prints its own ok line, all before the first grouped block"
 ok "$([ "$blk" -gt 0 ] && [ "${lastblk:-0}" -lt "$nodel" ] && echo y || echo "blocks $blk..${lastblk:-0}, node $nodel")" y \
   "F15: … and every grouped block prints before node runs"
 ok "$(lines '^fast-tier map check: ok \([0-9]+s\)$')|$(lines '^node tests \(1 files\): ok \([0-9]+s\)$')" "1|1" \
   "F17: a step ends with its own line"
 ok "$(lines '^make test: ALL PASS \([0-9]+s\)$')" 1 "F17: … and the verdict carries the run's seconds"
+
+# A finished suite's line shows while another suite still runs, the case a cut job meets. zzb blocks on a sentinel
+# this test creates only once zza's line is in the run's output file, so a run.sh that printed the lines from the main
+# shell after `wait` never shows zza's line in time. Both waits are bounded (estate ADR 0011 d3): zzb gives up at 30 s,
+# the poll at 20 s, so a regression fails in about 20 s and never hangs the suite.
+go="$TMP/f15.go"; f15out="$TMP/f15.out"; rm -f "$go" "$f15out"
+put "$F" tests/zzb.test.sh 'n=0; while [ ! -e "$ZZ_GO" ] && [ "$n" -lt 300 ]; do sleep 0.1; n=$((n+1)); done
+[ -e "$ZZ_GO" ] || { echo "zzb: no sentinel in 30 s"; exit 1; }
+echo "zzmarker-b zzb.py zz.workflow.js released"'
+(cd "$F" && THREAD_TEST_JOBS=4 ZZ_GO="$go" bash tests/run.sh --only tests/zza.test.sh tests/zzb.test.sh > "$f15out" 2>&1) &
+f15pid=$!
+n=0; while ! grep -q '^tests/zza\.test\.sh: ok (' "$f15out" 2>/dev/null && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+seen=$(cat "$f15out" 2>/dev/null)
+: > "$go"
+wait "$f15pid"; f15rc=$?
+ok "$(holds "$seen" 'tests/zza.test.sh: ok (' y n)|$(holds "$seen" 'tests/zzb.test.sh: ' y n)|$(holds "$seen" '== tests/zz' y n)" "y|n|n" \
+  "F15: zza's ok line is in the output while zzb is still blocked on its sentinel, before any block (printed before wait returned)"
+out=$(cat "$f15out")
+ok "$f15rc|$(lines '^tests/zzb\.test\.sh: ok \([0-9]+s\)$')|$(markers)" "0|1|zzmarker-a zzmarker-b " \
+  "F15: … and once the sentinel is there, zzb ends ok and the run passes"
+git -C "$F" checkout -q -- tests/zzb.test.sh
 
 put "$F" tests/zzb.test.sh 'exit 1'
 run bash --only tests/zzb.test.sh
