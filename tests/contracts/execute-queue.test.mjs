@@ -902,6 +902,20 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !(away ?? '').includes('A whole-rollout git-env, main-red or pause hold writes none.')) {
     fails.push('main-red')
   }
+
+  // surface-wait (P41-3): a surface wait (§ 4.5 *Surface re-check*'s exit 3 or 4) is a `waiting` turn: the driver's
+  // docstring and block reason allow it, § 8's Stop-hook paragraph names it, and § 6's `waiting` bullet and reason line
+  // carry it.
+  {
+    const reasonSW = collapse(s6raw.split('\n').find((l) => l.startsWith('`reason` appears only on')) ?? '')
+    if (!drvDoc.includes('or a surface wait stands (`surface wait: …`') ||
+      !drvBlock.includes('or a surface wait stands (`surface wait: …`, the same wait') ||
+      !hookP.includes("a surface wait's too") ||
+      !waitingB.includes('or a surface wait stands (§4.5 *Surface re-check*)') || !waitingB.includes("a surface wait's (`surface wait: …`)") ||
+      !reasonSW.includes('and on a surface wait (§4.5 *Surface re-check*)')) {
+      fails.push('surface-wait')
+    }
+  }
   return [...new Set(fails)]
 }
 
@@ -915,7 +929,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat', 'race-revert', 'main-red']
+  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat', 'race-revert', 'main-red', 'surface-wait']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1613,8 +1627,18 @@ test("control: the driver's docstring or block reason without the Heat hold fail
   only(drv(' or a Heat hold stands (`heat: …`, the "\n            "same wait)', ''), 'heat', 'block reason')
 })
 
-test('the rules are all named (42) and each has a control', () => {
-  assert.equal(RULES.length, 42)
+test("control: the driver, § 8 or § 6 without the surface wait fails surface-wait (P41-3)", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(', or a surface wait stands (`surface wait: …`: the', ', the'), 'surface-wait', 'docstring')
+  only(drv(' or a surface wait stands (`surface wait: …`, the same wait: `next` launches nothing until the "', ' "'), 'surface-wait', 'block reason')
+  only(sk(", a surface wait's too, `halted`", ', `halted`'), 'surface-wait', '§ 8')
+  only(sk(', or a surface wait stands (§4.5 *Surface re-check*), or a PR hold', ', or a PR hold'), 'surface-wait', '§ 6 waiting')
+  only(sk(" a surface wait's (`surface wait: …`),", ''), 'surface-wait', '§ 6 waiting reason')
+  only(sk(', and on a surface wait (§4.5 *Surface re-check*), and on a last-starts', ', and on a last-starts'), 'surface-wait', '§ 6 reason line')
+})
+
+test('the rules are all named (43) and each has a control', () => {
+  assert.equal(RULES.length, 43)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
 
@@ -1654,7 +1678,7 @@ function checkOriginLane(skill) {
   if (!hb.includes('nor the origin wait, which holds nothing') || !hb.includes('nor an `origin lane:` reason')) fails.push('origin-heartbeat')
   if (!waitingB.includes('a task waits on the origin lane') || !waitingB.includes("an origin lane wait's (`origin lane: …`)")) fails.push('origin-waiting')
   if (!surface.includes("another project's parallel rollout in this rollout's own clone") ||
-    !surface.includes('`reason="surface held: [[<x>]] writes repo:<clone>"`')) fails.push('origin-surface')
+    !surface.includes('`reason="surface wait: [[<x>]] writes repo:<clone>"`')) fails.push('origin-surface')
   if (!lost.includes("An integrate call's resume") || !lost.includes('runs no `mark-integrating`, so it re-enters the lane with no origin-lane check') ||
     !lost.includes('the base pin keeps every merge correct')) fails.push('reentry-lost')
   if (!s14.includes('The room-stopped integrate resume,') || !s14.includes('re-enter the lane with no `mark-integrating`')) fails.push('reentry-room')

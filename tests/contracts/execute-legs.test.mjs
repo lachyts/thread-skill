@@ -19,7 +19,8 @@
 //       before the first claim, § The task loop's **Land** paragraph (never a rebase, --verified, --red, a null line,
 //       `waits: true`) and the slotted Verify rule; the rank (ADR 0067 d9): § The task loop's `wait` action, its six
 //       steps in order (land, `leg.py wait`, the stalled close, landFirst's remedies and stopped close, cleared, next)
-//       and its two Leg log forms;
+//       and its two Leg log forms; § Begin runs begin with the Bash tool's `timeout: 600000` (P41-3: its surface
+//       re-check may retry for up to 240 s), and § Report's Begin wait row;
 //   e7  the close order (leg.py close before create_thread → lists → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
 //       Complete step 4), the lock and exit 5's retry-once, the repo land lock (never nested) and the in-place peer
@@ -107,13 +108,14 @@ const TABLE = [
   '| Room stop | `waiting reason="room stop: …"` | *nothing yet* | allow |',
   '| Complete, completion verify running | `waiting reason="completion verify in flight"` | *nothing yet* | allow |',
   '| Capacity or quota wait | `waiting reason="<why>"` | *nothing yet* | allow |',   // p36-7, ADR 0067 d8
+  '| Begin wait (begin exit 3 with beginWait) | `waiting reason="begin wait: …"`, no /thread:close | *nothing yet* | allow |',   // P41-3
   '| handoff, successor started | `done reason="handed off to Leg <N+1>"` after the banner | *closed*: reports to the origin, archives | allow |',
   '| handoff, manual | `halted reason="manual handoff: Leg <N+1> in <alias> from <folder>"` | demand | allow |',
   '| complete | `done` after the banner | *closed*: the final report | allow |',
   '| stuck | `halted reason="awaiting you: <k> set aside"` | demand | allow |',
   '| stopped | `halted reason="stopped: <reason>"` | demand | allow |',
   '| halt (incl. a second lock timeout) | `halted reason="halt: <reason>"` | demand | allow |',
-  '| `begin` refused (exit 1, 3 or 4) | `halted reason="<refusal>"`, no /thread:close | demand | allow |',
+  '| `begin` refused (exit 1, 3 but a begin wait, or 4) | `halted reason="<refusal>"`, no /thread:close | demand | allow |',
 ]
 const RETIRED_ASKS = ['never as a question (the banner stays last)', 'Close never asks:', 'Close never calls the question tool',
   'never a question, never a fought hook']
@@ -198,6 +200,8 @@ function check(f, product = tree) {
   need('e6', 'legs.md § Hand over', ho, [NEVER_ALIAS])
   need('e6', 'legs.md § The task loop', loop, ['commit only there, never in the primary', '`--revert`, which reverts it there'])
   // ADR 0067 d3: begin's landFirst runs a land before the first claim; the task loop's Land paragraph and its slotted Verify.
+  // P41-3: begin may retry its surface re-check for up to 240 s, so the Bash tool must not cut it at its default 120 s.
+  need('e6', 'legs.md § Begin', C(sec(legs, 'Begin')), ['Run `leg.py begin --cwd "$PWD"` with the Bash tool\'s `timeout: 600000`'])
   need('e6', 'legs.md § Begin 0', proseUnits(sec(legs, 'Begin')).find((u) => u.startsWith('- **0.**')) ?? '', [
     '`landFirst` is true', 'before the preflight, the smoke test and the first `claim`'])
   need('e6', 'legs.md § The task loop', loop, ['**Land (ADR 0067 d3).**', 'never a rebase', '`leg.py land --verified <head>`',
@@ -406,6 +410,10 @@ test('control: a Chain copy hand-over that runs the alias fails e6', () => {
   assert.ok(line.includes('never the alias itself'), 'control setup: § Hand over\'s manual hand-over bullet')
   const r = check({ ...real, legs: real.legs.replace(line, line.replace(', never the alias itself, whose `cd` opens the primary', '')) })
   assert.deepEqual(r.fails, ['e6'], r.details.join('\n'))
+})
+
+test('control: § Begin running begin with no Bash timeout fails e6 (P41-3)', () => {
+  only('legs', 'Run `leg.py begin --cwd "$PWD"` with the Bash tool\'s `timeout: 600000`', 'Run `leg.py begin --cwd "$PWD"`', ['e6'], 'begin timeout')
 })
 
 test('control: § Begin 0 without the landFirst land fails e6', () => {

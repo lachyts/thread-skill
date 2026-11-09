@@ -15,6 +15,13 @@ recovery fails twice or what is left is a decision now means only the Companion'
 d2), ADR 0067 d2 (schedule gives every new chain its Chain copies; d2's in-place branch, for a note without
 `chain_copies:`, survives only as the reader for a note written before this ADR, d4) and ADR 0067 d4's token rule (a
 bare `repo:<toplevel>` cell in a copied chain stands against an in-place peer only, d4).
+*(As built by P41-3, with ADR 0076 d2, 2026-11-09: d1's background poll and its begin marker are dropped. A begin wait
+writes nothing and ends `waiting`; the chain stays on the Waiting list (ADR 0076 d2), and P44-3 ends the session. The
+parallel half is a surface-wait marker (`~/.config/thread/leases/<rollout>.surface-wait.json`) that only execute § 4.5's
+Surface re-check writes and deletes: a refusal or an unanswered check ends the turn `waiting` and `next` launches nothing
+while it stands; a refusal while a serial chain on an engine snapshot from before P41-3 reaches the root still halts
+(exit 5), and such a chain's own readers read parallel rollouts by the old rule. d5's begin-marker case is gone: no
+begin marker exists for `moving` to read.)*
 
 ## Context
 
