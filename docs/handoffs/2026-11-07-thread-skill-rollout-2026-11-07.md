@@ -1,7 +1,7 @@
 ---
 thread: thread-skill
 written: 2026-11-07
-status: pending
+status: consumed
 launches: thread-skill-rollout-2026-11-07
 ---
 
