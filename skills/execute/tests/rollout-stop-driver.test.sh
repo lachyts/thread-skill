@@ -67,6 +67,15 @@ T="$TMP/t2d.jsonl"
 assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="last start: held until the Morning at 09:00"' > "$T"
 run_driver "$T" s2d
 [ -z "$OUT" ] && ok "waiting on a last-starts wait allows stop" || fail "last-starts wait: expected empty, got: $OUT"
+# P41-3: a surface wait (execute §4.5 *Surface re-check*) and a serial Leg's begin wait (legs.md § Begin) are waiting turns.
+T="$TMP/t2e.jsonl"
+assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="surface wait: [[c]] writes repo:/x"' > "$T"
+run_driver "$T" s2e
+echo "$OUT" | grep -q '"decision": "block"' && fail "surface wait: expected no block, got: $OUT" || ok "waiting on a surface wait allows stop"
+T="$TMP/t2f.jsonl"
+assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="begin wait: surface held: [[b]] holds vault:Work/Projects/A"' > "$T"
+run_driver "$T" s2f
+echo "$OUT" | grep -q '"decision": "block"' && fail "begin wait: expected no block, got: $OUT" || ok "waiting on a begin wait allows stop"
 
 # --- 3. state=running → block, naming the next steps of the queue loop ---
 T="$TMP/t3.jsonl"

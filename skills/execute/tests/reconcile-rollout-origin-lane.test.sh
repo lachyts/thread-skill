@@ -13,6 +13,10 @@
 #           race; origin-wait; a merge-hold release re-enters with no check (D12); malformed, non-JSON and other-version
 #           files; another tasksDir's entries.
 #   L20     an older Engine snapshot's rollout holds while it integrates (its lease and lane-taken read alike).
+#   L21-L23 a surface wait (P41-3; execute § 4.5 *Surface wait at Integration*): a rollout with a surface-wait marker,
+#           readable or not, counts as no waiter (L21) and holds no lane (L23, an integrated task awaiting its merge
+#           included) for a task not yet integrating, an Integration already begun excepted; mark-integrating's exit 5
+#           drops the caller's own entry and only it (L22a, L22b).
 # Temp vault and local repos whose origin URLs name github.com/o/r (only `git remote get-url` reads them); a pinned HOME
 # with lease files written directly; each scenario its own THREAD_EVENTS_DIR and THREAD_NOTE_LOCK_DIR. No network.
 # Usage: bash reconcile-rollout-origin-lane.test.sh   (exit 0 = pass)
@@ -290,6 +294,61 @@ mi b1; ok "$rc" 4 "L20: A on an older snapshot, its lease fresh and its record l
 has "$err" "$HOLDER (lane taken 2026-10-02T14:01+00:00" "L20: … the holder line names A"
 rm -f "$S/home/.config/thread/leases/ra-rollout.json"
 AT=$T1 mi b1; ok "$rc" 0 "L20 control: the same A with no lease (an engine older than leases) holds nothing"
+
+# ---- L21-L23 (P41-3): a rollout in a surface wait neither waits in nor holds the origin lane for a task not yet
+# integrating, and mark-integrating's surface-wait refusal (exit 5) drops that task's own entry ----------------------
+# sw <stem> <body> — a surface-wait marker in $S/home; markj <stem> — a readable one
+sw() { mkdir -p "$S/home/.config/thread/leases"; printf '%s\n' "$2" > "$S/home/.config/thread/leases/$1.surface-wait.json"; }
+markj() { printf '{"rollout": "%s", "written_at": "2026-10-02T14:00:00Z", "since": "2026-10-02T14:00:00Z", "why": "[[c]] writes repo:/x", "holders": ["c"], "live": []}' "$1"; }
+bentry() { printf '{"version": 1, "waiting": [{"tasksDir": "%s", "origin": "o/r", "rollout": "rb-rollout", "task": "b1", "since": "2026-10-02T14:00:00+00:00", "at": "2026-10-02T14:00:00+00:00"}]}\n' "$(cd "$D" && pwd -P)" > "$(F)"; }
+scen l21; ab; bentry
+mi a2 --dry-run; ok "$rc" 4 "L21 (a): control: no marker: B's entry is a valid waiter and a2 yields"
+has "$err" "ORIGIN LANE: [[rb-rollout]] waits on o/r since 2026-10-02T14:00:00+00:00 (its [[b1]]): [[a2]] yields its turn (ADR 0064)" "L21 (a): … the yield line"
+sw rb-rollout "$(markj rb-rollout)"
+mi a2; ok "$rc" 0 "L21 (b): under B's surface wait its entry for a task not yet integrating is no waiter: a2 takes the lane"
+ok "$(fm a2 integrating | cut -c1-12)|$(entries)" "integrating:|-" "L21 (b): … stamped, and the write prunes B's entry"
+mkt a2 ra-rollout; bentry; sw rb-rollout 'not json'
+mi a2 --dry-run; ok "$rc" 0 "L21 (c): an unreadable marker spares no waiter either"
+bentry; sw rb-rollout "$(markj rb-rollout)"; mkt b1 rb-rollout review 'integrating: 2026-10-02T14:01+00:00'
+mi a2 --dry-run; ok "$rc" 4 "L21 (d): B's task already integrating still waits under the marker"
+has "$err" "ORIGIN LANE: [[rb-rollout]] waits on o/r since 2026-10-02T14:00:00+00:00 (its [[b1]]): [[a2]] yields its turn" "L21 (d): … the yield line naming B"
+scen l22a; ab
+mi a1 >/dev/null; mi b1; ok "$rc|$(entries)" "4|rb-rollout:b1:2026-10-02T14:05:00+00:00" "L22a: setup: A holds, b1 refused, B's entry written"
+sw rb-rollout "$(markj rb-rollout)"
+before=$(sum1 "$(F)")
+mi b1 --dry-run; ok "$rc|$(sum1 "$(F)")" "5|$before" "L22a: --dry-run: exit 5, the file byte-identical"
+mi b1; ok "$rc" 5 "L22a: under B's surface wait, mark-integrating exits 5"
+has "$err" "SURFACE WAIT: [[b1]]'s Integration waits: a surface wait stands on [[rb-rollout]]" "L22a: … one SURFACE WAIT: line"
+hasnt "$err" "ORIGIN LANE:" "L22a: … and no origin-lane line (no decide)"
+ok "$(entries)|$(fm b1 integrating)|$(lanes rb-rollout lane-taken)|$(lanes rb-rollout lane-freed)" "-|<none>|0|0" \
+   "L22a: … B's own entry dropped; no integrating:, no lane-taken, no lane-freed"
+rm -f "$S/home/.config/thread/leases/rb-rollout.surface-wait.json"
+AT=$T1 mi b1; ok "$rc|$(entries)" "4|rb-rollout:b1:2026-10-02T14:10:00+00:00" "L22a: control: with the marker gone, A still holds and B waits again from a fresh since"
+scen l22b; ab
+mi a1 >/dev/null
+wall=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '{"version": 1, "waiting": [{"tasksDir": "%s", "origin": "o/r", "rollout": "rb-rollout", "task": "b1", "since": "2026-10-02T14:05:00+00:00", "at": "2026-10-02T14:05:00+00:00"}, {"tasksDir": "/elsewhere/Tasks", "origin": "o/r", "rollout": "xr", "task": "x1", "since": "2026-10-01T00:00:00Z", "at": "%s"}]}\n' "$(cd "$D" && pwd -P)" "$wall" > "$(F)"
+sw rb-rollout "$(markj rb-rollout)"
+mi b1; ok "$rc|$(entries)" "5|xr:x1:2026-10-01T00:00:00Z" "L22b: the refusal drops only B's own entry: another rollout's is kept"
+scen l23; ab
+mkt a1 ra-rollout
+printf '\n## Integration log\n\n2026-10-02T13:30+00:00 integrated path=integrator pr=2 anchor=a head=b base=c wait=1 duration=1\n' >> "$D/a1.md"
+em ra-rollout lane-taken a1 '{}' 2026-10-02T13:30:00Z
+mi b1 --dry-run; ok "$rc" 4 "L23: control: A's integrated a1 awaiting its merge holds the origin lane"
+has "$err" "$HOLDER" "L23: … the holder line"
+sw ra-rollout "$(markj ra-rollout)"
+mi b1 --dry-run; ok "$rc" 0 "L23: under A's surface wait, an integrated a1 not integrating holds no lane"
+hasnt "$err" "ORIGIN LANE" "L23: … no origin-lane line"
+sw ra-rollout 'not json'
+mi b1 --dry-run; ok "$rc" 0 "L23: … nor under an unreadable marker"
+sw ra-rollout "$(markj ra-rollout)"
+mkt a1 ra-rollout review 'integrating: 2026-10-02T14:01+00:00'
+printf '\n## Integration log\n\n2026-10-02T13:30+00:00 integrated path=integrator pr=2 anchor=a head=b base=c wait=1 duration=1\n' >> "$D/a1.md"
+mi b1 --dry-run; ok "$rc" 4 "L23: control: an Integration already begun (integrating:) still holds under the marker"
+has "$err" "$HOLDER (lane taken 2026-10-02T14:01+00:00" "L23: … the holder line"
+mkt a1 ra-rollout
+printf '\n## Integration log\n\n2026-10-02T13:30+00:00 integrated path=integrator pr=2 anchor=a head=b base=c wait=1 duration=1\n' >> "$D/a1.md"
+mi b1; ok "$rc|$(fm b1 integrating | cut -c1-12)" "0|integrating:" "L23: … and off --dry-run, B takes the lane"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-origin-lane: ALL PASS"; else echo "reconcile-rollout-origin-lane: FAILED"; fi

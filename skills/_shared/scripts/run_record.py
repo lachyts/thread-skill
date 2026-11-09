@@ -169,8 +169,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
                      on a PR's hold_until, vault-grammar § Hold until | hold-heat: a row waits for the Mac to cool,
                      the Heat hold, execute away.md § Heat | hold-quota: a row waits while the lead's Login is
-                     inside its line, the quota hold, p36-7, execute away.md § Capacity); free (int >= 0); settings
-                     (as slot-taken)
+                     inside its line, the quota hold, p36-7, execute away.md § Capacity | hold-surface: a surface
+                     wait holds every launch until the rollout's own Surface re-check passes, P41-3, execute § 4.5);
+                     free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -929,7 +930,8 @@ TIME_LOST_CAUSES = {
     "rework": ("integration", "race"),
     "plan-rejected": ("plan-rejected",),
 }
-TIME_LOST_OTHER = ("pause", "pause-drain", "dependency", "solo", "queue-tail", "hold-last-start", "hold-pr", "revise")
+TIME_LOST_OTHER = ("pause", "pause-drain", "dependency", "solo", "queue-tail", "hold-last-start", "hold-pr", "revise",
+                   "hold-surface")
 TIME_LOST_SOURCES = ("record", "audit", "baseline")
 AUDIT_SOURCES = ("transcripts", "suite-logs", "pause-logs", "mac-history")
 MAX_TL_ROLLOUTS = 8        # contributors kept per class on a time-lost line
@@ -1422,6 +1424,7 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
+                                           "hold-surface",
                                            "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
                                            "hold-away-cap", "hold-last-start", "hold-quota"),
                            "free": _int(0), "settings": SETTINGS}, {}),

@@ -133,6 +133,19 @@ Subcommands:
               heavy or worse `slotLimit` is 0, Away too, so nothing new starts; a restart stops at the ceiling only. A
               row held there reads `heat: the Mac is hot (<name>)` (a full ceiling still reads `ceiling:`), and while
               one is, `halt` stays null.
+              A surface wait (P41-3; execute § 4.5 *Surface re-check*): while this rollout's surface-wait marker
+              (~/.config/thread/leases/<stem>.surface-wait.json, written and deleted only by unfinished-rollout.py's
+              `check --surface-wait`) stands, readable or not, `next` launches nothing until a check passes: with no
+              --running the live rows are the in_progress ones its `live` lists (every one under an unreadable
+              marker), the rest stalled; the awaiting rows are held aside (`awaitingIntegration` []), no seeded revise
+              is read, `slotLimit` is 0 and no Trickle waiting record is written; while no pause stands every row that
+              could start or restart is held `surface wait: <why>` (a dependency, Solo or task PR hold keeps its
+              reason; under a pause the pause's reason stays), and every awaiting row is held so whatever the branch.
+              `surfaceWait` ({why, holders, live, since, held}, why `unreadable: <why>` for an unreadable marker, held
+              the slugs a `surface wait:` reason holds; null with no marker) follows `pausedNow`. While a surface wait
+              holds a row and no pause stands, `halt` stays null; a soft pause drains past the held rows (it reads no
+              awaiting row) and stamps, so a pause still reads `paused`. Only the calls in flight and an Integration
+              already begun (`integrating:`) go on.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -170,14 +183,17 @@ Subcommands:
               it refuses while another rollout holds the origin lane: a root-level, open, parallel rollout note on the
               same origin, whatever its `engine_snapshot:`, with no `paused:` stamp, a fresh lease (lapsed, none,
               unreadable and room-stop never hold), a readable Run record whose lane names a task with no open merge
-              hold and no open halt, and that task's note holding the lane (_holds_lane). Else it refuses while a valid
+              hold and no open halt, and that task's note holding the lane (_holds_lane), and, while a surface-wait
+              marker stands on that rollout (readable or not), only while that task carries `integrating:`. Else it
+              refuses while a valid
               waiter from another rollout on `origin-lane.json` (ORIGIN_LANE_FILE, beside the lock: {version: 1,
               waiting: [{tasksDir, origin, rollout, task, since, at}]}, read as the Trickle claims file is, an entry
               ORIGIN_WAIT_TTL (30 min) old or as far ahead dropped, another tasksDir's kept under 30 min by the wall
               clock and never counted, the latest `at` per rollout winning) has an earlier `since` than the caller's
               own entry, or the caller has none (ties by rollout stem). A valid waiter: its rollout note root-level,
-              tagged, parallel, open and not paused, its lease fresh, its record readable with no open halt, its task
-              `review` with a `pr:` and a `rollout:` naming it. A refusal writes no note; frees this rollout's own
+              tagged, parallel, open and not paused, its lease fresh, no surface-wait marker on its rollout unless its
+              task is already integrating, its record readable with no open halt, its task `review` with a `pr:` and
+              a `rollout:` naming it. A refusal writes no note; frees this rollout's own
               Run-record lane on the task when it is open there (or the record is unreadable): _free_lane, its open
               merge hold closed, then `lane-freed release=origin origin=<owner/name>`; writes the caller's entry
               (`since` kept from its earlier one on that origin, else now; `at` now), pruning the invalid ones; and
@@ -190,7 +206,13 @@ Subcommands:
               (silent); a lock not taken within NOTE_LOCK_TIMEOUT, an unreadable file (read as none, replaced by the
               next write), a file of another version (read as none, never written) or a candidate's unreadable record
               (neither holder nor waiter), each with one `WARN: origin lane: …` line. --dry-run reads the same way
-              with no lock and writes nothing. Exit 1 for any other refusal, else 4, else 0.
+              with no lock and writes nothing. A surface wait (P41-3; execute § 4.5 *Surface wait at Integration*): a
+              note not yet integrating whose rollout has a surface-wait marker (readable or not) is refused before
+              any of that: one `SURFACE WAIT: [[<slug>]]'s Integration waits: a surface wait stands on [[<rollout>]]
+              (<why>); nothing written (execute § 4.5)` line on stderr, no note, lane-taken or waiting entry of its
+              own written, no decide and no _free_lane; off --dry-run it drops that task's own entry from the waiting
+              list (under the ORIGIN_LANE_LOCK it holds); a note already integrating passes. Exit 1 for any other
+              refusal, else 5, else 4, else 0.
 
   origin-wait --tasks <slug> [--poll 20] [--timeout 900] [--now T]: the lead's background origin wait (execute §
               4.5 *Origin lane wait*, ADR 0064 d6), read-only and lock-free: every --poll seconds, D5's grant rule for
@@ -910,7 +932,8 @@ Subcommands:
                  the lead's RACE re-verify or its landing tail, which never halts on its own task, so judged by
                  silence; the third `noslot`'s `free-lane` closes it, and the RACE left to Lachy then reads `you`); halt
                  `complete` or `regenerate`; and `reentry`: each setAside entry at `run` or `integration`, not
-                 race-held, with no task `holdUntil`, under no held rollout hold and no `pauseRequested`, read as step
+                 race-held, with no task `holdUntil`, under no held rollout hold, no `pauseRequested` and no
+                 `surfaceWait` (a surface wait relaunches nothing, P41-3), read as step
                  1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
                  with that k and auto_retry_verdict). A null `humanFix` with a future `autoRetryAfter` goes to
                  `coolDown`; an `autoRevise` seeded revise is W only while `slotsInUse` plus the revises before it is
@@ -932,7 +955,10 @@ Subcommands:
                   place, whatever else is in W (a running task included), because the Approved-queue route runs as one
                   foreground turn with no life sign; then the silence test at stall-after; otherwise moving.
               12. With no W: (a) an open ("merge", task) hold on an integrating task, released only by the lead's own
-                  tick, is judged by silence at stall-after, else waiting `merge-hold`; (b) the waits judged by their
+                  tick, is judged by silence at stall-after, else waiting `merge-hold`; (a′) a `surfaceWait` whose `held`
+                  is non-empty with `halt` null (P41-3: the lead's heartbeat re-runs the Surface re-check at each tick,
+                  so a dead lead's surface wait is a stall) is judged by silence at stall-after, else waiting
+                  `surface-wait`, `surface wait: <surfaceWait.why>`; (b) the waits judged by their
                   own condition, in execute step 1.6's order: `cool-down` (`until` the earliest), `heat`, `quota`
                   (p36-7), `away-cap`, `trickle` (`next`'s hold prefixes, or capHeld), `last-start` (`until` the Morning), `approved-queue`
                   (onMerge `waits`), `pr-hold` (a held `waits: merge` holdUntil entry), and `paused` only when `next`
@@ -940,8 +966,8 @@ Subcommands:
                   keeps `integrating:`, so it falls to (c) and its ack is never hidden); (c) otherwise waiting `you`,
                   with H's reason, else `next`'s verdict worded as execute § 7 words it.
               Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test; moving_verdict
-              returns each through by_silence, which refuses a cause the list leaves out): `merge-hold` and
-              `regenerating`, and every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
+              returns each through by_silence, which refuses a cause the list leaves out): `merge-hold`,
+              `regenerating` and `surface-wait`, and every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
               own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
               changes only `waiting`'s cause, never moving or stalled.
 
@@ -1085,7 +1111,9 @@ Integration conflict, `integration: conflict unresolved in …`), integration-re
 else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): a whole-rollout gitEnvHold entry (a
 bare checkout; a lane trip holds no Slot) -> hold-git-env; mainRed (a RACE revert that did not land) -> hold-race;
-paused or pauseRequested -> pause-drain; any `heat:` hold (the Heat hold; only ever a queued row) -> hold-heat; any
+paused or pauseRequested -> pause-drain; any `surface wait:` hold (a surface wait, P41-3: `next` launches nothing until
+the rollout's own Surface re-check passes) -> hold-surface; any `heat:` hold (the Heat hold; only ever a queued row) ->
+hold-heat; any
 `quota:` hold (the quota hold, p36-7: the lead's Login is inside its line while Capacity is in force) -> hold-quota; any
 `trickle:` hold (only ever a queued row: a stalled row waits on the ceiling alone) -> hold-trickle, and any `away cap:`
 hold (the same, Away) -> hold-away-cap; any `last start:` hold (p28-2: a queued row or a head Solo the last starts hold
@@ -5945,7 +5973,10 @@ def cmd_next(args) -> int:
     reads exactly as before. The caller's Login is its own (_capacity_state's, capacity.py login(os.environ)), and off
     --dry-run the lease names it (_caller_login), so `moving` reads the lead's; the hidden `--quota-login NAME`, read
     only with --dry-run (exit 2 without it, nothing read), reads NAME's line instead ("" reads no quota): `moving`'s dry
-    run passes the lead's Login off its lease (_lead_login), never its reader's."""
+    run passes the lead's Login off its lease (_lead_login), never its reader's. A surface wait (P41-3; the module
+    docstring's `next`): while the rollout's surface-wait marker stands, readable or not, nothing starts, restarts or
+    begins Integration (`surface wait: <why>`), `slotLimit` is 0, no seeded revise and no waiting record, `surfaceWait`
+    reports it, `halt` stays null while it holds a row and no pause stands, and idle-slots reads `hold-surface`."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     quota_login = getattr(args, "quota_login", None)
     if quota_login is not None and not args.dry_run:
@@ -6055,6 +6086,22 @@ def cmd_next(args) -> int:
         known = {r["slug"].lower() for r in in_progress}
         for s in sorted(want - known):
             print(f"WARN: --running {s}: not an in_progress task of this rollout — ignored", file=sys.stderr)
+    # A surface wait (P41-3; execute § 4.5 *Surface re-check*): while this rollout's surface-wait marker stands,
+    # readable or not, nothing launches until a check passes: every start, restart and seeded revise and every
+    # Integration not yet begun waits (`surface wait: <why>`); only the calls in flight and an Integration already begun
+    # (`integrating:`) go on. With no --running the live rows are the in_progress ones the marker's `live` lists (every
+    # in_progress row under an unreadable marker); the rest read stalled, held. The awaiting rows are held aside, as a
+    # standing rollout hold's on_merge verdict holds them, so the drain and the verdict read none.
+    sw = _surface_wait_read(rollout_path.stem)
+    sw_on = sw[0] != "none"
+    sw_awaiting, sw_why = [], None
+    if sw_on:
+        sw_why = f"{SURFACE_WAIT_PREFIX} {_surface_wait_why(sw)}"
+        if args.running is None and sw[0] == "ok":
+            sw_live = set(_surface_wait_live(sw[1]))
+            live = [r for r in in_progress if r["slug"].lower() in sw_live]
+            stalled = [r for r in in_progress if r["slug"].lower() not in sw_live]
+        sw_awaiting, awaiting = awaiting, []
 
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
@@ -6091,7 +6138,7 @@ def cmd_next(args) -> int:
     # write claims, the first rev_go of them (p28-8): read here, before the trickle claim lock, so the lock never spans
     # their git and settings reads. None under a pause or a standing rollout hold, where step 1.2 launches none; main
     # red and a whole-rollout git-env hold (read below, where step 1.1 halts first) clear them too.
-    revises = [] if (paused or pause_requested or ro_held) else \
+    revises = [] if (paused or pause_requested or ro_held or sw_on) else \
         _seeded_revises(by_state.get("set-aside", []), task_held, rollout_note, root)
     # The Trickle claims (p28-3; away.md § The Trickle, *Trickle claims*), taken after every PR-hold gh call so the
     # lock never spans gh. Off --dry-run `next` takes the machine-wide trickle claim lock (the outermost lock:
@@ -6176,15 +6223,15 @@ def cmd_next(args) -> int:
 
     def fair_limit(demand):
         """(slot_limit, kept) for this call, its own demand `demand` (0 contends nothing; the quota hold contends
-        nothing either, p36-7)."""
+        nothing either, p36-7, nor does a surface wait, P41-3: slot_limit 0)."""
         kept_ = {}
-        if quota_on:
+        if quota_on or sw_on:
             demand = 0
         if free_places > 0 and not heat["held"] and waiters:
             me = [{"name": rollout_path.stem, "held": mine, "served": my_served, "since": my_since,
                    "demand": demand}] if demand > 0 else []
             kept_ = {n: k for n, k in _fair_share(free_places, waiters + me, now).items() if n != rollout_path.stem}
-        if heat["held"] or quota_on:
+        if heat["held"] or quota_on or sw_on:
             return 0, kept_
         return min(ceiling, max(0, cap - running_elsewhere - sum(kept_.values()))), kept_
 
@@ -6299,6 +6346,14 @@ def cmd_next(args) -> int:
                 _quota_why(capacity) if quota_on else
                 f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac{kept_for}")
     holds += [(r, slot_why) for r in slot_held]
+    # A surface wait (P41-3) holds every row this call could start or restart, its Slot reason replaced, while no pause
+    # stands (a pause's own reason stays); a dependency, a Solo rule or a task's own PR hold keeps its reason.
+    if sw_on and not (paused or pause_requested):
+        could = restart + start + slot_held
+        ids = {id(r) for r in could}
+        holds = [(r, why) for r, why in holds if id(r) not in ids] + [(r, sw_why) for r in could]
+        start, restart = [], []
+        used = len(live)
     # A rollout hold that stands (vault-grammar § Hold until) holds the whole queue, after the pause (a pause wins) and
     # before the git-env override (git-env wins): nothing starts or restarts, and every stalled or queued task waits on
     # it, its dependency, Solo and Slot reasons replaced. Live calls, Integration and set-asides carry on as they are.
@@ -6332,6 +6387,11 @@ def cmd_next(args) -> int:
         start, restart = [], []
         used = len(live)
         holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
+    # A surface wait's awaiting rows wait whatever the branch (an Integration not yet begun never begins under it);
+    # sw_held is every row a `surface wait:` reason holds: `surfaceWait.held`, which `moving` and the verdict read.
+    if sw_on:
+        holds += [(r, sw_why) for r in sw_awaiting]
+    sw_held = [r for r, why in holds if why.startswith(SURFACE_WAIT_PREFIX)]
     # The claims write (p28-3), under the lock and only once the rollout note's save has succeeded (a failed one raised
     # above, so nothing is claimed), after the main-red and whole-rollout git-env overrides, so it reads the final
     # `start`: every kept entry plus one claim per start (the head Solo task's lone start included) and one per seeded
@@ -6362,6 +6422,8 @@ def cmd_next(args) -> int:
     want = min(want + len(revises) - rev_go, max(0, ceiling - (mine + len(start) + rev_go)))
     if quota_on and not heat["held"]:
         want = 0   # the quota hold (p36-7) waits on its Login, never in the Mac's line: no record, an earlier one removed
+    if sw_on:
+        want = 0   # a surface wait (P41-3) waits on its own Surface re-check, never in the Mac's line
     if claiming and claims_writable:
         at = now.astimezone().isoformat(timespec="seconds")
         here = os.path.realpath(str(tasks_dir))
@@ -6435,6 +6497,9 @@ def cmd_next(args) -> int:
     heat_held = any(why.startswith(HEAT_PREFIX) for _, why in holds)
     # Nor does a row the quota hold holds (p36-7): it could start once the Login is back under its line.
     quota_held = any(why.startswith(QUOTA_PREFIX) for _, why in holds)
+    # Nor does a row a surface wait holds (P41-3): it could start once the rollout's own Surface re-check passes. Not
+    # under a pause: a soft pause drains past the held rows (`awaiting` reads none) and a pause wins the verdict.
+    surface_held = bool(sw_held) and not (paused or pause_requested)
     if whole:
         halt = "git-env"
     elif main_red:
@@ -6445,7 +6510,7 @@ def cmd_next(args) -> int:
         # lane hold (a lane git-env trip or an undecided RACE, ADR 0046) halts first, as every git-env trip did before.
         halt = "regenerate"
     elif not start and not restart and not live and not lane_moving \
-            and not cap_held and not last_start_held and not heat_held and not quota_held:
+            and not cap_held and not last_start_held and not heat_held and not quota_held and not surface_held:
         if lane_git_env:
             halt = "git-env"
         elif any(e["hold"] == "race" and not e["revert"] for e in lane_hold):
@@ -6476,7 +6541,8 @@ def cmd_next(args) -> int:
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold,
                               by_state.get("set-aside", []), cap_held, last_start_held, ro_held, bool(task_held),
-                              heat_held=heat_held, main_red=main_red, quota_held=quota_held)
+                              heat_held=heat_held, main_red=main_red, quota_held=quota_held,
+                              surface_held=bool(sw_held))
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     # The night record (Chorus ADR 0104's Consequences; execute away.md § The night record), after idle-slots.
@@ -6527,6 +6593,15 @@ def cmd_next(args) -> int:
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
+        # A surface wait (P41-3; execute § 4.5 *Surface re-check*): {why, holders, live, since, held}, or null.
+        "surfaceWait": None if not sw_on else {
+            "why": _surface_wait_why(sw),
+            "holders": [str(x) for x in (sw[1] or {}).get("holders") or [] if isinstance(x, str)]
+            if sw[0] == "ok" and isinstance((sw[1] or {}).get("holders"), list) else [],
+            "live": _surface_wait_live(sw[1]) if sw[0] == "ok" else [],
+            "since": (sw[1] or {}).get("since") if sw[0] == "ok" and isinstance((sw[1] or {}).get("since"), str)
+            else None,
+            "held": slugs(sw_held)},
         "startUnattended": start_unattended,
         "startCleared": start_cleared,
         "halt": halt,
@@ -6685,7 +6760,8 @@ def cmd_mark_started(args) -> int:
     directly follows a sign-off says so, once, and no later restart does. Refuses a done, merged or
     dropped note. Arms the task window first (p26-3, _arm_gate): a failed arm writes nothing for that
     note. Records slot-taken (p15-2), its start read before the markers are removed, with the Mac-wide cap in force
-    (p29-8)."""
+    (p29-8). Refuses a task whose rollout has a surface-wait marker, readable or not (P41-3; execute § 4.5 *Surface
+    re-check*: no task starts or restarts until a check passes): nothing written for it, exit 1."""
     if (args.arm_repo is None) != (args.arm_default is None):
         print("ERROR: mark-started: --arm-repo <repoPath> and --arm-default <B> go together (p26-3); nothing written",
               file=sys.stderr)
@@ -6708,6 +6784,11 @@ def cmd_mark_started(args) -> int:
             args._errors.append(f"{slug}: status is {status!r} — refusing to mark started")
             continue
         rollout, start = _note_rollout(note), _start_kind(note, args.start)  # read before the writes
+        sw = _surface_wait_read(rollout) if rollout else ("none", None, None)
+        if sw[0] != "none":
+            args._errors.append(f"{slug}: a surface wait stands on [[{rollout}]] ({_surface_wait_why(sw)}): nothing starts "
+                                "or restarts until its Surface re-check passes (execute § 4.5) — refusing to mark started")
+            continue
         arm_path, refusal = _arm_gate(args, slug, rollout, rollouts)
         if refusal:
             args._errors.append(refusal)
@@ -6840,6 +6921,20 @@ def _origin_lane_write(path, waiting):
     return None
 
 
+def _origin_lane_drop_task(waiting, here, origin, rollout, slug):
+    """`waiting` less each entry that is a dict with `tasksDir` == here, `origin` == origin, and a `rollout` and `task`
+    equal to `rollout` and `slug` (both compared lowercased): mark-integrating's surface-wait refusal drops the caller's
+    own entry for that task (P41-3). Every other entry is kept as it was, malformed ones included."""
+    ro, sl = (rollout or "").lower(), (slug or "").lower()
+
+    def mine(e):
+        return isinstance(e, dict) and e.get("tasksDir") == here and e.get("origin") == origin and \
+            isinstance(e.get("rollout"), str) and e["rollout"].lower() == ro and \
+            isinstance(e.get("task"), str) and e["task"].lower() == sl
+
+    return [e for e in waiting if not mine(e)]
+
+
 def _open_halt(lines) -> bool:
     """An open `halt` stop in the record (_stop_state's `open`, the stops after the last lead-entry)."""
     return any(d.get("cause") == "halt" for d in _stop_state(lines)["open"])
@@ -6868,7 +6963,10 @@ def _origin_holders(cands, tasks_dir: Path, leases, warns):
     """The candidates holding the origin lane (ADR 0064 d5), whatever their `engine_snapshot:`: no `paused:` stamp; a
     fresh lease (_Leases: lapsed, none, unreadable and room-stop never hold); a readable Run record whose lane names a
     task T with no open merge hold (a merge hold frees the origin lane) and no open halt; and T's note holding the lane
-    (_holds_lane). [{rollout, task, integrating, lapsesAt}], by stem."""
+    (_holds_lane), and, while a surface-wait marker stands on its rollout (readable or not: execute § 4.5 *Surface
+    re-check*, P41-3), only while T carries `integrating:` (an Integration already begun goes on; one not yet begun, an
+    integrated T awaiting its merge included, is held by `next` and refused by `mark-integrating`, so it holds no lane).
+    [{rollout, task, integrating, lapsesAt}], by stem."""
     out = []
     for path, note in cands:
         if _valued(note.get("paused")):
@@ -6890,6 +6988,8 @@ def _origin_holders(cands, tasks_dir: Path, leases, warns):
             tnote = None
         if tnote is None or not _holds_lane(tnote):
             continue
+        if _surface_wait_read(path.stem)[0] != "none" and not _scalar(tnote.get("integrating")):
+            continue
         out.append({"rollout": path.stem, "task": tpath.stem, "integrating": _scalar(tnote.get("integrating")) or "-",
                     "lapsesAt": lease["lapsesAt"]})
     return out
@@ -6898,7 +6998,9 @@ def _origin_holders(cands, tasks_dir: Path, leases, warns):
 def _origin_waiter_valid(e, tasks_dir: Path, leases) -> bool:
     """A waiting entry of another rollout counts (ADR 0064 d5) when its rollout note is directly in the tasks dir, tagged,
     parallel, neither done nor dropped and not paused, its lease reads fresh, its Run record is readable with no open
-    halt, and its task note is `review` with a `pr:` whose `rollout:` names that rollout."""
+    halt, no surface-wait marker on its rollout (readable or not, P41-3) unless its task is already integrating
+    (`integrating:`: an Integration not yet begun never begins under a surface wait), and its task note is `review`
+    with a `pr:` whose `rollout:` names that rollout."""
     path = tasks_dir / f"{e['rollout']}.md"
     try:
         note = Note(path) if path.is_file() else None
@@ -6909,6 +7011,8 @@ def _origin_waiter_valid(e, tasks_dir: Path, leases) -> bool:
             _shape(note) != SHAPES[0] or _valued(note.get("paused")):
         return False
     if leases.state(path.stem, note)["state"] != "fresh":
+        return False
+    if _surface_wait_read(path.stem)[0] != "none" and not _scalar(task.get("integrating")):
         return False
     lines = _record_read(path.stem)
     if lines is None or _open_halt(lines):
@@ -6980,7 +7084,13 @@ def cmd_mark_integrating(args) -> int:
     merge hold closed first), writes the caller's waiting entry (`since` kept from its earlier one on that origin, `at`
     now), prints one `ORIGIN LANE:` line on stderr, and exits 4. A grant removes the caller's entry, then stamps. Fail
     open (today's behaviour): no rollout, Project root or origin (silent), or a lock it cannot take (one WARN).
-    --dry-run reads the same way and writes nothing. Exit 1 for any other refusal, else 4, else 0."""
+    A surface wait (P41-3; execute § 4.5 *Surface wait at Integration*): a note not yet integrating whose rollout has a
+    surface-wait marker, readable or not, is refused before the origin lane is decided: one `SURFACE WAIT:` line on
+    stderr, no note, no lane-taken and no waiting entry of its own written, no decide and no _free_lane; off --dry-run
+    it drops that task's own entry from the origin lane's waiting list (_origin_lane_drop_task, under the
+    ORIGIN_LANE_LOCK it holds), and exits 5. A note already carrying `integrating:` passes (kept): an Integration
+    already begun goes on. --dry-run reads the same way and writes nothing. Exit 1 for any other refusal, else 5, else
+    4, else 0."""
     now = _now(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     notes = list(_each_note(args))
@@ -7002,7 +7112,7 @@ def cmd_mark_integrating(args) -> int:
             lock = None
             print(f"{ORIGIN_WARN} {e} — no origin lane this call", file=sys.stderr)
             origin_of = {}
-    refused = False
+    refused = sw_refused = False
     try:
         waiting, why, writable = _origin_lane_read(file_path) if any(origin_of.values()) else ([], None, True)
         if why:
@@ -7017,6 +7127,21 @@ def cmd_mark_integrating(args) -> int:
                 continue
             rollout = _note_rollout(note)
             origin = origin_of.get(rollout.lower()) if rollout else None
+            if rollout and not _scalar(note.get("integrating")):
+                sw = _surface_wait_read(rollout)
+                if sw[0] != "none":
+                    # A surface wait (P41-3): an Integration not yet begun waits until a Surface re-check passes.
+                    print(f"SURFACE WAIT: [[{slug}]]'s Integration waits: a surface wait stands on [[{rollout}]] "
+                          f"({_surface_wait_why(sw)}); nothing written (execute § 4.5)", file=sys.stderr)
+                    if not args.dry_run and origin is not None and writable:
+                        new = _origin_lane_drop_task(waiting, os.path.realpath(str(tasks_dir)), origin, rollout, slug)
+                        if new != waiting:
+                            err = _origin_lane_write(file_path, new)
+                            if err:
+                                print(f"{ORIGIN_WARN} cannot write {file_path}: {err}", file=sys.stderr)
+                            waiting = new
+                    sw_refused = True
+                    continue
             if origin is not None:
                 warns = []
                 d = _origin_lane_decide(tasks_dir, rollout, slug, origin, now, wall, waiting, warns)
@@ -7054,7 +7179,7 @@ def cmd_mark_integrating(args) -> int:
         if lock is not None:
             lock.__exit__(None, None, None)
     rc = _finish(args, now)
-    return rc if rc else (4 if refused else 0)
+    return rc if rc else (5 if sw_refused else 4 if refused else 0)
 
 
 def cmd_origin_wait(args) -> int:
@@ -9530,20 +9655,24 @@ def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
 
 def _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
                  last_start_held, pr_held=False, task_pr_held=False, heat_held=False, main_red=(),
-                 quota_held=False) -> str:
+                 quota_held=False, surface_held=False) -> str:
     """The idle-slots reason (the module docstring's table, first match). `whole`: the whole-rollout git-env trips (a bare
     checkout; a lane trip holds no Slot); `main_red`: `next`'s mainRed (a RACE revert that did not land). `cap_held`:
     this call holds a queued row on the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a
     stalled row waits only on the ceiling); `last_start_held`: one on `last start:`. `pr_held`: the rollout's own
     hold_until stands (p30-3). `task_pr_held`: a task's own hold_until stands, on a queued, stalled or set-aside (at
     run or a gate) row. `heat_held`: one on `heat:` (the Heat hold, estate ADR 0009 d5), ahead of the Mac-wide cap.
-    `quota_held`: one on `quota:` (the quota hold, p36-7), after the heat and ahead of the Mac-wide cap."""
+    `quota_held`: one on `quota:` (the quota hold, p36-7), after the heat and ahead of the Mac-wide cap.
+    `surface_held`: a row a surface wait holds (`surface wait:`, P41-3), after the pause's drain and ahead of the heat:
+    `next` launches nothing while it stands."""
     if whole:
         return "hold-git-env"
     if main_red:
         return "hold-race"
     if paused or pause_requested:
         return "pause-drain"
+    if surface_held:
+        return "hold-surface"
     if heat_held:
         return "hold-heat"
     if quota_held:
@@ -13308,7 +13437,7 @@ REGENERATE_STALL_MIN = 120    # the Approved-queue route's one foreground turn: 
 # The meant waits that silence ends: only the lead's own tick releases them (status § The Watchdog's reading, *Which
 # waits silence judges*, binds this list by a contract test). moving_verdict returns each through its by_silence, which
 # refuses a cause not listed here, so the code cannot judge a wait by silence that the list (and status) leaves out.
-SILENCE_JUDGED = ("merge-hold", "regenerating")
+SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait")
 # Execute § 7's *Whole-rollout halts kept (ADR 0048)*, judged from the open halt H's reason (re.match): a halt that
 # holds the whole rollout on purpose, so work beside it waits on Lachy, never a stall. {rollout} is the rollout's stem,
 # escaped. A contract test binds this list to § 7's, both ways.
@@ -13348,7 +13477,7 @@ WHOLE_HALT_PATTERNS = (
     r"hold_until needs you on \[\[{rollout}\]\]",
     r"approved queue: regenerate stopped:",
     r"approved queue: \[\[[^\]]+\]\] written unstamped:",
-    r"surface held: \[\[[^\]]+\]\] writes \S+",
+    r"surface held: \[\[[^\]]+\]\] writes \S+",   # live for the Surface re-check's exit 5 and older snapshots (P41-3)
     r"surface re-check failed",
 )
 # The two kept halts `moving` reads live from `next` (step 7), never from H: a bare checkout's git-env trip and a RACE
@@ -13554,7 +13683,7 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
     work["start"] = list(nx.get("start") or []) + list(nx.get("restart") or [])
     race_slugs = {h["slug"].lower() for h in nx.get("raceHold") or []}
     ro_held = any(h.get("scope") == "rollout" and h.get("held") for h in nx.get("holdUntil") or [])
-    if not ro_held and not nx.get("pauseRequested"):
+    if not ro_held and not nx.get("pauseRequested") and not nx.get("surfaceWait"):
         root = _project_root(note)
         repo = str(root) if root is not None and root.is_dir() else None
         heat_mod = _heat_module()
@@ -13611,6 +13740,11 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
     # 12a. A wait only the lead's own tick ends: a merge hold, judged by silence.
     if merge_held:
         return by_silence(stall_after, "merge-hold", f"merge hold on [[{merge_held[0]}]]")
+    # 12a'. A surface wait holding a row (P41-3; execute § 4.5 *Surface re-check*): the lead's heartbeat re-runs the
+    # Surface re-check at each tick, so it is judged by silence; under a pause `next` reads halt paused instead.
+    sw_ = nx.get("surfaceWait")
+    if sw_ and sw_.get("held") and nx.get("halt") is None:
+        return by_silence(stall_after, "surface-wait", f"{SURFACE_WAIT_PREFIX} {sw_.get('why')}")
     # 12b. Waits judged by their own condition, in step 1.6's order.
     if work["coolDown"]:
         first = min(work["coolDown"], key=lambda c: _parse_ts(c["until"]))
@@ -13717,7 +13851,8 @@ def _parser():
     for name, func, help_ in (
         ("mark-started", cmd_mark_started, "stamp started: on task notes as they start (first start wins)"),
         ("mark-integrating", cmd_mark_integrating, "stamp integrating: on review notes with a PR (first wins); exit 4 "
-                                                   "while another rollout on the origin integrates or waits first"),
+                                                   "while another rollout on the origin integrates or waits first; "
+                                                   "exit 5 under a surface wait for a note not yet integrating"),
         ("mark-done", cmd_mark_done, "flip task notes review->done after their merge is confirmed (stamps merged:)"),
     ):
         m = sub.add_parser(name, help=help_)

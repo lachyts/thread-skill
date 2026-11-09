@@ -86,7 +86,8 @@ keyed by the record's own values where one fits:
 - plan-rejected: for each plan-rejected set-aside, the time from the task's latest slot-taken at or before it to the
   set-aside: the Slot hours of a plan thrown away. needs-human is no class of its own: a question throws no work away,
   and it holds rollout hours only when nothing else can run, which is exactly when its halt or wait is stalls/question.
-- other (unranked, never a Watch): pause, pause-drain, dependency, solo, queue-tail, hold-last-start, hold-pr, revise.
+- other (unranked, never a Watch): pause, pause-drain, dependency, solo, queue-tail, hold-last-start, hold-pr, revise,
+  hold-surface (a surface wait, P41-3).
 
 A suite runs from its suite-started to its suite-ended (or its seconds before a suite-ended with no start); one with no
 end is priced 0 and counted (`suite-unfinished`). Completion suites belong to no class. Which records are read: every
