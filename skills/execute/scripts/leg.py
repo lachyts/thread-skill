@@ -633,11 +633,12 @@ place; waiting Legs with no claim take turns by their waiting records' `since`, 
 too). begin writes the lease before its gate, so its own next reads that place too. leg_gate turns a held `claim` into
 the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity alone); begin's
 launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The Leg lease is
-~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from `next --waiting`,
-written off --dry-run on the open Leg by begin (any begin that runs it), next (its own session only), claim, wait,
-smoke, done, security, set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its
-last write, or LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback
-nothing is gated and nothing counts; the lease is still written.
+~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from `next --waiting`
+and a Capacity wait's renewals (`moving` reads an open Leg's waiting lease, P41-4), written off --dry-run on the open
+Leg by begin (any begin that runs it), next (its own session only), claim, wait, smoke, done, security, set-aside and
+land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its last write, or LEG_WAIT_LAPSE (180
+min) for a waiting one, from the latest boot or wake if later. Under the fallback nothing is gated and nothing counts;
+the lease is still written.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
@@ -1134,8 +1135,7 @@ class Chain:
         return parse_legs(self.log)
 
     def open_leg(self):
-        live = [n for n, g in self.legs.items() if g["began"] and g["closed"] is None]
-        return self.legs[max(live)] if live else None
+        return open_leg_of(self.legs)
 
     def last_n(self):
         return max(self.legs) if self.legs else 0
@@ -1271,6 +1271,13 @@ def parse_legs(log):
         elif e["kind"] == "hand-over":
             leg["handover"] = e["rest"].split(":", 1)[1].strip()
     return legs
+
+
+def open_leg_of(legs):
+    """The open Leg of parse_legs' map (the latest begun with no `closed:` line), or None: Chain.open_leg's one copy,
+    which reconcile-rollout.py `moving` reads too (P41-4: the Watchdog's reading of a waiting Leg)."""
+    live = [n for n, g in legs.items() if g["began"] and g["closed"] is None]
+    return legs[max(live)] if live else None
 
 
 def leg_base(note):
@@ -2206,7 +2213,8 @@ def capacity_wait(ctx, a, r, kind, check, on_t, done, out, base_now, t0):
     """`wait`'s Capacity branch (kinds `capacity` and `quota`, p36-7; legs.md § The task loop's `wait`): it logs no rank
     line. At its start (the lease already written) it records its waiting record (kind capacity) or drops it (kind
     quota: capacity_record), then polls read-only every RANK_POLL_SECONDS, the plan and the gate recomputed, re-recording
-    and renewing the Leg lease every CAPACITY_WAIT_REFRESH seconds (under TRICKLE_WAIT_TTL, so a lead on an older
+    and renewing the Leg lease, `waiting: true` (P41-4: the wait the turn end's `next --waiting` named still stands, so
+    `moving` reads it `waiting`), every CAPACITY_WAIT_REFRESH seconds (under TRICKLE_WAIT_TTL, so a lead on an older
     snapshot that dropped the record loses it for at most that long). It ends `cleared: true` once next is no `wait` on
     t (room), `flipped` when the kind changes, or when --for runs out; never `stalled`."""
     warns = out["warns"]
@@ -2225,7 +2233,7 @@ def capacity_wait(ctx, a, r, kind, check, on_t, done, out, base_now, t0):
         ctx.now = base_now + timedelta(seconds=time.monotonic() - t0)
         ch, lg, plan = check()
         if on_t(plan) and plan["kind"] == kind and time.monotonic() - refreshed >= CAPACITY_WAIT_REFRESH:
-            leg_lease(ctx, lg)
+            leg_lease(ctx, lg, waiting=True)   # P41-4: still a Capacity wait, so `moving` reads it `waiting`
             capacity_record(ctx, kind, warns)
             refreshed = time.monotonic()
 

@@ -926,10 +926,23 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
   `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
   more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
 - `waiting`, its cause the meant wait: `sign-off`, `paused`, `room-stop`, `not-started`, `merge-hold`,
-  `regenerating`, `surface-wait` (P41-3), `cool-down`, `heat`, `quota` (ADR 0067 d8), `away-cap`, `trickle`,
-  `last-start`, `approved-queue`, `pr-hold`, or `you`
+  `regenerating`, `surface-wait` (P41-3), `leg-wait` (a serial note's waiting Leg, below), `cool-down`, `heat`, `quota`
+  (ADR 0067 d8), `away-cap`, `trickle`, `last-start`, `approved-queue`, `pr-hold`, or `you`
   (Lachy's: a kept whole halt, an end-of-run verdict, `next` refusing the rollout).
-- `skip`: a serial, superseded, done, dropped or archived rollout.
+- `skip`: a superseded, done, dropped or archived rollout, and a serial one but for its waiting Leg (below).
+
+**A serial note's waiting Leg** (ADR 0075 d5, P41-4). A serial note runs as Legs, which write no Run record, so
+`moving` reads only one thing on it: an open Leg (the `## Leg log`'s latest began Leg with no `closed:` line) whose Leg
+lease (`skills/execute/away.md` § Capacity; `leg.py` writes it) reads `waiting: true`. A Leg's turn end writes that on
+`leg.py next --waiting` (a review in flight, a Capacity or quota wait, a completion verify in flight, a room stop), and
+a Capacity wait's renewals keep it, every 10 minutes. Its silence runs from the latest of the lease's write, the Mac's
+wake and its boot: `waiting leg-wait` (`Leg <n> waiting since <write> (session <id>)`, `until` the instant it turns
+`stalled`) while it is within `--stall-after`; `stalled` once it passes `--stall-after` (`silent`, or `mac-restart`
+when a boot came after the write), or once the lease reads lapsed (its 180 minutes, `LEG_WAIT_LAPSE`: the Leg's session
+is gone), whatever the bound. `lastEvent` is the lease's write, and `work` stays empty. Every other serial note stays
+`skip`, its cause unchanged: no open Leg (a chain on the Waiting list, ADR 0076, which the Stage starts), no lease, an
+unreadable one, or one with no `waiting` (a Leg mid-turn). So the Companion can recover a waiting Leg whose session
+died (Chorus's Watchdog sends `/thread:execute [[<slug>]]`, whose begin resumes the Leg or begins the next).
 
 `lastEvent` is the last life sign (every heartbeat tick's `lead-entry` and every verb the lead runs), `ageMinutes` the
 minutes since it; the silence is measured from the latest of it, the Mac's last wake and its last boot. The default
@@ -946,6 +959,8 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
   - `regenerating`: 120 min from the last life sign, judged in place of stall-after whatever else runs beside it, so a
     dead lead under a regenerate is caught at 120 min, never 45;
   - `surface-wait` (at `--stall-after`: the lead's heartbeat re-runs the Surface re-check at each tick, so a dead lead's surface wait is a stall);
+  - `leg-wait` (at `--stall-after`, from its Leg lease's last write rather than the Run record, or at the lease's lapse:
+    only the Leg's own session ends its wait, so a dead session's wait is a stall);
 - judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
 - judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `quota`, `away-cap`, `trickle` (a
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
@@ -965,9 +980,10 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
 reads `stalled` through silence: a Claude lead idling at `waiting`, a merge hold included, writes a `lead-entry` on
 every 20-minute heartbeat tick. Under `halt: regenerate` it reads `regenerating` only while the Approved-queue route's
 single foreground turn ends within 120 min of the last life sign; 120 min is one harness step, not a bound on the
-route. What does not hold: the route past 120 min, a lead blocked on an open question, and a Codex session-driven
-`--gated` run (no heartbeat; its verify and merge-task run in the foreground): each reads `stalled` against a live
-session. So `stalled` is a reason to look, never by itself a reason to start a second lead. The Companion first
+route. What does not hold: the route past 120 min, a lead blocked on an open question, a Codex session-driven
+`--gated` run (no heartbeat; its verify and merge-task run in the foreground), and a waiting Leg whose review or
+completion verify runs past `--stall-after` (its turn end writes the lease once, and nothing renews it until the
+notification): each reads `stalled` against a live session. So `stalled` is a reason to look, never by itself a reason to start a second lead. The Companion first
 confirms that the Session has no running Turn and is not waiting on the listener (Chorus `list_sessions`); no rollout
 notifies (ADR 0075 d2), and status starts nothing. A meant wait the verdict fails to name changes only `waiting`'s
 cause, never `moving` or `stalled`.
