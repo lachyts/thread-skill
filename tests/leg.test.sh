@@ -94,7 +94,9 @@
 #        note; its form rule, a missing Chain copy's unlisted line; restarted --listed on a stopped, closing or handed
 #        chain, refused beside an open Leg, idempotent, retired by a began; a handed after a logged hand-over writes
 #        nothing and prints the logged form's line; a manual hand-over keeps a stamped chain off the list until repair
-#        lists it; every new status line matches the Stop hook's STATUS_RE
+#        lists it; every new status line matches the Stop hook's STATUS_RE; --dry-run of handed --listed and
+#        restarted --listed writes nothing, listed and unlisted null (L21p); restarted --listed over a pending restart:
+#        another session's is exit 3, its own session's is its update, no --replace (L21q)
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -3604,6 +3606,35 @@ SESS=r1 leg restarted --leg 2 --listed
 leg status
 ok "$(q 'd["listed"]')|$(q 'd["restarted"]["how"]')" "True|listed" "L21n: restarted --listed lists it"
 hasnt "$(q 'd["needsYou"]')" "manual hand-over" "L21n: … and the manual hand-over item goes: a paste would double-start it"
+# (p) --dry-run: handed --listed and restarted --listed write nothing, their listed and unlisted null
+scen l21p; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff
+snap; leg handed --listed --dry-run
+ok "$rc|$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["stamped"]')|$(q 'd["handover"]')|$(q 'd["dryRun"]')" "0|None|None|False|None|True" \
+   "L21p: handed --listed --dry-run: listed and unlisted null, nothing stamped, no hand-over logged"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=done reason=\"listed Leg 2 on the Waiting list\"" \
+   "L21p: … the passed form's line"
+same "L21p: handed --listed --dry-run"
+snap; SESS=r1 leg restarted --leg 2 --listed --dry-run
+ok "$rc|$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["recorded"]')|$(q 'd["restarted"]')|$(q 'd["dryRun"]')" "0|None|None|False|None|True" \
+   "L21p: restarted --listed --dry-run: listed and unlisted null, nothing recorded"
+ok "$(fm "$RO" start)|$(logn 'restart: Leg 2')" "<none>|0" "L21p: … no stamp and no restart line"
+same "L21p: restarted --listed --dry-run"
+# (q) restarted --listed over a standing pending restart: another session's is exit 3; its own session's is its update,
+# written with no --replace
+scen l21q; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome stopped --reason "out of time"
+SESS=r1 leg restarted --leg 2 --pending; ok "$rc|$(q 'd["restarted"]["how"]')" "0|pending" "L21q: r1's --pending stands"
+snap; SESS=r2 leg restarted --leg 2 --listed
+ok "$rc" 3 "L21q: r2's --listed over r1's pending restart is exit 3"; has "$err" "a restart of Leg 2 stands (pending" "L21q: … naming it"
+same "L21q: r2 --listed over r1's pending"
+SESS=r1 leg restarted --leg 2 --listed
+ok "$rc|$(q 'd["recorded"]')|$(q 'd["restarted"]["how"]')|$(q 'd["listed"]')|$(fm "$RO" start)" "0|True|listed|True|unattended" \
+   "L21q: r1's own --listed over its pending restart is its update: written with no --replace, stamped and listed"
+ok "$(logn 'restart: Leg 2 pending (session r1)$')|$(logn 'restart: Leg 2 listed$')" "1|1" "L21q: … its listed line after the pending one"
+leg status
+ok "$(q 'd["restarted"]["how"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')" "listed|None|True" \
+   "L21q: status reads the listed restart standing, nothing blocking, the chain listed"
 # (o) the new status lines match the Stop hook's STATUS_RE
 ok "$(grep -c . "$L21_LINES")" 3 "L21o: three status lines collected (listed, not listed, manual)"
 bad=$(python3 - "$HOOK" "$L21_LINES" <<'PY'
