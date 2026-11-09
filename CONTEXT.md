@@ -1322,8 +1322,24 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Landed** — work final on `main` (`status: done`, or a `review`/`merged`
   task whose PR has merged, awaiting confirmation). Never re-dispatched on
-  resume.
+  resume. Landed is not **Live**, and a landed fix is not yet **Proven**.
   _Avoid_: finished, complete, shipped.
+- **Live** — landed work that the sessions actually load: in the installed
+  plugin or checkout they run from, not only on origin. From 7 to 9 Nov 2026
+  P41, P42, P43 and P44-1/2 were landed and not live, because the
+  **Primary checkout** had diverged. _Avoid_: deployed, installed (alone).
+- **Proven** — a fix whose purpose, the stuck work or failure it was filed
+  to clear, has been seen to move with the fix **Live**. Only a proven fix is
+  done (Lachy, 2026-11-09: "the stuck work moved"); until then it is a
+  **Carried fix**, and he is never told it is done. A task filed to clear
+  nothing in particular is done once live. _Avoid_: fixed, done (alone),
+  resolved, target (orient's **Target** is another thing).
+- **Carried fix** — a fix that has landed but is not yet **Proven**: the
+  system keeps carrying it (making it live, then watching for what it was
+  filed to clear to move) and repairs what stands in the way unseen. He sees
+  carried fixes, and any stuck machinery, on the quiet Stage line that opens
+  with a click; one the system cannot move within a day is a stop the
+  Companion leads him to (Lachy, 2026-11-09). _Avoid_: pending fix, open fix.
 - **Blocked** — the umbrella for a task that did not land: `blocked` (verifier
   never green), `plan-blocked` (plan never approved), or `review-blocked`
   (open PR, review rejected). In a Queue a blocked task is **set aside**: its
