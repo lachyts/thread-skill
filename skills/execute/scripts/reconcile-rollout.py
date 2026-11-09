@@ -909,7 +909,17 @@ Subcommands:
               outside 1 to 1440; default STALL_AFTER_MIN 45, two missed 20-minute heartbeat ticks and some slack).
               moving_verdict is the body; Chorus's Companion polls it. The algorithm's one copy, first match wins:
               1. skip: _ledger_skip (serial, superseded, done or dropped), or the note not directly in --tasks-dir
-                 (archived).
+                 (archived). But first, 1a (ADR 0075 d5, P41-4): a serial note, not superseded, done, dropped or
+                 archived, whose open Leg (leg.py's parse_log, parse_legs and open_leg_of, loaded through _leg_module)
+                 has a Leg lease reading `waiting: true` (a turn end's `next --waiting`: a review, Capacity or quota
+                 wait, a completion verify, a room stop; a Capacity wait's start and renewals keep it) reads that
+                 lease's silence, from the latest of its `written_at`, the Mac's wake and its boot: stalled once the
+                 lease reads lapsed (_Leases' Leg rule, LEG_WAIT_LAPSE from that same base: its session gone) or the
+                 silence passes stall-after, cause `mac-restart` when a boot came after the write, else `silent`;
+                 otherwise waiting `leg-wait`, `until` base + the lesser of stall-after and LEG_WAIT_LAPSE; lastEvent
+                 the lease's `written_at`. No Run record is
+                 read. Every other serial note (no open Leg, no lease, an unreadable one, one with no `waiting`, a
+                 chain on the Waiting list with no Leg) stays skip, its cause unchanged.
               2. The Run record (_record_read, _record_state): either unreadable is a MovingError.
               3. Pauses: waiting `sign-off` when `paused_for: sign-off` (checked first: await-sign-off stamps `paused:`
                  with it); then waiting `paused` when _pause_stands (a stamped pause, his whole-rollout act, read as
@@ -967,7 +977,8 @@ Subcommands:
                   with H's reason, else `next`'s verdict worded as execute § 7 words it.
               Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test; moving_verdict
               returns each through by_silence, which refuses a cause the list leaves out): `merge-hold`,
-              `regenerating` and `surface-wait`, and every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
+              `regenerating`, `surface-wait` and `leg-wait` (the Leg lease's silence, 1a), and every reading with
+              work; `room-stop` by its 6 h bound; the waits of 12(b) by their
               own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
               changes only `waiting`'s cause, never moving or stalled.
 
@@ -13437,10 +13448,14 @@ def _wait_seconds(v):
 STALL_AFTER_MIN = int(LEASE_LAPSE / timedelta(minutes=1))   # 45: a lead's lease lapse (p28-4), two missed ticks and slack
 STALL_AFTER_MAX = 1440
 REGENERATE_STALL_MIN = 120    # the Approved-queue route's one foreground turn: one harness step, never its bound
-# The meant waits that silence ends: only the lead's own tick releases them (status § The Watchdog's reading, *Which
-# waits silence judges*, binds this list by a contract test). moving_verdict returns each through its by_silence, which
-# refuses a cause not listed here, so the code cannot judge a wait by silence that the list (and status) leaves out.
-SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait")
+# The meant waits that silence ends: only the lead's own tick releases them, or for `leg-wait` the Leg's own session
+# (status § The Watchdog's reading, *Which waits silence judges*, binds this list by a contract test). moving_verdict
+# returns each through its by_silence, which refuses a cause not listed here, so the code cannot judge a wait by silence
+# that the list (and status) leaves out.
+SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait")
+LEG_WAIT = "leg-wait"         # a serial note's open Leg at a waiting turn end (ADR 0075 d5, P41-4), its lease's silence
+LEG_PY = Path(__file__).resolve().parent / "leg.py"
+_LEG_MOD = None
 # Execute § 7's *Whole-rollout halts kept (ADR 0048)*, judged from the open halt H's reason (re.match): a halt that
 # holds the whole rollout on purpose, so work beside it waits on Lachy, never a stall. {rollout} is the rollout's stem,
 # escaped. A contract test binds this list to § 7's, both ways.
@@ -13496,6 +13511,25 @@ class MovingError(Exception):
 def _whole_halt_res(stem):
     """WHOLE_HALT_PATTERNS compiled for one rollout (its stem formatted in where a pattern names the rollout)."""
     return [re.compile(pat.replace("{rollout}", re.escape(stem))) for pat in WHOLE_HALT_PATTERNS]
+
+
+def _leg_module():
+    """leg.py as a module, loaded on first use (the _run_record() pattern), for its Leg log reader (parse_log,
+    parse_legs, open_leg_of: the one copy `moving` reads a serial note's open Leg by, P41-4). Its `rr` is this module
+    (a namespace of its globals when this module is not the one sys.modules names). A load failure is a MovingError."""
+    global _LEG_MOD
+    if _LEG_MOD is None:
+        try:
+            spec = importlib.util.spec_from_file_location("thread_leg_moving", LEG_PY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception as e:  # noqa: BLE001 — a reader that will not load is a lost look, never a verdict
+            raise MovingError(f"leg.py would not load: {type(e).__name__}: {e}")
+        me = sys.modules.get(__name__)
+        mine = me is not None and getattr(me, "__dict__", None) is globals()
+        mod.rr = me if mine else types.SimpleNamespace(**globals())
+        _LEG_MOD = mod
+    return _LEG_MOD
 
 
 def _lead_login(stem, note, now):
@@ -13584,17 +13618,74 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
         out.update(verdict=verdict, cause=cause, reason=reason, until=until)
         return out
 
+    def by_silence(bound, cause, reason, until=None, test=None):
+        """A meant wait only the lead's own tick ends (or, for `leg-wait`, the Leg's own session): the silence test at
+        `bound` (`test`, else the lead's, silent below), else waiting `cause`. The cause must be in SILENCE_JUDGED (the
+        list status's *Which waits silence judges* is bound to); one that is not is a defect in this function, never a
+        reading."""
+        if cause not in SILENCE_JUDGED:
+            raise AssertionError(f"moving: {cause!r} is judged by silence but is not in SILENCE_JUDGED")
+        return (test or silent)(bound) or done("waiting", cause, reason, until)
+
+    def leg_wait():
+        """1a. A serial note's waiting Leg (ADR 0075 d5, P41-4): its open Leg (leg.py's Leg log reader) with a Leg lease
+        that reads `waiting: true` (a turn end's `next --waiting`, a Capacity wait's start and renewals) is judged by
+        that lease's silence; anything else (no open Leg, no lease, an unreadable one, one with no `waiting`) is None,
+        so the note stays skip. The silence runs from the latest of the lease's `written_at`, the Mac's wake and its
+        boot (the parallel reading's base). stalled once the lease reads lapsed (_Leases' Leg rule: LEG_WAIT_LAPSE from
+        that same base, its session gone) or the silence passes stall-after, cause `mac-restart` when a boot came after
+        the write, else `silent`; otherwise waiting `leg-wait`, `until` the earlier of the two, both measured from the
+        base (never _Leases' `lapsesAt`, which for a fresh lease is its write + LEG_WAIT_LAPSE and ignores a later wake
+        or boot)."""
+        lg = _leg_module()
+        leg = lg.open_leg_of(lg.parse_legs(lg.parse_log(note)))
+        if leg is None:
+            return None
+        state, written, _by, waiting, _login, _why = _lease_read(ro)
+        if state != "ok" or not waiting:
+            return None
+        lease = _Leases(now).state(ro, note, leg=True)
+        if lease["state"] not in ("fresh", "lapsed"):
+            return None   # a `written_at` ahead of now: unreadable, never a stall
+        mt = machine_times(since=now, now=now)
+        boot = mt.get("boot") if mt.get("boot") is not None and mt.get("boot") <= now else None
+        wake = mt.get("wake") if mt.get("wake") is not None and mt.get("wake") <= now else None
+        base = max(t_ for t_ in (written, boot, wake) if t_ is not None)
+        quiet_min = (now - base).total_seconds() / 60
+        out["lastEvent"] = _zms(written)
+        out["ageMinutes"] = max(0, int((now - written).total_seconds() // 60))
+        n, sid = leg["n"], leg["session"] or "unknown"
+        cause = "mac-restart" if boot is not None and boot > written else "silent"
+
+        def quiet(bound):
+            if lease["state"] == "lapsed":
+                return done("stalled", cause, f"Leg {n}'s waiting lease lapsed at {lease['lapsesAt']}: its session "
+                                              f"{sid} is gone")
+            if quiet_min > bound:
+                return done("stalled", cause, f"Leg {n}: no life sign for {out['ageMinutes']}m since its waiting turn "
+                                              f"end (session {sid})")
+            return None
+        # The real lapse restarts from a wake or boot after the write, as the silence does: one base for both.
+        until = base + timedelta(minutes=min(stall_after, LEG_WAIT_LAPSE / timedelta(minutes=1)))
+        return by_silence(stall_after, LEG_WAIT, f"Leg {n} waiting since {_zms(written)} (session {sid})",
+                          _stamp(until), test=quiet)
+
     if not rollout_path.is_file():
         raise MovingError(f"rollout note not found at {rollout_path}")
     try:
         note = Note(rollout_path)
     except (OSError, ValueError) as e:
         raise MovingError(f"cannot read {rollout_path}: {e}")
-    # 1. skip: serial, superseded, done or dropped; or archived (not directly in the tasks dir).
+    # 1. skip: serial, superseded, done or dropped; or archived (not directly in the tasks dir). 1a: a serial note's
+    # waiting Leg is read instead (P41-4); every other serial note stays skip, its cause unchanged.
     why = _ledger_skip(note)
+    archived = os.path.realpath(rollout_path.parent) != os.path.realpath(tasks_dir)
     if why:
+        if (_shape(note) == "serial" and not archived and not _valued(note.get("superseded_by"))
+                and _status(note) not in CLOSED_ROLLOUT_STATUSES):
+            return leg_wait() or done("skip", why, f"{ro}: {why}")
         return done("skip", why, f"{ro}: {why}")
-    if os.path.realpath(rollout_path.parent) != os.path.realpath(tasks_dir):
+    if archived:
         return done("skip", "archived", f"{ro}: not directly in {tasks_dir}")
     # 2. the Run record.
     lines, state = _record_read(ro), _record_state(ro)
@@ -13628,14 +13719,6 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
                 cause = "silent"
             return done("stalled", cause, f"no life sign for {out['ageMinutes']}m")
         return None
-
-    def by_silence(bound, cause, reason, until=None):
-        """A meant wait only the lead's own tick ends: the silence test at `bound`, else waiting `cause`. The cause must
-        be in SILENCE_JUDGED (the list status's *Which waits silence judges* is bound to); one that is not is a defect
-        in this function, never a reading."""
-        if cause not in SILENCE_JUDGED:
-            raise AssertionError(f"moving: {cause!r} is judged by silence but is not in SILENCE_JUDGED")
-        return silent(bound) or done("waiting", cause, reason, until)
 
     # 3. Pauses: a sign-off pause first (await-sign-off stamps paused: with it), then a stamped pause (his act).
     if _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:

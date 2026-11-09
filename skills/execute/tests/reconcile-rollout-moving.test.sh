@@ -315,6 +315,85 @@ ok "$(j "$(mv)" 'd["verdict"]')" '"skip"' "M12: done → skip"
 mkro; mkdir -p "$D/Archive"; cp "$D/$RO.md" "$D/Archive/$RO.md"
 ok "$(python3 "$SCRIPT" moving --rollout "$D/Archive/$RO.md" --tasks-dir "$D" --now "$NOW" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["verdict"], d["cause"])')" "skip archived" "M12: archived → skip"
 
+# ── M12w (P41-4, ADR 0075 d5): a serial note's waiting Leg — its open Leg's Leg lease reads `waiting: true` ──────────
+# fresh → waiting leg-wait; stale past stall-after or lapsed (its session gone) → stalled; anything else stays skip.
+scen m12w
+SKIPS='["skip","shape: serial (a serial rollout runs as Legs)"]'
+mkro "shape: serial"; mkt a in_progress "owner: leg-1"
+legline() { printf -- '- %s Leg %s %s\n' "$1" "$2" "$3" >> "$D/$RO.md"; }   # legline <stamp> <n> <rest>
+printf -- '\n## Leg log\n\n' >> "$D/$RO.md"
+legline 2026-10-26T09:00+00:00 1 "began: leg-1 session s1 in cc-demo from $D/root"
+legline 2026-10-26T09:05+00:00 1 "claimed [[a]]"
+leglease() { mkdir -p "$D/home/.config/thread/leases"
+  printf '{"rollout": "%s", "written_at": "%s", "by": "leg"%s}\n' "$RO" "$1" "${2:+, $2}" > "$D/home/.config/thread/leases/$RO.json"; }
+lt() { python3 -c 'import sys; from datetime import datetime; print(datetime.fromisoformat(sys.argv[1]).astimezone().isoformat(timespec="minutes"))' "$1"; }   # `until`'s form
+ok "$(vc)" "$SKIPS" "M12w: an open Leg with no lease stays skip"
+leglease 2026-10-26T11:40:00Z
+ok "$(vc)" "$SKIPS" "M12w: an open Leg whose lease has no \`waiting\` (mid-turn) stays skip"
+leglease 2026-10-26T11:40:00Z '"waiting": true'
+J=$(mv)
+ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"], d["lastEvent"], d["ageMinutes"], d["until"]]')" \
+  "[\"waiting\",\"leg-wait\",\"Leg 1 waiting since 2026-10-26T11:40:00.000Z (session s1)\",\"2026-10-26T11:40:00.000Z\",20,\"$(lt 2026-10-26T12:25:00+00:00)\"]" \
+  "M12w: a fresh waiting lease → waiting leg-wait, until its write + stall-after, lastEvent the write"
+ok "$(j "$J" 'd["work"]')" '{"running":[],"lane":false,"start":[],"halt":null,"reentry":[],"coolDown":[],"capHeld":[]}' \
+  "M12w: … no work read (no Run record, no next)"
+ok "$(ls "$THREAD_EVENTS_DIR" 2>/dev/null | wc -l | tr -d ' ')" 0 "M12w: … and no Run record written"
+# leg.py is loaded only on this path, so M13's no-bytecode check never reaches it: a copy of the plugin layout, no -B.
+CPL="$TMP/plugin-copy-leg"; mkdir -p "$CPL"; cp -R "$PLUGIN/skills" "$CPL/"; find "$CPL" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
+ok "$(unset PYTHONDONTWRITEBYTECODE; python3 "$CPL/skills/execute/scripts/reconcile-rollout.py" moving --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cause"])')" \
+  "leg-wait" "M12w: … read through leg.py's Leg log reader in a copy of the plugin layout"
+ok "$(find "$CPL" -name __pycache__ | wc -l | tr -d ' ')" 0 "M12w: … which writes no __pycache__, run without -B"
+leglease 2026-10-26T11:00:00Z '"waiting": true'
+ok "$(vcr)" '["stalled","silent","Leg 1: no life sign for 60m since its waiting turn end (session s1)"]' \
+  "M12w: a waiting lease 60 min stale (past stall-after 45) → stalled silent"
+ok "$(vc --stall-after 90)" '["waiting","leg-wait"]' "M12w: … under --stall-after 90 it still waits"
+leglease 2026-10-26T08:30:00Z '"waiting": true'
+ok "$(vcr --stall-after 1440)" '["stalled","silent","Leg 1'"'"'s waiting lease lapsed at 2026-10-26T11:30:00Z: its session s1 is gone"]' \
+  "M12w: a lapsed waiting lease (180 min, LEG_WAIT_LAPSE) → stalled, its session gone, whatever --stall-after"
+ok "$(j "$(MNOW=2026-10-26T11:00:00Z mv --stall-after 1440)" '[d["verdict"], d["until"]]')" \
+  "[\"waiting\",\"$(lt 2026-10-26T11:30:00+00:00)\"]" \
+  "M12w: … before its lapse, until is the lapse (the earlier of the two)"
+leglease 2026-10-26T11:00:00Z '"waiting": true'
+ok "$(THREAD_MACHINE_TIMES='{"boot":"2026-10-26T11:30:00Z"}' vc)" '["waiting","leg-wait"]' \
+  "M12w: a boot after the write restarts the silence (30 min since the boot)"
+ok "$(THREAD_MACHINE_TIMES='{"boot":"2026-10-26T11:10:00Z"}' vc)" '["stalled","mac-restart"]' \
+  "M12w: … past stall-after since the boot → stalled mac-restart"
+ok "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:50:00Z"}' vc)" '["waiting","leg-wait"]' "M12w: a fresh wake restarts it too"
+# until runs from the same base as the lapse: a wake after the write moves both (_Leases' lapsesAt alone reads the write
+# + 180 while the lease is younger than that, so it read 11:30 here, then jumped to 11:45 once the lease outlived it).
+leglease 2026-10-26T08:30:00Z '"waiting": true'
+for at in 11:20 11:31; do
+  ok "$(j "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:00:00Z"}' MNOW=2026-10-26T${at}:00Z mv)" '[d["verdict"], d["cause"], d["until"]]')" \
+    "[\"waiting\",\"leg-wait\",\"$(lt 2026-10-26T11:45:00+00:00)\"]" \
+    "M12w: a wake (11:00) after the write (08:30), read at ${at}: until is wake + stall-after (11:45), never write + 180 (11:30)"
+done
+ok "$(j "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:00:00Z"}' MNOW=2026-10-26T11:20:00Z mv --stall-after 1440)" '[d["verdict"], d["until"]]')" \
+  "[\"waiting\",\"$(lt 2026-10-26T14:00:00+00:00)\"]" "M12w: … under --stall-after 1440, until is wake + 180, the lapse from the same base"
+ok "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:00:00Z"}' MNOW=2026-10-26T11:46:00Z vc)" '["stalled","silent"]' \
+  "M12w: … and at 11:46, past that until, it reads stalled silent"
+leglease 2026-10-26T12:30:00Z '"waiting": true'
+ok "$(vc)" "$SKIPS" "M12w: a waiting lease written ahead of now (unreadable) stays skip, never a stall"
+leglease 2026-10-26T11:00:00Z '"waiting": true'
+legline 2026-10-26T11:20+00:00 1 "closed: stopped: room stop"
+ok "$(vc)" "$SKIPS" "M12w: a closed Leg (no open Leg) behind a stale waiting lease stays skip"
+legline 2026-10-26T11:30+00:00 2 "began: leg-2 session s2 in cc-demo from $D/root"
+leglease 2026-10-26T11:45:00Z '"waiting": true'
+ok "$(vcr)" '["waiting","leg-wait","Leg 2 waiting since 2026-10-26T11:45:00.000Z (session s2)"]' "M12w: the open Leg is the latest begun (Leg 2)"
+setfm "$RO" status done
+ok "$(vc)" "$SKIPS" "M12w: a done serial note behind a fresh waiting lease stays skip"
+setfm "$RO" status in_progress; setfm "$RO" superseded_by '"[[x-rollout-2026-10-27]]"'
+ok "$(vc)" "$SKIPS" "M12w: a superseded one too"
+python3 - "$D/$RO.md" <<'PYX'
+import re, sys
+p = sys.argv[1]; t = open(p).read(); open(p, "w").write(re.sub(r"\nsuperseded_by: .*", "", t, count=1))
+PYX
+mkdir -p "$D/Archive"; command mv "$D/$RO.md" "$D/Archive/$RO.md"
+ok "$(python3 "$SCRIPT" moving --rollout "$D/Archive/$RO.md" --tasks-dir "$D" --now "$NOW" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps([d["verdict"], d["cause"]], separators=(",", ":")))')" "$SKIPS" \
+  "M12w: an archived one too"
+command mv "$D/Archive/$RO.md" "$D/$RO.md"
+ok "$(vc)" '["waiting","leg-wait"]' "M12w: back in the tasks dir, it waits again"
+rm -f "${D:?}/home/.config/thread/leases/${RO:?}.json"
+
 # ── M13: moving writes nothing (the notes, the record, the locks, the claims file, HOME), and no bytecode ───────────
 scen m13
 QUEUE="a b c q"; mkro "pause_requested: true"; running a; integrating b; setaside_infra c 2026-10-26T11:58:00Z; mkt q open

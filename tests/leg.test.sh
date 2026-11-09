@@ -2279,6 +2279,16 @@ RANK_AT="2026-10-20T08:00:00+00:00"
 rk() { printf 'estate_rank: %s\nestate_rank_at: "%s"\n' "$1" "$RANK_AT"; }
 # kscen <name> — lscen, plus a third chain $RO3 (copy $C3)
 kscen() { lscen "$1"; RO3=demox-rollout-2026-10-20; C3="$S/chains/r-$RO3"; }
+# wlease — plant $RO's Leg lease as a waiting turn end wrote it (`next --waiting`, 09:00); glease — the lease as
+# [by, written_at, waiting], or none: a rank wait renews it with no `waiting` (P41-4: only a Capacity wait keeps it)
+wlease() { mkdir -p "$HOME/.config/thread/leases"
+  printf '{"rollout": "%s", "written_at": "2026-10-20T09:00:00Z", "by": "leg", "waiting": true}' "$RO" > "$HOME/.config/thread/leases/$RO.json"; }
+glease() { python3 -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except FileNotFoundError:
+    print("none"); sys.exit(0)
+print(json.dumps([d.get("by"), d.get("written_at"), d.get("waiting", False)], separators=(",", ":")))' "$HOME/.config/thread/leases/$RO.json"; }
 # fbase — a five-line f.txt on master, so two chains' edits of its first and last lines merge clean
 fbase() { printf '1\n2\n3\n4\n5\n' > "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -qm "f"; git -C "$R" update-ref refs/remotes/origin/master HEAD; }
 # nx — the last next's `action|kind|task|on`
@@ -2334,9 +2344,10 @@ ok "$rc" 1 "L18b: … and A's claim is refused"
 has "$err" "next is \`wait a1\`, not claim of [[a1]]: nothing written" "L18b: … naming the wait"; same "L18b: a refused claim"
 snap; CWD="$C1" leg wait --task a1 --for 0 --dry-run
 ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["logged"]')" "0|wait|False|False" "L18p: wait --dry-run reads the wait"; same "L18p: … and logs nothing"
-CWD="$C1" leg wait --task a1 --for 0
+wlease; CWD="$C1" leg wait --task a1 --for 0
 ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["stalled"]')|$(q 'd["logged"]')|$(q 'd["on"]')" "0|wait|False|False|True|$RO2" \
    "L18b: wait --for 0 logs the wait and prints cleared false"
+ok "$(glease)" '["leg","2026-10-20T10:00:00Z",false]' "L18b: … and renews the Leg lease with no \`waiting\`: a rank wait is mid-turn (P41-4)"
 ok "$(logn "Leg 1 rank wait: \[\[a1\]\] on \[\[$RO2\]\] (repo:$R//f.txt; ranks above it)\$")" 1 "L18b: … its rank wait: line"
 CWD="$C1" leg wait --task a1 --for 0
 ok "$rc|$(q 'd["logged"]')|$(logn 'rank wait:')" "0|False|1" "L18b: a second wait logs nothing: a1's latest line already records its kind"
@@ -2375,8 +2386,9 @@ ok "$(q 'd["action"]')|$(q 'd["task"]')|$(heldwhy b1)" "claim|b2|['rank: [[$RO1]
 CWD="$C2" leg claim --task b2; twork "$C2" b2 g.txt "b's g"; CWD="$C2" leg land
 CWD="$C2" leg next
 ok "$(nx)|$(q 'd["stalled"]')" "wait|retry|b1|$RO1|False" "L18d: with nothing else left, B's next is a retry on b1, not stalled"
-CWD="$C2" leg wait --task b1 --for 0
+wlease; CWD="$C2" leg wait --task b1 --for 0
 ok "$rc|$(q 'd["kind"]')|$(q 'd["logged"]')|$(q 'd["flipped"]')" "0|retry|True|False" "L18d: wait logs the retry"
+ok "$(glease)" '["leg","2026-10-20T10:00:00Z",false]' "L18d: … and renews the Leg lease with no \`waiting\` (P41-4)"
 ok "$(logn "Leg 1 rank retry: \[\[b1\]\] on \[\[$RO1\]\] (repo:$R//f.txt; \[\[$RO1\]\] ranks above)\$")" 1 "L18d: … its rank retry: line"
 LNOW=2026-10-20T10:59+00:00 CWD="$C2" leg next
 ok "$(nx)|$(q 'd["held"][0]["slug"]')" "wait|retry|b1|$RO1|b1" "L18e: 59 minutes on, B still sets b1 aside"

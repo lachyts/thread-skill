@@ -287,7 +287,8 @@ leg wait --task t1 --for 0 --dry-run
 ok "$rc|$(q 'd["kind"]')|$(WAITING)|$(LEASE)" "0|capacity|none|none" "L9: --dry-run waits read-only: no record, no lease"
 leg wait --task t1 --for 1
 ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["stalled"]')|$(q 'd["logged"]')" "0|capacity|False|False|False" "L9: no room: the wait returns kind capacity, not cleared, never stalled, no rank line"
-ok "$(WAITING)|$(LEASE)" "[[\"$RO\",1]]|[\"leg\",\"2026-10-20T10:00:00Z\",false]" "L9: … its waiting record and its lease are written at its start"
+ok "$(WAITING)|$(LEASE)" "[[\"$RO\",1]]|[\"leg\",\"2026-10-20T10:00:00Z\",true]" \
+   "L9: … its waiting record and its lease are written at its start, the lease \`waiting: true\` (P41-4)"
 ok "$(grep -c 'rank wait\|rank retry' "$T/$RO.md")" 0 "L9: … and the Leg log has no rank line"
 ( cd "$F" && python3 "$LEG" wait --task t1 --for 40 --rollout "$T/$RO.md" --tasks-dir "$T" --vault "$V" --now "$NOW" \
     --session s1 > "$S/wait.json" 2>/dev/null; echo $? > "$S/wait.rc" ) &
@@ -302,6 +303,7 @@ python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(
 ok "$(WAITING)" "[[\"$RO\",1]]" "L9: (an earlier waiting record stands)"
 CLAUDE_CODE_SESSION_ID=x CLAUDE_ACCOUNT_PINNED=login-a leg wait --task t1 --for 0
 ok "$rc|$(q 'd["kind"]')|$(q 'd["why"]')|$(WAITING)" "0|quota|quota: login-a is inside its line|[]" "L9: kind quota writes no record and removes the earlier one"
+ok "$(LEASE)" '["leg","2026-10-20T10:00:00Z",true]' "L9: … and writes its lease \`waiting: true\` too (P41-4)"
 
 # ════ L10: quota on a Leg; status ignores it ═══════════════════════════════════════════════════════════════════════
 scen l10
@@ -428,6 +430,8 @@ ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["flipped"]')|$(q 'd["stalled
 ok "$tail" "1200|80" "L14a: … it held the whole --for (1200 s), polling every RANK_POLL_SECONDS (80 polls)"
 ok "$(q 'd["waitedMinutes"]')" 20 "L14a: … and reports the 20 minutes it really waited"
 ok "$(q 'd["why"]')" "trickle: 2/1 tasks running on this Mac" "L14a: … its why the last poll's count"
+ok "$(LEASE)" '["leg","2026-10-20T10:20:00Z",true]' \
+   "L14a: … its lease renewed every CAPACITY_WAIT_REFRESH (600 s) to the last, each renewal \`waiting: true\` (P41-4)"
 scen l14b
 mkro t1 t2; mkpar 1 0; cap 1
 leg begin --cwd "$F"
@@ -435,6 +439,8 @@ res=$(fwait 1200 300:free); rc=$?
 out=$(printf '%s\n' "$res" | head -1); tail=$(printf '%s\n' "$res" | tail -1)
 ok "$rc|$(q 'd["cleared"]')|$(q 'd["next"]["action"]')|$(q 'd["flipped"]')" "0|True|claim|False" "L14b: room at 5 minutes: the wait clears and next is claim"
 ok "$tail|$(q 'd["waitedMinutes"]')" "300|20|5" "L14b: … at the poll that saw it, reporting the 5 minutes it waited"
+ok "$(LEASE)" '["leg","2026-10-20T10:00:00Z",true]' \
+   "L14b: … its lease the start write, \`waiting: true\` over wait's own (P41-4: a background wait that writes after the turn end keeps it)"
 
 # ════ L15: a Leg counts from its session's start (ADR 0076 d3, p44-2) ════════════════════════════════════════════════
 scen l15

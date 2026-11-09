@@ -49,6 +49,11 @@ def main():
     if spec == "badjson":
         respond(200, "<html>not json</html>", extra)
         return 0
+    if spec == "403plan":
+        msg = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+        respond(403, json.dumps({"message": msg, "status": "403"}))
+        sys.stderr.write("gh: %s (HTTP 403)\n" % msg)
+        return 1
     if spec in ("403", "404", "500"):
         code = int(spec)
         msg = {403: "Resource not accessible by integration", 404: "Branch not found", 500: "Server Error"}[code]

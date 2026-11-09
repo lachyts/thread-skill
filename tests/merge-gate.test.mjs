@@ -291,6 +291,25 @@ test('M7 a rules read that fails alone (an unprotected branch too), or a protect
   hasWhy(next, /^rules\/branches\/main: more than one page; only the first read$/)
 })
 
+test('M7b the plan\'s no-rulesets 403 is a clean empty rules read: none on an unprotected branch, read on a protected one', (t) => {
+  const fx = fixture(t, { '.github/workflows/ci.yml': ROLLUP })
+  // A private repo on GitHub Free: no ruleset can exist, and an unprotected branch requires nothing (lachyts/chorus).
+  const free = gate(fx, { branch: UNPROTECTED, rules: '403plan' })
+  assert.equal(free.status, 'none')
+  assert.deepEqual([free.required, free.unmatched, free.jobs], [[], [], []])
+  hasWhy(free, /^rules\/branches\/main: HTTP 403, rulesets are not on this repo's GitHub plan, so none can apply$/)
+  // A protected branch on the same plan: the protection's contexts are read in full.
+  const prot = gate(fx, { rules: '403plan' })
+  assert.equal(prot.status, 'read')
+  assert.deepEqual(prot.required.map((r) => r.context), [CTX])
+  // Any other 403 on the rules read stays a failure.
+  const other = gate(fx, { branch: UNPROTECTED, rules: '403' })
+  assert.equal(other.status, 'partial')
+  hasWhy(other, /^rules\/branches\/main: HTTP 403$/)
+  // The branch read's 403 is never read as the plan's, whatever its body.
+  assert.equal(gate(fx, { branch: '403', rules: '403plan' }).status, 'unreadable')
+})
+
 // ---- M8: gh failures ---------------------------------------------------------------------------------------------
 
 test('M8 gh missing, logged out, a 5xx and a body that is not JSON are each unreadable, exit 0', (t) => {

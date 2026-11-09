@@ -215,7 +215,7 @@ function check(f) {
   const bySilence = group(/^- judged by silence/, /^- judged by its own bound/)
   const byBound = group(/^- judged by its own bound/, /^- judged by a condition/)
   const never = group(/^- never judged by silence/, /^\*\*What `stalled` means/)
-  const CAUSES = ['sign-off', 'paused', 'room-stop', 'not-started', 'merge-hold', 'regenerating', 'surface-wait', 'cool-down', 'heat',
+  const CAUSES = ['sign-off', 'paused', 'room-stop', 'not-started', 'merge-hold', 'regenerating', 'surface-wait', 'leg-wait', 'cool-down', 'heat',
     'away-cap', 'trickle', 'last-start', 'approved-queue', 'pr-hold', 'you']
   const named = (txt) => CAUSES.filter((c) => new RegExp('`' + c + '`').test(txt))
   fail('watchdog', !wdc.includes('reconcile-rollout.py moving --rollout <rollout-note>') ||
@@ -226,7 +226,7 @@ function check(f) {
     !wdc.includes('The Watchdog is Chorus\'s Companion alone: with Chorus not running nothing watches, and a stall is read when Lachy runs /thread:status') ||
     /launchd|watchdog\.py|ntfy|only notif|notif(?:y|ies) (?:Lachy|him)/i.test(wdc) ||
     /a live lead never reads/i.test(wdc) ||
-    JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating', 'surface-wait']) ||
+    JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating', 'surface-wait', 'leg-wait']) ||
     JSON.stringify(named(bySilence).sort()) !== JSON.stringify([...silenceJudged].sort()) ||
     JSON.stringify(named(byBound)) !== JSON.stringify(['room-stop']) ||
     !['paused', 'sign-off', 'not-started', 'you'].every((c) => named(never).includes(c)) ||
@@ -339,7 +339,8 @@ test('control: a lane-site exit 2 routed to § 7, or the marker clause dropped, 
 
 test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, a launchd fallback back, or nothing-watches dropped, fails watchdog', () => {
   only('status', 'So `stalled` is a reason to look', 'So a live lead never reads `stalled`; it is a reason to look', 'watchdog')
-  only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait")', 'SILENCE_JUDGED = ("merge-hold", "regenerating")', 'watchdog')
+  only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait")', 'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait")', 'watchdog')
+  only('status', '  - `leg-wait` (at `--stall-after`,', '  - a Leg (at `--stall-after`,', 'watchdog')
   only('status', '  - `merge-hold` (at `--stall-after`:', '  - `pr-hold`, and `merge-hold` (at `--stall-after`:', 'watchdog')
   only('status', 'The Watchdog is Chorus\'s Companion alone: with Chorus not', 'The Watchdog is Chorus\'s Companion, and a launchd job when Chorus is not running: with Chorus not', 'watchdog')
   only('status', 'with Chorus not\nrunning nothing watches, and a stall is read when Lachy runs /thread:status', 'with Chorus not\nrunning a job watches', 'watchdog')

@@ -31,6 +31,9 @@ a next page (`Link: …; rel="next"`) keeps its first page and sets `truncated`.
 - Rules (200): every `required_status_checks` rule's `parameters.required_status_checks[].{context,
   integration_id}`; a `workflows` rule goes to `unmatched` as kind required-workflow (path, repositoryId, ref) and a
   `code_scanning` rule as kind code-scanning (tools). Other rule types are ignored.
+- Rules (403 naming the plan): GitHub answers a private repo on a plan without rulesets (GitHub Free) with a 403 whose
+  message reads `Upgrade to GitHub Pro or make this repository public …`. No ruleset can exist or apply there, so it
+  reads as a clean empty rules read (an empty list, ok) with one why line saying so. Any other 403 stays a failure.
 
 Status. none: both reads 200, the branch read full, and nothing required (no context, no required workflow, no
 code-scanning rule). read: both 200, the branch read full, something required, and the jobs read. partial: the
@@ -38,7 +41,7 @@ branch read 200 and the rules read not, or the protection object not visible, or
 missing, or PyYAML cannot be imported). unreadable: the branch read not 200 (a 403; a 404, which is also a private
 repo this gh account cannot see or a branch not on origin; a 5xx; an error; a timeout), gh missing or logged out, no
 GitHub origin or an origin error, or an internal error; `required` still lists what the rules read gave, and no
-workflow is read (`jobs: null`). Never `none` on anything less than two clean reads.
+workflow is read (`jobs: null`). Never `none` on anything less than two clean reads (the plan's no-rulesets 403 is one).
 
 `required`: [{context, sources: ["protection" | "ruleset", …], appId?, cut?}], deduplicated, in protection order and
 then ruleset order (a context both name carries both sources, its first app id kept).
@@ -208,6 +211,19 @@ def gh_get(gh_bin, endpoint):
     return code, "\n".join(lines[body_at:]), None, headers
 
 
+PLAN_NO_RULESETS_RE = re.compile(r"^Upgrade to GitHub Pro or make this repository public\b")
+
+
+def _plan_has_no_rulesets(body):
+    """A 403 body whose message says the repo's plan offers no rulesets (a private repo on GitHub Free)."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return False
+    msg = data.get("message") if isinstance(data, dict) else None
+    return isinstance(msg, str) and bool(PLAN_NO_RULESETS_RE.match(msg))
+
+
 def _read(gh_bin, slug, kind, branch, why):
     """One endpoint: (json | None, ok, next_page). `kind` is `branches` or `rules/branches`; a failure appends a why."""
     label = "%s/%s" % (kind, branch)
@@ -215,6 +231,9 @@ def _read(gh_bin, slug, kind, branch, why):
     if code is None:
         why.append("%s: %s" % (label, error))
         return None, False, False
+    if code == 403 and kind == "rules/branches" and _plan_has_no_rulesets(body):
+        why.append("%s: HTTP 403, rulesets are not on this repo's GitHub plan, so none can apply" % label)
+        return [], True, False
     if code != 200:
         why.append("%s: HTTP %d" % (label, code))
         return None, False, False
