@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-09
+last_touched: 2026-11-10
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -10,7 +10,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
-**2026-11-09 (latest): [[thread-skill-rollout-2026-11-08]] led to 17/18 merged (PRs #340-#356); it halted waiting only on p44-4's external dependency [[chorus-p100-8-the-stage-starts-chains-from-the-waiting-list]] (open, in no rollout).**
+**2026-11-10 (latest): [[thread-skill-rollout-2026-11-08]] finished 18/18 merged in 34h 33m and is archived. P41 is closed; P42 and P43 were already closed; P44 stays open on p44-5.**
+- A Chorus Watchdog recovery ran `/thread:repair` once [[chorus-p100-8-the-stage-starts-chains-from-the-waiting-list]] merged (chorus#717). Nothing needed handing back, so repair handed off to execute's resume. p44-4 then took 3 plan rounds (it climbed to opus-xhigh) and 2 review rounds, and merged as #359 (c9154ab) through merge-task on the base it was integrated against.
+- Completion ceremony: close-score recorded t-20261109T165200Z-722053. Two follow-ons were filed: [[thread-skill-followup-remove-fast-tier-adr-worktree]] and [[thread-skill-followup-schedule-adr-0070-tasks]] (#312 is still open). Vault commit 69f87d4f.
+- The primary checkout still has not caught up: 6 local-only commits (4 queued in close/2026-11-08-thread-skill-b54970b7a2bb, 2 stranded, 54e1277 among them) and 56 behind origin. The stranded pair are their owner's to land by PR.
+
+**2026-11-09: [[thread-skill-rollout-2026-11-08]] led to 17/18 merged (PRs #340-#356); it halted waiting only on p44-4's external dependency [[chorus-p100-8-the-stage-starts-chains-from-the-waiting-list]] (open, in no rollout).**
 - Landed: P41-2..7, P42-2..4, P43-2..6 (the Fast tier, CI gating PRs on it, the suite audit), P44-1..3 (the Waiting list verb, a Leg counts from its session's start, a held begin ends the session). Master now declares `Verifier: make test-fast`; the next rollout's schedule stamps it.
 - p41-3 plan-blocked three runs; on Lachy's word `max_plan_rounds` went to 4 and it landed first round (#354).
 - Integration snags worth knowing: master's new fast-tier map (p43-2) made later tasks red until their new fixture tests or deleted tests were listed (integrators fixed each); conflicts in fake-gh.py, CONTEXT.md, serial-chains.py resolved by integrators; one Flake filed (merge-task-base 8b).
@@ -1189,6 +1194,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-10 (rollout 2026-11-08 complete):** next is `/thread:schedule --tasks thread-skill-p44-5-move-todays-chains-onto-the-list` (serial; it closes P44). Land the primary's 2 stranded commits by PR so close-outs land again. Then [[thread-skill-followup-remove-fast-tier-adr-worktree]], [[thread-skill-followup-schedule-adr-0070-tasks]] once #312 merges, and `/thread:reflect [[thread-skill-rollout-2026-11-08]]` if wanted.
+
 **From 2026-11-09 (rollout 2026-11-08 at 17/18):** once [[chorus-p100-8-the-stage-starts-chains-from-the-waiting-list]] lands, run `/thread:execute [[thread-skill-rollout-2026-11-08]]` from `~/repos/tools/thread-skill-rollout`: it starts p44-4, merges it and runs the completion ceremony. Then `/thread:schedule --tasks thread-skill-p44-5-move-todays-chains-onto-the-list` (serial). Filed Flakes: [[thread-skill-followup-flake-111f0712fd]], [[thread-skill-followup-flake-c04dc6ff0c]].
 
 **From 2026-11-08 (release-check fix):** PR #335 is queued; once it merges, #332 needs master merged in if this close did not do it. Then [[thread-skill-release-check-review-follow-ups]] when suite time matters.
@@ -1234,6 +1241,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-10 (close, repair + execute): a Watchdog recovery repair started p44-4 once chorus-p100-8 merged; p44-4 merged as #359; [[thread-skill-rollout-2026-11-08]] finished 18/18, ceremony run, P41 closed, archived.
 - 2026-11-09 (close, execute + repair): led [[thread-skill-rollout-2026-11-08]] to 17/18 merged (#340-#356); p41-3 handed back with max_plan_rounds 4 on Lachy's word; halted on p44-4's external dependency chorus-p100-8; Lachy ruled out all rollout notifications.
 - 2026-11-08 (close): ubuntu-latest's GNU diffutils 3.12 broke release-check (c)/(c2) on every PR; rewrote the cache diff as a find -L + cmp walk (PR #335), three xhigh review rounds, 3 blocking fixed, rest filed.
 - 2026-11-07 (close, build): merge-task merges an UNSTABLE PR when no required check is reported (Animately/optimizer's develop stalled five of seven PRs in [[animately-app-rollout-2026-11-07]]); first tried reading the protection object as `none`, withdrawn after review round 1 reproduced a hidden non-check gate; two dev review rounds, round 2 clean, 10 findings filed to [[thread-skill-merge-task-unstable-guard-follow-ups]].
