@@ -28,7 +28,8 @@
 //                Stage `restarted --listed` (P44-4), else `restarted --pending` → `create_thread` → `--started`, or
 //                the manual handoff → `--manual`; never `leg.py begin`;
 //   r-restarting § 7 (e) step 2's outcomes: a standing restart stops, `recorded: false` by `began` (a begun Leg
-//                stops, this session's own standing line goes on to step 3), no session id stops;
+//                stops; a standing identical line parts by form: the `--pending` form's goes on to step 3, the
+//                `--listed` form's reads its listed and stops, never reaching step 3), no session id stops;
 //   r-setaside   § 7 (b): `approve-gates` on sign-off, a declined gate deferred, a hand-back recorded first;
 //   r-defer      § 7 (b)'s Defer: the `dependants`, the chain-or-fix ask, one `defer` of the closure, a held
 //                dependant never written, and no retire block or `## Notes` line;
@@ -238,8 +239,11 @@ function check(f) {
     flag('r-restart', 'step 2 does not list before its --pending form')
   }
   for (const p of ['with `--replace` only on the `restart Leg N` branch', 'Exit 3 → report the standing restart, and stop',
-    '`recorded: false` → by `began`: `true`, Leg N began meanwhile: stop',
-    "`false`, this session's own identical line already stands", 'go on to step 3',
+    '`recorded: false` with `began: true` → Leg N began meanwhile: stop',
+    '`recorded: false` with `began: false` is the identical line already standing', 'and the forms part there',
+    "The `--pending` form's is this session's own line: go on to step 3",
+    "The `--listed` form's (`restart: Leg N listed`, whichever session logged it) reads its `listed` and `unlisted`",
+    'and stops: steps 3 and 4 never run for it, since a `create_thread` would double-start a listed chain',
     'Exit 1 naming `--session` → this session has no id: report it, and stop; never invent one']) {
     if (!step2.includes(p)) flag('r-restarting', `step 2 lacks ${p}`)
   }
@@ -447,8 +451,16 @@ test('control: a step 2 that invents a session id fails r-restarting', () => {
   only('repair', 'report it, and stop; never invent one.', 'pass a made-up one.', ['r-restarting'], 'invent')
 })
 test('control: a step 2 that stops on its own standing line fails r-restarting', () => {
-  only('repair', "`recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line\n   already stands (a re-run of this step, after a compaction say): go on to step 3.",
-    '`recorded: false` → Leg N began meanwhile: stop.', ['r-restarting'], 'began')
+  only('repair', "The `--pending` form's is this\n   session's own line: go on to step 3.", "The `--pending` form's is this\n   session's own line: stop.",
+    ['r-restarting'], 'began')
+})
+test('control: a step 2 whose re-run --listed goes on to step 3 fails r-restarting', () => {
+  only('repair', 'and stops: steps 3 and 4 never run for it, since a `create_thread` would\n   double-start a listed chain.',
+    'and goes on to step 3.', ['r-restarting'], 'listed re-run')
+})
+test('control: a step 2 whose recorded: false clause is scoped to either form fails r-restarting', () => {
+  only('repair', 'standing (a re-run of this step, after a compaction say), and the forms part there.',
+    'standing (a re-run of this step, after a compaction say): go on to step 3.', ['r-restarting'], 'either form')
 })
 test('control: (e) without the take-over evidence rule fails r-restart only', () => {
   only('repair', "   Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence: Leg K's session gone\n" +

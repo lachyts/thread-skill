@@ -953,9 +953,13 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
    Otherwise (a take-over, that exit 2, off the Stage, or on Codex Desktop):
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --pending`,
    with `--replace` only on the `restart Leg N` branch. Either form: Exit 3 → report the standing restart, and stop.
-   `recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line
-   already stands (a re-run of this step, after a compaction say): go on to step 3. Exit 1 naming `--session` → this
-   session has no id: report it, and stop; never invent one.
+   Exit 1 naming `--session` → this session has no id: report it, and stop; never invent one. `recorded: false` with
+   `began: true` → Leg N began meanwhile: stop. `recorded: false` with `began: false` is the identical line already
+   standing (a re-run of this step, after a compaction say), and the forms part there. The `--pending` form's is this
+   session's own line: go on to step 3. The `--listed` form's (`restart: Leg N listed`, whichever session logged it)
+   reads its `listed` and `unlisted` as its first run's would (`listed` true → "listed: the Stage opens Leg N when
+   there is room"; false → its `unlisted`), and stops: steps 3 and 4 never run for it, since a `create_thread` would
+   double-start a listed chain.
 3. **Start it** (the `--pending` form only) with the host's `create_thread`, chosen as § Native runtime binding says (a
    claude harness, or `restart.anyLaunch`, on the Chorus Stage: a take-over, or a snapshot from before `--listed`): `title`, `prompt`, `tldr` and `cwd` from `restart`, no `brief`,
    `report_back` on. Then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <N> --started <its id>`.
