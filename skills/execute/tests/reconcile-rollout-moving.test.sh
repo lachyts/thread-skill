@@ -326,13 +326,14 @@ legline 2026-10-26T09:00+00:00 1 "began: leg-1 session s1 in cc-demo from $D/roo
 legline 2026-10-26T09:05+00:00 1 "claimed [[a]]"
 leglease() { mkdir -p "$D/home/.config/thread/leases"
   printf '{"rollout": "%s", "written_at": "%s", "by": "leg"%s}\n' "$RO" "$1" "${2:+, $2}" > "$D/home/.config/thread/leases/$RO.json"; }
+lt() { python3 -c 'import sys; from datetime import datetime; print(datetime.fromisoformat(sys.argv[1]).astimezone().isoformat(timespec="minutes"))' "$1"; }   # `until`'s form
 ok "$(vc)" "$SKIPS" "M12w: an open Leg with no lease stays skip"
 leglease 2026-10-26T11:40:00Z
 ok "$(vc)" "$SKIPS" "M12w: an open Leg whose lease has no \`waiting\` (mid-turn) stays skip"
 leglease 2026-10-26T11:40:00Z '"waiting": true'
 J=$(mv)
 ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"], d["lastEvent"], d["ageMinutes"], d["until"]]')" \
-  "[\"waiting\",\"leg-wait\",\"Leg 1 waiting since 2026-10-26T11:40:00.000Z (session s1)\",\"2026-10-26T11:40:00.000Z\",20,\"$(python3 -c 'from datetime import datetime; print(datetime.fromisoformat("2026-10-26T12:25:00+00:00").astimezone().isoformat(timespec="minutes"))')\"]" \
+  "[\"waiting\",\"leg-wait\",\"Leg 1 waiting since 2026-10-26T11:40:00.000Z (session s1)\",\"2026-10-26T11:40:00.000Z\",20,\"$(lt 2026-10-26T12:25:00+00:00)\"]" \
   "M12w: a fresh waiting lease → waiting leg-wait, until its write + stall-after, lastEvent the write"
 ok "$(j "$J" 'd["work"]')" '{"running":[],"lane":false,"start":[],"halt":null,"reentry":[],"coolDown":[],"capHeld":[]}' \
   "M12w: … no work read (no Run record, no next)"
@@ -350,7 +351,7 @@ leglease 2026-10-26T08:30:00Z '"waiting": true'
 ok "$(vcr --stall-after 1440)" '["stalled","silent","Leg 1'"'"'s waiting lease lapsed at 2026-10-26T11:30:00Z: its session s1 is gone"]' \
   "M12w: a lapsed waiting lease (180 min, LEG_WAIT_LAPSE) → stalled, its session gone, whatever --stall-after"
 ok "$(j "$(MNOW=2026-10-26T11:00:00Z mv --stall-after 1440)" '[d["verdict"], d["until"]]')" \
-  "[\"waiting\",\"$(python3 -c 'from datetime import datetime; print(datetime.fromisoformat("2026-10-26T11:30:00+00:00").astimezone().isoformat(timespec="minutes"))')\"]" \
+  "[\"waiting\",\"$(lt 2026-10-26T11:30:00+00:00)\"]" \
   "M12w: … before its lapse, until is the lapse (the earlier of the two)"
 leglease 2026-10-26T11:00:00Z '"waiting": true'
 ok "$(THREAD_MACHINE_TIMES='{"boot":"2026-10-26T11:30:00Z"}' vc)" '["waiting","leg-wait"]' \
@@ -358,6 +359,18 @@ ok "$(THREAD_MACHINE_TIMES='{"boot":"2026-10-26T11:30:00Z"}' vc)" '["waiting","l
 ok "$(THREAD_MACHINE_TIMES='{"boot":"2026-10-26T11:10:00Z"}' vc)" '["stalled","mac-restart"]' \
   "M12w: … past stall-after since the boot → stalled mac-restart"
 ok "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:50:00Z"}' vc)" '["waiting","leg-wait"]' "M12w: a fresh wake restarts it too"
+# until runs from the same base as the lapse: a wake after the write moves both (_Leases' lapsesAt alone reads the write
+# + 180 while the lease is younger than that, so it read 11:30 here, then jumped to 11:45 once the lease outlived it).
+leglease 2026-10-26T08:30:00Z '"waiting": true'
+for at in 11:20 11:31; do
+  ok "$(j "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:00:00Z"}' MNOW=2026-10-26T${at}:00Z mv)" '[d["verdict"], d["cause"], d["until"]]')" \
+    "[\"waiting\",\"leg-wait\",\"$(lt 2026-10-26T11:45:00+00:00)\"]" \
+    "M12w: a wake (11:00) after the write (08:30), read at ${at}: until is wake + stall-after (11:45), never write + 180 (11:30)"
+done
+ok "$(j "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:00:00Z"}' MNOW=2026-10-26T11:20:00Z mv --stall-after 1440)" '[d["verdict"], d["until"]]')" \
+  "[\"waiting\",\"$(lt 2026-10-26T14:00:00+00:00)\"]" "M12w: … under --stall-after 1440, until is wake + 180, the lapse from the same base"
+ok "$(THREAD_MACHINE_TIMES='{"wake":"2026-10-26T11:00:00Z"}' MNOW=2026-10-26T11:46:00Z vc)" '["stalled","silent"]' \
+  "M12w: … and at 11:46, past that until, it reads stalled silent"
 leglease 2026-10-26T12:30:00Z '"waiting": true'
 ok "$(vc)" "$SKIPS" "M12w: a waiting lease written ahead of now (unreadable) stays skip, never a stall"
 leglease 2026-10-26T11:00:00Z '"waiting": true'

@@ -912,11 +912,12 @@ Subcommands:
                  (archived). But first, 1a (ADR 0075 d5, P41-4): a serial note, not superseded, done, dropped or
                  archived, whose open Leg (leg.py's parse_log, parse_legs and open_leg_of, loaded through _leg_module)
                  has a Leg lease reading `waiting: true` (a turn end's `next --waiting`: a review, Capacity or quota
-                 wait, a completion verify, a room stop; a Capacity wait's renewals keep it) reads that lease's
-                 silence, from the latest of its `written_at`, the Mac's wake and its boot: stalled once the lease
-                 reads lapsed (_Leases' Leg rule, LEG_WAIT_LAPSE: its session gone) or the silence passes
-                 stall-after, cause `mac-restart` when a boot came after the write, else `silent`; otherwise waiting
-                 `leg-wait`, `until` the earlier of the two; lastEvent the lease's `written_at`. No Run record is
+                 wait, a completion verify, a room stop; a Capacity wait's start and renewals keep it) reads that
+                 lease's silence, from the latest of its `written_at`, the Mac's wake and its boot: stalled once the
+                 lease reads lapsed (_Leases' Leg rule, LEG_WAIT_LAPSE from that same base: its session gone) or the
+                 silence passes stall-after, cause `mac-restart` when a boot came after the write, else `silent`;
+                 otherwise waiting `leg-wait`, `until` base + the lesser of stall-after and LEG_WAIT_LAPSE; lastEvent
+                 the lease's `written_at`. No Run record is
                  read. Every other serial note (no open Leg, no lease, an unreadable one, one with no `waiting`, a
                  chain on the Waiting list with no Leg) stays skip, its cause unchanged.
               2. The Run record (_record_read, _record_state): either unreadable is a MovingError.
@@ -13628,12 +13629,14 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
 
     def leg_wait():
         """1a. A serial note's waiting Leg (ADR 0075 d5, P41-4): its open Leg (leg.py's Leg log reader) with a Leg lease
-        that reads `waiting: true` (a turn end's `next --waiting`, a Capacity wait's renewal) is judged by that lease's
-        silence; anything else (no open Leg, no lease, an unreadable one, one with no `waiting`) is None, so the note
-        stays skip. The silence runs from the latest of the lease's `written_at`, the Mac's wake and its boot (the
-        parallel reading's base). stalled once the lease reads lapsed (_Leases' Leg rule: LEG_WAIT_LAPSE, its session
-        gone) or the silence passes stall-after, cause `mac-restart` when a boot came after the write, else `silent`;
-        otherwise waiting `leg-wait`, `until` the earlier of the two."""
+        that reads `waiting: true` (a turn end's `next --waiting`, a Capacity wait's start and renewals) is judged by
+        that lease's silence; anything else (no open Leg, no lease, an unreadable one, one with no `waiting`) is None,
+        so the note stays skip. The silence runs from the latest of the lease's `written_at`, the Mac's wake and its
+        boot (the parallel reading's base). stalled once the lease reads lapsed (_Leases' Leg rule: LEG_WAIT_LAPSE from
+        that same base, its session gone) or the silence passes stall-after, cause `mac-restart` when a boot came after
+        the write, else `silent`; otherwise waiting `leg-wait`, `until` the earlier of the two, both measured from the
+        base (never _Leases' `lapsesAt`, which for a fresh lease is its write + LEG_WAIT_LAPSE and ignores a later wake
+        or boot)."""
         lg = _leg_module()
         leg = lg.open_leg_of(lg.parse_legs(lg.parse_log(note)))
         if leg is None:
@@ -13649,7 +13652,6 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
         wake = mt.get("wake") if mt.get("wake") is not None and mt.get("wake") <= now else None
         base = max(t_ for t_ in (written, boot, wake) if t_ is not None)
         quiet_min = (now - base).total_seconds() / 60
-        lapses = _parse_ts(lease["lapsesAt"])
         out["lastEvent"] = _zms(written)
         out["ageMinutes"] = max(0, int((now - written).total_seconds() // 60))
         n, sid = leg["n"], leg["session"] or "unknown"
@@ -13663,7 +13665,8 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
                 return done("stalled", cause, f"Leg {n}: no life sign for {out['ageMinutes']}m since its waiting turn "
                                               f"end (session {sid})")
             return None
-        until = min(t_ for t_ in (base + timedelta(minutes=stall_after), lapses) if t_ is not None)
+        # The real lapse restarts from a wake or boot after the write, as the silence does: one base for both.
+        until = base + timedelta(minutes=min(stall_after, LEG_WAIT_LAPSE / timedelta(minutes=1)))
         return by_silence(stall_after, LEG_WAIT, f"Leg {n} waiting since {_zms(written)} (session {sid})",
                           _stamp(until), test=quiet)
 
