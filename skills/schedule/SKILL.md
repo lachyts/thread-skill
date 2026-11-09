@@ -1094,8 +1094,10 @@ checkout nested inside it by path, a separate repo with its own index (p33-3); b
 in no checkout still covers every checkout beneath it. Quote each `--surface` token as one shell word, since a vault
 path holds spaces: `--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7. A stuck
 chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces, and a parallel rollout
-awaiting sign-off or halted on its set-asides holds no Project root against a chain (ADR 0060): a `WARN: … released …`
-line names what this chain may now use beside it. That rollout reclaims the place on resume and then waits its turn.
+awaiting sign-off or halted on its set-asides, or idle in a surface wait (P41-3: its surface-wait marker stands, no call
+it lists in flight and no task integrating, after a check that refused or only went unanswered, exit 4), holds no
+Project root against a chain (ADR 0060): a `WARN: … released …` line names what this chain may now use beside it. That
+rollout reclaims the place on resume and then waits its turn.
 
 **S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
 nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its

@@ -1,5 +1,5 @@
 // A stuck rollout holds only what it waits on (ADR 0060, p33-2). The behaviour is pinned by tests/unfinished-rollout.test.sh
-// X1-X16 and WL11, tests/leg.test.sh L14 and skills/execute/tests/reconcile-rollout-origin-lane.test.sh L21-L23; this
+// X1-X16, WL11 and WL12, tests/leg.test.sh L14 and skills/execute/tests/reconcile-rollout-origin-lane.test.sh L21-L23; this
 // pins the prose each reader follows, one rule per piece:
 //   context   CONTEXT.md **Unfinished rollout** says a stuck chain holds only its unlanded rows' surfaces, a waiting
 //             parallel rollout holds no Project root against serial chains, and each reclaims on resume and waits its
@@ -13,14 +13,16 @@
 //             next), the check's --resume --surface-wait --running form, exit 3 or 4 a surface wait (never § 7), exit 5
 //             and exit 2 halting; § 7 lists the halt and says a surface wait is none, *Whole-rollout halts kept* keeps it;
 //             step 1.2, *Lost call* and step 3's *Surface wait at Integration* hold under it (P41-3)
-//   legs      legs.md § Begin's exit 3: a begin wait (`waiting`, no needs-you item, no create_thread) and a failed
-//             re-check (listed, `halted`)
+//   legs      legs.md § Begin's exit 3: a begin wait (`waiting`, no create_thread; a needs-you item only when `listed`
+//             is false, a standing Leg session keeping it off the Waiting list, P41-3) and a failed re-check (listed,
+//             `halted`)
 //   status    status § 5's **Hold** block, S12's "holds only", the restart's `surface held by` blocker and § 4's Hold
 //             line from `unfinished-rollout.py hold`
-//   repair    repair § 7 (e) step 1's `surface held by` branch (never restart), (b)'s reclaim note and the refusal
-//             section's released case
+//   repair    repair § 7 (e) step 1's `surface held by` branch (never restart) and its `surface re-check unanswered`
+//             branch (restart it, P41-3), (b)'s reclaim note and the refusal section's released case
 //   schedule  schedule § 0's parallel-path prose (a chain's hold, a stuck chain's released place a WARN, not a refusal),
-//             S3's stuck-chain note and S7's amended closing line, and the serial template's legend
+//             S3's stuck-chain note (a surface wait's idle release included, P41-3) and S7's amended closing line, and
+//             the serial template's legend
 // check() returns named failures, so the real text and each control run through identical logic. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -109,8 +111,11 @@ function check(f) {
   const begin = collapse(section(f.legs, /^## Begin/, /^## (?!Begin)/))
   fail('legs', !all(begin, ['- **3, a begin wait** (ADR 0060', 'the chain waits its turn', 'It is no needs-you item',
     '`waiting reason="begin wait: surface held: [[<B>]] holds <token>"`', '`waiting reason="begin wait: surface re-check unanswered: …"`',
-    'Never call `create_thread` on it', '- **3, a failed re-check**', 'list it (§ Needs you), and end on its `status_line`']) ||
-    begin.includes('`halted reason="surface held: [[<B>]] holds <token>"`'))
+    'Never call `create_thread` on it', '- **3, a failed re-check**', 'list it (§ Needs you), and end on its `status_line`',
+    // P41-3: an unlisted begin wait (a standing Leg session keeps it off the Waiting list) is a needs-you item
+    'With `listed` false, nothing begins it again, so list it (§ Needs you)',
+    '`waiting` keeps a chain with a standing Leg session off the list and counts that session against the room (ADR 0076 d3)']) ||
+    begin.includes('`halted reason="surface held: [[<B>]] holds <token>"`') || begin.includes('The chain stays listed'))
 
   // status
   const s5 = collapse(section(f.status, /^### 5\. A serial chain/, /^## /))
@@ -124,6 +129,7 @@ function check(f) {
   const s7 = collapse(section(f.repair, /^### 7\. A serial chain/, /^## /))
   const step1 = s7.slice(s7.indexOf('1. **Restartable?**'), s7.indexOf('2. **Mark it.**'))
   fail('repair', !step1.includes('- `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn.') ||
+    !step1.includes('- `surface re-check unanswered: <why>` → restart it: no hold is known') ||
     !s7.includes("After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules") ||
     !collapse(f.repair).includes("A stuck serial chain (ADR 0060) holds only its unlanded rows' surfaces"))
 
@@ -134,6 +140,7 @@ function check(f) {
     "a stuck one (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces (ADR 0060)",
     'a root that overlaps only a place a stuck chain released gives a `WARN: … released …` line instead of a refusal']) ||
     s0.includes('a surface of an unfinished serial chain') || !sched.includes("A stuck chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces") ||
+    !sched.includes('awaiting sign-off or halted on its set-asides, or idle in a surface wait (P41-3') ||
     !sched.includes("it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060)") ||
     !f.template.includes("(while it is stuck, only its unlanded rows' surfaces: ADR 0060)"))
   return fails
@@ -203,6 +210,15 @@ test('control: legs § Begin calling create_thread on the stand fails legs', () 
 })
 test('control: legs § Begin halting on a begin wait fails legs (P41-3)', () => {
   only('legs', '`waiting reason="begin wait: surface held: [[<B>]] holds <token>"`', '`halted reason="surface held: [[<B>]] holds <token>"`', 'legs')
+})
+test('control: legs § Begin calling every begin wait listed fails legs (P41-3)', () => {
+  only('legs', 'With `listed` false, nothing begins it again, so list it (§ Needs you)', 'The chain stays listed (`start: unattended`, ADR 0076 d2)', 'legs')
+})
+test('control: repair stopping on an unanswered re-check fails repair (P41-3)', () => {
+  only('repair', '- `surface re-check unanswered: <why>` → restart it: no hold is known', '- `surface re-check unanswered: <why>` → report it, and stop: no hold is known', 'repair')
+})
+test('control: schedule S3 without the surface wait\'s release fails schedule (P41-3)', () => {
+  only('schedule', 'awaiting sign-off or halted on its set-asides, or idle in a surface wait (P41-3', 'awaiting sign-off or halted on its set-asides (', 'schedule')
 })
 
 test('control: status without its Hold block or Hold line fails status', () => {

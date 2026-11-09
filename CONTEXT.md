@@ -681,9 +681,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollout's hold on a place this Leg would write (a surface stand, ADR 0060).
   `leg.py begin` ends `state=waiting reason="begin wait: …"` (exit 3,
   `beginWait`) with nothing written, never `halted`. No session polls the
-  check and no marker records it: the chain stays on the **Waiting list** (ADR
-  0076 d2, `start: unattended`), P44-3 ends the session, and the Stage begins
-  it again from the list once its way is clear. A Leg never begins without a
+  check and no marker records it. A chain the **Waiting list** lists once
+  begin has written nothing (begin's `listed`: stamped `start: unattended`, a
+  chain state on the list, no Leg session standing) stays on it (ADR 0076
+  d2), P44-3 ends the session, and the Stage begins it again from the list
+  once its way is clear. Any other begin wait is a needs-you item, its
+  `unlisted` saying why: a chain with no `start: unattended` or in a state
+  off the list, or one whose Leg session still stands (the successor of a
+  started hand-over, a standing
+  restart `pending` or `started`, a take-over's open Leg), which `waiting`
+  keeps off the list and counts against the room (ADR 0076 d3). It waits on
+  `/thread:execute [[<slug>]]` instead. A Leg never begins without a
   passing check: a check still unanswered after its longer retry reads
   `unanswered`, never a pass and never a refusal. Every other begin refusal
   stays a halt, a check that fails included. Parallel execute's version is a

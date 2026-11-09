@@ -204,8 +204,9 @@ lane, so the hand-off runs (ADR 0046, ADR 0048).
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
 the **Close-out interrupted** stop above: run `/thread:repair [[<P>]]`, and on Lachy's confirmation it closes
 P out, so schedule's check no longer counts P. A stuck serial chain (ADR 0060) holds only its unlanded rows' surfaces,
-and a parallel rollout awaiting sign-off or halted on its set-asides holds no Project root against serial chains. So a
-refusal that names one of them is about a place its waiting rows still hold. Resolving those rows (§ 7 (b), or § 3 to
+and a parallel rollout awaiting sign-off or halted on its set-asides, or idle in a surface wait (P41-3: execute § 4.5's
+marker stands, with no call it lists in flight and no task integrating), holds no Project root against serial chains.
+So a refusal that names one of them is about a place its waiting rows still hold. Resolving those rows (§ 7 (b), or § 3 to
 § 6 for a parallel one) is what frees it, and a place it released never refuses: schedule's `WARN: … released …` line
 says so.
 
@@ -908,6 +909,11 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
      `/thread:status [[B]]`, and stop. Re-run this repair, or `/thread:execute`, once [[B]] lands its rows there, or
      its Leg closes. `surface re-check failed: <line>` → report
      the line, and stop.
+   - `surface re-check unanswered: <why>` → restart it: no hold is known, only that status's own read (60 s, with no
+     retry) went unanswered on a busy Mac. A restart is safe: the new Leg's `begin` runs its own re-check (60 s, then
+     once more at 180 s) and writes nothing on a begin wait (P41-3), so a Leg that still meets no answer, or a hold,
+     ends `waiting`, never halted, and lists its begin wait as a needs-you item (`listed` false: its standing restart
+     keeps the chain off the Waiting list), whose remedy is `/thread:execute [[<slug>]]` in that session.
    - null → by `chain`: stalled; awaiting-successor with no hand-over line, or a manual one Lachy says he has not
      pasted; stopped, on his word; completable, not-started or ready, on his ask.
    - Anything else → report it, and stop.

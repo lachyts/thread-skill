@@ -829,7 +829,7 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
   `surface re-check unanswered: <why>` is status's own 60 s read, with no retry, on a busy Mac. begin retries longer
   (60 s, then 180 s) and writes nothing on a begin wait, so `/thread:execute [[<slug>]]` once the Mac is quieter is the
-  remedy.
+  remedy (or `/thread:repair [[<slug>]]`, whose § 7 (e) restarts it).
   A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (by rank: a chain that has
   begun before one that has not, then its estate rank, then the first to begin, else the earlier schedule or the slug
   order: ADR 0067 d9) and holds an unlanded row (in Chain copies, a done row it has not yet landed: ADR 0067 d3) on
