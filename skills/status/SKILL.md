@@ -935,7 +935,7 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
 `moving` reads only one thing on it: an open Leg (the `## Leg log`'s latest began Leg with no `closed:` line) whose Leg
 lease (`skills/execute/away.md` § Capacity; `leg.py` writes it) reads `waiting: true`. A Leg's turn end writes that
 when it ends waiting (a review in flight, a Capacity or quota wait, a completion verify in flight, a room stop), and
-a Capacity wait's renewals keep it, every 10 minutes. Its silence runs from the latest of the lease's write, the Mac's
+a Capacity wait writes it again at its own start and every 10 minutes. Its silence runs from the latest of the lease's write, the Mac's
 wake and its boot: `waiting leg-wait` (`Leg <n> waiting since <write> (session <id>)`, `until` the instant it turns
 `stalled`) while it is within `--stall-after`; `stalled` once it passes `--stall-after` (`silent`, or `mac-restart`
 when a boot came after the write), or once the lease reads lapsed (its 180 minutes, `LEG_WAIT_LAPSE`: the Leg's session
@@ -981,9 +981,11 @@ reads `stalled` through silence: a Claude lead idling at `waiting`, a merge hold
 every 20-minute heartbeat tick. Under `halt: regenerate` it reads `regenerating` only while the Approved-queue route's
 single foreground turn ends within 120 min of the last life sign; 120 min is one harness step, not a bound on the
 route. What does not hold: the route past 120 min, a lead blocked on an open question, a Codex session-driven
-`--gated` run (no heartbeat; its verify and merge-task run in the foreground), and a waiting Leg whose review or
+`--gated` run (no heartbeat; its verify and merge-task run in the foreground), a waiting Leg whose review or
 completion verify runs past `--stall-after` (its turn end writes the lease once, and nothing renews it until the
-notification): each reads `stalled` against a live session. So `stalled` is a reason to look, never by itself a
+notification), and a Leg's room stop past `--stall-after` (it writes nothing to the note, so it reads `stalled silent`
+while the Stage still owes its resume; the parallel reading holds a room stop to its 6 h bound, execute § Room stop):
+each reads `stalled` against a live session. So `stalled` is a reason to look, never by itself a
 reason to start a second lead. The Companion first
 confirms that the Session has no running Turn and is not waiting on the listener (Chorus `list_sessions`); no rollout
 notifies (ADR 0075 d2), and status starts nothing. A meant wait the verdict fails to name changes only `waiting`'s
