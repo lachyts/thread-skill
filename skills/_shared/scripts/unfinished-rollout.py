@@ -320,7 +320,8 @@ anything loads, the marker untouched. Its run order (surface_wait_check): valida
 check's own validation; resolve, read the old `since`, delete the marker (a delete that fails is exit 2); arm the deadline
 ($THREAD_SURFACE_CHECK_DEADLINE, default 240 s; SIGALRM, SurfaceDeadline); compute; disarm, then write and exit. A
 refusal is exit 3 and writes the marker {rollout, written_at, since, why `[[<first>]] writes <token>`, holders, live},
-`since` carried over from a standing marker; a run its deadline cut is exit 4, stdout `unanswered`, and writes it with why
+`since` carried over from a standing marker, `live` --running's entries as `next --running` reads them (a wikilink
+stripped to its slug, lowercased); a run its deadline cut is exit 4, stdout `unanswered`, and writes it with why
 `surface re-check unanswered after <d> s`; a pass is exit 0, `none`, the marker gone. Exit 5: a refusal while a serial
 chain on an engine snapshot from before P41-3 (legacy_engine) reaches the root (legacy_reach: every place a Leg it may
 still begin can reach, erring wide), since such a chain reads no surface wait: no marker, the refuse line and holder
@@ -422,10 +423,13 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   (reconcile-rollout.py's _start_unattended) whose chain and hold leg.py reads (an unreadable one is WARNed by
   serial_notes and left off, as begin's re-check would fail closed on it), and that has no Leg session and no stop
   needing Lachy: its chain state (leg.py's chain_read) is `not-started`, `ready`, `awaiting-successor` or
-  `completable` (WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`, `stuck`,
-  `incomplete`, `superseded`, `complete` or `dropped`; and leg.py's restart_of, from the contention-free plan for its
-  next Leg, is a finish, claim, wait or complete with no blockedBy (a started hand-over, a malformed `chain_copies:` or
-  a missing Chain copy keeps it off). A manual hand-over is on the list, for its next Leg (ADR 0076 d4).
+  `completable` (leg.py's WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`,
+  `stuck`, `incomplete`, `superseded`, `complete` or `dropped`; it has no Leg session (leg.py's leg_session_of: an open
+  Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started` session that has not begun,
+  one whose begin waited included, since begin writes nothing on a begin wait: P41-3); and leg.py's restart_of, from
+  the contention-free plan for its next Leg, is a finish, claim, wait or complete with no blockedBy (a malformed
+  `chain_copies:` or a missing Chain copy keeps it off). leg.py's waiting_listed is this rule's one copy, which begin's
+  begin wait reads too (its `listed`). A manual hand-over is on the list, for its next Leg (ADR 0076 d4).
 - Order: leg.py's order_key (rank-led, ADR 0067 d9: a chain that has begun before one that has not, then the estate
   rank, then the first to begin or the earlier `captured:`, then the slug). `rank` is the chain's 1-based place.
 - Held (ADR 0076 d2): `held_by` is the first holder, by case-folded slug, that begin's surface re-check would name for
@@ -440,10 +444,11 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   resolve, else null}) less `running`: the Mac-wide running Rollout tasks (_running_by_rollout, leases read at --now,
   Leg claims never; under a rollout's surface-wait marker only its calls in flight, reconcile-rollout.py's
   _counted_tasks) plus every root serial note's Leg session, done and dropped ones aside (a Leg counts from its
-  start, ADR 0076 d3: an open Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started`
-  session), floored at 0. An open Leg whose Leg lease reads lapsed at --now (_Leases' Leg rule, the Capacity count's:
-  90 min after its last write, 180 for a waiting one) holds no place: its session died without `leg.py close`, and
-  counting it would leave the room 0 until a repair; no lease file, or an unreadable one, still counts.
+  start, ADR 0076 d3: leg.py's leg_session_of, an open Leg, a standing restart `pending` or `started`, or a last Leg
+  handed off to a `started` session, one whose begin waited included), floored at 0. An open Leg whose Leg lease
+  reads lapsed at --now (_Leases' Leg rule, the Capacity count's: 90 min after its last write, 180 for a waiting one)
+  holds no place: its session died without `leg.py close`, and counting it would leave the room 0 until a repair; no
+  lease file, or an unreadable one, still counts.
 stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"n", "by", "why"}, "waiting": [{"slug",
 "rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null}; cwd, title, prompt and harness are
 restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain), but a Complete Leg's harness, which
@@ -486,7 +491,7 @@ SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfa
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
 LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by", "restart_of",
-             "leg_outcome")
+             "leg_outcome", "leg_session_of", "waiting_listed")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
@@ -498,7 +503,6 @@ ENGINES = {}  # legacy_engine's reads: one probe read per distinct Engine snapsh
 # from P41-3 on, and no older copy carries it.
 SURFACE_WAIT_PROBE = "--surface-wait"
 SURFACE_DEADLINE = 240.0   # check --surface-wait's own deadline, seconds ($THREAD_SURFACE_CHECK_DEADLINE)
-WAITING_STATES = ("not-started", "ready", "awaiting-successor", "completable")   # `waiting`: chain states on the list
 
 
 def die(msg):
@@ -1406,14 +1410,17 @@ def surface_wait_check(args, rr, tasks_dir, toks, checkouts, vault, warns, warne
     - a refusal while a chain on an engine snapshot from before P41-3 reaches the root (`legacy`) -> exit 5, no marker:
       the refuse line and holder lines, then one `legacy: [[<c>]]: <why>: …` line per such chain;
     - a refusal with none -> exit 3: the marker {rollout, written_at, since (the old since, else now), why: `[[<first>]]
-      writes <token>`, holders, live (--running)}, then the refuse line and holder lines;
+      writes <token>`, holders, live (--running's entries, each a wikilink stripped to its slug and lowercased, as
+      `next --running` reads them)}, then the refuse line and holder lines;
     - cut by the deadline -> exit 4: the marker, why `surface re-check unanswered after <d> s`; stdout `unanswered`;
     - a pass -> exit 0, `none` (the marker already gone).
     A marker it cannot write is exit 2, `cannot write <path>: <why>`."""
     me = rr._wikilink_slug(args.resume) or args.resume.strip()
     if not me:
         die(f"--resume {args.resume}: no rollout note at {tasks_dir / (me + '.md')}")
-    live = [x.strip().lower() for x in (args.running or "").split(",") if x.strip()]
+    # Each entry as `next --running` reads it: a wikilink stripped to its slug, lowercased (an entry left `[[pt1]]`
+    # would never match pt1's stem, so parallel_hold would read its call in flight as none and release the root).
+    live = [(rr._wikilink_slug(x) or x.strip()).lower() for x in (args.running or "").split(",") if x.strip()]
     state, data, _why = rr._surface_wait_read(me)
     old = data.get("since") if state == "ok" and isinstance(data.get("since"), str) and data.get("since") else None
     err = rr._surface_wait_drop(me)
@@ -2254,21 +2261,17 @@ def cmd_unstarted(args, rr) -> int:
 
 # ---- the Waiting list (ADR 0076) --------------------------------------------------------------------------------------
 
-def leg_session(leg, ctx, chain, read, leases=None) -> bool:
-    """Whether a serial chain has a Leg session, which holds a place from its start (ADR 0076 d3): an open Leg, a
-    standing restart `pending` or `started` (a manual one starts none), or a last Leg handed off to a `started`
-    session that has not begun. With `leases` (a reconcile-rollout.py _Leases, the room's count), an open Leg whose
-    Leg lease reads lapsed is none (its session died without `leg.py close`: the Capacity count's rule,
-    _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a later boot or wake
-    restarting it); no lease file or an unreadable one still counts (a Leg on an older snapshot writes none)."""
+def leg_session(leg, ctx, chain, read, leases) -> bool:
+    """Whether a serial chain's Leg session holds a place in the room (ADR 0076 d3): leg.py's leg_session_of, its one
+    copy (an open Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started` session that
+    has not begun, a session whose begin waited included, P41-3: begin writes nothing), but an open Leg whose Leg lease
+    reads lapsed (`leases`, a reconcile-rollout.py _Leases) is none (its session died without `leg.py close`: the
+    Capacity count's rule, _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a
+    later boot or wake restarting it); no lease file or an unreadable one still counts (a Leg on an older snapshot
+    writes none)."""
     if read["open_leg"] is not None:
-        return leases is None or leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
-    restarted = read["restarted"]
-    if restarted is not None and restarted["how"] in ("pending", "started"):
-        return True
-    last = chain.legs.get(chain.last_n()) if chain.legs else None
-    return (last is not None and leg.leg_outcome(last["closed"]) == "handoff"
-            and (last["handover"] or "").startswith("started "))
+        return leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
+    return leg.leg_session_of(chain, read) is not None
 
 
 def cmd_waiting(args, rr) -> int:
@@ -2314,14 +2317,8 @@ def cmd_waiting(args, rr) -> int:
     git = SC.Git() if chains else None
     listed = []
     for path, ctx, chain, read in chains:
-        if not rr._start_unattended(chain.note):
-            continue
-        leg = load_leg(rr)
-        if read["state"] not in WAITING_STATES or leg_session(leg, ctx, chain, read):
-            continue
-        restart = leg.restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"],
-                                 read["restarted"])
-        if restart is None or restart["blockedBy"] is not None:
+        restart, _why = load_leg(rr).waiting_listed(ctx, chain, read)   # the list's rule, its one copy (begin's too)
+        if restart is None:
             continue
         hold, _why = chain_hold(rr, path, tasks_dir)
         if hold is None:

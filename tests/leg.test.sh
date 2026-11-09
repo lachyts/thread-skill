@@ -28,7 +28,9 @@
 #        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
 #        row's surface, and status's restart names it as its blocker; a held begin is a begin wait (`waiting`,
 #        beginWait held, P41-3), and so is a re-check unanswered after its retry, which status reads with no retry
-#        (L14u); a re-check that fails is exit 3 too, still halted, and status's blocker (L14f); a stuck chain with a row
+#        (L14u); a begin wait's `listed`: false and why when unstamped or a standing restart's session stands, true for
+#        a stamped chain with no Leg session (L14); an infinite re-check timeout reads its default, never a crash
+#        (L14i); a re-check that fails is exit 3 too, still halted, and status's blocker (L14f); a stuck chain with a row
 #        in progress, or no Queue rows, holds its whole claim with a warn (L14h)
 #   L15  claim stamps one leg_base per checkout the row works (a file token's checkout, its launch folder's; the vault
 #        never), and status's hold carries the order's began stamp and the open Leg (ADR 0067 d2, d4)
@@ -1138,6 +1140,20 @@ ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=wai
 ok "$(q 'd["beginWait"]')" "held" "L14: … beginWait held"
 has "$(q 'd["error"]')" "this chain waits its turn" "L14: … and its error says it waits its turn"
 same "L14: a held begin writes nothing"
+ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')" "False|no start: unattended" \
+   "L14: … unstamped, it is not listed: nothing begins it again, so legs.md lists it as a needs-you item"
+# A begin wait's `listed` (P41-3): whether `waiting` lists the chain as begin left it (waiting_listed)
+subst "$T/$RO.md" 'status: open' $'status: open\nstart: unattended'
+snap; SESS=s2 leg begin --cwd "$F"
+ok "$rc|$(q 'd["beginWait"]')|$(q 'd["listed"]')|$(q '"unlisted" in d')" "3|held|True|False" \
+   "L14: stamped start: unattended with no Leg session standing, its begin wait is listed: the Waiting list holds it"
+same "L14: a listed begin wait"
+leg restarted --leg 2 --started sess-r; ok "$rc" 0 "L14: a restart of Leg 2, started"
+snap; SESS=sess-r leg begin --cwd "$F"
+ok "$rc|$(q 'd["beginWait"]')|$(q 'd["listed"]')|$(q 'd["unlisted"]')" "3|held|False|its Leg session stands (restart Leg 2 (started))" \
+   "L14: … the restarted Leg's begin wait is not listed: its standing restart keeps the chain off the list, its place counted"
+has "$(q 'd["status_line"]')" 'state=waiting reason="begin wait: surface held: ' "L14: … still a begin wait, never halted"
+same "L14: an unlisted begin wait"
 subst "$T/$B.md" 'status: open' 'status: dropped'
 SESS=s2 leg begin --cwd "$F"
 ok "$rc|$(q 'd["leg"]')|$(q '[x["task"] for x in d["smoke"]]')" "0|2|['t1']" "L14: once that chain is dropped, Leg 2 begins"
@@ -1156,6 +1172,11 @@ ok "$(q 'd["restart"]["blockedBy"].startswith("surface re-check unanswered: no a
    "L14u: status's own read runs once, with no retry, and names it as the restart's blocker"
 THREAD_LEG_RECHECK_TIMEOUT=0.001 THREAD_LEG_RECHECK_RETRY=60 leg begin --cwd "$F"
 ok "$rc|$(q 'd["leg"]')" "0|1" "L14u: a first run that times out and a retry that answers: Leg 1 begins"
+# An infinite re-check timeout reads as its default (subprocess.run cannot take one: OverflowError), never a crash
+scen l14i
+mkro '' "t1~cc-demo~$F~$VA"; mkt t1
+THREAD_LEG_RECHECK_TIMEOUT=inf THREAD_LEG_RECHECK_RETRY=inf leg begin --cwd "$F"
+ok "$rc|$(q 'd["leg"]')" "0|1" "L14i: an infinite re-check timeout reads as 60 s: the check answers and Leg 1 begins"
 # The re-check fails closed: a --rollout outside --tasks-dir gives a --resume naming no note there, so the check exits 2
 scen l14f
 mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2

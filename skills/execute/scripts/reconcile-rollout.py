@@ -4620,9 +4620,11 @@ def _surface_wait_read(stem):
 
 
 def _surface_wait_live(data):
-    """The marker's `live`, lowercased: the task-call and seeded-revise slugs in flight when its check ran."""
+    """The marker's `live`, as `next --running` reads its entries (a wikilink stripped to its slug, lowercased): the
+    task-call and seeded-revise slugs in flight when its check ran."""
     live = (data or {}).get("live")
-    return [x.strip().lower() for x in live if isinstance(x, str) and x.strip()] if isinstance(live, list) else []
+    return [(_wikilink_slug(x) or x.strip()).lower() for x in live if isinstance(x, str) and x.strip()] \
+        if isinstance(live, list) else []
 
 
 def _surface_wait_why(sw):

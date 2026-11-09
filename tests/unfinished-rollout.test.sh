@@ -53,7 +53,7 @@
 #   X16     check --surface-wait (P41-3; execute § 4.5 *Surface re-check*): the marker its refusal writes (a), deletes on a
 #           pass (b), cannot delete (c) or write (d), an unanswered run (e), since carried (f), the deadline inside chain_hold
 #           (g), --running required (h), exit 5 while a chain on a pre-P41-3 engine snapshot reaches the root (i-m),
-#           legacy_reach (n) and the exact run order (o)
+#           legacy_reach (n), the exact run order (o) and a wikilinked --running entry, stored and read as its slug (p)
 #   T1-T16  a resuming chain's order (ADR 0067 d4, rank-led by d9): a chain that has begun before one that has not, then
 #           the estate rank, then the first to begin, slug order breaking ties, said as such (T1-T6); ADR 0060's yield, toward a later chain
 #           only when it is free to run, so no cycle forms (T7, T11, T14 with three chains), a stuck chain working no
@@ -75,7 +75,8 @@
 #           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
 #           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
 #           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
-#   WL1-WL11 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3)
+#   WL1-WL12 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
+#           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -1289,6 +1290,15 @@ PY
 ok "$(printf '%s' "$oout" | head -1)" "True 3 2026-11-01T00:00:00Z 0.0" \
    "X16 (o): the delete runs unarmed with the marker standing, then the compute armed; since carried; disarmed after"
 ok "$(printf '%s' "$oout" | sed -n 2p)" "2 []" "X16 (o): … and a missing --running exits 2 before reconcile-rollout.py loads"
+# (p) a wikilinked --running entry is stored as its slug, as `next --running` reads it: an entry left `[[pt1]]` would
+# match no stem, so parallel_hold would read pt1's call in flight as none and release P's root while pt1 still writes it
+chw --resume p --repo "$R" --surface-wait --running '[[pt1]]'
+ok "$out|$rc|$(mj 'd["live"]')" "refuse c1|3|['pt1']" "X16 (p): a wikilinked --running entry is written to live as its slug"
+chw --shape serial --resume c1 --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X16 (p): … so pt1's call in flight, live in the marker, still holds P's root against a resuming chain"
+printf '{"rollout": "p", "written_at": "2026-11-01T00:00:00Z", "since": "2026-11-01T00:00:00Z", "why": "x", "holders": ["c1"], "live": ["[[pt1]]"]}\n' > "$MK"
+chw --shape serial --resume c1 --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X16 (p): … and a marker whose live holds the wikilink reads it as its slug too"
 export THREAD_EVENTS_DIR="$EV0"
 # X15 (p33-3 beside ADR 0060): the release WARNs and both --resume reads keep the nested-checkout rule, as the schedule
 # checks do: a checkout nested inside another by path is its own repo, so it never meets a hold or a release on the
@@ -3054,6 +3064,37 @@ printf '[defaults]\ncapacity_max = "lots"\n' > "$S/home/.config/thread/rollouts.
 wl
 ok "$(wj 'd["cap"]["n"]')|$(wj 'd["cap"]["by"]')" "2|trickle" "WL10: a fresh Capacity whose capacity_max will not resolve falls back to the Trickle"
 has "$(wj 'd["cap"]["why"]')" "rollouts.toml" "WL10: … and why names the refused file, never null"
+# WL12 (P41-3): what `waiting` reads after a begin wait. begin writes nothing, so the successor of a started hand-over
+# that waits at begin still reads as that Leg session: off the list and its place counted (ADR 0076 d3), and begin's
+# JSON says so (listed false, its unlisted why), so legs.md § Begin lists it as a needs-you item; a stamped chain with
+# no Leg session stays on the list, held (listed true).
+tscen wl12
+LOG=$(LFOLD="$W" lg $D29 open) LFOLD="$W" mkchain hh "$OTHER" h1~open~"\`repo:$W//f.py\`"
+LOG="$(LFOLD="$W" lg $D28 open)"$'\n'"- $D29 Leg 1 closed: handoff to Leg 2 in cc-x from $W"$'\n'"- $D29 Leg 1 hand-over: started sess-9" \
+  LFOLD="$W" mkchain ws "$DEMO$UN"$'\n'"$(rk 1)" s1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W" mkchain wn "$OTHER$UN"$'\n'"$(rk 2)" n1~open~"\`repo:$W//f.py\`"
+capf 4
+# lb <slug> [session] -> $out, $rc: leg.py begin in $W (session sess-9 by default), HOME and the lock dir in $S
+lb() { (cd "$W" && HOME="$S/home" THREAD_LEG_LOCK_DIR="$S/locks" python3 "$LEGPY" begin --rollout "$T/$1.md" --tasks-dir "$T" \
+  --vault "$S/vault" --session "${2:-sess-9}" --cwd "$W") > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); }
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')" "[('wn', 'hh')]|2|2" \
+  "WL12: before any begin: ws, handed off to started sess-9, is off the list; its session and hh's open Leg hold places"
+cp "$T/ws.md" "$S/ws0"
+lb ws
+ok "$rc|$(wj 'd["beginWait"]')|$(wj 'd["listed"]')|$(wj 'd["unlisted"]')" "3|held|False|its Leg session stands (handover started sess-9)" \
+  "WL12: sess-9's begin waits on hh (exit 3, held) and says the Waiting list will not list ws"
+has "$(wj 'd["status_line"]')" 'state=waiting reason="begin wait: surface held: [[hh]] holds ' "WL12: … its status line a begin wait, never halted"
+cmp -s "$T/ws.md" "$S/ws0"; ok "$?" 0 "WL12: … with nothing written"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "[('wn', 'hh')]|2|2|None" \
+  "WL12: after it, waiting reads the same: ws still off the list and its session still counted (so legs.md lists that wait)"
+lb wn sess-n
+ok "$rc|$(wj 'd["beginWait"]')|$(wj 'd["listed"]')|$(wj '"unlisted" in d')" "3|held|True|False" \
+  "WL12: a stamped chain with no Leg session: its begin wait is listed"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')" "[('wn', 'hh')]|2" \
+  "WL12: … and waiting still lists it, held by hh, its begin wait counting no place"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
