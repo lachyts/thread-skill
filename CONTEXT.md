@@ -74,7 +74,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   nothing records), **One call** (a single decision, offered with a
   recommendation), **Grill** (a few low-level decisions an agent with the
   project's thread, ADRs and code can recommend on), or **Orient** (the
-  decisions shape the project, so it needs a full-context session). Only
+  decisions shape the project, so it needs a full-context session), or
+  **Drop** (the task duplicates another or is confidently stale: it moves to
+  the archive, reversibly, recorded in the Grade log only; any doubt makes it
+  a One call asking whether to drop it instead; grilled 2026-11-09). Only
   Lachy's own decisions count: a fork the grader settles with evidence, a
   technical or priorities call, is ruled now and written as Decided for you,
   never asked (ADR 0054). A decision of his the agent cannot recommend on with
@@ -283,7 +286,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   working from a pending handoff doc, would do. While the doc is pending,
   `close` routes it to the doc (refreshing it in place) and never to a vault
   task. Its complement is a **loose end** — work outside the thread's scope
-  line — which reaches the task menu as before (ADR 0017). _Avoid_: next
+  line — which is filed as an undated task in its project's list without
+  asking (grilled 2026-11-09; before that it reached the task menu, ADR 0017).
+  A task with a date is filed only when Lachy asks for it. _Avoid_: next
   steps (ambiguous), remaining work.
 - **Capture** — the self-contained vault task `stash` or `defer` writes to set
   a thread's next move down, marked as a capture by its writer
