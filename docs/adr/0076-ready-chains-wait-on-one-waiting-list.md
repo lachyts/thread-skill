@@ -46,6 +46,14 @@ from its start, not from its first claim.
 on each chain note it writes for a run Lachy approved. orient-all's Leg items, and a Leg's handoff to the next Leg,
 stamp the note instead of calling `create_thread`. Parallel rollouts keep one lead each, started as today.
 
+*(Amended by P44-4, 2026-11-10: only a writer on the Chorus Stage lists a chain (Chorus's `list_sessions` answers).
+Schedule stamps only on a standalone run; under orient, orient-all and the Backlog orient the parent stamps
+(`reconcile-rollout.py stamp-start`), so his Not yet withholds the stamp. Off the Stage nothing is stamped, and Leg 1
+is pasted: a chain is listed or has a paste-ready prompt, never both. A Leg's hand-over writes `hand-over: listed`
+(`leg.py handed --listed`). A manual hand-over stays off the list, reversing P44-1's reading that it was on it, until
+repair lists it; repair rejoins a fixed or held chain with `leg.py restarted --listed` (d6). A Leg closed with a
+handoff counts as its chain's session (`closing Leg N`) until its hand-over is written.)*
+
 **d5. He sees it as one quiet line.** The Stage shows one line (how many chains wait, which is next, how much room),
 which opens into the ordered list with a click: no notification, no card per chain, no command to run (Lachy, 2026-11-08:
 "I just want to be at least able to, with a click, see what that list actually looks like"). Where the line sits is a

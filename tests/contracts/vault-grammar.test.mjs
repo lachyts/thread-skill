@@ -295,11 +295,16 @@ function startStampChecks(text, s) {
   const out = []
   if (!stamp) return ['states the stamp']
   if (s.START_KEY !== stamp[1] || s.START_UNATTENDED !== stamp[2]) out.push('script constants')
-  for (const want of ['orient § 9', 'schedule step 8', "schedule § 0's **Put back**", '`reconcile-rollout.py approve-queue`',
+  for (const want of ["orient § 9's", 'schedule step 8', "schedule § 0's **Put back**", '`reconcile-rollout.py approve-queue`',
     'stamp-start`', 'Chorus Stage', '`started_unattended:',
-    '`/thread:status`', 'reconcile-rollout.py next', '--dry-run', '**Supersede prep**']) {
+    '`/thread:status`', 'reconcile-rollout.py next', '--dry-run', '**Supersede prep**',
+    // P44-4 (ADR 0076 d4): the serial writers, all on the Chorus Stage, its reader and no clearer
+    "orient-all § 7's Leg item", 'the Backlog orient B8', '`leg.py handed --listed`', '`leg.py restarted --listed`',
+    'schedule § Serial path S7', 'Off the Stage nothing stamps a serial note', '`unfinished-rollout.py waiting`',
+    'None on a serial note']) {
     if (!sec.includes(want)) out.push(`names ${want}`)
   }
+  if (sec.includes('a serial note has none')) out.push('still bars a serial note')
   return out
 }
 
@@ -453,7 +458,12 @@ test("§ Rollout start stamp states the stamp, its writers, readers and clearers
 test('control: a drifted stamp or a dropped writer fails the start-stamp check', () => {
   const s = scripts()
   assert.deepEqual(startStampChecks(mutate(doc, 'with `start: unattended`', 'with `start: auto`'), s), ['script constants'])
-  assert.deepEqual(startStampChecks(mutate(doc, "orient § 9's", "orient's"), s), ['names orient § 9'])
+  assert.deepEqual(startStampChecks(mutate(doc, "orient § 9's", "orient's"), s), ["names orient § 9's"])
+  // P44-4: a serial writer off the Stage, or the old bar on a serial note, fails it
+  assert.deepEqual(startStampChecks(mutate(doc, 'Off the Stage nothing stamps a serial note', 'Off the Stage they stamp it too'), s),
+    ['names Off the Stage nothing stamps a serial note'])
+  assert.deepEqual(startStampChecks(mutate(doc, 'whose launch was never made', 'on a parallel note only (a serial note has none), whose launch was never made'), s),
+    ['still bars a serial note'])
   assert.deepEqual(startStampChecks(mutate(doc, "schedule § 0's **Put back**", 'schedule'), s),
     ["names schedule § 0's **Put back**"])
   assert.deepEqual(startStampChecks(mutate(doc, 'And `/thread:status`', 'And status'), s), ['names `/thread:status`'])

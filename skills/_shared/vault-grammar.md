@@ -50,18 +50,22 @@ the frontmatter, its scalar lower-cased with quotes and an inline ` # comment` d
 other value (`start: manual`, an empty `start:`), a `start:` nested under another key, and a body line are
 no stamp; `started:` and `started_unattended:` are other keys.
 
-- **Writers**: the execute handoff's Start when ready, on the rollout note just written and never started, whose
-  launch was never made or was withdrawn first (handoff § Lifecycle's `dismiss_task` rules; a lead already running
-  gets no stamp), on a parallel
-  note only (the Stage starts a lead in a note's Project root; a serial note has none): orient § 9's
+- **Writers**: the execute handoff's Start when ready, on the parallel rollout note just written and never started,
+  whose launch was never made or was withdrawn first (handoff § Lifecycle's `dismiss_task` rules; a lead already running
+  gets no stamp; the Stage starts a lead in a note's Project root): orient § 9's
   Start when ready move, on his word, and schedule step
   8's **Start when ready.** on a standalone run. `reconcile-rollout.py approve-queue`, on Lachy's words
   naming the queue and the PR its start waits on (§ Approved queue), and `reconcile-rollout.py
   stamp-start`, schedule step 8's under the chain, on the note an approved queue's regenerate wrote. And
   `reconcile-rollout.py stamp-start --backlog`, the Backlog orient's decided start (`skills/orient/backlog.md` § B8),
-  on each parallel note its forks wrote, its post-question round's included, never a serial or held one. And
+  on each parallel note its forks wrote, its post-question round's included, never a held one. And
   schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
-  when the run stops before step 6 writes its note.
+  when the run stops before step 6 writes its note. On a serial note (P44-4, ADR 0076 d4: the stamp is its chain's
+  place on the Waiting list), the writers run only on the Chorus Stage (Chorus's `list_sessions` answers):
+  `reconcile-rollout.py stamp-start` on a never-begun chain, from schedule § Serial path S7 (a standalone run),
+  orient § 9, orient-all § 7's Leg item and the Backlog orient B8 (`stamp-start --backlog`); and, on a running chain,
+  a Leg's `leg.py handed --listed` and repair's `leg.py restarted --listed`.
+  Off the Stage nothing stamps a serial note: its Leg 1 is a paste-ready prompt.
 - **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
   amended). It starts one lead (`/thread:execute [[<rollout>]]`) in the note's Project root, the
   rollout clone for every rollout scheduled after P26 (ADR 0042), so its launch passes execute § 2.8,
@@ -70,12 +74,14 @@ no stamp; `started:` and `started_unattended:` are other keys.
   (§ 1's **Start stamp**), which reports a stamped note nothing has started as waiting for the Stage
   (its § 4 action 13). And `/thread:orient-all`'s `estate-dispatch.py plan`, through
   reconcile-rollout's `_start_unattended`, loaded: a stamped note it neither starts nor relays (the
-  Stage starts it).
+  Stage starts it). And, on a serial note, `unfinished-rollout.py waiting` (leg.py's `waiting_listed`, the Waiting
+  list's one rule), which lists the chain, and the Stage's start of that list's `next` (Chorus ADR 0115).
 - **Clearers**: `reconcile-rollout.py next`, on every call off `--dry-run` that exits 0 (the lead's,
   execute § 4.5 step 1), which removes every top-level `start:` line reading `unattended` and reports
   `startCleared`, so a running rollout clears it; a refused `next` (exit 1) writes nothing, so the stamp
   waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede
-  (and step 1's report names the clear).
+  (and step 1's report names the clear). None on a serial note: its stamp stands until the chain is done or dropped,
+  with `started_unattended:` beside it once the Stage has started a Leg (Chorus ADR 0115 R1).
 
 ## Hold until
 
@@ -199,7 +205,10 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
 - `skills/execute/scripts/reconcile-rollout.py` carry's `SHORT_ID_RE` and `_order_hints`' short-id match:
   `p<PHASE_N>-<M>`, the phase matched literally.
 - `skills/execute/scripts/reconcile-rollout.py` `next`: `START_KEY` and `START_UNATTENDED` (the stamp
-  above), read as `_scalar` reads a frontmatter value, and reported as `startUnattended`.
+  above), read as `_scalar` reads a frontmatter value, and reported as `startUnattended`. Its `stamp-start`,
+  `skills/execute/scripts/leg.py` (`handed --listed`, `restarted --listed`, `waiting_listed`) and
+  `skills/_shared/scripts/unfinished-rollout.py` (`waiting`, `unstarted`) read and write it on a serial note too,
+  through `_start_unattended` and those two constants, loaded (P44-4).
 - `skills/execute/scripts/reconcile-rollout.py` `next`, `status` and `carry`: `HOLD_KEY` (§ Hold until's
   key) and `HOLD_UNTIL_PREFIX` (every hold reason's opening), parsed by `_hold_until`, the one reader of both
   forms.

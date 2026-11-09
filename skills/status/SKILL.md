@@ -822,11 +822,17 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
 - **Smoke list.** The `smoke` entries: the next Leg re-runs each one's Verify, and `why` says why. With none, no
   block.
 - **Needs you.** `needsYou`, verbatim, one per line under `Needs you (<n>)`; with none, no block.
+- **Waiting list** (ADR 0076, P44-4), from `listed` and `unlisted`: `on the Waiting list: the Stage opens Leg
+  <restart.leg> when there is room` when `listed` is true; else `not on the Waiting list: <unlisted>` (for a chain
+  never stamped, `no start: unattended`, a plain line: off the Chorus Stage nothing lists a chain, and its Leg is
+  pasted). No block for a terminal chain.
 - **Stall.** When `stall` is set: each claimed task with its owner and its Leg's outcome, then `stall.why`.
 - **Restart.** When `restart` is set: `Leg <restart.leg>` in `restart.launch` (or "any launch, from
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
+  A `closing Leg <N> (session <id>)` blocker reads "Leg <N> is still closing (its /thread:close writes the hand-over
+  last), or died there" (P44-4).
   `surface re-check unanswered: <why>` is status's own 60 s read, with no retry, on a busy Mac. begin retries longer
   (60 s, then 180 s) and writes nothing on a begin wait, so `/thread:execute [[<slug>]]` once the Mac is quieter is the
   remedy (or `/thread:repair [[<slug>]]`, whose § 7 (e) restarts it).
@@ -874,17 +880,23 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
   `/thread:execute [[<rollout>]]`". Report only.
 - S5 `halted` → `/thread:repair [[<rollout>]]`: the halt's evidence, and its clearing on Lachy's word.
 - S6 `restarting` → by `restarted.how`: `pending` → wait, a repair is starting Leg `<restarted.leg>`; `started` →
-  wait for that Session (`restarted.started`); `manual` → paste `restart.prompt` in `restart.launch`, or any launch
+  wait for that Session (`restarted.started`); `listed` → "on the Waiting list: the Stage opens Leg
+  `<restarted.leg>` when there is room" (P44-4; with `listed` false, its `unlisted`); `manual` →
+  paste `restart.prompt` in `restart.launch`, or any launch
   from `restart.cwd` when `restart.anyLaunch`. From another session, check the Chorus Stage first, and only if that
   session is gone run `/thread:repair [[<rollout>]]`.
 - S7 `live` → "Leg `<openLeg>` is live: check that session first; if it is gone, `/thread:repair [[<rollout>]]` takes
   it over".
 - S8 `awaiting-successor` → by the last Leg's `handover`: `started <id>` → wait for that Session, or check it;
-  `manual …` → paste `restart.prompt` in `restart.launch` (or any launch from `restart.cwd` when
+  `listed` → "on the Waiting list: the Stage opens Leg `<restart.leg>` when there is room" (P44-4; with `listed`
+  false, its `unlisted` and `/thread:repair [[<rollout>]]`); `manual …` (a manual hand-over keeps the chain off the
+  Waiting list, stamped or not) → paste `restart.prompt` in `restart.launch` (or any launch from `restart.cwd` when
   `restart.anyLaunch`), or `/thread:repair [[<rollout>]]`, which asks whether it was pasted; no hand-over line →
-  `/thread:repair [[<rollout>]]`.
+  "Leg N is still closing (its /thread:close writes the hand-over last), or died there: check that session first;
+  only if it is gone, `/thread:repair [[<rollout>]]`".
 - S9 `completable` → "`/thread:execute [[<rollout>]]` from `restart.cwd` (the last Leg's folder), or any folder but
-  this plugin's own checkout (begin refuses it, ADR 0040): a Complete Leg works no row".
+  this plugin's own checkout (begin refuses it, ADR 0040): a Complete Leg works no row"; with `listed` true, "on the
+  Waiting list; nothing to start by hand" (P44-4).
 - S10 `stopped` → `/thread:execute [[<rollout>]]` as `restart.launch` when you want it to go on (with no `restart`,
   only set-aside rows are left: S12's repair). A `stall` here is the stopped Leg's claim: that Leg's `begin`
   inherits it, so its needs-you item's `/thread:repair` would start the same Leg. A Leg stopped by a stalled rank
@@ -893,15 +905,16 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
 - S11 `stalled` → `/thread:repair [[<rollout>]]`.
 - S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
   Meanwhile it holds only the surfaces its Hold block lists (ADR 0060), so other rollouts carry on beside it.
-- S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`; with `restart.blockedBy`
+- S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch` (with `listed` true, "on the
+  Waiting list; nothing to start by hand", P44-4); with `restart.blockedBy`
   `surface held by [[<B>]] (<token>)`, the chain waits its turn (whichever cause, ADR 0067 d4): wait for [[<B>]] to
   land its rows there, or for its open Leg to close when the line names one (`/thread:status [[<B>]]`), then run it;
   on a code file between two chains in Chain copies held by a [[<B>]] with no open Leg, it clears once [[<B>]]'s Leg
   opens (ADR 0067 d9).
 
 The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
-restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is
-checked before anything starts another, so two Legs never run one chain.
+restart, and a Session that may still be live (a pending or started restart, an open Leg, a closing Leg, a started
+hand-over) is checked before anything starts another, so two Legs never run one chain.
 
 ## The Watchdog's reading (ADR 0048)
 

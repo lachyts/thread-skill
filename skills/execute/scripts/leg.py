@@ -87,10 +87,12 @@ clear-halt, restarted, copies, land):
       surface held: [[<B>]] holds <token>"` (the chain waits its turn); a check unanswered after both runs `waiting
       reason="begin wait: surface re-check unanswered: no answer in <a>+<b> s"`. A begin wait also carries `listed`
       (waiting_listed over the chain as begin left it: whether unfinished-rollout.py's `waiting` lists the chain once
-      the turn ends), and `unlisted`, its why not, when false (no `start: unattended`, a chain state off the list, or
-      a Leg session still standing: the open Leg a take-over would close, a standing restart `pending` or `started`, or
-      a last Leg handed off to a `started` session, which `waiting` counts against the room and keeps off the list, ADR
-      0076 d3); nothing begins an unlisted chain again, so legs.md § Begin lists it as a needs-you item. A check that
+      the turn ends), and `unlisted`, its why not, when false (no `start: unattended`, a chain state off the list, a
+      Leg session still standing: the open Leg a take-over would close, a standing restart `pending` or `started`, a
+      closing Leg (closed with a handoff, no hand-over line yet), or a last Leg handed off to a `started` session, which
+      `waiting` counts against the room and keeps off the list, ADR 0076 d3; or a manual hand-over standing, whose
+      paste-ready prompt is its one start path, P44-4); nothing begins an unlisted chain again, so legs.md § Begin
+      lists it as a needs-you item. A check that
       fails (exit 2, an unreadable answer) stays a halt: exit 3, `halted reason="surface re-check failed: <its line>"`
       (fail closed). An empty write set skips it. The launch check: the cwd's
       realpath, case-folded, must be the
@@ -368,9 +370,19 @@ clear-halt, restarted, copies, land):
       root, each --also path, the old path when tracked); with the key declared it prints `completionVerify` {state,
       summary, followup}, and without it the bytes, the pathspec and the JSON are as before. A failed commit is
       `committed: false`, exit 0: the daily sweep commits it.
-  handed --started <id> | --manual <why>
-      Logs `hand-over: started <id>` or `hand-over: manual (<why>)` on this session's Leg closed with a handoff, and
-      prints its status line (a manual one names the next row's folder inside its Chain copy). Idempotent once logged.
+  handed --started <id> | --manual <why> | --listed
+      Exactly one form, else usage (exit 2). On this session's Leg closed with a handoff, with no hand-over logged yet,
+      it logs `hand-over: started <id>`, `hand-over: manual (<why>)` or (P44-4, ADR 0076 d4: legs.md § Hand over on the
+      Chorus Stage) `hand-over: listed`, which in the same save stamps `start: unattended` below `status:` when the
+      note lacks it, so the chain waits on the Waiting list and the Stage opens Leg N+1. The first logged hand-over
+      wins: once one is logged, a handed of any form writes nothing (no line and no stamp, so a stamp Lachy removed is
+      never added back) and prints the logged form's status line, never the passed one's. It prints {verb, rollout,
+      leg, handover, status_line, listed, unlisted, stamped, dryRun}: listed and unlisted are begin_wait_listed over
+      the chain as it now reads (null under --dry-run, which writes nothing and reads no list), stamped true only when
+      this call wrote the stamp. The status line by the logged form (the passed one under --dry-run): started `done
+      reason="handed off to Leg <N+1>"`; manual `halted reason="manual handoff: Leg <N+1> in <alias> from <folder>"`
+      (the next row's folder inside its Chain copy); listed `done reason="listed Leg <N+1> on the Waiting list"`, or,
+      when it is not listed, `halted reason="hand-over not listed: <unlisted>"`.
   clear-halt --reason <r>
       Logs `halt cleared: <r>` when a halt stands (else exit 1); the halted claim is then inherited by the next Leg.
   copies
@@ -487,24 +499,31 @@ clear-halt, restarted, copies, land):
       status runs in another session), `stall`, `hold` (hold_of, below), `rank` {stamp (the estate rank,
       or null), warn (a malformed stamp), key (order_key, as pos read it: a never-begun chain's as begun now), pos,
       lifts, standing [{task, kind, at}], contention {held, land, warns}} (*The rank*; pos and lifts null in place)
-      and `needsYou` (needs_you's items, plus a halt, a manual hand-over, a pending or manual restart and a stall). A
-      row's `held` carries the rank's reason too. In a terminal chain state (complete, dropped, superseded, incomplete:
+      `needsYou` (needs_you's items, plus a halt, a manual hand-over unless a listed restart stands since, a pending
+      or manual restart and a stall), and `listed` and `unlisted` (waiting_listed over the chain: whether
+      unfinished-rollout.py's `waiting` lists it, and its why not, null when listed; P44-4). A row's `held` carries the
+      rank's reason too. In a terminal chain state (complete, dropped, superseded, incomplete:
       begin refuses each, so no Leg acts next) `restart` and `next` are null and `smoke` is empty. Stamps print raw, as
       the log holds them.
-  restarted --leg <N> (--pending | --started <id> | --manual <why>) [--replace]
+  restarted --leg <N> (--pending | --started <id> | --manual <why> | --listed) [--replace]
       Records that /thread:repair is starting Leg N (repair § 7 (e)), so a second repair, or status, sees it:
       `--pending` before its create_thread, then `--started <id>` (the new Session's id) or `--manual <why>` (a
-      paste-ready manual handoff). Exactly one form, else usage (exit 2). Its checks, in order, are the complete
-      list: the note (begin's refusals, exit 1); the session (`unknown`, no --session and no session env, is exit 1
-      naming `--session`, whatever the form: nothing is written); a standing halt (exit 3); Leg N already has a
-      `began` line (exit 0, `recorded: false`, `began: true`, nothing written); N is not the last Leg + 1 (exit 1);
-      a standing restart (below): the same line again is exit 0 `recorded: false`; a `pending` one whose session is
-      this session's (both real ids: `unknown` never matches), met by --started or --manual, is its update and is
-      written; any other is exit 3 (`a restart of Leg N stands (<how>, <at>): check that session; --replace once
-      it is gone`) unless --replace. It checks nothing else: never the open Leg (a take-over's evidence is the
-      caller's: repair § 7 (d)) and never the hand-over. Logs `restart: Leg <N> pending (session <sid>)`,
-      `restart: Leg <N> started <id>` or `restart: Leg <N> manual (<why>)` and prints {verb, rollout, leg,
-      restarted, recorded: true}.
+      paste-ready manual handoff); or, on the Chorus Stage, `--listed` (P44-4, ADR 0076 d4, d6: the chain rejoins the
+      Waiting list and the Stage opens Leg N), which in the same save stamps `start: unattended` below `status:` when
+      the note lacks it. Exactly one form, else usage (exit 2). Its checks, in order, are the complete list: the note
+      (begin's refusals, exit 1); the session (`unknown`, no --session and no session env, is exit 1 naming
+      `--session`, whatever the form: nothing is written); a standing halt (exit 3); Leg N already has a `began` line
+      (exit 0, `recorded: false`, `began: true`, nothing written); N is not the last Leg + 1 (exit 1); for --listed
+      only, an open Leg (exit 1, `an open Leg stands (Leg K): a take-over starts through create_thread (repair § 7
+      (e)); nothing written`: a take-over is never listed); a standing restart (below): the same line again is exit 0
+      `recorded: false`; a `pending` one whose session is this session's (both real ids: `unknown` never matches), met
+      by --started, --manual or --listed, is its update and is written; any other is exit 3 (`a restart of Leg N
+      stands (<how>, <at>): check that session; --replace once it is gone`) unless --replace. It checks nothing else:
+      never the open Leg but for --listed (a take-over's evidence is the caller's: repair § 7 (d)) and never the
+      hand-over. Logs `restart: Leg <N> pending (session <sid>)`, `restart: Leg <N> started <id>`, `restart: Leg <N>
+      manual (<why>)` or `restart: Leg <N> listed` and prints {verb, rollout, leg, restarted, recorded: true, listed,
+      unlisted} (listed and unlisted are begin_wait_listed over the chain as it now reads, on every exit 0, null under
+      --dry-run).
 
 The Leg log (`## Leg log`, at the note's end: below `## Queue` and `## Post-rollout`, so a queue reader never ranks
 it). Its line forms are stable (status and reflect's serial-score.py read them); readers key them by Leg number, never
@@ -520,7 +539,7 @@ by position:
   - <stamp> Leg <N> reverted <sha> in <top>
   - <stamp> Leg <N> closed: handoff to Leg <N+1> in <alias> from <folder> | chain complete | chain stuck: <k> set
     aside | stopped: <reason> | halted: <reason> | lost (taken over by Leg <M>)
-  - <stamp> Leg <N> hand-over: started <id> | manual (<why>)
+  - <stamp> Leg <N> hand-over: started <id> | manual (<why>) | listed
   - <stamp> Leg <N> follow-on [[f]] (close|post-item <k>|land)
   - <stamp> Leg <N> land: [[t1]], [[t2]] on <d> in <P> (<sha12>) | close-outs on <d> in <P> (<sha12>)
   - <stamp> Leg <N> land stood: <P>: <why>
@@ -528,7 +547,7 @@ by position:
   - <stamp> Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)
   - <stamp> Leg <N> rank retry: [[t]] on [[X]] (<token>; [[X]] ranks above)
   - <stamp> halt cleared: <reason>
-  - <stamp> restart: Leg <N> pending (session <sid>) | started <id> | manual (<why>)
+  - <stamp> restart: Leg <N> pending (session <sid>) | started <id> | manual (<why>) | listed
 A `restart:` line carries no Leg number of its own (it names the Leg to come), so no reader counts it as a Leg. A rank
 line stands from its write until a `claimed`, `took` or `set aside` line for its task in the same Leg, or that Leg's
 `closed:` line (standing_lines); only a standing line reserves its task's cell or ages its chain.
@@ -537,7 +556,8 @@ The Completion log's last line is `- Reflection: <close --reflection's text>`.
 The chain, as status reads it (repair and serial-score.py read these; this is their one copy):
 - The chain state, the first that matches: `complete` (status: done, live or archived); `dropped`; `superseded`
   (a `superseded_by:`); `incomplete` (`incomplete: true`, or reconcile-rollout.py's incomplete); `paused` (a
-  `paused:` or `pause_requested:` stamp); `halted` (a standing halt); `restarting` (a standing restart); `live` (an
+  `paused:` or `pause_requested:` stamp); `halted` (a standing halt); `restarting` (a standing restart, a listed one
+  included); `live` (an
   open Leg); `awaiting-successor` (the last Leg closed `handoff to Leg <N+1>`, and no Leg N+1 began); `completable`
   (every counted row done, no Leg open); `stopped` (the last Leg closed `stopped:`); `stalled` (the stall below);
   `not-started` (no Leg began); `stuck` (a fresh Leg's next is `stuck`); else `ready`.
@@ -558,17 +578,31 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   the last Leg's folder (realpath, mapped into its copy; begin accepted it, so it is never this plugin's checkout; the
   vault when no Leg began), harness, launch and task null, anyLaunch true (a Complete Leg works no row, so begin takes
   any cwd but this plugin's checkout). blockedBy, the first that holds, else null:
-  `halt`; `restart Leg <N> (<how>)` (a standing restart); `open Leg <K> (session <id>)`; `handover started <id>`
-  (the last Leg handed off to a started Session that never began); `chain_copies: <why>: fix the note` (a malformed
+  `halt`; `restart Leg <N> (<how>)` (a standing restart, but a `listed` one: repair listed the chain, P44-4); `open
+  Leg <K> (session <id>)`; then, unless the standing restart is `listed`, `closing Leg <N> (session <id|unknown>)` (the
+  last Leg closed with a handoff and logged no hand-over yet: its /thread:close writes it last, P44-4) or `handover
+  started <id>` (the last Leg handed off to a started Session that never began); `chain_copies: <why>: fix the note` (a malformed
   key); `chain copy missing: <C> (leg.py copies --rollout <note> remakes it)` (a copy chain whose cwd is gone); then,
   only when none of those holds, begin's
   surface re-check run read-only for Leg N: `surface held by [[<B>]] (<token>)` on a hit (its causes include (O)'s
   holder half, ADR 0067 d9: an earlier copied chain with no open Leg holding a code file), `surface re-check failed:
   <its line>` when the check fails (ADR 0060), `surface re-check unanswered: <why>` when it times out (status's own
   read runs once, 60 s, with no retry, so it stays inside serial-score's cap; begin retries longer). A manual
-  hand-over is null: it waits on Lachy.
+  hand-over is null: it waits on Lachy (and, P44-4, keeps the chain off the Waiting list: waiting_listed), as is a
+  `listed` one.
 - The standing restart (`restarted`): the latest `restart:` line with no `began` line after it, as {leg, how
-  (pending, started or manual), started, manual, session (a pending line's), at}, else null.
+  (pending, started, manual or listed), started, manual, session (a pending line's), at}, else null. A `listed` one
+  (repair's `restarted --listed`, P44-4) holds no session: the chain reads `restarting` and waits on the Waiting list.
+- The Leg session (leg_session_of, ADR 0076 d3, the one copy unfinished-rollout.py's room and waiting_listed read), the
+  first that holds: `open Leg <K>`; a standing restart `pending` or `started`, `restart Leg <N> (<how>)` (a `listed`
+  one: none, the hand-over unread); `closing Leg <N> (session <id|unknown>)` (P44-4: a last Leg closed with a handoff,
+  no hand-over line yet; unfinished-rollout.py counts it in the room until LEG_LEASE_LAPSE after its close);
+  `handover started <id>`; else none (a manual or listed hand-over, a manual restart).
+- The list rule (waiting_listed, ADR 0076 d3, the one copy unfinished-rollout.py's `waiting`, begin's begin wait,
+  status and handed read): a chain is listed when it is stamped `start: unattended`, no Leg session stands, its state
+  is in WAITING_STATES (or `restarting` on a listed restart), no manual hand-over stands with no restart after it (its
+  paste-ready prompt is its one start path: a chain is listed or has a start path off the list, never both, P44-4),
+  and its restart has a next Leg with no blockedBy.
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
   against other rollouts, {scope, why, held, released, unlanded, undone, pending, rows, warn, began, open, rank,
   captured, holding}. In every
@@ -601,7 +635,8 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
 The status mapping (legs.md § Report): every Leg turn ends `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R>
 state=<state>[ reason="…"]`, R 1 while this Leg owns an in_progress task. It is never `running`: next --waiting
 <r> `waiting reason="<r>"`; handed --started `done reason="handed off to Leg <N+1>"`; handed --manual `halted
-reason="manual handoff: Leg <N+1> in <alias> from <folder>"`; complete `done`; stuck `halted reason="awaiting you:
+reason="manual handoff: Leg <N+1> in <alias> from <folder>"`; handed --listed `done reason="listed Leg <N+1> on the
+Waiting list"`, or `halted reason="hand-over not listed: <unlisted>"` (P44-4); complete `done`; stuck `halted reason="awaiting you:
 <k> set aside"`; stopped `halted reason="stopped: <r>"`; halt `halted reason="halt: <r>"`; a refused begin `halted
 reason="<refusal>"`.
 

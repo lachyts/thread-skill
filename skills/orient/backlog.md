@@ -223,14 +223,17 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <note>` prints, exported
   by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md` rule 2 (this amends ADR 0057's execute handoff: the Chorus
   Stage starts the lead). It prints one undo line for the record. No stamp is written after a "Checklist — ladder
-  refused". A refusal (exit 1: serial, a hold, paused, run, and the rest) goes in the record with
+  refused". A refusal (exit 1: a hold, paused, run, and the rest) goes in the record with
   `/thread:execute [[<note>]]`.
-- **A serial note is never stamped.** On the Chorus Stage (`create_thread` answers ToolSearch): call `list_sessions`
-  once per call of B8; a Session carrying `leads the Rollout <slug>` means nothing is started, and that Session is
-  named; otherwise `create_thread` with the title `Leg 1: <slug>`, the prompt `/thread:execute [[<slug>]]` and its
-  brief line, and as cwd row 1's launch folder in its Chain copy (`leg.py status`'s `restart.launch`). A `cx-*` row 1,
-  or no folder, gets a labelled manual hand-over. A `Raised` result is reported as raised.
-- **Off the Stage** the stamps wait like Not yet, and each Leg 1 is a paste-ready prompt in the record.
+- **A serial note is listed on the Chorus Stage.** With Chorus's `list_sessions` answering ToolSearch, it gets
+  `python3 <root>/skills/execute/scripts/reconcile-rollout.py stamp-start --backlog --rollout <note>` (`<root>` as
+  above), with no `create_thread` (ADR 0076 d4): the chain waits on the Waiting list, and the Stage opens Leg 1 when
+  there is room. A `cx-*` row 1 is listed too: the Stage opens it on `waiting`'s harness. A row 1 with no folder is
+  not stamped, and is a labelled manual hand-over. It prints one undo line for the record; a refusal (exit 1: a chain
+  that has run, paused, and the rest) goes in the record with `/thread:execute [[<note>]]`.
+- **Off the Stage** nothing is stamped there, parallel or serial: the parallel stamps wait like Not yet, and each
+  serial note's Leg 1 is a paste-ready prompt in the record (`leg.py status`'s `restart.launch`), never listed, its
+  one start path.
 - Every result is a Rollouts started row. Never `/thread:repair`, run or relayed.
 
 ## B9. The questions, last
@@ -306,7 +309,7 @@ no `create_thread` and no write-back.
 
 ## Don'ts
 
-- **Never stamp a serial note, or a note beside a hold**, and never run or relay `/thread:repair`.
+- **Never stamp a note beside a hold, or a serial note off the Stage**, and never run or relay `/thread:repair`.
 - **Never reopen, schedule or obsolete a held park.**
 - **Never supersede a prior that answer 6 stops on.**
 - **Never park for size alone, or close a task for being small**: a task closes only once it stops being true.

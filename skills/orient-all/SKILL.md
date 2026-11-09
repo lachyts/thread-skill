@@ -32,9 +32,12 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
   - `estate-rank.py snooze`, `unpark` and `kill`, the Unpark offer's answers;
   - `reconcile-rollout.py approve-gates --tasks`, for a gate Lachy signs in this pass, run from that task's rollout's
     engine root (§ 4's Sign-off);
+  - `reconcile-rollout.py stamp-start`, on the Chorus Stage, each Leg item's serial note, run from its engine root
+    (§ 7 step 4: the chain waits on the Waiting list, ADR 0076 d4; never on a dry run);
   - its schedule forks (§ 6), each one `/thread:schedule` run, whose `estate-dispatch.py decided-for-you --write`
     writes the calls the grade ruled for Lachy into each task it queues (`## Decided for you`, ADR 0054).
-- It runs no git of its own and writes no handoff doc: a Sign-off's `engine-snapshot.py resolve` (§ 4) reads the
+- It runs no git of its own and writes no handoff doc: a Sign-off's `engine-snapshot.py resolve` (§ 4), and § 7
+  step 4's for a Leg item, reads the
   rollout note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the
   Primary checkout (ADR 0043). A started session's brief is its prompt plus the note it names
   (`skills/execute/legs.md` § Hand over).
@@ -262,7 +265,8 @@ run keeps its place ahead of this pass's dispatches), so the Legs that start bel
 
 1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> [--open <label>]... [--typed <his words>] > "$S/sessions.json"`,
    one `--status` per status agent's action number; an unread one is left out. It returns `items[]`, already in
-   start order (execute and Leg items, then repair, then orient last), and `left[]`: every live rollout that gets no
+   start order (execute and Leg items, then repair, then orient last; on the Chorus Stage a Leg item is listed, never
+   started: step 4), and `left[]`: every live rollout that gets no
    item, with its action and its holds (a big project's one not ticked is held `own session`, with the item it would
    get). Start exactly `items[]`, never another.
 2. **The allow-list.** `sessions` applies it; the table is here for the reader, and its numbers are status § 4's
@@ -280,12 +284,19 @@ run keeps its place ahead of this pass's dispatches), so the Legs that start bel
 3. An orient item's cwd is the home `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py home --project <note>`
    prints, else `~/Projects/<Area>/<Project>/` when it exists, else none. Every other item carries its own `cwd`.
 4. **On the Chorus Stage** (the `create_thread` tool answers ToolSearch, searched for as in handoff § Success contract):
+   A Leg item is listed, never started (ADR 0076 d4). With Chorus's `list_sessions` answering, each Leg item gets
+   `python3 <root>/skills/execute/scripts/reconcile-rollout.py stamp-start --rollout <vault>/<item.note>`, `<root>`
+   what `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <vault>/<item.note>`
+   prints (`item.note` is vault-relative; `<vault>` is `~/repos/obsidian`), whatever its `manual` (step 6 names the
+   one it skips): its chain waits on the Waiting list, and the Stage opens its Leg 1 when there is room. A Leg item
+   gets no candidate search, relay, `create_thread` or raise, so steps 4.2–4.5 name execute items only. Its undo line
+   goes to § 8; a refusal (exit 1) goes to § 8 with its ERROR line and the item's prompt, paste-ready.
    1. Call `list_sessions` once. Each Session's state comes from the list, never from a read: running a Turn, waiting
       on the listener, a failed last Turn, or at rest, with its background work.
    2. **Candidates, by item kind.** An orient item's only candidates are Sessions named exactly the item's `title`,
       and a repair item's only Sessions named exactly its `title`: the name `create_thread` was given, `Orient: <project>`
       or `Repair: <rollout>` as `sessions` cuts it to 60 characters with `…`, so a long name never matches its uncut
-      form. An execute or Leg item's candidates are the Sessions whose `list_sessions` line
+      form. An execute item's candidates are the Sessions whose `list_sessions` line
       carries `leads the Rollout <rollout>` as one of its ` · `-separated parts, wherever it stands (a relay line may follow it).
       That part's slug, the whole word after `leads the Rollout`, equals the item's `rollout` (the note stem)
       exactly, case aside, never as a prefix or a part. A line naming `demo-rollout-2026-10-26-2` is no candidate for
@@ -305,25 +316,33 @@ run keeps its place ahead of this pass's dispatches), so the Legs that start bel
       every one by id. Two or more leads of one rollout are Lachy's to settle, and Chorus answers that slug AMBIGUOUS
       whatever their number.
    4. A candidate at rest with nothing running: a roster candidate needs no read, its line being the Stage's own
-      reading. An execute or Leg candidate the names found, not named exactly the item's title, gets one
-      `read_session` first, asking only whether it is that rollout's lead or Leg; if not, it is no candidate. Each
+      reading. An execute candidate the names found, not named exactly the item's title, gets one
+      `read_session` first, asking only whether it is that rollout's lead; if not, it is no candidate. Each
       Session is read at most once in the pass. Every candidate left (an orient or repair one, a roster one, an
-      execute or Leg one named exactly the item's title, or one the read confirmed) gets `relay_session` with the
+      execute one named exactly the item's title, or one the read confirmed) gets `relay_session` with the
       item's prompt, the Session named by its id: a lead is named `<Project> rollout`, a name the project's other
       leads share.
    5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`.
-      An execute or Leg item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
+      An execute item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
       a repair item beside its lead still does. A `Raised (task_id: …)` result
       is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held card stays
       open as Lachy's offer, its `unstarted` line saying why (`"<name>" leads this Rollout on the Stage: …` when a lead
       appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
-   6. With `create_thread` but no `list_sessions`, only the items for notes this pass wrote are started; every other
-      item becomes a paste-ready prompt.
+   6. With `create_thread` but no `list_sessions` (Codex Desktop, no Chorus Stage), only the items for notes this pass
+      wrote are started; every other item becomes a paste-ready prompt. A Leg item for a note this pass wrote is
+      started with that host's `create_thread`, never stamped, as `skills/execute/legs.md` § Hand over's Codex Desktop
+      bullet starts a Leg (a `manual: true` one is a labelled manual hand-over).
 5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, its `launch`: `<alias>
    from <folder>` in place; for a chain in Chain copies, the copy's paste line, never the alias itself, whose `cd`
-   opens the primary), then the prompt, labelled `paste-ready prompt (no session started)`.
-6. A `manual: true` item (a `cx-*` row 1, `skills/execute/legs.md` § Hand over, or no Project root) is always a
-   labelled manual hand-over.
+   opens the primary), then the prompt, labelled `paste-ready prompt (no session started)`. Off the Stage a Leg item
+   is never stamped (ADR 0076 d4): its block is labelled
+   `paste-ready prompt (not listed: off the Stage, this is how Leg 1 starts)`, its one start path.
+6. A `manual: true` item (a `cx-*` row 1, `skills/execute/legs.md` § Hand over, or no Project root) is a labelled
+   manual hand-over off the Chorus Stage, and an execute one on it too. On the Stage a Leg item is never a manual
+   hand-over: it is listed whatever its `manual` (a `cx-*` row 1 the Stage opens on `waiting`'s harness); one whose
+   `why` names `chain_copies:` is stamped and reported unlisted, `blocked by chain_copies: <why>`, fix the note, and
+   it joins the list once the note reads (ADR 0076 d6); one with no `cwd` (row 1 names no launch) is never stamped,
+   and stays a labelled manual hand-over.
 
 Child orients start after every execute, so a lead's first `next` has marked its note started before an orient could
 see it, and the orient prompt's second line names the note this pass wrote for that project. Only a project ticked on
@@ -359,6 +378,9 @@ One message of statements, no question:
 - the sessions raised (title → task id: the Stage starts it unless its card says why it waits), relayed (title → the
   Session's name and id), or held (title → the Session's name, id and state; for two or more roster leads, every one
   named by id), or the prompts printed;
+- the chains listed (§ 7 step 4: each Leg item's `stamp-start`), each with its undo line; each listed chain the
+  Waiting list would not hold, with its why (`blocked by chain_copies: <why>`: fix the note); and each refusal, with
+  its ERROR line and the item's paste-ready prompt;
 - `left[]`: each rollout with its action, its status line and its hold. For action 12 add "check the owner session
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";
@@ -392,10 +414,11 @@ with no `--write`, lists the calls the forks would write.
 
 It prints the slate (§ 3's glance), the decision batch (each AskUserQuestion call's questions, then the grill list,
 each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), the Decided for you list and the dispatch
-plan: each batch's schedule args with the execute or Leg 1 each would start, then each item with its cwd and prompt,
+plan: each batch's schedule args with the execute each would start or the chain each would list, then each item
+with its cwd and prompt,
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
-It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `approve-gates`,
+It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `approve-gates`, `stamp-start`,
 `estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, the sign-in pass (§ 6 step 2), `list_sessions`, `read_session`, `relay_session` or
 `create_thread`.
 
@@ -404,7 +427,7 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 - Reshape a project, or ask, schedule or start anything of a big project's (ADR 0061) unless it was ticked on the pick
   list: Orient-graded work goes to its own orient session, once ticked.
 - Start, relay or move a live rollout other than through `sessions`' items: never on status actions 1–5, 9, 10 or 12,
-  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute or Leg item for a rollout
+  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute item for a rollout
   a Session on the Stage leads by the roster.
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
   its state.
@@ -413,7 +436,7 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 - Start session-lane or parked work, other than a project unparked in this pass.
 - Schedule a run that waits, run two batches at once, route a fork's misfits, or run its follow-up line.
 - Supersede anything: no `--regenerate`.
-- Write `start: unattended`.
+- Write `start: unattended` other than through § 7 step 4's `stamp-start` on a Leg item on the Chorus Stage.
 - Ask past the budget, sign-offs and the pick list aside. § 6 step 2's sign-in list is raised whatever the budget too:
   a sign-in is his hands, not a decision (ADR 0074 d2).
 - Call the question tool from a fork or an agent.

@@ -153,10 +153,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   dispatch blockers, each with every dependency it needs scheduled in the
   same pass (one held only because its dependency was scheduled late goes
   next pass), in batches; then one visible session per new parallel
-  execute and serial Leg 1, per live rollout that status sends to a ceremony,
-  a start, a signed reinstate or a repair, and per child orient of a project
-  ticked on the **Pick list** (paste-ready prompts off the Stage); nothing of a
-  **Big project** unticked. _Avoid_: launch list.
+  execute (on the Stage each new serial chain is listed on the **Waiting
+  list**: its Leg item runs `stamp-start`, never opened as a session), per
+  live rollout that status sends to a ceremony, a start, a signed reinstate or
+  a repair, and per child orient of a project ticked on the **Pick list**
+  (paste-ready prompts off the Stage, a serial Leg 1's among them); nothing of
+  a **Big project** unticked. _Avoid_: launch list.
 
 ## Continuity (threads and attention)
 
@@ -689,11 +691,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   no place in the room, and the Stage begins the chain again, in a fresh
   session, from the list once its way is clear. Any other begin wait is a
   needs-you item, its `unlisted` saying why: a chain with no
-  `start: unattended` or in a state off the list, or one whose Leg session
+  `start: unattended` or in a state off the list, one whose Leg session
   still stands (the successor of a started hand-over, a standing
   restart `pending` or `started`, a take-over's open Leg), which `waiting`
-  keeps off the list and counts against the room (ADR 0076 d3). It waits on
-  `/thread:execute [[<slug>]]` instead. A Leg never begins without a
+  keeps off the list and counts against the room (ADR 0076 d3), or one whose
+  last Leg handed over by hand (P44-4). It waits on
+  `/thread:execute [[<slug>]]` instead. A listed restart (repair's
+  `restarted --listed`) holds no session: its chain stays on the list. A Leg never begins without a
   passing check: a check still unanswered after its longer retry reads
   `unanswered`, never a pass and never a refusal. Every other begin refusal
   stays a halt, a check that fails included. Parallel execute's version is a
@@ -822,7 +826,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   it gets one only when it reaches the front and there is room, best
   **Estate rank** first. He sees it as one quiet line on the Stage (how many
   wait, which is next, how much room) that opens into the ordered list with a
-  click, never as a command or a notification. Ruled with Lachy 2026-11-08,
+  click, never as a command or a notification. A serial note's
+  `start: unattended` is its place on the list, never cleared while the chain
+  is unfinished. Only a writer on the Chorus Stage lists a chain (P44-4, ADR
+  0076 d4): schedule S7 on a standalone run; the parent's `stamp-start` under
+  orient, orient-all and the **Backlog orient**; a Leg's `handed --listed`;
+  repair's `restarted --listed`. Off the Stage nothing lists it, and Leg 1 is
+  a paste-ready prompt. A chain is listed or has a paste-ready prompt, never
+  both, so a manual hand-over or a manual restart keeps it off the list, and
+  a closing Leg (closed with a handoff, no hand-over line yet) keeps its chain
+  off the list until its hand-over. Ruled with Lachy 2026-11-08,
   after `orient-all` left about 30 chains open as idle or stopped sessions
   with room for 2. _Avoid_:
   begin queue, backlog, queue (a parallel rollout's **Queue** is another
@@ -1207,7 +1220,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   The **Backlog orient** stamps each parallel note it wrote this way itself, as its
   decided start (`stamp-start --backlog`, ADR 0071), never beside a hold.
   When he names the PR the start waits on, it is an **Approved queue**
-  instead. _Avoid_: auto-start, scheduled start.
+  instead. A serial note takes the same stamp as its place on the **Waiting
+  list** (P44-4, ADR 0076 d4), written only on the Chorus Stage and never
+  cleared while the chain is unfinished: the Stage opens each Leg from the
+  list, not a lead. _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`, its **Rollout clone** since ADR 0042) kept its
   `refs/heads/<default>` and its bareness across each **Window** (execute § 4.5,

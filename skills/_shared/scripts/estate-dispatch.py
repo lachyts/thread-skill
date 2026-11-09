@@ -241,7 +241,11 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   (RR._shape) is an execute item in its Project root (no root: manual); a serial one is a `leg` item for Leg 1, in
   its `## Queue` row 1's launch folder (inside its Chain copy when the note carries `chain_copies:`, SC.copy_folder),
   with its `launch` line (LEG.launch_line: `<alias> from <folder>` in place, a copy's paste line otherwise), manual when
-  its alias starts `cx-` (legs.md § Hand over) or its `chain_copies:` is malformed (the item's why says so).
+  its alias starts `cx-` (legs.md § Hand over) or its `chain_copies:` is malformed (the item's why says so). On the
+  Chorus Stage, orient-all § 7 step 4 lists every Leg item with a launch (`reconcile-rollout.py stamp-start` on its
+  `note`) whatever its `manual`, and never starts it (P44-4, ADR 0076 d4): `manual` and `tldr` are read only where a
+  Leg item is still started or pasted, § 7 step 4.6's `create_thread` in a host with no Chorus Stage, and steps 5 and
+  6 off it.
   --status SLUG=N: SLUG one of plan.rollouts[], N an integer 1 to 13 (else exit 2). An execute item only with
   canExecute, a reinstate only with reinstate and canExecute (so a sign-off pause that every gate signed but another
   hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair (live_item); every live

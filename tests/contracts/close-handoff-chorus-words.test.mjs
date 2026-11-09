@@ -787,6 +787,8 @@ test('a Leg\'s turn ends read through the port as legs.md § Report says', () =>
   const [bA, bB] = banners(real.close).map(fill)
   assert.ok(bA && bB, 'close step 9 has banners A and B')
   const LEG_REPORT = 'landing /Users/lachlants/repos/tools/demo: not landed: commit-only\nhand-over: started task_x'
+  const LISTED_REPORT = 'landing /Users/lachlants/repos/tools/demo: not landed: commit-only\nhand-over: listed (Waiting list)'
+  const NOT_LISTED = 'hand-over not listed: blocked by chain copy missing: /Users/lachlants/.local/state/thread/chains/demo-demo-rollout-2026-10-20 (leg.py copies --rollout /x remakes it)'
   const manual = 'manual handoff:\n\n```\n/thread:execute [[' + RO + ']]\nLeg 2 of the serial chain; the brief is the rollout note\'s ## Leg log: /x\n```\n\ncx-demo from /Users/lachlants/repos/tools/demo'
   const cases = [
     ['handoff, successor started', closing(LEG_REPORT, `${bB}\n${line(5, 'done', 'handed off to Leg 2')}`), ['closed', '']],
@@ -797,6 +799,10 @@ test('a Leg\'s turn ends read through the port as legs.md § Report says', () =>
     // ADR 0055: a Complete Leg waiting on its completion verify's --run or --wait.
     ['Complete, completion verify running', line(7, 'waiting', 'completion verify in flight'), ['nothing yet', '']],
     ['stuck', closing(REPORT, `${bA}\n${line(3, 'halted', 'awaiting you: 1 set aside')}`), ['halted', 'awaiting you: 1 set aside']],
+    // P44-4 (ADR 0076 d4): a Leg on the Chorus Stage lists its chain (handed --listed); its not-listed line is a demand.
+    ['handoff, listed', closing(LISTED_REPORT, `${bB}\n${line(5, 'done', 'listed Leg 2 on the Waiting list')}`), ['closed', '']],
+    ['handoff, not listed', closing(`${REPORT}\nLeft for Lachy: Leg 2 not listed`, `${bA}\n${line(5, 'halted', NOT_LISTED)}`),
+      ['halted', cutOnAWord(NOT_LISTED, REASON_CHARS)]],
   ]
   for (const [, text, want] of cases) assert.deepEqual(R(text).statusClose, want, text.slice(-160))
   assert.equal(R(cases[2][1]).asks, false, 'a manual hand-over asks nothing')
