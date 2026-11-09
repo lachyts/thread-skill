@@ -5833,7 +5833,8 @@ def _superseded_output(stem, successor, progress) -> dict:
             "heat": None, "start": [], "restart": [], "hold": [], "running": [], "awaitingIntegration": [],
             "integrating": [], "setAside": [], "raceHold": [], "gitEnvHold": [], "laneHold": [], "mainRed": [],
             "holdUntil": [], "onMerge": None, "supersededBy": successor, "paused": None, "pauseRequested": False,
-            "pausedNow": False, "startUnattended": False, "startCleared": False, "halt": "superseded",
+            "pausedNow": False, "surfaceWait": None, "startUnattended": False, "startCleared": False,
+            "halt": "superseded",
             "awaitingSignOff": [], "progress": progress}
 
 
