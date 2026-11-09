@@ -1502,10 +1502,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reading it from the **Situational report** (`reconcile-rollout.py moving`):
   Chorus's Companion, alone (ADR 0048, ADR 0075 d5). It recovers without
   asking and sends no push (ADR 0075 d2); its only signal to Lachy is the
-  Companion's lead at the Stage, which is Chorus's reading (d3). From P41-4
-  it also watches a serial note's waiting Leg (a **Begin wait**, a Capacity
-  or review wait), `stalled` once its session is gone or it goes stale (ADR
-  0075 d5), and a parallel **Surface wait** reads `waiting surface-wait`. Its
+  Companion's lead at the Stage, which is Chorus's reading (d3). It also
+  watches a serial note's waiting Leg (an open Leg whose Leg lease reads
+  `waiting`: a review in flight, a Capacity or quota wait, a completion
+  verify in flight or a room stop; a chain on the **Waiting list** has no
+  Leg and stays `skip`), `waiting leg-wait` while fresh and `stalled` once
+  its session is gone or it goes stale (ADR 0075 d5, P41-4), and a
+  parallel **Surface wait** reads `waiting surface-wait`. Its
   `stalled` is a reason to look, never by itself a reason to start a second
   lead. With Chorus not running nothing watches, and a stall
   is read when Lachy runs `/thread:status`.
