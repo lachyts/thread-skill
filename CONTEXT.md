@@ -535,19 +535,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
   inherited task aside, fewer when its context grows heavy or a task proves
   large, and never closing mid-task. Each code-writing task gets one clean-room
   review before it is done. Its close ritual lands its close-outs commit-only,
-  hands the rest to a fresh Leg through the Stage (a labelled manual hand-over
-  elsewhere), and ends on a `ROLLOUT-STATUS:` line; every Leg whose Close reads
-  *closed* reports to the origin. A Leg whose Session died is taken over, or
-  the next one started, by `/thread:repair`, which never runs a Leg itself.
-  _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
+  then hands the rest on (legs.md § Hand over): on the Chorus Stage it opens no
+  successor but lists the chain on the **Waiting list** (`leg.py handed
+  --listed`), and the Stage opens the next Leg when there is room; Codex
+  Desktop starts it as a task, and anywhere else it is a labelled manual
+  hand-over. It ends on a `ROLLOUT-STATUS:` line. A Leg whose Close reads
+  *closed* reports to the origin (Leg 1, started by hand or from a card),
+  but a Leg the Stage opens from the Waiting list is no card's and reports
+  nowhere (a listed hand-over's Close archives), and off the Stage none
+  reports (legs.md § Report). A Leg whose Session died is taken over, or its
+  stalled chain restarted, by `/thread:repair`, which never runs a Leg itself:
+  on the Stage it lists the chain (`leg.py restarted --listed`) for the Stage
+  to open, and only a take-over, Codex Desktop, a run off the Stage or an
+  engine snapshot from before `--listed` starts the next Leg as a new Session
+  (repair § 7 (e)). _Avoid_: shift, stint, iteration (one task in a Ralph
+  loop), batch.
 - **Stalled chain** — a serial chain with claimed work and no Leg open: a task
   in progress for a Leg that closed (stopped, or halted and since cleared) or
   never began, and nothing starts the Leg that inherits it. `leg.py status`
   sets its `stall` field; its chain state reads `stalled` only when no earlier
   state matches, so a Leg that stopped holding a claim reads `stopped` (and a
   standing halt `halted`), the `stall` set beside it. `/thread:repair`
-  restarts it by starting the next Leg as a new Session, once nothing shows a
-  Session still holding it. An open Leg whose Session died reads live, never
+  restarts it once nothing shows a Session still holding it: on the Chorus
+  Stage by listing it on the **Waiting list** (`leg.py restarted --listed`),
+  elsewhere by starting the next Leg as a new Session (repair § 7 (e)). An
+  open Leg whose Session died reads live, never
   stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
   so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
   hung, frozen.

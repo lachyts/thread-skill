@@ -267,7 +267,14 @@ function check(f, product = tree) {
 
   // ---- e8: docs ----
   need('e8', 'CONTEXT **Leg**', entry(f.context, 'Leg'), ['`leg.py begin`', 'the preflight', 'the smoke test',
-    'up to five fresh claims', 'never closing mid-task', 'commit-only', 'reports to the origin'])
+    'up to five fresh claims', 'never closing mid-task', 'commit-only', 'reports to the origin',
+    // P44-4 (ADR 0076 d4): legs.md § Hand over and § Report, repair § 7 (e)
+    'lists the chain on the **Waiting list** (`leg.py handed --listed`)',
+    "a Leg the Stage opens from the Waiting list is no card's and reports nowhere (a listed hand-over's Close archives)",
+    'on the Stage it lists the chain (`leg.py restarted --listed`) for the Stage to open'])
+  if (/every Leg whose Close reads \*closed\* reports to the origin/i.test(entry(f.context, 'Leg'))) {
+    flag('e8', 'CONTEXT **Leg** still has every closed Leg report to the origin')
+  }
   need('e8', 'CONTEXT **Serial rollout**', entry(f.context, 'Serial rollout'), ['No task worktrees', 'execute runs its Legs',
     'A serial note is never paused', "the completion verify's detached verify tree outside the checkout"])
   const scopeLegs = C(section(f.execute, /^## Scope$/) ?? '')
@@ -277,7 +284,9 @@ function check(f, product = tree) {
     '**How a Leg runs** (the p24-3 plan, 2026-10-19)', '`verifies:`', 'refines the ruling\'s "`fixes:` that task"',
     '`land.sh --route`', 'A serial note is never paused'])
   need('e8', 'README /thread:execute row', (f.readme ?? '').split('\n').find((l) => l.startsWith('| `/thread:execute`')) ?? '',
-    ['A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg'])
+    ['A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg',
+      // P44-4 (ADR 0076 d4): on the Stage the Leg lists the chain, never opening its successor
+      'it opens no successor but lists the chain on the Waiting list (`leg.py handed --listed`)'])
 
   // ---- e9: close § Under a Leg ----
   const close = f.close ?? ''
@@ -489,7 +498,15 @@ test('control: a Serial rollout entry back on "No worktrees" fails e8', () => {
   only('context', 'No task worktrees (leg.py\'s transient scratch\n  revert, and', 'No worktrees (leg.py\'s transient scratch\n  revert, and', ['e8'], 'worktrees')
 })
 test('control: a README row without Legs fails e8', () => {
-  only('readme', ' A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg.', '', ['e8'], 'readme')
+  only('readme', ' A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg:', '', ['e8'], 'readme')
+})
+test('control: a CONTEXT Leg entry where every closed Leg reports to the origin fails e8', () => {
+  only('context', "A Leg whose Close reads\n  *closed* reports to the origin (Leg 1, started by hand or from a card),",
+    "Every Leg whose Close reads\n  *closed* reports to the origin (Leg 1, started by hand or from a card),", ['e8'], 'context report')
+})
+test('control: a README row whose Leg opens its successor on the Stage fails e8', () => {
+  only('readme', 'it opens no successor but lists the chain on the Waiting list (`leg.py handed --listed`)',
+    'it starts its successor as a new Session', ['e8'], 'readme listed')
 })
 test('control: § Under a Leg moved before ## Edge cases fails e9', () => {
   const ul = slice(real.close, /^## Under a Leg$/, /^## Why this exists$/)

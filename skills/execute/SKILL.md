@@ -62,7 +62,7 @@ approved task with the latest base branch (`main` unless §4's `defaultBranch` s
 merges it — no per-PR confirmation. `--gated` is the same queue with a **merge hold** before each merge (§4.5
 *Merge hold*): task calls keep running while the lane waits for your go-ahead.
 
-**A serial rollout runs as Legs.** `/thread:execute [[<serial note>]]` runs one Leg of its chain in this session (`legs.md`): it begins, works tasks one at a time, closes and hands the rest to a fresh Leg. `--take-over` (a dead Leg's claim) and `--resume <N>` (this conversation's own Leg after its session id changed) pass through to `leg.py begin` (`skills/execute/legs.md` § Begin).
+**A serial rollout runs as Legs.** `/thread:execute [[<serial note>]]` runs one Leg of its chain in this session (`legs.md`): it begins, works tasks one at a time, closes and hands the rest to a fresh Leg (on the Chorus Stage by listing the chain on the Waiting list, `leg.py handed --listed`, never by opening its successor: `skills/execute/legs.md` § Hand over). `--take-over` (a dead Leg's claim) and `--resume <N>` (this conversation's own Leg after its session id changed) pass through to `leg.py begin` (`skills/execute/legs.md` § Begin).
 
 **A wave number is refused.** `execute Wave N of [[rollout]]` prints "single-wave mode is gone (ADR 0030): run `execute [[rollout]]`, or add `--gated` to approve each merge" and stops.
 
