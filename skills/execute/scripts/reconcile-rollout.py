@@ -607,13 +607,25 @@ Subcommands:
               below `status:` on the note an approved queue's regenerate wrote (no write when it is already there) and
               prints `undo: remove start: unattended from [[<note>]] before the Stage starts it, or pause [[<note>]]
               once it runs; it superseded [[<prior>]] when <pr> merged`. Refuses (exit 1, one `ERROR: stamp-start:`
-              line, nothing written): not found, serial, incomplete (so it runs after step 7.5, which closes the prior),
+              line, nothing written): not found, incomplete (so it runs after step 7.5, which closes the prior),
               closed, superseded, paused or pause-requested, not never started, a valued `started_unattended:`, or no
               `supersedes:`.
               `--backlog` (ADR 0071): the Backlog orient's decided start (skills/orient/backlog.md § B8) on a parallel
               note its forks wrote. It drops only the `supersedes:` refusal and adds one: a rollout-scope `hold_until`
               (readable or not) is refused, `… carries hold_until <pr>: a held queue starts on Lachy's word`. Its undo
               line ends `the Backlog orient stamped it`.
+              A `shape: serial` note (P44-4, ADR 0076 d4: schedule S7's standalone run, orient § 9, orient-all § 7's
+              Leg item and the Backlog orient B8, each only on the Chorus Stage) is listed on the Waiting list: the
+              same refusals in the same order, not found, incomplete, done or dropped, superseded, paused or
+              pause-requested, then a chain that has run (never_started false: a `## Leg log` heading, or a linked task
+              carrying `owner:`), `[[<note>]] has run (<why>): a stamp alone does not list a chain that has run; its
+              Leg log says whether it rejoins the Waiting list, through its Leg's hand-over (leg.py handed --listed) or
+              /thread:repair (leg.py restarted --listed, after leg.py clear-halt on a halt); nothing written`. It reads
+              no `started_unattended:` (Chorus ADR 0115 R1), no `supersedes:` and no `hold_until` (vault-grammar
+              § Hold until reads no serial note), with or without --backlog. It stamps `start: unattended` below
+              `status:` (no write when it stands) and prints `undo: remove start: unattended from [[<note>]] before the
+              Stage opens its Leg 1; it waits on the Waiting list (unfinished-rollout.py waiting)`, ending `; the
+              Backlog orient listed it` under --backlog.
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
@@ -11689,10 +11701,13 @@ def cmd_approve_queue(args) -> int:
 def cmd_stamp_start(args) -> int:
     """Under the chain (schedule step 8, after step 7.5): stamp `start: unattended` on the note the approved queue's
     regenerate just wrote, and print the one undo line. Refuses (exit 1, one ERROR line, nothing written) a note that
-    is not found, serial, incomplete, closed, superseded, paused, not never started, already started by the Stage (a
+    is not found, incomplete, closed, superseded, paused, not never started, already started by the Stage (a
     valued `started_unattended:`) or that supersedes nothing. A stamp already there is not rewritten.
     With `--backlog` (ADR 0071, skills/orient/backlog.md § B8) the note need supersede nothing, and a rollout-scope
-    `hold_until` (readable or not) refuses instead: a held queue starts on Lachy's word, never the Backlog orient's."""
+    `hold_until` (readable or not) refuses instead: a held queue starts on Lachy's word, never the Backlog orient's.
+    A serial note (P44-4, ADR 0076 d4) is listed on the Waiting list: the same refusals up to the never-started one
+    (a chain that has run is refused: its Leg log says whether it rejoins the list), then the stamp, whatever its
+    `started_unattended:`, `supersedes:` or `hold_until`, with or without --backlog."""
     def refuse(msg):
         print(f"ERROR: stamp-start: {msg}", file=sys.stderr)
         return 1
@@ -11702,8 +11717,7 @@ def cmd_stamp_start(args) -> int:
     if why:
         return refuse(why)
     stem = path.stem
-    if _shape(note) == SHAPES[1]:
-        return refuse(f"{stem}: shape: serial: the Stage never starts a serial note")
+    serial = _shape(note) == SHAPES[1]
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     linked, index = _scan(path, tasks_dir)
     why = incomplete(path, note, linked, index)
@@ -11716,8 +11730,14 @@ def cmd_stamp_start(args) -> int:
     if _valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")):
         return refuse(f"{stem} is paused (or a pause is requested): its reinstate is Lachy's")
     fresh, why = never_started(note, linked)
+    if not fresh and serial:
+        return refuse(f"[[{stem}]] has run ({why}): a stamp alone does not list a chain that has run; its Leg log says "
+                      "whether it rejoins the Waiting list, through its Leg's hand-over (leg.py handed --listed) or "
+                      "/thread:repair (leg.py restarted --listed, after leg.py clear-halt on a halt); nothing written")
     if not fresh:
         return refuse(f"{stem} has run ({why}): a running queue needs no start stamp")
+    if serial:
+        return _stamp_serial(note, path, stem, getattr(args, "backlog", False), refuse)
     if _valued(note.get("started_unattended")):
         return refuse(f"{stem} carries started_unattended: {_scalar(note.get('started_unattended'))}: the Stage "
                       "already started it")
@@ -11745,6 +11765,23 @@ def cmd_stamp_start(args) -> int:
     shown = hold["pr"] if hold is not None and hold["pr"] else "its gating PR"
     print(f"undo: remove {START_KEY}: {START_UNATTENDED} from [[{stem}]] before the Stage starts it, or pause [[{stem}]] "
           f"once it runs; it superseded [[{prior_name}]] when {shown} merged")
+    return 0
+
+
+def _stamp_serial(note, path: Path, stem: str, backlog: bool, refuse) -> int:
+    """stamp-start's serial branch (P44-4, ADR 0076 d4), after its refusals: `start: unattended` below `status:` (no
+    write when it stands), which lists the never-begun chain on the Waiting list (unfinished-rollout.py waiting), and
+    the one undo line. A valued `started_unattended:`, no `supersedes:` and a `hold_until` are read by nothing here
+    (vault-grammar § Hold until reads no serial note)."""
+    if not _start_unattended(note):
+        note.set(START_KEY, START_UNATTENDED, after=("status",))
+    try:
+        note.save()
+    except OSError as e:
+        return refuse(f"{stem}: cannot write {path}: {e}; nothing written")
+    tail = "; the Backlog orient listed it" if backlog else ""
+    print(f"undo: remove {START_KEY}: {START_UNATTENDED} from [[{stem}]] before the Stage opens its Leg 1; it waits on "
+          f"the Waiting list (unfinished-rollout.py waiting){tail}")
     return 0
 
 
@@ -14129,8 +14166,11 @@ def _parser():
     aq.set_defaults(func=cmd_approve_queue)
 
     ss = sub.add_parser("stamp-start", help="under an approved queue's chain (schedule step 8): stamp start: unattended "
-                                            "on the note its regenerate wrote, print one undo line; exit 1 refused")
-    ss.add_argument("--rollout", required=True, help="path to the new rollout note (it supersedes the approved queue)")
+                                            "on the note its regenerate wrote, print one undo line; exit 1 refused. A "
+                                            "never-begun serial note is listed on the Waiting list (P44-4); one that has "
+                                            "run is refused (leg.py handed --listed or restarted --listed lists it)")
+    ss.add_argument("--rollout", required=True, help="path to the new rollout note (it supersedes the approved queue), "
+                                                     "or a serial note to list")
     ss.add_argument("--backlog", action="store_true", help="the Backlog orient's decided start (ADR 0071): the note "
                                                             "need supersede nothing, and a rollout hold_until refuses")
     ss.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)

@@ -319,6 +319,9 @@ ok "$out" "closed ro-arch (archived)" "N6: a note only under Archive/ reads clos
 mkro ro-serial 'shape: serial'
 un --rollout ro-serial
 ok "$out" "serial ro-serial" "N7: a serial note reads serial"
+mkro ro-serial-st 'shape: serial' 'start: unattended'
+un --rollout ro-serial-st
+ok "$out" "stamped ro-serial-st (start: unattended)" "N7b: a stamped serial note reads stamped: the Stage opens its Leg 1 (P44-4)"
 mkro ro-inc 'incomplete: true'
 un --rollout ro-inc
 has "$out" "incomplete ro-inc (it carries incomplete: true" "N8: incomplete: true reads incomplete"

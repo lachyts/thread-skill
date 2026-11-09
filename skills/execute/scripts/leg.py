@@ -743,7 +743,7 @@ LAUNCH_RE = re.compile(r"^`([^`]+)`\s+from\s+`([^`]+)`$")
 VERIFY_RE = re.compile(r"^\s*\*\*Verify:\*\*.*$", re.M)
 LOG_RE = re.compile(r"^- (?P<stamp>\S+) Leg (?P<n>\d+) (?P<rest>.*)$")
 CLEARED_RE = re.compile(r"^- (?P<stamp>\S+) halt cleared: (?P<reason>.*)$")
-RESTART_RE = re.compile(r"^- (\S+) restart: Leg (\d+) (pending \(session (\S+)\)|started (\S+)|manual \((.*)\))$")
+RESTART_RE = re.compile(r"^- (\S+) restart: Leg (\d+) (pending \(session (\S+)\)|started (\S+)|manual \((.*)\)|listed)$")
 LINK_RE = re.compile(r"\[\[([^\]|#^\\]+)[^\]]*\]\]")
 BEGAN_RE = re.compile(r"^began: leg-(\d+) session (\S+) in (\S+) from (.*?)(?:; took over from Leg (\d+))?$")
 
@@ -4784,8 +4784,8 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
 
 
 def cmd_handed(ctx, a):
-    if bool(a.started) == bool(a.manual):
-        raise Usage("handed takes exactly one of --started <id> and --manual <why>")
+    if sum((bool(a.started), bool(a.manual), bool(a.listed))) != 1:
+        raise Usage("handed takes exactly one of --started <id>, --manual <why> and --listed")
     with Lock(ctx):
         chain = Chain(ctx)
         cands = [g for g in chain.legs.values() if (g["closed"] or "").startswith("handoff to Leg")
@@ -4798,19 +4798,39 @@ def cmd_handed(ctx, a):
         nxt, alias, folder = (int(m.group(1)), m.group(2), m.group(3)) if m else (n + 1, "?", "?")
         pairs = copies_read(chain)[0]   # the Leg log names the Queue folder; the next Leg opens in its Chain copy
         folder = (sc.copy_folder(folder, pairs) if pairs and m else None) or folder
+        stamped = False
+        # The first logged hand-over wins: once one is logged a handed of any form writes nothing (no line, no stamp, so
+        # a stamp Lachy removed is never added back) and prints the logged form's line.
         if leg["handover"] is None and not ctx.dry:
-            text = f"hand-over: started {a.started.strip()}" if a.started else f"hand-over: manual ({reason_text(a.manual, 200)})"
+            if a.started:
+                text = f"hand-over: started {a.started.strip()}"
+            elif a.manual:
+                text = f"hand-over: manual ({reason_text(a.manual, 200)})"
+            else:
+                text = "hand-over: listed"   # P44-4: the chain waits on the Waiting list; the Stage opens Leg N+1
+                if not rr._start_unattended(chain.note):
+                    chain.note.set(rr.START_KEY, rr.START_UNATTENDED, after=("status",))
+                    stamped = True
             log_line(chain.note, leg_line(ctx, n, text))
             save(ctx, chain.note)
             chain = Chain(ctx)
             leg = chain.legs[n]
+        form = leg["handover"] or ("started" if a.started else "manual" if a.manual else "listed")
+        listed = unlisted = None
+        if not ctx.dry:
+            got = begin_wait_listed(ctx, chain)
+            listed, unlisted = got["listed"], got.get("unlisted")
         prog = chain.progress(n)
-        if (leg["handover"] or "").startswith("started") or (leg["handover"] is None and a.started):
+        if form.startswith("started"):
             line = status_line(ctx.slug, prog, "done", f"handed off to Leg {nxt}")
-        else:
+        elif form.startswith("manual"):
             line = status_line(ctx.slug, prog, "halted", f"manual handoff: Leg {nxt} in {alias} from {folder}")
+        elif listed is False:
+            line = status_line(ctx.slug, prog, "halted", f"hand-over not listed: {unlisted}")
+        else:
+            line = status_line(ctx.slug, prog, "done", f"listed Leg {nxt} on the Waiting list")
         return {"verb": "handed", "rollout": ctx.slug, "leg": n, "handover": leg["handover"], "status_line": line,
-                "dryRun": ctx.dry}
+                "listed": listed, "unlisted": unlisted, "stamped": stamped, "dryRun": ctx.dry}
 
 
 def cmd_clear_halt(ctx, a):
@@ -5010,17 +5030,15 @@ def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
                    cwd=os.path.realpath(mapped or os.path.expanduser(row.folder)), harness=launch_harness(row.alias),
                    launch=chain_launch(pairs, row.alias, row.folder), task=row.slug, anyLaunch=False)
     blocked = None
+    listed = restarted is not None and restarted["how"] == "listed"   # repair listed the chain (P44-4): no session
     if halt is not None:
         blocked = "halt"
-    elif restarted is not None:
+    elif restarted is not None and not listed:
         blocked = f"restart Leg {restarted['leg']} ({restarted['how']})"
     elif take:
         blocked = f"open Leg {open_leg['n']} (session {open_leg['session'] or 'unknown'})"
-    elif chain.legs:
-        last = chain.legs[chain.last_n()]
-        ho = last["handover"] or ""
-        if leg_outcome(last["closed"]) == "handoff" and ho.startswith("started "):
-            blocked = f"handover started {ho[len('started '):].strip()}"
+    elif chain.legs and not listed:
+        blocked = handover_session(chain)
     if blocked is None and bad:
         blocked = f"chain_copies: {bad}: fix the note"
     elif blocked is None and mapped and not os.path.isdir(out["cwd"]):
@@ -5071,37 +5089,72 @@ def chain_state(chain, inc, paused, superseded, halt, restarted, open_leg, stall
 WAITING_STATES = ("not-started", "ready", "awaiting-successor", "completable")
 
 
+def handover_session(chain):
+    """The session a last Leg closed with a handoff still holds (restart_of's blockedBy and leg_session_of read it):
+    `closing Leg <N> (session <id|unknown>)` while no hand-over line is logged (P44-4: its /thread:close writes the
+    hand-over last, so close-outs still land in its Chain copy), `handover started <id>` once it handed off to a started
+    session that has not begun, else None (a `manual (…)` or `listed` hand-over holds no session; no handoff)."""
+    last = chain.legs.get(chain.last_n()) if chain.legs else None
+    if last is None or leg_outcome(last["closed"]) != "handoff":
+        return None
+    ho = last["handover"]
+    if ho is None:
+        return f"closing Leg {last['n']} (session {last['session'] or 'unknown'})"
+    if ho.startswith("started "):
+        return f"handover started {ho[len('started '):].strip()}"
+    return None
+
+
+def manual_handover(chain):
+    """The reason of a manual hand-over the last Leg closed with (`hand-over: manual (<why>)`), else None."""
+    last = chain.legs.get(chain.last_n()) if chain.legs else None
+    if last is None or leg_outcome(last["closed"]) != "handoff":
+        return None
+    m = re.match(r"manual \((.*)\)$", last["handover"] or "")
+    return m.group(1) if m else None
+
+
 def leg_session_of(chain, read):
     """The chain's Leg session (ADR 0076 d3: a Leg holds a place from its start), the one copy unfinished-rollout.py's
-    leg_session (the room's count) and waiting_listed read: `open Leg <K>` (an open Leg), `restart Leg <N> (<how>)` (a
-    standing restart `pending` or `started`; a manual one starts none), or `handover started <id>` (a last Leg handed
-    off to a `started` session that has not begun), else None. `read` is chain_read's (its open_leg and restarted).
-    A begin wait writes nothing, so a session that took one still reads here (P41-3)."""
+    leg_session (the room's count) and waiting_listed read, the first that holds: `open Leg <K>` (an open Leg); a
+    standing restart, `restart Leg <N> (<how>)` when `pending` or `started`, none when `listed` (repair listed the chain,
+    P44-4: the hand-over below is then not read; a manual one starts none and reads on); `closing Leg <N> (session
+    <id|unknown>)` (a last Leg closed with a handoff and no hand-over line yet, P44-4); `handover started <id>` (a last
+    Leg handed off to a `started` session that has not begun); else None (a `manual (…)` or `listed` hand-over holds
+    no session). `read` is chain_read's (its open_leg and restarted). A begin wait writes nothing, so a session that
+    took one still reads here (P41-3)."""
     if read["open_leg"] is not None:
         return f"open Leg {read['open_leg']['n']}"
     restarted = read["restarted"]
     if restarted is not None and restarted["how"] in ("pending", "started"):
         return f"restart Leg {restarted['leg']} ({restarted['how']})"
-    last = chain.legs.get(chain.last_n()) if chain.legs else None
-    ho = (last or {}).get("handover") or ""
-    if last is not None and leg_outcome(last["closed"]) == "handoff" and ho.startswith("started "):
-        return f"handover started {ho[len('started '):].strip()}"
-    return None
+    if restarted is not None and restarted["how"] == "listed":
+        return None
+    return handover_session(chain)
 
 
 def waiting_listed(ctx, chain, read):
     """Whether unfinished-rollout.py's `waiting` lists the chain (ADR 0076 d3), the one copy of its rule, which begin's
-    begin wait reads too (P41-3): (restart, None) when it does (restart_of's, for its next Leg), else (None, why not),
-    the first that holds: `no start: unattended`; `its Leg session stands (<s>)` (leg_session_of, read with no lease:
-    an open Leg always keeps a chain off the list); `its chain reads <state>` (a state off WAITING_STATES); `no Leg acts
-    next`; `blocked by <restart.blockedBy>`. The hold (held_by) is `waiting`'s own, never a reason to leave the list."""
+    begin wait, status and handed read too (P41-3, P44-4): (restart, None) when it does (restart_of's, for its next
+    Leg), else (None, why not), the first that holds: `no start: unattended`; `its Leg session stands (<s>)`
+    (leg_session_of, read with no lease: an open Leg, or a closing one, always keeps a chain off the list); `its chain
+    reads <state>` (a state off WAITING_STATES, but `restarting` on a standing restart `listed`, repair's listing,
+    P44-4); `a manual hand-over stands (Leg <N>: <why>)` (no restart standing and the last Leg handed off by hand: its
+    paste-ready prompt is its one start path, until a Leg begins or repair's `restarted --listed` supersedes it,
+    P44-4); `no Leg acts next`; `blocked by <restart.blockedBy>`. The hold (held_by) is `waiting`'s own, never a reason
+    to leave the list."""
     if not rr._start_unattended(chain.note):
         return None, "no start: unattended"
     session = leg_session_of(chain, read)
     if session is not None:
         return None, f"its Leg session stands ({session})"
-    if read["state"] not in WAITING_STATES:
+    restarted = read["restarted"]
+    if read["state"] not in WAITING_STATES and not (read["state"] == "restarting" and restarted is not None
+                                                    and restarted["how"] == "listed"):
         return None, f"its chain reads {read['state']}"
+    manual = manual_handover(chain) if restarted is None else None
+    if manual is not None:
+        return None, f"a manual hand-over stands (Leg {chain.last_n()}: {manual})"
     restart = restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"], read["restarted"])
     if restart is None:
         return None, "no Leg acts next"
@@ -5684,7 +5737,10 @@ def cmd_status(ctx, a):
         items.append(f"[[{ctx.slug}]] halted at Leg {halt[1]}: {reason_text(halt[0], 140)}: the halt is yours to "
                      f"clear → /thread:repair [[{ctx.slug}]]")
     last = chain.legs.get(chain.last_n()) if chain.legs else None
-    if last is not None and leg_outcome(last["closed"]) == "handoff" and (last["handover"] or "").startswith("manual"):
+    # A manual hand-over is a paste, unless repair listed the chain since (a paste would double-start it, P44-4).
+    relisted = restarted is not None and restarted["how"] == "listed"
+    if last is not None and leg_outcome(last["closed"]) == "handoff" and (last["handover"] or "").startswith("manual") \
+            and not relisted:
         m = re.match(r"handoff to Leg (\d+) in (\S+) from (.*)$", last["closed"])
         where = chain_launch(copies_read(chain)[0], m.group(2), m.group(3)) if m else "its launch"
         items.append(f"[[{ctx.slug}]] manual hand-over: start Leg {last['n'] + 1} in {where} with the prompt "
@@ -5699,6 +5755,7 @@ def cmd_status(ctx, a):
     if stall is not None:
         items.append(f"[[{ctx.slug}]] stalled: {stall['why']} → /thread:repair [[{ctx.slug}]]")
     fixes = [{"task": r.slug, "verifies": v, "state": r.state} for r, v in chain.fixes() if r.state != "done"]
+    _listed, unlisted = waiting_listed(ctx, chain, read)   # whether `waiting` lists it (P44-4), the list's one rule
     return {"verb": "status", "rollout": ctx.slug,
             "note": {"status": rr._status(note) or None, "archived": ctx.archived, "incomplete": inc,
                      "paused": paused, "supersededBy": superseded},
@@ -5711,14 +5768,25 @@ def cmd_status(ctx, a):
             "legs": legs_json(chain), "rows": [row_json(chain, r, own_contend) for r in chain.rows],
             "smoke": [] if ended else smoke_list(chain, open_leg["n"] if open_leg is not None else n_next),
             "fixes": fixes, "next": None if ended else next_json(own), "stall": stall, "restart": restart,
-            "hold": hold_of(chain, read), "rank": rank_json(chain, own_contend), "needsYou": items}
+            "hold": hold_of(chain, read), "rank": rank_json(chain, own_contend), "needsYou": items,
+            "listed": unlisted is None, "unlisted": unlisted}
+
+
+def restarted_json(ctx, chain, out):
+    """restarted's JSON plus `listed` and `unlisted` (begin_wait_listed over the chain as it now reads, P44-4), both
+    null under --dry-run."""
+    listed = unlisted = None
+    if not ctx.dry:
+        got = begin_wait_listed(ctx, chain)
+        listed, unlisted = got["listed"], got.get("unlisted")
+    return {**out, "listed": listed, "unlisted": unlisted}
 
 
 def cmd_restarted(ctx, a):
     forms = [f for f, on in (("pending", a.pending), ("started", a.started is not None),
-                              ("manual", a.manual is not None)) if on]
+                              ("manual", a.manual is not None), ("listed", a.listed)) if on]
     if len(forms) != 1:
-        raise Usage("restarted takes exactly one of --pending, --started <id> and --manual <why>")
+        raise Usage("restarted takes exactly one of --pending, --started <id>, --manual <why> and --listed")
     if (a.started is not None and not a.started.strip()) or (a.manual is not None and not a.manual.strip()):
         raise Usage("--started needs the new Session's id, and --manual its reason")
     with Lock(ctx):
@@ -5733,23 +5801,31 @@ def cmd_restarted(ctx, a):
         n = a.leg
         g = chain.legs.get(n)
         if g is not None and g["began"]:
-            return {"verb": "restarted", "rollout": ctx.slug, "leg": n, "restarted": standing_restart(chain.log),
-                    "recorded": False, "began": True, "dryRun": ctx.dry}
+            return restarted_json(ctx, chain, {"verb": "restarted", "rollout": ctx.slug, "leg": n,
+                                               "restarted": standing_restart(chain.log), "recorded": False,
+                                               "began": True, "dryRun": ctx.dry})
         if n != chain.last_n() + 1:
             raise Refuse(1, f"Leg {n} is not the next Leg (Leg {chain.last_n() + 1}): nothing written")
         form = forms[0]
+        if form == "listed":
+            open_leg = chain.open_leg()
+            if open_leg is not None:
+                raise Refuse(1, f"an open Leg stands (Leg {open_leg['n']}): a take-over starts through create_thread "
+                                "(repair § 7 (e)); nothing written")
         if form == "pending":
             text = f"restart: Leg {n} pending (session {ctx.session})"
         elif form == "started":
             text = f"restart: Leg {n} started {a.started.strip().split()[0]}"
+        elif form == "listed":
+            text = f"restart: Leg {n} listed"
         else:
             text = f"restart: Leg {n} manual ({reason_text(a.manual, 200)})"
         cur = standing_restart(chain.log)
         if cur is not None:
             same = next((e for e in reversed(chain.log) if e["kind"] == "restart"), None)
             if same is not None and f"restart: Leg {same['leg']} {same['rest']}" == text:
-                return {"verb": "restarted", "rollout": ctx.slug, "leg": n, "restarted": cur, "recorded": False,
-                        "began": False, "dryRun": ctx.dry}
+                return restarted_json(ctx, chain, {"verb": "restarted", "rollout": ctx.slug, "leg": n, "restarted": cur,
+                                                   "recorded": False, "began": False, "dryRun": ctx.dry})
             update = (cur["how"] == "pending" and form != "pending" and cur["session"] not in (None, "unknown")
                       and cur["session"] == ctx.session)
             if not update and not a.replace:
@@ -5757,11 +5833,13 @@ def cmd_restarted(ctx, a):
                                 "--replace once it is gone", restarted=cur)
         if not ctx.dry:
             log_line(chain.note, f"- {ctx.stamp} {text}")
+            if form == "listed" and not rr._start_unattended(chain.note):
+                chain.note.set(rr.START_KEY, rr.START_UNATTENDED, after=("status",))   # the same save (P44-4)
             save(ctx, chain.note)
             chain = Chain(ctx)
-        return {"verb": "restarted", "rollout": ctx.slug, "leg": n,
-                "restarted": standing_restart(chain.log) if not ctx.dry else None, "recorded": not ctx.dry,
-                "dryRun": ctx.dry}
+        return restarted_json(ctx, chain, {"verb": "restarted", "rollout": ctx.slug, "leg": n,
+                                           "restarted": standing_restart(chain.log) if not ctx.dry else None,
+                                           "recorded": not ctx.dry, "dryRun": ctx.dry})
 
 
 # ---- main -----------------------------------------------------------------------------------------------------------
@@ -5850,6 +5928,7 @@ def parser():
     s = sub.add_parser("handed", parents=[common])
     s.add_argument("--started")
     s.add_argument("--manual")
+    s.add_argument("--listed", action="store_true")
     s = sub.add_parser("clear-halt", parents=[common])
     s.add_argument("--reason", required=True)
     sub.add_parser("status", parents=[common])
@@ -5863,6 +5942,7 @@ def parser():
     s.add_argument("--pending", action="store_true")
     s.add_argument("--started")
     s.add_argument("--manual")
+    s.add_argument("--listed", action="store_true")
     s.add_argument("--replace", action="store_true")
     return p
 

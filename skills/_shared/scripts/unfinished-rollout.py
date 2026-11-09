@@ -398,7 +398,10 @@ peer guard, makes that doc stale (ADR 0057 d4). It reads the note (root-first, t
 tasks, the Run record (run_record.py's record_path for the slug; an unreadable record reads as none) and the `*.md`
 directly in each --handoffs dir; it writes nothing and runs no git. It prints one line, the first that applies:
   closed <slug> (<status>|archived)     the root note is `done` or `dropped`, or the note sits only under Archive/
-  serial <slug>                         `shape: serial` (Leg 1 starts by hand; no handoff is made for it)
+  stamped <slug> (start: unattended)    `shape: serial` stamped `start: unattended` (P44-4): it waits on the Waiting
+                                        list and the Stage opens its Leg 1; no handoff is made for it
+  serial <slug>                         any other `shape: serial` note: no handoff is made for it (on the Chorus Stage
+                                        its writer lists it; off it, Leg 1 is a paste-ready prompt)
   started <slug> (<why>)                reconcile-rollout.py's approved_unrun is false
   started <slug> (a lead entered <ts>)  the Run record holds a `kind: lead-entry` line (a lead waiting on `hold_until`
                                         stamps no `owner:`); <ts> is the first one's
@@ -424,12 +427,16 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   serial_notes and left off, as begin's re-check would fail closed on it), and that has no Leg session and no stop
   needing Lachy: its chain state (leg.py's chain_read) is `not-started`, `ready`, `awaiting-successor` or
   `completable` (leg.py's WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`,
-  `stuck`, `incomplete`, `superseded`, `complete` or `dropped`; it has no Leg session (leg.py's leg_session_of: an open
-  Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started` session that has not begun,
-  one whose begin waited included, since begin writes nothing on a begin wait: P41-3); and leg.py's restart_of, from
-  the contention-free plan for its next Leg, is a finish, claim, wait or complete with no blockedBy (a malformed
-  `chain_copies:` or a missing Chain copy keeps it off). leg.py's waiting_listed is this rule's one copy, which begin's
-  begin wait reads too (its `listed`). A manual hand-over is on the list, for its next Leg (ADR 0076 d4).
+  `stuck`, `incomplete`, `superseded`, `complete` or `dropped`, but `restarting` on repair's `restart: Leg N listed`
+  (P44-4); it has no Leg session (leg.py's leg_session_of: an open Leg, a standing restart `pending` or `started`, a
+  last Leg closed with a handoff and no hand-over line yet, `closing Leg N`, or a last Leg handed off to a `started`
+  session that has not begun, one whose begin waited included, since begin writes nothing on a begin wait: P41-3); it
+  has no manual hand-over standing; and leg.py's restart_of, from the contention-free plan for its next Leg, is a
+  finish, claim, wait or complete with no blockedBy (a malformed `chain_copies:` or a missing Chain copy keeps it off).
+  leg.py's waiting_listed is this rule's one copy, which begin's begin wait, status and handed read too (their
+  `listed`). By the hand-over (ADR 0076 d4 as P44-4 amends it): `hand-over: listed` is on the list, for its next Leg;
+  a manual hand-over is off it, since its paste-ready prompt is its one start path, until a Leg begins or repair writes
+  `restart: Leg N listed`; a closing Leg is a Leg session, so its successor never opens while its close-outs land.
 - Order: leg.py's order_key (rank-led, ADR 0067 d9: a chain that has begun before one that has not, then the estate
   rank, then the first to begin or the earlier `captured:`, then the slug). `rank` is the chain's 1-based place.
 - Held (ADR 0076 d2): `held_by` is the first holder, by case-folded slug, that begin's surface re-check would name for
@@ -444,11 +451,13 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   resolve, else null}) less `running`: the Mac-wide running Rollout tasks (_running_by_rollout, leases read at --now,
   Leg claims never; under a rollout's surface-wait marker only its calls in flight, reconcile-rollout.py's
   _counted_tasks) plus every root serial note's Leg session, done and dropped ones aside (a Leg counts from its
-  start, ADR 0076 d3: leg.py's leg_session_of, an open Leg, a standing restart `pending` or `started`, or a last Leg
-  handed off to a `started` session, one whose begin waited included), floored at 0. An open Leg whose Leg lease
-  reads lapsed at --now (_Leases' Leg rule, the Capacity count's: 90 min after its last write, 180 for a waiting one)
-  holds no place: its session died without `leg.py close`, and counting it would leave the room 0 until a repair; no
-  lease file, or an unreadable one, still counts.
+  start, ADR 0076 d3: leg.py's leg_session_of, an open Leg, a standing restart `pending` or `started`, a closing Leg,
+  or a last Leg handed off to a `started` session, one whose begin waited included; a listed restart holds no place),
+  floored at 0. An open Leg whose Leg lease reads lapsed at --now (_Leases' Leg rule, the Capacity count's: 90 min
+  after its last write, 180 for a waiting one) holds no place: its session died without `leg.py close`, and counting
+  it would leave the room 0 until a repair; no lease file, or an unreadable one, still counts. A closing Leg counts
+  until LEG_LEASE_LAPSE (90 min) after its `closed:` stamp (close deletes its lease; an unparseable stamp counts), so
+  one that died inside /thread:close frees the room, though its chain stays off the list until repair lists it.
 stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"n", "by", "why"}, "waiting": [{"slug",
 "rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null}; cwd, title, prompt and harness are
 restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain), but a Complete Leg's harness, which
@@ -2227,7 +2236,7 @@ def cmd_unstarted(args, rr) -> int:
         print(f"closed {slug} ({status})")
         return 0
     if rr._shape(note) == "serial":
-        print(f"serial {slug}")
+        print(f"stamped {slug} (start: unattended)" if rr._start_unattended(note) else f"serial {slug}")
         return 0
     linked, index = rr._scan(path, tasks_dir)
     fresh, why = rr.approved_unrun(note, linked)
@@ -2263,15 +2272,24 @@ def cmd_unstarted(args, rr) -> int:
 
 def leg_session(leg, ctx, chain, read, leases) -> bool:
     """Whether a serial chain's Leg session holds a place in the room (ADR 0076 d3): leg.py's leg_session_of, its one
-    copy (an open Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started` session that
-    has not begun, a session whose begin waited included, P41-3: begin writes nothing), but an open Leg whose Leg lease
-    reads lapsed (`leases`, a reconcile-rollout.py _Leases) is none (its session died without `leg.py close`: the
-    Capacity count's rule, _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a
-    later boot or wake restarting it); no lease file or an unreadable one still counts (a Leg on an older snapshot
-    writes none)."""
+    copy (an open Leg, a standing restart `pending` or `started`, a closing Leg, or a last Leg handed off to a `started`
+    session that has not begun, a session whose begin waited included, P41-3: begin writes nothing; a listed restart
+    holds none), but an open Leg whose Leg lease reads lapsed (`leases`, a reconcile-rollout.py _Leases) is none (its
+    session died without `leg.py close`: the Capacity count's rule, _running_by_rollout's Leg half, 90 min after the
+    lease's last write, 180 for a waiting one, a later boot or wake restarting it); no lease file or an unreadable one
+    still counts (a Leg on an older snapshot writes none). A closing Leg (`closing Leg N`, P44-4: closed with a handoff,
+    no hand-over line yet) counts only while its `closed:` stamp is within LEG_LEASE_LAPSE (90 min) of leases.now (close
+    deleted its lease, so its stamp is the one clock; an unparseable stamp counts), so one that died inside
+    /thread:close frees the room; waiting_listed reads no lapse, so its chain stays off the list until repair lists it."""
     if read["open_leg"] is not None:
         return leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
-    return leg.leg_session_of(chain, read) is not None
+    session = leg.leg_session_of(chain, read)
+    if session is None:
+        return False
+    if session.startswith("closing Leg "):
+        closed = leg.rr._parse_ts(chain.legs[chain.last_n()]["closedStamp"])
+        return closed is None or leases.now - closed <= leg.rr.LEG_LEASE_LAPSE
+    return True
 
 
 def cmd_waiting(args, rr) -> int:
