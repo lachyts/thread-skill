@@ -933,8 +933,8 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
 
 **A serial note's waiting Leg** (ADR 0075 d5, P41-4). A serial note runs as Legs, which write no Run record, so
 `moving` reads only one thing on it: an open Leg (the `## Leg log`'s latest began Leg with no `closed:` line) whose Leg
-lease (`skills/execute/away.md` § Capacity; `leg.py` writes it) reads `waiting: true`. A Leg's turn end writes that on
-`leg.py next --waiting` (a review in flight, a Capacity or quota wait, a completion verify in flight, a room stop), and
+lease (`skills/execute/away.md` § Capacity; `leg.py` writes it) reads `waiting: true`. A Leg's turn end writes that
+when it ends waiting (a review in flight, a Capacity or quota wait, a completion verify in flight, a room stop), and
 a Capacity wait's renewals keep it, every 10 minutes. Its silence runs from the latest of the lease's write, the Mac's
 wake and its boot: `waiting leg-wait` (`Leg <n> waiting since <write> (session <id>)`, `until` the instant it turns
 `stalled`) while it is within `--stall-after`; `stalled` once it passes `--stall-after` (`silent`, or `mac-restart`
@@ -983,7 +983,8 @@ single foreground turn ends within 120 min of the last life sign; 120 min is one
 route. What does not hold: the route past 120 min, a lead blocked on an open question, a Codex session-driven
 `--gated` run (no heartbeat; its verify and merge-task run in the foreground), and a waiting Leg whose review or
 completion verify runs past `--stall-after` (its turn end writes the lease once, and nothing renews it until the
-notification): each reads `stalled` against a live session. So `stalled` is a reason to look, never by itself a reason to start a second lead. The Companion first
+notification): each reads `stalled` against a live session. So `stalled` is a reason to look, never by itself a
+reason to start a second lead. The Companion first
 confirms that the Session has no running Turn and is not waiting on the listener (Chorus `list_sessions`); no rollout
 notifies (ADR 0075 d2), and status starts nothing. A meant wait the verdict fails to name changes only `waiting`'s
 cause, never `moving` or `stalled`.

@@ -337,6 +337,11 @@ ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"], d["lastEvent"], d["ageMinu
 ok "$(j "$J" 'd["work"]')" '{"running":[],"lane":false,"start":[],"halt":null,"reentry":[],"coolDown":[],"capHeld":[]}' \
   "M12w: … no work read (no Run record, no next)"
 ok "$(ls "$THREAD_EVENTS_DIR" 2>/dev/null | wc -l | tr -d ' ')" 0 "M12w: … and no Run record written"
+# leg.py is loaded only on this path, so M13's no-bytecode check never reaches it: a copy of the plugin layout, no -B.
+CPL="$TMP/plugin-copy-leg"; mkdir -p "$CPL"; cp -R "$PLUGIN/skills" "$CPL/"; find "$CPL" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
+ok "$(unset PYTHONDONTWRITEBYTECODE; python3 "$CPL/skills/execute/scripts/reconcile-rollout.py" moving --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cause"])')" \
+  "leg-wait" "M12w: … read through leg.py's Leg log reader in a copy of the plugin layout"
+ok "$(find "$CPL" -name __pycache__ | wc -l | tr -d ' ')" 0 "M12w: … which writes no __pycache__, run without -B"
 leglease 2026-10-26T11:00:00Z '"waiting": true'
 ok "$(vcr)" '["stalled","silent","Leg 1: no life sign for 60m since its waiting turn end (session s1)"]' \
   "M12w: a waiting lease 60 min stale (past stall-after 45) → stalled silent"
