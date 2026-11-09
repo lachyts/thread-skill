@@ -684,8 +684,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   check and no marker records it. A chain the **Waiting list** lists once
   begin has written nothing (begin's `listed`: stamped `start: unattended`, a
   chain state on the list, no Leg session standing) stays on it (ADR 0076
-  d2), P44-3 ends the session, and the Stage begins it again from the list
-  once its way is clear. Any other begin wait is a needs-you item, its
+  d2). The held begin ends that session (P44-3): its turn ends on the
+  `waiting` line and it runs nothing more, holding no Leg and no place in the
+  room, and the Stage begins the chain again, in a fresh session, from the
+  list once its way is clear. Any other begin wait is a needs-you item, its
   `unlisted` saying why: a chain with no `start: unattended` or in a state
   off the list, or one whose Leg session still stands (the successor of a
   started hand-over, a standing

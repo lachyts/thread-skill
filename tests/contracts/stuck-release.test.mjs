@@ -14,8 +14,8 @@
 //             and exit 2 halting; § 7 lists the halt and says a surface wait is none, *Whole-rollout halts kept* keeps it;
 //             step 1.2, *Lost call* and step 3's *Surface wait at Integration* hold under it (P41-3)
 //   legs      legs.md § Begin's exit 3: a begin wait (`waiting`, no create_thread; a needs-you item only when `listed`
-//             is false, a standing Leg session keeping it off the Waiting list, P41-3) and a failed re-check (listed,
-//             `halted`)
+//             is false, a standing Leg session keeping it off the Waiting list, P41-3; a listed one ends its session,
+//             no poll, P44-3) and a failed re-check (listed, `halted`)
 //   status    status § 5's **Hold** block, S12's "holds only", the restart's `surface held by` blocker and § 4's Hold
 //             line from `unfinished-rollout.py hold`
 //   repair    repair § 7 (e) step 1's `surface held by` branch (never restart) and its `surface re-check unanswered`
@@ -114,7 +114,10 @@ function check(f) {
     'Never call `create_thread` on it', '- **3, a failed re-check**', 'list it (§ Needs you), and end on its `status_line`',
     // P41-3: an unlisted begin wait (a standing Leg session keeps it off the Waiting list) is a needs-you item
     'With `listed` false, nothing begins it again, so list it (§ Needs you)',
-    '`waiting` keeps a chain with a standing Leg session off the list and counts that session against the room (ADR 0076 d3)']) ||
+    '`waiting` keeps a chain with a standing Leg session off the list and counts that session against the room (ADR 0076 d3)',
+    // P44-3: a listed begin wait ends its session, with no poll; the Stage begins the next Leg in a fresh one
+    'The held begin ends this session (ADR 0076 d2): this turn is its last, so run nothing more in it, never `begin` again here and no background wait or poll.',
+    'The Stage begins the next Leg in a fresh session from the list']) ||
     begin.includes('`halted reason="surface held: [[<B>]] holds <token>"`') || begin.includes('The chain stays listed'))
 
   // status
@@ -213,6 +216,10 @@ test('control: legs § Begin halting on a begin wait fails legs (P41-3)', () => 
 })
 test('control: legs § Begin calling every begin wait listed fails legs (P41-3)', () => {
   only('legs', 'With `listed` false, nothing begins it again, so list it (§ Needs you)', 'The chain stays listed (`start: unattended`, ADR 0076 d2)', 'legs')
+})
+test('control: legs § Begin polling a listed begin wait in its session fails legs (P44-3)', () => {
+  only('legs', 'this turn is its last, so run nothing more in it, never `begin` again here and no background wait or poll.',
+    'launch `leg.py wait` in the background and run `begin` again on its notification.', 'legs')
 })
 test('control: repair stopping on an unanswered re-check fails repair (P41-3)', () => {
   only('repair', '- `surface re-check unanswered: <why>` → restart it: no hold is known', '- `surface re-check unanswered: <why>` → report it, and stop: no hold is known', 'repair')

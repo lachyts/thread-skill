@@ -1148,6 +1148,10 @@ snap; SESS=s2 leg begin --cwd "$F"
 ok "$rc|$(q 'd["beginWait"]')|$(q 'd["listed"]')|$(q '"unlisted" in d')" "3|held|True|False" \
    "L14: stamped start: unattended with no Leg session standing, its begin wait is listed: the Waiting list holds it"
 same "L14: a listed begin wait"
+# P44-3 (ADR 0076 d2): the held begin ends its session: the note keeps its stamp, so the chain stays listed, and the
+# session holds no Leg and no lease, so it counts no place in the room
+ok "$(grep -c '^start: unattended$' "$T/$RO.md")|$(logn 'Leg 2 began')|$(test -e "$HOME/.config/thread/leases/$RO.json"; echo $?)" "1|0|1" \
+   "L14: … still stamped start: unattended, no Leg 2 begun and no Leg lease written: the session ends holding nothing"
 leg restarted --leg 2 --started sess-r; ok "$rc" 0 "L14: a restart of Leg 2, started"
 snap; SESS=sess-r leg begin --cwd "$F"
 ok "$rc|$(q 'd["beginWait"]')|$(q 'd["listed"]')|$(q 'd["unlisted"]')" "3|held|False|its Leg session stands (restart Leg 2 (started))" \
@@ -1170,6 +1174,12 @@ cmp -s "$T/t1.md" "$TMP/snap-t1"; ok "$?" 0 "L14u: … and its first row's task 
 THREAD_LEG_RECHECK_TIMEOUT=0.001 leg status
 ok "$(q 'd["restart"]["blockedBy"].startswith("surface re-check unanswered: no answer in 0.001 s")')" True \
    "L14u: status's own read runs once, with no retry, and names it as the restart's blocker"
+# P44-3: stamped, an unanswered begin is listed too: the note unchanged and still stamped, the chain stays on the list
+subst "$T/$RO.md" 'status: open' $'status: open\nstart: unattended'
+snap; THREAD_LEG_RECHECK_TIMEOUT=0.001 THREAD_LEG_RECHECK_RETRY=0.001 leg begin --cwd "$F"
+ok "$rc|$(q 'd["beginWait"]')|$(q 'd["listed"]')|$(grep -c '^start: unattended$' "$T/$RO.md")" "3|unanswered|True|1" \
+   "L14u: stamped start: unattended, an unanswered begin is a listed begin wait and the note keeps its stamp"
+same "L14u: a listed unanswered begin"
 THREAD_LEG_RECHECK_TIMEOUT=0.001 THREAD_LEG_RECHECK_RETRY=60 leg begin --cwd "$F"
 ok "$rc|$(q 'd["leg"]')" "0|1" "L14u: a first run that times out and a retry that answers: Leg 1 begins"
 # An infinite re-check timeout reads as its default (subprocess.run cannot take one: OverflowError), never a crash
