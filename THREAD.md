@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-08
+last_touched: 2026-11-09
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-11-09 (latest): [[thread-skill-rollout-2026-11-08]] led to 17/18 merged (PRs #340-#356); it halted waiting only on p44-4's external dependency [[chorus-p100-8-the-stage-starts-chains-from-the-waiting-list]] (open, in no rollout).**
+- Landed: P41-2..7, P42-2..4, P43-2..6 (the Fast tier, CI gating PRs on it, the suite audit), P44-1..3 (the Waiting list verb, a Leg counts from its session's start, a held begin ends the session). Master now declares `Verifier: make test-fast`; the next rollout's schedule stamps it.
+- p41-3 plan-blocked three runs; on Lachy's word `max_plan_rounds` went to 4 and it landed first round (#354).
+- Integration snags worth knowing: master's new fast-tier map (p43-2) made later tasks red until their new fixture tests or deleted tests were listed (integrators fixed each); conflicts in fake-gh.py, CONTEXT.md, serial-chains.py resolved by integrators; one Flake filed (merge-task-base 8b).
+- **Lachy, 2026-11-09: no rollout notifications ever** (ADR 0075 d2, landed by p41-5 #343). Leave the ntfy topic and Remote Control unset; an older engine snapshot's push step is skipped (project memory `no-rollout-notifications`).
 
 **2026-11-08 (latest): ubuntu-latest moved to GNU diffutils 3.12 and broke `make test` on every PR (release-check (c)/(c2)); fixed in PR #335 (`fix/release-check-quoted-diff`), queued by close after a three-round review. Built in its own session for the Animately rollout lead, which waits on #332.**
 - **Cause:** 3.12 shell-quotes a path holding a space in `diff -rq`'s `Only in` lines; `Makefile`'s release-check dropped the cache's own lines by an exact `Only in $c/` prefix, and the test's cache sits under `config dir`. Master's last green run was 2026-11-07 05:30Z.
@@ -1183,6 +1189,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-09 (rollout 2026-11-08 at 17/18):** once [[chorus-p100-8-the-stage-starts-chains-from-the-waiting-list]] lands, run `/thread:execute [[thread-skill-rollout-2026-11-08]]` from `~/repos/tools/thread-skill-rollout`: it starts p44-4, merges it and runs the completion ceremony. Then `/thread:schedule --tasks thread-skill-p44-5-move-todays-chains-onto-the-list` (serial). Filed Flakes: [[thread-skill-followup-flake-111f0712fd]], [[thread-skill-followup-flake-c04dc6ff0c]].
+
 **From 2026-11-08 (release-check fix):** PR #335 is queued; once it merges, #332 needs master merged in if this close did not do it. Then [[thread-skill-release-check-review-follow-ups]] when suite time matters.
 
 **From 2026-11-07 (orient, P41 to P43 scheduled):** [[thread-skill-rollout-2026-11-07]] is handed to a fresh lead (Stage task_e2209ea6); `/thread:status [[thread-skill-rollout-2026-11-07]]` reads where it is. Once #312 merges, `/thread:orient Thread Skill --steer` grills p39-15's four Overrun questions and schedules p39-13 and p39-14. After p43-2 lands, the next rollout's schedule stamps the Fast tier and the `Completion verifier:`. Remove the stale worktree `~/repos/tools/thread-skill-rollout/.claude/worktrees/fast-tier-adr` once p43-1 merges. Then [[thread-skill-reflect-p39-p40-rollout]].
@@ -1226,6 +1234,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-09 (close, execute + repair): led [[thread-skill-rollout-2026-11-08]] to 17/18 merged (#340-#356); p41-3 handed back with max_plan_rounds 4 on Lachy's word; halted on p44-4's external dependency chorus-p100-8; Lachy ruled out all rollout notifications.
 - 2026-11-08 (close): ubuntu-latest's GNU diffutils 3.12 broke release-check (c)/(c2) on every PR; rewrote the cache diff as a find -L + cmp walk (PR #335), three xhigh review rounds, 3 blocking fixed, rest filed.
 - 2026-11-07 (close, build): merge-task merges an UNSTABLE PR when no required check is reported (Animately/optimizer's develop stalled five of seven PRs in [[animately-app-rollout-2026-11-07]]); first tried reading the protection object as `none`, withdrawn after review round 1 reproduced a hidden non-check gate; two dev review rounds, round 2 clean, 10 findings filed to [[thread-skill-merge-task-unstable-guard-follow-ups]].
 - 2026-11-07 (close, orient): reshuffled Thread Skill into P41 (+p41-7), P42 and new P43 (ADR 0073, Fast tier at merge); renumbered P41's ADR to 0075; scheduled and handed off [[thread-skill-rollout-2026-11-07]] (17 Ready).
