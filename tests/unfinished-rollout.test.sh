@@ -75,8 +75,9 @@
 #           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
 #           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
 #           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
-#   WL1-WL12 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
-#           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted
+#   WL1-WL15 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
+#           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
+#           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -2925,7 +2926,7 @@ LOG=- LFOLD="$W2" mkchain wb "$OTHER$UN"$'\n'"$(rk 1)" b1~open~"\`repo:$W2//b.py
 LOG=- mkchain wc "$OTHER" c1~open~"$VC"
 LOG=$(lg $D29 open) mkchain wd "$OTHER$UN" d1~open~'`vault:Work/Projects/D`'
 LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: started sess-9" mkchain we "$OTHER$UN" e1~open~'`vault:Work/Projects/E`'
-LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wf "$OTHER$UN"$'\n'"$(rk 3)" f1~open~'`vault:Work/Projects/F`'
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: listed" mkchain wf "$OTHER$UN"$'\n'"$(rk 3)" f1~open~'`vault:Work/Projects/F`'
 capf 4
 wl
 ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')" "0|['wf', 'wb', 'wa']" "WL1: stamped chains with no Leg wait in order_key's order (one that has begun, then estate rank 1, 2)"
@@ -2936,7 +2937,7 @@ ok "$(wj 'd["running"]')|$(wj 'd["cap"]')|$(wj 'd["room"]')" "2|{'n': 4, 'by': '
 ok "$(wj 'd["next"]')" "wf" "WL1: … and next is the first chain on the list"
 ok "$(wj '[(w["title"], w["cwd"], w["harness"], w["prompt"].split(chr(10))[0]) for w in d["waiting"][1:2]]')" \
   "[('Leg 1: wb', '$W2', 'claude', '/thread:execute [[wb]]')]" "WL1: … with the Leg's title, launch folder, harness and prompt"
-has "$(wj 'd["waiting"][0]["prompt"]')" "Leg 2 of the serial chain" "WL1: a manual hand-over is on the list, for its next Leg"
+has "$(wj 'd["waiting"][0]["prompt"]')" "Leg 2 of the serial chain" "WL1: a listed hand-over is on the list, for its next Leg"
 hasnt "$out" '"wc"' "WL1: an unstamped chain is absent"
 hasnt "$out" '"wd"' "WL1: … a chain with an open Leg too"
 hasnt "$out" '"we"' "WL1: … and one handed over to a started session"
@@ -3028,7 +3029,7 @@ python3 "$CHECK" waiting --tasks-dir "$T" --now yesterday > "$S.out" 2> "$S.err"
 ok "$rc|$(cat "$S.out")" "2|" "WL7: … and so is a --now that is no ISO time"
 has "$(cat "$S.err")" "unfinished-rollout: --now yesterday" "WL7: … with one line saying so"
 tscen wl8
-LOG="$(LFOLD="$W" lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wz "$OTHER$UN" z1~done~'`vault:Work/Projects/Z`'
+LOG="$(LFOLD="$W" lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: listed" mkchain wz "$OTHER$UN" z1~done~'`vault:Work/Projects/Z`'
 capf 3
 wl
 ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wz']|wz" \
@@ -3095,6 +3096,44 @@ ok "$rc|$(wj 'd["beginWait"]')|$(wj 'd["listed"]')|$(wj '"unlisted" in d')" "3|h
 wl
 ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')" "[('wn', 'hh')]|2" \
   "WL12: … and waiting still lists it, held by hh, its begin wait counting no place"
+
+# WL13 (P44-4, ADR 0076 d4): a Leg's `hand-over: listed` and repair's `restart: Leg N listed` are on the list, holding no
+# place; a stamped chain whose last Leg handed off by hand is off it (its paste-ready prompt is its one start path)
+tscen wl13
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: listed" mkchain wl "$OTHER$UN"$'\n'"$(rk 1)" l1~open~'`vault:Work/Projects/L`'
+LOG="$(lg $D28)"$'\n'"- $D29 restart: Leg 2 listed" mkchain wr "$OTHER$UN"$'\n'"$(rk 2)" r1~open~'`vault:Work/Projects/R`'
+LOG="$(lg $D28 open)$HO"$'\n'"- $D29 Leg 1 hand-over: manual (no harness)" mkchain wm "$OTHER$UN"$'\n'"$(rk 3)" m1~open~'`vault:Work/Projects/M`'
+capf 4
+wl
+ok "$rc|$(wj '[(w["slug"], w["title"]) for w in d["waiting"]]')" "0|[('wl', 'Leg 2: wl'), ('wr', 'Leg 2: wr')]" \
+  "WL13: a listed hand-over and a stopped chain repair listed both wait, for their Leg 2"
+hasnt "$out" '"wm"' "WL13: … a stamped chain whose last Leg handed off by hand is absent"
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "0|4" "WL13: … and none of them holds a place"
+# WL14 (P44-4): a Leg closed with a handoff and no hand-over line yet is its chain's session: off the list, and its place
+# counted until LEG_LEASE_LAPSE (90 min) after its close (a Leg that died inside /thread:close holds the room no longer)
+tscen wl14
+LOG="$(lg $D28 open)"$'\n'"- 2026-11-08T09:30+00:00 Leg 1 closed: handoff to Leg 2 in cc-x from /x" \
+  mkchain wc "$OTHER$UN"$'\n'"$(rk 1)" c1~open~'`vault:Work/Projects/C`'
+LOG=- mkchain wo "$OTHER$UN"$'\n'"$(rk 2)" o1~open~'`vault:Work/Projects/O`'
+capf 4
+wl
+ok "$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')" "['wo']|1|3" \
+  "WL14: 30 min after its handoff close with no hand-over line, the closing Leg keeps its chain off the list and holds a place"
+capf 4 2026-11-08T11:30:00+00:00
+wl --now 2026-11-08T11:30:00+00:00
+ok "$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')" "['wo']|0|4" \
+  "WL14: 2 h after it, the chain is still off the list, but its Leg counts nothing (lapsed)"
+# WL15 (P44-4 review): leg_session reads LEG_LEASE_LAPSE through LEG.rr, so RR_NAMES checks it at load: a plugin copy
+# whose reconcile-rollout.py renamed it is exit 2 before anything is read, never an AttributeError mid-count
+P15="$S/plugin15"; mkdir -p "$P15"; cp -R "$root/skills" "$P15/"
+sed 's/^LEG_LEASE_LAPSE = /LEG_LEASE_LAPSE_RENAMED = /' "$root/skills/execute/scripts/reconcile-rollout.py" \
+  > "$P15/skills/execute/scripts/reconcile-rollout.py"
+ok "$(grep -c '^LEG_LEASE_LAPSE = ' "$P15/skills/execute/scripts/reconcile-rollout.py")" 0 "WL15: control setup: the copy renamed LEG_LEASE_LAPSE"
+HOME="$S/home" THREAD_MACHINE_TIMES='{}' python3 "$P15/skills/_shared/scripts/unfinished-rollout.py" waiting --tasks-dir "$T" \
+  --now 2026-11-08T11:30:00+00:00 > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "WL15: a reconcile-rollout.py without LEG_LEASE_LAPSE exits 2 at load, no stdout"
+has "$(cat "$S.err")" "LEG_LEASE_LAPSE" "WL15: … its cannot-load line naming the constant"
+rm -rf "$P15"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

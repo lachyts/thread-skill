@@ -153,10 +153,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   dispatch blockers, each with every dependency it needs scheduled in the
   same pass (one held only because its dependency was scheduled late goes
   next pass), in batches; then one visible session per new parallel
-  execute and serial Leg 1, per live rollout that status sends to a ceremony,
-  a start, a signed reinstate or a repair, and per child orient of a project
-  ticked on the **Pick list** (paste-ready prompts off the Stage); nothing of a
-  **Big project** unticked. _Avoid_: launch list.
+  execute (on the Stage each new serial chain is listed on the **Waiting
+  list**: its Leg item runs `stamp-start`, never opened as a session), per
+  live rollout that status sends to a ceremony, a start, a signed reinstate or
+  a repair, and per child orient of a project ticked on the **Pick list**
+  (paste-ready prompts off the Stage, a serial Leg 1's among them); nothing of
+  a **Big project** unticked. _Avoid_: launch list.
 
 ## Continuity (threads and attention)
 
@@ -533,19 +535,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
   inherited task aside, fewer when its context grows heavy or a task proves
   large, and never closing mid-task. Each code-writing task gets one clean-room
   review before it is done. Its close ritual lands its close-outs commit-only,
-  hands the rest to a fresh Leg through the Stage (a labelled manual hand-over
-  elsewhere), and ends on a `ROLLOUT-STATUS:` line; every Leg whose Close reads
-  *closed* reports to the origin. A Leg whose Session died is taken over, or
-  the next one started, by `/thread:repair`, which never runs a Leg itself.
-  _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
+  then hands the rest on (legs.md § Hand over): on the Chorus Stage it opens no
+  successor but lists the chain on the **Waiting list** (`leg.py handed
+  --listed`), and the Stage opens the next Leg when there is room; Codex
+  Desktop starts it as a task, and anywhere else it is a labelled manual
+  hand-over. It ends on a `ROLLOUT-STATUS:` line. A Leg whose Close reads
+  *closed* reports to the origin (Leg 1, started by hand or from a card),
+  but a Leg the Stage opens from the Waiting list is no card's and reports
+  nowhere (a listed hand-over's Close archives), and off the Stage none
+  reports (legs.md § Report). A Leg whose Session died is taken over, or its
+  stalled chain restarted, by `/thread:repair`, which never runs a Leg itself:
+  on the Stage it lists the chain (`leg.py restarted --listed`) for the Stage
+  to open, and only a take-over, Codex Desktop, a run off the Stage or an
+  engine snapshot from before `--listed` starts the next Leg as a new Session
+  (repair § 7 (e)). _Avoid_: shift, stint, iteration (one task in a Ralph
+  loop), batch.
 - **Stalled chain** — a serial chain with claimed work and no Leg open: a task
   in progress for a Leg that closed (stopped, or halted and since cleared) or
   never began, and nothing starts the Leg that inherits it. `leg.py status`
   sets its `stall` field; its chain state reads `stalled` only when no earlier
   state matches, so a Leg that stopped holding a claim reads `stopped` (and a
   standing halt `halted`), the `stall` set beside it. `/thread:repair`
-  restarts it by starting the next Leg as a new Session, once nothing shows a
-  Session still holding it. An open Leg whose Session died reads live, never
+  restarts it once nothing shows a Session still holding it: on the Chorus
+  Stage by listing it on the **Waiting list** (`leg.py restarted --listed`),
+  elsewhere by starting the next Leg as a new Session (repair § 7 (e)). An
+  open Leg whose Session died reads live, never
   stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
   so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
   hung, frozen.
@@ -689,11 +703,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   no place in the room, and the Stage begins the chain again, in a fresh
   session, from the list once its way is clear. Any other begin wait is a
   needs-you item, its `unlisted` saying why: a chain with no
-  `start: unattended` or in a state off the list, or one whose Leg session
+  `start: unattended` or in a state off the list, one whose Leg session
   still stands (the successor of a started hand-over, a standing
   restart `pending` or `started`, a take-over's open Leg), which `waiting`
-  keeps off the list and counts against the room (ADR 0076 d3). It waits on
-  `/thread:execute [[<slug>]]` instead. A Leg never begins without a
+  keeps off the list and counts against the room (ADR 0076 d3), or one whose
+  last Leg handed over by hand (P44-4). It waits on
+  `/thread:execute [[<slug>]]` instead. A listed restart (repair's
+  `restarted --listed`) holds no session: its chain stays on the list. A Leg never begins without a
   passing check: a check still unanswered after its longer retry reads
   `unanswered`, never a pass and never a refusal. Every other begin refusal
   stays a halt, a check that fails included. Parallel execute's version is a
@@ -822,7 +838,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   it gets one only when it reaches the front and there is room, best
   **Estate rank** first. He sees it as one quiet line on the Stage (how many
   wait, which is next, how much room) that opens into the ordered list with a
-  click, never as a command or a notification. Ruled with Lachy 2026-11-08,
+  click, never as a command or a notification. A serial note's
+  `start: unattended` is its place on the list, never cleared while the chain
+  is unfinished. Only a writer on the Chorus Stage lists a chain (P44-4, ADR
+  0076 d4): schedule S7 on a standalone run; the parent's `stamp-start` under
+  orient, orient-all and the **Backlog orient**; a Leg's `handed --listed`;
+  repair's `restarted --listed`. Off the Stage nothing lists it, and Leg 1 is
+  a paste-ready prompt. A chain is listed or has a paste-ready prompt, never
+  both, so a manual hand-over or a manual restart keeps it off the list, and
+  a closing Leg (closed with a handoff, no hand-over line yet) keeps its chain
+  off the list until its hand-over. Ruled with Lachy 2026-11-08,
   after `orient-all` left about 30 chains open as idle or stopped sessions
   with room for 2. _Avoid_:
   begin queue, backlog, queue (a parallel rollout's **Queue** is another
@@ -1207,7 +1232,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   The **Backlog orient** stamps each parallel note it wrote this way itself, as its
   decided start (`stamp-start --backlog`, ADR 0071), never beside a hold.
   When he names the PR the start waits on, it is an **Approved queue**
-  instead. _Avoid_: auto-start, scheduled start.
+  instead. A serial note takes the same stamp as its place on the **Waiting
+  list** (P44-4, ADR 0076 d4), written only on the Chorus Stage and never
+  cleared while the chain is unfinished: the Stage opens each Leg from the
+  list, not a lead. _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`, its **Rollout clone** since ADR 0042) kept its
   `refs/heads/<default>` and its bareness across each **Window** (execute § 4.5,

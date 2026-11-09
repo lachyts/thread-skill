@@ -496,7 +496,8 @@ schedule's summary with its `sign in to <server>, then /thread:orient --steer` l
 - **Uncommitted grill docs.** § 6's hold applies to any repo a member writes.
 
 **Under `--backlog`.** Each serial fork runs under B6's answers, one per batch after every parallel batch, and its
-Leg 1 starts at B8 (`skills/orient/backlog.md` § B5, § B6).
+note is listed at B8, on the Chorus Stage (off it, its Leg 1 is a paste-ready prompt) (`skills/orient/backlog.md`
+§ B5, § B6).
 
 ### 8. Batches (retired)
 
@@ -511,8 +512,14 @@ them, though an end line with an open fork still counts (§ 2 Open forks). Old r
 
 When § 6 or § 7 wrote a rollout note, end with the execute handoff, decided and never asked (Owner *gate*: the
 reshuffle routed the work to run, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1; ADR 0057). One handoff per
-parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain, each row's launch and Leg
-1's start line, and never stamp `start: unattended` on it. For each parallel note, print
+parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain and each row's launch, then
+list it or print its start line (ADR 0076 d4). On the Chorus Stage (Chorus's `list_sessions` answers ToolSearch), list
+it: run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py stamp-start --rollout <the note>`
+from the note's engine root (`engine-snapshot.py resolve`), and print
+`Listed: [[<slug>]] waits on the Waiting list; the Stage opens Leg 1 when there is room (decided: you scheduled it to run; say "not yet" to take it off)`
+and its undo line; his "not yet" withholds the stamp (said after, the undo line removes it, unless Leg 1 has begun).
+Off the Stage, stamp nothing, and print Leg 1's start line (`leg.py status`'s `restart.launch`) as its one start path.
+For each parallel note, print
 `Execute: a fresh session runs [[<slug>]] from <root> (decided: you scheduled it to run; say "not yet" to withdraw the handoff)`
 (`<slug>` the note, `<root>` its Project root), then run **Fresh session** below, the decided move. Only his words
 choose another of the moves: Here, Not yet or Start when ready. The one hold is a refused ladder file (schedule's
@@ -556,8 +563,9 @@ Execute's own runtime gate still applies wherever it runs. No rollout written �
 overlap with a live chain).
 
 **Under `--backlog`.** No handoff is made and nothing is put to him first: each parallel note is stamped by
-`stamp-start --backlog`, each serial note's Leg 1 starts through `create_thread` on the Chorus Stage, and his questions
-follow the start (`skills/orient/backlog.md` § B7, § B8, § B9).
+`stamp-start --backlog`, each serial note is listed on the Chorus Stage by the same `stamp-start --backlog` (off the
+Stage its Leg 1 is a paste-ready prompt), and his questions follow the start (`skills/orient/backlog.md` § B7, § B8,
+§ B9).
 
 ### 10. `--debrief` (retired)
 
@@ -591,6 +599,6 @@ given). It resolves, asks, reads and writes nothing.
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
   started); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
-- **Under `--backlog`, don't put a question before the start or stamp a serial note**: its questions come last, its
-  serial Leg 1 starts through `create_thread`, and it never runs `/thread:repair` (`skills/orient/backlog.md` § B8,
-  § B9).
+- **Under `--backlog`, don't put a question before the start, or start a serial note**: its questions come last, a
+  serial note is listed on the Chorus Stage at B8, never started through `create_thread`, and it never runs
+  `/thread:repair` (`skills/orient/backlog.md` § B8, § B9).

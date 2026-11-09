@@ -33,6 +33,7 @@ The default orient asks at R4's gate and at § 6's steer, and has no park. Sched
    - Each parallel note the run writes, the post-question round's included, gets `reconcile-rollout.py stamp-start --backlog`, before the re-stamp. It is the chain's stamp less its `supersedes:` refusal, and it is refused beside a rollout hold, since a held queue starts on Lachy's word.
    - Each serial note's Leg 1 starts through `create_thread` on the Chorus Stage, or is a paste-ready prompt off it.
    - A serial note is never stamped, and `/thread:repair` is never run.
+   - *(Amended by P44-4, 2026-11-10, ADR 0076 d4 as amended: on the Chorus Stage a serial note is listed on the Waiting list by `stamp-start --backlog`, never started through `create_thread`; off it nothing is stamped, and its Leg 1 is a paste-ready prompt.)*
 7. **The record and the write-back.**
    - **The record** is written after the last task write of the main flow (B5's and its forks'), then `last_orient_at` and `last_reason` are written back into the area's `backlog_trigger:` file. The write keeps the Pulse's keys in order, as investigations.atomic_write_json writes, and rounds `last_orient_at` up to the next whole second, so a write in the same second counts as seen.
    - **The guards.** It writes only when four guards pass:

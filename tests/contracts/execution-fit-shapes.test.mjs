@@ -11,7 +11,8 @@
 //       test file (tests/**, skills/*/tests/**).
 //   s3  orient § 6 steers serial-shaped and session-lane work, Autonomous and Mixed schedule a serial rollout
 //       (§ 7, one schedule call per project, one serial rollout note per chain) and Mixed keeps its handed item out
-//       of it; § 9 hands off a parallel note § 6 or § 7 wrote, makes no handoff for a serial note (Leg 1 starts by hand),
+//       of it; § 9 hands off a parallel note § 6 or § 7 wrote, makes no handoff for a serial note (on the Chorus Stage
+//       it lists it with `stamp-start`, off it Leg 1 starts by hand: P44-4, ADR 0076 d4),
 //       and names a surface overlap among its no-handoff reasons; §§ 8 and 10 are retired tombstones, and `--debrief`
 //       stops at the top of § 1, before the resolver, and appears nowhere else but § 10 and the invocation forms;
 //       the description drops the fan-out trigger and `--debrief`; and none of the batch machinery survives.
@@ -168,7 +169,7 @@ function check(files) {
   ])
   const s9 = C(section(orient, /^### 9\./))
   need('s3', `${ORIENT} § 9`, s9, ['When § 6 or § 7 wrote a rollout note',
-    'a serial note (`shape: serial`) gets no handoff: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it'])
+    'a serial note (`shape: serial`) gets no handoff: name it, its chain and each row\'s launch, then list it or print its start line (ADR 0076 d4)', 'On the Chorus Stage (Chorus\'s `list_sessions` answers ToolSearch), list it: run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py stamp-start --rollout <the note>`', 'Off the Stage, stamp nothing, and print Leg 1\'s start line (`leg.py status`\'s `restart.launch`) as its one start path'])
   need('s3', `${ORIENT} § 9 closing line`, sentences(s9).find((x) => x.startsWith('No rollout written')) ?? '', ['a surface overlap with a live chain'])
   for (const n of ['8', '10']) {
     if (!olines.some((l) => new RegExp(`^### ${n}\\. .*\\(retired\\)$`).test(l))) flag('s3', `${ORIENT} § ${n} heading does not end (retired)`)

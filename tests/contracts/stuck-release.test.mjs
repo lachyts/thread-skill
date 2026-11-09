@@ -18,7 +18,8 @@
 //             unanswered alike, it ends its session, no poll, P44-3) and a failed re-check (listed, `halted`)
 //   status    status § 5's **Hold** block, S12's "holds only", the restart's `surface held by` blocker and § 4's Hold
 //             line from `unfinished-rollout.py hold`
-//   repair    repair § 7 (e) step 1's `surface held by` branch (never restart) and its `surface re-check unanswered`
+//   repair    repair § 7 (e) step 1's `surface held by` branch (listed on the Chorus Stage, P44-4; off it, never
+//             restart) and its `surface re-check unanswered`
 //             branch (restart it, P41-3), (b)'s reclaim note and the refusal section's released case
 //   schedule  schedule § 0's parallel-path prose (a chain's hold, a stuck chain's released place a WARN, not a refusal),
 //             S3's stuck-chain note (a surface wait's idle release included, P41-3) and S7's amended closing line, and
@@ -133,7 +134,8 @@ function check(f) {
   // repair
   const s7 = collapse(section(f.repair, /^### 7\. A serial chain/, /^## /))
   const step1 = s7.slice(s7.indexOf('1. **Restartable?**'), s7.indexOf('2. **Mark it.**'))
-  fail('repair', !step1.includes('- `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn.') ||
+  fail('repair', !step1.includes('- `surface held by [[B]] (<token>)` → on the Chorus Stage') ||
+    !step1.includes('Off the Stage, never restart (ADR 0060): the chain waits its turn.') ||
     !step1.includes('- `surface re-check unanswered: <why>` → restart it: no hold is known') ||
     !s7.includes("After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules") ||
     !collapse(f.repair).includes("A stuck serial chain (ADR 0060) holds only its unlanded rows' surfaces"))
@@ -245,7 +247,7 @@ test('control: status without its Hold block or Hold line fails status', () => {
 })
 
 test('control: repair restarting over a held surface fails repair', () => {
-  only('repair', '→ never restart (ADR 0060): the chain waits its turn.', '→ restart it.', 'repair')
+  only('repair', 'Off the Stage, never restart (ADR 0060): the chain waits its turn.', 'Off the Stage, restart it.', 'repair')
 })
 
 test('control: schedule § 0 refusing on a stuck chain\'s whole claim fails schedule', () => {

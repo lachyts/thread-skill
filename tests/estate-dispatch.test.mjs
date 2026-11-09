@@ -1023,6 +1023,8 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
   assert.deepEqual([ser.kind, ser.cwd, ser.alias, ser.manual, ser.title], ['leg', W1, 'cc-thread', false, 'Leg 1: wrote-ser-rollout-2026-10-20'])
   assert.equal(ser.launch, `cc-thread from ${W1}`, 'an in-place Leg 1 item carries its launch line')
   assert.ok(ser.prompt.startsWith('/thread:execute [[wrote-ser-rollout-2026-10-20]]\n'))
+  // P44-4 (ADR 0076 d4): orient-all § 7 step 4 lists a Leg item on the Chorus Stage by its vault-relative note.
+  assert.equal(ser.note, 'Work/Tasks/wrote-ser-rollout-2026-10-20.md', 'a Leg item names the note § 7 step 4 stamps')
   assert.deepEqual([cx.kind, cx.alias, cx.manual], ['leg', 'cx-ops', true])
   // The allow-list, on the clean rollout.
   const CLEAN = 'clean-rollout-2026-10-19'

@@ -12,8 +12,9 @@
 //       contract helpers' section() read as before), and no product file still holds p24-1's interim stop;
 //   t3  the Serial path's steps name serial-chains.py, the serial check with `--surface` and `--checkout`, ruling (c)'s
 //       session lane, one note per chain from serial-rollout-template.md, rollout-settings.py with its one-checkout
-//       `--repo` rule, the stamps S6 never writes, the stamp it removes last, no execute handoff and no `start:
-//       unattended`, and body-read surfaces only for members that declare none; the completion verifier (ADR 0055):
+//       `--repo` rule, the stamps S6 never writes, the stamp it removes last, no execute handoff, S7's `stamp-start`
+//       on a standalone run on the Chorus Stage and no stamp off it (P44-4, ADR 0076 d4), and body-read surfaces only
+//       for members that declare none; the completion verifier (ADR 0055):
 //       S4 stores it only for exactly one `checkouts` entry that is a git toplevel, by its `git -C <entry> rev-parse
 //       --show-toplevel` (ADR 0067 d4: a chain's checkouts, never one `repo:` token, since a claim is a file), S5
 //       stamps it and checks the note with `verify-timeout`, and Scope and the Don'ts' no-git line name S4's probe
@@ -24,7 +25,7 @@
 //       never crosses shapes; § 0, S3 and ADR 0040 say a clone root never overlaps an in-place chain (ADR 0042);
 //   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
 //       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-handoff sentence for a serial
-//       note, and the vault grammar's parallel-only Writers clause;
+//       note with its Stage and off-the-Stage branches, and the vault grammar's serial Writers clause (P44-4);
 //   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** (the keyed
 //       `repo:<toplevel>//<path in it>` token and a bare one covering its checkout, ADR 0067 d4; a `## Launch` path at
 //       `/` or the home directory never claimed; a vault claim narrowed to its first project's place, ADR 0059) and
@@ -162,7 +163,12 @@ function check(files) {
   if (!sentences(s6).some((x) => /\bremove\b/i.test(x) && x.includes('`incomplete: true`') && x.includes('last write'))) {
     flag('t3', 'S6 does not remove incomplete: true as its last write')
   }
-  need('t3', 'S7', para(serialPath, '**S7. Summary.**'), ['no execute handoff, no `start: unattended`'])
+  need('t3', 'S7', para(serialPath, '**S7. Summary.**'), ['no execute handoff, no `start: unattended` (off the Stage nothing lists it)',
+    // P44-4 (ADR 0076 d4): S7 lists each note on the Chorus Stage, on a standalone run; off the Stage it stamps none.
+    'On a standalone run on the Chorus Stage (Chorus\'s `list_sessions` answers ToolSearch), after S6\'s last write, run `python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py stamp-start --rollout <note>` per note',
+    '"listed on the Waiting list: the Stage opens Leg 1 when there is room',
+    'Off the Stage no note is stamped, and Leg 1\'s paste line is its one start path',
+    'Under orient, orient-all and the Backlog orient, S7 writes nothing: the parent lists the note'])
   // The completion verifier (ADR 0055): S4's stamping rule and probe, S5's stamp and check, Scope and the no-git line.
   need('t3', 'S4', para(serialPath, '**S4. '), ["when the chain's `checkouts` (S2's JSON) hold exactly one entry and that entry is a git toplevel",
     '`git -C <entry> rev-parse --show-toplevel` prints the entry itself',
@@ -210,10 +216,11 @@ function check(files) {
     '`status: dropped` on a never-started serial chain\'s note', 'or run that chain'])
   need('t5', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['one serial rollout note per chain'])
   need('t5', `${ORIENT} § 9`, C(section(files[ORIENT], /^### 9\./)), [
-    'One handoff per parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it',
+    'One handoff per parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain and each row\'s launch, then list it or print its start line (ADR 0076 d4)', 'On the Chorus Stage (Chorus\'s `list_sessions` answers ToolSearch), list it: run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py stamp-start --rollout <the note>`', '`Listed: [[<slug>]] waits on the Waiting list; the Stage opens Leg 1 when there is room (decided: you scheduled it to run; say "not yet" to take it off)`', 'Off the Stage, stamp nothing, and print Leg 1\'s start line (`leg.py status`\'s `restart.launch`) as its one start path',
   ])
   const writers = C(slice(files[GRAMMAR], /^- \*\*Writers\*\*/, /^- \*\*Readers\*\*/))
-  need('t5', `${GRAMMAR} Writers`, writers, ['on a parallel note only (the Stage starts a lead in a note\'s Project root; a serial note has none)'])
+  need('t5', `${GRAMMAR} Writers`, writers, ['On a serial note (P44-4, ADR 0076 d4: the stamp is its chain\'s place on the Waiting list), the writers run only on the Chorus Stage',
+    'Off the Stage nothing stamps a serial note'])
 
   // ---- t6: the glossary ----
   const ctx = files[CONTEXT] ?? ''
@@ -357,6 +364,11 @@ test('control: an S7 that makes an execute handoff fails t3', () => {
   only(swap(SCHEDULE, 'no execute handoff, no `start: unattended`', 'then the execute handoff'), ['t3'], 'S7 handoff')
 })
 
+test('control: an S7 that stamps off the Chorus Stage fails t3 (P44-4)', () => {
+  only(swap(SCHEDULE, 'Off the Stage no note is stamped, and Leg 1\'s paste line is', 'Off the Stage each note is stamped too, and Leg 1\'s paste line is'),
+    ['t3'], 'S7 off the Stage')
+})
+
 test('control: a Don\'t that lets only step 7 remove incomplete: true fails t3', () => {
   only(swap(SCHEDULE, "except as step 7's (or § Serial path S6's) last write", "except as step 7's last write"), ['t3'], 'dont S6')
 })
@@ -394,8 +406,12 @@ test('control: an orient § 0 stop without the dropped remedy fails t5', () => {
     ['t5'], 'orient dropped')
 })
 
-test('control: a vault grammar whose Writers drop the parallel-only clause fails t5', () => {
-  only(swap(GRAMMAR, ', on a parallel\n  note only (the Stage starts a lead in a note\'s Project root; a serial note has none)', ''), ['t5'], 'writers')
+test('control: a vault grammar whose Writers stamp a serial note off the Stage fails t5 (P44-4)', () => {
+  only(swap(GRAMMAR, 'Off the Stage nothing stamps a serial note', 'Off the Stage they stamp it too'), ['t5'], 'writers')
+})
+
+test('control: an orient § 9 that stamps a serial note off the Stage fails t5 (P44-4)', () => {
+  only(swap(ORIENT, 'Off the Stage, stamp nothing, and print', 'Off the Stage, stamp it too, and print'), ['t5'], '§ 9 off the Stage')
 })
 
 test('control: a Surface entry without the bare token covering its checkout fails t6', () => {

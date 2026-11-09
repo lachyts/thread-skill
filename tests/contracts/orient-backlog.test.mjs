@@ -20,7 +20,8 @@
 //                held write-back #1; the script writes as atomic_write_json does;
 //   look         `--look` runs B2's steps 1–4 only (never its mend) and B10 writes nothing of any kind;
 //   schedule     schedule's **Under the Backlog orient.**, § 0 item 4, § 1.2 and § Scope;
-//   grammar      the vault grammar's Writers name `stamp-start --backlog`, never a serial or held note;
+//   grammar      the vault grammar's Writers name `stamp-start --backlog`, never a held note, and list a serial note
+//                only on the Chorus Stage (P44-4, ADR 0076 d4);
 //   asking       asking.md § 1's clone bullet names the Backlog orient's exception;
 //   script       the script's eight verbs, and `stamp-start --backlog` with its hold refusal, GUARD_EXEMPT unchanged;
 //   adr          ADR 0071 in the house format, amending the ADRs it names, and ADR 0054's § B9 row;
@@ -109,7 +110,7 @@ function check(F) {
     if (!us[0].includes('`skills/orient/backlog.md` § B') || !us[0].includes(`§ ${bn}`)) flag('pointers', `orient § ${n}'s Under paragraph does not cite § ${bn}`)
     if (ASKS(us[0]) || /background batch/i.test(us[0])) flag('pointers', `orient § ${n}'s Under paragraph asks or names a background batch`)
   }
-  if (!C(sec(o, /^## Don't/)).includes("**Under `--backlog`, don't put a question before the start or stamp a serial note**")) {
+  if (!C(sec(o, /^## Don't/)).includes("**Under `--backlog`, don't put a question before the start, or start a serial note**: its questions come last, a serial note is listed on the Chorus Stage at B8, never started through `create_thread`")) {
     flag('pointers', "orient's Don't has no `--backlog` bullet")
   }
   const preamble = r.slice(0, r.indexOf('## Scoped targets'))
@@ -209,7 +210,7 @@ function check(F) {
   // grammar
   const writers = C(slice(sec(F[GRAMMAR], /^## Rollout start stamp/), /^- \*\*Writers\*\*/, /^- \*\*/) ?? '')
   need('grammar', "the vault grammar's Writers", writers, ['`reconcile-rollout.py stamp-start --backlog`', '`skills/orient/backlog.md` § B8',
-    'never a serial or held one'])
+    'never a held one', 'the Backlog orient B8 (`stamp-start --backlog`)', 'Off the Stage nothing stamps a serial note'])
 
   // asking
   need('asking', 'asking.md § 1', sec(F[ASKING], /^## 1\. /), ['except under the Backlog orient, which creates it (ADR 0071)'])
@@ -255,6 +256,8 @@ function check(F) {
     'handoff-home.sh --dir <§ 0\'s resolved path>)/docs/handoffs', 'handoff-home.sh --shared-root)/docs/handoffs',
     'handoff-home.sh)/docs/handoffs', 'reconcile-rollout.py status --rollout <prior>', 'both `holdUntil` and `onMerge` are null',
     '`stamped <prior> (start: unattended)`', '`launched …`', 'any rollout hold, readable or not, and an `on_merge:`',
+    // P44-4: a stamped chain has its own line, which stops the supersede at any Leg
+    "`serial …`, stamped or not (`serial <prior> (start: unattended)`", "the `stamped` line is a parallel note's alone",
     '`waits on [[<prior>]]: <the unstarted line | hold_until <pr> | on_merge>; it stands (/thread:status [[<prior>]])`'])
   need('prior', "B's Don'ts", sec(b, /^## Don'ts/), ['**Never supersede a prior that answer 6 stops on.**'])
 
@@ -287,9 +290,12 @@ function check(F) {
   // start
   const b8 = B(F, 8)
   need('start', 'B8', b8, ['each note B5\'s forks or B7\'s fold wrote', 'then from B9, with each note its post-question round wrote',
-    'reconcile-rollout.py stamp-start --backlog --rollout <note>', '**A serial note is never stamped.**', '`list_sessions`',
-    '`leads the Rollout <slug>`', '`create_thread`', "`leg.py status`'s `restart.launch`", 'Never `/thread:repair`',
-    'Every result is a Rollouts started row'])
+    'reconcile-rollout.py stamp-start --backlog --rollout <note>', '**A serial note is listed on the Chorus Stage.**', '`list_sessions`',
+    "`leg.py status`'s `restart.launch`", 'Never `/thread:repair`', 'Every result is a Rollouts started row',
+    // P44-4 (R1): off the Stage nothing is stamped; each serial Leg 1 is a paste-ready prompt, never listed.
+    '**Off the Stage** nothing is stamped there, parallel or serial: the parallel stamps wait like Not yet, and each serial note\'s Leg 1 is a paste-ready prompt in the record',
+    'never listed, its one start path'])
+  if (/leads the Rollout <slug>|`create_thread` with the title `Leg 1/.test(C(b8))) flag('start', 'B8 still starts a serial Leg 1 through create_thread')
   need('start', 'B9', b9, ['then § B8 on that note; then its Rollouts started row'])
 
   // questions
@@ -361,7 +367,9 @@ const CONTROLS = [
   ['look', [BACK, 'no `create_thread` and no write-back', 'no `create_thread`, and then the write-back']],
   ['look', [BACK, "runs B1, B2's steps 1–4 and B10 only", 'runs B1, B2 and B10 only']],
   ['schedule', [SCHED, 'under the Backlog orient (`skills/orient/backlog.md` § B6), or under orient § 6', 'or under orient § 6']],
-  ['grammar', [GRAMMAR, ', never a serial or held one', '']],
+  ['grammar', [GRAMMAR, ', never a held one', '']],
+  ['start', [BACK, '- **Off the Stage** nothing is stamped there, parallel or serial: the parallel stamps wait like Not yet, and each\n  serial note\'s Leg 1 is a paste-ready prompt',
+    '- **Off the Stage** each serial note is stamped too: the parallel stamps wait like Not yet, and each\n  serial note\'s Leg 1 is a paste-ready prompt']],
   ['asking', [ASKING, ', except under the Backlog orient, which creates it (ADR 0071)', '']],
   ['script', [SCRIPT, 'rh = sub.add_parser("rehome")', 'rh = sub.add_parser("re-home")']],
   ['adr', [ADR, '## Considered options', '## Options']],

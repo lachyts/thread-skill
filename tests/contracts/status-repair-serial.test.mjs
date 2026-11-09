@@ -11,20 +11,25 @@
 //                terminal chain with no Restart and no Smoke list;
 //   s-order      § 5's recommended actions S1–S13 in order, one chain state each; S9 runs a Complete Leg from
 //                `restart.cwd` or any folder but this plugin's own checkout; S6's and S8's paste names any launch
-//                from `restart.cwd` for a Complete restart (`restart.anyLaunch`, whose `launch` is null);
+//                from `restart.cwd` for a Complete restart (`restart.anyLaunch`, whose `launch` is null); S6 and S8
+//                read a `listed` restart or hand-over as on the Waiting list, S8 a manual hand-over as off it and a
+//                missing hand-over line as a Leg still closing, checked first (P44-4);
 //   r-route      repair § 1 scans a serial note through status § 5 and, after the Stops, sends it to § 7;
 //   r-halt       § 7 (c): the halt's evidence, then `leg.py clear-halt` only on Lachy's word;
 //   r-takeover   § 7 (d), run whenever `restart.takeOver` (whatever blocks first): `list_sessions` present stops, gone
 //                (or his word) takes over, else ask; (e)'s open-Leg clause needs (d)'s evidence and the take-over
 //                prompt;
-//   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence (a missing Chain copy remade
-//                by `leg.py copies`, then the restart goes on; a malformed `chain_copies:` stops; a surface re-check
-//                status left unanswered restarts, P41-3, since begin retries and writes nothing), (d)'s evidence whenever
-//                `restart.takeOver` (the restart clause included: a standing restart outranks an open Leg), the
-//                "checks only" sentence, and the steps re-read → `restarted --pending` → `create_thread` →
-//                `--started`, or the manual handoff → `--manual`; never `leg.py begin`;
+//   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence (a closing Leg's session
+//                gone, P44-4; a missing Chain copy remade by `leg.py copies`, then the restart goes on; a malformed
+//                `chain_copies:` stops; a held chain listed on the Chorus Stage and stopped off it, ADR 0076 d2, d6; a
+//                failed re-check stops; a surface re-check status left unanswered restarts, P41-3, since begin retries
+//                and writes nothing), (d)'s evidence whenever `restart.takeOver` (the restart clause included: a
+//                standing restart outranks an open Leg), the "checks only" sentence, and the steps re-read → on the
+//                Stage `restarted --listed` (P44-4), else `restarted --pending` → `create_thread` → `--started`, or
+//                the manual handoff → `--manual`; never `leg.py begin`;
 //   r-restarting § 7 (e) step 2's outcomes: a standing restart stops, `recorded: false` by `began` (a begun Leg
-//                stops, this session's own standing line goes on to step 3), no session id stops;
+//                stops; a standing identical line parts by form: the `--pending` form's goes on to step 3, the
+//                `--listed` form's reads its listed and stops, never reaching step 3), no session id stops;
 //   r-setaside   § 7 (b): `approve-gates` on sign-off, a declined gate deferred, a hand-back recorded first;
 //   r-defer      § 7 (b)'s Defer: the `dependants`, the chain-or-fix ask, one `defer` of the closure, a held
 //                dependant never written, and no retire block or `## Notes` line;
@@ -81,9 +86,12 @@ function item(text, start) {
 }
 const S_STATES = [['complete'], ['dropped', 'superseded'], ['incomplete'], ['paused'], ['halted'], ['restarting'], ['live'],
   ['awaiting-successor'], ['completable'], ['stopped'], ['stalled'], ['stuck'], ['not-started', 'ready']]
-const BLOCKERS = [/^`halt` → never: \(c\) first\.$/, /^`open Leg K \(session <id>\)` → /, /^`handover started <X>` → /, /^`restart Leg N \(<how>\)` → /,
+const BLOCKERS = [/^`halt` → never: \(c\) first\.$/, /^`open Leg K \(session <id>\)` → /, /^`handover started <X>` → /,
+  /^`closing Leg N \(session <id>\)` → /, /^`restart Leg N \(<how>\)` → /,
   /^`chain_copies: <why>: fix the note` → report it, and stop/, /^`chain copy missing: <C> \(leg\.py copies --rollout <note> remakes it\)` → /,
-  /^`surface held by \[\[B\]\] \(<token>\)` → never restart \(ADR 0060\)/, /^`surface re-check unanswered: <why>` → restart it: no hold is known/,
+  /^`surface held by \[\[B\]\] \(<token>\)` → on the Chorus Stage \(Chorus's `list_sessions` answers ToolSearch\), list it/,
+  /^`surface re-check failed: <line>` → report the line, and stop/,
+  /^`surface re-check unanswered: <why>` → restart it: no hold is known/,
   /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
 const LEG_VERBS = ['begin', 'claim', 'done', 'close', 'set-aside', 'smoke', 'file-fix', 'handed', 'file-followup', 'land']
 
@@ -134,6 +142,16 @@ function check(f) {
     if (!C(acts[k]).replace(/[()]/g, '').includes('any launch from `restart.cwd` when `restart.anyLaunch`')) {
       flag('s-order', `S${k + 1}'s paste names only restart.launch`)
     }
+    // P44-4: a listed restart (S6) or a listed hand-over (S8) waits on the Waiting list, nothing to start by hand.
+    if (!C(acts[k]).includes('`listed` → "on the Waiting list: the Stage opens Leg')) flag('s-order', `S${k + 1} has no listed clause`)
+  }
+  const s8 = C(acts[7])
+  for (const p of ['`manual …` (a manual hand-over keeps the chain off the Waiting list, stamped or not)',
+    'no hand-over line → "Leg N is still closing (its /thread:close writes the hand-over last), or died there: check that session first; only if it is gone, `/thread:repair [[<rollout>]]`"']) {
+    if (!s8.includes(p)) flag('s-order', `S8 lacks ${p}`)
+  }
+  if (!C(s5).includes('a Session that may still be live (a pending or started restart, an open Leg, a closing Leg, a started hand-over)')) {
+    flag('s-order', "§ 5's precedence does not check a closing Leg first")
   }
 
   // ---- repair ----
@@ -167,7 +185,19 @@ function check(f) {
     'the take-over form (`restart.takeOver`)'])
 
   if (bullets.length !== BLOCKERS.length || BLOCKERS.some((re, k) => !re.test(bullets[k] ?? ''))) {
-    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, chain_copies, chain copy missing, surface held, unanswered, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
+    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, closing, restart, chain_copies, chain copy missing, surface held, failed, unanswered, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
+  }
+  // P44-4: a closing Leg (handoff-closed, no hand-over line) acts only on its session's evidence.
+  const closingLeg = bullets.find((x) => x.startsWith('`closing Leg N (session <id>)`')) ?? ''
+  if (!closingLeg.includes('act only after `list_sessions` shows `<id>` gone, or Lachy says Leg N died before its hand-over')) {
+    flag('r-restart', `the closing clause: ${closingLeg}`)
+  }
+  // ADR 0076 d2, d6: a held chain on the Chorus Stage is listed (it keeps its place); off the Stage it waits, as before.
+  const held = bullets.find((x) => x.startsWith('`surface held by [[B]]')) ?? ''
+  for (const p of ["step 2's `--listed` puts the chain back on the Waiting list",
+    '"listed, held by [[B]] (<token>): `waiting` passes it over and keeps its place, and the Stage opens Leg N once [[B]] lands its rows there or its Leg closes (ADR 0076 d2, d6)"',
+    'Off the Stage, never restart (ADR 0060): the chain waits its turn']) {
+    if (!held.includes(p)) flag('r-restart', `the held clause lacks ${p}`)
   }
   // ADR 0067 d2: a missing Chain copy is agent-fixable (leg.py copies remakes it, then the restart goes on).
   const cm = bullets.find((x) => x.startsWith('`chain copy missing: <C>')) ?? ''
@@ -182,9 +212,11 @@ function check(f) {
   if (!rs.includes("With `restart.takeOver`, (d)'s evidence for Leg K too")) flag('r-restart', `the restart clause skips (d) on a take-over: ${rs}`)
   need('r-restart', '§ 7 (e)', e, ["Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence",
     "A previous repair's check never stands in for it"])
-  for (const w of ['stalled', 'awaiting-successor with no hand-over line', 'stopped, on his word', 'completable, not-started or ready, on his ask']) {
+  for (const w of ['stalled', 'awaiting-successor after a manual hand-over Lachy says he has not pasted', 'stopped, on his word',
+    'completable, not-started or ready, on his ask']) {
     if (!nul.includes(w)) flag('r-restart', `the null clause lacks ${w}`)
   }
+  if (nul.includes('no hand-over line')) flag('r-restart', 'the null clause restarts a Leg with no hand-over line (it is a closing Leg)')
   need('r-restart', '§ 7 (e)', e, ['`leg.py restarted` checks only the halt, the numbering (Leg N not begun, N = last_n + 1) and a standing restart',
     'It never checks the open Leg or the hand-over, so that evidence is this step\'s'])
   const ce = C(e)
@@ -195,9 +227,23 @@ function check(f) {
   if (pyVerbs(e).includes('leg.py begin')) flag('r-restart', '(e) runs leg.py begin')
 
   const step2 = C(item(e, /^2\. \*\*Mark it\.\*\*/))
+  // P44-4 (ADR 0076 d4, d6): on the Chorus Stage, no take-over, repair lists the chain and starts nothing.
+  for (const p of ['On the Chorus Stage (Chorus\'s `list_sessions` answers ToolSearch), with `restart.takeOver` false, list it',
+    '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --listed`',
+    'steps 3 and 4 never run', '`listed` true → report "listed: the Stage opens Leg N when there is room"', '`listed` false → report its `unlisted`, and stop',
+    'Exit 2 (an engine snapshot from before `--listed`) → the `--pending` form below',
+    'Otherwise (a take-over, that exit 2, off the Stage, or on Codex Desktop)']) {
+    if (!step2.includes(p)) flag('r-restart', `step 2 lacks ${p}`)
+  }
+  if (!(step2.indexOf('--leg <restart.leg> --listed') >= 0 && step2.indexOf('--leg <restart.leg> --listed') < step2.indexOf('--leg <restart.leg> --pending'))) {
+    flag('r-restart', 'step 2 does not list before its --pending form')
+  }
   for (const p of ['with `--replace` only on the `restart Leg N` branch', 'Exit 3 → report the standing restart, and stop',
-    '`recorded: false` → by `began`: `true`, Leg N began meanwhile: stop',
-    "`false`, this session's own identical line already stands", 'go on to step 3',
+    '`recorded: false` with `began: true` → Leg N began meanwhile: stop',
+    '`recorded: false` with `began: false` is the identical line already standing', 'and the forms part there',
+    "The `--pending` form's is this session's own line: go on to step 3",
+    "The `--listed` form's (`restart: Leg N listed`, whichever session logged it) reads its `listed` and `unlisted`",
+    'and stops: steps 3 and 4 never run for it, since a `create_thread` would double-start a listed chain',
     'Exit 1 naming `--session` → this session has no id: report it, and stop; never invent one']) {
     if (!step2.includes(p)) flag('r-restarting', `step 2 lacks ${p}`)
   }
@@ -228,13 +274,16 @@ function check(f) {
     'It makes no `gh` call and no task call there'])
   need('r-scope', 'repair ## Native runtime binding', section(f.repair, /^## Native runtime binding$/), ['A serial chain (§ 7) makes no task call',
     'as `skills/execute/legs.md` § Hand over does', 'the new Leg\'s `begin` takes the chain under leg.py\'s lock',
-    'The host tool is the one `skills/execute/legs.md` § Hand over picks'])
+    'The host tool is the one `skills/execute/legs.md` § Hand over picks',
+    'On the Chorus Stage (Chorus\'s `list_sessions` answers ToolSearch) it starts no Session: `leg.py restarted --listed` puts the chain on the Waiting list'])
+  need('r-scope', 'repair ## Scope', section(f.repair, /^## Scope$/), ['On the Chorus Stage its restart is `leg.py restarted --listed`, which lists the chain on the Waiting list'])
 
   const donts = section(f.repair, /^## Don'ts$/) ?? ''
   const dont = C(item(donts, /^- \*\*Don't run a serial chain's Legs\.\*\*/))
   const allow = dont.slice(0, Math.max(0, dont.indexOf(' Never ')))
   const forbid = dont.slice(Math.max(0, dont.indexOf(' Never ')))
   if (!allow.includes('§ 7 runs only')) flag('r-allow', 'the serial Don\'t has no allow-list')
+  if (!allow.includes('`leg.py restarted` (its `--listed` form on the Chorus Stage)')) flag('r-allow', 'the allow-list does not name restarted --listed')
   for (const v of pyVerbs(r7)) {
     const [script, verb] = v.split(' ')
     const ok = script === 'leg.py' ? allow.includes(`\`${v}\``) : script === 'reconcile-rollout.py' && allow.includes(`\`${verb}\``)
@@ -367,6 +416,34 @@ test('control: create_thread before --pending fails r-restart', () => {
   const { fails } = check({ ...real, repair: swapped })
   assert.deepEqual(fails, ['r-restart'])
 })
+test('control: a held clause that stops even on the Chorus Stage fails r-restart only (P44-4)', () => {
+  const l = lineOf('repair', '   - `surface held by [[B]] (<token>)` → on the Chorus Stage')
+  const lines = real.repair.split('\n')
+  const i = lines.indexOf(l)
+  const j = lines.findIndex((x, k) => k > i && x.includes('Off the Stage, never restart (ADR 0060): the chain waits its turn.'))
+  assert.ok(j > i, 'control setup: the held clause\'s Stage half')
+  const head = lines.slice(i, j + 1).join('\n')
+  const tail = lines[j].slice(lines[j].indexOf('Off the Stage, never restart (ADR 0060): the chain waits its turn.') + 'Off the Stage, never restart (ADR 0060): the chain waits its turn.'.length)
+  only('repair', head, `   - \`surface held by [[B]] (<token>)\` → never restart (ADR 0060): the chain waits its turn.${tail}`, ['r-restart'], 'held on the Stage')
+})
+test('control: (e) without the closing Leg clause fails r-restart only (P44-4)', () => {
+  const l = lineOf('repair', '   - `closing Leg N (session <id>)` → ')
+  const lines = real.repair.split('\n')
+  const i = lines.indexOf(l)
+  let j = i + 1
+  while (lines[j].startsWith('     ')) j++
+  only('repair', `${lines.slice(i, j).join('\n')}\n`, '', ['r-restart'], 'closing')
+})
+test('control: a step 2 that starts a Session on the Chorus Stage fails r-restart only (P44-4)', () => {
+  only('repair', '--leg <restart.leg> --listed`', '--leg <restart.leg> --pending`', ['r-restart'], 'listed')
+})
+test('control: S8 reading a manual hand-over as listed fails s-order only (P44-4)', () => {
+  only('status', ' (a manual hand-over keeps the chain off the\n  Waiting list, stamped or not)', '', ['s-order'], 'manual')
+})
+test('control: S8 restarting a Leg with no hand-over line at once fails s-order only (P44-4)', () => {
+  only('status', '"Leg N is still closing (its /thread:close writes the hand-over last), or died there: check that session first;\n  only if it is gone, `/thread:repair [[<rollout>]]`"',
+    '`/thread:repair [[<rollout>]]`', ['s-order'], 'closing')
+})
 test('control: a handover clause without its evidence fails r-restart', () => {
   only('repair', 'only after `list_sessions` shows X gone, or Lachy says X never ran.', 'restart it.', ['r-restart'], 'handover')
 })
@@ -374,8 +451,16 @@ test('control: a step 2 that invents a session id fails r-restarting', () => {
   only('repair', 'report it, and stop; never invent one.', 'pass a made-up one.', ['r-restarting'], 'invent')
 })
 test('control: a step 2 that stops on its own standing line fails r-restarting', () => {
-  only('repair', "`recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line\n   already stands (a re-run of this step, after a compaction say): go on to step 3.",
-    '`recorded: false` → Leg N began meanwhile: stop.', ['r-restarting'], 'began')
+  only('repair', "The `--pending` form's is this\n   session's own line: go on to step 3.", "The `--pending` form's is this\n   session's own line: stop.",
+    ['r-restarting'], 'began')
+})
+test('control: a step 2 whose re-run --listed goes on to step 3 fails r-restarting', () => {
+  only('repair', 'and stops: steps 3 and 4 never run for it, since a `create_thread` would\n   double-start a listed chain.',
+    'and goes on to step 3.', ['r-restarting'], 'listed re-run')
+})
+test('control: a step 2 whose recorded: false clause is scoped to either form fails r-restarting', () => {
+  only('repair', 'standing (a re-run of this step, after a compaction say), and the forms part there.',
+    'standing (a re-run of this step, after a compaction say): go on to step 3.', ['r-restarting'], 'either form')
 })
 test('control: (e) without the take-over evidence rule fails r-restart only', () => {
   only('repair', "   Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence: Leg K's session gone\n" +

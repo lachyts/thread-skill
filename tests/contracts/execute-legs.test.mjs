@@ -12,17 +12,19 @@
 //   e4  set-aside: --revert, the halt and clear-halt, gates before any write, the standing approval, the chain goes on;
 //   e5  fix tasks: `verifies:` on every fix, `fixes:` names the culprit (own: the task; chain: the later chain task;
 //       outside and drift: none), the task stays done, its dependants held through `verifies:`;
-//   e6  the hand-over and status: create_thread's fields (no brief, report_back on), a report per *closed* Leg, the §
-//       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and listed manual
-//       hand-over; a Chain copy's launch line (ADR 0067 d2) in § Begin 4 and § Hand over, never the alias itself, and §
+//   e6  the hand-over and status: on the Chorus Stage (Chorus's `list_sessions` answers) `leg.py handed --listed`, no
+//       create_thread (P44-4, ADR 0076 d4); Codex Desktop's create_thread fields (no brief, report_back on); a report
+//       per *closed* Leg, the § Report table verbatim (its listed and not-listed rows), never `running`, a `waiting`
+//       line from `next --waiting`, a labelled and listed manual hand-over that keeps the chain off the Waiting list; a
+//       Chain copy's launch line (ADR 0067 d2) in § Begin 4 and § Hand over, never the alias itself, and §
 //       The task loop's commit in the copy, never in the primary; the land (ADR 0067 d3): § Begin 0's `landFirst` land
 //       before the first claim, § The task loop's **Land** paragraph (never a rebase, --verified, --red, a null line,
 //       `waits: true`) and the slotted Verify rule; the rank (ADR 0067 d9): § The task loop's `wait` action, its six
 //       steps in order (land, `leg.py wait`, the stalled close, landFirst's remedies and stopped close, cleared, next)
 //       and its two Leg log forms; § Begin runs begin with the Bash tool's `timeout: 600000` (P41-3: its surface
 //       re-check may retry for up to 240 s), and § Report's Begin wait row;
-//   e7  the close order (leg.py close before create_thread → lists → /thread:close with the hand-over between 7 and
-//       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
+//   e7  the close order (leg.py close before any hand-over, the chain off the Waiting list until handed (P44-4) →
+//       lists → /thread:close with the hand-over between 7 and 8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
 //       Complete step 4), the lock and exit 5's retry-once, the repo land lock (never nested) and the in-place peer
 //       stand, the rank lock (ADR 0067 d9), no question tool, and the push Don't as the landing route reads it (ADR
 //       0028, ADR 0067 d3);
@@ -111,6 +113,8 @@ const TABLE = [
   '| Begin wait (begin exit 3 with beginWait) | `waiting reason="begin wait: …"`, no /thread:close | *nothing yet* | allow |',   // P41-3
   '| handoff, successor started | `done reason="handed off to Leg <N+1>"` after the banner | *closed*: reports to the origin, archives | allow |',
   '| handoff, manual | `halted reason="manual handoff: Leg <N+1> in <alias> from <folder>"` | demand | allow |',
+  '| handoff, listed | `done reason="listed Leg <N+1> on the Waiting list"` after the banner | *closed*: archives | allow |',   // P44-4
+  '| handoff, not listed | `halted reason="hand-over not listed: <unlisted>"` | demand | allow |',   // P44-4
   '| complete | `done` after the banner | *closed*: the final report | allow |',
   '| stuck | `halted reason="awaiting you: <k> set aside"` | demand | allow |',
   '| stopped | `halted reason="stopped: <reason>"` | demand | allow |',
@@ -190,9 +194,15 @@ function check(f, product = tree) {
 
   // ---- e6: hand-over and status ----
   const ho = sec(legs, 'Hand over')
-  need('e6', 'legs.md § Hand over', ho, ['call `create_thread`', '`title`', '`prompt`', '`tldr`', '`cwd`', 'Pass no `brief`',
+  need('e6', 'legs.md § Hand over', ho, ['its own `create_thread`, per /thread:handoff § Success contract, with `close`\'s `handover`',
+    '`title`', '`prompt`', '`tldr`', '`cwd`', 'Pass no `brief`',
     'leave `report_back` at its default (on)', 'labelled `manual handoff`, and lists it as a needs-you item', 'leg.py handed --started <id>',
     'leg.py handed --manual "<why>"'])
+  // P44-4 (ADR 0076 d4): on the Chorus Stage a Leg lists its chain, never launches one; a manual hand-over stays off the list.
+  need('e6', 'legs.md § Hand over', ho, ['**On the Chorus Stage** (Chorus\'s `list_sessions` answers ToolSearch), run `leg.py handed --listed`, with no `create_thread`',
+    '**In Codex Desktop** (`create_thread` answers, Chorus\'s `list_sessions` does not)',
+    'list it as a needs-you item with its `unlisted` and `/thread:repair [[<slug>]]`',
+    'A manual hand-over keeps the chain off the Waiting list, stamped or not, so this prompt is its one start path; on the Stage `/thread:repair` lists it'])
   // ADR 0067 d2: a Chain copy's manual line never runs the alias (its `cd` opens the primary), and a task commits in its
   // copy only.
   const NEVER_ALIAS = 'never the alias itself, whose `cd` opens the primary'
@@ -231,7 +241,7 @@ function check(f, product = tree) {
 
   // ---- e7: close order, concurrency, no question tool ----
   const cl = items(sec(legs, 'Close'))
-  const ci = [/^1\. `leg\.py close .*before any `create_thread`/, /^2\. List each `needs_you` item in the report/,
+  const ci = [/^1\. `leg\.py close .*before any hand-over/, /^2\. List each `needs_you` item in the report/,
     /^3\. `\/thread:close`.*runs between sub-step 7 and step 8/, /^4\. `leg\.py handed`/,
     /^5\. close's banner, then the `ROLLOUT-STATUS:` line/].map((re) => cl.findIndex((x) => re.test(x)))
   if (ci.some((i, k) => i !== k)) flag('e7', `§ Close's steps are out of order: ${ci}`)
@@ -240,6 +250,10 @@ function check(f, product = tree) {
   if (/\bcomplete\b/.test(cmd1) && !cmd1.includes('--reflection')) flag('e7', `§ Close step 1 offers complete without --reflection: ${cmd1}`)
   if (!close1.includes('closes in § Complete step 4 instead, with `--outcome complete --reflection`')) {
     flag('e7', '§ Close step 1 does not send a completing Leg to § Complete step 4')
+  }
+  // P44-4: a handoff-closed Leg is its chain's session until its hand-over, so no successor opens mid-close.
+  if (!close1.includes("Until step 4's `handed`, the chain stays off the Waiting list and this Leg counts as its session (`closing Leg N`)")) {
+    flag('e7', '§ Close step 1 does not keep the chain off the Waiting list until handed')
   }
   need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['holds the rollout\'s lock', 'exit 5',
     'retry the verb once', '`halted reason="halt: rollout note locked"`'])
@@ -253,7 +267,14 @@ function check(f, product = tree) {
 
   // ---- e8: docs ----
   need('e8', 'CONTEXT **Leg**', entry(f.context, 'Leg'), ['`leg.py begin`', 'the preflight', 'the smoke test',
-    'up to five fresh claims', 'never closing mid-task', 'commit-only', 'reports to the origin'])
+    'up to five fresh claims', 'never closing mid-task', 'commit-only', 'reports to the origin',
+    // P44-4 (ADR 0076 d4): legs.md § Hand over and § Report, repair § 7 (e)
+    'lists the chain on the **Waiting list** (`leg.py handed --listed`)',
+    "a Leg the Stage opens from the Waiting list is no card's and reports nowhere (a listed hand-over's Close archives)",
+    'on the Stage it lists the chain (`leg.py restarted --listed`) for the Stage to open'])
+  if (/every Leg whose Close reads \*closed\* reports to the origin/i.test(entry(f.context, 'Leg'))) {
+    flag('e8', 'CONTEXT **Leg** still has every closed Leg report to the origin')
+  }
   need('e8', 'CONTEXT **Serial rollout**', entry(f.context, 'Serial rollout'), ['No task worktrees', 'execute runs its Legs',
     'A serial note is never paused', "the completion verify's detached verify tree outside the checkout"])
   const scopeLegs = C(section(f.execute, /^## Scope$/) ?? '')
@@ -263,7 +284,9 @@ function check(f, product = tree) {
     '**How a Leg runs** (the p24-3 plan, 2026-10-19)', '`verifies:`', 'refines the ruling\'s "`fixes:` that task"',
     '`land.sh --route`', 'A serial note is never paused'])
   need('e8', 'README /thread:execute row', (f.readme ?? '').split('\n').find((l) => l.startsWith('| `/thread:execute`')) ?? '',
-    ['A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg'])
+    ['A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg',
+      // P44-4 (ADR 0076 d4): on the Stage the Leg lists the chain, never opening its successor
+      'it opens no successor but lists the chain on the Waiting list (`leg.py handed --listed`)'])
 
   // ---- e9: close § Under a Leg ----
   const close = f.close ?? ''
@@ -441,8 +464,19 @@ test('control: a status table row that drifts fails e6', () => {
   only('legs', '| stuck | `halted reason="awaiting you: <k> set aside"` | demand | allow |',
     '| stuck | `done` | *closed* | allow |', ['e6'], 'table')
 })
-test('control: create_thread before leg.py close fails e7', () => {
-  only('legs', '--cwd "$PWD"`, before any `create_thread`, so', '--cwd "$PWD"`, after `create_thread`, so', ['e7'], 'order')
+test('control: a hand-over before leg.py close fails e7', () => {
+  only('legs', '--cwd "$PWD"`, before any hand-over, so', '--cwd "$PWD"`, after `create_thread`, so', ['e7'], 'order')
+})
+test('control: § Close step 1 listing the chain before handed fails e7 (P44-4)', () => {
+  only('legs', " Until step 4's `handed`, the chain stays off the Waiting list and this Leg counts as its session (`closing Leg N`), so no successor opens while close-outs land in the Chain copy.",
+    '', ['e7'], 'closing')
+})
+test('control: a Stage hand-over that launches the next Leg fails e6 (P44-4)', () => {
+  only('legs', 'run `leg.py handed --listed`, with no `create_thread`', 'call `create_thread`', ['e6'], 'listed')
+})
+test('control: a manual hand-over left on the Waiting list fails e6 (P44-4)', () => {
+  only('legs', ' A manual hand-over keeps the chain off the Waiting list, stamped or not, so this prompt is its one start path; on the Stage `/thread:repair` lists it.',
+    ' The Stage opens it from the Waiting list too.', ['e6'], 'manual')
 })
 test('control: § Close step 1 offering a bare complete fails e7', () => {
   only('legs', '1. `leg.py close --outcome handoff|stuck|stopped|halt [--reason <r>]', '1. `leg.py close --outcome handoff|complete|stuck|stopped|halt [--reason <r>]',
@@ -464,7 +498,15 @@ test('control: a Serial rollout entry back on "No worktrees" fails e8', () => {
   only('context', 'No task worktrees (leg.py\'s transient scratch\n  revert, and', 'No worktrees (leg.py\'s transient scratch\n  revert, and', ['e8'], 'worktrees')
 })
 test('control: a README row without Legs fails e8', () => {
-  only('readme', ' A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg.', '', ['e8'], 'readme')
+  only('readme', ' A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg:', '', ['e8'], 'readme')
+})
+test('control: a CONTEXT Leg entry where every closed Leg reports to the origin fails e8', () => {
+  only('context', "A Leg whose Close reads\n  *closed* reports to the origin (Leg 1, started by hand or from a card),",
+    "Every Leg whose Close reads\n  *closed* reports to the origin (Leg 1, started by hand or from a card),", ['e8'], 'context report')
+})
+test('control: a README row whose Leg opens its successor on the Stage fails e8', () => {
+  only('readme', 'it opens no successor but lists the chain on the Waiting list (`leg.py handed --listed`)',
+    'it starts its successor as a new Session', ['e8'], 'readme listed')
 })
 test('control: § Under a Leg moved before ## Edge cases fails e9', () => {
   const ul = slice(real.close, /^## Under a Leg$/, /^## Why this exists$/)

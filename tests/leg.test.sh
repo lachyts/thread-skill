@@ -89,6 +89,14 @@
 #   L20  begin's `mcp` (ADR 0074 d2): the required namespaces of this launch's unlanded rows, read by serial-chains.py's
 #        required_mcp: the optional part dropped, a line with no `required` word read, `required none` read as nothing,
 #        and another launch's rows left out
+#   L21  a Leg lists its chain instead of launching one (P44-4, ADR 0076 d4): a handoff-closed Leg is its chain's
+#        session (`closing Leg N`) until its hand-over; handed --listed logs `hand-over: listed` and stamps an unstamped
+#        note; its form rule, a missing Chain copy's unlisted line; restarted --listed on a stopped, closing or handed
+#        chain, refused beside an open Leg, idempotent, retired by a began; a handed after a logged hand-over writes
+#        nothing and prints the logged form's line; a manual hand-over keeps a stamped chain off the list until repair
+#        lists it; every new status line matches the Stop hook's STATUS_RE; --dry-run of handed --listed and
+#        restarted --listed writes nothing, listed and unlisted null (L21p); restarted --listed over a pending restart:
+#        another session's is exit 3, its own session's is its update, no --replace (L21q)
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -976,8 +984,8 @@ scen l13e
 mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3 t4 t5 t6 t7); for t in t1 t2 t3 t4 t5 t6 t7; do mkt "$t"; done
 leg begin --cwd "$F"; for t in t1 t2 t3 t4 t5; do finish "$t"; done; leg close --outcome handoff
 leg status
-ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')" "awaiting-successor|None|t6" \
-   "L13e: a handoff with no hand-over line: awaiting-successor, nothing blocking"
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')" "awaiting-successor|closing Leg 1 (session s1)|t6" \
+   "L13e: a handoff with no hand-over line: awaiting-successor, its closing Leg the blocker (P44-4: it counts until its hand-over)"
 # (h) per-Leg event lists equal the log lines
 ok "$(q '",".join(x["task"] for x in d["legs"][0]["claimed"])')|$(q '",".join(x["task"] for x in d["legs"][0]["done"])')" "t1,t2,t3,t4,t5|t1,t2,t3,t4,t5" "L13h: Leg 1's claimed and done lists"
 ok "$(q 'len(d["legs"][0]["claimed"])')|$(q 'len(d["legs"][0]["done"])')" "$(logn 'Leg 1 claimed ')|$(logn 'Leg 1 done ')" "L13h: … equal its log lines"
@@ -3483,6 +3491,162 @@ git -C "$V" add -A && git -C "$V" commit -qm vault
 leg begin --cwd "$F"
 ok "$rc|$(q 'd["mcp"]')" "0|['mcp__a__*', 'mcp__c__*']" \
    "L20: begin's mcp: the optional part dropped, a line with no required word read, required none nothing, another launch's row left out"
+
+# ════ L21: a Leg lists its chain instead of launching one (P44-4, ADR 0076 d4) ═════════════════════════════════════
+L21_LINES="$TMP/l21-status-lines"; : > "$L21_LINES"
+keep21() { q 'd["status_line"]' >> "$L21_LINES"; }
+stamp21() { subst "$T/$RO.md" 'status: open' $'status: open\nstart: unattended'; }
+two21() { mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2; }
+# (a) a stamped chain: its handoff-closed Leg is its session until handed --listed lists it
+scen l21a; two21; stamp21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["listed"]')|$(q 'd["restart"]["blockedBy"]')" "awaiting-successor|False|closing Leg 1 (session s1)" \
+   "L21a: after close --outcome handoff: awaiting-successor, not listed, its closing Leg the blocker"
+has "$(q 'd["unlisted"]')" "its Leg session stands (closing Leg 1" "L21a: … unlisted: its closing Leg is its session"
+leg handed --listed
+ok "$rc|$(q 'd["status_line"]')" "0|ROLLOUT-STATUS: $RO merged=1/2 running=0 state=done reason=\"listed Leg 2 on the Waiting list\"" \
+   "L21a: handed --listed prints the listed line"
+keep21
+ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["stamped"]')|$(logn 'Leg 1 hand-over: listed$')" "True|None|False|1" \
+   "L21a: … listed, the stamp already there, and hand-over: listed logged"
+leg status
+ok "$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["legs"][0]["handover"]')" "None|True|None|listed" \
+   "L21a: status then reads nothing blocking, and the chain listed"
+snap; leg handed --listed; ok "$rc|$(q 'd["stamped"]')" "0|False" "L21a: a second handed --listed"; same "L21a: a second handed --listed"
+# (b) an unstamped chain: handed --listed stamps it in the same save
+scen l21b; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff
+leg handed --listed
+ok "$rc|$(q 'd["stamped"]')|$(q 'd["listed"]')|$(fm "$RO" start)" "0|True|True|unattended" "L21b: handed --listed stamps an unstamped chain, and lists it"
+# (c) exactly one form
+for v in "" "--listed --started x" "--manual x --listed"; do
+  snap; leg handed $v; ok "$rc|$out" "2|" "L21c: handed ${v:-with no form} is a usage error"; same "L21c: handed ${v:-with no form}"
+done
+# (d) a missing Chain copy: listed false, the halted not-listed line
+cscen l21d
+R="$S/r"; crepo "$R" https://github.com/o/r21d.git; C="$S/chains/r-$RO"; export CWD="$C"
+mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`" "t2~cc-r~$R~\`repo:$R//b.txt\`"; mkt t1; mkt t2
+CWD="$R" leg copies; leg begin --cwd "$C"; finish t1; leg close --outcome handoff --cwd "$C"
+mv "$C" "$S/moved"
+CWD="$R" leg handed --listed
+ok "$rc|$(q 'd["listed"]')|$(logn 'Leg 1 hand-over: listed$')" "0|False|1" "L21d: with its Chain copy gone, the hand-over is logged but not listed"
+has "$(q 'd["status_line"]')" "state=halted reason=\"hand-over not listed: blocked by chain copy missing: $C" "L21d: … its halted line names why"
+keep21
+mv "$S/moved" "$C"; unset CWD
+# (e) restarted --listed on a stopped chain: the line and the stamp, read as a listed restart
+scen l21e; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome stopped --reason "out of time"
+SESS=r1 leg restarted --leg 2 --listed
+ok "$rc|$(q 'd["recorded"]')|$(q 'd["restarted"]["how"]')|$(q 'd["listed"]')|$(fm "$RO" start)" "0|True|listed|True|unattended" \
+   "L21e: restarted --listed on a stopped chain records the restart and stamps the note"
+ok "$(logn 'restart: Leg 2 listed$')" 1 "L21e: … logging restart: Leg 2 listed"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restarted"]["how"]')|$(q 'd["listed"]')|$(q 'd["restart"]["blockedBy"]')" "restarting|listed|True|None" \
+   "L21e: status reads restarting (how listed), listed, nothing blocking"
+hasnt "$(q 'd["needsYou"]')" "restart of Leg 2" "L21e: … and a listed restart is no needs-you item"
+# (i) the same line again records nothing
+snap; SESS=r2 leg restarted --leg 2 --listed; ok "$rc|$(q 'd["recorded"]')" "0|False" "L21i: the same --listed line again"; same "L21i: --listed again"
+# (j) a later began retires it
+SESS=s2 leg begin --cwd "$F"; ok "$rc|$(q 'd["leg"]')" "0|2" "L21j: Leg 2 begins"
+leg status
+ok "$(q 'd["restarted"]')|$(q 'd["chain"]')|$(q 'd["listed"]')|$(q 'd["unlisted"]')" "None|live|False|its Leg session stands (open Leg 2)" \
+   "L21j: … its began retires the listed restart: live, its open Leg off the list"
+# (f) a handoff with no hand-over line, then restarted --listed: the closing session clears
+scen l21f; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff
+SESS=r1 leg restarted --leg 2 --listed; ok "$rc|$(q 'd["listed"]')" "0|True" "L21f: restarted --listed over a Leg that died before its hand-over"
+leg status
+ok "$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')|$(q 'd["chain"]')" "None|True|restarting" "L21f: … the closing session clears"
+# (g) a handoff to a started session, then restarted --listed: the handover started session clears
+scen l21g; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff; leg handed --started sess-x
+leg status
+ok "$(q 'd["restart"]["blockedBy"]')|$(q 'd["unlisted"]')" "handover started sess-x|no start: unattended" "L21g: a started hand-over blocks the restart"
+stamp21; leg status
+ok "$(q 'd["unlisted"]')" "its Leg session stands (handover started sess-x)" "L21g: … and, stamped, is its Leg session"
+SESS=r1 leg restarted --leg 2 --listed
+leg status
+ok "$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')" "None|True" "L21g: restarted --listed clears the started session"
+# (h) an open Leg: a take-over is never listed
+scen l21h; two21
+leg begin --cwd "$F"; finish t1
+snap; SESS=r1 leg restarted --leg 2 --listed
+ok "$rc" 1 "L21h: restarted --listed beside an open Leg is exit 1"; has "$err" "an open Leg stands (Leg 1)" "L21h: … naming it"
+same "L21h: an open Leg"
+# (k)-(m) a handed after a logged hand-over writes nothing and prints the logged form's line
+scen l21k; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff; leg handed --started sess-1
+snap; leg handed --listed
+ok "$rc|$(q 'd["stamped"]')|$(fm "$RO" start)" "0|False|<none>" "L21k: handed --listed after --started stamps nothing"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=done reason=\"handed off to Leg 2\"" "L21k: … and prints the started line"
+same "L21k: handed --listed after --started"
+scen l21l; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff; leg handed --manual "no host tool"
+snap; leg handed --listed
+ok "$rc|$(q 'd["stamped"]')" "0|False" "L21l: handed --listed after --manual"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=halted reason=\"manual handoff: Leg 2 in cc-demo from $F\"" \
+   "L21l: … prints the manual line"
+same "L21l: handed --listed after --manual"
+scen l21m; two21; stamp21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff; leg handed --listed
+snap; leg handed --manual x
+ok "$rc|$(q 'd["status_line"]')|$(q 'd["handover"]')" "0|ROLLOUT-STATUS: $RO merged=1/2 running=0 state=done reason=\"listed Leg 2 on the Waiting list\"|listed" \
+   "L21m: handed --manual after --listed prints the listed line"
+same "L21m: handed --manual after --listed"
+# (n) a manual hand-over keeps a stamped chain off the list until repair lists it
+scen l21n; two21; stamp21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff; leg handed --manual "no host tool"
+keep21
+leg status
+ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["restart"]["blockedBy"]')" "False|a manual hand-over stands (Leg 1: no host tool)|None" \
+   "L21n: a stamped chain after a manual hand-over is not listed, and nothing blocks its restart"
+has "$(q 'd["needsYou"]')" "manual hand-over: start Leg 2 in" "L21n: … its paste-ready prompt a needs-you item"
+SESS=r1 leg restarted --leg 2 --listed
+leg status
+ok "$(q 'd["listed"]')|$(q 'd["restarted"]["how"]')" "True|listed" "L21n: restarted --listed lists it"
+hasnt "$(q 'd["needsYou"]')" "manual hand-over" "L21n: … and the manual hand-over item goes: a paste would double-start it"
+# (p) --dry-run: handed --listed and restarted --listed write nothing, their listed and unlisted null
+scen l21p; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff
+snap; leg handed --listed --dry-run
+ok "$rc|$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["stamped"]')|$(q 'd["handover"]')|$(q 'd["dryRun"]')" "0|None|None|False|None|True" \
+   "L21p: handed --listed --dry-run: listed and unlisted null, nothing stamped, no hand-over logged"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=done reason=\"listed Leg 2 on the Waiting list\"" \
+   "L21p: … the passed form's line"
+same "L21p: handed --listed --dry-run"
+snap; SESS=r1 leg restarted --leg 2 --listed --dry-run
+ok "$rc|$(q 'd["listed"]')|$(q 'd["unlisted"]')|$(q 'd["recorded"]')|$(q 'd["restarted"]')|$(q 'd["dryRun"]')" "0|None|None|False|None|True" \
+   "L21p: restarted --listed --dry-run: listed and unlisted null, nothing recorded"
+ok "$(fm "$RO" start)|$(logn 'restart: Leg 2')" "<none>|0" "L21p: … no stamp and no restart line"
+same "L21p: restarted --listed --dry-run"
+# (q) restarted --listed over a standing pending restart: another session's is exit 3; its own session's is its update,
+# written with no --replace
+scen l21q; two21
+leg begin --cwd "$F"; finish t1; leg close --outcome stopped --reason "out of time"
+SESS=r1 leg restarted --leg 2 --pending; ok "$rc|$(q 'd["restarted"]["how"]')" "0|pending" "L21q: r1's --pending stands"
+snap; SESS=r2 leg restarted --leg 2 --listed
+ok "$rc" 3 "L21q: r2's --listed over r1's pending restart is exit 3"; has "$err" "a restart of Leg 2 stands (pending" "L21q: … naming it"
+same "L21q: r2 --listed over r1's pending"
+SESS=r1 leg restarted --leg 2 --listed
+ok "$rc|$(q 'd["recorded"]')|$(q 'd["restarted"]["how"]')|$(q 'd["listed"]')|$(fm "$RO" start)" "0|True|listed|True|unattended" \
+   "L21q: r1's own --listed over its pending restart is its update: written with no --replace, stamped and listed"
+ok "$(logn 'restart: Leg 2 pending (session r1)$')|$(logn 'restart: Leg 2 listed$')" "1|1" "L21q: … its listed line after the pending one"
+leg status
+ok "$(q 'd["restarted"]["how"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')" "listed|None|True" \
+   "L21q: status reads the listed restart standing, nothing blocking, the chain listed"
+# (o) the new status lines match the Stop hook's STATUS_RE
+ok "$(grep -c . "$L21_LINES")" 3 "L21o: three status lines collected (listed, not listed, manual)"
+bad=$(python3 - "$HOOK" "$L21_LINES" <<'PY'
+import importlib.util, re, sys
+spec = importlib.util.spec_from_file_location("drv", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+for line in open(sys.argv[2]).read().splitlines():
+    if not re.fullmatch(m.STATUS_RE.pattern + r'(?: reason="[^"]*")?', line) or "state=running" in line:
+        print(line)
+PY
+)
+ok "$bad" "" "L21o: every new hand-over status line matches the Stop hook's STATUS_RE, and none is state=running"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi
 exit "$fail"

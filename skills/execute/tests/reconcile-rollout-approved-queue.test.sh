@@ -10,6 +10,8 @@
 #   A3 the chain's script half and the superseded tail      A4-A4f pauses and room stops      A5 an unreadable on_merge
 #   A6 stamp-start's refusals      A7 status      A8 no on_merge and mixed case      A9 one room-stop regex
 #   A10 stamp-start --backlog (ADR 0071): a never-started note with no prior, refused beside a hold
+#   A11 stamp-start on a serial note (P44-4, ADR 0076 d4): a never-begun chain is listed, with or without a prior, a
+#       hold_until or started_unattended:; one that has run, or is closed, paused or incomplete, is refused
 # Usage: bash reconcile-rollout-approved-queue.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -462,7 +464,11 @@ sref() {  # sref <label>
   rm -f "$D/ro-2.before"
 }
 sref "a note not found"
-mkro ro-2 "" 'shape: serial' 'supersedes: "[[ro]]"'; sref "a serial note"
+# A serial note is listed (P44-4): stamped, with the Waiting list's undo line (A11 holds its refusals)
+mkro ro-2 "" 'shape: serial' 'supersedes: "[[ro]]"'
+out=$(ss --rollout "$D/ro-2.md" 2>"$D/err"); rc=$?
+ok "$rc|$out|$(grep -c '^start: unattended$' "$D/ro-2.md")" "0|undo: remove start: unattended from [[ro-2]] before the Stage opens its Leg 1; it waits on the Waiting list (unfinished-rollout.py waiting)|1" \
+  "A6: a serial note is no longer refused: it is stamped, with its Waiting list undo line"
 mkro ro-3 "" ; mkro ro-2 "" 'supersedes: "[[ro-3]]"'; sref "an incomplete note (its prior still open)"; rm "$D/ro-3.md"
 mkro ro-2 "" 'supersedes: "[[ro]]"'; sed -i.bak 's/^status: open$/status: dropped/' "$D/ro-2.md"; sref "a closed note"
 mkro ro-2 "" 'supersedes: "[[ro]]"' 'superseded_by: "[[ro-4]]"'; sref "a superseded note"
@@ -543,7 +549,10 @@ bref() {  # bref <label>: --backlog refuses ro-2 with one ERROR line and writes 
   [ -f "$D/ro-2.before" ] && { cmp -s "$D/ro-2.md" "$D/ro-2.before"; ok "$?" 0 "A10: … $1 writes nothing"; }
   rm -f "$D/ro-2.before"
 }
-mkro ro-2 "" 'shape: serial'; bref "a serial note"
+mkro ro-2 "" 'shape: serial'
+out=$(sb --rollout "$D/ro-2.md" 2>"$D/err"); rc=$?
+ok "$rc|$out|$(grep -c '^start: unattended$' "$D/ro-2.md")" "0|undo: remove start: unattended from [[ro-2]] before the Stage opens its Leg 1; it waits on the Waiting list (unfinished-rollout.py waiting); the Backlog orient listed it|1" \
+  "A10: --backlog lists a serial note too (P44-4): stamped, its undo line naming the Backlog orient"
 mkro ro-3 "" ; mkro ro-2 "" 'supersedes: "[[ro-3]]"'; bref "an incomplete note (its prior still open)"; rm "$D/ro-3.md"
 mkro ro-2 ""; sed -i.bak 's/^status: open$/status: dropped/' "$D/ro-2.md"; bref "a closed note"
 mkro ro-2 "" 'status_note: x'; sed -i.bak 's/^status: open$/status: done/' "$D/ro-2.md"; bref "a done note"
@@ -562,6 +571,47 @@ mkro ro "" "${APPROVED[@]}"; sed -i.bak 's/^status: open$/status: done/' "$D/ro.
 mkro ro-2 "" 'supersedes: "[[ro]]"' "$OM"
 out=$(ss --rollout "$D/ro-2.md" 2>"$D/err"); rc=$?
 ok "$rc|$(grep -c '^start: unattended$' "$D/ro-2.md")" "0|1" "A10: without --backlog the chain still stamps beside its carried hold"
+
+# ── A11 (P44-4, ADR 0076 d4): stamp-start lists a never-begun serial chain on the Waiting list ───────────────────────────
+scen a11
+SU='undo: remove start: unattended from [[ch]] before the Stage opens its Leg 1; it waits on the Waiting list (unfinished-rollout.py waiting)'
+mkro ch "" 'shape: serial'; mkt x-p44-1-a ch open "$X"
+out=$(ss --rollout "$D/ch.md" 2>"$D/err"); rc=$?
+ok "$rc|$out|$(cat "$D/err")" "0|$SU|" "A11: a fresh serial note with no supersedes: is stamped, with its one undo line"
+ok "$(grep -A1 '^status:' "$D/ch.md")" "status: open
+start: unattended" "A11: … start: unattended just below status:"
+cp "$D/ch.md" "$D/ch.once"
+ok "$(ss --rollout "$D/ch.md" 2>&1)" "$SU" "A11: a re-run prints the same line"
+cmp -s "$D/ch.md" "$D/ch.once"; ok "$?" 0 "A11: … and writes nothing"
+mkro ch "" 'shape: serial' 'started_unattended: 2026-10-02T12:00+00:00'
+out=$(ss --rollout "$D/ch.md" 2>"$D/err"); rc=$?
+ok "$rc|$out|$(grep -c '^start: unattended$' "$D/ch.md")" "0|$SU|1" "A11: a valued started_unattended: is accepted (Chorus ADR 0115 R1)"
+mkro ch "" 'shape: serial' "$OM"
+out=$(ss --rollout "$D/ch.md" 2>"$D/err"); rc=$?
+ok "$rc|$out|$(grep -c '^start: unattended$' "$D/ch.md")" "0|$SU|1" "A11: a hold_until with no supersedes:, without --backlog, is stamped with the plain undo line"
+mkro ch "" 'shape: serial' "$OM"
+out=$(ss --backlog --rollout "$D/ch.md" 2>"$D/err"); rc=$?
+ok "$rc|$out|$(grep -c '^start: unattended$' "$D/ch.md")" "0|$SU; the Backlog orient listed it|1" \
+  "A11: … and under --backlog it is stamped too, its undo line naming the Backlog orient"
+sref11() {  # sref11 <label>: a refusal of ch, exit 1, one ERROR line, nothing written
+  cp "$D/ch.md" "$D/ch.before"
+  ss --rollout "$D/ch.md" >"$D/out" 2>"$D/err"; rc=$?
+  ok "$rc|$(cat "$D/out")|$(grep -c '^ERROR: stamp-start: ' "$D/err")|$(grep -c . "$D/err")" "1||1|1" "A11: $1 is refused with one ERROR line"
+  cmp -s "$D/ch.md" "$D/ch.before"; ok "$?" 0 "A11: … $1 writes nothing"
+}
+mkro ch "" 'shape: serial' 'incomplete: true'; sref11 "an incomplete serial note"
+mkro ch "" 'shape: serial'; sed -i.bak 's/^status: open$/status: done/' "$D/ch.md"; sref11 "a done serial note"
+mkro ch "" 'shape: serial'; sed -i.bak 's/^status: open$/status: dropped/' "$D/ch.md"; sref11 "a dropped serial note"
+mkro ch "" 'shape: serial' 'superseded_by: "[[ch-2]]"'; sref11 "a superseded serial note"
+mkro ch "" 'shape: serial' 'paused: 2026-10-02T10:00+00:00'; sref11 "a paused serial note"
+mkro ch "" 'shape: serial' 'pause_requested: true'; sref11 "a pause-requested serial note"
+mkro ch $'## Leg log\n\n- 2026-10-02T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x' 'shape: serial'
+sref11 "a serial chain with a Leg log"
+has "$(cat "$D/err")" "[[ch]] has run (it has a ## Leg log section): a stamp alone does not list a chain that has run" "A11: … saying it has run"
+mkro ch "" 'shape: serial'; mkt x-p44-1-a ch in_progress "$X" 'owner: leg-1'; sref11 "a serial chain whose task carries owner: leg-1"
+for w in "leg.py handed --listed" "leg.py restarted --listed" "leg.py clear-halt"; do
+  has "$(cat "$D/err")" "$w" "A11: … the has-run refusal names $w"
+done
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-approved-queue: ALL PASS"; else echo "reconcile-rollout-approved-queue: FAILED"; fi

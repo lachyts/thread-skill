@@ -31,11 +31,15 @@ original run's caller/session and native child identities. Read
 session's pending claims. Recover the actual native children first; otherwise report the unresolved
 ownership. Codex has no detached driver: repair preserves the diagnosis and the hand-backs, and the queue can
 then run only as a session-driven `--gated` run. Do not claim that a request for continuous repair has been
-completed by preparing one. Never create a second convergence engine. A serial chain (§ 7) makes no task call. Its
-`create_thread` opens a new visible Session that runs `/thread:execute` itself, as `skills/execute/legs.md` § Hand over
-does. There is no engine preflight, no native child and no claim adopted: the new Leg's `begin` takes the chain
-under leg.py's lock. The host tool is the one `skills/execute/legs.md` § Hand over picks: the Chorus Stage's for a
-claude launch, Codex Desktop's own per /thread:handoff for codex, and a manual handoff otherwise.
+completed by preparing one. Never create a second convergence engine. A serial chain (§ 7) makes no task call. On
+the Chorus Stage (Chorus's `list_sessions` answers ToolSearch) it starts no Session: `leg.py restarted --listed` puts
+the chain on the Waiting list and the Stage opens the Leg, as `skills/execute/legs.md` § Hand over does with
+`leg.py handed --listed` (ADR 0076 d4, d6). A take-over, and a snapshot from before `--listed`, still start one: its
+`create_thread` opens a new visible Session that runs `/thread:execute` itself. There is no engine preflight, no native
+child and no claim adopted: the new Leg's `begin` takes the chain under leg.py's lock. The host tool is the one
+`skills/execute/legs.md` § Hand over picks: the Chorus Stage's for a claude launch, Codex Desktop's own per
+/thread:handoff for codex (Codex Desktop has `create_thread` but no `list_sessions`, so it lists nothing), and a manual
+handoff otherwise.
 
 ## Scope
 
@@ -46,7 +50,9 @@ note under `Work/Tasks/` (Archive included) and the Project root's git, read-onl
 ever happen through execute's merge step (`merge-task.sh`). On a serial chain (§ 7) it runs `leg.py status`
 (read-only), `leg.py restarted` and, on Lachy's word, `leg.py clear-halt`. These are the only Leg-log writes it makes,
 under leg.py's lock. On a `chain copy missing` restart blocker it also runs `leg.py copies`, which remakes the Chain copy
-and writes at most the note's `chain_copies:` (ADR 0067 d2). It also runs the task-note verbs `approve-gates`, `record-answer`, `hand-back` and `defer`, a
+and writes at most the note's `chain_copies:` (ADR 0067 d2). On the Chorus Stage its restart is
+`leg.py restarted --listed`, which lists the chain on the Waiting list (stamping `start: unattended`) instead of starting it (ADR 0076
+d4, d6). It also runs the task-note verbs `approve-gates`, `record-answer`, `hand-back` and `defer`, a
 read-only `git status --porcelain` in the chain's checkouts, and the Chorus Stage's `list_sessions` and
 `create_thread`, which starts a new Session. It makes no `gh` call and no task call there.
 
@@ -801,7 +807,8 @@ the choice, any restore and its rescue line, and the ack line).
 
 A `shape: serial` note (§ 1) is a chain of **Legs** (`skills/execute/legs.md`), and repair is its conductor, never a
 Leg: a Leg works the chain's tasks, while repair answers what only Lachy can, clears what he says, and starts the next
-Leg as a new Session. Every step re-reads `leg.py status` (status § 5's read), whose header defines each key below.
+Leg as a new Session, or, on the Chorus Stage, lists the chain on the Waiting list for the Stage to open it (ADR 0076
+d4, d6). Every step re-reads `leg.py status` (status § 5's read), whose header defines each key below.
 
 **(a) Diagnose.** Show status § 5's report: the headline, the Legs, the Queue, Needs you, the Stall and the Restart.
 The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever the chain state, and then the first of
@@ -877,11 +884,15 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
 **(e) Restart.** The next Leg starts as a new Session, never in this one.
 
 1. **Restartable?** Re-read `leg.py status`. `restart` null → report why (a stuck chain goes back to (b)), and stop.
-   Otherwise, by `restart.blockedBy`:
+   `listed` true → report "on the Waiting list: the Stage opens Leg <restart.leg> when there is room", and stop:
+   nothing to restart, and a start here would double-start it. Otherwise, by `restart.blockedBy`:
    - `halt` → never: (c) first.
    - `open Leg K (session <id>)` → only after (d) found `<id>` gone from `list_sessions`, or Lachy said Leg K is dead;
      the prompt is then the take-over form (`restart.takeOver`).
    - `handover started <X>` → only after `list_sessions` shows X gone, or Lachy says X never ran.
+   - `closing Leg N (session <id>)` → Leg N closed with a handoff and has not logged its hand-over yet (its
+     /thread:close writes it last, so it may still be closing): act only after `list_sessions` shows `<id>` gone, or
+     Lachy says Leg N died before its hand-over.
    - `restart Leg N (<how>)` → only with `--replace` in step 2, after its own check: for `started` (its id is
      `restarted.started`), `list_sessions` shows that id gone; for `pending` or `manual`, Lachy says it never started.
      With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.
@@ -892,9 +903,12 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
      the copy on its `chain/<rollout>` branch, its commits kept, and writes at most the note's `chain_copies:`. Exit 0 → re-read
      `leg.py status` and go on to the restart by its new `restart.blockedBy`; a non-zero exit → report its `error`,
      and stop.
-   - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain holds a
-     place the next Leg writes, and its `begin` would only stand at exit 3. Its five causes (ADR 0067 d4) name the
-     remedy: [[B]] comes first (by rank: a chain that has begun before one that has not, then its estate rank, then
+   - `surface held by [[B]] (<token>)` → on the Chorus Stage (Chorus's `list_sessions` answers ToolSearch), list it:
+     step 2's `--listed` puts the chain back on the Waiting list, and step 2 reports "listed, held by [[B]] (<token>):
+     `waiting` passes it over and keeps its place, and the Stage opens Leg N once [[B]] lands its rows there or its
+     Leg closes (ADR 0076 d2, d6)". Off the Stage, never restart (ADR 0060): the chain waits its turn. Another chain
+     holds a place the next Leg writes, and its `begin` would only stand at exit 3. Its five causes (ADR 0067 d4) name
+     the remedy: [[B]] comes first (by rank: a chain that has begun before one that has not, then its estate rank, then
      the first to begin, else the earlier schedule or the slug order) and holds an unlanded row (in Chain copies, a
      done row it has not yet landed: ADR 0067 d3) on that place, and, in Chain copies on a code file, only while [[B]]
      has no open Leg: run [[B]], whose open Leg ends the stand (they then meet at claim by rank, ADR 0067 d9; a Leg
@@ -907,31 +921,47 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
      [[B]] was scheduled on a place this one released while it was stuck; or [[B]]'s chain is unreadable and holds its
      whole claim (fix its note). Report it, with
      `/thread:status [[B]]`, and stop. Re-run this repair, or `/thread:execute`, once [[B]] lands its rows there, or
-     its Leg closes. `surface re-check failed: <line>` → report
-     the line, and stop.
+     its Leg closes.
+   - `surface re-check failed: <line>` → report the line, and stop: an errored check is a fix-first stop (ADR 0076
+     d6), never listed.
    - `surface re-check unanswered: <why>` → restart it: no hold is known, only that status's own read (60 s, with no
-     retry) went unanswered on a busy Mac. A restart is safe: the new Leg's `begin` runs its own re-check (60 s, then
-     once more at 180 s) and writes nothing on a begin wait (P41-3), so a Leg that still meets no answer, or a hold,
-     ends `waiting`, never halted, and lists its begin wait as a needs-you item (`listed` false: its standing restart
-     keeps the chain off the Waiting list), whose remedy is `/thread:execute [[<slug>]]` in that session.
-   - null → by `chain`: stalled; awaiting-successor with no hand-over line, or a manual one Lachy says he has not
-     pasted; stopped, on his word; completable, not-started or ready, on his ask.
+     retry) went unanswered on a busy Mac. On the Chorus Stage it is listed as a held one is (step 2's `--listed`):
+     the Stage's begin re-checks it. Off the Stage a restart is safe: the new Leg's `begin` runs its own re-check (60
+     s, then once more at 180 s) and writes nothing on a begin wait (P41-3), so a Leg that still meets no answer, or a
+     hold, ends `waiting`, never halted, and lists its begin wait as a needs-you item (`listed` false: its standing
+     restart keeps the chain off the Waiting list), whose remedy is `/thread:execute [[<slug>]]` in that session.
+   - null → by `chain`: stalled; awaiting-successor after a manual hand-over Lachy says he has not pasted (on the
+     Stage, listing it is how that chain rejoins the Waiting list: a manual hand-over keeps it off); stopped, on his
+     word; completable, not-started or ready, on his ask.
    - Anything else → report it, and stop.
 
    Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence: Leg K's session gone
    from `list_sessions`, or Lachy's word that Leg K is dead. A previous repair's check never stands in for it.
 
    `leg.py restarted` checks only the halt, the numbering (Leg N not begun, N = last_n + 1) and a standing restart.
-   It never checks the open Leg or the hand-over, so that evidence is this step's. Nothing later re-checks a
+   It never checks the open Leg or the hand-over, so that evidence is this step's (its `--listed` form alone refuses an
+   open Leg: a take-over is never listed). Nothing later re-checks a
    take-over: the new Leg's `begin --take-over` closes Leg K `lost`. `begin`'s lock and exit 3 back up only a doubled
    start.
-2. **Mark it.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --pending`,
-   with `--replace` only on the `restart Leg N` branch. Exit 3 → report the standing restart, and stop.
-   `recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line
-   already stands (a re-run of this step, after a compaction say): go on to step 3. Exit 1 naming `--session` → this
-   session has no id: report it, and stop; never invent one.
-3. **Start it** with the host's `create_thread`, chosen as § Native runtime binding says (a claude harness, or
-   `restart.anyLaunch`, on the Chorus Stage): `title`, `prompt`, `tldr` and `cwd` from `restart`, no `brief`,
+2. **Mark it.** On the Chorus Stage (Chorus's `list_sessions` answers ToolSearch), with `restart.takeOver` false, list
+   it: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --listed`,
+   with `--replace` only on the `restart Leg N` branch. It logs `restart: Leg N listed` and, in the same save, stamps
+   `start: unattended`, so the chain rejoins the Waiting list (ADR 0076 d4, d6) and nothing starts here: steps 3 and 4
+   never run. `listed` true → report "listed: the Stage opens Leg N when there is room" (a held chain: step 1's held
+   line), and stop. `listed` false → report its `unlisted`, and stop. Exit 2 (an engine snapshot from before
+   `--listed`) → the `--pending` form below.
+   Otherwise (a take-over, that exit 2, off the Stage, or on Codex Desktop):
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --pending`,
+   with `--replace` only on the `restart Leg N` branch. Either form: Exit 3 → report the standing restart, and stop.
+   Exit 1 naming `--session` → this session has no id: report it, and stop; never invent one. `recorded: false` with
+   `began: true` → Leg N began meanwhile: stop. `recorded: false` with `began: false` is the identical line already
+   standing (a re-run of this step, after a compaction say), and the forms part there. The `--pending` form's is this
+   session's own line: go on to step 3. The `--listed` form's (`restart: Leg N listed`, whichever session logged it)
+   reads its `listed` and `unlisted` as its first run's would (`listed` true → "listed: the Stage opens Leg N when
+   there is room"; false → its `unlisted`), and stops: steps 3 and 4 never run for it, since a `create_thread` would
+   double-start a listed chain.
+3. **Start it** (the `--pending` form only) with the host's `create_thread`, chosen as § Native runtime binding says (a
+   claude harness, or `restart.anyLaunch`, on the Chorus Stage: a take-over, or a snapshot from before `--listed`): `title`, `prompt`, `tldr` and `cwd` from `restart`, no `brief`,
    `report_back` on. Then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <N> --started <its id>`.
 4. **Otherwise** (no host tool, a codex launch off Codex Desktop, or a `create_thread` error): print `restart.prompt`
    fenced with its launch line (`restart.launch`, or any launch from `restart.cwd` when `restart.anyLaunch`), labelled
@@ -995,8 +1025,8 @@ record, and its Completion log is the last Leg's.
   finish its close-out instead (§ 1).
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it. On a serial
   chain the closure is `leg.py status`'s `dependants` (§ 7 (b)).
-- **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted`, `leg.py clear-halt` (his
-  word only), `leg.py copies` (on a `chain copy missing` blocker), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
+- **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted` (its `--listed` form on the
+  Chorus Stage), `leg.py clear-halt` (his word only), `leg.py copies` (on a `chain copy missing` blocker), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
   `list_sessions` and `create_thread`. Never `leg.py begin`, `claim`, `done`, `close`, `set-aside`, `smoke`,
   `file-fix`, `handed`, `file-followup` or `land`; no Workflow, `next`, `resume` or hand-off loop; no hand edit of the Leg log
   or the frontmatter, and no `## Notes` line; and never take over a session `list_sessions` shows present, without
