@@ -462,7 +462,7 @@ test('control: a drifted stamp or a dropped writer fails the start-stamp check',
   // P44-4: a serial writer off the Stage, or the old bar on a serial note, fails it
   assert.deepEqual(startStampChecks(mutate(doc, 'Off the Stage nothing stamps a serial note', 'Off the Stage they stamp it too'), s),
     ['names Off the Stage nothing stamps a serial note'])
-  assert.deepEqual(startStampChecks(mutate(doc, 'whose launch was never made', 'on a parallel note only (a serial note has none), whose launch was never made'), s),
+  assert.deepEqual(startStampChecks(mutate(doc, 'whose\n  launch was never made', 'on a parallel note only (a serial note has none), whose\n  launch was never made'), s),
     ['still bars a serial note'])
   assert.deepEqual(startStampChecks(mutate(doc, "schedule § 0's **Put back**", 'schedule'), s),
     ["names schedule § 0's **Put back**"])

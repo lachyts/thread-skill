@@ -1230,14 +1230,12 @@ and the unmatched `--signed-out` WARNs. Then the start (ADR 0076 d4, P44-4). On 
 decided (Owner *gate*: he scheduled it to run, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1). His "not yet"
 in the request skips it; said after, remove the stamp by its undo line, unless the Leg log shows Leg 1 began. The
 summary then carries each note's undo line and one line: "listed on the Waiting list: the Stage opens Leg 1 when there
-is room, in row 1's launch folder inside its Chain copy; no execute handoff; until it finishes or is dropped (`status:
-dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060), so a parallel run rooted in
-place in a checkout it works is refused, and another chain over them takes turns with it". A refused `stamp-start`
-prints its ERROR line, and that note gets the line below. Off the Stage no note is stamped, and Leg 1's paste line is
-its one start path: one line, "Leg 1 opens in row 1's launch folder inside its Chain copy, as `leg.py status` prints it (`restart.launch`, never the alias itself, whose `cd` opens the primary), and runs `/thread:execute [[<note>]]`;
-no execute handoff, no `start: unattended` (off the Stage nothing lists it); until it finishes or
-is dropped (`status: dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060), so a
-parallel run rooted in place in a checkout it works is refused, and another chain over them takes turns with it".
+is room, in row 1's launch folder inside its Chain copy; no execute handoff". A refused `stamp-start` prints its ERROR
+line, and that note gets the line below. Off the Stage no note is stamped, and Leg 1's paste line is its one start
+path: one line, "Leg 1 opens in row 1's launch folder inside its Chain copy, as `leg.py status` prints it (`restart.launch`, never the alias itself, whose `cd` opens the primary), and runs `/thread:execute [[<note>]]`;
+no execute handoff, no `start: unattended` (off the Stage nothing lists it)". Either way, one more line: "until it
+finishes or is dropped (`status: dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060),
+so a parallel run rooted in place in a checkout it works is refused, and another chain over them takes turns with it".
 Under orient, orient-all and the Backlog orient, S7 writes nothing: the parent lists the note (orient § 9, orient-all
 § 7 step 4, `skills/orient/backlog.md` § B8).
 
