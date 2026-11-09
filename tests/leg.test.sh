@@ -1148,8 +1148,8 @@ snap; SESS=s2 leg begin --cwd "$F"
 ok "$rc|$(q 'd["beginWait"]')|$(q 'd["listed"]')|$(q '"unlisted" in d')" "3|held|True|False" \
    "L14: stamped start: unattended with no Leg session standing, its begin wait is listed: the Waiting list holds it"
 same "L14: a listed begin wait"
-# P44-3 (ADR 0076 d2): the held begin ends its session: the note keeps its stamp, so the chain stays listed, and the
-# session holds no Leg and no lease, so it counts no place in the room
+# P44-3 (ADR 0076 d2): a listed begin wait ends its session: the note keeps its stamp, so the chain stays listed, and
+# the session holds no Leg and no lease, so it counts no place in the room
 ok "$(grep -c '^start: unattended$' "$T/$RO.md")|$(logn 'Leg 2 began')|$(test -e "$HOME/.config/thread/leases/$RO.json"; echo $?)" "1|0|1" \
    "L14: … still stamped start: unattended, no Leg 2 begun and no Leg lease written: the session ends holding nothing"
 leg restarted --leg 2 --started sess-r; ok "$rc" 0 "L14: a restart of Leg 2, started"
