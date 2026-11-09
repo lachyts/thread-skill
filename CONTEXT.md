@@ -1449,6 +1449,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
   (clearing `rollout:`/`owner:`), permitted only when nothing in the rollout
   depends on it. _Avoid_: drop, cancel, skip.
+- **Overrun** — the extra runs a landing or a rollout task takes by itself
+  once its normal budget (its review rounds, its automatic retries) is spent:
+  a re-run, a CI fix with its review, another review round. Three at most, never
+  asked of Lachy; a decision only he can make still stops it. A task whose
+  Overrun is spent is **taken out**: a rollout task by a Clean defer, a
+  landing by a hold with a filed task, listed in its report and never alerted
+  (ADR 0070). _Avoid_: extra budget, approval round, raise.
 
 ## Convergence engine
 
