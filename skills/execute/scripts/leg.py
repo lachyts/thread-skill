@@ -32,7 +32,8 @@ every verb but status first asks engine-snapshot.py's guard(), loaded from this 
 usable snapshot than this plugin root, or a live note whose snapshot is unusable, prints its `engine-snapshot: ` line,
 stdout empty, nothing written: re-run from the root it names; an archived note whose snapshot is gone passes, so
 file-followup after Complete still runs) · 3 a stand (an unclosed Leg of another session, a standing halt,
-a surface another rollout holds (begin's surface re-check, ADR 0060), a revert that would conflict or a dirty path to
+a surface another rollout holds or a surface re-check that never answers (begin's surface re-check, ADR 0060: a
+begin wait, `beginWait`, its status line `waiting`, P41-3), a revert that would conflict or a dirty path to
 revert, a claim the Capacity holds (ADR 0067 d8: *The Capacity*, below); nothing written) · 4 wrong launch (nothing written to the Leg log: in a chain with `chain_copies:` begin may
 first remake a missing copy and stamp a newly needed pair) · 5 the
 rollout's lock was held past its timeout (nothing written). A refusal's JSON carries `exit`, `error` and, from
@@ -77,11 +78,21 @@ clear-halt, restarted, copies, land):
       Otherwise Leg N (the last + 1) begins, after the surface re-check and the launch check. The surface re-check (ADR
       0060 d3), on a fresh Leg or a take-over only (never a silent resume or --resume, and --dry-run included): the
       Leg's write set (write_set: the Surfaces cells of its unlanded rows and of its smoke list's rows) goes to one
-      read-only `unfinished-rollout.py check --shape serial --resume <slug> --surface <token>…` (sys.executable, 60 s,
-      stdin closed), which compares it with the other unfinished serial notes' unlanded rows and the held Project roots
-      of the unfinished parallel rollouts. A hit is exit 3 with `held: [{rollout, token}]` and the status line
-      `halted reason="surface held: [[<B>]] holds <token>"`: the chain waits its turn; a check that fails is exit 3,
-      `surface re-check failed: <its line>` (fail closed). An empty write set skips it. The launch check: the cwd's
+      read-only `unfinished-rollout.py check --shape serial --resume <slug> --surface <token>…` (sys.executable, stdin
+      closed; 60 s, $THREAD_LEG_RECHECK_TIMEOUT, then once more at 180 s, $THREAD_LEG_RECHECK_RETRY, when the first
+      run times out), which compares it with the other unfinished serial notes' unlanded rows and the held Project
+      roots of the unfinished parallel rollouts. A hit or a check that never answers is a begin wait (ADR 0075 d1 as
+      ADR 0076 d2 amends it, P41-3): exit 3 with `beginWait` (`held` or `unanswered`), nothing written, and a
+      `waiting` status line, never `halted`: a hit carries `held: [{rollout, token}]` and `waiting reason="begin wait:
+      surface held: [[<B>]] holds <token>"` (the chain waits its turn); a check unanswered after both runs `waiting
+      reason="begin wait: surface re-check unanswered: no answer in <a>+<b> s"`. A begin wait also carries `listed`
+      (waiting_listed over the chain as begin left it: whether unfinished-rollout.py's `waiting` lists the chain once
+      the turn ends), and `unlisted`, its why not, when false (no `start: unattended`, a chain state off the list, or
+      a Leg session still standing: the open Leg a take-over would close, a standing restart `pending` or `started`, or
+      a last Leg handed off to a `started` session, which `waiting` counts against the room and keeps off the list, ADR
+      0076 d3); nothing begins an unlisted chain again, so legs.md § Begin lists it as a needs-you item. A check that
+      fails (exit 2, an unreadable answer) stays a halt: exit 3, `halted reason="surface re-check failed: <its line>"`
+      (fail closed). An empty write set skips it. The launch check: the cwd's
       realpath, case-folded, must be the
       folder of the first row the Leg must work (an inherited claim, else the first fix task, else the first
       claimable row), read from next's contention-aware plan (*The rank*: a `wait` uses its row, so a first row
@@ -552,7 +563,9 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   only when none of those holds, begin's
   surface re-check run read-only for Leg N: `surface held by [[<B>]] (<token>)` on a hit (its causes include (O)'s
   holder half, ADR 0067 d9: an earlier copied chain with no open Leg holding a code file), `surface re-check failed:
-  <its line>` when the check fails (ADR 0060). A manual hand-over is null: it waits on Lachy.
+  <its line>` when the check fails (ADR 0060), `surface re-check unanswered: <why>` when it times out (status's own
+  read runs once, 60 s, with no retry, so it stays inside serial-score's cap; begin retries longer). A manual
+  hand-over is null: it waits on Lachy.
 - The standing restart (`restarted`): the latest `restart:` line with no `began` line after it, as {leg, how
   (pending, started or manual), started, manual, session (a pending line's), at}, else null.
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
@@ -666,6 +679,7 @@ import contextlib
 import fcntl
 import importlib.util
 import json
+import math
 import os
 import posixpath
 import re
@@ -882,6 +896,26 @@ def lock_timeout():
         return float(os.environ.get("THREAD_LEG_LOCK_TIMEOUT") or "30")
     except ValueError:
         return 30.0
+
+
+def _env_seconds(name, default):
+    """A positive, finite float from $<name>, else default (a bad value, `inf` or `nan` included, reads as the default:
+    subprocess.run's timeout cannot take an infinite one)."""
+    try:
+        v = float(os.environ.get(name) or default)
+    except ValueError:
+        return float(default)
+    return v if v > 0 and math.isfinite(v) else float(default)
+
+
+def recheck_timeout():
+    """$THREAD_LEG_RECHECK_TIMEOUT seconds (default 60): the surface re-check's first run."""
+    return _env_seconds("THREAD_LEG_RECHECK_TIMEOUT", 60)
+
+
+def recheck_retry():
+    """$THREAD_LEG_RECHECK_RETRY seconds (default 180): begin's one retry of a surface re-check that timed out."""
+    return _env_seconds("THREAD_LEG_RECHECK_RETRY", 180)
 
 
 def security_budget():
@@ -1884,7 +1918,9 @@ def cmd_begin(ctx, a):
     except Refuse as e:
         if e.code in (1, 3, 4):
             prog = chain.progress() if chain is not None else {"done": 0, "total": 0, "running": 0}
-            e.extra.setdefault("status_line", status_line(ctx.slug, prog, "halted", e.extra.get("reason") or e.msg))
+            # A begin wait (a surface hold or an unanswered re-check, P41-3) ends `waiting`; every other refusal halts.
+            state = e.extra.pop("state", "halted")
+            e.extra.setdefault("status_line", status_line(ctx.slug, prog, state, e.extra.get("reason") or e.msg))
         raise
 
 
@@ -1923,16 +1959,22 @@ def _begin_locked(ctx, a, chain, cwd, raw=None, sec=(None, None)):
     elif a.resume is not None:
         raise Refuse(1, f"--resume {a.resume}: no Leg is unclosed")
     n = (took_over + 1) if took_over is not None else chain.last_n() + 1
-    # The surface re-check (ADR 0060 d3): what this Leg writes, against the places other rollouts hold now.
-    held, failed = surface_recheck(ctx, chain, n)
+    # The surface re-check (ADR 0060 d3): what this Leg writes, against the places other rollouts hold now. A hold or
+    # a check that never answers is a begin wait (P41-3: `waiting`, nothing written); a check that fails halts.
+    held, failed, unanswered = surface_recheck(ctx, chain, n)
     if failed:
         raise Refuse(3, f"surface re-check failed: {failed}; nothing written: fix what it names, then begin again",
                      reason=f"surface re-check failed: {failed}")
+    if unanswered:
+        raise Refuse(3, f"surface re-check unanswered: {unanswered}; nothing written: this chain waits; begin again "
+                        f"once the Mac answers", beginWait="unanswered", state="waiting",
+                     reason=f"begin wait: surface re-check unanswered: {unanswered}", **begin_wait_listed(ctx, chain))
     if held:
         b, tok = held[0]["rollout"], held[0]["token"]
         raise Refuse(3, f"surface held: [[{b}]] holds {tok}, which Leg {n} writes; nothing written: this chain waits "
                         f"its turn: begin again once [[{b}]] lands its rows there (/thread:status [[{b}]])",
-                     held=held, reason=f"surface held: [[{b}]] holds {tok}")
+                     held=held, beginWait="held", state="waiting",
+                     reason=f"begin wait: surface held: [[{b}]] holds {tok}", **begin_wait_listed(ctx, chain))
     # Chain copies (ADR 0067 d2): a missing copy remade and a newly needed one added before the launch check, so an
     # exit 4's line names a folder that exists. A note with no `chain_copies:` works in place, as before.
     pairs, made, copies, warns = chain_pairs(chain), [], [], []
@@ -5012,6 +5054,61 @@ def chain_state(chain, inc, paused, superseded, halt, restarted, open_leg, stall
     return "ready"
 
 
+# The chain states the Waiting list lists (ADR 0076 d3; waiting_listed): never one that needs Lachy or has a Leg.
+WAITING_STATES = ("not-started", "ready", "awaiting-successor", "completable")
+
+
+def leg_session_of(chain, read):
+    """The chain's Leg session (ADR 0076 d3: a Leg holds a place from its start), the one copy unfinished-rollout.py's
+    leg_session (the room's count) and waiting_listed read: `open Leg <K>` (an open Leg), `restart Leg <N> (<how>)` (a
+    standing restart `pending` or `started`; a manual one starts none), or `handover started <id>` (a last Leg handed
+    off to a `started` session that has not begun), else None. `read` is chain_read's (its open_leg and restarted).
+    A begin wait writes nothing, so a session that took one still reads here (P41-3)."""
+    if read["open_leg"] is not None:
+        return f"open Leg {read['open_leg']['n']}"
+    restarted = read["restarted"]
+    if restarted is not None and restarted["how"] in ("pending", "started"):
+        return f"restart Leg {restarted['leg']} ({restarted['how']})"
+    last = chain.legs.get(chain.last_n()) if chain.legs else None
+    ho = (last or {}).get("handover") or ""
+    if last is not None and leg_outcome(last["closed"]) == "handoff" and ho.startswith("started "):
+        return f"handover started {ho[len('started '):].strip()}"
+    return None
+
+
+def waiting_listed(ctx, chain, read):
+    """Whether unfinished-rollout.py's `waiting` lists the chain (ADR 0076 d3), the one copy of its rule, which begin's
+    begin wait reads too (P41-3): (restart, None) when it does (restart_of's, for its next Leg), else (None, why not),
+    the first that holds: `no start: unattended`; `its Leg session stands (<s>)` (leg_session_of, read with no lease:
+    an open Leg always keeps a chain off the list); `its chain reads <state>` (a state off WAITING_STATES); `no Leg acts
+    next`; `blocked by <restart.blockedBy>`. The hold (held_by) is `waiting`'s own, never a reason to leave the list."""
+    if not rr._start_unattended(chain.note):
+        return None, "no start: unattended"
+    session = leg_session_of(chain, read)
+    if session is not None:
+        return None, f"its Leg session stands ({session})"
+    if read["state"] not in WAITING_STATES:
+        return None, f"its chain reads {read['state']}"
+    restart = restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"], read["restarted"])
+    if restart is None:
+        return None, "no Leg acts next"
+    if restart["blockedBy"] is not None:
+        return None, f"blocked by {restart['blockedBy']}"
+    return restart, None
+
+
+def begin_wait_listed(ctx, chain):
+    """A begin wait's `listed` and `unlisted` (P41-3): {listed: True} when `waiting` lists the chain as begin leaves it
+    (waiting_listed over chain_read: begin wrote nothing), else {listed: False, unlisted: <why>}, so legs.md § Begin
+    lists an unlisted one as a needs-you item, since nothing begins it again (a chain that will not read is
+    unlisted)."""
+    try:
+        _restart, why = waiting_listed(ctx, chain, chain_read(ctx, chain))
+    except Refuse as e:
+        why = f"its chain will not read ({reason_text(e.msg, 120)})"
+    return {"listed": True} if why is None else {"listed": False, "unlisted": why}
+
+
 # ---- the hold (ADR 0060) ---------------------------------------------------------------------------------------------
 
 def _cell_tokens(r):
@@ -5444,33 +5541,50 @@ def write_set(chain, n):
 HELD_RE = re.compile(r"^\[\[([^\]]+)\]\] .*? holds `([^`]+)`")
 
 
-def surface_recheck(ctx, chain, n):
+def _secs(x):
+    """A timeout in seconds as the reason names it: whole seconds without a fraction."""
+    return f"{x:g}"
+
+
+def surface_recheck(ctx, chain, n, retry=True):
     """unfinished-rollout.py's `check --shape serial --resume` over write_set(chain, n), read-only (ADR 0060 d3):
-    ([{rollout, token}], None) on a hit, ([], None) on none or an empty write set, (None, <why>) when the check
-    fails (exit 2, a timeout, an unreadable answer)."""
+    (held, failed, unanswered). ([{rollout, token}], None, None) on a hit, ([], None, None) on none or an empty write
+    set, (None, <why>, None) when the check fails (exit 2, an OS error, an unreadable answer), and (None, None, <why>)
+    when it never answers (P41-3): the first run waits recheck_timeout() (60 s); a timeout runs it once more at
+    recheck_retry() (180 s) when `retry` (begin's), and a second timeout, or a first one without retry (status's, so it
+    stays inside serial-score's cap), reads `no answer in <a>+<b> s` (`<a> s` without retry). Unanswered is never a
+    pass and never a refusal: begin reads it as a begin wait."""
     toks = write_set(chain, n)
     if not toks:
-        return [], None
+        return [], None, None
     cmd = [sys.executable, str(UNFINISHED_PY), "check", "--shape", "serial", "--resume", ctx.slug,
            "--tasks-dir", str(ctx.tasks)]
     for t in toks:
         cmd += ["--surface", t]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as e:
-        return None, reason_text(f"{type(e).__name__}: {e}", 160)
+    waits = [recheck_timeout()] + ([recheck_retry()] if retry else [])
+    r = None
+    for w in waits:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=w, stdin=subprocess.DEVNULL)
+            break
+        except subprocess.TimeoutExpired:
+            continue
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, reason_text(f"{type(e).__name__}: {e}", 160), None
+    if r is None:
+        return None, None, f"no answer in {'+'.join(_secs(w) for w in waits)} s"
     out = r.stdout.strip()
     if r.returncode == 0 and out == "none":
-        return [], None
+        return [], None, None
     if r.returncode == 3 and out.startswith("refuse "):
         held = []
         for line in r.stderr.splitlines():
             m = HELD_RE.match(line)
             if m:
                 held.append({"rollout": m.group(1), "token": m.group(2)})
-        return (held, None) if held else (None, f"no holds line beside `{out}`")
+        return (held, None, None) if held else (None, f"no holds line beside `{out}`", None)
     line = next((x for x in r.stderr.splitlines() if x.startswith("unfinished-rollout:")), "") or out
-    return None, reason_text(line or f"exit {r.returncode}", 160)
+    return None, reason_text(line or f"exit {r.returncode}", 160), None
 
 
 def chain_read(ctx, chain):
@@ -5545,9 +5659,11 @@ def cmd_status(ctx, a):
     restart = None if ended else restart_of(ctx, chain, fresh_rank, n_next, open_leg, halt, restarted)
     if restart is not None and restart["blockedBy"] is None:
         # ADR 0060 d3: what the next Leg writes, re-checked against the other rollouts (begin's re-check, read-only).
-        held, failed = surface_recheck(ctx, chain, n_next)
+        held, failed, unanswered = surface_recheck(ctx, chain, n_next, retry=False)
         if failed:
             restart["blockedBy"] = f"surface re-check failed: {failed}"
+        elif unanswered:
+            restart["blockedBy"] = f"surface re-check unanswered: {unanswered}"
         elif held:
             restart["blockedBy"] = f"surface held by [[{held[0]['rollout']}]] ({held[0]['token']})"
     items = needs_you(ctx, chain, None, None)

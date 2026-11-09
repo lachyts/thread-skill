@@ -10,6 +10,8 @@ ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of re
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel|serial]
         --resume <slug> (--repo <path> | --surface <token>... [--checkout <dir>]...) [--project <name> | --tasks <slug,...>]
         [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape parallel --repo <path>
+        --resume <slug> --surface-wait --running <slug,...|""> [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <slug> [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py clone --repo <Local:> --project <name>
         [--tasks-dir <dir>]
@@ -25,7 +27,8 @@ hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origi
 row's launch-folder checkout; plus one child,
 `bash skills/execute/scripts/self-rollout-check.sh --in-place <path>` (check's step 2c, `clone`) and `--resolve <Local:>
 <slug>` (`clone`'s rule 3 only), both read-only and memoised (SelfRollout), which run git and land.sh themselves. It
-writes nothing. The surface grammar (parse_token,
+writes nothing, except `check --surface-wait`'s surface-wait marker (no note; *Surface wait*, below). The surface
+grammar (parse_token,
 overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check`, `hold` and
 `pickups`, and by `running` (primary-hold.sh's verb, which otherwise loads only reconcile-rollout.py) only through leg.py,
 for an unstamped serial note, with its statement of a chain's checkouts (repo_parts, checkout_of, checkouts_of). What a
@@ -68,7 +71,13 @@ Rules.
   record's (rr._record_read) last open stop (rr._stop_state's `open`) a `halt` whose reason starts `nothing can start`.
   An unreadable record is not released. A released rollout holds no Project root against serial chains; against a
   second parallel run of its own project on the repo it is still that project's one unfinished rollout (ADR 0060 d5, as
-  ADR 0064 amends it).
+  ADR 0064 amends it). A surface wait (P41-3: a readable surface-wait marker, *Surface wait* below) takes the place of
+  that rule: released while no task the marker's `live` lists is running and none is integrating (an
+  awaiting-integration task never counts), whatever is set aside, paused or halted; an unreadable marker releases
+  nothing. A parallel rollout idle in a surface wait (no call in flight that its marker lists, no task integrating)
+  holds no Project root against serial chains that read the marker: it launches nothing until its own Surface re-check
+  passes, so no cycle forms. A serial chain on an engine snapshot from before P41-3 reads no marker (legacy_engine):
+  every serial resume read of it reads the rule above alone.
 - Checkout (ADR 0064): a Project root's git toplevel (its realpath when it is in no checkout). Two projects' parallel
   rollouts on one repo each run from their own clone: the default `<T>-rollout`, or `<T>-<slug>-rollout` (`clone`,
   below). A candidate SHARES this run's checkout when its checkout is --repo's toplevel, or --repo's in-place twin
@@ -226,7 +235,12 @@ here, at begin, ahead of rank: rank orders only the claims after begin.
 A serial resume then meets every unfinished, not complete parallel rollout's Project root that ws(R) or T(R) meets,
 unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting Integration) and paused
 (`paused:` or `pause_requested`) or with an open halt in its Run record: a call still in flight after a halt or in a
-pause's drain writes the root, so a rollout with one holds it (`… holds `<token>`, its Project root, …`). Every line
+pause's drain writes the root, so a rollout with one holds it (`… holds `<token>`, its Project root, …`). An idle surface
+wait holds nothing against a chain that reads the marker (parallel_hold's release: it launches nothing until its own
+check passes, and its check waits on that chain, so no cycle forms). The legacy reader rule (P41-3): a resuming chain
+stamped with an engine snapshot from before P41-3 (legacy_engine: its snapshot's unfinished-rollout.py lacks the text
+`--surface-wait`, SURFACE_WAIT_PROBE, or will not read) reads each parallel rollout by the old rule (parallel_hold's
+marker=False), as its own begin does, so no reader frees a chain its own begin would refuse. Every line
 keeps `holds `<token>``, which leg.py reads. A parallel resume (ADR 0064, clone_holders) also meets another project's
 parallel rollout in its own clone: one
 that is unfinished, not complete and has run (not never started), in no `supersedes:` link with this note, whose
@@ -297,15 +311,33 @@ leg.py cannot read (leg.py will not load, or chain_read raises) is counted as ru
 unreadable (<why>): counted as running` on stderr. stdout: `running <slug>` per rollout,
 sorted, or `none` (a missing tasks dir included); exit 0.
 
-Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
-<new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
+Surface wait (`check --shape parallel --repo <path> --resume <slug> --surface-wait --running <slugs>`, P41-3; execute
+§ 4.5 *Surface re-check*, its only caller): the resume check above, which owns the rollout's surface-wait marker,
+~/.config/thread/leases/<slug>.surface-wait.json (reconcile-rollout.py's _surface_wait_path; only this check writes
+and deletes it). --running is required (the lead's live task-call and seeded-revise slugs, comma-separated, `""` when
+none): without it, or with --surface-wait off a parallel --resume, or --running without --surface-wait, exit 2 before
+anything loads, the marker untouched. Its run order (surface_wait_check): validate the flags; load reconcile-rollout.py;
+check's own validation; resolve, read the old `since`, delete the marker (a delete that fails is exit 2); arm the deadline
+($THREAD_SURFACE_CHECK_DEADLINE, default 240 s; SIGALRM, SurfaceDeadline); compute; disarm, then write and exit. A
+refusal is exit 3 and writes the marker {rollout, written_at, since, why `[[<first>]] writes <token>`, holders, live},
+`since` carried over from a standing marker, `live` --running's entries as `next --running` reads them (a wikilink
+stripped to its slug, lowercased); a run its deadline cut is exit 4, stdout `unanswered`, and writes it with why
+`surface re-check unanswered after <d> s`; a pass is exit 0, `none`, the marker gone. Exit 5: a refusal while a serial
+chain on an engine snapshot from before P41-3 (legacy_engine) reaches the root (legacy_reach: every place a Leg it may
+still begin can reach, erring wide), since such a chain reads no surface wait: no marker, the refuse line and holder
+lines, then one `legacy: [[<c>]]: <why>: it reads no surface wait, so this rollout halts as before P41-3 (ADR 0043, ADR
+0060 d5)` line per such chain; execute halts on it as before. A marker it cannot write is exit 2.
+
+Output (check). stdout is exactly one line on exit 0, 3, 4 and 5: `none` | `supersede <slug>` | `interrupted <prior-slug>
+<new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]` | `unanswered` (exit 4, --surface-wait only). Slugs are filename stems; an unfinished
 note is root-only, so `<tasks dir>/<slug>.md` is exact. `WARN:` lines go only to stderr and never change
 stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` stderr line: a missing or
 non-directory --repo, --repo with serial or --surface or --checkout with parallel, no --surface with serial, a
 --surface token parse_token refuses, a relative --checkout, neither or both of --project/--tasks (both, with
 --resume), a --tasks note not found, a --resume naming no note directly in the tasks dir, a serial --resume whose
-chain leg.py cannot read, a missing tasks dir, or reconcile-rollout.py, serial-chains.py or (once an unfinished serial
-note is read) leg.py unloadable.
+chain leg.py cannot read, a missing tasks dir, reconcile-rollout.py, serial-chains.py or (once an unfinished serial
+note is read) leg.py unloadable, or (*Surface wait*) a bad --surface-wait or --running and a marker it cannot write or
+delete.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py pickups --repo <path> --tasks <slug,...>
         [--misfit <slug>=<why>]... [--tasks-dir <dir>]
@@ -391,26 +423,32 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   (reconcile-rollout.py's _start_unattended) whose chain and hold leg.py reads (an unreadable one is WARNed by
   serial_notes and left off, as begin's re-check would fail closed on it), and that has no Leg session and no stop
   needing Lachy: its chain state (leg.py's chain_read) is `not-started`, `ready`, `awaiting-successor` or
-  `completable` (WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`, `stuck`,
-  `incomplete`, `superseded`, `complete` or `dropped`; and leg.py's restart_of, from the contention-free plan for its
-  next Leg, is a finish, claim, wait or complete with no blockedBy (a started hand-over, a malformed `chain_copies:` or
-  a missing Chain copy keeps it off). A manual hand-over is on the list, for its next Leg (ADR 0076 d4).
+  `completable` (leg.py's WAITING_STATES), so never `paused`, `halted`, `restarting`, `live`, `stopped`, `stalled`,
+  `stuck`, `incomplete`, `superseded`, `complete` or `dropped`; it has no Leg session (leg.py's leg_session_of: an open
+  Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started` session that has not begun,
+  one whose begin waited included, since begin writes nothing on a begin wait: P41-3); and leg.py's restart_of, from
+  the contention-free plan for its next Leg, is a finish, claim, wait or complete with no blockedBy (a malformed
+  `chain_copies:` or a missing Chain copy keeps it off). leg.py's waiting_listed is this rule's one copy, which begin's
+  begin wait reads too (its `listed`). A manual hand-over is on the list, for its next Leg (ADR 0076 d4).
 - Order: leg.py's order_key (rank-led, ADR 0067 d9: a chain that has begun before one that has not, then the estate
   rank, then the first to begin or the earlier `captured:`, then the slug). `rank` is the chain's 1-based place.
 - Held (ADR 0076 d2): `held_by` is the first holder, by case-folded slug, that begin's surface re-check would name for
   its next Leg's write set (leg.py's write_set, as surface_recheck passes it, no --checkout): another serial chain by
   serial_waits (over serial_notes, so a chain whose rows are all merged holds nothing), or a parallel rollout's Project
-  root that write set or its checkouts meet; else null (an empty write set, a Complete Leg's, is never held). A held
-  chain keeps its place and is passed over.
+  root that write set or its checkouts meet (a parallel rollout idle in a surface wait holds none, P41-3, unless the
+  chain runs an engine snapshot from before P41-3: serial_resume_hits' legacy reader rule); else null (an empty write
+  set, a Complete Leg's, is never held). A held chain keeps its place and is passed over.
 - Room: the Mac-wide cap in force (reconcile-rollout.py's _capacity_state over capacity.py's read, then _cap_in_force:
   a fresh Capacity's C, else the Trickle, or the Away cap while Away; `cap` {n, by: capacity | trickle | away cap, why:
   the Capacity reading's why when it fell back, or its `maxWhy` when the reading is fresh but capacity_max will not
   resolve, else null}) less `running`: the Mac-wide running Rollout tasks (_running_by_rollout, leases read at --now,
-  Leg claims never) plus every root serial note's Leg session, done and dropped ones aside (a Leg counts from its
-  start, ADR 0076 d3: an open Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started`
-  session), floored at 0. An open Leg whose Leg lease reads lapsed at --now (_Leases' Leg rule, the Capacity count's:
-  90 min after its last write, 180 for a waiting one) holds no place: its session died without `leg.py close`, and
-  counting it would leave the room 0 until a repair; no lease file, or an unreadable one, still counts.
+  Leg claims never; under a rollout's surface-wait marker only its calls in flight, reconcile-rollout.py's
+  _counted_tasks) plus every root serial note's Leg session, done and dropped ones aside (a Leg counts from its
+  start, ADR 0076 d3: leg.py's leg_session_of, an open Leg, a standing restart `pending` or `started`, or a last Leg
+  handed off to a `started` session, one whose begin waited included), floored at 0. An open Leg whose Leg lease
+  reads lapsed at --now (_Leases' Leg rule, the Capacity count's: 90 min after its last write, 180 for a waiting one)
+  holds no place: its session died without `leg.py close`, and counting it would leave the room 0 until a repair; no
+  lease file, or an unreadable one, still counts.
 stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"n", "by", "why"}, "waiting": [{"slug",
 "rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null}; cwd, title, prompt and harness are
 restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain), but a Complete Leg's harness, which
@@ -426,10 +464,11 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -445,25 +484,36 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
             "_record_read", "_stop_state", "_truthy_flag", "_parse_ts", "_share_walks", "_walk_of", "_note_index",
-            "_capacity_state", "_cap_in_force", "_away_state", "_running_by_rollout", "_Leases")
+            "_capacity_state", "_cap_in_force", "_away_state", "_running_by_rollout", "_Leases", "_surface_wait_read",
+            "_surface_wait_write", "_surface_wait_drop", "_surface_wait_path", "_surface_wait_live")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
 LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by", "restart_of",
-             "leg_outcome")
+             "leg_outcome", "leg_session_of", "waiting_listed")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
 SC = None   # serial-chains.py, loaded by cmd_check and cmd_pickups (load_sc)
 LEG = None  # leg.py, loaded once the first unfinished serial note is read (load_leg)
 CHAINS = {}  # chain_read_of's reads: one leg.py read per serial note per process (every verb here writes no note)
-WAITING_STATES = ("not-started", "ready", "awaiting-successor", "completable")   # `waiting`: chain states on the list
+ENGINES = {}  # legacy_engine's reads: one probe read per distinct Engine snapshot per process, keyed by its path
+# The text that marks an engine from P41-3 on (legacy_engine): argparse names this flag in every copy of this script
+# from P41-3 on, and no older copy carries it.
+SURFACE_WAIT_PROBE = "--surface-wait"
+SURFACE_DEADLINE = 240.0   # check --surface-wait's own deadline, seconds ($THREAD_SURFACE_CHECK_DEADLINE)
 
 
 def die(msg):
     print(f"unfinished-rollout: {msg}", file=sys.stderr)
     sys.exit(2)
+
+
+class SurfaceDeadline(BaseException):
+    """check --surface-wait's deadline cut the computation (exit 4, `unanswered`). A BaseException, never an Exception,
+    so the `except Exception` handlers on the check's path (chain_hold, chain_read_of, load_module, reconcile-rollout.py's
+    own) never swallow it as an unreadable chain or note: it always reaches surface_wait_check."""
 
 
 class Parser(argparse.ArgumentParser):
@@ -746,7 +796,9 @@ def chain_hold(rr, path, tasks_dir):
     read the chain. The hold also carries `ws`, what its next Leg writes (leg.py's write_set for Leg n_next), and
     `wsFolders`, the launch folders of the rows that write set reads (write_rows): ADR 0067 d4's order and interim;
     and `openWs`, what its open Leg writes (write_set for that Leg; [] with none), which serial_waits' (M) meets; and
-    hold_of's own `rank`, `captured` (the rank-led order's inputs) and `holding` ((O)'s holder half, ADR 0067 d9)."""
+    hold_of's own `rank`, `captured` (the rank-led order's inputs) and `holding` ((O)'s holder half, ADR 0067 d9); and
+    `engineStamp`, the note's `engine_snapshot:` (None when unstamped), which serial_resume_hits reads for the legacy
+    reader rule (legacy_engine, P41-3)."""
     leg = load_leg(rr)
     _ctx, chain, read, why = chain_read_of(rr, path, tasks_dir)
     if why is not None:
@@ -757,6 +809,7 @@ def chain_hold(rr, path, tasks_dir):
         hold["wsFolders"] = [r.folder for r in leg.write_rows(chain, read["n_next"]) if r.folder]
         hold["openWs"] = leg.write_set(chain, hold["open"]["n"]) if hold["open"] is not None else []
         hold["copied"] = copied_of(chain.note, path.stem, [])
+        hold["engineStamp"] = rr._scalar(chain.note.get("engine_snapshot")) or None
         return hold, None
     except leg.Refuse as e:
         return None, e.msg
@@ -794,7 +847,8 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
     launch `folders`, and what its next Leg writes (`ws`, with those rows' launch folders, `wsFolders`), and for ADR
     0067 d9 its estate `rank`, `captured:` and `holding` (its rows in progress and done rows not yet landed); an
     unreadable chain has none of those but `ws`, its whole claim (`readable` False), with `rank` and `captured` read
-    from its frontmatter. `skip` names a note left out (a resuming chain's own)."""
+    from its frontmatter. Each entry, an unreadable one too, carries `engineStamp`, its `engine_snapshot:` (None when
+    unstamped: legacy_engine, P41-3). `skip` names a note left out (a resuming chain's own)."""
     out = []
     for path, note, where in notes:
         if where != "root" or rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) != "serial":
@@ -825,7 +879,7 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
                  why=f"{bad}: read as any, it holds everything" if bad else "", began=None, open=None, folders=[],
                  ws=tokens, wsFolders=[], openWs=[], readable=False, copied=copied_of(note, c["slug"], warns),
                  rank=SC.read_estate_rank(note, rr._parse_ts), captured=rr._scalar(note.get("captured")) or None,
-                 holding=tokens)
+                 holding=tokens, engineStamp=rr._scalar(note.get("engine_snapshot")) or None)
         # The hold is read even when `surfaces:` reads as any: a schedule still meets `any` (tokens, scope whole), but a
         # --resume compares against the unlanded rows' own cells (hold_of reads them apart from the claim, and falls
         # back to the whole claim, `any` here, only on a bad cell), so one hand-edited note never halts every rollout.
@@ -900,6 +954,39 @@ def next_works(s, git, vault):
     return union(turn(s["ws"]), launch_checkouts(s["wsFolders"], git, vault))
 
 
+def legacy_engine(stamp):
+    """Whether a serial chain stamped `engine_snapshot: <stamp>` runs an engine from before P41-3, which reads no
+    surface-wait marker (ADR 0043: it keeps its snapshot until one of its Legs closes `stopped:`): None (current), or
+    why not. An empty or None stamp reads as current (an unstamped chain runs this tree). Otherwise the snapshot's
+    skills/_shared/scripts/unfinished-rollout.py (the stamp's realpath, as engine-snapshot.py's real(stamp) reads it) is
+    current when the text `--surface-wait` appears anywhere in it (SURFACE_WAIT_PROBE's value: argparse names that flag
+    in every copy from P41-3 on, and no older copy carries it); a copy it cannot read is `its engine snapshot <stamp>
+    cannot be read (<err>)`, and one without the text `its engine snapshot <stamp> is from before P41-3`. Memoised per
+    path in ENGINES."""
+    if not stamp:
+        return None
+    path = Path(os.path.realpath(os.path.expanduser(stamp))) / "skills/_shared/scripts/unfinished-rollout.py"
+    key = str(path)
+    if key not in ENGINES:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            ENGINES[key] = f"its engine snapshot {stamp} cannot be read ({e.strerror or type(e).__name__})"
+        else:
+            ENGINES[key] = None if SURFACE_WAIT_PROBE in text else f"its engine snapshot {stamp} is from before P41-3"
+    return ENGINES[key]
+
+
+def legacy_reach(s, git, vault):
+    """Every place a Leg that serial chain s may still begin can reach, by its old begin's per-Leg re-check reach
+    (serial_resume_hits' reach on each Leg's write set and launch folders), erring wide: its claim, its unlanded rows'
+    tokens and its next Leg's write set, the checkouts each of those names (turn), and the checkouts of every unlanded
+    row's and its next Leg's launch folders. An over-reach costs only today's halt (check --surface-wait's exit 5).
+    serial_notes fills these keys for an unreadable chain too."""
+    return union(s["claim"], s["unlanded"], s["ws"], turn(s["claim"]), turn(s["unlanded"]), turn(s["ws"]),
+                 launch_checkouts(list(s["folders"]) + list(s["wsFolders"]), git, vault))
+
+
 def order_key(rr, slug, began, rank=None, captured=None):
     """ADR 0067 d4's order, rank-led (d9; leg.py's order_key, its one copy, which land's actual-claim check and claim's
     rank read too): a chain that has begun before one that has not, then the estate rank (a stamped chain before an
@@ -908,13 +995,24 @@ def order_key(rr, slug, began, rank=None, captured=None):
     return load_leg(rr).order_key(slug, began, rank, captured)
 
 
-def parallel_hold(rr, path, note, linked):
+def parallel_hold(rr, path, note, linked, marker=True):
     """ADR 0060 d4: whether an unfinished parallel rollout holds its Project root against serial chains. {released,
-    why, paused, halt, unreadable, busy}: released when nothing is running, integrating or awaiting Integration, a task
-    is set aside, and it awaits sign-off (`paused_for: sign-off`), or it is not paused and its Run record's last open
-    stop is a halt whose reason starts `nothing can start` (execute § 7's stuck halt). An unreadable record is not
-    released. `busy` counts its tasks running, integrating or awaiting Integration: a call in flight still writes the
-    root after a halt or during a pause's drain (check_resume reads it)."""
+    why, paused, halt, unreadable, busy, surfaceWait}, by one rule:
+    - `marker` False (a reader on an engine snapshot from before P41-3, serial_resume_hits' legacy rule), or no
+      surface-wait marker: released when nothing is running, integrating or awaiting Integration, a task is set aside,
+      and it awaits sign-off (`paused_for: sign-off`), or it is not paused and its Run record's last open stop is a halt
+      whose reason starts `nothing can start` (execute § 7's stuck halt). An unreadable record is not released. `busy`
+      counts its tasks running, integrating or awaiting Integration: a call in flight still writes the root after a halt
+      or during a pause's drain (check_resume reads it). `surfaceWait` is null.
+    - A readable surface-wait marker (reconcile-rollout.py's _surface_wait_read `ok`; execute § 4.5 *Surface re-check*,
+      P41-3): busy is its `integrating` tasks plus its `running` ones whose slug the marker's `live` lists (an
+      `awaiting-integration` task never counts: `next` holds it); busy > 0 is not released, `<busy> task(s) running or
+      in Integration`; busy 0 is released, why `surface wait: <the marker's why>`, whatever is set aside, paused or
+      halted. A parallel rollout idle in a surface wait (no call in flight that its marker lists, no task integrating)
+      holds no Project root against serial chains that read the marker: it launches nothing until its own Surface
+      re-check passes, so no cycle forms.
+    - An unreadable marker: the first rule exactly, never released (fail closed). `surfaceWait` is the marker's why,
+      or `unreadable: <why>`."""
     states = [rr._queue_state(t)[0] for _, t in linked]
     stamped = rr._valued(note.get("paused"))
     paused = stamped or rr._truthy_flag(note.get("pause_requested"))
@@ -926,7 +1024,22 @@ def parallel_hold(rr, path, note, linked):
         if stops and stops[-1].get("cause") == "halt":
             halt = str(stops[-1].get("reason") or "")
     busy = sum(st in ("running", "integrating", "awaiting-integration") for st in states)
-    out = {"released": False, "why": "", "paused": paused, "halt": halt, "unreadable": lines is None, "busy": busy}
+    sw = rr._surface_wait_read(path.stem) if marker else ("none", None, None)
+    out = {"released": False, "why": "", "paused": paused, "halt": halt, "unreadable": lines is None, "busy": busy,
+           "surfaceWait": None}
+    if sw[0] == "ok":
+        live = set(rr._surface_wait_live(sw[1]))
+        busy = sum(st == "integrating" or (st == "running" and tp.stem.lower() in live)
+                   for (tp, _t), st in zip(linked, states))
+        why = str(sw[1].get("why") or "a surface wait stands")
+        out.update(busy=busy, surfaceWait=why)
+        if busy:
+            out["why"] = f"{busy} task(s) running or in Integration"
+        else:
+            out.update(released=True, why=f"surface wait: {why}")
+        return out
+    if sw[0] == "unreadable":
+        out["surfaceWait"] = f"unreadable: {sw[2]}"
     if busy:
         out["why"] = f"{busy} task(s) running or in Integration"
     elif "set-aside" not in states:
@@ -941,6 +1054,8 @@ def parallel_hold(rr, path, note, linked):
         out.update(released=True, why=f"halted: {halt}")
     else:
         out["why"] = "not halted on its set-asides"
+    if out["released"] and sw[0] == "unreadable":
+        out.update(released=False, why=f"{out['why']}, but its surface-wait marker is unreadable ({sw[2]})")
     return out
 
 
@@ -1032,8 +1147,10 @@ def cmd_check(args, rr) -> int:
     warns, warned = [], set()
     vault = vault_root(tasks_dir)
     if args.resume is not None:
-        return check_resume(args, rr, tasks_dir, surfaces if serial else [path_token(repo, vault)], checkouts, vault,
-                            warns, warned)
+        toks = surfaces if serial else [path_token(repo, vault)]
+        if getattr(args, "surface_wait", False):
+            return surface_wait_check(args, rr, tasks_dir, toks, checkouts, vault, warns, warned)
+        return check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned)
     if serial:
         return check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
     env = git_env()
@@ -1251,7 +1368,7 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
         ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
         if ph["released"]:
             warns.append(f"WARN: [[{c['slug']}]] ({c['label']}; {ph['why']}) is released (ADR 0060): it holds no "
-                         f"Project root against serial chains while it waits on you, so this chain may write "
+                         f"Project root against serial chains while it waits, so this chain may write "
                          f"{SC.fmt_token(rtok)}; on resume it waits its turn while this chain holds it")
             continue
         hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) is an unfinished parallel rollout "
@@ -1263,7 +1380,92 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
     return finish(warns, "none", 0)
 
 
-def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> int:
+def surface_deadline():
+    """$THREAD_SURFACE_CHECK_DEADLINE seconds (default SURFACE_DEADLINE, 240): check --surface-wait's own deadline. A
+    value that is not a positive number reads 240."""
+    try:
+        v = float(os.environ.get("THREAD_SURFACE_CHECK_DEADLINE") or SURFACE_DEADLINE)
+    except ValueError:
+        return SURFACE_DEADLINE
+    return v if v > 0 and math.isfinite(v) else SURFACE_DEADLINE
+
+
+def _on_deadline(_signum, _frame):
+    raise SurfaceDeadline()   # the module-level name, looked up at raise time
+
+
+def _utc_now_z():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def surface_wait_check(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> int:
+    """`check --shape parallel --resume <slug> --surface-wait --running <slugs>` (execute § 4.5 *Surface re-check*,
+    P41-3): the parallel lead's Surface re-check, which owns the rollout's surface-wait marker (reconcile-rollout.py's
+    _surface_wait_path). main has validated the flags, loaded reconcile-rollout.py and cmd_check has run its own
+    validation; then, in order: resolve the slug, read the standing marker's `since`, delete the marker (a delete that
+    fails is exit 2, `cannot delete <path>: <why>`, before any deadline is armed, so a slow delete never reads as
+    unanswered); arm the deadline (surface_deadline(), SIGALRM raising SurfaceDeadline; none without setitimer);
+    compute (check_resume(..., collect=True)); disarm (first, in an inner finally, then the old handler back); then
+    write and exit:
+    - a refusal while a chain on an engine snapshot from before P41-3 reaches the root (`legacy`) -> exit 5, no marker:
+      the refuse line and holder lines, then one `legacy: [[<c>]]: <why>: …` line per such chain;
+    - a refusal with none -> exit 3: the marker {rollout, written_at, since (the old since, else now), why: `[[<first>]]
+      writes <token>`, holders, live (--running's entries, each a wikilink stripped to its slug and lowercased, as
+      `next --running` reads them)}, then the refuse line and holder lines;
+    - cut by the deadline -> exit 4: the marker, why `surface re-check unanswered after <d> s`; stdout `unanswered`;
+    - a pass -> exit 0, `none` (the marker already gone).
+    A marker it cannot write is exit 2, `cannot write <path>: <why>`."""
+    me = rr._wikilink_slug(args.resume) or args.resume.strip()
+    if not me:
+        die(f"--resume {args.resume}: no rollout note at {tasks_dir / (me + '.md')}")
+    # Each entry as `next --running` reads it: a wikilink stripped to its slug, lowercased (an entry left `[[pt1]]`
+    # would never match pt1's stem, so parallel_hold would read its call in flight as none and release the root).
+    live = [(rr._wikilink_slug(x) or x.strip()).lower() for x in (args.running or "").split(",") if x.strip()]
+    state, data, _why = rr._surface_wait_read(me)
+    old = data.get("since") if state == "ok" and isinstance(data.get("since"), str) and data.get("since") else None
+    err = rr._surface_wait_drop(me)
+    if err:
+        die(f"cannot delete {rr._surface_wait_path(me)}: {err}")
+    d = surface_deadline()
+    armed = hasattr(signal, "setitimer") and hasattr(signal, "SIGALRM")
+    result = None
+    try:
+        prior = None
+        try:
+            if armed:
+                prior = signal.signal(signal.SIGALRM, _on_deadline)
+                signal.setitimer(signal.ITIMER_REAL, d)
+            result = check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned, collect=True)
+        finally:
+            if armed:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, prior if prior is not None else signal.SIG_DFL)
+    except SurfaceDeadline:
+        result = None
+    now = _utc_now_z()
+
+    def write(why, holders):
+        e = rr._surface_wait_write(me, {"rollout": me, "written_at": now, "since": old or now, "why": why,
+                                        "holders": holders, "live": live})
+        if e:
+            die(f"cannot write {rr._surface_wait_path(me)}: {e}")
+
+    if result is None:
+        write(f"surface re-check unanswered after {d:g} s", [])
+        return finish(warns, "unanswered", 4)
+    line, code, errors, firsts, legacy = result
+    if code != 3:
+        return finish(warns, line, code, errors)
+    holders = line.split(" ", 1)[1].split(",")
+    if legacy:
+        return finish(warns, line, 5, list(errors) + [
+            f"legacy: [[{c}]]: {why}: it reads no surface wait, so this rollout halts as before P41-3 (ADR 0043, ADR "
+            "0060 d5)" for c, why in legacy])
+    write(f"[[{holders[0]}]] writes {firsts.get(holders[0], '?')}", holders)
+    return finish(warns, line, 3, errors)
+
+
+def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned, collect=False):
     """`--resume <slug>` (ADR 0060 d3, ADR 0067 d4): what a resuming rollout writes (a serial chain's write set, or a
     parallel rollout's root), against the others. A parallel resume meets every other unfinished serial note's rows
     not yet done (`undone`: a Chain copy's done row awaiting leg.py land holds no parallel rollout, whose clone
@@ -1274,7 +1476,11 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
     would work in
     (serial_waits: no cycle forms); then every unfinished parallel rollout's root its write set or checkouts meet,
     unless that rollout is released, or idle and paused or halted. Its only git is the nested-checkout read
-    (serial-chains.py's Git.checkout) and the launch folders' toplevels."""
+    (serial-chains.py's Git.checkout) and the launch folders' toplevels. `collect` (check --surface-wait's compute,
+    P41-3) returns (line, code, errors, firsts, legacy) instead of printing: `firsts` maps each hit to its token (a
+    serial hit's held token, a clone holder's `repo:<clone>`), and `legacy` is [(slug, why)] for each other unfinished
+    serial note on an engine snapshot from before P41-3 (legacy_engine) whose legacy_reach meets this rollout's root,
+    read only for a parallel resume under --surface-wait."""
     me = rr._wikilink_slug(args.resume) or args.resume.strip()
     if not me or not (tasks_dir / f"{me}.md").is_file():
         die(f"--resume {args.resume}: no rollout note at {tasks_dir / (me + '.md')}")
@@ -1284,7 +1490,7 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
     notes = list(rollout_notes(rr, tasks_dir, archive=False))
     git = SC.Git()
     top = git.checkout
-    hits = {}
+    hits, firsts, legacy = {}, {}, []
     if args.shape == "serial":
         hold, why = chain_hold(rr, tasks_dir / f"{me}.md", tasks_dir)
         if hold is None:
@@ -1292,21 +1498,34 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
         hits.update(serial_resume_hits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns,
                                        warned))
     else:
-        for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
+        serials = serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me)
+        for s in serials:
             # Only its rows not yet done: a Chain copy's done row awaiting leg.py land holds no parallel rollout, whose
             # clone integrates through origin, which that land never reaches (ADR 0067 d3).
             pairs = SC.overlap_pairs(toks, s["undone"], top)
             if pairs:
                 a, b = pairs[0]
+                firsts[s["slug"]] = SC.fmt_token(b)
                 hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) holds `{SC.fmt_token(b)}` for an "
                                    f"unlanded row, which this rollout writes as `{SC.fmt_token(a)}` (ADR 0060): "
                                    f"[[{me}]] waits its turn: re-run once [[{s['slug']}]] lands its rows there "
                                    f"({serial_remedy(s)})")
-        hits.update(clone_holders(args, rr, tasks_dir, me, mine, toks[0], notes, vault, warns, warned))
+        hits.update(clone_holders(args, rr, tasks_dir, me, mine, toks[0], notes, vault, warns, warned, firsts))
+        if getattr(args, "surface_wait", False):
+            # A chain on an engine snapshot from before P41-3 reads no surface wait, so while one reaches this root a
+            # refusal halts as before (exit 5): the old rule skips a halted, idle rollout, so no cycle forms.
+            for s in serials:
+                why = legacy_engine(s["engineStamp"])
+                if why is not None and any(SC.overlaps(x, toks[0], top) for x in legacy_reach(s, git, vault)):
+                    legacy.append((s["slug"], why))
     if hits:
         keys = sorted(hits, key=str.lower)
-        return finish(warns, "refuse " + ",".join(keys), 3, [hits[k] for k in keys])
-    return finish(warns, "none", 0)
+        line, code, errors = "refuse " + ",".join(keys), 3, [hits[k] for k in keys]
+    else:
+        line, code, errors = "none", 0, []
+    if collect:
+        return line, code, errors, firsts, legacy
+    return finish(warns, line, code, errors)
 
 
 def serial_resume_hits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned,
@@ -1314,11 +1533,16 @@ def serial_resume_hits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vau
     """A serial resume R's holders, {slug: line} (check_resume's serial half, its one copy, which `waiting` runs per
     listed chain in-process): every other unfinished serial note by serial_waits, then every unfinished, not complete
     parallel rollout whose Project root R's write set (`toks`), its launch folders' checkouts, the checkouts its tokens
-    name or --checkout meet, unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting
-    Integration) and paused or halted. `serials` (serial_notes over `notes`, all of them) and `parallels`
-    (parallel_roots over `notes`) are read once by a caller that re-checks many chains; R's own entry is skipped in
-    each."""
+    name or --checkout meet, unless parallel_hold reads it released (a rollout idle in a surface wait included, P41-3),
+    or idle (nothing running, integrating or awaiting Integration) and paused or halted. The legacy reader rule
+    (P41-3): R stamped with an engine snapshot from before P41-3 (legacy_engine of the hold's `engineStamp`, a snapshot
+    it cannot read included) reads each parallel rollout by the old rule, never the marker's release
+    (parallel_hold(..., marker=False)), since its own old begin reads no marker: so no reader (begin's re-check, `check
+    --resume`, leg.py status's restart, the Waiting list) frees a chain that its own begin would refuse. `serials`
+    (serial_notes over `notes`, all of them) and `parallels` (parallel_roots over `notes`) are read once by a caller
+    that re-checks many chains; R's own entry is skipped in each."""
     top = git.checkout
+    legacy = legacy_engine(hold.get("engineStamp")) is not None
     hits = serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned, serials)
     reach = union(toks, launch_checkouts(hold["wsFolders"], git, vault), turn(toks), checkouts)
     if parallels is None:
@@ -1329,10 +1553,12 @@ def serial_resume_hits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vau
         a = next((x for x in reach if SC.overlaps(x, rtok, top)), None)
         if a is None:
             continue
-        ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
-        # Skipped only while it writes nothing: released, or idle and paused or halted (one halted by its own entry
-        # re-check launched nothing, so the chain it waits on never waits on it). A call still in flight after a
-        # halt, or in a pause's drain, writes the root, so a rollout with one holds it.
+        ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0], marker=not legacy)
+        # Skipped only while it writes nothing: released (one idle in a surface wait included: it launches nothing until
+        # its own Surface re-check passes, P41-3), or idle and paused or halted (one halted by its own entry re-check
+        # launched nothing, so the chain it waits on never waits on it). A call still in flight after a halt, or in a
+        # pause's drain, writes the root, so a rollout with one holds it. A chain on an engine snapshot from before
+        # P41-3 reads no marker (marker=False), as its own begin does.
         if ph["released"] or (ph["busy"] == 0 and (ph["paused"] or ph["halt"] is not None)):
             continue
         hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) holds `{SC.fmt_token(rtok)}`, its "
@@ -1520,12 +1746,12 @@ def first_line_ts(rr, slug):
     return rr._parse_ts(lines[0].get("ts")) if lines else None
 
 
-def clone_holders(args, rr, tasks_dir, me, mine, tok, notes, vault, warns, warned) -> dict:
+def clone_holders(args, rr, tasks_dir, me, mine, tok, notes, vault, warns, warned, firsts=None) -> dict:
     """ADR 0064: a resuming parallel rollout against another project's in the same clone, {slug: line}. A hit is another
     project's unfinished, not complete parallel rollout that has run, with no `supersedes:` link to this one, whose
     Project root's checkout is --repo's, and which wins the tie: this rollout has not run, or the other's Run record
     began earlier (its first line's ts); ties and unreadable records break by slug order. With no --project or --tasks,
-    `mine` is the resuming note's own `projects:`."""
+    `mine` is the resuming note's own `projects:`. `firsts`, when given, gets each hit's token (`repo:<clone>`)."""
     me_path = tasks_dir / f"{me}.md"
     try:
         me_note = rr.Note(me_path)
@@ -1556,6 +1782,8 @@ def clone_holders(args, rr, tasks_dir, me, mine, tok, notes, vault, warns, warne
             if not wins:
                 continue
         rtok = path_token(root, vault)
+        if firsts is not None:
+            firsts[c["slug"]] = SC.fmt_token(rtok)
         hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) holds `{SC.fmt_token(rtok)}`, its Project "
                            f"root, which this rollout writes as `{SC.fmt_token(tok)}` (ADR 0064): [[{me}]] waits its "
                            "turn: two projects' rollouts never share a clone: /thread:schedule "
@@ -2033,21 +2261,17 @@ def cmd_unstarted(args, rr) -> int:
 
 # ---- the Waiting list (ADR 0076) --------------------------------------------------------------------------------------
 
-def leg_session(leg, ctx, chain, read, leases=None) -> bool:
-    """Whether a serial chain has a Leg session, which holds a place from its start (ADR 0076 d3): an open Leg, a
-    standing restart `pending` or `started` (a manual one starts none), or a last Leg handed off to a `started`
-    session that has not begun. With `leases` (a reconcile-rollout.py _Leases, the room's count), an open Leg whose
-    Leg lease reads lapsed is none (its session died without `leg.py close`: the Capacity count's rule,
-    _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a later boot or wake
-    restarting it); no lease file or an unreadable one still counts (a Leg on an older snapshot writes none)."""
+def leg_session(leg, ctx, chain, read, leases) -> bool:
+    """Whether a serial chain's Leg session holds a place in the room (ADR 0076 d3): leg.py's leg_session_of, its one
+    copy (an open Leg, a standing restart `pending` or `started`, or a last Leg handed off to a `started` session that
+    has not begun, a session whose begin waited included, P41-3: begin writes nothing), but an open Leg whose Leg lease
+    reads lapsed (`leases`, a reconcile-rollout.py _Leases) is none (its session died without `leg.py close`: the
+    Capacity count's rule, _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a
+    later boot or wake restarting it); no lease file or an unreadable one still counts (a Leg on an older snapshot
+    writes none)."""
     if read["open_leg"] is not None:
-        return leases is None or leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
-    restarted = read["restarted"]
-    if restarted is not None and restarted["how"] in ("pending", "started"):
-        return True
-    last = chain.legs.get(chain.last_n()) if chain.legs else None
-    return (last is not None and leg.leg_outcome(last["closed"]) == "handoff"
-            and (last["handover"] or "").startswith("started "))
+        return leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
+    return leg.leg_session_of(chain, read) is not None
 
 
 def cmd_waiting(args, rr) -> int:
@@ -2093,14 +2317,8 @@ def cmd_waiting(args, rr) -> int:
     git = SC.Git() if chains else None
     listed = []
     for path, ctx, chain, read in chains:
-        if not rr._start_unattended(chain.note):
-            continue
-        leg = load_leg(rr)
-        if read["state"] not in WAITING_STATES or leg_session(leg, ctx, chain, read):
-            continue
-        restart = leg.restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"],
-                                 read["restarted"])
-        if restart is None or restart["blockedBy"] is not None:
+        restart, _why = load_leg(rr).waiting_listed(ctx, chain, read)   # the list's rule, its one copy (begin's too)
+        if restart is None:
             continue
         hold, _why = chain_hold(rr, path, tasks_dir)
         if hold is None:
@@ -2298,6 +2516,12 @@ def main() -> int:
     c.add_argument("--regenerate", action="store_true", help="this run may supersede (schedule --regenerate)")
     c.add_argument("--resume", default=None,
                    help="a resuming rollout's slug (ADR 0060): its writes against what the others hold for it")
+    c.add_argument("--surface-wait", dest="surface_wait", action="store_true",
+                   help="execute § 4.5's Surface re-check only (--shape parallel --resume): it owns the rollout's "
+                        "surface-wait marker (P41-3)")
+    c.add_argument("--running", default=None,
+                   help="with --surface-wait: the lead's live task-call and seeded-revise slugs, comma-separated "
+                        "(\"\" when none)")
     c.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     h = sub.add_parser("hold", help="what one rollout holds against the others (ADR 0060): one JSON line")
     h.add_argument("--rollout", required=True, help="the rollout note's slug (or [[wikilink]])")
@@ -2327,9 +2551,19 @@ def main() -> int:
     wl.add_argument("--now", default=None, help="the clock for the Capacity, Away and lease reads (an ISO time)")
     wl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
+    if args.cmd == "check":
+        # check --surface-wait's flags, validated before anything is loaded or touched, so a standing marker stays
+        # byte-identical on any of these (P41-3).
+        if args.surface_wait and (args.resume is None or args.shape == "serial"):
+            die("--surface-wait is the parallel resume check's (--shape parallel --resume)")
+        if args.surface_wait and args.running is None:
+            die('--surface-wait needs --running <live slugs, "" when none>')
+        if args.running is not None and not args.surface_wait:
+            die("--running is --surface-wait's")
     rr = load_rr()
-    # Every verb here writes no note, so one walk of the tasks dir serves the whole process (p41-2): each serial note's
-    # _scan, leg.py's Chain (sharing this rr) and this script's own reads share it, and nothing outlives the process.
+    # Every verb here writes no note (but check --surface-wait's marker, no note), so one walk of the tasks dir serves
+    # the whole process (p41-2): each serial note's _scan, leg.py's Chain (sharing this rr) and this script's own reads
+    # share it, and nothing outlives the process.
     rr._share_walks()
     verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
              "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting}

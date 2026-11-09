@@ -4,6 +4,8 @@
 # `next` clears a merged one itself, off --dry-run. `next` reads the PR through gh (a stub here), `status` reads the
 # key alone (no gh), and the compare-and-swap removal keeps a hold rewritten since the read. Temp notes only; no vault,
 # no network.
+# H-surface* (P41-3; execute § 4.5 *Surface re-check*): a surface wait's marker holds every launch in `next`, a pause
+# still wins, and mark-started and mark-integrating refuse in the engine (exit 1, exit 5).
 # Usage: bash reconcile-rollout-hold.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -442,6 +444,113 @@ J=$(nxt)
 ok "$(gh_calls)" 1 "H25: owner/repo#7 and its URL make one gh call"
 ok "$(q "$J" "[d['start'], $hu]")" '[["a"],[["ro","rollout","MERGED",false,null,true],["a","task","MERGED",false,null,true]]]' "H25: … both release and both are cleared"
 ok "$(fm ro hold_until)|$(fm a hold_until)" "<none>|<none>" "H25: … both lines gone"
+
+# ── H-surface (P41-3; execute § 4.5 *Surface re-check*): a surface wait's marker ($EH/.config/thread/leases/
+# ro.surface-wait.json) holds every launch: no start, restart or seeded revise, no Integration not yet begun; only the
+# calls in flight and an Integration already begun go on. A pause still wins the verdict. mark-started and
+# mark-integrating refuse in the engine.
+SWM="$EH/.config/thread/leases/ro.surface-wait.json"
+swm() { mkdir -p "$EH/.config/thread/leases"; printf '%s\n' "$1" > "$SWM"; }
+swj() { printf '{"rollout": "ro", "written_at": "2026-10-02T14:00:00Z", "since": "2026-10-02T14:00:00Z", "why": "[[c]] writes repo:/x", "holders": ["c"], "live": [%s]}' "$1"; }
+mst() { HOME="$EH" python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "$NOW" "${@:2}" > "$D/ms.out" 2> "$D/ms.err"; rc=$?; }
+mig() { HOME="$EH" python3 "$SCRIPT" mark-integrating --tasks "$1" --tasks-dir "$D" --now "$NOW" "${@:2}" > "$D/mi.out" 2> "$D/mi.err"; rc=$?; }
+scen h-surface
+EVD="$D/events"
+mkro $'- [[a]]\n- [[b]]\n- [[r1]]'
+mkt a in_progress 'owner: lead' 'started: 2026-10-02T13:00+00:00'; mkt b open
+mkt r1 review "pr: $U/9" 'ready: 2026-10-02T13:30+00:00'
+swm "$(swj '')"
+J=$(THREAD_EVENTS_DIR="$EVD" nxt --running '')
+ok "$(q "$J" '[d["start"], d["restart"], d["slotLimit"], d["awaitingIntegration"], d["halt"]]')" '[[],[],0,[],null]' \
+   "H-surface: nothing starts or restarts, slotLimit 0, no Integration begins, halt null"
+ok "$(q "$J" "$holds")" '{"a":"surface wait: [[c]] writes repo:/x","b":"surface wait: [[c]] writes repo:/x","r1":"surface wait: [[c]] writes repo:/x"}' \
+   "H-surface: the stalled, queued and awaiting rows are held surface wait: <why>"
+ok "$(q "$J" '[d["surfaceWait"]["why"], d["surfaceWait"]["holders"], d["surfaceWait"]["live"], d["surfaceWait"]["since"], sorted(d["surfaceWait"]["held"])]')" \
+   '["[[c]] writes repo:/x",["c"],[],"2026-10-02T14:00:00Z",["a","b","r1"]]' "H-surface: surfaceWait reports the marker and the held rows"
+ok "$(ev)" '["hold-surface"]' "H-surface: idle-slots reads hold-surface"
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["running"], d["restart"]]')" '[[],[]]' "H-surface: with no --running, an in_progress row the marker does not list is no live call"
+swm "$(swj '"a"')"
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["running"], d["restart"], d["start"], d["halt"]]')" '[["a"],[],[],null]' "H-surface: … one it lists reads running, and nothing else launches"
+mkt i1 review "pr: $U/10" 'integrating: 2026-10-02T13:40+00:00'
+J=$(nxt --dry-run --running a)
+ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"]]')" '[["i1"],[]]' "H-surface: an Integration already begun goes on"
+rm -f "$D/i1.md"
+cp "$D/b.md" "$D/b.before"
+mst b
+ok "$rc" 1 "H-surface: mark-started refuses under a surface wait"
+has "$(cat "$D/ms.err")" "a surface wait stands on [[ro]]" "H-surface: … saying so"
+cmp -s "$D/b.md" "$D/b.before"; ok "$?" 0 "H-surface: … nothing written"
+swm 'not json'
+J=$(nxt --dry-run --running '')
+ok "$(q "$J" '[d["start"], d["restart"], d["awaitingIntegration"], d["surfaceWait"]["why"].startswith("unreadable: ")]')" '[[],[],[],true]' \
+   "H-surface: an unreadable marker still holds every launch"
+mst b
+ok "$rc" 1 "H-surface: … and mark-started still refuses"
+rm -f "$SWM"
+J=$(nxt --dry-run --running '')
+ok "$(q "$J" '[d["restart"], d["surfaceWait"]]')" '[["a"],null]' "H-surface: control: with no marker, the stalled row restarts"
+scen h-surface-stuck
+mkro $'- [[a]]'
+mkt a blocked 'owner: lead'
+swm "$(swj '')"
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["halt"], d["surfaceWait"]["held"]]')" '["stuck",[]]' "H-surface: with only set-aside rows, the surface wait holds nothing and the halt is stuck"
+scen h-surface-pause-drain
+mkro $'- [[b]]\n- [[r1]]' 'pause_requested: true'
+mkt b open; mkt r1 review "pr: $U/9" 'ready: 2026-10-02T13:30+00:00'
+swm "$(swj '')"
+cp "$D/ro.md" "$D/ro.before"
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["pausedNow"], d["halt"]]')" '[true,"paused"]' "H-surface-pause-drain: --dry-run: the soft pause drains past the held review row"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "H-surface-pause-drain: … the --dry-run note byte-identical"
+EVD="$D/events"
+J=$(THREAD_EVENTS_DIR="$EVD" nxt)
+ok "$(q "$J" '[d["pausedNow"], d["halt"], d["awaitingIntegration"]]')" '[true,"paused",[]]' "H-surface-pause-drain: a pause still wins: it stamps and reads paused"
+ok "$(fm ro paused | cut -c1-8)|$(fm ro pause_requested)" "paused: |<none>" "H-surface-pause-drain: … paused: stamped, pause_requested: gone"
+ok "$(ev)" '["pause-drain"]' "H-surface-pause-drain: … idle-slots pause-drain"
+scen h-surface-pause-stamped
+mkro $'- [[b]]' 'paused: 2026-10-02T13:00+00:00'
+mkt b open
+swm "$(swj '')"
+cp "$D/ro.md" "$D/ro.before"
+J=$(nxt)
+ok "$(q "$J" '[d["pausedNow"], d["halt"]]')" '[false,"paused"]' "H-surface-pause-stamped: a stamped pause reads paused under a surface wait"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "H-surface-pause-stamped: … the note byte-identical"
+scen h-surface-pause-live
+mkro $'- [[a]]\n- [[b]]' 'pause_requested: true'
+mkt a in_progress 'owner: lead'; mkt b open
+swm "$(swj '"a"')"
+J=$(nxt --dry-run --running a)
+ok "$(q "$J" '[d["pausedNow"], d["halt"]]')" '[false,null]' "H-surface-pause-live: control: a live call keeps the drain open"
+scen h-surface-integrate
+mkro $'- [[r1]]\n- [[b]]'
+mkt r1 review "pr: $U/9"; mkt b open
+swm "$(swj '')"
+cp "$D/r1.md" "$D/r1.before"
+mig r1
+ok "$rc" 5 "H-surface-integrate: mark-integrating exits 5 on a note not yet integrating"
+has "$(cat "$D/mi.err")" "SURFACE WAIT: [[r1]]'s Integration waits" "H-surface-integrate: … one SURFACE WAIT: line"
+cmp -s "$D/r1.md" "$D/r1.before"; ok "$?" 0 "H-surface-integrate: … the note byte-identical"
+ok "$(cat "$THREAD_EVENTS_DIR/ro.jsonl" 2>/dev/null | grep -c '"lane-taken"')" 0 "H-surface-integrate: … no lane-taken"
+ok "$([ -e "$THREAD_NOTE_LOCK_DIR/origin-lane.json" ] && echo y || echo n)" n "H-surface-integrate: … and no origin-lane.json"
+mig r1 --dry-run
+ok "$rc" 5 "H-surface-integrate: --dry-run: exit 5"
+mig r1,b
+ok "$rc" 1 "H-surface-integrate: a refused-status note beside it: exit 1"
+swm 'not json'
+mig r1
+ok "$rc" 5 "H-surface-integrate: an unreadable marker: exit 5"
+swm "$(swj '')"
+mkt r1 review "pr: $U/9" 'integrating: 2026-10-02T13:40+00:00'
+mig r1
+ok "$rc" 0 "H-surface-integrate: a note already integrating goes on"
+has "$(cat "$D/mi.out")" "(kept)" "H-surface-integrate: … its stamp kept"
+rm -f "$SWM"
+mkt r1 review "pr: $U/9"
+mig r1
+ok "$rc|$(fm r1 integrating | cut -c1-12)" "0|integrating:" "H-surface-integrate: control: with no marker, it stamps"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-hold: ALL PASS"; else echo "reconcile-rollout-hold: FAILED"; fi

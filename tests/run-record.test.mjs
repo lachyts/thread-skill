@@ -313,6 +313,13 @@ test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
   assert.deepEqual([l.kind, l.reason, l.free], ['idle-slots', 'hold-last-start', 3])
 })
 
+test('idle-slots (P41-3): a hold-surface reason (a surface wait) is accepted', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-surface', free: 2, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([l.kind, l.reason, l.free], ['idle-slots', 'hold-surface', 2])
+})
+
 test('the night record (p28-2): away-night, last-start-held and ran-past-morning land in <rollout>.jsonl as v 1', (t) => {
   const home = tmpHome(t)
   const emit = (task, kind, f) => emitOk(home, ['--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })

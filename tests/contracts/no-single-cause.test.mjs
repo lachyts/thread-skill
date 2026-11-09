@@ -24,8 +24,8 @@
 //                 silence judges* bound to SILENCE_JUDGED; the Companion is the Watchdog alone (ADR 0075 d5): with
 //                 Chorus not running nothing watches, and the section names no launchd fallback, no watchdog.py and no
 //                 notice to Lachy (ADR 0075 d2)
-//   reason-table  its table covers every `reason="…"` of steps 1.5 and 1.6, *Merge hold*, *Lane hold*, *lead-integrate's
-//                 exit 2* and § Room stop item 8
+//   reason-table  its table covers every `reason="…"` of steps 1.5 and 1.6 (a surface wait's included, P41-3), *Merge
+//                 hold*, *Lane hold*, *lead-integrate's exit 2* and § Room stop item 8
 //   repair-adrs   repair § 3g writes `lane-ack`; ADR 0048 says how p29-7 built it; ADRs 0033 and 0030 are amended
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -215,8 +215,8 @@ function check(f) {
   const bySilence = group(/^- judged by silence/, /^- judged by its own bound/)
   const byBound = group(/^- judged by its own bound/, /^- judged by a condition/)
   const never = group(/^- never judged by silence/, /^\*\*What `stalled` means/)
-  const CAUSES = ['sign-off', 'paused', 'room-stop', 'not-started', 'merge-hold', 'regenerating', 'cool-down', 'heat', 'away-cap', 'trickle',
-    'last-start', 'approved-queue', 'pr-hold', 'you']
+  const CAUSES = ['sign-off', 'paused', 'room-stop', 'not-started', 'merge-hold', 'regenerating', 'surface-wait', 'cool-down', 'heat',
+    'away-cap', 'trickle', 'last-start', 'approved-queue', 'pr-hold', 'you']
   const named = (txt) => CAUSES.filter((c) => new RegExp('`' + c + '`').test(txt))
   fail('watchdog', !wdc.includes('reconcile-rollout.py moving --rollout <rollout-note>') ||
     !['`moving`', '`stalled`', '`waiting`', '`skip`'].every((v) => wdc.includes(v)) ||
@@ -226,7 +226,7 @@ function check(f) {
     !wdc.includes('The Watchdog is Chorus\'s Companion alone: with Chorus not running nothing watches, and a stall is read when Lachy runs /thread:status') ||
     /launchd|watchdog\.py|ntfy|only notif|notif(?:y|ies) (?:Lachy|him)/i.test(wdc) ||
     /a live lead never reads/i.test(wdc) ||
-    JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating']) ||
+    JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating', 'surface-wait']) ||
     JSON.stringify(named(bySilence).sort()) !== JSON.stringify([...silenceJudged].sort()) ||
     JSON.stringify(named(byBound)) !== JSON.stringify(['room-stop']) ||
     !['paused', 'sign-off', 'not-started', 'you'].every((c) => named(never).includes(c)) ||
@@ -339,7 +339,7 @@ test('control: a lane-site exit 2 routed to § 7, or the marker clause dropped, 
 
 test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, a launchd fallback back, or nothing-watches dropped, fails watchdog', () => {
   only('status', 'So `stalled` is a reason to look', 'So a live lead never reads `stalled`; it is a reason to look', 'watchdog')
-  only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating")', 'SILENCE_JUDGED = ("merge-hold",)', 'watchdog')
+  only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait")', 'SILENCE_JUDGED = ("merge-hold", "regenerating")', 'watchdog')
   only('status', '  - `merge-hold` (at `--stall-after`:', '  - `pr-hold`, and `merge-hold` (at `--stall-after`:', 'watchdog')
   only('status', 'The Watchdog is Chorus\'s Companion alone: with Chorus not', 'The Watchdog is Chorus\'s Companion, and a launchd job when Chorus is not running: with Chorus not', 'watchdog')
   only('status', 'with Chorus not\nrunning nothing watches, and a stall is read when Lachy runs /thread:status', 'with Chorus not\nrunning a job watches', 'watchdog')
@@ -349,6 +349,8 @@ test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, a
 
 test('control: a reason the table leaves out fails reason-table', () => {
   only('status', '| `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |\n', '', 'reason-table')
+  // P41-3: step 1.6's surface wait reason has its row
+  only('status', "| `surface wait: <surfaceWait.why>` (§ 4.5's Surface re-check refused", "| `a wait` (§ 4.5's Surface re-check refused", 'reason-table')
 })
 
 test('control: § 3g without lane-ack, or ADR 0048 without its build section, fails repair-adrs', () => {

@@ -18,7 +18,8 @@
 //                (or his word) takes over, else ask; (e)'s open-Leg clause needs (d)'s evidence and the take-over
 //                prompt;
 //   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence (a missing Chain copy remade
-//                by `leg.py copies`, then the restart goes on; a malformed `chain_copies:` stops), (d)'s evidence whenever
+//                by `leg.py copies`, then the restart goes on; a malformed `chain_copies:` stops; a surface re-check
+//                status left unanswered restarts, P41-3, since begin retries and writes nothing), (d)'s evidence whenever
 //                `restart.takeOver` (the restart clause included: a standing restart outranks an open Leg), the
 //                "checks only" sentence, and the steps re-read → `restarted --pending` → `create_thread` →
 //                `--started`, or the manual handoff → `--manual`; never `leg.py begin`;
@@ -82,7 +83,8 @@ const S_STATES = [['complete'], ['dropped', 'superseded'], ['incomplete'], ['pau
   ['awaiting-successor'], ['completable'], ['stopped'], ['stalled'], ['stuck'], ['not-started', 'ready']]
 const BLOCKERS = [/^`halt` → never: \(c\) first\.$/, /^`open Leg K \(session <id>\)` → /, /^`handover started <X>` → /, /^`restart Leg N \(<how>\)` → /,
   /^`chain_copies: <why>: fix the note` → report it, and stop/, /^`chain copy missing: <C> \(leg\.py copies --rollout <note> remakes it\)` → /,
-  /^`surface held by \[\[B\]\] \(<token>\)` → never restart \(ADR 0060\)/, /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
+  /^`surface held by \[\[B\]\] \(<token>\)` → never restart \(ADR 0060\)/, /^`surface re-check unanswered: <why>` → restart it: no hold is known/,
+  /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
 const LEG_VERBS = ['begin', 'claim', 'done', 'close', 'set-aside', 'smoke', 'file-fix', 'handed', 'file-followup', 'land']
 
 function check(f) {
@@ -165,7 +167,7 @@ function check(f) {
     'the take-over form (`restart.takeOver`)'])
 
   if (bullets.length !== BLOCKERS.length || BLOCKERS.some((re, k) => !re.test(bullets[k] ?? ''))) {
-    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, chain_copies, chain copy missing, surface held, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
+    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, chain_copies, chain copy missing, surface held, unanswered, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
   }
   // ADR 0067 d2: a missing Chain copy is agent-fixable (leg.py copies remakes it, then the restart goes on).
   const cm = bullets.find((x) => x.startsWith('`chain copy missing: <C>')) ?? ''

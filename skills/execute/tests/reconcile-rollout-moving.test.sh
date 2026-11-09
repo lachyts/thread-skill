@@ -3,7 +3,8 @@
 # verdict (moving | stalled | waiting | skip), and the narrowings it reads: the Lane hold (`lane-hold` / `lane-ack`, `next`'s
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
-#   S1 stop_spans' reason and index   M1-M22 the verdicts   N1-N9b the narrowings, each through the real verbs
+#   S1 stop_spans' reason and index   M1-M23 the verdicts (M23 a surface wait, P41-3)   N1-N9b the narrowings, each
+#   through the real verbs
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR per scenario and ignores THREAD_TEST_EVENTS_DIR.
@@ -517,6 +518,32 @@ ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"]]')" \
   '["waiting","last-start","last start: no history for cross-cutting (0 past runs, 3 needed), none starts in the 2 h before the Morning at 13:00"]' \
   "M22: a row the last starts hold → a meant wait naming it, whatever the silence, never stalled"
 ok "$(j "$J" 'd["until"]')" '"2026-10-26T13:00:00+00:00"' "M22: until the Morning"
+
+# ── M23 (P41-3): a surface wait holding a row → waiting surface-wait, judged by silence ──────────────────────────────
+# swm <live slugs, JSON list body>: this rollout's surface-wait marker in $D/home
+swm() { mkdir -p "$D/home/.config/thread/leases"
+  printf '{"rollout": "%s", "written_at": "2026-10-26T11:00:00Z", "since": "2026-10-26T11:00:00Z", "why": "[[c]] writes repo:/x", "holders": ["c"], "live": [%s]}\n' "$RO" "$1" > "$D/home/.config/thread/leases/$RO.surface-wait.json"; }
+scen m23
+QUEUE="a b"; mkro; mkt a open; mkt b open
+swm ''
+entry 2026-10-26T11:50:00Z
+ok "$(vcr)" '["waiting","surface-wait","surface wait: [[c]] writes repo:/x"]' "M23: an idle rollout whose surface wait holds its queued rows → waiting surface-wait"
+ok "$(vc --stall-after 5)" '["stalled","silent"]' "M23: … judged by silence: past --stall-after it is stalled silent"
+setaside_infra b 2026-10-26T08:00:00Z
+entry 2026-10-26T11:50:00Z
+ok "$(vc)" '["waiting","surface-wait"]' "M23: a run set-aside beside it is no re-entry work under the surface wait"
+scen m23-live
+QUEUE="a b"; mkro; running a; mkt b open
+swm '"a"'
+entry 2026-10-26T11:50:00Z
+ok "$(vc)" '["moving",null]' "M23: a running row the marker lists is work: moving"
+swm ''
+ok "$(vc)" '["waiting","surface-wait"]' "M23: … one it does not list is held, not work"
+scen m23-pause
+QUEUE="a b"; mkro "pause_requested: true"; mkt a review "pr: $PR" "ready: 2026-10-26T07:00+00:00"; mkt b open
+swm ''
+entry 2026-10-26T11:50:00Z
+ok "$(vc)" '["waiting","paused"]' "M23: pause_requested, a surface wait and an awaiting row: the pause drains and wins"
 
 # ════ The narrowings, each through the real verbs ══════════════════════════════════════════════════════════════════
 

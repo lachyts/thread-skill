@@ -46,7 +46,14 @@
 #           chains only (X10, D5); the `hold` verb (X11); a resuming parallel rollout (X12); a chain whose
 #           `surfaces:` reads as any holds only its unlanded rows' cells against a resume (X13); a resuming chain against a
 #           parallel rollout's root: held while a call is in flight, paused or halted included, never by one idle and
-#           paused or halted (X14); the release WARNs and both --resume reads keep the nested-checkout rule (X15, p33-3)
+#           paused or halted (X14; P41-3: a surface wait's marker releases it while idle, unless a call its marker lists
+#           is in flight or an Integration has begun, an unreadable marker never, and a chain on an engine snapshot from
+#           before P41-3 reads the old rule); the release WARNs and both --resume reads keep the nested-checkout rule
+#           (X15, p33-3)
+#   X16     check --surface-wait (P41-3; execute § 4.5 *Surface re-check*): the marker its refusal writes (a), deletes on a
+#           pass (b), cannot delete (c) or write (d), an unanswered run (e), since carried (f), the deadline inside chain_hold
+#           (g), --running required (h), exit 5 while a chain on a pre-P41-3 engine snapshot reaches the root (i-m),
+#           legacy_reach (n), the exact run order (o) and a wikilinked --running entry, stored and read as its slug (p)
 #   T1-T16  a resuming chain's order (ADR 0067 d4, rank-led by d9): a chain that has begun before one that has not, then
 #           the estate rank, then the first to begin, slug order breaking ties, said as such (T1-T6); ADR 0060's yield, toward a later chain
 #           only when it is free to run, so no cycle forms (T7, T11, T14 with three chains), a stuck chain working no
@@ -68,6 +75,8 @@
 #           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
 #           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
 #           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
+#   WL1-WL12 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
+#           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -960,6 +969,11 @@ ok "$(jv '[d["shape"], d["scope"], d["held"], d["released"]]')" "['parallel', 'r
 mkt pt2.md p in_progress 'owner: lead'
 hv --rollout p
 ok "$(jv '[d["scope"], d["held"], d["released"]]')" "['whole', ['repo:$R'], []]" "X11: … one with a running task holds it"
+mkdir -p "$S/home/.config/thread/leases"
+printf '{"rollout": "p", "written_at": "2026-10-30T10:00:00Z", "since": "2026-10-30T10:00:00Z", "why": "[[cx]] writes repo:%s", "holders": ["cx"], "live": []}\n' "$R" > "$S/home/.config/thread/leases/p.surface-wait.json"
+HOME="$S/home" hv --rollout p
+ok "$(jv '[d["scope"], d["held"], d["released"]]')" "['released', [], ['repo:$R']]" "X11: … idle in a surface wait (its running task not live in the marker), it releases its root (P41-3)"
+has "$(jv 'd["why"]')" "surface wait: [[cx]] writes repo:$R: it holds no Project root against serial chains" "X11: … why names the surface wait"
 ST=done mkro pd.md "$R" "$OTHER"
 hv --rollout pd
 ok "$(jv '[d["scope"], d["held"]]')" "['none', []]" "X11: a done note holds nothing"
@@ -968,8 +982,9 @@ ok "$rc|$out" "2|" "X11: a note not found exits 2"
 scen x12
 mkro p.md "$R" "$OTHER"; mkt pt1.md p open 'owner: lead'
 LOG=- mkchain cq "$DEMO" q1~open~"\`repo:$R\`"
-chk --resume p --repo "$R"
+HOME="$S/home" chk --resume p --repo "$R"
 ok "$out|$rc" "refuse cq|3" "X12: a resuming parallel rollout refuses while a chain's unlanded row holds its root"
+ok "$(ls -A "$S/home/.config/thread/leases" 2>/dev/null)" "" "X12: … and, without --surface-wait, writes no surface-wait marker (P41-3)"
 has "$err" "holds \`repo:$R\` for an unlanded row, which this rollout writes as \`repo:$R\` (ADR 0060): [[p]] waits its turn" "X12: … waits its turn"
 mkchain cq "$DEMO" q1~done~"\`repo:$R\`" q2~blocked~'`ext:cms`'
 chk --resume p --repo "$R"
@@ -1018,6 +1033,272 @@ ok "$out|$rc" "refuse p|3" "X14: halted with a call still in flight (execute § 
 mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1' 'integrating: 2026-10-30T10:10+00:00'
 chs --resume ca --surface "repo:$R"
 ok "$out|$rc" "refuse p|3" "X14: … and in Integration too"
+# P41-3: a parallel rollout in a surface wait (its marker in $S/home) holds its root only for a call in flight that its
+# marker lists, or an Integration already begun; an unreadable marker holds by the old rule, never released.
+swm() { mkdir -p "$S/home/.config/thread/leases"; printf '%s\n' "$2" > "$S/home/.config/thread/leases/$1.surface-wait.json"; }
+mkj() { printf '{"rollout": "%s", "written_at": "2026-10-30T10:00:00Z", "since": "2026-10-30T10:00:00Z", "why": "[[%s]] writes repo:%s", "holders": ["%s"], "live": [%s]}' "$1" "$2" "$R" "$2" "$3"; }
+chsw() { HOME="$S/home" chk --shape serial "$@"; }
+STOPLOG="- 2026-10-28T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x
+- 2026-10-28T10:00+00:00 Leg 1 closed: stopped: out of time"
+OLDSNAP="$S/old-snap"; mkdir -p "$OLDSNAP/skills/_shared/scripts"
+printf '# an engine from before P41-3\n' > "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+rm -rf "$S/events"; mkro p.md "$R" "$OTHER"; mkt pt1.md p in_progress 'owner: lead'; mkt pt2.md p open
+swm p "$(mkj p ca '')"
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14 (P41-3): idle in a surface wait, its in_progress row not live in the marker: no holder against a chain that reads it"
+swm p "$(mkj p ca '"pt1"')"
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14 (P41-3): … with that row live in its marker, it holds its root"
+swm p "$(mkj p ca '')"
+mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1' 'integrating: 2026-10-30T10:10+00:00'
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14 (P41-3): … an Integration already begun holds it under the marker"
+mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1'
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14 (P41-3): … one only awaiting Integration does not (next holds it)"
+mkt pt1.md p open; swm p 'not json'
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14 (P41-3): an unreadable marker, P idle and not halted: it holds its root (fail closed)"
+mkt pt1.md p in_progress 'owner: lead'; swm p "$(mkj p ca '')"
+LOG=- mkchain ca "$DEMO"$'\n'"engine_snapshot: \"$OLDSNAP\"" a1~open~"\`repo:$R\`"
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14 (P41-3): a resuming chain on an engine snapshot from before P41-3 reads P by the old rule"
+LOG=- mkchain ca "$DEMO"$'\n'"engine_snapshot: \"$S/gone-snap\"" a1~open~"\`repo:$R\`"
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14 (P41-3): … and so does one whose snapshot is gone"
+printf '\n# --surface-wait\n' >> "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+LOG=- mkchain ca "$DEMO"$'\n'"engine_snapshot: \"$OLDSNAP\"" a1~open~"\`repo:$R\`"
+chsw --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14 (P41-3): control: a snapshot whose copy names --surface-wait reads the marker"
+printf '# an engine from before P41-3\n' > "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+# The three-chain case: P's marker names only c1; c2 meets P's root only through a smoke row, on another file than c1's
+rm -f "$T/ca.md" "$T/a1.md"
+LOG=- mkchain c1 "$DEMO" k1~open~"\`repo:$R//a.py\`"
+LOG="$STOPLOG" mkchain c2 "$OTHER" m1~done~"\`repo:$R//b.py\`" m2~open~"$VA"
+mkt pt1.md p open; swm p "$(mkj p c1 '')"
+chsw --resume c2 --surface "repo:$R//b.py" --surface vault:Work/Projects/A
+ok "$out|$rc" "none|0" "X14 (P41-3): three chains: P waits on c1, and c2, reaching P's root only through a smoke row, passes it"
+rm -f "$S/home/.config/thread/leases/p.surface-wait.json"
+chsw --resume c2 --surface "repo:$R//b.py" --surface vault:Work/Projects/A
+ok "$out|$rc" "refuse p|3" "X14 (P41-3): … control: with no marker, idle P holds it"
+export THREAD_EVENTS_DIR="$EV0"
+
+# ── X16 (P41-3): check --surface-wait, the parallel lead's Surface re-check, owns the rollout's surface-wait marker ──
+scen x16
+EV0=$THREAD_EVENTS_DIR; export THREAD_EVENTS_DIR="$S/events"
+MK="$S/home/.config/thread/leases/p.surface-wait.json"; mkdir -p "$S/home"   # the marker needs a home dir
+chw() { HOME="$S/home" chk "$@"; }
+mj() { python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$MK" "$1"; }
+there() { [ -e "$1" ] && echo y || echo n; }
+STOPLOG="- 2026-10-28T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x
+- 2026-10-28T10:00+00:00 Leg 1 closed: stopped: out of time"
+OLDSNAP="$S/old-snap"; mkdir -p "$OLDSNAP/skills/_shared/scripts"
+printf '# an engine from before P41-3\n' > "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+mkro p.md "$R" "$OTHER"; mkt pt1.md p in_progress 'owner: lead'
+LOG=- mkchain cq "$DEMO" q1~open~"\`repo:$R\`"
+chw --resume p --repo "$R" --surface-wait --running pt1
+ok "$out|$rc" "refuse cq|3" "X16 (a): a chain on P's root: refuse, exit 3"
+ok "$(mj '[d["rollout"], d["why"], d["holders"], d["live"]]')" "['p', '[[cq]] writes repo:$R', ['cq'], ['pt1']]" \
+   "X16 (a): … and the marker names the first holder, its token, the holders and the live calls"
+ok "$(mj 'd["since"] == d["written_at"]')" "True" "X16 (a): … since is now on a first refusal"
+has "$err" "holds \`repo:$R\` for an unlanded row, which this rollout writes as \`repo:$R\`" "X16 (a): … today's holder line"
+# (h) --running is required; every refusal before the marker is touched leaves it byte-identical
+cp "$MK" "$S/mk0"
+chw --resume p --repo "$R" --surface-wait
+ok "$rc|$out" "2|" "X16 (h): --surface-wait without --running exits 2"
+has "$err" "--surface-wait needs --running" "X16 (h): … saying so"
+cmp -s "$MK" "$S/mk0"; ok "$?" 0 "X16 (h): … the marker byte-identical"
+chw --resume p --repo "$R" --running pt1
+ok "$rc|$out" "2|" "X16 (h): --running without --surface-wait exits 2"
+has "$err" "--running is --surface-wait's" "X16 (h): … saying so"
+cmp -s "$MK" "$S/mk0"; ok "$?" 0 "X16 (h): … the marker byte-identical"
+chw --resume p --repo /nonexistent --surface-wait --running ""
+ok "$rc|$out" "2|" "X16 (h): check's own validation (a --repo that is no directory) exits 2"
+has "$err" "not a directory" "X16 (h): … saying so"
+cmp -s "$MK" "$S/mk0"; ok "$?" 0 "X16 (h): … the marker byte-identical"
+chw --shape serial --resume p --surface "repo:$R" --surface-wait --running ""
+ok "$rc|$out" "2|" "X16 (h): --surface-wait on a serial check exits 2"
+has "$err" "--surface-wait is the parallel resume check's" "X16 (h): … saying so"
+# (f) since carries over across refusals
+since0=$(mj 'd["since"]')
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc|$(mj 'd["since"]')|$(mj 'd["live"]')" "refuse cq|3|$since0|[]" "X16 (f): a second refusal carries since over, live from --running"
+# (b) a pass deletes it
+mkchain cq "$DEMO" q1~done~"\`repo:$R\`"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc|$(there "$MK")" "none|0|n" "X16 (b): once the row is done the check passes and the marker is gone"
+# (c) a marker it cannot delete
+mkdir -p "$MK/x"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$rc|$out" "2|" "X16 (c): a directory at the marker path: exit 2"
+has "$err" "cannot delete" "X16 (c): … cannot delete"
+rm -rf "$MK"
+# (d) a marker it cannot write
+LOG=- mkchain cq "$DEMO" q1~open~"\`repo:$R\`"
+chmod 555 "$S/home/.config/thread/leases"
+chw --resume p --repo "$R" --surface-wait --running ""
+chmod 755 "$S/home/.config/thread/leases"
+ok "$rc|$out|$(there "$MK")" "2||n" "X16 (d): a refusal whose marker cannot be written: exit 2"
+has "$err" "cannot write" "X16 (d): … cannot write"
+# (e) a check its deadline cuts is unanswered, exit 4, and writes the marker
+THREAD_SURFACE_CHECK_DEADLINE=0.001 chw --resume p --repo "$R" --surface-wait --running pt1
+ok "$out|$rc" "unanswered|4" "X16 (e): a check cut by its deadline: unanswered, exit 4"
+ok "$(mj 'd["why"].startswith("surface re-check unanswered after")')|$(mj 'd["holders"]')|$(mj 'd["live"]')" "True|[]|['pt1']" \
+   "X16 (e): … its marker says so"
+since1=$(mj 'd["since"]')
+chw --resume p --repo "$R" --surface-wait --running pt1
+ok "$out|$rc|$(mj 'd["why"]')|$(mj 'd["since"]')" "refuse cq|3|[[cq]] writes repo:$R|$since1" \
+   "X16 (e, f): a normal run deletes it and writes its own, since carried over from the unanswered one"
+# (g) the deadline fires inside chain_hold: SurfaceDeadline is a BaseException, so no `except Exception` swallows it
+cat > "$S/x16g.py" <<'PY'
+import contextlib, importlib.util, io, json, os, sys, time, types
+check, tasks, repo, mk, mode = sys.argv[1:6]
+spec = importlib.util.spec_from_file_location("ur_x16g", check)
+ur = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ur)
+state = {"entered": False, "finished": False}
+class StubRefuse(Exception):
+    pass
+class StubChain:
+    def __init__(self, ctx):
+        state["entered"] = True
+        time.sleep(10)
+        state["finished"] = True
+stub = types.SimpleNamespace(Chain=StubChain, Refuse=StubRefuse, chain_read=lambda ctx, chain: {})
+ur.load_leg = lambda rr: stub
+if mode == "fake":
+    class Fake(Exception):
+        pass
+    ur.SurfaceDeadline = Fake
+os.environ["THREAD_SURFACE_CHECK_DEADLINE"] = "1"
+sys.argv = ["unfinished-rollout.py", "check", "--tasks-dir", tasks, "--resume", "p", "--repo", repo, "--surface-wait",
+            "--running", "pt1"]
+out, t0 = io.StringIO(), time.time()
+with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+    try:
+        rc = ur.main()
+    except SystemExit as e:
+        rc = e.code
+took = time.time() - t0
+why = json.load(open(mk))["why"] if os.path.exists(mk) else None
+print(f"{out.getvalue().strip()}|{rc}|{state['entered']}|{state['finished']}|{why}|{took < 5}")
+if mode == "real":
+    print(issubclass(ur.SurfaceDeadline, BaseException) and not issubclass(ur.SurfaceDeadline, Exception))
+PY
+gout=$(HOME="$S/home" python3 "$S/x16g.py" "$CHECK" "$T" "$R" "$MK" real)
+ok "$(printf '%s' "$gout" | head -1)" "unanswered|4|True|False|surface re-check unanswered after 1 s|True" \
+   "X16 (g): the alarm inside chain_hold reads unanswered (exit 4), the stub cut mid-sleep, in under 5 s"
+ok "$(printf '%s' "$gout" | sed -n 2p)" "True" "X16 (g): … SurfaceDeadline is a BaseException, never an Exception"
+gout=$(HOME="$S/home" python3 "$S/x16g.py" "$CHECK" "$T" "$R" "$MK" fake)
+hasnt "$gout" "unanswered|4" "X16 (g): control: with an Exception in its place, chain_read_of swallows it and the run is no unanswered"
+# (i) a legacy holder: cq on an engine snapshot from before P41-3 reaches P's root, so P halts as before (exit 5)
+LOG=- mkchain cq "$DEMO"$'\n'"engine_snapshot: \"$OLDSNAP\"" q1~open~"\`repo:$R\`"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc|$(there "$MK")" "refuse cq|5|n" "X16 (i): a refusal while a chain on a pre-P41-3 snapshot reaches the root: exit 5, no marker"
+has "$err" "legacy: [[cq]]: its engine snapshot $OLDSNAP is from before P41-3: it reads no surface wait, so this rollout halts as before P41-3 (ADR 0043, ADR 0060 d5)" \
+   "X16 (i): … with its legacy line"
+has "$err" "holds \`repo:$R\` for an unlanded row" "X16 (i): … after today's holder line"
+HOME="$S/home" python3 "$CHECK" hold --tasks-dir "$T" --rollout p > "$S.out" 2> "$S.err"
+ok "$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["scope"])' "$S.out")" "whole" "X16 (i): … and hold reads P whole"
+# (l) without --surface-wait the same fixture is today's exit 3
+chw --resume p --repo "$R"
+ok "$out|$rc" "refuse cq|3" "X16 (l): without --surface-wait, today's refusal (exit 3)"
+printf '\n# --surface-wait\n' >> "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc|$(there "$MK")" "refuse cq|3|y" "X16 (i): control: a snapshot whose copy names --surface-wait is current: exit 3 and a marker"
+printf '# an engine from before P41-3\n' > "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+# (j) a gone snapshot reads as legacy
+LOG=- mkchain cq "$DEMO"$'\n'"engine_snapshot: \"$S/gone-snap\"" q1~open~"\`repo:$R\`"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc" "refuse cq|5" "X16 (j): a stamp naming a gone snapshot reads as legacy: exit 5"
+has "$err" "legacy: [[cq]]: its engine snapshot $S/gone-snap cannot be read" "X16 (j): … cannot be read"
+# (k) three parties: P refuses on unstamped c1; legacy c2 meets P's root only through a smoke row
+rm -f "$T/cq.md" "$T/q1.md"
+LOG=- mkchain c1 "$DEMO" k1~open~"\`repo:$R\`"
+LOG="$STOPLOG" mkchain c2 "$OTHER"$'\n'"engine_snapshot: \"$OLDSNAP\"" m1~done~"\`repo:$R//b.py\`" m2~open~"$VA"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc|$(there "$MK")" "refuse c1|5|n" "X16 (k): a legacy chain reaching the root only through a smoke row: exit 5, no marker"
+has "$err" "legacy: [[c2]]" "X16 (k): … naming it"
+LOG="$STOPLOG" mkchain c2 "$OTHER" m1~done~"\`repo:$R//b.py\`" m2~open~"$VA"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc|$(there "$MK")" "refuse c1|3|y" "X16 (k): … with c2 unstamped, exit 3 and a marker"
+# (m) a later row launches in P's root: legacy_reach reads every unlanded row's launch folder
+rm -f "$T/c2.md" "$T/m1.md" "$T/m2.md"
+LOG=- mkchain c3 "$OTHER"$'\n'"engine_snapshot: \"$OLDSNAP\"" r1~open~'`vault:Work/Projects/Z`' r2~open~'`vault:Work/Projects/Y`'~"@$R"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc" "refuse c1|5" "X16 (m): a legacy chain with a later row launched in P's root: exit 5"
+has "$err" "legacy: [[c3]]" "X16 (m): … naming it"
+LOG=- mkchain c3 "$OTHER"$'\n'"engine_snapshot: \"$OLDSNAP\"" r1~open~'`vault:Work/Projects/Z`' r2~open~'`vault:Work/Projects/Y`'~"@/x"
+chw --resume p --repo "$R" --surface-wait --running ""
+ok "$out|$rc" "refuse c1|3" "X16 (m): control: launched from /x, it reaches nothing there: exit 3"
+# (n) legacy_reach itself, in-process
+nout=$(python3 - "$CHECK" "$T" "$R" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+check, tasks, repo = sys.argv[1:4]
+spec = importlib.util.spec_from_file_location("ur_x16n", check)
+ur = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ur)
+SC = ur.load_sc()
+git, vault = SC.Git(), ur.vault_root(Path(tasks))
+z = SC.parse_token("vault:Work/Projects/Z")
+base = {"claim": [z], "unlanded": [z], "ws": [z], "wsFolders": []}
+print(("repo", repo) in ur.legacy_reach({**base, "folders": [repo]}, git, vault),
+      ("repo", repo) in ur.legacy_reach({**base, "folders": []}, git, vault),
+      ("repo", repo) in ur.legacy_reach({"claim": [f"repo:{repo}//x.py"], "unlanded": [], "ws": [], "folders": [],
+                                         "wsFolders": []}, git, vault))
+PY
+)
+ok "$nout" "True False True" "X16 (n): legacy_reach takes an unlanded row's launch folder's checkout, and turn's of its claim"
+# (o) the run order: the delete runs with no timer armed, before the compute, which runs with it armed
+printf '{"rollout": "p", "written_at": "2026-11-01T00:00:00Z", "since": "2026-11-01T00:00:00Z", "why": "x", "holders": ["c1"], "live": []}\n' > "$MK"
+oout=$(HOME="$S/home" THREAD_SURFACE_CHECK_DEADLINE=30 python3 - "$CHECK" "$T" "$R" "$MK" <<'PY'
+import contextlib, importlib.util, io, json, os, signal, sys
+check, tasks, repo, mk = sys.argv[1:5]
+spec = importlib.util.spec_from_file_location("ur_x16o", check)
+ur = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ur)
+rec = []
+load_rr, check_resume = ur.load_rr, ur.check_resume
+def wrapped_rr():
+    rr = load_rr()
+    drop = rr._surface_wait_drop
+    def logged(stem):
+        rec.append((signal.getitimer(signal.ITIMER_REAL)[0], os.path.exists(mk)))
+        return drop(stem)
+    rr._surface_wait_drop = logged
+    return rr
+def wrapped_cr(*a, **k):
+    rec.append(("compute", signal.getitimer(signal.ITIMER_REAL)[0]))
+    return check_resume(*a, **k)
+ur.load_rr, ur.check_resume = wrapped_rr, wrapped_cr
+def run(*extra):
+    sys.argv = ["unfinished-rollout.py", "check", "--tasks-dir", tasks, "--resume", "p", "--repo", repo, "--surface-wait",
+                *extra]
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            return ur.main()
+        except SystemExit as e:
+            return e.code
+rc = run("--running", "pt1")
+ok = len(rec) == 2 and rec[0] == (0.0, True) and rec[1][0] == "compute" and rec[1][1] > 0
+print(ok, rc, json.load(open(mk))["since"], signal.getitimer(signal.ITIMER_REAL)[0])
+rec.clear()
+print(run(), rec)
+PY
+)
+ok "$(printf '%s' "$oout" | head -1)" "True 3 2026-11-01T00:00:00Z 0.0" \
+   "X16 (o): the delete runs unarmed with the marker standing, then the compute armed; since carried; disarmed after"
+ok "$(printf '%s' "$oout" | sed -n 2p)" "2 []" "X16 (o): … and a missing --running exits 2 before reconcile-rollout.py loads"
+# (p) a wikilinked --running entry is stored as its slug, as `next --running` reads it: an entry left `[[pt1]]` would
+# match no stem, so parallel_hold would read pt1's call in flight as none and release P's root while pt1 still writes it
+chw --resume p --repo "$R" --surface-wait --running '[[pt1]]'
+ok "$out|$rc|$(mj 'd["live"]')" "refuse c1|3|['pt1']" "X16 (p): a wikilinked --running entry is written to live as its slug"
+chw --shape serial --resume c1 --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X16 (p): … so pt1's call in flight, live in the marker, still holds P's root against a resuming chain"
+printf '{"rollout": "p", "written_at": "2026-11-01T00:00:00Z", "since": "2026-11-01T00:00:00Z", "why": "x", "holders": ["c1"], "live": ["[[pt1]]"]}\n' > "$MK"
+chw --shape serial --resume c1 --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X16 (p): … and a marker whose live holds the wikilink reads it as its slug too"
 export THREAD_EVENTS_DIR="$EV0"
 # X15 (p33-3 beside ADR 0060): the release WARNs and both --resume reads keep the nested-checkout rule, as the schedule
 # checks do: a checkout nested inside another by path is its own repo, so it never meets a hold or a release on the
@@ -1641,6 +1922,14 @@ has "$err" "[[ro-o]] (Other; has run: " "P9: … naming the holder"
 has "$err" "holds \`repo:$R-rollout\`, its Project root, which this rollout writes as \`repo:$R-rollout\` (ADR 0064): [[ro-d]] waits its turn: two projects' rollouts never share a clone: /thread:schedule Demo --regenerate moves it to its own clone" "P9: … and the line"
 chk --resume ro-o --repo "$R-rollout"
 ok "$out|$rc" "none|0" "P9: … the one that has run never waits on a fresh one"
+mkdir -p "$S/home"; HOME="$S/home" chk --resume ro-d --repo "$R-rollout" --surface-wait --running ""
+ok "$out|$rc" "refuse ro-o|3" "X14 (P41-3, clone): the clone holder is a surface wait too: exit 3"
+ok "$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print([d["holders"], d["why"]])' "$S/home/.config/thread/leases/ro-d.surface-wait.json")" \
+   "[['ro-o'], '[[ro-o]] writes repo:$R-rollout']" "X14 (P41-3, clone): … its marker names the holder and repo:<clone>"
+HOME="$S/home" python3 "$CHECK" hold --tasks-dir "$T" --rollout ro-d > "$S.out" 2> "$S.err"
+ok "$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["scope"], d["why"].startswith("surface wait: [[ro-o]] writes repo:"))' "$S.out")" \
+   "released True" "X14 (P41-3, clone): … and hold reads it released, why the surface wait"
+rm -f "$S/home/.config/thread/leases/ro-d.surface-wait.json"
 mkt d1.md ro-d open 'owner: lead-d'
 em ro-o lead-entry '{"by":"heartbeat","session":"S"}' 2026-10-30T10:00:00Z
 em ro-d lead-entry '{"by":"heartbeat","session":"S"}' 2026-10-30T11:00:00Z
@@ -2685,6 +2974,40 @@ wl
 ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wa', 'ro-p'), ('wb', None)]|wb" \
   "WL4: a parallel rollout with a call in flight holds its Project root: the chain there is passed over"
 ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "1|2" "WL4: … and its running task holds a place"
+# WL11 (P41-3): ro-p in a surface wait, its marker in $S/home: idle, it holds nothing against a chain that reads the
+# marker, and only its calls in flight hold a place; a chain on an engine snapshot from before P41-3 reads the old rule
+OLDSNAP="$S/old-snap"; mkdir -p "$OLDSNAP/skills/_shared/scripts"
+printf '# an engine from before P41-3\n' > "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+swl() { mkdir -p "$S/home/.config/thread/leases"; printf '{"rollout": "ro-p", "written_at": "%s", "since": "%s", "why": "[[x]] writes repo:/x", "holders": ["x"], "live": [%s]}\n' "$WNOW" "$WNOW" "$1" > "$S/home/.config/thread/leases/ro-p.surface-wait.json"; }
+swl ''
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')|$(wj 'd["running"]')" "[('wa', None), ('wb', None)]|wa|0" \
+  "WL11: idle in a surface wait, ro-p holds no Project root and no place: the chain there is next"
+swl '"p1"'
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')" "[('wa', 'ro-p'), ('wb', None)]|1" \
+  "WL11: … its call in flight, live in the marker, holds both"
+swl ''
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)"$'\n'"engine_snapshot: \"$OLDSNAP\"" a1~open~"\`repo:$W//f.py\`"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["next"]')" "[('wa', 'ro-p'), ('wb', None)]|wb" \
+  "WL11: a chain on an engine snapshot from before P41-3 reads ro-p by the old rule: held"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)"$'\n'"engine_snapshot: \"$S/gone-snap\"" a1~open~"\`repo:$W//f.py\`"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]][0]')" "('wa', 'ro-p')" "WL11: … and so does one whose snapshot is gone"
+printf '\n# --surface-wait\n' >> "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)"$'\n'"engine_snapshot: \"$OLDSNAP\"" a1~open~"\`repo:$W//f.py\`"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]][0]')" "('wa', None)" "WL11: control: a snapshot whose copy names --surface-wait reads the marker"
+printf '# an engine from before P41-3\n' > "$OLDSNAP/skills/_shared/scripts/unfinished-rollout.py"
+mkt p1.md ro-p open
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)"$'\n'"engine_snapshot: \"$OLDSNAP\"" a1~open~"\`repo:$W//f.py\`"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]][0]')" "('wa', 'ro-p')" "WL11: ro-p with nothing in progress, the legacy chain still reads it held (idle, not halted)"
+LOG=- LFOLD="$W" mkchain wa "$DEMO$UN"$'\n'"$(rk 1)" a1~open~"\`repo:$W//f.py\`"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]][0]')" "('wa', None)" "WL11: … and an unstamped one reads the marker: not held"
+rm -f "$S/home/.config/thread/leases/ro-p.surface-wait.json"
 scen wl5
 LOG=- mkchain wp "$DEMO$UN"$'\n'"$PAUSED" p1~open~'`vault:Work/Projects/P`'
 mkchain ws "$DEMO$UN" s1~done~"$VB" s2~blocked~"$VC"
@@ -2741,6 +3064,37 @@ printf '[defaults]\ncapacity_max = "lots"\n' > "$S/home/.config/thread/rollouts.
 wl
 ok "$(wj 'd["cap"]["n"]')|$(wj 'd["cap"]["by"]')" "2|trickle" "WL10: a fresh Capacity whose capacity_max will not resolve falls back to the Trickle"
 has "$(wj 'd["cap"]["why"]')" "rollouts.toml" "WL10: … and why names the refused file, never null"
+# WL12 (P41-3): what `waiting` reads after a begin wait. begin writes nothing, so the successor of a started hand-over
+# that waits at begin still reads as that Leg session: off the list and its place counted (ADR 0076 d3), and begin's
+# JSON says so (listed false, its unlisted why), so legs.md § Begin lists it as a needs-you item; a stamped chain with
+# no Leg session stays on the list, held (listed true).
+tscen wl12
+LOG=$(LFOLD="$W" lg $D29 open) LFOLD="$W" mkchain hh "$OTHER" h1~open~"\`repo:$W//f.py\`"
+LOG="$(LFOLD="$W" lg $D28 open)"$'\n'"- $D29 Leg 1 closed: handoff to Leg 2 in cc-x from $W"$'\n'"- $D29 Leg 1 hand-over: started sess-9" \
+  LFOLD="$W" mkchain ws "$DEMO$UN"$'\n'"$(rk 1)" s1~open~"\`repo:$W//f.py\`"
+LOG=- LFOLD="$W" mkchain wn "$OTHER$UN"$'\n'"$(rk 2)" n1~open~"\`repo:$W//f.py\`"
+capf 4
+# lb <slug> [session] -> $out, $rc: leg.py begin in $W (session sess-9 by default), HOME and the lock dir in $S
+lb() { (cd "$W" && HOME="$S/home" THREAD_LEG_LOCK_DIR="$S/locks" python3 "$LEGPY" begin --rollout "$T/$1.md" --tasks-dir "$T" \
+  --vault "$S/vault" --session "${2:-sess-9}" --cwd "$W") > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); }
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')" "[('wn', 'hh')]|2|2" \
+  "WL12: before any begin: ws, handed off to started sess-9, is off the list; its session and hh's open Leg hold places"
+cp "$T/ws.md" "$S/ws0"
+lb ws
+ok "$rc|$(wj 'd["beginWait"]')|$(wj 'd["listed"]')|$(wj 'd["unlisted"]')" "3|held|False|its Leg session stands (handover started sess-9)" \
+  "WL12: sess-9's begin waits on hh (exit 3, held) and says the Waiting list will not list ws"
+has "$(wj 'd["status_line"]')" 'state=waiting reason="begin wait: surface held: [[hh]] holds ' "WL12: … its status line a begin wait, never halted"
+cmp -s "$T/ws.md" "$S/ws0"; ok "$?" 0 "WL12: … with nothing written"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "[('wn', 'hh')]|2|2|None" \
+  "WL12: after it, waiting reads the same: ws still off the list and its session still counted (so legs.md lists that wait)"
+lb wn sess-n
+ok "$rc|$(wj 'd["beginWait"]')|$(wj 'd["listed"]')|$(wj '"unlisted" in d')" "3|held|True|False" \
+  "WL12: a stamped chain with no Leg session: its begin wait is listed"
+wl
+ok "$(wj '[(w["slug"], w["held_by"]) for w in d["waiting"]]')|$(wj 'd["running"]')" "[('wn', 'hh')]|2" \
+  "WL12: … and waiting still lists it, held by hh, its begin wait counting no place"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

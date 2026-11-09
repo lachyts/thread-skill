@@ -9,6 +9,7 @@
 # p28-4: a lead's lease (~/.config/thread/leases/<rollout>.json) keeps its Rollout in the count; one that has lapsed leaves
 # it (L-cases). Every lease a call writes lands in its scenario's $D/home, and THREAD_MACHINE_TIMES stands in for the
 # Mac's boot and wake, so nothing reads this machine's.
+# SW1 (P41-3): a rollout in a surface wait counts only the calls in flight its marker lists (_counted_tasks).
 # Usage: bash reconcile-rollout-trickle.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -872,5 +873,19 @@ lease ro-dead 2026-10-02T12:05:00Z
 J=$(nx ro-x)
 ok "$(q "$J" "[$el, d[\"start\"], d[\"slotLimit\"]]")" '[[{},{"ro-dead":3}],["x1","x2","x3","x4"],4]' \
   "L10: Away, ro-dead's lapsed lease leaves the count: ro-x fills to min(ceiling, Away cap)"
+
+# ── SW1 (P41-3): a rollout in a surface wait counts only its calls in flight (its marker's `live`) ──────────────────
+scen sw1-count
+mkro ro-a 3; mkt a1 ro-a open
+mkro ro-b 4; mkt one ro-b in_progress 'owner: lead-b'; mkt two ro-b in_progress 'owner: lead-b'
+swmk() { mkdir -p "$D/$LEASES"; printf '%s' "$1" > "$D/$LEASES/ro-b.surface-wait.json"; }
+J=$(nx ro-a --dry-run)
+ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"ro-b":2}' "SW1: control: no marker: ro-b's two in_progress tasks count"
+swmk '{"rollout": "ro-b", "written_at": "2026-10-02T14:00:00Z", "since": "2026-10-02T14:00:00Z", "why": "[[c]] writes repo:/x", "holders": ["c"], "live": ["one"]}'
+J=$(nx ro-a --dry-run)
+ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"ro-b":1}' "SW1: under ro-b's surface wait only the call its marker lists counts"
+swmk 'not json'
+J=$(nx ro-a --dry-run)
+ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"ro-b":2}' "SW1: an unreadable marker counts every in_progress task (fail closed)"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

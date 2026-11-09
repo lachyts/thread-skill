@@ -675,20 +675,65 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is bounded at 180 minutes. Nobody is stopped mid-task. Only code files and
   `any` rank-wait: the vault and `ext:` never do (d6). _Avoid_: lock, lease,
   preemption.
-- **Begin wait** — a Leg that cannot begin yet waiting, then beginning itself
-  (ADR 0075 d1; built by P41-3, and `moving`'s reading of it by P41-4). Two
-  causes: a surface re-check left unanswered on a busy Mac, and another
+- **Begin wait** — a Leg that cannot begin yet, waiting (ADR 0075 d1 as ADR
+  0076 d2 amends it; built by P41-3). Two causes: a surface re-check left
+  unanswered on a busy Mac (60 s, then once more at 180 s), and another
   rollout's hold on a place this Leg would write (a surface stand, ADR 0060).
-  `leg.py begin` ends `state=waiting reason="begin wait: …"` with nothing
-  written, never `halted`; the session polls the check and runs begin again
-  once it passes, and its only record is a marker outside the vault. A Leg
-  never begins without a passing check: a check still unanswered after its
-  longer retry reads `unanswered`, never a pass and never a refusal. Every
-  other begin refusal stays a halt. `reconcile-rollout.py moving` reads a Begin
-  wait as `waiting` while its marker is fresh, so the **Watchdog** can recover
-  one whose session died (d5). Parallel execute's § 4.5 Surface re-check waits
-  the same way. Not a **Rank wait** (two begun chains meeting at a claim).
+  `leg.py begin` ends `state=waiting reason="begin wait: …"` (exit 3,
+  `beginWait`) with nothing written, never `halted`. No session polls the
+  check and no marker records it. A chain the **Waiting list** lists once
+  begin has written nothing (begin's `listed`: stamped `start: unattended`, a
+  chain state on the list, no Leg session standing) stays on it (ADR 0076
+  d2), P44-3 ends the session, and the Stage begins it again from the list
+  once its way is clear. Any other begin wait is a needs-you item, its
+  `unlisted` saying why: a chain with no `start: unattended` or in a state
+  off the list, or one whose Leg session still stands (the successor of a
+  started hand-over, a standing
+  restart `pending` or `started`, a take-over's open Leg), which `waiting`
+  keeps off the list and counts against the room (ADR 0076 d3). It waits on
+  `/thread:execute [[<slug>]]` instead. A Leg never begins without a
+  passing check: a check still unanswered after its longer retry reads
+  `unanswered`, never a pass and never a refusal. Every other begin refusal
+  stays a halt, a check that fails included. Parallel execute's version is a
+  **Surface wait**. Not a **Rank wait** (two begun chains meeting at a claim).
   _Avoid_: begin halt, surface halt, retry loop.
+- **Surface wait** — a parallel rollout whose own Surface re-check (execute §
+  4.5) refused (exit 3: a serial chain, or another project's rollout in its
+  clone, now holds its Project root) or went unanswered (exit 4: the check's
+  240 s deadline cut it), waiting instead of halting (P41-3; ADR 0060 d5 as
+  P41-3 amends it). Its marker,
+  `~/.config/thread/leases/<rollout>.surface-wait.json`, is written and
+  deleted only by that check (`unfinished-rollout.py check --surface-wait`),
+  which needs `--running`, the lead's live calls (without it, exit 2 and the
+  marker untouched). It never lapses: a rollout with one launches nothing, so
+  a dead lead's marker holds only what it already held, until the next entry's
+  check. While it stands, `next` holds every start, restart, seeded revise and
+  Integration not yet begun (`surface wait: <why>`), and `mark-started` and
+  `mark-integrating` refuse them in the engine; only the calls in flight and
+  an Integration already begun (`integrating:`) go on. A pause still wins. On
+  the **Origin lane**, its task not yet integrating neither holds the lane nor
+  waits in it. A parallel rollout idle in a surface wait (no call in flight
+  that its marker lists, no task integrating) holds no Project root against
+  serial chains that read the marker: it launches nothing until its own
+  Surface re-check passes, so no cycle forms. A serial chain stamped with an
+  engine snapshot from before P41-3 keeps it until one of its Legs closes
+  `stopped:` (ADR 0043's move rule), and reads no surface-wait marker
+  meanwhile: every serial resume read of such a chain (begin's re-check,
+  `check --resume`, the Waiting list) reads each parallel rollout by the old
+  rule, never the marker's release. So while such a chain reaches a parallel
+  rollout's Project root, that rollout's Surface re-check halts on a refusal
+  as it did before (exit 5, `surface held: …`, § 7) instead of waiting, and
+  the old rule skips a halted, idle rollout: no cycle forms. A check cut by
+  its deadline (exit 4) reads no chain, so it writes the marker whatever chain
+  reaches the root: the Waiting list then holds a chain on an engine snapshot
+  from before P41-3 that reaches it, so the Stage never starts one, and one
+  begun by hand halts at begin (`surface held: [[<rollout>]] holds <token>`),
+  as it would have while the rollout ran, until Lachy begins it again. Before
+  P41-3 an unanswered check halted the rollout (exit 2), so such a chain
+  skipped it and began; now it waits for the rollout's next answered check,
+  which passes, or refuses and, while that chain still reaches the root, halts
+  (exit 5). `moving` reads it `waiting surface-wait`, judged by silence.
+  _Avoid_: surface halt, surface hold (a pre-P41-3 halt).
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -709,7 +754,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rows' surfaces, and releases the rest, its done rows' included; it works no
   checkout, since it uses no index or HEAD. A parallel
   rollout awaiting sign-off, or halted with nothing able to start, holds no
-  Project root against serial chains, though it is still its project's one
+  Project root against serial chains, nor does one idle in a **Surface wait**
+  (against a chain that reads the marker), though it is still its project's one
   unfinished parallel rollout on the repo. Each reclaims its whole claim on resume, and
   waits its turn for a place another rollout took meanwhile: whoever released
   a place yields it to a chain free to run (ADR 0067 d4's order, rank-led by
@@ -864,8 +910,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Rollout clone**, take turns. `mark-integrating` takes a rollout's
   **Integration lane** only while no other rollout on the origin holds its own
   (a fresh lease, its Run-record lane open on a task that holds the lane, no
-  merge hold, no open halt, no `paused:` stamp), and passes it in turn to the
-  rollout that has waited longest (its waiting list, `origin-lane.json`); a
+  merge hold, no open halt, no `paused:` stamp, and, in a **Surface wait**, only
+  while that task's Integration has begun (`integrating:`)), and passes it in
+  turn to the rollout that has waited longest (its waiting list,
+  `origin-lane.json`, where a rollout in a **Surface wait** waits only for an
+  Integration already begun); a
   refused lead yields its own lane (`lane-freed release=origin`), and its
   **origin wait** (`origin-wait`, read-only) re-checks until its turn. A merge
   hold frees it; merge-task's base pin keeps every merge correct where two
@@ -1456,8 +1505,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Companion's lead at the Stage, which is Chorus's reading (d3). From P41-4
   it also watches a serial note's waiting Leg (a **Begin wait**, a Capacity
   or review wait), `stalled` once its session is gone or it goes stale (ADR
-  0075 d5). Its `stalled` is a reason to look, never by itself a reason to
-  start a second lead. With Chorus not running nothing watches, and a stall
+  0075 d5), and a parallel **Surface wait** reads `waiting surface-wait`. Its
+  `stalled` is a reason to look, never by itself a reason to start a second
+  lead. With Chorus not running nothing watches, and a stall
   is read when Lachy runs `/thread:status`.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.

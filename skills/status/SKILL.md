@@ -472,7 +472,8 @@ carries one, and its `reason` on an indented `→` line for `stalled` and `waiti
 `Moving: not read offline (a PR hold stands)` render as they are. A `stalled` reading is a reason to look (§ The
 Watchdog's reading), never by itself a recommendation to resume.
 
-**The Hold line** (ADR 0060), right under the Moving line, only for a rollout awaiting sign-off or halted: run
+**The Hold line** (ADR 0060), right under the Moving line, only for a rollout awaiting sign-off or halted, or whose
+`next` reports `surfaceWait` (a surface wait, P41-3: execute § 4.5 *Surface re-check*): run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <rollout-slug>` (read-only;
 its one JSON line `{rollout, shape, scope, why, held, released}`). Scope `released`: `Hold: released <released> to
 serial chains (<why>)`: a chain may be scheduled on the root while it waits, and on resume execute's *Surface re-check*
@@ -826,6 +827,9 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
+  `surface re-check unanswered: <why>` is status's own 60 s read, with no retry, on a busy Mac. begin retries longer
+  (60 s, then 180 s) and writes nothing on a begin wait, so `/thread:execute [[<slug>]]` once the Mac is quieter is the
+  remedy (or `/thread:repair [[<slug>]]`, whose § 7 (e) restarts it).
   A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (by rank: a chain that has
   begun before one that has not, then its estate rank, then the first to begin, else the earlier schedule or the slug
   order: ADR 0067 d9) and holds an unlanded row (in Chain copies, a done row it has not yet landed: ADR 0067 d3) on
@@ -922,8 +926,8 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
   `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
   more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
 - `waiting`, its cause the meant wait: `sign-off`, `paused`, `room-stop`, `not-started`, `merge-hold`,
-  `regenerating`, `cool-down`, `heat`, `quota` (ADR 0067 d8), `away-cap`, `trickle`, `last-start`, `approved-queue`,
-  `pr-hold`, or `you`
+  `regenerating`, `surface-wait` (P41-3), `cool-down`, `heat`, `quota` (ADR 0067 d8), `away-cap`, `trickle`,
+  `last-start`, `approved-queue`, `pr-hold`, or `you`
   (Lachy's: a kept whole halt, an end-of-run verdict, `next` refusing the rollout).
 - `skip`: a serial, superseded, done, dropped or archived rollout.
 
@@ -941,6 +945,7 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
     approval, so a dead lead's merge hold is a stall);
   - `regenerating`: 120 min from the last life sign, judged in place of stall-after whatever else runs beside it, so a
     dead lead under a regenerate is caught at 120 min, never 45;
+  - `surface-wait` (at `--stall-after`: the lead's heartbeat re-runs the Surface re-check at each tick, so a dead lead's surface wait is a stall);
 - judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
 - judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `quota`, `away-cap`, `trickle` (a
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
@@ -982,6 +987,7 @@ reads beside it:
 | `held until <pr> merges` | `waiting pr-hold` |
 | `origin lane: waiting on <owner/name> behind [[<rollout>]]` (another project's Integration on the origin, ADR 0064) | `moving`, judged by silence: its task awaits Integration, lane work |
 | `approved queue waits: <onMerge.why>` | `waiting approved-queue` |
+| `surface wait: <surfaceWait.why>` (§ 4.5's Surface re-check refused, `[[<x>]] writes <token>`, or went unanswered, `surface re-check unanswered after <n> s`; `next` launches nothing until a check passes) | `waiting surface-wait`, judged by silence |
 | `gated: awaiting merge approval for [[slug]] (PR #N)`, `review required: approve PR #N (<url>)` (*Merge hold*'s `<hold reason>`) | `waiting merge-hold`, judged by silence |
 | `room stop: stopping calls at a step boundary`, `room stop: nothing mid-step, awaiting the Stage resume` | `waiting room-stop` |
 | `lane held: the shared checkout changed`, `lane held: RACE undecided: [[slug]]`, `lane held: <cause> on [[<slug>]]` (other work moves, the lead's own RACE re-verify or its landing tail included) | `moving`, judged by silence |

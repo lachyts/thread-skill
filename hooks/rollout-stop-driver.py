@@ -27,8 +27,11 @@ falling back to a transcript scan for history, and:
               stands (`heat: …`: the Mac is too hot to start a task, estate
               ADR 0009 d5), or a quota hold does (`quota: …`: the lead's
               Login is inside its line while the Capacity is in force, ADR
-              0067 d8); its notification or the heartbeat cron is the wake
-              signal)
+              0067 d8), or a surface wait stands (`surface wait: …`: the
+              parallel lead's own Surface re-check refused or went unanswered,
+              so `next` launches nothing until a check passes, execute §4.5,
+              ADR 0060 as P41-3 amends it); its notification or the heartbeat
+              cron is the wake signal)
   halted   -> allow + clear driver state (a §7 stop condition; human's turn)
   done     -> allow + clear driver state (completion ceremony performed)
   (none)   -> allow (not a rollout-driving session)
@@ -296,7 +299,9 @@ def main():
             "with its reason=\"away cap: …\"), or a last-starts wait stands (`next` holds a "
             "task on the last starts, with its reason=\"last start: …\", §4.5 step 1.6)"
             " or a Heat hold stands (`heat: …`, the "
-            "same wait) or a quota hold does (`quota: …`, the same wait), state=halted with "
+            "same wait) or a quota hold does (`quota: …`, the same wait)"
+            " or a surface wait stands (`surface wait: …`, the same wait: `next` launches nothing until the "
+            "Surface re-check passes), state=halted with "
             "reason=\"…\" if a §7 stop "
             "condition fired, or state=done after the completion ceremony. Do not end the turn while "
             "state=running."

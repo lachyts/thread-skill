@@ -6,6 +6,25 @@ Status: accepted. Ruled with Lachy on 2026-10-30 (the grill behind `thread-skill
 run on the repo, and `--resume` also meets another project's rollout in its own clone.)*
 *(Amended by ADR 0066's 2026-11-05 amendment, p37-7: decision 1's stuck chain also stops counting as running for ADR
 0031's primary hold, so it holds nothing on the Primary checkout.)*
+*(Amended by P41-3, 2026-11-09: decision 5's exit 3 is now a **Surface wait**, never a halt: the parallel lead's
+Surface re-check that refuses (exit 3) or goes unanswered (exit 4) writes a surface-wait marker
+(`~/.config/thread/leases/<rollout>.surface-wait.json`), and `next` launches nothing while it stands; only the calls
+in flight and an Integration already begun go on. A parallel rollout idle in a surface wait (no call in flight that
+its marker lists, no task integrating) holds no Project root against serial chains that read the marker: it launches
+nothing until its own Surface re-check passes, so no cycle forms. The marker is not the rejected *recorded release
+stamp*: that stamp was a release written for others to trust; the marker is the parallel lead's own promise to launch
+nothing until a check passes, written and deleted by that check alone, so it never outlives the wait it records. A
+serial chain stamped with an engine snapshot from before P41-3 keeps it until one of its Legs closes `stopped:` (ADR
+0043's move rule), and reads no surface-wait marker meanwhile: every serial resume read of such a chain (begin's
+re-check, `check --resume`, the Waiting list) reads each parallel rollout by the old rule, never the marker's release.
+So while such a chain reaches a parallel rollout's Project root, that rollout's Surface re-check halts on a refusal as
+it did before (exit 5, `surface held: …`, § 7) instead of waiting, and the old rule skips a halted, idle rollout: no
+cycle forms. A check cut by its deadline (exit 4) reads no chain, so it writes the marker whatever chain reaches the
+root: the Waiting list then holds a chain on an engine snapshot from before P41-3 that reaches it, so the Stage never
+starts one, and one begun by hand halts at begin (`surface held: [[<rollout>]] holds <token>`), as it would have while
+the rollout ran, until Lachy begins it again. Before P41-3 an unanswered check halted the rollout (exit 2), so such a
+chain skipped it and began; now it waits for the rollout's next answered check, which passes, or refuses and, while
+that chain still reaches the root, halts (exit 5).)*
 
 ## Context
 
