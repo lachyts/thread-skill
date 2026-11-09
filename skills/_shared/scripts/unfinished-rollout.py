@@ -398,8 +398,13 @@ peer guard, makes that doc stale (ADR 0057 d4). It reads the note (root-first, t
 tasks, the Run record (run_record.py's record_path for the slug; an unreadable record reads as none) and the `*.md`
 directly in each --handoffs dir; it writes nothing and runs no git. It prints one line, the first that applies:
   closed <slug> (<status>|archived)     the root note is `done` or `dropped`, or the note sits only under Archive/
-  stamped <slug> (start: unattended)    `shape: serial` stamped `start: unattended` (P44-4): it waits on the Waiting
-                                        list and the Stage opens its Leg 1; no handoff is made for it
+  serial <slug> (start: unattended)     `shape: serial` stamped `start: unattended` (P44-4), at any Leg: the stamp is
+                                        never cleared while the chain is unfinished, so a chain that has already run
+                                        reads so too. Its Legs start from the Waiting list on the Chorus Stage; this
+                                        line says nothing of whether `waiting` lists it now (a Leg session or a manual
+                                        hand-over keeps it off). No handoff is made for it. Never the parallel
+                                        `stamped` line below, so a reader that accepts `stamped <slug> (start:
+                                        unattended)` (backlog.md § B6 answer 6's supersede) never takes a chain.
   serial <slug>                         any other `shape: serial` note: no handoff is made for it (on the Chorus Stage
                                         its writer lists it; off it, Leg 1 is a paste-ready prompt)
   started <slug> (<why>)                reconcile-rollout.py's approved_unrun is false
@@ -494,7 +499,8 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
             "_record_read", "_stop_state", "_truthy_flag", "_parse_ts", "_share_walks", "_walk_of", "_note_index",
             "_capacity_state", "_cap_in_force", "_away_state", "_running_by_rollout", "_Leases", "_surface_wait_read",
-            "_surface_wait_write", "_surface_wait_drop", "_surface_wait_path", "_surface_wait_live")
+            "_surface_wait_write", "_surface_wait_drop", "_surface_wait_path", "_surface_wait_live",
+            "LEG_LEASE_LAPSE")   # leg_session's closing-Leg clock (P44-4), read through LEG.rr
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -2236,7 +2242,8 @@ def cmd_unstarted(args, rr) -> int:
         print(f"closed {slug} ({status})")
         return 0
     if rr._shape(note) == "serial":
-        print(f"stamped {slug} (start: unattended)" if rr._start_unattended(note) else f"serial {slug}")
+        # Never the parallel `stamped` line: backlog.md's supersede accepts that one (P44-4 review).
+        print(f"serial {slug} (start: unattended)" if rr._start_unattended(note) else f"serial {slug}")
         return 0
     linked, index = rr._scan(path, tasks_dir)
     fresh, why = rr.approved_unrun(note, linked)

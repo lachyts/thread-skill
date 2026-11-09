@@ -151,7 +151,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
    It goes on only when `unstarted` prints `unstarted …`, `incomplete …` or `stamped <prior> (start: unattended)`,
    and both `holdUntil` and `onMerge` are null. Every other line stops the fork before the prep, with nothing written:
    `started …` (his pause, a sign-off's, a pause request, a lead's entry), `stamped … (started_unattended: …)`,
-   `launched …`, `closed …` and `serial …`, any rollout hold, readable or not, and an `on_merge:`. Its stop line is
+   `launched …`, `closed …` and `serial …`, stamped or not (`serial <prior> (start: unattended)`, a chain on the
+   Waiting list, at any Leg: the `stamped` line is a parallel note's alone, so a chain never passes here), any
+   rollout hold, readable or not, and an `on_merge:`. Its stop line is
    `waits on [[<prior>]]: <the unstarted line | hold_until <pr> | on_merge>; it stands (/thread:status [[<prior>]])`.
    Any other final line of the check stops the fork with its stderr.
 7. schedule § 1.2's pickup sweep: not run (the call names its members on purpose).

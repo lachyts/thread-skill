@@ -75,8 +75,9 @@
 #           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
 #           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
 #           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
-#   WL1-WL14 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
-#           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted
+#   WL1-WL15 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
+#           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
+#           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -3122,6 +3123,17 @@ capf 4 2026-11-08T11:30:00+00:00
 wl --now 2026-11-08T11:30:00+00:00
 ok "$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["running"]')|$(wj 'd["room"]')" "['wo']|0|4" \
   "WL14: 2 h after it, the chain is still off the list, but its Leg counts nothing (lapsed)"
+# WL15 (P44-4 review): leg_session reads LEG_LEASE_LAPSE through LEG.rr, so RR_NAMES checks it at load: a plugin copy
+# whose reconcile-rollout.py renamed it is exit 2 before anything is read, never an AttributeError mid-count
+P15="$S/plugin15"; mkdir -p "$P15"; cp -R "$root/skills" "$P15/"
+sed 's/^LEG_LEASE_LAPSE = /LEG_LEASE_LAPSE_RENAMED = /' "$root/skills/execute/scripts/reconcile-rollout.py" \
+  > "$P15/skills/execute/scripts/reconcile-rollout.py"
+ok "$(grep -c '^LEG_LEASE_LAPSE = ' "$P15/skills/execute/scripts/reconcile-rollout.py")" 0 "WL15: control setup: the copy renamed LEG_LEASE_LAPSE"
+HOME="$S/home" THREAD_MACHINE_TIMES='{}' python3 "$P15/skills/_shared/scripts/unfinished-rollout.py" waiting --tasks-dir "$T" \
+  --now 2026-11-08T11:30:00+00:00 > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "WL15: a reconcile-rollout.py without LEG_LEASE_LAPSE exits 2 at load, no stdout"
+has "$(cat "$S.err")" "LEG_LEASE_LAPSE" "WL15: … its cannot-load line naming the constant"
+rm -rf "$P15"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

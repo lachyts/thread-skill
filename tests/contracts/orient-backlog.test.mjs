@@ -256,6 +256,8 @@ function check(F) {
     'handoff-home.sh --dir <§ 0\'s resolved path>)/docs/handoffs', 'handoff-home.sh --shared-root)/docs/handoffs',
     'handoff-home.sh)/docs/handoffs', 'reconcile-rollout.py status --rollout <prior>', 'both `holdUntil` and `onMerge` are null',
     '`stamped <prior> (start: unattended)`', '`launched …`', 'any rollout hold, readable or not, and an `on_merge:`',
+    // P44-4: a stamped chain has its own line, which stops the supersede at any Leg
+    "`serial …`, stamped or not (`serial <prior> (start: unattended)`", "the `stamped` line is a parallel note's alone",
     '`waits on [[<prior>]]: <the unstarted line | hold_until <pr> | on_merge>; it stands (/thread:status [[<prior>]])`'])
   need('prior', "B's Don'ts", sec(b, /^## Don'ts/), ['**Never supersede a prior that answer 6 stops on.**'])
 
