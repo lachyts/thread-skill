@@ -181,6 +181,20 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   when he starts it. A late heartbeat tick on the closed prior ends at its clause (1), and `next` on a superseded
   note halts `superseded`.
 
+## Waits on
+
+A rollout note's `## Waits on` section, at the note's end, holds one line per dependency that no rollout will land for
+a dependant on that note (ADR 0078 d7):
+
+`- [[<dependant>]] waits on [[<x>]] (<Project>, not scheduled)`
+
+`<x>` is another project's task (it shares no `projects:` entry with the dependant) that has not landed and whose
+`rollout:` links no live rollout. `<Project>` is its first project, or `no project`. `waits-on.py write` is the
+section's one writer: schedule step 7, § Serial path S6 and orient-all § 2 run it, and it rewrites the section on every
+live rollout note as it stands, one line per unit a dependant waits on, removing it when nothing waits. `estate-scan.py` reads the lines back for each live rollout (`rollouts[].waitsOn[]`, each kept
+only while its dependant is still open and its dependency is still an open task on no live rollout) and orient-all
+lists them (§ 3, § 8).
+
 ## Readers
 
 - `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
@@ -232,5 +246,7 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
 - `skills/_shared/scripts/estate-rank.py` `rank --superseding` and estate-dispatch.py's `slices --superseding`
   (schedule's Pre-flight): § In flight's exception, read through estate-scan's `still_to_start`, loaded, so a
   carried task still queued is gradeable and one that has started stays in flight.
+- `skills/_shared/scripts/waits-on.py` (§ Waits on's one writer) and `skills/_shared/scripts/estate-scan.py`'s
+  `WAITS_ON` (its one reader), which carries each line still true to `rollouts[].waitsOn[]` for orient-all.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.
