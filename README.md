@@ -465,8 +465,10 @@ line. `bash tests/run.sh --only <test file>...` runs named files in the same her
 d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-latest)`, ADR 0025) run
 `make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
-in exactly one shard; `--shard-plan N` is the dry run). The over-selection from message strings and FOREIGN names
-is `thread-skill-followup-fast-tier-over-selection`.
+in exactly one shard; `--shard-plan N` is the dry run). A test that holds a FOREIGN name (`THREAD.md`,
+`CONTEXT.md` and the other root prose) only as a fixture repo's file sits on a `FOREIGN-ONLY` line, so a change to
+the real file does not select it; the over-selection still left (message strings, broad walkers, rule (1)'s
+namers) is measured in `thread-skill-followup-fast-tier-over-selection`.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
