@@ -152,6 +152,24 @@ rc 0" "LC3 $n: … so origin is asked, and answers trunk"
   echo mine > "$s5/new.txt"
   ok "$(src lc_overlap "$s5" master)" "new.txt" "LC5 $n: … but a copy here that origin deletes is still one"
 
+  # A handoff doc that differs from origin's only by its pickup's mark is no overlap (ADR 0078 d3): one row per reading.
+  srv m5; m5="$tmp/w/m5"; cl m5 "$m5"; fm='---\nthread: t\nstatus: %s\n---\nbody\n'
+  origin=$(printf -- "$fm" 'pending  # pending -> consumed, set by the session that picks it up')
+  push m5 docs/handoffs/h.md "$origin"; push m5 notes/h.md "$origin"; fetchall "$m5"; mkdir -p "$m5/docs/handoffs" "$m5/notes"
+  while IFS='|' read -r file status tail want why; do
+    { printf -- "$fm" "$status"; printf '%s' "$tail"; } > "$m5/$file"
+    ok "$(src lc_overlap "$m5" master)" "$want" "LC5 $n: $why"
+    rm -f "$m5/$file"
+  done <<'EOF'
+docs/handoffs/h.md|consumed|||the consumed mark alone: no overlap, whatever the line's comment
+docs/handoffs/h.md|consumed|more|docs/handoffs/h.md|the mark and an edit: still an overlap
+docs/handoffs/h.md|done||docs/handoffs/h.md|another status: still an overlap
+notes/h.md|consumed||notes/h.md|the same mark off docs/handoffs/: still an overlap
+EOF
+  { printf -- "$fm" consumed | awk 'NR > 1 { printf "\n" } { printf "%s", $0 }'; } > "$m5/docs/handoffs/h.md"
+  ok "$(src lc_overlap "$m5" master)" "" "LC5 $n: … and a marked copy with no last newline"
+  rm -f "$m5/docs/handoffs/h.md"
+
   # ---- LC6: lc_ff ------------------------------------------------------------------------------------------------
   srv f6; c6="$tmp/w/f6"; cl f6 "$c6"; old6=$(git -C "$c6" rev-parse HEAD)
   push f6 a.txt origin; fetchall "$c6"; echo mine > "$c6/a.txt"; rm -f "$c6/.git/ORIG_HEAD"
@@ -180,6 +198,14 @@ new" "LC6 $n: … at origin's tip, clean, every copy as it was"
   g -C "$g6" commit -q --allow-empty -m local; push g6 z.txt zed; fetchall "$g6"; printf 'zed\n' > "$g6/z.txt"
   out=$(src lc_ff "$g6" master); rc=$?
   ok "$rc|$(git -C "$g6" status --porcelain)" "1|?? z.txt" "LC6 $n: a merge git refuses (diverged) unstages the copy it staged"
+
+  # A picked-up handoff doc keeps its mark through the fast-forward, and stays dirty on the tracked doc.
+  srv h6; h6="$tmp/w/h6"; cl h6 "$h6"; mkdir -p "$h6/docs/handoffs"
+  push h6 docs/handoffs/h.md "$(printf -- '---\nstatus: pending\n---\nbody')"; fetchall "$h6"
+  printf -- '---\nstatus: consumed\n---\nbody\n' > "$h6/docs/handoffs/h.md"
+  ok "$(src lc_ff "$h6" master; echo "rc $?")" "rc 0" "LC6 $n: a marked handoff doc does not hold the fast-forward back"
+  ok "$(git -C "$h6" rev-parse HEAD)|$(git -C "$h6" status --porcelain)|$(sed -n 2p "$h6/docs/handoffs/h.md")" "$(tipof h6)| M docs/handoffs/h.md|status: consumed" \
+     "LC6 $n: … at origin's tip, tracked, the mark kept and dirty"
 
   # ---- LC7: every lc_check form, each one primary-refresh.py's regex accepts --------------------------------------
   srv k7; c7="$tmp/w/k7"; cl k7 "$c7"; forms=

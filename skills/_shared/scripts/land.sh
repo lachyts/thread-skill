@@ -45,14 +45,16 @@
 #   work tree) applied as a 3-way diff, so a checkout behind origin never drops lines other sessions landed. A
 #   conflict there, or a commit already stranded on the checkout (HEAD not an ancestor of origin/<d>), puts it on
 #   HEAD instead: the stranded commits are carried under it, and a conflicting PR is brought current on GitHub
-#   (ADR 0078 d2). The commit is reported (`land: commit <sha>`) only once it is on origin; a stuck result before
-#   then is `land: nothing committed`, the paths left as they were for a re-run. A pending class on what may be
-#   the default branch commits nothing at all. Once the commit is on origin, settle_handed leaves the checkout free to
+#   (ADR 0078 d2). The commit is reported (`land: commit <sha>`) only once it is on origin's default branch or in an
+#   open PR; a stuck result before then, or `not landed: no push access`, is `land: nothing committed`, the paths left
+#   as they were (a close-out reads each as `not versioned`). A pending class on what may be the default branch
+#   commits nothing at all. Once the commit is on origin, settle_handed leaves the checkout free to
 #   fast-forward: a THREAD.md whose copy has not changed since goes back to HEAD's (a staged copy of it unstaged,
 #   the one write to the index, since a staged THREAD.md would refuse the fast-forward), because many sessions land in
 #   that file and origin's copy will rarely equal this one; a consumed review doc is removed from disk; every other
 #   handed path stays as handed, a doc for its reader and a deletion gone, and the fast-forward lets it through once
-#   origin's copy equals it (live-checkout.sh's lc_same). Unprotected, the checkout then moves to the pushed tip
+#   origin's copy equals it, or differs only by the pickup's consumed mark (live-checkout.sh's lc_same and lc_marked).
+#   Unprotected, the checkout then moves to the pushed tip
 #   unless it is held; a refused move is a stderr note, since the commit is already on origin.
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
 #   runs S2) and the own branch never drift.
@@ -530,7 +532,7 @@ main() {
   [ "$class" = deferred ] && finish "not landed: $reason" 0
   [ "$class" = pending ] && finish "stuck: $pending" 1
 
-  # ---- S7. The ahead set A = origin/<d>..HEAD ---------------------------------------------------------
+  # ---- S7. The ahead set A = origin/<d>..<tip> (the scratch commit, else HEAD) --------------------------
   local od="refs/remotes/origin/$d" ahead count
   ahead=$(git rev-list "$od..$tip" 2>"$tmpd/rl.err") || finish "stuck: cannot list commits ahead of origin/$d: $(first_line "$tmpd/rl.err")" 1
   count=$(printf '%s' "$ahead" | grep -c .)
@@ -737,14 +739,15 @@ scratch_build() {
 # scratch_commit <base> <tree>: in a detached scratch worktree at <base>, apply each handed path's HEAD-to-<tree> change
 # as a 3-way diff and commit it, hooks off, the new tip in $tmpd/tip. 1 = a path conflicted against <base>; 4 = no
 # change left against <base>; 3 = anything else (git's words in $tmpd/wt.err). A handed path's deletion that <base> has
-# already made is skipped, so a retried deletion is no conflict.
+# already made is skipped, so a retried deletion is no conflict. The patch comes from diff-tree, plumbing, because
+# porcelain `git diff` reads diff.noprefix, color.ui and the like, and `git apply` cannot read what those make.
 scratch_commit() (
   wtroot=$(mktemp -d "${TMPDIR:-/tmp}/land-wt.XXXXXX") || exit 3
   wt=$wtroot/wt
   trap 'git worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wtroot"; git worktree prune >/dev/null 2>&1' EXIT
   GIT_LFS_SKIP_SMUDGE=1 git -c core.hooksPath=/dev/null worktree add -q --detach "$wt" "$1" 2>"$tmpd/wt.err" || exit 3
   for r in ${list[@]+"${list[@]}"}; do
-    git diff --binary --full-index HEAD "$2" -- "$r" > "$tmpd/p.patch" 2>"$tmpd/wt.err" || exit 3
+    git diff-tree -p --binary --full-index HEAD "$2" -- "$r" > "$tmpd/p.patch" 2>"$tmpd/wt.err" || exit 3
     [ -s "$tmpd/p.patch" ] || continue
     if ! git cat-file -e "$2:$r" 2>/dev/null && ! git -C "$wt" cat-file -e "HEAD:$r" 2>/dev/null; then continue; fi
     git -C "$wt" apply --3way --whitespace=nowarn "$tmpd/p.patch" 2>"$tmpd/wt.err" || { cat "$tmpd/wt.err"; exit 1; }
@@ -797,7 +800,7 @@ scratch_rebase() (
   exit 0
 )
 
-# ---- S12. Protected: push HEAD unchanged to close/…, open or reuse the PR, label it, queue auto-merge ------
+# ---- S12. Protected: push the tip unchanged to close/…, open or reuse the PR, label it, queue auto-merge ---
 LAND_PR_FILTER='import json, sys
 sha12, head, phase = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
@@ -856,6 +859,9 @@ label_landing() {
 
 land_protected() {
   local head sha12 cdate s branch n url state rc out body title
+  # no_pr <why>: pushed, but no PR holds it, so nothing carries the commit: not reported, and the local tracking ref
+  # (the push wrote it) goes, so the peer guard never reads this branch as a landing still on its way.
+  no_pr() { git update-ref -d "refs/remotes/origin/$branch" 2>/dev/null; finish "stuck: pr create failed: $1" 1; }
   head=$(git rev-parse "$tip"); sha12=$(printf '%s' "$head" | cut -c1-12)
   cdate=$(git log -1 --format=%cd --date=short "$tip")
   s=$(printf '%s' "$slug_arg" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9-][^a-z0-9-]*/-/g' -e 's/^-*//' -e 's/-*$//' | cut -c1-40 | sed -e 's/-*$//')
@@ -881,7 +887,6 @@ EOF
       net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
       [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
       [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
-      made=$built
       title=$(git log -1 --format=%s "$tip")
       body=$tmpd/body
       printf '%s\n\n%s\n' "Landing for \`$sha12\` (ADR 0028)." \
@@ -900,9 +905,10 @@ EOF
         IFS=$'\t' read -r state n url <<EOF
 $PR_HIT
 EOF
-        [ "$rc" = 0 ] && [ "$state" = OPEN ] || finish "stuck: pr create failed: $cerr" 1
+        [ "$rc" = 0 ] && [ "$state" = OPEN ] || no_pr "$cerr"
       fi
-      [ -n "$n" ] && [ -n "$url" ] || finish "stuck: pr create failed: no PR number in the reply" 1
+      [ -n "$n" ] && [ -n "$url" ] || no_pr "no PR number in the reply"
+      made=$built
       ;;
   esac
 

@@ -157,6 +157,7 @@ test('step 8: landing rows, the SHA source, and the stuck and dropped mappings',
     'No row for `landed` with `land: nothing to land`, for `not landed: swept by the daily sweep` or for `not landed: commit-only`',
     '`not landed: no push access` does get a row',
     '**`stuck:` together with `land: nothing committed`.**', 'each handed path maps to `not versioned: <path> (<reason>)`',
+    '`not landed: no push access` together with `land: nothing committed` maps the same way',
     '**A `dropped` path**', '`not versioned: <path> (not on disk)`',
     '`landing <top>: stuck: land.sh failed (<first stderr line>)`',
   ])

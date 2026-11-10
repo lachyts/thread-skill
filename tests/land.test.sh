@@ -771,6 +771,10 @@ land GH_ACCESS=null -- "$W"; res "case 33 null" 1 "stuck: push access unknown (t
 land GH_ACCESS=empty -- "$W"; res "case 33 empty" 1 "stuck: push access unknown (token lacks permissions)"
 land GH_ACCESS=404 -- "$W"; res "case 33 404" 1 "stuck: cannot read push access: gh: Not Found (HTTP 404)"
 land GH_ACCESS=hang -- "$W"; res "case 33 hang" 1 "stuck: cannot read push access: timed out"
+H0=$(git -C "$W" rev-parse HEAD); edit
+land GH_ACCESS=false -- "$W" "$W/THREAD.md"; res "case 33 false, a handed edit" 0 "not landed: no push access"
+has "$err" "land: nothing committed" "case 33: the scratch commit is dropped, and it says so"
+ok "$(made)|$(git -C "$W" status --porcelain -- THREAD.md)|$(git -C "$W" rev-parse HEAD)" "| M THREAD.md|$H0" "case 33: the edit stays as it was, HEAD unmoved"
 
 echo "== 34. labelling"
 ghreset; mkrepo c34; c0
@@ -2103,6 +2107,46 @@ land GH_PROT=false -- "$W" "$W/docs/handoffs/h.md" "$W/docs/handoffs/n.md"
 res "case 79j" 0 landed
 C=$(made)
 ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" status --porcelain)|$(cat "$W/docs/handoffs/h.md")" "$C||refreshed" "case 79j: moved to C, clean"
+
+echo "== 79k. a doc picked up before its landing merges: left, kept through the fast-forward, deleted by a later close"
+awk '/^# thread:peer-guard/{on=1; next} /^# end thread:peer-guard/{on=0} on' "$root/skills/_shared/handoff-lifecycle.md" > "$tmp/guard.sh"
+ghreset; mkrepo c79k; mkdir -p "$W/docs/handoffs"; D="$W/docs/handoffs/h.md"
+printf -- '---\nthread: t\nstatus: pending\n---\nbody\n' > "$D"
+land -- --slug c79k -- "$W" "$D"
+res "case 79k" 0 "queued https://github.com/o/c79k/pull/1"
+C=$(made)
+printf -- '---\nthread: t\nstatus: consumed\n---\nbody\n' > "$D"
+ok "$(f="$D" bash "$tmp/guard.sh")" "keep landing" "case 79k: the consumer's close leaves it (HEAD lacks it, its close/ branch holds it)"
+srvmerge c79k "$C"
+ok "$(bash "$LC" check "$W" master | cut -d' ' -f1)" behind "case 79k: the Primary refresh reads it as behind, no overlap"
+ok "$(bash "$LC" ff "$W" master | cut -d' ' -f1)" moved "case 79k: the fast-forward goes through"
+ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" status --porcelain)|$(sed -n 3p "$D")" "$C| M docs/handoffs/h.md|status: consumed" \
+   "case 79k: no pending doc came back: tracked, the mark kept and dirty"
+touch -t 202601010000 "$D"
+ok "$(f="$D" bash "$tmp/guard.sh")" delete "case 79k: a later close may delete it now"
+git -C "$W" rm -qf docs/handoffs/h.md
+land -- --slug c79k -- "$W" "$D"
+res "case 79k, the later close" 0 "queued https://github.com/o/c79k/pull/2"
+C=$(made)
+ok "$(git -C "$W" show --name-status --format= "$C" | tr '\t\n' ' |')" "D docs/handoffs/h.md|" "case 79k: the deletion lands"
+srvmerge c79k "$C"; ffchecks "case 79k, the later close" "$C"
+ok "$([ -e "$D" ] && echo present || echo gone)" gone "case 79k: and the doc is gone"
+
+echo "== 79l. a pushed close-out with no PR is reported as no commit, and a re-run lands the path"
+ghreset; mkrepo c79l; edit; H0=$(git -C "$W" rev-parse HEAD)
+land GH_CREATE=fail -- --slug c79l -- "$W" "$W/THREAD.md"
+res "case 79l" 1 "stuck: pr create failed: gh: Validation Failed (HTTP 422)"
+has "$err" "land: nothing committed" "case 79l: says nothing committed"
+ok "$(made)|$(git -C "$W" status --porcelain -- THREAD.md)|$(git -C "$W" rev-parse HEAD)" "| M THREAD.md|$H0" "case 79l: the edit stays for a re-run, HEAD unmoved"
+ok "$(git -C "$W" for-each-ref refs/remotes/origin/close/)" "" "case 79l: the branch no PR holds is no landing to the peer guard"
+land -- --slug c79l -- "$W" "$W/THREAD.md"
+res "case 79l, the re-run" 0 "queued https://github.com/o/c79l/pull/1"
+
+echo "== 79m. diff.noprefix and color.ui never reach the close-out's patch"
+ghreset; mkrepo c79m; git -C "$W" config diff.noprefix true; git -C "$W" config color.ui always; edit
+land -- --slug c79m -- "$W" "$W/THREAD.md"
+res "case 79m" 0 "queued https://github.com/o/c79m/pull/1"
+ok "$(git -C "$W" show "$(made):THREAD.md" | tail -n 1)" closed "case 79m: the close-out is in the commit"
 
 echo "== 79g. a commit-only landing still commits on the checkout (its by-design route)"
 ghreset; mkrepo c79g; edit
