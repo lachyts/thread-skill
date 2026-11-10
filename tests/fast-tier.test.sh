@@ -567,6 +567,8 @@ ok "$(lines '^tests/zzb\.test\.sh: FAILED \([0-9]+s\)$')|$(lines '^tests/zzb\.te
   "1|1|1" "F20: … the hung suite prints its FAILED line and a timed-out line, the other its ok line"
 ok "$(lines '^  - tests/zzb\.test\.sh \(timed out after 2s\)$')|$(lines '^run\.sh: timed out after 2s \(its liveness bound\); its process group was killed$')|$(lines '^  - ')" \
   "1|1|1" "F20: … its failure-list line and its block say it timed out, and it is the run's only failure"
+ok "$(lines '^run\.sh: a healthy suite that has only grown slower needs tests/shard-weights\.tsv regenerated \(its header says how\), or THREAD_SUITE_BOUND=<seconds>$')" \
+  1 "F20: … and its block names the fix for a suite that has only grown slower"
 ok "$(wc -l < "$pids" | tr -d ' ')|${alive:-none}" "2|none" "F20: … and its whole process group is gone, the background child too"
 git -C "$F" checkout -q -- tests/zzb.test.sh
 for bad in 0 x; do

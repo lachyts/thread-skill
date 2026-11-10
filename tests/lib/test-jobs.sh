@@ -24,21 +24,38 @@
 #                        or no weights file) gets SUITE_BOUND_UNWEIGHTED. run.sh bounds each merge-task self-test by
 #                        the `@merge-task-self-tests` line. A malformed weights line is skipped here (shard.py refuses
 #                        it).
+#   bound_or_unweighted <bound>
+#                        print <bound> when it is a positive integer (decimal, so 007 is 7), else print
+#                        SUITE_BOUND_UNWEIGHTED and return 1. run.sh's spawn passes every bound through it, so a suite
+#                        whose bound went missing (an entry suite_bounds printed no line for) is still bounded, and
+#                        spawn says so, where watch_group's test on an empty bound would fail and never fire.
 #   watch_group <pgid> <bound> <marker> [grace]
-#                        while the leader <pgid> lives, poll once a second; once it has lived <bound> seconds, create
-#                        <marker> and end the group (end_groups, <grace> defaulting to SUITE_STOP_GRACE). Run it in the
-#                        background with its output on /dev/null.
+#                        while the leader <pgid> lives, poll every SUITE_POLL seconds; once the suite has been awake
+#                        <bound> seconds, create <marker> and end the group (end_groups, <grace> defaulting to
+#                        SUITE_STOP_GRACE). Run it in the background with its output on /dev/null. Awake seconds, not
+#                        elapsed ones: each poll adds the step of its clock (_watch_clock), but a step past
+#                        SUITE_POLL_JUMP, or a backwards one, adds one second. bash's SECONDS follows the wall clock,
+#                        so a Mac asleep through a verify (lid closed, idle sleep) or a Ctrl-Z on `make test` (the
+#                        watchers stop with run.sh, the suites in their own groups run on) would otherwise come back
+#                        with every live suite past its bound and kill them all, a false red; the engine likewise
+#                        counts Mac sleeps as stops (reconcile-rollout.py's machine_times), and verify-slot.py's bounds
+#                        read time.monotonic.
+#   _watch_clock         set _watch_now to the clock watch_group reads: SECONDS (no fork, and bash 3.2 has it). A test
+#                        redefines it after sourcing: an injected clock (estate ADR 0011 d3).
 #   end_groups <grace> [pgid...]
 #                        TERM every group at once, wait up to <grace> seconds for all of them to empty, then KILL
 #                        whatever is left. No group is a no-op. run.sh's stop_suites ends every live suite this way.
 # 3x the measured seconds covers CI macOS's roughly 1.6x local time with margin (tests/leg.test.sh: 527 s, bound
-# 1581 s), and a small suite's hang shows red in 5 minutes. SUITE_STOP_GRACE sits under verify-slot.py's KILL_GRACE
-# (10 s): a guard that ends a run TERMs run.sh's group, and run.sh's own TERM trap then KILLs a suite that outlives its
-# TERM before the guard KILLs run.sh's group, which no longer holds the suites.
+# 1581 s), and a small suite's hang shows red in 5 minutes. SUITE_POLL_JUMP is a few polls' worth: a loaded machine's
+# `sleep 1` overruns by far less, and a Mac sleep or a suspend by far more. SUITE_STOP_GRACE sits under
+# verify-slot.py's KILL_GRACE (10 s): a guard that ends a run TERMs run.sh's group, and run.sh's own TERM trap then
+# KILLs a suite that outlives its TERM before the guard KILLs run.sh's group, which no longer holds the suites.
 SUITE_BOUND_FACTOR=3
 SUITE_BOUND_FLOOR=300
 SUITE_BOUND_UNWEIGHTED=1200
 SUITE_STOP_GRACE=5
+SUITE_POLL=1
+SUITE_POLL_JUMP=5
 
 _test_cores() {
   local c
@@ -92,15 +109,27 @@ suite_bounds() {
     }' "$w" phase=1 -
 }
 
+bound_or_unweighted() {
+  case "$1" in ''|*[!0-9]*) echo "$SUITE_BOUND_UNWEIGHTED"; return 1 ;; esac
+  [ $((10#$1)) -ge 1 ] || { echo "$SUITE_BOUND_UNWEIGHTED"; return 1; }
+  echo $((10#$1))
+}
+
+_watch_clock() { _watch_now=$SECONDS; }
+
 watch_group() {
-  local g="$1" bound="$2" mark="$3" grace="${4:-$SUITE_STOP_GRACE}" s=$SECONDS
+  local g="$1" bound="$2" mark="$3" grace="${4:-$SUITE_STOP_GRACE}" up=0 last d
+  _watch_clock; last=$_watch_now
   while kill -0 "$g" 2>/dev/null; do
-    if [ $((SECONDS - s)) -ge "$bound" ]; then
+    _watch_clock; d=$((_watch_now - last)); last=$_watch_now
+    [ "$d" -ge 0 ] && [ "$d" -le "$SUITE_POLL_JUMP" ] || d=1  # asleep, suspended or a clock change: one poll's second
+    up=$((up + d))
+    if [ "$up" -ge "$bound" ]; then
       : > "$mark"
       end_groups "$grace" "$g"
       return 0
     fi
-    sleep 1
+    sleep "$SUITE_POLL"
   done
   return 0
 }

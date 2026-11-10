@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # p23-4, executed: tests/lib/test-jobs.sh, tests/run.sh's cap on its own background suites (suite_cap,
-# wait_for_room) and their liveness bound (flat_bound, suite_bounds, watch_group, end_groups), and the run.sh lines that
-# use them.
+# wait_for_room) and their liveness bound (flat_bound, suite_bounds, bound_or_unweighted, watch_group, end_groups), and
+# the run.sh lines that use them.
 # Run under this bash and, when present, under /bin/bash (3.2 on macOS), the shell run.sh is written for. Structural:
 # the peak is counted by marker dirs, never timed; watch_group's bounds and end_groups's grace are 1 s, their checks
-# liveness-bounded at 10 s.
+# liveness-bounded at 10 s; watch_group's awake-seconds count reads an injected clock, never a real sleep.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -84,6 +84,31 @@ for sh in "${shells[@]}"; do
   ok "$(within "$(wg 'sleep 30 & sleep 30' 1)" 10)" "y|y|fast" "$n: watch_group: a leader past its 1 s bound: marker made, the group (a background child too) gone, well inside 30 s"
   ok "$(within "$(wg "trap '' TERM; sleep 30" 1)" 10)" "y|y|fast" "$n: watch_group: a group that ignores TERM is KILLed after the grace"
   ok "$(within "$(wg 'sleep 0.3' 30)" 10)" "n|y|fast" "$n: watch_group: a leader that ends inside its bound: no marker, and the watch ends with it"
+  # ---- watch_group counts awake seconds: a clock step past SUITE_POLL_JUMP (5), or backwards, adds one ---------------
+  # An injected clock (estate ADR 0011 d3) at a 0.05 s poll; each read logs `<clock>:<marker made yet?>`. Bound 9: 0, 1
+  # (+1), 6 (+5, at SUITE_POLL_JUMP, whole), 3606 (an hour asleep or suspended: +1), 3000 (backwards: +1), 3001 (+1)
+  # reaches it at the sixth read. Read as elapsed time, 3606 would end the group at the fourth: the false red of a Mac
+  # that slept through a verify. Past its list the clock steps 1 a read, and the group's own 30 s bounds a regression.
+  got=$("$sh" -c '. tests/lib/test-jobs.sh
+    D=$1; rm -f "$D/mark"; SUITE_POLL=0.05; ts=(0 1 6 3606 3000 3001); i=0; log=
+    _watch_clock() {
+      if [ "$i" -lt ${#ts[@]} ]; then _watch_now=${ts[i]}; else _watch_now=$((_watch_now + 1)); fi
+      i=$((i + 1)); [ -e "$D/mark" ] && log="$log $_watch_now:y" || log="$log $_watch_now:n"
+    }
+    set -m; bash -c "sleep 30" > /dev/null 2>&1 < /dev/null & g=$!; set +m
+    watch_group "$g" 9 "$D/mark" 1 > /dev/null 2>&1
+    wait "$g" 2>/dev/null
+    n=0; while kill -0 -- "-$g" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.2; n=$((n + 1)); done
+    kill -0 -- "-$g" 2>/dev/null && gone=n || gone=y
+    [ -e "$D/mark" ] && m=y || m=n
+    echo "${log# }|$m|$gone"' sh "$D")
+  ok "$got" "0:n 1:n 6:n 3606:n 3000:n 3001:n|y|y" \
+    "$n: watch_group: a clock step past SUITE_POLL_JUMP or backwards counts one second, so an hour asleep never ends the group; it still ends at its bound"
+  # ---- bound_or_unweighted: a positive integer stands; anything else is the unweighted 1200 s, rc 1 -----------------
+  got=$("$sh" -c '. tests/lib/test-jobs.sh
+    for b in 301 007 "" abc 0 00 -5 1.5; do r=$(bound_or_unweighted "$b"); echo "$b=$r/$?"; done' | tr '\n' ' ')
+  ok "$got" "301=301/0 007=7/0 =1200/1 abc=1200/1 0=1200/1 00=1200/1 -5=1200/1 1.5=1200/1 " \
+    "$n: bound_or_unweighted: 301 and 007 (decimal) stand; empty, abc, 0, 00, -5 and 1.5 fall back to 1200 s with rc 1"
   # ---- end_groups: every group TERMed at once; one that ignores TERM is KILLed after the grace ------------------------
   got=$("$sh" -c '. tests/lib/test-jobs.sh
     s=$SECONDS
@@ -112,6 +137,8 @@ has "$run" 'node --test --test-concurrency="$max_jobs" --test-timeout=600000' \
 has "$run" 'flat=$(flat_bound) || {' "run.sh: a bad THREAD_SUITE_BOUND stops the run"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /set -m; "\$@"/{a=1} on && /watch_group "\$pid" "\$bound"/{b=1} on && /^\}/{exit} END{print (a && b) ? "y" : "n"}' tests/run.sh)" y \
   "run.sh: spawn() runs each suite as a process group of its own, watched by watch_group"
+ok "$(awk '/^spawn\(\) \{/{on=1} on && /bound=\$\(bound_or_unweighted "\$2"\) \|\|/{print "y"; exit} on && /^\}/{exit}' tests/run.sh)" y \
+  "run.sh: spawn() passes its bound through bound_or_unweighted, so a missing bound never leaves a suite unbounded"
 ok "$(awk '/^stop_suites\(\) \{/{on=1} on && /end_groups "\$SUITE_STOP_GRACE"/{print "y"; exit} on && /^\}/{exit}' tests/run.sh)" y \
   "run.sh: stop_suites() ends the live groups through end_groups (TERM, then KILL after the grace)"
 has "$run" 'export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"' "run.sh: the verify slots stay in scratch"

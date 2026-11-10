@@ -38,11 +38,15 @@
 # Bounded (#327 finding 6, estate ADR 0011 d3: a liveness bound, never a tight wall-clock one). Each spawned suite runs
 # as a process group of its own (`set -m` around its spawn), watched by tests/lib/test-jobs.sh's watch_group: past its
 # bound the whole group is TERMed, then KILLed, and the suite ends `<label>: FAILED (<N>s)` plus a `<label>: timed out
-# after <B>s` line, also in its block and its failure-list line; it fails even when it exits 0 on its TERM. The bound is
-# suite_bounds's (3x the suite's measured seconds in tests/shard-weights.tsv rounded up, 300 s floor, 1200 s with no
-# weight); THREAD_SUITE_BOUND (seconds) sets one flat bound for every suite instead. Since no suite shares run.sh's
-# process group any more, a TERM, INT or HUP to run.sh ends every live suite's group before it exits: TERM, then KILL
-# after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 600 s
+# after <B>s` line, also in its block and its failure-list line; it fails even when it exits 0 on its TERM. Its block
+# also names the fix for a healthy suite that has only grown slower: regenerate tests/shard-weights.tsv, or set
+# THREAD_SUITE_BOUND. The bound is suite_bounds's (3x the suite's measured seconds in tests/shard-weights.tsv rounded
+# up, 300 s floor, 1200 s with no weight); THREAD_SUITE_BOUND (seconds) sets one flat bound for every suite instead. A
+# bound that is not a positive integer (an entry suite_bounds printed no line for) falls back to the 1200 s, and spawn
+# prints a `run.sh: <label>: no liveness bound` line. The bound counts the suite's awake seconds, not elapsed ones
+# (watch_group's rule), so a Mac asleep through the run or a Ctrl-Z on it does not count against it. Since no suite
+# shares run.sh's process group any more, a TERM, INT or HUP to run.sh ends every live suite's group before it exits:
+# TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 600 s
 # (`--test-timeout`, which bounds a whole file as well as each test: node 23.9 cancels a file of three 1.5 s tests at a
 # 2 s timeout), several times the slowest file (tests/reflect-weekly.test.mjs, 153 s locally at the cap of 4).
 set -uo pipefail
@@ -171,7 +175,9 @@ spawn() {  # spawn <label> <bound> <cmd...> — run in background once there is 
   # output + exit code by index, then print its `ended` line (and a timed-out one) from the background, as it ends.
   # <n>.pid holds the live group's id for stop_suites, emptied once the suite has ended.
   wait_for_room "$max_jobs"
-  local label="$1" bound="$2"; shift 2
+  local label="$1" bound; bound=$(bound_or_unweighted "$2") ||
+    echo "run.sh: $label: no liveness bound ('$2'); it gets the unweighted ${bound}s"
+  shift 2
   labels[$n]=$label; bounds[$n]=$bound
   {
     s=$SECONDS
@@ -182,7 +188,10 @@ spawn() {  # spawn <label> <bound> <cmd...> — run in background once there is 
     if [ -e "$scratch/$n.timedout" ]; then
       wait "$wd"  # the group is gone once the watch ends: TERM, then KILL after its grace
       [ "$rc" != 0 ] || rc=124  # a suite that exits 0 on its TERM still ran out of time: it fails
-      echo "run.sh: timed out after ${bound}s (its liveness bound); its process group was killed" >> "$scratch/$n.out"
+      { echo "run.sh: timed out after ${bound}s (its liveness bound); its process group was killed"
+        echo "run.sh: a healthy suite that has only grown slower needs tests/shard-weights.tsv regenerated" \
+          "(its header says how), or THREAD_SUITE_BOUND=<seconds>"
+      } >> "$scratch/$n.out"
     else
       kill "$wd" 2>/dev/null
     fi
