@@ -5,7 +5,8 @@
 # first; LC4 the one-branch fetch; LC5 the overlap; LC6 lc_ff; LC7 every lc_check form against primary-refresh.py's own
 # regexes; LC8 sourcing changes nothing of the caller's; LC9 the run modes' exit codes, the overlap mode's included
 # (leg.py's ff_primary, p39-4); LC10 lc_bounded: the child's rc, the budget's 142, and a TERM or HUP to it kills the
-# whole group (143, 129), as does a normal exit. Origins are
+# whole group (143, 129), as does a normal exit; LC11 the content mode, each form against primary-refresh.py's regexes,
+# and lc_ahead_content's records. Origins are
 # git@github.com:<o>/<r>.git, served from $SRV/<o>/<r>.git by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`, with
 # GIT_SSH_COMMAND unset, so the ssh rule is what reaches it. Hermetic: HOME and every path live under mktemp; commits
 # carry an inline identity; global/system git config is ignored; never the network.
@@ -133,6 +134,42 @@ rc 0" "LC3 $n: … so origin is asked, and answers trunk"
   ok "$(src lc_overlap "$c5" master)" "" "LC5 $n: a dirty file origin never touches: nothing"
   rm -f "$c5/untouched.txt" "$c5/sub.txt"
 
+  # A copy already holding origin's bytes is no overlap for a fast-forward (ADR 0078 d3); lc_overlap_ref stays strict.
+  srv s5; s5="$tmp/w/s5"; cl s5 "$s5"
+  push s5 new.txt same; fetchall "$s5"; printf 'same\n' > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: an untracked file with origin's bytes: no overlap"
+  ok "$(src lc_overlap_ref "$s5" refs/remotes/origin/master)" "new.txt" "LC5 $n: … lc_overlap_ref, leg.py's overlap mode, still names it"
+  ok "$(mode overlap "$s5" refs/remotes/origin/master)" "overlap new.txt" "LC5 $n: … and the overlap run mode too"
+  rm -f "$s5/new.txt"; printf 'other\n' > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "new.txt" "LC5 $n: … other bytes still overlap"
+  rm -f "$s5/new.txt"; g -C "$s5" merge -q --ff-only origin/master
+  push s5 new.txt edited; fetchall "$s5"; printf 'edited\n' > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: a dirty tracked file with origin's bytes: no overlap"
+  g -C "$s5" add new.txt
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: … staged too"
+  g -C "$s5" reset -q --hard HEAD; g -C "$tmp/seed-s5" rm -q new.txt; g -C "$tmp/seed-s5" commit -qm gone; g -C "$tmp/seed-s5" push -q origin master 2>/dev/null; fetchall "$s5"
+  rm -f "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: gone from both: no overlap"
+  echo mine > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "new.txt" "LC5 $n: … but a copy here that origin deletes is still one"
+
+  # A handoff doc origin holds is no overlap, whatever differs (ADR 0078 d3): one row per reading.
+  srv m5; m5="$tmp/w/m5"; cl m5 "$m5"; fm='---\nthread: t\nstatus: %s\n---\nbody\n'
+  origin=$(printf -- "$fm" 'pending  # pending -> consumed, set by the session that picks it up')
+  push m5 docs/handoffs/h.md "$origin"; push m5 notes/h.md "$origin"; fetchall "$m5"; mkdir -p "$m5/docs/handoffs" "$m5/notes"
+  while IFS='|' read -r file status tail want why; do
+    { printf -- "$fm" "$status"; printf '%s' "$tail"; } > "$m5/$file"
+    ok "$(src lc_overlap "$m5" master)" "$want" "LC5 $n: $why"
+    rm -f "$m5/$file"
+  done <<'EOF'
+docs/handoffs/h.md|consumed|||the consumed mark alone: no overlap, whatever the line's comment
+notes/h.md|consumed||notes/h.md|the same copy off docs/handoffs/: still an overlap
+EOF
+  git -C "$m5" merge -q --ff-only origin/master; g -C "$tmp/seed-m5" rm -q docs/handoffs/h.md
+  g -C "$tmp/seed-m5" commit -qm del; g -C "$tmp/seed-m5" push -q origin master 2>/dev/null; fetchall "$m5"
+  echo edited > "$m5/docs/handoffs/h.md"
+  ok "$(src lc_overlap "$m5" master)" "docs/handoffs/h.md" "LC5 $n: … but a copy of a doc origin deleted is one (git would refuse the merge)"
+
   # ---- LC6: lc_ff ------------------------------------------------------------------------------------------------
   srv f6; c6="$tmp/w/f6"; cl f6 "$c6"; old6=$(git -C "$c6" rev-parse HEAD)
   push f6 a.txt origin; fetchall "$c6"; echo mine > "$c6/a.txt"; rm -f "$c6/.git/ORIG_HEAD"
@@ -149,6 +186,29 @@ rc 3" "LC6 $n: an overlap returns rc 3 with its paths"
   out=$(src lc_ff "$c6" master); rc=$?
   ok "$rc|$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1|1" "LC6 $n: a merge git refuses (diverged): rc 1, one line"
   has "$out" "Not possible to fast-forward" "LC6 $n: … git's own reason"
+
+  # A same-bytes copy never holds the fast-forward back, staged or not, and a refused merge unstages it again.
+  srv g6; g6="$tmp/w/g6"; cl g6 "$g6"
+  push g6 d.txt doomed; push g6 e.txt old; fetchall "$g6"; g -C "$g6" merge -q --ff-only origin/master
+  g -C "$tmp/seed-g6" rm -q d.txt; g -C "$tmp/seed-g6" commit -qm rm; push g6 e.txt new; push g6 n.txt fresh; push g6 m.txt staged; fetchall "$g6"
+  rm -f "$g6/d.txt"; printf 'new\n' > "$g6/e.txt"; printf 'fresh\n' > "$g6/n.txt"; printf 'staged\n' > "$g6/m.txt"; g -C "$g6" add m.txt
+  ok "$(src lc_ff "$g6" master; echo "rc $?")" "rc 0" "LC6 $n: a deletion, a dirty copy, an untracked copy and a staged copy, all origin's bytes: rc 0"
+  ok "$(git -C "$g6" rev-parse HEAD)|$(git -C "$g6" status --porcelain)|$(cat "$g6/n.txt" "$g6/e.txt")" "$(tipof g6)||fresh
+new" "LC6 $n: … at origin's tip, clean, every copy as it was"
+  g -C "$g6" commit -q --allow-empty -m local; push g6 z.txt zed; fetchall "$g6"; printf 'zed\n' > "$g6/z.txt"
+  out=$(src lc_ff "$g6" master); rc=$?
+  ok "$rc|$(git -C "$g6" status --porcelain)" "1|?? z.txt" "LC6 $n: a merge git refuses (diverged) unstages the copy it staged"
+
+  # A handoff doc keeps its copy through the fast-forward, mark and refresh alike, and stays dirty on the tracked doc.
+  srv h6; h6="$tmp/w/h6"; cl h6 "$h6"; mkdir -p "$h6/docs/handoffs"
+  push h6 docs/handoffs/h.md "$(printf -- '---\nstatus: pending\n---\nbody')"; fetchall "$h6"
+  printf -- '---\nstatus: consumed\n---\nbody\n' > "$h6/docs/handoffs/h.md"
+  ok "$(src lc_ff "$h6" master; echo "rc $?")" "rc 0" "LC6 $n: a marked handoff doc does not hold the fast-forward back"
+  ok "$(git -C "$h6" rev-parse HEAD)|$(git -C "$h6" status --porcelain)|$(sed -n 2p "$h6/docs/handoffs/h.md")" "$(tipof h6)| M docs/handoffs/h.md|status: consumed" \
+     "LC6 $n: … at origin's tip, tracked, the mark kept and dirty"
+  push h6 docs/handoffs/r.md "$(printf -- '---\nstatus: pending\n---\nv1')"; fetchall "$h6"
+  printf -- '---\nstatus: pending\n---\nv2\n' > "$h6/docs/handoffs/r.md"
+  ok "$(src lc_ff "$h6" master; echo "rc $?")|$(tail -n 1 "$h6/docs/handoffs/r.md")" "rc 0|v2" "LC6 $n: a refreshed doc does not either, and keeps its refresh"
 
   # ---- LC7: every lc_check form, each one primary-refresh.py's regex accepts --------------------------------------
   srv k7; c7="$tmp/w/k7"; cl k7 "$c7"; forms=
@@ -239,6 +299,48 @@ rc 0" "LC9 $n: overlap: a ref that does not resolve reads clear"
   done
   g init -q "$tmp/w/decoy"; g -C "$tmp/w/decoy" commit -q --allow-empty -m decoy
   ok "$(GIT_DIR="$tmp/w/decoy/.git" mode check "$c9" master | cut -d' ' -f1)" "diverged" "LC9 $n: a caller's GIT_DIR is scrubbed: the named repo is read"
+
+  # ---- LC11: the content mode (ADR 0078 d4): a diverged checkout, read for its repair --------------------------------
+  srv m11; c11="$tmp/w/m11"; cl m11 "$c11"; contents=
+  content() { printf '%s\n' "$1" >> "$tmp/content.forms"; contents="$contents ${1%% *}"; }
+  : > "$tmp/content.forms"
+  git -C "$c11" checkout -q -b side; content "$(mode content "$c11" master)"; git -C "$c11" checkout -q master
+  content "$(mode content "$c11" master)"                      # no commit ahead: untouched
+  echo same > "$c11/s.txt"; g -C "$c11" add -A; g -C "$c11" commit -qm local-s; push m11 s.txt same; fetchall "$c11"
+  content "$(mode content "$c11" master)"                      # landed
+  echo other > "$c11/t.txt"; g -C "$c11" add -A; g -C "$c11" commit -qm local-t
+  content "$(mode content "$c11" master)"                      # unlanded
+  ok "$contents" " busy untouched landed unlanded" "LC11 $n: the forms read in order"
+  ok "$(python3 - "$PR" "$tmp/content.forms" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("pr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+for line in open(sys.argv[2]):
+    line = line.rstrip("\n")
+    rx = m.CONTENT_FORMS.get(line.split(" ", 1)[0])
+    if not (rx and rx.match(line)):
+        print(repr(line)); break
+else:
+    print("all")
+PY
+)" all "LC11 $n: … each matching primary-refresh.py's CONTENT_FORMS regex"
+  ok "$(mode content "$c11" master)" "unlanded 1 t.txt" "LC11 $n: unlanded names what differs, not what matches"
+  # Run under set -euo pipefail, as the header promises: a differing file is rc 1 from git, which must not end the function.
+  strict() { "$SH" -c 'set -euo pipefail; . "$1"; shift; "$@"' _ "$LC" "$@"; }
+  ok "$(strict lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "Ts.txt Tt.txt Dt.txt =1 " \
+    "LC11 $n: lc_ahead_content's records under set -euo pipefail: every touched file, each differing one, then the result"
+  ok "$(strict lc_ahead_content "$c11" refs/remotes/origin/nowhere refs/heads/master | tr '\0' ' ')" "=128 " \
+    "LC11 $n: a ref git cannot read is its failure, never =3 (touches no file)"
+  git -C "$c11" reset -q --hard origin/master
+  ok "$(src lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "=3 " \
+    "LC11 $n: nothing ahead: nothing touched, =3"
+  ok "$(mode content "$c11" master >/dev/null; echo "rc $?")" "rc 0" "LC11 $n: content exits 0"
+  git -C "$c11" update-ref -d refs/remotes/origin/master
+  ok "$(mode content "$c11" master)" "unreadable git diff failed (128)" "LC11 $n: … and an unreadable ref reads unreadable, never untouched"
+  for args in "content" "content $c11" "content $c11 master extra"; do
+    out=$(mode $args 2>"$tmp/err"); rc=$?
+    ok "$rc|$out" "2|" "LC11 $n: usage '$args' exits 2, stdout empty"
+  done
 
   # ---- LC10: lc_bounded: the child's rc, the budget, and a signal or a normal exit kills the whole group -----------
   # gone <pgid>: polls up to ~2 s until no process of the group is left (a reaped zombie can't fake a pass)

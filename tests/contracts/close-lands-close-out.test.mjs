@@ -118,7 +118,8 @@ test('§ Land the close-outs: when, what is collected, the message, the call', (
     '`top` may be a removed directory', 'nearest existing ancestor',
     'Landing does not wait', '`mode=\'\'` in close', 'set `mode=\'--commit-only\'` for every call',
     'its own Bash tool call', 'timeout 600000', 'Never chain', 'one after another',
-    'stuck only when origin\'s new changes overlap a local change', 'never pre-staged work',
+    'a local change that overlaps origin\'s only refuses the checkout\'s fast-forward', 'never pre-staged work',
+    'THREAD.md goes back to HEAD\'s copy', 'A handed doc stays as handed',
     '`queued: needs merge <url>`', '`land: commit <sha>`', '`land: carried <N> earlier close-out commit(s)`',
     '7.2\'s consumed review docs, still on disk (land.sh deletes them)',
     'A consumed review doc\'s deletion rides the close-out landing; there is no other route',
@@ -156,6 +157,7 @@ test('step 8: landing rows, the SHA source, and the stuck and dropped mappings',
     'No row for `landed` with `land: nothing to land`, for `not landed: swept by the daily sweep` or for `not landed: commit-only`',
     '`not landed: no push access` does get a row',
     '**`stuck:` together with `land: nothing committed`.**', 'each handed path maps to `not versioned: <path> (<reason>)`',
+    '`not landed: no push access` together with `land: nothing committed` maps the same way',
     '**A `dropped` path**', '`not versioned: <path> (not on disk)`',
     '`landing <top>: stuck: land.sh failed (<first stderr line>)`',
   ])
@@ -176,7 +178,7 @@ test('Edge cases name the landing cases', () => {
     '`not landed: no push access`', 'Push access unknown',
     '**A non-default checkout**', 'never fetched into or fast-forwarded',
     '`queued: needs merge`', '`/thread:open save`', '`--commit-only`', 'An older close-out PR still queued',
-    'refuses direct pushes', '**Origin moved with local changes** → landed unless a local change overlaps origin\'s, then stuck until that file is committed or stashed',
+    'refuses direct pushes', '**Origin moved with local changes** → on a landable default branch it still lands', 'Elsewhere it is landed unless a local change overlaps origin\'s, then stuck until that file is committed or stashed',
   ])
   assert.ok(!e.includes('close never fetches'), 'the old "close never fetches" edge case survives')
 })
