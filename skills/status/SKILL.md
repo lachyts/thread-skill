@@ -443,7 +443,8 @@ here runs. Print its JSON's `line` verbatim when it is not null, on a line of it
 The line is the Primary refresh job's last recorded state, a point-in-time read with no freshness check: a spell stands
 as the job's last pass wrote it until a pass clears it, so with the job unloaded or dead it can be old. In plain words,
 it names each stuck checkout (a spell a day old, or one whose fast-forward timed out, at once), its outcome, since when,
-and for a checkout the git command that shows its state. This section never quotes the line, nor any part of it (an
+and for a checkout the git command that shows its state. A diverged Primary the job repaired or is carrying shows here
+only once its repair has been blocked a day. This section never quotes the line, nor any part of it (an
 outcome, its advice, the git command), in a code span or a fenced block, and shows no example line: status's read-only
 rule reads every span as a command status runs.
 

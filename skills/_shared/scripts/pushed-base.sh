@@ -54,6 +54,8 @@ for v in $(git rev-parse --local-env-vars 2>/dev/null); do case $v in GIT_CONFIG
 export LC_ALL=C
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+. "$here/live-checkout.sh" 2>/dev/null   # lc_ahead_content, the content test the Primary refresh's repair reads too
+[ "$(type -t lc_loaded 2>/dev/null)" = function ] || { echo "pushed-base: cannot load $here/live-checkout.sh" >&2; exit 2; }
 REPO_STATE="$here/../../close/scripts/repo-state.sh"
 SELF_CHECK="$here/../../execute/scripts/self-rollout-check.sh"
 
@@ -178,7 +180,8 @@ peer_scoped() {  # peer_scoped <member> [<cited path>…]: 0 when the member's a
 # ahead member blocks only when some of its content is not on origin/<b>: a file the ahead commits touch
 # (merges included) differs between origin/<b> and local <b>. THREAD.md is set aside first. Landed content
 # that origin/<b> has since changed blocks, and so does an ahead set that touches no file (empty commits,
-# net-zero changes): with nothing to compare, the gate stays conservative.
+# net-zero changes): with nothing to compare, the gate stays conservative. The test itself is live-checkout.sh's
+# lc_ahead_content, which the Primary refresh's repair of a diverged primary reads too (ADR 0078 d4).
 blocked=0 broken=0
 up="refs/remotes/origin/$b"
 reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed commits
@@ -201,19 +204,20 @@ for c in "${members[@]}"; do
   [ "$n" -gt 0 ] || continue
   hh=$(held_hint "$c")   # the wait a reset of this member needs, once per ahead member (ADR 0031)
   # The files the ahead commits touch (merge-base..<b>), and which of them differ from origin/<b> now.
-  touched=() differ=() other=0
-  while IFS= read -r -d '' f; do touched+=("$f"); done < <(git -C "$c" diff --no-renames --name-only -z "$up...refs/heads/$b" 2>/dev/null)
-  if [ ${#touched[@]} -gt 0 ]; then
-    # --quiet first: its exit status is the answer (0 same, 1 differs, else a failure, which blocks).
-    git -C "$c" --literal-pathspecs diff --quiet --no-renames "$up" "refs/heads/$b" -- "${touched[@]}" >/dev/null 2>&1; drc=$?
-    if [ "$drc" = 1 ]; then
-      while IFS= read -r -d '' f; do differ+=("$f"); done < <(git -C "$c" --literal-pathspecs diff --no-renames --name-only -z "$up" "refs/heads/$b" -- "${touched[@]}" 2>/dev/null)
-      [ ${#differ[@]} -gt 0 ] || other=1
-      for f in ${differ[@]+"${differ[@]}"}; do [ "${f##*/}" = THREAD.md ] || other=1; done
-    elif [ "$drc" != 0 ]; then
-      other=1
-    fi
-  fi
+  touched=() differ=() other=0 drc=
+  while IFS= read -r -d '' r; do
+    case "$r" in
+      T*) touched+=("${r#T}") ;;
+      D*) differ+=("${r#D}") ;;
+      =*) drc=${r#=} ;;
+    esac
+  done < <(lc_ahead_content "$c" "$up" "refs/heads/$b")
+  case $drc in
+    0|3) ;;   # none of them differs, or nothing touched at all (which blocks below)
+    1) [ ${#differ[@]} -gt 0 ] || other=1
+       for f in ${differ[@]+"${differ[@]}"}; do [ "${f##*/}" = THREAD.md ] || other=1; done ;;
+    *) other=1 ;;   # a failure blocks, never skips
+  esac
   if [ ${#touched[@]} -gt 0 ] && [ "$other" = 0 ]; then
     only_thread=1
     for f in "${touched[@]}"; do [ "${f##*/}" = THREAD.md ] || only_thread=0; done
