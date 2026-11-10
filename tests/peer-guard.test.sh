@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # The peer guard in skills/_shared/handoff-lifecycle.md § Close-out, extracted by its marker and run against
 # runtime-generated fixtures (fresh, old, 23 h, 25 h, future mtime, paths with a space, a missing path, a
-# failing `find` stub first on PATH, and `f` unset), under bash and under `zsh -f` when zsh is installed (the Bash tool is zsh). The snippet reads
+# failing `find` stub first on PATH, a doc on origin that HEAD lacks, also under pipefail, and `f` unset), under bash and under `zsh -f` when zsh is installed (the Bash tool is zsh). The snippet reads
 # its one input `f` (the doc's absolute path) as a shell variable; here it comes from the environment.
 # Then prose asserts: close's step 7.2 runs the guard for every consumed doc before any `git rm -f`, step 8
-# carries the three kept/gone rows and the <age> expression, the lifecycle states rule (a)/(b), the K41
+# carries the kept/gone rows and the <age> expression, the lifecycle states rule (a)/(b), the K41
 # no-evidence rule and the one conversation-dependent input, and ADR 0017's Status block carries the amendment.
 # Hermetic: every fixture lives under mktemp. bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+unset $(git rev-parse --local-env-vars)
 
 LIFECYCLE=skills/_shared/handoff-lifecycle.md
 CLOSE=skills/close/SKILL.md
@@ -57,12 +58,36 @@ chmod +x "$tmp/badbin/find"
 
 # $1 is the shell, left unquoted so "zsh -f" splits into command and flag.
 guard() { out=$(env f="$2" $1 "$tmp/guard.sh" 2>/dev/null); rc=$?; }
+# guard_pipefail <shell> <path>: the same under pipefail (the guard's copy in land.sh runs under it).
+guard_pipefail() { out=$(env f="$2" $1 -o pipefail "$tmp/guard.sh" 2>/dev/null); rc=$?; }
 # guard_badfind <shell> <path>: the same, with the failing find stub ahead of the real one on PATH.
 guard_badfind() { out=$(env f="$2" PATH="$tmp/badbin:$PATH" $1 "$tmp/guard.sh" 2>/dev/null); rc=$?; }
+
+# A repo where HEAD lacks h.md, which a close/ tracking ref holds, and d.md, which origin's default branch holds (through
+# the origin/HEAD symref, at a branch the master/main fallback cannot name); old.md is on no origin ref. A second repo has
+# no origin/HEAD symref, and origin/main holds m.md there.
+L="$tmp/l/docs/handoffs"; git init -q -b master "$tmp/l"; mkdir -p "$L"; echo doc > "$L/h.md"
+lg() { git -C "$tmp/l" -c user.name=t -c user.email=t@t "$@"; }
+lg commit -q --allow-empty -m base; lg checkout -q -b side; lg add -A; lg commit -qm doc
+lg update-ref refs/remotes/origin/close/x HEAD; lg checkout -q master; lg branch -qD side
+mkdir -p "$L"; lg checkout -q -b side; echo doc > "$L/d.md"; lg add -A; lg commit -qm d
+lg update-ref refs/remotes/origin/trunk HEAD; lg symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk; lg checkout -q master; lg branch -qD side
+mkdir -p "$L"; echo doc > "$L/h.md"; echo doc > "$L/d.md"; echo doc > "$L/old.md"; touch -t 202601010000 "$L/h.md" "$L/d.md" "$L/old.md"
+# close/ tips that sort after close/x and hold no doc: a guard that stops at the first blob leaves cat-file a next line to die on.
+base=$(lg rev-parse master); for k in $(seq 100); do echo "create refs/remotes/origin/close/zz-$k $base"; done | lg update-ref --stdin
+N="$tmp/n/docs/handoffs"; git init -q -b master "$tmp/n"; mkdir -p "$N"; echo doc > "$N/m.md"
+ng() { git -C "$tmp/n" -c user.name=t -c user.email=t@t "$@"; }
+ng commit -q --allow-empty -m base; ng add -A; ng commit -qm m; ng update-ref refs/remotes/origin/main HEAD; ng reset -q --hard HEAD~1
+mkdir -p "$N"; echo doc > "$N/m.md"; touch -t 202601010000 "$N/m.md"
 
 shells=("bash")
 command -v zsh >/dev/null 2>&1 && shells+=("zsh -f")
 for sh in "${shells[@]}"; do
+  guard "$sh" "$L/h.md"; ok "$out" "keep landing" "[$sh] an old doc HEAD lacks, on a close/ branch → keep landing"
+  guard "$sh" "$L/d.md"; ok "$out" "keep landing" "[$sh] an old doc HEAD lacks, on origin's default branch → keep landing"
+  guard "$sh" "$N/m.md"; ok "$out" "keep landing" "[$sh] the same with no origin/HEAD symref, on origin/main → keep landing"
+  guard_pipefail "$sh" "$L/h.md"; ok "$out" "keep landing" "[$sh] under pipefail, close/ tips after the doc's → still keep landing"
+  guard "$sh" "$L/old.md"; ok "$out" delete "[$sh] an old doc no origin ref holds → delete"
   for pair in "fresh.md|keep fresh" "old.md|delete" "h23.md|keep fresh" "h25.md|delete" \
               "future.md|keep fresh" "a b.md|keep fresh" "old b.md|delete" "missing.md|keep missing"; do
     name=${pair%%|*}; want=${pair#*|}
@@ -103,6 +128,8 @@ rmf=$(idx "$step72" 'rm -f')
 e=$(idx "$step72" "$every"); k=$(idx "$step72" 'keep missing')
 [ "$e" -ge 0 ] && [ "$e" -lt "$rmf" ] && ok y y "the every-doc guard precedes rm -f" || ok n y "the every-doc guard precedes rm -f"
 [ "$k" -ge 0 ] && [ "$k" -lt "$rmf" ] && ok y y "keep missing is handled before rm -f" || ok n y "keep missing is handled before rm -f"
+k=$(idx "$step72" 'keep landing'); del=$(idx "$step72" 'To delete:')
+[ "$k" -ge 0 ] && [ "$k" -lt "$del" ] && ok y y "keep landing is handled before the delete" || ok n y "keep landing is handled before the delete"
 has "$step72" 'other than this one or a subagent it spawned' "step 7.2 excludes this session and its subagents from the listing"
 has "$step72" 'guard kept is **not** carried' "step 7.2: the workspaces auto-commit never carries a kept doc"
 has "$step72" 'Run from:' "step 7.2's listing match takes the doc's Run from directory"
@@ -116,6 +143,7 @@ has "$step72" 'a doc that is both reports `left for live peer <session>`' "step 
 # ---- close elsewhere -----------------------------------------------------------------------------------
 has "$closetext" 'left for its consumer (marked <age> ago)' "step 8 has the left-for-its-consumer row"
 has "$closetext" 'left for live peer <session>' "step 8 has the live-peer row"
+has "$closetext" 'left until the checkout holds it' "step 8 has the not-on-this-checkout row"
 has "$closetext" 'already gone (removed by another close)' "step 8 has the already-gone row"
 dead=$(grep -E '^- \*\*A consumed handoff doc left by a session that died' "$CLOSE")
 ok "$(printf '%s' "$dead" | grep -c .)" 1 "the dead-session edge case exists"
@@ -125,7 +153,7 @@ has "$dead" 'peer guard' "the dead-session edge defers to the peer guard"
 # ---- the lifecycle file --------------------------------------------------------------------------------
 life=$(cat "$LIFECYCLE")
 for phrase in 'no evidence' 'K41' 'ListAgents' 'list_agents' 'whoever marked it, once the peer guard allows' \
-              'other than this one or a subagent it spawned' 'three outputs' 'dormant' \
+              'other than this one or a subagent it spawned' 'four outputs' 'dormant' \
               'one conversation-dependent input' 'not its own'; do
   has "$life" "$phrase" "lifecycle says: $phrase"
 done
