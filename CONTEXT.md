@@ -1426,7 +1426,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
   report's `Needs you:` block and in the rollout note, for a sitting Lachy
-  chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Only a
+  chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Every
+  open needs-you item across all rollouts is also gathered into one list he
+  can open with a click from the quiet Stage line, and work through as one
+  board in a sitting; he never has to visit rollout notes one by one to find
+  them (2026-11-10: seven stops sat in seven notes with nothing collecting
+  them). Only a
   halt that stops the whole rollout can lead anywhere, and only through
   Chorus's Companion while he is at the Stage, when Chorus reads it as his
   (d3); a single set-aside stays listed. The rollout note's
