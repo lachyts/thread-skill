@@ -1156,9 +1156,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   current with origin: every few minutes it fast-forwards it whenever ADR
   0031's hold is clear, and keeps the other checkouts sessions load live from
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
-  Fast-forward only: a diverged checkout, or one with an uncommitted edit
-  origin would overwrite, is left as it is (an edit origin never touches rides
-  along; `refused` only once the hold is clear). One that stays unable to
+  Fast-forward only: a checkout with an uncommitted edit origin would
+  overwrite is left as it is (an edit origin never touches rides along;
+  `refused` only once the hold is clear), and a diverged `~/.agents` too. A
+  diverged **Primary checkout** repairs itself instead (ADR 0078 d4), under
+  the hold: its commits' content already on origin, it resets to origin,
+  keeping a backup ref; otherwise land.sh carries its close-out commits (a
+  landing PR where origin is protected), and any other local commit stays
+  and is recorded, a stop for the Stage after a day. One that stays unable to
   catch up, a rollout's hold included, stays in the job's state file and sends
   no notice (ADR 0075 d2): `/thread:status`'s Primary refresh line reads the
   job's last recorded state there (`primary-refresh.py stuck`), naming a
@@ -1426,7 +1431,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
   report's `Needs you:` block and in the rollout note, for a sitting Lachy
-  chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Only a
+  chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Every
+  open needs-you item across all rollouts is also gathered into one list he
+  can open with a click from the quiet Stage line, and work through as one
+  board in a sitting; he never has to visit rollout notes one by one to find
+  them (2026-11-10: seven stops sat in seven notes with nothing collecting
+  them). Only a
   halt that stops the whole rollout can lead anywhere, and only through
   Chorus's Companion while he is at the Stage, when Chorus reads it as his
   (d3); a single set-aside stays listed. The rollout note's
