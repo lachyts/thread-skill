@@ -450,7 +450,12 @@ from `THREAD_VERIFY_BASE` (ADR 0062's verify base; else `origin/HEAD`) reaches. 
 `tests/fast-tier.map`, and `tests/lib/fast-tier.py`'s header holds its rules: a script reaches the tests that name
 it and, transitively, the tests of every script that names it, and the walkers (tests that read the whole tree)
 run on every diff. A changed path the map cannot place, or one that reaches a path marked FULL, runs the full
-suite, so the fast tier is only ever slower than it could be, never wrong. Every run, `make test` included, checks
+suite, so the fast tier is only ever slower than it could be. The five hubs (`reconcile-rollout.py`,
+`lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`), which most suites name, sit on HUB
+lines instead of FULL: a diff that reaches one runs the suites listed on its line and the reach ends there, and
+check (i) keeps each list holding every suite that names the hub (a tests/lib helper's included). So a suite that
+drives a hub only through another script runs at completion and on master rather than at the merge, ADR 0073 d1's
+accepted risk. Every run, `make test` included, checks
 the map first (`fast-tier.py check`) and names what is missing: a script under `skills/*/scripts/` or `hooks/`
 that no test names (`skills/**` and `hooks/**` already place it, so a test that names it is all it needs; a map
 line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` without its `tests/fixtures/<d>/**`
@@ -460,12 +465,10 @@ line. `bash tests/run.sh --only <test file>...` runs named files in the same her
 d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-latest)`, ADR 0025) run
 `make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
-in exactly one shard; `--shard-plan N` is the dry run). Most code diffs still go FULL today, through the five hubs the map marks
-FULL (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`) and
-the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`. A test that
-holds a FOREIGN name (`THREAD.md`, `CONTEXT.md` and the other root prose) only as a fixture repo's file sits on a
-`FOREIGN-ONLY` line, so a change to the real file does not select it; the over-selection still left (message
-strings, broad walkers, rule (1)'s namers) is measured in `thread-skill-followup-fast-tier-over-selection`.
+in exactly one shard; `--shard-plan N` is the dry run). A test that holds a FOREIGN name (`THREAD.md`,
+`CONTEXT.md` and the other root prose) only as a fixture repo's file sits on a `FOREIGN-ONLY` line, so a change to
+the real file does not select it; the over-selection still left (message strings, broad walkers, rule (1)'s
+namers) is measured in `thread-skill-followup-fast-tier-over-selection`.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third

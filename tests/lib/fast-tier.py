@@ -45,6 +45,7 @@ The map (tests/fast-tier.map). A line matches a path when its pattern does; a ma
 the path. Lines: `<pattern>` alone places the path and leaves the result to its reach; `<pattern> FULL` is the full
 suite; `<pattern> NONE` places it and selects nothing of its own (a path only NONE lines place selects only the ALSO
 entries of its lines, the walkers); `<pattern> <entry>...` places it and selects the entries;
+`<pattern> HUB <entry>...` declares a hub: its suites, which rule (3) stops at (several lines of one pattern add up);
 `<pattern> ALSO <entry>...` selects the entries on top and never places. An entry is a collected test path, a glob
 over collected tests, or `@merge-task-self-tests` (run.sh's two merge-task.sh self-tests, plain lines only).
 `FOREIGN <basename>...` names files the scripts read in other roots (a vault's notes, another repo's docs): such a
@@ -67,6 +68,11 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
       - otherwise q adds the ALSO entries of its matching lines on top (never reach), and then
         - only NONE lines place q: q adds nothing more and pushes nothing, so a path only NONE lines place selects
           only the ALSO entries of its lines (the walkers: a diff under tests/e2e/ still changes text they read);
+        - a HUB line places q: q adds, as reach, the entries of its placing lines and pushes nothing. A hub is named
+          by carriers across the repo, so following them selects nearly every suite (185 of 189 test files on
+          2026-11-11), and its line's check (i) keeps its declared suites whole instead. The reach ends there: a suite
+          that drives the hub only through another carrier (a loader's own suite) does not run at merge, ADR 0073 d1's
+          accepted risk, which the completion verifier and master's run hold;
         - else q adds, as reach, the plain entries of its placing lines and every collected test that names
           basename(q) (for a FOREIGN basename, minus its FOREIGN-ONLY tests); then every carrier that names
           basename(q) is pushed (a FOREIGN basename pushes only tests/lib carriers). A carrier's own text changes
@@ -77,10 +83,11 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
       and has no runners. --ignore-full applies (5) too.
 
 check:
-  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, OWN-LISTINGS, FULL, NONE, ALSO), FULL and NONE
-      stand alone, `@merge-task-self-tests` is the only `@` entry and sits on plain lines only, each OWN-LISTINGS line
-      names at least one test and carries a trailing `# (i) ...` or `# (ii) ...` comment, and each FOREIGN-ONLY line
-      names a FOREIGN name and at least one test and carries a trailing `# ...` comment.
+  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, OWN-LISTINGS, FULL, NONE, ALSO, HUB), FULL and
+      NONE stand alone, HUB and ALSO list at least one entry, `@merge-task-self-tests` is the only `@` entry and sits
+      on plain lines only, each OWN-LISTINGS line names at least one test and carries a trailing `# (i) ...` or
+      `# (ii) ...` comment, and each FOREIGN-ONLY line names a FOREIGN name and at least one test and carries a
+      trailing `# ...` comment.
   (b) Every exact pattern exists on disk, and every glob matches at least one tracked file.
   (c) Every entry resolves to collected tests, and an exact test entry (an OWN-LISTINGS or FOREIGN-ONLY one too) is
       collected.
@@ -122,6 +129,10 @@ check:
       that no longer does is stale: drop it).
   (h) Every repo file that tests/run.sh names, read by the .sh carrier rule (its non-comment lines), is marked FULL
       or carries `@merge-task-self-tests` on a line: run.sh's own inputs run in every mode.
+  (i) Every HUB line names one exact path, and its pattern's lines together list every collected test that names the
+      hub's basename and every one that names a tests/lib helper naming it: a suite that drives a hub is on its list,
+      or the map says which is missing. A list may hold more (a suite a hub's loader runs, say); an entry is never
+      required to name the hub.
 """
 import ast
 import fnmatch
@@ -268,7 +279,7 @@ def unquote(s):
 
 
 class Line:
-    """One map line: its number, pattern, kind (PLACE, PLAIN, FULL, NONE or ALSO) and resolved entries."""
+    """One map line: its number, pattern, kind (PLACE, PLAIN, FULL, NONE, HUB or ALSO) and resolved entries."""
     def __init__(self, no, pattern, kind):
         self.no, self.pattern, self.kind = no, pattern, kind
         self.entries = set()   # collected test paths and SELF_TESTS
@@ -359,6 +370,11 @@ class Repo:
                     if l.kind == "ALSO":
                         also |= l.entries
                 if all(kind(l) == "NONE" for l in placing):
+                    continue
+                if any(l.kind == "HUB" for l in placing):
+                    # The reach ends at a hub: its declared suites, kept whole by check (i).
+                    for l in placing:
+                        reach |= l.entries
                     continue
                 base = os.path.basename(q)
                 for l in placing:
@@ -456,12 +472,16 @@ def parse_map(repo):
             kind, rest = "ALSO", rest[1:]
             if not rest:
                 problems.append(f"{where}: ALSO lists no entry (check a)")
+        elif rest and rest[0] == "HUB":
+            kind, rest = "HUB", rest[1:]
+            if not rest:
+                problems.append(f"{where}: HUB lists no entry (check a)")
         elif rest:
             kind = "PLAIN"
         line = Line(no, head, kind)
         for w in rest:
             if KEYWORD.match(w):
-                problems.append(f"{where}: {w} is not an entry; FULL, NONE and ALSO come first on a line (check a)")
+                problems.append(f"{where}: {w} is not an entry; FULL, NONE, ALSO and HUB come first on a line (check a)")
             elif w.startswith("@"):
                 if w != SELF_TESTS:
                     problems.append(f"{where}: {w}: {SELF_TESTS} is the only @ entry (check a)")
@@ -681,6 +701,23 @@ def check(repo):
             lines = repo.matching(p)
             if not any(l.kind == "FULL" or SELF_TESTS in l.entries for l in lines):
                 problems.append(f"{RUNNER} names {p}; mark it FULL or give it {SELF_TESTS} on a line (check h)")
+    # (i) a hub's declared suites are whole
+    hubs = {}
+    for l in repo.map_lines:
+        if l.kind == "HUB":
+            hubs.setdefault(l.pattern, []).append(l)
+    for pat, lines in sorted(hubs.items()):
+        if GLOB_CHARS.search(pat):
+            problems.append(f"{MAP}:{lines[0].no}: {pat}: a HUB line names one exact path (check i)")
+            continue
+        base = os.path.basename(pat)
+        listed = set().union(*(l.entries for l in lines))
+        drivers = {t: "names it" for t in repo.namers(base, "tests")}
+        for h in sorted(c for c in repo.namers(base, "carriers") if c.startswith(LIB)):
+            for t in repo.namers(os.path.basename(h), "tests"):
+                drivers.setdefault(t, f"names {h}, which names it")
+        for t in sorted(set(drivers) - listed):
+            problems.append(f"{MAP}:{lines[0].no}: {t} {drivers[t]} but is missing from the HUB line of {pat} (check i)")
     if problems:
         return problems, ""
     summary = (f"{len(repo.map_lines)} lines, {len(sources)} sources placed, {len(dirs)} fixture dirs, "

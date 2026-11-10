@@ -15,14 +15,22 @@
 //     close line, part or option says what close writes; in wording Lachy reads, **session** is this chat and
 //     **thread** the durable work its THREAD.md records (CONTEXT.md's **Thread** entry records that convention);
 //   - step 5 writes nothing for it apart from **A launch first.**, and only Lachy archives a session;
-//   - § Don't bans the bare "Leave it" / "Keep thread" labels.
+//   - § Don't bans the bare "Leave it" / "Keep thread" labels;
+//   - since 2026-11-09's custard doof stick session, whose handoff would have lost its process record to an archive,
+//     an unwritten record (no THREAD.md for a conversation of thread shape, or a process observation in no METHOD.md)
+//     makes the move close, which creates them: step 1 reads it, step 3 decides it, step 4 says why in one line;
+//     that close writes the thread under the handoff doc's own `thread:` slug, the one the consumer's close looks
+//     up, after step 1 has looked for it there too, skips 7.9 so the other session's branch is left alone, and its
+//     line tells Lachy to archive this chat once close's report prints, never to "say archive instead" of a close
+//     that has already run.
 //
 // Two pure checks, nextFails and contextFails, each returning a failure list: the real files and the controls
 // run through them, so a control proves its pin is not vacuous. Every numbered pin has at least one control that
-// breaks it and expects its failure: P1 (M), P1b (N), P2 (E, G), P2b (H), P3 (I), P4 (A, B, C, D, L, L2, R, R2),
-// P5 (O), P6 (A, B, B2), P7 (F, S), P8 (P, Q), P9 (J), P10 (K). A control breaks one phrase or line of its pin, not every
-// phrase the pin lists. Every line pin finds its line inside its own step slice, so a moved line fails. Phrase
-// checks run on collapsed text. Reads files only.
+// breaks it and expects its failure: P1 (M), P1b (N and the process-record table), P2 (E, G), P2b (H), P3 (I),
+// P4 (A, B, C, D, L, L2, R, R2), P5 (O), P6 (A, B, B2), P7 (F, S), P8 (P, Q), P9 (J), P10 (K), P11-P14 (the
+// process-record table). A control breaks one phrase or line of its pin, not every phrase the pin lists. Every line
+// pin finds its line inside its own step slice, so a moved line fails. Phrase checks run on collapsed text. Reads
+// files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, lineOf, read, slice } from '../lib/contract-text.mjs'
@@ -49,8 +57,18 @@ const CLOSE_PART = /^\s*- the close part,/
 const PART_LABEL = /^\s*- the (\w+) part,/
 const PART_LABELS = ['archive', 'close']
 const DISPATCHED = /^\s*\*\*Archive this session, dispatched\.\*\*/
+const PROCESS = /^\s*- \*\*This session's process record\*\*/
+const AFTER_HANDOFF = /^\s*- \*\*After this session's own handoff\*\*/
+const CLOSE_FIRST = /^\s*\*\*An unwritten process record, close first\.\*\*/
+const CONFIRM_HOLDS = /^\s*\*\*An open confirm, while another session holds the thread\.\*\*/
+const CLEAR = /^\s*- \*\*Clear\*\*/
+const CLOSE_LINE = /^\s*\*\*The close line, when the process record is unwritten\.\*\*/
+const CLOSE_DISPATCHED = /^\s*\*\*Close for an unwritten process record, dispatched\.\*\*/
+const DONT_ARCHIVE = "- Don't recommend archive while"
 const LEAVE = /\bleave it\b/i
 const KEEP = /\bkeep (the )?thread\b/i
+// The overturn the close line once offered, which close (run at once, step 5) has already gone past.
+const OVERTURN = /say archive instead/i
 
 const C = (s) => (s == null ? '' : collapse(s))
 const has = (text, p) => (typeof p === 'string' ? text.includes(p) : p.test(text))
@@ -99,6 +117,7 @@ function nextFails(text) {
   // P1b — the own-branch fact, in a step-1 bullet of its own, so every close line, part or option gets it.
   needLine(fails, 'P1b step-1 own-branch bullet', lineOf(s1, OWN_BRANCH), [
     'close § The own branch', 'Every close line, part or option', "the move's line and the menu's as well as the archive line's",
+    'names the branch as left to the other session instead',
   ])
 
   // P2 — the step-3 Archive bullet alone: the compact paragraph's own "not a route" cannot satisfy it.
@@ -179,6 +198,51 @@ function nextFails(text) {
   needLine(fails, "P8 § Don't moves bullet", lineOf(dont, DONT_MOVES), [
     'handoff, stash or defer', 'another session holds the thread', 'only Lachy',
   ])
+
+  // P11 — step 1 reads the process record only when the work continues elsewhere, by close's and process-scan's own
+  // tests, and after this session's own handoff it can still make the move close. Close's chain never reads a doc
+  // this session wrote (its rung 2 is a named slug or a picked-up doc), so step 1 also looks the thread up by that
+  // doc's `thread:`, where the consumer's close may already have created it.
+  needLine(fails, 'P11 step-1 process-record bullet', lineOf(s1, PROCESS), [
+    'read only when the work continues in another session', 'writes nothing', 'thread shape', 'rung 4', 'rung 1',
+    'no METHOD.md capture', 'process-scan.md` § The bar', '`## Candidates`', 'on Windows',
+    "open § Repo-thread lookup run with `slug=` that doc's `thread:`", 'A hit there means this half does not hold',
+  ])
+  needLine(fails, 'P11 after-handoff bullet', lineOf(s1, AFTER_HANDOFF), ['with the process record unwritten, that move is close'])
+
+  // P12 — step 3: an unwritten record outweighs Archive, and every rule that says otherwise names the exception.
+  needLine(fails, 'P12 close-first paragraph', lineOf(s3, CLOSE_FIRST), [
+    'the move is `close`, not Archive', 'runs no process scan', 'Close creates what is missing', 'never asked',
+    'keep going, handoff, stash and defer still drop', 'Its sub-step 7.9 does not run',
+  ])
+  needLine(fails, 'P12 Archive bullet', lineOf(s3, ARCHIVE_ROUTE), ["unless this session's process record is unwritten"])
+  needLine(fails, 'P12 holds paragraph', lineOf(s3, HOLDS), [
+    'Only an unwritten process record outweighs them, and only for what a decided close still writes',
+    'the THREAD.md and its METHOD.md row', 'since that close skips sub-step 7.9',
+  ])
+  needLine(fails, 'P12 open-confirm paragraph', lineOf(s3, CONFIRM_HOLDS), ['takes **An open confirm, settled first.**'])
+
+  // P13 — step 4: the close is clear too, a line and no menu, saying what would be lost, where the thread lives on and
+  // when to archive this chat. Close runs at once, so the line never offers an archive in its place.
+  needLine(fails, 'P13 clear bullet', lineOf(s4, CLEAR), ["with this session's process record unwritten (close)"])
+  const closeLine = lineOf(s4, CLOSE_LINE)
+  needLine(fails, 'P13 close line', closeLine, [
+    'there is no menu', '`Next move: close, because the work continues in <the other session> but <what is unwritten> would be lost with this chat.',
+    "The thread stays active in <the other session>; once close's report prints, archive this chat on the Stage, from its row.",
+    'the line offers no overturn', '"archive this task in the sidebar" in Codex Desktop', 'where the thread was last logged',
+    '`<B>` is left to <the other session>, neither reviewed nor queued',
+  ])
+  if (closeLine != null && OVERTURN.test(C(closeLine))) fails.push(`P13 close line offers an overturn: ${OVERTURN}`)
+  needLine(fails, 'P13 archive line lead', lineOf(s4, LINE_LEAD), ['with the process record written'])
+
+  // P14 — step 5 and § Don't: close takes the thread step 1's lookup found, or creates it, without a second offer,
+  // under the handoff doc's `thread:` slug the consumer's close looks up; it leaves the own branch to the other
+  // session (no 7.9) and is not rerouted.
+  needLine(fails, 'P14 step-5 close paragraph', lineOf(s5, CLOSE_DISPATCHED), [
+    'rung 4', 'asks neither', '**Wrong route?**', "when step 1's lookup by this session's handoff doc's `thread:` found a file",
+    "that slug is the doc's `thread:` value", 'Sub-step 7.9 (Land the own branch) does not run', 'as under `/thread:open save` and a Leg',
+  ])
+  needLine(fails, "P14 § Don't archive bullet", lineOf(dont, DONT_ARCHIVE), ['process record is unwritten', 'close'])
   return fails
 }
 
@@ -389,3 +453,37 @@ test("control Q: a § Don't label bullet that drops the session-for-this-chat cl
   const fails = nextFails(bad)
   assert.ok(failsWith(fails, "P8 § Don't label bullet"), `no P8 failure: ${fails}`)
 })
+
+// One row per pin of the unwritten process record: the rule broken (or its line gone), and the pin that must name it.
+for (const [name, broken, pin] of [
+  ['step 1 stops reading the record', () => dropLine(next, PROCESS), 'P11 step-1 process-record bullet: missing'],
+  ['the METHOD.md half goes', () => mutateLine(next, PROCESS, '**no METHOD.md capture**', ''), 'P11 step-1 process-record bullet'],
+  ['the after-handoff bullet loses the exception', () => mutateLine(next, AFTER_HANDOFF, ' (with the process record unwritten, that move is close, step 3)', ''), 'P11 after-handoff bullet'],
+  ['step 3 no longer overrides Archive', () => dropLine(next, CLOSE_FIRST), 'P12 close-first paragraph: missing'],
+  ['the Archive bullet recommends archive whatever the record', () => mutateLine(next, ARCHIVE_ROUTE, ", unless this session's process record is unwritten (**An unwritten process record, close first.**)", ''), 'P12 Archive bullet'],
+  ['the holds paragraph forgets the exception', () => mutateLine(next, HOLDS, ' Only an unwritten process record outweighs them, and only for what a decided close still writes', ''), 'P12 holds paragraph'],
+  ['the holds paragraph lets the decided close land the own branch', () => mutateLine(next, HOLDS, 'since that close skips sub-step 7.9', 'since that close also runs sub-step 7.9'), 'P12 holds paragraph'],
+  ['close first lands the own branch', () => mutateLine(next, CLOSE_FIRST, 'Its sub-step 7.9 does not run', 'Its sub-step 7.9 runs'), 'P12 close-first paragraph'],
+  ['step 1 misses the thread the consumer created', () => mutateLine(next, PROCESS, "open § Repo-thread lookup run with `slug=` that doc's `thread:`", 'nothing else'), 'P11 step-1 process-record bullet'],
+  ['a lookup hit still counts as no THREAD.md', () => mutateLine(next, PROCESS, 'A hit there means this half does not hold', 'A hit there is ignored'), 'P11 step-1 process-record bullet'],
+  ['the own-branch bullet names a landing the decided close skips', () => mutateLine(next, OWN_BRANCH, 'names the branch as left to the other session instead', 'names it too'), 'P1b step-1 own-branch bullet'],
+  ['a confirm under close is still carried as for archive', () => mutateLine(next, CONFIRM_HOLDS, "takes **An open confirm, settled first.**'s carrier", 'stays here'), 'P12 open-confirm paragraph'],
+  ['the close is no longer clear', () => mutateLine(next, CLEAR, " or does so with this session's process record unwritten (close)", ''), 'P13 clear bullet'],
+  ['no close line', () => dropLine(next, CLOSE_LINE), 'P13 close line: missing'],
+  ['the line does not say what would be lost', () => mutateLine(next, CLOSE_LINE, 'but <what is unwritten> would be lost with this chat', 'and close is tidier'), 'P13 close line'],
+  ['the line never says to archive this chat', () => mutateLine(next, CLOSE_LINE, "once close's report prints, archive this chat on the Stage, from its row.", ''), 'P13 close line'],
+  ['the line offers an archive close has already run past', () => mutateLine(next, CLOSE_LINE, 'from its row.`', 'from its row. Say archive instead and that record goes with this chat.`'), 'P13 close line offers an overturn'],
+  ['a closed successor is named as live', () => mutateLine(next, CLOSE_LINE, 'where the thread was last logged', 'the other session'), 'P13 close line'],
+  ['the line says close reviews and queues the own branch', () => mutateLine(next, CLOSE_LINE, 'neither reviewed nor queued', 'reviewed and queued'), 'P13 close line'],
+  ['the archive line ignores the record', () => mutateLine(next, LINE_LEAD, ', with the process record written (else the close line below)', ''), 'P13 archive line lead'],
+  ['close offers the thread again', () => mutateLine(next, CLOSE_DISPATCHED, 'asks neither', 'asks first'), 'P14 step-5 close paragraph'],
+  ['close names the thread from the conversation, splitting it in two', () => mutateLine(next, CLOSE_DISPATCHED, "that slug is the doc's `thread:` value", 'that slug comes from the conversation'), 'P14 step-5 close paragraph'],
+  ["close creates a thread step 1's lookup already found", () => mutateLine(next, CLOSE_DISPATCHED, "when step 1's lookup by this session's handoff doc's `thread:` found a file", 'always'), 'P14 step-5 close paragraph'],
+  ['close lands the own branch under the other session', () => mutateLine(next, CLOSE_DISPATCHED, 'Sub-step 7.9 (Land the own branch) does not run', 'Sub-step 7.9 (Land the own branch) runs'), 'P14 step-5 close paragraph'],
+  ["§ Don't loses the rule", () => dropLine(next, new RegExp(`^${DONT_ARCHIVE}`)), "P14 § Don't archive bullet: missing"],
+]) {
+  test(`control, process record: ${name}`, () => {
+    const fails = nextFails(broken())
+    assert.ok(failsWith(fails, pin), `no ${pin} failure: ${fails}`)
+  })
+}
