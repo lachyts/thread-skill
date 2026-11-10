@@ -48,7 +48,20 @@
 #                              included) prints nothing: the merge is still the guard. A case-only collision on a
 #                              case-insensitive filesystem slips past it, and git's own refusal (which rewrites
 #                              ORIG_HEAD) catches it; so does an index.lock, which the overlap never reads.
-#   lc_overlap <repo> <d>      lc_overlap_ref against refs/remotes/origin/<d>.
+#   lc_overlap_list <repo> <ref>
+#                              lc_overlap_ref's paths, one a line and whole, for a caller that reads them one by one.
+#   lc_same <repo> <ref> <path>
+#                              rc 0 when the checkout already holds <ref>'s copy of <path>: a regular file with <ref>'s
+#                              blob (`git hash-object --path`, so filters apply), or gone from both. A fast-forward
+#                              loses nothing there.
+#   lc_doc <repo> <ref> <path> rc 0 when <path> is a handoff doc (a regular file directly under docs/handoffs/ or
+#                              */docs/handoffs/) that <ref> holds too. Whatever differs is the doc's own lifecycle (its
+#                              pickup's mark, a refresh at close), and the fast-forward keeps this copy.
+#   lc_overlap <repo> <d>      the fast-forward's overlap: lc_overlap_ref's paths against refs/remotes/origin/<d>, less
+#                              every lc_same or lc_doc path (ADR 0078 d3: a landed close-out's own copy and a handoff
+#                              doc left on disk never hold the checkout back). lc_doc loses nothing: the copy on disk
+#                              stays, and origin's is in history.
+#                              lc_overlap_ref, leg.py's overlap mode, stays strict.
 #   lc_busy <repo> <d>         why the checkout must not be moved, on stdout, rc 0, else rc 1: `index.lock present`, a
 #                              half-applied operation in words (`a rebase in progress`, a merge, cherry-pick, revert,
 #                              bisect, or `a cherry-pick or revert sequence in progress`), `HEAD detached`, or `on
@@ -63,9 +76,12 @@
 #                              "ahead" for ever. rc 0 always; the result is the last record. An ahead set that touches no
 #                              file, or a failure, is never "on origin".
 #   lc_ff <repo> <d>           the overlap first: one prints its paths and returns 3, running nothing, so ORIG_HEAD is
-#                              never rewritten (a refused `merge --ff-only` writes it). Else `git merge -q --ff-only
-#                              --no-autostash refs/remotes/origin/<d>`: rc 0, or rc 1 with git's output (its `hint:`
-#                              lines dropped) on one line of at most 200 characters.
+#                              never rewritten (a refused `merge --ff-only` writes it). Origin's blob is staged for
+#                              each overlap path still on disk (git's two-way merge keeps an index entry that matches
+#                              the target and refuses an untracked or unstaged copy; a doc that differs from it stays
+#                              dirty, as it did when the doc was committed on HEAD), and unstaged again if the merge is refused.
+#                              Then `git merge -q --ff-only --no-autostash refs/remotes/origin/<d>`: rc 0, or rc 1 with
+#                              git's output (its `hint:` lines dropped) on one line of at most 200 characters.
 #   lc_check <repo> <d>        exactly one line, the first form that holds (tips and heads 40-hex, counts integers):
 #                                unreadable <why>            HEAD or refs/remotes/origin/<d> names no commit, or a count
 #                                                            failed
@@ -164,7 +180,7 @@ lc_fetch() {
     "+refs/heads/${2:-}:refs/remotes/origin/${2:-}"
 }
 
-lc_overlap_ref() {
+lc_overlap_list() {
   local _lc_c _lc_p _lc_q _lc_u
   _lc_c=$(git -C "${1:-}" -c core.quotePath=false diff --no-renames --name-only HEAD "${2:-}" -- \
     2>/dev/null) || return 0
@@ -180,16 +196,47 @@ $_lc_u"
     $0 != "" {
       for (i = 1; i <= n; i++) {
         if (p[i] == "") continue
-        if ($0 == p[i] || index($0, p[i] "/") == 1 || index(p[i], $0 "/") == 1) {
-          out = out (out == "" ? "" : ", ") $0; break
-        }
+        if ($0 == p[i] || index($0, p[i] "/") == 1 || index(p[i], $0 "/") == 1) { print; break }
       }
-    }
-    END { if (out != "") print substr(out, 1, 200) }' || :
+    }' || :
   return 0
 }
 
-lc_overlap() { lc_overlap_ref "${1:-}" "refs/remotes/origin/${2:-}"; }
+_lc_join() { awk '$0 != "" { out = out (out == "" ? "" : ", ") $0 } END { if (out != "") print substr(out, 1, 200) }'; }
+
+lc_overlap_ref() { lc_overlap_list "${1:-}" "${2:-}" | _lc_join; }
+
+lc_same() {
+  local _lc_t _lc_h
+  _lc_t=$(git -C "${1:-}" rev-parse -q --verify "${2:-}:${3:-}" 2>/dev/null) || _lc_t=
+  if [ -z "$_lc_t" ]; then
+    [ ! -e "${1:-}/${3:-}" ] && [ ! -L "${1:-}/${3:-}" ]
+    return
+  fi
+  [ -f "${1:-}/${3:-}" ] && [ ! -L "${1:-}/${3:-}" ] || return 1
+  _lc_h=$(git -C "${1:-}" hash-object --path="${3:-}" -- "${3:-}" 2>/dev/null) || return 1
+  [ "$_lc_h" = "$_lc_t" ]
+}
+
+lc_doc() {
+  local _lc_n
+  case "${3:-}" in
+    docs/handoffs/*) _lc_n=${3#docs/handoffs/} ;;
+    */docs/handoffs/*) _lc_n=${3##*/docs/handoffs/} ;;
+    *) return 1 ;;
+  esac
+  case "$_lc_n" in ''|*/*) return 1 ;; esac
+  [ -f "${1:-}/${3:-}" ] && [ ! -L "${1:-}/${3:-}" ] || return 1
+  git -C "${1:-}" rev-parse -q --verify "${2:-}:${3:-}" >/dev/null 2>&1
+}
+
+lc_overlap() {
+  local _lc_x _lc_r="refs/remotes/origin/${2:-}"
+  lc_overlap_list "${1:-}" "$_lc_r" | while IFS= read -r _lc_x; do
+    [ -n "$_lc_x" ] || continue
+    lc_same "${1:-}" "$_lc_r" "$_lc_x" || lc_doc "${1:-}" "$_lc_r" "$_lc_x" || printf '%s\n' "$_lc_x"
+  done | _lc_join
+}
 
 lc_busy() {
   local _lc_l _lc_m _lc_cur
@@ -235,10 +282,25 @@ lc_ahead_content() {
 }
 
 lc_ff() {
-  local _lc_o
+  local _lc_o _lc_x _lc_b _lc_m _lc_added= _lc_r="refs/remotes/origin/${2:-}"
   _lc_o=$(lc_overlap "${1:-}" "${2:-}")
   if [ -n "$_lc_o" ]; then printf '%s\n' "$_lc_o"; return 3; fi
-  if _lc_o=$(git -C "${1:-}" merge -q --ff-only --no-autostash "refs/remotes/origin/${2:-}" 2>&1); then return 0; fi
+  while IFS= read -r _lc_x; do
+    [ -n "$_lc_x" ] && [ -e "${1:-}/$_lc_x" ] || continue
+    _lc_b=$(git -C "${1:-}" rev-parse -q --verify "$_lc_r:$_lc_x" 2>/dev/null) || continue
+    [ "$(git -C "${1:-}" rev-parse -q --verify ":$_lc_x" 2>/dev/null)" != "$_lc_b" ] || continue
+    _lc_m=$(git -C "${1:-}" ls-tree "$_lc_r" -- "$_lc_x" 2>/dev/null | awk '{ print $1; exit }')
+    if [ -n "$_lc_m" ] && git -C "${1:-}" update-index --add --cacheinfo "$_lc_m,$_lc_b,$_lc_x" 2>/dev/null; then
+      _lc_added="$_lc_added$_lc_x
+"
+    fi
+  done <<_LC_EOF
+$(lc_overlap_list "${1:-}" "$_lc_r")
+_LC_EOF
+  if _lc_o=$(git -C "${1:-}" merge -q --ff-only --no-autostash "$_lc_r" 2>&1); then return 0; fi
+  printf '%s' "$_lc_added" | while IFS= read -r _lc_x; do
+    [ -z "$_lc_x" ] || git -C "${1:-}" reset -q -- "$_lc_x" 2>/dev/null || :
+  done
   _lc_o=$(printf '%s\n' "$_lc_o" | tr '\t\r' '  ' \
     | awk '$1 != "hint:" && NF { $1 = $1; s = s (s == "" ? "" : " ") $0 } END { print s }')
   printf '%s\n' "$(printf '%s' "${_lc_o:-git merge --ff-only failed}" | cut -c1-200)"

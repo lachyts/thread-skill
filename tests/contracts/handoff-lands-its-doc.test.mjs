@@ -129,6 +129,7 @@ test('result mapping follows close step 8\'s Landing rows in full', () => {
   assertHas(COMMIT(), 'handoff § Commit it', [
     "close step 8's **Landing rows**",
     '`land: commit <sha>`', '`stuck:` together with `land: nothing committed`', '`not versioned: <path> (<reason>)`',
+    '`not landed: no push access` together with `land: nothing committed` reads the same',
     '`landing <top>: <result line>`', '`landing <top>: stuck: land.sh failed (<first stderr line>)`',
     ' (carried <N> earlier close-out commit(s))',
     'no row for `landed` with `land: nothing to land`', 'nor for `not landed: swept by the daily sweep`',
