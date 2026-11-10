@@ -309,6 +309,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Landing register** — the one estate-wide list of repos agents must never
   push to on their own. Any repo Lachy can push to lands unless the register
   names it. _Avoid_: allow-list (it is a deny-list), push list.
+- **Landing carrier** — the background pass that carries every open landing PR
+  to its merge with no one touching it (ADR 0078 d2): every `landing` PR, and
+  every PR on a land.sh-named `close/` branch. It brings them current, resolves
+  THREAD.md and handoff conflicts where both sides only add, re-runs CI that
+  GitHub stopped when nothing failed for real, merges a close-out whose repo
+  will not queue auto-merge, and closes one a later close-out carries. An own
+  branch's `queued: needs merge` leaves a `Landing queued` marker the carrier
+  merges at the queued head once green and clean. A PR unmoved for a day is
+  listed as stuck (`land-carrier.py stuck`). It runs from the **Primary
+  refresh**'s job every 15 minutes. _Avoid_: daily lander, nightly lander.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.
@@ -1170,7 +1180,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   checkout once it has stood a day, or at once when it timed out. It runs an
   installed bundle that updates itself only after a smoke run with the job's
   own argv and a real fetch, and it records a launchd job an update left stale
-  in the same state file, read on the same line. _Avoid_: auto-update, plugin
+  in the same state file, read on the same line. Each installed pass ends by
+  running the **Landing carrier**. _Avoid_: auto-update, plugin
   update (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never

@@ -101,7 +101,7 @@ tests/fixtures/away-state/** skills/execute/tests/reconcile-rollout-trickle.test
 tests/fixtures/gated-inputs/** tests/gated-inputs.test.mjs
 tests/fixtures/land/** tests/git-env-canary.test.sh tests/land.test.sh tests/lead-integrate.test.sh tests/live-checkout.test.sh
 tests/fixtures/land/** tests/merge-task-base.test.sh tests/parallel-rollouts-one-repo.test.sh tests/primary-refresh.test.sh
-tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh
+tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh tests/land-carrier.test.sh
 tests/fixtures/landing-register/** tests/execution-fit-remote.test.sh tests/landing-register.test.mjs
 tests/fixtures/merge-gate/** tests/merge-gate.test.mjs
 tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integrated.test.sh tests/parallel-rollouts-one-repo.test.sh
