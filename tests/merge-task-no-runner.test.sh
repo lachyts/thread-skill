@@ -31,17 +31,21 @@ queued() {  # queued <job json>… — run 7 unfinished on the head, holding exa
   echo '[{"id": 7, "status": "queued"}]' > "$MT_STATE/runs"
 }
 
-# 1. A required job queued past the limit: the watch is cut, the job read, the task set aside in this one run.
-fresh; pair; mkpr 5 "$I" BLOCKED
-queued "$(job 8 'self-hosted (arm)' null "$OLD")"
-hang 'self-hosted (arm)' 8
-run 5 "$I" "$B"
-ok "$rc" 4 "1. a required job no runner took: exit 4"
-ok "$(sent)" "failed:4" "1. failed:4"
-ok "$(nmerge)" 0 "1. nothing merged"
-has "$out" 'set-aside reason: integration: no-runner: required job "self-hosted (arm)"' "1. the reason names no-runner and the job"
-has "$out" "(run 7, job 8)" "1. names the run and the job"
-ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 1 "1. one watch: no second wait"
+# 1. A required job queued past the limit: the watch is cut, the job read, the task set aside in this one run. A row
+#    whose link names no job is matched by the job's name.
+for form in link no-link; do
+  r=$(row 'self-hosted (arm)' pending 8); [ "$form" = link ] || r=$(printf 'self-hosted (arm)\tpending\t1m\t\t')
+  fresh; pair; mkpr 5 "$I" BLOCKED
+  queued "$(job 8 'self-hosted (arm)' null "$OLD")"
+  chk 8 "$r" "" 30
+  run 5 "$I" "$B"
+  ok "$rc" 4 "1 ($form). a required job no runner took: exit 4"
+  ok "$(sent)" "failed:4" "1 ($form). failed:4"
+  ok "$(nmerge)" 0 "1 ($form). nothing merged"
+  has "$out" 'set-aside reason: integration: no-runner: required job "self-hosted (arm)"' "1 ($form). the reason names no-runner and the job"
+  has "$out" "(run 7, job 8)" "1 ($form). names the run and the job"
+  ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 1 "1 ($form). one watch: no second wait"
+done
 
 # 2. The same job not required, and no required check reported: it stops counting as CI in flight, and an UNSTABLE PR
 #    merges at once.
@@ -52,14 +56,17 @@ run 5 "$I" "$B"
 ok "$rc" 0 "2. an optional job no runner took: merges"; ok "$(nmerge)" 1 "2. merged once"
 lacks "$out" "CI in flight on head — waiting" "2. not read as CI in flight"
 
-# 3. An optional no-runner job beside a required check still pending: the cut finds it not required, the watch goes on.
-fresh; pair; mkpr 5 "$I" UNSTABLE
-queued "$(job 9 'optional-arm' null "$OLD")"
-hang 'ci' 8; green 'ci' 8
-run 5 "$I" "$B"
-ok "$rc" 0 "3. a required check still pending beside the optional job: waited on, then merges"
-ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 2 "3. the watch went on after the cut"
-lacks "$out" "no-runner" "3. never set aside"
+# 3. An optional no-runner job beside a required check still pending: the cut finds it not required, the watch goes on,
+#    also when it shares the required check's name (another workflow's job: the row's link names job 8, this one is 9).
+for name in optional-arm ci; do
+  fresh; pair; mkpr 5 "$I" UNSTABLE
+  queued "$(job 9 "$name" null "$OLD")"
+  hang 'ci' 8; green 'ci' 8
+  run 5 "$I" "$B"
+  ok "$rc" 0 "3 ($name). a required check still pending beside the optional job: waited on, then merges"
+  ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 2 "3 ($name). the watch went on after the cut"
+  lacks "$out" "no-runner" "3 ($name). never set aside"
+done
 
 # 4. Not "no runner": a job a runner took, and a job under the limit. Each stays in flight at both reads.
 for c in 'assigned|5|' 'under the limit|null|'"$NEVER"; do

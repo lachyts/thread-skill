@@ -69,8 +69,8 @@ keyed by the record's own values where one fits:
   stalls/question; handed-back via retry or descope, race-decided, carried, or an unrecorded mover (a slot-taken,
   lane-taken or merged first, flagged) is stalls/hand-back. With no mover yet (still waiting at the span's end), the
   rollout's latest unmoved set-aside's reasonClass decides, flagged `still waiting`: gate is gate, needs-human question,
-  quota quota-bound/cool-down, transient, call-failed or ci-timeout (ADR 0073 d4) stalls/cool-down, anything else
-  hand-back. A wait over set-asides of different reasonClasses is classed by the first one moved, flagged.
+  quota quota-bound/cool-down, transient, call-failed, ci-timeout (ADR 0073 d4) or no-runner (ADR 0069) stalls/cool-down,
+  anything else hand-back. A wait over set-asides of different reasonClasses is classed by the first one moved, flagged.
 - quota-bound: usage-limit stop spans (cause usage-limit), the quota cool-downs above (cool-down) and not-running
   stretches labelled hold-quota (p36-7: the quota hold, a lead whose Login is inside its line); quota-stall lines are
   counted as events. Here the call-level stalls go: ADR 0051's three missed stops out of nine.

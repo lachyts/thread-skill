@@ -197,10 +197,10 @@
 # with neither a runner_id nor a runner_name, `created_at` at least MERGE_TASK_NO_RUNNER_LIMIT seconds ago (900, 15
 # minutes). no_runner_read reads it, job by job, on the integrated head; a read that fails or a field that does not
 # parse is never "no runner", so a bad read waits as before. Optional, it stops counting: ci_runs_in_flight drops a run
-# held only by such jobs. Required (a pending row of `gh pr checks --required`, the job named by its id or name): the
-# watch is cut every MERGE_TASK_NO_RUNNER_POLL seconds to look, and exit 4 sets the task aside at Integration at once,
-# because `--watch` would otherwise hold the lane until GitHub drops the job. A live-checkout.sh that cannot be loaded
-# leaves the watch uncut, today's wait.
+# held only by such jobs. Required (a pending row of `gh pr checks --required` whose link names that job, or, a row with
+# no job link, the job's name): the watch is cut every MERGE_TASK_NO_RUNNER_POLL seconds to look, and exit 4 sets the
+# task aside at Integration at once, because `--watch` would otherwise hold the lane until GitHub drops the job. A
+# live-checkout.sh that cannot be loaded leaves the watch uncut, today's wait.
 #
 # Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
@@ -1142,29 +1142,34 @@ for r in json.load(open(sys.argv[1])).get("workflow_runs") or []:
   eval "$assigns"
 }
 
-NR_WHY=''
-no_runner_required() {  # 0 when a required job has no runner (NR_WHY names each); 1 when none is, or that cannot be read
-  NR_WHY=''
-  no_runner_read && [ -n "$NR_ROWS" ] || return 1
-  gh pr checks "$PR" -R "$OWNER/$REPO" --required >"$tmp/nr.required" 2>/dev/null   # its exit says only pending or red
-  NR_WHY=$(python3 - "$tmp/nr.required" "$NR_ROWS" <<'PY'
+no_runner_match() {  # no_runner_match <`pr checks --required` table> <NR_ROWS> — the reason for each no-runner job a pending row holds
+  python3 - "$1" "$2" <<'PY'
 import re, sys
 names, ids = set(), set()
 for line in open(sys.argv[1]).read().split("\n"):
     cells = line.split("\t")
     if len(cells) > 1 and cells[1] == "pending":
-        names.add(cells[0])
+        # A row whose link names its job is that job alone: another workflow's job of the same name is not this check.
         m = re.search(r"/job/([0-9]+)", cells[3] if len(cells) > 3 else "")
         if m:
             ids.add(m.group(1))
+        else:
+            names.add(cells[0])
 out = []
 for row in sys.argv[2].split("\n"):
     name, run, job, minutes = row.split("\t")
-    if name in names or job in ids:
+    if job in ids or name in names:
         out.append('required job "%s" queued %s minutes with no runner (run %s, job %s)' % (name, minutes, run, job))
 print("; ".join(out))
 PY
-  )
+}
+
+NR_WHY=''
+no_runner_required() {  # 0 when a required job has no runner (NR_WHY names each); 1 when none is, or that cannot be read
+  NR_WHY=''
+  no_runner_read && [ -n "$NR_ROWS" ] || return 1
+  gh pr checks "$PR" -R "$OWNER/$REPO" --required >"$tmp/nr.required" 2>/dev/null   # its exit says only pending or red
+  NR_WHY=$(no_runner_match "$tmp/nr.required" "$NR_ROWS")
   [ -n "$NR_WHY" ]
 }
 
@@ -1424,7 +1429,7 @@ checks_watch() {  # one slice of the required-checks watch: gh's rc, or 142 once
 }
 
 WAIT_MSG=''
-wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed)
+wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
   local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc
   echo "  PR #$PR — waiting on required checks…"
   while : ; do

@@ -413,6 +413,8 @@ ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"], d["huma
   "A5c-cancel: a cancelled required check at Integration → infra, cooling 15 minutes, no human fix"
 ANOW=2026-10-03T08:15:00Z ar "$A"
 ok "$rc|$(fm "$A" status)" "0|status: review" "A5c-cancel: past the cool-down → review"
+ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","infra"]' \
+  "A5c-cancel: stage integrate, setAsideAt integration, retryClass infra"
 # A5c-no-runner (ADR 0069, amended 2026-11-11): merge-task's exit-4 no-runner set-aside is infra too: no code fix clears
 # it and a runner coming back does, so it cools down rather than reaching Lachy on its second identical block.
 scen a5c-no-runner
@@ -421,8 +423,6 @@ lead "$A" integration 'integration: no-runner: required job "self-hosted" queued
 I=$(INOW=2026-10-03T08:05:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"], d["humanFix"]]')" '["infra",false,"2026-10-03T08:15+00:00",null]' \
   "A5c-no-runner: a required job no runner took → infra, cooling 15 minutes, no human fix"
-ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","infra"]' \
-  "A5c-cancel: stage integrate, setAsideAt integration, retryClass infra"
 # The second control: a `ci<TAB>fail` cell after the never-appeared line, as the flattened one-line reason carries it.
 GH_FAIL="$GH_NEVER ci"$'\t'"fail"$'\t'"1m"$'\t'"https://github.com/o/r/actions/runs/7/job/8"
 for c in "gate|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate is in the way" \
