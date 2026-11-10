@@ -78,14 +78,15 @@ Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwis
      it watches).
   4. Anything else, `unlanded` or `untouched`: the carry. land.sh `-- <primary>`, the primary's own copy, once per head.
      On a protected origin it lands the ahead commits as they are onto a `close/…` branch and a queued landing PR,
-     leaving the primary's HEAD and index alone; on an unprotected one its S11 rebases them, moves the primary's branch
-     (move_branch, unless a rollout holds it) and pushes (S9 carries close-out commits only: any other local commit is
-     `stuck: local commits not from a close-out: …`, so it stays here, is recorded, and is the stop below). land.sh's
-     one line is the spell's `repair` field {head, at, result}: `queued <url>` or `queued: needs merge <url>` reads
-     `carried: <it>`, and land.sh is never asked again for that head (it would update-branch on every call: the PR's
-     upkeep is the landing carrier's, p45-4); `landed` (an unprotected origin took them) ends the spell; anything else
-     reads `not carried (<result>)` and is retried once CARRY_RETRY (1 h) has passed. --dry-run reads `would carry …`,
-     kind dry, and never runs land.sh. A land.sh that cannot run reads `broken: …`.
+     leaving the primary's HEAD and index alone; on an unprotected one its S11 rebases them, pushes, then moves the
+     primary's branch (primary_follow, unless a rollout holds it; a move local edits refuse is a `land: ff refused` note
+     and still `landed`, and the next pass finds the content on origin). S9 carries close-out commits only: any other
+     local commit is `stuck: local commits not from a close-out: …`, so it stays here, is recorded, and is the stop
+     below. land.sh's one line is the spell's `repair` field {head, at, result}: `queued <url>` or `queued: needs merge
+     <url>` reads `carried: <it>`, and land.sh is never asked again for that head (it would update-branch on every call:
+     the PR's upkeep is the landing carrier's, p45-4); `landed` (an unprotected origin took them) ends the spell;
+     anything else reads `not carried (<result>)` and is retried once CARRY_RETRY (1 h) has passed. --dry-run reads
+     `would carry …`, kind dry, and never runs land.sh. A land.sh that cannot run reads `broken: …`.
 A repair blocked for a day is the d4 stop: a primary pass of kind `diverged` whose spell is STUCK_AFTER old is recorded
 kind `stuck` (any cause; its line stays the pass's own), for /thread:status's line and the Stage's. A commit that lands
 by a merge (the landing PR's, as queued) leaves the primary only behind: the ordinary fast-forward takes it from there.
