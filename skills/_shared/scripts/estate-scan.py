@@ -153,7 +153,9 @@ Output, one JSON object (schema 1; --compact for one line):
                the row's, and its own self-rollout, unpushed-default and no-verifier), its `clone` refusal and its own
                unfinished-rollout refusal. estate-rank.py reads a run's blockers from its home project's row;
   rollouts[]  {slug, note, status, shape (absent: parallel), protocolVersion, projects[] (as written), projectRoot,
-               supersedes, supersededBy, summary, error}, by slug. summary is reconcile-rollout.py status's
+               supersedes, supersededBy, waitsOn[] {task, dependency, project} (a live rollout's `## Waits on` lines,
+               waits-on.py's, kept only while their dependency is an open task on no live rollout: ADR 0078 d7), summary,
+               error}, by slug. summary is reconcile-rollout.py status's
                {rolloutStatus, paused, pause_requested, pausedFor, incomplete, ceiling, ceilingError, counts,
                progress, gitEnvHold (a count), setAside[] {slug, status, setAsideAt, needsHuman?}, running[],
                awaitingIntegration[], pendingSignOffs[] (set aside at `gate`), awaitingSignOff}, or null with error
@@ -192,6 +194,7 @@ SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check
 LAND_SH = os.path.join(HERE, "land.sh")
 LANDING_REGISTER_PY = os.path.join(HERE, "landing-register.py")
 UNFINISHED_ROLLOUT_PY = os.path.join(HERE, "unfinished-rollout.py")
+WAITS_ON = re.compile(r"^- \[\[(.+?)\]\] waits on \[\[(.+?)\]\] \((.+?), not scheduled\)$")   # waits-on.py's line
 BACKGROUND_JOB_PY = os.path.join(HERE, "background_job.py")
 BJ = None  # background_job.py, loaded by main (load_siblings); a module that loads this one in process never needs it
 
@@ -1108,6 +1111,24 @@ class Scan:
 
     # ---- rollouts --------------------------------------------------------------------------------------------------
 
+    def waits_on(self, note, tasks):
+        """A live rollout's `## Waits on` lines (waits-on.py, ADR 0078 d7), each only while its dependency is still an open
+        task, by slug, on no live rollout: `tasks` holds the scan's non-dead task rows, so the line for a dependency
+        since closed, archived or scheduled is dropped."""
+        if self.NA.status_of(note) in self.NA.DEAD_STATUSES:
+            return []
+        lines = note.lines[note.span[1] + 1:] if note.span else []
+        out, inside = [], False
+        for line in lines:
+            if line.startswith("## "):
+                inside = line.strip() == "## Waits on"
+                continue
+            m = WAITS_ON.match(line.strip()) if inside else None
+            row = tasks.get(m.group(2).lower()) if m else None
+            if row is not None and not row["rolloutLive"]:
+                out.append({"task": m.group(1), "dependency": m.group(2), "project": m.group(3)})
+        return out
+
     def status(self, rel):
         r = self.runner.run([sys.executable, RECONCILE_ROLLOUT_PY, "status", "--rollout", os.path.join(self.root, rel),
                              "--tasks-dir", os.path.join(self.root, self.NA.TASKS_DIR)])
@@ -1189,6 +1210,9 @@ class Scan:
                                                  "status": jsonable(note.get("status")),
                                                  "phase": jsonable(note.get("phase")), "openTasks": count})
         rollouts = [self.rollout_row(rel, note) for rel, note in rollout_notes]
+        by_slug = {t["slug"].lower(): t for t in tasks}
+        for row, (_rel, note) in zip(rollouts, rollout_notes):
+            row["waitsOn"] = self.waits_on(note, by_slug)
         for row, (rel, note) in zip(rollouts, rollout_notes):
             for prel in {self.resolve(link)[0] for link in self.NA.links_in(note.get("projects"))} - {None}:
                 projects[prel]["rollouts"].append(row["slug"])

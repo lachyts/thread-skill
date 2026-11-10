@@ -404,7 +404,8 @@ R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, §
     before the refusal stays, since it completes a supersede an earlier run confirmed (an
     `interrupted` finish stamps the incomplete note, re-points task notes to it and closes out the
     prior rollout). Orient reports any such finish from schedule's output, never as "nothing
-    written". The phases are written and wait; orient reports schedule's remedy and names the next
+    written". The phases are written and wait; orient reports schedule's remedy and the tasks its
+    `this run would have taken:` line names (each a row of the left-out list below), and names the next
     move: `/thread:status` (then `repair`) for a stuck rollout or a serial chain that has run,
     `status: dropped` on a never-started serial chain's note (dropping it frees its tasks) or run
     that chain, or a later `/thread:orient <project>` (`--steer` is enough) once
@@ -453,8 +454,21 @@ R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, §
   completes the capture, so the pointer would be dead the moment it landed.
   An ordinary task stays open there and gets the fill like any other.
 
+- **The left-out list** (ADR 0078 d7), last, after the steering answer and the rollouts, whether or not a note was
+  written: every open task this orient swept (§ 2; for a scoped target, the tasks its reshuffle wrote) that no
+  `--tasks` list named is printed, none dropped or rolled into a count, under the heading `Left out of the rollout:`,
+  one line each, `- [[<task>]]: <reason>`. Its reason is one of: `open fork: <the fork>` (§ 2 Open forks);
+  `conversation-gated` (the weekly decision task's `decisions` tag names it; § 7 Exclusions); `in flight` (§ 2);
+  `handed to you (Mixed)`; `Not now`; `Hands-on` (a serial-shaped cluster Hands-on left unstamped); `session lane`;
+  `left out by schedule: <its line>` (a Pre-flight leaver, a gate, a branch collision, a `sessionLane` or `leftOut`
+  row, each with schedule's own line); `would have taken: <schedule's refusal>` (schedule stopped at § 0, or on
+  uncommitted grill docs, so nothing joined); or one line of what actually held it. A task another project's work
+  depends on is never left out silently: schedule's `waits-on.py` writes its wait on the dependant's rollout note
+  (schedule step 7). An orient that leaves nothing out prints no heading.
+
 **Under `--backlog`.** The parallel-shaped batches go to forked schedule runs under B6's answers, and the steer is
-decided as Autonomous, with nothing put to him (`skills/orient/backlog.md` § B5).
+decided as Autonomous, with nothing put to him; B7's Left out section stands in for the left-out list
+(`skills/orient/backlog.md` § B5, § B7).
 
 ### 7. Autonomous: a serial rollout
 
@@ -473,8 +487,8 @@ question here, before any note is written: a sign-in, never a confirm. A server 
 check that cannot run, leaves the rows needing it out with their dependants, unstamped. Orient reports each from
 schedule's summary with its `sign in to <server>, then /thread:orient --steer` line.
 
-- **Exclusions** (kept out of every `--tasks`; the fit test already sends most of them to the
-  session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or
+- **Exclusions** (kept out of every `--tasks`, each named with its reason in § 6's left-out list; the fit test already
+  sends most of them to the session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or
   the next reshuffle's grill). The weekly Reflection's decision task (tagged `decisions`, § 2
   Decisions waiting) is conversation-gated and never goes into a serial rollout: Lachy decides it
   at Chorus's Thursday Reflection Routine. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its

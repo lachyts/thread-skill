@@ -107,6 +107,9 @@ Print a glance, short lines, not a wall:
 - `rounds.ownSession[]`: what waits on each big project's own session (its ready work, its One calls, Grills and
   Orient tasks, its sign-offs, a held Unpark offer), none of it asked here; the pick list comes at the end (§ 7);
 - the Unpark offers;
+- each cross-project wait (`rounds.waitsOn[]`, ADR 0078 d7), one line each: `[[<task>]] in [[<rollout>]] waits on
+  [[<dependency>]] (<project>, not scheduled)`, kept out of no count and resolved by scheduling that task or moving the
+  dependant;
 - the warnings, and the ungraded and invalid tasks; `rounds.warnings[]` names each `orient:` key the scan could not
   read.
 
@@ -385,6 +388,8 @@ One message of statements, no question:
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";
 - the waiting runs, each with its why;
+- each cross-project wait (`rounds.waitsOn[]`) as "[[<task>]] in [[<rollout>]] waits on [[<dependency>]] (<project>,
+  not scheduled)";
 - the pick list: each project opened, each offered and not ticked, the candidates past the top 3 (the rest of
   `plan.pick[]`), and `sessions.unmatched[]` as "not on the pick list: <words>";
 - each big project's waiting work (`rounds.ownSession[]`) as "waits on [[<project>]]'s own session";
