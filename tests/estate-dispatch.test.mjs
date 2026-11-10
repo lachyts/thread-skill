@@ -218,6 +218,7 @@ const CLONE = path.join(S, 'clone')
 function injected(raw) {
   const s = structuredClone(raw)
   for (const r of s.rollouts) if (r.slug in SUMMARIES) { r.summary = SUMMARIES[r.slug]; r.error = null }
+  s.rollouts.find((r) => r.slug === 'live-rollout-2026-10-19').waitsOn = [{ task: 'live-running', dependency: 'far-x', project: 'Far' }]
   for (const r of s.repos) {
     if (r.path === ROOT('blk')) r.blockers = BLOCKER
     if (r.path === ROOT('mira') || r.path === ROOT('mirb')) r.rolloutRoot = CLONE
@@ -542,6 +543,8 @@ test('D6. rounds: top holds --top rows in rank order, live carries each rollout 
   assert.equal(live['live-rollout-2026-10-19'].live, 1)
   assert.equal(live['unread-rollout-2026-10-19'].error, 'deadline')
   assert.equal(j.live.length, scanned().rollouts.length)
+  assert.deepEqual(j.waitsOn, [{ rollout: 'live-rollout-2026-10-19', task: 'live-running', dependency: 'far-x', project: 'Far' }],
+    'rounds carries each live rollout\'s cross-project wait (ADR 0078 d7)')
 })
 
 // ---- D7. Acceptance: decisions gate dispatch ---------------------------------------------------------------------------
