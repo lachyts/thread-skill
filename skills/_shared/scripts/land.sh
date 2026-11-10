@@ -47,11 +47,13 @@
 #   HEAD instead: the stranded commits are carried under it, and a conflicting PR is brought current on GitHub
 #   (ADR 0078 d2). The commit is reported (`land: commit <sha>`) only once it is on origin; a stuck result before
 #   then is `land: nothing committed`, the paths left as they were for a re-run. A pending class on what may be
-#   the default branch commits nothing at all. Once the commit is on origin, each handed path whose copy has not
-#   changed since is returned to HEAD's (a staged copy of it unstaged), so the checkout's next fast-forward is not
-#   refused over its own close-out; a file new in this close-out stays on disk, since a handoff's reader may start
-#   this minute. Unprotected, the checkout then moves to the pushed tip unless it is held; a refused move is a
-#   stderr note, since the commit is already on origin.
+#   the default branch commits nothing at all. Once the commit is on origin, settle_handed leaves the checkout free to
+#   fast-forward: a THREAD.md whose copy has not changed since goes back to HEAD's (a staged copy of it unstaged,
+#   the one write to the index, since a staged THREAD.md would refuse the fast-forward), because many sessions land in
+#   that file and origin's copy will rarely equal this one; a consumed review doc is removed from disk; every other
+#   handed path stays as handed, a doc for its reader and a deletion gone, and the fast-forward lets it through once
+#   origin's copy equals it (live-checkout.sh's lc_same). Unprotected, the checkout then moves to the pushed tip
+#   unless it is held; a refused move is a stderr note, since the commit is already on origin.
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
 #   runs S2) and the own branch never drift.
 #
@@ -645,9 +647,9 @@ land_unprotected() {
 
 # primary_follow <old> <new> <reflog msg> <held wording>: after a push to the default branch, move the checkout from
 # <old> to <new>. It is held while a rollout runs on the primary checkout, and a move git refuses over local changes is
-# a note: the commit is on origin either way, and the checkout catches up at its next fast-forward. A new handed file
-# clear_handed left on disk is staged first (its blob is <new>'s, so the move keeps it) and unstaged again if the move
-# is refused.
+# a note: the commit is on origin either way, and the checkout catches up at its next fast-forward. A handed file
+# settle_handed left on disk with <new>'s blob is staged first (so the move keeps it) and unstaged again if the move is
+# refused.
 primary_follow() {
   local rc r added=()
   [ "$1" = "$2" ] && return 0
@@ -656,12 +658,12 @@ primary_follow() {
     return 0
   fi
   for r in ${list[@]+"${list[@]}"}; do
-    if ! git cat-file -e "HEAD:$r" 2>/dev/null && [ -f "$r" ] && [ ! -L "$r" ] \
+    if [ -f "$r" ] && [ ! -L "$r" ] \
        && [ "$(git hash-object --path="$r" -- "$r" 2>/dev/null)" = "$(git rev-parse -q --verify "$2:$r" 2>/dev/null)" ]; then
       git add -- "$r" 2>/dev/null && added+=("$r")
     fi
   done
-  git update-index -q --refresh >/dev/null 2>&1   # read-tree -u trusts the stat cache, stale after clear_handed's restore
+  git update-index -q --refresh >/dev/null 2>&1   # read-tree -u trusts the stat cache, stale after settle_handed's restore
   move_branch "$1" "$2" "$3"; rc=$?
   [ "$rc" = 0 ] && return 0
   for r in ${added[@]+"${added[@]}"}; do git reset -q HEAD -- "$r" 2>/dev/null; done
@@ -754,26 +756,28 @@ scratch_commit() (
 )
 
 # delivered: the handed paths have reached origin (this run's commit is pushed, or origin already held them).
-delivered() { if [ -n "$built$already" ]; then clear_handed; fi; }
+delivered() { if [ -n "$built$already" ]; then settle_handed; fi; }
 
-# clear_handed: once the close-out is on origin, give each handed path back to HEAD, so the checkout's next
-# fast-forward is not refused over its own close-out (live-checkout.sh's overlap: a dirty or staged path origin
-# changes). Only a path still exactly as it was committed: one edited since keeps its edit. A file HEAD does not know
-# stays on disk (a handoff's reader may start this minute). A copy the caller staged (`git rm -f`) is unstaged first.
-clear_handed() {
+# settle_handed: once the close-out is on origin, leave the checkout free to fast-forward (the header's scratch commit).
+# THREAD.md goes back to HEAD's copy, only if it is still exactly as committed: one edited since keeps its edit, and
+# a copy the caller staged (close's 7.1) is unstaged first, since a staged copy that differs from origin's would
+# refuse the fast-forward. A consumed review doc still on disk is removed, the removal the pathspec route does up front.
+# Every other handed path stays as handed: a new or refreshed doc for its reader, a deletion gone.
+settle_handed() {
   local r
   for r in ${list[@]+"${list[@]}"}; do
-    if [ -L "$r" ]; then echo "land: kept $r (a symlink)"; continue; fi
     if git cat-file -e "$tree:$r" 2>/dev/null; then
+      case $r in THREAD.md|*/THREAD.md) ;; *) continue ;; esac
+      git cat-file -e "HEAD:$r" 2>/dev/null || continue
+      if [ -L "$r" ]; then echo "land: kept $r (a symlink)"; continue; fi
       [ -f "$r" ] && [ "$(git hash-object --path="$r" -- "$r" 2>/dev/null)" = "$(git rev-parse -q --verify "$tree:$r")" ] \
         || { echo "land: kept $r (changed since it was committed)"; continue; }
-    elif [ -e "$r" ] && [ ! -f "$r" ]; then
-      echo "land: kept $r (not a file)"; continue
+      git diff --quiet --cached HEAD -- "$r" || git reset -q HEAD -- "$r" 2>/dev/null \
+        || { echo "land: kept $r (could not unstage it)"; continue; }
+      git restore --worktree --source=HEAD -- "$r" 2>/dev/null || echo "land: kept $r (could not restore it)"
+    elif review_doc "$r" && consumed_review "$r"; then
+      rm -f -- "$r" 2>/dev/null || echo "land: kept $r (could not remove it)"
     fi
-    git cat-file -e "HEAD:$r" 2>/dev/null || continue
-    git diff --quiet --cached HEAD -- "$r" || git reset -q HEAD -- "$r" 2>/dev/null \
-      || { echo "land: kept $r (could not unstage it)"; continue; }
-    git restore --worktree --source=HEAD -- "$r" 2>/dev/null || echo "land: kept $r (could not restore it)"
   done
 }
 
@@ -869,7 +873,7 @@ land_protected() {
 $PR_HIT
 EOF
   case $state in
-    OPEN) ;;
+    OPEN) made=$built ;;  # the very commit is already on its close/ branch: a re-run of an identical scratch build
     MERGED) finish "stuck: close-out PR $url merged but $sha12 is not on origin/$d" 1 ;;
     CLOSED) finish "stuck: close-out PR $url was closed unmerged" 1 ;;
     *)

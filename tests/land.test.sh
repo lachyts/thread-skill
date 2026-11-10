@@ -22,6 +22,7 @@ unset $(git rev-parse --local-env-vars)
 
 root=$(pwd -P)
 LAND=$root/skills/_shared/scripts/land.sh
+LC=$root/skills/_shared/scripts/live-checkout.sh
 CLOSE=$root/skills/close/SKILL.md
 BASH32=/bin/bash
 
@@ -2019,13 +2020,23 @@ ok "$(git -C "$W" rev-parse "$C^")" "$B0" "case 79c: C sits on the checkout's ow
 ok "$(cnt "$(ghlog)" update-branch)" 1 "case 79c: update-branch once (C is behind origin)"
 unmoved "case 79c" "$B0"
 
-echo "== 79d. origin already holds the handed edit"
-ghreset; mkrepo c79d; B0=$(git -C "$W" rev-parse HEAD); edit; srvcommit c79d THREAD.md "$(cat "$W/THREAD.md")"
+echo "== 79d. origin already holds the handed edit (and more): nothing to commit"
+ghreset; mkrepo c79d; printf 't1\nt2\nt3\nt4\nt5\nt6\n' > "$W/THREAD.md"; git -C "$W" commit -qam seed
+git -C "$W" push -q "$SRV/o/c79d.git" master; fetchsrv c79d
+printf 'mine\n' | cat - "$W/THREAD.md" > "$W/THREAD.new" && mv "$W/THREAD.new" "$W/THREAD.md"
+srvcommit c79d THREAD.md "$(cat "$W/THREAD.md"; echo origin-more)"
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 79d" 0 landed
 has "$err" "land: nothing committed (origin/master already holds these changes)" "case 79d: nothing committed, and why"
 nopush "case 79d"
 ok "$(git -C "$W" status --porcelain -- THREAD.md)" "" "case 79d: the copy is cleared"
+
+echo "== 79d2. origin's copy equals the handed edit: the checkout just fast-forwards to it"
+ghreset; mkrepo c79dd; edit; srvcommit c79dd THREAD.md "$(cat "$W/THREAD.md")"; S=$(srvref c79dd master)
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 79d2" 0 landed
+nopush "case 79d2"
+ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" status --porcelain)" "$S|" "case 79d2: at origin's tip, nothing left dirty"
 
 echo "== 79e. a path edited during the landing keeps its edit"
 ghreset; mkrepo c79e; edit
@@ -2041,7 +2052,16 @@ has "$err" "land: kept THREAD.md (changed since it was committed)" "case 79e: ke
 ok "$(tail -n 1 "$W/THREAD.md")" later "case 79e: the later edit is intact"
 ok "$(git -C "$W" status --porcelain -- THREAD.md)" " M THREAD.md" "case 79e: still dirty"
 
-echo "== 79f. a pre-staged handed deletion (git rm -f) is unstaged once it is on origin"
+# srvmerge <name> <commit>: the landing PR merges (origin's master reaches <commit>), and the checkout fetches it.
+srvmerge() { git -C "$W" push -q "$SRV/o/$1.git" "$2:refs/heads/master"; fetchsrv "$1"; }
+# ffchecks <label> <tip>: the Primary refresh reads `behind` (never `overlap`), moves the checkout to <tip> and leaves it clean.
+ffchecks() {
+  ok "$(bash "$LC" check "$W" master | cut -d' ' -f1)" behind "$1: the Primary refresh reads it as behind, no overlap"
+  ok "$(bash "$LC" ff "$W" master | cut -d' ' -f1)" moved "$1: the fast-forward goes through"
+  ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" status --porcelain)" "$2|" "$1: at the merged tip, clean"
+}
+
+echo "== 79f. a pre-staged handed deletion stays staged and gone; the fast-forward over it is not refused once it merges"
 ghreset; mkrepo c79f; mkdir -p "$W/docs/handoffs"; echo z > "$W/docs/handoffs/z.md"
 git -C "$W" add docs && git -C "$W" commit -qm z && git -C "$W" push -q "$SRV/o/c79f.git" master && fetchsrv c79f
 H0=$(git -C "$W" rev-parse HEAD); git -C "$W" rm -qf docs/handoffs/z.md
@@ -2050,7 +2070,39 @@ res "case 79f" 0 "queued https://github.com/o/c79f/pull/1"
 C=$(made)
 ok "$(git -C "$W" show --name-status --format= "$C" | tr '\t\n' ' |')" "D docs/handoffs/z.md|" "case 79f: C holds the deletion"
 ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 79f: HEAD unmoved"
-ok "$(git -C "$W" status --porcelain -- docs/handoffs/z.md)" "" "case 79f: nothing left staged; the checkout's next ff is not refused"
+ok "$(git -C "$W" status --porcelain -- docs/handoffs/z.md)" "D  docs/handoffs/z.md" "case 79f: the staged deletion is left as it was"
+ok "$([ -e "$W/docs/handoffs/z.md" ] && echo present || echo gone)" gone "case 79f: the consumed doc does not come back to disk"
+srvmerge c79f "$C"; ffchecks "case 79f" "$C"
+
+echo "== 79h. a new handoff doc stays on disk for its reader, and never holds the checkout back once it merges"
+ghreset; mkrepo c79h; mkdir -p "$W/docs/handoffs"; echo doc > "$W/docs/handoffs/h.md"; H0=$(git -C "$W" rev-parse HEAD); I0=$(shasum < "$W/.git/index")
+land -- --slug c79h -- "$W" "$W/docs/handoffs/h.md"
+res "case 79h" 0 "queued https://github.com/o/c79h/pull/1"
+C=$(made)
+ok "$(cat "$W/docs/handoffs/h.md")|$(git -C "$W" rev-parse HEAD)|$(shasum < "$W/.git/index")" "doc|$H0|$I0" "case 79h: on disk, HEAD and index unwritten"
+ok "$(git -C "$W" status --porcelain)" "?? docs/" "case 79h: still untracked here"
+ok "$(git -C "$W" show "$C:docs/handoffs/h.md")" doc "case 79h: and in C"
+srvmerge c79h "$C"; ffchecks "case 79h" "$C"
+ok "$(cat "$W/docs/handoffs/h.md")" doc "case 79h: the doc is as it was, now tracked"
+
+echo "== 79i. a refreshed handoff doc stays as refreshed, and so does its staged copy, until it merges"
+ghreset; mkrepo c79i; mkdir -p "$W/docs/handoffs"; echo old > "$W/docs/handoffs/h.md"
+git -C "$W" add docs && git -C "$W" commit -qm h && git -C "$W" push -q "$SRV/o/c79i.git" master && fetchsrv c79i
+echo refreshed > "$W/docs/handoffs/h.md"; git -C "$W" add docs/handoffs/h.md
+land -- --slug c79i -- "$W" "$W/docs/handoffs/h.md"
+res "case 79i" 0 "queued https://github.com/o/c79i/pull/1"
+C=$(made)
+ok "$(cat "$W/docs/handoffs/h.md")|$(git -C "$W" status --porcelain)" "refreshed|M  docs/handoffs/h.md" "case 79i: the reader keeps the refresh"
+srvmerge c79i "$C"; ffchecks "case 79i" "$C"
+
+echo "== 79j. an unprotected landing moves the checkout over a refreshed doc and a new one, both kept"
+ghreset; mkrepo c79j; mkdir -p "$W/docs/handoffs"; echo old > "$W/docs/handoffs/h.md"
+git -C "$W" add docs && git -C "$W" commit -qm h && git -C "$W" push -q "$SRV/o/c79j.git" master && fetchsrv c79j
+echo refreshed > "$W/docs/handoffs/h.md"; echo new > "$W/docs/handoffs/n.md"
+land GH_PROT=false -- "$W" "$W/docs/handoffs/h.md" "$W/docs/handoffs/n.md"
+res "case 79j" 0 landed
+C=$(made)
+ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" status --porcelain)|$(cat "$W/docs/handoffs/h.md")" "$C||refreshed" "case 79j: moved to C, clean"
 
 echo "== 79g. a commit-only landing still commits on the checkout (its by-design route)"
 ghreset; mkrepo c79g; edit

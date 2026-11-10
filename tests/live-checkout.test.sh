@@ -133,6 +133,25 @@ rc 0" "LC3 $n: … so origin is asked, and answers trunk"
   ok "$(src lc_overlap "$c5" master)" "" "LC5 $n: a dirty file origin never touches: nothing"
   rm -f "$c5/untouched.txt" "$c5/sub.txt"
 
+  # A copy already holding origin's bytes is no overlap for a fast-forward (ADR 0078 d3); lc_overlap_ref stays strict.
+  srv s5; s5="$tmp/w/s5"; cl s5 "$s5"
+  push s5 new.txt same; fetchall "$s5"; printf 'same\n' > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: an untracked file with origin's bytes: no overlap"
+  ok "$(src lc_overlap_ref "$s5" refs/remotes/origin/master)" "new.txt" "LC5 $n: … lc_overlap_ref, leg.py's overlap mode, still names it"
+  ok "$(mode overlap "$s5" refs/remotes/origin/master)" "overlap new.txt" "LC5 $n: … and the overlap run mode too"
+  rm -f "$s5/new.txt"; printf 'other\n' > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "new.txt" "LC5 $n: … other bytes still overlap"
+  rm -f "$s5/new.txt"; g -C "$s5" merge -q --ff-only origin/master
+  push s5 new.txt edited; fetchall "$s5"; printf 'edited\n' > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: a dirty tracked file with origin's bytes: no overlap"
+  g -C "$s5" add new.txt
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: … staged too"
+  g -C "$s5" reset -q --hard HEAD; g -C "$tmp/seed-s5" rm -q new.txt; g -C "$tmp/seed-s5" commit -qm gone; g -C "$tmp/seed-s5" push -q origin master 2>/dev/null; fetchall "$s5"
+  rm -f "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "" "LC5 $n: gone from both: no overlap"
+  echo mine > "$s5/new.txt"
+  ok "$(src lc_overlap "$s5" master)" "new.txt" "LC5 $n: … but a copy here that origin deletes is still one"
+
   # ---- LC6: lc_ff ------------------------------------------------------------------------------------------------
   srv f6; c6="$tmp/w/f6"; cl f6 "$c6"; old6=$(git -C "$c6" rev-parse HEAD)
   push f6 a.txt origin; fetchall "$c6"; echo mine > "$c6/a.txt"; rm -f "$c6/.git/ORIG_HEAD"
@@ -149,6 +168,18 @@ rc 3" "LC6 $n: an overlap returns rc 3 with its paths"
   out=$(src lc_ff "$c6" master); rc=$?
   ok "$rc|$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1|1" "LC6 $n: a merge git refuses (diverged): rc 1, one line"
   has "$out" "Not possible to fast-forward" "LC6 $n: … git's own reason"
+
+  # A same-bytes copy never holds the fast-forward back, staged or not, and a refused merge unstages it again.
+  srv g6; g6="$tmp/w/g6"; cl g6 "$g6"
+  push g6 d.txt doomed; push g6 e.txt old; fetchall "$g6"; g -C "$g6" merge -q --ff-only origin/master
+  g -C "$tmp/seed-g6" rm -q d.txt; g -C "$tmp/seed-g6" commit -qm rm; push g6 e.txt new; push g6 n.txt fresh; push g6 m.txt staged; fetchall "$g6"
+  rm -f "$g6/d.txt"; printf 'new\n' > "$g6/e.txt"; printf 'fresh\n' > "$g6/n.txt"; printf 'staged\n' > "$g6/m.txt"; g -C "$g6" add m.txt
+  ok "$(src lc_ff "$g6" master; echo "rc $?")" "rc 0" "LC6 $n: a deletion, a dirty copy, an untracked copy and a staged copy, all origin's bytes: rc 0"
+  ok "$(git -C "$g6" rev-parse HEAD)|$(git -C "$g6" status --porcelain)|$(cat "$g6/n.txt" "$g6/e.txt")" "$(tipof g6)||fresh
+new" "LC6 $n: … at origin's tip, clean, every copy as it was"
+  g -C "$g6" commit -q --allow-empty -m local; push g6 z.txt zed; fetchall "$g6"; printf 'zed\n' > "$g6/z.txt"
+  out=$(src lc_ff "$g6" master); rc=$?
+  ok "$rc|$(git -C "$g6" status --porcelain)" "1|?? z.txt" "LC6 $n: a merge git refuses (diverged) unstages the copy it staged"
 
   # ---- LC7: every lc_check form, each one primary-refresh.py's regex accepts --------------------------------------
   srv k7; c7="$tmp/w/k7"; cl k7 "$c7"; forms=
