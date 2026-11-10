@@ -53,7 +53,9 @@
 #   the one write to the index, since a staged THREAD.md would refuse the fast-forward), because many sessions land in
 #   that file and origin's copy will rarely equal this one; a consumed review doc is removed from disk; every other
 #   handed path stays as handed, a doc for its reader and a deletion gone, and the fast-forward lets it through once
-#   origin's copy equals it, or differs only by the pickup's consumed mark (live-checkout.sh's lc_same and lc_marked).
+#   origin's copy equals it, or at any time for a handoff doc origin holds (live-checkout.sh's lc_same and lc_doc). A
+#   handoff doc HEAD lacks that origin's default branch or a close/ tip already holds is kept out of the commit (`land:
+#   kept <rel> (its landing has not reached this checkout)`), since a second landing would add the same new file twice.
 #   Unprotected, the checkout then moves to the pushed tip
 #   unless it is held; a refused move is a stderr note, since the commit is already on origin.
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
@@ -691,6 +693,16 @@ move_branch() {
   return 0
 }
 
+# in_landing <rel>: <rel> is a handoff doc HEAD lacks that origin/<d> or a close/ tip already holds (the peer guard's
+# `keep landing`). Landing it again would add the same new file twice, and that PR would conflict with the first.
+in_landing() {
+  case $1 in docs/handoffs/*|*/docs/handoffs/*) ;; *) return 1 ;; esac
+  [ -e "$1" ] || return 1
+  git cat-file -e "HEAD:$1" 2>/dev/null && return 1
+  git for-each-ref --format="%(refname):$1" "refs/remotes/origin/$d" refs/remotes/origin/close/ 2>/dev/null \
+    | git cat-file --batch-check 2>/dev/null | grep -q ' blob '
+}
+
 # scratch_build: S5 on a landable default branch. Stage the handed paths into a throwaway index (the checkout's own is
 # not written), then build the close-out commit in a scratch worktree (ADR 0078 d3). Sets list, tree, built, tip
 # (the commit, when there is one) and already (origin already holds every handed edit). A stuck here commits nothing.
@@ -698,7 +710,9 @@ scratch_build() {
   local idx=$tmpd/index rel base rc head
   GIT_INDEX_FILE=$idx git read-tree HEAD 2>"$tmpd/rt.err" || stuck_early "cannot read HEAD: $(first_line "$tmpd/rt.err")"
   for rel in ${rels[@]+"${rels[@]}"}; do
-    if review_doc "$rel" && { [ -e "$rel" ] || [ -L "$rel" ]; }; then
+    if in_landing "$rel"; then
+      echo "land: kept $rel (its landing has not reached this checkout)"
+    elif review_doc "$rel" && { [ -e "$rel" ] || [ -L "$rel" ]; }; then
       GIT_INDEX_FILE=$idx git rm -q --cached -- "$rel" 2>"$tmpd/rm.err" || stuck_early "rm failed: $rel: $(first_line "$tmpd/rm.err")"
       list+=("$rel")
     elif [ -e "$rel" ] || [ -L "$rel" ]; then

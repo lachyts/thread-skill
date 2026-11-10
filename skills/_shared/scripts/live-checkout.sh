@@ -54,20 +54,19 @@
 #                              rc 0 when the checkout already holds <ref>'s copy of <path>: a regular file with <ref>'s
 #                              blob (`git hash-object --path`, so filters apply), or gone from both. A fast-forward
 #                              loses nothing there.
-#   lc_marked <repo> <ref> <path>
-#                              rc 0 when <path> is a handoff doc (a regular file directly under docs/handoffs/ or
-#                              */docs/handoffs/) that differs from <ref>'s copy only by its pickup's mark: the front
-#                              matter's `status: pending` there, `status: consumed` here, every other byte alike but a
-#                              missing last newline (handoff-lifecycle.md § Pickup). The fast-forward keeps the mark.
+#   lc_doc <repo> <ref> <path> rc 0 when <path> is a handoff doc (a regular file directly under docs/handoffs/ or
+#                              */docs/handoffs/) that <ref> holds too. Whatever differs is the doc's own lifecycle (its
+#                              pickup's mark, a refresh at close), and the fast-forward keeps this copy.
 #   lc_overlap <repo> <d>      the fast-forward's overlap: lc_overlap_ref's paths against refs/remotes/origin/<d>, less
-#                              every lc_same or lc_marked path (ADR 0078 d3: a landed close-out's own copy, a handoff
-#                              doc left on disk for its reader or already picked up, never holds the checkout back).
+#                              every lc_same or lc_doc path (ADR 0078 d3: a landed close-out's own copy and a handoff
+#                              doc left on disk never hold the checkout back). lc_doc loses nothing: the copy on disk
+#                              stays, and origin's is in history.
 #                              lc_overlap_ref, leg.py's overlap mode, stays strict.
 #   lc_ff <repo> <d>           the overlap first: one prints its paths and returns 3, running nothing, so ORIG_HEAD is
 #                              never rewritten (a refused `merge --ff-only` writes it). Origin's blob is staged for
 #                              each overlap path still on disk (git's two-way merge keeps an index entry that matches
-#                              the target and refuses an untracked or unstaged copy; a marked copy stays dirty, as it
-#                              did when the doc was committed on HEAD), and unstaged again if the merge is refused.
+#                              the target and refuses an untracked or unstaged copy; a doc that differs from it stays
+#                              dirty, as it did when the doc was committed on HEAD), and unstaged again if the merge is refused.
 #                              Then `git merge -q --ff-only --no-autostash refs/remotes/origin/<d>`: rc 0, or rc 1 with
 #                              git's output (its `hint:` lines dropped) on one line of at most 200 characters.
 #   lc_check <repo> <d>        exactly one line, the first form that holds (tips and heads 40-hex, counts integers):
@@ -200,37 +199,23 @@ lc_same() {
   [ "$_lc_h" = "$_lc_t" ]
 }
 
-# _lc_no_status <state>: stdin less its front matter's first `status: <state>` line; rc 1 when it has none.
-_lc_no_status() {
-  awk -v s="${1:-}" '
-    { r = $0; sub(/\r$/, "", r) }
-    NR == 1 { fm = (r == "---"); print; next }
-    fm && r == "---" { fm = 0; print; next }
-    fm && !hit && r ~ ("^status:[ \t]*" s "[ \t]*(#.*)?$") { hit = 1; next }
-    { print }
-    END { exit (hit && !fm) ? 0 : 1 }'
-}
-
-lc_marked() {
-  local _lc_t _lc_a _lc_b
+lc_doc() {
+  local _lc_n
   case "${3:-}" in
-    docs/handoffs/*) _lc_a=${3#docs/handoffs/} ;;
-    */docs/handoffs/*) _lc_a=${3##*/docs/handoffs/} ;;
+    docs/handoffs/*) _lc_n=${3#docs/handoffs/} ;;
+    */docs/handoffs/*) _lc_n=${3##*/docs/handoffs/} ;;
     *) return 1 ;;
   esac
-  case "$_lc_a" in ''|*/*) return 1 ;; esac
+  case "$_lc_n" in ''|*/*) return 1 ;; esac
   [ -f "${1:-}/${3:-}" ] && [ ! -L "${1:-}/${3:-}" ] || return 1
-  _lc_t=$(git -C "${1:-}" rev-parse -q --verify "${2:-}:${3:-}" 2>/dev/null) || return 1
-  _lc_a=$(git -C "${1:-}" cat-file blob "$_lc_t" 2>/dev/null | _lc_no_status pending) || return 1
-  _lc_b=$(_lc_no_status consumed < "${1:-}/${3:-}") || return 1
-  [ "$_lc_a" = "$_lc_b" ]
+  git -C "${1:-}" rev-parse -q --verify "${2:-}:${3:-}" >/dev/null 2>&1
 }
 
 lc_overlap() {
   local _lc_x _lc_r="refs/remotes/origin/${2:-}"
   lc_overlap_list "${1:-}" "$_lc_r" | while IFS= read -r _lc_x; do
     [ -n "$_lc_x" ] || continue
-    lc_same "${1:-}" "$_lc_r" "$_lc_x" || lc_marked "${1:-}" "$_lc_r" "$_lc_x" || printf '%s\n' "$_lc_x"
+    lc_same "${1:-}" "$_lc_r" "$_lc_x" || lc_doc "${1:-}" "$_lc_r" "$_lc_x" || printf '%s\n' "$_lc_x"
   done | _lc_join
 }
 

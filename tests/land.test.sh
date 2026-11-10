@@ -2132,6 +2132,37 @@ ok "$(git -C "$W" show --name-status --format= "$C" | tr '\t\n' ' |')" "D docs/h
 srvmerge c79k "$C"; ffchecks "case 79k, the later close" "$C"
 ok "$([ -e "$D" ] && echo present || echo gone)" gone "case 79k: and the doc is gone"
 
+echo "== 79k2. a doc already on origin's default branch that the checkout has not caught up to is left, not removed"
+ghreset; mkrepo c79kk; mkdir -p "$W/docs/handoffs"; D="$W/docs/handoffs/h.md"; H0=$(git -C "$W" rev-parse HEAD)
+srvcommit c79kk a.txt theirs; echo mine > "$W/a.txt"
+printf -- '---\nthread: t\nstatus: pending\n---\nbody\n' > "$D"
+land GH_PROT=false -- "$W" "$D"
+res "case 79k2" 0 landed
+ok "$(cnt "$err" "land: ff refused")/$(git -C "$W" rev-parse HEAD)" "2/$H0" "case 79k2: the move was refused both times, HEAD unmoved (precondition)"
+printf -- '---\nthread: t\nstatus: consumed\n---\nbody\n' > "$D"
+ok "$(f="$D" bash "$tmp/guard.sh")" "keep landing" "case 79k2: origin's default branch holds it, so no plain rm"
+git -C "$W" checkout -q -- a.txt
+ok "$(bash "$LC" ff "$W" master | cut -d' ' -f1)" moved "case 79k2: the fast-forward goes through once the overlap clears"
+ok "$(git -C "$W" ls-files -- docs/handoffs/h.md)|$(sed -n 3p "$D")" "docs/handoffs/h.md|status: consumed" "case 79k2: tracked, and still consumed"
+
+echo "== 79n. a refresh before the checkout holds the doc stays on disk, out of a second commit, and lands afterwards"
+ghreset; mkrepo c79n; mkdir -p "$W/docs/handoffs"; D="$W/docs/handoffs/h.md"
+printf -- '---\nthread: t\nstatus: pending\n---\nv1\n' > "$D"
+land -- --slug c79n -- "$W" "$D"
+res "case 79n" 0 "queued https://github.com/o/c79n/pull/1"
+C=$(made)
+printf -- '---\nthread: t\nstatus: pending\n---\nv2\n' > "$D"
+land -- --slug c79n -- "$W" "$D"
+res "case 79n, the refresh" 0 landed
+has "$err" "land: kept docs/handoffs/h.md (its landing has not reached this checkout)" "case 79n: kept, and why"
+ok "$(srvclose c79n | grep -c .)" 1 "case 79n: no second landing to conflict with the first"
+srvmerge c79n "$C"
+ok "$(bash "$LC" ff "$W" master | cut -d' ' -f1)" moved "case 79n: the refreshed copy does not hold the checkout back"
+ok "$(git -C "$W" status --porcelain)|$(tail -n 1 "$D")" " M docs/handoffs/h.md|v2" "case 79n: tracked, the refresh kept"
+land -- --slug c79n -- "$W" "$D"
+res "case 79n, once HEAD holds it" 0 "queued https://github.com/o/c79n/pull/2"
+ok "$(git -C "$W" show "$(made):docs/handoffs/h.md" | tail -n 1)" v2 "case 79n: the refresh lands"
+
 echo "== 79l. a pushed close-out with no PR is reported as no commit, and a re-run lands the path"
 ghreset; mkrepo c79l; edit; H0=$(git -C "$W" rev-parse HEAD)
 land GH_CREATE=fail -- --slug c79l -- "$W" "$W/THREAD.md"
