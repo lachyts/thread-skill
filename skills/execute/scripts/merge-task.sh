@@ -195,12 +195,18 @@
 # No runner (ADR 0069, amended 2026-11-11). A job GitHub queued that no runner took (a self-hosted runner that no longer
 # exists) stays queued about 24 hours, and read as CI in flight the whole time. A job is "no runner" when it is `queued`
 # with neither a runner_id nor a runner_name, `created_at` at least MERGE_TASK_NO_RUNNER_LIMIT seconds ago (900, 15
-# minutes). no_runner_read reads it, job by job, on the integrated head; a read that fails or a field that does not
-# parse is never "no runner", so a bad read waits as before. Optional, it stops counting: ci_runs_in_flight drops a run
-# held only by such jobs. Required (a pending row of `gh pr checks --required` whose link names that job, or, a row with
-# no job link, the job's name): the watch is cut every MERGE_TASK_NO_RUNNER_POLL seconds to look, and exit 4 sets the
-# task aside at Integration at once, because `--watch` would otherwise hold the lane until GitHub drops the job. A
-# live-checkout.sh that cannot be loaded leaves the watch uncut, today's wait.
+# minutes), and its `labels` place it on a self-hosted or custom-label runner. A job whose labels name a GitHub-hosted
+# image (a label starting `ubuntu-`, `macos-` or `windows-`: macos-latest, ubuntu-24.04-arm) and none `self-hosted` is
+# never "no runner": GitHub runs 5 macOS jobs at a time, so this repo's own required macOS jobs queue past 15 minutes
+# behind full-suite.yml's shards. Only a GitHub-hosted larger runner on a custom label is still read by time alone.
+# no_runner_read reads it, job by job, on the integrated head; a read that fails, labels missing or not a list of
+# strings, or a field that does not parse is never "no runner", so a bad read waits as before. Optional, it stops
+# counting: ci_runs_in_flight drops a run held only by such jobs (a run with any other live job, or whose jobs page
+# lists fewer than its total_count, still counts); a required roll-up check that `needs:` one is never created, so
+# "never appeared" names the held jobs. Required (a pending row of `gh pr checks --required` whose link names that job,
+# or, a row with no job link, the job's name): the watch is cut every MERGE_TASK_NO_RUNNER_POLL seconds to look, and
+# exit 4 sets the task aside at Integration at once, because `--watch` would otherwise hold the lane until GitHub drops
+# the job. A live-checkout.sh that cannot be loaded leaves the watch uncut, today's wait.
 #
 # Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
@@ -1092,9 +1098,20 @@ def load(path):
             return json.load(fh)
     except Exception:
         return None
+HOSTED = ("ubuntu-", "macos-", "windows-")
+def github_hosted(job):
+    """Whether the job waits in GitHub's own queue, never a lost runner's: a label names a GitHub-hosted image (prefix
+    HOSTED: macos-latest, ubuntu-24.04-arm) and none is `self-hosted`. Labels missing, empty or not a list of strings
+    read as hosted too: a job that cannot be placed is never "no runner", as a bad read."""
+    labels = job.get("labels")
+    if not isinstance(labels, list) or not labels or not all(isinstance(l, str) for l in labels):
+        return True
+    low = [l.lower() for l in labels]
+    return "self-hosted" not in low and any(l.startswith(HOSTED) for l in low)
 def queued_for(job):
-    """Seconds a job has sat queued with no runner, past the limit; None when it is anything else or does not parse."""
-    if job.get("status") != "queued" or job.get("runner_id") or job.get("runner_name"):
+    """Seconds a job has sat queued with no runner, past the limit; None when it is anything else, runs on a
+    GitHub-hosted image (a macOS job can queue 15 minutes behind GitHub's concurrency cap), or does not parse."""
+    if job.get("status") != "queued" or job.get("runner_id") or job.get("runner_name") or github_hosted(job):
         return None
     try:
         at = datetime.fromisoformat(str(job.get("created_at")).replace("Z", "+00:00"))
@@ -1121,8 +1138,8 @@ for r in unfinished:
         age = queued_for(j)
         if age is not None:
             stuck += 1
-            rows.append("\t".join((str(j.get("name") or "").replace("\t", " "), str(r.get("id")), str(j.get("id")),
-                                   str(int(age // 60)))))
+            name = " ".join(str(j.get("name") or "").replace("\t", " ").splitlines())   # one row, four cells
+            rows.append("\t".join((name, str(r.get("id")), str(j.get("id")), str(int(age // 60)))))
     # Every unfinished job no-runner, on a page that holds them all (a longer run may hide a live job).
     if live and stuck == len(live) and len(jobs) >= int(body.get("total_count") or 0):
         held += 1
@@ -1131,6 +1148,7 @@ PY
 }
 no_runner_read() {  # sets NR_RUNS, NR_HELD and NR_ROWS (`<name>\t<run>\t<job>\t<minutes>`); 0 read, 1 the runs list unreadable
   local id assigns
+  NR_RUNS=0; NR_HELD=0; NR_ROWS=''   # a failed read holds nothing: never an earlier poll's jobs
   gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$IHEAD&per_page=100" >"$tmp/nr.runs" 2>/dev/null || return 1
   for id in $(python3 -c 'import json,sys
 for r in json.load(open(sys.argv[1])).get("workflow_runs") or []:
@@ -1430,7 +1448,7 @@ checks_watch() {  # one slice of the required-checks watch: gh's rc, or 142 once
 
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
-  local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc
+  local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
     checks_watch; rc=$?
@@ -1511,7 +1529,15 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
             WAIT_MSG="retryable: no required check is reported for PR #$PR and nothing runs on its head, but $BASE's gate is unreadable ($REQ_WHY): GitHub has not settled its mergeability yet; nothing merged; re-run"
             return 8
           fi
-          echo "ERROR: required checks never appeared for PR #$PR — no CI runs in flight on its head SHA, nothing is coming" >&2
+          # A required roll-up check that `needs:` a job no runner took is never created: name those jobs on this
+          # line, which the lead copies as the reason. ci_runs_in_flight just read nothing in flight, so with
+          # NR_HELD > 0 every unfinished run is held and NR_ROWS holds only held jobs. The prefix stays
+          # MERGE_TASK_INFRA's, an infra retry.
+          held=''
+          [ "$NR_HELD" -gt 0 ] && held=$(printf '%s\n' "$NR_ROWS" | awk -F'\t' 'NF == 4 {
+            printf "%sjob \"%s\" queued %s minutes with no runner (run %s, job %s)", (n++ ? "; " : ""),
+                   $1, $4, $2, $3 }')
+          echo "ERROR: required checks never appeared for PR #$PR — no CI runs in flight on its head SHA, nothing is coming${held:+; held only by jobs no runner took: $held}" >&2
           return 1
         fi
       fi

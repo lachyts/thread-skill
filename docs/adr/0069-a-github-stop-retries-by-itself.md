@@ -14,12 +14,19 @@ last considered option carry the change.)*
 *(Amended 2026-11-11 by thread-skill-integration-wait-ends-on-a-job-no-runner-will-take: a job queued with no runner
 for 15 minutes (`MERGE_TASK_NO_RUNNER_LIMIT`; `queued`, no runner_id or runner_name, by its `created_at`) is "no
 runner", not CI in flight. Found in compression-engine-rollout-2026-11-08: a job on a self-hosted runner that no longer
-exists counted as CI in flight for about 24 hours. Optional, it stops counting in `ci_runs_in_flight`, the read behind
-decision 2's in-flight test. Required (a pending row of `gh pr checks --required`), `--watch` would hold the lane until
-GitHub drops the job, so the watch is sliced by `MERGE_TASK_NO_RUNNER_POLL` (60 s) and the job set aside at once: exit
-4, `integration: no-runner: required job "<name>" queued <n> minutes with no runner (run <r>, job <j>)`, reasonClass
-`no-runner`, retrying as `infra` under decision 3's budget. A failed read or an unparseable timestamp is never "no
-runner", so it waits as before.)*
+exists counted as CI in flight for about 24 hours. Only a self-hosted or custom-label job is read this way: a job whose
+`labels` name a GitHub-hosted image (a label starting `ubuntu-`, `macos-` or `windows-`, such as `macos-latest` or
+`ubuntu-24.04-arm`, and none `self-hosted`) is never "no runner". GitHub runs 5 macOS jobs at a time and full-suite.yml
+queues 4 macOS shards on every master push, so this repo's own required macOS jobs queued 14 and 18 minutes on
+2026-11-10; time alone would have set them aside. A GitHub-hosted larger runner on a custom label is the one hosted
+job still read by time alone. Optional, it stops counting in `ci_runs_in_flight`, the read behind decision 2's
+in-flight test (a run with any other live job still counts). A required roll-up check that `needs:` it is never
+created, so the "never appeared" exit 1 names the held jobs after its usual text, still an infra retry. Required (a
+pending row of `gh pr checks --required`), `--watch` would hold the lane until GitHub drops the job, so the watch is
+sliced by `MERGE_TASK_NO_RUNNER_POLL` (60 s) and the job set aside at once: exit 4, `integration: no-runner: required
+job "<name>" queued <n> minutes with no runner (run <r>, job <j>)`, reasonClass `no-runner`, retrying as `infra` under
+decision 3's budget. A failed read, labels missing or not a list, or an unparseable timestamp is never "no runner", so
+it waits as before.)*
 
 ## Context
 
