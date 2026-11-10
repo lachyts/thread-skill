@@ -96,7 +96,7 @@ export HOME="$scratch/home"; mkdir -p "$HOME"
 # passing run; a missed site fails loudly (`next` exits 1, status's ceiling goes null) instead of silently
 # reading whatever the scratch HOME holds.
 mkdir -p "$HOME/.config/thread"
-printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that reaches rollout-settings.py must pin HOME.' \
+printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that reaches the rollout settings must pin HOME.' \
   '[defaults]' 'parallel_ceiling = 0' > "$HOME/.config/thread/rollouts.toml"
 # The Run record (run_record.py, ADR 0032) lands in temp too, whatever the caller exported; each engine-driving
 # suite also sets its own (tests/contracts/run-record-hermetic.test.mjs), so this is the backstop. The one knob,

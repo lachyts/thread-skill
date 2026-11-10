@@ -141,7 +141,9 @@ rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round
   budget}, ownSession[] {project, note, by, repo, ready (graded Ready, unheld), oneCalls, grills, decisions (his, over
   its One calls and Grills), orient, signOffs (pending on its live rollouts), unpark (an offered Unpark row held back)}
   (one per big project with any of them, in scan order: what waits on its own session), warnings[] (one line per
-  project whose `orient:` key is neither own nor sweep, naming what its design record made it)}.
+  project whose `orient:` key is neither own nor sweep, naming what its design record made it), waitsOn[] {rollout,
+  task, dependency, project} (each live rollout's scan `waitsOn[]`, in scan order: ADR 0078 d7, listed at orient-all
+  § 3 and § 8)}.
 
 plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG]... [--status SLUG=N]...
   [--rounds F --assume-answered]: what the pass schedules and starts once the answers are in. --status is sessions'
@@ -1141,7 +1143,9 @@ class Rounds:
                 "grill": grill, "later": later, "skipped": skipped, "asks": asks, "index": index,
                 "minutes": {"signOffs": so_min, "oneCalls": mins["one-call"], "unpark": mins["unpark"],
                             "grill": mins["grill"], "used": used, "budget": self.budget},
-                "ownSession": self.own_session(), "warnings": self.warnings()}
+                "ownSession": self.own_session(), "warnings": self.warnings(),
+                "waitsOn": [dict(rollout=r["slug"], **w) for r in self.scan["rollouts"] if isinstance(r, dict)
+                            for w in r.get("waitsOn") or []]}
 
     def parked_big(self, u):
         """True for an Unpark row of a big project: no offer here, it sits last on the pick list (ADR 0061)."""
