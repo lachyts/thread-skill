@@ -179,11 +179,12 @@ ro g-paused "$PAUSED\n$(two)"
 ro g-unrun "$(two)"
 ro g-run "$(two)"; tk g-run-t g-run open "owner: lead-1"
 RO_STATUS=done ro g-done "$(two)"
-ro g-new "" ; ro g-sup "superseded_by: \"[[g-new]]\"\n$(two)"
+ro g-new "supersedes: \"[[g-sup]]\"\n$(two)"; ro g-sup "superseded_by: \"[[g-new]]\"\n$(two)"
 RO_STATUS=done ro g-arch "superseded_by: \"[[g-new]]\"\n$(two)"; mv "$T/g-arch.md" "$T/Archive/Rollouts/g-arch.md"
 tk t-open g-paused open "$(two)"
 tk t-done g-paused done "$(two)"
 tk t-none - open "$(two)"
+tk t-carried g-new open "$(two)"
 RO_STATUS=done ro g-nogh "$(wh "merged o/r#5" regenerate)"
 rows
 ok "$(grep -c 'pull/5 ' "$GHLOG")" 0 "an entry that cannot fire makes no gh call"
@@ -201,6 +202,9 @@ t-open|due|/thread:schedule [[X]] --regenerate $D/repo|regenerate
 t-done|due|/thread:schedule [[X]] --regenerate $D/repo|regenerate
 t-none|waiting|no rollout to regenerate|regenerate
 t-none|due|/thread:schedule --tasks u|schedule [[u]]
+g-new|due|/thread:schedule [[X]] --regenerate $D/repo|regenerate
+t-carried|waiting|[[g-new]] superseded a rollout|regenerate
+t-carried|due|/thread:schedule --tasks u|schedule [[u]]
 EOF
 before="$(cat "$T/g-sup.md" "$T/g-new.md" | shasum -a 256)"
 out="$(fire "$(idof g-sup regenerate)" 2>&1)"; ok "$?" 1 "fire on a superseded note exits 1"
@@ -287,7 +291,8 @@ while IFS='~' read -r verdict rc output; do
   if [ "$verdict" = R ]; then
     ok "$rc2" 0 "recorded: $output"
     has "$(cat "$T/k.md")" "fired: \"$STAMP\"" "fired: written for: $output"
-    has "$out" '"outcome":' "and the outcome shown"
+    want="$(printf '%b' "$output" | tail -1 | sed 's/^@ //')"   # the last line: a self-update line comes first
+    has "$out" "\"outcome\": \"$want\"" "and the outcome shown: $want"
   else
     ok "$rc2" 1 "not recorded: $output (rc $rc)"
     ok "$(shasum -a 256 < "$T/k.md")" "$before" "nothing written for: $output"
@@ -336,6 +341,9 @@ SINGLE = [
     ("wide-dash", f'when:\n  -   on: {A}\n      do: regenerate', f'when:\n  -   on: {A}\n      do: regenerate\n      {F}'),
     ("flow-item-col0", f'when:\n- {{on: "{A}", do: regenerate}}', f'when:\n- {{on: "{A}", do: regenerate, {F}}}'),
     ("block-item-col0", f'when:\n- on: {A}\n  do: regenerate', f'when:\n- on: {A}\n  do: regenerate\n  {F}'),
+    ("block-item-gap", f'when:\n  - on: {A}\n\n# keep\n    do: regenerate', f'when:\n  - on: {A}\n\n# keep\n    do: regenerate\n    {F}'),
+    ("flow-close-alone", f'when: {{on: "{A}",\n  do: regenerate\n  }}', f'when: {{on: "{A}",\n  do: regenerate\n  , {F} }}'),
+    ("flow-close-after-comma", f'when: {{on: "{A}",\n  do: regenerate,\n  }}', f'when: {{on: "{A}",\n  do: regenerate,\n   {F} }}'),
 ]
 # Mixed siblings at both dash columns, firing each one.
 def mixed(dash):
@@ -423,18 +431,57 @@ bad u-emptyf '{on: "merged o/r#7", do: reset-primary, fired: ""}'
 bad u-nullf '{on: "merged o/r#7", do: reset-primary, fired: null}'
 bad u-comma '{on: "merged o/r#7", do: regenerate --tasks a,b}'
 bad u-link '{on: "merged o/r#7", do: schedule [[a]]}'
+bad u-offcol 'on: merged o/r#7\n      do: reset-primary'
+bad u-dupkey '{on: "merged o/r#7", on: "merged o/r#8", do: reset-primary}'
+bad u-item 'soon'
+bad u-emptyi ''
+bad u-pausedx '{on: "paused x", do: reset-primary}'
+bad u-resetx '{on: "merged o/r#7", do: "reset-primary x"}'
+bad u-heading '{on: "landed [[#x]]", do: reset-primary}'
+bad u-block '{on: "merged o/r#7", do: "schedule [[^x]]"}'
 tk u-flist - open "when: [{on: \"$GOOD_ON\", do: reset-primary}]"
 ro u-ser "shape: serial\nwhen:\n  - {on: \"$GOOD_ON\", do: regenerate}\n  - {on: \"$GOOD_ON\", do: reset-primary}"
 tk u-tser u-ser open "when:\n  - {on: \"$GOOD_ON\", do: regenerate}\n  - {on: \"$GOOD_ON\", do: reset-primary}"
 tk u-cols - open "when:\n  - {on: \"$GOOD_ON\", do: reset-primary}\n    - {on: \"merged o/r#2\", do: reset-primary}"
+tk u-null - open 'when: null'
+tk u-empty - open 'when:'
+tk u-scalar - open 'when: soon'
+tk u-stray - open "when:\n  - {on: \"$GOOD_ON\", do: reset-primary}\n  stray: 1"
 printf -- '---\ntags: [task, rollout]\nstatus: open\n%s\n---\n\nProject root: `%s`\n' "$(wh "$GOOD_ON" regenerate)" "$D/repo" > "$T/u-noproj.md"
 rows
-for n in u-key u-nodo u-onverb u-doverb u-bare u-foo u-emptyf u-nullf u-comma u-link u-flist u-cols; do
-  ok "$(grep -c "^$n	due" "$D/rows")" "$( [ "$n" = u-flist ] || [ "$n" = u-cols ] && echo 0 || echo 1 )" "$n: the good sibling alone is due"
+# note|its due rows (the good sibling, or none when the block cannot be split)|why it is unreadable: its branch's own words
+while IFS='|' read -r n kept why; do
+  [ -n "$n" ] || continue
+  ok "$(grep -c "^$n	due" "$D/rows")" "$kept" "$n: $kept due"
   ok "$(grep -c "^$n	unreadable" "$D/rows")" 1 "$n: one unreadable row"
-done
-ok "$(grep -c '^u-dup	due' "$D/rows")" 1 "u-dup: the first copy is due"
-ok "$(grep -c '^u-dup	unreadable' "$D/rows")" 1 "u-dup: the second is unreadable"
+  has "$(grep "^$n	unreadable" "$D/rows" | cut -f5)" "$why" "$n: $why"
+done <<'EOF'
+u-key|1|unknown key x
+u-nodo|1|no do
+u-onverb|1|unknown on exploded
+u-doverb|1|unknown do explode
+u-bare|1|merged names owner/repo#N
+u-foo|1|regenerate takes only --tasks
+u-dup|1|a duplicate of an entry above
+u-emptyf|1|an empty fired:
+u-nullf|1|an empty fired:
+u-comma|1|not an {on, do} mapping
+u-link|1|a flow value holding a wikilink must be quoted
+u-offcol|1|a key off its column
+u-dupkey|1|duplicate key on
+u-item|1|not an {on, do} mapping
+u-emptyi|1|empty list item
+u-pausedx|1|paused takes no argument
+u-resetx|1|reset-primary takes no argument
+u-heading|1|landed names one [[task]]
+u-block|1|schedule names one [[task]]
+u-flist|0|a flow list
+u-cols|0|list items at two dash columns
+u-null|0|null value
+u-empty|0|empty value
+u-scalar|0|not an {on, do} mapping
+u-stray|0|a line outside any list item
+EOF
 ok "$(bucket u-ser regenerate)" none "a serial rollout's regenerate has no due or waiting row"
 ok "$(grep -c '^u-ser	unreadable.*supersedes nothing' "$D/rows")" 1 "a serial rollout's regenerate is unreadable"
 ok "$(grep -c '^u-ser	due' "$D/rows")" 1 "a serial note's other trigger is due"

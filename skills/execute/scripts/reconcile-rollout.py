@@ -11942,6 +11942,12 @@ def _when_raw(fm, i, j):
     return out
 
 
+def _when_link(arg):
+    """The slug of the note `arg` links when it is one wikilink naming a note, else None: `[[#heading]]`, `[[^block]]`,
+    `[[|x]]` and `[[.md]]` have a link's shape and name none."""
+    return _wikilink_slug(arg) if WHEN_LINK_RE.match(arg) else None
+
+
 def _when_on(text):
     """(spec, None) for a readable `on` (vault-grammar § When), else (None, why). spec: {verb, norm (the id's form)} and
     `pr` and `key` (canonical URL) for `merged`, `task` for `landed`. A bare PR number is unreadable: a trigger fires with
@@ -11960,9 +11966,9 @@ def _when_on(text):
     if verb == "paused":
         return ({"verb": verb, "norm": verb}, None) if not arg else (None, "paused takes no argument")
     if verb == "landed":
-        if not WHEN_LINK_RE.match(arg):
+        slug = _when_link(arg)
+        if not slug:
             return None, "landed names one [[task]]"
-        slug = _wikilink_slug(arg)
         return {"verb": verb, "task": slug, "norm": f"landed {slug.lower()}"}, None
     return None, f"unknown on {verb}"
 
@@ -11985,9 +11991,9 @@ def _when_do(text):
         return {"verb": verb, "kind": "command", "targets": slugs,
                 "norm": f"regenerate --tasks {','.join(sorted(s.lower() for s in slugs))}"}, None
     if verb == "schedule":
-        if not WHEN_LINK_RE.match(arg):
+        slug = _when_link(arg)
+        if not slug:
             return None, "schedule names one [[task]]"
-        slug = _wikilink_slug(arg)
         return {"verb": verb, "kind": "command", "targets": [slug], "norm": f"schedule {slug.lower()}"}, None
     if verb == "reset-primary":
         if arg:
@@ -12090,19 +12096,21 @@ def _trigger_notes(walk):
 
 
 def _when_anchor(walk, path, note):
-    """The (path, Note) a trigger is held to: the note itself when tagged `rollout`, else the rollout its `rollout:` links,
-    through the walk's index; None when it links none found."""
+    """The (path, Note) a trigger is held to: the note itself when tagged `rollout`, else the rollout its `rollout:` links
+    now (a carried task's is the successor: _regenerate_gate), through the walk's index; None when it links none found."""
     if "rollout" in _tags(note):
         return path, note
     return walk.index.get(_link_slug(note, "rollout"))
 
 
-def _regenerate_gate(walk, anchor):
-    """Why a `regenerate` cannot fire now, whichever form (vault-grammar § When's Regenerate's gate): (None, None) when it
-    can, else ("unreadable" or "waiting", why). /thread:schedule --regenerate acts on whatever is unfinished for the
-    project now, so it is held to the rollout it was written against. In order: a serial anchor is unreadable; no anchor,
-    a superseded one, a closed one and one neither paused nor approved_unrun wait (unfinished-rollout.py's `eligible`, its
-    two facts, so a merge during a run never spends `fired:` on schedule's refusal)."""
+def _regenerate_gate(walk, anchor, trigger_path):
+    """Why a `regenerate` written on the note at `trigger_path` cannot fire now, whichever form (vault-grammar § When's
+    Regenerate's gate): (None, None) when it can, else ("unreadable" or "waiting", why). /thread:schedule --regenerate
+    acts on whatever is unfinished for the project now, so it is held to the rollout it was written against. In order: a
+    serial anchor is unreadable; no anchor, a superseded one, a successor read from a task note (carry moves a task's
+    `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from one written since), a
+    closed one and one neither paused nor approved_unrun wait (unfinished-rollout.py's `eligible`, its two facts, so a
+    merge during a run never spends `fired:` on schedule's refusal)."""
     if anchor is not None and _shape(anchor[1]) == SHAPES[1]:
         return "unreadable", "a serial rollout supersedes nothing"
     if anchor is None:
@@ -12110,6 +12118,9 @@ def _regenerate_gate(walk, anchor):
     path, note = anchor
     if _valued(note.get("superseded_by")):
         return "waiting", f"superseded by [[{_wikilink_slug(_scalar(note.get('superseded_by')))}]]: nothing to regenerate"
+    if path != trigger_path and _valued(note.get("supersedes")):
+        return "waiting", (f"[[{path.stem}]] superseded a rollout: a task's regenerate does not follow its carry; "
+                           f"to keep it, write it on [[{path.stem}]]")
     if _status(note) in CLOSED_ROLLOUT_STATUSES:
         return "waiting", "closed: nothing to regenerate"
     linked = [(p, n) for p, n in walk.by_rollout.get(path.stem.lower(), ()) if p != path]
@@ -12156,7 +12167,7 @@ def _trigger_eval(scan, path, note, e):
     walk, on, do = scan.walk, e["onSpec"], e["doSpec"]
     anchor = _when_anchor(walk, path, note)
     if do["verb"] == "regenerate":
-        verdict, why = _regenerate_gate(walk, anchor)
+        verdict, why = _regenerate_gate(walk, anchor, path)
         if verdict:
             return verdict, why
     targets = []

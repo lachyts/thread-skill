@@ -225,10 +225,13 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
 - **Regenerate's gate**, both `regenerate` forms, because `/thread:schedule --regenerate` acts on whatever is unfinished
   for the project now. Its anchor is the note when tagged `rollout`, else the rollout its `rollout:` links; a task note's
   own status does not count. In order: a `shape: serial` anchor is unreadable (a serial rollout supersedes nothing); no
-  anchor waits; a valued `superseded_by:` waits, so a successor is never touched by the prior's merge; a done or dropped
-  anchor waits; one neither paused nor never started (`approved_unrun`) waits, since schedule refuses a regenerate on a
-  running rollout. A `regenerate` written against a rollout that runs to its end lapses at its close, listed under
-  `waiting`. `fire` runs the same reading.
+  anchor waits; a valued `superseded_by:` waits; on a task note, an anchor with a valued `supersedes:` waits, because
+  `carry` moves a task's `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from
+  one written since; a done or dropped anchor waits; one neither paused nor never started (`approved_unrun`) waits, since
+  schedule refuses a regenerate on a running rollout. So a successor is never touched by the prior's merge, whether the
+  entry sits on the prior or on a carried task, and one written on a successor's own rollout note fires as any other. A
+  `regenerate` written against a rollout that runs to its end lapses at its close, listed under `waiting`. `fire` runs
+  the same reading.
 - **Where a command runs.** A command row has a `projectRoot`, read on the trigger's own note for `regenerate` and on the
   target task for `schedule [[U]]` (the note schedule § 0 resolves). The first present decides: the note's own `Project
   root:` line, the `Project root:` of the rollout its `rollout:` links, then the first project, in `projects:` order,
@@ -248,7 +251,9 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   two dash columns, already invalid YAML, is one unreadable row. A trigger that cannot be read today shows only in
   `triggers due`.
 - **Never carried.** `carry` copies no `when:`, so a superseded note's unfired `paused` or `regenerate` lapses, listed under
-  `waiting` for good; to keep one, write it again on the successor.
+  `waiting` for good; to keep one, write it again on the successor. A carried task keeps its own `when:` and links the
+  successor: its `regenerate` lapses the same way (Regenerate's gate), and its other entries go on, a `paused` read on the
+  successor; to keep the `regenerate`, write it on the successor's rollout note.
 
 ## Readers
 
