@@ -552,13 +552,17 @@ test('L3: the transcripts\' floor is the earlier of since and until - 14 days: a
 
 // ---- L4: waits to start -------------------------------------------------------------------------------------------------
 
-test('L4: a rollout\'s wait runs from the earliest captured: of its queue\'s tasks (carried rows skipped), else its own; open while unstarted', (t) => {
+test('L4: a rollout\'s wait runs from the earliest captured: of its queue\'s tasks (carried and joined rows skipped), else its own; open while unstarted', (t) => {
   const h = setup(t)
   taskNote(h, 't1', { captured: '2026-10-18', dir: path.join(h.tasks, 'Archive', '2026') })
   taskNote(h, 't2', { captured: '2026-10-20' })
   taskNote(h, 't3', { captured: '2026-10-01' })
   taskNote(h, 't4', { captured: null })
-  rolloutNote(h, 'r-started', { captured: '2026-10-22', queue: [['t1', '—'], ['t2', 'solo'], ['t3', 'carried (queued)']] })
+  // a task a later schedule joined to the running queue (ADR 0078 d6) was asked after it started: its earlier date
+  // never moves the ask (an unskipped t6 would read 2026-08-31T13:00)
+  taskNote(h, 't6', { captured: '2026-09-01' })
+  taskNote(h, 't7', { captured: '2026-09-02' })
+  rolloutNote(h, 'r-started', { captured: '2026-10-22', queue: [['t1', '—'], ['t2', 'solo'], ['t3', 'carried (queued)'], ['t6', 'joined 2026-10-23'], ['t7', 'joined 2026-10-23, solo']] })
   emitAll(h, 'r-started', [[T(23, '00:00'), 'slot-taken', 't1', { settings: { parallel_ceiling: 2 }, start: 'start' }],
     [T(23, '01:00'), 'slot-freed', 't1', { outcome: 'ready' }], [T(23, '02:00'), 'merged', 't1', { pr: 1 }]])
   rolloutNote(h, 'r-open', { captured: '2026-10-25', queue: [['t4', '—'], ['t-missing', '—']] })
@@ -577,7 +581,7 @@ test('L4: a rollout\'s wait runs from the earliest captured: of its queue\'s tas
     assert.ok(b.attention.cannotShow.includes(`${n} is no calendar date: read as none`), JSON.stringify(b.attention.cannotShow))
   }
   assert.deepEqual([w['r-started'].ask, w['r-started'].scheduled, w['r-started'].started, w['r-started'].hours, w['r-started'].scheduleHours, w['r-started'].open],
-    [T(17, '13:00'), T(21, '13:00'), T(23, '00:00'), 131, 35, false], 'the Archive task\'s date wins; the carried row is skipped')
+    [T(17, '13:00'), T(21, '13:00'), T(23, '00:00'), 131, 35, false], 'the Archive task\'s date wins; the carried and joined rows are skipped')
   assert.deepEqual([w['r-open'].ask, w['r-open'].started, w['r-open'].hours, w['r-open'].open], [T(24, '13:00'), null, 24, true], 'no linked date: the note\'s own')
   assert.ok(b.flags.includes('attention: wait of [[r-open]]: its queue links [[t-missing]], which has no note'), JSON.stringify(b.flags))
   assert.ok(b.attention.cannotShow.some((c) => c.startsWith('a serial chain has no wait to start') && c.includes('[[r-serial]]')))

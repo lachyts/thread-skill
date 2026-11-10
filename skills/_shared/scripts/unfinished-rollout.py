@@ -161,11 +161,19 @@ Outcomes (parallel, the default), the first that applies:
   3. U is exactly one interrupted pair {P, N} and N is this project's: with --regenerate `interrupted P N`,
      exit 0; without, `refuse P,N` (sorted), exit 3, and stderr says N is incomplete.
   4. U is one note X: eligible with --regenerate -> `supersede X`, exit 0 (an incomplete X WARNs that this
-     run finishes it). Otherwise `refuse X`, exit 3, with the remedy for its case (incomplete: the
+     run finishes it). This project's, not eligible (it has run and is not paused), not incomplete, not
+     pausing (`pause_requested`) and at protocol_version 5 -> `join X`, exit 0, with or without --regenerate
+     (ADR 0078 d6: this run adds its tasks to X's queue in place, reconcile-rollout.py join; a join is no
+     refusal, so it prints no `this run would have taken` line); with --regenerate it first WARNs `WARN:
+     --regenerate not applied: [[X]] has run and is not paused (<why>), so this run joins its queue (ADR 0078
+     d6): to supersede it, pause it first (execute § Pausing), then re-run with --regenerate`. Otherwise
+     `refuse X`, exit 3, with the remedy for its case (incomplete: the
      incomplete line; eligible: re-run with --regenerate, and for one awaiting sign-off (below) the
-     waiting tasks carry still gate-pending, or sign off, then /thread:execute; this project's, has run,
-     not paused: let it finish, pause it, or hard-pause it, then --regenerate, or /thread:status then
-     /thread:repair; another project's: wait, or /thread:status then /thread:repair; another project's
+     waiting tasks carry still gate-pending, or sign off, then /thread:execute; this project's, pausing: let
+     it drain, then --regenerate once its `paused:` stamp lands, or /thread:status; this project's, has run,
+     not paused, below protocol 5 (the protocol migration): let it finish, pause it, or hard-pause it, then
+     --regenerate, or /thread:status then /thread:repair; another project's: wait, or /thread:status then
+     /thread:repair; another project's
      awaiting sign-off: it waits only on Lachy's sign-off of its waiting tasks: sign off each gate, then
      /thread:execute (it runs them and closes), or /thread:repair to defer them, then /thread:execute
      closes it).
@@ -334,7 +342,9 @@ lines, then one `legacy: [[<c>]]: <why>: it reads no surface wait, so this rollo
 0060 d5)` line per such chain; execute halts on it as before. A marker it cannot write is exit 2.
 
 Output (check). stdout is exactly one line on exit 0, 3, 4 and 5: `none` | `supersede <slug>` | `interrupted <prior-slug>
-<new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]` | `unanswered` (exit 4, --surface-wait only). Slugs are filename stems; an unfinished
+<new-slug>` | `file <slug> <relpath>` | `join <slug>` (exit 0, outcome 4: this project's running rollout, joined; with
+--regenerate, its `--regenerate not applied` WARN on stderr) | `refuse <slug>[,<slug>…]` | `unanswered` (exit 4,
+--surface-wait only). Slugs are filename stems; an unfinished
 note is root-only, so `<tasks dir>/<slug>.md` is exact. `WARN:` lines go only to stderr and never change
 stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` stderr line: a missing or
 non-directory --repo, --repo with serial or --surface or --checkout with parallel, no --surface with serial, a
@@ -784,7 +794,8 @@ def shape_of(rr, slug, note, warns, warned):
 
 
 def note_state(rr, path, note, tasks_dir, mine):
-    """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete."""
+    """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete, pausing
+    (pause_requested) and its protocol_version."""
     linked, index = rr._scan(path, tasks_dir)
     fresh, why = rr.approved_unrun(note, linked)
     counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
@@ -797,6 +808,8 @@ def note_state(rr, path, note, tasks_dir, mine):
         "signOff": sign_off, "waiting": waiting,
         "complete": counts["total"] >= 1 and counts["merged"] == counts["total"],
         "supersedes": link_slug(rr, note, "supersedes"), "incomplete": rr.incomplete(path, note, linked, index),
+        "pauseRequested": rr._truthy_flag(note.get("pause_requested")),
+        "protocol": rr._scalar(note.get("protocol_version")),
     }
 
 
@@ -1334,6 +1347,14 @@ def cmd_check(args, rr) -> int:
                 warns.append(f"WARN: {x['slug']} is incomplete ({x['incomplete']}): this run supersedes it, "
                              "which finishes it")
             return finish(warns, f"supersede {x['slug']}", 0)
+        # This project's running rollout (it has run and is not paused, nor draining a pause, at protocol 5) is joined in
+        # place (ADR 0078 d6): no pause, no regenerate. --regenerate is not applied to it, and says so.
+        if x["mine"] and not x["eligible"] and not x["incomplete"] and not x["pauseRequested"] and x["protocol"] == "5":
+            if args.regenerate:
+                warns.append(f"WARN: --regenerate not applied: [[{x['slug']}]] has run and is not paused ({x['why']}), "
+                             "so this run joins its queue (ADR 0078 d6): to supersede it, pause it first (execute "
+                             "§ Pausing), then re-run with --regenerate")
+            return finish(warns, f"join {x['slug']}", 0)
         return refused(f"refuse {x['slug']}", [remedy(x)])
 
     # 5. Two or more.
@@ -1869,7 +1890,12 @@ def remedy(x) -> str:
     if x["eligible"]:
         return (f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo: re-run with "
                 "--regenerate to supersede it (its unlanded tasks carry into the new rollout)")
+    if x["mine"] and x["pauseRequested"]:
+        return (f"unfinished rollout [[{s}]] ({x['label']}) is pausing (pause_requested): let it drain; once its "
+                "`paused:` stamp lands, re-run with --regenerate to supersede it, or /thread:status "
+                f"[[{s}]]")
     if x["mine"]:
+        # A note below protocol 5 (execute refuses it): the protocol migration's hard pause, then --regenerate.
         return (f"unfinished rollout [[{s}]] ({x['label']}) has run and is not paused ({x['why']}): if a session "
                 "drives it, let it finish or pause it (execute § Pausing); if none does, hard-pause it (stamp "
                 f"`paused:` and a `## Pause log` line) and re-run with --regenerate; if stuck: /thread:status "
@@ -2563,7 +2589,7 @@ def main() -> int:
                                                          "project, each in its own clone; serial chains limited by "
                                                          "surfaces (schedule § 0, § Serial path).")
     sub = p.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("check", help="print none | supersede | interrupted | file | refuse for this repo or chain")
+    c = sub.add_parser("check", help="print none | supersede | interrupted | file | join | refuse for this repo or chain")
     c.add_argument("--shape", choices=("parallel", "serial"), default="parallel",
                    help="parallel (schedule § 0, the default) or serial (schedule § Serial path S3)")
     c.add_argument("--repo", default=None, help="the target repo (the path schedule § 0 resolved); parallel only")

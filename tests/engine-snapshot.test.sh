@@ -14,7 +14,8 @@
 #          and at a serial chain's first Leg or first after any close, never mid-Leg (a take-over) nor with no git
 #          Primary
 #   G1-G3b the guards: every wrong-root CLI refuses with `engine-snapshot:` and writes nothing (a task-keyed
-#          reconcile-rollout verb with --rollout left off, and reconcile's stdin rows, included); the exemptions;
+#          reconcile-rollout verb with --rollout left off, and reconcile's stdin rows, included); the exemptions
+#          (`join` among them, ADR 0078 d6);
 #          file-followup after Complete, and the retire race closed by the archived grace and close's re-resolve
 #   G4     schedule step 6's defer of a Pre-flight leaver (ADR 0047): refused from this run's root, then run from
 #          the prior's root before its carry, which carries only the rest; step 6's flags only
@@ -561,6 +562,9 @@ echo "== G2"
 pass() { hasnt "$err" "engine-snapshot:" "G2: $1 from the Primary passes"; }
 py "$P" skills/execute/scripts/reconcile-rollout.py status --rollout "$TASKS/g1.md" --tasks-dir "$TASKS"; pass "reconcile-rollout status"
 py "$P" skills/execute/scripts/reconcile-rollout.py fold-journals --rollout "$TASKS/g1.md" --dry-run; pass "fold-journals"
+py "$P" skills/execute/scripts/reconcile-rollout.py join --rollout "$TASKS/g1.md" --tasks gt1 --dry-run --tasks-dir "$TASKS"
+pass "join"; ok "$rc" 2 "G2: … join reaches the verb (g1 has no ## Queue: its own refusal, exit 2)"
+has "$err" "ERROR: join:" "G2: … with its ERROR: join: line"
 py "$P" skills/execute/scripts/step-boundary.py stands --rollout "$TASKS/g1.md"; pass "step-boundary stands"
 py "$P" skills/execute/scripts/leg.py status --rollout "$TASKS/sg1.md" --tasks-dir "$TASKS"; pass "leg.py status"
 py "$P" skills/execute/scripts/lead-integrate.py inputs --note "$TASKS/gt1.md"; pass "lead-integrate inputs"

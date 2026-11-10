@@ -360,3 +360,88 @@ test('control: a step 6 or a template line that carries on_merge fails never-on-
   assert.notEqual(tcut, template, 'control is vacuous')
   assert.deepEqual(checkNeverOnMerge(schedule, tcut), ['never-on-merge'])
 })
+
+// ---- join (ADR 0078 d6): this project's running rollout takes a later schedule's tasks in place --------------------
+// § 0 prints `join <rollout>`; step 7's **Join** stamps every other field first, then runs `reconcile-rollout.py join`
+// from this run's root (guard-exempt, since a running rollout's snapshot predates the verb), then the Cross-project
+// waits; step 8 reports the Joined line, the holds and an unapplied --regenerate. Its callers and the snapshot doc name
+// it, and the forms it writes are a cross-version contract. Pure, like checkSupersede: one control per rule.
+const JOIN_TEXTS = {
+  schedule,
+  template,
+  fit: read('skills/_shared/execution-fit.md'),
+  orient: read('skills/orient/SKILL.md'),
+  backlog: read('skills/orient/backlog.md'),
+  orientAll: read('skills/orient-all/SKILL.md'),
+  snapshot: read('skills/_shared/engine-snapshot.md'),
+  rr: read('skills/execute/scripts/reconcile-rollout.py'),
+}
+const sectionUpTo = (text, startRe, stopRe) => {
+  const lines = text.split('\n')
+  const i = lines.findIndex((l) => startRe.test(l))
+  if (i < 0) return ''
+  const j = lines.findIndex((l, k) => k > i && stopRe.test(l))
+  return lines.slice(i, j < 0 ? undefined : j).join('\n')
+}
+
+function checkJoin(t) {
+  const fails = []
+  const zero = collapse(sectionUpTo(t.schedule, /^### 0\. /, /^### 1\. /))
+  if (!zero.includes('- `join <rollout>` (ADR 0078 d6) → this project\'s rollout is running')) fails.push('outcome')
+  const prior = collapse(paragraph(t.schedule, "**The prior's root (ADR 0043).**"))
+  if (!prior.includes("`join` (step 7's **Join**) names no prior") || !prior.includes('guard-exempt')) fails.push('prior-root')
+  const seven = collapse(sectionOf(t.schedule, /^### 7\. /))
+  const stamps = seven.indexOf('Preserve all other frontmatter fields verbatim')
+  const join = seven.indexOf('reconcile-rollout.py join --rollout')
+  const waits = seven.indexOf('python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write')
+  if (stamps < 0 || join < stamps || waits < join || !seven.includes("Every bullet above except `rollout:` first")) fails.push('order')
+  const eight = collapse(sectionOf(t.schedule, /^### 8\. /))
+  if (!eight.includes('Joined [[<rollout>]] (running): <N> tasks ranked first') || !eight.includes('each `hold` line `join` printed') ||
+    !eight.includes('never instantly')) fails.push('report')
+  if (!eight.includes('--regenerate not applied: [[<rollout>]] is running, so this run joined it')) fails.push('regenerate-note')
+  const orient6 = collapse(sectionUpTo(t.orient, /^### 6\. /, /^### 7\. /))
+  const b6 = collapse(sectionUpTo(t.backlog, /^## B6\. /, /^## B7\. /))
+  const oa6 = collapse(sectionUpTo(t.orientAll, /^### 6\. /, /^### 7\. /))
+  if (!collapse(t.fit).includes('`interrupted`, `join`, `refuse`') || !orient6.includes('**Schedule joined a running rollout** (`join`') ||
+    !b6.includes('At `join <X>`') || !oa6.includes("at a join, its `Joined [[<X>]]` line")) fails.push('callers')
+  const refusal = collapse(sectionUpTo(t.snapshot, /^## The refusal rule/, /^## Schedule's cut/))
+  const cross = collapse(sectionUpTo(t.snapshot, /^## Cross-version state/, /^## (?!Cross)/))
+  if (!refusal.includes('every verb but `status`, `fold-journals`, `moving` and `join`') || !refusal.includes('`join` (ADR 0078 d6) is run by a newer') ||
+    !cross.includes("Schedule's `join` (ADR 0078 d6)") || !cross.includes('joined <YYYY-MM-DD>')) fails.push('snapshot-doc')
+  const exempt = (t.rr.match(/^GUARD_EXEMPT = \(([^)]*)\)/m) ?? [])[1] ?? ''
+  const comment = collapse(t.rr.slice(Math.max(0, t.rr.indexOf('# The four verbs any root runs')), t.rr.indexOf('GUARD_EXEMPT = (')))
+  if (!exempt.includes('"join"') || !comment.includes('change only by migration')) fails.push('guard')
+  if (!t.template.includes('`joined <YYYY-MM-DD>` (`joined <YYYY-MM-DD>, solo` for a Solo task)')) fails.push('mode')
+  return fails
+}
+
+test('schedule joins a running rollout: § 0, the prior-root carve-out, step 7, step 8, the callers, the snapshot doc, the guard', () => {
+  assert.deepEqual(checkJoin(JOIN_TEXTS), [])
+})
+
+const JOIN_CONTROLS = [
+  ['outcome', 'schedule', '- `join <rollout>` (ADR 0078 d6)', '- `join` (ADR 0078 d6)'],
+  ['prior-root', 'schedule', "`join` (step 7's **Join**) names no prior", '`join` runs from the prior'],
+  ['order', 'schedule', 'Every bullet above except `rollout:` first', 'The bullets above, in any order'],
+  ['report', 'schedule', 'Joined [[<rollout>]] (running): <N> tasks ranked first', 'Queue for [[<rollout>]]'],
+  ['regenerate-note', 'schedule', '--regenerate not applied: [[<rollout>]] is running, so this run joined it', 'the flag was ignored'],
+  ['callers', 'backlog', 'At `join <X>`', 'At a running rollout'],
+  ['snapshot-doc', 'snapshot', 'every verb but `status`, `fold-journals`, `moving` and `join`', 'every verb but `status`, `fold-journals` and `moving`'],
+  ['guard', 'rr', 'GUARD_EXEMPT = ("status", "fold-journals", "moving", "join")', 'GUARD_EXEMPT = ("status", "fold-journals", "moving")'],
+  ['mode', 'template', '`joined <YYYY-MM-DD>` (`joined <YYYY-MM-DD>, solo` for a Solo task)', '`added`'],
+]
+for (const [rule, key, from, to] of JOIN_CONTROLS) {
+  test(`control: ${key} without its join wording fails ${rule}`, () => {
+    const cut = JOIN_TEXTS[key].replace(from, to)
+    assert.notEqual(cut, JOIN_TEXTS[key], 'control is vacuous')
+    assert.deepEqual(checkJoin({ ...JOIN_TEXTS, [key]: cut }), [rule])
+  })
+}
+
+test('control: step 7 running the join after the Cross-project waits fails order', () => {
+  const seven = sectionOf(schedule, /^### 7\. /)
+  const join = seven.slice(seven.indexOf('2. Then, from this run\'s root'), seven.indexOf('3. Then the Cross-project waits'))
+  const moved = schedule.replace(join, '').replace('**Then clear this note\'s stamp.**', `${join}\n**Then clear this note's stamp.**`)
+  assert.notEqual(moved, schedule, 'control is vacuous')
+  assert.deepEqual(checkJoin({ ...JOIN_TEXTS, schedule: moved }), ['order'])
+})

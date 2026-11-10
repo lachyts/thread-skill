@@ -23,7 +23,8 @@
 //   grammar      the vault grammar's Writers name `stamp-start --backlog`, never a held note, and list a serial note
 //                only on the Chorus Stage (P44-4, ADR 0076 d4);
 //   asking       asking.md § 1's clone bullet names the Backlog orient's exception;
-//   script       the script's eight verbs, and `stamp-start --backlog` with its hold refusal, GUARD_EXEMPT unchanged;
+//   script       the script's eight verbs, and `stamp-start --backlog` with its hold refusal, GUARD_EXEMPT holding only
+//                status, fold-journals, moving and join (stamp-start stays guarded);
 //   adr          ADR 0071 in the house format, amending the ADRs it names, and ADR 0054's § B9 row;
 //   unparseable  B2 and orient § 4 mend each unparseable row, then sweep again;
 //   named        guard 2's named set, in B7 and the script's header;
@@ -221,7 +222,7 @@ function check(F) {
   const rr = F[RR] ?? ''
   if (!rr.includes('ss.add_argument("--backlog"')) flag('script', 'stamp-start has no --backlog')
   need('script', 'reconcile-rollout.py', rr, ["a held queue starts on Lachy's word", '`--backlog` (ADR 0071)', 'the Backlog orient stamped it'])
-  if (!/^GUARD_EXEMPT = \("status", "fold-journals", "moving"\)$/m.test(rr)) flag('script', 'GUARD_EXEMPT changed')
+  if (!/^GUARD_EXEMPT = \("status", "fold-journals", "moving", "join"\)$/m.test(rr)) flag('script', 'GUARD_EXEMPT changed')
 
   // adr
   const adr = F[ADR] ?? ''

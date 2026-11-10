@@ -587,6 +587,41 @@ Subcommands:
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
 
+  join        `--rollout <note> --tasks <slug,...> [--files <slug>=<a,b>]... [--tasks-dir <dir>] [--dry-run] [--now
+              <iso>]` (ADR 0078 d6; /thread:schedule step 7's **Join**, after unfinished-rollout.py check printed `join
+              <slug>`): add tasks to this project's running parallel rollout in place, with no pause and no regenerate.
+              Guard-exempt (the Engine snapshot guard, below): a newer schedule runs it from its own root on a rollout
+              whose snapshot predates the verb, and it writes only forms every protocol-5 engine reads, under the same
+              note lock (engine-snapshot.md § Cross-version state). Refuses (exit 2, one `ERROR: join:` line, every
+              check before any write): the rollout note missing, unparseable or not tagged `rollout` (_carry_note), not
+              directly in --tasks-dir, done or dropped, superseded (`superseded_by:` valued), serial, not at
+              protocol_version 5, incomplete (reconcile's incomplete), paused or pause-requested, complete (at least one
+              linked task and every one merged), or with a `## Queue` holding neither a table nor a list item; a task not
+              directly in --tasks-dir, not tagged `task`, or tagged `rollout` or `decisions`; and, for a task whose
+              `rollout:` does not already link the note, one whose `projects:` share none of the note's (_norm_project),
+              whose status is neither `open` nor empty, or whose `rollout:` links another live rollout (_live_rollout).
+              A task already stamped to the note is never refused, whatever its status (its lead may have started it).
+              Usage (exit 2): an empty --tasks, or a --files slug not in --tasks. Slugs dedupe case-insensitively.
+              Writes, in order: the rollout note, in one save (_join_edit through Note.apply, journaled, so a concurrent
+              save replays it once): each task its `## Queue` does not link gets a row ranked first, `| <n> |
+              [[<slug>\\|<alias>]] | <its scope: or —> | joined <YYYY-MM-DD> |` (`joined <YYYY-MM-DD>, solo` for a
+              `solo: true` task; columns mapped by header name, any other `—`), right below the rows already joined (so
+              joined tasks keep their join order, above the original queue; at the top of a table with no Mode column),
+              its `#` the integer of the row it displaces and every integer `#` below shifted; a list-form queue gets `-
+              [[<slug>|<alias>]] — joined <YYYY-MM-DD>` items below its joined ones. The alias drops the rollout's
+              project-slug prefix (its slug before `-rollout-`) and is cut to 40 characters; the date is --now's, in its
+              own offset. A --files task with no `## File-sets` line gets `- <slug>: a, b` after the section's last line
+              (the section appended when absent). Then each task's `rollout: "[[<note>]]"`, one save each, so no task is
+              linked before its row exists (a row linking an unstamped task is ignored by next). Then a re-read: every
+              slug must be on a ranked `## Queue` line, else exit 1. A write error is exit 1 with an `ERROR: join:` line
+              naming what was written; a re-run of the same join finishes it. stdout, in order: `join <slug>
+              row|already` per task (already: its row stood before this call), `fileset <slug> <files|->`, `lead
+              <fresh|lapsed|room-stop|none|unreadable>` (_Leases' state at --now), the advisory `hold <kind>: <why>:
+              <remedy>` lines (git-env, lane, room-stop, hold_until, surface-wait, halt: read with no git and no gh;
+              they never change the exit), then `[written: <n notes saved>]`, `[no-change]` or `(dry-run)`. stderr's
+              `WARN: join:` lines: a queued linked task a ranked line above the queue's table ranks above the joined
+              ones, and a queued linked task whose `priority:` outweighs a joined one's (next orders by priority first).
+
   approve-queue  `--rollout <note> --pr <owner/repo#N | PR URL>` (p30-4; Approved queue below): run on Lachy's words
               naming a queue and its gating PR (execute § Invocation forms, orient § 9, schedule step 8). Writes, in one
               locked save, `hold_until: {pr: <ref>, merged: true}` (after `parallel_ceiling:`, else `status:`),
@@ -1581,19 +1616,22 @@ three levels down and a run-end-shaped line is indented, so feedback text can ne
 open or close a run (the sha stays over the content as given). See Note.append_run for the rules; nothing
 already written is ever deleted.
 
-The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status`, `fold-journals` and
-`moving` first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
+The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status`, `fold-journals`,
+`moving` and `join` first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
 --rollout (carry: its --from) names (lane-hold and lane-ack require it), and guard_task() on each --tasks slug's note
 and, for `reconcile`, each result row's task note (the rollout its `rollout:` names), so a task-keyed verb run with
 --rollout left off (hand-back, mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold,
 defer, approve-gates, reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live
 note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
 command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
-that names no rollout (or one not found), pass from any root. The three exemptions run from any root: `status` writes
+that names no rollout (or one not found), pass from any root. The four exemptions run from any root: `status` writes
 nothing (/thread:status and the estate scan read every rollout with it), `moving` writes nothing either and is the
-Watchdog's reading of any rollout from any root, and `fold-journals` never reads the note
+Watchdog's reading of any rollout from any root, `fold-journals` never reads the note
 and writes only call-journal lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
-state) that reflect folds across rollouts from its own root.
+state) that reflect folds across rollouts from its own root, and `join` (ADR 0078 d6) is run by a newer
+/thread:schedule on a running rollout whose snapshot predates the verb, and writes only the forms every protocol-5
+engine reads (a `## Queue` row whose Mode starts `joined `, a `- <slug>: a, b` `## File-sets` line, a task's `rollout:`
+stamp) under the same note lock, a cross-version contract that changes only by migration.
 """
 
 import argparse
@@ -11613,6 +11651,395 @@ def cmd_carry(args) -> int:
     return 0
 
 
+# ---- join (ADR 0078 d6) -------------------------------------------------------------------------------------------------
+# A later /thread:schedule adds its tasks to this project's running parallel rollout in place: `## Queue` rows ranked
+# first, `## File-sets` lines and each task's `rollout:` stamp, with no pause and no regenerate. It runs from that newer
+# schedule's root, so it is guard-exempt (GUARD_EXEMPT), and it writes only the forms every protocol-5 engine reads, under
+# the same note lock: those forms are a cross-version contract (engine-snapshot.md § Cross-version state).
+
+JOINED_MODE = "joined "            # a joined `## Queue` row's Mode cell starts so: `joined <YYYY-MM-DD>[, solo]`
+JOINED_LIST_MARK = "— joined "     # a list-form queue's joined item reads `- [[slug|alias]] — joined <YYYY-MM-DD>`
+JOIN_ALIAS_MAX = 40                # schedule step 6's short alias, cut
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s)")
+TABLE_CELL_RE = re.compile(r"(?<!\\)\|")
+INT_CELL_RE = re.compile(r"\d+")
+
+
+def _join_alias(rollout_stem: str, slug: str) -> str:
+    """A joined row's alias, as schedule step 6 renders one: the rollout's project-slug prefix (its slug before
+    `-rollout-`) and the `-` after it dropped when the task slug starts with them, cut to JOIN_ALIAS_MAX characters."""
+    prefix = rollout_stem.split("-rollout-", 1)[0] if "-rollout-" in rollout_stem else ""
+    alias = slug[len(prefix) + 1:] if prefix and slug.lower().startswith(prefix.lower() + "-") else slug
+    return (alias or slug)[:JOIN_ALIAS_MAX]
+
+
+def _table_parts(line: str):
+    """A table row split on its unescaped pipes (a cell's `[[slug\\|alias]]` keeps its escaped one): the parts between
+    them, the text before the first pipe and after the last included, so "|".join(parts) is the line again."""
+    return TABLE_CELL_RE.split(line)
+
+
+def _table_cells(line: str):
+    """A table row's cells, stripped (the text outside the first and last pipe left out)."""
+    parts = _table_parts(line)
+    inner = parts[1:-1] if len(parts) > 1 and not parts[-1].strip() else parts[1:]
+    return [c.strip() for c in inner]
+
+
+def _table_set_cell(line: str, i: int, value: str) -> str:
+    """The row with its cell i's text replaced by `value`, its padding kept."""
+    parts = _table_parts(line)
+    m = re.match(r"^(\s*)(.*?)(\s*)$", parts[i + 1], re.DOTALL)
+    parts[i + 1] = f"{m.group(1)}{value}{m.group(3)}"
+    return "|".join(parts)
+
+
+def _join_queue(note):
+    """Where a join writes in the rollout note's `## Queue` section: None when the section holds neither a table nor a list
+    item (outside fenced code), else (lines, form, at) with lines the body's lines and form `table` or `list`. For a table
+    (its first row outside fences, taken over a list item), at = (header, separator or None, first data row, end): line
+    indices, end one past its last data row. For a list, at = the line indices of its items, in order."""
+    found = note._section_bounds("## Queue")
+    if found is None:
+        return None
+    lines, start, end = found
+    fenced, items, header = False, [], None
+    for i in range(start + 1, end):
+        if FENCE_RE.match(lines[i]):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if lines[i].lstrip().startswith("|"):
+            header = i
+            break
+        if LIST_ITEM_RE.match(lines[i]):
+            items.append(i)
+    if header is not None:
+        sep = header + 1 if header + 1 < end and lines[header + 1].lstrip().startswith("|") and \
+            all(set(c) <= set("-: ") for c in _table_cells(lines[header + 1])) else None
+        first = (sep if sep is not None else header) + 1
+        stop = first
+        while stop < end and lines[stop].lstrip().startswith("|"):
+            stop += 1
+        return lines, "table", (header, sep, first, stop)
+    if items:
+        return lines, "list", items
+    return None
+
+
+def _join_rows(note, new, day):
+    """Insert `new` [(slug, alias, scope, solo)] into the note's `## Queue`, ranked first: a table takes each as a row
+    right below the leading rows whose Mode starts JOINED_MODE (at the top in a table with no Mode column), its `#` the
+    integer of the row it displaces (else one past the row above, else 1), and every integer `#` below shifted by the rows
+    inserted; a list takes each as an item below its leading joined items. Computed from the note alone (_join_edit)."""
+    q = _join_queue(note)
+    if q is None:
+        return
+    lines, form, at = q
+    if form == "list":
+        joined = []
+        for i in at:
+            line = lines[i]
+            if "]]" not in line or not line[line.index("]]") + 2:].strip().startswith(JOINED_LIST_MARK):
+                break
+            joined.append(i)
+        p = joined[-1] + 1 if joined else at[0]
+        add = [f"- [[{slug}|{alias}]] {JOINED_LIST_MARK}{day}{', solo' if solo else ''}" for slug, alias, _s, solo in new]
+        note._set_body_lines(lines[:p] + add + lines[p:])
+        return
+    header, _sep, first, stop = at
+    cols = [c.lower() for c in _table_cells(lines[header])]
+    ni = cols.index("#") if "#" in cols else None
+    mi = cols.index("mode") if "mode" in cols else None
+    ti = cols.index("task") if "task" in cols else (1 if len(cols) > 1 and ni == 0 else 0)
+    si = cols.index("scope") if "scope" in cols else None
+
+    def cell(i, k):
+        cells = _table_cells(lines[i])
+        return cells[k] if k is not None and k < len(cells) else ""
+
+    p = first
+    if mi is not None:
+        while p < stop and cell(p, mi).lower().startswith(JOINED_MODE):
+            p += 1
+    n0 = 1
+    if ni is not None:
+        if p < stop and INT_CELL_RE.fullmatch(cell(p, ni)):
+            n0 = int(cell(p, ni))
+        elif p > first and INT_CELL_RE.fullmatch(cell(p - 1, ni)):
+            n0 = int(cell(p - 1, ni)) + 1
+    add = []
+    for k, (slug, alias, scope, solo) in enumerate(new):
+        cells = ["—"] * max(len(cols), 1)
+        if ni is not None:
+            cells[ni] = str(n0 + k)
+        if si is not None:
+            cells[si] = scope or "—"
+        if mi is not None:
+            cells[mi] = f"{JOINED_MODE}{day}{', solo' if solo else ''}"
+        cells[ti] = f"[[{slug}\\|{alias}]]"
+        add.append("| " + " | ".join(cells) + " |")
+    below = lines[p:stop]
+    if ni is not None:
+        below = [_table_set_cell(row, ni, str(int(cell(p + j, ni)) + len(new)))
+                 if INT_CELL_RE.fullmatch(cell(p + j, ni)) else row for j, row in enumerate(below)]
+    note._set_body_lines(lines[:p] + add + below + lines[stop:])
+
+
+def _join_edit(note, rows, filesets, day):
+    """The rollout-note half of `join`, applied once through Note.apply (journaled), so save()'s replay over a concurrent
+    writer's fresh read (a second join, a `next`, a reconcile) inserts each row once and shifts the numbers once: rows
+    [(slug, alias, scope, solo)], filesets [(slug, [files])] and day YYYY-MM-DD are its only inputs, and everything else is
+    read from the note it is given. A slug the `## Queue` already links (_queue_links) gets no row; a slug `## File-sets`
+    already lists (_file_sets) gets no line, and any other gets `- <slug>: a, b` after the section's last line (the
+    section appended at the note's end when absent). An application that changes nothing journals nothing."""
+    have, new = _queue_links(note), []
+    for slug, alias, scope, solo in rows:
+        if slug.lower() not in have:
+            have.add(slug.lower())
+            new.append((slug, alias, scope, solo))
+    if new:
+        _join_rows(note, new, day)
+    listed, add = set(_file_sets(note)), []
+    for slug, files in filesets:
+        if files and slug.lower() not in listed:
+            listed.add(slug.lower())
+            add.append(f"- {slug}: {', '.join(files)}")
+    if not add:
+        return
+    found = note._section_bounds("## File-sets")
+    if found is None:
+        note.append_section("## File-sets", "\n".join(add))
+        return
+    lines, start, end = found
+    filled = [i for i in range(start + 1, end) if lines[i].strip()]
+    if not filled:
+        note._set_body_lines(lines[:start + 1] + ["", *add, ""] + lines[end:])
+        return
+    j = filled[-1] + 1
+    tail = [""] if j == len(lines) or lines[j].strip() else []
+    note._set_body_lines(lines[:j] + add + tail + lines[j:])
+
+
+def _join_above(note) -> set:
+    """The slugs (lowercased) a ranked line above the `## Queue` table (or above a list-form queue's first item)
+    wikilinks, read as _schedule_positions reads the body: what `next` ranks above every joined row."""
+    q = _join_queue(note)
+    if q is None:
+        return set()
+    lines, _form, at = q
+    out, fenced = set(), False
+    for line in lines[:at[0]]:
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or not RANKED_LINE_RE.match(line):
+            continue
+        for m in WIKILINK_OPEN_RE.finditer(line):
+            slug = (_wikilink_slug(m.group(1)) or "").lower()
+            if slug:
+                out.add(slug)
+    return out
+
+
+def _join_holds(x_path: Path, x_note, now) -> list:
+    """`join`'s advisory `hold <kind>: <why>: <remedy>` lines: what stops the running rollout's `next` from starting the
+    joined tasks, or its Integration, read with no git and no gh from the readers `next` itself uses."""
+    stem, out = x_path.stem, []
+    trips = _git_env_hold(x_note)
+    for scope in ("rollout", "lane"):
+        names = ", ".join(dict.fromkeys(f"[[{t['slug']}]]" for t in trips if t["scope"] == scope))
+        if names and scope == "rollout":
+            out.append(f"hold git-env: an unacked git-env trip ({names}) reads a bare checkout: nothing starts until "
+                       f"/thread:repair [[{stem}]] records the ack")
+        elif names:
+            out.append(f"hold git-env: an unacked git-env trip ({names}): Integration waits; starts go on")
+    lane = _lane_log_hold(x_note)
+    if lane:
+        names = ", ".join(dict.fromkeys(f"[[{h['slug']}]] ({h['cause']})" for h in lane))
+        out.append(f"hold lane: an unacked Lane hold on {names}: Integration waits until /thread:repair's lane-ack; "
+                   "starts go on")
+    if _room_stop_stands(x_note, now):
+        out.append(f"hold room-stop: a room stop stands on [[{stem}]]: nothing starts until the Stage resumes its lead")
+    hold = _hold_until(x_note, _project_root(x_note))
+    if hold is not None:
+        if hold["error"]:
+            out.append(f"hold hold_until: unreadable ({hold['error']}): nothing starts until it is fixed")
+        else:
+            line = f"hold hold_until: [[{stem}]] holds on {hold['pr']}: nothing starts until {hold['pr']} merges"
+            if _approved_queue(x_note):
+                line += "; on_merge: regenerate: that regenerate's carry takes the joined tasks"
+            out.append(line)
+    sw = _surface_wait_read(stem)
+    if sw[0] != "none":
+        out.append(f"hold surface-wait: {_surface_wait_why(sw)}: nothing starts until its lead's Surface re-check passes")
+    lines = _record_read(stem)
+    if lines is None:
+        out.append("hold halt: unreadable Run record")
+    else:
+        halts = [d for d in _stop_state(lines)["open"] if d.get("cause") == "halt"]
+        if halts:
+            out.append(f"hold halt: its lead halted ({halts[-1].get('reason') or 'no reason recorded'}) and has not "
+                       f"re-entered: /thread:execute [[{stem}]]")
+    return out
+
+
+def cmd_join(args) -> int:
+    """`join` (the module docstring's Subcommands): add tasks to this project's running parallel rollout in place."""
+    def refuse(msg):
+        print(f"ERROR: join: {msg}", file=sys.stderr)
+        return 2
+
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs, seen = [], set()
+    for s in (args.tasks or "").split(","):
+        s = (_wikilink_slug(s) or "").strip()
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            slugs.append(s)
+    if not slugs:
+        return refuse("usage: --tasks names no task")
+    files = {}
+    for spec in args.files or []:
+        slug, eq, rest = spec.partition("=")
+        slug = slug.strip()
+        if not eq or not slug:
+            return refuse(f"usage: --files {spec}: not <slug>=<a,b>")
+        if slug.lower() not in seen:
+            return refuse(f"usage: --files {slug}: not one of --tasks")
+        got = files.setdefault(slug.lower(), [])
+        got += [f for f in (x.strip() for x in rest.split(",")) if f and f not in got]
+    if not tasks_dir.is_dir():
+        return refuse(f"tasks dir {tasks_dir} not found")
+    x_path = Path(os.path.expanduser(args.rollout))
+    x_note, why = _carry_note(x_path, "--rollout")
+    if why:
+        return refuse(why)
+    stem = x_path.stem
+    if x_path.parent.resolve() != tasks_dir.resolve():
+        return refuse(f"--rollout {x_path} is not directly in the tasks dir {tasks_dir}: an archived rollout takes no "
+                      "task")
+    if _status(x_note) in CLOSED_ROLLOUT_STATUSES:
+        return refuse(f"--rollout {stem} is {_status(x_note)}: a closed rollout takes no task")
+    if _valued(x_note.get("superseded_by")):
+        return refuse(f"--rollout {stem} is superseded by [[{_link_slug(x_note, 'superseded_by')}]]: a superseded "
+                      "rollout takes no task")
+    if _shape(x_note) == SHAPES[1]:
+        return refuse(f"--rollout {stem} is a serial rollout (shape: serial): only a parallel queue is joined")
+    protocol = _scalar(x_note.get("protocol_version"))
+    if protocol != "5":
+        return refuse(f"--rollout {stem} is at protocol_version {protocol or 'none'}: only a protocol-5 queue is joined")
+    linked, index = _scan(x_path, tasks_dir)
+    inc = incomplete(x_path, x_note, linked, index)
+    if inc:
+        return refuse(f"--rollout {stem} is incomplete ({inc}): /thread:schedule --regenerate supersedes it")
+    if _valued(x_note.get("paused")):
+        return refuse(f"--rollout {stem} is paused ({_scalar(x_note.get('paused'))}): /thread:schedule --regenerate "
+                      "supersedes it, carrying its unlanded tasks")
+    if _truthy_flag(x_note.get("pause_requested")):
+        return refuse(f"--rollout {stem} is pausing (pause_requested): once its `paused:` stamp lands, "
+                      "/thread:schedule --regenerate supersedes it")
+    counts = _counts([dict(zip(("state", "setAsideAt"), _queue_state(n))) for _p, n in linked])
+    if counts["total"] >= 1 and counts["merged"] == counts["total"]:
+        return refuse(f"--rollout {stem} is complete (every task merged): its completion ceremony runs next, so a new "
+                      "rollout takes these tasks")
+    if _join_queue(x_note) is None:
+        return refuse(f"--rollout {stem}: its ## Queue holds neither a table nor a list item, so a joined task would "
+                      "have no rank")
+    x_projects = {p for p in (_norm_project(v) for v in x_note.get_list("projects")) if p}
+    # A slug names its note case-insensitively, by the note's own filename (as a wikilink resolves), never the spelling
+    # given: a row and a stamp always carry the note's name.
+    names, folded = {p.stem for p in tasks_dir.glob("*.md")}, {}
+    for name in sorted(names):
+        folded.setdefault(name.lower(), name)
+    rows, tasks = [], []
+    for slug in slugs:
+        path = tasks_dir / f"{slug if slug in names else folded.get(slug.lower(), slug)}.md"
+        if not path.is_file():
+            return refuse(f"task {slug}: no note directly in {tasks_dir}")
+        try:
+            note = Note(path)
+        except (ValueError, OSError) as e:
+            return refuse(f"task {slug}: {e}")
+        tags = _tags(note)
+        if "task" not in tags or tags & {"rollout", "decisions"}:
+            return refuse(f"task {slug}: not a task note (tagged {', '.join(sorted(tags)) or 'nothing'})")
+        mine = _link_slug(note, "rollout") == stem.lower()
+        if not mine:
+            if not ({_norm_project(v) for v in note.get_list("projects")} & x_projects):
+                return refuse(f"task {slug}: its projects: share none of [[{stem}]]'s")
+            if _status(note) not in ("", "open"):
+                return refuse(f"task {slug} is {_status(note)}: only an open task joins a queue")
+            if _live_rollout(tasks_dir, note.get("rollout")):
+                return refuse(f"task {slug} is on another live rollout, [[{_link_slug(note, 'rollout')}]]: it joins "
+                              "no second queue")
+        rows.append((path.stem, _join_alias(stem, path.stem), _scalar(note.get("scope")) or "—",
+                     _truthy_flag(note.get("solo"))))
+        tasks.append((path, note, mine))
+
+    now = _now(args)
+    day = now.strftime("%Y-%m-%d")
+    had = _queue_links(x_note)
+    x_note.apply(_join_edit, rows, [(r[0], files[r[0].lower()]) for r in rows if files.get(r[0].lower())], day)
+    written, done = 0, []
+    if not args.dry_run:
+        try:
+            if x_note.dirty:
+                before = x_note._text
+                x_note.save()
+                if x_note._text != before:
+                    written += 1
+                    done.append(f"[[{stem}]]'s rows")
+            for path, note, mine in tasks:
+                if mine:
+                    continue
+                note.set("rollout", f'"[[{stem}]]"')
+                if note.dirty:
+                    note.save()
+                    written += 1
+                    done.append(f"[[{path.stem}]]'s rollout: stamp")
+        except OSError as e:
+            print(f"ERROR: join: cannot write: {e} (written so far: {', '.join(done) or 'nothing'}; a re-run of the same "
+                  "join finishes it)", file=sys.stderr)
+            return 1
+        try:
+            now_links = _queue_links(Note(x_path))
+        except (OSError, ValueError) as e:
+            print(f"ERROR: join: cannot re-read {x_path}: {e}", file=sys.stderr)
+            return 1
+        missing = [r[0] for r in rows if r[0].lower() not in now_links]
+        if missing:
+            print(f"ERROR: join: {', '.join(f'[[{s}]]' for s in missing)} not on a ranked ## Queue line of [[{stem}]] "
+                  "after the write: a re-run of the same join finishes it", file=sys.stderr)
+            return 1
+    sets = _file_sets(x_note)
+    for slug, *_rest in rows:
+        print(f"join {slug} {'already' if slug.lower() in had else 'row'}")
+    for slug, *_rest in rows:
+        print(f"fileset {slug} {','.join(sets.get(slug.lower(), [])) or '-'}")
+    print(f"lead {_Leases(now).state(stem, x_note)['state']}")
+    for line in _join_holds(x_path, x_note, now):
+        print(line)
+    joined = {r[0].lower() for r in rows}
+    others = [(p, n) for p, n in _scan(x_path, tasks_dir)[0]
+              if p.stem.lower() not in joined and _queue_state(n)[0] == "queued"]
+    above = _join_above(x_note)
+    for p, _n in sorted(others, key=lambda pn: pn[0].stem.lower()):
+        if p.stem.lower() in above:
+            print(f"WARN: join: [[{p.stem}]] is ranked above the joined tasks by a list or table line above "
+                  f"[[{stem}]]'s ## Queue: next starts it first at equal priority", file=sys.stderr)
+    for path, note, _mine in tasks:
+        mine_p = _priority(note)
+        beat = [f"[[{p.stem}]] ({_priority(n)})" for p, n in sorted(others, key=lambda pn: pn[0].stem.lower())
+                if PRIORITY_WEIGHTS[_priority(n)] > PRIORITY_WEIGHTS[mine_p]]
+        if beat:
+            print(f"WARN: join: {', '.join(beat)} outrank the joined [[{path.stem}]] ({mine_p}): next orders by "
+                  "priority: first, so they start first", file=sys.stderr)
+    print("(dry-run)" if args.dry_run else f"[written: {written}]" if written else "[no-change]")
+    return 0
+
+
 # ---- approve-queue and stamp-start (p30-4; vault-grammar § Approved queue) ----------------------------------------
 
 def _queue_note(path: Path):
@@ -14157,6 +14584,18 @@ def _parser():
     ca.add_argument("--dry-run", action="store_true", help="print the carry/keep lines and write nothing")
     ca.set_defaults(func=cmd_carry)
 
+    jn = sub.add_parser("join", help="add tasks to this project's running parallel rollout in place (ADR 0078 d6; "
+                                     "/thread:schedule step 7's Join): ## Queue rows ranked first, ## File-sets lines, "
+                                     "rollout: stamps; exit 2 refused, nothing written; guard-exempt")
+    jn.add_argument("--rollout", required=True, help="path to the running rollout note")
+    jn.add_argument("--tasks", required=True, help="the task slugs to join, comma-separated, in schedule order")
+    jn.add_argument("--files", action="append", default=None, metavar="SLUG=A,B",
+                    help="a joined task's planned files for its ## File-sets line (repeatable)")
+    jn.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    jn.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (its date is the rows' `joined <date>`)")
+    jn.add_argument("--dry-run", action="store_true", help="print the outcome; write nothing")
+    jn.set_defaults(func=cmd_join)
+
     aq = sub.add_parser("approve-queue", help="approve a queue on Lachy's words (p30-4; vault-grammar § Approved queue): "
                                               "write hold_until, on_merge: regenerate and start: unattended, print "
                                               "one undo line; exit 1 refused, nothing written")
@@ -14303,10 +14742,14 @@ def main() -> int:
 # engine-snapshot.py, this tree's own copy (ADR 0043): loaded only for the guard, as _ladder() loads ladder.py.
 ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
 GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
-# The three verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write
-# nothing (moving is the Watchdog's reading, which must read any rollout from any root), and fold-journals never reads
-# the note and writes only the Run record, a cross-version store.
-GUARD_EXEMPT = ("status", "fold-journals", "moving")
+# The four verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write nothing
+# (moving is the Watchdog's reading, which must read any rollout from any root); fold-journals never reads the note and
+# writes only the Run record, a cross-version store; and join (ADR 0078 d6) is run by a newer schedule on a running
+# rollout whose snapshot predates the verb, and writes only forms every protocol-5 engine reads, under the same note
+# lock: a `## Queue` row (a wikilink on a ranked line, its Mode `joined <date>` or `joined <date>, solo`), a
+# `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp. Those forms and the note lock's path are a
+# cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration.
+GUARD_EXEMPT = ("status", "fold-journals", "moving", "join")
 
 
 def _guarded_notes(args):

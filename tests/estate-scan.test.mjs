@@ -614,7 +614,8 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.deepEqual(a.declaredBy, ['Crowned One'])
   // The stand-in for exit 4 is the peer it becomes: schedule § 0's --ensure clones A-rollout at origin/main, so the
   // in-place main ahead of it blocks only on a cited path (case 16 runs pushed-base.sh that way). The unfinished-rollout
-  // refusal is the project's own (ADR 0064): it sits on the project row, never the repo row.
+  // refusal is the project's own (ADR 0064): it sits on the project row, never the repo row. R1 has never started, so
+  // it is refused without --regenerate; only a rollout that has run is joined (ADR 0078 d6, E1).
   assert.deepEqual(checks(a.blockers), [])
   assert.deepEqual(a.projects.map((x) => [x.project, x.clone, checks(x.blockers)]),
     [['Crowned One', { exit: 0, line: 'default', slug: null }, ['unfinished-rollout']]])
@@ -1113,7 +1114,7 @@ test('19. ownSession: the orient: key wins, else a declared repo with its own de
 // ---- E1-E5: two projects' parallel rollouts on one repo, each in its own clone (ADR 0064, D8) ----------------------
 const twoClones = once(() => scan(V6))
 const projOf = (row, name) => { const p = row.projects.find((x) => x.project === name); assert.ok(p, `${row.path}: a project row ${name}`); return p }
-test('E1. B, beside A\'s rollout in D, reads clone project proj-b with the toplevel standing in; A has only its own refusal', () => {
+test('E1. B, beside A\'s rollout in D, reads clone project proj-b with the toplevel standing in; A joins its own running rollout', () => {
   const j = ok(twoClones())
   const tb = repoAt(j, R('TB'))
   const b = projOf(tb, 'Proj B')
@@ -1124,7 +1125,7 @@ test('E1. B, beside A\'s rollout in D, reads clone project proj-b with the tople
   const a = projOf(tb, 'Proj A')
   assert.deepEqual(a.clone, { exit: 0, line: 'default', slug: null })
   assert.equal(a.rolloutRoot, R('TB-rollout'))
-  assert.deepEqual(checks(a.blockers), ['unfinished-rollout'], 'its own started rollout in D')
+  assert.deepEqual(checks(a.blockers), [], 'its own started rollout in D is joined (ADR 0078 d6), no blocker')
 })
 test('E2. B\'s own clone exists: it is B\'s rolloutRoot and root', () => {
   const b = projOf(repoAt(ok(twoClones()), R('TB2')), 'Proj B')
@@ -1149,7 +1150,7 @@ test('E4. the repo row keeps the default resolution and carries no project\'s un
   assert.equal(tb.rolloutRoot, R('TB-rollout'))
   assert.equal(tb.selfRollout.exit, 0)
   assert.deepEqual(checks(tb.blockers), [])
-  assert.deepEqual(tb.unfinishedRollout.map((x) => [x.project, x.verdict]), [['Proj A', 'refuse'], ['Proj B', 'none']],
+  assert.deepEqual(tb.unfinishedRollout.map((x) => [x.project, x.verdict]), [['Proj A', 'join'], ['Proj B', 'none']],
     'each project checked against its own root')
 })
 test('E5. <T>-proj-b an unrelated checkout: B\'s clone blocker carries the collision line', () => {

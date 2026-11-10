@@ -357,7 +357,7 @@ main chain (its `items`, each with an `id`, its outcome, its recommended option 
 or note, and the hours it held work; its `counts`, the totals); `trails`, the /fresh-review rounds of each PR, keyed by
 its landing merge, its branch, or a run of rounds in one checkout (rounds, code rounds, findings, and whether the PR
 changed docs alone); `waits`, each rollout's wait to start, from his ask (the earliest `captured:` of its
-queue's tasks) and from its scheduling; `circling`, `W1` (a work item three or more Sessions touched with nothing merged
+queue's tasks, a carried or joined row's aside) and from its scheduling; `circling`, `W1` (a work item three or more Sessions touched with nothing merged
 while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours with nothing merged) and `readings` (the
 reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
 rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed cycle named); and `trend`.

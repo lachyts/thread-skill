@@ -106,14 +106,15 @@ the Run record's `set-aside` lines in [since, until] with reasonClass `review-ro
 beside the trails).
 
 Waits to start. One row per rollout whose first `slot-taken` falls in [since, until], or that is open at until (by
-rollout_end()) with none. ask: the earliest `captured:` of the task notes its `## Queue` rows link (`| # | Task | Scope |
-Mode |`, a `[[slug|label]]` through find, a row whose Mode starts `carried (` skipped: that task was asked for another
-rollout), else the rollout note's own `captured:`, counted from the start of its Melbourne day; scheduled: the note's
-`captured:`; started: the first slot-taken. hours and scheduleHours run from ask and scheduled to started (until while
-open, never below 0); open is no start by until. A serial chain has no Slot, so it has no row (cannotShow). A linked
-task with no note is flagged; with no date anywhere the row is skipped and flagged. A `captured:` no calendar holds
-(2026-02-30), wherever it is read (a queue's task, a rollout note, a superseding note), reads as none and is named in
-cannotShow (captured_day()), never a fault that costs the block.
+rollout_end()) with none. ask: the earliest `captured:` of the task notes its `## Queue` rows link
+(`| # | Task | Scope | Mode |`, a `[[slug|label]]` through find, a row whose Mode starts `carried (` or `joined `
+skipped: that task was asked for another rollout, or joined this one after it started (ADR 0078 d6)), else the rollout
+note's own `captured:`, counted from the start of its Melbourne day; scheduled: the note's `captured:`; started: the
+first slot-taken. hours and scheduleHours run from ask and scheduled to started (until while open, never below 0); open
+is no start by until. A serial chain has no Slot, so it has no row (cannotShow). A linked task with no note is flagged;
+with no date anywhere the row is skipped and flagged. A `captured:` no calendar holds (2026-02-30), wherever it is read
+(a queue's task, a rollout note, a superseding note), reads as none and is named in cannotShow (captured_day()), never a
+fault that costs the block.
 
 rollout_end(), the first that matches: (1) its close line's stamp (tune.py's close_line); (2) its `completed:`; (3) the
 `captured:` of the note `superseded_by:` names; (4) a status in LEDGER.CLOSED: the record's last line (a note with no
@@ -1081,7 +1082,7 @@ def leg_done_by(rec, until):
 
 
 def queue_links(body):
-    """The task slugs a rollout note's ## Queue table links, rows whose Mode starts `carried (` left out."""
+    """The task slugs a rollout note's ## Queue table links, rows whose Mode starts `carried (` or `joined ` left out."""
     out, inside, cols = [], False, None
     for line in (body or "").split("\n"):
         if line.startswith("## "):
@@ -1101,7 +1102,7 @@ def queue_links(body):
         ti, mi = cols
         if ti >= len(cells):
             continue
-        if mi is not None and mi < len(cells) and cells[mi].lower().startswith("carried ("):
+        if mi is not None and mi < len(cells) and cells[mi].lower().startswith(("carried (", "joined ")):
             continue
         m = re.search(r"\[\[([^\]]+)\]\]", cells[ti])
         s = link_slug(m.group(1)) if m else None

@@ -393,10 +393,14 @@ R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, §
   unfinished rollout per repo and project**, each project's in its own rollout clone (ADR 0064), and schedule
   § 0's unfinished-rollout check enforces it.
   `--regenerate` is orient's supersede policy: the check allows a supersede only for a paused or
-  never-started rollout of this project (its unlanded tasks carry into the new one), and schedule
-  § 0 finishes an interrupted supersede on its own.
+  never-started rollout of this project (its unlanded tasks carry into the new one), and joins this
+  project's running one, and schedule § 0 finishes an interrupted supersede on its own.
+  - **Schedule joined a running rollout** (`join`, ADR 0078 d6) → schedule added the tasks to this project's
+    running rollout in place (schedule step 7's **Join**): orient writes no rollout, hands nothing off (§ 9) and
+    starts nothing for it; it reports the Joined line and its holds, and the `--regenerate not applied` line its
+    supersede policy draws.
   - **Schedule stopped at § 0** (one of its checks refused; for this check, another project's
-    rollout on the repo, one that has run and is not paused, two at once, or a live serial chain
+    rollout on the repo, this project's draining or pre-protocol-5 one, two at once, or a live serial chain
     working the repo in place, where this run would share its index and HEAD (ADR 0042), any
     project's) → schedule stamped no task and
     wrote no new rollout note, so orient must schedule nothing and touch nothing else.
@@ -613,7 +617,7 @@ given). It resolves, asks, reads and writes nothing.
 - **Never a second unfinished parallel rollout per repo and project, and never another rollout's
   lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
-  started); anything else waits (§ 6).
+  started); this project's running one is joined (§ 6); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
 - **Under `--backlog`, don't put a question before the start, or start a serial note**: its questions come last, a
   serial note is listed on the Chorus Stage at B8, never started through `create_thread`, and it never runs

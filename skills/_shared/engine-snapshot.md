@@ -51,7 +51,9 @@ re-send or a repair hand-off is no § 1 entry for a lead already in hand: it kee
 A command on another rollout (schedule's ten prior-acting commands on a superseded rollout, a lineage read, a
 close-out) runs from that rollout's own `resolve` root: the Primary for an unstamped prior, never this run's snapshot.
 So does a write to a rollout from a session that runs none: orient-all's Sign-off (§ 4) resolves the task's
-`rollout:` and runs `approve-gates --tasks <slug> --rollout <its note>` from the `root` that prints.
+`rollout:` and runs `approve-gates --tasks <slug> --rollout <its note>` from the `root` that prints. One exception:
+schedule's `join` (ADR 0078 d6) runs from this run's own root, since a running rollout's snapshot predates it; it is
+guard-exempt and writes only the cross-version forms below (§ Cross-version state).
 
 Schedule's Pre-flight scripts (`estate-scan.py`, `estate-dispatch.py` `slices`, `preflight`, `record`,
 `decided-for-you` and `log`, `estate-rank.py rank`) run from the session's own root: they are unguarded and write no
@@ -64,7 +66,7 @@ ADR 0054).
 The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr line starting `engine-snapshot:` that
 names the root to re-run from. They are:
 
-- `reconcile-rollout.py`, every verb but `status`, `fold-journals` and `moving`: it asks about the note `--rollout` (carry:
+- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving` and `join`: it asks about the note `--rollout` (carry:
   `--from`) names, which `lane-hold` and `lane-ack` always take, and the rollout each `--tasks` slug's note (and, for
   `reconcile`, each result row's) names in its `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`,
   `hand-back`, `mark-started`, `mark-integrating`, `origin-wait`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
@@ -75,7 +77,9 @@ names the root to re-run from. They are:
 The exemptions run from any root: `reconcile-rollout.py status` writes nothing (status and the estate scan read every
 rollout with it); `moving` writes nothing either, and is the Watchdog's reading of any rollout from any root (status §
 The Watchdog's reading); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
-cross-version state (below); `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan`
+cross-version state (below); `join` (ADR 0078 d6) is run by a newer `/thread:schedule` on this project's running
+rollout, whose snapshot predates the verb, and writes only the forms § Cross-version state names for it, under the same
+note lock; `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan`
 only read; and `lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
 
 An `engine-snapshot:` line, whatever its exit code, means a wrong root, never the script's own failure: re-run the
@@ -159,3 +163,16 @@ correct (exit 3 re-integrates the second). An engine older than leases leaves le
 The Trickle claims file's `woken` list (p28-9) widens it at `version: 1`, as `waiting` did: a snapshot from before p28-9
 ignores it and drops it on rewrite, which costs a waiting lead only its wake (it re-checks at its trickle wait's timeout
 or its tick).
+
+Schedule's `join` (ADR 0078 d6) writes a running rollout's note from a newer root, so its forms are a cross-version
+contract:
+
+- the `## Queue` row `| <n> | [[<slug>\|<alias>]] | <scope> | joined <YYYY-MM-DD> |`, or `joined <YYYY-MM-DD>, solo`
+  for a Solo task, and the list form `- [[<slug>|<alias>]] — joined <YYYY-MM-DD>`. Every engine reads the row only as a
+  wikilink on a ranked line (RANKED_LINE_RE), and the weekly reading leaves a Mode starting `joined ` out of a wait to
+  start (attention.py);
+- the `- <slug>: a, b` `## File-sets` line (FILESET_RE);
+- the task's `rollout: "[[<slug>]]"` stamp (`_scan`'s backlink);
+- and the note lock it takes (`_note_lock_path`).
+
+They change only by migration.
