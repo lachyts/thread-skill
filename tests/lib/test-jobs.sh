@@ -26,13 +26,19 @@
 #                        it).
 #   watch_group <pgid> <bound> <marker> [grace]
 #                        while the leader <pgid> lives, poll once a second; once it has lived <bound> seconds, create
-#                        <marker>, TERM the group, wait up to <grace> seconds (default 5) for it to empty, then KILL it.
-#                        Run it in the background with its output on /dev/null.
+#                        <marker> and end the group (end_groups, <grace> defaulting to SUITE_STOP_GRACE). Run it in the
+#                        background with its output on /dev/null.
+#   end_groups <grace> [pgid...]
+#                        TERM every group at once, wait up to <grace> seconds for all of them to empty, then KILL
+#                        whatever is left. No group is a no-op. run.sh's stop_suites ends every live suite this way.
 # 3x the measured seconds covers CI macOS's roughly 1.6x local time with margin (tests/leg.test.sh: 527 s, bound
-# 1581 s), and a small suite's hang shows red in 5 minutes.
+# 1581 s), and a small suite's hang shows red in 5 minutes. SUITE_STOP_GRACE sits under verify-slot.py's KILL_GRACE
+# (10 s): a guard that ends a run TERMs run.sh's group, and run.sh's own TERM trap then KILLs a suite that outlives its
+# TERM before the guard KILLs run.sh's group, which no longer holds the suites.
 SUITE_BOUND_FACTOR=3
 SUITE_BOUND_FLOOR=300
 SUITE_BOUND_UNWEIGHTED=1200
+SUITE_STOP_GRACE=5
 
 _test_cores() {
   local c
@@ -87,16 +93,27 @@ suite_bounds() {
 }
 
 watch_group() {
-  local g="$1" bound="$2" mark="$3" grace="${4:-5}" s=$SECONDS t=0
+  local g="$1" bound="$2" mark="$3" grace="${4:-$SUITE_STOP_GRACE}" s=$SECONDS
   while kill -0 "$g" 2>/dev/null; do
     if [ $((SECONDS - s)) -ge "$bound" ]; then
       : > "$mark"
-      kill -TERM -- "-$g" 2>/dev/null
-      while [ "$t" -lt $((grace * 5)) ] && kill -0 -- "-$g" 2>/dev/null; do sleep 0.2; t=$((t + 1)); done
-      kill -KILL -- "-$g" 2>/dev/null
+      end_groups "$grace" "$g"
       return 0
     fi
     sleep 1
   done
+  return 0
+}
+
+end_groups() {
+  local grace="$1" g t=0 live; shift
+  for g in "$@"; do kill -TERM -- "-$g" 2>/dev/null; done
+  while [ "$t" -lt $((grace * 5)) ]; do
+    live=0
+    for g in "$@"; do kill -0 -- "-$g" 2>/dev/null && { live=1; break; }; done
+    [ "$live" = 1 ] || return 0
+    sleep 0.2; t=$((t + 1))
+  done
+  for g in "$@"; do kill -KILL -- "-$g" 2>/dev/null; done
   return 0
 }

@@ -468,7 +468,11 @@ over-selection from message strings and FOREIGN names is `thread-skill-followup-
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
 of the cores' worth of background suites at once (at least 2; 4 on 12 cores), largest first, and node
-at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 4):
+at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 4). A hung suite fails in minutes,
+not at CI's job limit: each shell suite runs under a liveness bound (3x its measured seconds in
+`tests/shard-weights.tsv`, at least 300 s, 1200 s for an unmeasured suite; `THREAD_SUITE_BOUND=<s>` sets one for
+every suite), past which its process group is killed and it reports `FAILED` with a `timed out` line, and node bounds
+each test file at 600 s. What it runs:
 
 - **Syntax** — `bash -n` on every shell script, `ast.parse` on every Python script, and a real parse
   of every `*.workflow.js` (`tests/lib/check-workflow-parse.sh`: the body wrapped the way the Workflow

@@ -38,12 +38,13 @@
 # Bounded (#327 finding 6, estate ADR 0011 d3: a liveness bound, never a tight wall-clock one). Each spawned suite runs
 # as a process group of its own (`set -m` around its spawn), watched by tests/lib/test-jobs.sh's watch_group: past its
 # bound the whole group is TERMed, then KILLed, and the suite ends `<label>: FAILED (<N>s)` plus a `<label>: timed out
-# after <B>s` line, also in its block and its failure-list line. The bound is suite_bounds's (3x the suite's measured
-# seconds in tests/shard-weights.tsv rounded up, 300 s floor, 1200 s with no weight); THREAD_SUITE_BOUND (seconds) sets
-# one flat bound for every suite instead. Since no suite shares run.sh's process group any more, a TERM, INT or HUP to
-# run.sh TERMs every live suite's group before it exits. Node bounds each test file at 600 s (`--test-timeout`, which
-# bounds a whole file as well as each test: node 23.9 cancels a file of three 1.5 s tests at a 2 s timeout), several
-# times the slowest file (tests/reflect-weekly.test.mjs, 153 s locally at the cap of 4).
+# after <B>s` line, also in its block and its failure-list line; it fails even when it exits 0 on its TERM. The bound is
+# suite_bounds's (3x the suite's measured seconds in tests/shard-weights.tsv rounded up, 300 s floor, 1200 s with no
+# weight); THREAD_SUITE_BOUND (seconds) sets one flat bound for every suite instead. Since no suite shares run.sh's
+# process group any more, a TERM, INT or HUP to run.sh ends every live suite's group before it exits: TERM, then KILL
+# after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 600 s
+# (`--test-timeout`, which bounds a whole file as well as each test: node 23.9 cancels a file of three 1.5 s tests at a
+# 2 s timeout), several times the slowest file (tests/reflect-weekly.test.mjs, 153 s locally at the cap of 4).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -180,6 +181,7 @@ spawn() {  # spawn <label> <bound> <cmd...> — run in background once there is 
     wait "$pid" 2>/dev/null; rc=$?
     if [ -e "$scratch/$n.timedout" ]; then
       wait "$wd"  # the group is gone once the watch ends: TERM, then KILL after its grace
+      [ "$rc" != 0 ] || rc=124  # a suite that exits 0 on its TERM still ran out of time: it fails
       echo "run.sh: timed out after ${bound}s (its liveness bound); its process group was killed" >> "$scratch/$n.out"
     else
       kill "$wd" 2>/dev/null
@@ -199,11 +201,12 @@ report() {  # report <i> — print that suite's block; a non-zero or missing rc 
   [ "$rc" = 0 ] || { fail=1; failed="$failed
   - ${labels[$i]}$why"; }
 }
-# stop_suites: TERM every live suite's process group (their own groups never get a signal sent to run.sh's), then
-# the background blocks that watch them.
+# stop_suites: end every live suite's process group (their own groups never get a signal sent to run.sh's): TERM, then
+# KILL whatever outlives SUITE_STOP_GRACE (end_groups); then the background blocks that watch them.
 stop_suites() {
-  local f g
-  for f in "$scratch"/*.pid; do g=; read -r g < "$f"; [ -z "$g" ] || kill -TERM -- "-$g" 2>/dev/null; done
+  local f g live=()
+  for f in "$scratch"/*.pid; do g=; read -r g < "$f"; [ -z "$g" ] || live+=("$g"); done
+  end_groups "$SUITE_STOP_GRACE" ${live[@]+"${live[@]}"}
   for g in $(jobs -p); do kill "$g" 2>/dev/null; done
 }
 trap 'stop_suites; exit 129' HUP; trap 'stop_suites; exit 130' INT; trap 'stop_suites; exit 143' TERM

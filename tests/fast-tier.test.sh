@@ -552,9 +552,11 @@ git -C "$F" checkout -q -- tests/zzb.test.sh
 
 # F20-F22 (#327 finding 6): a hung suite fails the run within its liveness bound and names itself. zzb hangs (a 60 s
 # sleep, and a background child) past the 2 s bound THREAD_SUITE_BOUND sets, so the run ends in seconds with zzb's whole
-# process group gone. A regression ends at zzb's own 60 s, so the check never hangs the suite.
+# process group gone. zzb exits 0 on its TERM and still names zzb.py and zz.workflow.js (so the map check stays green),
+# so only the timeout can make the run red. A regression ends at zzb's own 60 s, so the check never hangs the suite.
 pids="$TMP/f20.pids"; rm -f "$pids"
-put "$F" tests/zzb.test.sh 'sleep 60 & echo $! >> "$ZZ_PIDS"; echo $$ >> "$ZZ_PIDS"; echo "zzmarker-b hung"; sleep 60'
+put "$F" tests/zzb.test.sh 'trap "exit 0" TERM; sleep 60 & echo $! >> "$ZZ_PIDS"; echo $$ >> "$ZZ_PIDS"
+echo "zzmarker-b hung zzb.py zz.workflow.js"; sleep 60'
 s20=$SECONDS
 ZZ_PIDS="$pids" THREAD_SUITE_BOUND=2 run bash --only tests/zza.test.sh tests/zzb.test.sh
 t20=$((SECONDS - s20))
@@ -563,8 +565,8 @@ ok "$rc|$(markers)|$([ "$t20" -lt 30 ] && echo fast || echo "slow (${t20}s)")" "
   "F20: a suite hung past its 2 s bound fails the run in seconds, not at its 60 s, and the other suite still runs"
 ok "$(lines '^tests/zzb\.test\.sh: FAILED \([0-9]+s\)$')|$(lines '^tests/zzb\.test\.sh: timed out after 2s$')|$(lines '^tests/zza\.test\.sh: ok \([0-9]+s\)$')" \
   "1|1|1" "F20: … the hung suite prints its FAILED line and a timed-out line, the other its ok line"
-ok "$(lines '^  - tests/zzb\.test\.sh \(timed out after 2s\)$')|$(lines '^run\.sh: timed out after 2s \(its liveness bound\); its process group was killed$')" \
-  "1|1" "F20: … its failure-list line and its block say it timed out"
+ok "$(lines '^  - tests/zzb\.test\.sh \(timed out after 2s\)$')|$(lines '^run\.sh: timed out after 2s \(its liveness bound\); its process group was killed$')|$(lines '^  - ')" \
+  "1|1|1" "F20: … its failure-list line and its block say it timed out, and it is the run's only failure"
 ok "$(wc -l < "$pids" | tr -d ' ')|${alive:-none}" "2|none" "F20: … and its whole process group is gone, the background child too"
 git -C "$F" checkout -q -- tests/zzb.test.sh
 for bad in 0 x; do

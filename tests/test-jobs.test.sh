@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # p23-4, executed: tests/lib/test-jobs.sh, tests/run.sh's cap on its own background suites (suite_cap,
-# wait_for_room) and their liveness bound (flat_bound, suite_bounds, watch_group), and the run.sh lines that use them.
+# wait_for_room) and their liveness bound (flat_bound, suite_bounds, watch_group, end_groups), and the run.sh lines that
+# use them.
 # Run under this bash and, when present, under /bin/bash (3.2 on macOS), the shell run.sh is written for. Structural:
-# the peak is counted by marker dirs, never timed; watch_group's bounds are 1 s, its checks liveness-bounded at 10 s.
+# the peak is counted by marker dirs, never timed; watch_group's bounds and end_groups's grace are 1 s, their checks
+# liveness-bounded at 10 s.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -82,6 +84,21 @@ for sh in "${shells[@]}"; do
   ok "$(within "$(wg 'sleep 30 & sleep 30' 1)" 10)" "y|y|fast" "$n: watch_group: a leader past its 1 s bound: marker made, the group (a background child too) gone, well inside 30 s"
   ok "$(within "$(wg "trap '' TERM; sleep 30" 1)" 10)" "y|y|fast" "$n: watch_group: a group that ignores TERM is KILLed after the grace"
   ok "$(within "$(wg 'sleep 0.3' 30)" 10)" "n|y|fast" "$n: watch_group: a leader that ends inside its bound: no marker, and the watch ends with it"
+  # ---- end_groups: every group TERMed at once; one that ignores TERM is KILLed after the grace ------------------------
+  got=$("$sh" -c '. tests/lib/test-jobs.sh
+    s=$SECONDS
+    set -m
+    bash -c "trap \"\" TERM; sleep 30 & sleep 30" > /dev/null 2>&1 < /dev/null & a=$!
+    bash -c "sleep 30 & sleep 30" > /dev/null 2>&1 < /dev/null & b=$!
+    set +m
+    sleep 0.3
+    end_groups 1 "$a" "$b"
+    wait "$a" "$b" 2>/dev/null
+    n=0; while { kill -0 -- "-$a" || kill -0 -- "-$b"; } 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.2; n=$((n + 1)); done
+    { kill -0 -- "-$a" || kill -0 -- "-$b"; } 2>/dev/null && gone=n || gone=y
+    end_groups 1; echo "$?|$gone|$((SECONDS - s))"')
+  ok "$(within "$got" 10)" "0|y|fast" \
+    "$n: end_groups: two groups (one ignores TERM) both gone after a 1 s grace, background children too; no group is a no-op"
 done
 
 # ---- run.sh uses it ----------------------------------------------------------------------------------------
@@ -95,6 +112,8 @@ has "$run" 'node --test --test-concurrency="$max_jobs" --test-timeout=600000' \
 has "$run" 'flat=$(flat_bound) || {' "run.sh: a bad THREAD_SUITE_BOUND stops the run"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /set -m; "\$@"/{a=1} on && /watch_group "\$pid" "\$bound"/{b=1} on && /^\}/{exit} END{print (a && b) ? "y" : "n"}' tests/run.sh)" y \
   "run.sh: spawn() runs each suite as a process group of its own, watched by watch_group"
+ok "$(awk '/^stop_suites\(\) \{/{on=1} on && /end_groups "\$SUITE_STOP_GRACE"/{print "y"; exit} on && /^\}/{exit}' tests/run.sh)" y \
+  "run.sh: stop_suites() ends the live groups through end_groups (TERM, then KILL after the grace)"
 has "$run" 'export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"' "run.sh: the verify slots stay in scratch"
 has "$run" 'sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))' "run.sh: the shell suites spawn largest first"
 # `ls -S` is word-split into the array, so no suite path may hold whitespace.
