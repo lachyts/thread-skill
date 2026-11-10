@@ -56,7 +56,8 @@
 #   4  Set aside AT Integration. Prints `set-aside reason: integration: <why>` on stdout and stderr:
 #      (a) the cap: `integration: base moved before the merge 4 times in a row after 3 re-integrations
 #      (bases …)`; (b) `integration: head moved after Integration (PR head <h>, origin <b> at <r>, integrated
-#      head <i>)`, only when origin's branch (ls-remote) ≠ the integrated head.
+#      head <i>)`, only when origin's branch (ls-remote) ≠ the integrated head; (c) `integration: no-runner: required
+#      job "<name>" queued <n> minutes with no runner (run <r>, job <j>)` (No runner, below).
 #                                                                        counter cleared    lead: mark blocked;
 #      the diagnosis's first line is the text after `set-aside reason: `, which reconcile reads as
 #      `setAsideAt: integration` (reconcile-rollout.py INTEGRATION_PREFIX).
@@ -191,6 +192,16 @@
 # re-polled the same way, while BLOCKED stays the non-check gate's 1. Checks that never appear while the gate is
 # unreadable are 8, never 1.
 #
+# No runner (ADR 0069, amended 2026-11-11). A job GitHub queued that no runner took (a self-hosted runner that no longer
+# exists) stays queued about 24 hours, and read as CI in flight the whole time. A job is "no runner" when it is `queued`
+# with neither a runner_id nor a runner_name, `created_at` at least MERGE_TASK_NO_RUNNER_LIMIT seconds ago (900, 15
+# minutes). no_runner_read reads it, job by job, on the integrated head; a read that fails or a field that does not
+# parse is never "no runner", so a bad read waits as before. Optional, it stops counting: ci_runs_in_flight drops a run
+# held only by such jobs. Required (a pending row of `gh pr checks --required`, the job named by its id or name): the
+# watch is cut every MERGE_TASK_NO_RUNNER_POLL seconds to look, and exit 4 sets the task aside at Integration at once,
+# because `--watch` would otherwise hold the lane until GitHub drops the job. A live-checkout.sh that cannot be loaded
+# leaves the watch uncut, today's wait.
+#
 # Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
 # delete (`gh pr merge --delete-branch` would `git branch -d` a branch checked out in the task's worktree,
@@ -209,6 +220,8 @@ for v in $(git rev-parse --local-env-vars 2>/dev/null); do case $v in GIT_CONFIG
 CHECK_RETRY_MAX=10     # consecutive "no required checks AND no CI in flight" polls before halting (1), or exit 8
                        # when the gate is unreadable
 CHECK_INTERVAL=${MERGE_TASK_CHECK_INTERVAL:-15}          # gh pr checks --watch refresh
+NO_RUNNER_LIMIT=${MERGE_TASK_NO_RUNNER_LIMIT:-900}       # seconds queued with no runner before a job reads as "no runner"
+NO_RUNNER_POLL=${MERGE_TASK_NO_RUNNER_POLL:-60}          # seconds per watch slice between no-runner reads (0 reads as 1)
 STATE_INTERVAL=${MERGE_TASK_STATE_INTERVAL:-10}          # re-poll of a BEHIND state on an unmoved base, and of a
                                                          # PR GitHub has not settled
 BEHIND_REPOLL_MAX=3    # BEHIND re-polls on an unmoved base before halting (within the guard)
@@ -823,7 +836,8 @@ done
 # or abort an `$((…))` (a leading 0 reads as octal), so it is a 2 before any GitHub call.
 int_re='^(0|[1-9][0-9]{0,8})$'
 for v in MERGE_TASK_CHECK_INTERVAL MERGE_TASK_STATE_INTERVAL MERGE_TASK_CONFIRM_INTERVAL MERGE_TASK_READ_TRIES \
-         MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX MERGE_TASK_FETCH_TIMEOUT; do
+         MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX MERGE_TASK_FETCH_TIMEOUT \
+         MERGE_TASK_NO_RUNNER_LIMIT MERGE_TASK_NO_RUNNER_POLL; do
   val=${!v:-}
   [ -z "$val" ] || [[ $val =~ $int_re ]] \
     || finish 2 "ERROR: $v='$val' is not a non-negative integer (at most 9 digits) — nothing was read or merged."
@@ -1065,7 +1079,96 @@ record_base_moved() {  # record_base_moved <live> — the cap, inline before exi
 }
 check_base() { read_base; [ "$LIVE" = "$IBASE" ] || record_base_moved "$LIVE"; }
 
-ci_runs_in_flight() {  # success (0) when ≥1 workflow run on the integrated head is not completed
+NR_RUNS=0; NR_HELD=0; NR_ROWS=''
+no_runner_scan() {  # no_runner_scan <runs.json> <jobs-file prefix> <limit> — shell assignments for the NR_* fields (eval'd)
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, shlex, sys, time
+from datetime import datetime
+runs_path, prefix, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
+now = time.time()
+def load(path):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+def queued_for(job):
+    """Seconds a job has sat queued with no runner, past the limit; None when it is anything else or does not parse."""
+    if job.get("status") != "queued" or job.get("runner_id") or job.get("runner_name"):
+        return None
+    try:
+        at = datetime.fromisoformat(str(job.get("created_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if at.tzinfo is None:
+        return None
+    age = now - at.timestamp()
+    return age if age >= limit else None
+runs = (load(runs_path) or {}).get("workflow_runs")
+if not isinstance(runs, list):
+    sys.exit(1)
+unfinished = [r for r in runs if isinstance(r, dict) and r.get("status") != "completed"]
+held = 0
+rows = []
+for r in unfinished:
+    body = load("%s%s" % (prefix, r.get("id")))
+    jobs = body.get("jobs") if isinstance(body, dict) else None
+    if not isinstance(jobs, list):
+        continue                        # its jobs unread: the run stays in flight
+    live = [j for j in jobs if isinstance(j, dict) and j.get("status") != "completed"]
+    stuck = 0
+    for j in live:
+        age = queued_for(j)
+        if age is not None:
+            stuck += 1
+            rows.append("\t".join((str(j.get("name") or "").replace("\t", " "), str(r.get("id")), str(j.get("id")),
+                                   str(int(age // 60)))))
+    # Every unfinished job no-runner, on a page that holds them all (a longer run may hide a live job).
+    if live and stuck == len(live) and len(jobs) >= int(body.get("total_count") or 0):
+        held += 1
+print("NR_RUNS=%d NR_HELD=%d NR_ROWS=%s" % (len(unfinished), held, shlex.quote("\n".join(rows))))
+PY
+}
+no_runner_read() {  # sets NR_RUNS, NR_HELD and NR_ROWS (`<name>\t<run>\t<job>\t<minutes>`); 0 read, 1 the runs list unreadable
+  local id assigns
+  gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$IHEAD&per_page=100" >"$tmp/nr.runs" 2>/dev/null || return 1
+  for id in $(python3 -c 'import json,sys
+for r in json.load(open(sys.argv[1])).get("workflow_runs") or []:
+    if r.get("status") != "completed": print(r.get("id"))' "$tmp/nr.runs" 2>/dev/null); do
+    case "$id" in ''|*[!0-9]*) continue ;; esac
+    gh api "repos/$OWNER/$REPO/actions/runs/$id/jobs?per_page=100" >"$tmp/nr.jobs.$id" 2>/dev/null || : >"$tmp/nr.jobs.$id"
+  done
+  assigns=$(no_runner_scan "$tmp/nr.runs" "$tmp/nr.jobs." "$NO_RUNNER_LIMIT") || return 1
+  eval "$assigns"
+}
+
+NR_WHY=''
+no_runner_required() {  # 0 when a required job has no runner (NR_WHY names each); 1 when none is, or that cannot be read
+  NR_WHY=''
+  no_runner_read && [ -n "$NR_ROWS" ] || return 1
+  gh pr checks "$PR" -R "$OWNER/$REPO" --required >"$tmp/nr.required" 2>/dev/null   # its exit says only pending or red
+  NR_WHY=$(python3 - "$tmp/nr.required" "$NR_ROWS" <<'PY'
+import re, sys
+names, ids = set(), set()
+for line in open(sys.argv[1]).read().split("\n"):
+    cells = line.split("\t")
+    if len(cells) > 1 and cells[1] == "pending":
+        names.add(cells[0])
+        m = re.search(r"/job/([0-9]+)", cells[3] if len(cells) > 3 else "")
+        if m:
+            ids.add(m.group(1))
+out = []
+for row in sys.argv[2].split("\n"):
+    name, run, job, minutes = row.split("\t")
+    if name in names or job in ids:
+        out.append('required job "%s" queued %s minutes with no runner (run %s, job %s)' % (name, minutes, run, job))
+print("; ".join(out))
+PY
+  )
+  [ -n "$NR_WHY" ]
+}
+
+ci_runs_in_flight() {  # success (0) when ≥1 workflow run on the integrated head is not completed and is not held only by no-runner jobs
   # "Never appeared" must mean "nothing is coming", not "hasn't appeared yet": a repo whose ONLY
   # required check is an end-of-workflow roll-up job (giflab's `Checks Complete`: `needs:` every other
   # job) doesn't get that check run CREATED until ~the whole suite has run — far longer than the
@@ -1075,11 +1178,13 @@ ci_runs_in_flight() {  # success (0) when ≥1 workflow run on the integrated he
   # suites permanently `queued` with 0 check runs on every commit — a check-suite probe would read
   # "in flight" forever. FAIL-CLOSED throughout: API error or unparseable count return 1, so the caller
   # falls back to the bounded appear budget. The head is the pinned integrated head (already verified).
-  local n
-  n="$(gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$IHEAD&per_page=100" \
-       -q '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null)"
-  case "$n" in ''|*[!0-9]*) return 1;; esac
-  [ "$n" -gt 0 ]
+  # A run held only by jobs no runner took stops counting (No runner, the header).
+  no_runner_read || return 1
+  [ "$NR_RUNS" -gt 0 ] || return 1
+  if [ "$NR_HELD" -gt 0 ]; then
+    echo "  PR #$PR — $NR_HELD of $NR_RUNS run(s) on head held only by jobs no runner took for ${NO_RUNNER_LIMIT}s: not counted as CI in flight."
+  fi
+  [ "$NR_HELD" -lt "$NR_RUNS" ]
 }
 
 infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wait), 1 to HALT
@@ -1307,13 +1412,29 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
   echo "  $BASE's required gate: $REQ_GATE ($REQ_WHY)."
 }
 
+checks_watch() {  # one slice of the required-checks watch: gh's rc, or 142 once NO_RUNNER_POLL cut it
+  [ "$(type -t lc_loaded)" = function ] || . "$LIVE_CHECKOUT" 2>/dev/null
+  if [ "$(type -t lc_bounded)" = function ]; then
+    lc_bounded "$NO_RUNNER_POLL" gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast \
+      --interval "$CHECK_INTERVAL" >"$tmp/checks.out" 2>"$tmp/checks.err"
+  else
+    gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" \
+      >"$tmp/checks.out" 2>"$tmp/checks.err"
+  fi
+}
+
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed)
   local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
-    gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" \
-      >"$tmp/checks.out" 2>"$tmp/checks.err"; rc=$?
+    checks_watch; rc=$?
+    if [ "$rc" -eq 142 ]; then
+      # The slice ended with a required check still pending. A required job no runner took would hold the watch until
+      # GitHub drops it, about 24 hours: set the task aside now, and free the lane (No runner, the header).
+      no_runner_required && set_aside "no-runner: $NR_WHY"
+      continue
+    fi
     if [ $rc -eq 0 ]; then
       # A 0 with no red cell is green. A 0 with one is a CANCELLED required check (above): one re-run of its failed
       # jobs, then the GitHub-side exit 1 the lead sets aside at Integration and the infra retry takes (ADR 0073 d4),

@@ -11,6 +11,16 @@ the gate read `some`, and every PR red only on its optional review-app jobs wait
 came, then exited 1 "never appeared". The gate read is unchanged: `protected: true` stays `some`. Decision 2 and the
 last considered option carry the change.)*
 
+*(Amended 2026-11-11 by thread-skill-integration-wait-ends-on-a-job-no-runner-will-take: a job queued with no runner
+for 15 minutes (`MERGE_TASK_NO_RUNNER_LIMIT`; `queued`, no runner_id or runner_name, by its `created_at`) is "no
+runner", not CI in flight. Found in compression-engine-rollout-2026-11-08: a job on a self-hosted runner that no longer
+exists counted as CI in flight for about 24 hours. Optional, it stops counting in `ci_runs_in_flight`, the read behind
+decision 2's in-flight test. Required (a pending row of `gh pr checks --required`), `--watch` would hold the lane until
+GitHub drops the job, so the watch is sliced by `MERGE_TASK_NO_RUNNER_POLL` (60 s) and the job set aside at once: exit
+4, `integration: no-runner: required job "<name>" queued <n> minutes with no runner (run <r>, job <j>)`, reasonClass
+`no-runner`, retrying as `infra` under decision 3's budget. A failed read or an unparseable timestamp is never "no
+runner", so it waits as before.)*
+
 ## Context
 
 `chorus-rollout-2026-11-04` halted at 26/27 overnight on one task, `chorus-p96-12` (PR #632), until Lachy woke:

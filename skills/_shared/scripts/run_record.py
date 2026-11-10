@@ -139,6 +139,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed | ci-timeout |
+                     no-runner (a required job no runner took, merge-task's exit-4 set-aside, ADR 0069) |
                      merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
                      needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a

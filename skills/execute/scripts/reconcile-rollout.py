@@ -1122,6 +1122,8 @@ check reads the same cause: merge-task.sh's red required check is the stop's own
 merge gate reads; the mark printed before an infra rerun that a later `ERROR:` line follows stays merge-task);
 ci-timeout (ADR 0073 d4: a reason starting `merge-task` whose own cause is a CANCELLED required check,
 _merge_task_ci_timeout: a CI timeout, a stop on GitHub's side that retries as infra);
+no-runner (exit 4's `no-runner:` set-aside, ADR 0069 amended 2026-11-11: a required job no runner took, a stop that
+retries as infra);
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
@@ -9197,6 +9199,8 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "merge-gate"
     if lead and first.startswith("merge-task") and _merge_task_ci_timeout(reason):
         return "ci-timeout"
+    if lead and first.startswith(NO_RUNNER_OPENING):
+        return "no-runner"
     if lead and (first.startswith("merge-task") or first.startswith("base moved")
                  or first.startswith("head moved after integration")):
         return "merge-task"
@@ -10625,6 +10629,10 @@ MERGE_TASK_CI_TIMEOUT_MARK = "a REQUIRED check was CANCELLED on PR"
 # the reason's own cause with no red check there (_merge_task_infra_stop), they retry as `infra`. Pinned against
 # merge-task.sh by the auto-retry suite.
 MERGE_TASK_INFRA = ("required checks never appeared for PR", MERGE_TASK_CI_TIMEOUT_MARK)
+# merge-task.sh's exit-4 set-aside for a required job no runner took (ADR 0069, amended 2026-11-11): reasonClass
+# no-runner, and it retries as `infra` (_retry_class): no code fix clears it, and a runner coming back does. The first
+# line of a set-aside's reason, with `integration: ` already stripped. Pinned against merge-task.sh by the auto-retry suite.
+NO_RUNNER_OPENING = "no-runner:"
 # The mark each of merge-task.sh's exit-8 texts carries while GitHub settles a PR's mergeability (ADR 0069 d2): a third
 # exit 8 with it retries as `infra`. Pinned against merge-task.sh by the auto-retry suite.
 MERGE_TASK_SETTLING_MARK = "GitHub has not settled its mergeability"
@@ -10740,7 +10748,8 @@ def _retry_class(note) -> str:
     a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
     Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS, or a stop on GitHub's side, ADR 0069 d3:
     an Integration set-aside opening MERGE_TASK_GITHUB_OPENING whose rest is a _merge_task_infra_stop, a third exit 8
-    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, or a legacy own-run `merge-task` reason that is a
+    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 no-runner set-aside
+    (NO_RUNNER_OPENING), or a legacy own-run `merge-task` reason that is a
     _merge_task_infra_stop) or `agent` (everything else: an agent can act on its feedback; every other exit-8 text
     included)."""
     kind, reason = _note_reason(note)
@@ -10753,6 +10762,8 @@ def _retry_class(note) -> str:
             _merge_task_infra_stop(first[len(MERGE_TASK_GITHUB_OPENING):]):
         return "infra"
     if kind == "integration" and first.startswith(MERGE_TASK_EXIT8_OPENING) and MERGE_TASK_SETTLING_MARK in first:
+        return "infra"
+    if kind == "integration" and first.startswith(NO_RUNNER_OPENING):
         return "infra"
     if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"

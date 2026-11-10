@@ -36,7 +36,9 @@ State (a missing file takes the default in brackets):
   rules                   rules/branches/<b>, read 2 (the same segment check). Absent ⇒ []; a JSON array literal ⇒
                           served as-is; `403-plan` ⇒ chorus's live "Upgrade to GitHub Pro" text; `403-rate` ⇒ the
                           secondary rate limit; `404` ⇒ the Not Found form. err.rules: its text, rc 1, on every read.
-  inflight [0]            actions/runs in-flight count.
+  inflight [0]            actions/runs (the whole object; -q is rc 99): that many unfinished runs, ids 9000 on.
+  runs                    a JSON list served as workflow_runs instead of inflight's.
+  runjobs.<id>            actions/runs/<id>/jobs, served as written (absent ⇒ the 404 form).
   checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
                           sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
                           A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
@@ -464,8 +466,17 @@ if args[:1] == ["api"]:
         shas = r.stdout.split()
         print(json.dumps({"sha": shas[0], "parents": [{"sha": s} for s in shas[1:]]}))
         sys.exit(0)
+    if len(parts) == 7 and parts[3:5] == ["actions", "runs"] and parts[6] == "jobs":
+        guard_jq("api actions/runs/<id>/jobs")
+        if not has("runjobs." + parts[5]):
+            not_found()
+        print(rd(p("runjobs." + parts[5])))
+        sys.exit(0)
     if len(parts) >= 5 and parts[3:5] == ["actions", "runs"]:
-        print(rd(p("inflight"), "0"))
+        guard_jq("api actions/runs")
+        runs = json.loads(rd(p("runs"))) if has("runs") else [
+            {"id": 9000 + i, "status": "in_progress"} for i in range(int(rd(p("inflight"), "0")))]
+        print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
         sys.exit(0)
     if len(parts) >= 5 and (parts[3] == "branches" or parts[3:5] == ["rules", "branches"]):
         # merge-task's required-gate reads (ADR 0069 d1): whole objects, the branch one percent-encoded segment.

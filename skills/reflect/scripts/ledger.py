@@ -190,7 +190,7 @@ STALL_MARKERS = ("hold-trickle", "hold-away-cap", "hold-merge", "hold-git-env", 
 # A still-waiting wait's set-aside reasonClass -> (class, cause); anything else is stalls/hand-back.
 STILL_WAITING = {"gate": ("stalls", "gate"), "needs-human": ("stalls", "question"), "quota": ("quota-bound", "cool-down"),
                  "transient": ("stalls", "cool-down"), "call-failed": ("stalls", "cool-down"),
-                 "ci-timeout": ("stalls", "cool-down")}
+                 "ci-timeout": ("stalls", "cool-down"), "no-runner": ("stalls", "cool-down")}
 WAIT_STARTS = ("revise", "hand-back", "resume")
 
 # The set-aside mover rule (moved here from reflect.py, p29-11: one copy; Span.moved_by delegates to first_mover).

@@ -430,6 +430,11 @@ ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg10 set-aside:mg10" "mg10 
 ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","ci-timeout","integration"]' "mg10 a cancelled required check at Integration: integrate, ci-timeout, integration"
 out=$(mgc mg11 120 "merge-task exit 1, GitHub-side: $CANCEL ci"$'\t'"fail"$'\t'"40m" integration)
 ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","merge-task","integration"]' "mg11 a fail cell in its cause: merge-task, never ci-timeout"
+# mg12 (ADR 0069, amended 2026-11-11): merge-task's exit-4 no-runner set-aside, its text as merge-task prints it: frees the
+# lane, reasonClass no-runner, set aside at Integration.
+out=$(mgc mg12 121 'integration: no-runner: required job "self-hosted" queued 47 minutes with no runner (run 7, job 8)' integration)
+ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg12 set-aside:mg12" "mg12 a required job no runner took: lane-freed, set-aside"
+ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","no-runner","integration"]' "mg12 a required job no runner took: integrate, no-runner, integration"
 ok "$(python3 - "$SCRIPT" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
