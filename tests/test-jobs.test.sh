@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # p23-4, executed: tests/lib/test-jobs.sh, tests/run.sh's cap on its own background suites (suite_cap,
-# wait_for_room), and the run.sh lines that use it. Run under this bash and, when present, under /bin/bash (3.2 on
-# macOS), the shell run.sh is written for. Structural: the peak is counted by marker dirs, never timed.
+# wait_for_room) and their liveness bound (flat_bound, suite_bounds, watch_group), and the run.sh lines that use them.
+# Run under this bash and, when present, under /bin/bash (3.2 on macOS), the shell run.sh is written for. Structural:
+# the peak is counted by marker dirs, never timed; watch_group's bounds are 1 s, its checks liveness-bounded at 10 s.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -45,6 +46,42 @@ for sh in "${shells[@]}"; do
   peak=$(sort -n "$D/peaks" | tail -1 | tr -d ' ')
   ok "$([ "${peak:-9}" -le 2 ] && echo y || echo "peak $peak")" y "$n: wait_for_room 2 over six jobs: at most 2 at once"
   ok "$(wc -l < "$D/ran" | tr -d ' ')" 6 "$n: … and all six ran"
+  # ---- flat_bound: THREAD_SUITE_BOUND, a positive integer; an empty value is unset; anything else is refused --------
+  fb() { THREAD_SUITE_BOUND="$1" "$sh" -c '. tests/lib/test-jobs.sh; flat_bound; echo "rc=$?"'; }
+  ok "$(fb 7 | tr '\n' ' ')" "7 rc=0 " "$n: THREAD_SUITE_BOUND=7 → 7"
+  ok "$(fb 007 | tr '\n' ' ')" "7 rc=0 " "$n: THREAD_SUITE_BOUND=007 → 7 (decimal, not octal)"
+  ok "$(fb '' | tr '\n' ' ')" "rc=0 " "$n: THREAD_SUITE_BOUND='' → nothing (each suite's own bound)"
+  for bad in 0 abc -1 1.5 ' 2'; do
+    ok "$(fb "$bad" | tr '\n' ' ')" "rc=2 " "$n: THREAD_SUITE_BOUND='$bad' → return 2, nothing printed"
+  done
+  # ---- suite_bounds: 3x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ----------
+  W="$tmp/weights-$k.tsv"
+  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.2 tests/zza.test.sh \
+    0.5 tests/zzb.test.sh bad tests/zzc.test.sh > "$W"
+  sb() { local w="$1" f="$2"; shift 2; printf '%s\n' "$@" | "$sh" -c '. tests/lib/test-jobs.sh; suite_bounds "$@"' sh "$w" "$f" | tr '\t\n' ': '; }
+  ok "$(sb "$W" '' @merge-task-self-tests tests/zzleg.test.sh tests/zza.test.sh tests/zzb.test.sh tests/zzc.test.sh tests/zznew.test.mjs)" \
+    "@merge-task-self-tests:300 tests/zzleg.test.sh:1581 tests/zza.test.sh:301 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
+    "$n: suite_bounds: 3x the weight rounded up (527 → 1581, 100.2 → 301), the 300 s floor, 1200 s for no weight or a malformed line"
+  ok "$(sb "$tmp/no-such.tsv" '' tests/zzleg.test.sh)" "tests/zzleg.test.sh:1200 " "$n: suite_bounds: no weights file → 1200 s"
+  ok "$(sb "$W" 5 tests/zzleg.test.sh @merge-task-self-tests)" "tests/zzleg.test.sh:5 @merge-task-self-tests:5 " "$n: suite_bounds: a flat bound is every entry's"
+  # ---- watch_group: a group whose leader outlives its bound is TERMed whole; a group that ignores TERM is KILLed ----
+  # wg <group cmd> <bound>: run <group cmd> as a process group of its own, watched; prints `<marker?>|<group gone?>|<s>`.
+  wg() {
+    "$sh" -c '. tests/lib/test-jobs.sh
+      D=$1; rm -f "$D/mark"; s=$SECONDS
+      set -m; bash -c "$2" sh "$D" > /dev/null 2>&1 < /dev/null & g=$!; set +m
+      watch_group "$g" "$3" "$D/mark" 1 > /dev/null 2>&1
+      wait "$g" 2>/dev/null
+      n=0; while kill -0 -- "-$g" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.2; n=$((n + 1)); done
+      kill -0 -- "-$g" 2>/dev/null && gone=n || gone=y
+      [ -e "$D/mark" ] && m=y || m=n
+      echo "$m|$gone|$((SECONDS - s))"' sh "$D" "$1" "$2"
+  }
+  # within <got> <max s>: <got>'s fields 1-2, then `fast` when its seconds are at most <max s> (a liveness bound).
+  within() { local m=${1%|*}; [ "${1##*|}" -le "$2" ] && echo "$m|fast" || echo "$m|slow (${1##*|}s)"; }
+  ok "$(within "$(wg 'sleep 30 & sleep 30' 1)" 10)" "y|y|fast" "$n: watch_group: a leader past its 1 s bound: marker made, the group (a background child too) gone, well inside 30 s"
+  ok "$(within "$(wg "trap '' TERM; sleep 30" 1)" 10)" "y|y|fast" "$n: watch_group: a group that ignores TERM is KILLed after the grace"
+  ok "$(within "$(wg 'sleep 0.3' 30)" 10)" "n|y|fast" "$n: watch_group: a leader that ends inside its bound: no marker, and the watch ends with it"
 done
 
 # ---- run.sh uses it ----------------------------------------------------------------------------------------
@@ -53,7 +90,11 @@ has "$run" '. tests/lib/test-jobs.sh' "run.sh sources tests/lib/test-jobs.sh"
 has "$run" 'max_jobs=$(suite_cap) || {' "run.sh: the cap comes from suite_cap, and a bad THREAD_TEST_JOBS stops the run"
 has "$run" 'echo "== suites: at most $max_jobs at a time"' "run.sh prints the cap"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /wait_for_room "\$max_jobs"/{print "y"; exit} on && /^\}/{exit}' tests/run.sh)" y "run.sh: spawn() waits for room first"
-has "$run" 'node --test --test-concurrency="$max_jobs"' "run.sh: node runs at the same concurrency"
+has "$run" 'node --test --test-concurrency="$max_jobs" --test-timeout=600000' \
+  "run.sh: node runs at the same concurrency, each test file bounded at 10 minutes"
+has "$run" 'flat=$(flat_bound) || {' "run.sh: a bad THREAD_SUITE_BOUND stops the run"
+ok "$(awk '/^spawn\(\) \{/{on=1} on && /set -m; "\$@"/{a=1} on && /watch_group "\$pid" "\$bound"/{b=1} on && /^\}/{exit} END{print (a && b) ? "y" : "n"}' tests/run.sh)" y \
+  "run.sh: spawn() runs each suite as a process group of its own, watched by watch_group"
 has "$run" 'export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"' "run.sh: the verify slots stay in scratch"
 has "$run" 'sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))' "run.sh: the shell suites spawn largest first"
 # `ls -S` is word-split into the array, so no suite path may hold whitespace.
