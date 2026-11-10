@@ -1111,10 +1111,12 @@ class Scan:
 
     # ---- rollouts --------------------------------------------------------------------------------------------------
 
-    def waits_on(self, note, tasks):
+    def waits_on(self, note, tasks, closed):
         """A live rollout's `## Waits on` lines (waits-on.py, ADR 0078 d7), each only while its dependant is still open and
         its dependency is still an open task, by slug, on no live rollout: `tasks` holds the scan's non-dead task rows,
-        so the line for a dependant since dropped, or a dependency since closed, archived or scheduled, is dropped."""
+        so the line for a dependant since dropped, or a dependency since closed, archived or scheduled, is dropped.
+        `closed` holds the keys of the dead rollout notes in Work/Tasks: a link to one holds nothing, the writer's rule
+        (_live_rollout), where `rolloutLive` is § In flight's and asks only that the link resolves."""
         if self.NA.status_of(note) in self.NA.DEAD_STATUSES:
             return []
         lines = note.lines[note.span[1] + 1:] if note.span else []
@@ -1125,7 +1127,7 @@ class Scan:
                 continue
             m = WAITS_ON.match(line.strip()) if inside else None
             row = tasks.get(m.group(2).lower()) if m and m.group(1).lower() in tasks else None
-            if row is not None and not row["rolloutLive"]:
+            if row is not None and (not row["rolloutLive"] or _link_key(row["rollout"]) in closed):
                 out.append({"task": m.group(1), "dependency": m.group(2), "project": m.group(3)})
         return out
 
@@ -1211,8 +1213,9 @@ class Scan:
                                                  "phase": jsonable(note.get("phase")), "openTasks": count})
         rollouts = [self.rollout_row(rel, note) for rel, note in rollout_notes]
         by_slug = {t["slug"].lower(): t for t in tasks}
+        closed = {_link_key(rel) for rel, note in rollout_notes if self.NA.status_of(note) in self.NA.DEAD_STATUSES}
         for row, (_rel, note) in zip(rollouts, rollout_notes):
-            row["waitsOn"] = self.waits_on(note, by_slug)
+            row["waitsOn"] = self.waits_on(note, by_slug, closed)
         for row, (rel, note) in zip(rollouts, rollout_notes):
             for prel in {self.resolve(link)[0] for link in self.NA.links_in(note.get("projects"))} - {None}:
                 projects[prel]["rollouts"].append(row["slug"])

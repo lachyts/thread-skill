@@ -455,16 +455,18 @@ R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, §
   An ordinary task stays open there and gets the fill like any other.
 
 - **The left-out list** (ADR 0078 d7), last, after the steering answer and the rollouts, whether or not a note was
-  written: every open task this orient swept (§ 2; for a scoped target, the tasks its reshuffle wrote) that no
-  `--tasks` list named is printed, none dropped or rolled into a count, under the heading `Left out of the rollout:`,
-  one line each, `- [[<task>]]: <reason>`. Its reason is one of: `open fork: <the fork>` (§ 2 Open forks);
+  written: every open task this orient swept (§ 2; for a scoped target, the tasks its reshuffle wrote) that joined no
+  rollout note this orient wrote is printed, none dropped or rolled into a count, under the heading
+  `Left out of the rollout:`, one line each, `- [[<task>]]: <reason>`. Its reason is one of: `open fork: <the fork>` (§ 2 Open forks);
   `conversation-gated` (the weekly decision task's `decisions` tag names it; § 7 Exclusions); `in flight` (§ 2);
   `handed to you (Mixed)`; `Not now`; `Hands-on` (a serial-shaped cluster Hands-on left unstamped); `session lane`;
   `left out by schedule: <its line>` (a Pre-flight leaver, a gate, a branch collision, a `sessionLane` or `leftOut`
-  row, each with schedule's own line); `would have taken: <schedule's refusal>` (schedule stopped at § 0, or on
+  row, each with schedule's own line); `would have taken: <schedule's refusal>` (schedule stopped at § 0, at § Serial path S3, or on
   uncommitted grill docs, so nothing joined); or one line of what actually held it. A task another project's work
-  depends on is never left out silently: schedule's `waits-on.py` writes its wait on the dependant's rollout note
-  (schedule step 7). An orient that leaves nothing out prints no heading.
+  depends on is never left out silently: `waits-on.py write`, which every schedule (step 7, § Serial path S6) and
+  every orient-all pass (§ 2) runs, rewrites every live rollout note's `## Waits on`, so the next of those runs puts
+  its wait on the dependant's rollout note, whichever project's it is. An orient that leaves nothing out prints no
+  heading.
 
 **Under `--backlog`.** The parallel-shaped batches go to forked schedule runs under B6's answers, and the steer is
 decided as Autonomous, with nothing put to him; B7's Left out section stands in for the left-out list

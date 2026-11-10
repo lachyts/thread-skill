@@ -27,6 +27,8 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
 - **Writes**, only through scripts:
   - `estate-dispatch.py record`, each answer into its task note;
   - `estate-dispatch.py log`, the grades into the Grade log (never on a dry run);
+  - `waits-on.py write`, the `## Waits on` section of every live rollout note, before § 2's scan (never on a dry run;
+    ADR 0078 d7);
   - `estate-dispatch.py rank-stamp`, the pass's estate rank on each rollout note it dispatched and on every live one,
     re-stamped in its current order (never on a dry run; ADR 0067 d9);
   - `estate-rank.py snooze`, `unpark` and `kill`, the Unpark offer's answers;
@@ -71,7 +73,10 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
 ### 2. Scan, status and grade
 
 1. `S=$(mktemp -d -t orient-all)`.
-2. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-scan.py --compact > "$S/scan.json"`, with the Bash
+2. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write`, so every live
+   rollout note's `## Waits on` is true before the scan reads it (ADR 0078 d7: a dependency released since a note was
+   last written gets its line); a non-zero exit is a § 8 caveat, and the pass goes on. Then
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-scan.py --compact > "$S/scan.json"`, with the Bash
    tool's `timeout: 120000`. Exit 2 or 3 stops the pass with its one line. `vaultErrors` and `deadlineHit` become
    caveats for § 8, and the pass goes on.
 3. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan "$S/scan.json" --dir "$S/slices"`:
@@ -422,7 +427,7 @@ plan: each batch's schedule args with the execute each would start or the chain 
 with its cwd and prompt,
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
-It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `approve-gates`, `stamp-start`,
+It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `waits-on.py write`, `approve-gates`, `stamp-start`,
 `estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, the sign-in pass (§ 6 step 2), `list_sessions`, `read_session`, `relay_session` or
 `create_thread`.
 

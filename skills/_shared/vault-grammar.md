@@ -190,8 +190,8 @@ a dependant on that note (ADR 0078 d7):
 
 `<x>` is another project's task (it shares no `projects:` entry with the dependant) that has not landed and whose
 `rollout:` links no live rollout. `<Project>` is its first project, or `no project`. `waits-on.py write` is the
-section's one writer: schedule step 7 and § Serial path S6 run it, and it rewrites the section as it stands, removing
-it when nothing waits. `estate-scan.py` reads the lines back for each live rollout (`rollouts[].waitsOn[]`, each kept
+section's one writer: schedule step 7, § Serial path S6 and orient-all § 2 run it, and it rewrites the section on every
+live rollout note as it stands, one line per unit a dependant waits on, removing it when nothing waits. `estate-scan.py` reads the lines back for each live rollout (`rollouts[].waitsOn[]`, each kept
 only while its dependant is still open and its dependency is still an open task on no live rollout) and orient-all
 lists them (§ 3, § 8).
 
