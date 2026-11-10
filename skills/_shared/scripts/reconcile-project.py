@@ -43,7 +43,11 @@ outside --kinds is never written, even as a dependency.
    - Every task landed: U, action `status: done` + `completed: <today>` (directly after `status:`),
      `depends_on: []`. The vault's daily sweep moves it to Phases/Archive.
    - Every non-landed task is a U finished task (rule 2): U with `depends_on: [those slugs]` when `task`
-     is in --kinds; otherwise A, `needs task <slug> closed first`, and no task is written.
+     is in --kinds; otherwise A, `needs task <slug> closed first`, and no task is written. A dependency whose
+     action is `landed, carried (status: review)` (rule 2) keeps the phase out of both lists, one `skipped`
+     line `phase <slug> left open: [[<task>]] lands carried (ADR 0078 d1)`: its fix is not done until Proven.
+     One that lands owed (`status: done`) closes it as before; prove's carry-back reopens it once that note goes
+     back to review (reconcile-rollout.py's _reopen_phases).
    - A QUIET task keeps the phase out of both lists, whatever its other tasks are: a hold, a task at
      `review` under a live rollout (status/repair own that step: the queue integrates it and `resume` lands it
      once its PR merges) or with no `rollout:` at all (a human review step, nothing to repair), a carried fix
@@ -87,7 +91,9 @@ outside --kinds is never written, even as a dependency.
    `TODO`, `only item/part/step <n>`, a bold `**Open...**` label or a line-leading `Open:`; the reason
    quotes the match) or has an unchecked `- [ ]`; (ii) it has
    `owner:` and its rollout is live; (iii) the note does not parse. The U write is the landing write
-   /thread:execute's mark-done makes (Apply).
+   /thread:execute's mark-done makes (Apply), and its action names that write, read at detect time through
+   reconcile-rollout.py's _land_outcome (local: the live file, read once, and the walk only on a carried verdict):
+   `status: done`, `landed, carried (status: review)` or `landed, carry-back owed (status: done)`.
 3. MISFILED SUPERSEDED ROLLOUT. Candidate: a rollout note in T root or A (not R) named
    `<slug>-rollout*` with a non-empty `superseded_by:`. U, action `move to Archive/Rollouts/<name>`;
    A when that destination already exists.
@@ -100,10 +106,11 @@ one of three: done (a serial chain's task included): `status: done`, today's sin
 (_carry_write: `status: review`, `merged:` from gh's mergedAt else now; written line `task <slug>: landed, carried
 (status: review)`); owed (_owed_write: `status: done` for an engine that reads a carried fix as awaiting
 Integration; written line `task <slug>: landed, carry-back owed (status: done; <why>)`). Neither is an errors
-entry; only a save's OSError is. A phase is written only if every slug in its depends_on landed done or owed in
-this run and every one of its task files re-reads from disk as landed; a dependency that landed carried leaves it
-open, one `skipped` line, `phase <slug> left open: [[<task>]] landed, carried (ADR 0078 d1)`, never an error;
-otherwise it is skipped with `phase <slug> skipped: dependency <task> <reason>`. A rollout move never overwrites:
+entry; only a save's OSError is. Apply reads the verdict again at write time (the walk fresh), so a note changed
+since detect lands as it reads then. A phase is written only if every slug in its depends_on landed done or owed in
+this run and every one of its task files re-reads from disk as landed; a dependency that landed carried since
+detect leaves it open, rule 1's one `skipped` line, never an error; otherwise it is skipped with `phase <slug>
+skipped: dependency <task> <reason>`. A rollout move never overwrites:
 R is created if missing, then `os.link` (which fails atomically when the destination exists; that clash is
 reported and the item reclassified A) and `unlink(src)`; where hard links are unsupported, an exclusive-create
 copy. If `unlink(src)` fails the destination is removed again (rollback); a failed rollback names both copies (`two
@@ -162,6 +169,9 @@ PHASE_N = r"\d+(?:\.\d+)?"  # a phase number: whole or fractional with a literal
 LANDED = {"done", "merged", "dropped"}
 ACTIVE = {"open", "in_progress"}  # statuses are read with `-` as `_` (Rec.status)
 NOTE_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
+# A U task's action: the landing write apply makes, by _land_outcome's verdict (ADR 0078 d1), named at detect time.
+LAND_ACTIONS = {"done": "status: done", "carried": "landed, carried (status: review)",
+                "owed": "landed, carry-back owed (status: done)"}
 
 PR_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?$")
 PR_REF_RE = re.compile(r"/pull/\d+|(?<![\w&])#\d+")
@@ -326,8 +336,10 @@ class Detector:
     def __init__(self, vault: Path, slug: str, kinds, phases, today: str, gh_mode: str, gh_path, engine=None):
         self.vault, self.slug, self.kinds, self.phases, self.today = vault, slug, kinds, phases, today
         self.gh_mode, self.gh_path, self.gh_cache = gh_mode, gh_path, {}
-        self.engine = engine          # reconcile-rollout.py's module: the carried-fix and clears: readers
+        self.engine = engine          # reconcile-rollout.py's module: the carried-fix, clears: and landing readers
         self.merged_at = {}           # PR URL -> gh's mergedAt, for the landing write
+        self.land_memo = {}           # task path -> (outcome, why): its landing verdict, read once (land_outcome)
+        self._live, self._live_done, self._walk = None, False, None
         work = vault / "Work"
         self.P, self.T = work / "Phases", work / "Tasks"
         self.A, self.R = self.T / "Archive", self.T / "Archive" / "Rollouts"
@@ -436,6 +448,35 @@ class Detector:
         n = self._engine_note(rec) if "clears" in (rec.fm or {}) else None
         return bool(n is not None and self.engine._clears(n))
 
+    def live(self):
+        """The Primary refresh's live file, read once per run (reconcile-rollout.py's _live_read): None when unreadable,
+        which watches every repo (fail closed), with one WARN."""
+        if not self._live_done:
+            self._live_done = True
+            self._live, why = self.engine._live_read(self.engine._live_file(None))
+            if why:
+                print(f"WARN: reconcile-project: {why}: every repo reads watched (fail closed)", file=sys.stderr)
+        return self._live
+
+    def walk(self):
+        """The engine's walk of T (Archive included), taken once, and only on a carried verdict (_land_outcome)."""
+        if self._walk is None:
+            self._walk = self.engine._walk_of(self.T)
+        return self._walk
+
+    def land_outcome(self, rec: Rec):
+        """(outcome, why): rule 2's landing verdict for a U task at detect time, reconcile-rollout.py's _land_outcome:
+        local (the live file, read once, and the walk only on a carried verdict), so the dry run names the write apply
+        makes (LAND_ACTIONS). ("done", None) with no engine or a note it will not read."""
+        if rec.path not in self.land_memo:
+            n = self._engine_note(rec)
+            if n is None:
+                self.land_memo[rec.path] = ("done", None)
+            else:
+                outcome, _live_at_merge, why = self.engine._land_outcome(n, self.T, self.live(), self.walk)
+                self.land_memo[rec.path] = (outcome, why)
+        return self.land_memo[rec.path]
+
     def _eval_task(self, rec: Rec):
         if rec.fm is None:
             return "A", f"the note does not parse: {rec.err}"
@@ -490,7 +531,8 @@ class Detector:
             if rec.fm is not None and not (rec.is_task() and rec.status in ACTIVE):
                 continue
             verdict, reason = self.eval_task(rec)
-            self.record("task", rec, verdict, reason, "status: done")
+            action = LAND_ACTIONS[self.land_outcome(rec)[0]] if verdict == "U" else LAND_ACTIONS["done"]
+            self.record("task", rec, verdict, reason, action)
 
     def detect_phases(self):
         for rec in self.p_recs:
@@ -528,7 +570,7 @@ class Detector:
                 elif st in ACTIVE:
                     verdict, reason = self.eval_task(t)
                     if verdict == "U":
-                        depends.append(t.stem)
+                        depends.append(t)
                     elif verdict == "A":
                         blockers.append(f"task {t.stem} is ambiguous ({reason})")
                     elif verdict == "skip":
@@ -539,15 +581,20 @@ class Detector:
                     quiet = True  # a hold (parked, blocked, ...): deliberate, not drift
             if quiet:
                 continue  # resolving the ambiguous tasks could never close this phase
+            names = [d.stem for d in depends]
             if blockers:
                 self.Amb.append(self.item("phase", rec, "; ".join(blockers)))
             elif depends and "task" not in self.kinds:
-                self.Amb.append(self.item("phase", rec, f"needs task {', '.join(depends)} closed first"))
+                self.Amb.append(self.item("phase", rec, f"needs task {', '.join(names)} closed first"))
             else:
+                held = next((d.stem for d in depends if self.land_outcome(d)[0] == "carried"), None)
+                if held:  # its fix lands carried (ADR 0078 d1): the daily sweep closes the phase once it is Proven
+                    self.skipped.append(left_open(rec.stem, held))
+                    continue
                 noun = "task" if len(tasks) == 1 else "tasks"
-                reason = f"all {len(tasks)} {noun} landed" + (f" once {', '.join(depends)} closes" if depends else "")
+                reason = f"all {len(tasks)} {noun} landed" + (f" once {', '.join(names)} closes" if depends else "")
                 it = self.item("phase", rec, reason, action=f"status: done + completed: {self.today}",
-                               depends_on=depends)
+                               depends_on=names)
                 it["_tasks"] = [t.path for t in tasks]
                 self.U.append(it)
 
@@ -598,6 +645,11 @@ class Detector:
 
 # ---- apply --------------------------------------------------------------------------------------------
 
+def left_open(phase: str, task: str) -> str:
+    """The one `skipped` line for a phase a carried landing leaves open (detect, and apply's write-time re-check)."""
+    return f"phase {phase} left open: [[{task}]] lands carried (ADR 0078 d1)"
+
+
 def apply(det: Detector, mod, items=None):
     """Write `items` (default: all of det.U) in order tasks, phases, rollout moves. `mod` is reconcile-rollout.py's
     module (load_engine): each task lands through its _land_outcome (done, carried or owed, ADR 0078 d1)."""
@@ -605,11 +657,7 @@ def apply(det: Detector, mod, items=None):
     Note = mod.Note
     written, errors, done_tasks, carried_tasks = [], [], set(), set()
     tasks = [i for i in items if i["kind"] == "task"]
-    live = None
-    if tasks:
-        live, why = mod._live_read(mod._live_file(None))
-        if why:
-            print(f"WARN: reconcile-project: {why}: every repo reads watched (fail closed)", file=sys.stderr)
+    live = det.live() if tasks else None
     now = datetime.now().astimezone()
     for it in tasks:
         try:
@@ -619,10 +667,10 @@ def apply(det: Detector, mod, items=None):
             merged = mod._stamp(at if at is not None else now)
             if outcome == "done":
                 note.set("status", "done")
-                said = "status: done"
+                said = LAND_ACTIONS["done"]
             elif outcome == "carried":
                 mod._carry_write(note, merged, None, live_at_merge, why, now)
-                said = "landed, carried (status: review)"
+                said = LAND_ACTIONS["carried"]
             else:
                 mod._owed_write(note, merged, None, why, now)
                 said = f"landed, carry-back owed (status: done; {why})"
@@ -633,8 +681,8 @@ def apply(det: Detector, mod, items=None):
             errors.append(f"task {it['slug']} not written: {e}")
     for it in [i for i in items if i["kind"] == "phase"]:
         held = next((d for d in it["depends_on"] if d in carried_tasks), None)
-        if held:
-            det.skipped.append(f"phase {it['slug']} left open: [[{held}]] landed, carried (ADR 0078 d1)")
+        if held:  # it landed carried since detect read it: the phase stays open, as detect would have left it
+            det.skipped.append(left_open(it["slug"], held))
             continue
         why = next((f"{d} not written" for d in it["depends_on"] if d not in done_tasks), None)
         if why is None:

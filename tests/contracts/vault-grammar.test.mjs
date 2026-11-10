@@ -596,6 +596,8 @@ function provenChecks(text) {
     !p.includes('else the running plugin root, and never read as current by default')) out.push('unstamped')
   if (!p.includes('`{v: 1, carried, owed, carryBack}`, one split behind all three')) out.push('three-lists')
   if (!p.includes('`_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`)')) out.push('hook-mirror')
+  if (!p.includes('(`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from `Work/Phases/Archive/` first')) out.push('phase-reopen')
+  if (!p.includes("reconcile's read-only approval (no code, so never watched)")) out.push('read-only-landing')
   if (!r.includes('it is the only closer of a fix phase')) out.push('sweep')
   if (!r.includes("**Chorus's copy of `_queue_state`**") || !r.includes('it must read `review` with a valued `merged:` as `merged`, checked before its `pr:` branch')) out.push('chorus')
   return out
@@ -619,6 +621,8 @@ test('control: each § Proven rule, rewritten, fails its check', () => {
     '3. unstamped (no valued `engine_snapshot:`): unstamped reads True, the newest copy', 'unstamped')
   swap('`{v: 1, carried, owed, carryBack}`', '`{v: 1, carried}`', 'three-lists')
   swap('`v.lower() not in ("", "null", "~")`', '`bool(v)`', 'hook-mirror')
+  swap('writes it `status: open` with `completed:` removed', 'leaves it done', 'phase-reopen')
+  swap("reconcile's read-only approval (no code, so never watched)", 'reconcile writes a read-only task done', 'read-only-landing')
   swap('it is the only closer of a fix phase', 'prove closes the phase too', 'sweep')
   swap('it must read `review` with a valued `merged:` as `merged`', 'it reads `review` as awaiting Integration', 'chorus')
 })

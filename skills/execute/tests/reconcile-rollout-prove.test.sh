@@ -13,6 +13,9 @@
 #           a serial chain out of scope
 #   P23-P25 --land's three outcomes, the dependants gate (_carry_readers) and an unstamped rollout's real engine (a
 #           Primary stand-in without the marker), the JSON and carried-fixes.json
+#   P26     reconcile's read-only approval lands through _land_outcome: a fix (clears:) carried, never done
+#   P27     --seen on a note whose carry-back waits, or that the re-check turns owed: exit 1, nothing recorded
+#   P28     carry-back reopens the done phase over its fix (root and Archive/), never another phase
 # Every row runs a seeded engine Primary's copy ($T/P, a main checkout holding this tree's files), never this tree's, so
 # an unstamped rollout's engine (git_primary) is a known one wherever the suite runs. Hermetic: HOME, the global git
 # config, the vaults, the events dir, the note locks and the live files are temp; gh is a stub; no network.
@@ -656,4 +659,114 @@ ok "$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(sort
 python3 -c 'import os, sys; os.utime(sys.argv[1], (1000000000, 1000000000))' "$CF"
 pv --all
 ok "$(python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$CF")" 1000000000 "P25: … rewritten only when it changes"
+# ════ P26: reconcile's read-only approval lands through _land_outcome (no code: never watched) ════════════════════
+scen p26
+RBODY=$'## Queue\n\n- [[p26-fix]]\n- [[p26-plain]]\n- [[p26-dep]]\n' ro p26-ro.md 'status: open'
+ro p26-old.md 'status: open' "$OLD" "$OLDSHA"
+mk p26-fix.md 'status: in_progress' 'scope: read-only' 'rollout: "[[p26-ro]]"' 'clears:' '  - "the audit names the stuck task"'
+mk p26-plain.md 'status: in_progress' 'scope: read-only' 'rollout: "[[p26-ro]]"'
+mk p26-dep.md 'status: open' 'rollout: "[[p26-ro]]"' 'depends-on:' '  - "[[p26-fix]]"'
+# row <slug>...: one read-only approval row per slug, the engine's shape
+row() { python3 -c 'import json, sys
+json.dump({"rolloutSlug": "p26-ro", "tasks": [{"slug": s, "status": "review", "scope": "read-only", "prUrl": "", "rung": "",
+           "reviewRoundsUsed": 1, "planRoundsUsed": 0} for s in sys.argv[2:]]}, open(sys.argv[1], "w"))' "$V/row.json" "$@"; }
+merges() { grep -rh "\"$1\"" "$THREAD_EVENTS_DIR" 2>/dev/null | grep -c '"merged"'; }
+row p26-fix p26-plain
+rr reconcile --result "$V/row.json" --tasks-dir "$TK" --now "$NOW"
+ok "$rc" 0 "P26: reconcile of two read-only approvals exits 0"
+ok "$(fm p26-fix.md status)|$(fm p26-fix.md merged)|$(fm p26-fix.md live)" "review|$NOW|$NOW" \
+   "P26: a read-only approval of a fix (clears:) lands review + merged: + live:, never done"
+has "$out" "p26-fix: status=review (read-only, approved; landed, carried: unwatched: Live at merge; done once its 1 clears: item moved) merged=$NOW" \
+    "P26: … its line says landed, carried"
+has "$(proof p26-fix.md)" "landed, carried: unwatched: Live at merge" "P26: … with its Proof log line"
+ok "$(merges p26-fix)" 1 "P26: … its landing's merged event fires"
+ok "$(fm p26-plain.md status)|$(fm p26-plain.md merged)|$(proof p26-plain.md | wc -l | tr -d ' ')" "done|$NOW|0" \
+   "P26: control: a read-only approval with no clears: is today's done, no Proof log"
+has "$out" "p26-plain: status=done (read-only, approved) merged=$NOW" "P26: … today's line"
+rr next --rollout "$TK/p26-ro.md" --tasks-dir "$TK" --now "$NOW" --dry-run
+ok "$(j 'd["start"]')" '["p26-dep"]' "P26: next reads the carried fix landed: its dependant starts"
+before=$(sums "$TK/p26-fix.md")
+rr reconcile --result "$V/row.json" --tasks-dir "$TK" --now 2026-11-11T13:00+00:00
+ok "$rc|$(sums "$TK/p26-fix.md")|$(merges p26-fix)" "0|$before|1" "P26: a re-reconcile is no change and fires no second merged"
+has "$out" "p26-fix: status=review (read-only, approved; already landed, carried) [no-change]" "P26: … its line says already landed, carried"
+mk p26-owed.md 'status: in_progress' 'scope: read-only' 'rollout: "[[p26-ro]]"' 'clears:' '  - "x"'
+mk p26-od.md 'status: open' 'rollout: "[[p26-old]]"' 'depends-on:' '  - "[[p26-owed]]"'
+row p26-owed; rr reconcile --result "$V/row.json" --tasks-dir "$TK" --now "$NOW"
+ok "$(fm p26-owed.md status)|$(fm p26-owed.md merged)" "done|$NOW" "P26: a dependant queued in an old rollout → owed (status: done + merged:)"
+has "$out" "p26-owed: status=done (read-only, approved; landed, carry-back owed: dependant [[p26-od]] in [[p26-old]]: engine abc123def456" \
+    "P26: … its line says landed, carry-back owed"
+has "$(proof p26-owed.md)" "landed, carry-back owed: dependant [[p26-od]] in [[p26-old]]" "P26: … with the owed Proof log line"
+
+# ════ P27: --seen on a note whose carry-back waits, or that the re-check turns owed ═════════════════════════════
+scen p27
+ro p27-old.md 'status: open' "$OLD" "$OLDSHA"
+BODY=$'\n## Proof log\n\n- 2026-11-11T09:00+00:00 landed, carry-back owed: x; status: done written for that engine (ADR 0078 d1)\n' \
+  mk p27-w.md 'status: done' 'merged: 2026-11-11T08:00+00:00' 'clears:' '  - "x"'
+mk p27-wd.md 'status: open' 'rollout: "[[p27-old]]"' 'depends-on:' '  - "[[p27-w]]"'
+mk p27-n.md 'status: done' 'merged: 2026-11-11T08:00+00:00' 'rollout: "[[p27-old]]"' 'clears:' '  - "x"'
+before=$(sums "$TK/p27-w.md" "$TK/p27-n.md")
+pv --tasks p27-w --seen "the stuck work moved"
+ok "$rc" 1 "P27: --seen on an owed note whose carry-back waits → exit 1"
+has "$err" "ERROR: prove: p27-w: not a carried fix (landed, carry-back waits: dependant [[p27-wd]] in [[p27-old]]: engine abc123def456 reads a carried fix as awaiting Integration): nothing recorded" \
+    "P27: … the ERROR names the wait"
+pv --tasks p27-n --seen "the stuck work moved"
+ok "$rc" 1 "P27: --seen on a note done before Proven under its own old engine → exit 1"
+has "$err" "ERROR: prove: p27-n: not a carried fix (landed, carry-back waits: engine abc123def456" "P27: … the ERROR names its own engine"
+ok "$(sums "$TK/p27-w.md" "$TK/p27-n.md")" "$before" "P27: … nothing recorded on either"
+mk p27-c.md 'status: review' 'merged: 2026-11-11T08:00+00:00' 'live: 2026-11-11T08:00+00:00' 'clears:' '  - "x"'
+mk p27-cd.md 'status: open' 'rollout: "[[p27-old]]"' 'depends-on:' '  - "[[p27-c]]"'
+pv --tasks p27-c --seen "the stuck work moved"
+ok "$rc|$(fm p27-c.md status)" "1|done" "P27: --seen on a carried fix the re-check turns owed → owed written, exit 1"
+has "$err" "ERROR: prove: p27-c: not a carried fix (landed, carry-back owed: dependant [[p27-cd]] in [[p27-old]]" "P27: … the ERROR names it owed"
+hasnt "$(proof p27-c.md)" "seen item" "P27: … and no seen item is recorded"
+mk Archive/Rollouts/p27-r.md 'status: review' 'merged: 2026-11-11T08:00+00:00' 'live: 2026-11-11T08:00+00:00' 'clears:' '  - "x"'
+before=$(sums "$TK/Archive/Rollouts/p27-r.md"); pv --tasks p27-r --seen "x"
+ok "$rc|$(sums "$TK/Archive/Rollouts/p27-r.md")" "1|$before" "P27: --seen on a note under Archive/Rollouts/ → exit 1, nothing recorded"
+has "$err" "ERROR: prove: p27-r: not a carried fix (filed under Archive/Rollouts/): nothing recorded" "P27: … the ERROR says where it is"
+
+# ════ P28: carry-back reopens the done phase over its fix ═══════════════════════════════════════════════════════
+scen p28
+OWEDB=$'\n## Proof log\n\n- 2026-11-11T09:00+00:00 landed, carry-back owed: x; status: done written for that engine (ADR 0078 d1)\n'
+phase() { mkdir -p "$(dirname "$PH/$1")"; printf -- '---\ntags:\n  - phase\nstatus: %s\n%s---\n\n# %s\n' "$2" "${3:-}" "$(basename "$1" .md)" > "$PH/$1"; }
+pfm() { python3 -c 'import re, sys
+t = open(sys.argv[1]).read().split("\n---\n", 1)[0]
+m = re.search(r"^" + re.escape(sys.argv[2]) + r":[ \t]*(.*)$", t, re.M)
+print(m.group(1).strip() if m else "<none>")' "$PH/$1" "$2"; }
+phase demo-p1-fixes.md done $'completed: 2026-11-10\n'
+phase demo-p10-other.md done $'completed: 2026-11-10\n'
+phase demox-p1-other.md done $'completed: 2026-11-10\n'
+BODY="$OWEDB" mk demo-p1-1-fix.md 'status: done' 'merged: 2026-11-11T08:00+00:00' 'clears:' '  - "x"'
+pv --tasks demo-p1-1-fix --dry-run
+has "$out" "demo-p1-1-fix: would carry back (status: review; phase [[demo-p1-fixes]] reopened)" "P28: --dry-run names the phase it would reopen"
+ok "$(pfm demo-p1-fixes.md status)" "done" "P28: … and writes nothing"
+pv --tasks demo-p1-1-fix
+ok "$(fm demo-p1-1-fix.md status)|$(pfm demo-p1-fixes.md status)|$(pfm demo-p1-fixes.md completed)" "review|open|<none>" \
+   "P28: a done phase over a carried-back fix is reopened: status: open, completed: removed"
+has "$(proof demo-p1-1-fix.md)" "carried back: landed at status: done, never Proven (ADR 0078 d1); phase [[demo-p1-fixes]] reopened" \
+    "P28: … the Proof log line names it"
+ok "$(pfm demo-p10-other.md status)|$(pfm demox-p1-other.md status)" "done|done" "P28: … never p10 (-p1- is literal) or another project's p1"
+python3 "$RP" --project demo --vault "$V" --kinds phase --phases 1 --no-gh --json > "$T/out" 2>&1; out=$(cat "$T/out")
+ok "$(j '[i["slug"] for i in d["unambiguous"] + d["ambiguous"]]')" '[]' "P28: … reconcile-project then reads the reopened phase QUIET"
+phase Archive/demo-p2-fixes.md done $'completed: 2026-11-10\n'
+mk Archive/demo-p2-1-fix.md 'status: done' 'merged: 2026-11-11T08:00+00:00' 'completed: 2026-11-10' 'clears:' '  - "x"'
+pv --all
+ok "$([ -f "$PH/demo-p2-fixes.md" ] && echo root)|$([ -f "$PH/Archive/demo-p2-fixes.md" ] && echo still || echo gone)|$(pfm demo-p2-fixes.md status)|$(pfm demo-p2-fixes.md completed)" \
+   "root|gone|open|<none>" "P28: a phase the sweep archived is moved back to Work/Phases/ and reopened"
+has "$(proof demo-p2-1-fix.md)" "; from Archive/; completed: 2026-11-10 removed; phase [[demo-p2-fixes]] reopened from Archive/" "P28: … its clause says from Archive/"
+phase Archive/demo-p3-fixes.md done $'completed: 2026-11-10\n'
+phase demo-p3-fixes.md open
+BODY="$OWEDB" mk demo-p3-1-fix.md 'status: done' 'merged: 2026-11-11T08:00+00:00' 'clears:' '  - "x"'
+before=$(sums "$PH/Archive/demo-p3-fixes.md" "$PH/demo-p3-fixes.md")
+pv --tasks demo-p3-1-fix
+ok "$(fm demo-p3-1-fix.md status)|$(sums "$PH/Archive/demo-p3-fixes.md" "$PH/demo-p3-fixes.md")" "review|$before" \
+   "P28: a root phase note of the same name leaves both phase notes as they are; the task is still carried back"
+has "$(proof demo-p3-1-fix.md)" "phase [[demo-p3-fixes]] not reopened: Work/Phases/demo-p3-fixes.md exists" "P28: … its clause says why"
+MUT=$(hx 'print(mod._reopen_phases("demo-p9-1-fix", Path(argv[0]), True))
+f = Path(argv[1]) / "demo-p9-x.md"
+f.write_text("---\ntags: [phase]\nstatus: dropped\n---\n")
+print(mod._reopen_phases("demo-p9-1-fix", Path(argv[0]), True))
+f.write_text("---\ntags: [phase]\nstatus: done\n---\n")
+print(mod._reopen_phases("demo-p9-1-fix", Path(argv[0]), True))' "$TK" "$PH")
+ok "$MUT" "$(printf "[]\n[]\n['phase [[demo-p9-x]] reopened']")" "P28: no phase, or a dropped one, is never reopened (control: a done one is)"
+
 exit $fail

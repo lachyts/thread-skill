@@ -222,8 +222,9 @@ recorded at or after `live:` (`prove --seen`), and so does a link item that cann
 nothing after `live:`), on Lachy's word only (`--on-his-word`). Live with every item moved, or none: `status: done`
 and `proven: <date>`, with no `completed:` and no phase write.
 
-**The three landing outcomes**, one verdict for every landing caller (`_land_outcome`: mark-done, resume, `prove
---land`, reconcile-project's apply):
+**The three landing outcomes**, one verdict for every landing caller (`_land_outcome`: mark-done, resume,
+reconcile's read-only approval (no code, so never watched), `prove --land`, and reconcile-project's apply, whose dry
+run names the same verdict as each task's action):
 
 - `done`: today's write, for a landing unwatched with no `clears:` item, or one whose own rollout is a serial chain;
 - `carried`: the carried form (`status: review`, `merged:`, `- <stamp> landed, carried: <why>`), when it is watched
@@ -264,7 +265,15 @@ fix still unproven; `owed` every note at done whose Proof log's last entry is th
 entry holds `landed, carry-back owed`. Once `_carry_readers` reads True, prove moves an archived candidate back to the
 root first (a hard link, then a fresh read saved through `Note.save`, which keeps its created time and Finder tags),
 then writes `status: review`, removes `completed:` and logs `carried back: landed at status: done, never Proven (ADR
-0078 d1)[; from Archive/][; completed: <v> removed]`. A root note of the same name makes it wait.
+0078 d1)[; from Archive/][; completed: <v> removed][; phase [[<p>]] reopened[ from Archive/]]`. A root note of the
+same name makes it wait.
+
+**The phase a carry-back reopens.** A phase note at `status: done` whose literal prefix `<slug>-p<N>-` starts the
+carried-back task's name (§ Phase and task filenames) is a done over a fix that is not: the carry-back
+(`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from `Work/Phases/Archive/`
+first when the daily sweep filed it there (a root note of the same name leaves it as it is, its clause `phase
+[[<p>]] not reopened: <why>`), so the sweep's PHASE CLOSE closes it again once its last fix is proven. A phase the
+completion ceremony or reconcile-project closed over an old engine's done or an owed landing is reopened this way.
 
 **The hook's mirror.** hooks/vault-note-overlap.py reads a review writer live only with a `pr:` and an unvalued
 `merged:`, `_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`), since loading
@@ -321,18 +330,22 @@ reconcile-rollout.py would spend its budget.
 - `skills/_shared/scripts/estate-rank.py` `rank --superseding` and estate-dispatch.py's `slices --superseding`
   (schedule's Pre-flight): § In flight's exception, read through estate-scan's `still_to_start`, loaded, so a
   carried task still queued is gradeable and one that has started stays in flight.
-- § Proven's readers: `skills/execute/scripts/reconcile-rollout.py` `prove` (the judge, carry-back and the two
-  files), its five changed readers (`_landed`, `_queue_state`, `_holds_lane`, `_race_marks`, `_origin_waiter_valid`),
-  `mark-done` and `resume` (through `_land_outcome`); `skills/_shared/scripts/reconcile-project.py` (rule 1's QUIET
-  carried fix, rule 2's apply through `_land_outcome`, loaded); `hooks/vault-note-overlap.py` (its literal mirror);
+- § Proven's readers: `skills/execute/scripts/reconcile-rollout.py` `prove` (the judge, carry-back with its phase
+  reopen, and the two files), its five changed readers (`_landed`, `_queue_state`, `_holds_lane`, `_race_marks`,
+  `_origin_waiter_valid`), `mark-done`, `resume` and `reconcile`'s read-only approval (through `_land_outcome`);
+  `skills/_shared/scripts/reconcile-project.py` (rule 1's QUIET carried fix and its phase left open over a carried
+  landing, rule 2's action and apply through `_land_outcome`, loaded); orient § 3 and § 4 (the dry run's actions, the
+  `landed, carried` rows and the `left open` lines); `hooks/vault-note-overlap.py` (its literal mirror);
   close (`skills/close/SKILL.md` § A finished task closes itself), status (§ 4's Carried line) and reflect (§ 17's
   carried read), each running `prove` from the session's own root.
 - **The vault's daily sweep** (`~/repos/workspaces/_shared/scripts/archive-completed-vault-items.py`, run by
   daily-sweep.sh): its task move keys on the Landed statuses (§ Statuses) or the `archived` tag, so a carried fix stays in the
   root and a done-before-Proven or owed note is archived. It never pulls a note out of `Archive/`: prove's carry-back is
-  the only writer that does. Its PHASE CLOSE keys on the same statuses, so a carried fix keeps its phase open; once prove
-  proves the last fix, it is the only closer of a fix phase, since the completion ceremony's `--kinds phase` run left
-  that phase open (rule 1 reads it QUIET). No second phase closer belongs in prove.
+  the only writer that does, for the task and for the done phase it reopens (§ Proven, **The phase a carry-back
+  reopens**), which it moves back to `Work/Phases/` because PHASE CLOSE reads that root only. Its PHASE CLOSE keys on
+  the same statuses, so a carried fix keeps its phase open; once prove proves the last fix, it is the only closer of a
+  fix phase, since the completion ceremony's `--kinds phase` run left that phase open (rule 1 reads it QUIET), or the
+  carry-back reopened it. No second phase closer belongs in prove.
 - **Chorus's copy of `_queue_state`** (`~/repos/tools/chorus/src/stage/rollout.py`'s `queue_state`): it must read
   `review` with a valued `merged:` as `merged`, checked before its `pr:` branch, with `_valued`'s literal set. Until it
   does, the Stage's rollout page, the morning report's per-rollout `merged` count and, through `merged`, the awake read
