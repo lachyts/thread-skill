@@ -747,30 +747,26 @@ def cmd_run(args):
     try:
         _clean_leftovers()
         items = discover(ctx)
-        if items is None or not items:
-            ctx.save()
-            return 0
-        try:
-            ctx.me = _flat(gh("api", "user", "--jq", ".login"))
-            if not ctx.me:
-                raise GhError("no login")
-        except GhError as e:
-            _search_failed(ctx, f"cannot read the GitHub login: {e}")
-            ctx.save()
-            return 0
-        except _Deadline:
-            ctx.save()
-            return 0
-        ctx.items = items
+        if items:
+            try:
+                ctx.me = _flat(gh("api", "user", "--jq", ".login"))
+                if not ctx.me:
+                    raise GhError("no login")
+            except GhError as e:
+                _search_failed(ctx, f"cannot read the GitHub login: {e}")
+                items = None
+        ctx.items = items or []
         for it in _order(ctx):
             if DEADLINE_AT - time.monotonic() < 1:
                 break
             if not handle(ctx, it):
                 break
-        ctx.save()
-        return 0
+    except _Deadline:
+        pass  # the deadline came before the PRs: the next pass starts over
     finally:
         ctx.cleanup()
+    ctx.save()
+    return 0
 
 
 def handle(ctx, it):
@@ -827,6 +823,9 @@ def pr_pass(ctx, it, e):
         if e is None and not it.labelled:
             return KEEP
         e = e or _entry(ctx, it, it.url, None)
+        if e.get("supersededBy"):  # a tombstone keeps its own stuck flag (step 8)
+            e["outcome"], e["handledAt"] = f"cannot read the PR: {ex}", ctx.stamp
+            return e
         return _finish(ctx, it, e, e.get("kind") or "unread", f"cannot read the PR: {ex}")
     if pr.get("merged"):
         return DROP
@@ -988,6 +987,8 @@ def act(ctx, it, pr, e, kind, checks):
     green = checks["cls"] in ("green", "none")
     auto_on = bool(pr.get("auto_merge"))
     note = None
+    if pr.get("draft"):
+        return _finish(ctx, it, e, kind, "a draft: left to its session")
 
     if kind == "close-out":
         sup = supersession(ctx, it, pr, e)

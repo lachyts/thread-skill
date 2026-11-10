@@ -181,6 +181,7 @@ writes() { ghlog | grep -E -- '--method (PUT|POST|PATCH)|pr merge' ; }
 
 shard_1() {
 echo "== C0. quiet passes, and the rate limit"
+python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 9))' "$CARRIER"; ok "$?" 0 "C0: the carrier parses as python 3.9, its floor"
 reset; carrier
 ok "$rc|$out" "0|" "C0: no PR: exit 0, nothing printed"
 ok "$(cnt "$(ghlog)" "search prs")|$(cnt "$(ghlog)" "api user")" "2|0" "C0: … two searches and no api user"
