@@ -52,6 +52,7 @@ OWN-LISTINGS tests/land.test.sh  # (i) ls-files of temp repos; copies $root/skil
 OWN-LISTINGS tests/contracts/status-repair-queue.test.mjs  # (i) a spawned grep over fixture D
 OWN-LISTINGS tests/unfinished-rollout.test.sh  # (i) an rglob counter on a temp tasks dir (#340); a skills copy with a raising leg.py
 OWN-LISTINGS tests/pushed-base.test.sh  # (i) copies $root/skills as the primary's plugin root (15b)
+OWN-LISTINGS skills/execute/tests/reconcile-rollout-prove.test.sh  # (i) ls-files copy of $root/skills as a seeded Primary checkout; a temp vault
 OWN-LISTINGS tests/self-rollout-check.test.sh  # (i) copies $root/skills into a seed repo
 OWN-LISTINGS tests/lead-integrate.test.sh  # (i) C35's fixture verifier string `find . ...`, read by the inert proof
 OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R6 read the real tree through the selector's index; C1 is every run's map check, and R1-R6 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)

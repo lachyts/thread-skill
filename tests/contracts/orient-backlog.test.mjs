@@ -221,7 +221,7 @@ function check(F) {
   const rr = F[RR] ?? ''
   if (!rr.includes('ss.add_argument("--backlog"')) flag('script', 'stamp-start has no --backlog')
   need('script', 'reconcile-rollout.py', rr, ["a held queue starts on Lachy's word", '`--backlog` (ADR 0071)', 'the Backlog orient stamped it'])
-  if (!/^GUARD_EXEMPT = \("status", "fold-journals", "moving"\)$/m.test(rr)) flag('script', 'GUARD_EXEMPT changed')
+  if (!/^GUARD_EXEMPT = \("status", "fold-journals", "moving", "prove"\)$/m.test(rr)) flag('script', 'GUARD_EXEMPT changed')
 
   // adr
   const adr = F[ADR] ?? ''

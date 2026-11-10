@@ -15,6 +15,8 @@
 #   spells    P0-P2 (since, kindSince, outcome), U1 (an entry from before p37-7), M1 H1 N5, T1 T2 (timeouts and a TERM),
 #             K1 L1 J1
 #   stuck     ST1-ST7 (the read-only verb: its due rule, its line, no write, no freshness check)
+#   proven    LV1-LV6 (ADR 0078 d1: the live file beside the state, never pruned by a pass, pruned at install; the prove
+#             step, its log line, its spell and its bound)
 #   self-update  S1-S5, S6a-S6j (the smoke; S6j a candidate whose own background_job.py is broken), S7 (the
 #             transition), S8 S9, S10a-S10c (the candidate's table), I6 (the frozen contract)
 # Origins over ssh are git@github.com:o/origin.git, served by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`. Every pid
@@ -996,6 +998,79 @@ ok "$([ -e "$tmp/s-i7c.json" ] && echo written)" "" "I7c: … and no state"
 # I8: `bundle` loads no helper, so the lone copy prints the whole table
 python3 "$tmp/lone/x/y/z/primary-refresh.py" bundle > "$tmp/i8.out" 2> "$tmp/i8.err"; rc=$?
 ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the six-row table, stderr empty"
+
+# ---- LV1-LV6: the live file and the prove step (ADR 0078 d1) -----------------------------------------------------------
+LF="$XDG_STATE_HOME/thread/primary-live.json"
+lv() { python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+print(eval(sys.argv[2], {"d": d, "live": d["live"]}))' "$1" "$2" 2>&1; }
+rm -f "$LF"; job >/dev/null
+ok "$(lv "$LF" 'sorted(live)')" "['$tmp/agents', '$tmp/primary']" "LV1: a job pass writes one live entry per checkout"
+run >/dev/null
+ok "$(lv "$LF" 'sorted(live)')" "['$tmp/agents', '$tmp/primary']" "LV1: … a hand-run with --also left off keeps the --also entry"
+ok "$(lv "$LF" 'sorted(live["'"$tmp/primary"'"])')" "['branch', 'head', 'origin', 'primary', 'since']" "LV2: an entry's shape"
+ok "$(lv "$LF" '[live["'"$tmp/primary"'"][k] for k in ("origin", "head", "branch", "primary")]')" \
+   "['$tmp/origin.git', '$(head_of "$tmp/primary")', 'master', True]" "LV2: … origin, head, branch and primary read from the checkout"
+ok "$(lv "$LF" 'live["'"$tmp/agents"'"]["primary"]')" False "LV2: … an --also checkout is not the primary"
+cp "$LF" "$tmp/lv2.before"; python3 -c 'import os, sys; os.utime(sys.argv[1], (1000000000, 1000000000))' "$LF"
+run >/dev/null
+ok "$(same "$tmp/lv2.before" "$LF")|$(python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$LF")" "same|1000000000" \
+   "LV2: … a pass with nothing changed leaves it byte for byte, unwritten"
+rm -f "$LF"; run --dry-run >/dev/null
+ok "$([ -e "$LF" ] && echo written)" "" "LV2: … no live file under --dry-run"
+# LV3: install's prune drops a live entry it does not watch, and keeps the prove spell
+job >/dev/null
+python3 - "$LF" "$DS" <<'PYQ'
+import json, sys
+lf, ds = sys.argv[1:]
+d = json.load(open(lf)); d["live"]["/nowhere/stray"] = {"origin": "x", "head": "0" * 40, "branch": "", "since": "x", "primary": False}
+json.dump(d, open(lf, "w"))
+s = {"v": 1, "stuck": {"prove": {"since": "2026-11-09T10:00:00+11:00", "kind": "prove-failed", "kindSince": "2026-11-09T10:00:00+11:00", "outcome": "failed (exit 3)"}}}
+json.dump(s, open(ds, "w"))
+PYQ
+out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
+has "$out" "dropped live entry: /nowhere/stray (not watched by this job)" "LV3: install drops a live entry the job does not watch"
+ok "$(lv "$LF" 'sorted(live)')" "['$tmp/agents', '$tmp/primary']" "LV3: … and keeps the watched ones"
+ok "$(sv "$DS" prove kind)" prove-failed "LV3: … the prove spell is kept"
+rm -f "$DS"
+# LV4-LV6: the prove step, against a stub at the primary's reconcile-rollout.py (a checkout copy, under --prove)
+STUBP="$tmp/primary/skills/execute/scripts/reconcile-rollout.py"; mkdir -p "$(dirname "$STUBP")"
+cat > "$STUBP" <<'PYS'
+import os, sys, time
+open(os.environ["PROVE_ARGV"], "w").write(" ".join(sys.argv[1:]))
+open(os.environ["PROVE_PID"], "w").write(str(os.getpid()))
+mode = open(os.environ["PROVE_MODE"]).read().strip() if os.path.exists(os.environ["PROVE_MODE"]) else "ok"
+if mode == "hang":
+    time.sleep(30)
+print("fixture: judged")
+print("prove: 1 carried, 0 proven, 0 carried back, 0 owed, 0 waiting carry-back")
+if mode == "fail":
+    print("ERROR: prove: broken", file=sys.stderr); sys.exit(3)
+PYS
+export PROVE_ARGV="$tmp/prove.argv" PROVE_PID="$tmp/prove.pid" PROVE_MODE="$tmp/prove.mode"
+LS="$tmp/lv/state.json"; mkdir -p "$tmp/lv"; rm -f "$PROVE_ARGV" "$PROVE_MODE"
+out=$(run --prove --state "$LS" --now "$(at 0)")
+ok "$(cat "$PROVE_ARGV")" "prove --all --live-file $tmp/lv/primary-live.json" "LV4: the step runs prove --all --live-file <the live file beside --state>"
+has "$out" "primary-refresh prove: prove: 1 carried, 0 proven, 0 carried back, 0 owed, 0 waiting carry-back" "LV4: … its last stdout line is the log line"
+ok "$([ -e "$tmp/lv/primary-live.json" ] && echo written)" written "LV4: … beside a live file written first"
+rm -f "$PROVE_ARGV"; out=$(run --prove --dry-run --state "$LS")
+ok "$([ -e "$PROVE_ARGV" ] && echo ran)" "" "LV4: … never under --dry-run"
+lacks "$out" "primary-refresh prove:" "LV4: … and no prove line then"
+echo fail > "$PROVE_MODE"; out=$(run --prove --state "$LS" --now "$(at 0)")
+has "$out" "primary-refresh prove: failed (exit 3: ERROR: prove: broken)" "LV5: exit 3 is one failed line"
+ok "$(sv "$LS" prove kind)" prove-failed "LV5: … it opens the prove spell"
+has "$(python3 "$pr" stuck --state "$LS" --now "$(at 1500)" 2>&1)" "primary-refresh prove: failed (exit 3: ERROR: prove: broken) (stuck since" "LV5: … named on the stuck line after 24 h"
+echo ok > "$PROVE_MODE"; run --prove --state "$LS" --now "$(at 10)" >/dev/null
+ok "$(sv "$LS" prove kind)" None "LV5: exit 0 clears it"
+mv "$STUBP" "$tmp/stub.keep"; out=$(run --prove --state "$LS" --now "$(at 20)")
+has "$out" "primary-refresh prove: skipped (no skills/execute/scripts/reconcile-rollout.py in $tmp/primary)" "LV5: a missing script is a skip"
+ok "$(sv "$LS" prove kind)" None "LV5: … opening no spell"
+mv "$tmp/stub.keep" "$STUBP"; echo hang > "$PROVE_MODE"; rm -f "$PROVE_PID"
+out=$(run --prove --prove-timeout 1 --state "$LS" --now "$(at 30)")
+has "$out" "primary-refresh prove: timed out after 1 s" "LV6: the step is bounded"
+gone "$(cat "$PROVE_PID" 2>/dev/null)" "LV6: … the stub is stopped"
+ok "$(sv "$LS" prove kind)" prove-failed "LV6: … and the spell opens"
+rm -rf "$tmp/primary/skills/execute"; rm -f "$PROVE_MODE"
 
 ok "$(ls -a "$tmp/bin" | grep -c '^\.stage-')" 0 "no stage is left beside the copy"
 exit $fail

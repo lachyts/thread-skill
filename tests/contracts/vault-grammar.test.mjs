@@ -581,3 +581,44 @@ test('controls: a drifted set or a restored caveat fails its check', () => {
     ['orient § 2 restates in flight'])
   assert.deepEqual(citations({ orientText: orient, reshuffleText: reshuffle, docstring: 'no citation' }), ['docstring cites'])
 })
+
+// ---- § Proven (ADR 0078 d1): a fix is done only once Proven ---------------------------------------------
+// The section states the grammar every reader of a carried fix keeps to; § Readers names the readers outside this repo.
+function provenChecks(text) {
+  const p = collapse(section(text, /^## Proven$/) ?? '')
+  const r = collapse(section(text, /^## Readers\b/) ?? '')
+  const out = []
+  if (!p) return ['section']
+  if (!p.includes('A carried fix is a task note at `status: review` with a valued `merged:`')) out.push('carried-test')
+  if (!p.includes('both checks read it before any engine read: at landing, its task lands `done`; at carry-back, its task is never a candidate and never listed')) out.push('serial-first')
+  if (!p.includes('and the rollout of each dependant still to start (a `depends-on:` or `blocked-by:` naming it, through a folded member too')) out.push('dependants')
+  if (!p.includes('3. unstamped (no valued `engine_snapshot:`): the marker in the engine an unstamped note runs on, the Primary checkout\'s copy (found through `git_primary`') ||
+    !p.includes('else the running plugin root, and never read as current by default')) out.push('unstamped')
+  if (!p.includes('`{v: 1, carried, owed, carryBack}`, one split behind all three')) out.push('three-lists')
+  if (!p.includes('`_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`)')) out.push('hook-mirror')
+  if (!r.includes('it is the only closer of a fix phase')) out.push('sweep')
+  if (!r.includes("**Chorus's copy of `_queue_state`**") || !r.includes('it must read `review` with a valued `merged:` as `merged`, checked before its `pr:` branch')) out.push('chorus')
+  return out
+}
+
+test('§ Proven states the carried-fix grammar, and § Readers names the sweep and Chorus', () => {
+  assert.deepEqual(provenChecks(doc), [])
+})
+
+test('control: each § Proven rule, rewritten, fails its check', () => {
+  // from matches across the doc's line breaks: each run of whitespace in it matches any run in the doc.
+  const swap = (from, to, want) => {
+    const re = new RegExp(from.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+    assert.ok(re.test(doc), `control setup: ${from.slice(0, 60)}`)
+    assert.deepEqual(provenChecks(doc.replace(re, () => to)), [want], want)
+  }
+  swap('A carried fix is a task note at `status: review` with a valued `merged:`', 'A carried fix is a task note at `status: review`', 'carried-test')
+  swap('both checks read it before any engine read', 'both checks read it after the finished check', 'serial-first')
+  swap('and the rollout of each dependant still to start', 'and nothing else', 'dependants')
+  swap("3. unstamped (no valued `engine_snapshot:`): the marker in the engine an unstamped note runs on, the Primary checkout's copy",
+    '3. unstamped (no valued `engine_snapshot:`): unstamped reads True, the newest copy', 'unstamped')
+  swap('`{v: 1, carried, owed, carryBack}`', '`{v: 1, carried}`', 'three-lists')
+  swap('`v.lower() not in ("", "null", "~")`', '`bool(v)`', 'hook-mirror')
+  swap('it is the only closer of a fix phase', 'prove closes the phase too', 'sweep')
+  swap('it must read `review` with a valued `merged:` as `merged`', 'it reads `review` as awaiting Integration', 'chorus')
+})

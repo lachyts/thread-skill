@@ -202,7 +202,7 @@ REF_LOCK_RE = re.compile(r"cannot lock ref|Unable to create '.*\.lock'")
 
 def _load_reconcile():
     """reconcile-rollout.py, one source for the markers, queue states, project root and vault path
-    (reconcile-project.py's load_note_class pattern; importing it has no side effects)."""
+    (reconcile-project.py's load_engine pattern; importing it has no side effects)."""
     sys.dont_write_bytecode = True
     src = Path(__file__).resolve().parent / "reconcile-rollout.py"
     spec = importlib.util.spec_from_file_location("reconcile_rollout", src)

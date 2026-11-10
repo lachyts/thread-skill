@@ -4,6 +4,7 @@ current with origin.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py run [--primary DIR] [--also DIR]...
         [--state F] [--log F] [--now ISO] [--dry-run] [--job-shape N] [--ff-timeout N] [--smoke-timeout N]
+        [--prove] [--prove-timeout N]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py install [--primary DIR] [--also DIR]...
         [--bin-dir DIR] [--plist F] [--interval 300] [--label com.thread.primary-refresh]
         [--log ~/Library/Logs/thread-primary-refresh.log]
@@ -20,8 +21,29 @@ behind.
 run, one pass, in this order:
   1. --log F: a log over 1 MiB moves to F.1 first, one generation kept (a pass whose stdout or stderr is that file
      carries on in a fresh F); never under --dry-run, and a missing log directory skips it.
-  2. The state is read. 3. Each checkout's pass (below). 4. The self-update and 5. the job check, on the installed copy
-     only. 6. The state is written, when it changed or read as corrupt, never under --dry-run.
+  2. The state is read. 3. Each checkout's pass (below). 3a. The live file (below). 3b. The prove step (below), on the
+     installed copy or under --prove. 4. The self-update and 5. the job check, on the installed copy only. 6. The state
+     is written, when it changed or read as corrupt, never under --dry-run.
+
+The live file (ADR 0078 d1), beside the state file (--state's directory; the plist names no --state, so the readers'
+default ${XDG_STATE_HOME:-~/.local/state}/thread/primary-live.json): {"v": 1, "live": {<checkout path>: {origin, head,
+branch, since, primary}}}, one entry for each targeted checkout that passes checkout_problem (its pass did not read
+`not a primary checkout:`): origin the raw `git remote get-url origin`, head its HEAD after the pass, branch its
+branch ("" when detached), since when this head was first written (kept while head stays), primary whether it is
+--primary. Read and written through background_job.py's read_state and write_state, only when it changes, never under
+--dry-run (the smoke runs under --dry-run, so it never writes one). Never pruned: an entry this pass did not target is
+kept as read (only install's prune drops an unwatched key). A corrupt file is one WARN and is rewritten.
+reconcile-rollout.py's `prove`, mark-done, resume and reconcile-project.py read it: a landing whose repo a live
+entry's origin names is watched, so it stays carried until that entry's head holds its merge (Live).
+
+The prove step (ADR 0078 d1), after the checkout passes and the live file, before the self-update; on the installed
+copy, or under --prove (tests), never under --dry-run: `<python> <primary>/skills/execute/scripts/reconcile-rollout.py
+prove --all --live-file <the live file>` through the same child runner, bounded by --prove-timeout (PROVE_TIMEOUT,
+120 s). One log line, `primary-refresh prove: <its last stdout line>` | `failed (exit N: <why>)` | `timed out after N
+s` | `skipped (no <rel> in <primary>)`. A failure or a timeout opens the `prove` spell (kind prove-failed, read by
+`stuck` like any spell); exit 0 clears it; a missing script is a skip, which changes no spell. Its task-note writes and
+Archive move-backs go through reconcile-rollout.py (Note.save's lock, re-read and atomic rename; _move_no_clobber), and
+the vault's daily sweep commits them (`git add -A`).
 
 One checkout's pass, the primary first, one log line each, `<ISO time> primary-refresh <dir>: <outcome>`, stopping at
 the first step that says no. Every git step runs through skills/_shared/scripts/live-checkout.sh, the one primitive
@@ -116,7 +138,7 @@ outcome}], "line": <str or null>}. A spell is due once it is 24 h old from `sinc
 notice), or at once when its kind is timed-out (a merge stopped mid-checkout may have left the live-loaded tree half
 updated); a `since` in the future is never due. Due spells are ordered oldest first. A path key is named by its
 directory's name, with the tail `; git -C <key> status`; `self-update` reads `primary-refresh self-update` and `job`
-`primary-refresh job`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
+`primary-refresh job`, `prove` `primary-refresh prove`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
 joined with ` · `, each `<name>: <outcome> (stuck since <since16>[; git -C <key> status])`, never cut; null when none is
 due (no file included). An entry with no kind (before p37-7) reads the outcome `stuck (kind not yet read)`. It is a
 point-in-time read with no window, only --now, and no freshness check: a spell stands as the job's last pass wrote it
@@ -222,9 +244,11 @@ job runs <python>`, prunes (below), and prints the one line left to Lachy's shel
 
 The prune at install, the only moment the watched set changes: install reads the job's state file (the default path,
 which the job reads because the plist names no --state) and drops every spell whose key is not `self-update`, `job`,
-the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one line each,
+`prove`, the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one line each,
 `primary-refresh install: dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read.
-It writes the file only when it dropped one. A missing or corrupt file is left for the job's next pass, and a write
+It writes the file only when it dropped one. It prunes the live file beside it the same way: every entry whose key is
+not the primary or an --also checkout, one line each, `primary-refresh install: dropped live entry: <key> (not watched
+by this job)`, written only when it dropped one; a missing or corrupt live file is left for the job's next pass. A missing or corrupt file is left for the job's next pass, and a write
 that fails is one WARN (install still exits 0). A checkout dropped from --also, a moved primary or a junk key is
 dropped by the next install;
 an install not followed by its launchctl line leaves the old job running with its old targets, whose next pass reopens
@@ -232,7 +256,8 @@ any spell of its own that install dropped, with a fresh since. One job per state
 another --label shares the default file and its `self-update` and `job` keys, so its install drops the first job's
 checkout spells once, and that job's next pass reopens them with a fresh since.
 
-Stdlib only; `run`, `stuck` and `bundle` run on python >= 3.9. Never writes the vault, a rollout note or a Run record.
+Stdlib only; `run`, `stuck` and `bundle` run on python >= 3.9. It writes no note itself (the prove step's task-note
+writes are reconcile-rollout.py's) and no Run record.
 """
 import argparse
 import importlib.util
@@ -284,6 +309,9 @@ CARRY_RETRY = timedelta(hours=1)       # a carry land.sh could not queue is aske
 CARRY_TIMEOUT = 480                    # land.sh's own LAND_DEADLINE (450 s) plus its local work
 REPAIRED = "repaired:"                 # a state key's prefix: the last repair's record, no spell (the stuck read skips it)
 LAND_REL = "skills/_shared/scripts/land.sh"  # the primary's own copy: not in the bundle, like the hold
+PROVE_REL = "skills/execute/scripts/reconcile-rollout.py"  # the prove step runs the primary's own copy (ADR 0078 d1)
+LIVE_NAME = "primary-live.json"        # the live file, beside the state file
+PROVE_TIMEOUT = 120
 GIT_TIMEOUT = 60
 HOLD_TIMEOUT = 120
 BUNDLE_TIMEOUT = 60
@@ -757,6 +785,8 @@ def _stuck_name(key):
         return "primary-refresh self-update", False
     if key == "job":
         return "primary-refresh job", False
+    if key == "prove":
+        return "primary-refresh prove", False
     if os.path.isabs(key):
         return (Path(key).name or key), True
     return key, False
@@ -1049,6 +1079,36 @@ def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp,
     return _install(stage, table, me, branch, t12)
 
 
+def live_entry(d, is_primary, prev, stamp):
+    """The live file's entry for one checkout that passed checkout_problem: {origin, head, branch, since, primary}; None
+    when its origin or HEAD cannot be read. `since` is kept while the head stays."""
+    rc1, origin, _ = git(d, "remote", "get-url", "origin")
+    rc2, head, _ = git(d, "rev-parse", "-q", "--verify", "HEAD")
+    if rc1 != 0 or rc2 != 0 or not origin or not HEX40.match(head):
+        return None
+    rc3, branch, _ = git(d, "symbolic-ref", "-q", "--short", "HEAD")
+    since = prev.get("since") if isinstance(prev, dict) and prev.get("head") == head and \
+        isinstance(prev.get("since"), str) else stamp
+    return {"origin": origin, "head": head, "branch": branch if rc3 == 0 else "", "since": since,
+            "primary": bool(is_primary)}
+
+
+def prove_step(primary, live_path, timeout):
+    """(line, verdict) for the prove step: verdict True clears the `prove` spell, False opens it, None (a skip) leaves
+    it."""
+    script = Path(primary) / PROVE_REL
+    if not script.is_file():
+        return f"skipped (no {PROVE_REL} in {primary})", None
+    rc, out, err, timed_out = _run([sys.executable, str(script), "prove", "--all", "--live-file", str(live_path)],
+                                   timeout)
+    if timed_out:
+        return f"timed out after {timeout} s", False
+    if rc != 0:
+        why = _last_line(err) or _last_line(out)
+        return f"failed (exit {rc}{': ' + why if why else ''})", False
+    return _last_line(out) or "ran (no output)", True
+
+
 def job_check(args, stuck, stamp, primary):
     """The job's shape against this copy's (the module docstring's job check)."""
     if args.job_shape >= JOB_SHAPE:
@@ -1089,10 +1149,17 @@ def cmd_run(args):
     stuck, dirty = _read_state(state_path, stamp)
     before = json.dumps(stuck, sort_keys=True)
     tip, branch = None, None
+    live_path = Path(state_path).parent / LIVE_NAME
+    live, live_dirty = BJ.read_state(live_path, "primary-refresh", "live", STATE_VERSION)
+    live_before = json.dumps(live, sort_keys=True)
     for d, is_primary in targets:
         entry, extra = stuck.get(str(d)), {}
         outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout, now, entry, extra)
         _line(d, outcome)
+        if kind != "not-primary":
+            le = live_entry(d, is_primary, live.get(str(d)), stamp)
+            if le is not None:
+                live[str(d)] = le
         if is_primary:
             tip, branch = t, b
         if "record" in extra:
@@ -1105,6 +1172,18 @@ def cmd_run(args):
             stuck.pop(str(d), None)
         elif kind != "dry":
             _spell(stuck, str(d), kind, outcome, stamp, **extra)
+    if not args.dry_run and (live_dirty or json.dumps(live, sort_keys=True) != live_before):
+        try:
+            BJ.write_state(live_path, "live", live, STATE_VERSION)
+        except OSError as e:
+            print(f"WARN: primary-refresh: cannot write the live file {live_path}: {e}", file=sys.stderr)
+    if (INSTALLED or args.prove) and not args.dry_run:
+        line, verdict = prove_step(primary, live_path, args.prove_timeout)
+        _line("prove", line)
+        if verdict is True:
+            stuck.pop("prove", None)
+        elif verdict is False:
+            _spell(stuck, "prove", "prove-failed", line, stamp)
     if INSTALLED and tip is not None:
         try:
             line, kind = self_update(primary, branch, tip, args, stuck, now, stamp)
@@ -1146,20 +1225,20 @@ def _prune(primary, also):
     """install's prune of the job's state file: drop every spell this job's passes never write (the module docstring's
     prune at install). Writes only when it dropped one; a missing or corrupt file is left for the job's next pass."""
     path = _state_file(None)
-    entries, corrupt = BJ.read_state(path, "primary-refresh", "stuck", STATE_VERSION)
-    if corrupt:
-        return
-    watched = {"self-update", "job", str(primary), REPAIRED + str(primary)} | {str(_real(a)) for a in also}
-    dropped = [k for k in entries if k not in watched]
-    if not dropped:
-        return
-    for k in dropped:
-        print(f"primary-refresh install: dropped spell: {k} (not watched by this job)")
-    kept = {k: v for k, v in entries.items() if k in watched}
-    try:
-        BJ.write_state(path, "stuck", kept, STATE_VERSION)
-    except OSError as e:
-        print(f"WARN: primary-refresh install: cannot write state {path}: {e}", file=sys.stderr)
+    checkouts = {str(primary)} | {str(_real(a)) for a in also}
+    for p, key, watched, noun in ((path, "stuck", {"self-update", "job", "prove", REPAIRED + str(primary)} | checkouts,
+                                   "spell"),
+                                  (path.parent / LIVE_NAME, "live", checkouts, "live entry")):
+        entries, corrupt = BJ.read_state(p, "primary-refresh", key, STATE_VERSION)
+        dropped = [] if corrupt else [k for k in entries if k not in watched]
+        if not dropped:
+            continue
+        for k in dropped:
+            print(f"primary-refresh install: dropped {noun}: {k} (not watched by this job)")
+        try:
+            BJ.write_state(p, key, {k: v for k, v in entries.items() if k in watched}, STATE_VERSION)
+        except OSError as e:
+            print(f"WARN: primary-refresh install: cannot write state {p}: {e}", file=sys.stderr)
 
 
 def cmd_bundle(_args):
@@ -1256,6 +1335,9 @@ def main(argv=None):
     r.add_argument("--job-shape", type=int, default=0, help="the shape install wrote into the job (absent: 0)")
     r.add_argument("--ff-timeout", type=_positive, default=FF_TIMEOUT, help="the fast-forward's bound, seconds")
     r.add_argument("--smoke-timeout", type=_positive, default=SMOKE_TIMEOUT, help="the smoke run's bound, seconds")
+    r.add_argument("--prove", action="store_true", help="run the prove step on a checkout copy too (tests; the installed "
+                                                        "copy always runs it)")
+    r.add_argument("--prove-timeout", type=_positive, default=PROVE_TIMEOUT, help="the prove step's bound, seconds")
     r.set_defaults(func=cmd_run)
     i = sub.add_parser("install", allow_abbrev=False, help="install the bundle and the launchd job")
     i.add_argument("--primary", default=None)

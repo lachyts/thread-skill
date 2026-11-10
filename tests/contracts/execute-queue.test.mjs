@@ -414,7 +414,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     // ADR 0034: the stuck bullet names an UNVERIFIED first and no gate reason; a gate alone is § 7's awaiting-sign-off stop.
     !stuck7.includes('`reason="UNVERIFIED undecided: [[task]]"`, checked first') || stuck7.includes('gated inputs await sign-off') ||
     !signOff7.includes('`reason="awaiting sign-off: [[task]]"`') ||
-    !s8.includes('`resume` flips merged PRs done and skips a held RACE or UNVERIFIED task, and `next` keeps a held task out of Integration')) {
+    !s8.includes('`resume` lands merged PRs (done, or a carried fix, ADR 0078) and skips a held RACE or UNVERIFIED task, and `next` keeps a held task out of Integration')) {
     fails.push('race-hold')
   }
 
@@ -1785,4 +1785,26 @@ test('trickle-wait controls: each mutation fails exactly its rule', () => {
   tw("keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return (`skills/execute/away.md` § The Trickle, *What does not wake it*).",
     'keeps it a place.', 'wake-named', 'The Trickle promises a heat-held lead the 20-second wake')
   assert.deepEqual(WAKE_RULES.filter((r) => !WAKE_CONTROLLED.has(r)), [])
+})
+
+// A fix is done only once Proven (ADR 0078 d1): step 5's sweep accepts a carried note as landed, and the ceremony's
+// phase close reads a fix phase left open (the vault's daily sweep is its only closer once prove proves its last fix).
+function proven(skill) {
+  const ex = collapse(skill)
+  const fails = []
+  if (!ex.includes('every task should already have landed: `status: done`, or a carried fix (`review` with a valued `merged:`, ADR 0078 d1)') ||
+    !ex.includes('The Completion log names a carried note `landed, carried` and an owed one `landed, carry-back owed`, never done')) fails.push('sweep')
+  if (!ex.includes('A phase holding a carried fix is QUIET to reconcile-project, so it reads **left open**') ||
+    !ex.includes("Once `prove` proves its last fix, the vault's daily sweep's PHASE CLOSE closes it; nothing else closes it, and prove adds no phase write")) fails.push('fix-phase')
+  return fails
+}
+
+test('step 5 sweeps a carried note as landed and leaves a fix phase open (ADR 0078 d1)', () => {
+  assert.deepEqual(proven(real.skill), [])
+})
+
+test('control: a sweep that wants every task done, or a ceremony that closes a fix phase, fails', () => {
+  const swap = (from, to) => { assert.ok(real.skill.includes(from), `control setup: ${from}`); return real.skill.replace(from, to) }
+  assert.deepEqual(proven(swap('every task should already have landed: `status: done`, or a carried fix', 'every task should already read `status: done`, or a carried fix')), ['sweep'])
+  assert.deepEqual(proven(swap('so it reads **left open**', 'so the ceremony closes it')), ['fix-phase'])
 })

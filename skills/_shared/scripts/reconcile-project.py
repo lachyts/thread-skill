@@ -45,12 +45,15 @@ outside --kinds is never written, even as a dependency.
    - Every non-landed task is a U finished task (rule 2): U with `depends_on: [those slugs]` when `task`
      is in --kinds; otherwise A, `needs task <slug> closed first`, and no task is written.
    - A QUIET task keeps the phase out of both lists, whatever its other tasks are: a hold, a task at
-     `review` under a live rollout (status/repair own that step: the queue integrates it and `resume` flips it
-     once its PR merges) or with no `rollout:` at all (a human review step, nothing to repair), or a
-     genuinely open task with no evidence. Resolving the other tasks could never close such a phase.
+     `review` under a live rollout (status/repair own that step: the queue integrates it and `resume` lands it
+     once its PR merges) or with no `rollout:` at all (a human review step, nothing to repair), a carried fix
+     (`review` with a valued `merged:`, reconcile-rollout.py's _carried_fix, ADR 0078 d1: landed, awaiting proof)
+     whatever its rollout's liveness, or a genuinely open task with no evidence. Resolving the other tasks could
+     never close such a phase: once `prove` proves its last fix, the vault's daily sweep closes it.
    - Otherwise any non-landed task that is A, skipped, unparseable, archived-but-open (in A or tagged
-     `archived`, not landed), or at `review` under a retired rollout (one resolving into R, into A or
-     to no note: `run /thread:repair`) makes the phase A, naming it.
+     `archived`, not landed: a carried fix moved into Archive/ by hand reads `archived but review` here, before the
+     carried-fix test), or at `review` under a retired rollout (one resolving into R, into A or to no note, and no
+     carried fix: `run /thread:repair`) makes the phase A, naming it.
 2. FINISHED TASK. Candidate: a task note in T root named `<slug>-p<N>-*` at `open` or `in_progress`
    (either spelling: `in-progress` too).
    Evidence precedence:
@@ -58,7 +61,7 @@ outside --kinds is never written, even as a dependency.
    - `pr:` present but not a URL (e.g. `pr: 7`): A, `pr: is not a URL; cannot verify`.
    - `pr:` absent or empty: decided by (b) alone.
    (a) PR. `gh pr view <url> --json state,mergedAt`, one call per distinct URL, cached, 20 s timeout.
-       MERGED is evidence. OPEN or CLOSED is A (`pr: <url> is <STATE> but the completion log records
+       MERGED is evidence; its mergedAt is kept for the landing write (Apply). OPEN or CLOSED is A (`pr: <url> is <STATE> but the completion log records
        it`) when (b) would have fired, else not drift. gh missing, disabled or erroring: skipped, never U.
    (b) Completion log. The task's `rollout:` resolves into R, and a line of that note's
        `## Completion log` section (up to the next `## ` heading) NAMES the task: a wikilink
@@ -75,27 +78,36 @@ outside --kinds is never written, even as a dependency.
            Link targets and URLs are not scanned (a task named `...-partial-log` is no disposition);
            the reason quotes the markers.
        Any failing naming line makes the task A. A rollout in R at `status: done` whose log never names
-       the task is A (`its rollout is archived done, but the log does not record it`).
+       the task is A (`its rollout is archived done, but the log does not record it`). Evidence (b) on a fix (a
+       task with a `clears:` item) is A too: `a fix (clears:) with no pr: URL: Live cannot be read; set pr: and run
+       reconcile-rollout.py prove --tasks <t> --land` (ADR 0078 d1).
    A task with evidence is still A when (i) its body (fenced code stripped; link targets and URLs not
    scanned) reads as a partial landing (case-insensitive, deliberately broad: `open here`, `still open`,
    `not yet <word>`, `partially merged/...`, `remain(s|ing)`, `outstanding`, `still to do/build/...`,
    `TODO`, `only item/part/step <n>`, a bold `**Open...**` label or a line-leading `Open:`; the reason
    quotes the match) or has an unchecked `- [ ]`; (ii) it has
-   `owner:` and its rollout is live; (iii) the note does not parse. The U write is `status: done`, the
-   single write /thread:execute's mark-done makes.
+   `owner:` and its rollout is live; (iii) the note does not parse. The U write is the landing write
+   /thread:execute's mark-done makes (Apply).
 3. MISFILED SUPERSEDED ROLLOUT. Candidate: a rollout note in T root or A (not R) named
    `<slug>-rollout*` with a non-empty `superseded_by:`. U, action `move to Archive/Rollouts/<name>`;
    A when that destination already exists.
 
-Apply. Order: tasks, then phases, then rollout moves. Writes go through reconcile-rollout.py's `Note`
-(line-surgical frontmatter edits), loaded before any vault read; if it cannot be loaded the script exits
-2. A phase is written only if every slug in its depends_on was written in this run and every one of its
-task files re-reads from disk as landed; otherwise it is skipped with `phase <slug> skipped: dependency
-<task> <reason>`. A rollout move never overwrites: R is created if missing, then `os.link` (which fails
-atomically when the destination exists; that clash is reported and the item reclassified A) and
-`unlink(src)`; where hard links are unsupported, an exclusive-create copy. If `unlink(src)` fails the
-destination is removed again (rollback); a failed rollback names both copies (`two copies left: <src>,
-<dst>`). Per-item failures go to `errors` and never stop independent items.
+Apply. Order: tasks, then phases, then rollout moves. Writes go through reconcile-rollout.py (the engine
+module, loaded once before any vault read, load_engine; if it cannot be loaded the script exits 2): its `Note`
+(line-surgical frontmatter edits), its landing verdict and writers, and its `_move_no_clobber`, the move's one
+copy. A task's write is _land_outcome's (ADR 0078 d1; the live file read once, the walk only on a carried verdict),
+one of three: done (a serial chain's task included): `status: done`, today's single write; carried
+(_carry_write: `status: review`, `merged:` from gh's mergedAt else now; written line `task <slug>: landed, carried
+(status: review)`); owed (_owed_write: `status: done` for an engine that reads a carried fix as awaiting
+Integration; written line `task <slug>: landed, carry-back owed (status: done; <why>)`). Neither is an errors
+entry; only a save's OSError is. A phase is written only if every slug in its depends_on landed done or owed in
+this run and every one of its task files re-reads from disk as landed; a dependency that landed carried leaves it
+open, one `skipped` line, `phase <slug> left open: [[<task>]] landed, carried (ADR 0078 d1)`, never an error;
+otherwise it is skipped with `phase <slug> skipped: dependency <task> <reason>`. A rollout move never overwrites:
+R is created if missing, then `os.link` (which fails atomically when the destination exists; that clash is
+reported and the item reclassified A) and `unlink(src)`; where hard links are unsupported, an exclusive-create
+copy. If `unlink(src)` fails the destination is removed again (rollback); a failed rollback names both copies (`two
+copies left: <src>, <dst>`). Per-item failures go to `errors` and never stop independent items.
 
 Bound apply. --apply recomputes U at write time, so on a vault a live rollout is writing, a plain --apply
 can close more than a human reviewed. A caller that dry-runs, asks and then applies passes the reviewed
@@ -141,7 +153,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 KINDS = ("phase", "task", "rollout")
@@ -190,8 +202,9 @@ def die(msg: str, code: int = 2):
     sys.exit(code)
 
 
-def load_note_class():
-    """reconcile-rollout.py's Note, the one sanctioned frontmatter writer (side-effect-free on import)."""
+def load_engine():
+    """reconcile-rollout.py as a module (side-effect-free on import): its Note, the one sanctioned frontmatter writer;
+    its landing verdict and writers (ADR 0078 d1); and _move_no_clobber, the move's one copy."""
     sys.dont_write_bytecode = True
     try:
         spec = importlib.util.spec_from_file_location("reconcile_rollout", NOTE_SRC)
@@ -199,7 +212,8 @@ def load_note_class():
             raise ImportError("no loader for this path")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.Note
+        mod.Note  # noqa: B018 — the one name every caller needs, read now so a stale copy fails here
+        return mod
     except Exception as e:  # noqa: BLE001 — any failure to load is the same exit-2 condition
         die(f"cannot load Note from {NOTE_SRC} (skills/execute/scripts/reconcile-rollout.py): {e}")
 
@@ -309,9 +323,11 @@ def excerpt(line: str, width: int = 120) -> str:
 # ---- detection ----------------------------------------------------------------------------------------
 
 class Detector:
-    def __init__(self, vault: Path, slug: str, kinds, phases, today: str, gh_mode: str, gh_path):
+    def __init__(self, vault: Path, slug: str, kinds, phases, today: str, gh_mode: str, gh_path, engine=None):
         self.vault, self.slug, self.kinds, self.phases, self.today = vault, slug, kinds, phases, today
         self.gh_mode, self.gh_path, self.gh_cache = gh_mode, gh_path, {}
+        self.engine = engine          # reconcile-rollout.py's module: the carried-fix and clears: readers
+        self.merged_at = {}           # PR URL -> gh's mergedAt, for the landing write
         work = vault / "Work"
         self.P, self.T = work / "Phases", work / "Tasks"
         self.A, self.R = self.T / "Archive", self.T / "Archive" / "Rollouts"
@@ -356,7 +372,9 @@ class Detector:
                     msg = (p.stderr.strip().splitlines() or [f"exit {p.returncode}"])[-1]
                     res = ("error", msg)
                 else:
-                    res = ("state", str(json.loads(p.stdout)["state"]).upper())
+                    got = json.loads(p.stdout)
+                    res = ("state", str(got["state"]).upper())
+                    self.merged_at[url] = got.get("mergedAt") if isinstance(got.get("mergedAt"), str) else None
             except subprocess.TimeoutExpired:
                 res = ("error", "timed out after 20 s")
             except (OSError, ValueError, KeyError, TypeError) as e:
@@ -399,6 +417,25 @@ class Detector:
         self.task_memo[rec.path] = res
         return res
 
+    def _engine_note(self, rec: Rec):
+        """The engine's Note for a parsed Rec, or None (no engine, or it will not read)."""
+        if self.engine is None:
+            return None
+        try:
+            return self.engine.Note(rec.path)
+        except (OSError, ValueError):
+            return None
+
+    def carried_fix(self, rec: Rec) -> bool:
+        """reconcile-rollout.py's _carried_fix, the rule's one copy: `review` with a valued `merged:`."""
+        n = self._engine_note(rec) if rec.status == "review" else None
+        return bool(n is not None and self.engine._carried_fix(n))
+
+    def is_fix(self, rec: Rec) -> bool:
+        """A fix: its note has a `clears:` item (reconcile-rollout.py's _clears)."""
+        n = self._engine_note(rec) if "clears" in (rec.fm or {}) else None
+        return bool(n is not None and self.engine._clears(n))
+
     def _eval_task(self, rec: Rec):
         if rec.fm is None:
             return "A", f"the note does not parse: {rec.err}"
@@ -424,6 +461,9 @@ class Detector:
             kind, text = self.log_evidence(rec, rollout)
             if kind != "evidence":
                 return kind, text
+            if self.is_fix(rec):
+                return "A", (f"a fix (clears:) with no pr: URL: Live cannot be read; set pr: and run "
+                             f"reconcile-rollout.py prove --tasks {rec.stem} --land")
             evidence = text
         body = FENCE_RE.sub("", rec.body)
         m = PARTIAL_RE.search(MARKER_BLIND_RE.sub(" ", body))
@@ -477,6 +517,8 @@ class Detector:
                     continue
                 if t.where == "A" or "archived" in t.tags:
                     blockers.append(f"task {t.stem} is archived but {st or 'has no status'}")
+                elif st == "review" and self.carried_fix(t):
+                    quiet = True  # landed, carried (ADR 0078 d1): prove proves it; the daily sweep closes the phase
                 elif st == "review":
                     rkind, _, rstem = self.resolve_rollout(t)
                     if rkind == "live" or not rstem:
@@ -556,51 +598,44 @@ class Detector:
 
 # ---- apply --------------------------------------------------------------------------------------------
 
-class MoveError(Exception):
-    pass
-
-
-def move_no_clobber(src: Path, dst: Path):
-    """Move src to dst without ever overwriting; roll back on a half-failure. FileExistsError on a clash."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.link(src, dst)
-    except FileExistsError:
-        raise
-    except OSError:
-        data = src.read_bytes()
-        f = open(dst, "xb")  # exclusive create: FileExistsError on a clash, never an overwrite
-        try:  # from here on dst is ours: any failure (write, close, copystat) removes it again
-            with f:
-                f.write(data)
-            shutil.copystat(src, dst)
-        except OSError:
-            os.unlink(dst)
-            raise
-    try:
-        os.unlink(src)
-    except OSError as e:
-        try:
-            os.unlink(dst)
-        except OSError as e2:
-            raise MoveError(f"{e}; rollback failed ({e2}): two copies left: {src}, {dst}")
-        raise MoveError(f"{e} (rolled back)")
-
-
-def apply(det: Detector, Note, items=None):
-    """Write `items` (default: all of det.U) in order tasks, phases, rollout moves."""
+def apply(det: Detector, mod, items=None):
+    """Write `items` (default: all of det.U) in order tasks, phases, rollout moves. `mod` is reconcile-rollout.py's
+    module (load_engine): each task lands through its _land_outcome (done, carried or owed, ADR 0078 d1)."""
     items = det.U if items is None else items
-    written, errors, done_tasks = [], [], set()
-    for it in [i for i in items if i["kind"] == "task"]:
+    Note = mod.Note
+    written, errors, done_tasks, carried_tasks = [], [], set(), set()
+    tasks = [i for i in items if i["kind"] == "task"]
+    live = None
+    if tasks:
+        live, why = mod._live_read(mod._live_file(None))
+        if why:
+            print(f"WARN: reconcile-project: {why}: every repo reads watched (fail closed)", file=sys.stderr)
+    now = datetime.now().astimezone()
+    for it in tasks:
         try:
             note = Note(it["_path"])
-            note.set("status", "done")
+            outcome, live_at_merge, why = mod._land_outcome(note, det.T, live)
+            at = mod._parse_ts(det.merged_at.get(mod._pr(note)) or "")
+            merged = mod._stamp(at if at is not None else now)
+            if outcome == "done":
+                note.set("status", "done")
+                said = "status: done"
+            elif outcome == "carried":
+                mod._carry_write(note, merged, None, live_at_merge, why, now)
+                said = "landed, carried (status: review)"
+            else:
+                mod._owed_write(note, merged, None, why, now)
+                said = f"landed, carry-back owed (status: done; {why})"
             note.save()
-            done_tasks.add(it["slug"])
-            written.append(f"task {it['slug']}: status: done")
+            (carried_tasks if outcome == "carried" else done_tasks).add(it["slug"])
+            written.append(f"task {it['slug']}: {said}")
         except Exception as e:  # noqa: BLE001 — a per-item failure never stops independent items
             errors.append(f"task {it['slug']} not written: {e}")
     for it in [i for i in items if i["kind"] == "phase"]:
+        held = next((d for d in it["depends_on"] if d in carried_tasks), None)
+        if held:
+            det.skipped.append(f"phase {it['slug']} left open: [[{held}]] landed, carried (ADR 0078 d1)")
+            continue
         why = next((f"{d} not written" for d in it["depends_on"] if d not in done_tasks), None)
         if why is None:
             for p in it["_tasks"]:
@@ -623,13 +658,13 @@ def apply(det: Detector, Note, items=None):
         src = it["_path"]
         dst = det.R / src.name
         try:
-            move_no_clobber(src, dst)
+            mod._move_no_clobber(src, dst)
             written.append(f"rollout {it['slug']}: moved to {det.rel(dst)}")
         except FileExistsError:
             errors.append(f"rollout {it['slug']} not moved: destination exists: {det.rel(dst)}")
             det.Amb.append({k: v for k, v in it.items() if k not in ("action", "depends_on")}
                            | {"reason": f"destination exists: {det.rel(dst)}"})
-        except (OSError, MoveError) as e:
+        except (OSError, mod.MoveError) as e:
             errors.append(f"rollout {it['slug']} not moved: {e}")
     return written, errors
 
@@ -718,7 +753,7 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     if args.only is not None and not args.apply:
         die("--only binds an apply to a reviewed dry run; it needs --apply")
-    Note = load_note_class()
+    mod = load_engine()
     kinds = [k.strip() for k in args.kinds.split(",") if k.strip()]
     if not kinds or any(k not in KINDS for k in kinds):
         die(f"--kinds takes a comma list of {', '.join(KINDS)}, got {args.kinds!r}")
@@ -745,12 +780,12 @@ def main(argv=None) -> int:
         gh_path = shutil.which(args.gh_bin)
         gh_mode = "ok" if gh_path else "missing"
 
-    det = Detector(vault, args.project, kinds, phases, today, gh_mode, gh_path)
+    det = Detector(vault, args.project, kinds, phases, today, gh_mode, gh_path, engine=mod)
     det.run()
     items, new, not_applied = det.U, [], []
     if reviewed is not None:
         items, new, not_applied = bind(det.U, det.Amb, reviewed)
-    written, errors = apply(det, Note, items) if args.apply else ([], [])
+    written, errors = apply(det, mod, items) if args.apply else ([], [])
     order = lambda i: (KINDS.index(i["kind"]), i["slug"])  # noqa: E731
     u_keys = ("kind", "slug", "path", "action", "reason", "depends_on")
     public_u = [{k: i[k] for k in u_keys} for i in sorted(det.U, key=order)]

@@ -34,7 +34,7 @@ notes lack it. Either read of the settings file runs land.sh's `--origin-slug` r
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
 execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*), and
 `reconcile-rollout.py moving`, the Watchdog's reading (§ 2's *Moving*; § The Watchdog's reading), which runs `next`'s
-dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. On a
+dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. It also runs `reconcile-rollout.py prove` with `--dry-run --no-gh` for § 4's Carried line, a read that writes nothing and calls no gh (ADR 0078 d1). On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
 read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
@@ -166,7 +166,8 @@ Each task's `queueState` is one of the six in the count (`merged`, `running`, `i
 `awaiting-integration`, `queued`, `set-aside`) or one of two outside it: `folded` (an affine tombstone) and
 `other` (dropped, parked). **Integrating is a durable stamp**: execute's lead writes `integrating:` on a
 `review` note with a `pr:` when its Integration begins, so a separate status session reads it too; a `review`
-+ `pr:` note without it awaits Integration. A set-aside task's `setAsideAt` is `integration` (its latest
++ `pr:` note without it awaits Integration. A carried fix (`review` with a valued `merged:`: landed, awaiting proof,
+ADR 0078 d1) reads `merged`: its PR merged, so it never awaits Integration. A set-aside task's `setAsideAt` is `integration` (its latest
 `## Blocker diagnosis` run starts `integration:`), `gate` (gate-pending) or `run`. `waitingOn` lists a queued
 task's unmet dependencies; `blockerSummary` is the latest run of the feedback section matching the note's
 status.
@@ -290,7 +291,7 @@ verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, s
 `noslot` verdict file reads like an absent one: the re-verify has not run (no verify slot came in time), and the
 lead re-runs it with the lane held. A `heat` verdict file reads the same way: the Mac was too hot to run it (the Heat
 hold, `skills/execute/away.md` § Heat), no verdict, never red. A task that a
-`## Race log` line names and that is not done is in the first of these states that matches:
+`## Race log` line names and that has not landed (done, or a carried fix) is in the first of these states that matches:
 
 - **Decided:** a dated `## Notes` line on the rollout note records `repair: [[<slug>]] RACE decided: …`. If
   the merge stands, the task reads as merged, never marked; if it does not, repair defers it.
@@ -335,9 +336,9 @@ takes none of them, nor does a RACE revert in flight.
 - **Merged into another base:** a MERGED PR whose `baseRefName` is not the default branch (the resolver's
   answer). That is the test `resume` applies: it leaves such a task alone, so it is escalated, never flipped:
   `/thread:repair` shows the evidence and leaves the call to Lachy.
-- **Merged, never marked:** a note that is not done whose PR is MERGED into the default branch. `resume` is
-  the sanctioned path: it checks the state and the default base and flips the note done, and execute's
-  *Cold resume* runs it first. `/thread:repair` runs it when no lead is live.
+- **Merged, never marked:** a note that has not landed (neither done nor a carried fix) whose PR is MERGED into the
+  default branch. `resume` is the sanctioned path: it checks the state and the default base and lands the note (done,
+  or a carried fix, ADR 0078), and execute's *Cold resume* runs it first. `/thread:repair` runs it when no lead is live.
 - **PR CLOSED:** an awaiting-Integration, integrating or set-aside-at-Integration task whose PR is CLOSED
   unmerged. `prepare` never reads the PR state, so the loop would integrate it only for merge-task to set it
   aside at its own run. Input-gated: repair offers restore, recut, defer or leave.
@@ -480,6 +481,20 @@ its one JSON line `{rollout, shape, scope, why, held, released}`). Scope `releas
 serial chains (<why>)`: a chain may be scheduled on the root while it waits, and on resume execute's *Surface re-check*
 makes it wait its turn for that chain; it is still its project's one unfinished parallel rollout on the repo (ADR 0064). Scope `whole`: `Hold:
 holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
+
+**The Carried line** (ADR 0078 d1), right under the Hold line: the fixes of this rollout that landed but are not yet
+Proven. Run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --rollout <rollout-note> --dry-run --no-gh --json`
+with the session's own root in place, the root this session's rendered status text named before any hand-over, never
+`<root>`: prove is exempt from the engine guard and works across versions, as Schedule's Pre-flight scripts are and do
+(`_shared/engine-snapshot.md` § Another rollout's commands), so the newest prove available reads any rollout's notes,
+whatever engine it is pinned to. Print one line per entry of its three lists: each `carried` entry as
+`Carried: [[t]] landed, carried (<waits>)`, each `owed` entry as `Carried: [[t]] landed, carry-back owed (<why>)`,
+each `carryBack` entry as `Carried: [[t]] landed, carry-back waits[, archived] (<waits>)`. Print nothing when all
+three are empty. A non-zero exit prints `Carried: not read (<its last stderr line>)` (a session root without the verb
+exits 2). An entry is never called done. The line appears only in status prose at this text's prose id or later:
+status on an older-snapshot rollout hands over to that snapshot's own status text (§ 1), which has no Carried line, so
+there these notes show on the Stage line (`carried-fixes.json`), in reflect § 17 and in close's rows.
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 
@@ -1056,7 +1071,9 @@ session reads `reconcile-rollout.py moving` instead (§ The Watchdog's reading).
   `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `reconcile-rollout.py moving` (§ 2's
   *Moving*, `next`'s dry run in-process: it writes nothing), `leg.py status` (§ 5, a serial
   note's one read), `engine-snapshot.py resolve` (§ 1, a read), `unfinished-rollout.py hold` (§ 4's Hold line, a
-  read), `primary-refresh.py stuck` (§ 4's Primary refresh line, a read that writes nothing), `lead-integrate.py inputs`
+  read), `primary-refresh.py stuck` (§ 4's Primary refresh line, a read that writes nothing), `reconcile-rollout.py prove` with
+  `--dry-run --no-gh` (§ 4's Carried line, a read that writes nothing and calls no gh; never without `--dry-run`, never
+  with `--land` or `--seen`), `lead-integrate.py inputs`
   and `rollout-settings.py` (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
   the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
   `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
