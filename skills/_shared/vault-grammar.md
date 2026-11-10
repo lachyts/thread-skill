@@ -241,10 +241,18 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   repo. A `script` row needs none.
 - **`reset-primary`** runs one `skills/_shared/scripts/primary-refresh.py run` pass in place (ADR 0078 Decided 3: a second
   reset path would bypass its rule). `run` exits 0 whatever it finds, so `fire` reads the pass's outcome line, and records
-  only an outcome that read the checkout to a standing verdict (`current`, `ahead`, `moved`, `diverged`, `held:`,
-  `refused:`). Every other outcome (`not a primary checkout:`, `fetch failed:`, `broken:`, `unreadable`, `timed out:`,
-  `busy:`), no line, an outcome it does not know and a non-zero exit are not recorded: `fire` exits 1, due again next
-  tick. It blocks on the pass, up to about 15 minutes, so its caller runs it off the 5-minute tick.
+  only an outcome that read the checkout to a standing verdict (`current`, `ahead`, `moved`, `repaired:`, `diverged`,
+  `held:`, `refused:`; RESET_PRIMARY_RECORDED). `repaired: reset <head12> to origin/<b> at <tip12> (…)` is the refresh's
+  repair of a diverged Primary whose commits are already on origin, and ends the stuck spell as `current` does. On the
+  Primary every other `diverged (ahead a, behind b): …` line is that repair's too (`repair waits (…)`, `repair held: …`,
+  `repair refused: …`, `carried: …`, `not carried (…)`), recorded under the `diverged` prefix: the job keeps passing, and
+  a repair blocked for a day shows on /thread:status. `never integrated here` is an `--also` checkout's line, never the
+  Primary's. Every other outcome (`not a primary checkout:`, `fetch failed:`, `broken:`, `unreadable:`, `timed out:`,
+  `busy:`, a dry pass's `would …`; RESET_PRIMARY_RETRIED), no line, an outcome in neither list and a non-zero exit are not
+  recorded: `fire` exits 1, due again next tick, and its ERROR names an outcome in neither list as one it does not know.
+  tests/contracts/vault-grammar.test.mjs classifies every outcome a pass can return into one list or the other, so a new
+  or renamed outcome fails there. It blocks on the pass, up to about 15 minutes, so its caller runs it off the 5-minute
+  tick.
 - **Fails closed.** An unknown key, a missing `on` or `do`, a verb outside the lists above, a bad `regenerate` argument, a
   duplicate of an entry above, an empty `fired:`, a bare `regenerate` whose rollout names no project, or a `regenerate`
   on a serial rollout lists under `unreadable`, is never due and never hides a good sibling; a block whose items sit at

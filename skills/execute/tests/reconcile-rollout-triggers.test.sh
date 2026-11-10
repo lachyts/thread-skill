@@ -278,7 +278,8 @@ fire "$pid" > "$D/par1" & p1=$!; fire "$pid" > "$D/par2" & p2=$!; wait "$p1"; wa
 ok "$(cat "$D/par1" "$D/par2" | grep -c '"fresh": true')" 1 "two parallel fires give exactly one fresh"
 ok "$(grep -o 'fired:' "$T/par.md" | wc -l | tr -d ' ')" 1 "and one fired:"
 
-# ---- T8: reset-primary, one row per outcome (R recorded, N not recorded and still due) -----------------------------------
+# ---- T8: reset-primary, one row per outcome (R recorded; N not recorded and still due; U the same, for an outcome the -----
+# script does not know, which its ERROR names as such) ---------------------------------------------------------------------
 scen reset
 LINE="2026-10-02T14:05:00+00:00 primary-refresh /tmp/my repo:"
 while IFS='~' read -r verdict rc output; do
@@ -287,7 +288,7 @@ while IFS='~' read -r verdict rc output; do
   id="$(python3 "$SCRIPT" triggers due --tasks-dir "$T" | python3 -c 'import json,sys; print(json.load(sys.stdin)["due"][0]["id"])')"
   export REFRESH_RC="$rc" REFRESH_OUT="$(printf '%b' "$output" | sed "s#^@ #$LINE #")"
   before="$(shasum -a 256 < "$T/k.md")"
-  out="$(fire "$id" 2>/dev/null)"; rc2=$?
+  out="$(fire "$id" 2>"$D/err")"; rc2=$?
   if [ "$verdict" = R ]; then
     ok "$rc2" 0 "recorded: $output"
     has "$(cat "$T/k.md")" "fired: \"$STAMP\"" "fired: written for: $output"
@@ -296,6 +297,9 @@ while IFS='~' read -r verdict rc output; do
   else
     ok "$rc2" 1 "not recorded: $output (rc $rc)"
     ok "$(shasum -a 256 < "$T/k.md")" "$before" "nothing written for: $output"
+    has "$(cat "$D/err")" "it stays due" "and still due: $output"
+    if [ "$verdict" = U ]; then has "$(cat "$D/err")" "does not know" "and named an outcome it does not know: $output"
+    else hasnt "$(cat "$D/err")" "does not know" "and not named unknown: $output (rc $rc)"; fi
   fi
 done <<'EOF'
 R~0~@ current
@@ -304,6 +308,8 @@ R~0~@ moved aaaaaaaaaaaa..bbbbbbbbbbbb (3 commits)
 R~0~@ diverged (ahead 1, behind 2): never integrated here
 R~0~@ held: a rollout runs
 R~0~@ refused: local changes overlap origin/main (x)
+R~0~@ repaired: reset aaaaaaaaaaaa to origin/main at bbbbbbbbbbbb (ahead 1, behind 2: their content is already on origin; backup refs/thread/primary-backup/20261002T140500)
+R~0~@ diverged (ahead 1, behind 2): carried: queued https://github.com/o/r/pull/9
 R~0~@ self-update: would install it\n@ current
 N~0~@ busy: a rebase is in progress
 N~0~@ not a primary checkout: a linked worktree
@@ -311,8 +317,9 @@ N~0~@ fetch failed: no route
 N~0~@ broken: live-checkout.sh default: exit 1
 N~0~@ unreadable: an unborn HEAD
 N~0~@ timed out: git merge --ff-only ran past 600 s and was stopped
+N~0~@ would move aaaaaaaaaaaa..bbbbbbbbbbbb (3 commits)
 N~0~
-N~0~@ a new outcome
+U~0~@ a new outcome
 N~0~@ self-update: current
 N~1~@ current
 EOF

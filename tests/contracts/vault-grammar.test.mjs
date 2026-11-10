@@ -24,8 +24,9 @@
 // ON_MERGE_KEY and ON_MERGE_REGENERATE are pinned to it, § Rollout start stamp's Writers name approve-queue and
 // stamp-start, and § Hold until's Clearer names the approved-queue exception. § When (p45-7) states the durable trigger
 // (`when:`), its verbs and `triggers due` / `triggers fire`; reconcile-rollout.py's WHEN_KEY is pinned to it, its LOCAL_RE
-// to serial-chains.py's literal, and each RESET_PRIMARY_RECORDED outcome to a refresh() return in primary-refresh.py, so a
-// renamed outcome fails here rather than quietly reading as not recorded.
+// to serial-chains.py's literal, and every outcome a Primary refresh pass returns (primary-refresh.py's refresh() and
+// the repair it hands off to) to RESET_PRIMARY_RECORDED or RESET_PRIMARY_RETRIED, each of their literals to one, so a
+// renamed or a new outcome fails here rather than quietly reading as not recorded.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -79,6 +80,7 @@ print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHA
                   "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED, "HOLD_KEY": rr.HOLD_KEY,
                   "ON_MERGE_KEY": rr.ON_MERGE_KEY, "ON_MERGE_REGENERATE": rr.ON_MERGE_REGENERATE,
                   "WHEN_KEY": rr.WHEN_KEY, "RESET_PRIMARY_RECORDED": list(rr.RESET_PRIMARY_RECORDED),
+                  "RESET_PRIMARY_RETRIED": list(rr.RESET_PRIMARY_RETRIED),
                   "PRIMARY_REFRESH_PY": str(rr.PRIMARY_REFRESH_PY),
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
@@ -366,12 +368,47 @@ function approvedQueueChecks(text, s) {
 // ---- the durable trigger (p45-7) ----------------------------------------------------------------------------
 
 const LOCAL_LINE = (text) => (text.match(/^LOCAL_RE = re\.compile\(.*\)$/m) ?? [])[0]
-const REFRESH_BODY = (text) => text.split(/^def refresh\(/m)[1]?.split(/^def /m)[0] ?? ''
+
+// Every outcome a Primary refresh pass can print, as the literal it opens with: each return of refresh() in
+// primary-refresh.py and of every function a return there hands off to (repair, then _reset and _carry), a returned
+// local read at its assignment (_reset's `line = f"repaired: …"`) and a leading `{name}` at name's (`{base}`,
+// repair's `diverged (…)`). A return the pin cannot read is '', which no prefix classifies, so an outcome built
+// another way fails too.
+function passOutcomes(pr) {
+  const body = (fn) => pr.split(new RegExp(`^def ${fn}\\(`, 'm'))[1]?.split(/^def /m)[0] ?? ''
+  const str = (text) => text.match(/^\(?\s*(f?)"((?:[^"\\]|\\.)*)"/)
+  const opens = (m) => {
+    if (!m) return ''
+    if (!m[1]) return m[2]
+    const lead = m[2].replace(/^\{(\w+)\}/, (all, name) => {
+      const a = pr.match(new RegExp(`^\\s+${name} = (f?"(?:[^"\\\\]|\\\\.)*")`, 'm'))
+      return a ? str(a[1])[2] : all
+    })
+    return lead.startsWith('{') ? '' : lead.split('{')[0]
+  }
+  const out = []
+  const seen = new Set()
+  const todo = ['refresh']
+  while (todo.length) {
+    const fn = todo.shift()
+    if (seen.has(fn)) continue
+    seen.add(fn)
+    const b = body(fn)
+    for (const [, rest] of b.matchAll(/^\s+return\s+(.*)$/gm)) {
+      const call = rest.match(/^(\w+)\(/)
+      const local = rest.match(/^(\w+),/)
+      if (call && body(call[1])) todo.push(call[1])
+      else if (local) out.push(opens(str(b.match(new RegExp(`^\\s+${local[1]} = (.*)$`, 'm'))?.[1] ?? '')))
+      else out.push(opens(str(rest)))
+    }
+  }
+  return out
+}
 
 // The names of the failed § When checks; [] when the section states the key, names `triggers due`, `triggers fire` and
 // every on and do verb, the attended-run rule and the never-carried rule; the script's WHEN_KEY equals the key, its LOCAL_RE
-// is serial-chains.py's literal, PRIMARY_REFRESH_PY exists, and each RESET_PRIMARY_RECORDED outcome is what a refresh()
-// return in primary-refresh.py opens with.
+// is serial-chains.py's literal, PRIMARY_REFRESH_PY exists, every outcome a pass returns opens with a
+// RESET_PRIMARY_RECORDED or RESET_PRIMARY_RETRIED literal, and each of those literals opens an outcome.
 function whenChecks(text, s, rr = reconcileRollout, sc = serialChains, pr = primaryRefresh) {
   const sec = collapse(section(text, /^## When$/) ?? '')
   const key = sec.match(/the key is `([a-z_]+)`/)
@@ -386,9 +423,13 @@ function whenChecks(text, s, rr = reconcileRollout, sc = serialChains, pr = prim
   }
   if (!LOCAL_LINE(rr) || LOCAL_LINE(rr) !== LOCAL_LINE(sc)) out.push('LOCAL_RE copy')
   if (!existsSync(s.PRIMARY_REFRESH_PY)) out.push('primary-refresh path')
-  const body = REFRESH_BODY(pr)
-  for (const lit of s.RESET_PRIMARY_RECORDED) {
-    if (!body.includes(`return "${lit}`) && !body.includes(`return f"${lit}`)) out.push(`refresh() returns ${lit}`)
+  const outcomes = passOutcomes(pr)
+  const known = [...s.RESET_PRIMARY_RECORDED, ...s.RESET_PRIMARY_RETRIED]
+  for (const o of new Set(outcomes)) {
+    if (!known.some((lit) => o.startsWith(lit))) out.push(`classifies ${o || 'a return it cannot read'}`)
+  }
+  for (const lit of known) {
+    if (!outcomes.some((o) => o.startsWith(lit))) out.push(`refresh() returns ${lit}`)
   }
   return out
 }
@@ -553,7 +594,7 @@ test('§ When states the key, its verbs and the attended-run rule, and pins WHEN
   assert.deepEqual(whenChecks(doc, scripts()), [])
 })
 
-test('control: a drifted key, a dropped verb, a drifted LOCAL_RE or a renamed outcome fails the when check', () => {
+test('control: a drifted key, verb or LOCAL_RE, or a renamed, new or unclassified outcome fails the when check', () => {
   const s = scripts()
   assert.deepEqual(whenChecks(mutate(doc, 'the key is `when`', 'the key is `whence`'), s), ['script constant'])
   assert.deepEqual(whenChecks(doc, { ...s, WHEN_KEY: 'whence' }), ['script constant'])
@@ -563,8 +604,16 @@ test('control: a drifted key, a dropped verb, a drifted LOCAL_RE or a renamed ou
     ['names a fired regenerate or schedule is an attended run that can wait on Lachy'])
   assert.deepEqual(whenChecks(doc, s, mutate(reconcileRollout, /^LOCAL_RE = .*$/m, 'LOCAL_RE = re.compile(r"x")')), ['LOCAL_RE copy'])
   assert.deepEqual(whenChecks(doc, { ...s, PRIMARY_REFRESH_PY: '/no/such/file' }), ['primary-refresh path'])
-  assert.deepEqual(whenChecks(doc, s, reconcileRollout, serialChains, mutate(primaryRefresh, 'return f"held: {h}"', 'return f"blocked: {h}"')),
-    ['refresh() returns held: '])
+  const pass = (from, to) => whenChecks(doc, s, reconcileRollout, serialChains, mutate(primaryRefresh, from, to))
+  assert.deepEqual(pass('return f"held: {h}"', 'return f"blocked: {h}"'), ['classifies blocked: ', 'refresh() returns held: '])
+  assert.deepEqual(pass('line = f"repaired: ', 'line = f"fixed: '), ['classifies fixed: ', 'refresh() returns repaired: '])
+  assert.deepEqual(pass('base = f"diverged (', 'base = f"split ('), ['classifies split (ahead '])
+  const novel = '    if form == "new":\n        return f"novel: {m.group(2)}", "novel", tip, branch\n    if form == "busy":\n'
+  assert.deepEqual(pass('    if form == "busy":\n', novel), ['classifies novel: '])
+  assert.deepEqual(pass('return line, None, tip, branch', 'return said(line), None, tip, branch'),
+    ['classifies a return it cannot read', 'refresh() returns repaired: '])
+  const recorded = s.RESET_PRIMARY_RECORDED.filter((lit) => lit !== 'repaired: ')
+  assert.deepEqual(whenChecks(doc, { ...s, RESET_PRIMARY_RECORDED: recorded }), ['classifies repaired: '])
   assert.deepEqual(whenChecks(mutate(doc, '## When', '## Whence'), s), ['states the key'])
 })
 

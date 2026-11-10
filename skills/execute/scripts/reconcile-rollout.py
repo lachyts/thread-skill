@@ -1424,9 +1424,10 @@ is `due`'s and `fire`'s one reading, the `do` gate first (_regenerate_gate, a ta
 last (merged through _resolve_holds, landed through _dep_status, paused on the note or its rollout), so an entry that
 cannot fire makes no gh call. `triggers fire` records a model step and hands its command back, since this script starts
 no session; a script step (reset-primary) runs one Primary refresh pass first and records only a standing verdict
-(RESET_PRIMARY_RECORDED). The record is _mark_fired, a Note.apply edit, under TRIGGER_LOCK with the note read again inside
-it. A fired regenerate or schedule is an attended run: the command carries no `Under the chain:` line, which only an
-approved queue's approval supplies, so the Session the Stage starts can stop at schedule's questions and wait on Lachy.
+(RESET_PRIMARY_RECORDED), never a transient or failed one (RESET_PRIMARY_RETRIED) or one in neither. The record is
+_mark_fired, a Note.apply edit, under TRIGGER_LOCK with the note read again inside it. A fired regenerate or schedule is
+an attended run: the command carries no `Under the chain:` line, which only an approved queue's approval supplies, so
+the Session the Stage starts can stop at schedule's questions and wait on Lachy.
 
 
 Heat hold (estate ADR 0009 d5; the spec is skills/execute/away.md § Heat): `next` reads the Mac's thermal pressure once
@@ -11817,9 +11818,18 @@ WHEN_DASH_RE = re.compile(r"^([ \t]*)-(?:[ \t]+(.*))?$")
 WHEN_LINK_RE = re.compile(r"^\[\[[^\[\]]+\]\]$")
 TRIGGER_LOCK = "trigger.lock"   # machine-wide, beside the note locks (_note_lock_dir), the note locks inside it
 PRIMARY_REFRESH_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "primary-refresh.py"
-# A pass's outcome that read the checkout to a standing verdict: recorded. An allowlist, so a new outcome or no line
-# fails closed; tests/contracts/vault-grammar.test.mjs pins each literal to a refresh() return in primary-refresh.py.
-RESET_PRIMARY_RECORDED = ("current", "ahead ", "moved ", "diverged ", "held: ", "refused: ")
+# A pass's outcome that read the checkout to a standing verdict: recorded. `repaired: ` is the repair of a diverged
+# Primary (ADR 0078 d4), which ends the stuck spell as `current` does; on the Primary every other `diverged (…): …`
+# line is that repair's (repair waits, repair held, repair refused, carried, not carried), the job's to retry. An
+# allowlist, so a new outcome or no line fails closed.
+RESET_PRIMARY_RECORDED = ("current", "ahead ", "moved ", "repaired: ", "diverged ", "held: ", "refused: ")
+# A pass's outcome that is not recorded, so the trigger stays due: transient (busy, a fetch failure, a timeout), a
+# checkout that is no Primary, a broken or unreadable step, or a dry pass's `would …`. `fire` names an outcome in
+# neither tuple as one it does not know; tests/contracts/vault-grammar.test.mjs classifies every outcome
+# primary-refresh.py's refresh() can return into one of the two and pins each literal to one, so a renamed or new
+# outcome fails there.
+RESET_PRIMARY_RETRIED = ("not a primary checkout: ", "fetch failed: ", "broken: ", "unreadable: ", "timed out: ",
+                         "busy: ", "would ")
 PRIMARY_PASS_RE = re.compile(r"^\S+ primary-refresh .+?: (.*)$")
 # A project note's `` Local: `<path>` `` line, the one schedule § 0 reads (serial-chains.py's LOCAL_RE, a literal copy
 # as backlog-orient.py keeps one; tests/contracts/vault-grammar.test.mjs pins it).
@@ -12271,10 +12281,11 @@ def cmd_triggers_fire(args) -> int:
     """`triggers fire <id>`: run one due trigger and record it once, as `fired:` on its entry (vault-grammar § When). A
     model step (regenerate, schedule) is recorded and its command handed back, since this script starts no session; a
     script step (reset-primary) runs one Primary refresh pass first, outside any lock, and records only a standing verdict
-    (RESET_PRIMARY_RECORDED). The record is taken under TRIGGER_LOCK, the note read again inside it, so of two fires
-    exactly one is `fresh`. Prints the row plus {fired, fresh, ran} and, on a script step, `outcome`. Exit 0 when fresh or
-    already fired; 1 on an unknown id, an unreadable entry, not due, a script outcome not recorded or a save failure.
-    Only `fresh: true` tells a caller to act on `command`."""
+    (RESET_PRIMARY_RECORDED); any other outcome or a non-zero exit stays due, and an outcome in neither tuple is named
+    as unknown. The record is taken under TRIGGER_LOCK, the note read again inside it, so of two fires exactly one is
+    `fresh`. Prints the row plus {fired, fresh, ran} and, on a script step, `outcome`. Exit 0 when fresh or already
+    fired; 1 on an unknown id, an unreadable entry, not due, a script outcome not recorded or a save failure. Only
+    `fresh: true` tells a caller to act on `command`."""
     def refuse(msg):
         print(f"ERROR: triggers fire {args.id}: {msg}", file=sys.stderr)
         return 1
@@ -12306,7 +12317,10 @@ def cmd_triggers_fire(args) -> int:
         ran, outcome = True, _primary_outcome(out)
         if rc != 0 or outcome is None or not outcome.startswith(RESET_PRIMARY_RECORDED):
             answer(row, None, False, True, outcome)
-            return refuse(f"not recorded: the pass read {outcome or 'no outcome'} (exit {rc}): it stays due")
+            unknown = outcome is not None and not outcome.startswith(RESET_PRIMARY_RECORDED + RESET_PRIMARY_RETRIED)
+            why = (", an outcome this script does not know (neither RESET_PRIMARY_RECORDED nor "
+                   "RESET_PRIMARY_RETRIED), so it fails closed") if unknown else ""
+            return refuse(f"not recorded: the pass read {outcome or 'no outcome'} (exit {rc}){why}: it stays due")
     stamp = _stamp(_now(args))
     try:
         with _note_lock(lock_path=_note_lock_dir() / TRIGGER_LOCK, label="trigger lock"):
