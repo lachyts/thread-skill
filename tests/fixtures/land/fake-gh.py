@@ -22,6 +22,7 @@ Behaviour per call is chosen by environment variables (default in brackets):
   GH_SEARCH  [none]  none | prs | fail | hang                        search prs
   GH_PULL    [ok]    ok | fail                                       GET  …/pulls/<n> (an entry with hang: "pull" hangs)
   GH_COMMIT  [ok]    ok | fail                                       GET  …/commits/<sha>, …/compare/<a>...<b>
+  GH_REF     [ok]    ok | fail                                       GET  …/git/ref/heads/<b> (the server's live tip)
   GH_RERUN   [ok]    ok | fail                                       POST …/actions/runs/<run>/rerun-failed-jobs
   GH_PUTMERGE [ok]   ok | fail                                       PUT  …/pulls/<n>/merge
   GH_PATCH   [ok]    ok | fail                                       PATCH …/pulls/<n>
@@ -47,9 +48,11 @@ server's base branch into the PR's head branch as GitHub's update-branch does (c
 `search prs` with GH_SEARCH=prs serves prs.json's open PRs by GH_LOGIN, filtered by --label (the entry's `labels`) and
 --head (a prefix of headRefName). Optional prs.json fields: repo, labels (the label POST appends `landing`), draft,
 strict [true], base [master], mergeableState (a string, or a list read one per GET, the last kept), hang.
-GET pulls/<n> serves the REST shape: the head sha read live from the server; mergeable_state pinned, else computed
-(base not in head: dirty on a merge-tree conflict, else behind when strict; base in head: clean when the head's checks
-kind is pass, neutral or none, else unstable).
+GET pulls/<n> serves the REST shape: the head sha read live from the server; base.sha frozen as GitHub keeps it, the
+base tip when the head last moved (prs.json `baseOid`, written with `seenHead` at a create, at the fake's update-branch,
+and at the first GET that sees a new head), so a base that moves alone leaves it stale; mergeable_state pinned, else
+computed against the live base tip (base not in head: dirty on a merge-tree conflict, else behind when strict; base in
+head: clean when the head's checks kind is pass, neutral or none, else unstable).
 `pr edit` always fails with the projectCards deprecation error. A hang writes its pid to $GH_STATE/hang.pid, then runs
 a non-exec `sleep 120 | cat`. `holdout` prints `false` and leaves a `sleep 120` holding stdout after exiting 0.
 """
@@ -392,6 +395,16 @@ if method == "GET" and rest[:1] == ["compare"]:
     print(json.dumps({"status": status}))
     sys.exit(0)
 
+if method == "GET" and rest[:3] == ["git", "ref", "heads"] and len(rest) > 3:
+    if E("GH_REF", "ok") == "fail":
+        die("gh: Server Error (HTTP 502)")
+    ref = "/".join(rest[3:])
+    sha = srvsha("refs/heads/" + ref)
+    if not sha:
+        die("gh: Not Found (HTTP 404)")
+    print(json.dumps({"ref": "refs/heads/" + ref, "object": {"sha": sha, "type": "commit"}}))
+    sys.exit(0)
+
 if method == "GET" and rest[:1] == ["issues"] and rest[2:] == ["comments"]:
     if E("GH_COMMENTS", "ok") == "fail":
         die("gh: Server Error (HTTP 502)")
@@ -461,6 +474,10 @@ if method == "GET" and rest[:1] == ["pulls"] and len(rest) == 2:
     base = p.get("base") or "master"
     head = head_sha(p)
     btip = srvsha("refs/heads/" + base)
+    bsha = p.get("baseOid") or ""
+    if p.get("seenHead") != head or not bsha:
+        bsha = btip   # GitHub moves base.sha only when the head moves; a base that moves alone leaves it stale
+        setpr(n, seenHead=head, baseOid=bsha)
     ms = p.get("mergeableState")
     if isinstance(ms, list):
         cur = ms[0] if ms else "unknown"
@@ -486,7 +503,7 @@ if method == "GET" and rest[:1] == ["pulls"] and len(rest) == 2:
         "merged": state == "MERGED", "draft": bool(p.get("draft")),
         "user": {"login": (p.get("author") or {}).get("login")},
         "head": {"ref": p["headRefName"], "sha": head, "repo": hrepo},
-        "base": {"ref": base, "sha": btip, "repo": {"full_name": SLUG}},
+        "base": {"ref": base, "sha": bsha, "repo": {"full_name": SLUG}},
         "auto_merge": {"merge_method": "merge"} if p.get("autoMergeRequest") else None,
         "mergeable_state": ms, "labels": [{"name": x} for x in (p.get("labels") or [])],
     }))
@@ -529,7 +546,8 @@ if method == "POST" and rest == ["pulls"]:
     prs.insert(0, {"number": n, "url": url, "state": "OPEN", "headRefName": head, "headRefOid": oid,
                    "isCrossRepository": False, "title": fields.get("title"),
                    "base": fields.get("base"), "author": {"login": E("GH_LOGIN", "me")},
-                   "autoMergeRequest": None, "repo": SLUG})
+                   "autoMergeRequest": None, "repo": SLUG,
+                   "seenHead": oid, "baseOid": srvsha("refs/heads/" + (fields.get("base") or "master"))})
     save(prs)
     if oid:
         srvgit("update-ref", "refs/pull/%d/head" % n, oid)
@@ -583,7 +601,7 @@ if method == "PUT" and rest[:1] == ["pulls"] and rest[2:] == ["update-branch"]:
                     die("fake gh: update-branch merge failed: " + r.stderr.strip())
         oid = srvgit("rev-parse", "refs/heads/" + head).stdout.strip()
         srvgit("update-ref", "refs/pull/%d/head" % n, oid)
-        setpr(n, headRefOid=oid)
+        setpr(n, headRefOid=oid, seenHead=oid, baseOid=srvsha("refs/heads/" + (pr.get("base") or "master")))
     print('{"message":"Updating pull request branch."}')
     sys.exit(0)
 

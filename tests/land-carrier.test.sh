@@ -98,6 +98,7 @@ keys() { python3 -c 'import json,sys; print(" ".join(sorted(json.load(open(sys.a
 stk() { python3 "$CARRIER" stuck "$@" 2>&1; }
 sline() { python3 "$CARRIER" stuck "$@" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["line"])'; }
 srvsha() { git --git-dir "$SRV/o/$1.git" rev-parse -q --verify "refs/heads/$2"; }
+bsha() { gh api "repos/o/$1/pulls/$2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["base"]["sha"])'; }   # the fake's base.sha
 prstate() { python3 -c 'import json,sys; print([p for p in json.load(open(sys.argv[1])) if p["number"] == int(sys.argv[2])][0]["state"])' "$GH_STATE/prs.json" "$1"; }
 reruns() { cat "$GH_STATE/reruns.txt" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
 cb() { printf 'close/2026-11-10-%s-%s' "$1" "$(printf '%s' "$1" | shasum | cut -c1-12)"; }
@@ -125,10 +126,11 @@ ci() { git -C "$W" add -A; git -C "$W" commit -qm "$1"; git -C "$W" push -q orig
 put() { co "$1" "${4:-}"; mkdir -p "$(dirname "$W/$2")"; printf '%s\n' "$3" >> "$W/$2"; ci "$1: $3"; }
 # sub <branch> <file> <old> <new>: replace a line on <branch>, commit, push
 sub() { co "$1"; python3 -c 'import sys; p,o,n=sys.argv[1:]; t=open(p).read(); assert o in t, o; open(p,"w").write(t.replace(o,n,1))' "$W/$2" "$3" "$4"; ci "$1: $3 -> $4"; }
-# pr <repo> <branch> [<field>=<json>…] → N: a PR in the fake's state (open, labelled landing, by me, base master)
+# pr <repo> <branch> [<field>=<json>…] → N: a PR in the fake's state (open, labelled landing, by me, base master), its
+# base.sha the base tip now, as GitHub records it at a create (it moves only when the head does)
 pr() {
   N=$(python3 - "$GH_STATE/prs.json" "$@" <<'PY'
-import json, sys
+import json, os, subprocess, sys
 f, repo, branch = sys.argv[1:4]
 try:
     prs = json.load(open(f))
@@ -141,6 +143,9 @@ p = {"number": n, "url": "https://github.com/o/%s/pull/%d" % (repo, n), "state":
 for kv in sys.argv[4:]:
     k, _, v = kv.partition("=")
     p[k] = json.loads(v)
+tip = lambda ref: subprocess.run(["git", "--git-dir", os.path.join(os.environ["SRV"], "o", repo + ".git"), "rev-parse",
+                                  "-q", "--verify", "refs/heads/" + ref], capture_output=True, text=True).stdout.strip()
+p["seenHead"], p["baseOid"] = tip(branch), tip(p["base"])
 prs.insert(0, p)
 json.dump(prs, open(f, "w"))
 print(n)
@@ -254,6 +259,10 @@ repo r3b; B3b=$(cb r3b); side "$B3b" 2026-11-02 "- head line" 1762800000; H3b=$C
 pr r3b "$B3b" "$AM"; N3b=$N
 repo r3c; B3c=$(cb r3c); put "$B3c" docs/handoffs/h.md "head line"; H3c=$C; put master docs/handoffs/h.md "base line"; M3c=$C
 pr r3c "$B3c" "$AM"; N3c=$N
+# r3s: master moves after the PR's push, so GitHub's base.sha stays at the PR's base, stale
+repo r3s; B3s=$(cb r3s); put "$B3s" THREAD.md "- head line"; H3s=$C; pr r3s "$B3s" "$AM"; N3s=$N; S3s=$(srvsha r3s master)
+put master THREAD.md "- base line"; M3s=$C
+ok "$(bsha r3s "$N3s")" "$S3s" "C3c: (the PR's base.sha is the tip before master moved)"
 carrier PATH="$tmp/gitw:$PATH" GIT_SNAP="$ST" GH_CHECKS=pass
 P=$(srvsha r3h "$B3h")
 has "$out" "o/r3h#$N3h: resolved THREAD.md and pushed ${P:0:12}" "C3: resolved and pushed, and says so"
@@ -280,6 +289,10 @@ echo "== C3b. a both-add hunk in a handoff doc is resolved"
 P=$(srvsha r3c "$B3c")
 has "$out" "o/r3c#$N3c: resolved docs/handoffs/h.md and pushed ${P:0:12}" "C3b: resolved"
 ok "$(git --git-dir "$SRV/o/r3c.git" show "$P:docs/handoffs/h.md" | tr '\n' '|')" "h|base line|head line|" "C3b: both lines (a tie puts base first)"
+echo "== C3c. master moved after the PR's push: the resolver merges the live tip, never the stale base.sha"
+P=$(srvsha r3s "$B3s")
+has "$out" "o/r3s#$N3s: resolved THREAD.md and pushed ${P:0:12}" "C3c: resolved and pushed"
+ok "$(git --git-dir "$SRV/o/r3s.git" rev-list --parents -n 1 "$P")" "$P $H3s $M3s" "C3c: … a merge whose second parent is master's live tip"
 
 echo "== C4. ineligible conflicts: no push, and the outcome says why"
 reset
@@ -444,10 +457,11 @@ reset; repo r6i; put feat/i THREAD.md "- i"; S=$C; put master a.txt moved; pr r6
 carrier GH_UPDATE=merge GH_CHECKS=pass
 M1=$(srvsha r6i feat/i); m0=$(ef "o/r6i#$N" movedAt)
 ok "$(ef "o/r6i#$N" bound)|$(git --git-dir "$SRV/o/r6i.git" rev-list --parents -n 1 "$M1" | cut -d' ' -f2)" "$S|$S" "C6i (i): pass 1 binds S and update-branches to M1 [S, master]"
-put master a.txt "moved again"
+S0=$(srvsha r6i master); put master a.txt "moved again"
+ok "$(bsha r6i "$N")" "$S0" "C6i (i): (master moved after the carrier's update-branch: the PR's base.sha is stale)"
 carrier GH_UPDATE=merge GH_CHECKS=pass GH_SNAP="$ST"
 M2=$(srvsha r6i feat/i)
-ok "$(ef "o/r6i#$N" bound)|$(git --git-dir "$SRV/o/r6i.git" rev-list --parents -n 1 "$M2" | cut -d' ' -f2)" "$M1|$M1" "C6i (i): pass 2 advances to M1 and update-branches again to M2 [M1, master']"
+ok "$(ef "o/r6i#$N" bound)|$(git --git-dir "$SRV/o/r6i.git" rev-list --parents -n 1 "$M2" | cut -d' ' -f2)" "$M1|$M1" "C6i (i): pass 2 still binds the GitHub merge M1 and update-branches again to M2 [M1, master']"
 ok "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["landings"][sys.argv[2]]["bound"])' "$(ls "$GH_STATE"/snaps/*-put.json | head -1)" "o/r6i#$N")" "$M1" \
   "C6i (i): … the state file held bound=M1 when that PUT went (O1)"
 ok "$(ef "o/r6i#$N" movedAt)" "$m0" "C6i (i): … the carrier's merges never move the clock"
@@ -478,6 +492,12 @@ repo r7c; git -C "$W" push -q origin master:dev; pl r7c "$(cb r7c-l)" 'base="dev
 repo r7d; pl r7d feat/l; Pd=$Np
 repo r7f; pl r7f "$(cb r7f-l)"; Pf=$Np; Lf=$Nl
 repo r7g; pl r7g "$(cb r7g-l)"; Pg=$Np; Lg=$Nl
+repo r7s; put "$(cb r7s)" THREAD.md "- p"; pr r7s "$(cb r7s)" "$AM"; Ns=$N; S7s=$(srvsha r7s master)   # base gains it later
+repo r7h; pl r7h "$(cb r7h-l)"; Ph=$Np; Lh=$Nl                                                     # L is closed by M later
+repo r7i; put "$(cb r7i-p)" THREAD.md "- p"; pr r7i "$(cb r7i-p)" "$AM"; Pi=$N                    # L, one commit, by base later
+co "$(cb r7i-l)"; printf -- '- p\n- l\n' >> "$W/THREAD.md"; ci "- p and - l"; pr r7i "$(cb r7i-l)" "$AM"; Li=$N
+repo r7r; sub "$(cb r7r-p)" THREAD.md "- base entry" "- base entry (rewritten)"; pr r7r "$(cb r7r-p)" "$AM"; Pr=$N
+sub "$(cb r7r-l)" THREAD.md "- base entry" "- base entry (rewritten)"; put "$(cb r7r-l)" THREAD.md "- l"; pr r7r "$(cb r7r-l)" "$AM"; Lr=$N
 carrier GH_CHECKS=pending
 ok "$(prstate "$Na")|$(keys | tr ' ' '\n' | grep -c "^o/r7a#")" "CLOSED|0" "C7 (a): its lines on base, one commit: closed, the entry dropped"
 has "$(cat "$GH_STATE/comments/o/r7a/$Na.json")" "Superseded (ADR 0078 d2): its lines are already on master" "C7 (a): … with a Superseded comment"
@@ -486,16 +506,34 @@ ok "$(prstate "$Pb")|$(ef "o/r7b#$Pb" supersededBy)" "CLOSED|o/r7b#$Lb" "C7 (b):
 has "$out" "o/r7b#$Pb: closed as superseded (https://github.com/o/r7b/pull/$Lb carries its lines)" "C7 (b): … and says so"
 ok "$(prstate "$Pc")|$(ef "o/r7c#$Pc" outcome)" "OPEN|waiting for its checks" "C7 (c): an L on another base: kept (supersession read, no verdict)"
 ok "$(prstate "$Pd")|$(ef "o/r7d#$Pd" outcome)" "OPEN|waiting for its checks" "C7 (d): an L on an own branch: kept"
+ok "$(prstate "$Pr")|$(ef "o/r7r#$Pr" supersededBy)" "CLOSED|o/r7r#$Lr" \
+  "C7 (r): P rewrites a THREAD.md line and L carries the rewrite and a new line: closed, supersededBy L"
+ok "$(prstate "$Ns")|$(prstate "$Ph")|$(prstate "$Pi")" "OPEN|CLOSED|CLOSED" "C7 (a2) (h) (i): (P on r7s open; P on r7h and r7i closed by L)"
+W="$tmp/w/r7s"; put master THREAD.md "- p"
+ok "$(bsha r7s "$Ns")" "$S7s" "C7 (a2): (master gained P's lines after P's push: P's base.sha is stale)"
+W="$tmp/w/r7h"; put "$(cb r7h-m)" THREAD.md "- m" "origin/$(cb r7h-l)"; pr r7h "$(cb r7h-m)" "$AM"; Mh=$N
+W="$tmp/w/r7i"; co master; printf -- '- p\n- l\n' >> "$W/THREAD.md"; ci "the lines, by another route"
 setf "$Lb" 'state="CLOSED"'; setf "$Lg" 'state="MERGED"'
 carrier GH_CHECKS=pending
 ok "$(prstate "$Pb")|$(ef "o/r7b#$Pb" supersededBy)" "OPEN|None" "C7 (e): L closed unmerged: P reopened"
 has "$out" "o/r7b#$Pb: reopened (https://github.com/o/r7b/pull/$Lb closed unmerged)" "C7 (e): … and says so"
 ok "$(keys | tr ' ' '\n' | grep -c "^o/r7g#$Pg\$")" 0 "C7 (g): L merged: P's tombstone dropped"
 ok "$(ef "o/r7f#$Pf" supersededBy)" "o/r7f#$Lf" "C7 (f): (a tombstone stands while its L is open)"
+ok "$(prstate "$Ns")|$(keys | tr ' ' '\n' | grep -c "^o/r7s#")" "CLOSED|0" \
+  "C7 (a2): base gained P's lines after P's push: the next pass closes it, though its base.sha is stale"
+ok "$(prstate "$Lh")|$(ef "o/r7h#$Lh" supersededBy)|$(prstate "$Ph")|$(ef "o/r7h#$Ph" supersededBy)" "CLOSED|o/r7h#$Mh|CLOSED|o/r7h#$Mh" \
+  "C7 (h): L closed as superseded by M: P stays closed, its supersededBy passed on to M"
+ok "$(prstate "$Li")|$(prstate "$Pi")|$(keys | tr ' ' '\n' | grep -c "^o/r7i#")" "CLOSED|CLOSED|0" \
+  "C7 (i): L closed as superseded by base: P stays closed, its tombstone dropped"
+carry() { ok "$(grep -c 'Reopened' "$GH_STATE/comments/o/$1/$2.json")|$(ghlog | grep -c "repos/o/$1/pulls/$2 -f state=open")" "0|0" "$3"; }
+carry r7h "$Ph" "C7 (h): … no Reopened comment, no PATCH state=open"; carry r7i "$Pi" "C7 (i): … no Reopened comment, no PATCH state=open"
 setf "$Lf" 'state="CLOSED"'
 carrier GH_CHECKS=pending GH_PATCH=fail
 ok "$(prstate "$Pf")|$(ef "o/r7f#$Pf" stuck)" "CLOSED|True" "C7 (f): the reopen fails: P stays closed and is flagged stuck"
 has "$(sline --now "$(at $CLK)")" "o/r7f#$Pf: reopen failed (https://github.com/o/r7f/pull/$Lf closed unmerged)" "C7 (f): … listed by stuck at once"
+carry r7h "$Ph" "C7 (h): the pass after: still no reopen"; carry r7i "$Pi" "C7 (i): the pass after: still no reopen"
+ok "$(ef "o/r7h#$Ph" supersededBy)|$(ef "o/r7h#$Ph" outcome)" "o/r7h#$Mh|closed as superseded by https://github.com/o/r7h/pull/$Mh, which is open" \
+  "C7 (h): … P's tombstone reads M, open"
 
 echo "== C7n. a commit stranded under a close-out keeps it open, unless a later close-out carries both"
 reset; repo r7n; P=$(cb r7n-p); put "$P" THREAD.md "- s"; X=$C; put "$P" THREAD.md "- c"

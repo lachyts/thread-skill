@@ -62,8 +62,9 @@ run, one pass:
         rerun count. A failed read counts as a carrier change: a failed read never restarts the clock.
      e. The checks on head.sha, land.sh LAND_CHECKS_PY's classes (`GET commits/<sha>/check-runs?per_page=100` and
         `/status`, a check run's latest id per name): red (a failure), infra (cancelled, timed_out, startup_failure,
-        action_required, stale, a status error), pending, green. No check on the head reads the base tip's: any there
-        is pending, none is `none` (green). The class says only whether the head is green; 6.4 decides any rerun.
+        action_required, stale, a status error), pending, green. No check on the head reads the base tip's (the
+        scratch clone paragraph's): any there is pending, none is `none` (green). The class says only whether the head
+        is green; 6.4 decides any rerun.
      f. The binding, its one copy. Let id be M's comment id and S its sha. A cleared binding stays cleared: when
         entry.markerId is id and entry.cleared, the PR is own-unqueued and nothing is evaluated, even when the head
         returns to S; only a new `--queue` (a new marker id) starts over. B, by one rule: entry.bound when
@@ -121,7 +122,11 @@ run, one pass:
      or rerun never moves it, so a PR caught in update-branch cycles is listed after a day.
   8. Tombstones. A PR closed as superseded by L keeps its entry (`supersededBy`) while L is open; L merged drops it; L
      closed unmerged reopens it (a register check, a comment, `PATCH state=open`; `reopened`). A reopen that fails
-     flags it stuck until it is open again or merged.
+     flags it stuck until it is open again or merged. The chain: when the carrier closes L itself as superseded, every
+     tombstone naming L is passed on at that moment, never reopened: superseded by a later M, it names M (M carries
+     L's lines, so P's), so a chain is always one link long; superseded by base, it is dropped (L's lines are on base,
+     so P's). Passed on when L closes, not on P's next read, because L's own entry is dropped once M merges, and P's
+     read can come after that. So only a target closed unmerged by someone else reopens a PR.
   9. Output: one stdout line per act or transition only (update-branch requested, resolved and pushed, re-ran,
      auto-merge queued, merged, closed as superseded, reopened, became stuck, search failed); failures go to the
      entry's outcome, so a pass that does nothing prints nothing. Exit 0 for a pass, whatever it did; 3 not due (no
@@ -135,8 +140,11 @@ note's scratch worktree: the carrier has no checkout of most repos and never tou
 --no-tags --single-branch --branch <base.ref> -c credential.helper= -c 'credential.helper=!gh auth git-credential' -c
 core.hooksPath=/dev/null -c gc.auto=0 -c maintenance.auto=false https://github.com/<slug>.git <scratch>/r<i>.git`: the
 helpers live in its config, so merge-tree's and cat-file's lazy blob fetches use them, the empty one clearing inherited
-helpers first. Then `fetch origin +refs/heads/<head.ref>:refs/carrier/<n>`. Each tip is checked against the PR's base.sha
-and head.sha: a tip that moved is "the PR moved during the pass", for the next pass.
+helpers first. Then `fetch origin +refs/heads/<head.ref>:refs/carrier/<n>`, checked against the PR's head.sha: a head
+that moved is "the PR moved during the pass (its head)", for the next pass. The base tip, `base` below, is the clone's
+refs/heads/<base.ref>, and before there is a clone one `GET repos/<slug>/git/ref/heads/<base.ref>` per repo per pass (a
+failed read fails the step that needed it). Never the PR's base.sha: GitHub moves it only when the head moves, so it
+reads stale whenever the base moved after the PR's last push, the usual way a PR comes to be dirty or behind.
 
 The resolver (step 6.3), for close-out, own-auto and own-marked PRs. `git merge-tree --write-tree -z <head> <base>`:
 exit 0 (GitHub said dirty, the merge is clean) is left to update-branch; exit 1 is parsed (the tree, `<mode> <oid>
@@ -154,16 +162,18 @@ line, takes the later date; anything else is ineligible (`a conflict hunk in <pa
 paths in its body; the global git identity), `pushed`/`pushedFrom` written, a register check, and `-c
 core.hooksPath=/dev/null push origin <commit>:refs/heads/<head.ref>`, never forced.
 
-Supersession (step 6.1): both P and L close-outs by the grammar (an own branch is session work, never closed). C is
-P's non-merge commits in base..head, read in the scratch clone. P's lines are carried into a target when, for every
-path P changes from its merge base: a deletion, the target lacks the path; an addition or modification, every
-non-blank line it adds is in the target's file and every non-blank line it removes and does not re-add is absent from
-it, THREAD.md's `last_touched:` counting as carried when the target's date is the same or later; a binary change never
-is. Superseded by base: carried with target = base, and |C| = 1 (a commit stranded under a close-out keeps it open, so
-the Primary converges). Superseded by a later close-out L (open, a higher number, the same base.ref, not superseded
-this pass; newest first): carried with target = base ∪ L.head (a line in either; a path absent from both), and C less
-its newest commit within base..L.head; the entry records `supersededBy`. The verdict is cached in entry.checked by
-(base sha, P's head, the later close-outs' heads).
+Supersession (step 6.1): both P and L close-outs by the grammar (an own branch is session work, never closed). base is
+the base tip. C is P's non-merge commits in base..head, read in the scratch clone. A target has an add side, where
+what P adds must be, and a remove side, where what P removes must not be. P's lines are carried into it when, for
+every path P changes from its merge base: a deletion, the remove side lacks the path; an addition or modification,
+every non-blank line it adds is in the add side's file and every non-blank line it removes and does not re-add is
+absent from the remove side's, THREAD.md's `last_touched:` counting as carried when the add side's date is the same or
+later; a binary change never is. Superseded by base: both sides base, and |C| = 1 (a commit stranded under a close-out
+keeps it open, so the Primary converges). Superseded by a later close-out L (open, a higher number, the same base.ref,
+not superseded this pass; newest first): the add side base ∪ L.head (a line in either), the remove side L.head alone
+(merging L applies a removal L carries, while base keeps what P removes until then, so a rewritten `Where we are` or
+Resume line would otherwise never be carried), and C less its newest commit within base..L.head; the entry records
+`supersededBy`. The verdict is cached in entry.checked by (the base tip, P's head, the later close-outs' heads).
 
 marker --login L: stdin is one or more concatenated JSON arrays of issue comments (`gh api --paginate`); the newest
 comment by L (by id) whose first line starts with a marker prefix (`Landing queued (ADR 0078 d2): `, `Landing withdrawn
@@ -197,6 +207,7 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 sys.dont_write_bytecode = True
 
@@ -455,9 +466,10 @@ def _date(line):
 # ---- the scratch clone --------------------------------------------------------------------------------------------------
 
 class Clone:
-    """One bare partial clone of a repo's base branch for this pass."""
+    """One bare partial clone of a repo's base branch for this pass; `base` is its tip (the base tip, never the PR's
+    base.sha)."""
 
-    def __init__(self, ctx, slug, base_ref, base_sha):
+    def __init__(self, ctx, slug, base_ref):
         self.ctx, self.slug, self.base_ref = ctx, slug, base_ref
         self.dir = Path(ctx.scratch()) / f"r{len(ctx.clones)}.git"
         argv = ["git", "clone", "--bare", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", base_ref,
@@ -470,9 +482,9 @@ class Clone:
             raise CloneError(f"the clone ran past {t:.0f} s and was stopped")
         if rc != 0:
             raise CloneError(f"the clone failed: {_why(err) or rc}")
-        tip = self.rev(f"refs/heads/{base_ref}")
-        if tip != base_sha:
-            raise CloneError("the PR moved during the pass (its base)")
+        self.base = self.rev(f"refs/heads/{base_ref}")
+        if not self.base:
+            raise CloneError(f"the clone holds no {base_ref}")
         self.heads = {}
 
     def git(self, *a, timeout=GIT_TIMEOUT, raw=False, input=None, env=None, ok=(0,)):
@@ -526,7 +538,7 @@ class Pass:
         self.dry = args.dry_run
         self.me = None
         self.items = []
-        self.pulls, self.repos, self.slots, self.clones, self.gum = {}, {}, {}, {}, {}
+        self.pulls, self.repos, self.slots, self.clones, self.gum, self.tips = {}, {}, {}, {}, {}, {}
         self.superseded = set()
         self._scratch = None
         self.wrote = False
@@ -581,19 +593,38 @@ class Pass:
                 self.repos[k] = {"push": False, "auto": None, "err": f"cannot read {slug}: {e}"}
         return self.repos[k]
 
-    def clone(self, slug, base_ref, base_sha):
+    def clone(self, slug, base_ref):
         k = (slug.lower(), base_ref)
         c = self.clones.get(k)
         if isinstance(c, CloneError):
             raise c
         if c is None:
             try:
-                c = Clone(self, slug, base_ref, base_sha)
+                c = Clone(self, slug, base_ref)
             except CloneError as e:
                 self.clones[k] = e
                 raise
             self.clones[k] = c
         return c
+
+    def base_tip(self, slug, base_ref):
+        """The base tip (the module docstring's): the scratch clone's once there is one, else one `GET
+        git/ref/heads/<base_ref>` per repo per pass. GhError when that read fails."""
+        k = (slug.lower(), base_ref)
+        c = self.clones.get(k)
+        if isinstance(c, Clone):
+            return c.base
+        if k not in self.tips:
+            try:
+                r = api_json(f"repos/{slug}/git/ref/heads/{quote(base_ref, safe='/')}")
+                sha = ((r.get("object") or {}).get("sha") or "") if isinstance(r, dict) else ""
+            except GhError as e:
+                self.tips[k] = e
+            else:
+                self.tips[k] = sha if HEX40.match(sha) else GhError(f"unexpected JSON for {slug}'s {base_ref}")
+        if isinstance(self.tips[k], GhError):
+            raise self.tips[k]
+        return self.tips[k]
 
     def gh_update_merge(self, slug, h, x, base_ref):
         """(verdict, P2): True when H is a GitHub-made update-branch merge from X, False when not, None when a read
@@ -835,7 +866,7 @@ def pr_pass(ctx, it, e):
         return DROP
     labels = {x.get("name") for x in (pr.get("labels") or []) if isinstance(x, dict)}
     head_ref, head = pr["head"]["ref"], pr["head"]["sha"]
-    base_ref, base_sha = pr["base"]["ref"], pr["base"].get("sha") or ""
+    base_ref = pr["base"]["ref"]
     grammar = bool(CLOSE_RE.match(head_ref))
     if "landing" not in labels and not grammar:
         return DROP
@@ -882,7 +913,7 @@ def pr_pass(ctx, it, e):
 
     # 5e: the checks
     try:
-        checks = read_checks(slug, head, base_sha)
+        checks = read_checks(ctx, slug, head, base_ref)
     except GhError as ex:
         checks = {"cls": "unread", "pending": False, "why": f"cannot read the checks: {ex}"}
     return act(ctx, it, pr, e, kind, checks)
@@ -910,7 +941,7 @@ def own_kind(ctx, it, pr, e):
         return "own-unqueued", "cannot read whether the head follows its queue marker: left to its session"
     if v:
         try:
-            cl = ctx.clone(slug, pr["base"]["ref"], pr["base"].get("sha") or "")
+            cl = ctx.clone(slug, pr["base"]["ref"])
             cl.fetch_head(n, pr["head"]["ref"], head)
             follows = cl.merge_tree(b, p2) == cl.git("rev-parse", f"{head}^{{tree}}")
         except CloneError as ex:
@@ -922,7 +953,7 @@ def own_kind(ctx, it, pr, e):
     return "own-unqueued", f"its queue marker is for {str(b)[:12]} and the head moved past it: left to its session"
 
 
-def read_checks(slug, sha, base_sha):
+def read_checks(ctx, slug, sha, base_ref):
     """The head's checks (5e): {cls, pending, runs, statuses}."""
     cr = api_json(f"repos/{slug}/commits/{sha}/check-runs?per_page=100")
     stt = api_json(f"repos/{slug}/commits/{sha}/status")
@@ -954,8 +985,7 @@ def read_checks(slug, sha, base_sha):
         elif stv == "error":
             infra = True
     if not runs and not sts:
-        if not base_sha:
-            return {"cls": "none", "pending": False, "runs": {}, "statuses": {}}
+        base_sha = ctx.base_tip(slug, base_ref)
         bcr = api_json(f"repos/{slug}/commits/{base_sha}/check-runs?per_page=100")
         bst = api_json(f"repos/{slug}/commits/{base_sha}/status")
         try:
@@ -981,7 +1011,7 @@ def _wait_outcome(pr, checks, settled):
 def act(ctx, it, pr, e, kind, checks):
     """Phase B: the first step of the module docstring's step 6 that applies."""
     slug, n, key = it.slug, it.n, it.key
-    head, head_ref = pr["head"]["sha"], pr["head"]["ref"]
+    head = pr["head"]["sha"]
     st = pr.get("mergeable_state")
     settled = st != "unknown"
     green = checks["cls"] in ("green", "none")
@@ -1191,11 +1221,12 @@ def resolver(ctx, it, pr, e):
     """Step 6.3: an outcome."""
     slug, n, key = it.slug, it.n, it.key
     head, head_ref = pr["head"]["sha"], pr["head"]["ref"]
-    base_ref, base = pr["base"]["ref"], pr["base"].get("sha") or ""
+    base_ref = pr["base"]["ref"]
     if ctx.slots.get(slug.lower()):
         return "dirty: waiting its turn to be brought current"
     try:
-        cl = ctx.clone(slug, base_ref, base)
+        cl = ctx.clone(slug, base_ref)
+        base = cl.base
         cl.fetch_head(n, head_ref, head)
         rc, out = cl.git("merge-tree", "--write-tree", "-z", head, base, ok=(0, 1), raw=True)
         if rc == 0:
@@ -1311,16 +1342,25 @@ def _changes(cl, mb, head):
     return res
 
 
-def _carried(cl, changes, targets):
+def _carried(cl, changes, add_in, remove_in):
+    """P's lines carried into a target (the module docstring's Supersession): each line P adds is in one of the
+    commits add_in, and each line P removes (a path P deletes) is in none of the commits remove_in."""
     for st, path, added, removed, binary in changes:
-        files = [cl.lines(t, path) for t in targets]
-        present = [f for f in files if f is not None]
+        files = {}
+
+        def at(ts, path=path, files=files):
+            for t in ts:
+                if t not in files:
+                    files[t] = cl.lines(t, path)
+            return [files[t] for t in ts if files[t] is not None]
+        gone = at(remove_in)
         if st == "D":
-            if present:
+            if gone:
                 return False
             continue
         if binary:
             return False
+        present = at(add_in)
         union = set()
         for f in present:
             union.update(f)
@@ -1336,10 +1376,13 @@ def _carried(cl, changes, targets):
             if ln not in union:
                 return False
         readded = set(added)
+        kept = set()
+        for f in gone:
+            kept.update(f)
         for ln in removed:
             if not ln.strip() or ln in readded or (is_thread(path) and _date(ln)):
                 continue
-            if ln in union:
+            if ln in kept:
                 return False
     return True
 
@@ -1348,7 +1391,7 @@ def supersession(ctx, it, pr, e):
     """Step 6.1: None, a string (why it was not evaluated), or ("base", None) / ("pr", (item, L's PR))."""
     slug, n = it.slug, it.n
     head, head_ref = pr["head"]["sha"], pr["head"]["ref"]
-    base_ref, base = pr["base"]["ref"], pr["base"].get("sha") or ""
+    base_ref = pr["base"]["ref"]
     cands = []
     for o in ctx.items:
         if o.slug.lower() != slug.lower() or o.n <= n or o.key in ctx.superseded:
@@ -1361,32 +1404,40 @@ def supersession(ctx, it, pr, e):
                 and lp["base"]["ref"] == base_ref):
             cands.append((o, lp))
     cands.sort(key=lambda x: -x[0].n)
-    ckey = f"{base}:{head}:" + ",".join(f"{o.n}={lp['head']['sha']}" for o, lp in cands)
+
+    def ckey(base):
+        return f"{base}:{head}:" + ",".join(f"{o.n}={lp['head']['sha']}" for o, lp in cands)
+    try:
+        base = ctx.base_tip(slug, base_ref)
+    except GhError as ex:
+        return f"supersession not read (cannot read {base_ref}'s tip: {ex})"
     chk = e.get("checked") if isinstance(e.get("checked"), dict) else {}
-    if chk.get("key") == ckey:
+    if chk.get("key") == ckey(base):
         verdict = chk.get("verdict")
     else:
         try:
-            cl = ctx.clone(slug, base_ref, base)
+            cl = ctx.clone(slug, base_ref)
+            base = cl.base
             cl.fetch_head(n, head_ref, head)
             commits = cl.git("rev-list", "--no-merges", "--topo-order", f"{base}..{head}").split()
             verdict = None
             if commits:
                 mb = cl.git("merge-base", base, head)
                 changes = _changes(cl, mb, head)
-                if len(commits) == 1 and _carried(cl, changes, [base]):
+                if len(commits) == 1 and _carried(cl, changes, [base], [base]):
                     verdict = "base"
                 else:
                     rest = set(commits[1:])
                     for o, lp in cands:
-                        cl.fetch_head(o.n, lp["head"]["ref"], lp["head"]["sha"])
-                        lset = set(cl.git("rev-list", f"{base}..{lp['head']['sha']}").split())
-                        if rest <= lset and _carried(cl, changes, [base, lp["head"]["sha"]]):
+                        lh = lp["head"]["sha"]
+                        cl.fetch_head(o.n, lp["head"]["ref"], lh)
+                        lset = set(cl.git("rev-list", f"{base}..{lh}").split())
+                        if rest <= lset and _carried(cl, changes, [base, lh], [lh]):
                             verdict = o.key
                             break
         except CloneError as ex:
             return f"supersession not read ({ex})"
-        e["checked"] = {"key": ckey, "verdict": verdict}
+        e["checked"] = {"key": ckey(base), "verdict": verdict}
     if verdict is None:
         return None
     if verdict == "base":
@@ -1414,11 +1465,23 @@ def close_superseded(ctx, it, pr, e, sup):
         return _finish(ctx, it, e, "close-out", f"would close as superseded ({by})")
     ctx.superseded.add(key)
     ctx.say(f"{key}: closed as superseded ({by})")
+    pass_on(ctx, key, None if what == "base" else l)
     if what == "base":
         return DROP
     e["supersededBy"], e["closedAt"] = l[0].key, ctx.stamp
     e["kind"], e["outcome"], e["handledAt"], e["stuck"] = "close-out", f"closed as superseded ({by})", ctx.stamp, False
     return e
+
+
+def pass_on(ctx, key, l):
+    """Step 8's chain: the tombstones that name key, just closed as superseded, now name its target l (item, PR), or
+    are dropped when l is None (key's lines are on base, so theirs are)."""
+    for k in [k for k, x in ctx.state.items() if k != PASS and isinstance(x, dict) and x.get("supersededBy") == key]:
+        if l is None:
+            ctx.state.pop(k)
+        else:
+            ctx.state[k] = dict(ctx.state[k], supersededBy=l[0].key,
+                                outcome=f"closed as superseded by {l[1].get('html_url') or l[0].url}, which is open")
 
 
 def tombstone(ctx, it, e):
