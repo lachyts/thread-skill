@@ -1156,9 +1156,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   current with origin: every few minutes it fast-forwards it whenever ADR
   0031's hold is clear, and keeps the other checkouts sessions load live from
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
-  Fast-forward only: a diverged checkout, or one with an uncommitted edit
-  origin would overwrite, is left as it is (an edit origin never touches rides
-  along; `refused` only once the hold is clear). One that stays unable to
+  Fast-forward only: a checkout with an uncommitted edit origin would
+  overwrite is left as it is (an edit origin never touches rides along;
+  `refused` only once the hold is clear), and a diverged `~/.agents` too. A
+  diverged **Primary checkout** repairs itself instead (ADR 0078 d4), under
+  the hold: its commits' content already on origin, it resets to origin,
+  keeping a backup ref; otherwise its close-out commits are carried to a
+  landing PR, and any other local commit stays and is recorded, a stop for
+  the Stage after a day. One that stays unable to
   catch up, a rollout's hold included, stays in the job's state file and sends
   no notice (ADR 0075 d2): `/thread:status`'s Primary refresh line reads the
   job's last recorded state there (`primary-refresh.py stuck`), naming a
