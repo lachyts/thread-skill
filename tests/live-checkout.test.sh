@@ -5,7 +5,8 @@
 # first; LC4 the one-branch fetch; LC5 the overlap; LC6 lc_ff; LC7 every lc_check form against primary-refresh.py's own
 # regexes; LC8 sourcing changes nothing of the caller's; LC9 the run modes' exit codes, the overlap mode's included
 # (leg.py's ff_primary, p39-4); LC10 lc_bounded: the child's rc, the budget's 142, and a TERM or HUP to it kills the
-# whole group (143, 129), as does a normal exit. Origins are
+# whole group (143, 129), as does a normal exit; LC11 the content mode, each form against primary-refresh.py's regexes,
+# and lc_ahead_content's records. Origins are
 # git@github.com:<o>/<r>.git, served from $SRV/<o>/<r>.git by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`, with
 # GIT_SSH_COMMAND unset, so the ssh rule is what reaches it. Hermetic: HOME and every path live under mktemp; commits
 # carry an inline identity; global/system git config is ignored; never the network.
@@ -298,6 +299,48 @@ rc 0" "LC9 $n: overlap: a ref that does not resolve reads clear"
   done
   g init -q "$tmp/w/decoy"; g -C "$tmp/w/decoy" commit -q --allow-empty -m decoy
   ok "$(GIT_DIR="$tmp/w/decoy/.git" mode check "$c9" master | cut -d' ' -f1)" "diverged" "LC9 $n: a caller's GIT_DIR is scrubbed: the named repo is read"
+
+  # ---- LC11: the content mode (ADR 0078 d4): a diverged checkout, read for its repair --------------------------------
+  srv m11; c11="$tmp/w/m11"; cl m11 "$c11"; contents=
+  content() { printf '%s\n' "$1" >> "$tmp/content.forms"; contents="$contents ${1%% *}"; }
+  : > "$tmp/content.forms"
+  git -C "$c11" checkout -q -b side; content "$(mode content "$c11" master)"; git -C "$c11" checkout -q master
+  content "$(mode content "$c11" master)"                      # no commit ahead: untouched
+  echo same > "$c11/s.txt"; g -C "$c11" add -A; g -C "$c11" commit -qm local-s; push m11 s.txt same; fetchall "$c11"
+  content "$(mode content "$c11" master)"                      # landed
+  echo other > "$c11/t.txt"; g -C "$c11" add -A; g -C "$c11" commit -qm local-t
+  content "$(mode content "$c11" master)"                      # unlanded
+  ok "$contents" " busy untouched landed unlanded" "LC11 $n: the forms read in order"
+  ok "$(python3 - "$PR" "$tmp/content.forms" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("pr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+for line in open(sys.argv[2]):
+    line = line.rstrip("\n")
+    rx = m.CONTENT_FORMS.get(line.split(" ", 1)[0])
+    if not (rx and rx.match(line)):
+        print(repr(line)); break
+else:
+    print("all")
+PY
+)" all "LC11 $n: … each matching primary-refresh.py's CONTENT_FORMS regex"
+  ok "$(mode content "$c11" master)" "unlanded 1 t.txt" "LC11 $n: unlanded names what differs, not what matches"
+  # Run under set -euo pipefail, as the header promises: a differing file is rc 1 from git, which must not end the function.
+  strict() { "$SH" -c 'set -euo pipefail; . "$1"; shift; "$@"' _ "$LC" "$@"; }
+  ok "$(strict lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "Ts.txt Tt.txt Dt.txt =1 " \
+    "LC11 $n: lc_ahead_content's records under set -euo pipefail: every touched file, each differing one, then the result"
+  ok "$(strict lc_ahead_content "$c11" refs/remotes/origin/nowhere refs/heads/master | tr '\0' ' ')" "=128 " \
+    "LC11 $n: a ref git cannot read is its failure, never =3 (touches no file)"
+  git -C "$c11" reset -q --hard origin/master
+  ok "$(src lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "=3 " \
+    "LC11 $n: nothing ahead: nothing touched, =3"
+  ok "$(mode content "$c11" master >/dev/null; echo "rc $?")" "rc 0" "LC11 $n: content exits 0"
+  git -C "$c11" update-ref -d refs/remotes/origin/master
+  ok "$(mode content "$c11" master)" "unreadable git diff failed (128)" "LC11 $n: … and an unreadable ref reads unreadable, never untouched"
+  for args in "content" "content $c11" "content $c11 master extra"; do
+    out=$(mode $args 2>"$tmp/err"); rc=$?
+    ok "$rc|$out" "2|" "LC11 $n: usage '$args' exits 2, stdout empty"
+  done
 
   # ---- LC10: lc_bounded: the child's rc, the budget, and a signal or a normal exit kills the whole group -----------
   # gone <pgid>: polls up to ~2 s until no process of the group is left (a reaped zombie can't fake a pass)

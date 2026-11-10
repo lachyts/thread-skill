@@ -6,6 +6,9 @@ Status: accepted. Lachy asked for it on 2026-11-02: "some sort of automation whe
 amendment (item 4's timeout notice, item 5, item 6's refused-tip notice and `ntfy-push.py` bundle row, and item 9's
 job-spell notice) are superseded; a stuck checkout stays in the state file, and `/thread:status` reads it there
 once P41-5 adds its Primary refresh line.)*
+*(Amended by ADR 0078 d4, 2026-11-10, p45-3: the Primary repairs a divergence instead of only reading it: decision 2's
+"Diverged: never integrated" now holds for an `--also` checkout, and primary-refresh.py's docstring is the repair's one
+copy.)*
 
 ## Context
 

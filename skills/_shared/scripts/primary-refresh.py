@@ -39,9 +39,10 @@ never current or moved, and never leads to a merge.
      conflict never fails it. A failure is `fetch failed: <git's last fatal: or error: line, else its last line>`,
      and nothing later reads the stale refs.
   d. The read (`check`): `current` (HEAD at origin's tip, on any branch); `ahead <n>: left to its landing route`;
-     `diverged (ahead <a>, behind <b>)`: never integrated here (ADR 0042's rule; read before the hold, since it never
-     clears by itself); behind and `busy: <why>` (an index.lock, a rebase, merge, cherry-pick, revert, bisect or
-     sequencer in progress, a detached HEAD, another branch); `unreadable: <why>` (an unborn HEAD, say).
+     `diverged (ahead <a>, behind <b>)`: an --also checkout reads `never integrated here` (ADR 0042's rule), the primary
+     goes to the repair below (read before the hold, since a divergence never clears by itself); behind and `busy:
+     <why>` (an index.lock, a rebase, merge, cherry-pick, revert, bisect or sequencer in progress, a detached HEAD,
+     another branch); `unreadable: <why>` (an unborn HEAD, say).
   e. Behind, the primary only: the hold, `bash <primary>/skills/_shared/scripts/primary-hold.sh <primary>` (the
      primary's own copy, the rule the rollouts reading it run by; 120 s). Any output is `held: <it>`, flattened to one
      line; a missing script, a non-zero exit or a timeout holds too (fail closed). An `--also` checkout has no hold:
@@ -55,9 +56,44 @@ never current or moved, and never leads to a merge.
      against what the helper said), `refused: <git's reason>`, or `timed out: git merge --ff-only ran past <N> s and was
      stopped: the working tree may be partly updated (git -C <d> status)`.
 
+The repair, the primary only (ADR 0078 d4): a diverged primary returns to origin by itself; nothing is ever merged here.
+Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwise, kind `diverged`, in this order:
+  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block): `busy` reads `repair waits
+     (<why>)` (a half-applied operation, HEAD detached or on another branch: a commit there is someone's work); a read
+     that fails reads `unreadable: <why>`, kind unreadable.
+  2. The hold, as for a behind checkout (`held` above; the same primary-hold.sh): `repair held: <it>`, for a reset and a
+     carry alike.
+  3. `landed` (no file the ahead commits touch differs from origin/<d>, THREAD.md included): the reset. An uncommitted
+     edit origin's commits would overwrite reads `repair refused: local changes overlap origin/<d> (<paths>)`. Under
+     --dry-run `would reset <head12> to origin/<d> at <tip12> (ahead <a>, behind <b>: their content is already on
+     origin)`, kind dry. Else HEAD is read again, last thing before the backup ref: the verdict above was read before
+     the hold, which can run 120 s, so a HEAD that has moved reads `repair waits (HEAD moved during the pass)`, with no
+     backup ref and no reset, and the next pass re-reads the content. Else the backup ref
+     refs/thread/primary-backup/<YYYYMMDDTHHMMSS> (the pass's stamp) is written, must-not-exist, at the old HEAD, and
+     `git reset --keep <tip>` runs, bounded by --ff-timeout: the line `repaired: reset <head12> to origin/<d> at <tip12>
+     (…; backup <ref>)` (HEAD re-read and checked; kind None, which ends the spell), `repair refused: git reset --keep:
+     <why>` with the backup ref removed, or `timed out: git reset --keep ran past <N> s …` (kind timed-out, as for a
+     merge). The state entry `repaired:<checkout path>` (kind repaired; its since, outcome, backup, head and tip)
+     records the last repair; it is no spell: the stuck read skips it and only an install's prune may drop it (never one
+     it watches).
+  4. Anything else, `unlanded` or `untouched`: the carry. land.sh `-- <primary>`, the primary's own copy, once per head.
+     On a protected origin it lands the ahead commits as they are onto a `close/…` branch and a queued landing PR,
+     leaving the primary's HEAD and index alone; on an unprotected one its S11 rebases them, pushes, then moves the
+     primary's branch (primary_follow, unless a rollout holds it; a move local edits refuse is a `land: ff refused` note
+     and still `landed`, and the next pass finds the content on origin). S9 carries close-out commits only: any other
+     local commit is `stuck: local commits not from a close-out: …`, so it stays here, is recorded, and is the stop
+     below. land.sh's one line is the spell's `repair` field {head, at, result}: `queued <url>` or `queued: needs merge
+     <url>` reads `carried: <it>`, and land.sh is never asked again for that head (it would update-branch on every call:
+     the PR's upkeep is the landing carrier's, p45-4); `landed` (an unprotected origin took them) ends the spell;
+     anything else reads `not carried (<result>)` and is retried once CARRY_RETRY (1 h) has passed. --dry-run reads
+     `would carry …`, kind dry, and never runs land.sh. A land.sh that cannot run reads `broken: …`.
+A repair blocked for a day is the d4 stop: a primary pass of kind `diverged` whose spell is STUCK_AFTER old is recorded
+kind `stuck` (any cause; its line stays the pass's own), for /thread:status's line and the Stage's. A commit that lands
+by a merge (the landing PR's, as queued) leaves the primary only behind: the ordinary fast-forward takes it from there.
+
 The spells. A pass sends no notice (ADR 0075 d2: no rollout code notifies Lachy); a stuck checkout is read at a sitting,
 on /thread:status's Primary refresh line (`stuck`, below). A stuck spell runs from the first pass whose kind is stuck
-(not-primary, busy, fetch-failed, broken, unreadable, diverged, held, refused, timed-out) to the next that reads
+(not-primary, busy, fetch-failed, broken, unreadable, diverged, stuck, held, refused, timed-out) to the next that reads
 current, moved or ahead (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
 moves within the spell, a change of kind restarts only `kindSince`, `outcome` is the latest pass's. The installed copy's
 own `self-update` and `job` spells are entries of the same shape. The spells live in the state file
@@ -70,8 +106,8 @@ rewrite, so a rolled-back older copy still sees what it notified. An entry in th
 notified?}, takes its first stuck pass's kind. STATE_VERSION stays 1: the fields are additive, and every older copy
 keeps unknown keys and fields.
 
-A pass never prunes: it drops only the key of a checkout it read as current, moved or ahead, so a hand-run of either
-copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
+A pass never prunes: it drops only the key of a checkout it read as current, moved, ahead or repaired, so a hand-run of
+either copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
 checkout the job does not watch stands until a pass on that checkout clears it or the next install drops it (below).
 
 stuck, a read that writes nothing (no rotation, no prune, no fetch, no temp file): the spells due now, for
@@ -186,10 +222,11 @@ job runs <python>`, prunes (below), and prints the one line left to Lachy's shel
 
 The prune at install, the only moment the watched set changes: install reads the job's state file (the default path,
 which the job reads because the plist names no --state) and drops every spell whose key is not `self-update`, `job`,
-the primary or an --also checkout (the keys a pass of this job writes), one line each, `primary-refresh install:
-dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read. It writes the file only
-when it dropped one. A missing or corrupt file is left for the job's next pass, and a write that fails is one WARN
-(install still exits 0). A checkout dropped from --also, a moved primary or a junk key is dropped by the next install;
+the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one line each,
+`primary-refresh install: dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read.
+It writes the file only when it dropped one. A missing or corrupt file is left for the job's next pass, and a write
+that fails is one WARN (install still exits 0). A checkout dropped from --also, a moved primary or a junk key is
+dropped by the next install;
 an install not followed by its launchctl line leaves the old job running with its old targets, whose next pass reopens
 any spell of its own that install dropped, with a fresh since. One job per state file: a second job installed under
 another --label shares the default file and its `self-update` and `job` keys, so its install drops the first job's
@@ -243,6 +280,10 @@ DEFAULT_BIN = "~/.local/state/thread/bin"
 STATE_VERSION = 1
 STUCK_AFTER = timedelta(hours=24)      # a spell is due on the Primary refresh line (`stuck`) this long from its since
 SMOKE_RETRY = timedelta(hours=24)      # a refused tip is smoked again after this (= STUCK_AFTER, by design)
+CARRY_RETRY = timedelta(hours=1)       # a carry land.sh could not queue is asked again this long after its last try
+CARRY_TIMEOUT = 480                    # land.sh's own LAND_DEADLINE (450 s) plus its local work
+REPAIRED = "repaired:"                 # a state key's prefix: the last repair's record, no spell (the stuck read skips it)
+LAND_REL = "skills/_shared/scripts/land.sh"  # the primary's own copy: not in the bundle, like the hold
 GIT_TIMEOUT = 60
 HOLD_TIMEOUT = 120
 BUNDLE_TIMEOUT = 60
@@ -264,6 +305,17 @@ CHECK_FORMS = {
     "overlap": re.compile(r"^overlap ([0-9a-f]{40}) ([0-9]+) (.+)$"),
     "behind": re.compile(r"^behind ([0-9a-f]{40}) ([0-9]+) ([0-9a-f]{40})$"),
     "unreadable": re.compile(r"^unreadable (.+)$"),
+}
+CONTENT_FORMS = {  # live-checkout.sh content: a diverged checkout, read for its repair
+    "busy": re.compile(r"^busy (.+)$"),
+    "unreadable": re.compile(r"^unreadable (.+)$"),
+    "untouched": re.compile(r"^untouched$"),
+    "landed": re.compile(r"^landed ([0-9]+)$"),
+    "unlanded": re.compile(r"^unlanded ([0-9]+) (.+)$"),
+}
+OVERLAP_FORMS = {
+    "overlap": re.compile(r"^overlap (.+)$"),
+    "clear": re.compile(r"^clear$"),
 }
 FF_FORMS = {
     "moved": re.compile(r"^moved ([0-9a-f]{40}) ([0-9a-f]{40})$"),
@@ -474,10 +526,13 @@ def _origin_tip(d, branch):
     return t if rc == 0 and HEX40.match(t) else None
 
 
-def refresh(d, primary, is_primary, dry_run, ff_timeout=FF_TIMEOUT):
-    """One checkout's pass: (outcome, kind, tip, branch). kind None clears a stuck spell (current, moved, ahead), `dry`
-    changes nothing (would move), any other is stuck. tip is origin's tip as this pass fetched it (ff's verified new sha
-    after a move), None when the fetch did not succeed: the self-update runs on it whatever the checkout read."""
+def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
+    """One checkout's pass: (outcome, kind, tip, branch). kind None clears a stuck spell (current, moved, ahead,
+    repaired), `dry` changes nothing (would move), any other is stuck. tip is origin's tip as this pass fetched it (ff's
+    verified new sha after a move), None when the fetch did not succeed: the self-update runs on it whatever the
+    checkout read. `entry` is this checkout's spell as last written (its repair field read by the carry), `now` the
+    pass's time, and `extra` a dict a repair fills: "repair" (the spell's repair field) or "record" (the repaired:
+    entry)."""
     why = checkout_problem(d)
     if why:
         return f"not a primary checkout: {why}", "not-primary", None, None
@@ -512,6 +567,8 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout=FF_TIMEOUT):
     if form == "ahead":
         return f"ahead {m.group(2)}: left to its landing route", None, tip, branch
     if form == "diverged":
+        if is_primary:
+            return repair(d, lc, primary, branch, tip, (m.group(2), m.group(3)), dry_run, ff_timeout, now, entry, extra)
         return f"diverged (ahead {m.group(2)}, behind {m.group(3)}): never integrated here", "diverged", tip, branch
     if form == "busy":
         return f"busy: {m.group(2)}", "busy", tip, branch
@@ -541,6 +598,97 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout=FF_TIMEOUT):
     if form == "refused":
         return f"refused: {m.group(1)}", "refused", tip, branch
     return f"broken: live-checkout.sh ff: {_said(rc, out)}", "broken", tip, branch
+
+
+# ---- the repair of a diverged primary (ADR 0078 d4; the rules are the module docstring's) ---------------------------------
+
+def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra):
+    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple."""
+    base = f"diverged (ahead {counts[0]}, behind {counts[1]})"
+    rc, out, _, timed_out = _lc(lc, "content", d, branch)
+    form, m = _form(CONTENT_FORMS, rc, out, timed_out)
+    if form is None:
+        return f"broken: live-checkout.sh content: {_said(rc, out, timed_out)}", "broken", tip, branch
+    if form == "busy":
+        return f"{base}: repair waits ({m.group(1)})", "diverged", tip, branch
+    if form == "unreadable":
+        return f"unreadable: {m.group(1)}", "unreadable", tip, branch
+    head = git(d, "rev-parse", "-q", "--verify", "HEAD^{commit}")[1]
+    if not HEX40.match(head):
+        return "unreadable: HEAD names no commit", "unreadable", tip, branch
+    h = hold(d)
+    if h:
+        return f"{base}: repair held: {h}", "diverged", tip, branch
+    if form == "landed":
+        return _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra)
+    return _carry(d, primary, branch, tip, head, base, dry_run, now, entry, extra)
+
+
+def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra):
+    """The reset of a primary whose ahead commits are all on origin by content: a backup ref, then `reset --keep`."""
+    where = f"reset {head[:12]} to origin/{branch} at {tip[:12]}"
+    why = f"ahead {counts[0]}, behind {counts[1]}: their content is already on origin"
+    rc, out, _, timed_out = _lc(lc, "overlap", d, f"refs/remotes/origin/{branch}")
+    form, m = _form(OVERLAP_FORMS, rc, out, timed_out)
+    if form is None:
+        return f"broken: live-checkout.sh overlap: {_said(rc, out, timed_out)}", "broken", tip, branch
+    if form == "overlap":
+        return f"{base}: repair refused: local changes overlap origin/{branch} ({m.group(1)})", "diverged", tip, branch
+    if dry_run:
+        return f"would {where} ({why})", "dry", tip, branch
+    if git(d, "rev-parse", "-q", "--verify", "HEAD^{commit}")[1] != head:
+        return f"{base}: repair waits (HEAD moved during the pass)", "diverged", tip, branch
+    ref = "refs/thread/primary-backup/" + re.sub(r"[^0-9T]", "", _STAMP[:19])
+    urc, _, uerr = git(d, "update-ref", ref, head, "0" * 40)
+    if urc != 0:
+        return f"broken: cannot write the backup ref {ref} ({_why_line(uerr) or urc})", "broken", tip, branch
+    rrc, _, rerr, rto = _run(["git", "-C", str(d), "reset", "--keep", tip], ff_timeout)
+    if rto:
+        return (f"timed out: git reset --keep ran past {ff_timeout} s and was stopped: the working tree may be partly "
+                f"updated (git -C {d} status)", "timed-out", tip, branch)
+    if rrc != 0:
+        git(d, "update-ref", "-d", ref, head)
+        return f"{base}: repair refused: git reset --keep: {_why_line(rerr) or rrc}", "diverged", tip, branch
+    now_head = git(d, "rev-parse", "-q", "--verify", "HEAD^{commit}")[1]
+    if now_head != tip:
+        return (f"broken: git reset --keep said done, HEAD is {now_head[:12] or 'unreadable'}, not {tip[:12]} (backup "
+                f"{ref})", "broken", tip, branch)
+    line = f"repaired: {where} ({why}; backup {ref})"
+    extra["record"] = {"since": _STAMP, "kind": "repaired", "kindSince": _STAMP, "outcome": line, "backup": ref,
+                       "head": head, "tip": tip}
+    return line, None, tip, branch
+
+
+def _carry(d, primary, branch, tip, head, base, dry_run, now, entry, extra):
+    """The carry of a diverged primary's local commits to a landing PR, by land.sh: once per head while queued, retried
+    after CARRY_RETRY otherwise."""
+    prev = entry.get("repair") if isinstance(entry, dict) else None
+    if isinstance(prev, dict) and prev.get("head") == head:
+        result = str(prev.get("result") or "")
+        if result.startswith("queued"):
+            return f"{base}: carried: {result}", "diverged", tip, branch
+        at = _parse_iso(prev.get("at"))
+        if at is not None and now - at < CARRY_RETRY:
+            return f"{base}: not carried ({result})", "diverged", tip, branch
+    if dry_run:
+        return f"would carry {head[:12]} to a landing PR ({base})", "dry", tip, branch
+    land = Path(primary) / LAND_REL
+    if not land.is_file():
+        return f"broken: no {LAND_REL} in the primary", "broken", tip, branch
+    rc, out, err, timed_out = _run(["bash", str(land), "--", str(d)], CARRY_TIMEOUT)
+    if timed_out:
+        result = f"land.sh ran past {CARRY_TIMEOUT} s and was stopped"
+    elif (rc == 0 and out.startswith(("queued", "landed", "not landed:"))) or (rc == 1 and out.startswith("stuck:")):
+        result = _flat(out)
+    else:
+        said = _said(rc, out) + (f": {_last_line(err, 120)}" if err else "")
+        return f"broken: land.sh: {said}", "broken", tip, branch
+    extra["repair"] = {"head": head, "at": _STAMP, "result": result}
+    if result == "landed":
+        return f"{base}: carried: landed", None, tip, branch
+    if result.startswith("queued"):
+        return f"{base}: carried: {result}", "diverged", tip, branch
+    return f"{base}: not carried ({result})", "diverged", tip, branch
 
 
 # ---- state and the stuck read ---------------------------------------------------------------------------------------
@@ -631,9 +779,9 @@ def _stuck_text(key, e):
 
 def _due(e, now):
     """A spell on the Primary refresh line: 24 h from since (STUCK_AFTER), or at once for timed-out; never a since in
-    the future."""
+    the future, and never a repair's record (kind repaired)."""
     since = _parse_iso(e.get("since"))
-    if since is None or since > now:
+    if since is None or since > now or e.get("kind") == "repaired":
         return False
     return e.get("kind") == "timed-out" or now - since >= STUCK_AFTER
 
@@ -942,14 +1090,21 @@ def cmd_run(args):
     before = json.dumps(stuck, sort_keys=True)
     tip, branch = None, None
     for d, is_primary in targets:
-        outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout)
+        entry, extra = stuck.get(str(d)), {}
+        outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout, now, entry, extra)
         _line(d, outcome)
         if is_primary:
             tip, branch = t, b
+        if "record" in extra:
+            stuck[REPAIRED + str(d)] = extra.pop("record")
+        if kind == "diverged" and is_primary and entry is not None:  # d4: a repair blocked a day is recorded stuck
+            since = _parse_iso(entry.get("since"))
+            if since is not None and now - since >= STUCK_AFTER:
+                kind = "stuck"
         if kind is None:
             stuck.pop(str(d), None)
         elif kind != "dry":
-            _spell(stuck, str(d), kind, outcome, stamp)
+            _spell(stuck, str(d), kind, outcome, stamp, **extra)
     if INSTALLED and tip is not None:
         try:
             line, kind = self_update(primary, branch, tip, args, stuck, now, stamp)
@@ -994,7 +1149,7 @@ def _prune(primary, also):
     entries, corrupt = BJ.read_state(path, "primary-refresh", "stuck", STATE_VERSION)
     if corrupt:
         return
-    watched = {"self-update", "job", str(primary)} | {str(_real(a)) for a in also}
+    watched = {"self-update", "job", str(primary), REPAIRED + str(primary)} | {str(_real(a)) for a in also}
     dropped = [k for k in entries if k not in watched]
     if not dropped:
         return

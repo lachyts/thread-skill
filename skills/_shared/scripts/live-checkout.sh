@@ -62,6 +62,19 @@
 #                              doc left on disk never hold the checkout back). lc_doc loses nothing: the copy on disk
 #                              stays, and origin's is in history.
 #                              lc_overlap_ref, leg.py's overlap mode, stays strict.
+#   lc_busy <repo> <d>         why the checkout must not be moved, on stdout, rc 0, else rc 1: `index.lock present`, a
+#                              half-applied operation in words (`a rebase in progress`, a merge, cherry-pick, revert,
+#                              bisect, or `a cherry-pick or revert sequence in progress`), `HEAD detached`, or `on
+#                              <cur>, not <d>`, in that order. lc_check's busy form and the content mode's.
+#   lc_ahead_content <repo> <up> <ref>
+#                              the content test (ADR 0078 d4; pushed-base.sh's block runs it too): whether the commits
+#                              <ref> has over <up> are already on <up> by content. NUL-terminated records on stdout, in
+#                              order: `T<path>` for each file those commits touch (`diff --no-renames <up>...<ref>`),
+#                              `D<path>` for each of them that differs between <up> and <ref>, and last `=<rc>`: 0 no
+#                              touched file differs (`diff --quiet`), 1 some do, 3 the commits touch no file, any other a
+#                              git failure. Ancestry alone over-counts: a commit landed by a squash or cherry-pick stays
+#                              "ahead" for ever. rc 0 always; the result is the last record. An ahead set that touches no
+#                              file, or a failure, is never "on origin".
 #   lc_ff <repo> <d>           the overlap first: one prints its paths and returns 3, running nothing, so ORIG_HEAD is
 #                              never rewritten (a refused `merge --ff-only` writes it). Origin's blob is staged for
 #                              each overlap path still on disk (git's two-way merge keeps an index entry that matches
@@ -83,7 +96,7 @@
 #
 # Run modes, `bash live-checkout.sh <mode> <repo> [<d> | <ref>]`, scrub the caller's repo-local git env (git's own list,
 # the two config channels kept) and unset CDPATH first. Their output and exit codes are a contract: default, fetch,
-# check and ff are primary-refresh.py's, which parses them strictly (anything else reads as `broken:` there, never as
+# check, ff and content are primary-refresh.py's, which parses them strictly (anything else reads as `broken:` there, never as
 # current or moved), and overlap is leg.py's (ff_primary reads anything else as broken, WARNs, and lets git's own
 # refusal guard its merge), so change each together with its reader:
 #   default <repo>   lc_default_local, else lc_ssh_rule and lc_default: the branch on stdout, exit 0; exit 1 when
@@ -92,6 +105,12 @@
 #                    failed fetch never exits 0.
 #   check <repo> <d> lc_check's one line, exit 0.
 #   ff <repo> <d>    exactly one line, exit 0: `moved <old40> <new40>`, `overlap <paths>` or `refused <why>`.
+#   content <repo> <d>
+#                    primary-refresh.py's repair read of a diverged checkout (ADR 0078 d4), exactly one line, exit 0, the
+#                    first that holds: `busy <why>` (lc_busy, so HEAD is on <d> after it), `unreadable <why>` (git failed,
+#                    or said differs and listed nothing), `untouched` (the commits ahead touch no file), `landed <n>` (no
+#                    file of the <n> they touch differs from origin/<d>) or `unlanded <k> <paths>` (<k> of them differ,
+#                    `, `-joined and cut to 200 characters).
 #   overlap <repo> <ref>
 #                    <ref> a full ref (it starts `refs/`): exactly one line, exit 0, `overlap <paths>` (lc_overlap_ref's)
 #                    or `clear`. A <ref> that does not resolve reads `clear`, lc_overlap's fail-open rule.
@@ -219,6 +238,49 @@ lc_overlap() {
   done | _lc_join
 }
 
+lc_busy() {
+  local _lc_l _lc_m _lc_cur
+  _lc_l=$(git -C "${1:-}" rev-parse --path-format=absolute --git-path index.lock 2>/dev/null) || _lc_l=
+  if [ -n "$_lc_l" ] && [ -e "$_lc_l" ]; then echo "index.lock present"; return 0; fi
+  if _lc_m=$(lc_op "${1:-}"); then
+    case "$_lc_m" in
+      rebase-merge|rebase-apply) _lc_m="a rebase" ;;
+      MERGE_HEAD) _lc_m="a merge" ;;
+      CHERRY_PICK_HEAD) _lc_m="a cherry-pick" ;;
+      REVERT_HEAD) _lc_m="a revert" ;;
+      BISECT_LOG) _lc_m="a bisect" ;;
+      *) _lc_m="a cherry-pick or revert sequence" ;;
+    esac
+    echo "$_lc_m in progress"; return 0
+  fi
+  _lc_cur=$(git -C "${1:-}" symbolic-ref -q --short HEAD 2>/dev/null) || { echo "HEAD detached"; return 0; }
+  if [ "$_lc_cur" != "${2:-}" ]; then echo "on $_lc_cur, not ${2:-}"; return 0; fi
+  return 1
+}
+
+lc_ahead_content() {
+  local _lc_f _lc_rc
+  local -a _lc_t=()
+  while IFS= read -r -d '' _lc_f; do
+    _lc_t+=("$_lc_f"); printf 'T%s\0' "$_lc_f"
+  done < <(git -C "${1:-}" diff --no-renames --name-only -z "${2:-}...${3:-}" 2>/dev/null)
+  if [ ${#_lc_t[@]} -eq 0 ]; then
+    # No records is a commit set that touches nothing, or a listing that failed (its stderr is dropped above).
+    git -C "${1:-}" diff --no-renames --name-only "${2:-}...${3:-}" >/dev/null 2>&1 && _lc_rc=0 || _lc_rc=$?
+    if [ "$_lc_rc" != 0 ]; then printf '=%s\0' "$_lc_rc"; return 0; fi
+    printf '=3\0'; return 0
+  fi
+  # --quiet first: its exit status is the answer (0 same, 1 differs, else a failure).
+  git -C "${1:-}" --literal-pathspecs diff --quiet --no-renames "${2:-}" "${3:-}" -- "${_lc_t[@]}" >/dev/null 2>&1 \
+    && _lc_rc=0 || _lc_rc=$?
+  if [ "$_lc_rc" = 1 ]; then
+    while IFS= read -r -d '' _lc_f; do
+      printf 'D%s\0' "$_lc_f"
+    done < <(git -C "${1:-}" --literal-pathspecs diff --no-renames --name-only -z "${2:-}" "${3:-}" -- "${_lc_t[@]}" 2>/dev/null)
+  fi
+  printf '=%s\0' "$_lc_rc"
+}
+
 lc_ff() {
   local _lc_o _lc_x _lc_b _lc_m _lc_added= _lc_r="refs/remotes/origin/${2:-}"
   _lc_o=$(lc_overlap "${1:-}" "${2:-}")
@@ -246,7 +308,7 @@ _LC_EOF
 }
 
 lc_check() {
-  local _lc_h _lc_t _lc_a _lc_b _lc_m _lc_cur _lc_o _lc_l
+  local _lc_h _lc_t _lc_a _lc_b _lc_m _lc_o
   _lc_h=$(git -C "${1:-}" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     || { echo "unreadable HEAD names no commit"; return 0; }
   _lc_t=$(git -C "${1:-}" rev-parse -q --verify "refs/remotes/origin/${2:-}^{commit}" 2>/dev/null) \
@@ -261,21 +323,7 @@ lc_check() {
   fi
   if [ "$_lc_b" = 0 ]; then echo "ahead $_lc_t $_lc_a"; return 0; fi
   if [ "$_lc_a" != 0 ]; then echo "diverged $_lc_t $_lc_a $_lc_b"; return 0; fi
-  _lc_l=$(git -C "${1:-}" rev-parse --path-format=absolute --git-path index.lock 2>/dev/null) || _lc_l=
-  if [ -n "$_lc_l" ] && [ -e "$_lc_l" ]; then echo "busy $_lc_t index.lock present"; return 0; fi
-  if _lc_m=$(lc_op "${1:-}"); then
-    case "$_lc_m" in
-      rebase-merge|rebase-apply) _lc_m="a rebase" ;;
-      MERGE_HEAD) _lc_m="a merge" ;;
-      CHERRY_PICK_HEAD) _lc_m="a cherry-pick" ;;
-      REVERT_HEAD) _lc_m="a revert" ;;
-      BISECT_LOG) _lc_m="a bisect" ;;
-      *) _lc_m="a cherry-pick or revert sequence" ;;
-    esac
-    echo "busy $_lc_t $_lc_m in progress"; return 0
-  fi
-  _lc_cur=$(git -C "${1:-}" symbolic-ref -q --short HEAD 2>/dev/null) || { echo "busy $_lc_t HEAD detached"; return 0; }
-  if [ "$_lc_cur" != "${2:-}" ]; then echo "busy $_lc_t on $_lc_cur, not ${2:-}"; return 0; fi
+  if _lc_m=$(lc_busy "${1:-}" "${2:-}"); then echo "busy $_lc_t $_lc_m"; return 0; fi
   _lc_o=$(lc_overlap "${1:-}" "${2:-}")
   if [ -n "$_lc_o" ]; then echo "overlap $_lc_t $_lc_b $_lc_o"; return 0; fi
   echo "behind $_lc_t $_lc_b $_lc_h"
@@ -288,7 +336,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     case $_lc_v in GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS) ;; *) unset "$_lc_v" ;; esac
   done
   unset CDPATH
-  _lc_usage="live-checkout: usage: live-checkout.sh default <repo> | fetch <repo> <branch> | check <repo> <branch> | ff <repo> <branch> | overlap <repo> <refs/…>"
+  _lc_usage="live-checkout: usage: live-checkout.sh default <repo> | fetch <repo> <branch> | check <repo> <branch> | ff <repo> <branch> | content <repo> <branch> | overlap <repo> <refs/…>"
   case "${1:-}" in
     default)
       [ $# -eq 2 ] && [ -n "$2" ] || { echo "$_lc_usage" >&2; exit 2; }
@@ -311,6 +359,25 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
            echo "moved $_lc_old $_lc_new" ;;
         3) echo "overlap $_lc_o" ;;
         *) echo "refused ${_lc_o:-git merge --ff-only failed}" ;;
+      esac
+      exit 0 ;;
+    content)
+      [ $# -eq 3 ] && [ -n "$2" ] && [ -n "$3" ] || { echo "$_lc_usage" >&2; exit 2; }
+      if _lc_w=$(lc_busy "$2" "$3"); then echo "busy $_lc_w"; exit 0; fi
+      _lc_n=0 _lc_k=0 _lc_ps= _lc_rc=
+      while IFS= read -r -d '' _lc_r; do
+        case "$_lc_r" in
+          T*) _lc_n=$((_lc_n + 1)) ;;
+          D*) _lc_k=$((_lc_k + 1)); _lc_ps="$_lc_ps${_lc_ps:+, }${_lc_r#D}" ;;
+          =*) _lc_rc=${_lc_r#=} ;;
+        esac
+      done < <(lc_ahead_content "$2" "refs/remotes/origin/$3" "refs/heads/$3")
+      case "$_lc_rc" in
+        0) echo "landed $_lc_n" ;;
+        3) echo "untouched" ;;
+        1) if [ "$_lc_k" -gt 0 ]; then echo "unlanded $_lc_k $(printf '%s' "$_lc_ps" | tr '\t\n' '  ' | cut -c1-200)"
+           else echo "unreadable git said the files differ and listed none"; fi ;;
+        *) echo "unreadable git diff failed (${_lc_rc:-no result})" ;;
       esac
       exit 0 ;;
     overlap)
