@@ -47,7 +47,7 @@ outside --kinds is never written, even as a dependency.
      action is `landed, carried (status: review)` (rule 2) keeps the phase out of both lists, one `skipped`
      line `phase <slug> left open: [[<task>]] lands carried (ADR 0078 d1)`: its fix is not done until Proven.
      One that lands owed (`status: done`) closes it as before; prove's carry-back reopens it once that note goes
-     back to review (reconcile-rollout.py's _reopen_phases).
+     back to review and its judge leaves it there (reconcile-rollout.py's _carry_back_close).
    - A QUIET task keeps the phase out of both lists, whatever its other tasks are: a hold, a task at
      `review` under a live rollout (status/repair own that step: the queue integrates it and `resume` lands it
      once its PR merges) or with no `rollout:` at all (a human review step, nothing to repair), a carried fix

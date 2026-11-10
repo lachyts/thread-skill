@@ -930,10 +930,12 @@ Subcommands:
               One walk per call (_walk_of, Archive included, never shared: prove writes notes). It judges carried fixes
               in the tasks dir's root only, and carries back the candidates (_carry_back_candidate) in the root and
               Archive/ (never Archive/Rollouts/): an archived one is moved back to the root first (_move_no_clobber),
-              then written `status: review` with `completed:` removed, and its phase, when done, reopened
-              (_reopen_phases: `status: open`, `completed:` removed, moved back from Work/Phases/Archive/ first, so
-              the daily sweep closes it again once its last fix is Proven). A carried fix in Archive/ is reported
-              `archived while carried: not judged`. The judge (_prove_judge): its readers re-check (_carry_readers
+              then written `status: review` with `completed:` removed and judged in the same pass. Its phase, when
+              done, is reopened only once the judge leaves it carried (_carry_back_close, then _reopen_phases:
+              `status: open`, `completed:` removed, moved back from Work/Phases/Archive/ first, so the daily sweep
+              closes it again once its last fix is Proven); one proven in the same pass leaves its phase as it is.
+              prove never closes a phase. A carried fix in Archive/ is reported `archived while carried: not judged`.
+              The judge (_prove_judge): its readers re-check (_carry_readers
               False -> _owed_write), a RACE revert (never Live), the merge commit (merge_commit:, else gh,
               PROVE_GH_TIMEOUT), Live (a live entry's head holds it: `live: <now>`; unwatched: `live:` = `merged:`),
               then each clears: item (_item_moved); every item moved, or none -> `status: done`, `proven: <date>`, no
@@ -14112,12 +14114,13 @@ def _phases_dir(tasks_dir) -> Path:
 def _reopen_phases(stem, tasks_dir, dry_run):
     """[clause]: carry-back's phase write (ADR 0078 d1). A phase note (tagged `phase`) at `status: done` whose literal
     prefix `<slug>-p<N>-` (PHASED_STEM_RE on its own name, the prefix the daily sweep's PHASE CLOSE and
-    reconcile-project key on) starts the carried-back task's name is a done that lies once its fix is back at review:
-    it is reopened, `status: open` with `completed:` removed, so the daily sweep's PHASE CLOSE closes it again once its
-    last fix is Proven. Read in Work/Phases/ and its Archive/** (where the sweep files a done phase): an archived one is
-    moved back to the root first (_move_no_clobber), since PHASE CLOSE and reconcile-project read the root only, and a
-    root note of the same name leaves it as it is. Each clause joins the carry-back's Proof log line: `phase [[<p>]]
-    reopened[ from Archive/]`, or `phase [[<p>]] not reopened: <why>`. --dry-run moves and writes nothing."""
+    reconcile-project key on) starts the carried-back task's name is a done that lies once its fix is back at review: it
+    is reopened, `status: open` with `completed:` removed, so the daily sweep's PHASE CLOSE closes it again once its
+    last fix is Proven. Its one caller, _carry_back_close, runs it only for a fix the judge leaves carried. Read in
+    Work/Phases/ and its Archive/** (where the sweep files a done phase): an archived one is moved back to the root
+    first (_move_no_clobber), since PHASE CLOSE and reconcile-project read the root only, and a root note of the same
+    name leaves it as it is. Each clause joins the carry-back's Proof log line: `phase [[<p>]] reopened[ from
+    Archive/]`, or `phase [[<p>]] not reopened: <why>`. --dry-run moves and writes nothing."""
     pdir = _phases_dir(tasks_dir)
     if not pdir.is_dir():
         return []
@@ -14158,24 +14161,25 @@ def _reopen_phases(stem, tasks_dir, dry_run):
 
 
 def _carry_back(path, note, tasks_dir, walk, now, dry_run, memo=None):
-    """(kind, detail, Note) for one carry-back candidate: ("waits", why, None) while _carry_readers reads False, a root
-    note of the same name exists or the source moved meanwhile; ("error", why, None) on a failed move or save; else
-    ("carried", detail, note) with the note at `status: review`, `completed:` removed, its done phase reopened
-    (_reopen_phases) and the Proof log line `carried back: landed at status: done, never Proven (ADR 0078 d1)[; from
-    Archive/][; completed: <v> removed][; phase [[<p>]] reopened[ from Archive/]]`, `detail` that line's clauses
-    after `from Archive/` ("" when none). An archived candidate is moved back to the root first (_move_no_clobber: a
-    hard link, so no copy and no torn file), and only then is a fresh Note read and saved (Note.save keeps its created
-    time and Finder tags; it refuses a moved path, so the walk's Note is never saved). The phase is written before the
-    task's save, so a save that fails leaves a candidate the next pass carries back, its phase already open. --dry-run
-    moves and writes nothing: the Note returned holds the edits in memory."""
+    """(kind, detail, Note, logged) for one carry-back candidate: ("waits", why, None, None) while _carry_readers reads
+    False, a root note of the same name exists or the source moved meanwhile; ("error", why, None, None) on a failed
+    move or read; else ("carried", detail, note, logged), in memory and unsaved: the note at `status: review` with
+    `completed:` removed and `logged`, its Proof log line `- <stamp> carried back: landed at status: done, never Proven
+    (ADR 0078 d1)[; from Archive/][; completed: <v> removed]`, `detail` that line's clauses after `from Archive/` (""
+    when none). The caller judges it, then _carry_back_close adds the phase clause (its done phase reopened only when
+    the judge leaves it carried), and only then saves it. An archived candidate is moved back to the root first
+    (_move_no_clobber: a hard link, so no copy and no torn file), and only then is a fresh Note read (Note.save keeps
+    its created time and Finder tags; it refuses a moved path, so the walk's Note is never saved). A save that fails
+    after the move leaves it in the root at done, a candidate the next pass carries back in place. --dry-run moves
+    nothing: the Note returned reads the candidate where it is."""
     ok, why = _carry_readers(note, tasks_dir, walk, memo)
     if not ok:
-        return "waits", why, None
+        return "waits", why, None, None
     archived = _note_place(path, tasks_dir) == "archive"
     dst = Path(tasks_dir) / Path(path).name
     shown = "/".join(dst.parts[-3:])
     if archived and dst.exists():
-        return "waits", f"{shown} exists", None
+        return "waits", f"{shown} exists", None, None
     try:
         if dry_run:
             fresh = Note(Path(path), Path(path).read_text())
@@ -14184,28 +14188,49 @@ def _carry_back(path, note, tasks_dir, walk, now, dry_run, memo=None):
                 try:
                     _move_no_clobber(Path(path), dst)
                 except FileExistsError:
-                    return "waits", f"{shown} exists", None
+                    return "waits", f"{shown} exists", None, None
                 except FileNotFoundError:
-                    return "waits", "moved meanwhile", None
+                    return "waits", "moved meanwhile", None, None
             fresh = Note(dst)
     except FileNotFoundError:
-        return "waits", "moved meanwhile", None
+        return "waits", "moved meanwhile", None, None
     except (OSError, ValueError, MoveError) as e:
-        return "error", f"carry-back of {Path(path).name} failed: {e}", None
+        return "error", f"carry-back of {Path(path).name} failed: {e}", None, None
     completed = _scalar(fresh.get("completed"))
     fresh.set("status", "review")
     fresh.remove("completed")
-    clauses = ([f"completed: {completed} removed"] if completed else []) + \
-        _reopen_phases(Path(path).stem, tasks_dir, dry_run)
-    line = "carried back: landed at status: done, never Proven (ADR 0078 d1)" + ("; from Archive/" if archived else "") + \
-        "".join(f"; {c}" for c in clauses)
-    fresh.append_line(PROOF_LOG_SECTION, f"- {_stamp(now)} {line}")
-    if not dry_run:
-        try:
-            fresh.save()
-        except OSError as e:
-            return "error", f"carry-back of {dst.name} not saved: {e}", None
-    return "carried", "; ".join(clauses), fresh
+    clauses = [f"completed: {completed} removed"] if completed else []
+    logged = f"- {_stamp(now)} carried back: landed at status: done, never Proven (ADR 0078 d1)" + \
+        ("; from Archive/" if archived else "") + "".join(f"; {c}" for c in clauses)
+    fresh.append_line(PROOF_LOG_SECTION, logged)
+    return "carried", "; ".join(clauses), fresh, logged
+
+
+def _extend_line(note, heading, line, extra):
+    """Note.apply's edit: the last `line` under `heading` becomes `line` + `extra` (none there: no change)."""
+    found = note._section_bounds(heading)
+    if found is None:
+        return
+    lines, start, end = found
+    for i in range(end - 1, start, -1):
+        if lines[i].rstrip() == line:
+            note._set_body_lines(lines[:i] + [line + extra] + lines[i + 1:])
+            return
+
+
+def _carry_back_close(note, stem, tasks_dir, logged, proven, dry_run):
+    """[clause]: the phase write of a note carried back this pass, once its judge has run (ADR 0078 d1). Proven in the
+    same pass, it leaves its phase as it is ([]): a done phase over a fix that is done is no lie, and a reopen would
+    only have the sweep close it again with a new `completed:`. Left carried (or not judged: a refused --seen), it
+    reopens its done phase (_reopen_phases), each clause joining its carry-back line `logged` in memory. The caller
+    saves the note after this phase write, so a save that fails leaves a candidate the next pass carries back, its phase
+    already open."""
+    if proven:
+        return []
+    clauses = _reopen_phases(stem, tasks_dir, dry_run)
+    if clauses:
+        note.apply(_extend_line, PROOF_LOG_SECTION, logged, "".join(f"; {c}" for c in clauses))
+    return clauses
 
 
 def _melbourne_date(dt):
@@ -14643,9 +14668,10 @@ def cmd_prove(args) -> int:
         rollout = _note_rollout(note)
         rentry = walk.index.get(rollout.lower()) if rollout else None
         rnote = rentry[1] if rentry else None
+        back = None   # (archived, detail, logged) for a note carried back in this pass
         if cand:
             archived = place == "archive"
-            kind, detail, fresh = _carry_back(path, note, tasks_dir, walk, now, args.dry_run, c.memo)
+            kind, detail, fresh, logged = _carry_back(path, note, tasks_dir, walk, now, args.dry_run, c.memo)
             if kind == "waits":
                 if args.seen is not None:  # landed at done, not carried: no item of it can be recorded yet
                     print(f"ERROR: prove: {slug}: not a carried fix (landed, carry-back waits: {detail}): nothing "
@@ -14666,9 +14692,7 @@ def cmd_prove(args) -> int:
                 errors.append(f"{slug}: {detail}")
                 lines.append(f"{slug}: carry-back failed ({detail})")
                 continue
-            carried_back.append({"slug": slug, "archived": archived})
-            lines.append(f"{slug}: {'would carry back' if args.dry_run else 'carried back'}"
-                         f"{' from Archive/' if archived else ''} (status: review{'; ' + detail if detail else ''})")
+            back = (archived, detail, logged)
             note, path = fresh, (path if args.dry_run else tasks_dir / path.name)
         elif slug.lower() != just_landed:
             ok, why = _carry_readers(note, tasks_dir, walk, c.memo)
@@ -14691,13 +14715,27 @@ def cmd_prove(args) -> int:
         if args.seen is not None:
             got = _prove_seen(args, note, slug, c)
             if got is not None:
+                if back is not None:   # the item is not recorded; the carry-back, left at review, still is
+                    _carry_back_close(note, slug, tasks_dir, back[2], False, args.dry_run)
+                    try:
+                        note.save(dry_run=args.dry_run)
+                    except OSError as e:
+                        print(f"ERROR: prove: {slug}: carry-back not written: {e}", file=sys.stderr)
                 return got
         res = _prove_judge(note, rnote, c)
+        clauses = _carry_back_close(note, slug, tasks_dir, back[2], res["proven"], args.dry_run) if back else []
         try:
             note.save(dry_run=args.dry_run)
         except OSError as e:
-            errors.append(f"{slug}: not written: {e}")
+            errors.append(f"{slug}: {'carry-back ' if back else ''}not written: {e}")
+            if back is not None:
+                lines.append(f"{slug}: carry-back failed (not written: {e})")
             continue
+        if back is not None:
+            archived, detail = back[0], "; ".join(([back[1]] if back[1] else []) + clauses)
+            carried_back.append({"slug": slug, "archived": archived})
+            lines.append(f"{slug}: {'would carry back' if args.dry_run else 'carried back'}"
+                         f"{' from Archive/' if archived else ''} (status: review{'; ' + detail if detail else ''})")
         if res["proven"]:
             proven.append(_prove_entry(note, path, proven=res["date"]))
             lines.append(f"{slug}: {would}prove (done; proven: {res['date']})" if args.dry_run else

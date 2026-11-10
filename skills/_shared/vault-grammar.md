@@ -265,15 +265,17 @@ fix still unproven; `owed` every note at done whose Proof log's last entry is th
 entry holds `landed, carry-back owed`. Once `_carry_readers` reads True, prove moves an archived candidate back to the
 root first (a hard link, then a fresh read saved through `Note.save`, which keeps its created time and Finder tags),
 then writes `status: review`, removes `completed:` and logs `carried back: landed at status: done, never Proven (ADR
-0078 d1)[; from Archive/][; completed: <v> removed][; phase [[<p>]] reopened[ from Archive/]]`. A root note of the
-same name makes it wait.
+0078 d1)[; from Archive/][; completed: <v> removed][; phase [[<p>]] reopened[ from Archive/]]`, and judges it in the
+same pass. A root note of the same name makes it wait.
 
 **The phase a carry-back reopens.** A phase note at `status: done` whose literal prefix `<slug>-p<N>-` starts the
-carried-back task's name (§ Phase and task filenames) is a done over a fix that is not: the carry-back
-(`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from `Work/Phases/Archive/`
-first when the daily sweep filed it there (a root note of the same name leaves it as it is, its clause `phase
-[[<p>]] not reopened: <why>`), so the sweep's PHASE CLOSE closes it again once its last fix is proven. A phase the
-completion ceremony or reconcile-project closed over an old engine's done or an owed landing is reopened this way.
+carried-back task's name (§ Phase and task filenames) is a done over a fix that is not: once the judge leaves the fix
+carried, the carry-back (`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from
+`Work/Phases/Archive/` first when the daily sweep filed it there (a root note of the same name leaves it as it is,
+its clause `phase [[<p>]] not reopened: <why>`), so the sweep's PHASE CLOSE closes it again once its last fix is
+proven. A fix the judge proves in the same pass leaves its phase as it is, `completed:` kept: that done is no lie.
+A phase the completion ceremony or reconcile-project closed over an old engine's done or an owed landing is reopened
+this way. prove never closes a phase.
 
 **The hook's mirror.** hooks/vault-note-overlap.py reads a review writer live only with a `pr:` and an unvalued
 `merged:`, `_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`), since loading

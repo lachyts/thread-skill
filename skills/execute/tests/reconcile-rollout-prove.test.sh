@@ -15,7 +15,8 @@
 #           Primary stand-in without the marker), the JSON and carried-fixes.json
 #   P26     reconcile's read-only approval lands through _land_outcome: a fix (clears:) carried, never done
 #   P27     --seen on a note whose carry-back waits, or that the re-check turns owed: exit 1, nothing recorded
-#   P28     carry-back reopens the done phase over its fix (root and Archive/), never another phase
+#   P28     carry-back reopens the done phase over a fix it leaves carried (root and Archive/), never another phase, and
+#           never a phase over a fix it proves in the same pass
 # Every row runs a seeded engine Primary's copy ($T/P, a main checkout holding this tree's files), never this tree's, so
 # an unstamped rollout's engine (git_primary) is a known one wherever the suite runs. Hermetic: HOME, the global git
 # config, the vaults, the events dir, the note locks and the live files are temp; gh is a stub; no network.
@@ -761,6 +762,26 @@ pv --tasks demo-p3-1-fix
 ok "$(fm demo-p3-1-fix.md status)|$(sums "$PH/Archive/demo-p3-fixes.md" "$PH/demo-p3-fixes.md")" "review|$before" \
    "P28: a root phase note of the same name leaves both phase notes as they are; the task is still carried back"
 has "$(proof demo-p3-1-fix.md)" "phase [[demo-p3-fixes]] not reopened: Work/Phases/demo-p3-fixes.md exists" "P28: … its clause says why"
+# An owed note with no clears:, unwatched: carried back and proven in the same pass, so its done phase is never touched.
+phase demo-p4-fixes.md done $'completed: 2026-11-10\n'
+BODY="$OWEDB" mk demo-p4-1-fix.md 'status: done' 'merged: 2026-11-11T08:00+00:00'
+before=$(sums "$PH/demo-p4-fixes.md")
+pv --tasks demo-p4-1-fix --dry-run
+ok "$(printf '%s\n' "$out" | grep '^demo-p4-1-fix: ')" "$(printf 'demo-p4-1-fix: would carry back (status: review)\ndemo-p4-1-fix: would prove (done; proven: 2026-11-11)')" \
+   "P28: --dry-run of a carry-back the judge proves names no phase"
+pv --tasks demo-p4-1-fix
+ok "$(fm demo-p4-1-fix.md status)|$(fm demo-p4-1-fix.md proven)|$(sums "$PH/demo-p4-fixes.md")" "done|2026-11-11|$before" \
+   "P28: a carry-back proven in the same pass leaves its done phase byte-identical (completed: kept)"
+hasnt "$(proof demo-p4-1-fix.md)" "phase [[" "P28: … and its Proof log names no phase"
+# A --seen refused after the carry-back (two items, no --item): the item is not recorded, the carry-back and its reopen are.
+phase demo-p5-fixes.md done $'completed: 2026-11-10\n'
+BODY="$OWEDB" mk demo-p5-1-fix.md 'status: done' 'merged: 2026-11-11T08:00+00:00' 'clears:' '  - "a"' '  - "b"'
+pv --tasks demo-p5-1-fix --seen "it moved"
+ok "$rc|$(fm demo-p5-1-fix.md status)|$(pfm demo-p5-fixes.md status)" "2|review|open" \
+   "P28: a --seen refused after a carry-back → exit 2; the note is carried back and its phase reopened"
+has "$(proof demo-p5-1-fix.md)" "carried back: landed at status: done, never Proven (ADR 0078 d1); phase [[demo-p5-fixes]] reopened" \
+    "P28: … its carry-back line names the phase"
+hasnt "$(proof demo-p5-1-fix.md)" "seen item" "P28: … and no seen item is recorded"
 MUT=$(hx 'print(mod._reopen_phases("demo-p9-1-fix", Path(argv[0]), True))
 f = Path(argv[1]) / "demo-p9-x.md"
 f.write_text("---\ntags: [phase]\nstatus: dropped\n---\n")
