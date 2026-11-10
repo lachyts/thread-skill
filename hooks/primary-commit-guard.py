@@ -8,17 +8,19 @@ imports fcntl), so the hook lets everything through there (docs/windows-setup.md
 
 What it does. It prints {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": ...}} when the Bash command would make a commit on the default branch of the Primary, the
-reason naming the command, the branch, the checkout and the remedy (a branch or a worktree, or land.sh). Otherwise it
-prints nothing. It always exits 0, nothing reaches stderr, and any exception lets the command through: it refuses only
-on positive evidence, so a command it cannot read runs.
+reason naming the command, the branch, the checkout and the remedy (a branch or a worktree, or land.sh; for a pull or
+a merge also `git pull --ff-only`, which is all a Primary that is only behind needs). Otherwise it prints nothing. It
+always exits 0, nothing reaches stderr, and any exception lets the command through: it refuses only on positive
+evidence, so a command it cannot read runs.
 
 Fast path: a payload that is not a Bash call, or a command that does not hold the text `git`, exits before any parsing.
 
 Reading the command. The text is split the way the shell would split it (Scan): separators, subshells, `$(...)` and
 backticks (their commands are read too), quotes, escapes, line continuations, comments, redirects and heredoc bodies,
-which are no commands. A word holding an expansion is unreadable, except $HOME and an unquoted leading ~. From each
-simple command, leading shell keywords (LEADERS), assignments and the wrappers (WRAPPERS) are dropped. Only a command
-whose first word is git, or a path ending /git, counts; `echo git commit` or a commit message's text never does.
+which are no commands. A word holding an expansion is unreadable, except $HOME, an unquoted leading ~ and a leading
+assignment, whose readable NAME= is kept (`FOO=$(date) git commit` is a commit, `GIT_DIR=$X git commit` moves the repo).
+From each simple command, leading shell keywords (LEADERS), assignments and the wrappers (WRAPPERS) are dropped. Only a
+command whose first word is git, or a path ending /git, counts; `echo git commit` or a commit message's text never does.
 
 Which checkout. The directory starts at the payload's cwd and follows the command's own `cd` and `pushd`, a subshell's
 ending with it, and then git's `-C` flags, relative to it. An unreadable or absent directory (`cd "$WT"`, `cd -`,
@@ -36,10 +38,10 @@ The default branch. Origin's: refs/remotes/origin/HEAD, read locally, else defau
 
 Which branch. HEAD's branch at the time of the call, except that the command's own earlier `git checkout` or
 `git switch` in the Primary moves it first (git checkout -b x && git commit is the remedy, and git checkout master &&
-git commit is the fault). A create names its branch; `git checkout <word>` is that branch when it exists here or on
-origin, a detached HEAD for any other revision, and moves nothing for a path (nor does any checkout with `--`); an
-unreadable target, `-` or --detach is no branch. `git rebase <upstream> <branch>` names its own target, and leaves
-HEAD on it.
+git commit is the fault). A create names its branch (`-b x`, `-bx`, `--create=x`); `git checkout <word>` is that
+branch when it exists here or on origin, a detached HEAD for any other revision, and moves nothing for a path (nor
+does any checkout with `--`); an unreadable target, `-` or --detach is no branch. `git rebase <upstream> <branch>`
+names its own target, and leaves HEAD on it.
 A detached HEAD is no branch, so it is let through.
 
 What makes a commit. git commit, merge, cherry-pick, am, rebase, revert and pull (a merging or rebasing one). Each
@@ -89,9 +91,14 @@ SPARED = {
 
 # ---- reading the shell text --------------------------------------------------------------------------------------
 
+def leading(word):
+    """True for a word read past on the way to a simple command's name: a keyword, a wrapper or an assignment."""
+    return bool(word) and (word in LEADERS or word in WRAPPERS or ASSIGN_RE.match(word) is not None)
+
+
 class Scan:
-    """The shell text as events in `out`: a simple command's words (None for one holding an expansion), and "(" and
-    ")" around a subshell or substitution."""
+    """The shell text as events in `out`: a simple command's words (None for one holding an expansion, a leading
+    assignment's readable part kept instead), and "(" and ")" around a subshell or substitution."""
 
     def __init__(self, text):
         self.s, self.i, self.out, self.docs = text, 0, [], []
@@ -209,27 +216,32 @@ class Scan:
 
     def words(self, closer):
         """Commands until `closer` (consumed) or the end of the text."""
-        cmd, buf, known, drop = [], None, True, False
+        cmd, buf, known, drop, lead = [], None, True, False, True
 
         def add(text):
             nonlocal buf
-            buf = (buf or []) + [text]
+            if buf is None:
+                buf = []
+            buf.append(text)
 
         def end_word():
-            nonlocal buf, known, drop
+            nonlocal buf, known, drop, lead
             if buf is not None:
                 if drop:
                     drop = False
                 else:
-                    cmd.append("".join(buf) if known else None)
+                    text = "".join(buf)
+                    word = text if known or (lead and ASSIGN_RE.match(text)) else None
+                    lead = lead and leading(word)
+                    cmd.append(word)
             buf, known = None, True
 
         def end_cmd():
-            nonlocal cmd
+            nonlocal cmd, lead
             end_word()
             if cmd:
                 self.out.append(cmd)
-            cmd = []
+            cmd, lead = [], True
 
         while self.i < len(self.s):
             c = self.s[self.i]
@@ -312,16 +324,10 @@ def command_of(words):
     """(argv, moved): a simple command less its leading keywords, assignments and wrappers; moved when an assignment
     moves git's repo."""
     i, moved = 0, False
-    while i < len(words):
-        w = words[i]
-        m = ASSIGN_RE.match(w) if w else None
-        if w in LEADERS or w in WRAPPERS:
-            i += 1
-        elif m:
-            moved = moved or m.group(1) in REPO_ENV
-            i += 1
-        else:
-            break
+    while i < len(words) and leading(words[i]):
+        m = ASSIGN_RE.match(words[i])
+        moved = moved or (m is not None and m.group(1) in REPO_ENV)
+        i += 1
     return words[i:], moved
 
 
@@ -406,11 +412,16 @@ def switched(eng, primary, verb, args):
     when the call moves nothing."""
     if verb == "checkout" and "--" in args:
         return None
+    creates = CREATE_FLAGS[verb]
     for i, a in enumerate(args):
         if a is None:
             return ""
-        if a in CREATE_FLAGS[verb]:
+        if a in creates:
             return (args[i + 1] if i + 1 < len(args) else "") or ""
+        if a[:2] in creates:   # -b<name>
+            return a[2:]
+        if a.split("=", 1)[0] in creates:   # --create=<name>
+            return a.split("=", 1)[1]
         if a in ("--detach", "-d", "-"):
             return ""
         if a.startswith("-"):
@@ -469,11 +480,13 @@ def refusal(ops, eng):
         if branch is None:
             branch = eng.git_out(primary, "symbolic-ref", "--short", "-q", "HEAD", timeout=GIT_TIMEOUT) or ""
         if branch == default:
+            behind = (" If the Primary is only behind, `git pull --ff-only` brings it up to date, and the guard allows "
+                      "that." if verb in ("pull", "merge") else "")
             return ("Refused (ADR 0078 d3, hooks/primary-commit-guard.py): `git %s` would make a commit on `%s` in the "
                     "Primary checkout %s, the copy every session loads the plugin from. Nothing commits there: it only "
                     "fast-forwards. Do this on a branch or in a worktree (`git switch -c <name>`, `git worktree add`) "
-                    "and land it by PR; a close-out's paths go through %s."
-                    % (verb, default, primary, os.path.join(ROOT, "skills", "_shared", "scripts", "land.sh")))
+                    "and land it by PR; a close-out's paths go through %s.%s"
+                    % (verb, default, primary, os.path.join(ROOT, "skills", "_shared", "scripts", "land.sh"), behind))
     return None
 
 

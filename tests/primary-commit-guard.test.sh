@@ -116,6 +116,7 @@ VERBS = [  # the command, in cwd /c, and the verbs it counts as committing
     ("unset $(git rev-parse --local-env-vars 2>/dev/null); git commit -m x", C), ("git add a && git commit -m x", C),
     ("false || git commit -m x", C), ("echo x | git commit -F -", C), ("sleep 1 & git commit -m x", C),
     ("git add a\ngit commit -m x", C), ("git add a \\\n  && git \\\n  commit -m x", C), ("FOO=bar git commit -m x", C),
+    ("FOO=$(date) git commit -m x", C), ('GIT_AUTHOR_DATE="$(date)" git commit -m x', C),
     ("env FOO=bar git commit -m x", C), ("command git commit -m x", C), ("if true; then git commit -m x; fi", C),
     ("for i in 1; do git commit -m x; done", C), ("{ git commit -m x; }", C), ("/usr/bin/git commit -m x", C),
     ("git -c user.name=x --no-pager commit -m x", C), ("git commit -m x 2>&1 | tail -1", C),
@@ -143,7 +144,8 @@ DIRS = [  # cwd, the command, the directories its one call runs in
     ("/p", "cd; git commit -m x", [H]), ("/p", "cd -P /o; git commit -m x", ["/o"]),
     (None, "git commit -m x", [None]), (None, "git -C /p commit -m x", ["/p"]),
     ("/p", "GIT_DIR=/x/.git git commit -m x", []), ("/p", "git --git-dir=/x/.git commit -m x", []),
-    ("/p", "git --work-tree /x commit -m x", []),
+    ("/p", "git --work-tree /x commit -m x", []), ("/p", "GIT_DIR=$X git commit -m x", []),
+    ("/p", "git -C FOO=$X commit -m x", [None]),
 ]
 bad = [repr(r) for r in VERBS if [o[1] for o in ops("/c", r[0])] != r[1]]
 bad += [repr(r) for r in DIRS if [o[0] for o in ops(r[0], r[1])] != r[2]]
@@ -164,10 +166,17 @@ deny "$P" $'git commit -m "$(cat <<\'EOF\'\nIt\'s a "quoted" fix (really)\nEOF\n
 allow "$P" 'echo "git commit -m x"' "a quoted string"
 allow "$P" 'git pull --ff-only' "a fast-forward"
 deny "$P" 'git pull' "a pull that may merge"
+has "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecisionReason"]')" "git pull --ff-only" "a refused pull names the update the guard allows"
 
 # ── 4. which branch: the command's own switch ─────────────────────────────────────────────────────────────────────
 allow "$P" 'git checkout -b fix && git commit -m x' "the remedy: checkout -b, then commit"
 allow "$P" 'git switch -c fix && git commit -m x' "the remedy: switch -c, then commit"
+for create in 'switch --create=fix' 'switch --force-create=fix' 'switch --orphan=fix' 'checkout --orphan=fix' \
+              'checkout -bfix' 'checkout -Bfix' 'switch -cfix' 'switch -Cfix'; do
+  allow "$P" "git $create && git commit -m x" "the remedy, the name attached: git $create"
+done
+deny "$P" 'git checkout -Bmaster && git commit -m x' "an attached name is read: -B<default> is the fault"
+deny "$P" 'git switch --force-create=master && git commit -m x' "a --flag=name is read: --force-create=<default> is the fault"
 allow "$P" 'git switch feature; git commit -m x' "switch to an existing branch first"
 allow "$P" 'git checkout feature && git merge master' "checkout an existing branch first"
 allow "$P" 'git checkout --detach && git commit -m x' "detached first"
@@ -180,6 +189,7 @@ deny "$P" 'git checkout feature -- a && git commit -m x' "git checkout <rev> -- 
 git -C "$P" checkout -q feature
 deny "$P" 'git checkout master && git commit -m x' "from a branch, checkout master, then commit"
 deny "$P" 'git switch master; git merge feature' "from a branch, switch master, then merge"
+has "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecisionReason"]')" "git pull --ff-only" "a refused merge names the update the guard allows"
 allow "$P" 'git rebase origin/master' "rebase of the branch it is on"
 deny "$P" 'git rebase origin/master master' "rebase naming the default branch"
 deny "$P" 'git rebase --onto origin/master a1 master' "rebase --onto naming the default branch"
@@ -230,6 +240,8 @@ run "$P" "cd '$T/gone' && git commit -m x"; quiet "a cd into a directory that do
 run "$P" 'echo "unterminated'; quiet "an unterminated quote"
 run "$P" "$(python3 -c 'print("(" * 1100)') git commit"; quiet "nesting past the interpreter's limit"
 deny "$P" 'git commit -m x; echo "unterminated' "a commit before an unterminated quote is still read"
+H payload "$P" Bash 'git commit -m x' | env -u PYTHONDONTWRITEBYTECODE python3 "$HOOK" > "$T/out" 2> "$T/err"
+ok "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecision"]')" deny "a denied call with PYTHONDONTWRITEBYTECODE unset loads the engine"
 ok "$([ -e "$P/hooks/__pycache__" ] || [ -e "$P/skills/_shared/scripts/__pycache__" ] && echo y || echo n)" n "no bytecode is written into the plugin"
 
 # ── 8. wiring and floor ───────────────────────────────────────────────────────────────────────────────────────────
