@@ -14,6 +14,8 @@ place runs the full suite (ADR 0073 d1). Every run, `make test` included, checks
   test that names it (check d). It needs a map line only when it should be FULL or no test names it.
 - A new tests/fixtures/<d>/ needs a `tests/fixtures/<d>/** <consumers>` line (check e).
 - A new test that lists a directory joins the walkers' `** ALSO` line or an OWN-LISTINGS line (check f).
+- A new test that names a hub (a `HUB` line's path) or a tests/lib helper that does joins that hub's HUB line
+  (check i).
 
 tests/fast-tier.map is itself FULL, so a diff that edits it runs the full suite at both Checkpoints and at
 Integration: edit it only when a check names a missing line.
