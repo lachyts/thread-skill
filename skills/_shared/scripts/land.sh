@@ -695,12 +695,14 @@ move_branch() {
 
 # in_landing <rel>: <rel> is a handoff doc HEAD lacks that origin/<d> or a close/ tip already holds (the peer guard's
 # `keep landing`). Landing it again would add the same new file twice, and that PR would conflict with the first.
+# grep reads all of stdin (no -q): under this script's pipefail, stopping at the first blob leaves cat-file a next line
+# to die on (SIGPIPE), and a doc that is there would read as absent, the second landing this check exists to stop.
 in_landing() {
   case $1 in docs/handoffs/*|*/docs/handoffs/*) ;; *) return 1 ;; esac
   [ -e "$1" ] || return 1
   git cat-file -e "HEAD:$1" 2>/dev/null && return 1
   git for-each-ref --format="%(refname):$1" "refs/remotes/origin/$d" refs/remotes/origin/close/ 2>/dev/null \
-    | git cat-file --batch-check 2>/dev/null | grep -q ' blob '
+    | git cat-file --batch-check 2>/dev/null | grep ' blob ' >/dev/null
 }
 
 # scratch_build: S5 on a landable default branch. Stage the handed paths into a throwaway index (the checkout's own is

@@ -2152,6 +2152,10 @@ land -- --slug c79n -- "$W" "$D"
 res "case 79n" 0 "queued https://github.com/o/c79n/pull/1"
 C=$(made)
 printf -- '---\nthread: t\nstatus: pending\n---\nv2\n' > "$D"
+# close/ tips that sort after the doc's and lack it: a reader that stops at the first blob leaves cat-file a next line
+# to die on (SIGPIPE, which land.sh's pipefail reads as false), so nothing here depends on timing.
+H0=$(git -C "$W" rev-parse HEAD)
+for k in $(seq 100); do echo "create refs/remotes/origin/close/zz-$k $H0"; done | git -C "$W" update-ref --stdin
 land -- --slug c79n -- "$W" "$D"
 res "case 79n, the refresh" 0 landed
 has "$err" "land: kept docs/handoffs/h.md (its landing has not reached this checkout)" "case 79n: kept, and why"

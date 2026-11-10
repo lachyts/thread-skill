@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The peer guard in skills/_shared/handoff-lifecycle.md § Close-out, extracted by its marker and run against
 # runtime-generated fixtures (fresh, old, 23 h, 25 h, future mtime, paths with a space, a missing path, a
-# failing `find` stub first on PATH, a doc on origin that HEAD lacks, and `f` unset), under bash and under `zsh -f` when zsh is installed (the Bash tool is zsh). The snippet reads
+# failing `find` stub first on PATH, a doc on origin that HEAD lacks, also under pipefail, and `f` unset), under bash and under `zsh -f` when zsh is installed (the Bash tool is zsh). The snippet reads
 # its one input `f` (the doc's absolute path) as a shell variable; here it comes from the environment.
 # Then prose asserts: close's step 7.2 runs the guard for every consumed doc before any `git rm -f`, step 8
 # carries the kept/gone rows and the <age> expression, the lifecycle states rule (a)/(b), the K41
@@ -58,6 +58,8 @@ chmod +x "$tmp/badbin/find"
 
 # $1 is the shell, left unquoted so "zsh -f" splits into command and flag.
 guard() { out=$(env f="$2" $1 "$tmp/guard.sh" 2>/dev/null); rc=$?; }
+# guard_pipefail <shell> <path>: the same under pipefail (the guard's copy in land.sh runs under it).
+guard_pipefail() { out=$(env f="$2" $1 -o pipefail "$tmp/guard.sh" 2>/dev/null); rc=$?; }
 # guard_badfind <shell> <path>: the same, with the failing find stub ahead of the real one on PATH.
 guard_badfind() { out=$(env f="$2" PATH="$tmp/badbin:$PATH" $1 "$tmp/guard.sh" 2>/dev/null); rc=$?; }
 
@@ -71,6 +73,8 @@ lg update-ref refs/remotes/origin/close/x HEAD; lg checkout -q master; lg branch
 mkdir -p "$L"; lg checkout -q -b side; echo doc > "$L/d.md"; lg add -A; lg commit -qm d
 lg update-ref refs/remotes/origin/trunk HEAD; lg symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk; lg checkout -q master; lg branch -qD side
 mkdir -p "$L"; echo doc > "$L/h.md"; echo doc > "$L/d.md"; echo doc > "$L/old.md"; touch -t 202601010000 "$L/h.md" "$L/d.md" "$L/old.md"
+# close/ tips that sort after close/x and hold no doc: a guard that stops at the first blob leaves cat-file a next line to die on.
+base=$(lg rev-parse master); for k in $(seq 100); do echo "create refs/remotes/origin/close/zz-$k $base"; done | lg update-ref --stdin
 N="$tmp/n/docs/handoffs"; git init -q -b master "$tmp/n"; mkdir -p "$N"; echo doc > "$N/m.md"
 ng() { git -C "$tmp/n" -c user.name=t -c user.email=t@t "$@"; }
 ng commit -q --allow-empty -m base; ng add -A; ng commit -qm m; ng update-ref refs/remotes/origin/main HEAD; ng reset -q --hard HEAD~1
@@ -82,6 +86,7 @@ for sh in "${shells[@]}"; do
   guard "$sh" "$L/h.md"; ok "$out" "keep landing" "[$sh] an old doc HEAD lacks, on a close/ branch → keep landing"
   guard "$sh" "$L/d.md"; ok "$out" "keep landing" "[$sh] an old doc HEAD lacks, on origin's default branch → keep landing"
   guard "$sh" "$N/m.md"; ok "$out" "keep landing" "[$sh] the same with no origin/HEAD symref, on origin/main → keep landing"
+  guard_pipefail "$sh" "$L/h.md"; ok "$out" "keep landing" "[$sh] under pipefail, close/ tips after the doc's → still keep landing"
   guard "$sh" "$L/old.md"; ok "$out" delete "[$sh] an old doc no origin ref holds → delete"
   for pair in "fresh.md|keep fresh" "old.md|delete" "h23.md|keep fresh" "h25.md|delete" \
               "future.md|keep fresh" "a b.md|keep fresh" "old b.md|delete" "missing.md|keep missing"; do
