@@ -462,8 +462,10 @@ d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
 in exactly one shard; `--shard-plan N` is the dry run). Most code diffs still go FULL today, through the five hubs the map marks
 FULL (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`) and
-the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`, and the
-over-selection from message strings and FOREIGN names is `thread-skill-followup-fast-tier-over-selection`.
+the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`. A test that
+holds a FOREIGN name (`THREAD.md`, `CONTEXT.md` and the other root prose) only as a fixture repo's file sits on a
+`FOREIGN-ONLY` line, so a change to the real file does not select it; the over-selection still left (message
+strings, broad walkers, rule (1)'s namers) is measured in `thread-skill-followup-fast-tier-over-selection`.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third

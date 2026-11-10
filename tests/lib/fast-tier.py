@@ -49,7 +49,11 @@ entries of its lines, the walkers); `<pattern> <entry>...` places it and selects
 over collected tests, or `@merge-task-self-tests` (run.sh's two merge-task.sh self-tests, plain lines only).
 `FOREIGN <basename>...` names files the scripts read in other roots (a vault's notes, another repo's docs): such a
 name pushes only tests/lib carriers, never a script, so a script that reads some note's SKILL.md is not reached by
-this repo's SKILL.md files. `OWN-LISTINGS <test>... # (i)|(ii) <what it lists>` excuses tests from check (f).
+this repo's SKILL.md files. `FOREIGN-ONLY <name> <test>... # <what it holds>` declares tests that hold the FOREIGN
+name <name> only as another root's file (a fixture repo's THREAD.md, a temp vault's note, a string or a comment) and
+never read this repo's: such a test is no namer of <name> (rule 3), so a prose change to the real file does not select
+it; it still selects for every other name it holds. A test that reads the real file, or runs a script on this tree
+that does, never goes on the line. `OWN-LISTINGS <test>... # (i)|(ii) <what it lists>` excuses tests from check (f).
 
 Rules, for each changed path p, in sorted order; the first FULL is the result:
   (1) p is a collected test (present or deleted). It selects itself when it exists (a runner of a deleted test now
@@ -64,20 +68,22 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
         - only NONE lines place q: q adds nothing more and pushes nothing, so a path only NONE lines place selects
           only the ALSO entries of its lines (the walkers: a diff under tests/e2e/ still changes text they read);
         - else q adds, as reach, the plain entries of its placing lines and every collected test that names
-          basename(q); then every carrier that names basename(q) is pushed (a FOREIGN basename pushes only tests/lib
-          carriers). A carrier's own text changes what it names, never who names it, so reach follows names from the
-          changed path outward.
+          basename(q) (for a FOREIGN basename, minus its FOREIGN-ONLY tests); then every carrier that names
+          basename(q) is pushed (a FOREIGN basename pushes only tests/lib carriers). A carrier's own text changes
+          what it names, never who names it, so reach follows names from the changed path outward.
   (4) p is placed, not only by NONE lines, and its reach is empty: FULL (`<p>: reaches no test`).
   (5) Once every path is read and the result is FAST, the selection is closed over runners: every collected test
       that runs a selected test (the runner map) is added, until nothing new is. `@merge-task-self-tests` is no file
       and has no runners. --ignore-full applies (5) too.
 
 check:
-  (a) The map parses: known keywords only (FOREIGN, OWN-LISTINGS, FULL, NONE, ALSO), FULL and NONE stand alone,
-      `@merge-task-self-tests` is the only `@` entry and sits on plain lines only, and each OWN-LISTINGS line names at
-      least one test and carries a trailing `# (i) ...` or `# (ii) ...` comment.
+  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, OWN-LISTINGS, FULL, NONE, ALSO), FULL and NONE
+      stand alone, `@merge-task-self-tests` is the only `@` entry and sits on plain lines only, each OWN-LISTINGS line
+      names at least one test and carries a trailing `# (i) ...` or `# (ii) ...` comment, and each FOREIGN-ONLY line
+      names a FOREIGN name and at least one test and carries a trailing `# ...` comment.
   (b) Every exact pattern exists on disk, and every glob matches at least one tracked file.
-  (c) Every entry resolves to collected tests, and an exact test entry (an OWN-LISTINGS one too) is collected.
+  (c) Every entry resolves to collected tests, and an exact test entry (an OWN-LISTINGS or FOREIGN-ONLY one too) is
+      collected.
   (d) Every source (SOURCES: skills/*/scripts/*, hooks/*, skills/*/*.workflow.js, skills/*/diagnostics/*.workflow.js)
       is placed, and its rule-(3) result is FULL or has a non-empty reach: every script maps to a test or to the
       full-suite list.
@@ -112,7 +118,8 @@ check:
       (ii) a test whose only repo walk is this selector's own index, and whose real-tree results change only through
           a FULL change or a change to a path the test names by basename, so that rule (1) or (3) selects it; its
           comment names those paths.
-  (g) Every FOREIGN name is the basename of a tracked file.
+  (g) Every FOREIGN name is the basename of a tracked file, and every FOREIGN-ONLY test names its line's name (one
+      that no longer does is stale: drop it).
   (h) Every repo file that tests/run.sh names, read by the .sh carrier rule (its non-comment lines), is marked FULL
       or carries `@merge-task-self-tests` on a line: run.sh's own inputs run in every mode.
 """
@@ -305,7 +312,10 @@ class Repo:
             self.runs[p] = got
             for t in got:
                 self.ran_by.setdefault(t, set()).add(p)
-        self.map_lines, self.foreign, self.own, self.parse_problems = parse_map(self)
+        self.map_lines, self.foreign, self.own, self.foreign_only, self.parse_problems = parse_map(self)
+        self.foreign_only_tests = {}   # FOREIGN name -> its FOREIGN-ONLY tests
+        for _no, name, t in self.foreign_only:
+            self.foreign_only_tests.setdefault(name, set()).add(t)
         self._matching = {}
 
     # ---- naming ----
@@ -353,10 +363,12 @@ class Repo:
                 base = os.path.basename(q)
                 for l in placing:
                     reach |= l.entries
-                reach |= self.namers(base, "tests")
+                named_by = self.namers(base, "tests")
                 pushed = self.namers(base, "carriers")
                 if base in self.foreign:
+                    named_by -= self.foreign_only_tests.get(base, set())
                     pushed = {c for c in pushed if c.startswith(LIB)}
+                reach |= named_by
                 for c in pushed:
                     if c not in seen:
                         seen.add(c)
@@ -392,13 +404,15 @@ class Repo:
 
 
 def parse_map(repo):
-    """(lines, FOREIGN names, OWN-LISTINGS (line, test) pairs, problems) of tests/fast-tier.map, entries resolved."""
-    lines, foreign, own, problems = [], set(), [], []
+    """(lines, FOREIGN names, OWN-LISTINGS (line, test) pairs, FOREIGN-ONLY (line, name, test) triples, problems) of
+    tests/fast-tier.map, entries resolved."""
+    lines, foreign, own, foreign_only, problems = [], set(), [], [], []
     try:
         with open(os.path.join(ROOT, MAP), encoding="utf-8") as f:
             raw = f.read().split("\n")
     except OSError:
-        return lines, foreign, own, [f"{MAP} is missing"]
+        return lines, foreign, own, foreign_only, [f"{MAP} is missing"]
+    fo_names = []   # (line, name) of each FOREIGN-ONLY line, checked once every FOREIGN line is read
     for no, text in enumerate(raw, 1):
         body, _, comment = text.partition("#")
         words = body.split()
@@ -418,6 +432,16 @@ def parse_map(repo):
                 problems.append(f"{where}: an OWN-LISTINGS line ends with a `# (i) ...` or `# (ii) ...` comment saying "
                                 f"which kind it is and what it lists (check a)")
             own.extend((no, t) for t in rest)
+            continue
+        if head == "FOREIGN-ONLY":
+            if len(rest) < 2:
+                problems.append(f"{where}: FOREIGN-ONLY names a FOREIGN name and at least one test (check a)")
+            if not comment.strip():
+                problems.append(f"{where}: a FOREIGN-ONLY line ends with a `# ...` comment saying what its tests hold "
+                                f"the name as (check a)")
+            if rest:
+                fo_names.append((no, rest[0]))
+                foreign_only.extend((no, rest[0], t) for t in rest[1:])
             continue
         if KEYWORD.match(head):
             problems.append(f"{where}: unknown keyword {head} (check a)")
@@ -456,7 +480,10 @@ def parse_map(repo):
                 else:
                     line.entries.add(w)
         lines.append(line)
-    return lines, foreign, own, problems
+    for no, name in fo_names:
+        if name not in foreign:
+            problems.append(f"{MAP}:{no}: FOREIGN-ONLY {name}: {name} is not a FOREIGN name (check a)")
+    return lines, foreign, own, foreign_only, problems
 
 
 # ---- check (f): directory listings ------------------------------------------------------------------------------
@@ -562,6 +589,9 @@ def check(repo):
     for no, t in repo.own:
         if t not in repo.tests:
             problems.append(f"{MAP}:{no}: the OWN-LISTINGS entry {t} is not a collected test (check c)")
+    for no, _name, t in repo.foreign_only:
+        if t not in repo.tests:
+            problems.append(f"{MAP}:{no}: the FOREIGN-ONLY entry {t} is not a collected test (check c)")
     # (d) sources
     sources = [p for p in repo.files if any(match(g, p) for g in SOURCES)]
     for s in sources:
@@ -641,6 +671,9 @@ def check(repo):
     for name in sorted(repo.foreign):
         if name not in basenames:
             problems.append(f"{MAP}: the FOREIGN name {name} is the basename of no tracked file (check g)")
+    for no, name, t in repo.foreign_only:
+        if t in repo.text and t not in repo.namers(name, "tests"):
+            problems.append(f"{MAP}:{no}: {t} does not name {name}; drop it from that FOREIGN-ONLY line (check g)")
     # (h) run.sh's own inputs
     named = tokens(sh_code(read(RUNNER)))
     for name in sorted(named):

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S13) and `check` (C1-C3) on throwaway
-# repos, its results on the real tree (R1-R6), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
+# repos, its results on the real tree (R1-R7), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
 # fixture checkout (F1-F19; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
 # temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -187,6 +187,13 @@ put "$D" tests/zznote.test.mjs "// reads skills/x/ZZNOTE.md"
 map "$D" 'FOREIGN ZZNOTE.md' 'skills/**' 'tests/lib/**' 'tests/*.test.*'
 ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzlibuser.test.sh tests/zznote.test.mjs" \
   "S9: a FOREIGN name selects its naming tests and a tests/lib helper's, never a script's"
+put "$D" tests/zzfx.test.sh 'printf x > "$tmp/repo/ZZNOTE.md"; python3 skills/x/scripts/zzreader.py "$tmp/repo"'
+ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzfx.test.sh tests/zzlibuser.test.sh tests/zznote.test.mjs" \
+  "S9b: a test that writes a fixture repo's ZZNOTE.md names the FOREIGN name until a FOREIGN-ONLY line declares it"
+map "$D" 'FOREIGN ZZNOTE.md' "FOREIGN-ONLY ZZNOTE.md tests/zzfx.test.sh  # a fixture repo's ZZNOTE.md" 'skills/**' 'tests/lib/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzlibuser.test.sh tests/zznote.test.mjs" \
+  "S9b: … and once declared it is no namer of that name: a change to the real ZZNOTE.md never selects it"
+has "$(sel "$D" --paths skills/x/scripts/zzreader.py)" "tests/zzfx.test.sh" "S9b: … while it still selects for the script it names"
 
 D="$TMP/s10"; mkrepo "$D"
 put "$D" tests/zzmd.test.mjs '// reads the skills prose'
@@ -301,6 +308,17 @@ pass "fixture dirs zz and zz-long: a test holding only fixtures/zz-long/a.md is 
   'put . tests/fixtures/zz/a.txt a; put . tests/fixtures/zz-long/a.txt a; put . tests/zzlong.test.sh "cat tests/fixtures/zz-long/a.md"
    ml "tests/fixtures/zz/** tests/zza.test.sh" "tests/fixtures/zz-long/** tests/zzlong.test.sh"'
 ctl "a FOREIGN name with no file" "the FOREIGN name ZZNOPE.md is the basename of no tracked file (check g)" 'ml "FOREIGN ZZNOPE.md"'
+# FO: a FOREIGN name ZZFX.md and a test that writes a temp repo's copy of it.
+FO='put . skills/x/ZZFX.md x; put . tests/zzfx.test.sh "echo x > \"\$tmp/ZZFX.md\""; ml "FOREIGN ZZFX.md"'
+pass "a FOREIGN-ONLY line naming a FOREIGN name, a test that holds it and what it holds" "$FO; ml 'FOREIGN-ONLY ZZFX.md tests/zzfx.test.sh  # a temp repo'"
+ctl "a FOREIGN-ONLY line without its comment" "a FOREIGN-ONLY line ends with a \`# ...\` comment" "$FO; ml 'FOREIGN-ONLY ZZFX.md tests/zzfx.test.sh'"
+ctl "a FOREIGN-ONLY line with no test" "FOREIGN-ONLY names a FOREIGN name and at least one test (check a)" "$FO; ml 'FOREIGN-ONLY ZZFX.md  # x'"
+ctl "a FOREIGN-ONLY name that is not FOREIGN" "FOREIGN-ONLY ZZOTHER.md: ZZOTHER.md is not a FOREIGN name (check a)" \
+  "$FO; ml 'FOREIGN-ONLY ZZOTHER.md tests/zzfx.test.sh  # x'"
+ctl "an uncollected FOREIGN-ONLY entry" "the FOREIGN-ONLY entry tests/lib/zzh.sh is not a collected test (check c)" \
+  "$FO; put . tests/lib/zzh.sh ZZFX.md; ml 'tests/lib/**' 'FOREIGN-ONLY ZZFX.md tests/lib/zzh.sh  # x'"
+ctl "a stale FOREIGN-ONLY entry" "tests/zza.test.sh does not name ZZFX.md; drop it from that FOREIGN-ONLY line (check g)" \
+  "$FO; ml 'FOREIGN-ONLY ZZFX.md tests/zza.test.sh  # x'"
 ctl "(h) a script run.sh runs, neither FULL nor self-tests" "tests/run.sh names skills/x/scripts/zza.py; mark it FULL" \
   'put . tests/run.sh "python3 skills/x/scripts/zza.py"; ml "tests/run.sh FULL"'
 pass "(h) a script named only in a run.sh comment line" 'put . tests/run.sh "# runs skills/x/scripts/zza.py"; ml "tests/run.sh FULL"'
@@ -371,6 +389,11 @@ has "$(python3 "$SEL" select --paths tests/reflect-weekly.test.mjs)" "tests/fast
 r6=$(python3 "$SEL" select --paths tests/e2e/parallel-rollouts-one-repo.live.sh)
 ok "$(printf '%s\n' "$r6" | head -1 | cut -f1)|$(printf '%s\n' "$r6" | grep -cxE 'tests/contracts/(queue-only|rung-vocabulary|no-single-cause)\.test\.mjs')" \
   "FAST|3" "R6: a tests/e2e/ change (NONE) still runs the walkers that read it (queue-only, rung-vocabulary, no-single-cause)"
+r7=$(python3 "$SEL" select --paths THREAD.md)
+ok "$(printf '%s\n' "$r7" | head -1 | cut -f1)|$(printf '%s\n' "$r7" | grep -cxE 'tests/leg.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
+  "R7: a THREAD.md change is FAST and skips the suites that write only fixture repos' THREAD.md (their FOREIGN-ONLY line)"
+has "$(python3 "$SEL" select --paths CONTEXT.md)" "tests/repo-threads.test.sh" "R7: … while CONTEXT.md still selects repo-threads.test.sh, which reads the real one"
+has "$(python3 "$SEL" select --paths CLAUDE.md)" "tests/fast-tier-wiring.test.mjs" "R7: … and CLAUDE.md still selects fast-tier-wiring.test.mjs (W3 reads it)"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
