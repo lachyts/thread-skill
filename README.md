@@ -62,12 +62,14 @@ provide that runtime. The estate pass (`/thread:orient-all`) grades through read
 forked subagents, and starts its sessions as visible Chorus sessions on the Stage; anywhere else it ends with
 paste-ready prompts.
 
-Two hooks ship with the plugin (`hooks/hooks.json`). The Stop hook (`hooks/rollout-stop-driver.py`) keeps a queued
+Three hooks ship with the plugin (`hooks/hooks.json`). The Stop hook (`hooks/rollout-stop-driver.py`) keeps a queued
 rollout moving. The PreToolUse hook on Edit, Write and MultiEdit (`hooks/vault-note-overlap.py`, ADR 0067 d6) records
 which live run's task wrote each vault note and, when another rollout's task edits it, lets the edit through and tells
 that agent to re-read the note; each warning lands in the Run record's `overlaps.jsonl`, and the weekly Reflection
 reports them. It keeps a debug line per vault-path call in its state dir (`~/.local/state/thread/note-writers/debug.jsonl` by default, capped at
 512 KB, one rotated copy): `THREAD_NOTE_OVERLAP_DEBUG=off` turns it off, and an absolute file logs every call there.
+The PreToolUse hook on Bash (`hooks/primary-commit-guard.py`, ADR 0078 d3) refuses a command that would make a commit
+on the Primary checkout's default branch and names the remedy: a branch or a worktree, or `land.sh`.
 
 ## The convergence engine
 
