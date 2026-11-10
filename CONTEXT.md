@@ -205,7 +205,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
-  which writes nothing and is never a route either. A rollout note written and
+  which writes nothing and is never a route either. With this session's process
+  record unwritten (no THREAD.md for a conversation of thread shape, or a
+  process observation in no METHOD.md) it recommends `close`, which creates
+  them. A rollout note written and
   waiting with no lead gets its **execute handoff** first, before the move
   (ADR 0072).
 - **Orient** — the one shaping verb, at project altitude: audits a whole
