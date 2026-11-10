@@ -1217,8 +1217,8 @@ standalone run, § 3.6's ask-ahead writes (step 7's
 bullets). Nothing else is
 stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then run step
 7's cross-project waits on each note written, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write --rollout <the note>` (its
-lines go in S7's summary, a non-zero exit a `WARN:` there, never a stop), and last remove the note's `incomplete: true`
-line, once every member is stamped.
+lines go in S7's summary, a non-zero exit a `WARN:` there, never a stop). Then remove the note's `incomplete: true`
+line, as its last write, once every member is stamped.
 
 **S7. Summary.** Per note: its name, its chain order with each row's launch, its surfaces, and the completion
 verifier S4 stored (and its Env bootstrap), or why there is none (no `checkouts` entry, several, one that is not a

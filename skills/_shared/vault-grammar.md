@@ -192,7 +192,8 @@ a dependant on that note (ADR 0078 d7):
 `rollout:` links no live rollout. `<Project>` is its first project, or `no project`. `waits-on.py write` is the
 section's one writer: schedule step 7 and § Serial path S6 run it, and it rewrites the section as it stands, removing
 it when nothing waits. `estate-scan.py` reads the lines back for each live rollout (`rollouts[].waitsOn[]`, each kept
-only while its dependency is still an open task on no live rollout) and orient-all lists them (§ 3, § 8).
+only while its dependant is still open and its dependency is still an open task on no live rollout) and orient-all
+lists them (§ 3, § 8).
 
 ## Readers
 
@@ -245,5 +246,7 @@ only while its dependency is still an open task on no live rollout) and orient-a
 - `skills/_shared/scripts/estate-rank.py` `rank --superseding` and estate-dispatch.py's `slices --superseding`
   (schedule's Pre-flight): § In flight's exception, read through estate-scan's `still_to_start`, loaded, so a
   carried task still queued is gradeable and one that has started stays in flight.
+- `skills/_shared/scripts/waits-on.py` (§ Waits on's one writer) and `skills/_shared/scripts/estate-scan.py`'s
+  `WAITS_ON` (its one reader), which carries each line still true to `rollouts[].waitsOn[]` for orient-all.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.

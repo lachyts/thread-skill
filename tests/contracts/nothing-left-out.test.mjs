@@ -55,7 +55,7 @@ test('n1. the prose carries every listing', () => {
     ['schedule step 8', s8, ['Waits on:']],
     ['schedule S6', serialPath, ['**S6. Stamp.**', 'scripts/waits-on.py write --rollout']],
     ['orient-all § 3', flat(orientAll, /^### 3\. /), ['`rounds.waitsOn[]`']],
-    ['orient-all § 8', flat(orientAll, /^### 8\. /), ['`rounds.waitsOn[]`', 'not scheduled']],
+    ['orient-all § 8', flat(orientAll, /^### 8\. /), ['`rounds.waitsOn[]`', 'not scheduled', '`this run would have taken:`']],
     ['vault-grammar', read('skills/_shared/vault-grammar.md'), ['## Waits on', '`waits-on.py write`']],
   ]
   for (const [name, text, patterns] of rows) {
@@ -98,8 +98,8 @@ test('n2. a refusal names the tasks the run would have taken', () => {
     const r = spawnSync('python3', [CHECK, args[0], '--tasks-dir', T, ...args.slice(1)], { encoding: 'utf8', env: ENV })
     assert.equal(r.status, 3, `${name}: ${r.stderr}`)
     assert.equal(r.stdout.trim(), line, name)
-    const lines = r.stderr.split('\n')
-    assert.ok(lines.includes(taken), `${name}: stderr lacks "${taken}": ${r.stderr}`)
+    // Last, so a reader of the refusal's first line (estate-scan.py's clone blocker) still reads who holds the repo.
+    assert.equal(r.stderr.trim().split('\n').at(-1), taken, `${name}: ${r.stderr}`)
     assert.ok(!r.stderr.includes('[[demo-done]]') && !r.stderr.includes('[[demo-held]]') && !r.stderr.includes('[[demo-decide]]'),
       `${name}: names a task step 1 would not take: ${r.stderr}`)
   }

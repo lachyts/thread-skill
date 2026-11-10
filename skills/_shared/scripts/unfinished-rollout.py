@@ -128,9 +128,10 @@ outer one's (a separate checkout nested by path, read from each path's nearest e
 <why>: read as any`; a `--resume` still compares against its unlanded rows' own cells, `any` only when one of those
 cells is empty or malformed too.
 
-Every refusal below (exit 3, `check` and `clone` alike) also prints `this run would have taken: [[a]], [[b]]` first
-among its stderr lines (ADR 0078 d7; would_take): --tasks's names, else schedule step 1's open tasks on --project. None
-to take prints no line.
+Every refusal of a run that would schedule (exit 3, `check` and `clone` alike, never a --resume re-check, which takes
+nothing) also prints `this run would have taken: [[a]], [[b]]` as its last stderr line (ADR 0078 d7; would_take):
+--tasks's names, else schedule step 1's open tasks on --project. None to take prints no line. Last, because a reader
+of a refusal's first non-WARN line (estate-scan.py's clone blocker) reads who holds the repo.
 
 Outcomes (parallel, the default), the first that applies:
   1. A misfiled superseded note -> `file <slug> <path relative to the tasks dir>` (the first by slug), exit 0.
@@ -1202,7 +1203,7 @@ def cmd_check(args, rr) -> int:
     mine = run_projects(rr, args, tasks_dir, warns)
 
     def refused(line, errors):
-        return finish(warns, line, 3, would_take(rr, args, tasks_dir, mine) + list(errors))
+        return finish(warns, line, 3, list(errors) + would_take(rr, args, tasks_dir, mine))
 
     # Rollout notes directly in the tasks dir and directly in Archive/ (never Archive/Rollouts/ or deeper).
     notes = list(rollout_notes(rr, tasks_dir, archive=True))
@@ -1420,7 +1421,7 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
     if hits:
         keys = sorted(hits, key=str.lower)
         return finish(warns, "refuse " + ",".join(keys), 3,
-                      would_take(rr, args, tasks_dir, mine) + [hits[k] for k in keys])
+                      [hits[k] for k in keys] + would_take(rr, args, tasks_dir, mine))
     return finish(warns, "none", 0)
 
 
@@ -2416,7 +2417,7 @@ def cmd_clone(args, rr) -> int:
     mine = {norm_project(rr, args.project)} - {""}
 
     def refused(line, errors):
-        return finish(warns, line, 3, would_take(rr, args, tasks_dir, mine) + list(errors))
+        return finish(warns, line, 3, list(errors) + would_take(rr, args, tasks_dir, mine))
 
     if sr.twin(top) is not None:
         warns.append(f"WARN: --repo {args.repo} is itself a rollout clone ({top}, of {sr.twin(top)}): its Local: line "

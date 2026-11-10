@@ -108,8 +108,7 @@ Print a glance, short lines, not a wall:
   Orient tasks, its sign-offs, a held Unpark offer), none of it asked here; the pick list comes at the end (§ 7);
 - the Unpark offers;
 - each cross-project wait (`rounds.waitsOn[]`, ADR 0078 d7), one line each: `[[<task>]] in [[<rollout>]] waits on
-  [[<dependency>]] (<project>, not scheduled)`, kept out of no count and resolved by scheduling that task or moving the
-  dependant;
+  [[<dependency>]] (<project>, not scheduled)`; scheduling or closing that dependency clears it;
 - the warnings, and the ungraded and invalid tasks; `rounds.warnings[]` names each `orient:` key the scan could not
   read.
 
@@ -371,7 +370,7 @@ One message of statements, no question:
   quotes a plain value), and the next pass grades it". This pass names it and never mends it;
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
-- each schedule's note, or its stop line;
+- each schedule's note, or its stop line, with every task its `this run would have taken:` line names (ADR 0078 d7);
 - the estate rank: `rank-stamp`'s `stamped` count, and after a second exit 1 its `failed` note and `notReached[]` as a
   caveat ("they keep their old stamps; the order stands");
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;

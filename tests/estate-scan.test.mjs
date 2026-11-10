@@ -399,10 +399,12 @@ const ro6 = (slug, proj, at) => {
 }
 for (const name of ['TB', 'TB2', 'TB3', 'TB4']) ro6(`ra-${name.toLowerCase()}`, 'Proj A', `~/repos/${name}-rollout`)
 ro6('rc-tb3', 'Proj C', '~/repos/TB3-proj-b-rollout')
-// ADR 0078 d7: a live rollout's `## Waits on` lines, one still true and two no longer (the dependency closed, or held).
+// ADR 0078 d7: a live rollout's `## Waits on` lines, one still true and three no longer (the dependency closed or held,
+// or the dependant dropped).
 fs.appendFileSync(path.join(V6, 'Work', 'Tasks', 'ra-tb.md'), '\n## Waits on\n\n' +
   '- [[ra-tb-t]] waits on [[w-open]] (Proj B, not scheduled)\n- [[ra-tb-t]] waits on [[w-done]] (Proj B, not scheduled)\n' +
-  '- [[ra-tb-t]] waits on [[w-held]] (Proj B, not scheduled)\n')
+  '- [[ra-tb-t]] waits on [[w-held]] (Proj B, not scheduled)\n- [[w-gone]] waits on [[w-open]] (Proj B, not scheduled)\n')
+write(path.join(V6, 'Work', 'Tasks', 'w-gone.md'), task('dropped', ['Proj A'], `\nrollout: "[[ra-tb]]"`))
 write(path.join(V6, 'Work', 'Tasks', 'w-open.md'), task('open', ['Proj B']))
 write(path.join(V6, 'Work', 'Tasks', 'w-done.md'), task('done', ['Proj B']))
 write(path.join(V6, 'Work', 'Tasks', 'w-held.md'), task('open', ['Proj B'], `\nrollout: "[[rc-tb3]]"`))
@@ -1131,6 +1133,7 @@ test('E3. D and P_B both taken by other projects: B carries a clone blocker', ()
   assert.equal(b.clone.exit, 3)
   assert.match(b.clone.line, /^refuse ra-tb3,rc-tb3$/)
   assert.deepEqual(checks(b.blockers), ['clone', 'unfinished-rollout'], 'with no clone of its own it reads D, where A runs')
+  assert.match(b.blockers.find((x) => x.check === 'clone').why, /^\[\[ra-tb3\]\]/, 'its why is the taker, never the refusal\'s task list')
 })
 test('E4b. a live rollout\'s waitsOn holds only the lines still true (ADR 0078 d7)', () => {
   const rows = ok(twoClones()).rollouts
