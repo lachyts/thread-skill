@@ -266,12 +266,18 @@ else:
 PY
 )" all "LC11 $n: … each matching primary-refresh.py's CONTENT_FORMS regex"
   ok "$(mode content "$c11" master)" "unlanded 1 t.txt" "LC11 $n: unlanded names what differs, not what matches"
-  ok "$(src lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "Ts.txt Tt.txt Dt.txt =1 " \
-    "LC11 $n: lc_ahead_content's records: every touched file, each differing one, then the result"
+  # Run under set -euo pipefail, as the header promises: a differing file is rc 1 from git, which must not end the function.
+  strict() { "$SH" -c 'set -euo pipefail; . "$1"; shift; "$@"' _ "$LC" "$@"; }
+  ok "$(strict lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "Ts.txt Tt.txt Dt.txt =1 " \
+    "LC11 $n: lc_ahead_content's records under set -euo pipefail: every touched file, each differing one, then the result"
+  ok "$(strict lc_ahead_content "$c11" refs/remotes/origin/nowhere refs/heads/master | tr '\0' ' ')" "=128 " \
+    "LC11 $n: a ref git cannot read is its failure, never =3 (touches no file)"
   git -C "$c11" reset -q --hard origin/master
   ok "$(src lc_ahead_content "$c11" refs/remotes/origin/master refs/heads/master | tr '\0' ' ')" "=3 " \
     "LC11 $n: nothing ahead: nothing touched, =3"
   ok "$(mode content "$c11" master >/dev/null; echo "rc $?")" "rc 0" "LC11 $n: content exits 0"
+  git -C "$c11" update-ref -d refs/remotes/origin/master
+  ok "$(mode content "$c11" master)" "unreadable git diff failed (128)" "LC11 $n: … and an unreadable ref reads unreadable, never untouched"
   for args in "content" "content $c11" "content $c11 master extra"; do
     out=$(mode $args 2>"$tmp/err"); rc=$?
     ok "$rc|$out" "2|" "LC11 $n: usage '$args' exits 2, stdout empty"

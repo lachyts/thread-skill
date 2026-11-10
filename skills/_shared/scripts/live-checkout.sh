@@ -217,10 +217,15 @@ lc_ahead_content() {
   while IFS= read -r -d '' _lc_f; do
     _lc_t+=("$_lc_f"); printf 'T%s\0' "$_lc_f"
   done < <(git -C "${1:-}" diff --no-renames --name-only -z "${2:-}...${3:-}" 2>/dev/null)
-  if [ ${#_lc_t[@]} -eq 0 ]; then printf '=3\0'; return 0; fi
+  if [ ${#_lc_t[@]} -eq 0 ]; then
+    # No records is a commit set that touches nothing, or a listing that failed (its stderr is dropped above).
+    git -C "${1:-}" diff --no-renames --name-only "${2:-}...${3:-}" >/dev/null 2>&1 && _lc_rc=0 || _lc_rc=$?
+    if [ "$_lc_rc" != 0 ]; then printf '=%s\0' "$_lc_rc"; return 0; fi
+    printf '=3\0'; return 0
+  fi
   # --quiet first: its exit status is the answer (0 same, 1 differs, else a failure).
-  git -C "${1:-}" --literal-pathspecs diff --quiet --no-renames "${2:-}" "${3:-}" -- "${_lc_t[@]}" >/dev/null 2>&1
-  _lc_rc=$?
+  git -C "${1:-}" --literal-pathspecs diff --quiet --no-renames "${2:-}" "${3:-}" -- "${_lc_t[@]}" >/dev/null 2>&1 \
+    && _lc_rc=0 || _lc_rc=$?
   if [ "$_lc_rc" = 1 ]; then
     while IFS= read -r -d '' _lc_f; do
       printf 'D%s\0' "$_lc_f"

@@ -66,22 +66,26 @@ Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwis
   3. `landed` (no file the ahead commits touch differs from origin/<d>, THREAD.md included): the reset. An uncommitted
      edit origin's commits would overwrite reads `repair refused: local changes overlap origin/<d> (<paths>)`. Under
      --dry-run `would reset <head12> to origin/<d> at <tip12> (ahead <a>, behind <b>: their content is already on
-     origin)`, kind dry. Else the backup ref refs/thread/primary-backup/<YYYYMMDDTHHMMSS> (the pass's stamp) is written,
-     must-not-exist, at the old HEAD, and `git reset --keep <tip>` runs, bounded by --ff-timeout: the line `repaired: reset
-     <head12> to origin/<d> at <tip12> (…; backup <ref>)` (HEAD re-read and checked; kind None, which ends the spell),
-     `repair refused: git reset --keep: <why>` with the backup ref removed, or `timed out: git reset --keep ran past <N> s
-     …` (kind timed-out, as for a merge). The state entry `repaired:<checkout path>` (kind repaired; its since, outcome,
-     backup, head and tip) records the last repair; it is no spell: the stuck read skips it and only an install's prune
-     may drop it (never one it watches).
-  4. Anything else, `unlanded` or `untouched`: the carry. land.sh `-- <primary>`, the primary's own copy, once per head,
-     lands the ahead commits as they are onto a `close/…` branch and a queued landing PR, leaving the primary's HEAD and
-     index alone (S9 carries close-out commits only: any other local commit is `stuck: local commits not from a
-     close-out: …`, so it stays here, is recorded, and is the stop below). land.sh's one line is the spell's `repair`
-     field {head, at, result}: `queued <url>` or `queued: needs merge <url>` reads `carried: <it>`, and land.sh is never
-     asked again for that head (it would update-branch on every call: the PR's upkeep is the landing carrier's, p45-4);
-     `landed` (an unprotected origin took them) ends the spell; anything else reads `not carried (<result>)` and is
-     retried once CARRY_RETRY (1 h) has passed. --dry-run reads `would carry …`, kind dry, and never runs land.sh. A
-     land.sh that cannot run reads `broken: …`.
+     origin)`, kind dry. Else HEAD is read again, last thing before the backup ref: the verdict above was read before
+     the hold, which can run 120 s, so a HEAD that has moved reads `repair waits (HEAD moved during the pass)`, with no
+     backup ref and no reset, and the next pass re-reads the content. Else the backup ref
+     refs/thread/primary-backup/<YYYYMMDDTHHMMSS> (the pass's stamp) is written, must-not-exist, at the old HEAD, and
+     `git reset --keep <tip>` runs, bounded by --ff-timeout: the line `repaired: reset <head12> to origin/<d> at <tip12>
+     (…; backup <ref>)` (HEAD re-read and checked; kind None, which ends the spell), `repair refused: git reset --keep:
+     <why>` with the backup ref removed, or `timed out: git reset --keep ran past <N> s …` (kind timed-out, as for a
+     merge). The state entry `repaired:<checkout path>` (kind repaired; its since, outcome, backup, head and tip)
+     records the last repair; it is no spell: the stuck read skips it and only an install's prune may drop it (never one
+     it watches).
+  4. Anything else, `unlanded` or `untouched`: the carry. land.sh `-- <primary>`, the primary's own copy, once per head.
+     On a protected origin it lands the ahead commits as they are onto a `close/…` branch and a queued landing PR,
+     leaving the primary's HEAD and index alone; on an unprotected one its S11 rebases them, moves the primary's branch
+     (move_branch, unless a rollout holds it) and pushes (S9 carries close-out commits only: any other local commit is
+     `stuck: local commits not from a close-out: …`, so it stays here, is recorded, and is the stop below). land.sh's
+     one line is the spell's `repair` field {head, at, result}: `queued <url>` or `queued: needs merge <url>` reads
+     `carried: <it>`, and land.sh is never asked again for that head (it would update-branch on every call: the PR's
+     upkeep is the landing carrier's, p45-4); `landed` (an unprotected origin took them) ends the spell; anything else
+     reads `not carried (<result>)` and is retried once CARRY_RETRY (1 h) has passed. --dry-run reads `would carry …`,
+     kind dry, and never runs land.sh. A land.sh that cannot run reads `broken: …`.
 A repair blocked for a day is the d4 stop: a primary pass of kind `diverged` whose spell is STUCK_AFTER old is recorded
 kind `stuck` (any cause; its line stays the pass's own), for /thread:status's line and the Stage's. A commit that lands
 by a merge (the landing PR's, as queued) leaves the primary only behind: the ordinary fast-forward takes it from there.
@@ -102,8 +106,7 @@ notified?}, takes its first stuck pass's kind. STATE_VERSION stays 1: the fields
 keeps unknown keys and fields.
 
 A pass never prunes: it drops only the key of a checkout it read as current, moved, ahead or repaired, so a hand-run of
-either
-copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
+either copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
 checkout the job does not watch stands until a pass on that checkout clears it or the next install drops it (below).
 
 stuck, a read that writes nothing (no rotation, no prune, no fetch, no temp file): the spells due now, for
@@ -218,10 +221,11 @@ job runs <python>`, prunes (below), and prints the one line left to Lachy's shel
 
 The prune at install, the only moment the watched set changes: install reads the job's state file (the default path,
 which the job reads because the plist names no --state) and drops every spell whose key is not `self-update`, `job`,
-the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one line each, `primary-refresh install:
-dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read. It writes the file only
-when it dropped one. A missing or corrupt file is left for the job's next pass, and a write that fails is one WARN
-(install still exits 0). A checkout dropped from --also, a moved primary or a junk key is dropped by the next install;
+the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one line each,
+`primary-refresh install: dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read.
+It writes the file only when it dropped one. A missing or corrupt file is left for the job's next pass, and a write
+that fails is one WARN (install still exits 0). A checkout dropped from --also, a moved primary or a junk key is
+dropped by the next install;
 an install not followed by its launchctl line leaves the old job running with its old targets, whose next pass reopens
 any spell of its own that install dropped, with a fresh since. One job per state file: a second job installed under
 another --label shares the default file and its `self-update` and `job` keys, so its install drops the first job's
@@ -631,6 +635,8 @@ def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra):
         return f"{base}: repair refused: local changes overlap origin/{branch} ({m.group(1)})", "diverged", tip, branch
     if dry_run:
         return f"would {where} ({why})", "dry", tip, branch
+    if git(d, "rev-parse", "-q", "--verify", "HEAD^{commit}")[1] != head:
+        return f"{base}: repair waits (HEAD moved during the pass)", "diverged", tip, branch
     ref = "refs/thread/primary-backup/" + re.sub(r"[^0-9T]", "", _STAMP[:19])
     urc, _, uerr = git(d, "update-ref", ref, head, "0" * 40)
     if urc != 0:
@@ -665,9 +671,9 @@ def _carry(d, primary, branch, tip, head, base, dry_run, now, entry, extra):
             return f"{base}: not carried ({result})", "diverged", tip, branch
     if dry_run:
         return f"would carry {head[:12]} to a landing PR ({base})", "dry", tip, branch
-    land = _helper(LAND_REL, primary)
-    if land is None:
-        return f"broken: no {LAND_REL} beside the copy or in {primary}", "broken", tip, branch
+    land = Path(primary) / LAND_REL
+    if not land.is_file():
+        return f"broken: no {LAND_REL} in the primary", "broken", tip, branch
     rc, out, err, timed_out = _run(["bash", str(land), "--", str(d)], CARRY_TIMEOUT)
     if timed_out:
         result = f"land.sh ran past {CARRY_TIMEOUT} s and was stopped"

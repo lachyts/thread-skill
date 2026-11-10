@@ -2,14 +2,15 @@
 # ADR 0066 as amended 2026-11-05 (p37-7) and by ADR 0075 d2 (P41-5: no notice is ever sent), executed:
 # skills/_shared/scripts/primary-refresh.py, the Primary refresh. A bare "origin" and clones of it stand for the primary
 # and an --also checkout. The seed commits the real bundle files (primary-refresh.py bundle's table) plus a stub
-# primary-hold.sh (it prints $HOLD_FILE's text). install runs first, into $tmp/bin, and job() runs the plist's own
+# primary-hold.sh (it prints $HOLD_FILE's text, after running $HOLD_HOOK, a test's snippet for what happens during the
+# hold, when there is one). install runs first, into $tmp/bin, and job() runs the plist's own
 # ProgramArguments (read with plistlib, so --log and --job-shape are in it) plus each arm's flags, outside any work tree,
 # as launchd does; run() is a checkout copy (no install marker) at its repo path, with background_job.py beside it. A
 # stuck spell is read by the `stuck` verb (/thread:status's Primary refresh line); no pass prints `notified` or
 # `would notify`.
 #   install   I1 I5 R8 I4 (the job's flags and env pinned beside JOB_SHAPE) I3 I2, I7 I7b I7c I8 (background_job.py:
 #             a copy that cannot load it, and `bundle`, which never loads it), Q1-Q4 (the prune at install)
-#   a pass    R1-R9, R4/N1-N3, R4b-R4i (the repair of a diverged primary, ADR 0078 d4), F1 B1 D1 (the fetch and the ssh
+#   a pass    R1-R9, R4/N1-N3, R4b-R4k (the repair of a diverged primary, ADR 0078 d4), F1 B1 D1 (the fetch and the ssh
 #             rule), O1 O2 (the overlap), X1 (the helper's contract)
 #   spells    P0-P2 (since, kindSince, outcome), U1 (an entry from before p37-7), M1 H1 N5, T1 T2 (timeouts and a TERM),
 #             K1 L1 J1
@@ -33,7 +34,7 @@ LCR=skills/_shared/scripts/live-checkout.sh
 tmp=$(mktemp -d); tmp=$(cd "$tmp" && pwd -P)
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
-export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state" HOLD_FILE="$tmp/hold"
+export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state" HOLD_FILE="$tmp/hold" HOLD_HOOK="$tmp/hold-hook"
 export SRV="$tmp/srv" LOG_SSH="$tmp/ssh.log" HOOK_PID="$tmp/hook.pid"
 mkdir -p "$HOME/.config/thread" "$tmp/out" "$tmp/sshbin" "$tmp/countbin" "$SRV/o"; : > "$LOG_SSH"
 DS="$XDG_STATE_HOME/thread/primary-refresh.json"   # the default state file: the job's, and install's prune's
@@ -63,7 +64,7 @@ g init -q --bare "$tmp/origin.git"; ln -s "$tmp/origin.git" "$SRV/o/origin.git"
 g clone -q "$tmp/origin.git" "$tmp/seed" 2>/dev/null
 python3 "$pr" bundle > "$tmp/table"
 while read -r m rel irel; do mkdir -p "$tmp/seed/$(dirname "$rel")"; cp -p "$root/$rel" "$tmp/seed/$rel"; done < "$tmp/table"
-printf '[ -f "$HOLD_FILE" ] && cat "$HOLD_FILE"\nexit 0\n' > "$tmp/seed/skills/_shared/scripts/primary-hold.sh"
+printf '[ -f "$HOLD_HOOK" ] && bash "$HOLD_HOOK" >/dev/null 2>&1\n[ -f "$HOLD_FILE" ] && cat "$HOLD_FILE"\nexit 0\n' > "$tmp/seed/skills/_shared/scripts/primary-hold.sh"
 cp -p "$root/skills/_shared/scripts/land.sh" "$root/skills/_shared/scripts/landing-register.py" "$tmp/seed/skills/_shared/scripts/"   # the carry runs the primary's land.sh
 echo one > "$tmp/seed/a.txt"
 g -C "$tmp/seed" add -A && g -C "$tmp/seed" commit -qm one && g -C "$tmp/seed" push -q origin master 2>/dev/null
@@ -247,8 +248,11 @@ job --state "$S" --now "$(at 25)" >/dev/null
 ok "$(rep at)" "$(at 20)" "R4d: … within the hour land.sh is not asked again"
 job --state "$S" --now "$(at 85)" >/dev/null
 ok "$(rep at)" "$(at 85)" "R4d: … after it, it is"
-# R4e: a repair blocked a day is recorded stuck (ADR 0078 d4), named by the stuck read
-job --state "$S" --now "$(at 1500)" >/dev/null
+# R4e: a repair blocked a day is recorded stuck (ADR 0078 d4), named by the stuck read. A checkout copy with a land.sh of
+# its own still runs the primary's: the decoy's result would replace the one the stuck read names below.
+printf 'echo "stuck: the copy'"'"'s own land.sh ran"; exit 1\n' > "$RUNC/land.sh"
+run --state "$S" --now "$(at 1500)" >/dev/null
+rm -f "$RUNC/land.sh"
 ok "$(sv "$S" "$P4" kind)" stuck "R4e: a repair still blocked a day on is recorded stuck"
 has "$(sline --state "$S" --now "$(at 1500)")" "Primary refresh: primary: diverged (ahead 1, behind 1): not carried (not landed: no GitHub origin) (stuck since $(at 20 | cut -c1-16)" "R4e: … named by the stuck read"
 # R4f: the close-out commit goes to one landing PR, the primary untouched; a second pass opens no second one
@@ -282,6 +286,23 @@ g -C "$P4" checkout -q -b r4side; localcommit r4s.txt x; h=$(head_of "$P4"); lan
 has "$(job --state "$S" --now "$(at 1950)")" "primary: diverged (ahead 1, behind 1): repair waits (on r4side, not master)" "R4i: a primary on another branch is left"
 ok "$(head_of "$P4")|$(nrefs)" "$h|$n" "R4i: … untouched"
 g -C "$P4" checkout -q master; g -C "$P4" branch -q -D r4side; g -C "$P4" reset -q --hard origin/master; g -C "$P4" remote set-url origin "$tmp/origin.git"; g -C "$P4" fetch -q origin
+# R4j: a commit made during the hold (land.sh's, a Codex Leg's: primary-commit-guard.py's Accepted misses) is not on the
+# verdict the pass read before the hold, so the reset waits and the next pass reads it again
+localcommit r4j.txt same; h=$(head_of "$P4"); land r4j.txt same; land a.txt r4j; n=$(nrefs)
+printf '%s\n' "cd '$P4' && echo during > r4j-during.txt && git add r4j-during.txt && git -c user.name=t -c user.email=t@t commit -qm during" > "$HOLD_HOOK"
+out=$(job --state "$S" --now "$(at 2000)"); rm -f "$HOLD_HOOK"
+has "$out" "primary: diverged (ahead 1, behind 2): repair waits (HEAD moved during the pass)" "R4j: a commit made during the hold stops the reset"
+ok "$(git -C "$P4" rev-parse HEAD^)|$(git -C "$P4" log -1 --format=%s)|$(nrefs)|$(cat "$P4/r4j-during.txt")|$(git -C "$P4" status --porcelain)|$(sv "$S" "$P4" kind)" "$h|during|$n|during||diverged" \
+  "R4j: … HEAD, the working tree and the backup refs as that commit left them, kind diverged"
+has "$(job --state "$S" --now "$(at 2005)")" "primary: diverged (ahead 2, behind 2): not carried" "R4j: … and the next pass re-reads the content: the new commit is not on origin, so no reset"
+g -C "$P4" reset -q --hard origin/master
+# R4k: a reset --keep git refuses after the backup ref is written (an index.lock taken during the hold) removes the ref
+localcommit r4k.txt same; h=$(head_of "$P4"); land r4k.txt same; land a.txt r4k; n=$(nrefs)
+printf '%s\n' ": > '$P4/.git/index.lock'" > "$HOLD_HOOK"
+out=$(job --state "$S" --now "$(at 2100)"); rm -f "$HOLD_HOOK" "$P4/.git/index.lock"
+has "$out" "primary: diverged (ahead 1, behind 2): repair refused: git reset --keep: " "R4k: an index.lock taken during the hold refuses the reset, in git's words"
+ok "$(head_of "$P4")|$(nrefs)" "$h|$n" "R4k: … HEAD as it was, the backup ref removed again"
+has "$(job --state "$S" --now "$(at 2110)")" "primary: repaired:" "R4k: cleared, the next pass repairs it"
 
 # ---- R7: never a linked worktree or a Rollout clone -----------------------------------------------------------------
 g -C "$tmp/primary" worktree add -q --detach "$tmp/wt" 2>/dev/null
@@ -914,19 +935,21 @@ import json, os, sys
 p, t, since = sys.argv[1:]
 e = lambda kind, **x: dict({"since": since, "kind": kind, "kindSince": since, "outcome": kind}, **x)
 d = {"v": 1, "stuck": {f"{t}/primary": e("held"), f"{t}/agents": e("diverged", notified=since, notifiedKinds=["diverged"]),
-                       "self-update": e("refused"), "job": e("stale-job"), f"{t}/gone": e("busy")}}
+                       "self-update": e("refused"), "job": e("stale-job"), f"{t}/gone": e("busy"),
+                       f"repaired:{t}/primary": e("repaired"), f"repaired:{t}/gone": e("repaired")}}
 os.makedirs(os.path.dirname(p), exist_ok=True)
 json.dump(d, open(p, "w"))
 PY
 }
 entry() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["stuck"].get(sys.argv[2]), sort_keys=True))' "$1" "$2"; }
-qseed; for k in "$tmp/primary" "$tmp/agents" self-update job; do entry "$DS" "$k"; done > "$tmp/q1.kept.before"
+qseed; for k in "$tmp/primary" "$tmp/agents" self-update job "repaired:$tmp/primary"; do entry "$DS" "$k"; done > "$tmp/q1.kept.before"
 out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
-ok "$(skeys "$DS")" "$(printf '%s\n' "$tmp/agents" "$tmp/primary" job self-update | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" \
-  "Q1: install keeps the spells of the checkouts it watches, self-update and job, and drops the rest"
+ok "$(skeys "$DS")" "$(printf '%s\n' "$tmp/agents" "$tmp/primary" job "repaired:$tmp/primary" self-update | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" \
+  "Q1: install keeps the spells of the checkouts it watches, self-update, job and the primary's repair record, and drops the rest"
 has "$out" "primary-refresh install: dropped spell: $tmp/gone (not watched by this job)" "Q1: … one line per dropped spell"
-ok "$(printf '%s\n' "$out" | grep -c 'dropped spell:')" 1 "Q1: … and only that one"
-for k in "$tmp/primary" "$tmp/agents" self-update job; do entry "$DS" "$k"; done > "$tmp/q1.kept.after"
+has "$out" "primary-refresh install: dropped spell: repaired:$tmp/gone (not watched by this job)" "Q1: … a repair record of a checkout it does not watch among them"
+ok "$(printf '%s\n' "$out" | grep -c 'dropped spell:')" 2 "Q1: … and only those two"
+for k in "$tmp/primary" "$tmp/agents" self-update job "repaired:$tmp/primary"; do entry "$DS" "$k"; done > "$tmp/q1.kept.after"
 ok "$(same "$tmp/q1.kept.before" "$tmp/q1.kept.after")" same "Q1: … each kept entry exactly as seeded, an old notified field included"
 has "$(printf '%s\n' "$out" | tail -1)" "next: launchctl bootout" "Q1: … before install's next: line, still last"
 qseed
