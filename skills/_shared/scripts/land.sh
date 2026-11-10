@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # land.sh — the one shared landing route (ADR 0028 as amended: queue and finish). It commits the handed
-# close-out paths on the repo's current branch, then lands them by the repo's own rules, synchronously:
-# no background process, no lock, no polling, no waiting for a merge.
+# close-out paths, then lands them by the repo's own rules, synchronously: no background process, no lock, no
+# polling, no waiting for a merge. On a landable checkout of origin's default branch the commit is built in a
+# detached scratch worktree, never on the checkout (ADR 0078 d3, below); every other route commits by pathspec
+# on the current branch.
 #
 #   land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…]
 #   land.sh --origin-slug <repo>      prints <owner>/<name> for a GitHub origin, else exit 4, stdout empty
@@ -20,7 +22,8 @@
 # Exit 0 for all but stuck (1). A usage error exits 2 with stdout empty.
 # stderr carries `land: …` lines: `land: commit <sha40>` (this run's commit, final SHA after any rebase)
 # or `land: nothing committed`, `land: carried <N> earlier close-out commit(s)`, `land: nothing to land`,
-# `land: dropped <rel> (…)`, `land: ff refused: …`, `land: label failed: …`, `land: update-branch failed: …`,
+# `land: dropped <rel> (…)`, `land: ff refused: …`, `land: 3-way conflict …`, `land: kept <rel> …`,
+# `land: label failed: …`, `land: update-branch failed: …`,
 # `land: skipped <step>: deadline`, `land: held the primary checkout at <sha>, …: <why>`, and git's or gh's
 # own diagnostics.
 #
@@ -34,8 +37,21 @@
 #   Engine snapshot runs on it (ADR 0031, narrowed by ADR 0043: a snapshotted rollout never runs on it): S4
 #   skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed without moving the
 #   branch. A protected landing is unaffected: its PR merges on GitHub.
-#   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
-#   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
+#   Protected → push the close-out commit unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST,
+#   label it `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
+#   The scratch commit (ADR 0078 d3): on a landable default branch, S5 stages the handed paths into a throwaway
+#   index and builds the commit in a detached scratch worktree, hooks off. The checkout's HEAD and index are not
+#   written while the commit is built or pushed. The commit sits on origin/<d>'s tip, the handed edits (HEAD to
+#   work tree) applied as a 3-way diff, so a checkout behind origin never drops lines other sessions landed. A
+#   conflict there, or a commit already stranded on the checkout (HEAD not an ancestor of origin/<d>), puts it on
+#   HEAD instead: the stranded commits are carried under it, and a conflicting PR is brought current on GitHub
+#   (ADR 0078 d2). The commit is reported (`land: commit <sha>`) only once it is on origin; a stuck result before
+#   then is `land: nothing committed`, the paths left as they were for a re-run. A pending class on what may be
+#   the default branch commits nothing at all. Once the commit is on origin, each handed path whose copy has not
+#   changed since is returned to HEAD's (a staged copy of it unstaged), so the checkout's next fast-forward is not
+#   refused over its own close-out; a file new in this close-out stays on disk, since a handoff's reader may start
+#   this minute. Unprotected, the checkout then moves to the pushed tip unless it is held; a refused move is a
+#   stderr note, since the commit is already on origin.
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
 #   runs S2) and the own branch never drift.
 #
@@ -327,7 +343,7 @@ main() {
 
   if [ "${1:-}" = --own-branch ]; then shift; own_main "$@"; exit 1; fi
 
-  local slug_arg= msgfile= commit_only= route_only= repo made= pending= class= reason= b= bref= d= top slug
+  local slug_arg= msgfile= commit_only= route_only= repo made= built= tip=HEAD tree= already= pending= class= reason= b= bref= d= top slug
   local -a paths=() rels=() list=()
 
   if [ "${1:-}" = --origin-slug ]; then
@@ -366,7 +382,9 @@ main() {
   # stuck_early <reason>: stuck before any commit.  finish <line> <rc>: the one way out after S5.
   stuck_early() { result "stuck: $1"; echo "land: nothing committed"; exit 1; }
   finish() {
-    [ -n "$made" ] && echo "land: commit $made"
+    if [ -n "$made" ]; then echo "land: commit $made"
+    elif [ -n "$built" ]; then echo "land: nothing committed"  # a scratch commit that never reached origin
+    fi
     result "$1"; exit "$2"
   }
 
@@ -461,27 +479,13 @@ main() {
   fi
 
   # ---- S5. Stage and commit the handed paths ----------------------------------------------------------
-  for rel in ${rels[@]+"${rels[@]}"}; do
-    if review_doc "$rel" && { [ -e "$rel" ] || [ -L "$rel" ]; }; then
-      git rm -q -f -- "$rel" 2>"$tmpd/rm.err" || stuck_early "rm failed: $rel: $(first_line "$tmpd/rm.err")"
-      list+=("$rel")
-    elif [ -e "$rel" ] || [ -L "$rel" ]; then
-      if ! git add -- "$rel" 2>"$tmpd/add.err"; then
-        git check-ignore -q -- "$rel" && stuck_early "ignored: $rel"
-        stuck_early "add failed: $rel: $(first_line "$tmpd/add.err")"
-      fi
-      list+=("$rel")
-    elif git cat-file -e "HEAD:$rel" 2>/dev/null; then
-      git rm -q --cached --ignore-unmatch -- "$rel" 2>"$tmpd/rm.err" \
-        || stuck_early "add failed: $rel: $(first_line "$tmpd/rm.err")"
-      list+=("$rel")
-    elif git ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
-      git rm -q --cached -- "$rel" 2>"$tmpd/rm.err" || stuck_early "add failed: $rel: $(first_line "$tmpd/rm.err")"
-      echo "land: dropped $rel (not on disk, index-only; unstaged)"
-    else
-      echo "land: dropped $rel (not on disk, never tracked)"
-    fi
-  done
+  # A pending class that may be on the default branch commits nothing (a commit there is what strands on the
+  # primary checkout, ADR 0078 d3): the paths stay as they are and a re-run lands them.
+  if [ "$class" = pending ]; then
+    local ld=$d
+    [ -n "$ld" ] || ld=$(lc_default_local "$top" 2>/dev/null)
+    [ -n "$ld" ] && [ "$b" != "$ld" ] || stuck_early "$pending"
+  fi
   local commit_failed=
   commit_paths() {
     [ "${#list[@]}" -gt 0 ] || { echo "land: nothing committed"; return 0; }
@@ -489,11 +493,36 @@ main() {
     git commit -q -F "$msgfile" -- "${list[@]}" 2>"$tmpd/commit.err" || { commit_failed=1; return 1; }
     made=$(git rev-parse HEAD)
   }
-  if ! commit_paths; then
+  if [ "$class" = landable ] && [ "$b" = "$d" ]; then
+    scratch_build
+  else
+    for rel in ${rels[@]+"${rels[@]}"}; do
+      if review_doc "$rel" && { [ -e "$rel" ] || [ -L "$rel" ]; }; then
+        git rm -q -f -- "$rel" 2>"$tmpd/rm.err" || stuck_early "rm failed: $rel: $(first_line "$tmpd/rm.err")"
+        list+=("$rel")
+      elif [ -e "$rel" ] || [ -L "$rel" ]; then
+        if ! git add -- "$rel" 2>"$tmpd/add.err"; then
+          git check-ignore -q -- "$rel" && stuck_early "ignored: $rel"
+          stuck_early "add failed: $rel: $(first_line "$tmpd/add.err")"
+        fi
+        list+=("$rel")
+      elif git cat-file -e "HEAD:$rel" 2>/dev/null; then
+        git rm -q --cached --ignore-unmatch -- "$rel" 2>"$tmpd/rm.err" \
+          || stuck_early "add failed: $rel: $(first_line "$tmpd/rm.err")"
+        list+=("$rel")
+      elif git ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
+        git rm -q --cached -- "$rel" 2>"$tmpd/rm.err" || stuck_early "add failed: $rel: $(first_line "$tmpd/rm.err")"
+        echo "land: dropped $rel (not on disk, index-only; unstaged)"
+      else
+        echo "land: dropped $rel (not on disk, never tracked)"
+      fi
+    done
+    if ! commit_paths; then
+      [ -s "$tmpd/commit.err" ] && cat "$tmpd/commit.err"
+      stuck_early "commit failed: $(first_line "$tmpd/commit.err")"
+    fi
     [ -s "$tmpd/commit.err" ] && cat "$tmpd/commit.err"
-    stuck_early "commit failed: $(first_line "$tmpd/commit.err")"
   fi
-  [ -s "$tmpd/commit.err" ] && cat "$tmpd/commit.err"
 
   # ---- S6. The deferred classes, and stuck results pending from S2–S4 -----------------------------------
   [ "$class" = deferred ] && finish "not landed: $reason" 0
@@ -501,10 +530,11 @@ main() {
 
   # ---- S7. The ahead set A = origin/<d>..HEAD ---------------------------------------------------------
   local od="refs/remotes/origin/$d" ahead count
-  ahead=$(git rev-list "$od..HEAD" 2>"$tmpd/rl.err") || finish "stuck: cannot list commits ahead of origin/$d: $(first_line "$tmpd/rl.err")" 1
+  ahead=$(git rev-list "$od..$tip" 2>"$tmpd/rl.err") || finish "stuck: cannot list commits ahead of origin/$d: $(first_line "$tmpd/rl.err")" 1
   count=$(printf '%s' "$ahead" | grep -c .)
   if [ "$count" = 0 ]; then
-    [ -z "$made" ] && echo "land: nothing to land"
+    delivered
+    [ -z "$built" ] && echo "land: nothing to land"
     finish landed 0
   fi
 
@@ -521,7 +551,7 @@ main() {
   esac
 
   # ---- S9. Ahead-set validation: only close-out commits are carried ------------------------------------
-  git merge-base HEAD "$od" >/dev/null 2>&1 || finish "stuck: local branch has no common history with origin/$d" 1
+  git merge-base "$tip" "$od" >/dev/null 2>&1 || finish "stuck: local branch has no common history with origin/$d" 1
   local c ps f st bad=() nbad=0 has_merge= subj
   for c in $ahead; do
     ps=$(git rev-list --parents -n 1 "$c"); set -- $ps; shift
@@ -545,7 +575,7 @@ main() {
     finish "stuck: local commits not from a close-out: $subj" 1
   fi
   local carried=$count
-  [ -n "$made" ] && carried=$((count - 1))
+  [ -n "$built" ] && carried=$((count - 1))
   [ "$carried" -gt 0 ] && echo "land: carried $carried earlier close-out commit(s)"
 
   # ---- S10. Protection --------------------------------------------------------------------------------
@@ -577,41 +607,66 @@ primary_hold() {
 # ---- S11. Unprotected: push the default branch, rebasing once in a scratch worktree if origin moved -------
 land_unprotected() {
   local od="refs/remotes/origin/$d" old N rc
-  if git merge-base --is-ancestor "$od" HEAD; then
-    bounded git push origin "HEAD:refs/heads/$d" 2>"$tmpd/push.err"; rc=$?
+  old=$(git rev-parse HEAD)
+  if git merge-base --is-ancestor "$od" "$tip"; then
+    bounded git push origin "$tip:refs/heads/$d" 2>"$tmpd/push.err"; rc=$?
     net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
     [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
     [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
+    [ -n "$built" ] && made=$built
+    delivered
+    [ -n "$built" ] && primary_follow "$old" "$built" "land: close-out" "not moved to it"
     finish landed 0
   fi
   [ -n "$has_merge" ] && finish "stuck: local merge commit on $d; not rebased" 1
   [ $((LAND_DEADLINE - SECONDS)) -ge 1 ] || finish "stuck: deadline passed before rebase" 1
-  old=$(git rev-parse HEAD)
-  scratch_rebase "$old" "$od"; rc=$?
+  scratch_rebase "$(git rev-parse "$tip")" "$od"; rc=$?
   if [ "$rc" != 0 ]; then
     [ "$rc" = 1 ] && finish "stuck: rebase conflict" 1
     finish "stuck: rebase failed: $(first_line "$tmpd/wt.err")" 1
   fi
   N=$(cat "$tmpd/rebased")
-  if primary_hold; then
-    # The rebase ran in a scratch worktree; only move_branch would touch the primary checkout. Push the
-    # rebased tip and leave the branch where it is (its commits are on origin by content once pushed).
-    echo "land: held the primary checkout at $(git rev-parse --short HEAD), pushed the rebased tip without moving it: $HOLD"
-  else
-    move_branch "$old" "$N" "land: rebase onto origin/$d"; rc=$?
-    [ "$rc" = 1 ] && finish "stuck: rebase refused: $MOVE_ERR" 1
-    [ "$rc" = 0 ] || finish "stuck: branch moved during landing" 1
-  fi
-  [ -n "$made" ] && made=$N
   if [ "$N" = "$(git rev-parse "$od")" ]; then
     echo "land: nothing to land"
+    delivered
+    built=
+    primary_follow "$old" "$N" "land: rebase onto origin/$d" "not moved to it"
     finish landed 0
   fi
   bounded git push origin "$N:refs/heads/$d" 2>"$tmpd/push.err"; rc=$?
   net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
   [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
   [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
+  [ -n "$built" ] && made=$N
+  delivered
+  primary_follow "$old" "$N" "land: rebase onto origin/$d" "pushed the rebased tip without moving it"
   finish landed 0
+}
+
+# primary_follow <old> <new> <reflog msg> <held wording>: after a push to the default branch, move the checkout from
+# <old> to <new>. It is held while a rollout runs on the primary checkout, and a move git refuses over local changes is
+# a note: the commit is on origin either way, and the checkout catches up at its next fast-forward. A new handed file
+# clear_handed left on disk is staged first (its blob is <new>'s, so the move keeps it) and unstaged again if the move
+# is refused.
+primary_follow() {
+  local rc r added=()
+  [ "$1" = "$2" ] && return 0
+  if primary_hold; then
+    echo "land: held the primary checkout at $(git rev-parse --short HEAD), $4: $HOLD"
+    return 0
+  fi
+  for r in ${list[@]+"${list[@]}"}; do
+    if ! git cat-file -e "HEAD:$r" 2>/dev/null && [ -f "$r" ] && [ ! -L "$r" ] \
+       && [ "$(git hash-object --path="$r" -- "$r" 2>/dev/null)" = "$(git rev-parse -q --verify "$2:$r" 2>/dev/null)" ]; then
+      git add -- "$r" 2>/dev/null && added+=("$r")
+    fi
+  done
+  git update-index -q --refresh >/dev/null 2>&1   # read-tree -u trusts the stat cache, stale after clear_handed's restore
+  move_branch "$1" "$2" "$3"; rc=$?
+  [ "$rc" = 0 ] && return 0
+  for r in ${added[@]+"${added[@]}"}; do git reset -q HEAD -- "$r" 2>/dev/null; done
+  if [ "$rc" = 1 ]; then echo "land: ff refused: $MOVE_ERR"; else echo "land: ff refused: the branch moved during landing"; fi
+  return 0
 }
 
 # move_branch <old> <new> <reflog msg>: move the checked-out branch $b from <old> to <new>. Two-tree checkout
@@ -630,6 +685,96 @@ move_branch() {
     return 2
   fi
   return 0
+}
+
+# scratch_build: S5 on a landable default branch. Stage the handed paths into a throwaway index (the checkout's own is
+# not written), then build the close-out commit in a scratch worktree (ADR 0078 d3). Sets list, tree, built, tip
+# (the commit, when there is one) and already (origin already holds every handed edit). A stuck here commits nothing.
+scratch_build() {
+  local idx=$tmpd/index rel base rc head
+  GIT_INDEX_FILE=$idx git read-tree HEAD 2>"$tmpd/rt.err" || stuck_early "cannot read HEAD: $(first_line "$tmpd/rt.err")"
+  for rel in ${rels[@]+"${rels[@]}"}; do
+    if review_doc "$rel" && { [ -e "$rel" ] || [ -L "$rel" ]; }; then
+      GIT_INDEX_FILE=$idx git rm -q --cached -- "$rel" 2>"$tmpd/rm.err" || stuck_early "rm failed: $rel: $(first_line "$tmpd/rm.err")"
+      list+=("$rel")
+    elif [ -e "$rel" ] || [ -L "$rel" ]; then
+      if ! GIT_INDEX_FILE=$idx git add -- "$rel" 2>"$tmpd/add.err"; then
+        git check-ignore -q -- "$rel" && stuck_early "ignored: $rel"
+        stuck_early "add failed: $rel: $(first_line "$tmpd/add.err")"
+      fi
+      list+=("$rel")
+    elif git cat-file -e "HEAD:$rel" 2>/dev/null; then
+      GIT_INDEX_FILE=$idx git rm -q --cached --ignore-unmatch -- "$rel" 2>"$tmpd/rm.err" \
+        || stuck_early "add failed: $rel: $(first_line "$tmpd/rm.err")"
+      list+=("$rel")
+    elif git ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
+      echo "land: dropped $rel (not on disk, index-only; left staged)"
+    else
+      echo "land: dropped $rel (not on disk, never tracked)"
+    fi
+  done
+  tree=$(GIT_INDEX_FILE=$idx git write-tree 2>"$tmpd/wtree.err") || stuck_early "cannot write the close-out tree: $(first_line "$tmpd/wtree.err")"
+  head=$(git rev-parse HEAD)
+  if [ "$tree" = "$(git rev-parse 'HEAD^{tree}')" ]; then echo "land: nothing committed"; return 0; fi
+  # origin's tip, unless a commit is already stranded here: then HEAD, so the stranded commits are carried under this one.
+  base=$(git rev-parse "refs/remotes/origin/$d")
+  git merge-base --is-ancestor "$head" "$base" || base=$head
+  scratch_commit "$base" "$tree"; rc=$?
+  if [ "$rc" = 1 ] && [ "$base" != "$head" ]; then
+    echo "land: 3-way conflict against origin/$d: built on $(git rev-parse --short "$head"), the checkout's own commit"
+    base=$head
+    scratch_commit "$base" "$tree"; rc=$?
+  fi
+  case $rc in
+    0) built=$(cat "$tmpd/tip"); tip=$built ;;
+    4) already=1; echo "land: nothing committed (origin/$d already holds these changes)" ;;
+    *) stuck_early "cannot build the close-out commit: $(first_line "$tmpd/wt.err")" ;;
+  esac
+}
+
+# scratch_commit <base> <tree>: in a detached scratch worktree at <base>, apply each handed path's HEAD-to-<tree> change
+# as a 3-way diff and commit it, hooks off, the new tip in $tmpd/tip. 1 = a path conflicted against <base>; 4 = no
+# change left against <base>; 3 = anything else (git's words in $tmpd/wt.err). A handed path's deletion that <base> has
+# already made is skipped, so a retried deletion is no conflict.
+scratch_commit() (
+  wtroot=$(mktemp -d "${TMPDIR:-/tmp}/land-wt.XXXXXX") || exit 3
+  wt=$wtroot/wt
+  trap 'git worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wtroot"; git worktree prune >/dev/null 2>&1' EXIT
+  GIT_LFS_SKIP_SMUDGE=1 git -c core.hooksPath=/dev/null worktree add -q --detach "$wt" "$1" 2>"$tmpd/wt.err" || exit 3
+  for r in ${list[@]+"${list[@]}"}; do
+    git diff --binary --full-index HEAD "$2" -- "$r" > "$tmpd/p.patch" 2>"$tmpd/wt.err" || exit 3
+    [ -s "$tmpd/p.patch" ] || continue
+    if ! git cat-file -e "$2:$r" 2>/dev/null && ! git -C "$wt" cat-file -e "HEAD:$r" 2>/dev/null; then continue; fi
+    git -C "$wt" apply --3way --whitespace=nowarn "$tmpd/p.patch" 2>"$tmpd/wt.err" || { cat "$tmpd/wt.err"; exit 1; }
+  done
+  git -C "$wt" diff --quiet --cached && exit 4
+  git -C "$wt" -c core.hooksPath=/dev/null commit -q -F "$msgfile" 2>"$tmpd/wt.err" || exit 3
+  git -C "$wt" rev-parse HEAD > "$tmpd/tip" 2>"$tmpd/wt.err" || exit 3
+  exit 0
+)
+
+# delivered: the handed paths have reached origin (this run's commit is pushed, or origin already held them).
+delivered() { if [ -n "$built$already" ]; then clear_handed; fi; }
+
+# clear_handed: once the close-out is on origin, give each handed path back to HEAD, so the checkout's next
+# fast-forward is not refused over its own close-out (live-checkout.sh's overlap: a dirty or staged path origin
+# changes). Only a path still exactly as it was committed: one edited since keeps its edit. A file HEAD does not know
+# stays on disk (a handoff's reader may start this minute). A copy the caller staged (`git rm -f`) is unstaged first.
+clear_handed() {
+  local r
+  for r in ${list[@]+"${list[@]}"}; do
+    if [ -L "$r" ]; then echo "land: kept $r (a symlink)"; continue; fi
+    if git cat-file -e "$tree:$r" 2>/dev/null; then
+      [ -f "$r" ] && [ "$(git hash-object --path="$r" -- "$r" 2>/dev/null)" = "$(git rev-parse -q --verify "$tree:$r")" ] \
+        || { echo "land: kept $r (changed since it was committed)"; continue; }
+    elif [ -e "$r" ] && [ ! -f "$r" ]; then
+      echo "land: kept $r (not a file)"; continue
+    fi
+    git cat-file -e "HEAD:$r" 2>/dev/null || continue
+    git diff --quiet --cached HEAD -- "$r" || git reset -q HEAD -- "$r" 2>/dev/null \
+      || { echo "land: kept $r (could not unstage it)"; continue; }
+    git restore --worktree --source=HEAD -- "$r" 2>/dev/null || echo "land: kept $r (could not restore it)"
+  done
 }
 
 # scratch_rebase <old> <onto>: rebase <old>'s commits onto <onto> once, in a detached scratch worktree, so
@@ -707,8 +852,8 @@ label_landing() {
 
 land_protected() {
   local head sha12 cdate s branch n url state rc out body title
-  head=$(git rev-parse HEAD); sha12=$(printf '%s' "$head" | cut -c1-12)
-  cdate=$(git log -1 --format=%cd --date=short HEAD)
+  head=$(git rev-parse "$tip"); sha12=$(printf '%s' "$head" | cut -c1-12)
+  cdate=$(git log -1 --format=%cd --date=short "$tip")
   s=$(printf '%s' "$slug_arg" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9-][^a-z0-9-]*/-/g' -e 's/^-*//' -e 's/-*$//' | cut -c1-40 | sed -e 's/-*$//')
   [ -n "$s" ] || s=$(basename "$top" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9-][^a-z0-9-]*/-/g' -e 's/^-*//' -e 's/-*$//' | cut -c1-40 | sed -e 's/-*$//')
   [ -n "$s" ] || s=close-out
@@ -728,11 +873,12 @@ EOF
     MERGED) finish "stuck: close-out PR $url merged but $sha12 is not on origin/$d" 1 ;;
     CLOSED) finish "stuck: close-out PR $url was closed unmerged" 1 ;;
     *)
-      bounded git push origin "HEAD:refs/heads/$branch" 2>"$tmpd/push.err"; rc=$?
+      bounded git push origin "$head:refs/heads/$branch" 2>"$tmpd/push.err"; rc=$?
       net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
       [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
       [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
-      title=$(git log -1 --format=%s HEAD)
+      made=$built
+      title=$(git log -1 --format=%s "$tip")
       body=$tmpd/body
       printf '%s\n\n%s\n' "Landing for \`$sha12\` (ADR 0028)." \
         "Queued with auto-merge as a merge commit, so \`$sha12\` stays an ancestor of $d." > "$body"
@@ -764,11 +910,12 @@ EOF
   net_rc "$rc" merge optional "$tmpd/merge.err"; rc=$?
   [ "$rc" = 0 ] && res="queued $url"
 
-  if ! git merge-base --is-ancestor "refs/remotes/origin/$d" HEAD; then
+  if ! git merge-base --is-ancestor "refs/remotes/origin/$d" "$tip"; then
     bounded gh api --method PUT "repos/$slug/pulls/$n/update-branch" >/dev/null 2>"$tmpd/ub.err"; rc=$?
     net_rc "$rc" update-branch optional "$tmpd/ub.err"; rc=$?
     [ "$rc" = 1 ] && echo "land: update-branch failed: $NET_ERR"
   fi
+  delivered
   finish "$res" 0
 }
 

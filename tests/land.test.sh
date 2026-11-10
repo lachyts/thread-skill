@@ -3,7 +3,8 @@
 # `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), its own-branch mode
 # with close's `# thread:land-own` snippet (cases 42–70; 71–73b are close-out cases), and its read-only route mode,
 # `--route` (case 74, leg.py's Complete; case 75, its parity with a landing, which self-rollout-check.sh
-# --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0058 d5). Fixture repos talk to bare "servers" under $tmp/srv
+# --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0058 d5); case 79 is the
+# scratch commit (ADR 0078 d3). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
@@ -166,6 +167,9 @@ res() {
   tmpempty "$label"
 }
 made() { printf '%s\n' "$err" | sed -n 's/^land: commit //p' | head -n 1; }
+msha12() { made | cut -c1-12; }
+# unmoved <label> <sha>: the checkout's HEAD is still <sha> and its work tree no longer holds the close-out (ADR 0078 d3).
+unmoved() { ok "$(git -C "$W" rev-parse HEAD)" "$2" "$1: the checkout's HEAD never moved"; ok "$(git -C "$W" status --porcelain -- THREAD.md)" "" "$1: its THREAD.md is back to HEAD's"; }
 nossh() { ok "$(sshlog | grep -c .)" 0 "$1: zero ssh calls"; }
 nogh() { ok "$(ghlog | grep -c .)" 0 "$1: zero gh calls"; }
 nopush() { ok "$(cnt "$(sshlog)" git-receive-pack)" 0 "$1: nothing pushed"; }
@@ -216,10 +220,12 @@ echo "== 1. protected, local strictly behind"
 ghreset; mkrepo c1; srvcommit c1 x.txt X; X=$(srvref c1 master); edit
 land -- --slug 'c1 thread' -- "$W" "$W/THREAD.md"
 res "case 1" 0 "queued https://github.com/o/c1/pull/1"
-C=$(git -C "$W" rev-parse HEAD)
-ok "$(made)" "$C" "case 1: land: commit is HEAD"
-ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 1: local fast-forwarded to X first (C's parent is X)"
-br="close/$(git -C "$W" log -1 --format=%cd --date=short)-c1-thread-$(sha12)"
+C=$(made)
+ok "$(git -C "$W" rev-parse "$C^")" "$X" "case 1: C sits on origin's tip X, built in the scratch worktree"
+unmoved "case 1" "$X"
+ok "$(git -C "$W" rev-parse -q --verify "$C^{commit}" >/dev/null && echo y)" y "case 1: C is in the object store"
+hasnt "$(git -C "$W" status --porcelain)" "THREAD" "case 1: the close-out is off the checkout"
+br="close/$(git -C "$W" log -1 --format=%cd --date=short "$C")-c1-thread-$(msha12)"
 ok "$(srvclose c1)" "$br $C" "case 1: server close/<cdate>-<slug>-<sha12> is C"
 ok "$(ghlog | awk '{print $1" "$2" "$3" "$4}' | tr '\n' '|')" \
    "api repos/o/c1 --jq .permissions.push|api repos/o/c1/branches/master --jq .protected|pr list -R o/c1|pr list -R o/c1|api --method POST repos/o/c1/pulls|api --method POST repos/o/c1/issues/1/labels|pr merge 1 -R|" \
@@ -229,17 +235,18 @@ has "$(ghlog)" "pr list -R o/c1 --state all --limit 200" "case 1: phase 2 is --s
 has "$(ghlog)" "pr merge 1 -R o/c1 --auto --merge" "case 1: auto-merge queued with a merge commit"
 has "$(ghlog)" "-f labels[]=landing" "case 1: labelled landing over REST"
 for bad in "pr edit" "pr create" "update-branch"; do hasnt "$(ghlog)" "$bad" "case 1: no $bad"; done
-ok "$(head -n 1 "$GH_STATE/body.txt")" "Landing for \`$(sha12)\` (ADR 0028)." "case 1: the PR body names the landing, not a caller"
+ok "$(head -n 1 "$GH_STATE/body.txt")" "Landing for \`$(msha12)\` (ADR 0028)." "case 1: the PR body names the landing, not a caller"
 hasnt "$(cat "$GH_STATE/body.txt")" "thread:close" "case 1: the PR body does not say thread:close"
-ok "$(git -C "$W" rev-parse refs/heads/master)" "$C" "case 1: the local default keeps the commit"
+ok "$(git -C "$W" rev-parse refs/heads/master)" "$X" "case 1: the local default stays at origin's tip (nothing commits on it)"
 
 echo "== 2. protected, diverged with a stranded C0"
 ghreset; mkrepo c2; c0; C0=$(git -C "$W" rev-parse HEAD); srvcommit c2 x.txt X; edit
 land -- --slug c2 -- "$W" "$W/THREAD.md"
 res "case 2" 0 "queued https://github.com/o/c2/pull/1"
-C=$(git -C "$W" rev-parse HEAD)
-ok "$(git -C "$W" rev-parse HEAD^)" "$C0" "case 2: HEAD pushed unchanged (C's parent is C0; not rebased)"
+C=$(made)
+ok "$(git -C "$W" rev-parse "$C^")" "$C0" "case 2: C sits on the stranded C0, pushed unchanged (not rebased)"
 ok "$(srvclose c2 | cut -d' ' -f2)" "$C" "case 2: the server close/ branch is C"
+unmoved "case 2" "$C0"
 ok "$(cnt "$(ghlog)" "update-branch")" 1 "case 2: update-branch called once"
 has "$err" "land: carried 1 earlier close-out commit(s)" "case 2: carried 1"
 
@@ -261,8 +268,8 @@ ok "$(cnt "$(ghlog)" "POST repos/o/c4/pulls")" 1 "case 4: a new PR"
 
 # ==== Protected route: reuse and retry ====================================================================
 echo "== 5. retry under another TZ, zero paths, OPEN PR"
-ghreset; mkrepo c5; edit
-land GH_MERGE=notallowed -- --slug c5 -- "$W" "$W/THREAD.md"; res "case 5 setup" 0 "queued: needs merge https://github.com/o/c5/pull/1"
+ghreset; mkrepo c5; c0
+land GH_MERGE=notallowed -- --slug c5 -- "$W"; res "case 5 setup" 0 "queued: needs merge https://github.com/o/c5/pull/1"
 closes=$(srvclose c5)
 land TZ=Pacific/Kiritimati GH_MERGE=notallowed -- --slug c5 -- "$W"
 res "case 5c (still refused)" 0 "queued: needs merge https://github.com/o/c5/pull/1"
@@ -277,8 +284,8 @@ has "$(ghlog)" "pr merge 1 -R o/c5 --auto --merge" "case 5b: the reused PR's mer
 hasnt "$(ghlog)" "autoMergeRequest" "case 5b: the PR list never asks for autoMergeRequest"
 
 echo "== 6. PR create hangs after creating"
-ghreset; mkrepo c6; edit
-land GH_CREATE=hang-after-create -- "$W" "$W/THREAD.md"
+ghreset; mkrepo c6; c0
+land GH_CREATE=hang-after-create -- "$W"
 res "case 6" 0 "queued https://github.com/o/c6/pull/1"
 ok "$(cnt "$(ghlog)" "pr list -R o/c6 --state open")" 2 "case 6: the re-lookup ran"
 land -- "$W"
@@ -318,8 +325,9 @@ land GH_LIST=badjson -- "$W"; res "case 9d (bad JSON)" 1 "stuck: cannot look up 
 echo "== 10. protection unreadable"
 ghreset; mkrepo c10; edit
 land GH_PROT=404 -- "$W" "$W/THREAD.md"; res "case 10" 1 "stuck: cannot read branch protection: gh: Branch not found (HTTP 404)"
-nopush "case 10"; ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 10: committed first"
-land GH_PROT=hang -- "$W"; res "case 10b" 1 "stuck: cannot read branch protection: timed out"
+nopush "case 10"; has "$err" "land: nothing committed" "case 10: nothing committed"
+ok "$(git -C "$W" status --porcelain -- THREAD.md)" " M THREAD.md" "case 10: the edit stays in the work tree for a re-run"
+c0; land GH_PROT=hang -- "$W"; res "case 10b" 1 "stuck: cannot read branch protection: timed out"
 
 echo "== 11. unprotected, origin unmoved"
 ghreset; mkrepo c11; edit
@@ -343,12 +351,14 @@ ok "$(wtcount)" 1 "case 12: the scratch worktree is gone"
 ok "$(git -C "$W" status --porcelain)" "" "case 12: the tree is clean"
 
 echo "== 13. rebase conflict"
-ghreset; mkrepo c13; srvcommit c13 THREAD.md "origin thread"; S=$(srvref c13 master); edit
+ghreset; mkrepo c13; B0=$(git -C "$W" rev-parse HEAD); srvcommit c13 THREAD.md "origin thread"; S=$(srvref c13 master); edit
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 13" 1 "stuck: rebase conflict"
 ok "$(srvref c13 master)" "$S" "case 13: server untouched"
-ok "$(git -C "$W" rev-parse HEAD)" "$(made)" "case 13: local HEAD is this run's commit, unmoved"
-ok "$(git -C "$W" status --porcelain)" "" "case 13: index and work tree unchanged"
+has "$err" "land: 3-way conflict against origin/master" "case 13: the 3-way conflict is named"
+has "$err" "land: nothing committed" "case 13: nothing committed"
+ok "$(git -C "$W" rev-parse HEAD)" "$B0" "case 13: local HEAD unmoved"
+ok "$(git -C "$W" status --porcelain)" " M THREAD.md" "case 13: the edit stays in the work tree, the index untouched"
 ok "$(wtcount)" 1 "case 13: the scratch worktree is removed"
 echo "== 13b. a local pull merge"
 ghreset; mkrepo c13b; c0; srvcommit c13b x.txt X1; fetchsrv c13b
@@ -381,14 +391,15 @@ for v in dirty untracked staged; do
     untracked) echo mine > "$W/d.txt"; want="'d.txt' would be overwritten"; wst='?? d.txt|' ;;
     staged) echo mine >> "$W/a.txt"; git -C "$W" add a.txt; want="a.txt"; wst='M  a.txt|' ;;
   esac
-  edit; land GH_PROT=false -- "$W" "$W/THREAD.md"
-  res "case 13d ($v)" 1 "stuck: rebase refused: …"
-  has "$out" "$want" "case 13d ($v): the refusal names [$want]"
+  H0=$(git -C "$W" rev-parse HEAD); edit; land GH_PROT=false -- "$W" "$W/THREAD.md"
+  res "case 13d ($v)" 0 landed
+  has "$err" "land: ff refused: " "case 13d ($v): a refused move is a note"
+  has "$err" "$want" "case 13d ($v): the note names [$want]"
   ok "$(git -C "$W" status --porcelain -- a.txt d.txt | tr '\n' '|')" "$wst" "case 13d ($v): the overlapping change is intact"
-  ok "$(git -C "$W" rev-parse HEAD)" "$(made)" "case 13d ($v): local HEAD unmoved"
+  ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 13d ($v): local HEAD unmoved"
   ok "$(git -C "$W" status --porcelain -- src/b.txt)" "A  src/b.txt" "case 13d ($v): src/b.txt still staged"
-  ok "$(srvref "c13d$v" master)" "$S" "case 13d ($v): server untouched"
-  nopush "case 13d ($v)"
+  ok "$(srvref "c13d$v" master)" "$(made)" "case 13d ($v): the commit is on the server"
+  ok "$(git -C "$W" rev-parse "$(made)~2")" "$S" "case 13d ($v): C0 and C rebased onto origin's tip"
   ok "$(wtcount)" 1 "case 13d ($v): the scratch worktree is removed"
 done
 ok "$(git -C "$W" status --porcelain -- a.txt)" "M  a.txt" "case 13d (staged): a.txt still staged"
@@ -420,7 +431,7 @@ land -- "$W" "$W/THREAD.md"; res "case 16" 0 "not landed: listed o/c16: shared t
 nossh "case 16"; nogh "case 16"; ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 16: committed"
 rm -f "$LANDING_REGISTER"; ln -s "$tmp/nowhere.md" "$LANDING_REGISTER"; edit
 land -- "$W" "$W/THREAD.md"; res "case 16b (dangling register)" 1 "stuck: landing register: landing-register: …"
-ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 16b: committed first"; nossh "case 16b"
+has "$err" "land: nothing committed" "case 16b: nothing committed"; nossh "case 16b"
 rm -f "$LANDING_REGISTER"; : > "$LANDING_REGISTER"
 
 # ==== Staging and preflight ===============================================================================
@@ -448,11 +459,11 @@ ghreset; mkrepo c17b; mkdir -p "$W/docs/handoffs"; echo n > "$W/docs/handoffs/n.
 git -C "$W" add docs/handoffs/n.md; rm "$W/docs/handoffs/n.md"; H0=$(git -C "$W" rev-parse HEAD); edit
 land GH_PROT=false -- "$W" "$W/THREAD.md" "$W/docs/handoffs/n.md"
 res "case 17b" 0 landed
-has "$err" "land: dropped docs/handoffs/n.md (not on disk, index-only; unstaged)" "case 17b: dropped with the index-only note"
+has "$err" "land: dropped docs/handoffs/n.md (not on disk, index-only; left staged)" "case 17b: dropped with the index-only note"
 hasnt "$err" "commit failed" "case 17b: no commit failure"
 ok "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "THREAD.md " "case 17b: the commit touches only THREAD.md"
 ok "$(git -C "$W" rev-parse HEAD^)" "$H0" "case 17b: one new commit"
-ok "$(git -C "$W" ls-files docs/handoffs/n.md)" "" "case 17b: n.md is out of the index"
+ok "$(git -C "$W" ls-files docs/handoffs/n.md)" "docs/handoffs/n.md" "case 17b: the checkout's index is not written"
 echo n > "$W/docs/handoffs/n.md"; git -C "$W" add docs/handoffs/n.md; rm "$W/docs/handoffs/n.md"; H0=$(git -C "$W" rev-parse HEAD)
 land GH_PROT=false -- "$W" "$W/docs/handoffs/n.md"
 res "case 17b only n.md" 0 landed
@@ -547,7 +558,8 @@ ghreset; mkrepo c21; git -C "$W" symbolic-ref -d refs/remotes/origin/HEAD; edit
 land GH_PROT=false -- "$W" "$W/THREAD.md"; res "case 21" 0 landed
 edit; land FAKE_SSH=fail -- "$W" "$W/THREAD.md"
 res "case 21 ssh fails" 1 "stuck: default branch unresolved: fake-ssh: connect to host github.com port 22: Connection refused"
-ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 21: committed first"
+has "$err" "land: nothing committed" "case 21: nothing committed"
+ok "$(git -C "$W" status --porcelain -- THREAD.md)" " M THREAD.md" "case 21: the edit stays in the work tree"
 edit; land FAKE_SSH=hang -- "$W" "$W/THREAD.md"
 res "case 21b" 1 "stuck: default branch unresolved: timed out"
 
@@ -555,7 +567,7 @@ echo "== 22. fetch hangs"
 ghreset; mkrepo c22; edit
 land FAKE_SSH=hang -- "$W" "$W/THREAD.md"
 res "case 22" 1 "stuck: cannot fetch origin/master: timed out"
-ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 22: committed first"
+has "$err" "land: nothing committed" "case 22: nothing committed"
 edit; land FAKE_SSH=fail -- "$W" "$W/THREAD.md"
 res "case 22b (fetch refused)" 1 "stuck: cannot fetch origin/master: fake-ssh: connect to host github.com port 22: Connection refused"
 
@@ -599,17 +611,17 @@ has "$(sshlog)" "git-receive-pack" "case 27: core.sshCommand is used, not overwr
 edit; land GIT_DIR=/nonexistent GH_PROT=false -- "$W" "$W/THREAD.md"; res "case 27 GIT_DIR" 0 landed
 printf '#!/bin/sh\n{ git config gc.auto; git config maintenance.auto; git config user.flavour; } > "%s"\n' "$tmp/hook27" > "$W/.git/hooks/post-commit"
 chmod +x "$W/.git/hooks/post-commit"; edit
-land GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.flavour GIT_CONFIG_VALUE_0=mint GH_PROT=false -- "$W" "$W/THREAD.md"
-res "case 27 GIT_CONFIG_COUNT" 0 landed
-ok "$(tr '\n' ' ' < "$tmp/hook27")" "0 false mint " "case 27: gc.auto=0, maintenance.auto=false, and the caller's key still applies"
+land GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.flavour GIT_CONFIG_VALUE_0=mint -- --commit-only "$W" "$W/THREAD.md"
+res "case 27 GIT_CONFIG_COUNT" 0 "not landed: commit-only"
+ok "$(tr '\n' ' ' < "$tmp/hook27")" "0 false mint " "case 27: gc.auto=0, maintenance.auto=false, and the caller's key still applies (a hook runs only on an in-place commit; the scratch commit's are off)"
 rm -f "$W/.git/hooks/post-commit"
 
 echo "== 28. slugs"
 ghreset; mkrepo c28; edit
 land -- --slug 'My Thread!' "$W" "$W/THREAD.md"; res "case 28" 0 "queued …"
-has "$(srvclose c28)" "-my-thread-$(sha12) " "case 28: 'My Thread!' → my-thread"
+has "$(srvclose c28)" "-my-thread-$(msha12) " "case 28: 'My Thread!' → my-thread"
 edit; land -- --slug '' "$W" "$W/THREAD.md"; res "case 28 empty" 0 "queued …"
-has "$(srvclose c28)" "-c28-$(sha12) " "case 28: an empty slug → the repo's basename"
+has "$(srvclose c28)" "-c28-$(msha12) " "case 28: an empty slug → the repo's basename"
 
 # ==== Structural ==========================================================================================
 echo "== 29. structural"
@@ -724,17 +736,19 @@ land -- --slug newslug "$W"; res "case 31 control" 0 "queued https://github.com/
 has "$(ghlog)" "POST repos/o/c31/pulls" "case 31 control: a different sha12 is not matched"
 
 echo "== 32. FF refused by a dirty overlap, protected"
-ghreset; mkrepo c32; B0=$(git -C "$W" rev-parse HEAD); srvcommit c32 a.txt "origin a"; echo mine >> "$W/a.txt"; edit
+ghreset; mkrepo c32; B0=$(git -C "$W" rev-parse HEAD); srvcommit c32 a.txt "origin a"; X=$(srvref c32 master); echo mine >> "$W/a.txt"; edit
 oh=$(cat "$W/.git/ORIG_HEAD" 2>/dev/null)
 land -- "$W" "$W/THREAD.md"
 res "case 32" 0 "queued https://github.com/o/c32/pull/1"
 has "$err" "land: ff refused: local changes overlap origin/master (a.txt)" "case 32: the ff refused note names the overlap"
 ok "$(cat "$W/.git/ORIG_HEAD" 2>/dev/null)" "$oh" "case 32: … no merge ran, so ORIG_HEAD is untouched"
-ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 32: C's parent is the old base"
-ok "$(srvclose c32 | cut -d' ' -f2)" "$(git -C "$W" rev-parse HEAD)" "case 32: the server close/ branch is C"
-ok "$(cnt "$(ghlog)" update-branch)" 1 "case 32: update-branch once"
+C=$(made)
+ok "$(git -C "$W" rev-parse "$C^")" "$X" "case 32: C sits on origin's tip although the checkout is behind"
+unmoved "case 32" "$B0"
+ok "$(srvclose c32 | cut -d' ' -f2)" "$C" "case 32: the server close/ branch is C"
+ok "$(cnt "$(ghlog)" update-branch)" 0 "case 32: C is current, so no update-branch"
 ok "$(git -C "$W" status --porcelain -- a.txt)" " M a.txt" "case 32: a.txt is still dirty"
-ok "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "THREAD.md " "case 32: a.txt is not in C"
+ok "$(git -C "$W" show --name-only --format= "$C" | tr '\n' ' ')" "THREAD.md " "case 32: a.txt is not in C"
 
 echo "== 32b. FF refused under merge.autoStash=true"
 ghreset; mkrepo c32b; git -C "$W" config merge.autoStash true; B0=$(git -C "$W" rev-parse HEAD)
@@ -742,7 +756,7 @@ srvcommit c32b a.txt "origin a"; echo mine >> "$W/a.txt"; edit
 land -- "$W" "$W/THREAD.md"
 res "case 32b" 0 "queued https://github.com/o/c32b/pull/1"
 has "$err" "land: ff refused: " "case 32b: the ff refused note"
-ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 32b: C's parent is the old base (no fast-forward)"
+ok "$(git -C "$W" rev-parse HEAD)" "$B0" "case 32b: HEAD is the old base (no fast-forward)"
 ok "$(git -C "$W" status --porcelain -- a.txt)" " M a.txt" "case 32b: a.txt is still just dirty"
 ok "$(cat "$W/a.txt" | tr '\n' '|')" "base|mine|" "case 32b: a.txt is exactly the local change, no conflict markers"
 ok "$(git -C "$W" stash list | grep -c .)" 0 "case 32b: no autostash entry left behind"
@@ -789,7 +803,7 @@ if [ "$hit" = y ]; then
 fi
 edit; land LAND_DEADLINE=0 -- "$W" "$W/THREAD.md"
 res "case 35 deadline 0" 1 "stuck: deadline passed before fetch"
-ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 35 deadline 0: THREAD.md committed"; nossh "case 35 deadline 0"
+has "$err" "land: nothing committed" "case 35 deadline 0: nothing committed"; nossh "case 35 deadline 0"
 
 echo "== 36. unrelated histories"
 ghreset; mkrepo c36; W="$tmp/w/c36u"; git init -q -b master "$W"; git -C "$W" remote add origin git@github.com:o/c36.git
@@ -799,7 +813,7 @@ has "$err" "land: nothing committed" "case 36 unborn: nothing committed"
 W="$tmp/w/c36o"; git init -q -b master "$W"; git -C "$W" remote add origin git@github.com:o/c36.git
 echo t > "$W/THREAD.md"; git -C "$W" add THREAD.md; git -C "$W" commit -qm "📝 docs(thread): orphan"; edit
 land -- "$W" "$W/THREAD.md"; res "case 36 orphan" 1 "stuck: local branch has no common history with origin/master"
-ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 36 orphan: committed first"
+has "$err" "land: nothing committed" "case 36 orphan: nothing committed"
 nopush "case 36 orphan"; hasnt "$(ghlog)" "pr " "case 36 orphan: no pr call"; hasnt "$(ghlog)" "pulls" "case 36 orphan: no pulls call"
 
 echo "== 37. the lookup window"
@@ -858,8 +872,8 @@ cat > "$W/.git/hooks/post-commit" <<EOF
 perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid"; print \$f \$\$; close \$f; sleep 120'
 EOF
 chmod +x "$W/.git/hooks/post-commit"; edit; rm -f "$tmp/holder.pid"
-land GH_PROT=false -- "$W" "$W/THREAD.md"
-res "case 39" 0 landed
+land -- --commit-only "$W" "$W/THREAD.md"
+res "case 39" 0 "not landed: commit-only"
 ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39: returned while the holder lives (${el}s < ${HANG_BOUND}s)"
 for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
@@ -871,8 +885,8 @@ else
 fi
 [ -n "$hp" ] && kill -9 "$hp" 2>/dev/null
 edit; rm -f "$tmp/holder.pid"
-fill "$W" c39 "" "$W/THREAD.md"
-snip bash GH_PROT=false; res "case 39 snippet" 0 landed
+fill "$W" c39 "--commit-only" "$W/THREAD.md"
+snip bash; res "case 39 snippet" 0 "not landed: commit-only"
 ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39 snippet: returned while the holder lives (${el}s < ${HANG_BOUND}s)"
 for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && { holders+=("$hp"); kill -9 "$hp" 2>/dev/null; }
@@ -880,8 +894,10 @@ hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && { holders+=("$hp"); kil
 echo "== 40. a refused push says why"
 ghreset; mkrepo c40; edit
 land GH_PROT=false FAKE_SSH=move -- "$W" "$W/THREAD.md"
-res "case 40 (non-fast-forward)" 1 "stuck: push refused: ! [rejected] HEAD -> master (fetch first)"
-ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 40: committed first"
+res "case 40 (non-fast-forward)" 1 "stuck: push refused: ! [rejected]…"
+has "$out" "-> master (fetch first)" "case 40: …a rejected push of the close-out commit"
+has "$err" "land: nothing committed" "case 40: nothing committed"
+ok "$(git -C "$W" status --porcelain -- THREAD.md)" " M THREAD.md" "case 40: the edit stays in the work tree for a re-run"
 ghreset; mkrepo c40b
 printf '#!/bin/sh\necho "error: GH006: Protected branch update failed for refs/heads/master." >&2\nexit 1\n' > "$SRV/o/c40b.git/hooks/pre-receive"
 chmod +x "$SRV/o/c40b.git/hooks/pre-receive"; S=$(srvref c40b master); edit
@@ -915,12 +931,12 @@ for sh in "$BASH32" "${shells[@]}"; do
   snip "$sh"; res "$L protected" 0 "queued https://github.com/o/c41p${#sh}/pull/1"
   ok "$(git -C "$W" symbolic-ref HEAD)" refs/heads/master "$L: the checkout stays on master"
   ok "$([ -f "$D" ] && echo y)" y "$L: the doc is still on disk"
-  ok "$(git -C "$W" log -1 --format=%s)" "📝 docs(handoff): x" "$L: HEAD is the doc's commit"
-  ok "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "docs/handoffs/2026-01-01-x.md " "$L: the commit holds the doc only"
+  ok "$(git -C "$W" log -1 --format=%s "$(made)")" "📝 docs(handoff): x" "$L: the close-out commit is the doc's"
+  ok "$(git -C "$W" show --name-only --format= "$(made)" | tr '\n' ' ')" "docs/handoffs/2026-01-01-x.md " "$L: the commit holds the doc only"
   ok "$(cnt "$(ghlog)" "pr merge 1 ")" 1 "$L: one pr merge"
   has "$(ghlog | grep -F 'pr merge 1 ')" "--auto" "$L: the merge is queued with --auto"
   has "$(ghlog | grep -F '/pulls ')" "title=📝 docs(handoff): x -f head=close/" "$L: the PR is titled with the doc's commit subject"
-  has "$(cat "$GH_STATE/body.txt")" "Landing for \`$(sha12)\`" "$L: the PR body names the doc's landing"
+  has "$(cat "$GH_STATE/body.txt")" "Landing for \`$(msha12)\`" "$L: the PR body names the doc's landing"
   hasnt "$(cat "$GH_STATE/body.txt")" "thread:close" "$L: the handoff's PR body does not say thread:close"
   hasnt "$(ghlog)" "pr checks" "$L: no pr checks"; hasnt "$(ghlog)" "--watch" "$L: no --watch"
   # Unprotected: pushed.
@@ -1501,22 +1517,22 @@ ghreset; mkrepo c71; pplugin c71; srvcommit c71 x.txt X; B0=$(git -C "$W" rev-pa
 prollout "$PTASKS"
 LAND=$PLAND land -- --slug c71 -- "$W" "$W/THREAD.md"
 res "case 71" 0 "queued https://github.com/o/c71/pull/1"
-ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71: not fast-forwarded (C's parent is the old base)"
+ok "$(git -C "$W" rev-parse HEAD)" "$B0" "case 71: not fast-forwarded (HEAD is the old base)"
 has "$err" "land: held the primary checkout at ${B0:0:7}, not fast-forwarded: [[demo-rollout-2026-10-03]] running on it" "case 71: the held note names the rollout"
 ghreset; mkrepo c71b; pplugin c71b; srvcommit c71b x.txt X; X=$(srvref c71b master); edit
 prollout "$PTASKS" "paused: 2026-10-03T10:00+10:00"
 LAND=$PLAND land -- --slug c71b -- "$W" "$W/THREAD.md"
 res "case 71b" 0 "queued https://github.com/o/c71b/pull/1"
-ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71b: a hard-paused rollout releases it: fast-forwarded to X"
+ok "$(git -C "$W" rev-parse HEAD)" "$X" "case 71b: a hard-paused rollout releases it: fast-forwarded to X"
 hasnt "$err" "held the primary checkout" "case 71b: no held note"
 ghreset; mkrepo c71c; pplugin c71c; srvcommit c71c x.txt X; X=$(srvref c71c master); edit
 prollout "$PTASKS"
 land -- --slug c71c -- "$W" "$W/THREAD.md"
-ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71c: land.sh run from another checkout never holds this one"
+ok "$(git -C "$W" rev-parse HEAD)" "$X" "case 71c: land.sh run from another checkout never holds this one"
 ghreset; mkrepo c71d; pplugin c71d; srvcommit c71d x.txt X; B0=$(git -C "$W" rev-parse HEAD); edit
 printf 'import sys\nsys.exit(5)\n' > "$W/skills/_shared/scripts/unfinished-rollout.py"
 LAND=$PLAND land -- --slug c71d -- "$W" "$W/THREAD.md"
-ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71d: a failed running check holds"
+ok "$(git -C "$W" rev-parse HEAD)" "$B0" "case 71d: a failed running check holds"
 has "$err" "not fast-forwarded: the running-rollout check failed (rc 5)" "case 71d: … and says so"
 git -C "$W" checkout -q -- skills
 
@@ -1528,7 +1544,7 @@ LAND=$PLAND land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 72" 0 landed
 ok "$(made)" "$(srvref c72 master)" "case 72: land: commit is the pushed, rebased tip"
 ok "$(git -C "$W" rev-parse "$(srvref c72 master)~2")" "$X" "case 72: C0 and C rebased onto origin's tip on the server"
-ok "$(git -C "$W" rev-parse HEAD^)" "$OLD" "case 72: the local branch never moved (C sits on its old base)"
+ok "$(git -C "$W" rev-parse HEAD)" "$OLD" "case 72: the local branch never moved"
 has "$err" "pushed the rebased tip without moving it: [[demo-rollout-2026-10-03]] running on it" "case 72: the held note"
 ok "$(wtcount)" 1 "case 72: the scratch worktree is gone"
 rm -rf "$HOME/repos"
@@ -1961,6 +1977,86 @@ LAND="$tmp/lonely/land.sh" land -- --origin-slug "$W"; ok "$out/$rc" "o/c78/0" "
 ghreset; mkbranch c78b
 LAND="$tmp/lonely/land.sh" own --; ores "case 78 own" 1 "stuck: cannot load $LONELY/live-checkout.sh"; nossh "case 78 own"; nogh "case 78 own"
 }  # end shard_12
+
+# ==== The scratch commit (ADR 0078 d3): a close-out never commits on the checkout of the default branch ======
+shard_13() {
+echo "== 79. a protected close leaves the checkout's HEAD and index alone, and opens the PR"
+ghreset; mkrepo c79; echo staged > "$W/src/b.txt"; git -C "$W" add src/b.txt; edit
+H0=$(git -C "$W" rev-parse HEAD); I0=$(shasum < "$W/.git/index")
+land -- --slug c79 -- "$W" "$W/THREAD.md"
+res "case 79" 0 "queued https://github.com/o/c79/pull/1"
+C=$(made)
+ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 79: the checkout's HEAD never moved"
+ok "$(shasum < "$W/.git/index")" "$I0" "case 79: its index is byte-identical (nothing staged or refreshed)"
+ok "$(git -C "$W" rev-list origin/master..HEAD | grep -c .)" 0 "case 79: nothing is stranded (origin/master..HEAD empty)"
+ok "$(git -C "$W" status --porcelain)" "A  src/b.txt" "case 79: only the pre-staged file shows; THREAD.md is back to HEAD's"
+ok "$(git -C "$W" show "$C:THREAD.md" | tail -n 1)" closed "case 79: the close-out is in C"
+ok "$(srvclose c79 | cut -d' ' -f2)" "$C" "case 79: the server close/ branch is C"
+ok "$(wtcount)" 1 "case 79: the scratch worktree is gone"
+has "$(ghlog)" "pr merge 1 -R o/c79 --auto --merge" "case 79: auto-merge queued"
+
+echo "== 79b. a checkout behind origin (ff refused): the 3-way keeps origin's newer lines"
+ghreset; mkrepo c79b; printf 't1\nt2\nt3\nt4\nt5\nt6\n' > "$W/THREAD.md"; git -C "$W" commit -qam seed
+git -C "$W" push -q "$SRV/o/c79b.git" master; fetchsrv c79b; B0=$(git -C "$W" rev-parse HEAD)
+srvcommit c79b THREAD.md "$(printf 't1\nt2\nt3\nt4\nt5\nt6\norigin-line')"; S=$(srvref c79b master)
+printf 'mine\n' | cat - "$W/THREAD.md" > "$W/THREAD.new" && mv "$W/THREAD.new" "$W/THREAD.md"
+land -- --slug c79b -- "$W" "$W/THREAD.md"
+res "case 79b" 0 "queued https://github.com/o/c79b/pull/1"
+C=$(made)
+has "$err" "land: ff refused: local changes overlap origin/master (THREAD.md)" "case 79b: the ff was refused (precondition)"
+hasnt "$err" "3-way conflict" "case 79b: the merge is clean"
+ok "$(git -C "$W" rev-parse "$C^")" "$S" "case 79b: C sits on origin's tip"
+ok "$(git -C "$W" show "$C:THREAD.md" | head -n 1)/$(git -C "$W" show "$C:THREAD.md" | tail -n 1)" "mine/origin-line" "case 79b: both the local edit and origin's newer line survive"
+ok "$(git -C "$W" rev-parse HEAD)" "$B0" "case 79b: HEAD unmoved"
+
+echo "== 79c. a 3-way conflict falls back to the checkout's own commit; the PR carries it"
+ghreset; mkrepo c79c; B0=$(git -C "$W" rev-parse HEAD); srvcommit c79c THREAD.md "origin thread"; edit
+land -- --slug c79c -- "$W" "$W/THREAD.md"
+res "case 79c" 0 "queued https://github.com/o/c79c/pull/1"
+C=$(made)
+has "$err" "land: 3-way conflict against origin/master" "case 79c: the conflict is named"
+ok "$(git -C "$W" rev-parse "$C^")" "$B0" "case 79c: C sits on the checkout's own commit"
+ok "$(cnt "$(ghlog)" update-branch)" 1 "case 79c: update-branch once (C is behind origin)"
+unmoved "case 79c" "$B0"
+
+echo "== 79d. origin already holds the handed edit"
+ghreset; mkrepo c79d; B0=$(git -C "$W" rev-parse HEAD); edit; srvcommit c79d THREAD.md "$(cat "$W/THREAD.md")"
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 79d" 0 landed
+has "$err" "land: nothing committed (origin/master already holds these changes)" "case 79d: nothing committed, and why"
+nopush "case 79d"
+ok "$(git -C "$W" status --porcelain -- THREAD.md)" "" "case 79d: the copy is cleared"
+
+echo "== 79e. a path edited during the landing keeps its edit"
+ghreset; mkrepo c79e; edit
+mkdir -p "$tmp/bin79"; cat > "$tmp/bin79/gh" <<EOF
+#!/bin/sh
+case "\$*" in *"/labels"*) echo later >> "$W/THREAD.md" ;; esac
+exec "$tmp/bin/gh" "\$@"
+EOF
+chmod +x "$tmp/bin79/gh"
+land PATH="$tmp/bin79:$PATH" -- --slug c79e -- "$W" "$W/THREAD.md"
+res "case 79e" 0 "queued https://github.com/o/c79e/pull/1"
+has "$err" "land: kept THREAD.md (changed since it was committed)" "case 79e: kept, and why"
+ok "$(tail -n 1 "$W/THREAD.md")" later "case 79e: the later edit is intact"
+ok "$(git -C "$W" status --porcelain -- THREAD.md)" " M THREAD.md" "case 79e: still dirty"
+
+echo "== 79f. a pre-staged handed deletion (git rm -f) is unstaged once it is on origin"
+ghreset; mkrepo c79f; mkdir -p "$W/docs/handoffs"; echo z > "$W/docs/handoffs/z.md"
+git -C "$W" add docs && git -C "$W" commit -qm z && git -C "$W" push -q "$SRV/o/c79f.git" master && fetchsrv c79f
+H0=$(git -C "$W" rev-parse HEAD); git -C "$W" rm -qf docs/handoffs/z.md
+land -- --slug c79f -- "$W" "$W/docs/handoffs/z.md"
+res "case 79f" 0 "queued https://github.com/o/c79f/pull/1"
+C=$(made)
+ok "$(git -C "$W" show --name-status --format= "$C" | tr '\t\n' ' |')" "D docs/handoffs/z.md|" "case 79f: C holds the deletion"
+ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 79f: HEAD unmoved"
+ok "$(git -C "$W" status --porcelain -- docs/handoffs/z.md)" "" "case 79f: nothing left staged; the checkout's next ff is not refused"
+
+echo "== 79g. a commit-only landing still commits on the checkout (its by-design route)"
+ghreset; mkrepo c79g; edit
+land -- --commit-only "$W" "$W/THREAD.md"; res "case 79g" 0 "not landed: commit-only"
+ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 79g: committed in place"
+}  # end shard_13
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }

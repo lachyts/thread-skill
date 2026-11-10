@@ -272,7 +272,7 @@ If `git add` fails — an ignored path such as `~/Projects/Tutorials/`, `_archiv
 
 ### Land the close-outs
 
-Landing (ADR 0028) is how close's own close-out commits reach origin's default branch without Lachy. One shared script, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh`, commits the handed paths on the repo's current branch and lands them by the repo's own rules. A repo listed on the landing register, with no GitHub origin, swept by the daily sweep, or checked out on a branch other than origin's default is committed only. An unprotected default branch is pushed. A protected one gets the commit pushed unchanged to a `close/…` branch, a `landing` PR and auto-merge queued with a merge commit. Landing does not wait for the merge: a queued merge that fails is retried by the next close in that repo and by the daily lander.
+Landing (ADR 0028) is how close's own close-out commits reach origin's default branch without Lachy. One shared script, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh`, commits the handed paths and lands them by the repo's own rules. On a landable checkout of origin's default branch it builds the commit in a detached scratch worktree off origin's tip, never on the checkout (ADR 0078 d3); elsewhere it commits on the current branch. A repo listed on the landing register, with no GitHub origin, swept by the daily sweep, or checked out on a branch other than origin's default is committed only. An unprotected default branch is pushed. A protected one gets the commit pushed unchanged to a `close/…` branch, a `landing` PR and auto-merge queued with a merge commit. Landing does not wait for the merge: a queued merge that fails is retried by the daily lander, and by the next close in that repo when a commit is still stranded on the checkout.
 
 **When.** Only at the end of sub-step 7.2, as its last act, once per repo, after every repo's handed paths are collected. Never from sub-step 7.1, and never mid-7.2.
 
@@ -315,7 +315,7 @@ bash "$ld" ${mode:+"$mode"} --slug "$slug" -F "$msg" -- "$top" <paths>
 - `top` may be a removed directory: the `docs/handoffs/` that `git rm -f` just emptied. land.sh resolves it through the nearest existing ancestor.
 - land.sh prints exactly one line on stdout: `landed`, `queued <url>`, `queued: needs merge <url>`, `not landed: <reason>` or `stuck: <reason>`. It exits 0, or 1 for `stuck`. stderr carries `land: commit <sha>` (this run's commit, at its final SHA) or `land: nothing committed`, and `land: carried <N> earlier close-out commit(s)` when older close-outs went with it. Step 8 reads both.
 - Landing does not wait. Nothing polls after the call, and nothing calls again to check the merge.
-- A dirty or pre-staged tree is fine. Landing commits only the handed paths, never pre-staged work, and it is stuck only when origin's new changes overlap a local change.
+- A dirty or pre-staged tree is fine. Landing commits only the handed paths, never pre-staged work. On a landable default branch the checkout's HEAD and index are never written for the commit: once it is on origin, each handed path that has not changed since is restored to HEAD's copy (a staged copy unstaged, a new file left on disk), so the checkout's next fast-forward is not refused over its own close-out; until the PR merges the checkout's THREAD.md shows HEAD's copy (`land: kept <rel> …` names any path left alone).
 
 ### Land the own branch
 
