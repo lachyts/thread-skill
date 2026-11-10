@@ -655,8 +655,8 @@ this evidence and notify Lachy, never ack: every lane hold is his.
 `clears:` item has moved. Two cases are Lachy's:
 
 - **A carried fix whose item cannot move** (status's Carried line, or `prove --tasks <t>`, reads `cannot move (<why>):
-  record it on Lachy's word`: a linked rollout or task missing, or finished with nothing after `live:`). Ask him, in
-  the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`, whether the stuck work moved; on his word run
+  record it on Lachy's word`: a linked rollout or task missing, or finished with nothing after `live:`). Only his word
+  records it: once he says the stuck work moved, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --tasks <t> --item N --seen "<his words>" --on-his-word`,
   which records it and proves the note once every item has moved.
 - **An archived carried fix** (`prove` reports `archived while carried: not judged`, and reconcile-project reads

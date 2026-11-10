@@ -328,7 +328,7 @@ reconcile-rollout.py would spend its budget.
   close (`skills/close/SKILL.md` § A finished task closes itself), status (§ 4's Carried line) and reflect (§ 17's
   carried read), each running `prove` from the session's own root.
 - **The vault's daily sweep** (`~/repos/workspaces/_shared/scripts/archive-completed-vault-items.py`, run by
-  daily-sweep.sh): its task move keys on done, merged or dropped or the `archived` tag, so a carried fix stays in the
+  daily-sweep.sh): its task move keys on the Landed statuses (§ Statuses) or the `archived` tag, so a carried fix stays in the
   root and a done-before-Proven or owed note is archived. It never pulls a note out of `Archive/`: prove's carry-back is
   the only writer that does. Its PHASE CLOSE keys on the same statuses, so a carried fix keeps its phase open; once prove
   proves the last fix, it is the only closer of a fix phase, since the completion ceremony's `--kinds phase` run left
