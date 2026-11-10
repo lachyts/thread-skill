@@ -22,11 +22,15 @@
 // and one that stands makes the verdict wait (approved_unrun's readers: carry and unfinished-rollout.py), that it is never
 // carried and fails closed only at the merge, the Integration wait and the chain's windows; reconcile-rollout.py's
 // ON_MERGE_KEY and ON_MERGE_REGENERATE are pinned to it, § Rollout start stamp's Writers name approve-queue and
-// stamp-start, and § Hold until's Clearer names the approved-queue exception.
+// stamp-start, and § Hold until's Clearer names the approved-queue exception. § When (p45-7) states the durable trigger
+// (`when:`), its verbs and `triggers due` / `triggers fire`; reconcile-rollout.py's WHEN_KEY is pinned to it, its LOCAL_RE
+// to serial-chains.py's literal, and each RESET_PRIMARY_RECORDED outcome to a refresh() return in primary-refresh.py, so a
+// renamed outcome fails here rather than quietly reading as not recorded.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { collapse, read, root, section } from '../lib/contract-text.mjs'
 
@@ -39,6 +43,9 @@ const orient = read('skills/orient/SKILL.md')
 const reshuffle = read('skills/orient/reshuffle.md')
 const close = read('skills/close/SKILL.md')
 const repoTrack = read('skills/close/scripts/repo-track.sh')
+const reconcileRollout = read('skills/execute/scripts/reconcile-rollout.py')
+const serialChains = read('skills/_shared/scripts/serial-chains.py')
+const primaryRefresh = read('skills/_shared/scripts/primary-refresh.py')
 
 // ---- the doc's grammar --------------------------------------------------------------------------------
 
@@ -71,6 +78,8 @@ print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHA
                   "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "SHORT_ID_RE": rr.SHORT_ID_RE.pattern,
                   "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED, "HOLD_KEY": rr.HOLD_KEY,
                   "ON_MERGE_KEY": rr.ON_MERGE_KEY, "ON_MERGE_REGENERATE": rr.ON_MERGE_REGENERATE,
+                  "WHEN_KEY": rr.WHEN_KEY, "RESET_PRIMARY_RECORDED": list(rr.RESET_PRIMARY_RECORDED),
+                  "PRIMARY_REFRESH_PY": str(rr.PRIMARY_REFRESH_PY),
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
 `
@@ -250,7 +259,8 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY', 'ON_MERGE_KEY']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY', 'ON_MERGE_KEY',
+  'WHEN_KEY']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -353,10 +363,40 @@ function approvedQueueChecks(text, s) {
   return out
 }
 
+// ---- the durable trigger (p45-7) ----------------------------------------------------------------------------
+
+const LOCAL_LINE = (text) => (text.match(/^LOCAL_RE = re\.compile\(.*\)$/m) ?? [])[0]
+const REFRESH_BODY = (text) => text.split(/^def refresh\(/m)[1]?.split(/^def /m)[0] ?? ''
+
+// The names of the failed § When checks; [] when the section states the key, names `triggers due`, `triggers fire` and
+// every on and do verb, the attended-run rule and the never-carried rule; the script's WHEN_KEY equals the key, its LOCAL_RE
+// is serial-chains.py's literal, PRIMARY_REFRESH_PY exists, and each RESET_PRIMARY_RECORDED outcome is what a refresh()
+// return in primary-refresh.py opens with.
+function whenChecks(text, s, rr = reconcileRollout, sc = serialChains, pr = primaryRefresh) {
+  const sec = collapse(section(text, /^## When$/) ?? '')
+  const key = sec.match(/the key is `([a-z_]+)`/)
+  if (!key) return ['states the key']
+  const out = []
+  if (s.WHEN_KEY !== key[1]) out.push('script constant')
+  for (const want of ['`reconcile-rollout.py triggers due`', '`reconcile-rollout.py triggers fire <id>`',
+    '`merged <owner/repo#N | PR URL>`', '`paused`', '`landed [[task]]`',
+    '`regenerate`', '`regenerate --tasks a,b`', '`schedule [[task]]`', '`reset-primary`',
+    'a fired regenerate or schedule is an attended run that can wait on Lachy', '**Never carried.**', '**Fails closed.**']) {
+    if (!sec.includes(want)) out.push(`names ${want}`)
+  }
+  if (!LOCAL_LINE(rr) || LOCAL_LINE(rr) !== LOCAL_LINE(sc)) out.push('LOCAL_RE copy')
+  if (!existsSync(s.PRIMARY_REFRESH_PY)) out.push('primary-refresh path')
+  const body = REFRESH_BODY(pr)
+  for (const lit of s.RESET_PRIMARY_RECORDED) {
+    if (!body.includes(`return "${lit}`) && !body.includes(`return f"${lit}`)) out.push(`refresh() returns ${lit}`)
+  }
+  return out
+}
+
 // ---- tests --------------------------------------------------------------------------------------------
 
-test('the doc has the seven sections the readers cite', () => {
-  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Approved queue', 'Readers']) {
+test('the doc has the eight sections the readers cite', () => {
+  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Approved queue', 'When', 'Readers']) {
     assert.ok(section(doc, new RegExp(`^## ${h}$`)), `${DOC} has no ## ${h}`)
   }
 })
@@ -507,6 +547,25 @@ test('control: a drifted key, a dropped room-stop rule or a carried approval fai
     ['names a room stop is no run mark'])
   assert.deepEqual(approvedQueueChecks(mutate(doc, '- **Never carried.**', '- **Carried.**'), s), ['names **Never carried.**'])
   assert.deepEqual(approvedQueueChecks(mutate(doc, '## Approved queue', '## Approved queues'), s), ['states the key'])
+})
+
+test('§ When states the key, its verbs and the attended-run rule, and pins WHEN_KEY, LOCAL_RE and the recorded outcomes', () => {
+  assert.deepEqual(whenChecks(doc, scripts()), [])
+})
+
+test('control: a drifted key, a dropped verb, a drifted LOCAL_RE or a renamed outcome fails the when check', () => {
+  const s = scripts()
+  assert.deepEqual(whenChecks(mutate(doc, 'the key is `when`', 'the key is `whence`'), s), ['script constant'])
+  assert.deepEqual(whenChecks(doc, { ...s, WHEN_KEY: 'whence' }), ['script constant'])
+  assert.deepEqual(whenChecks(mutate(doc, '`reconcile-rollout.py triggers due`', '`triggers list`'), s),
+    ['names `reconcile-rollout.py triggers due`'])
+  assert.deepEqual(whenChecks(mutate(doc, /is an\s+attended run that can wait on Lachy/, 'runs on its own'), s),
+    ['names a fired regenerate or schedule is an attended run that can wait on Lachy'])
+  assert.deepEqual(whenChecks(doc, s, mutate(reconcileRollout, /^LOCAL_RE = .*$/m, 'LOCAL_RE = re.compile(r"x")')), ['LOCAL_RE copy'])
+  assert.deepEqual(whenChecks(doc, { ...s, PRIMARY_REFRESH_PY: '/no/such/file' }), ['primary-refresh path'])
+  assert.deepEqual(whenChecks(doc, s, reconcileRollout, serialChains, mutate(primaryRefresh, 'return f"held: {h}"', 'return f"blocked: {h}"')),
+    ['refresh() returns held: '])
+  assert.deepEqual(whenChecks(mutate(doc, '## When', '## Whence'), s), ['states the key'])
 })
 
 test('§ Readers lists every reader, and no Not yet adopted line is left', () => {

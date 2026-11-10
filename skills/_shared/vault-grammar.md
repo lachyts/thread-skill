@@ -1,7 +1,7 @@
 # The vault grammar — phase and task names, statuses, in flight
 
 The one definition of how a vault note's filename places it in a phase and how its `status:` reads,
-a rollout's start stamp, a hold the engine can read, and an approved queue.
+a rollout's start stamp, a hold the engine can read, an approved queue, and a durable trigger.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
 reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
 lists every reader). A reader that needs a pattern or a set cites the section here instead of
@@ -181,6 +181,75 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   when he starts it. A late heartbeat tick on the closed prior ends at its clause (1), and `next` on a superseded
   note halts `superseded`.
 
+## When
+
+A "when X, then Y" step that only a session holds dies with the session (the follow-ups lost with a session's watchers,
+2026-11-08/09; ADR 0078 d5). So it is frontmatter on the note, never a sentence: the key is `when`, read on the first
+top-level `when:` line of a rollout or task note, one `{on, do}` entry or a list of them, written `when: {on: "merged
+lachyts/thread-skill#361", do: regenerate}`. It extends the form of § Hold until and § Approved queue and replaces
+neither: a hold blocks starts, and an approved queue's verdict has outcomes a trigger does not.
+
+- **Six forms read**, each giving the same id: the flow mapping above; the block mapping Obsidian re-serialises it to
+  (`when:` then indented `on:` and `do:` lines); a flow list item `  - {on: "…", do: "…"}`; a block list item
+  `  - on: …` over `    do: …`; and either list item at column 0. A flow value holding a comma or a wikilink must be
+  quoted, or it is not valid YAML. An optional trailing ` # comment` stays. A whole `when: […]` flow list is unreadable.
+- **`on`** is one of `merged <owner/repo#N | PR URL>` (read as § Hold until reads a PR: MERGED is due; OPEN, CLOSED or a
+  gh error or timeout waits; a bare number is unreadable, since a trigger fires with no lead and a bare number needs a
+  repo to be read in), `paused` (a valued `paused:` on the note, or on the rollout a task note's `rollout:` links, and
+  only while that note is not closed or superseded; `pause_requested` and a room stop do not count, a sign-off pause
+  does) and `landed [[task]]` (as a dependency lands, `_dep_status`, so a merged tombstone and Archive resolve).
+- **`do`** is one of `regenerate`, `regenerate --tasks a,b` (slugs or wikilinks), `schedule [[task]]`, `reset-primary`.
+  A `do` target that is not found keeps the trigger waiting, and so does a list whose every target is closed (done,
+  dropped or a merged tombstone); a partly landed `--tasks` list still fires, since schedule's skip rule drops the
+  landed ones.
+- **`id`** is the first 12 hex of sha256 over the note's stem (lower-cased) and the normalised `on` and `do`: stable when
+  sibling entries move and unchanged by `fired`. An edit to the `on` or `do` of an unfired entry makes a new id.
+- **Writers**: any agent, or Lachy, instead of a background watcher: a follow-up that must outlive the session goes here,
+  on the note it belongs to. The rollout template's commented `# when:` line shows the form.
+- **Readers**: `reconcile-rollout.py triggers due`, read-only and needing no lead, which prints `{due, waiting,
+  unreadable, fired}`; `reconcile-rollout.py triggers fire <id>`, which runs one and records it. The Chorus Stage fires
+  due ones (the Chorus task `chorus-stage-shows-machinery-health-and-fires-triggers`); until it does, no automation calls
+  them. The scan reads every note under the tasks dir, Archive included, the root copy preferred; a `status: dropped`
+  note is inert, and a done or archived note still fires `schedule` and `reset-primary`.
+- **The record.** `fire` writes `fired: "<stamp>"` on the entry where it stands, in the entry's own form, and rewrites
+  nothing else: before a flow entry's closing `}`, or as one new line after a block entry's last line, at its first key's
+  column. The dash column and the `when:` line never change, and a single mapping stays one. An entry already fired is a
+  no-op; an edit to a fired entry stays fired, and deleting `fired:` re-arms it. `fired:` on a hand-written entry reads as
+  fired; an empty one is unreadable. Only `fresh: true` tells a caller to act on the row's `command`.
+- **A model step is recorded once and its command handed back.** `reconcile-rollout.py` starts no session: `fire` records
+  `regenerate` or `schedule` and prints `/thread:schedule [[<project>]] --regenerate`, `/thread:schedule --regenerate
+  --tasks a,b` or `/thread:schedule --tasks <slug>`. The command carries no `Under the chain:` line (§ Approved queue
+  alone defines it, and it says Lachy approved the queue and its start), so **a fired regenerate or schedule is an
+  attended run that can wait on Lachy**: the Session the Stage starts can stop at schedule's questions. A caller that dies between
+  `fire` and starting the Session loses the step: `fired:` is the audit, and deleting it re-arms.
+- **Regenerate's gate**, both `regenerate` forms, because `/thread:schedule --regenerate` acts on whatever is unfinished
+  for the project now. Its anchor is the note when tagged `rollout`, else the rollout its `rollout:` links; a task note's
+  own status does not count. In order: a `shape: serial` anchor is unreadable (a serial rollout supersedes nothing); no
+  anchor waits; a valued `superseded_by:` waits, so a successor is never touched by the prior's merge; a done or dropped
+  anchor waits; one neither paused nor never started (`approved_unrun`) waits, since schedule refuses a regenerate on a
+  running rollout. A `regenerate` written against a rollout that runs to its end lapses at its close, listed under
+  `waiting`. `fire` runs the same reading.
+- **Where a command runs.** A command row has a `projectRoot`, read on the trigger's own note for `regenerate` and on the
+  target task for `schedule [[U]]` (the note schedule § 0 resolves). The first present decides: the note's own `Project
+  root:` line, the `Project root:` of the rollout its `rollout:` links, then the first project, in `projects:` order,
+  whose note under `Work/Projects/**` (outside Archive first) carries a `` Local: `<path>` `` line. None present, or the one
+  that decides is not a directory, keeps the row waiting and `fire` exits 1 with nothing written, so `fired:` is never
+  spent on a command the Stage cannot place. No fall-through past a dead path, which could place a Session in the wrong
+  repo. A `script` row needs none.
+- **`reset-primary`** runs one `skills/_shared/scripts/primary-refresh.py run` pass in place (ADR 0078 Decided 3: a second
+  reset path would bypass its rule). `run` exits 0 whatever it finds, so `fire` reads the pass's outcome line, and records
+  only an outcome that read the checkout to a standing verdict (`current`, `ahead`, `moved`, `diverged`, `held:`,
+  `refused:`). Every other outcome (`not a primary checkout:`, `fetch failed:`, `broken:`, `unreadable`, `timed out:`,
+  `busy:`), no line, an outcome it does not know and a non-zero exit are not recorded: `fire` exits 1, due again next
+  tick. It blocks on the pass, up to about 15 minutes, so its caller runs it off the 5-minute tick.
+- **Fails closed.** An unknown key, a missing `on` or `do`, a verb outside the lists above, a bad `regenerate` argument, a
+  duplicate of an entry above, an empty `fired:`, a bare `regenerate` whose rollout names no project, or a `regenerate`
+  on a serial rollout lists under `unreadable`, is never due and never hides a good sibling; a block whose items sit at
+  two dash columns, already invalid YAML, is one unreadable row. A trigger that cannot be read today shows only in
+  `triggers due`.
+- **Never carried.** `carry` copies no `when:`, so a superseded note's unfired `paused` or `regenerate` lapses, listed under
+  `waiting` for good; to keep one, write it again on the successor.
+
 ## Readers
 
 - `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
@@ -215,6 +284,9 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
 - `skills/execute/scripts/reconcile-rollout.py` `next`, `status`, `approve-queue`, `stamp-start` and `carry`:
   `ON_MERGE_KEY` and `ON_MERGE_REGENERATE` (§ Approved queue's key and value), read by `_on_merge`; and
   `approved_unrun`, loaded by `skills/_shared/scripts/unfinished-rollout.py`.
+- `skills/execute/scripts/reconcile-rollout.py` `triggers due` and `triggers fire`: `WHEN_KEY` (§ When's key), read by
+  `_when`, the one reader of its forms and of `on` and `do`; a target's status through `FINISHED_STATUSES`; and
+  `LOCAL_RE`, a literal copy of `skills/_shared/scripts/serial-chains.py`'s, pinned by this file's contract test.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,
