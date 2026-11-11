@@ -25,7 +25,7 @@ function check({ repair, execute }) {
   const stop = s3.slice(Math.max(0, s3.indexOf('**The complete-rollout stop')))
   if (!s3.includes('**The complete-rollout stop') ||
       !['`status: done`', 'Archive/Rollouts/', 'rollout complete', 'no § 4 hand-off and no § 6',
-        'write a dated `## Notes` line', 'merged, never marked: flipped done'].every((k) => stop.includes(k)))
+        'write a dated `## Notes` line', 'merged, never marked: flipped done', '`landed, carried (PR <url>)`'].every((k) => stop.includes(k)))
     fails.push('repair-stop')
   const s4 = collapse(section(repair, /^### 4\. /) ?? '')
   const handOff = s4.slice(Math.max(0, s4.indexOf('**Hand-off')))

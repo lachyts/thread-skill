@@ -1,7 +1,7 @@
 # The vault grammar — phase and task names, statuses, in flight
 
 The one definition of how a vault note's filename places it in a phase and how its `status:` reads,
-a rollout's start stamp, a hold the engine can read, and an approved queue.
+a rollout's start stamp, a hold the engine can read, an approved queue, and a durable trigger.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
 reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
 lists every reader). A reader that needs a pattern or a set cites the section here instead of
@@ -29,6 +29,7 @@ A `status:` is read lower-cased, with `-` read as `_`: TaskNotes' own spelling `
 - **Landed**: `done`, `merged`, `dropped`.
 - **Active**: `open`, `in_progress`.
 - **Review**: `review`.
+  Review includes a carried fix (a review note with a valued merged stamp, § Proven), which a queue reads as Landed.
 - **Hold**: any other status (`parked`, `blocked`, …): a deliberate hold, not drift.
 
 ## In flight
@@ -181,6 +182,187 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   when he starts it. A late heartbeat tick on the closed prior ends at its clause (1), and `next` on a superseded
   note halts `superseded`.
 
+## Proven
+
+ADR 0078 d1: a fix is done only once Proven. CONTEXT.md's **Live**, **Proven** and **Carried fix** are the terms.
+
+**`clears:`** names what a fix task is filed to clear. Its items are read by reconcile-rollout.py's `_clears`
+through the note's frontmatter block: a block list (`clears:` then `- <item>` lines, the form every vault note
+uses), a flow list `[...]` split at its commas outside quotes (`_flow_items`), or a scalar on the `clears:` line,
+one item. A block or scalar item is never split at commas. A double-quoted item is read up to its closing unescaped
+`"`, its `\"` and `\\` decoded; a single-quoted one with `''` decoded. An item that is exactly one `[[link]]` is a
+link item (a rollout, chain or task note); anything else is a line item. Empty items are dropped, so `clears: []` or a
+bare `clears:` has none.
+
+**The carried-fix test.** A carried fix is a task note at `status: review` with a valued `merged:` (`_valued`: not
+empty, `null` or `~`): `_carried_fix`, the rule's one copy. The queue reads it as Landed (`_landed`, `_queue_state`
+`merged`), so its dependants start; it is not done until `prove` stamps `proven:`.
+
+**The stamps.** `merged:` the landing (the first stamp wins); `merge_commit:` the merge commit (gh's, or `--land
+--commit`'s); `merge_repo:` the lowercased `<owner>/<name>` a `--land --commit --repo DIR` landing went to;
+`live:` the moment it was Live (the first stamp stays: prove never un-lives a note); `proven:` the date it was
+proven. `## Proof log` holds one dated `- <stamp> …` line per landing, carry-back, Live read, seen item and proof.
+
+**Live.** A landing's repo is watched when an entry of the Primary refresh's live file
+(`${XDG_STATE_HOME:-~/.local/state}/thread/primary-live.json`, `{v: 1, live: {<checkout>: {origin, head, branch,
+since, primary}}}`) has its key. The two key readers: a `pr:` PR URL gives `PR_URL_RE`'s group 1, lowercased (a bare
+`pr: #N` reads its rollout's Project root origin); an origin URL gives `ORIGIN_SLUG_RE`, lowercased, only ever an
+origin, never a `pr:` value. A watched landing is Live once a live entry's head holds its merge commit (`git
+merge-base --is-ancestor`), and `live:` is then stamped; an unwatched landing is Live at merge (`live:` = `merged:`).
+A missing live file watches nothing; an unreadable one watches everything (fail closed), and so does a repo that
+cannot be read while the file has any entry. A RACE revert (`reverted on main:`) is never Live.
+
+**The items.** Each item moves only strictly after `live:`: a `[[rollout]]` or `[[chain]]` item, followed through
+`superseded_by:` (at most 10 hops), when a note of any rollout on that chain has `started:`, `ready:`,
+`integrating:` or `merged:` after it, or a serial `## Leg log` has a `began:`, `done` or `closed:` line after it (a
+fix to the engine's own repo counts only on a rollout whose engine holds the merge); a `[[task]]` item on
+`started:`, `ready:`, `integrating:`, `merged:` or `completed:` after it; a date-only stamp only on a later
+Melbourne date. A line item moves only by a Proof log `seen item <N> "<text>": <evidence> (agent|Lachy)` line
+recorded at or after `live:` (`prove --seen`), and so does a link item that cannot move (missing, or finished with
+nothing after `live:`), on Lachy's word only (`--on-his-word`). Live with every item moved, or none: `status: done`
+and `proven: <date>`, with no `completed:` and no phase write.
+
+**The three landing outcomes**, one verdict for every landing caller (`_land_outcome`: mark-done, resume,
+reconcile's read-only approval (no code, so never watched), `prove --land`, and reconcile-project's apply, whose dry
+run names the same verdict as each task's action):
+
+- `done`: today's write, for a landing unwatched with no `clears:` item, or one whose own rollout is a serial chain;
+- `carried`: the carried form (`status: review`, `merged:`, `- <stamp> landed, carried: <why>`), when it is watched
+  or has `clears:`, and every engine that reads the note reads carried fixes;
+- `owed`: the old engine's own landed form, which every engine reads as landed (`status: done`, `merged:`, `- <stamp>
+  landed, carry-back owed: <why>; status: done written for that engine (ADR 0078 d1)`), when it would be carried but
+  an engine that reads it would read a carried fix as awaiting Integration. Every surface calls it `landed, carry-back
+  owed`, never done.
+
+**The serial-chain scope.** A serial chain (`shape: serial`, whatever its status, finished or archived included) is
+out of scope, and both checks read it before any engine read: at landing, its task lands `done`; at carry-back, its
+task is never a candidate and never listed.
+
+**`_carry_readers`**: every engine that reads this note reads carried fixes: the note's own rollout, and the rollout
+of each dependant still to start (a `depends-on:` or `blocked-by:` naming it, through a folded member too, whose queue
+state is queued or set-aside); a running or landed dependant is not checked. Each rollout's engine is read by
+`_engine_reads_carried`, its four clauses in this order:
+
+1. no `rollout:`, or no note: reads carried fixes;
+2. finished (status done or dropped, under `Archive/`, or a valued `superseded_by:`): reads them, since it runs no
+   queue;
+3. unstamped (no valued `engine_snapshot:`): the marker in the engine an unstamped note runs on, the Primary
+   checkout's copy (found through `git_primary`, engine-snapshot.py's `engine_root`), else the running plugin root,
+   and never read as current by default: a held or diverged Primary is an old engine like any snapshot;
+4. stamped: the marker in the `~`-expanded `engine_snapshot:` path's copy, a missing file failing closed.
+
+The marker is reconcile-rollout.py's line `PROVEN_ENGINE = 1`.
+
+**carried-fixes.json** (`prove --all` writes it beside the live file, only when it changes): `{v: 1, carried, owed,
+carryBack}`, one split behind all three, each entry with `slug`, `project` and `rollout`: `carried` every root carried
+fix still unproven; `owed` every note at done whose Proof log's last entry is the owed line, in the root or `Archive/`;
+`carryBack` every other carry-back candidate whose carry-back waits. `prove --json`, status's Carried line and reflect
+§ 17 use the same split.
+
+**Carry-back.** A note landed at `status: done` and never Proven goes back to review: a candidate is in the root or
+`Archive/` (never `Archive/Rollouts/`, never a serial chain's), at `status: done` with a valued `merged:`, no valued
+`proven:` and no `archived` tag, and has either a non-empty `clears:` with no `## Proof log`, or a Proof log whose last
+entry holds `landed, carry-back owed`. Once `_carry_readers` reads True, prove moves an archived candidate back to the
+root first (a hard link, then a fresh read saved through `Note.save`, which keeps its created time and Finder tags),
+then writes `status: review`, removes `completed:` and logs `carried back: landed at status: done, never Proven (ADR
+0078 d1)[; from Archive/][; completed: <v> removed][; phase [[<p>]] reopened[ from Archive/]]`, and judges it in the
+same pass. A root note of the same name makes it wait.
+
+**The phase a carry-back reopens.** A phase note at `status: done` whose literal prefix `<slug>-p<N>-` starts the
+carried-back task's name (§ Phase and task filenames) is a done over a fix that is not: once the judge leaves the fix
+carried, the carry-back (`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from
+`Work/Phases/Archive/` first when the daily sweep filed it there (a root note of the same name leaves it as it is,
+its clause `phase [[<p>]] not reopened: <why>`), so the sweep's PHASE CLOSE closes it again once its last fix is
+proven. A fix the judge proves in the same pass leaves its phase as it is, `completed:` kept: that done is no lie.
+A phase the completion ceremony or reconcile-project closed over an old engine's done or an owed landing is reopened
+this way. prove never closes a phase.
+
+**The hook's mirror.** hooks/vault-note-overlap.py reads a review writer live only with a `pr:` and an unvalued
+`merged:`, `_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`), since loading
+reconcile-rollout.py would spend its budget.
+
+## When
+
+A "when X, then Y" step that only a session holds dies with the session (the follow-ups lost with a session's watchers,
+2026-11-08/09; ADR 0078 d5). So it is frontmatter on the note, never a sentence: the key is `when`, read on the first
+top-level `when:` line of a rollout or task note, one `{on, do}` entry or a list of them, written `when: {on: "merged
+lachyts/thread-skill#361", do: regenerate}`. It extends the form of § Hold until and § Approved queue and replaces
+neither: a hold blocks starts, and an approved queue's verdict has outcomes a trigger does not.
+
+- **Six forms read**, each giving the same id: the flow mapping above; the block mapping Obsidian re-serialises it to
+  (`when:` then indented `on:` and `do:` lines); a flow list item `  - {on: "…", do: "…"}`; a block list item
+  `  - on: …` over `    do: …`; and either list item at column 0. A flow value holding a comma or a wikilink must be
+  quoted, or it is not valid YAML. An optional trailing ` # comment` stays. A whole `when: […]` flow list is unreadable.
+- **`on`** is one of `merged <owner/repo#N | PR URL>` (read as § Hold until reads a PR: MERGED is due; OPEN, CLOSED or a
+  gh error or timeout waits; a bare number is unreadable, since a trigger fires with no lead and a bare number needs a
+  repo to be read in), `paused` (a valued `paused:` on the note, or on the rollout a task note's `rollout:` links, and
+  only while that note is not closed or superseded; `pause_requested` and a room stop do not count, a sign-off pause
+  does) and `landed [[task]]` (as a dependency lands, `_dep_status`, so a merged tombstone and Archive resolve).
+- **`do`** is one of `regenerate`, `regenerate --tasks a,b` (slugs or wikilinks), `schedule [[task]]`, `reset-primary`.
+  A `do` target that is not found keeps the trigger waiting, and so does a list whose every target is closed (done,
+  dropped or a merged tombstone); a partly landed `--tasks` list still fires, since schedule's skip rule drops the
+  landed ones.
+- **`id`** is the first 12 hex of sha256 over the note's stem (lower-cased) and the normalised `on` and `do`: stable when
+  sibling entries move and unchanged by `fired`. An edit to the `on` or `do` of an unfired entry makes a new id.
+- **Writers**: any agent, or Lachy, instead of a background watcher: a follow-up that must outlive the session goes here,
+  on the note it belongs to. The rollout template's commented `# when:` line shows the form.
+- **Readers**: `reconcile-rollout.py triggers due`, read-only and needing no lead, which prints `{due, waiting,
+  unreadable, fired}`; `reconcile-rollout.py triggers fire <id>`, which runs one and records it. The Chorus Stage fires
+  due ones (the Chorus task `chorus-stage-shows-machinery-health-and-fires-triggers`); until it does, no automation calls
+  them. The scan reads every note under the tasks dir, Archive included, the root copy preferred; a `status: dropped`
+  note is inert, and a done or archived note still fires `schedule` and `reset-primary`.
+- **The record.** `fire` writes `fired: "<stamp>"` on the entry where it stands, in the entry's own form, and rewrites
+  nothing else: before a flow entry's closing `}`, or as one new line after a block entry's last line, at its first key's
+  column. The dash column and the `when:` line never change, and a single mapping stays one. An entry already fired is a
+  no-op; an edit to a fired entry stays fired, and deleting `fired:` re-arms it. `fired:` on a hand-written entry reads as
+  fired; an empty one is unreadable. Only `fresh: true` tells a caller to act on the row's `command`.
+- **A model step is recorded once and its command handed back.** `reconcile-rollout.py` starts no session: `fire` records
+  `regenerate` or `schedule` and prints `/thread:schedule [[<project>]] --regenerate`, `/thread:schedule --regenerate
+  --tasks a,b` or `/thread:schedule --tasks <slug>`. The command carries no `Under the chain:` line (§ Approved queue
+  alone defines it, and it says Lachy approved the queue and its start), so **a fired regenerate or schedule is an
+  attended run that can wait on Lachy**: the Session the Stage starts can stop at schedule's questions. A caller that dies between
+  `fire` and starting the Session loses the step: `fired:` is the audit, and deleting it re-arms.
+- **Regenerate's gate**, both `regenerate` forms, because `/thread:schedule --regenerate` acts on whatever is unfinished
+  for the project now. Its anchor is the note when tagged `rollout`, else the rollout its `rollout:` links; a task note's
+  own status does not count. In order: a `shape: serial` anchor is unreadable (a serial rollout supersedes nothing); no
+  anchor waits; a valued `superseded_by:` waits; on a task note, an anchor with a valued `supersedes:` waits, because
+  `carry` moves a task's `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from
+  one written since; a done or dropped anchor waits; one neither paused nor never started (`approved_unrun`) waits, since
+  schedule regenerates no running rollout: it joins its queue, `--regenerate` not applied (ADR 0078 d6). So a successor
+  is never touched by the prior's merge, whether the entry sits on the prior or on a carried task, and one written on a
+  successor's own rollout note fires as any other. A `regenerate` written against a rollout that runs to its end lapses
+  at its close, listed under `waiting`. `fire` runs the same reading.
+- **Where a command runs.** A command row has a `projectRoot`, read on the trigger's own note for `regenerate` and on the
+  target task for `schedule [[U]]` (the note schedule § 0 resolves). The first present decides: the note's own `Project
+  root:` line, the `Project root:` of the rollout its `rollout:` links, then the first project, in `projects:` order,
+  whose note under `Work/Projects/**` (outside Archive first) carries a `` Local: `<path>` `` line. None present, or the one
+  that decides is not a directory, keeps the row waiting and `fire` exits 1 with nothing written, so `fired:` is never
+  spent on a command the Stage cannot place. No fall-through past a dead path, which could place a Session in the wrong
+  repo. A `script` row needs none.
+- **`reset-primary`** runs one `skills/_shared/scripts/primary-refresh.py run` pass in place (ADR 0078 Decided 3: a second
+  reset path would bypass its rule). `run` exits 0 whatever it finds, so `fire` reads the pass's outcome line, and records
+  only an outcome that read the checkout to a standing verdict (`current`, `ahead`, `moved`, `repaired:`, `diverged`,
+  `held:`, `refused:`; RESET_PRIMARY_RECORDED). `repaired: reset <head12> to origin/<b> at <tip12> (…)` is the refresh's
+  repair of a diverged Primary whose commits are already on origin, and ends the stuck spell as `current` does. On the
+  Primary every other `diverged (ahead a, behind b): …` line is that repair's too (`repair waits (…)`, `repair held: …`,
+  `repair refused: …`, `carried: …`, `not carried (…)`), recorded under the `diverged` prefix: the job keeps passing, and
+  a repair blocked for a day shows on /thread:status. `never integrated here` is an `--also` checkout's line, never the
+  Primary's. Every other outcome (`not a primary checkout:`, `fetch failed:`, `broken:`, `unreadable:`, `timed out:`,
+  `busy:`, a dry pass's `would …`; RESET_PRIMARY_RETRIED), no line, an outcome in neither list and a non-zero exit are not
+  recorded: `fire` exits 1, due again next tick, and its ERROR names an outcome in neither list as one it does not know.
+  tests/contracts/vault-grammar.test.mjs classifies every outcome a pass can return into one list or the other, so a new
+  or renamed outcome fails there. It blocks on the pass, up to about 15 minutes, so its caller runs it off the 5-minute
+  tick.
+- **Fails closed.** An unknown key, a missing `on` or `do`, a verb outside the lists above, a bad `regenerate` argument, a
+  duplicate of an entry above, an empty `fired:`, a bare `regenerate` whose rollout names no project, or a `regenerate`
+  on a serial rollout lists under `unreadable`, is never due and never hides a good sibling; a block whose items sit at
+  two dash columns, already invalid YAML, is one unreadable row. A trigger that cannot be read today shows only in
+  `triggers due`.
+- **Never carried.** `carry` copies no `when:`, so a superseded note's unfired `paused` or `regenerate` lapses, listed under
+  `waiting` for good; to keep one, write it again on the successor. A carried task keeps its own `when:` and links the
+  successor: its `regenerate` lapses the same way (Regenerate's gate), and its other entries go on, a `paused` read on the
+  successor; to keep the `regenerate`, write it on the successor's rollout note.
+
 ## Waits on
 
 A rollout note's `## Waits on` section, at the note's end, holds one line per dependency that no rollout will land for
@@ -229,6 +411,9 @@ lists them (§ 3, § 8).
 - `skills/execute/scripts/reconcile-rollout.py` `next`, `status`, `approve-queue`, `stamp-start` and `carry`:
   `ON_MERGE_KEY` and `ON_MERGE_REGENERATE` (§ Approved queue's key and value), read by `_on_merge`; and
   `approved_unrun`, loaded by `skills/_shared/scripts/unfinished-rollout.py`.
+- `skills/execute/scripts/reconcile-rollout.py` `triggers due` and `triggers fire`: `WHEN_KEY` (§ When's key), read by
+  `_when`, the one reader of its forms and of `on` and `do`; a target's status through `FINISHED_STATUSES`; and
+  `LOCAL_RE`, a literal copy of `skills/_shared/scripts/serial-chains.py`'s, pinned by this file's contract test.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,
@@ -246,6 +431,30 @@ lists them (§ 3, § 8).
 - `skills/_shared/scripts/estate-rank.py` `rank --superseding` and estate-dispatch.py's `slices --superseding`
   (schedule's Pre-flight): § In flight's exception, read through estate-scan's `still_to_start`, loaded, so a
   carried task still queued is gradeable and one that has started stays in flight.
+- § Proven's readers: `skills/execute/scripts/reconcile-rollout.py` `prove` (the judge, carry-back with its phase
+  reopen, and the two files), its five changed readers (`_landed`, `_queue_state`, `_holds_lane`, `_race_marks`,
+  `_origin_waiter_valid`), `mark-done`, `resume` and `reconcile`'s read-only approval (through `_land_outcome`);
+  `skills/_shared/scripts/reconcile-project.py` (rule 1's QUIET carried fix and its phase left open over a carried
+  landing, rule 2's action and apply through `_land_outcome`, loaded); orient § 3 and § 4 (the dry run's actions, the
+  `landed, carried` rows and the `left open` lines); `hooks/vault-note-overlap.py` (its literal mirror);
+  close (`skills/close/SKILL.md` § A finished task closes itself), status (§ 4's Carried line) and reflect (§ 17's
+  carried read), each running `prove` from the session's own root.
+- **The vault's daily sweep** (`~/repos/workspaces/_shared/scripts/archive-completed-vault-items.py`, run by
+  daily-sweep.sh): its task move keys on the Landed statuses (§ Statuses) or the `archived` tag, so a carried fix stays in the
+  root and a done-before-Proven or owed note is archived. It never pulls a note out of `Archive/`: prove's carry-back is
+  the only writer that does, for the task and for the done phase it reopens (§ Proven, **The phase a carry-back
+  reopens**), which it moves back to `Work/Phases/` because PHASE CLOSE reads that root only. Its PHASE CLOSE keys on
+  the same statuses, so a carried fix keeps its phase open; once prove proves the last fix, it is the only closer of a
+  fix phase, since the completion ceremony's `--kinds phase` run left that phase open (rule 1 reads it QUIET), or the
+  carry-back reopened it. No second phase closer belongs in prove.
+- **Chorus's copy of `_queue_state`** (`~/repos/tools/chorus/src/stage/rollout.py`'s `queue_state`): it must read
+  `review` with a valued `merged:` as `merged`, checked before its `pr:` branch, with `_valued`'s literal set. Until it
+  does, the Stage's rollout page, the morning report's per-rollout `merged` count and, through `merged`, the awake read
+  and the stop line read a carried fix as awaiting Integration: the Chorus follow-up the rollout's lead files.
+- **`carried-fixes.json`**, the engine-independent surface (§ Proven): beside the live file, its three keys `carried`,
+  `owed` and `carryBack`, read by the Chorus Stage line. On an old-snapshot rollout status shows no Carried line (that
+  snapshot's prose has none), so this file, reflect § 17 and close's rows show that rollout's carried, owed and waiting
+  notes.
 - `skills/_shared/scripts/waits-on.py` (§ Waits on's one writer) and `skills/_shared/scripts/estate-scan.py`'s
   `WAITS_ON` (its one reader), which carries each line still true to `rollouts[].waitsOn[]` for orient-all.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both

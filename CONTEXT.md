@@ -312,6 +312,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Landing register** — the one estate-wide list of repos agents must never
   push to on their own. Any repo Lachy can push to lands unless the register
   names it. _Avoid_: allow-list (it is a deny-list), push list.
+- **Landing carrier** — the background pass that carries every open landing PR
+  to its merge with no one touching it (ADR 0078 d2): every `landing` PR, and
+  every PR on a land.sh-named `close/` branch. It brings them current, resolves
+  THREAD.md and handoff conflicts where both sides only add, re-runs CI that
+  GitHub stopped when nothing failed for real, merges a close-out whose repo
+  will not queue auto-merge, and closes one a later close-out carries. An own
+  branch's `queued: needs merge` leaves a `Landing queued` marker the carrier
+  merges at the queued head once green and clean. A PR unmoved for a day is
+  listed as stuck (`land-carrier.py stuck`). It runs from the **Primary
+  refresh**'s job every 15 minutes. _Avoid_: daily lander, nightly lander.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.
@@ -784,7 +794,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note stamped done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
-  started. _Avoid_: live (for this meaning), active, open.
+  started, and a schedule run for the project while it runs joins its queue
+  (**Join**). _Avoid_: live (for this meaning), active, open.
 - **Supersede** — a new rollout taking over an unfinished one: every unlanded
   task carries over (a `review` task with an open PR awaits Integration, an
   open one is queued, a running or set-aside one keeps its state), and merged
@@ -794,6 +805,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   hard-paused (ADR 0030). Same shape only: a serial run supersedes nothing
   (p24-2), and a parallel run never takes a serial note. _Avoid_: migrate
   (alone), replace.
+- **Join** — a schedule run adding its tasks to this project's running
+  parallel rollout in place (`reconcile-rollout.py join`): rows ranked first
+  in its `## Queue`, Mode `joined <date>`, `rollout:` stamped, no pause, no
+  regenerate, no new note (ADR 0078 d6). _Avoid_: append; not a **Pickup
+  sweep**'s join of the candidate set.
 - **Incomplete rollout** — a never-started rollout that must not run as
   written. Either it carries `incomplete: true`, which every rollout note is
   born with (schedule step 6, or S5 on § Serial path) until step 7's last
@@ -1173,7 +1189,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   checkout once it has stood a day, or at once when it timed out. It runs an
   installed bundle that updates itself only after a smoke run with the job's
   own argv and a real fetch, and it records a launchd job an update left stale
-  in the same state file, read on the same line. _Avoid_: auto-update, plugin
+  in the same state file, read on the same line. Each installed pass ends by
+  running the **Landing carrier**. _Avoid_: auto-update, plugin
   update (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never
@@ -1307,6 +1324,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   stop is no run mark for it. `skills/_shared/vault-grammar.md` § Approved
   queue. _Avoid_:
   auto-regenerate, pre-approved rollout.
+- **Durable trigger** — a "when X, then Y" step written on a rollout or task
+  note as a `when:` entry, so it survives any session (ADR 0078 d5): `on` is
+  `merged <owner/repo#N>`, `paused` or `landed [[task]]`, and `do` is
+  `regenerate`, `regenerate --tasks a,b`, `schedule [[task]]` or
+  `reset-primary`. `reconcile-rollout.py triggers due` lists what is due with
+  no lead; `triggers fire <id>` runs one and records it once, as `fired:` on
+  the entry, handing a model step's command back to its caller. A fired
+  regenerate or schedule is an attended run: its Session can stop at
+  schedule's questions and wait on Lachy. It extends **Hold until** and
+  **Approved queue** and replaces neither. `skills/_shared/vault-grammar.md`
+  § When. _Avoid_: a watcher for a follow-up, a follow-up sentence.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged (a `git-env miss` line) with the checkout's
@@ -1347,7 +1375,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   filed to clear to move) and repairs what stands in the way unseen. He sees
   carried fixes, and any stuck machinery, on the quiet Stage line that opens
   with a click; one the system cannot move within a day is a stop the
-  Companion leads him to (Lachy, 2026-11-09). _Avoid_: pending fix, open fix.
+  Companion leads him to (Lachy, 2026-11-09). Its note form: a task note at
+  `status: review` with a valued `merged:`, which the queue reads as landed
+  until `prove` stamps `proven:` (`skills/_shared/vault-grammar.md` § Proven).
+  _Avoid_: pending fix, open fix.
 - **Blocked** — the umbrella for a task that did not land: `blocked` (verifier
   never green), `plan-blocked` (plan never approved), or `review-blocked`
   (open PR, review rejected). In a Queue a blocked task is **set aside**: its
@@ -1704,7 +1735,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: review loop (the engine's convergence of plan, verify and review
   rounds, above); chain (`review-ledger.py`'s, narrower).
 - **Wait to start** — a rollout's time from Lachy's ask (the earliest
-  `captured:` of the tasks its queue links) and from its scheduling (its own
+  `captured:` of the tasks its queue links, carried and joined rows aside) and
+  from its scheduling (its own
   `captured:`) to its first Slot. _Avoid_: lead time.
 - **Circling** — work touched and not merged: a work item (a task with
   `phase:`, `pr:` or `rollout:`) three or more Sessions named while no

@@ -16,7 +16,7 @@ loop can't do by itself: hand a set-aside task back at the **stage it stopped** 
 (ADR 0030 decision 4; the lead's automatic retry re-enters the agent-fixable ones itself, ADR 0033), capture an
 **input-gated** decision or a `## Needs you` answer, record a gate sign-off, record an **automatic descope** of a
 plan-block the notes settle, raise a review budget **on Lachy's word**, **defer** a wedged task with its
-dependants, flip a **merged, never marked** task, **escalate** a merge the notes never recorded (or a RACE, or one
+dependants, land a **merged, never marked** task, **escalate** a merge the notes never recorded (or a RACE, or one
 into another base), and finish an interrupted supersede's **close-out**.
 It never re-implements Integration, merge or convergence, and **the engine keeps sole merge authority**.
 
@@ -238,7 +238,7 @@ class below it.
 | **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided § 3a's `resume` does not run, and § 4's hand-off still runs for an undecided RACE (its `resume` holds the RACE back and `next` holds only the lane), never for an undecided UNVERIFIED. A RACE whose revert did not land (status's Main red) holds the whole rollout, the hand-off included: § 3c first |
 | **PR-less merge** | status's "possible PR-less merge" flag | escalate with evidence (§ 3c) |
 | **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
-| **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
+| **merged, never marked** | not landed (neither done nor a carried fix); its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) lands it (done, or a carried fix, ADR 0078); never hand it back or defer it |
 | **merge hold** | merge-task exit 7: review required on the integrating PR | "approve PR #N": Lachy's; never re-integrated, never set aside |
 | **lane held** | a `laneLog` entry names it (status's Lane hold flag): a cause that reaches every merge holds the lane on it (execute § 4.5 *Lane hold*, ADR 0048) | § 3g: the evidence, then Lachy's ack; never handed back, re-integrated or set aside by repair |
 | **origin lane wait** | integrating with status's `originWait` (its lead yielded the origin lane to another project's Integration on the same origin, ADR 0064), rendered with status's wording, `waiting on the origin lane (<origin>) since <since>` | nothing with a lead live: its origin wait or heartbeat takes step 3 again in turn. With none live, § 4's hand-off, whose *Cold resume* runs step 3 again for it. Never a hand-back or a set-aside: it lost no work |
@@ -303,8 +303,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume
 ```
 
 `resume` works on the whole rollout, not one task: for every unmarked note with a `pr:`, it asks gh for the
-PR's state and base, flips one merged into the default branch to done (stamping `merged:`), and reports
-anything else unchanged. A PR merged into another base is left alone, so it is escalated (§ 3c), never
+PR's state and base, lands one merged into the default branch (stamping `merged:`: done, or a carried fix awaiting
+proof on a watched repo or with `clears:`, or owed, ADR 0078 d1), and reports anything else unchanged. A PR merged into another base is left alone, so it is escalated (§ 3c), never
 flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, and only Lachy's
 decision moves it: hold `resume` until § 3c records it. An exit 3 here (a `HOLD:` line) means § 2 missed one:
 escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next
@@ -313,9 +313,11 @@ escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the 
 **The complete-rollout stop (p19-14).** A rollout whose note reads `status: done`, or sits in
 `Work/Tasks/Archive/Rollouts/`, already had its completion ceremony. When `resume`'s `progress:` line reads
 `rollout complete` on such a note, repair reports the repair and stops: no § 4 hand-off and no § 6. For each task
-`resume` flipped, write a dated `## Notes` line to the rollout note,
-`- <YYYY-MM-DD> repair: [[<slug>]] merged, never marked: flipped done (PR <url>); rollout already complete, no hand-off`,
-since no second ceremony copies it into a Completion log. Execute's loop would otherwise re-run that ceremony (a
+`resume` landed, write a dated `## Notes` line to the rollout note naming what `resume` wrote,
+`- <YYYY-MM-DD> repair: [[<slug>]] merged, never marked: flipped done (PR <url>); rollout already complete, no hand-off`
+when `resume`'s line for the task says done, else the same line with `landed, carried (PR <url>)` or `landed,
+carry-back owed (PR <url>)` in place of `flipped done (PR <url>)`, since no second ceremony copies it into a
+Completion log. Execute's loop would otherwise re-run that ceremony (a
 second Completion log, thread close, cron delete and archive move); its own idempotence guard, `next`'s `halt:
 "done"` on a done, archived note (execute § 4.5 step 5), is the backstop, never the route (its `done` route still
 runs the thread close, the ceremony's one step after the archive commit). A done note still in
@@ -472,7 +474,7 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
   the decision moves the task: `resume` skips it (exit 3), `hand-back` refuses it (exit 2), an undecided RACE
   holds the Integration lane (execute's `next` halts `race` once nothing else moves, never holding a start) and an
   UNVERIFIED task is held set aside. Once that line is written, `resume`
-  flips the merged task done. The line is a rollout-note record, so repair writes it in every mode (§ 1),
+  lands the merged task: done, or a carried fix awaiting proof on a watched repo or with `clears:` (ADR 0078). The line is a rollout-note record, so repair writes it in every mode (§ 1),
   and a reinstate or a resume waits for it. If he decides the merge does not stand, defer the task (§ 5; its
   PR is merged, so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads
   it as landed. That defer is a lead-held note (§ 1): while a lead is live, append his decision to the
@@ -647,6 +649,19 @@ say so. Until the ack `carry` refuses the rollout (`ERROR: carry: --from <stem> 
 `--regenerate` that supersedes it stops and sends Lachy here: the carry strips `integrating:` and never copies the
 `## Lane log`, so the held task would otherwise integrate in the new rollout unacked. A Companion (ADR 0048) may gather
 this evidence and notify Lachy, never ack: every lane hold is his.
+
+**3h — a carried fix that cannot prove itself (ADR 0078 d1; `_shared/vault-grammar.md` § Proven).** A carried fix
+(`review` with a valued `merged:`) is landed: no class above routes it, and `prove` writes it done once Live and each
+`clears:` item has moved. Two cases are Lachy's:
+
+- **A carried fix whose item cannot move** (status's Carried line, or `prove --tasks <t>`, reads `cannot move (<why>):
+  record it on Lachy's word`: a linked rollout or task missing, or finished with nothing after `live:`). Only his word
+  records it: once he says the stuck work moved, run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --tasks <t> --item N --seen "<his words>" --on-his-word`,
+  which records it and proves the note once every item has moved.
+- **An archived carried fix** (`prove` reports `archived while carried: not judged`, and reconcile-project reads
+  `archived but review`: TaskNotes' `archived` tag, then the vault's daily sweep moved it). On his word, move it back
+  to `Work/Tasks/` (and drop the `archived` tag) so prove resumes its proof, or leave it set aside.
 
 ### 4. Hand back: re-enter at the stage it stopped
 

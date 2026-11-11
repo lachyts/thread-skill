@@ -1,7 +1,7 @@
 # 0078 — A fix is done when the stuck work moves, and nothing it needs rests on one session
 
 Date: 2026-11-09
-Status: proposed. Grilled with Lachy on 2026-11-09 (`/grill-with-docs`, thread-skill session), after an audit of why
+Status: proposed; d6 built by p45-6. Grilled with Lachy on 2026-11-09 (`/grill-with-docs`, thread-skill session), after an audit of why
 the Waiting list work (ADR 0076) and its fixes did not turn out as he expected. Sharpens the **Landing** ADR 0028 promises
 ("agents own it end to end"), amends ADR 0066 (a diverged Primary checkout is repaired, not only recorded) and ADR 0067
 d7 (a second schedule for a running rollout joins its queue).

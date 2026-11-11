@@ -240,7 +240,9 @@ A situational report written for Lachy catching up, not a log:
   `--look` or a scoped target (report-only then)) and ambiguous (listed for Lachy, never applied).
   Call the line the notice for those fixes only when fixes will follow (a default or `--steer` run
   on a project or area); on a `--look` run or a scoped target, say it is report-only. Omit the line
-  when both lists are empty.
+  when both lists are empty. Name a task by its action when it is not `status: done`: `landed, carried
+  (status: review)` and `landed, carry-back owed (status: done)` land a fix and never close it, and a
+  dry run's `phase <slug> left open: …` skipped line rides with that task.
 - **Placement**: the § 2 audit's summary line, then one line per finding with its fix, and its
   `unchecked:` lines; or its one `thread-placement:` line. Omit the line on `placement: none`.
   Report-only: a misplaced thread is moved by project-structure-audit or by Lachy, never by this run.
@@ -330,9 +332,14 @@ Report any `New since review` items to Lachy as landed since the dry run and not
 orient lists them again), and any `Reviewed, not applied` items with their reasons:
 `now ambiguous: …` needs his eye; `no longer drift (…)` is benign (closed or moved since, by the
 rollout's ceremony or a mark-done). Neither is written, so both join the reshuffle's frozen
-possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2), re-run the dry
-run, report its Drift line and apply from the new file. Ambiguous items are listed for Lachy and
-never applied. A scoped target applies no drift fixes: it reshapes one note, so the § 3 Drift line
+possibly-landed tier (reshuffle R1). Report a fix's landing as landed, never done (ADR 0078 d1): each
+`Written` row `task <slug>: landed, carried (status: review)` is a fix at review until `prove` proves
+it, and each `task <slug>: landed, carry-back owed (…)` row a done that prove carries back later; and
+each `Skipped` line `phase <slug> left open: [[<task>]] lands carried (…)` is a phase left open until
+that fix is proven (the vault's daily sweep closes it then), never a failed fix. If the saved file
+is gone (`--only` exits 2), re-run the dry run, report its Drift line and apply from the new file.
+Ambiguous items are listed for Lachy and never applied. A scoped target applies no drift fixes: it
+reshapes one note, so the § 3 Drift line
 is report-only for it. It goes straight to its reshuffle (`--look` still stops it after § 3).
 
 **Unparseable slots.** Mended under the drift fixes' authority: a default run and Steer only, never
@@ -393,10 +400,14 @@ R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, §
   unfinished rollout per repo and project**, each project's in its own rollout clone (ADR 0064), and schedule
   § 0's unfinished-rollout check enforces it.
   `--regenerate` is orient's supersede policy: the check allows a supersede only for a paused or
-  never-started rollout of this project (its unlanded tasks carry into the new one), and schedule
-  § 0 finishes an interrupted supersede on its own.
+  never-started rollout of this project (its unlanded tasks carry into the new one), and joins this
+  project's running one, and schedule § 0 finishes an interrupted supersede on its own.
+  - **Schedule joined a running rollout** (`join`, ADR 0078 d6) → schedule added the tasks to this project's
+    running rollout in place (schedule step 7's **Join**): orient writes no rollout, hands nothing off (§ 9) and
+    starts nothing for it; it reports the Joined line and its holds, and the `--regenerate not applied` line its
+    supersede policy draws.
   - **Schedule stopped at § 0** (one of its checks refused; for this check, another project's
-    rollout on the repo, one that has run and is not paused, two at once, or a live serial chain
+    rollout on the repo, this project's draining or pre-protocol-5 one, two at once, or a live serial chain
     working the repo in place, where this run would share its index and HEAD (ADR 0042), any
     project's) → schedule stamped no task and
     wrote no new rollout note, so orient must schedule nothing and touch nothing else.
@@ -613,7 +624,7 @@ given). It resolves, asks, reads and writes nothing.
 - **Never a second unfinished parallel rollout per repo and project, and never another rollout's
   lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
-  started); anything else waits (§ 6).
+  started); this project's running one is joined (§ 6); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
 - **Under `--backlog`, don't put a question before the start, or start a serial note**: its questions come last, a
   serial note is listed on the Chorus Stage at B8, never started through `create_thread`, and it never runs

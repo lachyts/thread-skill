@@ -1,7 +1,7 @@
 # 0056 — The weekly reading keeps the attention ledger, and a detector for work that circles
 
 Date: 2026-10-28
-Status: accepted. Written for the vault task `thread-skill-p30-7-the-question-and-review-loop-ledgers` (Phase 30 · Task
+Status: accepted (d4's carried rows aside covers joined rows too: ADR 0078 d6, p45-6). Written for the vault task `thread-skill-p30-7-the-question-and-review-loop-ledgers` (Phase 30 · Task
 7), from the 2026-10-25 audit of 21–25 October and Chorus ADR 0110; its plan was judged over two runs before the build.
 Widens ADR 0051's Time-lost ledger to the work before a rollout and to Lachy's attention, and adds two Watches under ADR
 0037's rule. The question gate it measures is ADR 0054.

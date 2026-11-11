@@ -1,11 +1,13 @@
 """background_job.py — the plumbing the background jobs share (p39-6; ADR 0066's 2026-11-06 note): the Primary refresh
-(skills/_shared/scripts/primary-refresh.py), plus the one TERM-grace-KILL stop of a child's process group that
-lead-integrate.py, declared-check.py, estate-scan.py and close-score.py run too.
+(skills/_shared/scripts/primary-refresh.py) and its landing carrier (land-carrier.py), plus the one TERM-grace-KILL
+stop of a child's process group that lead-integrate.py, declared-check.py, estate-scan.py and close-score.py run too.
 
 Loaded by path only (importlib's spec_from_file_location), never imported by name or put on sys.path:
   - primary-refresh.py main(), for `run`, `install` and `stuck` only (never `bundle`), from its own bundle, else the
     primary's when its own bundle has no file. It ships as a row of primary-refresh.py's BUNDLE table, so the
     self-update stages, smokes and installs it like any other helper;
+  - land-carrier.py main(), for `run` and `stuck` only (never `marker`), from its own directory: the bundle's copy
+    beside it or the checkout's, never the primary's (land-carrier.py ships as a BUNDLE row too);
   - lead-integrate.py at its module top, declared-check.py and close-score.py inside their broken-install guards, and
     estate-scan.py's load_siblings(), each from this directory.
 Importing it installs no signal handler, starts no subprocess and no thread, reads no environment variable and writes

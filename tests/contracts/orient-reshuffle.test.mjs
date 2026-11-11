@@ -188,3 +188,37 @@ test('Start when ready stamps the note and runs neither execute nor handoff', ()
   assert.notEqual(ran, S(9), 'control is vacuous: the answer text moved')
   assert.ok(startWhenReady(ran).includes('execute/SKILL.md'), 'control: the mutated answer names execute')
 })
+
+// ADR 0078 d1: reconcile-project's dry run names a fix's landing write as the task's action, and a phase that write
+// leaves open as a skipped line; orient reports both as landed, never done, in the words the script prints.
+function carriedReport(orientText, rpText) {
+  const s3 = collapse(section(orientText, /^### 3\./) ?? '')
+  const s4 = collapse(section(orientText, /^### 4\./) ?? '')
+  const drift = s3.slice(s3.indexOf('**Drift**'), s3.indexOf('**Placement**'))
+  const out = []
+  for (const w of ['"carried": "landed, carried (status: review)"', '"owed": "landed, carry-back owed (status: done)"']) {
+    if (!rpText.includes(w)) out.push(`script action ${w}`)
+  }
+  if (!rpText.includes('return f"phase {phase} left open: [[{task}]] lands carried (ADR 0078 d1)"')) out.push('script left open')
+  if (!/`task <slug>: landed, carried \(status: review\)` is a fix at review until `prove` proves it/.test(s4)) out.push('§ 4 carried row')
+  if (!/`task <slug>: landed, carry-back owed \(…\)` row a done that prove carries back later/.test(s4)) out.push('§ 4 owed row')
+  if (!/`phase <slug> left open: \[\[<task>\]\] lands carried \(…\)` is a phase left open until that fix is proven/.test(s4)) out.push('§ 4 left open')
+  if (!/`landed, carried \(status: review\)` and `landed, carry-back owed \(status: done\)` land a fix and never close it/.test(drift)) out.push('§ 3 Drift action')
+  return out
+}
+
+test('orient reports a carried landing and a phase left open as reconcile-project prints them', () => {
+  assert.deepEqual(carriedReport(orient, read('skills/_shared/scripts/reconcile-project.py')), [])
+})
+
+test('control: a dropped carried report, or a script that renames its words, fails its check', () => {
+  const rp = read('skills/_shared/scripts/reconcile-project.py')
+  const drop = (from) => { assert.ok(orient.includes(from), `control setup: ${from}`); return orient.replace(from, 'x') }
+  assert.deepEqual(carriedReport(drop('is a fix at review until `prove` proves'), rp), ['§ 4 carried row'])
+  assert.deepEqual(carriedReport(drop('row a done that prove carries back later'), rp), ['§ 4 owed row'])
+  assert.deepEqual(carriedReport(drop('is a phase left open until'), rp), ['§ 4 left open'])
+  assert.deepEqual(carriedReport(drop('land a fix and never close it'), rp), ['§ 3 Drift action'])
+  assert.deepEqual(carriedReport(orient, rp.replace('lands carried (ADR 0078 d1)"', 'landed, carried"')), ['script left open'])
+  assert.deepEqual(carriedReport(orient, rp.replace('"carried": "landed, carried (status: review)"', '"carried": "status: done"')),
+    ['script action "carried": "landed, carried (status: review)"'])
+})

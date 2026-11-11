@@ -319,14 +319,15 @@ function buildD() {
   const r1 = unfinished(n0, repo)
   if (r1.rc !== 0 || r1.out !== `interrupted ${RP} ${RN}\n`) fails.push(`never ran: rc ${r1.rc}, ${JSON.stringify(r1.out)}`)
 
-  // The close-out (a copy): the stamps, then the move. Schedule's check no longer counts P.
+  // The close-out (a copy): the stamps, then the move. Schedule's check no longer counts P, and N, this project's
+  // rollout that has run and is not paused, is joined in place (ADR 0078 d6).
   const c = copyDir(d, path.join(tmp, 'D-closed'))
   const pNote = path.join(c, `${RP}.md`)
   fs.writeFileSync(pNote, fs.readFileSync(pNote, 'utf8').replace('status: in_progress\n', `status: done\nsuperseded_by: "[[${RN}]]"\n`))
   fs.mkdirSync(path.join(c, 'Archive', 'Rollouts'), { recursive: true })
   fs.renameSync(pNote, path.join(c, 'Archive', 'Rollouts', `${RP}.md`))
   const r2 = unfinished(c, repo)
-  if (r2.out !== `refuse ${RN}\n` || r2.err.includes('is named by the supersedes')) fails.push(`closed out: ${JSON.stringify(r2.out)}`)
+  if (r2.out !== `join ${RN}\n` || r2.err.includes('is named by the supersedes')) fails.push(`closed out: ${JSON.stringify(r2.out)}`)
   return { fails, dir: d, successor: path.join(d, `${RN}.md`) }
 }
 
@@ -854,7 +855,8 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 // nothing.
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
   'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'primary-refresh.py stuck',
-  'unfinished-rollout.py hold']   // § 4's Hold line (ADR 0060): read-only, one JSON line
+  'unfinished-rollout.py hold',   // § 4's Hold line (ADR 0060): read-only, one JSON line
+  'reconcile-rollout.py prove']   // § 4's Carried line (ADR 0078 d1): --dry-run --no-gh, a read that writes nothing
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
@@ -901,7 +903,8 @@ const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.
 // Every command the text invokes, read from its fenced blocks (shell comments dropped) and inline code spans (an
 // escaped \` is a literal, never a delimiter; prose invokes nothing): a script verb (`<x>.py <verb>`), a `.sh`
 // script, a `gh` or `git` subcommand, and a file writer (mv, rm, …).
-function invocations(text) {
+// Every command-like span: each fenced line (its trailing comment dropped), then each prose code span.
+function spansOf(text) {
   const fenced = []
   const prose = []
   let inFence = false
@@ -910,7 +913,11 @@ function invocations(text) {
     if (inFence) fenced.push(l.replace(/\s#\s.*$/, ''))
     else prose.push(l)
   }
-  const spans = [...fenced, ...[...prose.join('\n').replace(/\\`/g, "'").matchAll(/`([^`]+)`/g)].map((m) => m[1])]
+  return [...fenced, ...[...prose.join('\n').replace(/\\`/g, "'").matchAll(/`([^`]+)`/g)].map((m) => m[1])]
+}
+
+function invocations(text) {
+  const spans = spansOf(text)
   const out = []
   for (const s of spans) {
     for (const m of s.matchAll(/([\w-]+\.py)\s+([a-z][\w-]*)/g)) out.push(`${m[1]} ${m[2]}`)
@@ -1024,8 +1031,11 @@ function check({ status, repair, execute, fx }) {
   // read-only, pinned positively: outside its Don'ts, status invokes its two script reads and § 3's gh/git reads,
   // and nothing else (no other script verb, no .sh, no gh or git writer, no file writer); the Don'ts name next.
   const calls = invocations(sb.replace(sDonts, ''))
+  // A prove read (§ 4's Carried line) is a read only with --dry-run, and never with --land or --seen (ADR 0078 d1).
+  const proveSpans = spansOf(sb).filter((s) => /python3 \S*reconcile-rollout\.py prove/.test(s))
   if (!calls.includes('reconcile-rollout.py status') || !calls.includes('lead-integrate.py inputs') || calls.some((c) => !READS.includes(c)) ||
-    !collapse(sDonts).includes('`reconcile-rollout.py next`')) fails.push('read-only')
+    !collapse(sDonts).includes('`reconcile-rollout.py next`') ||
+    proveSpans.some((s) => !/--dry-run/.test(s) || /--land|--seen/.test(s))) fails.push('read-only')
 
   // reverse-lineage: status § 1 reads the lineage before the version and finds a rollout whose supersedes: names
   // this one, as unfinished-rollout.py reads the link (its grep, run on fixture D, finds N's aliased, differently
@@ -1745,6 +1755,10 @@ test('control: a gh pr reopen invoked by status fails read-only', () => {
 })
 test('control: a git update-ref -d invoked by status fails read-only', () => {
   only(inject(`git -C <repoPath> ${ANCHOR}`), 'read-only', 'update-ref')
+})
+test('control: a prove read without --dry-run, or with --land, fails read-only', () => {
+  only(inject('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --rollout <rollout-note> --no-gh --json'), 'read-only', 'prove without --dry-run')
+  only(inject('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --tasks <slug> --dry-run --land'), 'read-only', 'prove --land')
 })
 test('control: a status that no longer runs its status read fails read-only', () => {
   only({ status: real.status.replaceAll('reconcile-rollout.py status', 'reconcile-rollout.py') }, 'read-only', 'no status read')

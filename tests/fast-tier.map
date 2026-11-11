@@ -25,6 +25,7 @@ FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
 # CONTEXT.md, fast-tier-wiring the real CLAUDE.md, inert-paths proves globs on this tree) ----
 FOREIGN-ONLY THREAD.md tests/leg.test.sh tests/lead-integrate.test.sh tests/git-env-canary.test.sh  # fixture repos' close-outs
 FOREIGN-ONLY THREAD.md tests/primary-refresh.test.sh tests/land.test.sh tests/pushed-base.test.sh  # fixture repos' close-outs
+FOREIGN-ONLY THREAD.md tests/land-carrier.test.sh  # fixture repos' landing PRs and their conflicts
 FOREIGN-ONLY THREAD.md tests/repo-threads.test.sh tests/thread-placement.test.mjs tests/estate-scan.test.mjs  # fixture repos' threads
 FOREIGN-ONLY THREAD.md tests/schedule-queue.test.sh tests/next-action.test.mjs tests/fast-tier-wiring.test.mjs  # fixture notes' strings
 FOREIGN-ONLY THREAD.md tests/run-record.test.mjs tests/reflect-tune.test.mjs tests/rollout-settings.test.mjs  # inert_paths globs as strings
@@ -76,6 +77,7 @@ OWN-LISTINGS tests/land.test.sh  # (i) ls-files of temp repos; copies $root/skil
 OWN-LISTINGS tests/contracts/status-repair-queue.test.mjs  # (i) a spawned grep over fixture D
 OWN-LISTINGS tests/unfinished-rollout.test.sh  # (i) an rglob counter on a temp tasks dir (#340); a skills copy with a raising leg.py
 OWN-LISTINGS tests/pushed-base.test.sh  # (i) copies $root/skills as the primary's plugin root (15b)
+OWN-LISTINGS skills/execute/tests/reconcile-rollout-prove.test.sh  # (i) ls-files copy of $root/skills as a seeded Primary checkout; a temp vault
 OWN-LISTINGS tests/self-rollout-check.test.sh  # (i) copies $root/skills into a seed repo
 OWN-LISTINGS tests/lead-integrate.test.sh  # (i) C35's fixture verifier string `find . ...`, read by the inert proof
 OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R8 read the real tree through the selector's index; C1 is every run's map check, and R1-R8 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)
@@ -107,11 +109,13 @@ skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/orient-backlog.t
 skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/run-record-hermetic.test.mjs tests/contracts/run-record-writers.test.mjs tests/contracts/rung-vocabulary.test.mjs
 skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/schedule-merge-gate.test.mjs tests/contracts/schedule-preflight.test.mjs tests/contracts/schedule-queue.test.mjs
 skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/schedule-serial.test.mjs tests/contracts/schedule-supersede.test.mjs tests/contracts/security-check.test.mjs
-skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/start-when-ready.test.mjs tests/contracts/status-repair-queue.test.mjs tests/contracts/status-repair-serial.test.mjs
+skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/start-when-ready.test.mjs tests/contracts/status-primary-refresh.test.mjs tests/contracts/status-repair-queue.test.mjs
+skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/status-repair-serial.test.mjs
 skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/vault-grammar.test.mjs tests/contracts/verify-slot-hermetic.test.mjs tests/engine-snapshot.test.sh tests/estate-dispatch.test.mjs
 skills/execute/scripts/reconcile-rollout.py HUB tests/execution-fit-remote.test.sh tests/fast-tier-wiring.test.mjs tests/fast-tier.test.sh tests/gated-inputs.test.mjs tests/git-env-canary.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/integration-marker-roundtrip.test.mjs tests/ladder.test.mjs tests/lead-integrate.test.sh tests/leg-capacity.test.sh tests/leg.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/merge-task-cancelled.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh tests/pickups.test.sh
+skills/execute/scripts/reconcile-rollout.py HUB tests/primary-refresh.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/reconcile-project.test.sh tests/reflect-score.test.mjs tests/run-record.test.mjs tests/schedule-queue.test.sh tests/serial-chains.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/unfinished-rollout.test.sh tests/vault-note-overlap.test.sh tests/verify-slot-wait.test.sh tests/verify-slot.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/integration-inputs.test.sh skills/execute/tests/reconcile-rollout-auto-retry.test.sh
@@ -198,7 +202,7 @@ tests/fixtures/away-state/** skills/execute/tests/reconcile-rollout-trickle.test
 tests/fixtures/gated-inputs/** tests/gated-inputs.test.mjs
 tests/fixtures/land/** tests/git-env-canary.test.sh tests/land.test.sh tests/lead-integrate.test.sh tests/live-checkout.test.sh
 tests/fixtures/land/** tests/merge-task-base.test.sh tests/parallel-rollouts-one-repo.test.sh tests/primary-refresh.test.sh
-tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh
+tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh tests/land-carrier.test.sh
 tests/fixtures/landing-register/** tests/execution-fit-remote.test.sh tests/landing-register.test.mjs
 tests/fixtures/merge-gate/** tests/merge-gate.test.mjs
 tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integrated.test.sh tests/parallel-rollouts-one-repo.test.sh

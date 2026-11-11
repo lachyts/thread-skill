@@ -87,11 +87,12 @@ H() { python3 "$T/h.py" "$@"; }
 rollout_note() {  # rollout_note <slug> [<extra frontmatter line>] [<body>]
   printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n%s\n---\n\n## Notes\n\n%s\n' "${2:-}" "${3:-}" > "$TASKS/$1.md"
 }
-task_note() {  # task_note <slug> <status> <owner> <rollout link> [<pr>]
+task_note() {  # task_note <slug> <status> <owner> <rollout link> [<pr> [<frontmatter line>]]
   { printf -- '---\ntags:\n  - task\nstatus: %s\n' "$2"
     [ -n "$3" ] && printf 'owner: %s\n' "$3"
     printf 'rollout: "[[%s]]"\n' "$4"
     [ -n "${5:-}" ] && printf 'pr: %s\n' "$5"
+    [ -n "${6:-}" ] && printf '%s\n' "$6"
     printf -- '---\n# %s\n\nbody\n' "$1"; } > "$TASKS/$1.md"
 }
 # agent <session> <agent id> <opener text> [<form: workflows | subagents> [<shape>]] — the agent's transcript beside
@@ -176,10 +177,10 @@ ok "$(H get "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" '[(w["task"], w[
   "the record counts each run's writes"
 
 # ── 5. liveness ends a record ───────────────────────────────────────────────────────────────────────────────────
-live_case() {  # live_case <label> <a1 status> <a1 owner> <a1 rollout> [<pr>] — B's edit after A's write
+live_case() {  # live_case <label> <a1 status> <a1 owner> <a1 rollout> [<pr> [<line>]] — B's edit after A's write
   reset; task_note a1 in_progress lead-aaaa1111 ra
   call "$SA" agentA Write "$VAULT/$DAY"
-  task_note a1 "$2" "$3" "$4" "${5:-}"
+  task_note a1 "$2" "$3" "$4" "${5:-}" "${6:-}"
   call "$SB" agentB Edit "$VAULT/$DAY"
 }
 live_case done done lead-aaaa1111 ra
@@ -203,6 +204,12 @@ live_case review review lead-aaaa1111 ra https://github.com/o/r/pull/7
 has "$(ctx)" "[[a1]]" "review with a pr: (awaiting Integration) still warns"
 live_case review-no-pr review lead-aaaa1111 ra
 ok "$out" "" "review with no pr: is not live"
+live_case carried review lead-aaaa1111 ra https://github.com/o/r/pull/7 'merged: 2026-11-11T10:00+00:00'
+ok "$out" "" "review with a pr: and a valued merged: (a carried fix, ADR 0078 d1) is not live"
+for m in 'merged: null' 'merged: ~' 'merged: ""'; do
+  live_case unvalued review lead-aaaa1111 ra https://github.com/o/r/pull/7 "$m"
+  has "$(ctx)" "[[a1]]" "review with a pr: and $m (unvalued, _valued's literal mirror) still warns"
+done
 reset; task_note a1 in_progress lead-aaaa1111 ra
 call "$SA" agentA Write "$VAULT/$DAY"
 mkdir -p "$TASKS/Archive/Rollouts"; mv "$TASKS/ra.md" "$TASKS/Archive/Rollouts/ra.md"

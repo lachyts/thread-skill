@@ -22,11 +22,16 @@
 // and one that stands makes the verdict wait (approved_unrun's readers: carry and unfinished-rollout.py), that it is never
 // carried and fails closed only at the merge, the Integration wait and the chain's windows; reconcile-rollout.py's
 // ON_MERGE_KEY and ON_MERGE_REGENERATE are pinned to it, § Rollout start stamp's Writers name approve-queue and
-// stamp-start, and § Hold until's Clearer names the approved-queue exception.
+// stamp-start, and § Hold until's Clearer names the approved-queue exception. § When (p45-7) states the durable trigger
+// (`when:`), its verbs and `triggers due` / `triggers fire`; reconcile-rollout.py's WHEN_KEY is pinned to it, its LOCAL_RE
+// to serial-chains.py's literal, and every outcome a Primary refresh pass returns (primary-refresh.py's refresh() and
+// the repair it hands off to) to RESET_PRIMARY_RECORDED or RESET_PRIMARY_RETRIED, each of their literals to one, so a
+// renamed or a new outcome fails here rather than quietly reading as not recorded.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { collapse, read, root, section } from '../lib/contract-text.mjs'
 
@@ -39,6 +44,9 @@ const orient = read('skills/orient/SKILL.md')
 const reshuffle = read('skills/orient/reshuffle.md')
 const close = read('skills/close/SKILL.md')
 const repoTrack = read('skills/close/scripts/repo-track.sh')
+const reconcileRollout = read('skills/execute/scripts/reconcile-rollout.py')
+const serialChains = read('skills/_shared/scripts/serial-chains.py')
+const primaryRefresh = read('skills/_shared/scripts/primary-refresh.py')
 
 // ---- the doc's grammar --------------------------------------------------------------------------------
 
@@ -71,6 +79,9 @@ print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHA
                   "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "SHORT_ID_RE": rr.SHORT_ID_RE.pattern,
                   "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED, "HOLD_KEY": rr.HOLD_KEY,
                   "ON_MERGE_KEY": rr.ON_MERGE_KEY, "ON_MERGE_REGENERATE": rr.ON_MERGE_REGENERATE,
+                  "WHEN_KEY": rr.WHEN_KEY, "RESET_PRIMARY_RECORDED": list(rr.RESET_PRIMARY_RECORDED),
+                  "RESET_PRIMARY_RETRIED": list(rr.RESET_PRIMARY_RETRIED),
+                  "PRIMARY_REFRESH_PY": str(rr.PRIMARY_REFRESH_PY),
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
 `
@@ -250,7 +261,8 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY', 'ON_MERGE_KEY']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY', 'ON_MERGE_KEY',
+  'WHEN_KEY']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -353,10 +365,79 @@ function approvedQueueChecks(text, s) {
   return out
 }
 
+// ---- the durable trigger (p45-7) ----------------------------------------------------------------------------
+
+const LOCAL_LINE = (text) => (text.match(/^LOCAL_RE = re\.compile\(.*\)$/m) ?? [])[0]
+
+// Every outcome a Primary refresh pass can print, as the literal it opens with: each return of refresh() in
+// primary-refresh.py and of every function a return there hands off to (repair, then _reset and _carry), a returned
+// local read at its assignment (_reset's `line = f"repaired: …"`) and a leading `{name}` at name's (`{base}`,
+// repair's `diverged (…)`). A return the pin cannot read is '', which no prefix classifies, so an outcome built
+// another way fails too.
+function passOutcomes(pr) {
+  const body = (fn) => pr.split(new RegExp(`^def ${fn}\\(`, 'm'))[1]?.split(/^def /m)[0] ?? ''
+  const str = (text) => text.match(/^\(?\s*(f?)"((?:[^"\\]|\\.)*)"/)
+  const opens = (m) => {
+    if (!m) return ''
+    if (!m[1]) return m[2]
+    const lead = m[2].replace(/^\{(\w+)\}/, (all, name) => {
+      const a = pr.match(new RegExp(`^\\s+${name} = (f?"(?:[^"\\\\]|\\\\.)*")`, 'm'))
+      return a ? str(a[1])[2] : all
+    })
+    return lead.startsWith('{') ? '' : lead.split('{')[0]
+  }
+  const out = []
+  const seen = new Set()
+  const todo = ['refresh']
+  while (todo.length) {
+    const fn = todo.shift()
+    if (seen.has(fn)) continue
+    seen.add(fn)
+    const b = body(fn)
+    for (const [, rest] of b.matchAll(/^\s+return\s+(.*)$/gm)) {
+      const call = rest.match(/^(\w+)\(/)
+      const local = rest.match(/^(\w+),/)
+      if (call && body(call[1])) todo.push(call[1])
+      else if (local) out.push(opens(str(b.match(new RegExp(`^\\s+${local[1]} = (.*)$`, 'm'))?.[1] ?? '')))
+      else out.push(opens(str(rest)))
+    }
+  }
+  return out
+}
+
+// The names of the failed § When checks; [] when the section states the key, names `triggers due`, `triggers fire` and
+// every on and do verb, the attended-run rule and the never-carried rule; the script's WHEN_KEY equals the key, its LOCAL_RE
+// is serial-chains.py's literal, PRIMARY_REFRESH_PY exists, every outcome a pass returns opens with a
+// RESET_PRIMARY_RECORDED or RESET_PRIMARY_RETRIED literal, and each of those literals opens an outcome.
+function whenChecks(text, s, rr = reconcileRollout, sc = serialChains, pr = primaryRefresh) {
+  const sec = collapse(section(text, /^## When$/) ?? '')
+  const key = sec.match(/the key is `([a-z_]+)`/)
+  if (!key) return ['states the key']
+  const out = []
+  if (s.WHEN_KEY !== key[1]) out.push('script constant')
+  for (const want of ['`reconcile-rollout.py triggers due`', '`reconcile-rollout.py triggers fire <id>`',
+    '`merged <owner/repo#N | PR URL>`', '`paused`', '`landed [[task]]`',
+    '`regenerate`', '`regenerate --tasks a,b`', '`schedule [[task]]`', '`reset-primary`',
+    'a fired regenerate or schedule is an attended run that can wait on Lachy', '**Never carried.**', '**Fails closed.**']) {
+    if (!sec.includes(want)) out.push(`names ${want}`)
+  }
+  if (!LOCAL_LINE(rr) || LOCAL_LINE(rr) !== LOCAL_LINE(sc)) out.push('LOCAL_RE copy')
+  if (!existsSync(s.PRIMARY_REFRESH_PY)) out.push('primary-refresh path')
+  const outcomes = passOutcomes(pr)
+  const known = [...s.RESET_PRIMARY_RECORDED, ...s.RESET_PRIMARY_RETRIED]
+  for (const o of new Set(outcomes)) {
+    if (!known.some((lit) => o.startsWith(lit))) out.push(`classifies ${o || 'a return it cannot read'}`)
+  }
+  for (const lit of known) {
+    if (!outcomes.some((o) => o.startsWith(lit))) out.push(`refresh() returns ${lit}`)
+  }
+  return out
+}
+
 // ---- tests --------------------------------------------------------------------------------------------
 
-test('the doc has the seven sections the readers cite', () => {
-  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Approved queue', 'Readers']) {
+test('the doc has the eight sections the readers cite', () => {
+  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Approved queue', 'When', 'Readers']) {
     assert.ok(section(doc, new RegExp(`^## ${h}$`)), `${DOC} has no ## ${h}`)
   }
 })
@@ -509,6 +590,33 @@ test('control: a drifted key, a dropped room-stop rule or a carried approval fai
   assert.deepEqual(approvedQueueChecks(mutate(doc, '## Approved queue', '## Approved queues'), s), ['states the key'])
 })
 
+test('§ When states the key, its verbs and the attended-run rule, and pins WHEN_KEY, LOCAL_RE and the recorded outcomes', () => {
+  assert.deepEqual(whenChecks(doc, scripts()), [])
+})
+
+test('control: a drifted key, verb or LOCAL_RE, or a renamed, new or unclassified outcome fails the when check', () => {
+  const s = scripts()
+  assert.deepEqual(whenChecks(mutate(doc, 'the key is `when`', 'the key is `whence`'), s), ['script constant'])
+  assert.deepEqual(whenChecks(doc, { ...s, WHEN_KEY: 'whence' }), ['script constant'])
+  assert.deepEqual(whenChecks(mutate(doc, '`reconcile-rollout.py triggers due`', '`triggers list`'), s),
+    ['names `reconcile-rollout.py triggers due`'])
+  assert.deepEqual(whenChecks(mutate(doc, /is an\s+attended run that can wait on Lachy/, 'runs on its own'), s),
+    ['names a fired regenerate or schedule is an attended run that can wait on Lachy'])
+  assert.deepEqual(whenChecks(doc, s, mutate(reconcileRollout, /^LOCAL_RE = .*$/m, 'LOCAL_RE = re.compile(r"x")')), ['LOCAL_RE copy'])
+  assert.deepEqual(whenChecks(doc, { ...s, PRIMARY_REFRESH_PY: '/no/such/file' }), ['primary-refresh path'])
+  const pass = (from, to) => whenChecks(doc, s, reconcileRollout, serialChains, mutate(primaryRefresh, from, to))
+  assert.deepEqual(pass('return f"held: {h}"', 'return f"blocked: {h}"'), ['classifies blocked: ', 'refresh() returns held: '])
+  assert.deepEqual(pass('line = f"repaired: ', 'line = f"fixed: '), ['classifies fixed: ', 'refresh() returns repaired: '])
+  assert.deepEqual(pass('base = f"diverged (', 'base = f"split ('), ['classifies split (ahead '])
+  const novel = '    if form == "new":\n        return f"novel: {m.group(2)}", "novel", tip, branch\n    if form == "busy":\n'
+  assert.deepEqual(pass('    if form == "busy":\n', novel), ['classifies novel: '])
+  assert.deepEqual(pass('return line, None, tip, branch', 'return said(line), None, tip, branch'),
+    ['classifies a return it cannot read', 'refresh() returns repaired: '])
+  const recorded = s.RESET_PRIMARY_RECORDED.filter((lit) => lit !== 'repaired: ')
+  assert.deepEqual(whenChecks(doc, { ...s, RESET_PRIMARY_RECORDED: recorded }), ['classifies repaired: '])
+  assert.deepEqual(whenChecks(mutate(doc, '## When', '## Whence'), s), ['states the key'])
+})
+
 test('§ Readers lists every reader, and no Not yet adopted line is left', () => {
   assert.deepEqual(readerChecks(doc), [])
 })
@@ -580,4 +688,49 @@ test('controls: a drifted set or a restored caveat fails its check', () => {
   assert.deepEqual(citations({ orientText: restated, reshuffleText: reshuffle, docstring: s.doc }),
     ['orient § 2 restates in flight'])
   assert.deepEqual(citations({ orientText: orient, reshuffleText: reshuffle, docstring: 'no citation' }), ['docstring cites'])
+})
+
+// ---- § Proven (ADR 0078 d1): a fix is done only once Proven ---------------------------------------------
+// The section states the grammar every reader of a carried fix keeps to; § Readers names the readers outside this repo.
+function provenChecks(text) {
+  const p = collapse(section(text, /^## Proven$/) ?? '')
+  const r = collapse(section(text, /^## Readers\b/) ?? '')
+  const out = []
+  if (!p) return ['section']
+  if (!p.includes('A carried fix is a task note at `status: review` with a valued `merged:`')) out.push('carried-test')
+  if (!p.includes('both checks read it before any engine read: at landing, its task lands `done`; at carry-back, its task is never a candidate and never listed')) out.push('serial-first')
+  if (!p.includes('and the rollout of each dependant still to start (a `depends-on:` or `blocked-by:` naming it, through a folded member too')) out.push('dependants')
+  if (!p.includes('3. unstamped (no valued `engine_snapshot:`): the marker in the engine an unstamped note runs on, the Primary checkout\'s copy (found through `git_primary`') ||
+    !p.includes('else the running plugin root, and never read as current by default')) out.push('unstamped')
+  if (!p.includes('`{v: 1, carried, owed, carryBack}`, one split behind all three')) out.push('three-lists')
+  if (!p.includes('`_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`)')) out.push('hook-mirror')
+  if (!p.includes('(`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from `Work/Phases/Archive/` first')) out.push('phase-reopen')
+  if (!p.includes("reconcile's read-only approval (no code, so never watched)")) out.push('read-only-landing')
+  if (!r.includes('it is the only closer of a fix phase')) out.push('sweep')
+  if (!r.includes("**Chorus's copy of `_queue_state`**") || !r.includes('it must read `review` with a valued `merged:` as `merged`, checked before its `pr:` branch')) out.push('chorus')
+  return out
+}
+
+test('§ Proven states the carried-fix grammar, and § Readers names the sweep and Chorus', () => {
+  assert.deepEqual(provenChecks(doc), [])
+})
+
+test('control: each § Proven rule, rewritten, fails its check', () => {
+  // from matches across the doc's line breaks: each run of whitespace in it matches any run in the doc.
+  const swap = (from, to, want) => {
+    const re = new RegExp(from.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+    assert.ok(re.test(doc), `control setup: ${from.slice(0, 60)}`)
+    assert.deepEqual(provenChecks(doc.replace(re, () => to)), [want], want)
+  }
+  swap('A carried fix is a task note at `status: review` with a valued `merged:`', 'A carried fix is a task note at `status: review`', 'carried-test')
+  swap('both checks read it before any engine read', 'both checks read it after the finished check', 'serial-first')
+  swap('and the rollout of each dependant still to start', 'and nothing else', 'dependants')
+  swap("3. unstamped (no valued `engine_snapshot:`): the marker in the engine an unstamped note runs on, the Primary checkout's copy",
+    '3. unstamped (no valued `engine_snapshot:`): unstamped reads True, the newest copy', 'unstamped')
+  swap('`{v: 1, carried, owed, carryBack}`', '`{v: 1, carried}`', 'three-lists')
+  swap('`v.lower() not in ("", "null", "~")`', '`bool(v)`', 'hook-mirror')
+  swap('writes it `status: open` with `completed:` removed', 'leaves it done', 'phase-reopen')
+  swap("reconcile's read-only approval (no code, so never watched)", 'reconcile writes a read-only task done', 'read-only-landing')
+  swap('it is the only closer of a fix phase', 'prove closes the phase too', 'sweep')
+  swap('it must read `review` with a valued `merged:` as `merged`', 'it reads `review` as awaiting Integration', 'chorus')
 })
