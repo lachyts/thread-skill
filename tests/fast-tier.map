@@ -146,7 +146,7 @@ skills/_shared/scripts/run_record.py HUB tests/contracts/run-record-writers.test
 skills/_shared/scripts/run_record.py HUB tests/contracts/status-repair-queue.test.mjs tests/contracts/verify-slot-hermetic.test.mjs tests/engine-snapshot.test.sh tests/fast-tier.test.sh
 skills/_shared/scripts/run_record.py HUB tests/git-env-canary.test.sh tests/integration-marker-roundtrip.test.mjs tests/lead-integrate.test.sh tests/merge-task-bare-blocked.test.sh
 skills/_shared/scripts/run_record.py HUB tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh tests/merge-task-cancelled.test.sh tests/merge-task-ci-headroom.test.sh
-skills/_shared/scripts/run_record.py HUB tests/merge-task-integrated.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh tests/pickups.test.sh
+skills/_shared/scripts/run_record.py HUB tests/merge-task-integrated.test.sh tests/merge-task-no-runner.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh tests/pickups.test.sh
 skills/_shared/scripts/run_record.py HUB tests/rollout-settings.test.mjs tests/run-record.test.mjs tests/schedule-queue.test.sh tests/unfinished-rollout.test.sh
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/approved-gates-resume.test.mjs skills/execute/tests/args-refusal.test.mjs skills/execute/tests/integrate.test.mjs
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/prompt-invariants.test.mjs skills/execute/tests/reconcile-rollout-auto-retry.test.sh skills/execute/tests/reconcile-rollout-heat.test.sh
@@ -158,7 +158,7 @@ skills/execute/scripts/verify-slot.py HUB tests/contracts/status-repair-queue.te
 skills/execute/scripts/verify-slot.py HUB tests/engine-ladder.test.mjs tests/fast-tier-wiring.test.mjs tests/fast-tier.test.sh tests/gated-inputs.test.mjs tests/git-env-scrub.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/git-env-scrub.test.sh tests/integration-marker-roundtrip.test.mjs tests/integration-tree.test.sh tests/ladder.test.mjs tests/lead-integrate.test.sh
 skills/execute/scripts/verify-slot.py HUB tests/merge-task-bare-blocked.test.sh tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh tests/merge-task-cancelled.test.sh
-skills/execute/scripts/verify-slot.py HUB tests/merge-task-ci-headroom.test.sh tests/merge-task-integrated.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh
+skills/execute/scripts/verify-slot.py HUB tests/merge-task-ci-headroom.test.sh tests/merge-task-integrated.test.sh tests/merge-task-no-runner.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh
 skills/execute/scripts/verify-slot.py HUB tests/pinned-tree.test.mjs tests/pinned-tree.test.sh tests/verify-slot-heat.test.sh tests/verify-slot-own.test.sh tests/verify-slot-wait.test.sh
 skills/execute/scripts/verify-slot.py HUB tests/verify-slot.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-auto-retry.test.sh skills/execute/tests/reconcile-rollout-churn.test.sh
