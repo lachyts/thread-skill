@@ -66,7 +66,8 @@ ADR 0054).
 The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr line starting `engine-snapshot:` that
 names the root to re-run from. They are:
 
-- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving` and `join`: it asks about the note `--rollout` (carry:
+- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving` and `join` (and `triggers`, which names
+  no note): it asks about the note `--rollout` (carry:
   `--from`) names, which `lane-hold` and `lane-ack` always take, and the rollout each `--tasks` slug's note (and, for
   `reconcile`, each result row's) names in its `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`,
   `hand-back`, `mark-started`, `mark-integrating`, `origin-wait`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
@@ -79,8 +80,10 @@ rollout with it); `moving` writes nothing either, and is the Watchdog's reading 
 The Watchdog's reading); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
 cross-version state (below); `join` (ADR 0078 d6) is run by a newer `/thread:schedule` on this project's running
 rollout, whose snapshot predates the verb, and writes only the forms § Cross-version state names for it, under the same
-note lock; `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan`
-only read; and `lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
+note lock; `reconcile-rollout.py triggers` names no note (no `--rollout`, no `--tasks`), so the guard finds nothing to
+ask about and it runs from any root, unguarded: `due` writes nothing and `fire` writes only the `fired:` of the one
+`when:` entry it ran; `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan` only read;
+and `lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
 
 An `engine-snapshot:` line, whatever its exit code, means a wrong root, never the script's own failure: re-run the
 same command once from the root it names. An unstamped note, an archived note whose snapshot is gone, and a task

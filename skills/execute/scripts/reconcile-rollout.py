@@ -662,6 +662,14 @@ Subcommands:
               Stage opens its Leg 1; it waits on the Waiting list (unfinished-rollout.py waiting)`, ending `; the
               Backlog orient listed it` under --backlog.
 
+  triggers    Durable follow-up triggers (p45-7, ADR 0078 d5; Durable triggers below; skills/_shared/vault-grammar.md
+              § When). `triggers due [--tasks-dir D] [--gh-bin G]`, read-only and needing no lead, prints one JSON object
+              {due, waiting, unreadable, fired}: exit 0, or 1 on a missing tasks dir. `triggers fire <id> [--tasks-dir D]
+              [--gh-bin G] [--refresh-bin B] [--now T]` runs one trigger and records it, idempotently, as `fired:` on its
+              entry, and prints the row plus {fired, fresh, ran} (and `outcome` on a script step): exit 0 fresh or already
+              fired, 1 an unknown id, an unreadable entry, not due, a script outcome not recorded or a save failure. Only
+              `fresh: true` tells a caller to act on `command`.
+
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
               max(60, 7200 - 600 - N), "verifySlot": {"script": <abs verify-slot.py>, "slots": V}} from its
@@ -1445,6 +1453,17 @@ the note's first project (_norm_project). While it holds nothing starts, restart
 dropped note) clears the hold and its `on_merge:` lines in one compare-and-swap (Note.remove_block's `also`), so a hold
 added by hand later is a plain hold. `carry` never copies `on_merge`.
 
+Durable triggers (p45-7, ADR 0078 d5; the grammar is skills/_shared/vault-grammar.md § When): a "when X, then Y" step
+written on a rollout or task note as a `when:` entry, so it survives any session. _when reads every form; _trigger_eval
+is `due`'s and `fire`'s one reading, the `do` gate first (_regenerate_gate, a target's status, _trigger_root) and the `on`
+last (merged through _resolve_holds, landed through _dep_status, paused on the note or its rollout), so an entry that
+cannot fire makes no gh call. `triggers fire` records a model step and hands its command back, since this script starts
+no session; a script step (reset-primary) runs one Primary refresh pass first and records only a standing verdict
+(RESET_PRIMARY_RECORDED), never a transient or failed one (RESET_PRIMARY_RETRIED) or one in neither. The record is
+_mark_fired, a Note.apply edit, under TRIGGER_LOCK with the note read again inside it. A fired regenerate or schedule is
+an attended run: the command carries no `Under the chain:` line, which only an approved queue's approval supplies, so
+the Session the Stage starts can stop at schedule's questions and wait on Lachy.
+
 
 Heat hold (estate ADR 0009 d5; the spec is skills/execute/away.md § Heat): `next` reads the Mac's thermal pressure once
 per call, right after the Away state (so a refused call reads neither), through verify-slot.py's heat_level()
@@ -1616,8 +1635,9 @@ three levels down and a run-end-shaped line is indented, so feedback text can ne
 open or close a run (the sha stays over the content as given). See Note.append_run for the rules; nothing
 already written is ever deleted.
 
-The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status`, `fold-journals`,
-`moving` and `join` first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
+The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb that names a note, but `status`,
+`fold-journals`, `moving` and `join`, first asks engine-snapshot.py, loaded from this tree, about each rollout the call
+acts on: guard() on the note its
 --rollout (carry: its --from) names (lane-hold and lane-ack require it), and guard_task() on each --tasks slug's note
 and, for `reconcile`, each result row's task note (the rollout its `rollout:` names), so a task-keyed verb run with
 --rollout left off (hand-back, mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold,
@@ -1631,7 +1651,9 @@ and writes only call-journal lines to the Run record, cross-version state (engin
 state) that reflect folds across rollouts from its own root, and `join` (ADR 0078 d6) is run by a newer
 /thread:schedule on a running rollout whose snapshot predates the verb, and writes only the forms every protocol-5
 engine reads (a `## Queue` row whose Mode starts `joined `, a `- <slug>: a, b` `## File-sets` line, a task's `rollout:`
-stamp) under the same note lock, a cross-version contract that changes only by migration.
+stamp) under the same note lock, a cross-version contract that changes only by migration. `triggers` names no note (no
+--rollout, no --tasks), so `_guarded_notes` finds nothing to ask about and it runs from any root, unguarded. `due`
+writes nothing; `fire` writes only the `fired:` of the one `when:` entry it ran.
 """
 
 import argparse
@@ -2211,8 +2233,8 @@ def _note_lock_dir() -> Path:
     """Where the note save locks (and the standing approval's spend lock) live: THREAD_NOTE_LOCK_DIR, else
     XDG_STATE_HOME/thread/note-locks, else ~/.local/state/thread/note-locks; outside the vault so they never sync. It
     also holds the trickle claim lock and the Trickle claims file (TRICKLE_LOCK, TRICKLE_CLAIMS; _trickle_paths):
-    `next`'s, and leg.py claim's and wait's (p36-7, capacity_gate), and mark-integrating's origin-lane lock and waiting
-    list (ORIGIN_LANE_LOCK, ORIGIN_LANE_FILE; _origin_lane_paths)."""
+    `next`'s, and leg.py claim's and wait's (p36-7, capacity_gate), mark-integrating's origin-lane lock and waiting
+    list (ORIGIN_LANE_LOCK, ORIGIN_LANE_FILE; _origin_lane_paths), and `triggers fire`'s trigger lock (TRIGGER_LOCK)."""
     absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
     base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
         absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
@@ -2682,7 +2704,9 @@ class _note_lock:
     Leg lease, the task note's save and the claims write, never git, gh or a child process (capacity_reads, the heat's
     `notifyutil` and the Mac's sysctl among them, is read before it); nothing takes a leg.py lock, or the trickle
     lock, inside it. So is the origin-lane lock (ORIGIN_LANE_LOCK, ADR 0064): only mark-integrating takes it, with note locks and
-    the Run record's flock inside it, and never nested with the trickle lock. No fcntl (Windows): no lock, the atomic replace alone."""
+    the Run record's flock inside it, and never nested with the trickle lock. The trigger lock (TRIGGER_LOCK, p45-7) is
+    taken only by `triggers fire`, around its record, with the note's lock inside it and never across a child process.
+    No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
         self.lock_path = Path(lock_path) if lock_path is not None else _note_lock_path(path)
@@ -12212,6 +12236,538 @@ def _stamp_serial(note, path: Path, stem: str, backlog: bool, refuse) -> int:
     return 0
 
 
+# ---- durable triggers (p45-7, ADR 0078 d5; vault-grammar § When) -----------------------------------------------------
+
+WHEN_KEY = "when"
+WHEN_FIELDS = ("on", "do", "fired")
+WHEN_NOT_MAPPING = "not an {on, do} mapping"
+WHEN_DASH_RE = re.compile(r"^([ \t]*)-(?:[ \t]+(.*))?$")
+WHEN_LINK_RE = re.compile(r"^\[\[[^\[\]]+\]\]$")
+TRIGGER_LOCK = "trigger.lock"   # machine-wide, beside the note locks (_note_lock_dir), the note locks inside it
+PRIMARY_REFRESH_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "primary-refresh.py"
+# A pass's outcome that read the checkout to a standing verdict: recorded. `repaired: ` is the repair of a diverged
+# Primary (ADR 0078 d4), which ends the stuck spell as `current` does; on the Primary every other `diverged (…): …`
+# line is that repair's (repair waits, repair held, repair refused, carried, not carried), the job's to retry. An
+# allowlist, so a new outcome or no line fails closed.
+RESET_PRIMARY_RECORDED = ("current", "ahead ", "moved ", "repaired: ", "diverged ", "held: ", "refused: ")
+# A pass's outcome that is not recorded, so the trigger stays due: transient (busy, a fetch failure, a timeout), a
+# checkout that is no Primary, a broken or unreadable step, or a dry pass's `would …`. `fire` names an outcome in
+# neither tuple as one it does not know; tests/contracts/vault-grammar.test.mjs classifies every outcome
+# primary-refresh.py's refresh() can return into one of the two and pins each literal to one, so a renamed or new
+# outcome fails there.
+RESET_PRIMARY_RETRIED = ("not a primary checkout: ", "fetch failed: ", "broken: ", "unreadable: ", "timed out: ",
+                         "busy: ", "would ")
+PRIMARY_PASS_RE = re.compile(r"^\S+ primary-refresh .+?: (.*)$")
+# A project note's `` Local: `<path>` `` line, the one schedule § 0 reads (serial-chains.py's LOCAL_RE, a literal copy
+# as backlog-orient.py keeps one; tests/contracts/vault-grammar.test.mjs pins it).
+LOCAL_RE = re.compile(r"Local:\s*`(~?/[^`\n]*)`")
+
+
+def _when_span(note):
+    """(i, j): the note's `when:` block in `_fm`, or None when it has no top-level `when:` line. It is _fm_span's span,
+    and for a header with no inline value it goes on over the column-0 `- ` lines YAML lets a block sequence use and
+    over blank or comment lines inside the block, for this key only, so _fm_span and its callers are untouched."""
+    span = note._fm_span(WHEN_KEY)
+    if span is None:
+        return None
+    i, j, fm = span[0], span[1], note._fm
+    if _yaml_uncomment(fm[i][len(WHEN_KEY) + 1:]):
+        return i, j
+    while True:
+        k = j
+        while k < len(fm) and (not fm[k].strip() or fm[k].startswith("#")):
+            k += 1
+        if k == len(fm) or not (fm[k][:1] in (" ", "\t") or WHEN_DASH_RE.match(fm[k])):
+            return i, j
+        j = k + 1
+
+
+def _when_blank(first, last, raw, error=None, col=None, flow=False):
+    """One `when:` entry before it is read: first and last (its line indices), raw (its text, one line), error (why it
+    reads as unreadable, None while it reads), col (its first key's column), flow, and on, do, fired, id, onSpec and
+    doSpec, which stay None while an entry reads as unreadable."""
+    return {"first": first, "last": last, "col": col, "flow": flow, "raw": raw, "on": None, "do": None, "fired": None,
+            "error": error, "id": None, "onSpec": None, "doSpec": None}
+
+
+def _when_entry(fm, keys, first, col):
+    """One entry of a `when:` block (_when_blank's dict): `keys` its lines' indices in `fm` (no blank or comment line among
+    them), `first` the uncommented text of its first line from the entry's own first key on, `col` that key's column (None
+    for a flow mapping on the `when:` line)."""
+    e = _when_blank(keys[0], keys[-1], " ".join(fm[k].strip() for k in keys), col=col, flow=first.startswith("{"))
+
+    def fail(why):
+        e["error"] = why
+        return e
+
+    rest = [fm[k] for k in keys[1:]]
+    if e["flow"]:
+        text = " ".join([first] + [_yaml_uncomment(line) for line in rest]).strip()
+        if not text.endswith("}"):
+            return fail(WHEN_NOT_MAPPING)
+        items = [item.strip() for item in _flow_items(text[1:-1]) if item.strip()]
+    else:
+        if any(len(line) - len(line.lstrip()) != col for line in rest):
+            return fail("a key off its column")
+        items = [first] + [_yaml_uncomment(line) for line in rest]
+    fields = {}
+    for item in items:
+        m = HOLD_PAIR_RE.match(item)
+        if not m or not HOLD_NAME_RE.match(m.group(1)):
+            return fail(WHEN_NOT_MAPPING)
+        k = m.group(1)
+        if k not in WHEN_FIELDS:
+            return fail(f"unknown key {k}")
+        if k in fields:
+            return fail(f"duplicate key {k}")
+        raw = (m.group(2) or "").strip()
+        if e["flow"] and raw[:1] not in ("'", '"') and re.search(r"[\[\]{}]", raw):
+            return fail(f"{k}: a flow value holding a wikilink must be quoted")
+        fields[k] = _yaml_unquote(raw)
+    if "fired" in fields and fields["fired"].lower() in ("", "null", "~"):
+        return fail("an empty fired:")
+    for k in ("on", "do"):
+        if not fields.get(k):
+            return fail(f"no {k}")
+    e.update(on=" ".join(fields["on"].split()), do=" ".join(fields["do"].split()), fired=fields.get("fired"))
+    return e
+
+
+def _when_raw(fm, i, j):
+    """The block fm[i:j] (_when_span) as _when_entry dicts, on one `on`/`do` read. Six forms read (vault-grammar § When):
+    a flow mapping on the `when:` line, the block mapping Obsidian re-serialises it to, and flow or block list items at a
+    dash column of any width, column 0 included. A block that cannot be split into entries is one unreadable row."""
+    whole = " ".join(line.strip() for line in fm[i:j] if line.strip())
+
+    def bad(why):
+        return [_when_blank(i, j - 1, whole, error=why)]
+
+    head = _yaml_uncomment(fm[i][len(WHEN_KEY) + 1:])
+    if head.lower() in ("null", "~"):
+        return bad("null value")
+    if head.startswith("["):
+        return bad("a flow list: write each entry on its own line")
+    if head:
+        if not head.startswith("{"):
+            return bad(WHEN_NOT_MAPPING)
+        keys = [i] + [k for k in range(i + 1, j) if _yaml_uncomment(fm[k])]
+        return [_when_entry(fm, keys, head, None)]
+    body = [k for k in range(i + 1, j) if _yaml_uncomment(fm[k])]
+    if not body:
+        return bad("empty value")
+    first = WHEN_DASH_RE.match(fm[body[0]])
+    if first is None:
+        col = len(fm[body[0]]) - len(fm[body[0]].lstrip())
+        return [_when_entry(fm, body, _yaml_uncomment(fm[body[0]]), col)]
+    dash, groups = len(first.group(1)), []
+    for k in body:
+        indent = len(fm[k]) - len(fm[k].lstrip())
+        if WHEN_DASH_RE.match(fm[k]):
+            if indent != dash:
+                return bad("list items at two dash columns")
+            groups.append([k])
+        elif indent <= dash:
+            return bad("a line outside any list item")
+        else:
+            groups[-1].append(k)
+    out = []
+    for keys in groups:
+        m = WHEN_DASH_RE.match(fm[keys[0]])
+        text = _yaml_uncomment(m.group(2) or "")
+        out.append(_when_entry(fm, keys, text, m.start(2)) if text
+                   else _when_blank(keys[0], keys[-1], fm[keys[0]].strip(), error="empty list item"))
+    return out
+
+
+def _when_link(arg):
+    """The slug of the note `arg` links when it is one wikilink naming a note, else None: `[[#heading]]`, `[[^block]]`,
+    `[[|x]]` and `[[.md]]` have a link's shape and name none."""
+    return _wikilink_slug(arg) if WHEN_LINK_RE.match(arg) else None
+
+
+def _when_on(text):
+    """(spec, None) for a readable `on` (vault-grammar § When), else (None, why). spec: {verb, norm (the id's form)} and
+    `pr` and `key` (canonical URL) for `merged`, `task` for `landed`. A bare PR number is unreadable: a trigger fires with
+    no lead, and a bare number needs a repo to be read in."""
+    verb, _, arg = text.partition(" ")
+    arg = arg.strip()
+    if verb == "merged":
+        repo_pr, url = HOLD_REPO_PR_RE.match(arg), PR_URL_RE.match(arg)
+        if repo_pr:
+            key = f"https://github.com/{repo_pr.group(1)}/pull/{repo_pr.group(2)}"
+        elif url:
+            key = f"https://github.com/{url.group(1)}/pull/{url.group(2)}"
+        else:
+            return None, "merged names owner/repo#N or a PR URL"
+        return {"verb": verb, "pr": arg, "key": key, "norm": f"merged {key}"}, None
+    if verb == "paused":
+        return ({"verb": verb, "norm": verb}, None) if not arg else (None, "paused takes no argument")
+    if verb == "landed":
+        slug = _when_link(arg)
+        if not slug:
+            return None, "landed names one [[task]]"
+        return {"verb": verb, "task": slug, "norm": f"landed {slug.lower()}"}, None
+    return None, f"unknown on {verb}"
+
+
+def _when_do(text):
+    """(spec, None) for a readable `do` (vault-grammar § When), else (None, why). spec: {verb, kind (command or script),
+    targets (slugs as written), norm (the id's form)}. A `--tasks` entry is a slug or a wikilink; a comma inside a wikilink
+    never splits."""
+    verb, _, arg = text.partition(" ")
+    arg = arg.strip()
+    if verb == "regenerate":
+        if not arg:
+            return {"verb": verb, "kind": "command", "targets": [], "norm": verb}, None
+        m = re.fullmatch(r"--tasks\s+(.+)", arg)
+        if not m:
+            return None, f"regenerate takes only --tasks, not {arg}"
+        slugs = [_wikilink_slug(part) for part in re.split(r",(?![^\[]*\]\])", m.group(1))]
+        if not all(slugs):
+            return None, "an empty --tasks entry"
+        return {"verb": verb, "kind": "command", "targets": slugs,
+                "norm": f"regenerate --tasks {','.join(sorted(s.lower() for s in slugs))}"}, None
+    if verb == "schedule":
+        slug = _when_link(arg)
+        if not slug:
+            return None, "schedule names one [[task]]"
+        return {"verb": verb, "kind": "command", "targets": [slug], "norm": f"schedule {slug.lower()}"}, None
+    if verb == "reset-primary":
+        if arg:
+            return None, "reset-primary takes no argument"
+        return {"verb": verb, "kind": "script", "targets": [], "norm": verb}, None
+    return None, f"unknown do {verb}"
+
+
+def _trigger_id(stem, on_norm, do_norm) -> str:
+    """A trigger's id: the first 12 hex of sha256 over the note's stem (lower-cased) and the normalised on and do, so it
+    holds when sibling entries move and when `fired:` is written, and carries no space or quote."""
+    return hashlib.sha256("\0".join((stem.lower(), on_norm, do_norm)).encode()).hexdigest()[:12]
+
+
+def _when(note):
+    """The note's `when:` entries in file order ([] when it has none), the one reader of every form (_when_raw) and of the
+    `on` and `do` grammar. A readable entry carries id, onSpec and doSpec; a second entry with the same id reads as a
+    duplicate, and an unreadable one never hides a good sibling."""
+    span = _when_span(note)
+    if span is None:
+        return []
+    out, seen = [], set()
+    for e in _when_raw(note._fm, *span):
+        if e["error"] is None:
+            on, why = _when_on(e["on"])
+            do, why_do = _when_do(e["do"])
+            if on is None or do is None:
+                e["error"] = why or why_do
+            else:
+                tid = _trigger_id(note.path.stem, on["norm"], do["norm"])
+                if tid in seen:
+                    e["error"] = "a duplicate of an entry above"
+                else:
+                    seen.add(tid)
+                    e.update(id=tid, onSpec=on, doSpec=do)
+        out.append(e)
+    return out
+
+
+def _mark_fired(note, tid, stamp) -> bool:
+    """`Note.apply`'s edit: record trigger `tid` as fired, on the entry where it stands and in its own form, rewriting
+    nothing else (vault-grammar § When's record), so a save's replay acts on the fresh text. An entry already fired or
+    no longer present is a no-op. A flow entry takes `, fired: "<stamp>"` before its closing `}`, so a trailing comment
+    stays; a block entry takes one new line after its last, at its first key's column. The block must re-parse with the
+    same ids and this one fired, or the note is left as read. True when it edited the note."""
+    before = _when(note)
+    hit = next((e for e in before if e["id"] == tid), None)
+    if hit is None or hit["fired"] is not None:
+        return False
+    fm, kept, value = note._fm, list(note._fm), f'"{stamp}"'
+    if hit["flow"]:
+        last = hit["last"]
+        line = fm[last]
+        close = len(line) - len(line.lstrip()) + len(_yaml_uncomment(line)) - 1
+        head = line[:close].rstrip()
+        gap = line[len(head):close]
+        ahead = head if head.strip() else _yaml_uncomment(fm[last - 1])
+        comma = "" if ahead.rstrip().endswith(",") else ","
+        fm[last] = f"{head or gap}{comma} fired: {value}{gap if head else ' '}{line[close:]}"
+    else:
+        fm.insert(hit["last"] + 1, " " * hit["col"] + f"fired: {value}")
+    after = _when(note)
+    mine = next((e for e in after if e["id"] == tid), None)
+    if [e["id"] for e in after] != [e["id"] for e in before] or mine is None or mine["fired"] != stamp:
+        note._fm = kept
+        return False
+    note.dirty = True
+    return True
+
+
+class _TriggerScan:
+    """One reading of the triggers under a tasks dir: its _Walk, gh's memo (one PR read once, whatever names it) and the
+    project notes under <vault>/Work/Projects (vault: the tasks dir's grandparent), indexed on first need."""
+
+    def __init__(self, tasks_dir: Path, gh_bin):
+        self.walk, self.gh_bin, self.memo = _Walk(tasks_dir), gh_bin, {}
+        self.projects_root, self._projects = tasks_dir.parent.parent / "Work" / "Projects", None
+
+    def project_note(self, name):
+        """The project note named `name` (case-folded), a match outside Archive/ first, as serial-chains.py's Projects
+        reads it; None when absent."""
+        if self._projects is None:
+            self._projects = {}
+            for found in self.projects_root.rglob("*.md"):
+                self._projects.setdefault(found.stem.casefold(), []).append(found)
+            for paths in self._projects.values():
+                paths.sort(key=lambda f: ("Archive" in f.relative_to(self.projects_root).parts, str(f)))
+        hits = self._projects.get(name.casefold())
+        return hits[0] if hits else None
+
+
+def _trigger_notes(walk):
+    """(path, Note, entries) for each note a trigger is read on, in stem order: the walk's index (Archive included, the
+    root copy preferred), a dropped note inert. A note unreadable on disk is one stderr WARN and the scan goes on."""
+    for path, err in walk.errors:
+        print(f"WARN: triggers: cannot read {path}: {err}", file=sys.stderr)
+    for _key, (path, note) in sorted(walk.index.items()):
+        if _status(note) != "dropped" and _when_span(note) is not None:
+            yield path, note, _when(note)
+
+
+def _when_anchor(walk, path, note):
+    """The (path, Note) a trigger is held to: the note itself when tagged `rollout`, else the rollout its `rollout:` links
+    now (a carried task's is the successor: _regenerate_gate), through the walk's index; None when it links none found."""
+    if "rollout" in _tags(note):
+        return path, note
+    return walk.index.get(_link_slug(note, "rollout"))
+
+
+def _regenerate_gate(walk, anchor, trigger_path):
+    """Why a `regenerate` written on the note at `trigger_path` cannot fire now, whichever form (vault-grammar § When's
+    Regenerate's gate): (None, None) when it can, else ("unreadable" or "waiting", why). /thread:schedule --regenerate
+    acts on whatever is unfinished for the project now, so it is held to the rollout it was written against. In order: a
+    serial anchor is unreadable; no anchor, a superseded one, a successor read from a task note (carry moves a task's
+    `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from one written since), a
+    closed one and one neither paused nor approved_unrun wait (unfinished-rollout.py's `eligible`, its two facts, so a
+    merge during a run never spends `fired:` on schedule's refusal)."""
+    if anchor is not None and _shape(anchor[1]) == SHAPES[1]:
+        return "unreadable", "a serial rollout supersedes nothing"
+    if anchor is None:
+        return "waiting", "no rollout to regenerate"
+    path, note = anchor
+    if _valued(note.get("superseded_by")):
+        return "waiting", f"superseded by [[{_wikilink_slug(_scalar(note.get('superseded_by')))}]]: nothing to regenerate"
+    if path != trigger_path and _valued(note.get("supersedes")):
+        return "waiting", (f"[[{path.stem}]] superseded a rollout: a task's regenerate does not follow its carry; "
+                           f"to keep it, write it on [[{path.stem}]]")
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return "waiting", "closed: nothing to regenerate"
+    linked = [(p, n) for p, n in walk.by_rollout.get(path.stem.lower(), ()) if p != path]
+    if not (_valued(note.get("paused")) or approved_unrun(note, linked)[0]):
+        return "waiting", "running: schedule refuses a regenerate until it is paused or finished"
+    return None, None
+
+
+def _project_local(scan, note):
+    """The first `` Local: `<path>` `` line, in `projects:` order, of the note's project notes; None when none has one."""
+    for name in (s for s in (_wikilink_slug(v) for v in note.get_list("projects")) if s):
+        found = scan.project_note(name)
+        try:
+            m = LOCAL_RE.search(found.read_text()) if found is not None else None
+        except (OSError, ValueError):
+            m = None
+        if m:
+            return Path(os.path.expanduser(m.group(1)))
+    return None
+
+
+def _trigger_root(scan, note):
+    """(root, None), or (None, why) when a command cannot be placed: the first of the note's own `Project root:` line, its
+    linked rollout's, and its projects' `Local:` line that is present decides. A deciding path that is no directory waits,
+    with no fall-through, which could place a Session in the wrong repo."""
+    root = _project_root(note)
+    if root is None:
+        linked = scan.walk.index.get(_link_slug(note, "rollout"))
+        root = _project_root(linked[1]) if linked is not None else None
+    if root is None:
+        root = _project_local(scan, note)
+    if root is None:
+        first = _project(note)
+        return None, (f"no Project root: add a Local: line to [[{first}]]" if first
+                      else "no Project root: it names no project")
+    if not root.is_dir():
+        return None, f"Project root {root} is not a directory"
+    return root, None
+
+
+def _trigger_eval(scan, path, note, e):
+    """One entry's reading, `due`'s and `fire`'s: ("due", row), ("waiting", why) or ("unreadable", error). The `do` gate
+    runs before the `on` read, so an entry that cannot fire makes no gh call. `e` is readable and unfired."""
+    walk, on, do = scan.walk, e["onSpec"], e["doSpec"]
+    anchor = _when_anchor(walk, path, note)
+    if do["verb"] == "regenerate":
+        verdict, why = _regenerate_gate(walk, anchor, path)
+        if verdict:
+            return verdict, why
+    targets = []
+    for slug in do["targets"]:
+        hit = walk.index.get(slug.lower())
+        if hit is None:
+            return "waiting", f"target [[{slug}]] not found"
+        targets.append(hit)
+    if targets and all(_status(n) in FINISHED_STATUSES for _p, n in targets):
+        return "waiting", "nothing left to schedule"
+    command, root = None, None
+    project = _project(note)
+    if do["kind"] == "command":
+        if do["verb"] == "schedule":
+            project, command = _project(targets[0][1]), f"/thread:schedule --tasks {targets[0][0].stem}"
+        else:
+            project = _project(anchor[1])
+            if targets:
+                command = f"/thread:schedule --regenerate --tasks {','.join(p.stem for p, _n in targets)}"
+            elif project:
+                command = f"/thread:schedule [[{project}]] --regenerate"
+            else:
+                return "unreadable", f"no project to regenerate: [[{anchor[0].stem}]] names none"
+        root, why = _trigger_root(scan, targets[0][1] if do["verb"] == "schedule" else note)
+        if why:
+            return "waiting", why
+    scope = "rollout" if "rollout" in _tags(note) else "task"
+    if on["verb"] == "merged":
+        hold = {"pr": on["pr"], "url": on["key"], "error": None, "key": on["key"], "cwd": None,
+                "argv": ["pr", "view", on["key"], "--json", "state,mergedAt,url"]}
+        read, _reason = _resolve_holds(scan.gh_bin, [(path.stem, scope, hold)], scan.memo)[0]
+        if read["held"]:
+            return "waiting", (f"{on['pr']}: {read['error']}" if read["error"] else f"{on['pr']} is {read['state']}")
+    elif on["verb"] == "landed":
+        landed, why = _dep_status(on["task"], walk.index)
+        if not landed:
+            return "waiting", f"[[{on['task']}]] has not landed ({why})"
+    else:
+        read_on = (anchor or (path, note))[1]
+        if _status(read_on) in CLOSED_ROLLOUT_STATUSES or _valued(read_on.get("superseded_by")):
+            return "waiting", "closed: it never pauses"
+        if not _valued(read_on.get("paused")):
+            return "waiting", "not paused"
+    return "due", {"id": e["id"], "note": path.stem, "path": str(path), "scope": scope, "on": e["on"], "do": e["do"],
+                   "kind": do["kind"], "command": command, "project": project,
+                   "rollout": anchor[0].stem if anchor is not None else None,
+                   "projectRoot": str(root) if root is not None else None}
+
+
+def cmd_triggers_due(args) -> int:
+    """`triggers due`: every `when:` entry under the tasks dir, as one JSON object {due, waiting, unreadable, fired}
+    (vault-grammar § When). Read-only and needs no lead. Exit 1 on a missing tasks dir, else 0."""
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        print(f"ERROR: triggers due: tasks dir not found at {tasks_dir}", file=sys.stderr)
+        return 1
+    scan = _TriggerScan(tasks_dir, args.gh_bin)
+    out = {"due": [], "waiting": [], "unreadable": [], "fired": 0}
+    for path, note, entries in _trigger_notes(scan.walk):
+        for e in entries:
+            if e["error"] is not None:
+                out["unreadable"].append({"note": path.stem, "path": str(path), "entry": e["raw"], "error": e["error"]})
+                continue
+            if e["fired"] is not None:
+                out["fired"] += 1
+                continue
+            verdict, row = _trigger_eval(scan, path, note, e)
+            if verdict == "due":
+                out["due"].append(row)
+            elif verdict == "waiting":
+                out["waiting"].append({"id": e["id"], "note": path.stem, "on": e["on"], "do": e["do"], "why": row})
+            else:
+                out["unreadable"].append({"note": path.stem, "path": str(path), "entry": e["raw"], "error": row})
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def _primary_outcome(out):
+    """The Primary refresh's outcome in `out`: the first `<stamp> primary-refresh <dir>: <outcome>` line whose outcome is
+    no `self-update:` or `job:` line, as primary-refresh.py's _smoke reads it; None when there is none."""
+    for line in out.splitlines():
+        m = PRIMARY_PASS_RE.match(line)
+        if m and not m.group(1).startswith(("self-update:", "job:")):
+            return m.group(1)
+    return None
+
+
+def _run_primary_refresh(refresh_bin):
+    """(exit code, stdout) of one Primary refresh pass (primary-refresh.py run; ADR 0078 Decided 3: the one rule for
+    moving the Primary). A step that cannot start reads as a failed pass. The pass bounds itself, so no timeout here:
+    stopping it from outside could leave a merge half done."""
+    argv = [refresh_bin, "run"] if refresh_bin else [sys.executable, "-B", str(PRIMARY_REFRESH_PY), "run"]
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True)
+    except OSError:
+        return 127, ""
+    return p.returncode, p.stdout
+
+
+def cmd_triggers_fire(args) -> int:
+    """`triggers fire <id>`: run one due trigger and record it once, as `fired:` on its entry (vault-grammar § When). A
+    model step (regenerate, schedule) is recorded and its command handed back, since this script starts no session; a
+    script step (reset-primary) runs one Primary refresh pass first, outside any lock, and records only a standing verdict
+    (RESET_PRIMARY_RECORDED); any other outcome or a non-zero exit stays due, and an outcome in neither tuple is named
+    as unknown. The record is taken under TRIGGER_LOCK, the note read again inside it, so of two fires exactly one is
+    `fresh`. Prints the row plus {fired, fresh, ran} and, on a script step, `outcome`. Exit 0 when fresh or already
+    fired; 1 on an unknown id, an unreadable entry, not due, a script outcome not recorded or a save failure. Only
+    `fresh: true` tells a caller to act on `command`."""
+    def refuse(msg):
+        print(f"ERROR: triggers fire {args.id}: {msg}", file=sys.stderr)
+        return 1
+
+    def answer(row, fired, fresh, ran, outcome=None):
+        out = {**row, "fired": fired, "fresh": fresh, "ran": ran}
+        if row.get("kind") == "script":
+            out["outcome"] = outcome
+        print(json.dumps(out, indent=2))
+
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        return refuse(f"tasks dir not found at {tasks_dir}")
+    scan = _TriggerScan(tasks_dir, args.gh_bin)
+    hit = next(((p, n, e) for p, n, entries in _trigger_notes(scan.walk) for e in entries if e["id"] == args.id), None)
+    if hit is None:
+        return refuse("unknown id (triggers due lists them)")
+    path, note, e = hit
+    if e["fired"] is not None:
+        answer({"id": e["id"], "note": path.stem, "path": str(path), "on": e["on"], "do": e["do"],
+                "kind": e["doSpec"]["kind"], "command": None}, e["fired"], False, False)
+        return 0
+    verdict, row = _trigger_eval(scan, path, note, e)
+    if verdict != "due":
+        return refuse(f"not due: {row}" if verdict == "waiting" else f"unreadable: {row}")
+    ran, outcome = False, None
+    if row["kind"] == "script":
+        rc, out = _run_primary_refresh(args.refresh_bin)
+        ran, outcome = True, _primary_outcome(out)
+        if rc != 0 or outcome is None or not outcome.startswith(RESET_PRIMARY_RECORDED):
+            answer(row, None, False, True, outcome)
+            unknown = outcome is not None and not outcome.startswith(RESET_PRIMARY_RECORDED + RESET_PRIMARY_RETRIED)
+            why = (", an outcome this script does not know (neither RESET_PRIMARY_RECORDED nor "
+                   "RESET_PRIMARY_RETRIED), so it fails closed") if unknown else ""
+            return refuse(f"not recorded: the pass read {outcome or 'no outcome'} (exit {rc}){why}: it stays due")
+    stamp = _stamp(_now(args))
+    try:
+        with _note_lock(lock_path=_note_lock_dir() / TRIGGER_LOCK, label="trigger lock"):
+            fresh = Note(path)
+            now_e = next((x for x in _when(fresh) if x["id"] == args.id), None)
+            if now_e is None:
+                return refuse("no longer on its note: nothing recorded")
+            if now_e["fired"] is not None:
+                answer(row, now_e["fired"], False, ran, outcome)
+                return 0
+            fresh.apply(_mark_fired, args.id, stamp)
+            fresh.save()
+    except (OSError, ValueError) as err:
+        return refuse(f"cannot record it: {err}")
+    if not any(x["id"] == args.id and x["fired"] == stamp for x in _when(fresh)):
+        return refuse("not recorded: the entry did not read fired after the save")
+    answer(row, stamp, True, ran, outcome)
+    return 0
+
+
 # ---- approve-gates ----------------------------------------------------------
 
 def _norm_gate(line: str) -> str:
@@ -14614,6 +15170,23 @@ def _parser():
                                                             "need supersede nothing, and a rollout hold_until refuses")
     ss.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ss.set_defaults(func=cmd_stamp_start)
+
+    tg = sub.add_parser("triggers", help="durable follow-up triggers on notes (p45-7; vault-grammar § When): `due` lists "
+                                         "them, read-only, with no lead; `fire <id>` runs one and records it")
+    tgs = tg.add_subparsers(dest="triggers_cmd", required=True)
+    td = tgs.add_parser("due", help="print what is due, waiting and unreadable as JSON; exit 1 on a missing tasks dir")
+    td.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    td.add_argument("--gh-bin", default="gh", help="the gh executable a merged PR is read through (tests pass a stub)")
+    td.set_defaults(func=cmd_triggers_due)
+    tf = tgs.add_parser("fire", help="run one due trigger and record it as fired: on its entry; exit 1 refused, nothing "
+                                     "written. Only fresh: true tells a caller to act on its command")
+    tf.add_argument("id", help="the trigger's id, as `triggers due` prints it")
+    tf.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    tf.add_argument("--gh-bin", default="gh", help="the gh executable a merged PR is read through (tests pass a stub)")
+    tf.add_argument("--refresh-bin", default=None, help="the Primary refresh's executable, run as `<it> run` (tests pass a "
+                                                        "stub; default primary-refresh.py beside this plugin's scripts)")
+    tf.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the fired: stamp)")
+    tf.set_defaults(func=cmd_triggers_fire)
 
     cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested/paused_for "
                                             "(/thread:execute resume); exit 3 STILL-AWAITING under a sign-off pause "

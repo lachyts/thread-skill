@@ -116,7 +116,7 @@ test('retry is scoped to committed docs; a not-versioned doc is not durable', ()
   ])
   assert.ok(!s.includes('A committed but unlanded doc is retried'), 'step 1 claims every unlanded doc is retried')
   assertHas(COMMIT(), 'handoff § Commit it', [
-    'the daily lander finishes an open `landing` PR', 'nothing retries committing it',
+    'the landing carrier carries an open `landing` PR to its merge', 'nothing retries committing it',
     '`not landed: <reason>` is committed only, by design, and no landing call retries it',
     '`not versioned: <path> (never committed)`', 'refresh diff is not `unchanged`', 'not durable',
     'destroyed rather than archived', 'no fallback plain commit', 're-run the § Commit it snippet',

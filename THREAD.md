@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-10
+last_touched: 2026-11-11
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-11-11: a Stage audit, two publish gates signed, and the Clean-up archive designed (Chorus ADR 0117).**
+- **Audit.** Of the Stage's sessions, 15 were leftovers: 14 Leg sessions whose chains are done or dropped and archived, plus the finished "Chorus rollout" lead. He archived them by hand, since the Stage's close route is the page's alone. Live: [[thread-skill-rollout-2026-11-10]] (7/13 done, 5 in review; its stops were only the weekly line) and [[narcissus-avp-rollout-2026-11-10]].
+- **Serial chains are not broken.** The three open chains stopped correctly at gates. [[website-re-design-rollout-2026-11-10]]: his two live animately.co publishes were signed (`approve-gates` from its Engine snapshot), and the chain is listed for Leg 3. [[quote-videos-rollout-2026-11-10]]: a US$50 spend gate that the US$200 line says should never ask (already filed: [[thread-skill-grill-a-spend-gate-under-the-cap-never-asks]]). [[giflab-rollout-2026-11-10]]: blocked on his crowd-service account.
+- **Clean-up archive.** Grilled: any Session, or the Companion, may archive another it judges finished, through `message_companion want: archive`, logged as an Upkeep act with undo. The automatic archive is unchanged. Chorus ADR 0117 and the glossary term landed (chorus#734). Build: [[chorus-sessions-and-the-companion-archive-on-intent]]. Here: [[thread-skill-followup-a-finished-chain-archives-its-leg-sessions]] (depends on it).
+- **Open:** Chorus p102-2 (#725) was meant to archive those 15 itself. Its Proven line had not held by 11:45, so either the Stage had not reloaded it, or it misses them. Noted on [[chorus-p102-restart-the-stage-and-felt-checks]].
 
 **2026-11-10 (late): the Stage clears itself.** [[chorus-rollout-2026-11-10-2]] started on Lachy's "Start it now"; its p102-2 archives the 13 dead Leg sessions of the dropped chains. His seven rollout stops went to him as one review board: the two US$1 Animately spends approved and the dead sweep branch cleared for deletion (both chains back on the Waiting list); the develop → main release and the SEO speed-slider publish held; Prolific, Sentry and the Eagle spike later. Filed [[thread-skill-a-task-limited-spend-never-uses-the-default-month-line]] (GifLab's task-limited US$200 used up the default month line, so US$1 gates asked) and [[thread-skill-needs-you-items-read-as-one-list]] (CONTEXT.md **Needs-you item**, #365; Chorus half added to [[chorus-stage-shows-machinery-health-and-fires-triggers]]).
 
@@ -1257,6 +1263,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-11 (close, Stage audit): 15 finished Leg and lead sessions found and archived by him; website-re-design's two publish gates signed (Leg 3 listed); grilled the Clean-up archive: Chorus ADR 0117 (#734), Chorus build task and a thread-skill follow-up filed; p102-2's unmet Proven line noted.
 - 2026-11-10 (close, late): started the Chorus queue on his word (it archives the dead Leg sessions); put his seven rollout stops to him as one board (2 spends signed, a branch delete cleared, a release and a publish held, three hands-on later); filed the month-line spend bug and the needs-you list (#365).
 - 2026-11-10 (close, audit + clean-up): audited the stuck orient-all chains (ADR 0076, Waiting list) and why its fixes were landed but not live (ADR 0078, Proven); landed #338, #358, #360, #361; reset the Primary; closed 9 stale landing PRs; dropped 30 chains and redid 33 tasks per project on the Waiting list (12 relaunched or split for ADR 0074 d3); filed P45 and two Chorus tasks; P45 runs in [[thread-skill-rollout-2026-11-10]].
 - 2026-11-10 (close, repair + execute): a Watchdog recovery repair started p44-4 once chorus-p100-8 merged; p44-4 merged as #359; [[thread-skill-rollout-2026-11-08]] finished 18/18, ceremony run, P41 closed, archived.

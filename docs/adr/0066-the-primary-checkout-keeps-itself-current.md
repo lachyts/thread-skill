@@ -9,6 +9,10 @@ once P41-5 adds its Primary refresh line.)*
 *(Amended by ADR 0078 d4, 2026-11-10, p45-3: the Primary repairs a divergence instead of only reading it: decision 2's
 "Diverged: never integrated" now holds for an `--also` checkout, and primary-refresh.py's docstring is the repair's one
 copy.)*
+*(Amended by ADR 0078 d2, 2026-11-11, p45-4: the job also runs the landing carrier, `land-carrier.py`, last in each
+installed pass and paced by its own 15-minute limit, shipped as three new bundle rows (land-carrier.py,
+landing-register.py and merge-task.sh), with no plist change. Its failures are the `carrier` spell on the Primary
+refresh line, and primary-refresh.py's docstring holds the wiring.)*
 
 ## Context
 

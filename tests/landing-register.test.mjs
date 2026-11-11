@@ -373,7 +373,7 @@ for (const args of [['-h'], ['--help'], ['check', '-h'], ['check', '--help'], ['
   })
 }
 
-// ---- --slug: owner/name without a checkout (the daily lander's form).
+// ---- --slug: owner/name without a checkout (the landing carrier's form).
 
 test('--slug listed', () => {
   assertResult(check(['--slug', 'Animately/imgproxy']), 3, 'listed Animately/imgproxy: reason A\n')
