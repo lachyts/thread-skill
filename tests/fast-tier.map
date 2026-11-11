@@ -25,6 +25,7 @@ FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
 # CONTEXT.md, fast-tier-wiring the real CLAUDE.md, inert-paths proves globs on this tree) ----
 FOREIGN-ONLY THREAD.md tests/leg.test.sh tests/lead-integrate.test.sh tests/git-env-canary.test.sh  # fixture repos' close-outs
 FOREIGN-ONLY THREAD.md tests/primary-refresh.test.sh tests/land.test.sh tests/pushed-base.test.sh  # fixture repos' close-outs
+FOREIGN-ONLY THREAD.md tests/land-carrier.test.sh  # fixture repos' landing PRs and their conflicts
 FOREIGN-ONLY THREAD.md tests/repo-threads.test.sh tests/thread-placement.test.mjs tests/estate-scan.test.mjs  # fixture repos' threads
 FOREIGN-ONLY THREAD.md tests/schedule-queue.test.sh tests/next-action.test.mjs tests/fast-tier-wiring.test.mjs  # fixture notes' strings
 FOREIGN-ONLY THREAD.md tests/run-record.test.mjs tests/reflect-tune.test.mjs tests/rollout-settings.test.mjs  # inert_paths globs as strings
