@@ -794,7 +794,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note stamped done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
-  started. _Avoid_: live (for this meaning), active, open.
+  started, and a schedule run for the project while it runs joins its queue
+  (**Join**). _Avoid_: live (for this meaning), active, open.
 - **Supersede** — a new rollout taking over an unfinished one: every unlanded
   task carries over (a `review` task with an open PR awaits Integration, an
   open one is queued, a running or set-aside one keeps its state), and merged
@@ -804,6 +805,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   hard-paused (ADR 0030). Same shape only: a serial run supersedes nothing
   (p24-2), and a parallel run never takes a serial note. _Avoid_: migrate
   (alone), replace.
+- **Join** — a schedule run adding its tasks to this project's running
+  parallel rollout in place (`reconcile-rollout.py join`): rows ranked first
+  in its `## Queue`, Mode `joined <date>`, `rollout:` stamped, no pause, no
+  regenerate, no new note (ADR 0078 d6). _Avoid_: append; not a **Pickup
+  sweep**'s join of the candidate set.
 - **Incomplete rollout** — a never-started rollout that must not run as
   written. Either it carries `incomplete: true`, which every rollout note is
   born with (schedule step 6, or S5 on § Serial path) until step 7's last
@@ -1726,7 +1732,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: review loop (the engine's convergence of plan, verify and review
   rounds, above); chain (`review-ledger.py`'s, narrower).
 - **Wait to start** — a rollout's time from Lachy's ask (the earliest
-  `captured:` of the tasks its queue links) and from its scheduling (its own
+  `captured:` of the tasks its queue links, carried and joined rows aside) and
+  from its scheduling (its own
   `captured:`) to its first Slot. _Avoid_: lead time.
 - **Circling** — work touched and not merged: a work item (a task with
   `phase:`, `pr:` or `rollout:`) three or more Sessions named while no

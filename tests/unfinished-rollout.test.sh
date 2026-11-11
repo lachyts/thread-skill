@@ -4,7 +4,8 @@
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
 #   C28-C29 an approved queue (p30-4; vault-grammar § Approved queue) whose only marks are the Chorus Stage's ended room
 #           stops reads as never started (reconcile-rollout.py approved_unrun): superseded, and paired as an interrupted
-#           supersede; a standing room stop, a hard pause's line, no on_merge or no hold_until still refuse
+#           supersede; with a standing room stop, a hard pause's line, no on_merge or no hold_until it has run, so this
+#           project's check joins it (ADR 0078 d6)
 #   U1-U3   a rollout awaiting sign-off (ADR 0034: `paused_for: sign-off`) is unfinished, and its refusal names the
 #           sign-off path (another project's) or the sign-off path beside --regenerate (this project's)
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
@@ -80,6 +81,8 @@
 #           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
+#   J1-J10  this project's running rollout is joined (ADR 0078 d6): the check's `join`, the verb's rows, File-sets,
+#           stamps, re-runs, refusals, WARNs, holds and a concurrent replay
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 #   P1-P13  two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4): check's step 2c
@@ -230,12 +233,13 @@ mkro ro-p.md "$R" "$DEMO"
 mkt t1.md ro-p in_progress 'owner: execute-live'
 for flag in "" --regenerate; do
   chk --repo "$R" --project Demo $flag
-  ok "$out|$rc" "refuse ro-p|3" "C5: this project's rollout that has run and is not paused refuses (${flag:-no flag})"
-  has "$err" '`paused:`' "C5: stderr names the hard pause (${flag:-no flag})"
-  has "$err" "/thread:status" "C5: stderr names /thread:status (${flag:-no flag})"
-  has "$err" "/thread:repair" "C5: stderr names /thread:repair (${flag:-no flag})"
-  has "$err" "owner: execute-live" "C5: stderr gives the never-started reason (${flag:-no flag})"
+  ok "$out|$rc" "join ro-p|0" "C5: this project's rollout that has run and is not paused is joined (ADR 0078 d6) (${flag:-no flag})"
+  hasnt "$err" "this run would have taken" "C5: … a join is no refusal: no would-take line (${flag:-no flag})"
 done
+has "$err" "WARN: --regenerate not applied: [[ro-p]] has run and is not paused (its task t1 carries owner: execute-live)" \
+  "C5: with --regenerate, a WARN says it was not applied, with the never-started reason"
+chk --repo "$R" --project Demo
+hasnt "$err" "--regenerate not applied" "C5: … and without --regenerate there is no such WARN"
 
 scen c6
 mkro ro-o.md "$R" 'projects: ["[[Other]]"]' "$PAUSED"
@@ -328,7 +332,12 @@ for v in "task owner:" "task integrating:" "## Pause log" "pause_requested: true
     "pause_requested: true") mkro ro-p.md "$R" "$DEMO" 'pause_requested: true' ;;
   esac
   chk --repo "$R" --project Demo --regenerate
-  ok "$out|$rc" "refuse ro-p|3" "C11: $v marks the rollout as run (not paused: refused)"
+  if [ "$v" = "pause_requested: true" ]; then
+    ok "$out|$rc" "refuse ro-p|3" "C11: $v marks the rollout as run, and a draining one is refused (never joined)"
+    has "$err" "is pausing" "C11: … its remedy says it is pausing"
+  else
+    ok "$out|$rc" "join ro-p|0" "C11: $v marks the rollout as run (not paused: joined, ADR 0078 d6)"
+  fi
 done
 # A protocol-3 note: its engine stamped owner: on each task at dispatch, and that alone marks it as run (as
 # giflab's real note reads); the rollout note's own stamps from that engine never count.
@@ -538,7 +547,7 @@ ok "$out|$rc" "refuse ro-q|3" "C27: … and the check refuses it without --regen
 hasnt "$err" "is incomplete" "C27: … never as incomplete"
 mkt q1.md ro-q in_progress 'owner: execute-x'
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "refuse ro-q|3" "C27 control: once it has run it is an ordinary running rollout"
+ok "$out|$rc" "join ro-q|0" "C27 control: once it has run it is an ordinary running rollout (joined, ADR 0078 d6)"
 hasnt "$err" "is incomplete" "C27 control: … never judged incomplete"
 
 # ── C28-C29: an approved queue whose only marks are the Stage's ended room stops (p30-4; approved_unrun) ──
@@ -556,18 +565,18 @@ chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "supersede $P|0" "C28: an approved queue whose only marks are ended room stops is superseded"
 BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD"
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "refuse $P|3" "C28 control: the same note with no on_merge has run"
-has "$err" "has run and is not paused (it has a ## Pause log section)" "C28 control: … with its remedy"
+ok "$out|$rc" "join $P|0" "C28 control: the same note with no on_merge has run (joined, ADR 0078 d6)"
+has "$err" "WARN: --regenerate not applied: [[$P]] has run and is not paused (it has a ## Pause log section)" "C28 control: … with its reason"
 BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_ON"
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "refuse $P|3" "C28 control: … and with no hold_until"
+ok "$out|$rc" "join $P|0" "C28 control: … and with no hold_until"
 BODY="$RS_STANDS" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "refuse $P|3" "C28 control: a room stop that still stands refuses"
+ok "$out|$rc" "join $P|0" "C28 control: a room stop that still stands has run (joined)"
 has "$err" "a room stop stands since 2026-10-01T10:00+00:00" "C28 control: … naming the standing room stop"
 BODY="$RS_HARD" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "refuse $P|3" "C28 control: a hard pause's Pause log line refuses"
+ok "$out|$rc" "join $P|0" "C28 control: a hard pause's Pause log line with no paused: stamp has run (joined)"
 has "$err" "it has a ## Pause log line that is no room stop" "C28 control: … naming it"
 
 scen c29
@@ -3134,6 +3143,179 @@ HOME="$S/home" THREAD_MACHINE_TIMES='{}' python3 "$P15/skills/_shared/scripts/un
 ok "$rc|$(cat "$S.out")" "2|" "WL15: a reconcile-rollout.py without LEG_LEASE_LAPSE exits 2 at load, no stdout"
 has "$(cat "$S.err")" "LEG_LEASE_LAPSE" "WL15: … its cannot-load line naming the constant"
 rm -rf "$P15"
+
+# ── J1-J10: this project's running rollout is joined in place (ADR 0078 d6) ────────────────────────────
+# jn [args...] -> $out, $err, $rc — reconcile-rollout.py join at a fixed --now, whose date is the rows' `joined <date>`
+jn() { HOME="$EH" python3 "$RR" join --tasks-dir "$T" --now 2026-10-01T12:00+00:00 "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+qrows() { sed -n '/^## Queue/,/^## /p' "$T/$1.md" | grep '^|' | tail -n +3; }   # qrows <rollout> — its ## Queue data rows
+QB=$'## Queue\n\n| # | Task | Scope | Mode |\n|---|---|---|---|\n| 1 | [[t1\\|t1]] | single-file | — |'
+scen j1
+mkro ro-p.md "$R" "$DEMO"
+mkt t1.md ro-p in_progress 'owner: execute-live'
+mkt fix.md - open "$DEMO"
+for flag in "" --regenerate; do
+  chk --repo "$R" --project Demo $flag
+  ok "$out|$rc" "join ro-p|0" "J1: this project's running rollout reads join (${flag:-no flag})"
+  hasnt "$err" "this run would have taken" "J1: … and no would-take line (${flag:-no flag})"
+done
+has "$err" "WARN: --regenerate not applied: [[ro-p]]" "J1: --regenerate, not applied to a running rollout, says so"
+chk --repo "$R" --project Demo
+hasnt "$err" "--regenerate not applied" "J1: … never without the flag"
+chk --repo "$R" --tasks fix
+ok "$out|$rc" "join ro-p|0" "J1: the --tasks form (its tasks share Demo) gives the same verdict"
+mkro ro-p.md "$R" "$DEMO" 'pause_requested: true'
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse ro-p|3" "J1: a draining rollout (pause_requested) is refused, never joined"
+has "$err" "is pausing (pause_requested): let it drain" "J1: … its remedy: let it drain, then --regenerate"
+PV=3 mkro ro-p.md "$R" "$DEMO"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse ro-p|3" "J1: a protocol-3 rollout that has run is refused (its migration), never joined"
+has "$err" '`paused:`' "J1: … with the hard-pause migration remedy"
+mkro ro-p.md "$R" "$DEMO" 'incomplete: true'; mkt t1.md ro-p open
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-p|3" "J1: an incomplete never-started note is still refused without --regenerate"
+mkro ro-p.md "$R" "$DEMO" "$PAUSED"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-p|0" "J1: a paused one with --regenerate is still superseded"
+
+scen j2
+render ro - "$(row 1 r1 —)
+$(row 2 r2 —)
+$(row 3 r3 —)"
+fmset ro.md parallel_ceiling 2; step7end ro
+mkt r1.md ro in_progress 'owner: lead' "$DEMO"; mkt r2.md ro open "$DEMO"; mkt r3.md ro open "$DEMO"
+mkt fix.md - open "$DEMO"
+jn --rollout "$T/ro.md" --tasks fix --files fix=src/f.py
+ok "$rc|$(qrows ro | head -1)" "0|| 1 | [[fix\|fix]] | — | joined 2026-10-01 |" "J2: the joined row is the queue's first, Mode joined <date>"
+ok "$(qrows ro | cut -d'|' -f2 | tr -d ' ' | tr '\n' ,)" "1,2,3,4," "J2: … and the # cells run 1..4"
+ok "$(grep -c '^- fix: src/f.py$' "$T/ro.md")" 1 "J2: its ## File-sets line"
+ok "$(fm fix.md rollout)" 'rollout: "[[ro]]"' "J2: the task is stamped to the rollout"
+ok "$(printf '%s' "$out" | grep -E '^(join|fileset|lead|hold)')" "join fix row
+fileset fix src/f.py
+lead none" "J2: stdout: its row, its file-set, no lead lease here and no hold"
+nx ro
+ok "$rc|$(starts)" "0|['fix']" "J2: next starts the joined task in the one free slot; r2 and r3 wait"
+
+scen j3
+render ro - "$(row 1 r1 —)"
+step7end ro
+mkt r1.md ro in_progress 'owner: lead' "$DEMO"; mkt fix.md - open "$DEMO"
+jn --rollout "$T/ro.md" --tasks fix --files fix=src/f.py
+before=$(sums)
+jn --rollout "$T/ro.md" --tasks fix --files fix=src/f.py
+ok "$rc|$(sums)" "0|$before" "J3: a re-run writes nothing"
+has "$out" "join fix already" "J3: … its row reads already"
+has "$out" "[no-change]" "J3: … [no-change]"
+fmset fix.md status in_progress; fmset fix.md owner lead; before=$(sums)
+jn --rollout "$T/ro.md" --tasks FIX
+ok "$rc|$(sums)" "0|$before" "J3: once its lead started it, a re-run (any case) is still no refusal and writes nothing"
+has "$out" "join fix already" "J3: … and reads already"
+
+scen j4
+render ro - "$(row 1 r1 —)
+$(row 2 r2 —)"
+step7end ro
+mkt r1.md ro open "$DEMO"; mkt r2.md ro open "$DEMO"; mkt fa.md - open "$DEMO"; mkt fb.md - open "$DEMO" 'solo: true'
+jn --rollout "$T/ro.md" --tasks fa
+jn --rollout "$T/ro.md" --tasks fb
+ok "$(qrows ro)" "| 1 | [[fa\|fa]] | — | joined 2026-10-01 |
+| 2 | [[fb\|fb]] | — | joined 2026-10-01, solo |
+| 3 | [[r1\|r1]] | single-file | — |
+| 4 | [[r2\|r2]] | single-file | — |" "J4: two joins keep their order above the original rows, # sequential; a Solo task's Mode says so"
+
+scen j5
+j5base() { rm -rf "$T"; mkdir -p "$T"; BODY="$QB" mkro ro.md "$R" "$DEMO" "$@"; mkt t1.md ro in_progress 'owner: lead' "$DEMO"; mkt fix.md - open "$DEMO"; }
+j5() {  # j5 <label> <ERROR text> [jn args...] — refused (exit 2) with its ERROR line, nothing written
+  local label="$1" want="$2" before; shift 2; before=$(sums)
+  jn "$@"
+  ok "$rc|$(sums)" "2|$before" "J5: $label: refused, nothing written"
+  has "$err" "ERROR: join: $want" "J5: $label: … with its ERROR line"
+}
+j5base "$PAUSED"; j5 paused "--rollout ro is paused" --rollout "$T/ro.md" --tasks fix
+j5base 'pause_requested: true'; j5 "pause_requested" "--rollout ro is pausing" --rollout "$T/ro.md" --tasks fix
+j5base 'shape: serial'; j5 serial "--rollout ro is a serial rollout" --rollout "$T/ro.md" --tasks fix
+ST=done j5base; j5 done "--rollout ro is done" --rollout "$T/ro.md" --tasks fix
+j5base 'superseded_by: "[[ro2]]"'; j5 superseded "--rollout ro is superseded by [[ro2]]" --rollout "$T/ro.md" --tasks fix
+j5base 'incomplete: true'; mkt t1.md ro open "$DEMO"; j5 incomplete "--rollout ro is incomplete (" --rollout "$T/ro.md" --tasks fix
+PV=3 j5base; j5 "protocol 3" "--rollout ro is at protocol_version 3" --rollout "$T/ro.md" --tasks fix
+j5base; mkt t1.md ro done "$DEMO"; j5 complete "--rollout ro is complete" --rollout "$T/ro.md" --tasks fix
+j5base; mkro ro.md "$R" "$DEMO"; j5 "no queue" "--rollout ro: its ## Queue holds neither a table nor a list item" --rollout "$T/ro.md" --tasks fix
+j5base; mkt fix.md - in_progress "$DEMO"; j5 "a task not open" "task fix is in_progress" --rollout "$T/ro.md" --tasks fix
+j5base; mkro ro2.md "$R" "$DEMO"; mkt fix.md ro2 open "$DEMO"; j5 "a task on another live rollout" "task fix is on another live rollout, [[ro2]]" --rollout "$T/ro.md" --tasks fix
+j5base; mkt fix.md - open "$OTHER"; j5 "a task sharing no project" "task fix: its projects: share none of [[ro]]'s" --rollout "$T/ro.md" --tasks fix
+j5base; j5 "a missing task" "task nosuch: no note directly in" --rollout "$T/ro.md" --tasks fix,nosuch
+j5base; BODY="$QB" mkro Archive/ro.md "$R" "$DEMO"; j5 "an archived rollout" "--rollout $T/Archive/ro.md is not directly in the tasks dir" --rollout "$T/Archive/ro.md" --tasks fix
+j5base; j5 "a --files slug not in --tasks" "usage: --files other: not one of --tasks" --rollout "$T/ro.md" --tasks fix --files other=a.py
+
+scen j6
+render ro - "$(row 1 r1 —)
+$(row 2 r2 —)"
+step7end ro
+mkt r1.md ro in_progress 'owner: lead' "$DEMO"; mkt r2.md ro open "$DEMO" 'priority: high'; mkt fix.md - open "$DEMO"
+jn --rollout "$T/ro.md" --tasks fix
+ok "$rc" 0 "J6: a join beside a higher-priority queued task still joins"
+has "$err" "WARN: join: [[r2]] (high) outrank the joined [[fix]] (normal)" "J6: … with the priority WARN"
+
+scen j7
+render ro - "$(row 1 r1 —)
+$(row 2 r2 —)"
+step7end ro
+awk '{print} /^## Notes$/ && !d {print ""; print "- retry first: [[r2]]"; d=1}' "$T/ro.md" > "$S.tmp" && mv "$S.tmp" "$T/ro.md"
+mkt r1.md ro in_progress 'owner: lead' "$DEMO"; mkt r2.md ro open "$DEMO"; mkt fix.md - open "$DEMO"
+jn --rollout "$T/ro.md" --tasks fix
+has "$err" "WARN: join: [[r2]] is ranked above the joined tasks" "J7: a list line above the table ranking a queued task: the rank WARN"
+fmset r2.md status in_progress
+jn --rollout "$T/ro.md" --tasks fix
+hasnt "$err" "is ranked above" "J7 control: the same line naming a running task: no WARN"
+
+scen j8
+render ro - "$(row 1 r1 —)"
+step7end ro
+mkt r1.md ro in_progress 'owner: lead' "$DEMO"; mkt fix.md - open "$DEMO"
+before=$(sums)
+jn --rollout "$T/ro.md" --tasks fix --files fix=src/f.py --dry-run
+ok "$rc|$(sums)" "0|$before" "J8: --dry-run writes nothing"
+has "$out" "join fix row" "J8: … reports the row it would write"
+has "$out" "(dry-run)" "J8: … and ends (dry-run)"
+
+scen j9
+EV0=$THREAD_EVENTS_DIR; export THREAD_EVENTS_DIR="$S/events"
+BODY="$QB"$'\n\n'"$RS_STANDS" mkro p.md "$R" "$DEMO"
+mkt pt1.md p in_progress 'owner: lead' "$DEMO"; mkt fix.md - open "$DEMO"
+jn --rollout "$T/p.md" --tasks fix
+ok "$rc|$(qrows p | head -1)" "0|| 1 | [[fix\|fix]] | — | joined 2026-10-01 |" "J9: a standing room stop never refuses: the row is written"
+has "$out" "lead none" "J9: … no lead lease here"
+has "$out" "hold room-stop: a room stop stands on [[p]]: nothing starts until the Stage resumes its lead" "J9: … its hold line"
+BODY="$QB" mkro p.md "$R" "$DEMO"; mkt fix2.md - open "$DEMO"
+halt_rec "nothing can start: 1 set aside"
+jn --rollout "$T/p.md" --tasks fix2
+ok "$rc" 0 "J9: an open halt never refuses"
+has "$out" "hold halt: its lead halted (nothing can start: 1 set aside) and has not re-entered: /thread:execute [[p]]" "J9: … its hold line names the halt and the resume"
+export THREAD_EVENTS_DIR="$EV0"
+
+scen j10
+render ro - "$(row 1 r1 —)
+$(row 2 r2 —)"
+python3 - "$RR" "$T/ro.md" > "$S.out" 2>&1 <<'PY'
+import importlib.util, sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+p = Path(sys.argv[2])
+a, b = rr.Note(p), rr.Note(p)
+a.apply(rr._join_edit, [("fix-a", "fix-a", "—", False)], [("fix-a", ["src/a.py"])], "2026-10-01")
+b.apply(rr._join_edit, [("fix-b", "fix-b", "—", False)], [("fix-b", ["src/b.py"])], "2026-10-01")
+a.save(); b.save()
+c = rr.Note(p)
+c.apply(rr._join_edit, [("fix-a", "fix-a", "—", False)], [("fix-a", ["src/a.py"])], "2026-10-01")
+print("dirty" if c.dirty else "clean"); c.save()
+PY
+ok "$?|$(cat "$S.out")" "0|clean" "J10: two joins saved over one read replay cleanly, and a third of the same task changes nothing"
+ok "$(qrows ro)" "| 1 | [[fix-a\|fix-a]] | — | joined 2026-10-01 |
+| 2 | [[fix-b\|fix-b]] | — | joined 2026-10-01 |
+| 3 | [[r1\|r1]] | single-file | — |
+| 4 | [[r2\|r2]] | single-file | — |" "J10: … each row once, in save order, above the originals, # shifted once"
+ok "$(grep -c '^- fix-a: src/a.py$' "$T/ro.md")|$(grep -c '^- fix-b: src/b.py$' "$T/ro.md")" "1|1" "J10: … one File-sets line each"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

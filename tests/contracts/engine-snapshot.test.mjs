@@ -127,7 +127,7 @@ function check(t) {
   // the Leg close's re-resolve.
   const refusal = collapse(section(t.doc, /^## The refusal rule/) ?? '')
   const another = collapse(section(t.doc, /^## Another rollout's commands/) ?? '')
-  if (!refusal.includes('`reconcile-rollout.py`, every verb but `status`, `fold-journals` and `moving`') ||
+  if (!refusal.includes('`reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving` and `join`') ||
     !refusal.includes('a task-keyed verb with `--rollout` left off') || !another.includes("orient-all's Sign-off")) fail('doc')
   if (!t.doc.includes('`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`') ||
     !doc.includes('The plugin root counts only when it is the toplevel of its own work tree') ||

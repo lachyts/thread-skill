@@ -246,7 +246,10 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        unstamped, and returned. Its queue's ruled calls are written by its `decided-for-you --write --by orient-all`
        (schedule § 1.5's orient-all form), and the fork returns their block.
 4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, its Pre-flight's
-   left-out members with each one's why, or its stop line.
+   left-out members with each one's why, or its stop line, or, at a join, its `Joined [[<X>]]` line, its tasks and its
+   hold lines, with no note path. A project whose own rollout is running carries no unfinished-rollout blocker in the
+   scan (schedule § 0 prints `join`, ADR 0078 d6), so `plan` forks a schedule for its ready tasks, and that fork joins
+   the running rollout in place (schedule step 7's **Join**).
 
 ### 7. Start
 
@@ -267,7 +270,9 @@ ticked label opens its own option alone; two projects of one name are each linke
 **The estate rank (ADR 0067 d9).** Before step 1's `sessions`: unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank "$S/rank.json" --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> > "$S/rank-stamp.json"`.
 It stamps this pass's rank on each note the forks wrote and re-stamps every live rollout in its current order (a live
 run keeps its place ahead of this pass's dispatches), so the Legs that start below meet at claim by rank (CONTEXT.md
-**Rank wait**). Exit 1 (`failed`: a note it could not write): run the same line once more. A second exit 1 goes to
+**Rank wait**). A fork that joined a running rollout wrote no note, so `rank-stamp --wrote` and `sessions --wrote` get
+nothing for it: the running rollout keeps its rank (re-stamped as every live one is), and this section starts no
+execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`failed`: a note it could not write): run the same line once more. A second exit 1 goes to
 § 8 as a caveat, and the pass goes on: the notes it never reached keep their old stamps, and the order stands.
 
 1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> [--open <label>]... [--typed <his words>] > "$S/sessions.json"`,
@@ -375,7 +380,8 @@ One message of statements, no question:
   quotes a plain value), and the next pass grades it". This pass names it and never mends it;
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
-- each schedule's note, or its stop line, with every task its `this run would have taken:` line names (ADR 0078 d7);
+- each schedule's note, or its stop line, with every task its `this run would have taken:` line names (ADR 0078 d7),
+  or the rollout it joined, with its Joined line and hold lines (ADR 0078 d6);
 - the estate rank: `rank-stamp`'s `stamped` count, and after a second exit 1 its `failed` note and `notReached[]` as a
   caveat ("they keep their old stamps; the order stands");
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;

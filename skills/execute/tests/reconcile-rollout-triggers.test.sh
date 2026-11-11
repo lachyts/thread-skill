@@ -191,7 +191,7 @@ ok "$(grep -c 'pull/5 ' "$GHLOG")" 0 "an entry that cannot fire makes no gh call
 table <<EOF
 g-paused|due|/thread:schedule [[X]] --regenerate|regenerate
 g-unrun|due|/thread:schedule [[X]] --regenerate|regenerate
-g-run|waiting|running: schedule refuses a regenerate|regenerate
+g-run|waiting|running: schedule joins a running rollout|regenerate
 g-done|waiting|closed: nothing to regenerate|regenerate
 g-done|due|/thread:schedule --tasks u|schedule [[u]]
 g-sup|waiting|superseded by [[g-new]]|regenerate

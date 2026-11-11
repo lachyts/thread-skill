@@ -117,8 +117,8 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   under the same answers.
 - **A fork returns** schedule's summary verbatim and each note's path; its misfits; Pre-flight's `out[]` with each
   why, and its `asks[]` and `index[]` verbatim; its § 3.5 drops, each with its matched words; its S3.7 `signIns` and
-  S2's `leftOut` rows, each with its line; its Decided for you block; its stop line; and **touched**, every task note
-  it wrote.
+  S2's `leftOut` rows, each with its line; its Decided for you block; its stop line, or its `joined [[<X>]]` line at a
+  join; and **touched**, every task note it wrote.
 - A reopened task whose fork stopped is parked again with the reason `its batch waits: <stop line>`.
 - Uncommitted grill docs hold that repo, as in orient § 6.
 
@@ -155,6 +155,8 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
    Waiting list, at any Leg: the `stamped` line is a parallel note's alone, so a chain never passes here), any
    rollout hold, readable or not, and an `on_merge:`. Its stop line is
    `waits on [[<prior>]]: <the unstarted line | hold_until <pr> | on_merge>; it stands (/thread:status [[<prior>]])`.
+   At `join <X>` (this project's rollout is running, ADR 0078 d6), the fork goes on to schedule step 7's **Join**: it
+   writes no note, and returns `joined [[<X>]]` with its touched (each joined task).
    Any other final line of the check stops the fork with its stderr.
 7. schedule § 1.2's pickup sweep: not run (the call names its members on purpose).
 8. schedule § 1.5's Pre-flight (and S3.5), as under the chain's item 4: its own read-only grading agents, `log` and
@@ -288,8 +290,10 @@ round does not queue keeps its Left out row.
   Rollouts started row. Each decided member that note does not queue gets
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/backlog-orient.py wait --task <slug> --why "<its why>"` and an
   `## Answered, waiting` row.
-- **A fork that stopped** (usually § 0's one-rollout-per-project refusal, because B8 just started that project's
-  note) → `wait` for each decided member, and an `## Answered, waiting` row each.
+- **A fork that joined** → no B8 for it (the running rollout runs under its own lead) and no `wait` for a member it
+  joined; each decided member it did not join gets `wait` and a row, as a fork that wrote a note does.
+- **A fork that stopped** (usually § 0's refusal of the note B8 just started, while it has not yet run; once it has,
+  the fork joins it) → `wait` for each decided member, and an `## Answered, waiting` row each.
 - New `asks[]` or § 3.5 drops from this round go to Questions waiting. There is no second round.
 
 **Then one re-stamp, last:** `backlog-orient.py trigger --area <note> --write --restamp --reason <reason> --record <path>`.
