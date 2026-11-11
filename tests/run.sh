@@ -34,6 +34,23 @@
 # no suite path holds a space, tests/test-jobs.test.sh pins it), so no static list can drift.
 # THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot (verify-slot.py) never waits on
 # the machine's pool, nor an inner `make test` on its outer wrapper's slot.
+#
+# Bounded (#327 finding 6, estate ADR 0011 d3: a liveness bound, never a tight wall-clock one). Each spawned suite runs
+# as a process group of its own (`set -m` around its spawn), watched by tests/lib/test-jobs.sh's watch_group: past its
+# bound the whole group is TERMed, then KILLed, and the suite ends `<label>: FAILED (<N>s)` plus a `<label>: timed out
+# after <B>s` line, also in its block and its failure-list line; it fails even when it exits 0 on its TERM. Its block
+# also names the fix for a healthy suite that has only grown slower: regenerate tests/shard-weights.tsv, or set
+# THREAD_SUITE_BOUND. The bound is suite_bounds's (10x the suite's measured seconds in tests/shard-weights.tsv rounded
+# up, 300 s floor, 1200 s with no weight; test-jobs.sh says why 10x); THREAD_SUITE_BOUND (seconds) sets one flat bound
+# for every suite instead. A
+# bound that is not a positive integer (an entry suite_bounds printed no line for) falls back to the 1200 s, and spawn
+# prints a `run.sh: <label>: no liveness bound` line. The bound counts the suite's awake seconds, not elapsed ones
+# (watch_group's rule), so a Mac asleep through the run or a Ctrl-Z on it does not count against it. Since no suite
+# shares run.sh's process group any more, a TERM, INT or HUP to run.sh ends every live suite's group before it exits:
+# TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 1200 s
+# (`--test-timeout`, which bounds a whole file as well as each test, from the file's own start: node 22 and 23.9 cancel
+# a file of three 1.5 s tests at a 2 s timeout), 2.3x the slowest file on macOS CI (tests/reflect-weekly.test.mjs,
+# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -138,6 +155,7 @@ python3 -c 'import os,sys; sys.exit(os.stat(sys.argv[1]).st_mtime_ns % 10**9 == 
 
 . tests/lib/test-jobs.sh
 max_jobs=$(suite_cap) || { echo "make test: THREAD_TEST_JOBS must be a positive integer, got '${THREAD_TEST_JOBS:-}'"; exit 2; }
+flat=$(flat_bound) || { echo "make test: THREAD_SUITE_BOUND must be a positive integer, got '${THREAD_SUITE_BOUND:-}'"; exit 2; }
 
 fail=0
 failed=""
@@ -153,23 +171,56 @@ step() {  # step <label> <cmd...>
   - $label"; }
 }
 
-n=0; labels=()
-spawn() {  # spawn <label> <cmd...> — run in background once there is room, capture output + exit code by index,
-  # then print its `ended` line from the background, as it ends
+n=0; labels=(); bounds=()
+spawn() {  # spawn <label> <bound> <cmd...> — run in background once there is room, as a process group of its own
+  # (stdin /dev/null, as a background job has without job control) watched by watch_group for <bound> seconds; capture
+  # output + exit code by index, then print its `ended` line (and a timed-out one) from the background, as it ends.
+  # <n>.pid holds the live group's id for stop_suites, emptied once the suite has ended.
   wait_for_room "$max_jobs"
-  local label="$1"; shift
-  labels[$n]=$label
-  { s=$SECONDS; "$@" > "$scratch/$n.out" 2>&1; rc=$?; echo "$rc" > "$scratch/$n.rc"; ended "$label" "$rc" "$s"; } &
+  local label="$1" bound; bound=$(bound_or_unweighted "$2") ||
+    echo "run.sh: $label: no liveness bound ('$2'); it gets the unweighted ${bound}s"
+  shift 2
+  labels[$n]=$label; bounds[$n]=$bound
+  {
+    s=$SECONDS
+    set -m; "$@" > "$scratch/$n.out" 2>&1 < /dev/null & pid=$!; set +m
+    echo "$pid" > "$scratch/$n.pid"
+    watch_group "$pid" "$bound" "$scratch/$n.timedout" > /dev/null 2>&1 & wd=$!
+    wait "$pid" 2>/dev/null; rc=$?
+    if [ -e "$scratch/$n.timedout" ]; then
+      wait "$wd"  # the group is gone once the watch ends: TERM, then KILL after its grace
+      [ "$rc" != 0 ] || rc=124  # a suite that exits 0 on its TERM still ran out of time: it fails
+      { echo "run.sh: timed out after ${bound}s (its liveness bound); its process group was killed"
+        echo "run.sh: a healthy suite that has only grown slower needs tests/shard-weights.tsv regenerated" \
+          "(its header says how), or THREAD_SUITE_BOUND=<seconds>"
+      } >> "$scratch/$n.out"
+    else
+      kill "$wd" 2>/dev/null
+    fi
+    : > "$scratch/$n.pid"
+    echo "$rc" > "$scratch/$n.rc"; ended "$label" "$rc" "$s"
+    [ ! -e "$scratch/$n.timedout" ] || echo "$label: timed out after ${bound}s"
+  } &
   n=$((n+1))
 }
 report() {  # report <i> — print that suite's block; a non-zero or missing rc fails the run
-  local i="$1" rc
+  local i="$1" rc why=""
   echo "== ${labels[$i]}"
   cat "$scratch/$i.out" 2>/dev/null
   rc=$(cat "$scratch/$i.rc" 2>/dev/null || echo missing)
+  [ ! -e "$scratch/$i.timedout" ] || why=" (timed out after ${bounds[$i]}s)"
   [ "$rc" = 0 ] || { fail=1; failed="$failed
-  - ${labels[$i]}"; }
+  - ${labels[$i]}$why"; }
 }
+# stop_suites: end every live suite's process group (their own groups never get a signal sent to run.sh's): TERM, then
+# KILL whatever outlives SUITE_STOP_GRACE (end_groups); then the background blocks that watch them.
+stop_suites() {
+  local f g live=()
+  for f in "$scratch"/*.pid; do g=; read -r g < "$f"; [ -z "$g" ] || live+=("$g"); done
+  end_groups "$SUITE_STOP_GRACE" ${live[@]+"${live[@]}"}
+  for g in $(jobs -p); do kill "$g" 2>/dev/null; done
+}
+trap 'stop_suites; exit 129' HUP; trap 'stop_suites; exit 130' INT; trap 'stop_suites; exit 143' TERM
 
 sh_files=(skills/*/scripts/*.sh hooks/*.sh tests/*.sh tests/lib/*.sh)
 py_files=(skills/*/scripts/*.py hooks/*.py tests/lib/*.py)
@@ -269,17 +320,21 @@ fi
 # Independent suites run concurrently (each builds under its own mktemp), at most $max_jobs at a time, each printing
 # its line as it ends. Once all have ended, every block (the self-tests', then the shell suites') prints in spawn
 # order, before node, which runs at the same concurrency.
+# bound_of <entry>: its seconds in $bound_lines (suite_bounds's `<entry><TAB><seconds>` lines).
+bound_lines="$nl$(printf '%s\n' @merge-task-self-tests ${run_sh[@]+"${run_sh[@]}"} | suite_bounds tests/shard-weights.tsv "$flat")$nl"
+bound_of() { local r=${bound_lines#*"$nl$1$tab"}; echo "${r%%"$nl"*}"; }
 echo "== suites: at most $max_jobs at a time"
 if [ "$self_tests" = 1 ]; then
-  spawn "merge-task classifier self-test"      bash skills/execute/scripts/merge-task.sh --self-test-classify
-  spawn "merge-task base self-test"            bash skills/execute/scripts/merge-task.sh --self-test-base
+  b=$(bound_of @merge-task-self-tests)
+  spawn "merge-task classifier self-test" "$b" bash skills/execute/scripts/merge-task.sh --self-test-classify
+  spawn "merge-task base self-test"       "$b" bash skills/execute/scripts/merge-task.sh --self-test-base
 fi
-for t in ${run_sh[@]+"${run_sh[@]}"}; do spawn "$t" bash "$t"; done
+for t in ${run_sh[@]+"${run_sh[@]}"}; do spawn "$t" "$(bound_of "$t")" bash "$t"; done
 wait
 i=0; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 # A bare `node --test` walks the whole tree, so node runs only when a file is selected.
 if [ "${#run_node[@]}" -gt 0 ]; then
-  step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" "${run_node[@]}"
+  step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"
 else
   echo "== node tests: none selected"
 fi

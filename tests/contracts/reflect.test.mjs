@@ -856,3 +856,30 @@ test('step 11 reads /fresh-review landings by the confirm-rate check (ADR 0065),
   assert.ok(!/self-grading|STOP entries|handed to him/.test(s17), 'step 17 still reports a retired reading')
   assert.ok(!/STOP entr|stop verdict/.test(real.skill.replace(/never a stop: [^\n]*/, '')), 'SKILL.md still reads a trail\'s STOP entries')
 })
+
+// The carried read (ADR 0078 d1): step 17 reports the fixes that landed but are not yet Proven, a point-in-time prove read
+// run from the session root (prove is guard-exempt and works across versions), in status's `landed, …` wording, never as
+// done; § Scope lists it.
+const CARRIED_CMD = 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --all --dry-run --no-gh --json'
+function carriedRead(skill) {
+  const s17 = collapse(sectionOf(skill, /^### 17\. /))
+  const scope = collapse(sectionOf(skill, /^## Scope$/))
+  const fails = []
+  if (!s17.includes(`\`${CARRIED_CMD}\``) || !s17.includes('once, from the session root') ||
+    !s17.includes('a point-in-time read at until with no window')) fails.push('read')
+  if (!['`[[t]] landed, carried (<waits>)`', '`[[t]] landed, carry-back owed (<why>)`', '`[[t]] landed, carry-back waits[, archived] (<waits>)`']
+    .every((w) => s17.includes(w)) || !s17.includes('never as done') || /`\[\[t\]\][^`]*\bdone\b/.test(s17)) fails.push('wording')
+  if (!scope.includes("Step 17's carried read runs `reconcile-rollout.py prove` with `--all --dry-run --no-gh`")) fails.push('scope')
+  return fails
+}
+
+test('step 17 reports the carried read (ADR 0078 d1): a point-in-time prove read from the session root, worded landed, never done', () => {
+  assert.deepEqual(carriedRead(real.skill), [])
+})
+
+test('control: the carried read without --dry-run, an owed entry worded done, or § Scope without it, fails', () => {
+  const swap = (from, to) => { assert.ok(real.skill.includes(from), `control setup: ${from}`); return real.skill.replace(from, to) }
+  assert.deepEqual(carriedRead(swap('prove --all --dry-run --no-gh --json', 'prove --all --no-gh --json')), ['read'])
+  assert.deepEqual(carriedRead(swap('`[[t]] landed, carry-back owed (<why>)`', '`[[t]] done (<why>)`')), ['wording'])
+  assert.deepEqual(carriedRead(swap("Step 17's carried read runs `reconcile-rollout.py prove` with", 'Step 17 reads')), ['scope'])
+})

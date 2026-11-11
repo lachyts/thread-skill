@@ -93,7 +93,8 @@ realpath; the declared strings kept):
                       tests/estate-scan.test.mjs runs it on copies of the fixtures for parity, as schedule § 0 would.
   unfinished-rollout  `unfinished-rollout.py check --repo <root> --project <name>` per declaring project, each against
                       its own clone's git root (ADR 0064), without --regenerate: exit 3 blocks that project, 0 is the
-                      verdict (`none`, `file`), else unchecked.
+                      verdict (`none`, `file`, `join`; a join is no blocker: a schedule adds the project's tasks to its
+                      own running rollout, ADR 0078 d6), else unchecked.
   no-verifier         schedule § 2.5's order, read from the root's working tree: a `Verifier: \\`<cmd>\\`` line in the
                       agent docs (source: the file it is in), a Makefile `test:` target (`make test`), pyproject.toml
                       [tool.poetry] (`poetry run pytest`), package.json scripts.test (`npm test`). The agent docs are

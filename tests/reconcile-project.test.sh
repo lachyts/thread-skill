@@ -21,13 +21,16 @@ tmp=$(cd "$tmp" && pwd -P) || { echo 'FAIL - cd into the mktemp dir'; exit 1; }
 if [ -z "$tmp" ] || [ ! -d "$tmp" ] || [ "$tmp" = "$root" ]; then echo "FAIL - mktemp gave no usable temp dir [$tmp]"; exit 1; fi
 trap 'chmod -R u+rwX "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
+# The landing write reads the Primary refresh's live file and a stamped rollout's snapshot under HOME (ADR 0078 d1):
+# both stay in temp.
+export HOME="$tmp/home"; mkdir -p "$HOME"; unset XDG_STATE_HOME
 
 # Fake gh: `gh pr view <url> --json state,mergedAt` answers from the case table below; anything else fails.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "$1 $2" = "pr view" ] || { echo "fake gh: unexpected $*" >&2; exit 1; }
 case "$3" in
-  */pull/42|*/pull/51|*/pull/81|*/pull/86|*/pull/35|*/pull/191) echo '{"mergedAt":"2026-09-20T00:00:00Z","state":"MERGED"}' ;;
+  */pull/42|*/pull/51|*/pull/81|*/pull/86|*/pull/35|*/pull/191|*/pull/411) echo '{"mergedAt":"2026-09-20T00:00:00Z","state":"MERGED"}' ;;
   */pull/82) echo '{"mergedAt":null,"state":"OPEN"}' ;;
   */pull/811) echo '{"mergedAt":null,"state":"CLOSED"}' ;;
   */pull/88) echo 'GraphQL: Could not resolve to a PullRequest (HTTP 404)' >&2; exit 1 ;;
@@ -565,5 +568,100 @@ has "$(field ambiguous demo-p40-signoff reason)" "demo-p40-1-gated" "P1e: the ph
 before=$(cat "$v/Work/Tasks/demo-p40-1-gated.md")
 rp --phases 40 --no-gh --apply --json
 ok "$(cat "$v/Work/Tasks/demo-p40-1-gated.md")" "$before" "P1e: --apply leaves t byte-identical"
+
+# ---- P2. a fix lands carried, owed or done (ADR 0078 d1) ----------------------------------------------------------
+# apply lands each task through reconcile-rollout.py's _land_outcome: a fix (clears:) is carried (review + merged:),
+# never done at merge; owed (status: done + its Proof log line) while an engine that reads it would hold it; a serial
+# chain's task is done as today. The dry run names that write as the task's action, and leaves a phase over a carried
+# landing open. A carried fix keeps its phase QUIET (the daily sweep closes it once proven); a phase closed over an
+# owed landing is reopened by prove's carry-back (reconcile-rollout-prove.test.sh P28).
+echo "# P2. a fix lands carried, owed or done"
+export TZ=UTC
+P2R=demo-rollout-2026-09-21
+p2phase() { mkdir -p "$v/Work/Phases"; printf -- '---\ntags:\n  - phase\nstatus: open\nprojects:\n  - "[[Demo]]"\nphase: 41\n---\n\n# Demo phase 41\n' > "$v/Work/Phases/demo-p41-fixes.md"; }
+p2task() {  # p2task <dir under Work/Tasks or ""> <status> [frontmatter lines...]: demo-p41-1-fix
+  local d="$v/Work/Tasks${1:+/$1}" st="$2"; shift 2; mkdir -p "$d"
+  { printf -- '---\ntags:\n  - task\nstatus: %s\nprojects:\n  - "[[Demo]]"\nphase: 41\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n# demo-p41-1-fix\n\nbody\n'; } > "$d/demo-p41-1-fix.md"
+}
+p2ro() {  # p2ro <dir under Work/Tasks or ""> <status> [frontmatter lines...]
+  local d="$v/Work/Tasks${1:+/$1}" st="$2"; shift 2; mkdir -p "$d"
+  { printf -- '---\ntags:\n  - task\n  - rollout\nstatus: %s\nprotocol_version: 5\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Completion log\n\n- [[demo-p41-1-fix]] → https://github.com/o/r/pull/411, merged 2026-09-20\n'; } > "$d/$P2R.md"
+}
+P2T="$tmp/p2.task"
+p2fm() { python3 -c 'import re, sys
+t = open(sys.argv[1]).read().split("\n---\n", 1)[0]
+m = re.search(r"^" + re.escape(sys.argv[2]) + r":[ \t]*(.*)$", t, re.M)
+print(m.group(1).strip() if m else "<none>")' "$v/Work/Tasks/demo-p41-1-fix.md" "$1"; }
+CLR='clears:'; CLI='  - "the stuck work moved"'; PR411='pr: https://github.com/o/r/pull/411'
+# P2a: a fix with no rollout (no engine read), its PR MERGED: the dry run names the carried write and leaves its phase
+# open (Orient § 2 shows this list as the drift Lachy approves); apply lands it carried, never done, exit 0
+fresh; p2phase; p2task "" in_progress "$PR411" "$CLR" "$CLI"
+LEFT="phase demo-p41-fixes left open: [[demo-p41-1-fix]] lands carried (ADR 0078 d1)"
+rp --phases 41 --json
+ok "$rc|$(field unambiguous demo-p41-1-fix action)" "0|landed, carried (status: review)" "P2a: the dry run's action for a fix names the carried write"
+ok "$(inlists demo-p41-fixes)|$(strs skipped)" "0|$LEFT" "P2a: … its phase is in neither list, one left open line"
+rp --phases 41 --apply --json
+ok "$rc|$(p2fm status)|$(p2fm merged)|$(p2fm live)" "0|review|2026-09-20T00:00+00:00|2026-09-20T00:00+00:00" "P2a: a fix lands carried (review + merged:, live: = merged: unwatched), exit 0"
+has "$(strs written)" "task demo-p41-1-fix: landed, carried (status: review)" "P2a: … its Written line"
+has "$(strs skipped)" "$LEFT" "P2a: … the phase is left open (skipped)"
+ok "$(strs errors)|$(grep -m1 '^status:' "$v/Work/Phases/demo-p41-fixes.md")" "|status: open" "P2a: … no Errors entry; the phase stays open"
+# P2b: owed: a live parallel rollout stamped to a snapshot without the marker reads the note, so it lands status: done
+fresh; p2phase; mkdir -p "$HOME/snaps/abc/skills/execute/scripts"; echo 'x = 1' > "$HOME/snaps/abc/skills/execute/scripts/reconcile-rollout.py"
+p2ro "" open 'engine_snapshot: "~/snaps/abc"'
+p2task "" in_progress "$PR411" "rollout: \"[[$P2R]]\"" "$CLR" "$CLI"
+rp --phases 41 --json
+ok "$(field unambiguous demo-p41-1-fix action)|$(field unambiguous demo-p41-fixes depends_on)" \
+   "landed, carry-back owed (status: done)|demo-p41-1-fix" "P2b: the dry run names the owed write; its phase closes on it"
+rp --phases 41 --apply --json
+ok "$rc|$(p2fm status)|$(p2fm merged)" "0|done|2026-09-20T00:00+00:00" "P2b: owed: status: done, merged: the fake gh's mergedAt, exit 0"
+has "$(cat "$v/Work/Tasks/demo-p41-1-fix.md")" "landed, carry-back owed: engine abc reads a carried fix as awaiting Integration" "P2b: … the owed Proof log line"
+has "$(strs written)" "task demo-p41-1-fix: landed, carry-back owed (status: done; engine abc" "P2b: … its Written line"
+ok "$(strs errors)|$(grep -m1 '^status:' "$v/Work/Phases/demo-p41-fixes.md")" "|status: done" "P2b: … no Errors entry; the phase closes as today"
+# P2c: a serial chain's task is out of scope: today's single status: done, no Proof log
+fresh; p2phase; p2ro "" open 'shape: serial' 'engine_snapshot: "~/snaps/abc"'
+p2task "" in_progress "$PR411" "rollout: \"[[$P2R]]\"" "$CLR" "$CLI"
+rp --phases 41 --json
+ok "$(field unambiguous demo-p41-1-fix action)" "status: done" "P2c: the dry run's action for a serial chain's task is status: done"
+rp --phases 41 --apply --json
+has "$(strs written)" "task demo-p41-1-fix: status: done" "P2c: a serial chain's task → today's status: done"
+ok "$(grep -c 'Proof log' "$v/Work/Tasks/demo-p41-1-fix.md")" 0 "P2c: … no Proof log"
+# P2d: a carried fix under a retired rollout keeps its phase QUIET; one moved into Archive/ by hand reads archived but review
+fresh; p2phase; p2ro Archive/Rollouts done; p2task "" review "$PR411" "rollout: \"[[$P2R]]\"" 'merged: 2026-09-20T00:00+00:00' "$CLR" "$CLI"
+rp --phases 41 --no-gh --json
+ok "$(inlists demo-p41-fixes)" 0 "P2d: a carried fix under a retired rollout: its phase is QUIET"
+rm "$v/Work/Tasks/demo-p41-1-fix.md"; p2task Archive review "$PR411" "rollout: \"[[$P2R]]\"" 'merged: 2026-09-20T00:00+00:00' "$CLR" "$CLI"
+rp --phases 41 --no-gh --json
+has "$(field ambiguous demo-p41-fixes reason)" "task demo-p41-1-fix is archived but review" "P2d: … in Archive/ it reads archived but review (A)"
+# P2e: completion-log evidence alone on a fix → A: Live cannot be read without a pr: URL
+fresh; p2phase; p2ro Archive/Rollouts done; p2task "" in_progress "rollout: \"[[$P2R]]\"" "$CLR" "$CLI"
+rp --phases 41 --no-gh --json
+has "$(field ambiguous demo-p41-1-fix reason)" "a fix (clears:) with no pr: URL: Live cannot be read; set pr: and run reconcile-rollout.py prove --tasks demo-p41-1-fix --land" \
+    "P2e: log-only evidence on a fix (clears:) → A"
+# P2f: apply reads the verdict again at write time: a task that turns into a fix between detect and apply lands
+# carried, and its phase, U at detect, is left open (one skipped line, no error), never closed
+fresh; p2phase; p2task "" in_progress "$PR411"
+P2F=$(PATH="$tmp/bin:$PATH" python3 - "$script" "$v" <<'PY2'
+import importlib.util, sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("rp", sys.argv[1]); rp = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rp)
+mod = rp.load_engine()
+det = rp.Detector(Path(sys.argv[2]), "demo", ["phase", "task"], {"41"}, "2026-09-27", "ok", "gh", engine=mod)
+det.run()
+print(sorted((i["kind"], i["action"]) for i in det.U))
+f = Path(sys.argv[2]) / "Work/Tasks/demo-p41-1-fix.md"
+f.write_text(f.read_text().replace("phase: 41\n", 'phase: 41\nclears:\n  - "the stuck work moved"\n', 1))
+written, errors = rp.apply(det, mod)
+print(written, errors, det.skipped)
+PY2
+)
+has "$P2F" "[('phase', 'status: done + completed: 2026-09-27'), ('task', 'status: done')]" "P2f: detect read a plain task: the phase U"
+has "$P2F" "['task demo-p41-1-fix: landed, carried (status: review)'] [] ['$LEFT']" "P2f: … apply lands it carried and leaves the phase open"
+ok "$(grep -m1 '^status:' "$v/Work/Phases/demo-p41-fixes.md")" "status: open" "P2f: … the phase note stays open"
 
 exit $fail
