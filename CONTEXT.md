@@ -1318,6 +1318,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   stop is no run mark for it. `skills/_shared/vault-grammar.md` § Approved
   queue. _Avoid_:
   auto-regenerate, pre-approved rollout.
+- **Durable trigger** — a "when X, then Y" step written on a rollout or task
+  note as a `when:` entry, so it survives any session (ADR 0078 d5): `on` is
+  `merged <owner/repo#N>`, `paused` or `landed [[task]]`, and `do` is
+  `regenerate`, `regenerate --tasks a,b`, `schedule [[task]]` or
+  `reset-primary`. `reconcile-rollout.py triggers due` lists what is due with
+  no lead; `triggers fire <id>` runs one and records it once, as `fired:` on
+  the entry, handing a model step's command back to its caller. A fired
+  regenerate or schedule is an attended run: its Session can stop at
+  schedule's questions and wait on Lachy. It extends **Hold until** and
+  **Approved queue** and replaces neither. `skills/_shared/vault-grammar.md`
+  § When. _Avoid_: a watcher for a follow-up, a follow-up sentence.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged (a `git-env miss` line) with the checkout's
