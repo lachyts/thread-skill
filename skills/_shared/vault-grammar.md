@@ -29,6 +29,7 @@ A `status:` is read lower-cased, with `-` read as `_`: TaskNotes' own spelling `
 - **Landed**: `done`, `merged`, `dropped`.
 - **Active**: `open`, `in_progress`.
 - **Review**: `review`.
+  Review includes a carried fix (a review note with a valued merged stamp, § Proven), which a queue reads as Landed.
 - **Hold**: any other status (`parked`, `blocked`, …): a deliberate hold, not drift.
 
 ## In flight
@@ -181,6 +182,105 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   when he starts it. A late heartbeat tick on the closed prior ends at its clause (1), and `next` on a superseded
   note halts `superseded`.
 
+## Proven
+
+ADR 0078 d1: a fix is done only once Proven. CONTEXT.md's **Live**, **Proven** and **Carried fix** are the terms.
+
+**`clears:`** names what a fix task is filed to clear. Its items are read by reconcile-rollout.py's `_clears`
+through the note's frontmatter block: a block list (`clears:` then `- <item>` lines, the form every vault note
+uses), a flow list `[...]` split at its commas outside quotes (`_flow_items`), or a scalar on the `clears:` line,
+one item. A block or scalar item is never split at commas. A double-quoted item is read up to its closing unescaped
+`"`, its `\"` and `\\` decoded; a single-quoted one with `''` decoded. An item that is exactly one `[[link]]` is a
+link item (a rollout, chain or task note); anything else is a line item. Empty items are dropped, so `clears: []` or a
+bare `clears:` has none.
+
+**The carried-fix test.** A carried fix is a task note at `status: review` with a valued `merged:` (`_valued`: not
+empty, `null` or `~`): `_carried_fix`, the rule's one copy. The queue reads it as Landed (`_landed`, `_queue_state`
+`merged`), so its dependants start; it is not done until `prove` stamps `proven:`.
+
+**The stamps.** `merged:` the landing (the first stamp wins); `merge_commit:` the merge commit (gh's, or `--land
+--commit`'s); `merge_repo:` the lowercased `<owner>/<name>` a `--land --commit --repo DIR` landing went to;
+`live:` the moment it was Live (the first stamp stays: prove never un-lives a note); `proven:` the date it was
+proven. `## Proof log` holds one dated `- <stamp> …` line per landing, carry-back, Live read, seen item and proof.
+
+**Live.** A landing's repo is watched when an entry of the Primary refresh's live file
+(`${XDG_STATE_HOME:-~/.local/state}/thread/primary-live.json`, `{v: 1, live: {<checkout>: {origin, head, branch,
+since, primary}}}`) has its key. The two key readers: a `pr:` PR URL gives `PR_URL_RE`'s group 1, lowercased (a bare
+`pr: #N` reads its rollout's Project root origin); an origin URL gives `ORIGIN_SLUG_RE`, lowercased, only ever an
+origin, never a `pr:` value. A watched landing is Live once a live entry's head holds its merge commit (`git
+merge-base --is-ancestor`), and `live:` is then stamped; an unwatched landing is Live at merge (`live:` = `merged:`).
+A missing live file watches nothing; an unreadable one watches everything (fail closed), and so does a repo that
+cannot be read while the file has any entry. A RACE revert (`reverted on main:`) is never Live.
+
+**The items.** Each item moves only strictly after `live:`: a `[[rollout]]` or `[[chain]]` item, followed through
+`superseded_by:` (at most 10 hops), when a note of any rollout on that chain has `started:`, `ready:`,
+`integrating:` or `merged:` after it, or a serial `## Leg log` has a `began:`, `done` or `closed:` line after it (a
+fix to the engine's own repo counts only on a rollout whose engine holds the merge); a `[[task]]` item on
+`started:`, `ready:`, `integrating:`, `merged:` or `completed:` after it; a date-only stamp only on a later
+Melbourne date. A line item moves only by a Proof log `seen item <N> "<text>": <evidence> (agent|Lachy)` line
+recorded at or after `live:` (`prove --seen`), and so does a link item that cannot move (missing, or finished with
+nothing after `live:`), on Lachy's word only (`--on-his-word`). Live with every item moved, or none: `status: done`
+and `proven: <date>`, with no `completed:` and no phase write.
+
+**The three landing outcomes**, one verdict for every landing caller (`_land_outcome`: mark-done, resume,
+reconcile's read-only approval (no code, so never watched), `prove --land`, and reconcile-project's apply, whose dry
+run names the same verdict as each task's action):
+
+- `done`: today's write, for a landing unwatched with no `clears:` item, or one whose own rollout is a serial chain;
+- `carried`: the carried form (`status: review`, `merged:`, `- <stamp> landed, carried: <why>`), when it is watched
+  or has `clears:`, and every engine that reads the note reads carried fixes;
+- `owed`: the old engine's own landed form, which every engine reads as landed (`status: done`, `merged:`, `- <stamp>
+  landed, carry-back owed: <why>; status: done written for that engine (ADR 0078 d1)`), when it would be carried but
+  an engine that reads it would read a carried fix as awaiting Integration. Every surface calls it `landed, carry-back
+  owed`, never done.
+
+**The serial-chain scope.** A serial chain (`shape: serial`, whatever its status, finished or archived included) is
+out of scope, and both checks read it before any engine read: at landing, its task lands `done`; at carry-back, its
+task is never a candidate and never listed.
+
+**`_carry_readers`**: every engine that reads this note reads carried fixes: the note's own rollout, and the rollout
+of each dependant still to start (a `depends-on:` or `blocked-by:` naming it, through a folded member too, whose queue
+state is queued or set-aside); a running or landed dependant is not checked. Each rollout's engine is read by
+`_engine_reads_carried`, its four clauses in this order:
+
+1. no `rollout:`, or no note: reads carried fixes;
+2. finished (status done or dropped, under `Archive/`, or a valued `superseded_by:`): reads them, since it runs no
+   queue;
+3. unstamped (no valued `engine_snapshot:`): the marker in the engine an unstamped note runs on, the Primary
+   checkout's copy (found through `git_primary`, engine-snapshot.py's `engine_root`), else the running plugin root,
+   and never read as current by default: a held or diverged Primary is an old engine like any snapshot;
+4. stamped: the marker in the `~`-expanded `engine_snapshot:` path's copy, a missing file failing closed.
+
+The marker is reconcile-rollout.py's line `PROVEN_ENGINE = 1`.
+
+**carried-fixes.json** (`prove --all` writes it beside the live file, only when it changes): `{v: 1, carried, owed,
+carryBack}`, one split behind all three, each entry with `slug`, `project` and `rollout`: `carried` every root carried
+fix still unproven; `owed` every note at done whose Proof log's last entry is the owed line, in the root or `Archive/`;
+`carryBack` every other carry-back candidate whose carry-back waits. `prove --json`, status's Carried line and reflect
+§ 17 use the same split.
+
+**Carry-back.** A note landed at `status: done` and never Proven goes back to review: a candidate is in the root or
+`Archive/` (never `Archive/Rollouts/`, never a serial chain's), at `status: done` with a valued `merged:`, no valued
+`proven:` and no `archived` tag, and has either a non-empty `clears:` with no `## Proof log`, or a Proof log whose last
+entry holds `landed, carry-back owed`. Once `_carry_readers` reads True, prove moves an archived candidate back to the
+root first (a hard link, then a fresh read saved through `Note.save`, which keeps its created time and Finder tags),
+then writes `status: review`, removes `completed:` and logs `carried back: landed at status: done, never Proven (ADR
+0078 d1)[; from Archive/][; completed: <v> removed][; phase [[<p>]] reopened[ from Archive/]]`, and judges it in the
+same pass. A root note of the same name makes it wait.
+
+**The phase a carry-back reopens.** A phase note at `status: done` whose literal prefix `<slug>-p<N>-` starts the
+carried-back task's name (§ Phase and task filenames) is a done over a fix that is not: once the judge leaves the fix
+carried, the carry-back (`_reopen_phases`) writes it `status: open` with `completed:` removed, moving it back from
+`Work/Phases/Archive/` first when the daily sweep filed it there (a root note of the same name leaves it as it is,
+its clause `phase [[<p>]] not reopened: <why>`), so the sweep's PHASE CLOSE closes it again once its last fix is
+proven. A fix the judge proves in the same pass leaves its phase as it is, `completed:` kept: that done is no lie.
+A phase the completion ceremony or reconcile-project closed over an old engine's done or an owed landing is reopened
+this way. prove never closes a phase.
+
+**The hook's mirror.** hooks/vault-note-overlap.py reads a review writer live only with a `pr:` and an unvalued
+`merged:`, `_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`), since loading
+reconcile-rollout.py would spend its budget.
+
 ## When
 
 A "when X, then Y" step that only a session holds dies with the session (the follow-ups lost with a session's watchers,
@@ -331,6 +431,30 @@ lists them (§ 3, § 8).
 - `skills/_shared/scripts/estate-rank.py` `rank --superseding` and estate-dispatch.py's `slices --superseding`
   (schedule's Pre-flight): § In flight's exception, read through estate-scan's `still_to_start`, loaded, so a
   carried task still queued is gradeable and one that has started stays in flight.
+- § Proven's readers: `skills/execute/scripts/reconcile-rollout.py` `prove` (the judge, carry-back with its phase
+  reopen, and the two files), its five changed readers (`_landed`, `_queue_state`, `_holds_lane`, `_race_marks`,
+  `_origin_waiter_valid`), `mark-done`, `resume` and `reconcile`'s read-only approval (through `_land_outcome`);
+  `skills/_shared/scripts/reconcile-project.py` (rule 1's QUIET carried fix and its phase left open over a carried
+  landing, rule 2's action and apply through `_land_outcome`, loaded); orient § 3 and § 4 (the dry run's actions, the
+  `landed, carried` rows and the `left open` lines); `hooks/vault-note-overlap.py` (its literal mirror);
+  close (`skills/close/SKILL.md` § A finished task closes itself), status (§ 4's Carried line) and reflect (§ 17's
+  carried read), each running `prove` from the session's own root.
+- **The vault's daily sweep** (`~/repos/workspaces/_shared/scripts/archive-completed-vault-items.py`, run by
+  daily-sweep.sh): its task move keys on the Landed statuses (§ Statuses) or the `archived` tag, so a carried fix stays in the
+  root and a done-before-Proven or owed note is archived. It never pulls a note out of `Archive/`: prove's carry-back is
+  the only writer that does, for the task and for the done phase it reopens (§ Proven, **The phase a carry-back
+  reopens**), which it moves back to `Work/Phases/` because PHASE CLOSE reads that root only. Its PHASE CLOSE keys on
+  the same statuses, so a carried fix keeps its phase open; once prove proves the last fix, it is the only closer of a
+  fix phase, since the completion ceremony's `--kinds phase` run left that phase open (rule 1 reads it QUIET), or the
+  carry-back reopened it. No second phase closer belongs in prove.
+- **Chorus's copy of `_queue_state`** (`~/repos/tools/chorus/src/stage/rollout.py`'s `queue_state`): it must read
+  `review` with a valued `merged:` as `merged`, checked before its `pr:` branch, with `_valued`'s literal set. Until it
+  does, the Stage's rollout page, the morning report's per-rollout `merged` count and, through `merged`, the awake read
+  and the stop line read a carried fix as awaiting Integration: the Chorus follow-up the rollout's lead files.
+- **`carried-fixes.json`**, the engine-independent surface (§ Proven): beside the live file, its three keys `carried`,
+  `owed` and `carryBack`, read by the Chorus Stage line. On an old-snapshot rollout status shows no Carried line (that
+  snapshot's prose has none), so this file, reflect § 17 and close's rows show that rollout's carried, owed and waiting
+  notes.
 - `skills/_shared/scripts/waits-on.py` (§ Waits on's one writer) and `skills/_shared/scripts/estate-scan.py`'s
   `WAITS_ON` (its one reader), which carries each line still true to `rollouts[].waitsOn[]` for orient-all.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both

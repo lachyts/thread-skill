@@ -1375,7 +1375,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   filed to clear to move) and repairs what stands in the way unseen. He sees
   carried fixes, and any stuck machinery, on the quiet Stage line that opens
   with a click; one the system cannot move within a day is a stop the
-  Companion leads him to (Lachy, 2026-11-09). _Avoid_: pending fix, open fix.
+  Companion leads him to (Lachy, 2026-11-09). Its note form: a task note at
+  `status: review` with a valued `merged:`, which the queue reads as landed
+  until `prove` stamps `proven:` (`skills/_shared/vault-grammar.md` § Proven).
+  _Avoid_: pending fix, open fix.
 - **Blocked** — the umbrella for a task that did not land: `blocked` (verifier
   never green), `plan-blocked` (plan never approved), or `review-blocked`
   (open PR, review rejected). In a Queue a blocked task is **set aside**: its

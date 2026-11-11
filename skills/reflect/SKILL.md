@@ -86,7 +86,9 @@ read-only, the lead sessions' transcripts, the suite logs, the rollout notes' pa
 writes only `audit.json` in that scratch dir. The attention ledger (steps 10, 11 and 13b) also reads, read-only, the
 main chain of the session transcripts (Claude's own and each profile's), `reviews.jsonl` and each /fresh-review
 checkout's git, never fetched; it writes the `attention` line and the circling Watches through reflect.py, and
-`owners.json`, the reading's Owner labels, in that scratch dir. `--decide` writes `watch-raised` lines
+`owners.json`, the reading's Owner labels, in that scratch dir. Step 17's carried read runs `reconcile-rollout.py prove` with
+`--all --dry-run --no-gh`, a point-in-time read at until with no window that writes nothing and calls no gh (ADR 0078
+d1). `--decide` writes `watch-raised` lines
 through `reflect.py raised` and a `moot` line in the decision task through `reflect.py moot`, and marks the task done.
 Neither form makes a git write or a PR.
 
@@ -729,6 +731,16 @@ reading leaves the week quiet.
 
 ### 17. Report, then tidy
 
+**The carried read** (ADR 0078 d1): once, from the session root, as every reflect command runs (it resolves no engine
+root: prove is exempt from the engine guard and works across versions), run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py prove --all --dry-run --no-gh --json`.
+It reads every rollout's notes, whatever their engine, so it is one of the three surfaces, with the Stage line and
+close's rows, that show an old-snapshot rollout's carried, owed and waiting notes. It is a point-in-time read at
+until with no window (CLAUDE.md's window rule does not apply). Report its three lists with status's Carried-line
+wording: each `carried` entry as `[[t]] landed, carried (<waits>)`, each `owed` entry as
+`[[t]] landed, carry-back owed (<why>)`, each `carryBack` entry as `[[t]] landed, carry-back waits[, archived] (<waits>)`,
+or `carried: none` when all three are empty; never as done. A non-zero exit reports `carried: not read (<its last stderr line>)`.
+
 Report first each `window: ` flag `span.json` holds (step 10), quoted whole: that block's numbers are unreliable this
 week, so say so before any of them. Then report the rollouts read (and the escapes-only and repairs-only ones), each
 trace and what it became, the grade
@@ -744,7 +756,7 @@ held), the Monthly audit's row when one ran (its hours found against the record'
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
-docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+docs-only PRs; the waits to start; each circling item and any Watch it opened), the carried read's three lists (above), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 

@@ -64,14 +64,16 @@ second entry for it is dropped. A visit always leaves the editor's own entry, so
 sweep, which runs at most once a day (the mtime of `.swept`), on a recorded write: it removes record, lock and temp
 files untouched for STALE_DAYS (14).
 
-Liveness. A writer is live while its task note reads `status: in_progress`, or `status: review` with a `pr:`
-(approved and awaiting Integration: neither done nor set aside); a writer recorded under a Leg's owner (`leg-N`) is
+Liveness. A writer is live while its task note reads `status: in_progress`, or `status: review` with a `pr:` and no
+valued `merged:` (approved and awaiting Integration: neither done nor set aside; a review note with a valued `merged:`
+is a carried fix, landed, ADR 0078 d1, its valued test reconcile-rollout.py's _valued mirrored: not empty, `null` or
+`~`); a writer recorded under a Leg's owner (`leg-N`) is
 live only while the note keeps that owner (a take-over writes the next leg-N, which is how a lost Leg shows), and a
 lead's session tag is never compared (execute § 4 re-stamps `owner: <session-tag>` on every start, restart and seeded
 revise, and a task restarted by a new lead Session is neither done nor set aside; an `owner:` missing on either side
 reads as status-only); its `rollout:` names the recorded rollout (a carry or a defer re-points it); and that rollout
 note is still directly in Work/Tasks. A missing or archived task note is dead. Statuses read lower-cased, `-` as `_`.
-Only the frontmatter's top-level `key: value` lines are read (status, owner, rollout, pr, shape).
+Only the frontmatter's top-level `key: value` lines are read (status, owner, rollout, pr, shape, merged).
 
 The warning. Another run is another rollout: a decided call (ADR 0067, Decided for Lachy 9: ADR 0059 d5's collision
 was between chains, and each serial chain is its own rollout note), so two tasks of one rollout in one note are an
@@ -123,7 +125,7 @@ DEBUG_CAP = 512 * 1024
 VAULT = "~/repos/obsidian"
 BOOKKEEPING = ("work/tasks/", ".obsidian/", ".git/", ".trash/")
 TOOLS = ("Edit", "Write", "MultiEdit")
-FM_KEYS = ("status", "owner", "rollout", "pr", "shape")
+FM_KEYS = ("status", "owner", "rollout", "pr", "shape", "merged")
 HARNESS_PREFIX = "[Workflow harness"
 AGENT_ID_RE_SRC = r"[A-Za-z0-9_-]{1,64}"
 SESSION_RE_SRC = r"[A-Za-z0-9_.:-]{1,128}"
@@ -207,6 +209,12 @@ def _scalar(raw):
     return s.strip('"').strip("'").strip()
 
 
+def _valued(v):
+    """reconcile-rollout.py's _valued, mirrored literally (loading that module would spend the budget): a value that
+    says something, not empty and not YAML's null. Read after _scalar."""
+    return v.lower() not in ("", "null", "~")
+
+
 def frontmatter_of(lines):
     """FM_KEYS from the top-level `key: value` lines between the opening and closing `---` ({} with none)."""
     if not lines or lines[0].strip() != "---":
@@ -249,7 +257,7 @@ def live(tasks, task, owner, rollout_link, cache):
     if not fm:
         return False
     st = _status(fm)
-    if not (st == "in_progress" or (st == "review" and fm.get("pr"))):
+    if not (st == "in_progress" or (st == "review" and fm.get("pr") and not _valued(fm.get("merged", "")))):
         return False
     cur = fm.get("owner", "")
     if owner and cur and cur != owner and _re(LEG_OWNER_RE_SRC).fullmatch(owner):

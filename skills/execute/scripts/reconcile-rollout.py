@@ -12,9 +12,13 @@ Subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + its feedback section. Idempotent (safe to re-run on resume). A `review` row
-              whose scope is read-only and that carries no PR is written `status: done` and stamped
-              `merged:` (the first stamp wins): a read-only task is done when its review approves and
-              never enters Integration. Every row removes `integrating:` (the run that produced the row
+              whose scope is read-only and that carries no PR lands the note through _land_outcome (ADR 0078
+              d1; Proven, below), with no code, so never watched: done (`status: done` and `merged:`, the first
+              stamp wins), carried for a fix with `clears:` (_carry_write: `status: review`, `merged:`, `live:` =
+              `merged:`, a Proof log line) or owed (_owed_write), its line `status=<s> (read-only, approved[;
+              landed, carried: <why> | ; landed, carry-back owed: <why>])`; a note already done or carried is no
+              change. A read-only task lands when its review approves and never enters Integration, and its merged
+              event fires in every outcome. Every row removes `integrating:` (the run that produced the row
               ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
               (see the Status mapping below). A row that ends a Slot (its note read in_progress; no integrate
               row) is its call's end (p29-12): `ready:`, a read-only approval's `merged:` and the row's Slot
@@ -229,11 +233,16 @@ Subcommands:
               75 (TRICKLE_WAKE_EXIT) after --timeout prints `trickle wait: no place kept for [[<rollout>]] within <n>
               s`; exit 2 on usage.
 
-  mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the task's merge is confirmed.
-              Stamps `merged: <time>` on a PR task with no stamp yet and removes `integrating:`. Refuses
-              any note at another status — a blocked/unmerged task can never be swept to done.
-              Idempotent (already-done = no-op). Read-only tasks never need it: reconcile writes them done
-              (and stamps `merged:`) on approval.
+  mark-done   Land task notes at `status: review`, run AFTER the task's merge is confirmed, through _land_outcome
+              (ADR 0078 d1; Proven, below): done (today's write: `status: done`, `merged: <time>` on a PR task with no
+              stamp yet, `integrating:` removed), carried (_carry_write: `status: review` with `merged:` now and a
+              Proof log line, `live:` = `merged:` on an unwatched note with `clears:`) or owed (_owed_write: `status:
+              done` for an engine that reads a carried fix as awaiting Integration), printed `<slug>: status=done`,
+              `<slug>: landed, carried (status: review; <why>)` or `<slug>: landed, carry-back owed (status: done;
+              <why>)`. --live-file names the live file (default beside the refresh job's state). Refuses any note at
+              another status — a blocked/unmerged task can never be swept to done. Idempotent (already-done and an
+              already carried fix = no-op). Read-only tasks never need it: reconcile lands them on approval (and
+              stamps `merged:`), through _land_outcome too.
 
   hand-back   A set-aside task re-enters the queue at the stage it stopped (ADR 0030 decision 4; the lead's
               *Set aside* and "retry [[task]]", and /thread:repair § 4's hand-off). A `blocked` note set
@@ -335,8 +344,11 @@ Subcommands:
               ISO stamp.
 
   resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
-              is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
-              MERGED into the repo's default branch flips the note to done with `merged:` from mergedAt.
+              is not done, merged or dropped and carries `pr:` (a carried fix is skipped first, `landed, carried
+              [no-change]`, before any gh call), ask gh for the PR's state, base and merge commit. A PR MERGED into
+              the repo's default branch lands the note through _land_outcome (done with `merged:` from mergedAt,
+              carried with its merge commit, or owed; ADR 0078 d1), its line `status=<s>->done`, `status=<s>->review:
+              landed, carried` or `status=<s>->done: landed, carry-back owed`.
               Anything else (merged into another base, OPEN, CLOSED) is reported and left alone, and so is a
               task whose `pr:` the RACE revert reverted on main (_reverted_pr: a `[no-change]` line, before any gh
               call: re-land it through a new `pr:` or defer). A task an
@@ -480,7 +492,8 @@ Subcommands:
               `auto_retry_at`, p16-4: a deferred task starts its next rollout afresh)
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
-              re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
+              re-plans them. The dependent-closure safety check lives in the /thread:repair skill. A carried fix is
+              refused (exit 1, `merged:` and `rollout:` kept): deferring it would take back a landed fix (ADR 0078).
 
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
@@ -954,6 +967,33 @@ Subcommands:
               hold line names, or a failed save. Every slug already acked writes nothing (`[no-change]`). It reads no
               task note and writes no event.
 
+  prove       A fix is done only once Proven (ADR 0078 d1; vault-grammar § Proven): `prove (--all | --rollout N |
+              --tasks a,b) [--tasks-dir D] [--live-file F] [--now T] [--dry-run] [--json] [--gh-bin gh | --no-gh]
+              [--land [--pr URL | --commit SHA --repo DIR | --no-code]] [--seen TEXT [--item N] [--on-his-word]]`.
+              One walk per call (_walk_of, Archive included, never shared: prove writes notes). It judges carried fixes
+              in the tasks dir's root only, and carries back the candidates (_carry_back_candidate) in the root and
+              Archive/ (never Archive/Rollouts/): an archived one is moved back to the root first (_move_no_clobber),
+              then written `status: review` with `completed:` removed and judged in the same pass. Its phase, when
+              done, is reopened only once the judge leaves it carried (_carry_back_close, then _reopen_phases:
+              `status: open`, `completed:` removed, moved back from Work/Phases/Archive/ first, so the daily sweep
+              closes it again once its last fix is Proven); one proven in the same pass leaves its phase as it is.
+              prove never closes a phase. A carried fix in Archive/ is reported `archived while carried: not judged`.
+              The judge (_prove_judge): its readers re-check (_carry_readers
+              False -> _owed_write), a RACE revert (never Live), the merge commit (merge_commit:, else gh,
+              PROVE_GH_TIMEOUT), Live (a live entry's head holds it: `live: <now>`; unwatched: `live:` = `merged:`),
+              then each clears: item (_item_moved); every item moved, or none -> `status: done`, `proven: <date>`, no
+              completed: and no phase write. --seen records `seen item <N> "<text>": <evidence> (agent|Lachy)` on one
+              Live carried fix (a link item only --on-his-word). --land lands one note (a MERGED PR into the default
+              branch, --commit, or --no-code) through _land_outcome: done, carried (then judged) or owed. Output: one
+              line per note, then `prove: <c> carried, <p> proven, <b> carried back, <o> owed, <w> waiting carry-back`;
+              --json {carried, owed, carryBack, proven, carriedBack, landed (--land), errors}, the three lists the
+              state the pass leaves. --all off --dry-run writes carried-fixes.json beside the live file, only when it
+              changes. Exit 0 it ran (--all reports per-note problems as waits); 1 a named note not found, not
+              carried (--seen: `ERROR: prove: <slug>: not a carried fix (<why>): nothing recorded`, a note whose
+              carry-back waits or fails, that the re-check turns owed or filed under Archive/Rollouts/ included),
+              archived while carried, not merged (--land) or --seen refused; 2 usage. Guard-exempt (the Engine
+              snapshot guard, below); it writes no Run-record event.
+
   moving      The Watchdog's reading (ADR 0048, p29-7; status SKILL.md § The Watchdog's reading, which carries the
               safety wording's one copy): `--rollout <note> [--tasks-dir D] [--now ISO] [--stall-after MIN]
               [--gh-bin gh]`. One compact JSON line, {rollout, verdict, cause, reason, lastEvent, ageMinutes,
@@ -1063,7 +1103,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   mark-integrating  lane-taken, on every successful call; on an origin-lane refusal (exit 4, ADR 0064) with this
                     rollout's record lane open on the task (or the record unreadable): hold-ended hold=merge when one is
                     open, then lane-freed release=origin origin=<owner/name>.
-  mark-done         (a note not already done) hold-ended race / merge for each the record shows open; then,
+  mark-done         (a note not already done or carried; every outcome: done, carried or owed) hold-ended race /
+                    merge for each the record shows open; then,
                     when it held the lane, lane-freed release=merge with path, triggers and conflict from
                     the Integration log's last line when it is the current Integration's (startedAt at or
                     after `ready:`; otherwise left out); then merged pr=.
@@ -1141,6 +1182,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
+  prove             none: its writes are proof stamps and landings the next queue read sees; mark-done's landing events
+                    are the queue's.
   record-verify     (p29-9) flake {test, repo, sha, site, followup, count} per new Flake log line (_record_flakes);
                     suite-timeout {site, run, seconds, sha?} for a timeout. reconcile writes flake events too, from a
                     row's `flakes` (the row-field mapping below).
@@ -1205,6 +1248,7 @@ this module has no side effects: reconcile-project.py loads `Note` from it.
 
 Queue states (one per linked task, re-read on every call):
   done                                        -> merged
+  review + merged: (a carried fix, valued)    -> merged (ADR 0078 d1: landed, awaiting proof)
   review + pr:                                -> integrating (with `integrating:`), else awaiting-integration
   review, no pr:, scope read-only             -> merged (a legacy read-only approval)
   review, no pr:, any other scope             -> set-aside ("approved without a PR")
@@ -1504,7 +1548,8 @@ it pairs with an open prior.
 
 Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
-                    read-only with no PR -> status: done instead;
+                    read-only with no PR -> landed through _land_outcome instead (status: done; a fix with
+                    clears: carried or owed, ADR 0078 d1);
                     `ready: <stamp>` (overwriting any earlier one) on a move to review from another status,
                     non-read-only, and NOT for a row carrying `integration`: readyAt is when the approving
                     own (or seeded revise) call returned, per the engine header, so the stamp is that
@@ -1636,24 +1681,28 @@ open or close a run (the sha stays over the content as given). See Note.append_r
 already written is ever deleted.
 
 The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb that names a note, but `status`,
-`fold-journals`, `moving` and `join`, first asks engine-snapshot.py, loaded from this tree, about each rollout the call
-acts on: guard() on the note its
+`fold-journals`, `moving`, `join` and `prove`, first asks engine-snapshot.py, loaded from this tree, about each rollout
+the call acts on: guard() on the note its
 --rollout (carry: its --from) names (lane-hold and lane-ack require it), and guard_task() on each --tasks slug's note
 and, for `reconcile`, each result row's task note (the rollout its `rollout:` names), so a task-keyed verb run with
 --rollout left off (hand-back, mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold,
 defer, approve-gates, reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live
 note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
 command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
-that names no rollout (or one not found), pass from any root. The four exemptions run from any root: `status` writes
+that names no rollout (or one not found), pass from any root. The five exemptions run from any root: `status` writes
 nothing (/thread:status and the estate scan read every rollout with it), `moving` writes nothing either and is the
 Watchdog's reading of any rollout from any root, `fold-journals` never reads the note
 and writes only call-journal lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
 state) that reflect folds across rollouts from its own root, and `join` (ADR 0078 d6) is run by a newer
 /thread:schedule on a running rollout whose snapshot predates the verb, and writes only the forms every protocol-5
 engine reads (a `## Queue` row whose Mode starts `joined `, a `- <slug>: a, b` `## File-sets` line, a task's `rollout:`
-stamp) under the same note lock, a cross-version contract that changes only by migration. `triggers` names no note (no
---rollout, no --tasks), so `_guarded_notes` finds nothing to ask about and it runs from any root, unguarded. `due`
-writes nothing; `fire` writes only the `fired:` of the one `when:` entry it ran.
+stamp) under the same note lock, a cross-version contract that changes only by migration, and `prove`'s judge writes
+only proof stamps, which every engine reads as landed, while each write a queue reads is gated per note by
+_carry_readers (the note's own rollout and the rollouts of its unstarted dependants): when that gate reads False,
+`--land` and its readers re-check write the old engine's own form (owed) and a carry-back waits, so it works across
+versions by design, like fold-journals (status's Carried line, reflect § 17 and close run it from the session's own
+root). `triggers` names no note (no --rollout, no --tasks), so `_guarded_notes` finds nothing to ask about and it runs
+from any root, unguarded. `due` writes nothing; `fire` writes only the `fired:` of the one `when:` entry it ran.
 """
 
 import argparse
@@ -2864,9 +2913,10 @@ def _scope(note) -> str:
 
 
 def _landed(note) -> bool:
-    """Merged for the queue: done, or a read-only task approved with nothing to merge."""
+    """Merged for the queue: done, a carried fix (review with a valued `merged:`, ADR 0078 d1: landed, awaiting proof),
+    or a read-only task approved with nothing to merge."""
     st = _status(note)
-    return st == "done" or (st == "review" and not _pr(note) and _scope(note) == "read-only")
+    return st == "done" or _carried_fix(note) or (st == "review" and not _pr(note) and _scope(note) == "read-only")
 
 
 # ---- the rollout's linked tasks ----------------------------------------------
@@ -2878,7 +2928,8 @@ class _Walk:
     entry and no error); `notes` path -> Note for each entry; `stems` stem (lowercased) -> [(path, Note)], in walk
     order; `index` stem (lowercased)
     -> (path, Note), a root copy preferred over an archived one; `by_rollout` the lowercased slug a note's
-    `rollout:` names -> [(path, Note)], in walk order."""
+    `rollout:` names -> [(path, Note)], in walk order; `dependants` (lazy: built on first read) each unit -> the
+    entries whose dependencies name it (_carry_readers, ADR 0078 d1)."""
 
     def __init__(self, tasks_dir: Path):
         self.tasks_dir = tasks_dir
@@ -2903,6 +2954,21 @@ class _Walk:
             slug = (_wikilink_slug(note.get("rollout")) or "").lower()
             if slug:
                 self.by_rollout.setdefault(slug, []).append(entry)
+        self._dependants = None
+
+    @property
+    def dependants(self):
+        """Lazy, built on first read only (so the queue's walks never build it): each lowercased unit -> [(path, Note)]
+        for every entry whose _dep_entries (`depends-on` + `blocked-by`) names it, each named slug resolved through
+        _fold_unit as _dep_status resolves it, so a dependant naming a folded member counts against the combined unit.
+        An unreadable note (`errors`) is no entry, so it is no dependant (_carry_readers' read)."""
+        if self._dependants is None:
+            deps = {}
+            for path, note in self.entries:
+                for dep in _dep_entries(note):
+                    deps.setdefault(_fold_unit(dep, self.index)[0].lower(), []).append((path, note))
+            self._dependants = deps
+        return self._dependants
 
 
 # The per-process walk share (p41-2): None (the default) walks the tasks dir afresh on every read; a dict, once
@@ -2968,6 +3034,8 @@ def _queue_state(note):
     st = _status(note)
     if st == "done":
         return "merged", None
+    if _carried_fix(note):
+        return "merged", None   # landed, carried (ADR 0078 d1): its PR merged; prove writes it done once Proven
     if st == "review":
         if _pr(note):
             return ("integrating" if _scalar(note.get("integrating")) else "awaiting-integration"), None
@@ -3356,7 +3424,7 @@ UNVERIFIED_MARK = "UNVERIFIED:"
 
 def _race_marks(rollout_note, linked):
     """{slug_lower: (slug, kind, decided)} for every linked task a RACE or UNVERIFIED marks, decided or not (the
-    module docstring's "Race holds"). RACE: a note not done, merged or dropped whose slug a wikilink names on a line
+    module docstring's "Race holds"). RACE: a note not done, merged, dropped or a carried fix whose slug a wikilink names on a line
     of the rollout's `## Race log`. UNVERIFIED: a set-aside note whose latest run (_blocker_summary) carries
     `UNVERIFIED:`. RACE wins when both apply. `decided` is True when a `repair: [[<slug>]] RACE decided:` line in the
     rollout's `## Notes` lifts it; a decision recorded anywhere else never does. `linked` is _scan's (path, Note)
@@ -3375,7 +3443,7 @@ def _race_marks(rollout_note, linked):
     marks = {}
     for path, note in linked:
         key = path.stem.lower()
-        if key in raced and _status(note) not in FINISHED_STATUSES:
+        if key in raced and _status(note) not in FINISHED_STATUSES and not _carried_fix(note):
             marks[key] = (path.stem, "RACE", key in decided)
         elif _queue_state(note)[0] == "set-aside" and UNVERIFIED_MARK in _blocker_summary(note):
             marks[key] = (path.stem, "UNVERIFIED", key in decided)
@@ -4008,6 +4076,14 @@ def cmd_reconcile(args) -> int:
     errors = []
     warnings = []
     top = None  # (name, source) of the ladder's top rung, read once, only for a pre-3.0.0 row
+    walk = None
+
+    def lazy_walk():  # one walk per call, taken only on a read-only fix's carried verdict (_land_outcome)
+        nonlocal walk
+        if walk is None:
+            walk = _walk_of(tasks_dir)
+        return walk
+
     for task in tasks:
         integ = task.get("integration")
         if args.no_verdict and isinstance(integ, dict) and integ.get("outcome") == "integrated":
@@ -4041,10 +4117,13 @@ def cmd_reconcile(args) -> int:
         ended = _call_end(rollout, slug, now) if ends_slot else None
         at = ended or now
         stamped = []  # the call-end stamps this row writes, for its line
-        # A read-only task is done when its review approves: nothing to merge, so it never enters
-        # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
+        # A read-only task lands when its review approves: nothing to merge, so it never enters
+        # Integration (ADR 0030). The row's scope wins; the note's own is the fallback. `note_status` is the row's
+        # verdict (its events and line): a read-only approval is its landing, whatever _land_outcome writes below.
         scope = _scalar(task.get("scope")).lower() or _scope(note)
-        note_status = "done" if (status == "review" and not pr and scope == "read-only") else status
+        ro_land = status == "review" and not pr and scope == "read-only"
+        note_status = "done" if ro_land else status
+        landed_before = prior == "done" or _carried_fix(note)  # a re-reconcile lands nothing twice
         # `ready:` is when the task joined the Integration queue: the approving own (or seeded revise)
         # call returned (the engine's readyAt), so it is that call's end (p29-12). Stamped on a move to review
         # from another status, overwriting any earlier value; never on a read-only task (it never enters
@@ -4055,13 +4134,33 @@ def cmd_reconcile(args) -> int:
             note.set("ready", _stamp(at))
             ready_stamped = True
             stamped.append(f"ready={_stamp(at)}")
-        note.set("status", note_status)
-        # Its approval is its completion, so it is stamped `merged:` as a PR task is at its merge (the
-        # first stamp wins), at its call's end: its duration then counts in the timeline, and a read-only
-        # task finishing last ends the rollout's elapsed time.
-        if note_status == "done" and not _scalar(note.get("merged")):
-            note.set("merged", _stamp(at))
-            stamped.append(f"merged={_stamp(at)}")
+        ro_said = ""
+        if ro_land:
+            # Its approval is its landing, so it is stamped `merged:` as a PR task is at its merge (the first stamp
+            # wins), at its call's end: its duration then counts in the timeline, and a read-only task finishing last
+            # ends the rollout's elapsed time. It lands through _land_outcome (ADR 0078 d1), as mark-done's landing
+            # does, with no code (never watched, so no live file is read; the walk only on a carried verdict): done
+            # (today's write), carried (a fix with `clears:`, written review with `merged:` and `live:` = `merged:`)
+            # or owed. A note already landed (done, or a carried fix) is no change.
+            merged_before = note.get("merged")
+            if prior == "done":
+                _done_write(note, _stamp(at))
+            elif _carried_fix(note):
+                ro_said = "; already landed, carried"
+            else:
+                outcome, live_at_merge, why = _land_outcome(note, tasks_dir, None, lazy_walk, no_code=True)
+                if outcome == "done":
+                    _done_write(note, _stamp(at))
+                elif outcome == "carried":
+                    _carry_write(note, _stamp(at), None, live_at_merge, why, now)
+                    ro_said = f"; landed, carried: {why}"
+                else:
+                    _owed_write(note, _stamp(at), None, why, now)
+                    ro_said = f"; {OWED_MARK}: {why}"
+            if note.get("merged") != merged_before:
+                stamped.append(f"merged={_stamp(at)}")
+        else:
+            note.set("status", note_status)
         if stamped and ended is None:
             stamped.append("(fallback)")
         # Whatever Integration this task was in, the run that produced this row ended it.
@@ -4194,13 +4293,14 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: cannot write {path}: {e} — nothing written for this row")
             continue
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
-                          ready_stamped, ended, now)
+                          ready_stamped, ended, now, landed_before=landed_before)
         _review_verdict_events(args, rollout, slug, task, prior, ended, now)
         flake_lines = _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
-        ro = " (read-only, approved)" if note_status != status else ""
+        ro = f" (read-only, approved{ro_said})" if ro_land else ""
         when = "".join(" " + s for s in stamped)
-        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{when}"
+        shown = _status(note) if ro_land else note_status  # what the note reads: a carried fix stays at review
+        print(f"{slug}: status={shown}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{when}"
               f"{flag}")
         for line in flake_lines:
             print(line)
@@ -6871,6 +6971,9 @@ def cmd_mark_started(args) -> int:
         if status in FINISHED_STATUSES:
             args._errors.append(f"{slug}: status is {status!r} — refusing to mark started")
             continue
+        if _carried_fix(note):
+            args._errors.append(f"{slug}: landed, carried: its PR merged — refusing to mark started")
+            continue
         rollout, start = _note_rollout(note), _start_kind(note, args.start)  # read before the writes
         sw = _surface_wait_read(rollout) if rollout else ("none", None, None)
         if sw[0] != "none":
@@ -7088,7 +7191,7 @@ def _origin_waiter_valid(e, tasks_dir: Path, leases) -> bool:
     parallel, neither done nor dropped and not paused, its lease reads fresh, its Run record is readable with no open
     halt, no surface-wait marker on its rollout (readable or not, P41-3) unless its task is already integrating
     (`integrating:`: an Integration not yet begun never begins under a surface wait), and its task note is `review`
-    with a `pr:` whose `rollout:` names that rollout."""
+    with a `pr:`, not a carried fix (its PR merged), whose `rollout:` names that rollout."""
     path = tasks_dir / f"{e['rollout']}.md"
     try:
         note = Note(path) if path.is_file() else None
@@ -7105,7 +7208,7 @@ def _origin_waiter_valid(e, tasks_dir: Path, leases) -> bool:
     lines = _record_read(path.stem)
     if lines is None or _open_halt(lines):
         return False
-    return _status(task) == "review" and bool(_pr(task)) and \
+    return _status(task) == "review" and bool(_pr(task)) and not _carried_fix(task) and \
         (_wikilink_slug(task.get("rollout")) or "").lower() == path.stem.lower()
 
 
@@ -7209,6 +7312,9 @@ def cmd_mark_integrating(args) -> int:
         wall = datetime.now().astimezone()
         for slug, _path, note in notes:
             status = _status(note)
+            if _carried_fix(note):
+                args._errors.append(f"{slug}: landed, carried: its PR merged — refusing to mark integrating")
+                continue
             if status != "review" or not _pr(note):
                 args._errors.append(f"{slug}: status is {status!r}{'' if _pr(note) else ' with no pr:'}, "
                                     f"not 'review' with a PR — refusing to mark integrating")
@@ -7297,6 +7403,9 @@ def cmd_origin_wait(args) -> int:
             print(f"origin lane: nothing to wait for: {slug}: {e}")
             return 0
         rollout = _note_rollout(note)
+        if _carried_fix(note):
+            print(f"ERROR: origin-wait: {slug}: landed, carried: its PR merged; nothing to wait for", file=sys.stderr)
+            return 1
         if _status(note) != "review" or not _pr(note):
             print(f"origin lane: nothing to wait for: [[{slug}]] left the Integration queue (status "
                   f"{_status(note) or 'none'}{'' if _pr(note) else ', no pr:'})")
@@ -7372,28 +7481,55 @@ def cmd_trickle_wait(args) -> int:
 
 
 def cmd_mark_done(args) -> int:
-    """review -> done once the task's merge is confirmed; stamps `merged:` on a PR task (first wins)
-    and removes `integrating:`. Read-only tasks never need it: reconcile writes them done on approval
-    (a legacy read-only note still at review is flipped like any other)."""
+    """A `review` note lands once the task's merge is confirmed, through _land_outcome (ADR 0078 d1): done (today's
+    write: `status: done`, `merged:` on a PR task, first wins, `integrating:` removed), carried (_carry_write: review
+    with `merged:` now, prove reads its merge commit later) or owed (_owed_write: `status: done` for an engine that reads
+    a carried fix as awaiting Integration). The landing events fire in every outcome. An already carried fix is no
+    change. Read-only tasks never need it: reconcile lands them on approval, through _land_outcome too (a legacy
+    read-only note still at review is landed like any other)."""
     now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    live = walk = None
+    live_read = False
+
+    def lazy_walk():
+        nonlocal walk
+        if walk is None:
+            walk = _walk_of(tasks_dir)
+        return walk
+
     for slug, _path, note in _each_note(args):
         status = note.get("status")
         if _status(note) == "done":
             print(f"{slug}: already done [no-change]")
+            continue
+        if _carried_fix(note):
+            print(f"{slug}: already landed, carried [no-change]")
             continue
         if _status(note) != "review":
             # Only a `review` note is "landed, awaiting confirmation". Anything else means the
             # caller's picture of the rollout is stale — refuse rather than mask a blocked/unmerged task.
             args._errors.append(f"{slug}: status is {status!r}, not 'review' — refusing to mark done")
             continue
+        if not live_read:
+            live, why = _live_read(_live_file(args.live_file))
+            if why:
+                print(f"WARN: mark-done: {why}: every repo reads watched (fail closed)", file=sys.stderr)
+            live_read = True
         held, lane_fields = _holds_lane(note), _lane_fields_from_log(note)  # read before the flip
-        note.set("status", "done")
-        if _pr(note) and not _scalar(note.get("merged")):
-            note.set("merged", _stamp(now))
-        note.remove("integrating")
+        outcome, live_at_merge, why = _land_outcome(note, tasks_dir, live, lazy_walk)
+        if outcome == "done":
+            _done_write(note, _stamp(now) if _pr(note) else None)
+            said = "status=done"
+        elif outcome == "carried":
+            _carry_write(note, _stamp(now), None, live_at_merge, why, now)
+            said = f"landed, carried (status: review; {why})"
+        else:
+            _owed_write(note, _stamp(now), None, why, now)
+            said = f"{OWED_MARK} (status: done; {why})"
         note.save(dry_run=args.dry_run)
         _landed_events(_note_rollout(note), slug, held, lane_fields, _pr(note), args)
-        print(f"{slug}: status=done" + (" (dry-run)" if args.dry_run else " [written]"))
+        print(f"{slug}: {said}" + (" (dry-run)" if args.dry_run else " [written]"))
     return _finish(args, now)
 
 
@@ -7535,6 +7671,9 @@ def cmd_log_integration(args) -> int:
     started = args.started.strip()
     ended = now.astimezone().isoformat(timespec="seconds")
     for slug, _path, note in _each_note(args):
+        if _carried_fix(note):
+            args._errors.append(f"{slug}: landed, carried: its PR merged — refusing to log an Integration")
+            continue
         if _status(note) != "review" or not _pr(note):
             args._errors.append(f"{slug}: status is {_status(note) or 'none'!r}{'' if _pr(note) else ' with no pr:'}, "
                                 "not 'review' with a PR — refusing to log an Integration")
@@ -7582,8 +7721,9 @@ def _project_root(rollout_note):
 
 
 def cmd_resume(args) -> int:
-    """Mark done every linked task whose PR MERGED into the repo's default branch but whose note was
-    never marked (an in_progress, review or set-aside note). Checks state AND base: a PR merged into a
+    """Land every linked task whose PR MERGED into the repo's default branch but whose note was never marked (an
+    in_progress, review or set-aside note), through _land_outcome (ADR 0078 d1): done, carried (with the PR's merge
+    commit) or owed. A carried fix is skipped before any gh call. Checks state AND base: a PR merged into a
     stacked or other branch is not landed. A task an undecided RACE or UNVERIFIED holds (_race_holds) is
     skipped before any gh call, with one stderr `HOLD:` line naming it and `/thread:repair`: main holds a
     combination nobody verified, and only Lachy's `RACE decided:` line releases it. Exit 3 when any task
@@ -7600,9 +7740,19 @@ def cmd_resume(args) -> int:
     marks = _race_marks(rollout_note, linked)
     race = {k: (s, kind) for k, (s, kind, decided) in marks.items() if not decided}  # _race_holds, read once
     defaults, errors, held = {}, [], []
+    live, live_read, walk = None, False, []
+
+    def lazy_walk():   # one walk for every carried verdict of this call, taken only on the first
+        if not walk:
+            walk.append(_walk_of(tasks_dir))
+        return walk[0]
+
     for path, note in linked:
         slug, status, pr = path.stem, _status(note), _pr(note)
         if status in FINISHED_STATUSES or not pr:
+            continue
+        if _carried_fix(note):
+            print(f"{slug}: landed, carried [no-change]")
             continue
         if slug.lower() in race:
             held.append(f"HOLD: [[{slug}]] {race[slug.lower()][1]} undecided: no \"repair: [[{slug}]] RACE decided:\" "
@@ -7625,7 +7775,7 @@ def cmd_resume(args) -> int:
         else:
             errors.append(f"{slug}: pr: {pr!r} is neither a GitHub PR URL nor a PR number")
             continue
-        raw, err = _gh(args.gh_bin, ["pr", "view", ref, "--json", "state,mergedAt,baseRefName,url"], cwd)
+        raw, err = _gh(args.gh_bin, ["pr", "view", ref, "--json", "state,mergedAt,baseRefName,url,mergeCommit"], cwd)
         if err is None:
             try:
                 info = json.loads(raw)
@@ -7652,18 +7802,30 @@ def cmd_resume(args) -> int:
             print(f"{slug}: PR {ref} merged into {base!r}, not the default branch {default!r} [no-change]")
             continue
         lane_held, lane_fields = _holds_lane(note), _lane_fields_from_log(note)  # read before the flip
-        note.set("status", "done")
-        if not _scalar(note.get("merged")):
-            merged_at = _parse_ts(info.get("mergedAt"))
-            if merged_at is not None:
-                note.set("merged", _stamp(merged_at))
-        note.remove("integrating")
+        if not live_read:
+            live, lwhy = _live_read(_live_file(args.live_file))
+            if lwhy:
+                print(f"WARN: resume: {lwhy}: every repo reads watched (fail closed)", file=sys.stderr)
+            live_read = True
+        merged_at = _parse_ts(info.get("mergedAt"))
+        oid = (info.get("mergeCommit") or {}).get("oid") if isinstance(info.get("mergeCommit"), dict) else None
+        oid = oid if isinstance(oid, str) and re.fullmatch(r"[0-9a-f]{40}", oid) else None
+        outcome, live_at_merge, why = _land_outcome(note, tasks_dir, live, lazy_walk)
+        if outcome == "done":
+            _done_write(note, _stamp(merged_at) if merged_at is not None else None)
+            landed_as = f"status={status or 'none'}->done"
+        elif outcome == "carried":
+            _carry_write(note, _stamp(merged_at or now), oid, live_at_merge, why, now)
+            landed_as = f"status={status or 'none'}->review: landed, carried"
+        else:
+            _owed_write(note, _stamp(merged_at or now), oid, why, now)
+            landed_as = f"status={status or 'none'}->done: {OWED_MARK}"
         note.save(dry_run=args.dry_run)
         mark = marks.get(slug.lower())
         if mark is not None:  # a decided RACE or UNVERIFIED (an undecided one was held above): Lachy's decision landed it
             _record_decision(_note_rollout(note), slug, mark[1], "resume", args)
         _landed_events(_note_rollout(note), slug, lane_held, lane_fields, pr, args, running=status == "in_progress")
-        print(f"{slug}: status={status or 'none'}->done (PR {ref} merged into {default})" + _flag(args, note))
+        print(f"{slug}: {landed_as} (PR {ref} merged into {default}{'; ' + why if why else ''})" + _flag(args, note))
     print(_progress_for(rollout_path, tasks_dir, now))
     for line in held:
         print(line, file=sys.stderr)
@@ -8987,8 +9149,9 @@ def _holds_lane(note) -> bool:
     """The note holds the Integration lane: `review` with a `pr:` and either `integrating:` (step 3 to step 4), or
     the Integration log's last line `integrated` with a startedAt at or after `ready:` (the window an integrate
     call's reconciled row leaves, since reconcile removes `integrating:`). A hand-back restamps `ready:` after its
-    old integrated line, so it reads as not holding; a `-` startedAt (legacy) reads as not holding."""
-    if _status(note) != "review" or not _pr(note):
+    old integrated line, so it reads as not holding; a `-` startedAt (legacy) reads as not holding. A carried fix
+    (_carried_fix) never holds it: its PR merged."""
+    if _status(note) != "review" or not _pr(note) or _carried_fix(note):
         return False
     if _scalar(note.get("integrating")):
         return True
@@ -9370,14 +9533,16 @@ def _call_end_mark(ended, now):
 
 
 def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped,
-                      ended, now):
+                      ended, now, landed_before=False):
     """One row's events, against the note's status (`prior`), _holds_lane (`held`) and the Integration log's lane
     fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes. A row that ends a
     Slot is its call's end (p29-12): its slot-freed, ready, merged, set-aside and quota-stall (and its review-verdict
     events, _review_verdict_events) are stamped at `ended` (_call_end) with `stamp: call-end` and the reconcile's own
     clock as `reconciledAt`, or, with no end read, at the reconcile's clock with `stamp: fallback`
     (_call_end_mark); a ready or merged on any other row is a fallback too. The lane's events are the lead's (ADR
-    0030): at the reconcile's clock, unmarked."""
+    0030): at the reconcile's clock, unmarked. A read-only approval (`note_status` done) fires its landing's merged
+    in every _land_outcome outcome, carried and owed included, as mark-done's does; `landed_before` (the note read done
+    or a carried fix before this row) fires none: a re-reconcile lands nothing twice."""
     if args.dry_run or not rollout:
         return
     integ = task.get("integration") if isinstance(task.get("integration"), dict) else None
@@ -9404,7 +9569,7 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
         _event(rollout, "slot-freed", slug, {"outcome": outcome_s, **mark}, args, ts=end_ts)
     if ready_stamped:
         _event(rollout, "ready", slug, {**({"pr": pr} if pr else {}), **mark}, args, ts=end_ts)
-    if note_status == "done" and prior != "done":
+    if note_status == "done" and prior != "done" and not landed_before:
         _event(rollout, "merged", slug, {"readOnly": True, **mark}, args, ts=end_ts)
     rejected = integ is not None and outcome == "rejected"
     if held and not (integ is not None and outcome == "integrated"):
@@ -10123,6 +10288,10 @@ def cmd_defer(args) -> int:
             if cur and cur != expected:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
+        if _carried_fix(note):
+            # Deferring would clear `merged:` and `rollout:`: it would quietly take back a landed fix (ADR 0078 d1).
+            errors.append(f"{slug}: landed, carried: its PR merged — refusing to defer (merged: and rollout: kept)")
+            continue
         # Read before anything is cleared: `rollout:` goes, and with it the only way to record the frees.
         rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
         note.set("status", "open")
@@ -14461,6 +14630,1179 @@ def _wait_seconds(v):
     return n
 
 
+# ---- Proven (ADR 0078 d1; vault-grammar § Proven): a fix is done only once Proven ----------------------------------
+# A carried fix is a task note at `status: review` with a valued `merged:` (_carried_fix). The queue reads it as landed
+# (_landed, _queue_state), so its dependants start; `prove` writes it done, with `proven:`, once it is Live (the
+# Primary holds its merge, read from the Primary refresh's live file) and each `clears:` item has moved since. Every
+# landing writer (mark-done, resume, reconcile's read-only approval, prove --land, reconcile-project's apply) asks
+# _land_outcome for one of three outcomes: done (today's write), carried (_carry_write) or owed (_owed_write: the old
+# engine's own landed form, while an engine that reads the note would read a carried fix as awaiting Integration).
+
+CLEARS_KEY = "clears"
+PROOF_LOG_SECTION = "## Proof log"
+OWED_MARK = "landed, carry-back owed"     # the text carry-back's candidate test matches in a Proof log's last entry
+LIVE_FILE_NAME = "primary-live.json"      # primary-refresh.py writes it beside its state file: {v: 1, live: {...}}
+CARRIED_FILE_NAME = "carried-fixes.json"  # prove --all writes it beside the live file: the Stage line's input
+PROVE_GH_TIMEOUT = 20                     # seconds for each gh call prove makes
+PROVE_GIT_TIMEOUT = 30                    # seconds for each git read prove makes (merge-base --is-ancestor)
+SEEN_MAX = 300                            # a --seen evidence line's most characters
+SUPERSEDE_HOPS = 10                       # a [[rollout]] item's superseded_by: chain is followed this far at most
+# The marker _engine_reads_carried greps for in an engine's own copy of this file: an engine whose reconcile-rollout.py
+# has this exact line reads a carried fix as landed. Never rename it, change its value or reference it in code.
+PROVEN_ENGINE = 1
+PROVEN_MARK_RE = re.compile(r"^PROVEN_ENGINE = 1$", re.M)
+CLEARS_LINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
+DATE_ONLY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+LEG_MOVE_RE = re.compile(r"^- (\S+) Leg \d+ (?:began:|closed:|done\b)")
+HEX_SHA_RE = re.compile(r"[0-9a-f]{7,40}")
+MOVE_KEYS = ("started", "ready", "integrating", "merged")   # a rollout item's task moved (+ completed for a task item)
+
+
+def _carried_fix(note) -> bool:
+    """The core rule (vault-grammar § Proven): `status: review` with a valued `merged:` (_valued: not empty, `null` or
+    `~`). The queue reads it as landed; it is not done until `prove` stamps `proven:`."""
+    return _status(note) == "review" and _valued(note.get("merged"))
+
+
+def _clears_item(raw: str) -> str:
+    """One `clears:` item's text: a double-quoted item up to its closing unescaped `"`, `\\"` and `\\\\` decoded (a
+    YAML escape _yaml_uncomment's quote toggle would pair wrongly); a single-quoted item with `''` decoded; anything else
+    through _yaml_uncomment then _yaml_unquote."""
+    s = raw.strip()
+    if s[:1] == '"':
+        out, i = [], 1
+        while i < len(s):
+            ch = s[i]
+            if ch == "\\" and s[i + 1:i + 2] in ('"', "\\"):
+                out.append(s[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                break
+            out.append(ch)
+            i += 1
+        return "".join(out).strip()
+    if s[:1] == "'":
+        out, i = [], 1
+        while i < len(s):
+            if s[i] == "'":
+                if s[i + 1:i + 2] == "'":
+                    out.append("'")
+                    i += 2
+                    continue
+                break
+            out.append(s[i])
+            i += 1
+        return "".join(out).strip()
+    return _yaml_unquote(_yaml_uncomment(s))
+
+
+def _clears(note):
+    """[(kind, text)]: a note's `clears:` items, read through its frontmatter block (fm_block's span, plus any `- ` lines
+    at column 0 right after it). A block list (`clears:` then `- <item>` lines, the form every vault note uses) gives one
+    item per line; a flow list `[...]` is split at its commas outside quotes (_flow_items); a scalar on the `clears:` line
+    is one item. A block or scalar item is never split at commas. An item that is exactly one `[[link]]` is ("link",
+    slug); anything else ("line", text). Empty items are dropped, so `clears: []` or a bare `clears:` has none."""
+    span = note._fm_span(CLEARS_KEY)
+    if span is None:
+        return []
+    i, j = span
+    while j < len(note._fm) and re.match(r"^-(?:\s|$)", note._fm[j]):
+        j += 1
+    lines = note._fm[i:j]
+    head = lines[0][len(CLEARS_KEY) + 1:].strip()
+    raws = []
+    if head and not head.startswith("#"):
+        if head.startswith("[") and not head.startswith("[["):
+            inner = _yaml_uncomment(head)
+            inner = inner[1:-1] if inner.startswith("[") and inner.endswith("]") else inner[1:]
+            raws = _flow_items(inner)
+        else:
+            raws = [head]
+    else:
+        for line in lines[1:]:
+            m = re.match(r"^\s*-(?:\s+(.*))?$", line)
+            if m:
+                raws.append(m.group(1) or "")
+    items = []
+    for raw in raws:
+        text = _clears_item(raw)
+        if not text:
+            continue
+        if CLEARS_LINK_RE.fullmatch(text):
+            slug = _wikilink_slug(text)
+            if slug:
+                items.append(("link", slug))
+                continue
+        items.append(("line", text))
+    return items
+
+
+def _item_label(kind, text) -> str:
+    return f"[[{text}]]" if kind == "link" else f'"{text}"'
+
+
+def _repo_key(origin):
+    """The lowercased <owner>/<name> of an origin URL (ORIGIN_SLUG_RE): only ever an origin, never a `pr:` value (the
+    regex is anchored at the end, so a PR URL would read `pull/<n>`)."""
+    m = ORIGIN_SLUG_RE.search(str(origin or "").strip())
+    return m.group(1).lower() if m else None
+
+
+def _note_repo(note, tasks_dir):
+    """(repo, why): the lowercased <owner>/<name> a landing's code went to, else (None, why) when it cannot be read, else
+    (None, None) for no code. A `pr:` PR URL gives PR_URL_RE's group 1; a bare `pr: #N` the origin of the note's rollout's
+    Project root (_origin_of_root); any other `pr:` cannot be read; with no `pr:`, a valued `merge_repo:` (written by
+    `prove --land --commit --repo DIR`)."""
+    pr = _pr(note)
+    if pr:
+        m = PR_URL_RE.match(pr)
+        if m:
+            return m.group(1).lower(), None
+        n = PR_NUM_RE.match(pr)
+        if n:
+            o = _origin_of_root(_rollout_root(tasks_dir, _note_rollout(note)))
+            return (o, None) if o else (None, f"bare pr: #{n.group(1)} with no readable Project root origin")
+        return None, f"pr: {pr} is not a PR URL"
+    mr = _scalar(note.get("merge_repo"))
+    return (mr.lower(), None) if _valued(mr) else (None, None)
+
+
+def _live_file(arg=None) -> Path:
+    """The live file: --live-file, else ${XDG_STATE_HOME:-~/.local/state}/thread/primary-live.json (the rule
+    background_job.state_path keeps for the refresh job's state file, which it sits beside)."""
+    if arg:
+        return Path(os.path.expanduser(arg))
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return Path(base) / "thread" / LIVE_FILE_NAME
+
+
+def _live_read(path):
+    """(entries, why): the live file's {<checkout>: {origin, head, branch, since, primary}}. A missing file is ({}, None):
+    nothing is watched. An unreadable or corrupt one is (None, why), which every reader takes as watched (fail closed)."""
+    try:
+        raw = Path(path).read_bytes()
+    except FileNotFoundError:
+        return {}, None
+    except OSError as e:
+        return None, f"{path} unreadable ({e})"
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        return None, f"{path} is not JSON ({e})"
+    if not isinstance(data, dict) or data.get("v") != 1 or not isinstance(data.get("live"), dict):
+        return None, f"{path} is not a v1 live file"
+    return {str(k): v for k, v in data["live"].items() if isinstance(v, dict)}, None
+
+
+def _watched(repo, rwhy, live) -> bool:
+    """A landing's repo is watched: a live entry's origin has its key. An unreadable live file is watched (fail closed),
+    and so is a repo that cannot be read (`rwhy`) while the live file has any entry."""
+    if live is None:
+        return True
+    if repo is None:
+        return bool(rwhy) and bool(live)
+    return any(_repo_key(e.get("origin")) == repo for e in live.values())
+
+
+def _serial_chain(rollout_note) -> bool:
+    """A serial chain's note (`shape: serial`), whatever its status, finished or archived included: out of scope, so
+    both _land_outcome and the carry-back test read it before any engine read."""
+    return rollout_note is not None and _shape(rollout_note) == SHAPES[1]
+
+
+def _rollout_entry(tasks_dir, slug, walk=None):
+    """(path, Note) of a rollout note: walk.index when a walk is at hand, else _find_note (root, then Archive/**); None."""
+    if not slug:
+        return None
+    if isinstance(walk, _Walk):
+        return walk.index.get(slug.lower())
+    path = _find_note(tasks_dir, slug)
+    if path is None:
+        return None
+    try:
+        return path, Note(path)
+    except (OSError, ValueError):
+        return None
+
+
+def _walk_get(walk, tasks_dir):
+    """A _Walk: the one given, a lazy holder's (a callable), else a fresh walk of tasks_dir."""
+    if walk is None:
+        return _walk_of(tasks_dir)
+    return walk() if callable(walk) else walk
+
+
+def _rollout_finished(path, note, tasks_dir) -> bool:
+    """A finished rollout runs no queue: status done or dropped, filed under Archive/ (Archive/Rollouts/ included) or a
+    valued `superseded_by:`."""
+    return _status(note) in CLOSED_ROLLOUT_STATUSES or Path(path).parent != Path(tasks_dir) or \
+        _valued(note.get("superseded_by"))
+
+
+_ENGINE_MARKERS = {}   # engine root -> (bool, why), per process (one prove, mark-done or apply call)
+_UNSTAMPED_ENGINE = {}
+
+
+def _engine_marker(root, label):
+    """(True, None) when `root`'s skills/execute/scripts/reconcile-rollout.py has the PROVEN_ENGINE marker line, else
+    (False, why): `<label> reads a carried fix as awaiting Integration`, or `engine <root> unreadable`."""
+    key = str(root)
+    if key not in _ENGINE_MARKERS:
+        try:
+            text = (Path(root) / "skills" / "execute" / "scripts" / "reconcile-rollout.py").read_text(
+                encoding="utf-8", errors="replace")
+        except OSError:
+            _ENGINE_MARKERS[key] = (False, f"engine {root} unreadable")
+        else:
+            _ENGINE_MARKERS[key] = (True, None) if PROVEN_MARK_RE.search(text) else \
+                (False, f"{label} reads a carried fix as awaiting Integration")
+    return _ENGINE_MARKERS[key]
+
+
+def _unstamped_engine(rollout_path):
+    """The verdict for an unstamped rollout's engine (_engine_reads_carried clause 3), computed once per call: every
+    unstamped rollout runs on the same root. engine-snapshot.py's engine_root holds the one copy of the rule (its
+    git_primary branch: the Primary checkout, else this running plugin root); this code keeps none of its own."""
+    if "v" not in _UNSTAMPED_ENGINE:
+        _UNSTAMPED_ENGINE["v"] = _unstamped_verdict(rollout_path)
+    return _UNSTAMPED_ENGINE["v"]
+
+
+def _unstamped_verdict(rollout_path):
+    mod = _engine_snapshot_mod()
+    if mod is None:
+        return False, "engine-snapshot.py would not load: the unstamped engine is unknown"
+    try:
+        root = mod.engine_root(str(rollout_path), str(PLUGIN_ROOT))["root"]
+        primary = mod.git_primary(str(PLUGIN_ROOT))[0]
+    except Exception as e:  # noqa: BLE001 — an engine root that cannot be read fails closed
+        return False, f"engine root unreadable: {e}"
+    if not root:
+        return False, "engine root unreadable: engine-snapshot.py names none"
+    label = "the Primary checkout" if primary and os.path.realpath(root) == os.path.realpath(primary) else \
+        "the plugin root"
+    return _engine_marker(root, f"engine {root} ({label})")
+
+
+def _engine_reads_carried(rollout_path, rollout_note, tasks_dir):
+    """(bool, why): the engine that runs this rollout reads a carried fix as landed. It reads only the engine (the
+    serial check is its callers'), its clauses in this order:
+      1. no `rollout:`, or no note -> True;
+      2. finished (status done or dropped, under Archive/, or a valued superseded_by:) -> True: it runs no queue;
+      3. unstamped (no valued engine_snapshot:) -> the marker in the engine an unstamped note runs on, engine-snapshot.py's
+         engine_root (the Primary checkout, found through git_primary from the Primary or any snapshot of it, else this
+         running plugin root): never True by default, since a held or diverged Primary is an old engine like any
+         snapshot; engine-snapshot.py that will not load, or a root that cannot be read, is False;
+      4. stamped -> the marker in `os.path.expanduser(engine_snapshot)`'s copy (no usability check: a live note's
+         unusable snapshot runs nothing until it is put back at the same sha, so a missing file fails closed)."""
+    if rollout_path is None or rollout_note is None:
+        return True, None
+    if _rollout_finished(rollout_path, rollout_note, tasks_dir):
+        return True, None
+    stamp = _scalar(rollout_note.get("engine_snapshot"))
+    if not _valued(stamp):
+        return _unstamped_engine(rollout_path)
+    root = os.path.expanduser(stamp)
+    sha = _scalar(rollout_note.get("engine_sha"))
+    return _engine_marker(root, f"engine {(sha if _valued(sha) else os.path.basename(root.rstrip('/')))[:12]}")
+
+
+def _carry_readers(note, tasks_dir, walk, memo=None):
+    """(bool, why): every engine that reads this note reads carried fixes: (a) the note's own rollout's, and (b) the
+    rollout of each dependant still to start (walk.dependants: a `depends-on:` or `blocked-by:` naming it, through a
+    folded member too, whose queue state is queued or set-aside, the set _unsatisfied gates). A running or landed
+    dependant is not checked: the old engine's dependency gate only holds a start. The first False wins; a dependant's
+    why reads `dependant [[d]] in [[r]]: <engine why>`. `memo` caches each rollout's engine read for one call."""
+    memo = {} if memo is None else memo
+
+    def engine(rollout):
+        key = (rollout or "").lower()
+        if key not in memo:
+            entry = walk.index.get(key) if key else None
+            memo[key] = _engine_reads_carried(entry[0] if entry else None, entry[1] if entry else None, tasks_dir)
+        return memo[key]
+
+    ok, why = engine(_note_rollout(note))
+    if not ok:
+        return False, why
+    stem = note.path.stem.lower()
+    for dpath, dnote in walk.dependants.get(stem, ()):
+        if dpath.stem.lower() == stem or _queue_state(dnote)[0] not in ("queued", "set-aside"):
+            continue
+        rollout = _note_rollout(dnote)
+        if not rollout:
+            continue
+        ok, why = engine(rollout)
+        if not ok:
+            return False, f"dependant [[{dpath.stem}]] in [[{rollout}]]: {why}"
+    return True, None
+
+
+def _land_outcome(note, tasks_dir, live, walk=None, no_code=False):
+    """(outcome, live_at_merge, why) for a merged landing, local (no gh call): the one verdict every landing caller
+    takes (mark-done, resume, reconcile's read-only approval, prove --land, reconcile-project's apply).
+      0. its own rollout a serial chain (any status) -> done: out of scope;
+      1-2. watched: a live entry's origin has the key _note_repo reads (an unreadable live file, or a repo that cannot be
+         read while the live file has an entry, reads watched: fail closed); `no_code` is never watched;
+      3. unwatched with no `clears:` item -> done (Live at merge, ADR 0078: done once Live);
+      4-5. unwatched with `clears:` -> a carried verdict, `live:` = `merged:` (live_at_merge); watched -> a carried
+         verdict with no `live:` yet;
+      6. a carried verdict takes the walk (`walk`: a _Walk, a lazy holder or None; so the done path never walks) and
+         asks _carry_readers: True -> carried, False -> owed, with its why."""
+    rentry = _rollout_entry(tasks_dir, _note_rollout(note), walk)
+    if rentry is not None and _serial_chain(rentry[1]):
+        return "done", False, "a serial chain: out of scope"
+    repo, rwhy = _note_repo(note, tasks_dir)
+    watched = not no_code and _watched(repo, rwhy, live)
+    clears = _clears(note)
+    if not watched and not clears:
+        return "done", False, None
+    ok, why = _carry_readers(note, tasks_dir, _walk_get(walk, tasks_dir))
+    if not ok:
+        return "owed", False, why
+    if not watched:
+        return "carried", True, (f"unwatched: Live at merge; done once its {len(clears)} clears: "
+                                 f"item{'s' if len(clears) != 1 else ''} moved")
+    what = ("the live file is unreadable" if live is None else f"repo unread: {rwhy}" if repo is None
+            else f"{repo} is watched")
+    tail = f" and its {len(clears)} clears: item{'s' if len(clears) != 1 else ''} moved" if clears else ""
+    return "carried", False, f"{what}; done once Live{tail}"
+
+
+def _done_write(note, merged=None):
+    """The done write (mark-done's today, byte for byte): `status: done`; `merged:` when given and none stands (mark-done
+    passes it on a PR task only); `integrating:` removed."""
+    note.set("status", "done")
+    if merged and not _scalar(note.get("merged")):
+        note.set("merged", merged)
+    note.remove("integrating")
+
+
+def _stamp_first(note, key, value, after):
+    """Set `key: value` only while no valued `key:` stands (the first stamp wins)."""
+    if value and not _valued(note.get(key)):
+        note.set(key, value, after=after)
+
+
+def _carry_write(note, merged, merge_commit, live_at_merge, why, now, merge_repo=None):
+    """The carried form: `status: review`; `merged:` (the first stamp wins); `merge_commit:`, `merge_repo:` when known and
+    `live:` = `merged:` when live_at_merge; `integrating:` removed; `- <now> landed, carried: <why>` under ## Proof log."""
+    note.set("status", "review")
+    _stamp_first(note, "merged", merged, ("owner", "status"))
+    _stamp_first(note, "merge_commit", merge_commit, ("merged", "status"))
+    _stamp_first(note, "merge_repo", merge_repo, ("merge_commit", "merged", "status"))
+    if live_at_merge:
+        _stamp_first(note, "live", _scalar(note.get("merged")), ("merge_repo", "merge_commit", "merged", "status"))
+    note.remove("integrating")
+    note.append_line(PROOF_LOG_SECTION, f"- {_stamp(now)} landed, carried: {why}")
+
+
+def _owed_write(note, merged, merge_commit, why, now, merge_repo=None):
+    """The owed form: the old engine's own landed form, which every engine reads as landed: `status: done`; `merged:` (the
+    first stamp wins; written with no `pr:` too, since carry-back keys on it); `merge_commit:` and `merge_repo:` when
+    known; `integrating:` removed; `- <now> landed, carry-back owed: <why>; status: done written for that engine (ADR
+    0078 d1)` under ## Proof log. It also turns a carried note owed (prove's readers re-check)."""
+    note.set("status", "done")
+    _stamp_first(note, "merged", merged, ("owner", "status"))
+    _stamp_first(note, "merge_commit", merge_commit, ("merged", "status"))
+    _stamp_first(note, "merge_repo", merge_repo, ("merge_commit", "merged", "status"))
+    note.remove("integrating")
+    note.append_line(PROOF_LOG_SECTION, f"- {_stamp(now)} {OWED_MARK}: {why}; status: done written for that engine "
+                                        "(ADR 0078 d1)")
+
+
+def _proof_entries(note):
+    """The `## Proof log`'s `- ` entries, oldest first."""
+    return [l.strip() for l in note.section_text(PROOF_LOG_SECTION).split("\n") if l.strip().startswith("- ")]
+
+
+def _note_place(path, tasks_dir):
+    """Where a walk path sits: "root" (directly in the tasks dir), "rollouts" (Archive/Rollouts/**), "archive" (the
+    rest of Archive/**) or None (anywhere else)."""
+    try:
+        parts = Path(path).relative_to(tasks_dir).parts
+    except ValueError:
+        return None
+    if len(parts) == 1:
+        return "root"
+    if parts[0] == "Archive":
+        return "rollouts" if len(parts) > 2 and parts[1] == "Rollouts" else "archive"
+    return None
+
+
+def _carry_back_candidate(path, note, tasks_dir, walk) -> bool:
+    """A note landed at `status: done` and never Proven, to carry back to review: its rollout (walk.index) is not a serial
+    chain (checked first, finished chains included); it sits in the tasks dir's root or Archive/ (never
+    Archive/Rollouts/); `status: done`, a valued `merged:`, no valued `proven:`; no `archived` tag (Lachy's set-aside)
+    and no `rollout` tag; and either (a) a non-empty `clears:` with no `## Proof log`, or (b) its Proof log's last entry
+    holds OWED_MARK. Once prove or a landing write has handled a note, a later hand flip to done is Lachy's call: its
+    last entry is then not the owed line."""
+    rollout = _note_rollout(note)
+    rentry = walk.index.get(rollout.lower()) if rollout else None
+    if rentry is not None and _serial_chain(rentry[1]):
+        return False
+    if _note_place(path, tasks_dir) not in ("root", "archive"):
+        return False
+    tags = _tags(note)
+    if "archived" in tags or "rollout" in tags:
+        return False
+    if _status(note) != "done" or not _valued(note.get("merged")) or _valued(note.get("proven")):
+        return False
+    if not note.has_heading(PROOF_LOG_SECTION):
+        return bool(_clears(note))
+    entries = _proof_entries(note)
+    return bool(entries) and OWED_MARK in entries[-1]
+
+
+class MoveError(Exception):
+    pass
+
+
+def _move_no_clobber(src: Path, dst: Path):
+    """Move src to dst without ever overwriting; roll back on a half-failure. FileExistsError on a clash. `os.link`, then
+    `unlink(src)`; where hard links are not supported, an exclusive-create copy plus `shutil.copystat`. A failed
+    unlink removes dst again; a failed rollback raises MoveError naming both copies (`two copies left: …`). The one copy:
+    reconcile-project.py binds it from this module, and prove's carry-back moves an archived note back with it."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        raise
+    except OSError:
+        data = src.read_bytes()
+        f = open(dst, "xb")  # exclusive create: FileExistsError on a clash, never an overwrite
+        try:  # from here on dst is ours: any failure (write, close, copystat) removes it again
+            with f:
+                f.write(data)
+            shutil.copystat(src, dst)
+        except OSError:
+            os.unlink(dst)
+            raise
+    try:
+        os.unlink(src)
+    except OSError as e:
+        try:
+            os.unlink(dst)
+        except OSError as e2:
+            raise MoveError(f"{e}; rollback failed ({e2}): two copies left: {src}, {dst}")
+        raise MoveError(f"{e} (rolled back)")
+
+
+def _phases_dir(tasks_dir) -> Path:
+    """Work/Phases, the tasks dir's sibling (the vault layout reconcile-project and the daily sweep read)."""
+    return Path(tasks_dir).parent / "Phases"
+
+
+def _reopen_phases(stem, tasks_dir, dry_run):
+    """[clause]: carry-back's phase write (ADR 0078 d1). A phase note (tagged `phase`) at `status: done` whose literal
+    prefix `<slug>-p<N>-` (PHASED_STEM_RE on its own name, the prefix the daily sweep's PHASE CLOSE and
+    reconcile-project key on) starts the carried-back task's name is a done that lies once its fix is back at review: it
+    is reopened, `status: open` with `completed:` removed, so the daily sweep's PHASE CLOSE closes it again once its
+    last fix is Proven. Its one caller, _carry_back_close, runs it only for a fix the judge leaves carried. Read in
+    Work/Phases/ and its Archive/** (where the sweep files a done phase): an archived one is moved back to the root
+    first (_move_no_clobber), since PHASE CLOSE and reconcile-project read the root only, and a root note of the same
+    name leaves it as it is. Each clause joins the carry-back's Proof log line: `phase [[<p>]] reopened[ from
+    Archive/]`, or `phase [[<p>]] not reopened: <why>`. --dry-run moves and writes nothing."""
+    pdir = _phases_dir(tasks_dir)
+    if not pdir.is_dir():
+        return []
+    found = sorted(pdir.glob("*.md"))
+    if (pdir / "Archive").is_dir():
+        found += sorted((pdir / "Archive").rglob("*.md"))
+    out = []
+    for p in found:
+        m = PHASED_STEM_RE.match(p.stem)
+        if not m or not stem.startswith(m.group(0)):
+            continue
+        try:
+            phase = Note(p)
+        except (OSError, ValueError):
+            continue
+        if "phase" not in _tags(phase) or _status(phase) != "done":
+            continue
+        archived, dst, name = p.parent != pdir, pdir / p.name, f"[[{p.stem}]]"
+        if archived and dst.exists():
+            out.append(f"phase {name} not reopened: Work/Phases/{p.name} exists")
+            continue
+        if not dry_run:
+            try:
+                if archived:
+                    _move_no_clobber(p, dst)
+                fresh = Note(dst)
+                fresh.set("status", "open")
+                fresh.remove("completed")
+                fresh.save()
+            except FileExistsError:
+                out.append(f"phase {name} not reopened: Work/Phases/{p.name} exists")
+                continue
+            except (OSError, ValueError, MoveError) as e:
+                out.append(f"phase {name} not reopened: {e}")
+                continue
+        out.append(f"phase {name} reopened" + (" from Archive/" if archived else ""))
+    return out
+
+
+def _carry_back(path, note, tasks_dir, walk, now, dry_run, memo=None):
+    """(kind, detail, Note, logged) for one carry-back candidate: ("waits", why, None, None) while _carry_readers reads
+    False, a root note of the same name exists or the source moved meanwhile; ("error", why, None, None) on a failed
+    move or read; else ("carried", detail, note, logged), in memory and unsaved: the note at `status: review` with
+    `completed:` removed and `logged`, its Proof log line `- <stamp> carried back: landed at status: done, never Proven
+    (ADR 0078 d1)[; from Archive/][; completed: <v> removed]`, `detail` that line's clauses after `from Archive/` (""
+    when none). The caller judges it, then _carry_back_close adds the phase clause (its done phase reopened only when
+    the judge leaves it carried), and only then saves it. An archived candidate is moved back to the root first
+    (_move_no_clobber: a hard link, so no copy and no torn file), and only then is a fresh Note read (Note.save keeps
+    its created time and Finder tags; it refuses a moved path, so the walk's Note is never saved). A save that fails
+    after the move leaves it in the root at done, a candidate the next pass carries back in place. --dry-run moves
+    nothing: the Note returned reads the candidate where it is."""
+    ok, why = _carry_readers(note, tasks_dir, walk, memo)
+    if not ok:
+        return "waits", why, None, None
+    archived = _note_place(path, tasks_dir) == "archive"
+    dst = Path(tasks_dir) / Path(path).name
+    shown = "/".join(dst.parts[-3:])
+    if archived and dst.exists():
+        return "waits", f"{shown} exists", None, None
+    try:
+        if dry_run:
+            fresh = Note(Path(path), Path(path).read_text())
+        else:
+            if archived:
+                try:
+                    _move_no_clobber(Path(path), dst)
+                except FileExistsError:
+                    return "waits", f"{shown} exists", None, None
+                except FileNotFoundError:
+                    return "waits", "moved meanwhile", None, None
+            fresh = Note(dst)
+    except FileNotFoundError:
+        return "waits", "moved meanwhile", None, None
+    except (OSError, ValueError, MoveError) as e:
+        return "error", f"carry-back of {Path(path).name} failed: {e}", None, None
+    completed = _scalar(fresh.get("completed"))
+    fresh.set("status", "review")
+    fresh.remove("completed")
+    clauses = [f"completed: {completed} removed"] if completed else []
+    logged = f"- {_stamp(now)} carried back: landed at status: done, never Proven (ADR 0078 d1)" + \
+        ("; from Archive/" if archived else "") + "".join(f"; {c}" for c in clauses)
+    fresh.append_line(PROOF_LOG_SECTION, logged)
+    return "carried", "; ".join(clauses), fresh, logged
+
+
+def _extend_line(note, heading, line, extra):
+    """Note.apply's edit: the last `line` under `heading` becomes `line` + `extra` (none there: no change)."""
+    found = note._section_bounds(heading)
+    if found is None:
+        return
+    lines, start, end = found
+    for i in range(end - 1, start, -1):
+        if lines[i].rstrip() == line:
+            note._set_body_lines(lines[:i] + [line + extra] + lines[i + 1:])
+            return
+
+
+def _carry_back_close(note, stem, tasks_dir, logged, proven, dry_run):
+    """[clause]: the phase write of a note carried back this pass, once its judge has run (ADR 0078 d1). Proven in the
+    same pass, it leaves its phase as it is ([]): a done phase over a fix that is done is no lie, and a reopen would
+    only have the sweep close it again with a new `completed:`. Left carried (or not judged: a refused --seen), it
+    reopens its done phase (_reopen_phases), each clause joining its carry-back line `logged` in memory. The caller
+    saves the note after this phase write, so a save that fails leaves a candidate the next pass carries back, its phase
+    already open."""
+    if proven:
+        return []
+    clauses = _reopen_phases(stem, tasks_dir, dry_run)
+    if clauses:
+        note.apply(_extend_line, PROOF_LOG_SECTION, logged, "".join(f"; {c}" for c in clauses))
+    return clauses
+
+
+def _melbourne_date(dt):
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.astimezone(ZoneInfo("Australia/Melbourne")).date()
+    except Exception:  # noqa: BLE001 — no tz database: the local date
+        return dt.astimezone().date()
+
+
+def _after_live(value, live_dt) -> bool:
+    """A stamp strictly after `live:`; a date-only stamp only on a later Melbourne date."""
+    s = _scalar(value)
+    if live_dt is None or not _valued(s):
+        return False
+    if DATE_ONLY_RE.fullmatch(s):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date() > _melbourne_date(live_dt)
+        except ValueError:
+            return False
+    t = _parse_ts(s)
+    return t is not None and t > live_dt
+
+
+def _git_rc(checkout, *argv):
+    """(returncode, stderr) of one read-only git call in `checkout`, GIT_* scrubbed, PROVE_GIT_TIMEOUT; (None, why) when
+    it cannot run or runs past its bound."""
+    try:
+        p = subprocess.run(["git", "-C", str(checkout), *argv], capture_output=True, text=True, timeout=PROVE_GIT_TIMEOUT,
+                           stdin=subprocess.DEVNULL, env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, str(e)
+    return p.returncode, (p.stderr or "").strip()
+
+
+def _is_ancestor(checkout, commit, head):
+    """True / False (rc 1, or a commit the checkout does not hold) / None (unread) for merge-base --is-ancestor."""
+    rc, err = _git_rc(checkout, "merge-base", "--is-ancestor", commit, head)
+    if rc == 0:
+        return True
+    if rc == 1 or (rc == 128 and re.search(r"not a valid|bad object|unknown revision", err or "", re.I)):
+        return False
+    return None
+
+
+def _seen_stamp(note, label, live_dt):
+    """The stamp of the latest Proof log `seen item <N> "<label>": …` line recorded at or after `live:`, else None."""
+    pat = re.compile(r"^- (\S+) seen item \d+ " + re.escape(label) + r": ")
+    best = None
+    for line in _proof_entries(note):
+        m = pat.match(line)
+        t = _parse_ts(m.group(1)) if m else None
+        if t is not None and (live_dt is None or t >= live_dt):
+            best = m.group(1)
+    return best
+
+
+def _rollout_chain(slug, walk):
+    """([(path, Note)], why): the rollout note `slug` names and each successor its `superseded_by:` names, at most
+    SUPERSEDE_HOPS hops; why names a cycle or a chain too long."""
+    chain, seen, cur = [], set(), slug
+    for _ in range(SUPERSEDE_HOPS + 1):
+        key = cur.lower()
+        if key in seen:
+            return chain, f"superseded_by: cycles at [[{cur}]]"
+        seen.add(key)
+        entry = walk.index.get(key)
+        if entry is None:
+            return chain, None
+        chain.append(entry)
+        nxt = _wikilink_slug(_scalar(entry[1].get("superseded_by")))
+        if not nxt:
+            return chain, None
+        cur = nxt
+    return chain, f"superseded_by: runs past {SUPERSEDE_HOPS} hops"
+
+
+def _engine_holds(rnote, c) -> bool:
+    """A rollout whose engine holds this fix's merge (a fix to the engine's own repo): unstamped (it runs on the Primary,
+    whose HEAD this note's Live read showed holds the merge), or its engine_sha descends from merge_commit."""
+    if not _valued(rnote.get("engine_snapshot")):
+        return True
+    sha = _scalar(rnote.get("engine_sha"))
+    if not _valued(sha) or c.strict is None:
+        return False
+    return _is_ancestor(c.strict["checkout"], c.strict["commit"], sha) is True
+
+
+def _item_moved(n, kind, text, note, live_dt, c):
+    """(moved, why) for clears: item n, counted only strictly after `live:`. Any item moves by a Proof log `seen item`
+    line matching its text recorded at or after `live:` (a link item only on Lachy's word). A [[rollout]] or [[chain]]
+    item follows `superseded_by:` (SUPERSEDE_HOPS) and moves when a note of any rollout on that chain has started:,
+    ready:, integrating: or merged: after `live:`, or a serial `## Leg log` has a began:, done or closed: line after it
+    (a fix to the engine's own repo counts only on a rollout whose engine holds the merge, _engine_holds). A [[task]]
+    item moves on started:, ready:, integrating:, merged: or completed: after `live:`. A link item that cannot move
+    (missing, or finished or archived with nothing after `live:`) waits on Lachy's word; a plain line moves only by a
+    seen line."""
+    label = _item_label(kind, text)
+    seen = _seen_stamp(note, label, live_dt)
+    if seen:
+        return True, f"seen {seen}"
+    if kind == "line":
+        return False, "not seen since live: record its Proven-when with prove --seen"
+    walk = c.walk
+    entry = walk.index.get(text.lower())
+    cannot = "cannot move ({}): record it on Lachy's word (/thread:repair)"
+    if entry is None:
+        return False, cannot.format("note not found")
+    if "rollout" in _tags(entry[1]):
+        chain, why = _rollout_chain(text, walk)
+        for rpath, rnote in chain:
+            if c.strict is not None and not _engine_holds(rnote, c):
+                continue
+            for _tp, tnote in walk.by_rollout.get(rpath.stem.lower(), ()):
+                if any(_after_live(tnote.get(k), live_dt) for k in MOVE_KEYS):
+                    return True, f"[[{rpath.stem}]] moved"
+            for line in rnote.section_text("## Leg log").split("\n"):
+                m = LEG_MOVE_RE.match(line.strip())
+                if m and _after_live(m.group(1), live_dt):
+                    return True, f"[[{rpath.stem}]]'s Leg log moved"
+        if why:
+            return False, cannot.format(why)
+        last_path, last = chain[-1]
+        if _rollout_finished(last_path, last, c.tasks_dir):
+            return False, cannot.format(f"[[{last_path.stem}]] finished with nothing after live")
+        return False, "not moved since live"
+    tnote = entry[1]
+    if any(_after_live(tnote.get(k), live_dt) for k in MOVE_KEYS + ("completed",)):
+        return True, "moved"
+    if _status(tnote) in FINISHED_STATUSES or _note_place(entry[0], c.tasks_dir) != "root":
+        return False, cannot.format("finished with nothing after live")
+    return False, "not moved since live"
+
+
+def _read_merge_commit(note, c):
+    """(oid, why): `gh pr view <url|N> --json mergeCommit`, bounded by c.gh_timeout; a bare N runs in the Project root."""
+    pr = _pr(note)
+    m, n = PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
+    if m:
+        ref, cwd = pr, None
+    elif n:
+        root = _rollout_root(c.tasks_dir, _note_rollout(note))
+        if root is None or not root.is_dir():
+            return None, "a bare pr: with no Project root"
+        ref, cwd = n.group(1), str(root)
+    else:
+        return None, f"pr: {pr or 'none'} is not a PR"
+    raw, err = _gh(c.gh_bin, ["pr", "view", ref, "--json", "mergeCommit"], cwd, timeout=c.gh_timeout)
+    if err is not None:
+        return None, err
+    try:
+        oid = (json.loads(raw).get("mergeCommit") or {}).get("oid")
+    except (ValueError, AttributeError):
+        return None, "gh pr view printed no JSON"
+    if not isinstance(oid, str) or not re.fullmatch(r"[0-9a-f]{40}", oid):
+        return None, "gh names no merge commit"
+    return oid, None
+
+
+def _live_check(repo, commit, c):
+    """("live", name, head) when any live entry of the repo holds the merge; ("not live", name, head) when one lacks it
+    (rc 1, or a commit it does not hold); ("unread", why) otherwise."""
+    lacks, unread = None, "no live entry names this repo"
+    for checkout, e in sorted(c.live.items()):
+        if _repo_key(e.get("origin")) != repo:
+            continue
+        head, name = str(e.get("head") or ""), Path(checkout).name or checkout
+        if not HEX_SHA_RE.fullmatch(head):
+            unread = f"{name} has no head"
+            continue
+        got = _is_ancestor(checkout, commit, head)
+        if got is True:
+            return "live", name, head
+        if got is False:
+            lacks = lacks or (name, head)
+        else:
+            unread = f"git cannot read {checkout}"
+    return ("not live", *lacks) if lacks else ("unread", unread)
+
+
+def _prove_judge(note, rollout_note, c):
+    """Judge one root carried fix (vault-grammar § Proven), editing `note` in memory (the caller saves). {proven, date,
+    waits, items}: a RACE revert is never Live; a watched note's merge commit (merge_commit:, else gh) must be held by a
+    live entry's head (merge-base --is-ancestor), stamped `live: <now>` with a Proof log line; an unwatched note's `live:`
+    is its `merged:`; then each clears: item (_item_moved). Every item moved, or none -> `status: done`, `proven:
+    <YYYY-MM-DD>` and a Proof log `proven:` line; no `completed:` and no phase write."""
+    def waits(why):
+        return {"proven": False, "date": None, "waits": why, "items": []}
+
+    if _reverted_pr(rollout_note, note):
+        return waits("reverted: its merge was reverted on main; re-land it (/thread:repair)")
+    live_stamp = _scalar(note.get("live"))
+    if not _valued(live_stamp):
+        repo, rwhy = _note_repo(note, c.tasks_dir)
+        if not _watched(repo, rwhy, c.live):
+            live_stamp = _scalar(note.get("merged"))
+            note.set("live", live_stamp, after=("merge_repo", "merge_commit", "merged", "status"))
+        else:
+            if c.live is None:
+                return waits(f"waits: live file unreadable ({c.live_why})")
+            if repo is None:
+                return waits(f"waits: repo unread ({rwhy})" if rwhy else "waits: no pr:, merge_commit: or merge_repo:")
+            commit = _scalar(note.get("merge_commit"))
+            if not _valued(commit):
+                if c.no_gh:
+                    return waits("waits: merge commit not read (no gh)")
+                commit, err = _read_merge_commit(note, c)
+                if err:
+                    return waits(f"waits: merge commit unread ({err})")
+                note.set("merge_commit", commit, after=("merged", "status"))
+            res = _live_check(repo, commit, c)
+            if res[0] == "unread":
+                return waits(f"waits: live unread ({res[1]})")
+            if res[0] == "not live":
+                return waits(f"not live: {res[1]} at {res[2][:12]} lacks {commit[:12]}")
+            live_stamp = _stamp(c.now)
+            note.set("live", live_stamp, after=("merge_repo", "merge_commit", "merged", "status"))
+            note.append_line(PROOF_LOG_SECTION, f"- {_stamp(c.now)} live: {res[1]} at {res[2][:12]} holds {commit[:12]}")
+    live_dt = _parse_ts(live_stamp)
+    # A fix to the engine's own repo (its key is the `primary` live entry's): a [[rollout]] item moves only on a rollout
+    # whose engine holds the merge (_engine_holds).
+    commit, repo, prim = _scalar(note.get("merge_commit")), _note_repo(note, c.tasks_dir)[0], c.primary
+    c.strict = ({"checkout": prim[0], "commit": commit}
+                if prim and repo and _valued(commit) and _repo_key(prim[1].get("origin")) == repo else None)
+    items = []
+    for n, (kind, text) in enumerate(_clears(note), 1):
+        moved, why = _item_moved(n, kind, text, note, live_dt, c)
+        items.append({"n": n, "kind": kind, "text": text, "moved": moved, "why": why})
+    c.strict = None
+    pending = [i for i in items if not i["moved"]]
+    if pending:
+        return {"proven": False, "date": None, "items": items,
+                "waits": "; ".join(f"item {i['n']} {_item_label(i['kind'], i['text'])}: {i['why']}" for i in pending)}
+    date = c.now.astimezone().date().isoformat()
+    note.set("status", "done")
+    note.set("proven", date, after=("live", "merge_repo", "merge_commit", "merged", "status"))
+    note.append_line(PROOF_LOG_SECTION, f"- {_stamp(c.now)} proven: " + (
+        f"Live, and every clears: item moved after it ({len(items)})" if items else "Live, with no clears: item"))
+    return {"proven": True, "date": date, "waits": None, "items": items}
+
+
+def _land_pr(ref, note, c):
+    """(info, why) for `prove --land` by PR: MERGED into the default branch (gh state,mergedAt,mergeCommit,baseRefName
+    plus the default branch, read as resume reads it), else why not."""
+    url, num = PR_URL_RE.match(ref), PR_NUM_RE.match(ref)
+    if url:
+        repo, cwd, ref = url.group(1), None, ref
+    elif num:
+        root = _rollout_root(c.tasks_dir, _note_rollout(note))
+        if root is None or not root.is_dir():
+            return None, f"pr: {ref!r} is a bare number and its rollout has no Project root"
+        repo, cwd, ref = None, str(root), num.group(1)
+    else:
+        return None, f"{ref!r} is neither a GitHub PR URL nor a PR number"
+    raw, err = _gh(c.gh_bin, ["pr", "view", ref, "--json", "state,mergedAt,mergeCommit,baseRefName"], cwd,
+                   timeout=c.gh_timeout)
+    try:
+        info = json.loads(raw) if err is None else None
+    except ValueError:
+        info, err = None, "gh pr view printed no JSON"
+    if err is not None or not isinstance(info, dict):
+        return None, f"gh pr view {ref} failed: {err or 'no JSON object'}"
+    state = str(info.get("state") or "").upper()
+    if state != "MERGED":
+        return None, f"PR {ref} is {state or 'in an unknown state'}"
+    out, derr = _gh(c.gh_bin, ["repo", "view", *([repo] if repo else []), "--json", "defaultBranchRef", "--jq",
+                               ".defaultBranchRef.name"], cwd, timeout=c.gh_timeout)
+    default = out.strip()
+    if not default:
+        return None, f"cannot resolve the default branch: {derr or 'empty answer'}"
+    if str(info.get("baseRefName") or "") != default:
+        return None, f"PR {ref} merged into {info.get('baseRefName')!r}, not the default branch {default!r}"
+    return info, None
+
+
+def _prove_entry(note, path, **more):
+    return {"slug": Path(path).stem, "rollout": _note_rollout(note), "project": _project(note),
+            "merged": _scalar(note.get("merged")) or None, **more}
+
+
+def cmd_prove(args) -> int:
+    """`prove` (ADR 0078 d1; vault-grammar § Proven): judge carried fixes, carry back the ones landed done before they
+    were Proven, and land one task (--land) or record one item's evidence (--seen). Guard-exempt (GUARD_EXEMPT): its
+    judge writes only proof stamps, which every engine reads as landed, and each write a queue reads is gated per note by
+    _carry_readers. One walk per call (Archive included, never shared: prove writes notes)."""
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in (args.tasks or "").split(",") if s.strip()]
+
+    def usage(msg):
+        print(f"ERROR: prove: {msg}", file=sys.stderr)
+        return 2
+
+    if args.tasks is not None and not slugs:
+        return usage("--tasks names no task")
+    if (args.land or args.seen is not None) and len(slugs) != 1:
+        return usage("--land and --seen take exactly one --tasks slug")
+    if args.land and args.seen is not None:
+        return usage("--land and --seen are separate calls (--seen once the land shows it Live)")
+    if (args.item is not None or args.on_his_word) and args.seen is None:
+        return usage("--item and --on-his-word go with --seen")
+    if not args.land and (args.pr or args.commit or args.repo or args.no_code):
+        return usage("--pr, --commit, --repo and --no-code go with --land")
+    if bool(args.commit) != bool(args.repo):
+        return usage("--commit SHA and --repo DIR go together")
+    if sum(map(bool, (args.pr, args.commit, args.no_code))) > 1:
+        return usage("--land takes one of --pr URL, --commit SHA --repo DIR or --no-code")
+    if args.commit and not re.fullmatch(r"[0-9a-f]{7,40}", args.commit):
+        return usage(f"--commit {args.commit!r} is not a commit sha")
+    if args.seen is not None and (not args.seen.strip() or len(args.seen) > SEEN_MAX or FLAKE_CTRL_RE.search(args.seen)):
+        return usage(f"--seen takes one line of evidence, at most {SEEN_MAX} characters, no control characters")
+    live, live_why = _live_read(_live_file(args.live_file))
+    if live_why:
+        print(f"WARN: prove: {live_why}: every repo reads watched (fail closed)", file=sys.stderr)
+    walk = _walk_of(tasks_dir)
+    prim = next(((k, e) for k, e in sorted((live or {}).items()) if e.get("primary") is True), None)
+    c = types.SimpleNamespace(tasks_dir=tasks_dir, walk=walk, live=live, live_why=live_why, gh_bin=args.gh_bin,
+                              no_gh=args.no_gh, gh_timeout=args.gh_timeout, now=now, dry_run=args.dry_run, memo={},
+                              primary=prim, strict=None)
+    lines, errors = [], []
+    carried, owed, carry_back, proven, carried_back = [], [], [], [], []
+    landed, rc = None, 0
+    would = "would " if args.dry_run else ""
+
+    if args.all:
+        scope = list(walk.entries)
+    elif args.rollout:
+        scope = list(walk.by_rollout.get(Path(os.path.expanduser(args.rollout)).stem.lower(), ()))
+    else:
+        scope = []
+        for slug in slugs:
+            entry = walk.index.get(slug.lower())
+            if entry is None:
+                errors.append(f"{slug}: task note not found in {tasks_dir} or its Archive/")
+                rc = 1
+            else:
+                scope.append(entry)
+    if (args.land or args.seen is not None) and not scope:
+        for e in errors:
+            print(f"ERROR: prove: {e}", file=sys.stderr)
+        return 1
+
+    just_landed = None
+    if args.land:
+        path, note = scope[0]
+        slug = path.stem
+        if _note_place(path, tasks_dir) != "root":
+            print(f"ERROR: prove: {slug}: not in {tasks_dir} (it is filed under Archive/); nothing written",
+                  file=sys.stderr)
+            return 1
+        if _carried_fix(note):
+            landed = {"slug": slug, "outcome": "carried"}
+        elif _status(note) == "done":
+            lines.append(f"{slug}: already done [no-change]")
+            landed = {"slug": slug, "outcome": "proven" if _valued(note.get("proven")) else "done"}
+            scope = []
+        else:
+            merged = commit = merge_repo = None
+            if args.no_code:
+                merged = _stamp(now)
+            elif args.commit:
+                merged, commit = _stamp(now), args.commit
+                merge_repo = _origin_of_root(Path(os.path.expanduser(args.repo)))
+                # _note_repo reads it from the note: written before the verdict, as a --pr is.
+                _stamp_first(note, "merge_repo", merge_repo, ("merged", "status"))
+            else:
+                ref = args.pr or _pr(note)
+                if not ref:
+                    return usage("--land needs a merged PR (the note's pr: or --pr URL), --commit SHA --repo DIR or "
+                                 "--no-code")
+                if args.no_gh:
+                    print(f"ERROR: prove: {slug}: not merged: the PR cannot be read (--no-gh); nothing written",
+                          file=sys.stderr)
+                    return 1
+                info, why = _land_pr(ref, note, c)
+                if why:
+                    print(f"ERROR: prove: {slug}: not merged: {why}; nothing written", file=sys.stderr)
+                    return 1
+                at = _parse_ts(info.get("mergedAt"))
+                merged = _stamp(at if at is not None else now)
+                oid = (info.get("mergeCommit") or {}).get("oid") if isinstance(info.get("mergeCommit"), dict) else None
+                commit = oid if isinstance(oid, str) and re.fullmatch(r"[0-9a-f]{40}", oid) else None
+                if args.pr and not _pr(note):
+                    note.set("pr", args.pr)
+            outcome, live_at_merge, why = _land_outcome(note, tasks_dir, live, walk, no_code=args.no_code)
+            if outcome == "done":
+                _done_write(note, merged if _pr(note) else None)
+                lines.append(f"{slug}: status=done{' (' + why + ')' if why else ''}" +
+                             (" (dry-run)" if args.dry_run else " [written]"))
+            elif outcome == "carried":
+                _carry_write(note, merged, commit, live_at_merge, why, now, merge_repo=merge_repo)
+                lines.append(f"{slug}: {'would write ' if args.dry_run else ''}landed, carried (status: review; {why})")
+            else:
+                _owed_write(note, merged, commit, why, now, merge_repo=merge_repo)
+                lines.append(f"{slug}: {'would write ' if args.dry_run else ''}{OWED_MARK} (status: done; {why})")
+                owed.append(_prove_entry(note, path, archived=False, why=why))
+            try:
+                note.save(dry_run=args.dry_run)
+            except OSError as e:
+                print(f"ERROR: prove: {slug}: not written: {e}", file=sys.stderr)
+                return 1
+            landed = {"slug": slug, "outcome": outcome}
+            if outcome != "carried":
+                scope = []
+            just_landed = slug.lower()
+
+    for path, note in scope:
+        slug, place = path.stem, _note_place(path, tasks_dir)
+        if place not in ("root", "archive"):
+            if args.seen is not None:
+                print(f"ERROR: prove: {slug}: not a carried fix (filed under Archive/Rollouts/): nothing recorded",
+                      file=sys.stderr)
+                return 1
+            if args.tasks is not None:
+                lines.append(f"{slug}: not carried (filed under Archive/Rollouts/)")
+            continue
+        cand = _carry_back_candidate(path, note, tasks_dir, walk)
+        fix = _carried_fix(note)
+        if place == "archive" and fix and not cand:
+            text = f"{slug}: archived while carried: not judged (move it back to Work/Tasks/ to resume its proof)"
+            lines.append(text)
+            errors.append(text)
+            if args.tasks is not None:
+                rc = 1
+            continue
+        if not cand and not (place == "root" and fix):
+            if args.tasks is not None:
+                st = _status(note) or "none"
+                lines.append(f"{slug}: not carried (status: {st}"
+                             f"{', proven: ' + _scalar(note.get('proven')) if _valued(note.get('proven')) else ''})")
+                if args.seen is not None:
+                    print(f"ERROR: prove: {slug}: not a carried fix (status: {st}): nothing recorded", file=sys.stderr)
+                    return 1
+            continue
+        rollout = _note_rollout(note)
+        rentry = walk.index.get(rollout.lower()) if rollout else None
+        rnote = rentry[1] if rentry else None
+        back = None   # (archived, detail, logged) for a note carried back in this pass
+        if cand:
+            archived = place == "archive"
+            kind, detail, fresh, logged = _carry_back(path, note, tasks_dir, walk, now, args.dry_run, c.memo)
+            if kind == "waits":
+                if args.seen is not None:  # landed at done, not carried: no item of it can be recorded yet
+                    print(f"ERROR: prove: {slug}: not a carried fix (landed, carry-back waits: {detail}): nothing "
+                          "recorded", file=sys.stderr)
+                    return 1
+                entries = _proof_entries(note)
+                if entries and OWED_MARK in entries[-1]:
+                    owed.append(_prove_entry(note, path, archived=archived, why=detail))
+                else:
+                    carry_back.append(_prove_entry(note, path, archived=archived, waits=detail))
+                lines.append(f"{slug}: landed, carry-back waits{', archived' if archived else ''} ({detail})")
+                continue
+            if kind == "error":
+                if args.seen is not None:
+                    print(f"ERROR: prove: {slug}: not a carried fix (carry-back failed: {detail}): nothing recorded",
+                          file=sys.stderr)
+                    return 1
+                errors.append(f"{slug}: {detail}")
+                lines.append(f"{slug}: carry-back failed ({detail})")
+                continue
+            back = (archived, detail, logged)
+            note, path = fresh, (path if args.dry_run else tasks_dir / path.name)
+        elif slug.lower() != just_landed:
+            ok, why = _carry_readers(note, tasks_dir, walk, c.memo)
+            if not ok:
+                _owed_write(note, _scalar(note.get("merged")), None, why, now)
+                try:
+                    note.save(dry_run=args.dry_run)
+                except OSError as e:
+                    errors.append(f"{slug}: not written: {e}")
+                    continue
+                owed.append(_prove_entry(note, path, archived=False, why=why))
+                lines.append(f"{slug}: {would}write {OWED_MARK} (status: done; {why})" if args.dry_run else
+                             f"{slug}: {OWED_MARK} (status: done; {why})")
+                if args.seen is not None:  # turned owed: no longer a carried fix, so the item is not recorded
+                    print(lines[-1])
+                    print(f"ERROR: prove: {slug}: not a carried fix ({OWED_MARK}: {why}): nothing recorded",
+                          file=sys.stderr)
+                    return 1
+                continue
+        if args.seen is not None:
+            got = _prove_seen(args, note, slug, c)
+            if got is not None:
+                if back is not None:   # the item is not recorded; the carry-back, left at review, still is
+                    _carry_back_close(note, slug, tasks_dir, back[2], False, args.dry_run)
+                    try:
+                        note.save(dry_run=args.dry_run)
+                    except OSError as e:
+                        print(f"ERROR: prove: {slug}: carry-back not written: {e}", file=sys.stderr)
+                return got
+        res = _prove_judge(note, rnote, c)
+        clauses = _carry_back_close(note, slug, tasks_dir, back[2], res["proven"], args.dry_run) if back else []
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            errors.append(f"{slug}: {'carry-back ' if back else ''}not written: {e}")
+            if back is not None:
+                lines.append(f"{slug}: carry-back failed (not written: {e})")
+            continue
+        if back is not None:
+            archived, detail = back[0], "; ".join(([back[1]] if back[1] else []) + clauses)
+            carried_back.append({"slug": slug, "archived": archived})
+            lines.append(f"{slug}: {'would carry back' if args.dry_run else 'carried back'}"
+                         f"{' from Archive/' if archived else ''} (status: review{'; ' + detail if detail else ''})")
+        if res["proven"]:
+            proven.append(_prove_entry(note, path, proven=res["date"]))
+            lines.append(f"{slug}: {would}prove (done; proven: {res['date']})" if args.dry_run else
+                         f"{slug}: proven (done; proven: {res['date']})")
+            if landed is not None and landed["slug"].lower() == slug.lower():
+                landed["outcome"] = "proven"
+        else:
+            carried.append(_prove_entry(note, path, live=_scalar(note.get("live")) or None,
+                                        items=res["items"], waits=res["waits"]))
+            lines.append(f"{slug}: landed, carried ({res['waits']})")
+    summary = (f"prove: {len(carried)} carried, {len(proven)} proven, {len(carried_back)} carried back, {len(owed)} owed, "
+               f"{len(carry_back)} waiting carry-back")
+    if args.all and not args.dry_run:
+        _write_carried_file(_live_file(args.live_file).parent / CARRIED_FILE_NAME, carried, owed, carry_back)
+    if args.json:
+        doc = {"carried": carried, "owed": owed, "carryBack": carry_back, "proven": proven, "carriedBack": carried_back,
+               "errors": errors}
+        if args.land:
+            doc["landed"] = landed
+        print(json.dumps(doc, ensure_ascii=False))
+    else:
+        for line in lines:
+            print(line)
+        print(summary)
+    for e in errors:
+        if e not in lines:
+            print(f"ERROR: prove: {e}", file=sys.stderr)
+    return rc
+
+
+def _prove_seen(args, note, slug, c):
+    """--seen on one carried fix: record `- <now> seen item <N> "<item text>": <evidence> (agent|Lachy)` under ## Proof
+    log, then the caller judges. None when recorded, else the exit code (nothing written): 2 for --item missing or out of
+    range (or no item), 1 for a link item without --on-his-word or a note not Live yet."""
+    items = _clears(note)
+    if not items:
+        print(f"ERROR: prove: {slug}: no clears: item to record", file=sys.stderr)
+        return 2
+    n = args.item if args.item is not None else (1 if len(items) == 1 else None)
+    if n is None:
+        print(f"ERROR: prove: {slug}: --item N is required: it has {len(items)} clears: items", file=sys.stderr)
+        return 2
+    if not 1 <= n <= len(items):
+        print(f"ERROR: prove: {slug}: --item {n} is out of range (1 to {len(items)})", file=sys.stderr)
+        return 2
+    kind, text = items[n - 1]
+    if kind == "link" and not args.on_his_word:
+        print(f"ERROR: prove: {slug}: item {n} [[{text}]] is a link: it is recorded only on Lachy's word "
+              "(--on-his-word); nothing recorded", file=sys.stderr)
+        return 1
+    is_live = _valued(note.get("live")) or not _watched(*_note_repo(note, c.tasks_dir), c.live)
+    if not is_live:
+        print(f"{slug}: not live yet: nothing recorded")
+        return 1
+    note.append_line(PROOF_LOG_SECTION, f"- {_stamp(c.now)} seen item {n} {_item_label(kind, text)}: "
+                                        f"{args.seen.strip()} ({'Lachy' if args.on_his_word else 'agent'})")
+    return None
+
+
+def _write_carried_file(path, carried, owed, carry_back):
+    """carried-fixes.json beside the live file (the Chorus Stage line's input, engine-independent): {v: 1, carried, owed,
+    carryBack}, written atomically and only when it changes; a write that fails is one WARN."""
+    keep = lambda e, keys: {k: e.get(k) for k in keys}  # noqa: E731
+    doc = {"v": 1,
+           "carried": [keep(e, ("slug", "project", "rollout", "merged", "live", "waits")) for e in carried],
+           "owed": [keep(e, ("slug", "project", "rollout", "merged", "archived", "why")) for e in owed],
+           "carryBack": [keep(e, ("slug", "project", "rollout", "merged", "archived", "waits")) for e in carry_back]}
+    data = json.dumps(doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    try:
+        if path.read_text(encoding="utf-8") == data:
+            return
+    except OSError:
+        pass
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(data, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"WARN: prove: cannot write {path}: {e}", file=sys.stderr)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 # ---- CLI --------------------------------------------------------------------
 
 # ---- moving: the Watchdog's reading (ADR 0048, p29-7; the module docstring's "moving") ---------------------------
@@ -14959,7 +16301,8 @@ def _parser():
         ("mark-integrating", cmd_mark_integrating, "stamp integrating: on review notes with a PR (first wins); exit 4 "
                                                    "while another rollout on the origin integrates or waits first; "
                                                    "exit 5 under a surface wait for a note not yet integrating"),
-        ("mark-done", cmd_mark_done, "flip task notes review->done after their merge is confirmed (stamps merged:)"),
+        ("mark-done", cmd_mark_done, "land task notes after their merge is confirmed: done, landed carried or "
+                                     "carry-back owed (ADR 0078 d1; stamps merged:)"),
     ):
         m = sub.add_parser(name, help=help_)
         m.add_argument("--tasks", required=True, help="comma-separated task slugs")
@@ -14967,6 +16310,9 @@ def _parser():
         m.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
         m.add_argument("--now", type=_iso_arg, default=None, help=now_help)
         m.add_argument("--dry-run", action="store_true")
+        if name == "mark-done":
+            m.add_argument("--live-file", default=None, help="the Primary refresh's live file (default ${XDG_STATE_HOME:-"
+                                                             "~/.local/state}/thread/primary-live.json; ADR 0078 d1)")
         if name == "mark-started":
             m.add_argument("--start", choices=START_CHOICES, default=None,
                            help="the start the Run record names (resume: a Lost-call or signed-gate resume; revise: "
@@ -15019,11 +16365,13 @@ def _parser():
     li.add_argument("--dry-run", action="store_true")
     li.set_defaults(func=cmd_log_integration)
 
-    rs = sub.add_parser("resume", help="mark done every linked task whose PR merged into the default branch (p6-8); "
+    rs = sub.add_parser("resume", help="land every linked task whose PR merged into the default branch (p6-8; done or "
+                                       "carried, ADR 0078); "
                                        "skip and report a held RACE / UNVERIFIED (exit 3)")
     rs.add_argument("--rollout", required=True, help="path to the rollout note")
     rs.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     rs.add_argument("--gh-bin", default="gh", help="the gh executable (tests pass a stub)")
+    rs.add_argument("--live-file", default=None, help="the Primary refresh's live file (ADR 0078 d1)")
     rs.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     rs.add_argument("--dry-run", action="store_true")
     rs.set_defaults(func=cmd_resume)
@@ -15291,6 +16639,36 @@ def _parser():
     la.add_argument("--dry-run", action="store_true")
     la.set_defaults(func=cmd_lane_ack)
 
+    pv = sub.add_parser("prove", help="judge carried fixes (ADR 0078 d1): Live, then every clears: item moved -> done + "
+                                      "proven:; carry back fixes landed done before Proven; --land lands one task; "
+                                      "--seen records one item's evidence; guard-exempt")
+    scope = pv.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--all", action="store_true", help="every carried fix in the tasks dir's root, and every carry-back "
+                                                         "candidate in it or its Archive/ (not Archive/Rollouts/)")
+    scope.add_argument("--rollout", default=None, help="the notes whose rollout: names this rollout note (path or slug)")
+    scope.add_argument("--tasks", default=None, help="comma-separated task slugs")
+    pv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    pv.add_argument("--live-file", default=None, help="the Primary refresh's live file (default ${XDG_STATE_HOME:-"
+                                                      "~/.local/state}/thread/primary-live.json)")
+    pv.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    pv.add_argument("--dry-run", action="store_true", help="write nothing: report the state the pass would leave")
+    pv.add_argument("--json", action="store_true", help="one JSON object: carried, owed, carryBack, proven, carriedBack, "
+                                                        "landed (--land), errors")
+    pv.add_argument("--gh-bin", default="gh", help="the gh executable a merge commit is read through (tests pass a stub)")
+    pv.add_argument("--no-gh", action="store_true", help="call no gh (it wins over --gh-bin): a merge commit not yet "
+                                                         "stamped waits")
+    pv.add_argument("--gh-timeout", type=float, default=PROVE_GH_TIMEOUT, help=argparse.SUPPRESS)
+    pv.add_argument("--land", action="store_true", help="land the one --tasks note: a MERGED PR (its pr: or --pr), "
+                                                        "--commit SHA --repo DIR, or --no-code")
+    pv.add_argument("--pr", default=None, help="with --land: the merged PR's URL")
+    pv.add_argument("--commit", default=None, help="with --land and --repo: the merge commit")
+    pv.add_argument("--repo", default=None, help="with --land --commit: the checkout the commit landed in")
+    pv.add_argument("--no-code", action="store_true", help="with --land: a non-code task (merged = live = now)")
+    pv.add_argument("--seen", default=None, help="record one clears: item's evidence (one line, at most 300 characters)")
+    pv.add_argument("--item", type=int, default=None, help="with --seen: the item's number (required with several)")
+    pv.add_argument("--on-his-word", action="store_true", help="with --seen: Lachy's word (required for a link item)")
+    pv.set_defaults(func=cmd_prove)
+
     mv = sub.add_parser("moving", help="the Watchdog's reading (ADR 0048; status § The Watchdog's reading): one JSON "
                                        "line, moving | stalled | waiting | skip; read-only, guard-exempt")
     mv.add_argument("--rollout", required=True, help="path to the rollout note")
@@ -15312,17 +16690,38 @@ def main() -> int:
     return args.func(args)
 
 
-# engine-snapshot.py, this tree's own copy (ADR 0043): loaded only for the guard, as _ladder() loads ladder.py.
+# engine-snapshot.py, this tree's own copy (ADR 0043): loaded for the guard, as _ladder() loads ladder.py, and for
+# _engine_reads_carried's unstamped clause (its engine_root).
 ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
+PLUGIN_ROOT = ENGINE_SNAPSHOT_PY.parent.parent.parent.parent   # the running plugin root (this file's tree)
 GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
-# The four verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write nothing
+# The five verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write nothing
 # (moving is the Watchdog's reading, which must read any rollout from any root); fold-journals never reads the note and
-# writes only the Run record, a cross-version store; and join (ADR 0078 d6) is run by a newer schedule on a running
+# writes only the Run record, a cross-version store; join (ADR 0078 d6) is run by a newer schedule on a running
 # rollout whose snapshot predates the verb, and writes only forms every protocol-5 engine reads, under the same note
 # lock: a `## Queue` row (a wikilink on a ranked line, its Mode `joined <date>` or `joined <date>, solo`), a
 # `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp. Those forms and the note lock's path are a
-# cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration.
-GUARD_EXEMPT = ("status", "fold-journals", "moving", "join")
+# cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration. And prove writes
+# only proof stamps every engine reads as landed, gating each write a queue reads per note on _carry_readers (ADR 0078
+# d1).
+GUARD_EXEMPT = ("status", "fold-journals", "moving", "join", "prove")
+_ES_MOD = []   # [engine-snapshot.py's module, or None], loaded once per process (_engine_snapshot_mod)
+
+
+def _engine_snapshot_mod():
+    """This tree's engine-snapshot.py (ENGINE_SNAPSHOT_PY), loaded once per process and cached; None when it will not
+    load. _engine_guard reads None as nothing to guard (only positive evidence refuses); _engine_reads_carried's
+    unstamped clause reads it as an unknown engine (it fails closed)."""
+    if not _ES_MOD:
+        try:
+            sys.dont_write_bytecode = True
+            spec = importlib.util.spec_from_file_location("thread_engine_snapshot", ENGINE_SNAPSHOT_PY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception:  # noqa: BLE001 — any failure to load is the same None
+            mod = None
+        _ES_MOD.append(mod)
+    return _ES_MOD[0]
 
 
 def _guarded_notes(args):
@@ -15360,14 +16759,10 @@ def _engine_guard(args):
     rollouts, tasks = _guarded_notes(args)
     if not rollouts and not tasks:
         return None
-    try:
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", ENGINE_SNAPSHOT_PY)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    except Exception:  # an engine-snapshot.py that will not load guards nothing (only positive evidence refuses)
+    mod = _engine_snapshot_mod()
+    if mod is None:  # an engine-snapshot.py that will not load guards nothing (only positive evidence refuses)
         return None
-    root = ENGINE_SNAPSHOT_PY.parent.parent.parent.parent
+    root = PLUGIN_ROOT
     for note in rollouts:
         line = mod.guard(note, root, GUARD_SCRIPT)
         if line:

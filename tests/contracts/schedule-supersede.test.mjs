@@ -406,10 +406,10 @@ function checkJoin(t) {
     !b6.includes('At `join <X>`') || !oa6.includes("at a join, its `Joined [[<X>]]` line")) fails.push('callers')
   const refusal = collapse(sectionUpTo(t.snapshot, /^## The refusal rule/, /^## Schedule's cut/))
   const cross = collapse(sectionUpTo(t.snapshot, /^## Cross-version state/, /^## (?!Cross)/))
-  if (!refusal.includes('every verb but `status`, `fold-journals`, `moving` and `join`') || !refusal.includes('`join` (ADR 0078 d6) is run by a newer') ||
+  if (!refusal.includes('every verb but `status`, `fold-journals`, `moving`, `join` and `prove`') || !refusal.includes('`join` (ADR 0078 d6) is run by a newer') ||
     !cross.includes("Schedule's `join` (ADR 0078 d6)") || !cross.includes('joined <YYYY-MM-DD>')) fails.push('snapshot-doc')
   const exempt = (t.rr.match(/^GUARD_EXEMPT = \(([^)]*)\)/m) ?? [])[1] ?? ''
-  const comment = collapse(t.rr.slice(Math.max(0, t.rr.indexOf('# The four verbs any root runs')), t.rr.indexOf('GUARD_EXEMPT = (')))
+  const comment = collapse(t.rr.slice(Math.max(0, t.rr.indexOf('# The five verbs any root runs')), t.rr.indexOf('GUARD_EXEMPT = (')))
   if (!exempt.includes('"join"') || !comment.includes('change only by migration')) fails.push('guard')
   if (!t.template.includes('`joined <YYYY-MM-DD>` (`joined <YYYY-MM-DD>, solo` for a Solo task)')) fails.push('mode')
   return fails
@@ -426,8 +426,8 @@ const JOIN_CONTROLS = [
   ['report', 'schedule', 'Joined [[<rollout>]] (running): <N> tasks ranked first', 'Queue for [[<rollout>]]'],
   ['regenerate-note', 'schedule', '--regenerate not applied: [[<rollout>]] is running, so this run joined it', 'the flag was ignored'],
   ['callers', 'backlog', 'At `join <X>`', 'At a running rollout'],
-  ['snapshot-doc', 'snapshot', 'every verb but `status`, `fold-journals`, `moving` and `join`', 'every verb but `status`, `fold-journals` and `moving`'],
-  ['guard', 'rr', 'GUARD_EXEMPT = ("status", "fold-journals", "moving", "join")', 'GUARD_EXEMPT = ("status", "fold-journals", "moving")'],
+  ['snapshot-doc', 'snapshot', 'every verb but `status`, `fold-journals`, `moving`, `join` and `prove`', 'every verb but `status`, `fold-journals`, `moving` and `prove`'],
+  ['guard', 'rr', 'GUARD_EXEMPT = ("status", "fold-journals", "moving", "join", "prove")', 'GUARD_EXEMPT = ("status", "fold-journals", "moving", "prove")'],
   ['mode', 'template', '`joined <YYYY-MM-DD>` (`joined <YYYY-MM-DD>, solo` for a Solo task)', '`added`'],
 ]
 for (const [rule, key, from, to] of JOIN_CONTROLS) {

@@ -240,7 +240,9 @@ A situational report written for Lachy catching up, not a log:
   `--look` or a scoped target (report-only then)) and ambiguous (listed for Lachy, never applied).
   Call the line the notice for those fixes only when fixes will follow (a default or `--steer` run
   on a project or area); on a `--look` run or a scoped target, say it is report-only. Omit the line
-  when both lists are empty.
+  when both lists are empty. Name a task by its action when it is not `status: done`: `landed, carried
+  (status: review)` and `landed, carry-back owed (status: done)` land a fix and never close it, and a
+  dry run's `phase <slug> left open: …` skipped line rides with that task.
 - **Placement**: the § 2 audit's summary line, then one line per finding with its fix, and its
   `unchecked:` lines; or its one `thread-placement:` line. Omit the line on `placement: none`.
   Report-only: a misplaced thread is moved by project-structure-audit or by Lachy, never by this run.
@@ -330,9 +332,14 @@ Report any `New since review` items to Lachy as landed since the dry run and not
 orient lists them again), and any `Reviewed, not applied` items with their reasons:
 `now ambiguous: …` needs his eye; `no longer drift (…)` is benign (closed or moved since, by the
 rollout's ceremony or a mark-done). Neither is written, so both join the reshuffle's frozen
-possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2), re-run the dry
-run, report its Drift line and apply from the new file. Ambiguous items are listed for Lachy and
-never applied. A scoped target applies no drift fixes: it reshapes one note, so the § 3 Drift line
+possibly-landed tier (reshuffle R1). Report a fix's landing as landed, never done (ADR 0078 d1): each
+`Written` row `task <slug>: landed, carried (status: review)` is a fix at review until `prove` proves
+it, and each `task <slug>: landed, carry-back owed (…)` row a done that prove carries back later; and
+each `Skipped` line `phase <slug> left open: [[<task>]] lands carried (…)` is a phase left open until
+that fix is proven (the vault's daily sweep closes it then), never a failed fix. If the saved file
+is gone (`--only` exits 2), re-run the dry run, report its Drift line and apply from the new file.
+Ambiguous items are listed for Lachy and never applied. A scoped target applies no drift fixes: it
+reshapes one note, so the § 3 Drift line
 is report-only for it. It goes straight to its reshuffle (`--look` still stops it after § 3).
 
 **Unparseable slots.** Mended under the drift fixes' authority: a default run and Steer only, never

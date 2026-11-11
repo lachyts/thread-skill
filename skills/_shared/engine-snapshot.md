@@ -11,7 +11,9 @@ command taken from text read as a file runs by `${CLAUDE_PLUGIN_ROOT}/skills/_sh
 Every command acting on a rollout runs with its **engine root**:
 
 - the rollout's **Engine snapshot**, named on its note by `engine_snapshot:` (with `engine_sha:`);
-- for a note that names none (scheduled before P29), the **Primary checkout**, when there is one (below);
+- for a note that names none (scheduled before P29), the **Primary checkout**, when there is one (below)
+  (reconcile-rollout.py's `_engine_reads_carried` reads that engine through `engine-snapshot.py`'s `engine_root`, its
+  `git_primary` branch, the one copy of the mechanics, and keeps no copy of its own: ADR 0078 d1);
 - otherwise the session's plugin root (a version-cache install).
 
 The existing commands stay byte-identical: `${CLAUDE_PLUGIN_ROOT}` in them means the engine root, put in place of the
@@ -61,13 +63,17 @@ rollout note, and `record`'s `## Decisions (asked ahead <date>)` bullet and `dec
 (<date>)` bullet into a carried queued task are forms every engine reads as note text (ADR 0047 § Build rulings;
 ADR 0054).
 
+status's Carried line (status § 4), reflect § 17's carried read and close's `prove --tasks` also run
+`reconcile-rollout.py prove` from the session's own root: prove is exempt from the guard and works across versions, so
+the newest prove available reads every rollout's notes, whatever its engine (ADR 0078 d1).
+
 ## The refusal rule
 
 The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr line starting `engine-snapshot:` that
 names the root to re-run from. They are:
 
-- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving` and `join` (and `triggers`, which names
-  no note): it asks about the note `--rollout` (carry:
+- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving`, `join` and `prove` (and `triggers`,
+  which names no note): it asks about the note `--rollout` (carry:
   `--from`) names, which `lane-hold` and `lane-ack` always take, and the rollout each `--tasks` slug's note (and, for
   `reconcile`, each result row's) names in its `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`,
   `hand-back`, `mark-started`, `mark-integrating`, `origin-wait`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
@@ -80,10 +86,14 @@ rollout with it); `moving` writes nothing either, and is the Watchdog's reading 
 The Watchdog's reading); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
 cross-version state (below); `join` (ADR 0078 d6) is run by a newer `/thread:schedule` on this project's running
 rollout, whose snapshot predates the verb, and writes only the forms § Cross-version state names for it, under the same
-note lock; `reconcile-rollout.py triggers` names no note (no `--rollout`, no `--tasks`), so the guard finds nothing to
-ask about and it runs from any root, unguarded: `due` writes nothing and `fire` writes only the `fired:` of the one
-`when:` entry it ran; `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan` only read;
-and `lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
+note lock; `prove` writes only proof stamps, which every engine reads as landed, and gates each write a queue reads per
+note on `_carry_readers` (the note's own rollout and the rollouts of its unstarted dependants): when that gate reads
+False, `--land` and its readers re-check write the old engine's own form (owed, `status: done`) and a carry-back waits,
+so it works across versions by design, like `fold-journals` (ADR 0078 d1; vault-grammar § Proven);
+`reconcile-rollout.py triggers` names no note (no `--rollout`, no `--tasks`), so the guard finds nothing to ask about
+and it runs from any root, unguarded: `due` writes nothing and `fire` writes only the `fired:` of the one `when:` entry
+it ran; `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan` only read; and
+`lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
 
 An `engine-snapshot:` line, whatever its exit code, means a wrong root, never the script's own failure: re-run the
 same command once from the root it names. An unstamped note, an archived note whose snapshot is gone, and a task

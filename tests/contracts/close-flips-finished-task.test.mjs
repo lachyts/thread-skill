@@ -85,6 +85,15 @@ const REQUIRED = {
   'resume-skips': /step 4's Resume instructions never name it as the next step/,
   'ticked-dropped': /ticked in step 6 is dropped from both/,
   'flips-first': /writes the flips and ticked options first, before the new tasks and before the set-down/,
+  // A fix is done only once Proven (ADR 0078 d1): a carried fix gets no flip; a landing writes through prove; an
+  // unproven landing's row starts with `task landed`.
+  'carried-exclusion': /A carried fix \(`status: review` with a valued `merged:`[^)]*\) gets no flip and no option/,
+  'land-route': /prove --tasks <task> --land/,
+  'completed-outcomes': /the JSON `landed\.outcome` `done`, `proven` or `owed`, and never on a carried landing/,
+  'carried-row': /`task landed, carried: \[\[<task>\]\] \(<waits>\)`/,
+  'owed-row': /`task landed, carry-back owed: \[\[<task>\]\] \(<why>\)`/,
+  'not-live-row': /`task landed, carried: \[\[<task>\]\] \(not live yet; seen not recorded: record it with \/thread:repair once live\)`/,
+  'landed-rule': /A row for a landing that is not Proven \(carried or owed\) starts with `task landed`, never `task done`/,
 }
 
 // Every violation of the section's contract, as a list (empty when it holds).
@@ -106,6 +115,10 @@ function checkFlip(text) {
   for (const s of review) {
     if (!/mark-done option/.test(s)) out.push('review-rule without mark-done option')
     if (/task left for execute/.test(s)) out.push('review-rule names execute row')
+  }
+  // Rule P: a row for a landing that is not Proven (it names `carried` or `carry-back owed`) starts with `task landed`.
+  for (const m of flat.matchAll(/`task [^`]*\[\[<task>\]\][^`]*`/g)) {
+    if (/carried|carry-back owed/.test(m[0]) && m[0].startsWith('`task done')) out.push('unproven row reads done')
   }
   return out
 }
@@ -158,6 +171,12 @@ const MUTATIONS = [
   ['m18 a chat mention is work', ' A bare mention in chat is not work.', '', ['missing: mention-not-work']],
   ['m19 worked undefined', "Worked means this session did the task's own work", 'Worked means this session touched the task',
     ['missing: worked-def']],
+  ['m20 owed row reads done', '`task landed, carry-back owed: [[<task>]] (<why>)`',
+    '`task done: [[<task>]] (landed, carry-back owed: <why>)`', ['missing: owed-row', 'unproven row reads done']],
+  ['m21 carried row reads done', '`task landed, carried: [[<task>]] (<waits>)`',
+    '`task done: [[<task>]] (landed, carried: <waits>)`', ['missing: carried-row', 'unproven row reads done']],
+  ['m22 completed on carried', '`done`, `proven` or `owed`', '`done`, `proven`, `owed` or `carried`',
+    ['missing: completed-outcomes']],
 ]
 
 for (const [name, from, to, want] of MUTATIONS) {
@@ -201,7 +220,11 @@ test('T7: sub-step 7.6 writes the flips first; step 8 reports them', () => {
   const step8 = lineOf(close, /^8\. \*\*Print the "What landed" report/)
   assertHas(step8, `${CLOSE} step 8`, [
     '`task done: [[<task>]] (<route>; <landing evidence>; <Verify run>)`',
+    '`task done: [[<task>]] (<route>; <landing evidence>; <Verify run>; proven <date>)`',
     '`task done (ticked): [[<task>]]`',
+    '`task landed, carried: [[<task>]] (<waits>)`',
+    '`task landed, carried: [[<task>]] (not live yet; seen not recorded: record it with /thread:repair once live)`',
+    '`task landed, carry-back owed: [[<task>]] (<why>)`',
     '`task left for execute: [[<task>]]`',
     '`task flip skipped: [[<task>]] partly landed (<what remains>)`',
     '`Repo state: <line> — tracked by [[<task>]] (flipped done this close)`',
@@ -209,6 +232,7 @@ test('T7: sub-step 7.6 writes the flips first; step 8 reports them', () => {
     /all on one line, rows joined with ` · `/,
   ])
   assert.doesNotMatch(step8, /`task done: \[\[<task>\]\][^`]*·/, 'a task-row reason must not nest the row separator')
+  assert.doesNotMatch(step8, /`task done[^`]*(carried|carry-back owed)/, 'no done row in step 8 carries the unproven wording')
 })
 
 test('T8: the intro bullets name the guarded flip and the mark-done option', () => {
@@ -269,6 +293,9 @@ const EDGE_LABELS = [
   'A task this session only did bookkeeping on',
   'A branch whose tracking task flips this close',
   'A task that already carries `completed:`',
+  'A carried fix this session worked',
+  'A flip that lands owed',
+  "A serial chain's task",
 ]
 
 test('T13: the flip set is never the next task; edge cases are named', () => {
