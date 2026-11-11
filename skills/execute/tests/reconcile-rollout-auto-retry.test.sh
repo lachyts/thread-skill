@@ -415,6 +415,14 @@ ANOW=2026-10-03T08:15:00Z ar "$A"
 ok "$rc|$(fm "$A" status)" "0|status: review" "A5c-cancel: past the cool-down → review"
 ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","infra"]' \
   "A5c-cancel: stage integrate, setAsideAt integration, retryClass infra"
+# A5c-no-runner (ADR 0069, amended 2026-11-11): merge-task's exit-4 no-runner set-aside is infra too: no code fix clears
+# it and a runner coming back does, so it cools down rather than reaching Lachy on its second identical block.
+scen a5c-no-runner
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration 'integration: no-runner: required job "self-hosted" queued 47 minutes with no runner (run 7, job 8)'
+I=$(INOW=2026-10-03T08:05:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"], d["humanFix"]]')" '["infra",false,"2026-10-03T08:15+00:00",null]' \
+  "A5c-no-runner: a required job no runner took → infra, cooling 15 minutes, no human fix"
 # The second control: a `ci<TAB>fail` cell after the never-appeared line, as the flattened one-line reason carries it.
 GH_FAIL="$GH_NEVER ci"$'\t'"fail"$'\t'"1m"$'\t'"https://github.com/o/r/actions/runs/7/job/8"
 for c in "gate|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate is in the way" \
@@ -857,7 +865,7 @@ import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps({"fix": list(m.MERGE_TASK_FIXABLE), "gone": m.BRANCH_GONE_MARK, "declined": m.DECLINED_MARK,
                   "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS),
-                  "mtInfra": list(m.MERGE_TASK_INFRA), "settling": m.MERGE_TASK_SETTLING_MARK,
+                  "mtInfra": list(m.MERGE_TASK_INFRA), "settling": m.MERGE_TASK_SETTLING_MARK, "noRunner": m.NO_RUNNER_OPENING,
                   "ghOpening": m.MERGE_TASK_GITHUB_OPENING}))
 PY
 }
@@ -870,6 +878,7 @@ while IFS= read -r frag; do
   ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_INFRA \"$frag\" is merge-task.sh's text"
 done < <(j "$P" '"\n".join(d["mtInfra"])')
 ok "$(grep -c -F -- "$(j "$P" 'd["settling"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_SETTLING_MARK is merge-task.sh's text"
+ok "$(grep -c -F -- "$(j "$P" 'd["noRunner"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: NO_RUNNER_OPENING is merge-task.sh's exit-4 text"
 ok "$(grep -c -F -- "$(j "$P" 'd["ghOpening"]')" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_GITHUB_OPENING is execute SKILL.md's reason"
 for frag in "(not OPEN/MERGED)" "is not on origin" "not the default branch" "merge queue required" "a NON-check gate" \
             "GitHub refused to merge" "is not confirmed merged" "stays BEHIND" "unexpected mergeStateStatus"; do
