@@ -23,7 +23,8 @@
 # stderr carries `land: …` lines: `land: commit <sha40>` (this run's commit, final SHA after any rebase)
 # or `land: nothing committed`, `land: carried <N> earlier close-out commit(s)`, `land: nothing to land`,
 # `land: dropped <rel> (…)`, `land: ff refused: …`, `land: 3-way conflict …`, `land: kept <rel> …`,
-# `land: label failed: …`, `land: update-branch failed: …`,
+# `land: label failed: …`, `land: update-branch failed: …`, the own branch's `land: queue marker …` and `land: queue
+# withdrawn (…)`,
 # `land: skipped <step>: deadline`, `land: held the primary checkout at <sha>, …: <why>`, and git's or gh's
 # own diagnostics.
 #
@@ -91,7 +92,8 @@
 # origin/<B> (`land: base <sha>`, `land: head <sha>`) · --queue and --hold only: record the review rounds
 # (below) · push.default upstream|tracking is stuck · nothing ahead is `landed` · push access · the newest
 # same-repo PR headed <B> (another author's: not landed; closed unmerged: stuck; merged with HEAD in its
-# head: landed) · auto-merge switched off on every call but --queue · --queue only: every commit after
+# head: landed) · auto-merge switched off on every call but --queue, and a live queue marker withdrawn (below) ·
+# --queue only: every commit after
 # --reviewed touches docs/reviews/ alone, or with --fixed-at-budget carries its reproduction (below) · push <B>
 # to itself · open and label the `landing` PR · then the action:
 #   plain    point <B>'s upstream at origin/<d> (the review base), print `land: upstream origin/<d> (was …)`
@@ -108,6 +110,15 @@
 #            direct merge when that is refused and HEAD is green (`landed`), else `queued: needs merge`;
 #            update-branch once when queued and behind. Unprotected: pending or infra is `queued: needs
 #            merge` with no merge call; green is a direct merge, `landed`.
+# The queue marker (ADR 0078 d2): a --queue that ends `queued: needs merge <url>` (any of its three exits) leaves the
+# comment `Landing queued (ADR 0078 d2): <HEAD sha>` on the PR (`land: queue marker <sha>`), bound to that head: the
+# landing carrier (land-carrier.py) follows it through GitHub's update-branch and its own conflict merges and merges
+# it once green and clean. Optional: a failed post is `land: queue marker failed: <why>`, the result unchanged, and
+# the PR stays unqueued. Every plain and --hold call on an open PR then reads the comments, right after the
+# auto-merge switch-off and so before anything is pushed (`land-carrier.py marker`, the grammar's one copy), and a
+# live marker for any head is withdrawn, `Landing withdrawn (ADR 0078 d2): <S>` (`land: queue withdrawn (<S>)`).
+# Fail closed: a failed read, a missing or failing land-carrier.py, or a failed post is `stuck: queue withdrawal
+# failed: <why>`, exit 1, nothing pushed. --hold's own comment stays optional.
 # --fixed-at-budget (fresh-review § Rounds — The budget, ADR 0001; thread-skill ADR 0065): R is the head of the chain's
 # third and last code round, and a blocking finding still open there is fixed until its reproduction passes, with no
 # further review. So a code commit after R is accepted when its message carries a `Fixes-finding: #<n>[, #<m>…]`
@@ -135,8 +146,9 @@
 # rounds`, `land: review rounds not all recorded (<its first review-round: warning: line>)` when it exited 0
 # with a warning, or `land: review rounds not recorded (<why>)`: timed out, or recorder exit <rc>. It never
 # changes the result line or exit code.
-# Results: pr open <url> · held <url> · queued <url> · queued: needs merge <url> · ci failed: … · landed ·
-# not landed: <reason> · stuck: <reason>. Exit 0 but stuck (1) and usage (2).
+# Results: pr open <url> · held <url> · queued <url> · queued: needs merge <url> (with its queue marker) · ci
+# failed: … · landed · not landed: <reason> · stuck: <reason> (`stuck: queue withdrawal failed: <why>` among them).
+# Exit 0 but stuck (1) and usage (2).
 #
 # Every network call runs under `bounded` (LAND_TIMEOUT seconds each, default 30; LAND_DEADLINE seconds
 # overall, default 450). The review-round recorder runs after them, under LAND_RECORD_TIMEOUT alone: 450 + 60
@@ -1031,12 +1043,55 @@ try:
 except Exception:
     sys.exit(2)'
 
-# own_finish <line> <rc>: the one way out once preflight passed. Restores <B>'s upstream first, then a --queue
-# or --hold records its review rounds (own_rounds), whatever the result.
+# own_finish <line> <rc>: the one way out once preflight passed. A --queue ending `queued: needs merge` with a PR
+# leaves its queue marker first (own_mark_queued, all three such exits); then <B>'s upstream is restored, and a
+# --queue or --hold records its review rounds (own_rounds), whatever the result.
 own_finish() {
+  if [ "$act" = --queue ] && [ -n "$n" ]; then
+    case $1 in "queued: needs merge "*) own_mark_queued ;; esac
+  fi
   [ -n "$own_restore" ] && restore_upstream
   [ -n "$act" ] && own_rounds
   result "$1"; exit "$2"
+}
+
+# own_mark_queued: the `Landing queued (ADR 0078 d2): <HEAD>` marker on PR $n, bound to the queued head; the landing
+# carrier (land-carrier.py) merges a marked PR once it is green and clean. Optional: a failure prints `land: queue
+# marker failed: <why>` and leaves the result as it was (the PR stays unqueued, listed by the carrier after a day).
+own_mark_queued() {
+  local out rc sha
+  sha=$(git rev-parse HEAD 2>/dev/null) || { echo "land: queue marker failed: cannot read HEAD"; return 0; }
+  printf '%s\n\n%s\n' "Landing queued (ADR 0078 d2): $sha" \
+    "The landing carrier merges this PR at \`$(printf '%s' "$sha" | cut -c1-12)\` once it is green and clean, following GitHub's update-branch and its own conflict merges; a later plain or --hold land.sh call withdraws it." > "$tmpd/queued"
+  out=$(bounded gh api --method POST "repos/$slug/issues/$n/comments" -F "body=@$tmpd/queued" 2>&1 >/dev/null); rc=$?
+  printf '%s\n' "$out" > "$tmpd/qm.err"
+  net_rc "$rc" "queue marker" optional "$tmpd/qm.err"; rc=$?
+  if [ "$rc" = 0 ]; then echo "land: queue marker $sha"; else echo "land: queue marker failed: $NET_ERR"; fi
+}
+
+# own_withdraw_queue: a plain or --hold call withdraws a live `Landing queued` marker, whatever head it names, before
+# anything is pushed. The comments are read through `land-carrier.py marker` (the one copy of the marker grammar); on
+# `queued <S>` it posts `Landing withdrawn (ADR 0078 d2): <S>`. Fail closed: a read (gh, or a land-carrier.py missing
+# or failing) or a post that fails returns 1 with NET_ERR saying why.
+own_withdraw_queue() {
+  local out rc s
+  out=$(bounded gh api --paginate "repos/$slug/issues/$n/comments?per_page=100" 2>"$tmpd/cms.err"); rc=$?
+  net_rc "$rc" "comments read" required "$tmpd/cms.err"; rc=$?
+  [ "$rc" = 0 ] || return 1
+  s=$(printf '%s' "$out" | python3 "$here/land-carrier.py" marker --login "$me" 2>"$tmpd/mk.err"); rc=$?
+  if [ "$rc" != 0 ]; then NET_ERR="cannot read the queue marker: $(first_line "$tmpd/mk.err")"; [ -s "$tmpd/mk.err" ] || NET_ERR="cannot read the queue marker: exit $rc"; return 1; fi
+  case $s in
+    none) return 0 ;;
+    "queued "*) s=${s#queued } ;;
+    *) NET_ERR="cannot read the queue marker: unexpected '$s'"; return 1 ;;
+  esac
+  printf '%s\n\n%s\n' "Landing withdrawn (ADR 0078 d2): $s" \
+    "A later land.sh call on this branch withdrew the queue: the landing carrier no longer merges this PR." > "$tmpd/withdrawn"
+  out=$(bounded gh api --method POST "repos/$slug/issues/$n/comments" -F "body=@$tmpd/withdrawn" 2>&1 >/dev/null); rc=$?
+  printf '%s\n' "$out" > "$tmpd/wd.err"
+  net_rc "$rc" "queue withdrawal" required "$tmpd/wd.err"; rc=$?
+  [ "$rc" = 0 ] || return 1
+  echo "land: queue withdrawn ($s)"
 }
 
 # up_name: <B>'s upstream as <remote>/<branch>, or none.
@@ -1341,6 +1396,10 @@ EOF
         [ "$rc" = 124 ] && own_finish "stuck: $NET_ERR" 1
         [ "$rc" = 0 ] || own_finish "stuck: cannot switch auto-merge off on $url: $NET_ERR" 1
         echo "land: auto-merge off"
+      fi
+      # Like auto-merge, a queue marker is withdrawn before O9-O11 can push anything (ADR 0078 d2).
+      if [ "$act" != --queue ]; then
+        own_withdraw_queue || own_finish "stuck: queue withdrawal failed: $NET_ERR" 1
       fi
       ;;
     MERGED)

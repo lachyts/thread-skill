@@ -25,6 +25,7 @@ FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
 # CONTEXT.md, fast-tier-wiring the real CLAUDE.md, inert-paths proves globs on this tree) ----
 FOREIGN-ONLY THREAD.md tests/leg.test.sh tests/lead-integrate.test.sh tests/git-env-canary.test.sh  # fixture repos' close-outs
 FOREIGN-ONLY THREAD.md tests/primary-refresh.test.sh tests/land.test.sh tests/pushed-base.test.sh  # fixture repos' close-outs
+FOREIGN-ONLY THREAD.md tests/land-carrier.test.sh  # fixture repos' landing PRs and their conflicts
 FOREIGN-ONLY THREAD.md tests/repo-threads.test.sh tests/thread-placement.test.mjs tests/estate-scan.test.mjs  # fixture repos' threads
 FOREIGN-ONLY THREAD.md tests/schedule-queue.test.sh tests/next-action.test.mjs tests/fast-tier-wiring.test.mjs  # fixture notes' strings
 FOREIGN-ONLY THREAD.md tests/run-record.test.mjs tests/reflect-tune.test.mjs tests/rollout-settings.test.mjs  # inert_paths globs as strings
@@ -197,7 +198,7 @@ tests/fixtures/away-state/** skills/execute/tests/reconcile-rollout-trickle.test
 tests/fixtures/gated-inputs/** tests/gated-inputs.test.mjs
 tests/fixtures/land/** tests/git-env-canary.test.sh tests/land.test.sh tests/lead-integrate.test.sh tests/live-checkout.test.sh
 tests/fixtures/land/** tests/merge-task-base.test.sh tests/parallel-rollouts-one-repo.test.sh tests/primary-refresh.test.sh
-tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh
+tests/fixtures/land/** tests/pushed-base.test.sh tests/self-rollout-check.test.sh tests/land-carrier.test.sh
 tests/fixtures/landing-register/** tests/execution-fit-remote.test.sh tests/landing-register.test.mjs
 tests/fixtures/merge-gate/** tests/merge-gate.test.mjs
 tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integrated.test.sh tests/parallel-rollouts-one-repo.test.sh

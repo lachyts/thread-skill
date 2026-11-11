@@ -2,6 +2,7 @@
 # merge-task.sh — merge ONE integrated PR, and only onto the base its Integration used (ADR 0030, p12-7).
 #
 # Usage:  merge-task.sh <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>
+#         merge-task.sh --classify-steps < <failed step names>   the classifier's verdict alone (land-carrier.py)
 #   <repoPath>   absolute path to the target repo (origin must be a github.com remote).
 #   <pr>         a positive PR number, or a https://github.com/<o>/<r>/pull/<N> URL (an optional /…, ?… or #…
 #                suffix is fine) in origin's repo, compared case-insensitively: the lead passes the row's `pr`
@@ -276,6 +277,11 @@ classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuin
   [ "$saw" -eq 1 ] || verdict=genuine   # no parseable steps ⇒ cannot prove infra ⇒ genuine
   printf '%s' "$verdict"
 )
+
+# `merge-task.sh --classify-steps`: classify_failed_steps on stdin's failed step names, its verdict on one line (infra |
+# genuine), exit 0. The landing carrier's rerun rule (land-carrier.py, ADR 0078 d2) reads this, the one copy of the
+# classifier. Before any other top-level code, so it needs no argument, repo, gh or GitHub.
+if [ "${1:-}" = "--classify-steps" ]; then classify_failed_steps; echo; exit 0; fi
 
 # ---- local base refresh --------------------------------------------------------------------------------
 # After the PR lands, fast-forward the checkout at repoPath — only when it is on the base branch; a
