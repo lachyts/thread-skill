@@ -9,7 +9,7 @@ code, never on the slug in the output; stdout and stderr may be shown verbatim.
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/landing-register.py check --slug <owner/name>
 
 Exactly one of <repo-path> and --slug. --slug is for callers holding a GitHub owner/name and no
-checkout (the daily lander, from gh's nameWithOwner); it never calls git. Stdlib only, python >= 3.9.
+checkout (the landing carrier, from gh's nameWithOwner); it never calls git. Stdlib only, python >= 3.9.
 
   exit 0  stdout `land`                          unlisted, or no register file (one stderr warning)
   exit 3  stdout `listed <owner/name>: <reason>`  on the register (or named anywhere in it)

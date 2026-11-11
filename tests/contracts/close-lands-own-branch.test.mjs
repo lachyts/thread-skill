@@ -302,7 +302,8 @@ test('mid-loop auto-merge is off, and nothing waits for CI', () => {
   assertHas(c, '§ Land the own branch', [
     'every call but `--queue` switches it off',
     'close does not wait for CI',
-    "A red CI or a PR left behind master after close ends is the daily lander's and the next close's",
+    "A PR left behind master after close ends is the landing carrier's",
+    "a real CI failure is the next close's",
     'It never waits for CI or for the merge',
   ])
   for (const bad of ['--watch', 'sleep', 'gh pr checks']) assert.ok(!sec.includes(bad), `§ Land the own branch holds ${bad}`)

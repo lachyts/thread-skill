@@ -3,7 +3,8 @@
 // process group.
 //   BJ0 python 3.8 syntax   BJ1 importing it changes nothing   BJ2 state_path   BJ3 read_state   BJ4 the writes
 //   BJ5 the plist and PATH   BJ6 notify and run_plain   BJ7 kill_group
-//   BJ8 a missing or broken module is each by-path loader's own broken-install line, never a traceback
+//   BJ8 a missing or broken module is each by-path loader's own broken-install line, never a traceback (land-carrier.py's
+//       marker, which loads none, still reads)
 //   BJ9 the structural pin: the TERM+KILL stops left in the tree are kill_group and the ones its docstring names
 //   BJ10 the frozen interface primary-refresh.py calls (its self-update contract): every `BJ.<name>(...)` call shape in
 //        primary-refresh.py is in a literal list, every listed one still binds to the module's signature, the parameters
@@ -312,6 +313,17 @@ test('BJ8. a missing or broken background_job.py is each by-path loader\'s own b
     assert.ok(r.stderr.startsWith(`estate-scan: cannot load ${mod}: `), `${how} estate-scan: ${r.stderr}`)
     assert.equal(r.stdout, '')
     assert.ok(!r.stderr.includes('Traceback'), r.stderr)
+    for (const verb of [['run', '--now', '2026-11-06T10:00:00+11:00'], ['stuck']]) {
+      r = runs('_shared/scripts/land-carrier.py', [...verb, '--state', path.join(s.dir, 'landings.json')])
+      assert.equal(r.status, 1, `${how} land-carrier ${verb[0]}: ${r.stdout}${r.stderr}`)
+      assert.ok(r.stderr.startsWith(`land-carrier: cannot load ${mod}: `), `${how} land-carrier ${verb[0]}: ${r.stderr}`)
+      assert.equal(r.stdout, '')
+      assert.ok(!r.stderr.includes('Traceback'), r.stderr)
+    }
+    assert.ok(!fs.existsSync(path.join(s.dir, 'landings.json')), `${how} land-carrier: no state written`)
+    r = spawnSync(PY, ['-B', path.join(copy, 'skills', '_shared', 'scripts', 'land-carrier.py'), 'marker', '--login', 'me'],
+      { cwd: s.cwd, env: s.env, encoding: 'utf8', input: '[]' })
+    assert.equal(`${r.status}|${r.stdout}`, '0|none\n', `${how} land-carrier marker loads no background_job.py: ${r.stderr}`)
   }
 })
 
@@ -344,7 +356,8 @@ test('BJ9. the TERM+KILL group stops left in the tree are kill_group and the one
   assert.deepEqual(r.stdout.trim().split('\n'), ['background_job.py:kill_group', 'estate-scan.py:interrupt', 'verify-slot.py:_end',
     'verify-slot.py:kill_group'])
   for (const rel of ['skills/_shared/scripts/primary-refresh.py', 'skills/execute/scripts/lead-integrate.py',
-    'skills/_shared/scripts/declared-check.py', 'skills/_shared/scripts/estate-scan.py', 'skills/reflect/scripts/close-score.py']) {
+    'skills/_shared/scripts/declared-check.py', 'skills/_shared/scripts/estate-scan.py', 'skills/reflect/scripts/close-score.py',
+    'skills/_shared/scripts/land-carrier.py']) {
     assert.ok(fs.readFileSync(path.join(root, rel), 'utf8').includes('background_job.py'), `${rel} names background_job.py`)
   }
 })
