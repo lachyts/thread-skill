@@ -56,14 +56,14 @@ for sh in "${shells[@]}"; do
   for bad in 0 abc -1 1.5 ' 2'; do
     ok "$(fb "$bad" | tr '\n' ' ')" "rc=2 " "$n: THREAD_SUITE_BOUND='$bad' → return 2, nothing printed"
   done
-  # ---- suite_bounds: 3x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ----------
+  # ---- suite_bounds: 10x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ---------
   W="$tmp/weights-$k.tsv"
-  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.2 tests/zza.test.sh \
+  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.25 tests/zza.test.sh \
     0.5 tests/zzb.test.sh bad tests/zzc.test.sh > "$W"
   sb() { local w="$1" f="$2"; shift 2; printf '%s\n' "$@" | "$sh" -c '. tests/lib/test-jobs.sh; suite_bounds "$@"' sh "$w" "$f" | tr '\t\n' ': '; }
   ok "$(sb "$W" '' @merge-task-self-tests tests/zzleg.test.sh tests/zza.test.sh tests/zzb.test.sh tests/zzc.test.sh tests/zznew.test.mjs)" \
-    "@merge-task-self-tests:300 tests/zzleg.test.sh:1581 tests/zza.test.sh:301 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
-    "$n: suite_bounds: 3x the weight rounded up (527 → 1581, 100.2 → 301), the 300 s floor, 1200 s for no weight or a malformed line"
+    "@merge-task-self-tests:300 tests/zzleg.test.sh:5270 tests/zza.test.sh:1003 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
+    "$n: suite_bounds: 10x the weight rounded up (527 → 5270, 100.25 → 1003), the 300 s floor (9 → 300), 1200 s for no weight or a malformed line"
   ok "$(sb "$tmp/no-such.tsv" '' tests/zzleg.test.sh)" "tests/zzleg.test.sh:1200 " "$n: suite_bounds: no weights file → 1200 s"
   ok "$(sb "$W" 5 tests/zzleg.test.sh @merge-task-self-tests)" "tests/zzleg.test.sh:5 @merge-task-self-tests:5 " "$n: suite_bounds: a flat bound is every entry's"
   # ---- watch_group: a group whose leader outlives its bound is TERMed whole; a group that ignores TERM is KILLed ----
@@ -132,8 +132,29 @@ has "$run" '. tests/lib/test-jobs.sh' "run.sh sources tests/lib/test-jobs.sh"
 has "$run" 'max_jobs=$(suite_cap) || {' "run.sh: the cap comes from suite_cap, and a bad THREAD_TEST_JOBS stops the run"
 has "$run" 'echo "== suites: at most $max_jobs at a time"' "run.sh prints the cap"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /wait_for_room "\$max_jobs"/{print "y"; exit} on && /^\}/{exit}' tests/run.sh)" y "run.sh: spawn() waits for room first"
-has "$run" 'node --test --test-concurrency="$max_jobs" --test-timeout=600000' \
-  "run.sh: node runs at the same concurrency, each test file bounded at 10 minutes"
+has "$run" 'node --test --test-concurrency="$max_jobs" --test-timeout=1200000' \
+  "run.sh: node runs at the same concurrency, each test file bounded at 20 minutes"
+# ---- the real bounds clear macOS CI: PR #373's first CI run (factor 3) killed tests/unfinished-rollout.test.sh at 336 s
+# and tests/leg.test.sh at 1581 s, both healthy. The slowest passing macos-latest times seen, 19 jobs (PR full runs and
+# master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
+# --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
+# A weights regenerate or a factor change that would kill one of them on CI is red here first.
+ci_max="tests/leg.test.sh 1891
+tests/lead-integrate.test.sh 735
+tests/unfinished-rollout.test.sh 613
+tests/primary-refresh.test.sh 543
+tests/land.test.sh 297
+tests/serial-chains.test.sh 163"
+bounds=$(printf '%s\n' "$ci_max" | awk '{print $1}' | bash -c '. tests/lib/test-jobs.sh; suite_bounds tests/shard-weights.tsv')
+bad=""
+while read -r t m; do
+  b=$(printf '%s\n' "$bounds" | awk -F'\t' -v t="$t" '$1 == t { print $2 }')
+  [ "$((${b:-0} * 2))" -ge "$((m * 3))" ] || bad="$bad $t=${b:-none}<1.5x$m"
+done <<< "$ci_max"
+ok "${bad# }" "" "run.sh: each suite's bound from the real weights is at least 1.5x its slowest passing macOS CI time"
+nt=$(grep -o 'test-timeout=[0-9]*' tests/run.sh | head -1); nt=${nt#test-timeout=}
+ok "$([ "${nt:-0}" -ge $((512 * 1500)) ] && echo ok || echo "${nt:-none} ms")" ok \
+  "run.sh: node's --test-timeout is at least 1.5x the slowest node file's macOS CI time (512 s)"
 has "$run" 'flat=$(flat_bound) || {' "run.sh: a bad THREAD_SUITE_BOUND stops the run"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /set -m; "\$@"/{a=1} on && /watch_group "\$pid" "\$bound"/{b=1} on && /^\}/{exit} END{print (a && b) ? "y" : "n"}' tests/run.sh)" y \
   "run.sh: spawn() runs each suite as a process group of its own, watched by watch_group"

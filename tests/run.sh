@@ -40,15 +40,17 @@
 # bound the whole group is TERMed, then KILLed, and the suite ends `<label>: FAILED (<N>s)` plus a `<label>: timed out
 # after <B>s` line, also in its block and its failure-list line; it fails even when it exits 0 on its TERM. Its block
 # also names the fix for a healthy suite that has only grown slower: regenerate tests/shard-weights.tsv, or set
-# THREAD_SUITE_BOUND. The bound is suite_bounds's (3x the suite's measured seconds in tests/shard-weights.tsv rounded
-# up, 300 s floor, 1200 s with no weight); THREAD_SUITE_BOUND (seconds) sets one flat bound for every suite instead. A
+# THREAD_SUITE_BOUND. The bound is suite_bounds's (10x the suite's measured seconds in tests/shard-weights.tsv rounded
+# up, 300 s floor, 1200 s with no weight; test-jobs.sh says why 10x); THREAD_SUITE_BOUND (seconds) sets one flat bound
+# for every suite instead. A
 # bound that is not a positive integer (an entry suite_bounds printed no line for) falls back to the 1200 s, and spawn
 # prints a `run.sh: <label>: no liveness bound` line. The bound counts the suite's awake seconds, not elapsed ones
 # (watch_group's rule), so a Mac asleep through the run or a Ctrl-Z on it does not count against it. Since no suite
 # shares run.sh's process group any more, a TERM, INT or HUP to run.sh ends every live suite's group before it exits:
-# TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 600 s
-# (`--test-timeout`, which bounds a whole file as well as each test: node 23.9 cancels a file of three 1.5 s tests at a
-# 2 s timeout), several times the slowest file (tests/reflect-weekly.test.mjs, 153 s locally at the cap of 4).
+# TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 1200 s
+# (`--test-timeout`, which bounds a whole file as well as each test, from the file's own start: node 22 and 23.9 cancel
+# a file of three 1.5 s tests at a 2 s timeout), 2.3x the slowest file on macOS CI (tests/reflect-weekly.test.mjs,
+# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -332,7 +334,7 @@ wait
 i=0; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 # A bare `node --test` walks the whole tree, so node runs only when a file is selected.
 if [ "${#run_node[@]}" -gt 0 ]; then
-  step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" --test-timeout=600000 "${run_node[@]}"
+  step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"
 else
   echo "== node tests: none selected"
 fi

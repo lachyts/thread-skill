@@ -45,12 +45,17 @@
 #   end_groups <grace> [pgid...]
 #                        TERM every group at once, wait up to <grace> seconds for all of them to empty, then KILL
 #                        whatever is left. No group is a no-op. run.sh's stop_suites ends every live suite this way.
-# 3x the measured seconds covers CI macOS's roughly 1.6x local time with margin (tests/leg.test.sh: 527 s, bound
-# 1581 s), and a small suite's hang shows red in 5 minutes. SUITE_POLL_JUMP is a few polls' worth: a loaded machine's
+# 10x the measured seconds, from macOS CI: the weights are local seconds, and the 3-vCPU macos-latest runner at the cap
+# of 4 runs a suite at up to 5.5x them (tests/unfinished-rollout.test.sh, 613 s against 112, in a PR's full run; leg
+# 1891 s against 527), the slowest passing times of 19 macOS jobs from 2026-11-10 to 11. 3x, which read that runner as
+# about 1.6x, killed those two healthy suites on PR #373's CI. 10x leaves 1.8x over the worst (unfinished-rollout
+# 1120 s), and tests/test-jobs.test.sh holds the real bounds to 1.5x those CI times. A small suite's hang still shows
+# red in 5 minutes (the floor); 1200 s with no weight clears every suite's macOS time but leg's (lead-integrate next,
+# 735 s). SUITE_POLL_JUMP is a few polls' worth: a loaded machine's
 # `sleep 1` overruns by far less, and a Mac sleep or a suspend by far more. SUITE_STOP_GRACE sits under
 # verify-slot.py's KILL_GRACE (10 s): a guard that ends a run TERMs run.sh's group, and run.sh's own TERM trap then
 # KILLs a suite that outlives its TERM before the guard KILLs run.sh's group, which no longer holds the suites.
-SUITE_BOUND_FACTOR=3
+SUITE_BOUND_FACTOR=10
 SUITE_BOUND_FLOOR=300
 SUITE_BOUND_UNWEIGHTED=1200
 SUITE_STOP_GRACE=5

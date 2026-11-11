@@ -1,8 +1,8 @@
 # Measured seconds per shell suite, read by tests/lib/shard.py (its docstring holds the format and the rules): each
 # entry's load in the full suite's shard split (ADR 0073 d3), so the shards balance on time, not file size.
-# tests/run.sh reads it too, for each suite's liveness bound (tests/lib/test-jobs.sh's suite_bounds): 3x the weight
-# rounded up, at least 300 s, 1200 s for a suite with none. A suite whose seconds grow towards its bound needs this file
-# regenerated, or it is killed as hung.
+# tests/run.sh reads it too, for each suite's liveness bound (tests/lib/test-jobs.sh's suite_bounds): 10x the weight
+# rounded up, at least 300 s, 1200 s for a suite with none (macOS CI runs a suite at up to 5.5x these local seconds). A
+# suite whose seconds grow towards its bound needs this file regenerated, or it is killed as hung.
 # Source: the per-suite `<label>: ok (<N>s)` lines of two local `make test` runs (2026-11-09, p43-6's audit,
 # docs/audits/2026-11-09-test-suite.md), at the default cap of 4 on a 12-core Mac, load 3 to 5; each value is the
 # median of the two. @merge-task-self-tests is its two self-tests summed. A suite that ended within its first
