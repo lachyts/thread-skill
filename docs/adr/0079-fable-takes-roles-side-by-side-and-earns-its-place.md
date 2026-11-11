@@ -1,18 +1,27 @@
-# 0079 — Fable takes roles side by side, and each role earns its place
+# 0079 — Fable plans every task and tops the ladder; further roles earn their place side by side
 
 Date: 2026-11-12
-Status: accepted, not built (grilled with Lachy 2026-11-12 at a `/thread:orient Thread Skill` reshuffle; builds as
-Phase 46; amends ADR 0029 decisions 1, 4 and 5). Nothing here runs until Lachy edits `~/.agents/AGENTS.md` § Model
-tier by hand: that section is the Opus lock, and the wording proposed for it is at the end.
+Status: accepted, not built (two sittings with Lachy on 2026-11-12: Chorus's thirtieth orient, recorded as Chorus
+ADR 0119, and a `/thread:orient Thread Skill` reshuffle; builds as Phase 46). Amends ADR 0029 decisions 1 (a rung
+may name a plan model, and a role its own), 4 (the plan judge rides with the planner) and 7 (the record gains
+arms). ADR 0029 decisions 2, 3, 5 and 6 and ADR 0037 stand as written. Within rollouts it overturns Chorus ADR 0119
+decision 9 ("everything else stays on Opus"), on his later word. Nothing here runs until Lachy edits
+`~/.agents/AGENTS.md` § Model tier by hand: that section is the Opus lock, and one wording for both ADRs is proposed
+at the end.
 
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.
-That replay was dropped on 2026-10-09 and never ran. Fable 5.2 shipped on 2026-11-09, and Lachy asked where it fits.
+That replay was dropped on 2026-10-09 and never ran. Fable 5.2 shipped on 2026-11-09, and on 2026-11-12 Lachy ruled
+on it twice.
 
-A first draft made Fable a rung reached only when a task was about to be set aside. He rejected it: *"I don't want
-to use it just as a last resort. I want it to be part of the many tools that we use … we can earn the right of
-using it more, log it, and see the effectiveness of it."* Asked how wide to start, he picked the widest option:
+**At Chorus's orient** (Chorus ADR 0119 decisions 1 and 2, his): Fable shapes every plan, in a Session and in a
+rollout, and is the top gear when Opus fights. That ADR names the rollout half as this repo's.
+
+**At this repo's orient, later the same day.** A first draft here made Fable a rung reached only when a task was
+about to be set aside. He rejected it: *"I don't want to use it just as a last resort. I want it to be part of the
+many tools that we use … Where do we think the rollout and thread system would benefit from Fable? … we can earn
+the right of using it more, log it, and see the effectiveness of it."* Offered three widths, he picked the widest:
 *everything, now.* On the weekly allowance: *"I have four different accounts and if I need to get more accounts,
 I'm happy to get more … using them in a way that feels balanced so that we're not burning all the Fable credit
 (and then we have this Opus credit that we could be using) … I don't want to have this stuff locked … that doesn't
@@ -35,47 +44,59 @@ What was known on 2026-11-12:
   to the master review passing code a later review flagged.
 - **Allowance.** Each Claude Login has its own weekly Fable window beside its general one, and all four Fable
   windows read 0% used. Whether Fable use also draws down the general window was not confirmed.
-- **The engine.** A Rung holds one model for every role, so "Fable plans, Opus builds" cannot be said. Escalation
-  climbs once per stage, so a third rung is not reached by a stage that already climbed. A model-allowance refusal
-  reads as a transient failure, which stalled two rollouts in September 2026.
+- **The engine.** A Rung holds one model for every role, so "Fable plans, Opus builds" cannot be said. A
+  model-allowance refusal reads as a transient failure, which stalled two rollouts in September 2026.
 
 ## Decision
 
-1. **Fable is assigned by Role, never by its place on the Ladder.** A Role may name its own model. The roles that
-   start: shaping (orient, orient-all, schedule's readiness grading), planning, plan judging, building a task whose
-   `work_depth` is deep, the final review, diagnosis (repair, the blocked-task investigator, the weekly Reflection,
-   audits) and leading a rollout. Routine builds and Integration stay on Opus.
-2. **Every role starts side by side.** Each role has two **Arms**, Opus and Fable. A task falls in one arm for a
-   role by a draw fixed by its name, a rollout's lead by a draw fixed by the rollout's name, and each role draws on
-   its own. Nothing picks an arm by how hard the work looks.
-3. **Both arms run under the same rules:** the same review rule, the same round budgets, the same gates. A Fable
-   role runs at `high` on every rung.
-4. **The Fable share is paced to the allowance.** Per Login, the share of work drawn into Fable arms follows what
+His, at Chorus's orient (the rollout half of Chorus ADR 0119):
+
+1. **Fable plans every task.** A Rung may name a plan model. The planner, the plan reviser and the plan judge run on
+   it, at `high`, on every rung; the judge rides with the planner. A climb at the plan stage moves the task's rung
+   and leaves the plan model as it is.
+2. **Fable tops the ladder.** The operator's file gains a third rung, every role on Fable at `high`. A task that
+   fights reaches it by ADR 0029's Escalation, unchanged: one rung, once per stage.
+
+His, at this repo's orient:
+
+3. **Further roles run side by side and earn their place.** A **Role** may name its own model, and four start in
+   two **Arms**, Opus and Fable: the final review, building a hard task, the blocked-task investigator, and leading
+   a rollout. A task is hard when its `work_depth` is deep, its starting rung is above the bottom, or its `scope` is
+   cross-cutting. A task falls in an arm for a role by a draw fixed by its name, a rollout's lead by a draw fixed
+   by the rollout's name, and each role draws on its own. Nothing picks an arm by how hard the work looks. The arm
+   drawn is stamped on the task note, as its rung is, so a resume or a later dispatch keeps it.
+4. **Both arms run under the same rules:** the same review rule, round budgets, gates and Escalation. A task that
+   climbs to the Fable rung leaves the comparison from that call on, and the record says so.
+5. **Session-run work records what ran, and has no arm yet.** Orient, the estate pass, schedule's grading, repair
+   and audits run on the model Chorus's footing gives their Session (Chorus ADR 0119) and record it. Nothing
+   measures their outcome today, so nothing here widens or shrinks them. The weekly Reflection stays on Opus at
+   `xhigh` (ADR 0037 decision 4): the judge of the trial stays outside it.
+6. **The Fable share is paced to the allowance.** Per Login, the share of work drawn into Fable arms follows what
    is left, so that the Fable window and the general window run down together through the week. It need not be
    exact, and allowance left over at the week's end is fine. Nothing is held in reserve for hand sessions. The rule
-   takes any number of Logins.
-5. **Nothing locks.** When a Login's Fable allowance is spent, a role drawn into the Fable arm runs on Opus, the
-   Run record says so, and that task is left out of the comparison. An allowance refusal is its own outcome, never a
-   transient failure and never a stop.
-6. **The Run record carries the measure:** for each role of each task, its arm, the model and effort that ran, its
-   tokens and its outcome.
-7. **The weekly Reflection reads each role's two arms** inside its window: rejected plans, the first review's
-   verdict, review rounds, Escapes, tokens per merge and the Hands-off rate. A role whose Fable arm wins on Quality
-   without costing the Hands-off rate widens on its own, and the Reflection says so. A trade (ADR 0037 decision 1)
-   goes to Lachy's decision task. A role that loses shrinks to nothing. The same reading says when another Login
-   would have carried Fable work that fell back to Opus.
-8. **The built-in ladder is unchanged** (ADR 0029 decision 2 stands): with no operator file, every role runs on
-   Opus. Fable roles are named in the operator's file.
+   takes any number of Logins. Planning (decision 1) is outside the share: it takes Fable whenever there is room.
+7. **Nothing locks.** When a Login's Fable allowance is spent, a call that would run on Fable (a plan, the top rung,
+   a Fable arm) runs on Opus, the Run record says so, and that task is left out of the comparison. An allowance
+   refusal is its own outcome, never a transient failure and never a stop. A lead cannot change its own model
+   mid-run, so the leading arm opens last, once Chorus restarts a lead whose Login has reached Fable's line (filed
+   there).
+8. **The Run record carries the measure:** for each role of each task call, the model and effort that ran, its
+   tokens, its outcome and, for a drawn role, its arm.
+9. **The weekly Reflection reads each drawn role's two arms** inside its window: rejected plans, the first review's
+   verdict, review rounds, Escapes, tokens per merge and the Hands-off rate. A change of share is a Tuning and lands
+   by ADR 0037 decision 5: three Reflections agree and no Guardrail is breached, tokens per merge among them. A
+   trade (ADR 0037 decision 1) goes to Lachy's decision task. The same reading says when another Login would have
+   carried Fable work that fell back to Opus.
+10. **The built-in ladder is unchanged** (ADR 0029 decision 2): with no operator file, every role runs on Opus.
 
 Considered:
 
-- *A last-resort rung* (the first draft, rejected by Lachy): it uses Fable least where it may help most, and one
-  climb per stage would rarely reach it.
-- *An ordinary third rung:* it puts every role of a hard task on one model, and says nothing about planning or
-  review on an easy one.
-- *Switching roles to Fable outright and comparing weeks:* rollouts differ too much week to week for a before and
-  after to mean anything.
-- *One draw per task for all its roles:* it cannot tell a better plan from a better review.
+- *A last-resort rung* (this repo's first draft, rejected by Lachy): it uses Fable least where it may help most.
+- *Planning as a drawn arm* (this repo's second draft): he had already ruled, at Chorus's orient, that Fable shapes
+  every plan.
+- *Switching the further roles to Fable outright and comparing weeks:* rollouts differ too much week to week for a
+  before and after to mean anything.
+- *One draw per task for all its roles:* it cannot tell a better review from a better build.
 - *A reserve for hand sessions* (offered to Lachy, turned down): capacity is his to add, and a reserve leaves
   allowance idle by design.
 - *The blind replay ADR 0029 named:* a taste test of a few plans. The Run record gives counts over hundreds of
@@ -83,36 +104,37 @@ Considered:
 
 ## Consequences
 
-- A Fable plan may be judged by an Opus judge, and the other way round, since each role draws on its own. A plan
-  passing its judge is therefore not the measure of the planning arm: what lands, and what Escapes, is.
-- The prompts a Fable role runs are checked against Anthropic's Fable 5.2 guidance before its arm opens: a "never"
-  rule carries its scope and its reason, steps that need no approval are named, and no line tells the model to
-  think less.
-- Three changes are Chorus's and are filed there: the conductor opens a Shaping session, and a lead drawn into the
-  Fable arm, on Fable 5.2 (its grid offers Opus alone and its fallback default names Fable 5.1); the Companion's
-  spread of Rollouts across Logins reads the Fable window beside the general one; and the Stage's benchmark reader
-  has failed on every read.
-- CONTEXT.md gains **Role**, **Arm**, **Fable share** and **Shaping session**; **Rung** names the exception.
+- Planning has no Opus arm, so nothing here measures it against Opus. The count of rejected plans before and after
+  is all the Reflection can say, and it should say that plainly.
+- The prompts a Fable role runs are checked against Anthropic's Fable 5.2 guidance before any of this is switched
+  on: a "never" rule carries its scope and its reason, steps that need no approval are named, and no line tells the
+  model to think less.
+- Chorus builds the Session half as its Phase 104 (ADR 0119): the conductor's Fable gears and the Login pick that
+  reads Fable's window. Two things are filed there from this ADR: a lead drawn into the Fable arm opens on Fable,
+  and ADR 0119 decision 9 and the lock's wording are brought into line with this one.
+- CONTEXT.md gains **Role**, **Arm**, **Fable share** and **Shaping session**; **Rung** names the plan model.
 
-## Proposed wording for `~/.agents/AGENTS.md` § Model tier (Lachy's hand edit)
+## Proposed wording for `~/.agents/AGENTS.md` § Model tier (Lachy's hand edit, one wording for both ADRs)
 
-> **Carve-out (Lachy, 2026-11-12): Fable 5.2 works beside Opus in Thread.** In thread rollouts and shaping
-> sessions, a role may run on Fable 5.2 at `high` in a measured arm beside its Opus arm (thread-skill ADR 0079):
-> shaping, planning, plan judging, hard builds, the final review, diagnosis and leading a rollout. Routine builds
-> and Integration stay on Opus. A role keeps or widens its Fable arm on the weekly Reflection's numbers. Outside
-> Thread, Opus stays the top tier.
+> **Opus 5.5 is the default tier. Fable 5.2 takes the plan, the grill (on trial) and the fights** (Chorus ADR
+> 0119). **In thread rollouts it also runs in measured arms beside Opus** (thread-skill ADR 0079): the final review,
+> hard builds, the blocked-task investigator and the lead. A role keeps or widens its Fable arm on the weekly
+> Reflection's numbers. Everything else stays on Opus.
 
 ## Decided for him (overturnable)
 
-- Fable roles' effort → `high` on every rung (technical: Anthropic says most of the gain arrives by `high`).
-- The draw → fixed by the task's name, one per role (technical: choosing by feel flatters whichever model gets the
-  hard-looking work, and one draw per task cannot tell roles apart).
-- The review rule and budgets → the same in both arms (technical: otherwise the comparison is unfair).
-- "Hard" for building → `work_depth: deep` (technical: the one hardness mark a task note already carries).
+- Fable's effort → `high` everywhere (technical: Anthropic says most of the gain arrives by `high`; Chorus ADR 0119
+  decision 7 says the same).
+- The plan judge → rides with the planner (technical, from Chorus ADR 0119: a weaker judge second-guessing a
+  stronger planner costs rounds).
+- The draw → fixed by the task's name, one per role, stamped on the note (technical: choosing by feel flatters
+  whichever model gets the hard-looking work, and a stamp keeps a resumed task in its arm).
+- Session-run work → recorded, no arm yet (technical: nothing measures its outcome, so an arm would decide
+  nothing).
+- The Reflection → stays on Opus (technical: it rules on the trial).
 - The pacing rule → per Login, Fable and general allowance run down together (priorities: his words, "balanced",
   "not locked", "doesn't have to be perfect").
-- A spent allowance → the Opus arm, logged and left out of the comparison (priorities: runs without him).
-- Who widens a role → the Reflection on a clean win; a trade is his (technical: ADR 0037 decision 1 already draws
-  that line).
-- The order → the allowance-refusal outcome and the prompt check land before any arm opens (technical: the refusal
-  stalled two rollouts in September).
+- Who changes a share → three agreeing Reflections inside the Guardrails; a trade is his (technical: ADR 0037
+  decisions 1 and 5 already draw that line).
+- The order → the allowance-refusal outcome and the prompt check land before anything is switched on (technical:
+  the refusal stalled two rollouts in September).

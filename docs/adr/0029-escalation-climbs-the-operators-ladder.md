@@ -5,6 +5,9 @@ Status: accepted, shipped in 3.0.0 (supersedes ADR 0024's `top-tier` file and ab
 amends ADR 0006's single opus→fable flip, ADR 0007's engine-fixed effort matrix and ADR 0016's
 ceiling; grilled with Lachy 2026-09-30)
 
+*(Amended 2026-11-12 by ADR 0079: a rung may name a plan model and a role its own, the plan judge rides with the
+planner, and the record gains arms. Decisions 1, 4 and 7 read with it; 2, 3, 5 and 6 stand.)*
+
 ## Context
 
 Lachy runs everything on Opus 5.5, held on each rollout as `max_tier: opus` (ADR 0016's ceiling);

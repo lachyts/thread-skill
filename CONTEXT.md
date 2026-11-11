@@ -160,6 +160,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (paste-ready prompts off the Stage, a serial Leg 1's among them); nothing of
   a **Big project** unticked. _Avoid_: launch list.
 
+- **Shaping session** — a session that runs `orient`, the **Estate pass** or
+  `schedule`: it reads open work and readies it for a rollout. Only `orient`
+  reshapes a project into phases and tasks; the estate pass and schedule
+  grade and route it (ADR 0027, ADR 0061, ADR 0079). _Avoid_: planning
+  session (a task's plan belongs to the engine), lead (a rollout's).
+
 ## Continuity (threads and attention)
 
 - **Thread** — a live agent conversation carrying working context. Ephemeral;
@@ -1463,7 +1469,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   0035). _Avoid_: answer key by hand, spend by hand.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
-  moves on, a merge hold's release, or a halt. The lead lists it in the
+  moves on, a merge hold's release, or a halt. Two rows sit on the same list
+  for him to read, never to decide before work moves: a "changed for you"
+  row (ADR 0080) and an open **Felt check** (ADR 0081). The lead lists it in the
   report's `Needs you:` block and in the rollout note, for a sitting Lachy
   chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Every
   open needs-you item across all rollouts is also gathered into one list he
@@ -1605,6 +1613,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.
   _Avoid_: monitor, heartbeat.
+
+- **Unreachable surface** — code that no check in its rollout's verifier
+  exercises: Codex computer use, device-only code. A task on one takes a
+  doubled final review and lands with a **Felt check** open (ADR 0081).
+  _Avoid_: untestable (some of it is testable by hand), risky code.
+- **Felt check** — Lachy's own try of landed work on an **Unreachable
+  surface**, at a sitting he chooses: one row on his needs-you list, which
+  his check closes. It never holds a merge, and it is not **Proven**, which
+  is about a fix (ADR 0081). _Avoid_: sign-off (that is a gate), QA.
 
 ## Run record and tuning
 
@@ -1782,28 +1799,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   matrix, tier list, config (alone).
 - **Rung** — one step of the Ladder: a model plus the efforts its roles run
   at. A task is on one rung at any moment, and its judges run on it too
-  (ADR 0029). A **Role** may name its own model in place of the rung's
-  (ADR 0079). _Avoid_: tier, model level, grade, model (alone).
-- **Role** — one kind of work a model does for a task or a rollout: shaping,
-  planning, plan judging, building, the final review, diagnosis, leading
-  (ADR 0079). _Avoid_: stage (a stage is when; a role is who), agent.
+  (ADR 0029). A rung may name a plan model, and a **Role** its own, in
+  place of the rung's (ADR 0079). _Avoid_: tier, model level, grade, model
+  (alone).
+- **Role** — one kind of work a model does for a task or a rollout:
+  planning, plan judging, building, the final review, investigating a block,
+  leading (ADR 0079). _Avoid_: stage (a stage is when; a role is who), agent.
 - **Arm** — one of the two models a Role runs on while it is being measured.
   A task falls in one arm for a role by a draw fixed by its name, never by
-  how hard the work looks (ADR 0079). _Avoid_: tier, variant, last resort,
-  fallback.
+  how hard the work looks, and the arm drawn is stamped on its note
+  (ADR 0079). Not the canary's `arm`, a verb (see **Window**). _Avoid_:
+  tier, variant, last resort, fallback.
 - **Fable share** — the part of a Login's work drawn into Fable Arms, paced
   so its Fable allowance and its general allowance run down together
   (ADR 0079). _Avoid_: reserve, cap, quota (alone).
-- **Unreachable surface** — code that no check a rollout can run exercises:
-  Codex computer use, device-only code. A task on one takes the strongest
-  final review and lands not **Proven** (ADR 0081). _Avoid_: untestable
-  (some of it is testable by hand), risky code.
 - **Top rung** — the Ladder's last rung, the ceiling for every task and every
   Integration (ADR 0029). _Avoid_: top tier, ceiling, max tier, default model.
-- **Shaping session** — a session that runs orient or orient-all's estate
-  pass: it audits open work and cuts it into phases and tasks (ADR 0027, ADR
-  0079). _Avoid_: planning session (a task's plan belongs to the engine),
-  lead (a rollout's).
 - **Starting rung** — the planning-time choice to start a hard task above the
   bottom rung, from its shape alone (ADR 0029). _Avoid_: escalation (that's
   run-time), upgrade, effort override.
