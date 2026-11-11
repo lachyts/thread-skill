@@ -400,14 +400,12 @@ ok "$(holds "${r1:0:4}" FULL y "$(holds "$r1" tests/reflect-weekly.test.mjs y "$
   "R1: attention.py is FULL or reaches tests/reflect-weekly.test.mjs (reflect.py loads it by path)"
 r2=$(python3 "$SEL" select --ignore-full --paths skills/reflect/scripts/attention.py)
 has "$r2" "tests/reflect-weekly.test.mjs" "R2: with --ignore-full, attention.py reaches tests/reflect-weekly.test.mjs through reflect.py"
-# R3, re-judged in p45-4 (ADR 0078 d2): land-carrier.py runs merge-task.sh's classifier (--classify-steps), and land.sh
-# runs land-carrier.py's marker verb, so a merge-task.sh change reaches land.sh, already FULL through rollout-settings.py.
+# R3, re-judged in p45-4 (ADR 0078 d2): land-carrier.py runs merge-task.sh's classifier (--classify-steps), land.sh runs
+# land-carrier.py's marker verb, and rollout-settings.py runs land.sh, so a merge-task.sh change reaches rollout-settings.py,
+# a HUB line (#372) whose reach ends at its declared suites: FAST, with the carrier's suite as well as the self-tests.
 r3=$(python3 "$SEL" select --paths skills/execute/scripts/merge-task.sh)
-ok "$(echo "$r3" | head -1)" "FULL	skills/execute/scripts/merge-task.sh: reaches skills/_shared/scripts/rollout-settings.py, marked FULL" \
-  "R3: merge-task.sh is FULL, through land-carrier.py and land.sh (if this turns FAST, check it still selects @merge-task-self-tests)"
-r3=$(python3 "$SEL" select --ignore-full --paths skills/execute/scripts/merge-task.sh)
-ok "$(printf '%s\n' "$r3" | grep -cx '@merge-task-self-tests')|$(printf '%s\n' "$r3" | grep -cx 'tests/land-carrier.test.sh')|$(printf '%s\n' "$r3" | grep -c 'fast-tier.py')" \
-  "1|1|0" "R3: … read as if no line were FULL it selects @merge-task-self-tests and the carrier's suite, and never fast-tier.py"
+ok "$(echo "$r3" | head -1 | cut -f1)|$(printf '%s\n' "$r3" | grep -cx '@merge-task-self-tests')|$(printf '%s\n' "$r3" | grep -cx 'tests/land-carrier.test.sh')|$(printf '%s\n' "$r3" | grep -c 'fast-tier.py')" \
+  "FAST|1|1|0" "R3: merge-task.sh is FAST with @merge-task-self-tests and the carrier's suite, through land-carrier.py and land.sh (if this turns FULL, re-judge the FULL list: what does it reach?)"
 r4=$(python3 "$SEL" select --paths docs/adr/0073-thread-skill-verifies-a-fast-tier-at-merge.md)
 ok "$(printf '%s\n' "$r4" | head -1 | cut -f1)|$(printf '%s\n' "$r4" | grep -cxE 'tests/(verify-slot|release-check-quoting-diff)\.test\.sh')" "FAST|2" \
   "R4: a docs-only change is FAST and runs the walkers (verify-slot, release-check-quoting-diff)"
