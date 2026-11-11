@@ -10,6 +10,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-11-11 (evening): [[thread-skill-rollout-2026-11-10]] is complete: 13/13 merged in 33h 36m, Phase 45 closed, and the completion verify (`make test`) green at 52a5eab.** Merged: #362, #363, #367, #368, #369, #370, #371, #372, #373, #374, #375, #376, #377. The rollout note is archived, with its Completion log (vault 043f5b17). Two follow-ons filed: [[thread-skill-prove-phase-45-fixes]] (each P45 task's Proven-when line; until a line holds, its task is landed, not proven, ADR 0078 d1) and [[chorus-schedule-machinery-health-task]] (schedule [[chorus-stage-shows-machinery-health-and-fires-triggers]] into Chorus now that p45-4, p45-6 and p45-7 are live; also check whether p45-8 moved chorus-p102-2 back to review). The run survived four room stops, two Login moves, Mac sleeps and a Watchdog recovery, each resumed from the Workflow journals.
+
 **2026-11-11: a Stage audit, two publish gates signed, and the Clean-up archive designed (Chorus ADR 0117).**
 - **Audit.** Of the Stage's sessions, 15 were leftovers: 14 Leg sessions whose chains are done or dropped and archived, plus the finished "Chorus rollout" lead. He archived them by hand, since the Stage's close route is the page's alone. Live: [[thread-skill-rollout-2026-11-10]] (7/13 done, 5 in review; its stops were only the weekly line) and [[narcissus-avp-rollout-2026-11-10]].
 - **Serial chains are not broken.** The three open chains stopped correctly at gates. [[website-re-design-rollout-2026-11-10]]: his two live animately.co publishes were signed (`approve-gates` from its Engine snapshot), and the chain is listed for Leg 3. [[quote-videos-rollout-2026-11-10]]: a US$50 spend gate that the US$200 line says should never ask (already filed: [[thread-skill-grill-a-spend-gate-under-the-cap-never-asks]]). [[giflab-rollout-2026-11-10]]: blocked on his crowd-service account.
@@ -922,6 +924,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **merge-task.sh can read a transient GitHub 401 as a failed required check** (2026-11-11, #370's second attempt): both checks were still pending, `gh auth status` was fine a minute later, and the run was set aside as `a REQUIRED check FAILED`. Before acting on a merge-task exit 1, read `gh pr checks` and the log's last lines; if it recurs, file a fix for the checks watch's error classing.
 - **A per-chain `leg.py status` takes 60-120 s** (it runs the surface re-check); fanning it out over ~30 chains pushed load to 20 on 2026-11-08. Read the estate with `unfinished-rollout.py waiting` (one process) or the notes' frontmatter, never a fan-out.
 - **An at-rest Stage session can't be closed by an agent** (2026-11-09): the Companion stops only running work, and the Stage's `DELETE /api/sessions/<id>` answers only its own page (`missing X-Stage`, a deliberate guard: never bypass it). At-rest sessions hold no process, so they cost no memory; Chorus p102-2 archives a dropped chain's Leg sessions.
 - **A Chain copy loses gitignored output** (2026-11-10): media written into a copy of `~/Projects` is deleted with the copy; filed as [[thread-skill-a-chain-copy-keeps-its-ignored-outputs]].
@@ -1214,6 +1217,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-11 (rollout 2026-11-10 complete):** nothing runs under this thread now. Next: work [[thread-skill-prove-phase-45-fixes]] as the proofs come in (each line is a real-world event, not a test run), and [[chorus-schedule-machinery-health-task]] in Chorus. `/thread:reflect [[thread-skill-rollout-2026-11-10]]` reads its score (t-20261111T104424Z-47aac0) if wanted. Lachy's own items from the 2026-11-10 line below still stand.
+
 **From 2026-11-10 (clean-up close):** nothing waits on this thread's sessions. [[thread-skill-rollout-2026-11-10]] (P45 + five pickups) runs under its own lead; its post-rollout items follow each P45 task to its Proven line and schedule [[chorus-stage-shows-machinery-health-and-fires-triggers]] once p45-4 and p45-7 merge. [[chorus-rollout-2026-11-10-2]] was started on Lachy's word (2026-11-10 late). Lachy's own items, for a sitting he chooses: sign in to Sentry (then schedule `sentry-silent-event-capture-gap` and `sentry-alert-threshold-review`), the Eagle spike ([[reference-loop-eagle-spike]]), the develop → main release and the SEO speed-slider sign-offs. Earlier lines below about p44-5 and the stranded commits are done.
 
 **From 2026-11-10 (rollout 2026-11-08 complete):** next is `/thread:schedule --tasks thread-skill-p44-5-move-todays-chains-onto-the-list` (serial; it closes P44). Land the primary's 2 stranded commits by PR so close-outs land again. Then [[thread-skill-followup-remove-fast-tier-adr-worktree]], [[thread-skill-followup-schedule-adr-0070-tasks]] once #312 merges, and `/thread:reflect [[thread-skill-rollout-2026-11-08]]` if wanted.
@@ -1263,6 +1268,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-11 (close, rollout lead): ran [[thread-skill-rollout-2026-11-10]] to completion: 13/13 merged, Phase 45 closed, completion verify green at 52a5eab, archived; filed the P45 proofs and the Chorus scheduling follow-ons; noted merge-task's 401 misread.
 - 2026-11-11 (close, Stage audit): 15 finished Leg and lead sessions found and archived by him; website-re-design's two publish gates signed (Leg 3 listed); grilled the Clean-up archive: Chorus ADR 0117 (#734), Chorus build task and a thread-skill follow-up filed; p102-2's unmet Proven line noted.
 - 2026-11-10 (close, late): started the Chorus queue on his word (it archives the dead Leg sessions); put his seven rollout stops to him as one board (2 spends signed, a branch delete cleared, a release and a publish held, three hands-on later); filed the month-line spend bug and the needs-you list (#365).
 - 2026-11-10 (close, audit + clean-up): audited the stuck orient-all chains (ADR 0076, Waiting list) and why its fixes were landed but not live (ADR 0078, Proven); landed #338, #358, #360, #361; reset the Primary; closed 9 stale landing PRs; dropped 30 chains and redid 33 tasks per project on the Waiting list (12 relaunched or split for ADR 0074 d3); filed P45 and two Chorus tasks; P45 runs in [[thread-skill-rollout-2026-11-10]].
