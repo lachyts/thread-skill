@@ -319,14 +319,15 @@ function buildD() {
   const r1 = unfinished(n0, repo)
   if (r1.rc !== 0 || r1.out !== `interrupted ${RP} ${RN}\n`) fails.push(`never ran: rc ${r1.rc}, ${JSON.stringify(r1.out)}`)
 
-  // The close-out (a copy): the stamps, then the move. Schedule's check no longer counts P.
+  // The close-out (a copy): the stamps, then the move. Schedule's check no longer counts P, and N, this project's
+  // rollout that has run and is not paused, is joined in place (ADR 0078 d6).
   const c = copyDir(d, path.join(tmp, 'D-closed'))
   const pNote = path.join(c, `${RP}.md`)
   fs.writeFileSync(pNote, fs.readFileSync(pNote, 'utf8').replace('status: in_progress\n', `status: done\nsuperseded_by: "[[${RN}]]"\n`))
   fs.mkdirSync(path.join(c, 'Archive', 'Rollouts'), { recursive: true })
   fs.renameSync(pNote, path.join(c, 'Archive', 'Rollouts', `${RP}.md`))
   const r2 = unfinished(c, repo)
-  if (r2.out !== `refuse ${RN}\n` || r2.err.includes('is named by the supersedes')) fails.push(`closed out: ${JSON.stringify(r2.out)}`)
+  if (r2.out !== `join ${RN}\n` || r2.err.includes('is named by the supersedes')) fails.push(`closed out: ${JSON.stringify(r2.out)}`)
   return { fails, dir: d, successor: path.join(d, `${RN}.md`) }
 }
 

@@ -27,6 +27,8 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
 - **Writes**, only through scripts:
   - `estate-dispatch.py record`, each answer into its task note;
   - `estate-dispatch.py log`, the grades into the Grade log (never on a dry run);
+  - `waits-on.py write`, the `## Waits on` section of every live rollout note, before § 2's scan (never on a dry run;
+    ADR 0078 d7);
   - `estate-dispatch.py rank-stamp`, the pass's estate rank on each rollout note it dispatched and on every live one,
     re-stamped in its current order (never on a dry run; ADR 0067 d9);
   - `estate-rank.py snooze`, `unpark` and `kill`, the Unpark offer's answers;
@@ -71,7 +73,10 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
 ### 2. Scan, status and grade
 
 1. `S=$(mktemp -d -t orient-all)`.
-2. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-scan.py --compact > "$S/scan.json"`, with the Bash
+2. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write`, so every live
+   rollout note's `## Waits on` is true before the scan reads it (ADR 0078 d7: a dependency released since a note was
+   last written gets its line); a non-zero exit is a § 8 caveat, and the pass goes on. Then
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-scan.py --compact > "$S/scan.json"`, with the Bash
    tool's `timeout: 120000`. Exit 2 or 3 stops the pass with its one line. `vaultErrors` and `deadlineHit` become
    caveats for § 8, and the pass goes on.
 3. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan "$S/scan.json" --dir "$S/slices"`:
@@ -107,6 +112,8 @@ Print a glance, short lines, not a wall:
 - `rounds.ownSession[]`: what waits on each big project's own session (its ready work, its One calls, Grills and
   Orient tasks, its sign-offs, a held Unpark offer), none of it asked here; the pick list comes at the end (§ 7);
 - the Unpark offers;
+- each cross-project wait (`rounds.waitsOn[]`, ADR 0078 d7), one line each: `[[<task>]] in [[<rollout>]] waits on
+  [[<dependency>]] (<project>, not scheduled)`; scheduling or closing that dependency clears it;
 - the warnings, and the ungraded and invalid tasks; `rounds.warnings[]` names each `orient:` key the scan could not
   read.
 
@@ -239,7 +246,10 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        unstamped, and returned. Its queue's ruled calls are written by its `decided-for-you --write --by orient-all`
        (schedule § 1.5's orient-all form), and the fork returns their block.
 4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, its Pre-flight's
-   left-out members with each one's why, or its stop line.
+   left-out members with each one's why, or its stop line, or, at a join, its `Joined [[<X>]]` line, its tasks and its
+   hold lines, with no note path. A project whose own rollout is running carries no unfinished-rollout blocker in the
+   scan (schedule § 0 prints `join`, ADR 0078 d6), so `plan` forks a schedule for its ready tasks, and that fork joins
+   the running rollout in place (schedule step 7's **Join**).
 
 ### 7. Start
 
@@ -260,7 +270,9 @@ ticked label opens its own option alone; two projects of one name are each linke
 **The estate rank (ADR 0067 d9).** Before step 1's `sessions`: unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank "$S/rank.json" --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> > "$S/rank-stamp.json"`.
 It stamps this pass's rank on each note the forks wrote and re-stamps every live rollout in its current order (a live
 run keeps its place ahead of this pass's dispatches), so the Legs that start below meet at claim by rank (CONTEXT.md
-**Rank wait**). Exit 1 (`failed`: a note it could not write): run the same line once more. A second exit 1 goes to
+**Rank wait**). A fork that joined a running rollout wrote no note, so `rank-stamp --wrote` and `sessions --wrote` get
+nothing for it: the running rollout keeps its rank (re-stamped as every live one is), and this section starts no
+execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`failed`: a note it could not write): run the same line once more. A second exit 1 goes to
 § 8 as a caveat, and the pass goes on: the notes it never reached keep their old stamps, and the order stands.
 
 1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> [--open <label>]... [--typed <his words>] > "$S/sessions.json"`,
@@ -368,7 +380,8 @@ One message of statements, no question:
   quotes a plain value), and the next pass grades it". This pass names it and never mends it;
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
-- each schedule's note, or its stop line;
+- each schedule's note, or its stop line, with every task its `this run would have taken:` line names (ADR 0078 d7),
+  or the rollout it joined, with its Joined line and hold lines (ADR 0078 d6);
 - the estate rank: `rank-stamp`'s `stamped` count, and after a second exit 1 its `failed` note and `notReached[]` as a
   caveat ("they keep their old stamps; the order stands");
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;
@@ -385,6 +398,8 @@ One message of statements, no question:
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";
 - the waiting runs, each with its why;
+- each cross-project wait (`rounds.waitsOn[]`) as "[[<task>]] in [[<rollout>]] waits on [[<dependency>]] (<project>,
+  not scheduled)";
 - the pick list: each project opened, each offered and not ticked, the candidates past the top 3 (the rest of
   `plan.pick[]`), and `sessions.unmatched[]` as "not on the pick list: <words>";
 - each big project's waiting work (`rounds.ownSession[]`) as "waits on [[<project>]]'s own session";
@@ -418,7 +433,7 @@ plan: each batch's schedule args with the execute each would start or the chain 
 with its cwd and prompt,
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
-It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `approve-gates`, `stamp-start`,
+It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `waits-on.py write`, `approve-gates`, `stamp-start`,
 `estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, the sign-in pass (§ 6 step 2), `list_sessions`, `read_session`, `relay_session` or
 `create_thread`.
 

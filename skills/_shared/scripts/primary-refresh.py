@@ -4,7 +4,7 @@ current with origin.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py run [--primary DIR] [--also DIR]...
         [--state F] [--log F] [--now ISO] [--dry-run] [--job-shape N] [--ff-timeout N] [--smoke-timeout N]
-        [--prove] [--prove-timeout N]
+        [--prove] [--prove-timeout N] [--carrier-timeout N]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py install [--primary DIR] [--also DIR]...
         [--bin-dir DIR] [--plist F] [--interval 300] [--label com.thread.primary-refresh]
         [--log ~/Library/Logs/thread-primary-refresh.log]
@@ -23,7 +23,8 @@ run, one pass, in this order:
      carries on in a fresh F); never under --dry-run, and a missing log directory skips it.
   2. The state is read. 3. Each checkout's pass (below). 3a. The live file (below). 3b. The prove step (below), on the
      installed copy or under --prove. 4. The self-update and 5. the job check, on the installed copy only. 6. The state
-     is written, when it changed or read as corrupt, never under --dry-run.
+     is written, when it changed or read as corrupt, never under --dry-run. 7. The landing carrier, on the installed
+     copy only, never under --dry-run (below).
 
 The live file (ADR 0078 d1), beside the state file (--state's directory; the plist names no --state, so the readers'
 default ${XDG_STATE_HOME:-~/.local/state}/thread/primary-live.json): {"v": 1, "live": {<checkout path>: {origin, head,
@@ -106,7 +107,8 @@ Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwis
      local commit is `stuck: local commits not from a close-out: …`, so it stays here, is recorded, and is the stop
      below. land.sh's one line is the spell's `repair` field {head, at, result}: `queued <url>` or `queued: needs merge
      <url>` reads `carried: <it>`, and land.sh is never asked again for that head (it would update-branch on every call:
-     the PR's upkeep is the landing carrier's, p45-4); `landed` (an unprotected origin took them) ends the spell;
+     the landing carrier, below, keeps that PR moving until it merges); `landed` (an unprotected origin took them) ends
+     the spell;
      anything else reads `not carried (<result>)` and is retried once CARRY_RETRY (1 h) has passed. --dry-run reads
      `would carry …`, kind dry, and never runs land.sh. A land.sh that cannot run reads `broken: …`.
 A repair blocked for a day is the d4 stop: a primary pass of kind `diverged` whose spell is STUCK_AFTER old is recorded
@@ -118,9 +120,9 @@ on /thread:status's Primary refresh line (`stuck`, below). A stuck spell runs fr
 (not-primary, busy, fetch-failed, broken, unreadable, diverged, stuck, held, refused, timed-out) to the next that reads
 current, moved or ahead (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
 moves within the spell, a change of kind restarts only `kindSince`, `outcome` is the latest pass's. The installed copy's
-own `self-update` and `job` spells are entries of the same shape. The spells live in the state file
+own `self-update` and `job` spells, and the landing carrier's `carrier` spell, are entries of the same shape. The spells live in the state file
 ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json (or --state), {"v": 1, "stuck": {<checkout path, or
-`self-update` or `job`>: entry}}, written atomically. A corrupt file, an entry whose `since` will not parse (dropped)
+`self-update`, `job` or `carrier`>: entry}}, written atomically. A corrupt file, an entry whose `since` will not parse (dropped)
 or a bad field (kindSince read as now; a non-40-hex `tip`, a non-ISO `tipAt` read as absent) is one WARN, never a
 traceback, and the file is rewritten valid. The fields an earlier copy wrote for its notices (notified, notifyFailed,
 notifyWhy, notifiedKinds) are kept exactly as read, malformed or not, never read for anything and never a reason to
@@ -137,8 +139,8 @@ stuck, a read that writes nothing (no rotation, no prune, no fetch, no temp file
 outcome}], "line": <str or null>}. A spell is due once it is 24 h old from `since` (STUCK_AFTER, ADR 0066's first
 notice), or at once when its kind is timed-out (a merge stopped mid-checkout may have left the live-loaded tree half
 updated); a `since` in the future is never due. Due spells are ordered oldest first. A path key is named by its
-directory's name, with the tail `; git -C <key> status`; `self-update` reads `primary-refresh self-update` and `job`
-`primary-refresh job`, `prove` `primary-refresh prove`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
+directory's name, with the tail `; git -C <key> status`; `self-update` reads `primary-refresh self-update`, `job`
+`primary-refresh job`, `prove` `primary-refresh prove` and `carrier` `landing carrier`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
 joined with ` · `, each `<name>: <outcome> (stuck since <since16>[; git -C <key> status])`, never cut; null when none is
 due (no file included). An entry with no kind (before p37-7) reads the outcome `stuck (kind not yet read)`. It is a
 point-in-time read with no window, only --now, and no freshness check: a spell stands as the job's last pass wrote it
@@ -146,10 +148,11 @@ until a pass clears it, so with the job unloaded or dead it can be old, and a pa
 changes, so its mtime says nothing about the job's health. A corrupt file is one WARN and a null line. Exit 0 for any
 read; 1 when background_job.py cannot be loaded; 2 on usage (a bad --now).
 
-The bundle: install writes BUNDLE's six files beside each other in --bin-dir, with the marker
+The bundle: install writes BUNDLE's nine files beside each other in --bin-dir, with the marker
 primary-refresh.installed: this copy (its install-rel primary-refresh.py, the plist's path), and live-checkout.sh,
-default-branch.sh, background_job.py, rollout-settings.py and ladder.py each at its repo path below the copy's
-directory (a mirrored mini plugin root, so live-checkout.sh's own sibling lookups work unchanged). `bundle` prints the
+default-branch.sh, background_job.py, rollout-settings.py, land-carrier.py, landing-register.py, merge-task.sh and
+ladder.py each at its repo path below the copy's directory (a mirrored mini plugin root, so live-checkout.sh's and
+land-carrier.py's own sibling lookups work unchanged: the carrier's register check and rerun classifier). `bundle` prints the
 table, one `<mode> <repo-rel> <install-rel>` line per file. The ntfy-push.py row an earlier table carried is dropped
 (ADR 0075 d2), so a self-update's step 5 removes an installed ntfy-push.py as a file the candidate's table drops.
 background_job.py holds the plumbing the background jobs share (the state file, the launchd job, the process-group
@@ -214,6 +217,19 @@ one is a contract change that needs a hand re-install, the same rule as I6's tok
 (tests/background-job.test.mjs BJ10 holds every call here to the list and every listed call to the module's
 signatures; BJ10b proves a retired call stays listed and binding).
 
+The landing carrier (ADR 0078 d2), on the installed copy only and never under --dry-run, last in the pass, after the
+state is written: `<python> -B <land-carrier.py> run --now <the pass's stamp>`, bounded by --carrier-timeout (240 s,
+over the carrier's own 200 s deadline) and stopped with SMOKE_GRACE. The bundle's copy runs, else the primary's when
+the bundle has none (an install older than the row); with neither, nothing is printed and the spell is left as it is.
+The carrier paces itself (every 15 minutes) and its docstring holds its rules. Exit 0: each stdout line is logged as
+`landing carrier: <line>` and the `carrier` spell ends; exit 3 (not due) prints nothing and leaves the spell exactly as
+it was, its since included, so a carrier that fails on every real pass still reaches 24 h; a timeout is `landing
+carrier: ran past <N> s and was stopped`, and any other exit `landing carrier: broken: exit <rc>: <its last stderr
+line>`. Both failures open or continue the `carrier` spell, kind `broken` (outcome: the text after `landing carrier:
+`), never timed-out, so `stuck` names it 24 h from its since and one slow pass is never an immediate stop. A spell
+change is a second state write. The smoke never reaches it (--dry-run), but the stage compiles the candidate's
+land-carrier.py like every bundled .py, so one that does not compile refuses the self-update.
+
 The job check, on the installed copy: the self-update rewrites bundle files only; the interpreter, PATH, --log and
 --job-shape live in the plist, which only install writes and only a re-bootstrap loads. A job whose --job-shape is below
 JOB_SHAPE (an absent one reads 0) opens the `job` spell (kind stale-job), logged once, when it opens:
@@ -244,7 +260,8 @@ job runs <python>`, prunes (below), and prints the one line left to Lachy's shel
 
 The prune at install, the only moment the watched set changes: install reads the job's state file (the default path,
 which the job reads because the plist names no --state) and drops every spell whose key is not `self-update`, `job`,
-`prove`, the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one line each,
+`prove`, `carrier`, the primary, an --also checkout or `repaired:<primary>` (the keys a pass of this job writes), one
+line each,
 `primary-refresh install: dropped spell: <key> (not watched by this job)`, keeping every other entry exactly as read.
 It writes the file only when it dropped one. It prunes the live file beside it the same way: every entry whose key is
 not the primary or an --also checkout, one line each, `primary-refresh install: dropped live entry: <key> (not watched
@@ -285,6 +302,7 @@ HOLD_REL = "skills/_shared/scripts/primary-hold.sh"
 LC_REL = "skills/_shared/scripts/live-checkout.sh"
 BJ_REL = "skills/_shared/scripts/background_job.py"
 SELF_REL = "skills/_shared/scripts/primary-refresh.py"
+CARRIER_REL = "skills/_shared/scripts/land-carrier.py"  # the landing carrier (ADR 0078 d2), run at the end of a pass
 COPY = "primary-refresh.py"  # the copy's install-rel: the plist's path, part of the self-update contract
 # (mode, repo-rel, install-rel): what install writes, what the self-update stages and installs, what `bundle` prints.
 BUNDLE = (
@@ -293,6 +311,9 @@ BUNDLE = (
     ("0755", "skills/execute/scripts/default-branch.sh", "skills/execute/scripts/default-branch.sh"),
     ("0644", BJ_REL, BJ_REL),
     ("0644", "skills/_shared/scripts/rollout-settings.py", "skills/_shared/scripts/rollout-settings.py"),
+    ("0755", CARRIER_REL, CARRIER_REL),
+    ("0755", "skills/_shared/scripts/landing-register.py", "skills/_shared/scripts/landing-register.py"),
+    ("0755", "skills/execute/scripts/merge-task.sh", "skills/execute/scripts/merge-task.sh"),
     ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
 )
 # Bump whenever install's ProgramArguments or EnvironmentVariables change: the self-update never rewrites the plist,
@@ -317,6 +338,7 @@ HOLD_TIMEOUT = 120
 BUNDLE_TIMEOUT = 60
 FF_TIMEOUT = 600
 SMOKE_TIMEOUT = 300
+CARRIER_TIMEOUT = 240  # the landing carrier's bound (its own --deadline is 200 s)
 KILL_GRACE = 5    # every leaf child: git, the bash helpers, the hold
 SMOKE_GRACE = 10  # a smoke's candidate, which stops its own child (KILL_GRACE) first
 LOG_MAX = 1 << 20
@@ -787,6 +809,8 @@ def _stuck_name(key):
         return "primary-refresh job", False
     if key == "prove":
         return "primary-refresh prove", False
+    if key == "carrier":
+        return "landing carrier", False
     if os.path.isabs(key):
         return (Path(key).name or key), True
     return key, False
@@ -1127,6 +1151,31 @@ def job_check(args, stuck, stamp, primary):
         _line(primary, f"job: {text}")
 
 
+def _carrier(args, primary, stuck, stamp):
+    """The landing carrier's pass (the module docstring's paragraph): its lines, and whether the `carrier` spell
+    changed. With no carrier beside the copy or in the primary it does nothing."""
+    carrier = _helper(CARRIER_REL, primary)
+    if carrier is None:
+        return False
+    rc, out, err, timed_out = _run([sys.executable, "-B", str(carrier), "run", "--now", stamp], args.carrier_timeout,
+                                   grace=SMOKE_GRACE)
+    if timed_out:
+        text = f"ran past {args.carrier_timeout} s and was stopped"
+    elif rc == 0:
+        for ln in out.splitlines():
+            if ln.strip():
+                _line(primary, f"landing carrier: {ln.strip()}")
+        return stuck.pop("carrier", None) is not None
+    elif rc == 3:  # not due: the spell stands as it was, its since included
+        return False
+    else:
+        text = f"broken: exit {rc}: {_last_line(err) or _last_line(out) or 'no output'}"
+    _line(primary, f"landing carrier: {text}")
+    before = json.dumps(stuck.get("carrier"), sort_keys=True)
+    _spell(stuck, "carrier", "broken", text, stamp)
+    return json.dumps(stuck.get("carrier"), sort_keys=True) != before
+
+
 # ---- the verbs ------------------------------------------------------------------------------------------------------
 
 def cmd_run(args):
@@ -1202,6 +1251,11 @@ def cmd_run(args):
             BJ.write_state(state_path, "stuck", stuck, STATE_VERSION)
         except OSError as e:
             print(f"WARN: primary-refresh: cannot write state {state_path}: {e}", file=sys.stderr)
+    if INSTALLED and not args.dry_run and _carrier(args, primary, stuck, stamp):
+        try:
+            BJ.write_state(state_path, "stuck", stuck, STATE_VERSION)
+        except OSError as e:
+            print(f"WARN: primary-refresh: cannot write state {state_path}: {e}", file=sys.stderr)
     return 0
 
 
@@ -1226,7 +1280,8 @@ def _prune(primary, also):
     prune at install). Writes only when it dropped one; a missing or corrupt file is left for the job's next pass."""
     path = _state_file(None)
     checkouts = {str(primary)} | {str(_real(a)) for a in also}
-    for p, key, watched, noun in ((path, "stuck", {"self-update", "job", "prove", REPAIRED + str(primary)} | checkouts,
+    for p, key, watched, noun in ((path, "stuck",
+                                   {"self-update", "job", "prove", "carrier", REPAIRED + str(primary)} | checkouts,
                                    "spell"),
                                   (path.parent / LIVE_NAME, "live", checkouts, "live entry")):
         entries, corrupt = BJ.read_state(p, "primary-refresh", key, STATE_VERSION)
@@ -1338,6 +1393,8 @@ def main(argv=None):
     r.add_argument("--prove", action="store_true", help="run the prove step on a checkout copy too (tests; the installed "
                                                         "copy always runs it)")
     r.add_argument("--prove-timeout", type=_positive, default=PROVE_TIMEOUT, help="the prove step's bound, seconds")
+    r.add_argument("--carrier-timeout", type=_positive, default=CARRIER_TIMEOUT,
+                   help="the landing carrier's bound, seconds (tests; the job never passes it)")
     r.set_defaults(func=cmd_run)
     i = sub.add_parser("install", allow_abbrev=False, help="install the bundle and the launchd job")
     i.add_argument("--primary", default=None)

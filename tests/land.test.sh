@@ -4,7 +4,7 @@
 # with close's `# thread:land-own` snippet (cases 42–70; 71–73b are close-out cases), and its read-only route mode,
 # `--route` (case 74, leg.py's Complete; case 75, its parity with a landing, which self-rollout-check.sh
 # --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0058 d5); case 79 is the
-# scratch commit (ADR 0078 d3). Fixture repos talk to bare "servers" under $tmp/srv
+# scratch commit (ADR 0078 d3); case 80 is the own branch's queue marker and the landing carrier that reads it (ADR 0078 d2). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
@@ -1256,6 +1256,7 @@ ores "case 51 plain" 0 "pr open https://github.com/o/c51/pull/1"
 dis=$(ghlog | grep -n -- '--disable-auto' | cut -d: -f1); lab=$(ghlog | grep -n 'issues/1/labels' | cut -d: -f1)
 ok "$dis" 4 "case 51: --disable-auto is the 4th gh call (after access, lookup, user)"
 ok "$([ -n "$dis" ] && [ -n "$lab" ] && [ "$dis" -lt "$lab" ] && echo y)" y "case 51: …before the push and label"
+ok "$(ghlog | sed -n 5p)" "api --paginate repos/o/c51/issues/1/comments?per_page=100" "case 51: the queue marker read is the 5th, before the push (ADR 0078 d2)"
 has "$err" "land: auto-merge off" "case 51: says so"
 setpr 1 autoMergeRequest '{}'; work "another"; S=$(srvref c51 "$OB")
 own GH_DISABLE=fail --
@@ -2188,6 +2189,108 @@ ghreset; mkrepo c79g; edit
 land -- --commit-only "$W" "$W/THREAD.md"; res "case 79g" 0 "not landed: commit-only"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 79g: committed in place"
 }  # end shard_13
+
+# ==== The queue marker and the landing carrier (ADR 0078 d2) ===================================================================
+shard_14() {
+git config --global url."file://$SRV/".insteadOf https://github.com/; git config --global uploadpack.allowFilter true
+CARRIER=$root/skills/_shared/scripts/land-carrier.py; cpass=0
+# carry [VAR=value …]: one landing carrier pass, 20 minutes on from the last → cout, crc
+carry() {
+  cpass=$((cpass + 20)); : > "$LOG_GH"
+  cout=$(env GH_SEARCH=prs "$@" python3 "$CARRIER" run --state "$tmp/landings.json" --settle-wait 0 \
+         --now "$(python3 -c 'import sys, datetime as d; print((d.datetime(2026, 11, 20, 10, tzinfo=d.timezone.utc) + d.timedelta(minutes=int(sys.argv[1]))).isoformat())' "$cpass")" 2>"$tmp/cerr"); crc=$?
+}
+# qread <repo>: land-carrier.py marker over the PR's comments, as land.sh reads them
+qread() { gh api "repos/o/$1/issues/1/comments" 2>/dev/null | python3 "$CARRIER" marker --login me; }
+cbody() { python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))[int(sys.argv[2])]; print(c["body"].split("\n")[0] + "|" + c["head"])' "$GH_STATE/comments/o/$1/1.json" "$2"; }
+
+echo "== 80a. own branch: --queue ending queued: needs merge leaves the queue marker on HEAD"
+qsetup c80a GH_PROT=false
+own GH_PROT=false GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 80a" 0 "queued: needs merge https://github.com/o/c80a/pull/1"
+has "$err" "land: queue marker $H" "case 80a: says so"
+ok "$(qread c80a)" "queued $H" "case 80a: marker --login me reads queued H"
+ok "$(cbody c80a -1 | cut -d'|' -f1)" "Landing queued (ADR 0078 d2): $H" "case 80a: the comment's first line"
+
+echo "== 80f. own branch: a plain call withdraws a live marker"
+own GH_PROT=false --
+ores "case 80f" 0 "pr open https://github.com/o/c80a/pull/1"
+has "$err" "land: queue withdrawn ($H)" "case 80f: says so"
+ok "$(qread c80a)" none "case 80f: the read is none"
+
+echo "== 80b. own branch: protected, auto-merge refused: the marker"
+qsetup c80b; own GH_MERGE=notallowed GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 80b" 0 "queued: needs merge https://github.com/o/c80b/pull/1"
+ok "$(qread c80b)" "queued $H" "case 80b: the marker"
+
+echo "== 80c. own branch: unprotected green, the direct merge refused: the marker"
+qsetup c80c GH_PROT=false; own GH_PROT=false GH_DIRECT=fail GH_CHECKS_MAP="$R=pass,$H=pass" -- --queue --reviewed "$R"
+ores "case 80c" 0 "queued: needs merge https://github.com/o/c80c/pull/1"
+ok "$(qread c80c)" "queued $H" "case 80c: the marker"
+
+echo "== 80d. own branch: auto-merge queued: no marker"
+qsetup c80d; own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 80d" 0 "queued https://github.com/o/c80d/pull/1"
+ok "$(qread c80d)" none "case 80d: no marker"
+
+echo "== 80e. own branch: the marker's post fails: noted, the result unchanged"
+qsetup c80e GH_PROT=false; own GH_PROT=false GH_COMMENT=fail GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 80e" 0 "queued: needs merge https://github.com/o/c80e/pull/1"
+has "$err" "land: queue marker failed: gh: Resource not accessible by integration (HTTP 403)" "case 80e: says so"
+
+echo "== 80k. own branch: a marker on an older head is withdrawn too, before the push"
+qsetup c80k GH_PROT=false; own GH_PROT=false GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+work "after the queue"; H2=$(tip)
+own GH_PROT=false --
+ores "case 80k" 0 "pr open https://github.com/o/c80k/pull/1"
+ok "$(cbody c80k -1)" "Landing withdrawn (ADR 0078 d2): $H|$H" "case 80k: withdrawn, naming the old S, posted while the server head was still S"
+ok "$(srvref c80k "$OB")" "$H2" "case 80k: … then the new commit pushed"
+
+echo "== 80g / 80h. own branch: a withdrawal that cannot be posted is stuck, nothing pushed"
+qsetup c80g GH_PROT=false; own GH_PROT=false GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+work "more"; S=$(srvref c80g "$OB")
+own GH_PROT=false GH_COMMENT=fail --
+ores "case 80g" 1 "stuck: queue withdrawal failed: gh: Resource not accessible by integration (HTTP 403)"
+ok "$(srvref c80g "$OB")" "$S" "case 80g: the server head unchanged"
+printf 'why\n' > "$tmp/diag80"
+own GH_PROT=false GH_COMMENT=fail -- --hold -F "$tmp/diag80"
+ores "case 80h" 1 "stuck: queue withdrawal failed: gh: Resource not accessible by integration (HTTP 403)"
+ok "$(srvref c80g "$OB")" "$S" "case 80h: --hold too: the server head unchanged"
+
+echo "== 80i. own branch: a comments read that fails is stuck, nothing pushed"
+own GH_PROT=false GH_COMMENTS=fail --
+ores "case 80i" 1 "stuck: queue withdrawal failed: gh: Server Error (HTTP 502)"
+nopush "case 80i"
+
+echo "== 80j. own branch: no live marker, a failing hold comment: held, as in case 50"
+qsetup c80j; own GH_COMMENT=fail -- --hold -F "$tmp/diag80"
+ores "case 80j" 0 "held https://github.com/o/c80j/pull/1"
+has "$err" "land: comment failed:" "case 80j: the hold comment stays optional"
+
+echo "== 80l. the carrier follows land.sh's update-branch from the marker's S and merges at the merge"
+qsetup c80l; srvcommit c80l x.txt X
+own GH_MERGE=notallowed GH_UPDATE=merge GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 80l" 0 "queued: needs merge https://github.com/o/c80l/pull/1"
+M=$(srvref c80l "$OB")
+ok "$(qread c80l)|$(git --git-dir "$SRV/o/c80l.git" rev-list --parents -n 1 "$M" | cut -d' ' -f2)|$(git --git-dir "$SRV/o/c80l.git" log -1 --format=%ce "$M")" \
+   "queued $H|$H|noreply@github.com" "case 80l: the marker on S=H, the server head M a GitHub-made merge [H, master]"
+carry GH_CHECKS_MAP="$M=pass"
+ok "$crc" 0 "case 80l: the carrier pass exits 0"
+ok "$(python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["landings"].get("o/c80l#1") or {}; print(e.get("kind"), e.get("bound"))' "$tmp/landings.json")" "None None" \
+   "case 80l: (merged: its entry is gone)"
+has "$(ghlog)" "api --method PUT repos/o/c80l/pulls/1/merge -f merge_method=merge -f sha=$M" "case 80l: own-marked, bound to M: PUT merge carries sha=M"
+ok "$(python3 -c 'import json,sys; print([p for p in json.load(open(sys.argv[1])) if p["number"] == 1][0]["state"])' "$GH_STATE/prs.json")" MERGED "case 80l: the PR is MERGED"
+
+echo "== 80m. the carrier finds land.sh's unlabelled close-out by its branch and queues its auto-merge"
+ghreset; mkrepo c80m; edit
+land GH_LABELS=404 GH_MERGE=notallowed -- --slug c80m -- "$W" "$W/THREAD.md"
+res "case 80m" 0 "queued: needs merge https://github.com/o/c80m/pull/1"
+has "$err" "land: label failed:" "case 80m: (the label failed: the PR is unlabelled)"
+carry GH_CHECKS=pending
+ok "$crc" 0 "case 80m: the carrier pass exits 0"
+has "$(ghlog)" "search prs --state open --author @me --head close" "case 80m: the --head close search"
+has "$(ghlog)" "pr merge 1 -R o/c80m --auto --merge" "case 80m: classed close-out by land.sh's own branch name: auto-merge queued"
+}  # end shard_14
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }

@@ -19,6 +19,8 @@
 #             step, its log line, its spell and its bound)
 #   self-update  S1-S5, S6a-S6j (the smoke; S6j a candidate whose own background_job.py is broken), S7 (the
 #             transition), S8 S9, S10a-S10c (the candidate's table), I6 (the frozen contract)
+#   carrier   LC1-LC6 (the landing carrier, ADR 0078 d2: run last in an installed pass, its lines, its exit 3, the
+#             `carrier` spell of kind broken, the primary's copy as the fallback, never under --dry-run or from a checkout)
 # Origins over ssh are git@github.com:o/origin.git, served by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`. Every pid
 # an arm records is checked gone (`gone`). Hermetic: HOME, XDG_STATE_HOME and every path live under mktemp; commits carry
 # an inline identity; global/system git config is ignored; no server runs.
@@ -106,8 +108,8 @@ ok "${bad:-none}" none "I1: an empty bin directory gets every bundle file, byte 
 ok "$(cd "$tmp/bin" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')" \
   "$( (cut -d' ' -f3 "$tmp/table"; echo primary-refresh.installed) | LC_ALL=C sort | tr '\n' ' ')" \
   "I5: … exactly the table's install-rels plus the marker"
-ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "6|6" \
-  "I5: primary-refresh.py bundle prints six lines in the strict form"
+ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "9|9" \
+  "I5: primary-refresh.py bundle prints nine lines in the strict form"
 lacks "$(cat "$tmp/table")" "ntfy-push" "I5: … and no ntfy-push.py row (ADR 0075 d2: a self-update removes the installed copy)"
 has "$(head -1 "$tmp/table")" "0755 skills/_shared/scripts/primary-refresh.py primary-refresh.py" "I5: … the copy's own row first"
 JOB=(); while IFS= read -r -d '' a; do JOB+=("$a"); done < <(python3 -c 'import plistlib,sys; sys.stdout.write("\0".join(plistlib.load(open(sys.argv[1],"rb"))["ProgramArguments"]) + "\0")' "$tmp/job.plist")
@@ -267,9 +269,9 @@ has "$cb" "close/" "R4f: … its commit pushed to a close/ branch"
 ok "$(git --git-dir "$tmp/origin.git" rev-parse "refs/heads/$cb")" "$h" "R4f: … holding the primary's head"
 ok "$(grep -c 'POST repos/o/origin/pulls' "$LOG_GH")" 1 "R4f: … one PR opened"
 ok "$(rep result | cut -d' ' -f1)|$(rep head)" "queued|$h" "R4f: … recorded on the spell"
-g1=$(wc -l < "$LOG_GH")
+g1=$(grep -vc '^search prs' "$LOG_GH")
 has "$(job --state "$S" --now "$(at 1700)")" "carried: queued https://" "R4f: a later pass on the same head still reads carried"
-ok "$(wc -l < "$LOG_GH")" "$g1" "R4f: … with no gh call at all (one PR, its upkeep p45-4's)"
+ok "$(grep -vc '^search prs' "$LOG_GH")" "$g1" "R4f: … with no gh call but the landing carrier's searches (the PR's upkeep is the carrier's)"
 # R4g: the PR merges: the primary is then only behind, so it fast-forwards and the spell ends
 g -C "$tmp/seed" fetch -q origin "+refs/heads/$cb:refs/remotes/origin/$cb"; g -C "$tmp/seed" merge -q --no-edit "origin/$cb"; g -C "$tmp/seed" push -q origin master 2>/dev/null
 has "$(job --state "$S" --now "$(at 1800)")" "primary: moved" "R4g: the landing merged: a plain fast-forward"
@@ -887,6 +889,75 @@ done
 real; commit "real again"; job >/dev/null
 ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "S10c: (the copy is this tree's script again)"
 
+# ---- LC1-LC6: the landing carrier, run at the end of an installed pass (ADR 0078 d2) ----------------------------------------
+LS="$XDG_STATE_HOME/thread/landings.json"; S="$tmp/s-lc.json"; CR=skills/_shared/scripts/land-carrier.py
+ok "$(grep -E " $CR | skills/_shared/scripts/landing-register.py | skills/execute/scripts/merge-task.sh " "$tmp/table" | cut -d' ' -f1 | tr '\n' ' ')" "0755 0755 0755 " \
+  "LC6: the carrier, the register reader and merge-task.sh are bundle rows, 0755 each"
+ok "$(grep -n '' "$tmp/table" | grep -E "land-carrier|ladder" | cut -d: -f1 | tr '\n' ' ')" "6 9 " "LC6: … before the ladder.py row, which stays last"
+ok "$(for f in "$CR" skills/_shared/scripts/landing-register.py skills/execute/scripts/merge-task.sh; do mode_of "$tmp/bin/$f"; done | tr '\n' ' ')" "0755 0755 0755 " "LC6: … installed with their modes"
+rm -f "$LS"; : > "$LOG_GH"
+out=$(job --state "$S" --now "$(at 3000)")
+ok "$(grep -c '^search prs' "$LOG_GH")" 2 "LC1: an installed pass runs the landing carrier: its two searches"
+lacks "$out" "landing carrier" "LC1: … a quiet carrier pass prints nothing"
+ok "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["landings"]["_pass"]["lastPass"])' "$LS")" "$(at 3000)" "LC1: … and its lastPass is the pass's stamp"
+cat > "$tmp/seed/$CR" <<'PY'
+#!/usr/bin/env python3
+import os, sys, time
+f = os.environ.get("CARRIER_STUB", "")
+mode = open(f).read().strip() if f and os.path.exists(f) else "line"
+if os.environ.get("CARRIER_PID"):
+    open(os.environ["CARRIER_PID"], "w").write(str(os.getpid()))
+if mode == "boom":
+    sys.stderr.write("boom\n")
+    sys.exit(1)
+if mode == "notdue":
+    sys.exit(3)
+if mode == "sleep":
+    time.sleep(60)
+print("o/x#1: merged at 0123456789ab")
+PY
+chmod 0755 "$tmp/seed/$CR"; commit "lc stub"; export CARRIER_STUB="$tmp/carrier.stub" CARRIER_PID="$tmp/carrier.pid"
+echo line > "$CARRIER_STUB"
+out=$(job --state "$S" --now "$(at 3100)")
+has "$out" "self-update: the installed bundle now matches" "LC2: (the stub carrier installed by the self-update)"
+has "$out" "$(at 3100) primary-refresh $tmp/primary: landing carrier: o/x#1: merged at 0123456789ab" "LC2: each carrier line is logged as landing carrier: <line>"
+echo boom > "$CARRIER_STUB"
+out=$(job --state "$S" --now "$(at 3200)")
+has "$out" "primary-refresh $tmp/primary: landing carrier: broken: exit 1: boom" "LC3: a carrier that exits 1 is broken: exit 1: <its last stderr line>"
+ok "$(sv "$S" carrier kind)|$(sv "$S" carrier since)|$(sv "$S" carrier outcome)" "broken|$(at 3200)|broken: exit 1: boom" "LC3: … the carrier spell opens, kind broken"
+echo notdue > "$CARRIER_STUB"
+out=$(job --state "$S" --now "$(at 3300)")
+lacks "$out" "landing carrier" "LC3: a not-due exit 3 prints nothing"
+ok "$(sv "$S" carrier since)|$(sv "$S" carrier outcome)" "$(at 3200)|broken: exit 1: boom" "LC3: … and leaves the spell, its since included, as it was"
+ok "$(sline --state "$S" --now "$(at 4639)" | grep -c 'landing carrier')" 0 "LC3: stuck does not name it before 24 h"
+has "$(sline --state "$S" --now "$(at 4640)")" "landing carrier: broken: exit 1: boom (stuck since $(at 3200 | cut -c1-16))" "LC3: … and names it as landing carrier at 24 h from its since"
+echo line > "$CARRIER_STUB"
+job --state "$S" --now "$(at 3400)" >/dev/null
+ok "$(sv "$S" carrier since)" None "LC3: an exit-0 pass ends the spell"
+echo sleep > "$CARRIER_STUB"; rm -f "$CARRIER_PID"
+out=$(job --state "$S" --now "$(at 3500)" --carrier-timeout 2)
+has "$out" "primary-refresh $tmp/primary: landing carrier: ran past 2 s and was stopped" "LC3b: a carrier past --carrier-timeout is stopped and says so"
+gone "$(cat "$CARRIER_PID" 2>/dev/null)" "LC3b: … the stub is gone"
+ok "$(sv "$S" carrier kind)" broken "LC3b: … kind broken, never timed-out"
+ok "$(sline --state "$S" --now "$(at 3501)" | grep -c 'landing carrier')|$(sline --state "$S" --now "$(at 4940)" | grep -c 'landing carrier')" "0|1" \
+  "LC3b: … so stuck names it at 24 h, not at once"
+unset CARRIER_STUB CARRIER_PID; real; commit "real again"; job --state "$S" >/dev/null
+ok "$(same "$root/$CR" "$tmp/bin/$CR")|$(same "$root/$CR" "$tmp/primary/$CR")" "same|same" "LC4: (the real carrier back in the bin and the primary)"
+before=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["stuck"].get("carrier"), sort_keys=True))' "$S")
+rm -f "$tmp/bin/$CR" "$tmp/primary/$CR"; g -C "$tmp/primary" remote set-url origin "$tmp/nowhere.git"; : > "$LOG_GH"; rm -f "$LS"
+out=$(job --state "$S" --now "$(at 3700)")
+ok "$(grep -c '^search prs' "$LOG_GH")" 0 "LC4: with no carrier beside the copy or in the primary: no carrier run"
+lacks "$out" "landing carrier" "LC4: … nothing printed"
+ok "$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["stuck"].get("carrier"), sort_keys=True))' "$S")" "$before" "LC4: … the carrier spell untouched"
+g -C "$tmp/primary" checkout -q -- "$CR"; : > "$LOG_GH"
+out=$(job --state "$S" --now "$(at 3800)")
+ok "$(grep -c '^search prs' "$LOG_GH")" 2 "LC4b: the bin's copy gone, on a pass whose fetch fails: the primary's copy runs"
+g -C "$tmp/primary" remote set-url origin "$tmp/origin.git"; job --state "$S" >/dev/null
+ok "$(same "$root/$CR" "$tmp/bin/$CR")" same "LC4b: (the next fetched pass installs it again)"
+: > "$LOG_GH"; rm -f "$LS"
+job --state "$S" --now "$(at 3900)" --dry-run >/dev/null; run --state "$tmp/s-lc5.json" >/dev/null
+ok "$(grep -c '^search prs' "$LOG_GH")" 0 "LC5: --dry-run, and the checkout copy, never run the carrier"
+
 # ---- I6: the frozen self-update contract ---------------------------------------------------------------------------------------------------
 # An installed copy in the field sends every candidate exactly these tokens and reads exactly these lines back. They are
 # literal here on purpose, never read from the code: a change to any of them strands every installed copy (ADR 0066's
@@ -937,21 +1008,21 @@ import json, os, sys
 p, t, since = sys.argv[1:]
 e = lambda kind, **x: dict({"since": since, "kind": kind, "kindSince": since, "outcome": kind}, **x)
 d = {"v": 1, "stuck": {f"{t}/primary": e("held"), f"{t}/agents": e("diverged", notified=since, notifiedKinds=["diverged"]),
-                       "self-update": e("refused"), "job": e("stale-job"), f"{t}/gone": e("busy"),
+                       "self-update": e("refused"), "job": e("stale-job"), "carrier": e("broken"), f"{t}/gone": e("busy"),
                        f"repaired:{t}/primary": e("repaired"), f"repaired:{t}/gone": e("repaired")}}
 os.makedirs(os.path.dirname(p), exist_ok=True)
 json.dump(d, open(p, "w"))
 PY
 }
 entry() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["stuck"].get(sys.argv[2]), sort_keys=True))' "$1" "$2"; }
-qseed; for k in "$tmp/primary" "$tmp/agents" self-update job "repaired:$tmp/primary"; do entry "$DS" "$k"; done > "$tmp/q1.kept.before"
+qseed; for k in "$tmp/primary" "$tmp/agents" self-update job carrier "repaired:$tmp/primary"; do entry "$DS" "$k"; done > "$tmp/q1.kept.before"
 out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
-ok "$(skeys "$DS")" "$(printf '%s\n' "$tmp/agents" "$tmp/primary" job "repaired:$tmp/primary" self-update | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" \
-  "Q1: install keeps the spells of the checkouts it watches, self-update, job and the primary's repair record, and drops the rest"
+ok "$(skeys "$DS")" "$(printf '%s\n' "$tmp/agents" "$tmp/primary" carrier job "repaired:$tmp/primary" self-update | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" \
+  "Q1: install keeps the spells of the checkouts it watches, self-update, job, the landing carrier's and the primary's repair record, and drops the rest"
 has "$out" "primary-refresh install: dropped spell: $tmp/gone (not watched by this job)" "Q1: … one line per dropped spell"
 has "$out" "primary-refresh install: dropped spell: repaired:$tmp/gone (not watched by this job)" "Q1: … a repair record of a checkout it does not watch among them"
 ok "$(printf '%s\n' "$out" | grep -c 'dropped spell:')" 2 "Q1: … and only those two"
-for k in "$tmp/primary" "$tmp/agents" self-update job "repaired:$tmp/primary"; do entry "$DS" "$k"; done > "$tmp/q1.kept.after"
+for k in "$tmp/primary" "$tmp/agents" self-update job carrier "repaired:$tmp/primary"; do entry "$DS" "$k"; done > "$tmp/q1.kept.after"
 ok "$(same "$tmp/q1.kept.before" "$tmp/q1.kept.after")" same "Q1: … each kept entry exactly as seeded, an old notified field included"
 has "$(printf '%s\n' "$out" | tail -1)" "next: launchctl bootout" "Q1: … before install's next: line, still last"
 qseed
@@ -997,7 +1068,7 @@ lacks "$out" "Traceback" "I7c: … no traceback"
 ok "$([ -e "$tmp/s-i7c.json" ] && echo written)" "" "I7c: … and no state"
 # I8: `bundle` loads no helper, so the lone copy prints the whole table
 python3 "$tmp/lone/x/y/z/primary-refresh.py" bundle > "$tmp/i8.out" 2> "$tmp/i8.err"; rc=$?
-ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the six-row table, stderr empty"
+ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the nine-row table, stderr empty"
 
 # ---- LV1-LV6: the live file and the prove step (ADR 0078 d1) -----------------------------------------------------------
 LF="$XDG_STATE_HOME/thread/primary-live.json"

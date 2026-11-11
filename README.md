@@ -46,7 +46,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 | Member | Role | What it does |
 |---|---|---|
-| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout of one project on a repo (`--regenerate` supersedes it, carrying its unlanded tasks), while another project's rollout runs beside it from its own rollout clone, the two landing one merge at a time per origin (ADR 0064); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain, and each chain works each repo in its own Chain copy; a chain sharing a live chain's surface takes turns with it, and only an unfinished parallel rollout's root refuses one (ADR 0067). No minimum size — shape decides, not count. A standalone `--tasks` run first sweeps the same repo's other open tasks for pickups, and every standalone parallel run ends by handing its note to a fresh session that runs `execute` (ADR 0057). |
+| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout of one project on a repo (this project's running one is joined in place, ADR 0078 d6; `--regenerate` supersedes a paused or unstarted one, carrying its unlanded tasks), while another project's rollout runs beside it from its own rollout clone, the two landing one merge at a time per origin (ADR 0064); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain, and each chain works each repo in its own Chain copy; a chain sharing a live chain's surface takes turns with it, and only an unfinished parallel rollout's root refuses one (ADR 0067). No minimum size — shape decides, not count. A standalone `--tasks` run first sweeps the same repo's other open tasks for pickups, and every standalone parallel run that writes a note ends by handing it to a fresh session that runs `execute` (ADR 0057). |
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg: on the Chorus Stage it opens no successor but lists the chain on the Waiting list (`leg.py handed --listed`), and the Stage opens the next Leg when there is room; in Codex Desktop it starts that Leg as a task, and elsewhere prints a paste-ready manual hand-over (ADR 0076 d4). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. A serial chain reads as its Legs, its chain state and any stall (`leg.py status`). |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. A stalled serial chain gets its set-asides answered or deferred with their dependants; then, on the Chorus Stage, repair lists the chain on the Waiting list (`leg.py restarted --listed`) and the Stage opens its next Leg. Only a take-over, Codex Desktop, a run off the Stage, or an engine snapshot from before `--listed` still starts that Leg as a new Session (a paste-ready manual hand-over where no host tool answers; ADR 0076 d4, d6). |
@@ -450,7 +450,12 @@ from `THREAD_VERIFY_BASE` (ADR 0062's verify base; else `origin/HEAD`) reaches. 
 `tests/fast-tier.map`, and `tests/lib/fast-tier.py`'s header holds its rules: a script reaches the tests that name
 it and, transitively, the tests of every script that names it, and the walkers (tests that read the whole tree)
 run on every diff. A changed path the map cannot place, or one that reaches a path marked FULL, runs the full
-suite, so the fast tier is only ever slower than it could be, never wrong. Every run, `make test` included, checks
+suite, so the fast tier is only ever slower than it could be. The five hubs (`reconcile-rollout.py`,
+`lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`), which most suites name, sit on HUB
+lines instead of FULL: a diff that reaches one runs the suites listed on its line and the reach ends there, and
+check (i) keeps each list holding every suite that names the hub (a tests/lib helper's included). So a suite that
+drives a hub only through another script runs at completion and on master rather than at the merge, ADR 0073 d1's
+accepted risk. Every run, `make test` included, checks
 the map first (`fast-tier.py check`) and names what is missing: a script under `skills/*/scripts/` or `hooks/`
 that no test names (`skills/**` and `hooks/**` already place it, so a test that names it is all it needs; a map
 line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` without its `tests/fixtures/<d>/**`
@@ -460,10 +465,10 @@ line. `bash tests/run.sh --only <test file>...` runs named files in the same her
 d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-latest)`, ADR 0025) run
 `make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
-in exactly one shard; `--shard-plan N` is the dry run). Most code diffs still go FULL today, through the five hubs the map marks
-FULL (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`) and
-the scripts that name them: narrowing that is `thread-skill-followup-fast-tier-narrow-the-reach`, and the
-over-selection from message strings and FOREIGN names is `thread-skill-followup-fast-tier-over-selection`.
+in exactly one shard; `--shard-plan N` is the dry run). A test that holds a FOREIGN name (`THREAD.md`,
+`CONTEXT.md` and the other root prose) only as a fixture repo's file sits on a `FOREIGN-ONLY` line, so a change to
+the real file does not select it; the over-selection still left (message strings, broad walkers, rule (1)'s
+namers) is measured in `thread-skill-followup-fast-tier-over-selection`.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third

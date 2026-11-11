@@ -5,6 +5,7 @@ Status: accepted, shipped in 2.11.0 (amends ADR 0011's close guardrail "never to
 *(Amended 2026-09-29, after p11-3's plan failed review twice: landing queues the merge and finishes; nothing waits for it. §§ 5–7 below are the amended text.)*
 *(Amended 2026-10-27 by ADR 0058: § 2's clean review means no **blocking** finding, and the rest are filed in a follow-up task; § 3's "no round cap" is replaced by a budget of four code rounds, and the ledger's regression stop no longer ends a landing. §§ 2–3 below keep their original text.)*
 *(Amended 2026-11-02 by ADR 0065: the budget is three code rounds, each finding's verdict is fresh-review's checker's, and a confirmed finding still open at the budget is fixed until its reproduction passes, with no further review.)*
+*(Amended by ADR 0078 d2, 2026-11-11, p45-4: the "daily lander" below (§ 7's retry; § 8's "nightly lander") is the landing carrier, `skills/_shared/scripts/land-carrier.py`, run by the Primary refresh's job every 15 minutes. It keeps every open `landing` PR, and every land.sh-named `close/` PR, moving until it merges, and lists one unmoved for a day as stuck. An own branch's `queued: needs merge` now leaves a `Landing queued` marker bound to the queued head, which the carrier merges once green and clean and any later plain or `--hold` call withdraws. The text below keeps its original wording.)*
 
 ## Context
 

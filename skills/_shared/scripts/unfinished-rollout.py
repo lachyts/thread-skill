@@ -13,7 +13,7 @@ ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of re
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape parallel --repo <path>
         --resume <slug> --surface-wait --running <slug,...|""> [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <slug> [--tasks-dir <dir>]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py clone --repo <Local:> --project <name>
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py clone --repo <Local:> --project <name> [--tasks <a,b>]
         [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py branches --repo <path> --tasks <slug,...>
         [--tasks-dir <dir>]
@@ -128,6 +128,11 @@ outer one's (a separate checkout nested by path, read from each path's nearest e
 <why>: read as any`; a `--resume` still compares against its unlanded rows' own cells, `any` only when one of those
 cells is empty or malformed too.
 
+Every refusal of a run that would schedule (exit 3, `check` and `clone` alike, never a --resume re-check, which takes
+nothing) also prints `this run would have taken: [[a]], [[b]]` as its last stderr line (ADR 0078 d7; would_take):
+--tasks's names, else schedule step 1's open tasks on --project. None to take prints no line. Last, because a reader
+of a refusal's first non-WARN line (estate-scan.py's clone blocker) reads who holds the repo.
+
 Outcomes (parallel, the default), the first that applies:
   1. A misfiled superseded note -> `file <slug> <path relative to the tasks dir>` (the first by slug), exit 0.
   2. Complete candidates are dropped with `WARN: <slug>: every task merged but its completion ceremony never
@@ -156,11 +161,19 @@ Outcomes (parallel, the default), the first that applies:
   3. U is exactly one interrupted pair {P, N} and N is this project's: with --regenerate `interrupted P N`,
      exit 0; without, `refuse P,N` (sorted), exit 3, and stderr says N is incomplete.
   4. U is one note X: eligible with --regenerate -> `supersede X`, exit 0 (an incomplete X WARNs that this
-     run finishes it). Otherwise `refuse X`, exit 3, with the remedy for its case (incomplete: the
+     run finishes it). This project's, not eligible (it has run and is not paused), not incomplete, not
+     pausing (`pause_requested`) and at protocol_version 5 -> `join X`, exit 0, with or without --regenerate
+     (ADR 0078 d6: this run adds its tasks to X's queue in place, reconcile-rollout.py join; a join is no
+     refusal, so it prints no `this run would have taken` line); with --regenerate it first WARNs `WARN:
+     --regenerate not applied: [[X]] has run and is not paused (<why>), so this run joins its queue (ADR 0078
+     d6): to supersede it, pause it first (execute § Pausing), then re-run with --regenerate`. Otherwise
+     `refuse X`, exit 3, with the remedy for its case (incomplete: the
      incomplete line; eligible: re-run with --regenerate, and for one awaiting sign-off (below) the
-     waiting tasks carry still gate-pending, or sign off, then /thread:execute; this project's, has run,
-     not paused: let it finish, pause it, or hard-pause it, then --regenerate, or /thread:status then
-     /thread:repair; another project's: wait, or /thread:status then /thread:repair; another project's
+     waiting tasks carry still gate-pending, or sign off, then /thread:execute; this project's, pausing: let
+     it drain, then --regenerate once its `paused:` stamp lands, or /thread:status; this project's, has run,
+     not paused, below protocol 5 (the protocol migration): let it finish, pause it, or hard-pause it, then
+     --regenerate, or /thread:status then /thread:repair; another project's: wait, or /thread:status then
+     /thread:repair; another project's
      awaiting sign-off: it waits only on Lachy's sign-off of its waiting tasks: sign off each gate, then
      /thread:execute (it runs them and closes), or /thread:repair to defer them, then /thread:execute
      closes it).
@@ -261,7 +274,7 @@ Like the serial check, it runs git only for the nested-checkout rule and the lau
 dropped note, a complete one, or a parallel one with no Project root: scope `none`, held []. WARN lines go to stderr.
 Exit 2 (no stdout, one `unfinished-rollout:` line): no note at `<tasks dir>/<slug>.md`, or a script unloadable.
 
-    clone --repo <Local:> --project <name|slug> [--tasks-dir <dir>]
+    clone --repo <Local:> --project <name|slug> [--tasks <a,b>] [--tasks-dir <dir>]
 
 `clone` (ADR 0064; schedule § 0 step 3, estate-scan.py per declaring project): which rollout clone this project's
 parallel rollout on --repo's repo runs from, read-only. stdout is one line: `default` or `project <slug>` (exit 0), or
@@ -329,7 +342,9 @@ lines, then one `legacy: [[<c>]]: <why>: it reads no surface wait, so this rollo
 0060 d5)` line per such chain; execute halts on it as before. A marker it cannot write is exit 2.
 
 Output (check). stdout is exactly one line on exit 0, 3, 4 and 5: `none` | `supersede <slug>` | `interrupted <prior-slug>
-<new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]` | `unanswered` (exit 4, --surface-wait only). Slugs are filename stems; an unfinished
+<new-slug>` | `file <slug> <relpath>` | `join <slug>` (exit 0, outcome 4: this project's running rollout, joined; with
+--regenerate, its `--regenerate not applied` WARN on stderr) | `refuse <slug>[,<slug>…]` | `unanswered` (exit 4,
+--surface-wait only). Slugs are filename stems; an unfinished
 note is root-only, so `<tasks dir>/<slug>.md` is exact. `WARN:` lines go only to stderr and never change
 stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` stderr line: a missing or
 non-directory --repo, --repo with serial or --surface or --checkout with parallel, no --surface with serial, a
@@ -779,7 +794,8 @@ def shape_of(rr, slug, note, warns, warned):
 
 
 def note_state(rr, path, note, tasks_dir, mine):
-    """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete."""
+    """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete, pausing
+    (pause_requested) and its protocol_version."""
     linked, index = rr._scan(path, tasks_dir)
     fresh, why = rr.approved_unrun(note, linked)
     counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
@@ -792,6 +808,8 @@ def note_state(rr, path, note, tasks_dir, mine):
         "signOff": sign_off, "waiting": waiting,
         "complete": counts["total"] >= 1 and counts["merged"] == counts["total"],
         "supersedes": link_slug(rr, note, "supersedes"), "incomplete": rr.incomplete(path, note, linked, index),
+        "pauseRequested": rr._truthy_flag(note.get("pause_requested")),
+        "protocol": rr._scalar(note.get("protocol_version")),
     }
 
 
@@ -1119,6 +1137,27 @@ def run_projects(rr, args, tasks_dir, warns):
     return mine
 
 
+def would_take(rr, args, tasks_dir, mine):
+    """The refusal's `this run would have taken:` stderr line (ADR 0078 d7), as a list of that one line, [] when the run
+    would have taken nothing: --tasks's names, else schedule step 1's filter over --project (`mine`): open task notes
+    directly in the tasks dir, tagged `task` and neither `rollout` nor `decisions`, on the project, on no live rollout.
+    A task a refusal stops is otherwise named nowhere, so an orient that reports the refusal reports them too."""
+    if getattr(args, "tasks", None):
+        names = [name for name, _ in named_tasks(rr, args.tasks, tasks_dir)]
+    else:
+        names = []
+        for path in sorted(tasks_dir.glob("*.md")) if mine else []:
+            try:
+                note = rr.Note(path)
+            except (ValueError, OSError):
+                continue
+            tags = tags_of(rr, note)
+            if "task" in tags and not tags & {"rollout", "decisions"} and rr._status(note) == "open" and \
+                    projects_of(rr, note) & mine and not rr._live_rollout(tasks_dir, note.get("rollout")):
+                names.append(path.stem)
+    return [f"this run would have taken: {links(names)}"] if names else []
+
+
 def cmd_check(args, rr) -> int:
     serial = args.shape == "serial"
     if serial:
@@ -1175,6 +1214,9 @@ def cmd_check(args, rr) -> int:
         warns.append(f"WARN: --repo {args.repo} is not a git repo with an origin here: matched on its path only")
 
     mine = run_projects(rr, args, tasks_dir, warns)
+
+    def refused(line, errors):
+        return finish(warns, line, 3, list(errors) + would_take(rr, args, tasks_dir, mine))
 
     # Rollout notes directly in the tasks dir and directly in Archive/ (never Archive/Rollouts/ or deeper).
     notes = list(rollout_notes(rr, tasks_dir, archive=True))
@@ -1253,7 +1295,7 @@ def cmd_check(args, rr) -> int:
             warns.append(released_warn(s, freed))
     if owners:
         keys = sorted(owners, key=str.lower)
-        return finish(warns, "refuse " + ",".join(keys), 3, [owners[k] for k in keys])
+        return refused("refuse " + ",".join(keys), [owners[k] for k in keys])
 
     # 2c. Two projects' parallel rollouts on one repo each run from their own clone (ADR 0064): another project's
     # unfinished rollout, in no interrupted pair and no `supersedes:` link, that shares this run's checkout (its Project
@@ -1283,7 +1325,7 @@ def cmd_check(args, rr) -> int:
         if shared:
             keys = sorted((ln[2:ln.index("]]")] for ln in shared), key=str.lower)
             lines = sorted(shared, key=lambda ln: ln[2:ln.index("]]")].lower())
-            return finish(warns, "refuse " + ",".join(keys), 3, lines)
+            return refused("refuse " + ",".join(keys), lines)
         pairs = [(p, n) for p, n in pairs if p in cands and n in cands]
     u = sorted(cands)
     if not u:
@@ -1295,7 +1337,7 @@ def cmd_check(args, rr) -> int:
         p, n = (cands[k] for k in pairs[0])
         if args.regenerate:
             return finish(warns, f"interrupted {p['slug']} {n['slug']}", 0)
-        return finish(warns, f"refuse {slugs_of(u)}", 3, [pair_incomplete(p, n)])
+        return refused(f"refuse {slugs_of(u)}", [pair_incomplete(p, n)])
 
     # 4. One unfinished parallel rollout.
     if len(u) == 1:
@@ -1305,7 +1347,15 @@ def cmd_check(args, rr) -> int:
                 warns.append(f"WARN: {x['slug']} is incomplete ({x['incomplete']}): this run supersedes it, "
                              "which finishes it")
             return finish(warns, f"supersede {x['slug']}", 0)
-        return finish(warns, f"refuse {x['slug']}", 3, [remedy(x)])
+        # This project's running rollout (it has run and is not paused, nor draining a pause, at protocol 5) is joined in
+        # place (ADR 0078 d6): no pause, no regenerate. --regenerate is not applied to it, and says so.
+        if x["mine"] and not x["eligible"] and not x["incomplete"] and not x["pauseRequested"] and x["protocol"] == "5":
+            if args.regenerate:
+                warns.append(f"WARN: --regenerate not applied: [[{x['slug']}]] has run and is not paused ({x['why']}), "
+                             "so this run joins its queue (ADR 0078 d6): to supersede it, pause it first (execute "
+                             "§ Pausing), then re-run with --regenerate")
+            return finish(warns, f"join {x['slug']}", 0)
+        return refused(f"refuse {x['slug']}", [remedy(x)])
 
     # 5. Two or more.
     lines = [f"at most one unfinished rollout per repo and project, and this repo has {len(u)}:"]
@@ -1323,7 +1373,7 @@ def cmd_check(args, rr) -> int:
             lines.append(f"{cands[c['supersedes']]['slug']} is named by the supersedes: of {c['slug']}, which "
                          "has since run: an interrupted supersede whose new rollout has since run: /thread:repair")
     lines.append("otherwise: let each finish, or /thread:status then /thread:repair the stuck one")
-    return finish(warns, f"refuse {slugs_of(u)}", 3, lines)
+    return refused(f"refuse {slugs_of(u)}", lines)
 
 
 # The works-too WARN, `works <checkout> in place too, with no Chain copy: ` and this tail (ADR 0067 d4, for a chain that
@@ -1391,7 +1441,8 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
                            f"{SC.fmt_token(a)}: wait for it to finish, or /thread:status then /thread:repair")
     if hits:
         keys = sorted(hits, key=str.lower)
-        return finish(warns, "refuse " + ",".join(keys), 3, [hits[k] for k in keys])
+        return finish(warns, "refuse " + ",".join(keys), 3,
+                      [hits[k] for k in keys] + would_take(rr, args, tasks_dir, mine))
     return finish(warns, "none", 0)
 
 
@@ -1839,7 +1890,12 @@ def remedy(x) -> str:
     if x["eligible"]:
         return (f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo: re-run with "
                 "--regenerate to supersede it (its unlanded tasks carry into the new rollout)")
+    if x["mine"] and x["pauseRequested"]:
+        return (f"unfinished rollout [[{s}]] ({x['label']}) is pausing (pause_requested): let it drain; once its "
+                "`paused:` stamp lands, re-run with --regenerate to supersede it, or /thread:status "
+                f"[[{s}]]")
     if x["mine"]:
+        # A note below protocol 5 (execute refuses it): the protocol migration's hard pause, then --regenerate.
         return (f"unfinished rollout [[{s}]] ({x['label']}) has run and is not paused ({x['why']}): if a session "
                 "drives it, let it finish or pause it (execute § Pausing); if none does, hard-pause it (stamp "
                 f"`paused:` and a `## Pause log` line) and re-run with --regenerate; if stuck: /thread:status "
@@ -2384,6 +2440,11 @@ def cmd_clone(args, rr) -> int:
     if top is None:
         die(f"--repo {args.repo}: not in a git work tree")
     sr = SelfRollout(env)
+    mine = {norm_project(rr, args.project)} - {""}
+
+    def refused(line, errors):
+        return finish(warns, line, 3, list(errors) + would_take(rr, args, tasks_dir, mine))
+
     if sr.twin(top) is not None:
         warns.append(f"WARN: --repo {args.repo} is itself a rollout clone ({top}, of {sr.twin(top)}): its Local: line "
                      "names the clone, so this project's rollout runs from it as is")
@@ -2441,7 +2502,7 @@ def cmd_clone(args, rr) -> int:
         lines.append(f"this project's unfinished rollouts on this repo run from {len(own)} clones "
                      f"({', '.join(sorted(own))}): one clone per (repo, project) (ADR 0064): let one finish, or "
                      "/thread:status then /thread:repair, then re-run")
-        return finish(warns, "refuse " + ",".join(c["slug"] for c in mineall), 3, lines)
+        return refused("refuse " + ",".join(c["slug"] for c in mineall), lines)
     if own:
         k, (x, cs) = next(iter(own.items()))
         held = takers(k)
@@ -2473,7 +2534,7 @@ def cmd_clone(args, rr) -> int:
         lines.append(collision)
     lines.append(f"this project's parallel rollout on this repo has no clone free (ADR 0064): wait for one of them to "
                  "finish, or /thread:status then /thread:repair, then re-run")
-    return finish(warns, "refuse " + ",".join(keys), 3, lines)
+    return refused("refuse " + ",".join(keys), lines)
 
 
 def cmd_branches(args, rr) -> int:
@@ -2528,7 +2589,7 @@ def main() -> int:
                                                          "project, each in its own clone; serial chains limited by "
                                                          "surfaces (schedule § 0, § Serial path).")
     sub = p.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("check", help="print none | supersede | interrupted | file | refuse for this repo or chain")
+    c = sub.add_parser("check", help="print none | supersede | interrupted | file | join | refuse for this repo or chain")
     c.add_argument("--shape", choices=("parallel", "serial"), default="parallel",
                    help="parallel (schedule § 0, the default) or serial (schedule § Serial path S3)")
     c.add_argument("--repo", default=None, help="the target repo (the path schedule § 0 resolved); parallel only")
@@ -2562,6 +2623,7 @@ def main() -> int:
     cl = sub.add_parser("clone", help="which rollout clone this project's parallel rollout runs from (ADR 0064)")
     cl.add_argument("--repo", required=True, help="the project note's Local: path (the in-place checkout)")
     cl.add_argument("--project", required=True, help="the project schedule § 0 reads Local: for (a name or [[wikilink]])")
+    cl.add_argument("--tasks", default=None, help="comma-separated task slugs (a --tasks run): a refusal names them")
     cl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     b = sub.add_parser("branches", help="the Branch check (schedule step 5): named tasks whose branch another run uses")
     b.add_argument("--repo", required=True, help="the target repo (the path schedule § 0 resolved)")
