@@ -647,14 +647,21 @@ rm -f "$ST"; ok "$(sline)" None "C15: no file: a null line"
 python3 "$CARRIER" stuck --now nope > /dev/null 2>&1; ok "$?" 2 "C15: a bad --now is usage, exit 2"
 
 echo "== C16. marker: the newest marker-class comment by the login"
-mk() { printf '%s' "$1" | python3 "$CARRIER" marker --login me 2>/dev/null; echo "|$?"; }
+# mk <json>: the marker line and its rc, as "<line>|<rc>" (the line captured, so its newline never sits before the |).
+# cm <id> <login> <body>: one comment object, into $c. The JSON is built by printf -v and passed as "$j", never written
+# out inside "$(…)": bash 3.2 (macOS's /bin/bash) brace-expands a quoted {a,b} there, so each case split into words
+# and passed vacuously on macOS while Linux failed it.
+mk() { local o; o=$(printf '%s' "$1" | python3 "$CARRIER" marker --login me 2>/dev/null); echo "$o|$?"; }
+cm() { printf -v c '{"id":%s,"user":{"login":"%s"},"body":"%s"}' "$1" "$2" "$3"; }
 q='Landing queued (ADR 0078 d2): '
-ok "$(mk "[{\"id\":1,\"user\":{\"login\":\"me\"},\"body\":\"${q}aaa\"}][{\"id\":3,\"user\":{\"login\":\"me\"},\"body\":\"${q}bbb\\nmore\"},{\"id\":2,\"user\":{\"login\":\"me\"},\"body\":\"Landing withdrawn (ADR 0078 d2): aaa\"}]")" \
-  "queued bbb|0" "C16: concatenated pages, the newest by id"
-ok "$(mk "[{\"id\":1,\"user\":{\"login\":\"me\"},\"body\":\"${q}aaa\"},{\"id\":2,\"user\":{\"login\":\"someone\"},\"body\":\"${q}ccc\"}]")" "queued aaa|0" "C16: another login's ignored"
-ok "$(mk "[{\"id\":1,\"user\":{\"login\":\"me\"},\"body\":\"${q}aaa\"},{\"id\":2,\"user\":{\"login\":\"me\"},\"body\":\"Landing held (ADR 0028 § 3)\\n\\nwhy\"}]")" "none|0" "C16: after a hold: none"
-ok "$(mk "[{\"id\":1,\"user\":{\"login\":\"me\"},\"body\":\"${q}aaa\"},{\"id\":2,\"user\":{\"login\":\"me\"},\"body\":\"Landing withdrawn (ADR 0078 d2): aaa\"}]")" "none|0" "C16: after a withdrawal: none"
-ok "$(mk "[{\"id\":7,\"user\":{\"login\":\"me\"},\"body\":\"${q}not-a-sha\"},{\"id\":8,\"user\":{\"login\":\"me\"},\"body\":\"a plain comment\"}]")" "queued not-a-sha|0" "C16: any S, the head never consulted"
+cm 1 me "${q}aaa"; a1=$c; cm 3 me "${q}bbb\\nmore"; b3=$c; cm 2 me 'Landing withdrawn (ADR 0078 d2): aaa'; w2=$c
+cm 2 someone "${q}ccc"; s2=$c; cm 2 me 'Landing held (ADR 0028 § 3)\n\nwhy'; h2=$c
+cm 7 me "${q}not-a-sha"; n7=$c; cm 8 me 'a plain comment'; p8=$c
+j="[$a1][$b3,$w2]"; ok "$(mk "$j")" "queued bbb|0" "C16: concatenated pages, the newest by id"
+j="[$a1,$s2]"; ok "$(mk "$j")" "queued aaa|0" "C16: another login's ignored"
+j="[$a1,$h2]"; ok "$(mk "$j")" "none|0" "C16: after a hold: none"
+j="[$a1,$w2]"; ok "$(mk "$j")" "none|0" "C16: after a withdrawal: none"
+j="[$n7,$p8]"; ok "$(mk "$j")" "queued not-a-sha|0" "C16: any S, the head never consulted"
 ok "$(mk 'not json')|$(mk '')" "|2||2" "C16: unreadable or empty JSON: exit 2"
 printf '[]' | python3 "$CARRIER" marker >/dev/null 2>&1; ok "$?" 2 "C16: no --login: exit 2"
 
