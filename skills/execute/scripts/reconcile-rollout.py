@@ -12547,7 +12547,7 @@ def _regenerate_gate(walk, anchor, trigger_path):
     serial anchor is unreadable; no anchor, a superseded one, a successor read from a task note (carry moves a task's
     `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from one written since), a
     closed one and one neither paused nor approved_unrun wait (unfinished-rollout.py's `eligible`, its two facts, so a
-    merge during a run never spends `fired:` on schedule's refusal)."""
+    merge during a run never spends `fired:` on schedule's join, which regenerates nothing: ADR 0078 d6)."""
     if anchor is not None and _shape(anchor[1]) == SHAPES[1]:
         return "unreadable", "a serial rollout supersedes nothing"
     if anchor is None:
@@ -12562,7 +12562,7 @@ def _regenerate_gate(walk, anchor, trigger_path):
         return "waiting", "closed: nothing to regenerate"
     linked = [(p, n) for p, n in walk.by_rollout.get(path.stem.lower(), ()) if p != path]
     if not (_valued(note.get("paused")) or approved_unrun(note, linked)[0]):
-        return "waiting", "running: schedule refuses a regenerate until it is paused or finished"
+        return "waiting", "running: schedule joins a running rollout, regenerating nothing, until it is paused or finished"
     return None, None
 
 

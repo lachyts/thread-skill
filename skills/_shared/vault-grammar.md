@@ -228,10 +228,10 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   anchor waits; a valued `superseded_by:` waits; on a task note, an anchor with a valued `supersedes:` waits, because
   `carry` moves a task's `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from
   one written since; a done or dropped anchor waits; one neither paused nor never started (`approved_unrun`) waits, since
-  schedule refuses a regenerate on a running rollout. So a successor is never touched by the prior's merge, whether the
-  entry sits on the prior or on a carried task, and one written on a successor's own rollout note fires as any other. A
-  `regenerate` written against a rollout that runs to its end lapses at its close, listed under `waiting`. `fire` runs
-  the same reading.
+  schedule regenerates no running rollout: it joins its queue, `--regenerate` not applied (ADR 0078 d6). So a successor
+  is never touched by the prior's merge, whether the entry sits on the prior or on a carried task, and one written on a
+  successor's own rollout note fires as any other. A `regenerate` written against a rollout that runs to its end lapses
+  at its close, listed under `waiting`. `fire` runs the same reading.
 - **Where a command runs.** A command row has a `projectRoot`, read on the trigger's own note for `regenerate` and on the
   target task for `schedule [[U]]` (the note schedule § 0 resolves). The first present decides: the note's own `Project
   root:` line, the `Project root:` of the rollout its `rollout:` links, then the first project, in `projects:` order,
