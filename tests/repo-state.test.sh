@@ -234,7 +234,7 @@ git config init.defaultBranch" 2>/dev/null)
   g -C "$tmp/wd7" checkout -q -b trunk && commits "$tmp/wd7" 1
   wd7_before=$(snap "$tmp/wd7")
   rs "$tmp/wd7"; clean0 "$(unres trunk)" "20g. on trunk with origin/HEAD → a missing origin/trunk → unresolved, not nothing"
-  # 20i. two live carriers: close/…-a holds A only, close/…-b holds A+B. The daily lander's update-branch
+  # 20i. two live carriers: close/…-a holds A only, close/…-b holds A+B. The landing carrier's update-branch
   #      (then a fetch) moves -a's tip to a later-dated merge, so -a sorts newest; -b still carries more.
   commits "$tmp/wd8" 1
   qa="close/2026-09-28-a-$(sha12 "$tmp/wd8")"; ca=$(g -C "$tmp/wd8" rev-parse HEAD)

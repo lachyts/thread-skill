@@ -89,3 +89,8 @@ Calls made in his place, each overturnable:
 - Thread Skill's own `CLAUDE.md` gains a `Verifier:` line naming the fast tier and a `Completion verifier:`
   line naming the full suite, so schedule stamps both (schedule steps 2.5 and 6).
 - A future timeout reaches Lachy only after the automatic retries are spent.
+- The five hubs (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`,
+  `rollout-settings.py`) sit on `tests/fast-tier.map` HUB lines, not FULL (2026-11-11, the reach follow-up): a diff
+  that reaches one runs the suites listed on its line, and the reach ends there. A suite that drives a hub only
+  through another script runs at completion and on master, the risk d1 accepts; check (i) keeps each list holding
+  every suite that names its hub, a tests/lib helper's included.
