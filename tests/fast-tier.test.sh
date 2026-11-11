@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3) on throwaway
 # repos, its results on the real tree (R1-R8), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
-# fixture checkout (F1-F19; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
+# fixture checkout (F1-F22; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
 # temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
@@ -608,6 +608,49 @@ run bash --only tests/zzb.test.sh
 ok "$rc|$(lines '^tests/zzb\.test\.sh: FAILED \([0-9]+s\)$')|$(lines '^  - tests/zzb\.test\.sh$')" "1|1|1" \
   "F16: a failing suite prints its FAILED line, fails the run and is in the failure list"
 ok "$(lines '^make test: FAILED \([0-9]+s\)$')" 1 "F17: … and the red verdict carries the run's seconds"
+git -C "$F" checkout -q -- tests/zzb.test.sh
+
+# F20-F22 (#327 finding 6): a hung suite fails the run within its liveness bound and names itself. zzb hangs (a 60 s
+# sleep, and a background child) past the 2 s bound THREAD_SUITE_BOUND sets, so the run ends in seconds with zzb's whole
+# process group gone. zzb exits 0 on its TERM and still names zzb.py and zz.workflow.js (so the map check stays green),
+# so only the timeout can make the run red. A regression ends at zzb's own 60 s, so the check never hangs the suite.
+pids="$TMP/f20.pids"; rm -f "$pids"
+put "$F" tests/zzb.test.sh 'trap "exit 0" TERM; sleep 60 & echo $! >> "$ZZ_PIDS"; echo $$ >> "$ZZ_PIDS"
+echo "zzmarker-b hung zzb.py zz.workflow.js"; sleep 60'
+s20=$SECONDS
+ZZ_PIDS="$pids" THREAD_SUITE_BOUND=2 run bash --only tests/zza.test.sh tests/zzb.test.sh
+t20=$((SECONDS - s20))
+alive=""; for p in $(cat "$pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && alive="$alive $p"; done
+ok "$rc|$(markers)|$([ "$t20" -lt 30 ] && echo fast || echo "slow (${t20}s)")" "1|zzmarker-a zzmarker-b |fast" \
+  "F20: a suite hung past its 2 s bound fails the run in seconds, not at its 60 s, and the other suite still runs"
+ok "$(lines '^tests/zzb\.test\.sh: FAILED \([0-9]+s\)$')|$(lines '^tests/zzb\.test\.sh: timed out after 2s$')|$(lines '^tests/zza\.test\.sh: ok \([0-9]+s\)$')" \
+  "1|1|1" "F20: … the hung suite prints its FAILED line and a timed-out line, the other its ok line"
+ok "$(lines '^  - tests/zzb\.test\.sh \(timed out after 2s\)$')|$(lines '^run\.sh: timed out after 2s \(its liveness bound\); its process group was killed$')|$(lines '^  - ')" \
+  "1|1|1" "F20: … its failure-list line and its block say it timed out, and it is the run's only failure"
+ok "$(lines '^run\.sh: a healthy suite that has only grown slower needs tests/shard-weights\.tsv regenerated \(its header says how\), or THREAD_SUITE_BOUND=<seconds>$')" \
+  1 "F20: … and its block names the fix for a suite that has only grown slower"
+ok "$(wc -l < "$pids" | tr -d ' ')|${alive:-none}" "2|none" "F20: … and its whole process group is gone, the background child too"
+git -C "$F" checkout -q -- tests/zzb.test.sh
+for bad in 0 x; do
+  THREAD_SUITE_BOUND=$bad run bash --only tests/zza.test.sh
+  ok "$rc|$(markers)|$(lines '^== ')" "2||0" "F21: THREAD_SUITE_BOUND=$bad exits 2 and runs nothing"
+done
+
+# F22: a TERM to run.sh's pid alone (as when a verify slot's guard ends a run) still ends a hung suite: the suite's
+# process group is no longer run.sh's, so run.sh's trap TERMs it. Both waits are bounded (20 s, then 5 s).
+pids="$TMP/f22.pids"; rm -f "$pids"
+put "$F" tests/zzb.test.sh 'sleep 60 & echo $! >> "$ZZ_PIDS"; echo $$ >> "$ZZ_PIDS"; sleep 60'
+(cd "$F" && ZZ_PIDS="$pids" exec bash tests/run.sh --only tests/zzb.test.sh > "$TMP/f22.out" 2>&1) & rpid=$!
+n=0; while [ "$(cat "$pids" 2>/dev/null | wc -l | tr -d ' ')" != 2 ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+sleep 0.5  # the spawn block has written the group id stop_suites reads
+kill -TERM "$rpid"; wait "$rpid"; rrc=$?
+n=0; alive=x
+while [ -n "$alive" ] && [ "$n" -lt 50 ]; do
+  alive=""; for p in $(cat "$pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && alive="$alive $p"; done
+  [ -z "$alive" ] || sleep 0.1; n=$((n+1))
+done
+ok "$rrc|$(cat "$pids" 2>/dev/null | wc -l | tr -d ' ')|${alive:-none}" "143|2|none" \
+  "F22: a TERM to run.sh exits 143 and TERMs the live suite's whole process group, its background child too"
 git -C "$F" checkout -q -- tests/zzb.test.sh
 
 # F18-F19 (p43-6): shard.py reads measured weights from tests/shard-weights.tsv beside run.sh (its docstring holds the
