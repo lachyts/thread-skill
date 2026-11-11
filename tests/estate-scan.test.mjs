@@ -399,6 +399,18 @@ const ro6 = (slug, proj, at) => {
 }
 for (const name of ['TB', 'TB2', 'TB3', 'TB4']) ro6(`ra-${name.toLowerCase()}`, 'Proj A', `~/repos/${name}-rollout`)
 ro6('rc-tb3', 'Proj C', '~/repos/TB3-proj-b-rollout')
+// ADR 0078 d7: a live rollout's `## Waits on` lines, two still true (w-open, and w-stale whose rollout is closed but
+// still in Work/Tasks) and three no longer (the dependency closed or held, or the dependant dropped).
+fs.appendFileSync(path.join(V6, 'Work', 'Tasks', 'ra-tb.md'), '\n## Waits on\n\n' +
+  '- [[ra-tb-t]] waits on [[w-open]] (Proj B, not scheduled)\n- [[ra-tb-t]] waits on [[w-stale]] (Proj B, not scheduled)\n' +
+  '- [[ra-tb-t]] waits on [[w-done]] (Proj B, not scheduled)\n' +
+  '- [[ra-tb-t]] waits on [[w-held]] (Proj B, not scheduled)\n- [[w-gone]] waits on [[w-open]] (Proj B, not scheduled)\n')
+write(path.join(V6, 'Work', 'Tasks', 'w-gone.md'), task('dropped', ['Proj A'], `\nrollout: "[[ra-tb]]"`))
+write(path.join(V6, 'Work', 'Tasks', 'w-open.md'), task('open', ['Proj B']))
+write(path.join(V6, 'Work', 'Tasks', 'w-stale.md'), task('open', ['Proj B'], `\nrollout: "[[rc-closed]]"`))
+write(path.join(V6, 'Work', 'Tasks', 'rc-closed.md'), fm('tags:\n  - task\n  - rollout\nstatus: dropped\nprotocol_version: 5', '\n## Notes\n'))
+write(path.join(V6, 'Work', 'Tasks', 'w-done.md'), task('done', ['Proj B']))
+write(path.join(V6, 'Work', 'Tasks', 'w-held.md'), task('open', ['Proj B'], `\nrollout: "[[rc-tb3]]"`))
 
 // ---- Running the scan ------------------------------------------------------------------------------------------
 const env = { ...base }
@@ -1124,6 +1136,13 @@ test('E3. D and P_B both taken by other projects: B carries a clone blocker', ()
   assert.equal(b.clone.exit, 3)
   assert.match(b.clone.line, /^refuse ra-tb3,rc-tb3$/)
   assert.deepEqual(checks(b.blockers), ['clone', 'unfinished-rollout'], 'with no clone of its own it reads D, where A runs')
+  assert.match(b.blockers.find((x) => x.check === 'clone').why, /^\[\[ra-tb3\]\]/, 'its why is the taker, never the refusal\'s task list')
+})
+test('E4b. a live rollout\'s waitsOn holds only the lines still true (ADR 0078 d7)', () => {
+  const rows = ok(twoClones()).rollouts
+  assert.deepEqual(rows.find((r) => r.slug === 'ra-tb').waitsOn,
+    [{ task: 'ra-tb-t', dependency: 'w-open', project: 'Proj B' }, { task: 'ra-tb-t', dependency: 'w-stale', project: 'Proj B' }])
+  assert.deepEqual(rows.find((r) => r.slug === 'rc-tb3').waitsOn, [])
 })
 test('E4. the repo row keeps the default resolution and carries no project\'s unfinished-rollout refusal', () => {
   const tb = repoAt(ok(twoClones()), R('TB'))

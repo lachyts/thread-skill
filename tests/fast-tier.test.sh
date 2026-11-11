@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S13) and `check` (C1-C3) on throwaway
-# repos, its results on the real tree (R1-R6), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
+# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3) on throwaway
+# repos, its results on the real tree (R1-R8), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
 # fixture checkout (F1-F19; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
 # temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -187,6 +187,13 @@ put "$D" tests/zznote.test.mjs "// reads skills/x/ZZNOTE.md"
 map "$D" 'FOREIGN ZZNOTE.md' 'skills/**' 'tests/lib/**' 'tests/*.test.*'
 ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzlibuser.test.sh tests/zznote.test.mjs" \
   "S9: a FOREIGN name selects its naming tests and a tests/lib helper's, never a script's"
+put "$D" tests/zzfx.test.sh 'printf x > "$tmp/repo/ZZNOTE.md"; python3 skills/x/scripts/zzreader.py "$tmp/repo"'
+ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzfx.test.sh tests/zzlibuser.test.sh tests/zznote.test.mjs" \
+  "S9b: a test that writes a fixture repo's ZZNOTE.md names the FOREIGN name until a FOREIGN-ONLY line declares it"
+map "$D" 'FOREIGN ZZNOTE.md' "FOREIGN-ONLY ZZNOTE.md tests/zzfx.test.sh  # a fixture repo's ZZNOTE.md" 'skills/**' 'tests/lib/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/ZZNOTE.md)" "FAST|-|-|1 tests/zzlibuser.test.sh tests/zznote.test.mjs" \
+  "S9b: … and once declared it is no namer of that name: a change to the real ZZNOTE.md never selects it"
+has "$(sel "$D" --paths skills/x/scripts/zzreader.py)" "tests/zzfx.test.sh" "S9b: … while it still selects for the script it names"
 
 D="$TMP/s10"; mkrepo "$D"
 put "$D" tests/zzmd.test.mjs '// reads the skills prose'
@@ -213,6 +220,24 @@ printf '\nSELF_TEST_SCRIPT = "skills/execute/scripts/merge-task.sh"\n' >> "$D/te
 map "$D" 'tests/run.sh FULL' 'tests/lib/fast-tier.py FULL' 'skills/execute/scripts/merge-task.sh @merge-task-self-tests' 'skills/**'
 ok "$(sel "$D" --paths skills/execute/scripts/merge-task.sh)" "FAST|-|-|1 @merge-task-self-tests" \
   "S13: run.sh and the selector name merge-task.sh in code, yet are never carriers: FAST, never naming either"
+
+# S14: a HUB line ends the reach at its declared suites (ADR 0073 follow-up: a hub named by most suites is no FULL).
+D="$TMP/s14"; mkrepo "$D"
+put "$D" skills/x/scripts/zzhub.py 'H = 1
+LEAF = "zzleaf14.py"'
+put "$D" skills/x/scripts/zzleaf14.py 'L = 14'
+put "$D" skills/x/scripts/zzloader14.py 'H = "zzhub.py"'
+put "$D" tests/zzhub.test.sh 'python3 skills/x/scripts/zzhub.py'
+put "$D" tests/zzhub2.test.sh 'python3 skills/x/scripts/zzhub.py again'
+put "$D" tests/zzloader14.test.sh 'python3 skills/x/scripts/zzloader14.py'
+put "$D" tests/zzleaf14.test.sh 'python3 skills/x/scripts/zzleaf14.py'
+put "$D" tests/zzw.test.mjs '// a walker'
+map "$D" '** ALSO tests/zzw.test.mjs' 'skills/x/scripts/zzhub.py HUB tests/zzhub.test.sh' \
+  'skills/x/scripts/zzhub.py HUB tests/zzhub2.test.sh' 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzhub.py)" "FAST|-|-|1 tests/zzhub.test.sh tests/zzhub2.test.sh tests/zzw.test.mjs" \
+  "S14: a HUB path selects its declared suites (two lines' union) and the walkers, never the suite of a carrier that names it"
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf14.py)" "FAST|-|-|1 tests/zzhub.test.sh tests/zzhub2.test.sh tests/zzleaf14.test.sh tests/zzw.test.mjs" \
+  "S14: a leaf that reaches a hub adds the hub's suites, and the reach stops there"
 
 # S12: the changed paths from git.
 D="$TMP/s12"; mkrepo "$D"
@@ -301,9 +326,30 @@ pass "fixture dirs zz and zz-long: a test holding only fixtures/zz-long/a.md is 
   'put . tests/fixtures/zz/a.txt a; put . tests/fixtures/zz-long/a.txt a; put . tests/zzlong.test.sh "cat tests/fixtures/zz-long/a.md"
    ml "tests/fixtures/zz/** tests/zza.test.sh" "tests/fixtures/zz-long/** tests/zzlong.test.sh"'
 ctl "a FOREIGN name with no file" "the FOREIGN name ZZNOPE.md is the basename of no tracked file (check g)" 'ml "FOREIGN ZZNOPE.md"'
+# FO: a FOREIGN name ZZFX.md and a test that writes a temp repo's copy of it.
+FO='put . skills/x/ZZFX.md x; put . tests/zzfx.test.sh "echo x > \"\$tmp/ZZFX.md\""; ml "FOREIGN ZZFX.md"'
+pass "a FOREIGN-ONLY line naming a FOREIGN name, a test that holds it and what it holds" "$FO; ml 'FOREIGN-ONLY ZZFX.md tests/zzfx.test.sh  # a temp repo'"
+ctl "a FOREIGN-ONLY line without its comment" "a FOREIGN-ONLY line ends with a \`# ...\` comment" "$FO; ml 'FOREIGN-ONLY ZZFX.md tests/zzfx.test.sh'"
+ctl "a FOREIGN-ONLY line with no test" "FOREIGN-ONLY names a FOREIGN name and at least one test (check a)" "$FO; ml 'FOREIGN-ONLY ZZFX.md  # x'"
+ctl "a FOREIGN-ONLY name that is not FOREIGN" "FOREIGN-ONLY ZZOTHER.md: ZZOTHER.md is not a FOREIGN name (check a)" \
+  "$FO; ml 'FOREIGN-ONLY ZZOTHER.md tests/zzfx.test.sh  # x'"
+ctl "an uncollected FOREIGN-ONLY entry" "the FOREIGN-ONLY entry tests/lib/zzh.sh is not a collected test (check c)" \
+  "$FO; put . tests/lib/zzh.sh ZZFX.md; ml 'tests/lib/**' 'FOREIGN-ONLY ZZFX.md tests/lib/zzh.sh  # x'"
+ctl "a stale FOREIGN-ONLY entry" "tests/zza.test.sh does not name ZZFX.md; drop it from that FOREIGN-ONLY line (check g)" \
+  "$FO; ml 'FOREIGN-ONLY ZZFX.md tests/zza.test.sh  # x'"
 ctl "(h) a script run.sh runs, neither FULL nor self-tests" "tests/run.sh names skills/x/scripts/zza.py; mark it FULL" \
   'put . tests/run.sh "python3 skills/x/scripts/zza.py"; ml "tests/run.sh FULL"'
 pass "(h) a script named only in a run.sh comment line" 'put . tests/run.sh "# runs skills/x/scripts/zza.py"; ml "tests/run.sh FULL"'
+# (i): a hub's declared suites are whole.
+HUB='skills/x/scripts/zza.py HUB tests/zza.test.sh'
+pass "(i) a HUB line holding every suite that names it" "ml '$HUB'"
+ctl "(i) a suite that names the hub, missing from its HUB line" "tests/zzb.test.sh names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
+  "put . tests/zzb.test.sh 'python3 skills/x/scripts/zza.py'; ml '$HUB'"
+ctl "(i) a suite that names a tests/lib helper naming the hub, missing" \
+  "tests/zzu.test.sh names tests/lib/zzh.sh, which names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
+  "put . tests/lib/zzh.sh 'python3 skills/x/scripts/zza.py'; put . tests/zzu.test.sh '. tests/lib/zzh.sh'; ml 'tests/lib/**' '$HUB'"
+ctl "(i) a HUB line naming no exact path" "skills/x/scripts/*.py: a HUB line names one exact path (check i)" 'ml "skills/x/scripts/*.py HUB tests/zza.test.sh"'
+ctl "(a) a HUB line with no entries" "HUB lists no entry (check a)" 'ml "skills/x/scripts/zza.py HUB"'
 ctl "an unknown keyword" "unknown keyword ZZKEY (check a)" 'ml "ZZKEY skills/x/scripts/zza.py"'
 ctl "FULL beside an entry" "FULL stands alone on its line (check a)" 'ml "skills/x/scripts/zza.py FULL tests/zza.test.sh"'
 ctl "an OWN-LISTINGS line without its kind" "an OWN-LISTINGS line ends with a" 'put . tests/zzls.test.sh "ls tests/*.test.sh"; ml "OWN-LISTINGS tests/zzls.test.sh"'
@@ -376,6 +422,17 @@ has "$(python3 "$SEL" select --paths tests/reflect-weekly.test.mjs)" "tests/fast
 r6=$(python3 "$SEL" select --paths tests/e2e/parallel-rollouts-one-repo.live.sh)
 ok "$(printf '%s\n' "$r6" | head -1 | cut -f1)|$(printf '%s\n' "$r6" | grep -cxE 'tests/contracts/(queue-only|rung-vocabulary|no-single-cause)\.test\.mjs')" \
   "FAST|3" "R6: a tests/e2e/ change (NONE) still runs the walkers that read it (queue-only, rung-vocabulary, no-single-cause)"
+for h in skills/execute/scripts/reconcile-rollout.py skills/execute/scripts/lead-integrate.py skills/_shared/scripts/run_record.py \
+  skills/execute/scripts/verify-slot.py skills/_shared/scripts/rollout-settings.py; do
+  r7=$(python3 "$SEL" select --paths "$h")
+  ok "$(printf '%s\n' "$r7" | head -1 | cut -f1)|$(printf '%s\n' "$r7" | grep -cx 'tests/verify-slot.test.sh')" "FAST|1" \
+    "R7: the hub $h is FAST: its declared suites and the walkers (FULL means its HUB line went)"
+done
+r8=$(python3 "$SEL" select --paths THREAD.md)
+ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
+  "R8: a THREAD.md change is FAST and skips the suites that write only fixture repos' THREAD.md (their FOREIGN-ONLY line)"
+has "$(python3 "$SEL" select --paths CONTEXT.md)" "tests/repo-threads.test.sh" "R8: … while CONTEXT.md still selects repo-threads.test.sh, which reads the real one"
+has "$(python3 "$SEL" select --paths CLAUDE.md)" "tests/fast-tier-wiring.test.mjs" "R8: … and CLAUDE.md still selects fast-tier-wiring.test.mjs (W3 reads it)"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
