@@ -12,6 +12,12 @@ cool-down waits over an UNVERIFIED task too, its (b) item pushed, the option thi
 *(Amended by ADR 0069, 2026-11-05: decision 8's allowlist stands, but merge-task's GitHub-side exit 1 (required
 checks that never appeared, no red check in its cause) is no human's text either: the lead sets it aside at
 Integration and it retries as `infra`.)*
+*(Amended 2026-11-12 by `thread-skill-p47-2-a-repeat-stall-frees-the-lane-and-keeps-its-diagnosis`, decision 4 only:
+at Integration, a kill, a GitHub-side exit 1 or a no-runner set-aside that comes back as the stop it was last
+re-entered from spends no more retries. Found in `compression-engine-rollout-2026-11-08`: two PRs took turns holding
+the Integration lane for about 18 hours, each automatic retry an `infra` one running the same 2-hour wait until it was
+killed, and the lead's finding at 20 minutes (a dead self-hosted runner) was lost to later diagnoses that read
+`signalled twice (143)` and `TLS handshake timeout`.)*
 
 ## Context
 
@@ -49,6 +55,24 @@ grill's question was how much of that the live lead may do alone without ever hi
    expected shape of a flaky infrastructure), and the budget still bounds it, each retry after decision 5's
    short cool-down. The fingerprint is compared with the stored sha, never with the previous run, because
    reconcile writes no new run for identical content.
+
+   *Amended 2026-11-12 (p47-2): the same stop at Integration.* Three Integration stops that hold the lane in a wait,
+   or need a person's act once they repeat, are infra but no longer exempt: merge-task killed twice
+   (`merge-task signalled twice`), its GitHub-side exit 1 (checks that never appeared, or a required check CANCELLED
+   again) and its no-runner set-aside (`SAME_STOP_OPENINGS`). When one comes back as the stop the task was last
+   re-entered from, it spends no more retries: `same stop twice running at Integration: <its reason>`, H10, before the
+   budget, so the lane goes to work that can move and the task waits for Lachy at the desk (ADR 0075 d2). "The same
+   stop" is `_stop_key`: the reason's first line equal but for its numbers (exit codes, minutes, run and job ids,
+   counters), and a kill read as the wait it was in (merge-task's `last wait:` line), whatever jobs that wait listed.
+   Either the block's fingerprint equals `auto_retry_sha` (an identical reason writes no new run) or the latest
+   `## Blocker diagnosis` run carrying that sha is an `integration:` run with the same key; a sha in another section
+   (a plan block's) is a different stop, so the first Integration stop after a plan-block retry still retries. The
+   exemption holds, at any stage, for a transient and a dead call, and at Integration for an origin outage (`prepare:
+   origin unreachable three times`) and a third exit 8 while GitHub settles: each clears by itself. An agent block
+   keeps the exact-fingerprint stop above. Being killed is no cause, so a kill that names no wait carries the last
+   real reason, the block last re-entered, as its diagnosis's second line (`last real reason (Blocker diagnosis run
+   <n>, <stamp>): …`), which no first-line reader sees: a later retry can no longer overwrite the cause with the
+   signal.
 5. **Quota blocks are retried free, after a cool-down; infra blocks after a short one.** A dead call whose error
    reads as a usage or rate limit spends no budget and has no fingerprint stop. It is retried after 30, 60, 120,
    240, then 480 minutes, measured from the later of its block's run stamp and the last retry: five free retries
@@ -106,6 +130,15 @@ Considered:
   never the turn's reason. A human is needed for those either way, so the halt comes first and only the cooling
   task's retry waits for the re-invocation.
 - *A budget per stage.* More state for no observed need; the fingerprint stop already catches a loop.
+- *A stop-key marker in frontmatter* (2026-11-12, decision 4's amendment), the key of the stop last re-entered stored
+  beside `auto_retry_sha`. More state, and each verb that touches the markers would need a rule for it (hand-back,
+  carry, defer); the key is read from the `## Blocker diagnosis` run the stored sha already names.
+- *The same-stop rule for a run-stage TRANSIENT.* Its text is fixed and names no cause, so every transient would read
+  as the same stop, and it holds a Slot, not the Integration lane: the budget and the cool-downs bound it.
+- *Widening the agent stop to key-equal reasons.* An agent's numbers can be its progress (a failing count, a line
+  number), so a reason equal but for its numbers is new feedback there.
+- *Every Integration infra stop held.* An origin outage and GitHub settling a PR's mergeability clear by themselves;
+  the settling exit 8 holds the lane about 5 minutes an attempt, so its retries cost little.
 - *Making `auto_retries` Retro-tunable.* It is no throughput dial and nothing in the Run record scores it yet;
   it stays a plain setting until a Retro shows a rule.
 - *Writing the dated line in the task note.* The task body is the brief: descope's `_brief_items` and the plan
@@ -119,7 +152,7 @@ Considered:
   UNVERIFIED task needs a human anyway.
 - **Amends ADR 0004.** Repair is still a conductor and still the one place a human's decision is captured, but it
   is no longer the only place an agent-fixable block is retried: it keeps the ones a spent budget, a repeated
-  fingerprint or a `needsHuman` question hands it.
+  fingerprint, the same Integration stop twice running (decision 4 as amended) or a `needsHuman` question hands it.
 - `hand-back` now writes frontmatter markers (the counters cleared, `auto_retry_sha` stamped); its stdout is
   unchanged.
 - **A usage limit inside an agent is not a quota block.** The quota class reads only a `workflow call failed:`

@@ -41,6 +41,7 @@ State (a missing file takes the default in brackets):
   runjobs.<id>            actions/runs/<id>/jobs, served as written (absent ⇒ the 404 form).
   checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
                           sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
+                          Its out is printed before its sleep, as gh prints its first table, then err after.
                           A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
                           checks as they stand. `pr checks --json` is gh 2.43.1's "unknown flag: --json", rc 1,
                           unless checks.json is present (a newer gh): with -q it prints `links`; without -q (merge-task's
@@ -64,6 +65,9 @@ State (a missing file takes the default in brackets):
   merge.lag <N>           see pr/<N>/lag.   merge.hook <sh>: run after a successful squash.
   squash-parent           the squash commit's parent [base.cur, else srv's default branch].
   squash.tree             the squash commit's tree: `head` (the PR head's tree) or a 40-hex tree [the empty tree].
+  daemon <secs>           the next gh call (any) leaves a child behind, as git's daemonize does for an auto gc: its own
+                          session, fds 0-2 on /dev/null, every other fd it inherited kept; it sleeps <secs>. Its pid is
+                          written to daemon.pid, for the test to stop.
 
 Opt-in verbs for lead-integrate.py revert (no existing suite calls them):
   pr create [-R o/r] --head <br> --base <b> --title <t> --body-file <f>
@@ -142,6 +146,20 @@ def pop(path):
 
 def peek(path):
     return (rd(path, "") or "").split("\n")[0]
+
+
+if has("daemon"):
+    secs = float(rd(p("daemon")) or 0)
+    rm(p("daemon"))
+    child = os.fork()
+    if child == 0:
+        os.setsid()
+        null = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(null, fd)
+        time.sleep(secs)
+        os._exit(0)
+    wr(p("daemon.pid"), str(child))
 
 
 def guard_jq(call):
@@ -311,9 +329,11 @@ if args[:2] == ["pr", "checks"]:
     if has("checks.seq"):
         e = json.loads(pop(p("checks.seq")))
         wr(p("checks.cur"), json.dumps(e))
+    # gh prints its first table before it waits for the next refresh, so a watch cut mid-sleep has written its rows.
+    sys.stdout.write(e.get("out", ""))
+    sys.stdout.flush()
     if e.get("sleep"):
         time.sleep(float(e["sleep"]))
-    sys.stdout.write(e.get("out", ""))
     sys.stderr.write(e.get("err", ""))
     sys.exit(int(e.get("rc", 0)))
 

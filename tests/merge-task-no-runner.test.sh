@@ -69,6 +69,7 @@ for name in optional-arm ci; do
   ok "$rc" 0 "3 ($name). a required check still pending beside the optional job: waited on, then merges"
   ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 2 "3 ($name). the watch went on after the cut"
   lacks "$out" "no-runner" "3 ($name). never set aside"
+  has "$out" "waiting on required checks: ci" "3 ($name). the cut names the required check still pending"
 done
 
 # 4. Not "no runner": a job a runner took, a job under the limit, and a job on a GitHub-hosted image queued past the
@@ -124,6 +125,33 @@ has "$err" "ERROR: required checks never appeared for PR #5 — no CI runs in fl
   "6. the never-appeared text, MERGE_TASK_INFRA's"
 has "$err" 'held only by jobs no runner took: job "self-hosted (arm)" queued' "6. names the held job"
 has "$err" "with no runner (run 7, job 8)" "6. names its run and job"
+
+# 7. A signal mid-wait names the wait it was in (ADR 0033 d4 as amended): the in-flight line lists each unfinished job on
+#    the head, a no-runner one marked, and the run's last line is `last wait: <that line>`, the reason the lead copies.
+#    No required check is reported on a BLOCKED PR and the absent read is sticky, so the run waits until TERM.
+for form in a b; do
+  fresh; pair; mkpr 5 "$I" BLOCKED
+  queued "$(job 10 build 3 "$OLD" ubuntu-latest in_progress)" "$(job 8 alpine null "$OLD" $SH)"
+  absent
+  : > "$MT_STATE/gh.log"
+  limit=$NEVER; [ "$form" = b ] && limit=900
+  MERGE_TASK_NO_RUNNER_LIMIT=$limit PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 5 "$I" "$B" > "$tmp/7.out" 2>&1 &
+  pid=$!
+  i=0; while [ "$i" -lt 300 ] && ! grep -q 'waiting on:' "$tmp/7.out" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  kill -TERM "$pid"; wait "$pid"; rc=$?
+  out=$(cat "$tmp/7.out"); last=$(tail -1 "$tmp/7.out")
+  ok "$rc" 143 "7$form. SIGTERM mid-wait exits 143"; ok "$(sent)" "failed:143" "7$form. failed:143"
+  has "$out" "CI in flight on head — waiting on: " "7$form. the in-flight line names what it waits on"
+  has "$out" "build (in_progress)" "7$form. … the live job"
+  case "$last" in
+    "  last wait: PR #5 — required checks not created yet; CI in flight on head — waiting on:"*) ok y y "7$form. the last line is the wait it was in" ;;
+    *) ok "$last" "  last wait: PR #5 — required checks not created yet; CI in flight on head — waiting on: …" "7$form. the last line is the wait it was in" ;;
+  esac
+  has "$last" "alpine" "7$form. … naming the job it waited on"
+  want="alpine (queued)"; [ "$form" = b ] && want="alpine (queued, no runner)"
+  has "$last" "$want" "7$form. the job reads $want"
+done
+lacks "$out" "held only by jobs no runner took" "7b. the live build keeps the run in flight"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task no-runner: ALL PASS" || echo "merge-task no-runner: SOME FAILED"
 exit "$fail"

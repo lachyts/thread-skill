@@ -5,7 +5,7 @@
 # writer of an answer, hand-back spends every live answer and takes `--answer <stamp>` as a compare-and-swap, and an
 # answered block is never retried.
 #   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H1-H12,
-#      H12 under an answer and a question; the null cases)
+#      H12 under an answer and a question; H10-same-infra, the same held stop twice running at Integration; the null cases)
 #   K  --max-review-rounds is an overlay humanFix ignores; the keys today's callers read are unchanged
 #   L  the label forms, and `ask 2` after a spent answer
 #   N  answerRecorded: the live forms, the dead keys, each re-entry stamp, ties and unparseable stamps
@@ -394,6 +394,19 @@ python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now "$NOW" >/
 lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)" 2026-10-03T09:10:00Z
 I=$(INOW=2026-10-03T09:10:00Z inp "$A")
 ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" 'same feedback as the block last re-entered|["hand back or defer",true,null]' "H10: the same fingerprint at Integration, no raise"
+# H10-same-infra (ADR 0033 d4 as amended): a held infra stop at Integration (here no-runner) that comes back the same
+# after its retry is Lachy's too: H10, its detail the same-stop why.
+scen h10-same-infra
+mkro; mkt "$B" open
+mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
+NR='no-runner: required job "alpine" queued 47 minutes with no runner (run 7, job 8)'
+lead "$A" integration "$NR"
+ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "H10 same infra: (the first retry, after its cool-down)"
+python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now 2026-10-03T08:20:00Z >/dev/null 2>&1
+lead "$A" integration "${NR/47 minutes/112 minutes}" 2026-10-03T08:30:00Z
+I=$(INOW=2026-10-03T09:30:00Z inp "$A")
+ok "$(hf "$I")" '["hand back or defer",true,null]' "H10: the same infra stop twice running at Integration, no raise"
+has "$(fix "$I" detail)" "same stop twice running at Integration: no-runner: required job" "H10 same infra: the detail names the stop"
 
 scen h11
 mkro; mkt "$B" open

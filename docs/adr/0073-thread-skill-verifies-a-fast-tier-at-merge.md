@@ -53,7 +53,9 @@ Reflection (d5), never a PR's.
 a stop on GitHub's side, read as one: one automatic re-run of the failed jobs, then an infra set-aside that
 the automatic retry takes with its cool-downs (ADR 0033, ADR 0069). It is never "a NON-check gate". The
 Companion needs no new authority: it still never hands back a block marked as his, and this one is no
-longer marked so.
+longer marked so. A timeout that comes back the same after a retry (four cancellations of one job in a row, each
+stop having re-run its failed jobs once) is Lachy's: a job too slow for its limit (d5's audit), not GitHub's load
+(ADR 0033 d4 as amended 2026-11-12).
 
 **d5. The suite and its CI are measured, and a breach files the audit.** Each merge's Run record holds each
 required job's time, its conclusion and its job's time limit (**CI headroom**). The Reflection reads two
@@ -88,7 +90,8 @@ Calls made in his place, each overturnable:
 - A slow-tier break can reach master and is found within one master run or at completion, then filed.
 - Thread Skill's own `CLAUDE.md` gains a `Verifier:` line naming the fast tier and a `Completion verifier:`
   line naming the full suite, so schedule stamps both (schedule steps 2.5 and 6).
-- A future timeout reaches Lachy only after the automatic retries are spent.
+- A future timeout reaches Lachy only after the automatic retries are spent, or once the same timeout comes back
+  after one.
 - The five hubs (`reconcile-rollout.py`, `lead-integrate.py`, `run_record.py`, `verify-slot.py`,
   `rollout-settings.py`) sit on `tests/fast-tier.map` HUB lines, not FULL (2026-11-11, the reach follow-up): a diff
   that reaches one runs the suites listed on its line, and the reach ends there. A suite that drives a hub only

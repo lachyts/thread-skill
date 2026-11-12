@@ -1501,7 +1501,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   auto-retry`, up to `auto_retries` times (default 2; an infra block after a
   short cool-down, while a quota block waits out a longer one free, ADR 0033);
   repair keeps the ones that need a human (a spent
-  budget, a repeated feedback fingerprint, a `## Needs you` question). _Avoid_:
+  budget, a repeated feedback fingerprint, the same Integration stop twice
+  running, a `## Needs you` question). _Avoid_:
   auto-block, soft block.
 - **Automatic descope** — a plan-block the notes already settle, dropped from
   the task without asking: the feedback centres on a part the note marks

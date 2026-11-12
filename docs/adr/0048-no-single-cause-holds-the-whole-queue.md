@@ -62,7 +62,8 @@ From September to 21 October about 150 to 185 hours of rollout time went to stal
   narrowed with the site that now holds less; `moving`'s WHOLE_HALT_PATTERNS is bound to the kept list by a contract
   test.
 - **The retry classes.** `prepare: origin unreachable three times` and `merge-task signalled twice` retry as `infra`;
-  `merge-task exit 8 three times` stays `agent`.
+  `merge-task exit 8 three times` stays `agent`. A `merge-task signalled twice` that repeats the stop last re-entered
+  is Lachy's (ADR 0033 d4, amended 2026-11-12).
 - **prepare's task-scoped set-aside.** A failure that threatens only the task (its anchor, its worktree, its anchor
   ref) routes `set-aside`, exit 0; the environment's stays exit 2, the Lane hold.
 - **The regenerate bound.** Under `halt: regenerate` the Approved-queue route runs one foreground turn with no life

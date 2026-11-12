@@ -2571,9 +2571,13 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          the stamp reads valid it falls through;
      17. an unresolvable budget: H9 or H10;
      18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
-     22. a quota block past its 5 free retries; 23. an agent or infra block past its budget; 24. an agent block whose
-         fingerprint equals `auto_retry_sha`: each H9 `raise <field>, hand back or defer` when _raise_field names the
-         source run's spent budget, else H10 `hand back or defer`, the detail its autoRetryWhy;
+     22. a quota block past its 5 free retries; 23. an infra block at Integration that repeats the stop last re-entered
+         (reconcile-rollout.py _same_stop: a kill, a GitHub-side exit 1 or a no-runner set-aside whose _stop_key equals
+         the `auto_retry_sha` run's, ADR 0033 d4 as amended 2026-11-12), `same stop twice running at Integration:
+         <its first line>`, then `; <its last real reason line>` when its run carries one; 24. an agent or infra
+         block past its budget; 25. an agent block whose fingerprint equals `auto_retry_sha`: each H9 `raise <field>,
+         hand back or defer` when _raise_field names the source run's spent budget, else H10 `hand back or defer`, the
+         detail its autoRetryWhy;
      and a quota block still cooling (QUOTA_COOLDOWN_MIN[quota_retries_used] from the later of the block's run stamp and
      `auto_retry_at`, setting `autoRetryAfter`) or an infra block still cooling (INFRA_COOLDOWN_MIN[auto_retries_used],
      the last repeating; no stamp fails closed; a stop on GitHub's side among them, reconcile-rollout.py _retry_class,
@@ -2760,6 +2764,11 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         if refused:
             return refused
     else:
+        # Cause 23 (ADR 0033 d4 as amended 2026-11-12): a held infra stop at Integration that repeats the stop last
+        # re-entered spends no more retries, before the budget, so the why names the cause.
+        if at == "integration" and cls == "infra" and rr._same_stop(note):
+            carried = _carried_line(note.latest_run_text(rr.BLOCKED_SECTIONS["blocked"]))
+            return spent(f"same stop twice running at Integration: {first}" + (f"; {carried}" if carried else ""))
         if used >= n:
             return spent(f"budget: {used}/{n} used")
         if cls == "agent" and out["fingerprint"] == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
@@ -2802,6 +2811,38 @@ def cmd_plan(args):
     return {"slug": path.stem, "plan": rr.approved_plan(note)}
 
 
+def _carried_line(text):
+    """A diagnosis's second line when it is a carried last real reason (rr.LAST_REAL_REASON_MARK), else ''."""
+    lines = (text or "").split("\n")
+    second = lines[1].strip() if len(lines) > 1 else ""
+    return second if second.startswith(rr.LAST_REAL_REASON_MARK) else ""
+
+
+def _carried_reason(note):
+    """The line a kill that names no wait carries (rr._kill_without_wait, ADR 0033 d4 as amended 2026-11-12): being
+    killed mid-wait is no cause, so the diagnosis keeps the last real one, the block the task was last re-entered from
+    (by the automatic retry or Lachy's hand-back). Only the `## Blocker diagnosis` top run, and only when it is an
+    `integration:` run whose sha is the note's `auto_retry_sha`: an own-run block on top, a sha in another section or
+    none carries nothing. A top run that is itself a kill without a wait re-carries its own carried line verbatim (its
+    run number and stamp kept, so a chain of kills writes no new run), or nothing. Otherwise `last real reason (Blocker
+    diagnosis run <n>, <its stamp>): <its first line, integration: stripped>`."""
+    heading = rr.BLOCKED_SECTIONS["blocked"]
+    runs = note.run_blocks(heading)
+    sha = rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY))
+    if not runs or not sha:
+        return ""
+    top = rr._top_run(runs)
+    first = top["content"].split("\n", 1)[0].strip()
+    if top["sha"] != sha or not first.lower().startswith(INTEGRATION_PREFIX):
+        return ""
+    if rr._kill_without_wait(first):
+        return _carried_line(top["content"])
+    m = rr.RUN_HEAD_RE.match(note._section_bounds(heading)[0][top["head"]])
+    stamp = m.group(2) if m else "?"
+    body = re.sub(r"^integration:\s*", "", first, flags=re.I)
+    return f"{rr.LAST_REAL_REASON_MARK}Blocker diagnosis run {top['n']}, {stamp}): {body}"
+
+
 def cmd_set_aside(args):
     path, note = _load_note(args.note)
     reason = sys.stdin.read().rstrip("\r\n")
@@ -2810,6 +2851,13 @@ def cmd_set_aside(args):
     inp = task_inputs(path, note)
     if args.kind == "integration":
         diag = integration_marker("set-aside", reason, inp["history"])
+        # A kill that names no wait carries the last real reason as the diagnosis's SECOND line, so every first-line
+        # reader (the retry class, the record's reasonClass, causes 13-15, integration_block, the engine's
+        # parseIntegrationMarker) reads only the kill, and the history parser skips it (no `Round`, no `- `).
+        carried = _carried_reason(note) if rr._kill_without_wait(reason) else ""
+        if carried:
+            head, sep, tail = diag.partition("\n")
+            diag = head + "\n" + carried + sep + tail
     elif args.kind == "revise-stopped":
         diag = integration_marker("revise-stopped", reason, inp["history"])
     else:
