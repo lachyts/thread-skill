@@ -216,7 +216,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   process observation in no METHOD.md) it recommends `close`, which creates
   them. A rollout note written and
   waiting with no lead gets its **execute handoff** first, before the move
-  (ADR 0072).
+  (ADR 0072). A task the work waits on that nothing builds gets its start too,
+  a one-task `/thread:schedule`, decided and never asked (ADR 0082).
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules parallel-shaped

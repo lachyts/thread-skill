@@ -14,7 +14,8 @@
 //     when step 5 launched one first (ADR 0072), whose archive part then says "Nothing else is written."; every
 //     close line, part or option says what close writes; in wording Lachy reads, **session** is this chat and
 //     **thread** the durable work its THREAD.md records (CONTEXT.md's **Thread** entry records that convention);
-//   - step 5 writes nothing for it apart from **A launch first.**, and only Lachy archives a session;
+//   - step 5 writes nothing for it apart from **A launch first.** and **A start, after the launches.**, and only Lachy
+//     archives a session;
 //   - § Don't bans the bare "Leave it" / "Keep thread" labels;
 //   - since 2026-11-09's custard doof stick session, whose handoff would have lost its process record to an archive,
 //     an unwritten record (no THREAD.md for a conversation of thread shape, or a process observation in no METHOD.md)
@@ -190,7 +191,7 @@ function nextFails(text) {
 
   // P7 — the step-5 dispatch paragraph alone: the compact clause's own "end the turn" cannot satisfy it.
   needLine(fails, 'P7 step-5 dispatch paragraph', lineOf(s5, DISPATCHED), [
-    'Apart from **A launch first.**, write nothing', 'run no sibling', 'stays active', 'end the turn', '`next` never archives',
+    'Apart from **A launch first.** and **A start, after the launches.**, which run before it and are no part of this move, write nothing', 'run no sibling', 'stays active', 'end the turn', '`next` never archives',
   ])
 
   // P8 — § Don't: the banned labels, and the moves that drop while another session holds the thread.
@@ -347,8 +348,9 @@ test('control R2: a lead that keeps "exactly two parts" with no launch sentence 
 })
 
 test('control S: a dispatch paragraph that writes nothing even after a launch first fails', () => {
-  const bad = mutateLine(next, DISPATCHED, 'Apart from **A launch first.**, write nothing', 'Write nothing')
-  assert.deepEqual(nextFails(bad), ['P7 step-5 dispatch paragraph: Apart from **A launch first.**, write nothing'])
+  const PHRASE = 'Apart from **A launch first.** and **A start, after the launches.**, which run before it and are no part of this move, write nothing'
+  const bad = mutateLine(next, DISPATCHED, PHRASE, 'Write nothing')
+  assert.deepEqual(nextFails(bad), [`P7 step-5 dispatch paragraph: ${PHRASE}`])
 })
 
 test('control C: a close part that drops "(it stays active)" fails the line', () => {

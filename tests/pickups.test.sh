@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# The pickup sweep and the unstarted read (ADR 0057; schedule § 1.2, close step 2): the two read-only verbs of
-# skills/_shared/scripts/unfinished-rollout.py.
+# The pickup sweep, the unstarted read and the awaited read (ADR 0057, ADR 0082; schedule § 1.2, close step 2): three
+# read-only verbs of skills/_shared/scripts/unfinished-rollout.py.
 #   P1-P10  `pickups --repo <path> --tasks <slugs> [--misfit <slug>=<why>]...`: the pool, its order, the Repo rule
 #           (counted aggregate only), the gate rule, misfits, the needed set and the extras' dependency closures under
 #           the cap of 5, the umbrella project, and its exit 2s, read-only and byte-equal on a rerun
 #   N1-N12  `unstarted --rollout <slug> [--handoffs <dir>]...`: closed, serial, started (approved_unrun, or a Run record
 #           lead-entry), stamped, incomplete, launched (a handoff doc's `launches:`) or unstarted with its Project root
 #           (N12: close step 2's **Stale launch.** read of a launch doc's own `launches:`, with the peer guard)
+#   A1-A8   `awaited [--rollout <slug>]... [--task <slug>]...` (ADR 0082; close step 2's **Tasks a wait names.**): a
+#           paused rollout's Pause log waits and its unlanded tasks' dependencies, its own queue left out; each
+#           line's kind, a note schedule step 1 never takes held (archived, not a task, a decisions task); a fold
+#           tombstone named once by its unit; its exit 2s; read-only; a task deferred out of the rollout (his decline)
+#           and the engine's own sign-off line never read as a wait (A6); a dependency on the rollout's own folded
+#           unit is its own queue (A7); a Pause log's held wait read back, a later plain wait lifting it (A8)
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them), a stub HOME and the Run
 # record in temp. No vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -382,6 +388,97 @@ ok "$(f="$HS/ro-ss-fresh.md" bash "$S.guard")" "keep fresh" "N12: … and a fres
 before_v=$(snap "$S/vault")
 un --rollout ro-fresh --handoffs "$HD"
 ok "$(snap "$S/vault")" "$before_v" "N: unstarted writes nothing"
+
+# ── A1-A8: awaited ──────────────────────────────────────────────────────────────────────────────────────────
+# aw [args...] -> $out, $err, $rc
+aw() { HOME="$H" python3 "$CHECK" awaited --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+scen a
+BODY=$'## Pause log\n\n- 2026-11-07T10:00+11:00 paused until [[fix-merge]] lands; [[own]] waits on it; see [[ro-p]]' \
+  mkro ro-p 'paused: 2026-11-07T10:00+11:00'
+mkt own - 'rollout: "[[ro-p]]"' 'depends-on: ["[[dep-blocked]]", "[[dep-ip]]", "[[own2]]", "[[dep-done]]"]'
+mkt own2 - 'rollout: "[[ro-p]]"'
+ST=done mkt own-done - 'rollout: "[[ro-p]]"' 'depends-on: ["[[dep-late]]"]'
+PROJ='"[[Thread Skill]]", "[[AI]]"' mkt fix-merge -
+ST=blocked mkt dep-blocked -; ST=in-progress mkt dep-ip -; ST=done mkt dep-done -; mkt dep-late -
+aw --rollout ro-p
+ok "$out|$rc" "unstarted fix-merge (Thread Skill, AI)
+held dep-blocked (status: blocked)
+building dep-ip (status: in_progress)
+landed dep-done (done)|0" \
+  "A1: a paused rollout's Pause log wait and its unlanded tasks' dependencies, its own queue and a landed task's left out"
+ok "$err" "" "A1: nothing on stderr"
+aw --rollout '[[ro-p]]' --task fix-merge
+ok "$(printf '%s\n' "$out" | head -1)" "unstarted fix-merge (Thread Skill, AI)" "A2: --task first, and a task named twice prints once"
+ok "$(printf '%s\n' "$out" | grep -c fix-merge)" 1 "A2: … once"
+
+mkro ro-live; mkt sch - 'rollout: "[[ro-live]]"'; mkt sch-p - 'rollout: "[[ro-p]]"'
+mkt held - 'hold_until: {pr: o/r#3, merged: true}'; mkt held-bad - 'hold_until: {pr: , merged: true}'
+ST=review mkt rev -; ST=merged mkt tomb - 'merged_into: "[[fix-merge]]"'
+mkt in-arch -; mkdir -p "$T/Archive"; mv "$T/in-arch.md" "$T/Archive/"
+TAGS=phase mkt ph -; TAGS='task, decisions' mkt dec -
+aw --task sch --task sch-p --task held --task held-bad --task rev --task ghost --task ro-live --task in-arch --task ph \
+  --task dec
+ok "$out" "scheduled sch [[ro-live]]
+scheduled sch-p [[ro-p]] (paused)
+held held (hold_until: o/r#3)
+held held-bad (hold_until unreadable: no pr)
+held rev (status: review)
+missing ghost
+rollout ro-live
+held in-arch (archived)
+held ph (not a task)
+held dec (a decisions task)" "A3: each line's kind, in the order named; a note schedule step 1 never takes is held, never unstarted"
+aw --task tomb --task fix-merge
+ok "$out" "unstarted fix-merge (Thread Skill, AI)" "A4: a fold tombstone is named by its unit, once"
+
+aw
+ok "$rc|$out" "2|" "A5: neither --rollout nor --task exits 2"
+has "$err" "awaited needs --rollout or --task" "A5: … with its line"
+aw --rollout ro-ghost
+ok "$rc|$out" "2|" "A5: a --rollout with no note exits 2"
+before_v=$(snap "$S/vault")
+aw --rollout ro-p --task held
+ok "$(snap "$S/vault")" "$before_v" "A5: awaited writes nothing"
+
+# A6: a sign-off pause whose gate task Lachy declined: repair § 5 deferred it (`rollout:` cleared, `open`), and
+# the rollout's `## Notes` records it. Neither the engine's own `awaiting sign-off: [[gate-a]]` line, nor a wait line
+# naming a task deferred out of the queue (an alias on its Notes line), nor a dependency on it reads as a wait; a link
+# no wait phrase introduces is none either.
+BODY=$'- 2026-11-08 repair: [[gate-a]] deferred: Lachy declined its gate\n- 2026-11-08 repair: [[fix-own|the fix]] deferred: not now\n\n## Pause log\n\n- 2026-11-06T09:00+00:00 hard pause: runs wf_1 [[side]]; lane none; paused until [[fix-own]] lands\n- 2026-11-07T10:00+00:00 awaiting sign-off: [[gate-a]] (gate-pending), [[gate-c]] (gate-pending): sign off, then /thread:execute [[ro-s]]' \
+  mkro ro-s 'paused: 2026-11-07T10:00+00:00' 'paused_for: sign-off'
+mkt gate-a -; mkt fix-own -; mkt side -
+ST=gate-pending mkt gate-c - 'rollout: "[[ro-s]]"'
+mkt t-s - 'rollout: "[[ro-s]]"' 'depends-on: ["[[gate-a]]"]'
+aw --rollout ro-s
+ok "$out|$rc" "|0" "A6: a task deferred out of a sign-off pause, and a link no wait phrase introduces, never read as a wait"
+aw --task gate-a --task fix-own
+ok "$out" "unstarted gate-a (Demo)
+unstarted fix-own (Demo)" "A6: … though each reads unstarted when named by --task"
+
+# A7: a task of the rollout depends on a member schedule step 4.5 folded into the rollout's own unit; the tombstone
+# carries no `rollout:`, so only its unit is the rollout's. A Pause log wait naming the member is its own queue too.
+BODY=$'## Pause log\n\n- 2026-11-07T10:00+00:00 paused until [[mem]] lands' mkro ro-u 'paused: 2026-11-07T10:00+00:00'
+mkt unit-u - 'rollout: "[[ro-u]]"'; ST=merged mkt mem - 'merged_into: "[[unit-u]]"'
+mkt t-u - 'rollout: "[[ro-u]]"' 'depends-on: ["[[mem]]"]'
+aw --rollout ro-u
+ok "$out|$rc" "|0" "A7: a dependency on a folded member of the rollout's own unit is its own queue, never a wait"
+aw --task mem
+ok "$out" "scheduled unit-u [[ro-u]] (paused)" "A7: … though the member folds to that unit when named by --task"
+
+# A8: a held wait in the Pause log (close sub-step 7.11's `waits on [[x]] (held: not yet)`) holds a task that would
+# read unstarted, whoever reads the rollout; the latest wait line naming the task decides, so a later plain one lifts
+# it; a held wait never hides a task something builds.
+BODY=$'## Pause log\n\n- 2026-11-07T10:00+00:00 paused until [[w-held]] and [[w-lift]] land, once [[w-sch]] lands\n- 2026-11-08T09:00+00:00 waits on [[w-held]] (held: not yet), [[w-lift]] (held: not yet)\n- 2026-11-08T09:05+00:00 waits on [[w-sch]] (held: not yet)\n- 2026-11-09T09:00+00:00 waits on [[w-lift]]' \
+  mkro ro-h 'paused: 2026-11-07T10:00+00:00'
+mkt w-held -; mkt w-lift -; mkt w-sch - 'rollout: "[[ro-live]]"'
+aw --rollout ro-h
+ok "$out" "held w-held (not yet)
+unstarted w-lift (Demo)
+scheduled w-sch [[ro-live]]" "A8: a Pause log's held wait holds, a later plain wait lifts it, and something building it wins"
+aw --task w-held --rollout ro-h
+ok "$(printf '%s\n' "$out" | head -1)" "held w-held (not yet)" "A8: … held when --task names it first"
+aw --task w-held
+ok "$out" "unstarted w-held (Demo)" "A8: … and only a --rollout's Pause log holds it"
 
 [ "$fail" = 0 ] && echo "pickups: ALL PASS" || echo "pickups: SOME FAILED"
 exit "$fail"

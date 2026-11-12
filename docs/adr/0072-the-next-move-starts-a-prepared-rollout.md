@@ -3,7 +3,8 @@
 Date: 2026-11-06
 Status: accepted. Written for the vault task `thread-skill-p40-2-next-starts-a-prepared-handoff-itself` (Phase 40 ·
 Task 2, "the next move starts by itself"); its plan was judged over two rounds before the build. Amends ADR 0057 d5
-and its "the close row offers only hand it off" item: the row survives, for a held note only.
+and its "the close row offers only hand it off" item: the row survives, for a held note only. Extended by ADR 0082
+from a waiting rollout note to a waiting task: a task a wait names that nothing builds starts the same way.
 
 ## Context
 
