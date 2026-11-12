@@ -2,8 +2,12 @@
 
 Date: 2026-11-12
 Status: accepted, not built (grilled with Lachy 2026-11-12, the "rollouts resolve themselves" grill; builds in
-Phase 47). Amends ADR 0025's by-hand lift of a protection rule, for a rule that cannot be met; extends ADR 0069 as
-amended 2026-11-11 (the `no-runner` set-aside), ADR 0075 and ADR 0078.
+Phase 47). Amends ADR 0025's by-hand lift of a protection rule, for a rule that cannot be met, and reopens on his
+word the no-bypass ADR 0025 kept because agents act as him; extends ADR 0069 as amended 2026-11-11 (the `no-runner`
+set-aside), ADR 0075 and ADR 0078.
+
+*(Amended 2026-11-12 by thread-skill-p46-8: findings 5, 8, 10 and 11 of review round 45adf20/cdf93d are settled in
+decisions 4 to 6, the Consequences and the Decided list, each marked "review #N".)*
 
 ## Context
 
@@ -14,8 +18,10 @@ about 20 hours on a required check assigned to a self-hosted runner that no long
 check from the branch's protection rule could free them.
 
 Two rules already bear on this. ADR 0025: a protected default branch moves only by a green pull request, and its
-protection is lifted by hand, deliberately, and then restored. ADR 0069 as amended: a required job queued with no
-runner is set aside at once as `no-runner`, retried as infrastructure, and then handed to a person.
+protection is lifted by hand, deliberately, and then restored. It grants no bypass, the owner included, because
+rollout agents act with Lachy's own GitHub identity: a bypass granted to him is granted to every agent he launches.
+ADR 0069 as amended: a required job queued with no runner is set aside at once as `no-runner`, retried as
+infrastructure, and then handed to a person.
 
 Asked whether the system may change a repo's merge settings on its own, he was offered *dead checks only*, *never
 mid-run* and *any merge setting*, and picked the widest: **any merge setting**.
@@ -36,18 +42,38 @@ hours in total; rollouts resume on wake), and what he meets on return is the one
    fix.
 3. **It makes the smallest change that frees the block,** and repairs before it removes: a renamed job's context is
    replaced with its new name, never dropped.
-4. **One owner makes the change.** The lead's own verb changes the setting; `/thread:repair` and the Companion ask
-   through it, so two changes never cross.
+4. **One script makes the change, under a lock, and its guard is technical, never prose.** The change lives in one
+   script. The lead, `/thread:repair` and the Companion each run it, so a stuck rollout with no live lead is still
+   freed, and the script's lock keeps two changes from crossing (review #11). This reopens ADR 0025's no bypass on
+   his word ("any merge setting"), and the guard is code (review #8): no agent prompt names a call that writes the
+   rulesets or the branch-protection settings (read-only calls, like schedule § 2.5's merge gate, stay), a contract
+   test pins that, and the script refuses unless the Run record already names the block it frees. No separate token
+   is minted for it.
 5. **Every change is logged with its undo:** one Run record line and one "changed for you" row on his needs-you
    list, each with the setting before, the setting after and the one command that restores it. Nothing asks him
-   first. The row stays open until the setting is restored or he dismisses it: a setting is never restored on a
-   guess, and never forgotten.
+   first. The row is written on the task note whose block the change freed, which outlives its rollout, so the
+   needs-you list reads it there after the rollout is archived too (review #10). The row stays open until the
+   setting is restored or he dismisses it. A dismissal is his decision to keep the change, and the Run record keeps
+   its line (review #5). A setting is never restored on a guess.
 6. **A repo check before the first Slot looks for these** (Phase 51's repo check), so a change mid-run is the
-   exception.
+   exception. At each rollout's start it also lists every setting changed under this ADR and not yet restored, a
+   dismissed row's among them, so none is forgotten (review #5).
 
 Considered: *dead checks only, with proof the check cannot run* (recommended to him, not picked: it leaves other
 rules that cannot be met waiting for him); *never mid-run, a repo check before the rollout only* (a runner that
-dies overnight still waits for him).
+dies overnight still waits for him); *only the lead changes a setting* (this ADR's first text: a stuck rollout often
+has no live lead, review #11); *a separate token for the script* (it would still be his to mint and hold, and the
+guard would move from code the tests read to a secret they cannot, review #8).
+
+## Consequences
+
+- **The residual risk** (review #8): the script runs as Lachy, so an agent that called the GitHub API by hand, as
+  him, could still change a protection rule. The guard narrows the way to one script and keeps every call that
+  writes those settings out of the agent prompts, where a contract test can see it; it does not close it, and
+  nothing short of a separate identity would.
+- A changed setting is never lost: a restored one closes its row; a dismissed one is kept by his decision and stays
+  in the Run record; every setting not yet restored, a dismissed one's included, stays listed by the repo check at
+  each rollout's start (decisions 5 and 6).
 
 ## Decided for him (overturnable)
 
@@ -59,3 +85,11 @@ dies overnight still waits for him).
   anything in the code itself (technical: none of these is a merge setting, and none has a one-line undo).
 - The record → the Run record and the needs-you list, never a notification (priorities: ADR 0075, rollouts never
   notify him).
+- Who changes a setting → one script with a lock, run by the lead, `/thread:repair` or the Companion (technical,
+  review #11: a stuck rollout often has no live lead).
+- The guard → the one script, no agent prompt naming a call that writes the rulesets or branch-protection settings
+  (read-only calls, like schedule § 2.5's merge gate, stay), a contract test, and a refusal unless the Run record
+  names the block; no separate token (technical, review #8).
+- A dismissed row → his decision to keep the change, its Run record line kept, and listed by the repo check at
+  each rollout's start until restored (technical, review #5).
+- Where the row lives → the task note whose block it freed, so it outlives the rollout (technical, review #10).

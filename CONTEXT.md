@@ -841,7 +841,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
 - **Parallel ceiling** — the most Slots a Queue holds at once, set per
-  rollout. Not the retired model-tier **Ceiling** (see **Top rung**).
+  rollout. Not the retired model-tier **Ceiling** (see **Top rung**), nor a
+  role's **Fable ceiling** (see **Fable share**).
   _Avoid_: bare "ceiling", concurrency, max agents.
 - **Capacity** — the most Rollout tasks, Leg task claims and full suites that
   run across the whole Mac at once, rising and falling on its own with heat,
@@ -1471,7 +1472,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. Two rows sit on the same list
   for him to read, never to decide before work moves: a "changed for you"
-  row (ADR 0080) and an open **Felt check** (ADR 0081). The lead lists it in the
+  row (ADR 0080) and an open **Felt check** (ADR 0081). Each is written on a
+  task note (a Felt check on its own task, a "changed for you" row on the
+  task whose block it freed), so such a row may outlive the rollout, and the
+  list reads it there after the rollout is archived too. The lead lists it in the
   report's `Needs you:` block and in the rollout note, for a sitting Lachy
   chooses, and never pushes it (ADR 0075 d2): no rollout notifies him. Every
   open needs-you item across all rollouts is also gathered into one list he
@@ -1616,12 +1620,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Unreachable surface** — code that no check in its rollout's verifier
   exercises: Codex computer use, device-only code. A task on one takes a
-  doubled final review and lands with a **Felt check** open (ADR 0081).
+  doubled master review and lands with a **Felt check** open (ADR 0081).
   _Avoid_: untestable (some of it is testable by hand), risky code.
 - **Felt check** — Lachy's own try of landed work on an **Unreachable
-  surface**, at a sitting he chooses: one row on his needs-you list, which
-  his check closes. It never holds a merge, and it is not **Proven**, which
-  is about a fix (ADR 0081). _Avoid_: sign-off (that is a gate), QA.
+  surface**, at a sitting he chooses: one row on his needs-you list, written
+  on the task's note, which his check closes. It never holds a merge. A task
+  that fixes nothing is done once live; a fix stays a **Carried fix** until
+  his Felt check, the evidence that proves it, makes it **Proven** (ADR 0078,
+  ADR 0081). _Avoid_: sign-off (that is a gate), QA.
 
 ## Run record and tuning
 
@@ -1798,23 +1804,37 @@ through time, from attention to merged PRs. Terms only — no implementation.
   models or efforts is an edit to it, never a release (ADR 0029). _Avoid_:
   matrix, tier list, config (alone).
 - **Rung** — one step of the Ladder: a model plus the efforts its roles run
-  at. A task is on one rung at any moment, and its judges run on it too
-  (ADR 0029). A rung may name a plan model, and a **Role** its own, in
-  place of the rung's (ADR 0079). _Avoid_: tier, model level, grade, model
-  (alone).
+  at. A task is on one rung at any moment, and its judges run on it too, but
+  for the plan judge, which rides with the plan model, and a drawn master
+  review, which runs on its arm's model (ADR 0029, ADR 0079). A rung may name
+  a plan model, and a **Role** its own, in place of the rung's; on a rung
+  where every role is Fable, the rung's model wins for every role (ADR 0079).
+  _Avoid_: tier, model level, grade, model (alone).
 - **Role** — one kind of work a model does for a task or a rollout:
-  planning, plan judging, building, the final review, investigating a block,
-  leading (ADR 0079). _Avoid_: stage (a stage is when; a role is who), agent.
+  planning, plan judging, building, the master review, investigating (the
+  agent of a `scope: read-only` task), leading. Four are drawn into **Arms**:
+  the master review (every round), the builder of a hard task, the
+  investigator and the lead (ADR 0079). _Avoid_: stage (a stage is when; a
+  role is who), agent, final review (the engine's name is master review).
 - **Arm** — one of the two models a Role runs on while it is being measured.
   A task falls in one arm for a role by a draw fixed by its name, never by
-  how hard the work looks, and the arm drawn is stamped on its note
-  (ADR 0079). Not the canary's `arm`, a verb (see **Window**). _Avoid_:
+  how hard the work looks, and the arm drawn is stamped on its note. A role
+  in its Fable arm has no stronger pass to climb to: its climbs are recorded
+  as no-ops (ADR 0079). Not the canary's `arm`, a verb (see **Window**). _Avoid_:
   tier, variant, last resort, fallback.
-- **Fable share** — the part of a Login's work drawn into Fable Arms, paced
-  so its Fable allowance and its general allowance run down together
-  (ADR 0079). _Avoid_: reserve, cap, quota (alone).
+- **Fable share** — the live part of a Login's work drawn into Fable Arms,
+  which pacing moves so its Fable allowance and its general allowance run
+  down together, never above the role's **Fable ceiling**: the most of a
+  drawn role's work its Fable arm may take, a rollout setting, one per drawn
+  role, and the only part a Tuning changes. Not the **Parallel ceiling** or
+  the retired **Ceiling**. Plans, the Fable rung and an
+  **Unreachable surface**'s first reviewer take Fable first; the arms get
+  what is left (ADR 0079). _Avoid_: reserve, cap, quota (alone), bare
+  "ceiling".
 - **Top rung** — the Ladder's last rung, the ceiling for every task and every
-  Integration (ADR 0029). _Avoid_: top tier, ceiling, max tier, default model.
+  Integration (ADR 0029). Integration never runs on an all-Fable rung: it
+  runs on the highest rung below it (ADR 0079). _Avoid_: top tier, ceiling,
+  max tier, default model.
 - **Starting rung** — the planning-time choice to start a hard task above the
   bottom rung, from its shape alone (ADR 0029). _Avoid_: escalation (that's
   run-time), upgrade, effort override.
