@@ -247,7 +247,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !st3.includes("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason") ||
     !st3.includes("`rung` is the task's own rung record, the accepted row's (`startRung`, `rung`, `climbs`), else the note's `rung` record") ||
     !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
-    !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
+    !st3.includes("never the ladder's top rung: Integration runs on the Integration rung (the top rung, or the highest rung below an all-Fable one, ADR 0079) whatever the record says") ||
     !st3.includes('`unlisted`, the commits in `taskBase..mainSha` that name no PR,') || !st3.includes('pass none of them to the integrate call') ||
     /tierCapped|tier_capped|escalated/.test(st3)) {
     fails.push('integrate-args')

@@ -15,6 +15,11 @@ in a rollout is the operator's ladder file (task p46-7), written once Phase 46 h
 decisions and the Decided list, each marked "review #N", and the lock's edit later the same day outdated the
 Status, decision 5 and the wording section, which now say what holds.)*
 
+*(Amended 2026-11-13 by thread-skill-p46-1: decisions 1, 2 and 10 are built. A rung may name `plan`, a ladder's
+`[role]` table gives `master-review`, `builder` or `investigator` its own model (decision 4's rule on an all-Fable
+rung included), and Integration runs on the highest rung that is not all-Fable (`ladder.py`, the engine's `runOn` and
+`integrationRungOf`). Decision 3's draw, its arms and their stamps are p46-2's.)*
+
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.

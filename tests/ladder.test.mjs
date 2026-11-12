@@ -86,14 +86,19 @@ const raw = (text) => ({ raw: text })
 
 // One comment line, then each rung as a [[rung]] table, a blank line between rungs. With that one-line head:
 // rung 1's header is line 2 and its keys lines 3-7 (name, model, effort, judge, review in R's order);
-// rung 2's header is line 9 and its keys lines 10-14; rung 3's header is line 16.
-function render(rungs, head = ['# the ladder, bottom first']) {
+// rung 2's header is line 9 and its keys lines 10-14; rung 3's header is line 16. A rung that also names `plan`
+// writes it on the line after its review. `roles` (ADR 0079 decision 3), when given, follows the last rung as a
+// blank line, then a `[role]` table, then its keys in order: after two five-key rungs, `[role]` is line 16 and its
+// first key line 17.
+function render(rungs, head = ['# the ladder, bottom first'], roles) {
   const lines = [...head]
+  const kv = ([k, v]) => `${k} = ${typeof v === 'string' ? JSON.stringify(v) : v.raw}`
   rungs.forEach((r, i) => {
     if (i) lines.push('')
     lines.push('[[rung]]')
-    for (const [k, v] of Object.entries(r)) lines.push(`${k} = ${typeof v === 'string' ? JSON.stringify(v) : v.raw}`)
+    for (const e of Object.entries(r)) lines.push(kv(e))
   })
+  if (roles) lines.push('', '[role]', ...Object.entries(roles).map(kv))
   return lines.join('\n') + '\n'
 }
 
@@ -491,4 +496,112 @@ test('L10 an extra argument is a one-line usage error, exit 2', (t) => {
   assert.equal(r.status, 2)
   assert.equal(r.stdout, '')
   assert.match(r.stderr, /^ladder: .+\n$/)
+})
+
+// ---- L11: a rung's plan model and the ladder's role models (ADR 0079 decisions 1 to 3 and 10) -----------------
+
+const ROLES = ['master-review', 'builder', 'investigator']
+const BUILT_IN_BYTES = '{"source": "built-in", "rungs": [' +
+  '{"name": "opus-high", "model": "opus", "effort": "high", "judge": "high", "review": "xhigh"}, ' +
+  '{"name": "opus-xhigh", "model": "opus", "effort": "xhigh", "judge": "high", "review": "xhigh"}]}\n'
+const P = (rung, plan) => ({ ...rung, plan })
+// The plan-model ladder: two Opus rungs that plan on Fable, then an all-Fable rung.
+const P3 = [P(R('opus-high'), 'fable'), P(R('opus-xhigh', 'opus', 'xhigh'), 'fable'), R('fable-high', 'fable', 'high', 'high', 'high')]
+
+test('L11 (a) no file prints the built-in ladder byte for byte, and a five-key file prints no plan and no roles', (t) => {
+  const r = run(tmpHome(t))
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stdout, BUILT_IN_BYTES, 'the exact bytes, not only the same object')
+  const home = tmpHome(t)
+  writeLadder(home, render(TWO))
+  const ladder = loads(home)
+  assert.deepEqual(Object.keys(ladder), ['source', 'rungs'])
+  for (const rung of ladder.rungs) assert.deepEqual(Object.keys(rung), FIELDS)
+})
+
+test('L11 (b) a rung names its plan model: it comes out only on the rungs that name it, after review', (t) => {
+  const home = tmpHome(t)
+  writeLadder(home, render(P3))
+  const ladder = loads(home)
+  assert.deepEqual(ladder.rungs, P3)
+  assert.deepEqual(Object.keys(ladder.rungs[0]), [...FIELDS, 'plan'])
+  assert.deepEqual(Object.keys(ladder.rungs[1]), [...FIELDS, 'plan'])
+  assert.deepEqual(Object.keys(ladder.rungs[2]), FIELDS, 'the all-Fable rung names no plan model')
+  assert.deepEqual(Object.keys(ladder), ['source', 'rungs'])
+  const written = tmpHome(t)
+  writeLadder(written, render([{ plan: 'fable', review: 'xhigh', judge: 'high', effort: 'high', model: 'opus', name: 'opus-high' }]))
+  assert.deepEqual(Object.keys(loads(written).rungs[0]), [...FIELDS, 'plan'], 'whatever order it was written in')
+})
+
+test('L11 (c) a [role] table loads as roles, in ROLES order, after the rungs', (t) => {
+  const home = tmpHome(t)
+  writeLadder(home, render(TWO, undefined, { investigator: 'fable', 'master-review': 'fable', builder: 'opus' }))
+  const ladder = loads(home)
+  assert.deepEqual(Object.keys(ladder), ['source', 'rungs', 'roles'])
+  assert.deepEqual(ladder.roles, { 'master-review': 'fable', builder: 'opus', investigator: 'fable' })
+  assert.deepEqual(Object.keys(ladder.roles), ROLES)
+  assert.deepEqual(ladder.rungs, TWO)
+  const empty = tmpHome(t)
+  writeLadder(empty, render(TWO, undefined, {}))
+  assert.deepEqual(Object.keys(loads(empty)), ['source', 'rungs'], 'an empty [role] names no role')
+  const inl = tmpHome(t)
+  writeLadder(inl, render(TWO, ['# the ladder', 'role = { builder = "fable" }']))
+  assert.deepEqual(loads(inl).roles, { builder: 'fable' }, 'the inline form, before the first rung')
+  const dotted = tmpHome(t)
+  writeLadder(dotted, render(TWO, ['role.investigator = "fable"', 'role.builder = "opus"']))
+  assert.deepEqual(loads(dotted).roles, { builder: 'opus', investigator: 'fable' }, 'the dotted-key form, before the first rung')
+})
+
+// [label, file content, line, reason]. With render's one-line head, TWO's keys end at line 14, [role] is line 16.
+const ROLE_INVALID = [
+  ['an unknown role "lead" lists the known ones', render(TWO, undefined, { lead: 'fable' }), 17,
+    /unknown role "lead" \(known: master-review, builder, investigator\)/],
+  ['an unknown role "reviewer" at its own line', render(TWO, undefined, { builder: 'fable', reviewer: 'fable' }), 18, /unknown role "reviewer"/],
+  ['an unknown role is reported ahead of an earlier bad value', render(TWO, undefined, { builder: raw('3'), lead: 'fable' }), 18, /unknown role "lead"/],
+  ['a role value that is no model', render(TWO, undefined, { 'master-review': 'gpt-5' }), 17,
+    /role master-review: unknown model "gpt-5": a model is a tier alias, never a version \(known: opus, fable\)/],
+  ['a role value that is not a string', render(TWO, undefined, { builder: raw('3') }), 17, /role builder must be a string, not an integer/],
+  ['a plan model that is no model', render([TWO[0], P(TWO[1], 'haiku')]), 15, /rung 2 \("opus-xhigh"\): unknown plan model "haiku".*known: opus, fable/],
+  ['a plan model that is not a string', render([P(TWO[0], raw('1')), TWO[1]]), 8, /rung 1 \("opus-high"\): plan must be a string, not an integer/],
+  ['[[role]] is not a table', render(TWO) + '\n[[role]]\nbuilder = "fable"\n', 16, /role must be a table: write \[role\]/],
+  ['a [roles] typo is an unknown top-level key', render(TWO) + '\n[roles]\nbuilder = "fable"\n', 16, /unknown top-level key "roles"/],
+  ['a [role.builder] table is not a string, at its header', render(TWO) + '\n[role.builder]\nx = 1\n', 16, /role builder must be a string, not a table/],
+  ['an inline role table names the `role =` line', render(TWO, ['# the ladder', 'role = { lead = "fable" }']), 2, /unknown role "lead"/],
+  ['a dotted role key names its own line, not the first `role.` line', render(TWO, ['role.builder = "fable"', 'role.lead = "opus"']), 2,
+    /unknown role "lead"/],
+  ['a dotted role key\'s bad value names its own line', render(TWO, ['role.builder = "fable"', 'role . "investigator" = 3']), 2,
+    /role investigator must be a string, not an integer/],
+  ['a string role is told its type', render(TWO, ['role = "fable"']), 1, /role must be a table \(\[role\]\), not a string$/m],
+  ['a [role] between rungs: its keys are its own', render([TWO[0]]) + '\n[role]\nbuilder = "fable"\nlead = "fable"\n\n' + render([TWO[1]], []), 11,
+    /unknown role "lead"/],
+  ['a [role] between rungs: the next rung\'s keys are the rung\'s, and its errors come first',
+    render([TWO[0]]) + '\n[role]\nlead = "fable"\n\n' + render([withKey(TWO[1], 'model', 'gpt-5')], []), 14, /rung 2 \("opus-xhigh"\): unknown model "gpt-5"/],
+]
+
+for (const [label, content, line, reason] of ROLE_INVALID) {
+  test(`L11 (d) refused, exit 2: ${label}`, (t) => {
+    const home = tmpHome(t)
+    writeLadder(home, content)
+    refused(home, { line, reason })
+  })
+}
+
+test('L11 (e) the inline-array form carries a plan model', (t) => {
+  const home = tmpHome(t)
+  writeLadder(home, inline(P3))
+  assert.deepEqual(loads(home).rungs, P3)
+})
+
+test('L11 (f) ROLES equals the engine\'s LADDER_ROLES, OPTIONAL_FIELDS is plan, and the engine accepts the output', (t) => {
+  const r = run(tmpHome(t), ['-B', '-c',
+    "import json, runpy, sys; g = runpy.run_path(sys.argv[1]); print(json.dumps([list(g['ROLES']), list(g['OPTIONAL_FIELDS'])]))", SCRIPT])
+  assert.equal(r.status, 0, r.stderr)
+  const [roles, optional] = JSON.parse(r.stdout)
+  const E = loadEngine(['LADDER_ROLES', 'ladderArgsError'])
+  assert.deepEqual(roles, JSON.parse(JSON.stringify(E.LADDER_ROLES)))
+  assert.deepEqual(roles, ROLES)
+  assert.deepEqual(optional, ['plan'])
+  const home = tmpHome(t)
+  writeLadder(home, render(P3, undefined, { 'master-review': 'fable', builder: 'fable', investigator: 'opus' }))
+  assert.equal(E.ladderArgsError(loads(home)), '', "the engine accepts ladder.py's output for a file using plan and [role]")
 })

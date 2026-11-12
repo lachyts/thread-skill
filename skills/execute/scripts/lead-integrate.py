@@ -2395,8 +2395,9 @@ def task_inputs(path, note, max_rounds=None, repo=None, row=None):
         resume_at = "integration"
     else:
         resume_at = "own"
-    # The note's rung (ADR 0029) as the integrate call's rung record: Integration runs on the ladder's top rung
-    # whatever this says, so a note with no valid `rung:` gives the neutral record, never a guess.
+    # The note's rung (ADR 0029) as the integrate call's rung record: Integration runs on the ladder's Integration
+    # rung (the highest rung that is not all-Fable, ADR 0079 decision 2) whatever this says, so a note with no valid
+    # `rung:` gives the neutral record, never a guess.
     rung = rr._scalar(note.get("rung"))
     if not rr.is_rung_name(rung):
         rung = ""
