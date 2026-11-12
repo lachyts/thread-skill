@@ -109,9 +109,9 @@ Considered:
 - The prompts a Fable role runs are checked against Anthropic's Fable 5.2 guidance before any of this is switched
   on: a "never" rule carries its scope and its reason, steps that need no approval are named, and no line tells the
   model to think less.
-- Chorus builds the Session half as its Phase 104 (ADR 0119): the conductor's Fable gears and the Login pick that
+- Chorus builds the Session half as its Phase 104 (Chorus ADR 0119): the conductor's Fable gears and the Login pick that
   reads Fable's window. Two things are filed there from this ADR: a lead drawn into the Fable arm opens on Fable,
-  and ADR 0119 decision 9 and the lock's wording are brought into line with this one.
+  and Chorus ADR 0119 decision 9 and the lock's wording are brought into line with this one.
 - CONTEXT.md gains **Role**, **Arm**, **Fable share** and **Shaping session**; **Rung** names the plan model.
 
 ## Proposed wording for `~/.agents/AGENTS.md` § Model tier (Lachy's hand edit, one wording for both ADRs)
