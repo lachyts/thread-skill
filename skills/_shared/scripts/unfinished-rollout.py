@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """unfinished-rollout.py — at most one unfinished parallel rollout per repo and project, each project's in its own
 rollout clone; serial chains ordered by their predicted surfaces (schedule § 0 and § Serial path; ADR 0027, ADR 0030,
-ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of ready chains (ADR 0076).
+ADR 0040, ADR 0060, ADR 0064, ADR 0067); the estate's one Waiting list of ready chains (ADR 0076); and the one list of
+every open needs-you item (p48-1).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel] --repo <path>
         (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
@@ -20,10 +21,12 @@ ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of re
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited [--rollout <slug>]...
         [--task <slug>]... [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py needs-you [--now <iso>] [--gh-bin <gh>]
+        [--tasks-dir <dir>]
 
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
-python >= 3.9. No network. Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
+python >= 3.9. No network but `needs-you`'s gh read of a `hold_until` PR (below). Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
 hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origin` and, in `check` and `clone`, `git -C
 <dir> rev-parse --show-toplevel` for the nested-checkout rule (below), each Project root's checkout and each serial
 row's launch-folder checkout; plus one child,
@@ -540,7 +543,8 @@ reconcile-rollout.py, serial-chains.py or leg.py unloadable.
 into one list the Chorus Stage opens as one board, so he never visits the rollout notes one by one. Read-only, one
 process like `waiting`: one walk of the tasks dir, reconcile-rollout.py's readers in-process, and lead-integrate.py's
 Human fix (ADR 0035) loaded in-process only once a parallel set-aside needs it. It runs no git but what
-rollout-settings.py's resolve runs, and gh only for a `hold_until` PR (--gh-bin, default `gh`, memoised per PR). --now
+rollout-settings.py's resolve runs and a set-aside's bare-number `pr:` read (below), and gh only for a `hold_until` PR
+(--gh-bin, default `gh`, memoised per PR). --now
 (an ISO time; a naive one reads local) is the clock for a cool-down and the standing approval's month; default now.
 The rollouts read: each rollout note directly in the tasks dir that is neither done nor dropped (rollout_notes, root
 only), so an archived rollout, done or not, is never read. In each, its linked tasks (reconcile-rollout.py _scan):
@@ -551,11 +555,15 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   summed as _StandingLedger sums them, never locked, plus the spend this read let through before it). Its ASK why is
   the item's `detail`. Once signed (the task leaves gate-pending) it drops out.
 - set-aside (kind `sign-in` when its reason is a Leg preflight's `preflight: <namespace> did not answer`, legs.md §
-  Preflight, else `hands-on`): each task set aside at its run or at Integration that only a person moves on. In a
-  parallel rollout that is lead-integrate.py's auto_retry_verdict with a non-null humanFix (execute § 6.5 (c): a null
-  one is the lead's own retry); its `act` is humanFix.act and its `detail` humanFix.detail. In a serial chain every
-  such task (no Leg retries one: leg.py needs_you's rule), its act `hand back or defer`. `text` is the set-aside
-  reason, the first line of its latest block. Handed back, it drops out.
+  Preflight, after the `Set aside by Leg <n> of [[<rollout>]]: ` leg.py set-aside opens it with, else `hands-on`):
+  each task set aside at its run or at Integration that only a person moves on. In a parallel rollout that is
+  lead-integrate.py's auto_retry_verdict with a non-null humanFix (execute § 6.5 (c): a null one is the lead's own
+  retry), over task_inputs read against the rollout's Project root (the lead's `inputs --repo`, as
+  reconcile-rollout.py auto-retry reads it: a bare-number `pr:` runs one `git remote get-url origin` there); its
+  `act` is humanFix.act and its `detail` humanFix.detail. In a serial chain every such task (no Leg retries one:
+  leg.py needs_you's rule), its act `hand back or defer` and its `detail` the note's `## Needs you` question
+  (needs_human), when it holds one. `text` is the set-aside reason, the first line of its latest block. Handed back,
+  it drops out.
 - hold (kind `hands-on`), parallel rollouts only: a rollout's or an unlanded task's `hold_until` that waits on him
   (_resolve_holds' `waits: you`: an unreadable hold, or a PR CLOSED unmerged), act `remove or fix hold_until on
   [[<note>]]`; and each open merge hold in the rollout's Run record (_record_state's `merge` holds: a `--gated`
@@ -566,10 +574,12 @@ for a sign-in; S6 removes it once the row is stamped): kind `sign-in`, `text` it
 `sign in, then /thread:orient --steer`.
 stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out, "rollout":
 <slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}]}, `project` the task's
-`projects:` names comma-joined (the rollout's when it has none, `no project` with neither); items in rollout order
-(case-folded slug), each rollout's by task, then the left-out rows by task. `WARN:` lines go to stderr (a rollout with a
-task that cannot be read, so its items are not listed). Exit 0, or 2 (no stdout, one
-`unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or reconcile-rollout.py unloadable.
+`projects:` names comma-joined (the rollout's when it has none, `no project` with neither). Items run in rollout order
+(case-folded slug); within a rollout, its gates and set-asides by task, then its hold_until holds (the rollout's, then
+its tasks' by task), then its merge holds by task; the left-out rows come last, by task. `WARN:` lines go to stderr (a
+rollout with a task that cannot be read, so its items are not listed). Exit 0, or 2 (no stdout, one
+`unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or reconcile-rollout.py (or, once a
+parallel set-aside needs it, lead-integrate.py) unloadable.
 """
 import argparse
 import importlib.util
@@ -603,8 +613,8 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "LEG_LEASE_LAPSE",   # leg_session's closing-Leg clock (P44-4), read through LEG.rr
             # needs-you's readers (p48-1)
             "_gated", "_standing_limit", "_ask_why", "_bounce_why", "_month_why", "_StandingLedger", "_norm_gate",
-            "_hold_until", "_resolve_holds", "_record_state", "_pr", "BLOCKED_SECTIONS", "GATE_PENDING_SECTION",
-            "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION")
+            "_hold_until", "_resolve_holds", "_record_state", "_pr", "needs_human", "BLOCKED_SECTIONS",
+            "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -2661,7 +2671,10 @@ def cmd_waiting(args, rr) -> int:
 # ---- the needs-you list (p48-1) ----------------------------------------------------------------------------------------
 
 LEFT_OUT_SECTION = "## Left out at schedule"   # schedule § Serial path S3.7's line for a row left out for a sign-in
-PREFLIGHT_SIGN_IN_RE = re.compile(r"^preflight:\s*\S+\s+did not answer\b", re.I)   # legs.md § Preflight's set-aside
+# legs.md § Preflight's set-aside reason, `preflight: <namespace> did not answer`, as leg.py set-aside writes it: the
+# first line of its Blocker diagnosis run, after its `Set aside by Leg <n> of [[<rollout>]]: ` opening.
+PREFLIGHT_SIGN_IN_RE = re.compile(r"^(?:Set aside by Leg \d+ of \[\[[^\]]*\]\]:\s*)?preflight:\s*\S+\s+did not answer\b",
+                                  re.I)
 BLOCKER_SECTION = "## Blocker diagnosis"
 
 
@@ -2724,7 +2737,7 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
         warns.append(f"WARN: {path.stem}: a task note cannot be read ({e}): its items are not listed")
         return []
     slug, serial = path.stem, rr._shape(note) == "serial"
-    label = project_label(rr, note)
+    label, root = project_label(rr, note), rr._project_root(note)
     gi = standing.gi
     out = []
 
@@ -2751,10 +2764,12 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
         kind = "sign-in" if PREFLIGHT_SIGN_IN_RE.match(reason) else "hands-on"
         if serial:
             out.append(needs_you_item(kind, "set-aside", slug, project(t), tp.stem, reason or f"set aside "
-                                      f"({rr._status(t)})", "hand back or defer"))
+                                      f"({rr._status(t)})", "hand back or defer", rr.needs_human(t)))
             continue
         li = load_li(rr)
-        fix = li.auto_retry_verdict(tp, t, li.task_inputs(tp, t), note, now)["humanFix"]
+        # the lead's `inputs --repo <Project root>`, as reconcile-rollout.py auto-retry reads it
+        inp = li.task_inputs(tp, t, repo=str(root) if root is not None else None)
+        fix = li.auto_retry_verdict(tp, t, inp, note, now)["humanFix"]
         if fix is None:
             continue   # the lead's own re-entry: a retry, a cool-down, a seeded revise
         text = reason or fix["detail"] or f"set aside {fix['label']}"
@@ -2762,7 +2777,6 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
                                   fix["detail"] if fix["detail"] != text else None))
     if serial:
         return out
-    root = rr._project_root(note)
     holds = []
     ro_hold = rr._hold_until(note, root)
     if ro_hold is not None:

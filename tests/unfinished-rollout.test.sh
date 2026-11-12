@@ -3368,6 +3368,15 @@ spend|gate|ro-a|g2|spend: more image calls — cap 6 USD|sign off gated input" \
   "NY3: a covered spend gate signs itself and never appears; one over the limit, and one past the month line (5 + 6 > 10), are listed"
 has "$(nyj 'd["items"][0]["detail"]')" "over the standing approval's US\$10" "NY3: … the over-limit gate says why"
 has "$(nyj 'd["items"][1]["detail"]')" "past the US\$10 month line" "NY3: … the gate past the month line says why"
+# The list's reading is a copy of approve-gates --standing's: on the same notes, its dry run signs exactly the gate the
+# list leaves off and asks exactly the two it lists.
+HOME="$EH" python3 "$RR" approve-gates --standing --dry-run --tasks g1,g2 --rollout "$T/ro-a.md" --tasks-dir "$T" \
+  --now 2026-11-12T09:00:00Z > "$S.ag" 2>&1
+ok "$(grep -c '^g1: gate approved under the standing approval: spend: image calls — cap 5 USD ' "$S.ag")|$(grep -c \
+  '^ASK: ' "$S.ag")|$(grep -c '^ASK: g1: spend: render farm — cap 50 USD: ' "$S.ag")|$(grep -c \
+  '^ASK: g2: spend: more image calls — cap 6 USD: ' "$S.ag")" "1|2|1|1" \
+  "NY3: … approve-gates --standing's dry run signs the one gate left off and asks exactly the two listed"
+ok "$(fm g1.md status)|$(grep -c 'Needs-you log' "$T/ro-a.md")" "status: gate-pending|0" "NY3: … (the dry run wrote nothing)"
 
 # NY4: a gate signed (the task leaves gate-pending) drops out.
 fmset g2.md status open
@@ -3399,14 +3408,22 @@ ok "$(fm b1.md status)" "status: blocked" "NY5: … (b1 is set aside again, at i
 ny
 ok "$out" '{"count": 0, "items": []}' "NY5: a block the lead's own automatic retry re-enters is no item"
 
-# NY6: a serial chain's set-aside is always his (no Leg retries one); a Leg preflight's set-aside is a sign-in.
+# NY6: a serial chain's set-aside is always his (no Leg retries one); a Leg preflight's set-aside is a sign-in. Each
+# diagnosis is the first line leg.py set-aside writes (pinned below, with legs.md § Preflight's reason).
 scen ny6
 mkro ro-s.md - "$DEMO" 'shape: serial'
-blocked s1.md ro-s 'preflight: mcp__claude_ai_Webflow did not answer'
-blocked s2.md ro-s 'the copy needs his voice'
+blocked s1.md ro-s 'Set aside by Leg 2 of [[ro-s]]: preflight: mcp__claude_ai_Webflow did not answer'
+blocked s2.md ro-s 'Set aside by Leg 2 of [[ro-s]]: the copy needs his voice'
+printf '\n## Needs you\n\nWhich tone should the copy take?\n' >> "$T/s2.md"
 ny
-ok "$(rows)" "sign-in|set-aside|ro-s|s1|preflight: mcp__claude_ai_Webflow did not answer|hand back or defer
-hands-on|set-aside|ro-s|s2|the copy needs his voice|hand back or defer" "NY6: a chain's set-asides, a preflight's as a sign-in"
+ok "$(rows)" "sign-in|set-aside|ro-s|s1|Set aside by Leg 2 of [[ro-s]]: preflight: mcp__claude_ai_Webflow did not answer|hand back or defer
+hands-on|set-aside|ro-s|s2|Set aside by Leg 2 of [[ro-s]]: the copy needs his voice|hand back or defer" \
+  "NY6: a chain's set-asides, a preflight's as a sign-in"
+ok "$(nyj 'd["items"][0]["detail"], d["items"][1]["detail"]')" "(None, 'Which tone should the copy take?')" \
+  "NY6: … a ## Needs you question is its detail"
+ok "$(grep -cF 'diag = f"Set aside by Leg {n} of [[{ctx.slug}]]: {reason.strip()}"' "$LEGPY")|$(grep -cF -- \
+  '--reason "preflight: <namespace> did not answer"' "$root/skills/execute/legs.md")" "1|1" \
+  "NY6: … leg.py set-aside writes that first line, and legs.md § Preflight that reason"
 
 # NY7: a hold_until that waits on him (unreadable, or its PR closed unmerged); one that waits on the merge is no item.
 scen ny7
