@@ -4,8 +4,10 @@
 # answer (`inputs`' answerRecorded, reconcile-rollout.py _answer_recorded). reconcile-rollout.py record-answer is the only
 # writer of an answer, hand-back spends every live answer and takes `--answer <stamp>` as a compare-and-swap, and an
 # answered block is never retried.
-#   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H1-H12,
-#      H12 under an answer and a question; H10-same-infra, the same held stop twice running at Integration; the null cases)
+#   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H1-H13,
+#      H12 under an answer and a question; H10-same-infra, the same held stop twice running at Integration, a settings
+#      block (ADR 0080) due for merge-settings.py free and its deadline, anchor, left, restored and spent change; the null
+#      cases)
 #   K  --max-review-rounds is an overlay humanFix ignores; the keys today's callers read are unchanged
 #   L  the label forms, and `ask 2` after a spent answer
 #   N  answerRecorded: the live forms, the dead keys, each re-entry stamp, ties and unparseable stamps
@@ -394,19 +396,68 @@ python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now "$NOW" >/
 lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)" 2026-10-03T09:10:00Z
 I=$(INOW=2026-10-03T09:10:00Z inp "$A")
 ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" 'same feedback as the block last re-entered|["hand back or defer",true,null]' "H10: the same fingerprint at Integration, no raise"
-# H10-same-infra (ADR 0033 d4 as amended): a held infra stop at Integration (here no-runner) that comes back the same
-# after its retry is Lachy's too: H10, its detail the same-stop why.
-scen h10-same-infra
+# H10-same-infra (ADR 0033 d4 as amended, ADR 0080): a held infra stop at Integration (here no-runner, a settings block)
+# that comes back the same after its retry is due for merge-settings.py `free` (the settings point): a null humanFix
+# with the deadline as autoRetryAfter; a due block no `free` moved within 60 minutes of its anchor is Lachy's H10, its
+# detail still the same-stop why.
+NR='no-runner: required job "alpine" queued 47 minutes with no runner (run 7, job 8)'
+nr_point() {  # nr_point <scenario>: A's no-runner block retried at 08:15, the same stop at 08:30 (the settings point)
+  scen "$1"
+  mkro; mkt "$B" open
+  mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
+  lead "$A" integration "$NR"
+  ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "$1: (the first retry, after its cool-down)"
+  python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now 2026-10-03T08:20:00Z >/dev/null 2>&1
+  lead "$A" integration "${NR/47 minutes/112 minutes}" 2026-10-03T08:30:00Z
+}
+sb() { j "$1" '[d["settingsBlock"][k] for k in ("state", "due", "freeNow")] if d["settingsBlock"] else None'; }
+# msrow <slug> <line>…: rows appended to A's `## Merge settings` (the shapes merge-settings.py writes)
+msrow() { local s="$1"; shift; { grep -q '^## Merge settings$' "$D/$s.md" || printf '\n## Merge settings\n\n'; printf '%s\n' "$@"; } >> "$D/$s.md"; }
+FP_NR=$(sha12 $'no-runner\nalpine')
+nr_point h10-same-infra
+I=$(INOW=2026-10-03T09:00:00Z inp "$A")
+ok "$(sb "$I")|$(j "$I" '[d["autoRetry"], d["humanFix"], d["autoRetryAfter"]]')" '["unfreed",true,true]|[false,null,"2026-10-03T09:30+00:00"]' \
+  "H10 same infra: at 09:00 the block is due for free (the settings point), no humanFix, the deadline its autoRetryAfter"
+has "$(j "$I" 'd["autoRetryWhy"]')" "settings block: merge-settings.py free changes the merge setting (ADR 0080); same stop twice running at Integration: no-runner:" \
+  "H10 same infra: … its why names free and the same stop"
+I=$(INOW=2026-10-03T09:30:00Z inp "$A")
+ok "$(hf "$I")|$(sb "$I")|$(j "$I" 'd["autoRetryAfter"]')" '["hand back or defer",true,null]|["unfreed",true,true]|null' \
+  "H10: no free within 60 minutes of the anchor: the deadline's H10, due and freeNow still true"
+has "$(fix "$I" detail)" "settings repair did not run within 60 minutes of 2026-10-03T08:30+00:00: /thread:repair runs merge-settings.py free (ADR 0080); same stop twice running at Integration: no-runner: required job" \
+  "H10 same infra: the detail names the deadline and the same stop"
+# F4: a hand-back's `re-entered` row anchors the deadline: an identical block after it (no new run, the block stamp kept)
+# is due, never the old deadline's H10.
+nr_point h-anchor
+HNOW=2026-10-03T09:00:00Z hb "$A"; ok "$rc|$(sec "$A" '## Merge settings' | grep -c 're-entered')" "0|2" "H anchor: (the hand-back wrote its boundary)"
+python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now 2026-10-03T09:05:00Z >/dev/null 2>&1
+lead "$A" integration "${NR/47 minutes/112 minutes}" 2026-10-03T09:10:00Z
+I=$(INOW=2026-10-03T09:40:00Z inp "$A")
+ok "$(sb "$I")|$(j "$I" '[d["humanFix"], d["autoRetryAfter"]]')" '["unfreed",true,true]|[null,"2026-10-03T10:00+00:00"]' \
+  "H anchor: the deadline runs from the hand-back's re-entered row: due, not H10"
+# left: H13; restored: H13 naming his restore; a change whose one re-entry is spent: H10, `did not free it`.
+nr_point h13-left
+msrow "$A" "- 2026-10-03T09:00:00+00:00 left $FP_NR: no-rights: this gh token has no admin rights on o/r"
+I=$(INOW=2026-10-03T09:05:00Z inp "$A")
+ok "$(hf "$I")|$(sb "$I")" '["change the merge setting, hand back or defer",true,null]|["left",true,false]' "H13: a block free left is Lachy's"
+ok "$(fix "$I" detail)" "no-rights: this gh token has no admin rights on o/r" "H13: … its detail the cause and why"
+nr_point h13-restored
+msrow "$A" "- 2026-10-03T08:40:00+00:00 changing aaaaaaaaaaaa $FP_NR: protection o/r@master: removed \"alpine\"" \
+  "- 2026-10-03T08:40:01+00:00 changed aaaaaaaaaaaa" "- 2026-10-03T08:50:00+00:00 restored aaaaaaaaaaaa"
+I=$(INOW=2026-10-03T09:05:00Z inp "$A")
+ok "$(fix "$I" act)" "change the merge setting, hand back or defer" "H13 restored: a setting he restored is never changed again"
+has "$(fix "$I" detail)" "restored: you restored it on 2026-10-03T08:50:00+00:00" "H13 restored: … its detail says so"
+nr_point h10-did-not-free
+msrow "$A" "- 2026-10-03T08:40:00+00:00 changing aaaaaaaaaaaa $FP_NR: protection o/r@master: removed \"alpine\"" \
+  "- 2026-10-03T08:40:01+00:00 changed aaaaaaaaaaaa" "- 2026-10-03T08:45:00+00:00 re-entered"
+I=$(INOW=2026-10-03T09:05:00Z inp "$A")
+ok "$(hf "$I")|$(sb "$I")" '["hand back or defer",true,null]|["changed",true,false]' "H10: a change whose re-entry is spent and the block back"
+has "$(fix "$I" detail)" "; the merge setting changed for you on 2026-10-03T08:40:01+00:00 did not free it" "H10: … it did not free it"
+# A red required check (reasonClass merge-gate, the Verify line's real red) is no settings block.
+scen sb-red
 mkro; mkt "$B" open
 mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
-NR='no-runner: required job "alpine" queued 47 minutes with no runner (run 7, job 8)'
-lead "$A" integration "$NR"
-ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "H10 same infra: (the first retry, after its cool-down)"
-python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now 2026-10-03T08:20:00Z >/dev/null 2>&1
-lead "$A" integration "${NR/47 minutes/112 minutes}" 2026-10-03T08:30:00Z
-I=$(INOW=2026-10-03T09:30:00Z inp "$A")
-ok "$(hf "$I")" '["hand back or defer",true,null]' "H10: the same infra stop twice running at Integration, no raise"
-has "$(fix "$I" detail)" "same stop twice running at Integration: no-runner: required job" "H10 same infra: the detail names the stop"
+lead "$A" own "merge-task: ERROR: a REQUIRED check FAILED on PR #5 (Ralph passed locally, but remote CI is red):"
+ok "$(j "$(inp "$A")" 'd["settingsBlock"]')" null "a red required check (reasonClass merge-gate): settingsBlock null"
 
 scen h11
 mkro; mkt "$B" open
@@ -500,11 +551,11 @@ ok "$(j "$I" '[d["autoRetry"], d["humanFix"]]')" '[false,null]' "K: a retryable 
 ok "$(python3 -c 'import importlib.util,json,sys
 s=importlib.util.spec_from_file_location("li",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(json.dumps([list(m.AUTO_RETRY_KEYS[:10]), list(m.AUTO_RETRY_KEYS[10:])], separators=(",", ":")))' "$LI")" \
-  "[$SETTINGS_KEYS,[\"humanFix\",\"answerRecorded\"]]" "K: today's ten verdict keys, in order, then the two new ones"
+  "[$SETTINGS_KEYS,[\"humanFix\",\"answerRecorded\",\"settingsBlock\"]]" "K: today's ten verdict keys, in order, then humanFix, answerRecorded and settingsBlock"
 ok "$(python3 -c 'import importlib.util,json,sys
 s=importlib.util.spec_from_file_location("li",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(json.dumps(list(m.HUMAN_FIX_ACTS), separators=(",", ":"), ensure_ascii=False))' "$LI")" \
-  '["finish the recorded answer","sign off gated input","fix its rollout: or defer","decide RACE","decide UNVERIFIED","answer the question","decide scope or defer","restore, recut or defer","fix the note'"'"'s pr: or defer","raise max_plan_rounds, hand back or defer","raise max_review_rounds, hand back or defer","raise max_iterations, hand back or defer","hand back or defer","fix the round budget"]' \
+  '["finish the recorded answer","sign off gated input","fix its rollout: or defer","decide RACE","decide UNVERIFIED","answer the question","decide scope or defer","restore, recut or defer","fix the note'"'"'s pr: or defer","raise max_plan_rounds, hand back or defer","raise max_review_rounds, hand back or defer","raise max_iterations, hand back or defer","hand back or defer","fix the round budget","change the merge setting, hand back or defer"]' \
   "K: HUMAN_FIX_ACTS, the fixed vocabulary every act the H series reads comes from (the verdict refuses any other)"
 
 # ── L: the label ─────────────────────────────────────────────────────────────────────────────────────────────────

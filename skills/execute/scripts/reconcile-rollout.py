@@ -1040,7 +1040,9 @@ Subcommands:
                  race-held, with no task `holdUntil`, under no held rollout hold, no `pauseRequested` and no
                  `surfaceWait` (a surface wait relaunches nothing, P41-3), read as step
                  1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
-                 with that k and auto_retry_verdict). A null `humanFix` with a future `autoRetryAfter` goes to
+                 with that k and auto_retry_verdict). A null `humanFix` whose `settingsBlock` reads `due`, state
+                 `unfreed` and `freeNow` (a settings block step 1.2's *Settings repair* frees now, ADR 0080) goes to
+                 `reentry`, ahead of the cool-down test; another null `humanFix` with a future `autoRetryAfter` goes to
                  `coolDown`; an `autoRevise` seeded revise is W only while `slotsInUse` plus the revises before it is
                  below `slotLimit`, else `capHeld` (cause `heat` at verify-slot's HEAT_HOLD or worse, `quota` while
                  `trickle.capacity` is in force with its quota, the lead's Login (step 6), inside (p36-7), `away-cap`
@@ -1210,6 +1212,8 @@ ci-timeout (ADR 0073 d4: a reason starting `merge-task` whose own cause is a CAN
 _merge_task_ci_timeout: a CI timeout, a stop on GitHub's side that retries as infra);
 no-runner (exit 4's `no-runner:` set-aside, ADR 0069 amended 2026-11-11: a required job no runner took, a stop that
 retries as infra);
+unreported-context (exit 4's `unreported-context:` set-aside, ADR 0080: a required context nothing reports on the PR's
+head while no run on it is in flight, a renamed job; a stop that retries as infra, a settings block like no-runner);
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
@@ -2757,6 +2761,8 @@ class _note_lock:
     lock, inside it. So is the origin-lane lock (ORIGIN_LANE_LOCK, ADR 0064): only mark-integrating takes it, with note locks and
     the Run record's flock inside it, and never nested with the trickle lock. The trigger lock (TRIGGER_LOCK, p45-7) is
     taken only by `triggers fire`, around its record, with the note's lock inside it and never across a child process.
+    The merge-settings lock (merge-settings.py, one per origin, ADR 0080) is taken outermost: note locks (Note.save) and
+    the Run record's flock go inside it, and its gh and git calls run under it; nothing takes it inside a note lock.
     No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
@@ -7555,18 +7561,29 @@ def _hand_back_note(note, now):
     review-blocked or plan-blocked note set aside at its run, or a PR-less code-writing review note -> in_progress,
     `owner:` removed and `handed_back: <now>` stamped (arm "run": the restart's mark-started consumes the marker and
     records start=hand-back). Anything else is (None, why) and the note is untouched. `said` is the stdout tail
-    after `<slug>: `. Shared by cmd_hand_back and cmd_auto_retry (p16-4), so the two re-enter a task identically."""
+    after `<slug>: `. Shared by cmd_hand_back and cmd_auto_retry (p16-4), so the two re-enter a task identically.
+    A transition also writes the `re-entered` boundary row of `## Merge settings` (ADR 0080, MERGE_SETTINGS_SECTION)
+    when the block it re-enters is a settings block (_settings_block, read before the transition) or the note already
+    holds that section: it ends the block, so a change's one re-entry is consumed, and a past block's `left` or `tried`
+    row never reads on a later one. It lands in the caller's one save with the transition, or not at all."""
     status = _status(note)
     state, at = _queue_state(note)
+    block = _settings_block(note)
+
+    def boundary():
+        if block is not None or note.has_heading(MERGE_SETTINGS_SECTION):
+            _append_settings_rows(note, [f"- {_settings_stamp(now)} re-entered"])
     if state == "set-aside" and at == "integration" and _pr(note):
         note.set("status", "review")
         note.set("ready", _stamp(now))
         note.remove("integrating")
+        boundary()
         return "integration", f"blocked->review (set aside at Integration; ready: {_stamp(now)})"
     if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
         note.set("status", "in_progress")
         note.remove("owner")
         note.set(HANDED_BACK_KEY, _stamp(now))  # the restart's mark-started records start=hand-back
+        boundary()
         return "run", f"{status}->in_progress (set aside at its run; owner: cleared)"
     return None, ("set aside at Integration with no pr:" if at == "integration"
                   else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
@@ -9426,6 +9443,8 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "ci-timeout"
     if lead and first.startswith(NO_RUNNER_OPENING):
         return "no-runner"
+    if lead and first.startswith(UNREPORTED_OPENING):
+        return "unreported-context"
     if lead and (first.startswith("merge-task") or first.startswith("base moved")
                  or first.startswith("head moved after integration")):
         return "merge-task"
@@ -10864,6 +10883,18 @@ MERGE_TASK_INFRA = ("required checks never appeared for PR", MERGE_TASK_CI_TIMEO
 # no-runner, and it retries as `infra` (_retry_class): no code fix clears it, and a runner coming back does. The first
 # line of a set-aside's reason, with `integration: ` already stripped. Pinned against merge-task.sh by the auto-retry suite.
 NO_RUNNER_OPENING = "no-runner:"
+# merge-task.sh's exit-4 set-aside for a required context that nothing reports on the PR's head while no run on it is in
+# flight (ADR 0080: a renamed job, the task's own rename included): reasonClass unreported-context, an `infra` retry like
+# no-runner. Its first line carries no sha, so _stop_key reads two heads alike. Pinned against merge-task.sh by the
+# auto-retry suite.
+UNREPORTED_OPENING = "unreported-context:"
+# The two settings blocks (ADR 0080): a required check no runner will take, and a required context no job reports. Each
+# retries as infra, and at the settings point (cause 23's same stop, or cause 24's spent budget, lead-integrate.py's
+# verdict) merge-settings.py `free` changes the merge setting that asks for it (_settings_block).
+SETTINGS_OPENINGS = (NO_RUNNER_OPENING, UNREPORTED_OPENING)
+SETTINGS_RETRY_MIN = 5           # a `tried` row's wait before `free` runs again (the verdict's freeNow)
+SETTINGS_FREE_DEADLINE_MIN = 60  # a due block no `free` moved within this many minutes reads H10 (the backstop)
+SETTINGS_TRIES_MAX = 3           # the third busy or transient try in one block writes `left` (unreadable)
 # The mark each of merge-task.sh's exit-8 texts carries while GitHub settles a PR's mergeability (ADR 0069 d2): a third
 # exit 8 with it retries as `infra`. Pinned against merge-task.sh by the auto-retry suite.
 MERGE_TASK_SETTLING_MARK = "GitHub has not settled its mergeability"
@@ -10974,12 +11005,15 @@ LAST_REAL_REASON_MARK = "last real reason ("
 #   - a GitHub-side exit 1 (MERGE_TASK_GITHUB_OPENING, a _merge_task_infra_stop): checks that still never appear after a
 #     cool-down and a fresh `prepare` (ADR 0069 d3), or a required check CANCELLED again (ADR 0073 d4), will not start
 #     or finish without a person's act;
-#   - a no-runner set-aside (NO_RUNNER_OPENING): a runner gone through a cool-down does not come back by itself.
+#   - a no-runner set-aside (NO_RUNNER_OPENING): a runner gone through a cool-down does not come back by itself;
+#   - an unreported-context set-aside (UNREPORTED_OPENING): a required context no job reports after a cool-down and a
+#     fresh `prepare` will not be reported by itself. Both are settings blocks: the same stop is the settings point,
+#     where merge-settings.py frees them (ADR 0080, _settings_block).
 # Exempt, as decision 4 had them (each still bounded by the budget): `prepare: origin unreachable three times` (an
 # origin outage clears by itself, and no task integrates without origin anyway), a third exit 8 while GitHub settles
 # (MERGE_TASK_SETTLING_MARK: its lazy mergeability clears by itself, and an attempt holds the lane about 5 minutes), a
 # dead call (`workflow call failed:`) and the engine's TRANSIENT, at any stage.
-SAME_STOP_OPENINGS = (KILL_OPENING, MERGE_TASK_GITHUB_OPENING, NO_RUNNER_OPENING)
+SAME_STOP_OPENINGS = (KILL_OPENING, MERGE_TASK_GITHUB_OPENING, NO_RUNNER_OPENING, UNREPORTED_OPENING)
 
 
 def _merge_task_infra_stop(reason) -> bool:
@@ -11005,8 +11039,8 @@ def _retry_class(note) -> str:
     a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
     Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS, or a stop on GitHub's side, ADR 0069 d3:
     an Integration set-aside opening MERGE_TASK_GITHUB_OPENING whose rest is a _merge_task_infra_stop, a third exit 8
-    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 no-runner set-aside
-    (NO_RUNNER_OPENING), or a legacy own-run `merge-task` reason that is a
+    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 settings set-asides
+    (SETTINGS_OPENINGS: no-runner and unreported-context, ADR 0080), or a legacy own-run `merge-task` reason that is a
     _merge_task_infra_stop) or `agent` (everything else: an agent can act on its feedback; every other exit-8 text
     included)."""
     kind, reason = _note_reason(note)
@@ -11020,7 +11054,7 @@ def _retry_class(note) -> str:
         return "infra"
     if kind == "integration" and first.startswith(MERGE_TASK_EXIT8_OPENING) and MERGE_TASK_SETTLING_MARK in first:
         return "infra"
-    if kind == "integration" and first.startswith(NO_RUNNER_OPENING):
+    if kind == "integration" and first.startswith(SETTINGS_OPENINGS):
         return "infra"
     if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"
@@ -11082,6 +11116,205 @@ def _same_stop(note) -> bool:
         return False
     prior = _top_run(runs)["content"].split("\n", 1)[0].strip()
     return prior.lower().startswith(INTEGRATION_PREFIX) and _stop_key(prior) == _stop_key(first)
+
+
+# ---- the merge settings a stuck rollout changes (ADR 0080, p47-9) --------------------------------------------------
+# A task note's `## Merge settings` section: the one record of what merge-settings.py did for a settings block of this
+# task (SETTINGS_OPENINGS), with each change's undo. This comment is the grammar's one copy. Rows are read in note
+# order, and position is the order: a stamp (datetime.isoformat(timespec="seconds"), local time with its offset) is read
+# only for display and for the deadline's latest stamp, never to tell which row is newer. <fp> is a block's fingerprint
+# (_settings_block: _sha12 of its kind and sorted contexts), <id> a change's 12-hex id.
+#   - <stamp> changing <id> <fp>: <source> <owner/repo>@<branch>[ ruleset <rid>]: <removed|replaced> <json C>[ -> <json C'>]
+#     followed by its three indented lines, each written in the same save:
+#       <id> before: <json>      the setting's body before (the write's own shape, merge-settings.py's _body)
+#       <id> after: <json>       the body written
+#       <id> undo: <command>     the one command that restores `before`
+#     written and saved BEFORE the write, so a crash between the write and its confirmation leaves the undo on the note;
+#   - <stamp> changed <id>            the write read back as `after`;
+#   - <stamp> void <id>: <why>        the write did not take (live reads `before`): never listed as unconfirmed;
+#   - <stamp> cleared <fp>: <why>     no write was needed: positive evidence that one re-entry meets the block freed;
+#   - <stamp> left <fp>: <cause>: <why>     `free` left the block for Lachy (H13); cause not-owned, no-rights,
+#                                     no-change, not-recorded or unreadable;
+#   - <stamp> tried <fp>: transient|busy: <text>   a try that read nothing decisive (a 5xx, a busy lock);
+#   - <stamp> re-entered              the block boundary: the transition a hand-back or an automatic retry made
+#                                     (_hand_back_note), written in the same save;
+#   - <stamp> restored <id> and <stamp> dismissed <id>   Lachy's word on a change (/thread:repair 3i).
+# Writers: merge-settings.py writes every row but `re-entered`, which only _hand_back_note writes; both go through
+# _append_settings_rows (Note.apply), never append_line, whose dedupe would drop a second change's identical indented
+# line. Readers: _settings_block (the verdict, `free`'s idempotence, the boundary) and merge-settings.py `rows`.
+MERGE_SETTINGS_SECTION = "## Merge settings"
+SETTINGS_ROW_RE = re.compile(r"^- (\S+) (changing|changed|void|cleared|left|tried|re-entered|restored|dismissed)\b ?(.*)$")
+SETTINGS_SUB_RE = re.compile(r"^\s+([0-9a-f]{12}) (before|after|undo): (.*)$")
+SETTINGS_CHANGING_RE = re.compile(r"^([0-9a-f]{12}) ([0-9a-f]{12}): (protection|ruleset) (\S+?)@(\S+)(?: ruleset (\d+))?: "
+                                  r"(removed|replaced) (.*)$")
+NO_RUNNER_JOB_RE = re.compile(r'required job "(.*?)" queued')
+UNREPORTED_CHECK_RE = re.compile(r'required check ("(?:[^"\\]|\\.)*")')
+
+
+def _settings_kind(first):
+    """`no-runner` or `unreported-context` for a reason's first line (integration: dropped), else None."""
+    if first.startswith(NO_RUNNER_OPENING):
+        return "no-runner"
+    if first.startswith(UNREPORTED_OPENING):
+        return "unreported-context"
+    return None
+
+
+def _settings_contexts(kind, first):
+    """The required contexts a settings block's first line names, in its order, deduplicated: a no-runner reason's
+    `required job "<name>" queued` names, an unreported-context reason's JSON-quoted name after `required check `."""
+    if kind == "no-runner":
+        found = NO_RUNNER_JOB_RE.findall(first)
+    else:
+        found = []
+        for q in UNREPORTED_CHECK_RE.findall(first):
+            try:
+                v = json.loads(q)
+            except ValueError:
+                continue
+            if isinstance(v, str):
+                found.append(v)
+    return list(dict.fromkeys(c for c in found if c))
+
+
+def _settings_fingerprint(kind, contexts):
+    return _sha12(kind + "\n" + "\n".join(sorted(contexts)))
+
+
+def _settings_rows(note):
+    """The `## Merge settings` rows in note order: [{i, stamp, verb, id, fp, text, line, ...}]. A `changing` row also
+    carries source, repo, branch, ruleset, change, context, newContext (None when its head does not parse) and its
+    before, after and undo lines; `void`, `cleared`, `left` and `tried` carry `why` (a `left` row its `cause` too)."""
+    found = note._section_bounds(MERGE_SETTINGS_SECTION)
+    if found is None:
+        return []
+    lines, start, end = found
+    rows = []
+    for raw in lines[start + 1:end]:
+        sub = SETTINGS_SUB_RE.match(raw)
+        if sub and rows and rows[-1]["verb"] == "changing" and rows[-1]["id"] == sub.group(1):
+            rows[-1][sub.group(2)] = sub.group(3)
+            continue
+        m = SETTINGS_ROW_RE.match(raw.rstrip())
+        if not m:
+            continue
+        stamp, verb, rest = m.group(1), m.group(2), m.group(3)
+        row = {"i": len(rows), "stamp": stamp, "verb": verb, "id": None, "fp": None, "text": rest, "line": raw.rstrip(),
+               "why": None, "cause": None}
+        if verb == "changing":
+            c = SETTINGS_CHANGING_RE.match(rest)
+            parts = rest.split(" ", 2)
+            row["id"] = parts[0] if parts and re.fullmatch(r"[0-9a-f]{12}", parts[0]) else None
+            row["fp"] = parts[1].rstrip(":") if len(parts) > 1 else None
+            row.update(source=None, repo=None, branch=None, ruleset=None, change=None, context=None, newContext=None,
+                       before=None, after=None, undo=None)
+            if c:
+                row.update(source=c.group(3), repo=c.group(4), branch=c.group(5), ruleset=c.group(6),
+                           change=c.group(7))
+                dec, tail = json.JSONDecoder(), c.group(8)
+                try:
+                    row["context"], at = dec.raw_decode(tail)
+                    if tail[at:].startswith(" -> "):
+                        row["newContext"], _ = dec.raw_decode(tail[at + 4:])
+                except ValueError:
+                    pass
+        elif verb in ("changed", "restored", "dismissed"):
+            row["id"] = rest.strip() or None
+        elif verb == "void":
+            head, _, why = rest.partition(": ")
+            row["id"], row["why"] = head.strip() or None, why
+        elif verb in ("cleared", "left", "tried"):
+            head, _, why = rest.partition(": ")
+            row["fp"] = head.strip() or None
+            if verb == "cleared":
+                row["why"] = why
+            else:
+                cause, _, text = why.partition(": ")
+                row["cause"], row["why"] = cause, text
+        rows.append(row)
+    return rows
+
+
+def _settings_block(note):
+    """A note's settings block (ADR 0080), or None: blocked and set aside at Integration, its latest block's first line
+    opening one of SETTINGS_OPENINGS. Otherwise {kind, contexts, fingerprint, state, cause, why, row, changedAt,
+    reentry, tries, lastTried, pending, boundary}, read off `## Merge settings` (the grammar above) by position, with
+    `cut` the index of its last `re-entered` row (none: -1):
+      - a `restored <id>` row, anywhere, for any `changing <id> <fp>` of this fingerprint: state `left`, cause
+        `restored` (Lachy restored it: never changed again);
+      - else the last `left <fp>` row after `cut`: state `left`, its cause and why (a `left` row before `cut` was a past
+        block's, so his hand-back of it lets `free` run again);
+      - else a `changed <id>` row of this fingerprint's change, or a `cleared <fp>` row, anywhere: state `changed`,
+        `changedAt` its stamp, `reentry` true only while no `re-entered` row follows it (the one re-entry it earns),
+        a dismissed id included;
+      - else `unfreed`: `tries` and `lastTried` from its `tried <fp>` rows after `cut`; `pending` the id of a `changing`
+        row of this fingerprint with no `changed` or `void` row (a crash between a write and its confirmation).
+    `boundary` is the last `re-entered` row's stamp (the deadline's anchor, lead-integrate.py)."""
+    if _status(note) != "blocked" or _queue_state(note) != ("set-aside", "integration"):
+        return None
+    kind, reason = _note_reason(note)
+    first = reason.split("\n", 1)[0].strip()
+    block = _settings_kind(first) if kind == "integration" else None
+    if block is None:
+        return None
+    contexts = _settings_contexts(block, first)
+    fp = _settings_fingerprint(block, contexts)
+    rows = _settings_rows(note)
+    cuts = [r["i"] for r in rows if r["verb"] == "re-entered"]
+    cut = cuts[-1] if cuts else -1
+    out = {"kind": block, "contexts": contexts, "fingerprint": fp, "state": "unfreed", "cause": None, "why": None,
+           "row": None, "changedAt": None, "reentry": False, "tries": 0, "lastTried": None, "pending": None,
+           "boundary": rows[cut]["stamp"] if cut >= 0 else None}
+    mine = {r["id"]: r for r in rows if r["verb"] == "changing" and r["fp"] == fp and r["id"]}
+    restored = [r for r in rows if r["verb"] == "restored" and r["id"] in mine]
+    if restored:
+        r = restored[-1]
+        out.update(state="left", cause="restored", why=f"you restored it on {r['stamp']}", row=r["line"])
+        return out
+    left = [r for r in rows if r["verb"] == "left" and r["fp"] == fp and r["i"] > cut]
+    if left:
+        r = left[-1]
+        out.update(state="left", cause=r["cause"], why=r["why"], row=r["line"])
+        return out
+    done = [r for r in rows if (r["verb"] == "changed" and r["id"] in mine) or (r["verb"] == "cleared" and r["fp"] == fp)]
+    if done:
+        r = done[-1]
+        out.update(state="changed", row=r["line"], changedAt=r["stamp"], why=f"changed for you on {r['stamp']}",
+                   reentry=not any(x["verb"] == "re-entered" and x["i"] > r["i"] for x in rows))
+        return out
+    tried = [r for r in rows if r["verb"] == "tried" and r["fp"] == fp and r["i"] > cut]
+    closed = {r["id"] for r in rows if r["verb"] in ("changed", "void")}
+    pending = [i for i in mine if i not in closed]
+    out.update(tries=len(tried), lastTried=tried[-1]["stamp"] if tried else None, pending=pending[-1] if pending else None,
+               row=tried[-1]["line"] if tried else None)
+    return out
+
+
+def _append_settings_rows(note, lines):
+    """Append `lines` (row lines and their indented lines, verbatim) to `## Merge settings` as one journaled edit
+    (Note.apply), after the section's last non-blank line, creating the section at the note's end when it is absent.
+    Never append_line: its dedupe would drop a repeated indented line. The caller saves the note."""
+    def put(n, block):
+        found = n._section_bounds(MERGE_SETTINGS_SECTION)
+        if found is None:
+            body = n._body.rstrip("\n")
+            n._set_body_lines((body + ("\n\n" if body else "") + MERGE_SETTINGS_SECTION + "\n").split("\n")
+                              + list(block) + [""])
+            return
+        ls, start, end = found
+        filled = [i for i in range(start + 1, end) if ls[i].strip()]
+        if not filled:
+            n._set_body_lines(ls[:start + 1] + [""] + list(block) + [""] + ls[end:])
+            return
+        j = filled[-1] + 1
+        tail = [""] if j == len(ls) or ls[j].strip() else []
+        n._set_body_lines(ls[:j] + list(block) + tail + ls[j:])
+    note.apply(put, list(lines))
+
+
+def _settings_stamp(now):
+    """A `## Merge settings` row's stamp: local time to the second, with its offset."""
+    return now.astimezone().isoformat(timespec="seconds")
 
 
 def _stamp_value(raw, minimum):
@@ -16247,6 +16480,12 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             except Exception as ex:  # noqa: BLE001 — a lost look, never a verdict
                 raise MovingError(f"inputs on [[{e['slug']}]] raised {type(ex).__name__}: {ex}")
             if v.get("humanFix") is not None:
+                continue
+            sb = v.get("settingsBlock") or {}
+            if sb.get("due") and sb.get("state") == "unfreed" and sb.get("freeNow"):
+                # A due settings block step 1.2's *Settings repair* frees now (ADR 0080): the lead's work, never a
+                # cool-down, though its verdict carries the deadline as autoRetryAfter.
+                work["reentry"].append(e["slug"])
                 continue
             after = _parse_ts(v["autoRetryAfter"]) if v.get("autoRetryAfter") else None
             if after is not None and after > now:

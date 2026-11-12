@@ -14,6 +14,9 @@
 #   A16 an answered block (ADR 0035: `inputs`' answerRecorded) is never retried
 #   A17 a repeat stall at Integration (ADR 0033 d4 as amended): the same held stop twice running is Lachy's, the exempt
 #       routes still cool, and a kill that names no wait carries the last real reason on its second line
+#   A18 a settings block (ADR 0080): the same stop is the settings point, 22a re-enters a changed block exactly once
+#       (the `re-entered` boundary in the verb's one save, a set-aside in the same minute included), and an
+#       unreported-context block on another head is the same stop
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
 # scenario's Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the
@@ -419,7 +422,7 @@ ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["in
   "A5c-cancel: stage integrate, setAsideAt integration, retryClass infra"
 # A5c-no-runner (ADR 0069, amended 2026-11-11): merge-task's exit-4 no-runner set-aside is infra too: no code fix clears
 # it and a runner coming back does, so it cools down on its first block; a second naming the same job, its minutes and
-# ids aside, is Lachy's: a runner gone through a cool-down needs his act (ADR 0033 d4 as amended, A17b).
+# ids aside, is the settings point: merge-settings.py frees it (ADR 0080, A18), never a cool-down again.
 scen a5c-no-runner
 mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration 'integration: no-runner: required job "self-hosted" queued 47 minutes with no runner (run 7, job 8)'
@@ -939,7 +942,6 @@ done <<EOF
 merge-task exit 1, GitHub-side: $GH_NEVER|merge-task exit 1, GitHub-side: $GH_NEVER
 merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD|merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD2
 merge-task exit 1, GitHub-side: $GH_CANCEL|merge-task exit 1, GitHub-side: ${GH_CANCEL/ci (run 7)/ci (run 9)}
-no-runner: required$HELD|no-runner: required$HELD2
 EOF
 
 # A17c: the exempt routes keep d4's exemption: the identical second stop cools 60 minutes from auto_retry_at
@@ -1054,6 +1056,63 @@ setfm "$A" auto_retry_sha 0123456789ab
 lead "$A" integration "$KILL" 2026-10-03T08:30:00Z
 hasnt "$(sec "$A" '## Blocker diagnosis')" "last real reason" "A17e: auto_retry_sha naming another block → no carry"
 
+# ── A18: a settings block (ADR 0080, p47-9) ──────────────────────────────────────────────────────────────────────
+# A no-runner or unreported-context block is a settings block: the same stop twice running is the settings point,
+# where merge-settings.py `free` changes the merge setting (a null humanFix, its deadline as autoRetryAfter); a block
+# whose setting changed (a `changed` row) re-enters once, past the same stop and the budget (22a); the verb's one save
+# writes the `re-entered` boundary that consumes it, so the block back, in the same minute too, is H10.
+FP_NR=$(sha12 $'no-runner\nalpine')
+msrow() { local s="$1"; shift; { grep -q '^## Merge settings$' "$D/$s.md" || printf '\n## Merge settings\n\n'; printf '%s\n' "$@"; } >> "$D/$s.md"; }
+reentered() { sec "$A" '## Merge settings' | grep -c ' re-entered$'; }
+a18() { a17int "$1"; a17first "$1" "no-runner: required$HELD"; lead "$A" integration "no-runner: required$HELD2" 2026-10-03T08:30:00Z; }
+a18 settings-point
+I=$(INOW=2026-10-03T09:00:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["humanFix"], d["autoRetryAfter"], d["settingsBlock"]["state"], d["settingsBlock"]["due"]]')" \
+  '[false,null,"2026-10-03T09:30+00:00","unfreed",true]' "A18: the same no-runner stop twice running → the settings point, due for free"
+ok "$(reentered)" 1 "A18: (the first retry wrote its boundary)"
+# 22a: a changed block re-enters at once, past the same stop and a spent budget
+setfm "$A" auto_retries_used 2
+msrow "$A" "- 2026-10-03T09:00:10+00:00 changing aaaaaaaaaaaa $FP_NR: protection o/r@master: removed \"alpine\"" \
+  "  aaaaaaaaaaaa before: {}" "  aaaaaaaaaaaa after: {}" "  aaaaaaaaaaaa undo: true" "- 2026-10-03T09:00:11+00:00 changed aaaaaaaaaaaa"
+I=$(INOW=2026-10-03T09:01:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["humanFix"], d["settingsBlock"]["state"]]')" '[true,null,"changed"]' \
+  "A18 22a: a changed block → autoRetry true despite the same stop and 2/2 used"
+ANOW=2026-10-03T09:01:00Z ar "$A"
+ok "$rc|$(fm "$A" status)|$(reentered)" "0|status: review|2" "A18 22a: the verb re-enters it and writes exactly one re-entered row in its save"
+# S1: the identical block back in the same minute (no new run), and with a new text: H10 `did not free it`
+mig "$A" 2026-10-03T09:01:20Z
+lead "$A" integration "no-runner: required$HELD2" 2026-10-03T09:01:40Z
+I=$(INOW=2026-10-03T09:01:50Z inp "$A")
+ok "$(refused "$I")" "$REFUSED" "A18 S1: the identical block in the same minute → H10, never a second 22a"
+has "$(j "$I" 'd["autoRetryWhy"]')" "the merge setting changed for you on 2026-10-03T09:00:11+00:00 did not free it" "A18 S1: … it did not free it"
+setfm "$A" status review; setfm "$A" integrating "2026-10-03T09:01:20+00:00"
+lead "$A" integration "no-runner: required${HELD2/112 minutes/113 minutes}" 2026-10-03T09:01:45Z
+ok "$(grep -c '^### Run ' "$D/$A.md")|$(refused "$(INOW=2026-10-03T09:01:50Z inp "$A")")" "3|$REFUSED" \
+  "A18 S1: a new text in the same minute (a run of its own) → H10 too"
+# a hand-back of a re-entry block writes the boundary too
+a18 hand-back-boundary
+msrow "$A" "- 2026-10-03T09:00:10+00:00 changing aaaaaaaaaaaa $FP_NR: protection o/r@master: removed \"alpine\"" \
+  "- 2026-10-03T09:00:11+00:00 changed aaaaaaaaaaaa"
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now 2026-10-03T09:02:00Z >/dev/null 2>&1
+ok "$(fm "$A" status)|$(reentered)" "status: review|2" "A18: a hand-back of a changed block writes its boundary"
+# a failed task save writes no row, and the verdict stays 22a
+a18 failed-save
+msrow "$A" "- 2026-10-03T09:00:10+00:00 changing aaaaaaaaaaaa $FP_NR: protection o/r@master: removed \"alpine\"" \
+  "- 2026-10-03T09:00:11+00:00 changed aaaaaaaaaaaa"
+chmod a-w "$D/$A.md"
+ANOW=2026-10-03T09:01:00Z ar "$A"
+chmod u+w "$D/$A.md"
+ok "$rc|$(reentered)|$(j "$(INOW=2026-10-03T09:01:00Z inp "$A")" 'd["autoRetry"]')" "1|1|true" \
+  "A18: a failed task save leaves no boundary row, and the verdict stays 22a"
+# R4: an unreported-context block carries no sha, so the same rename on another head is the same stop
+UR="unreported-context: required check \"build\" is reported by no check run or status on the PR's head, and no run on it is in flight"
+a17int ur; a17first ur "$UR"
+lead "$A" integration "$UR" 2026-10-03T08:30:00Z
+I=$(INOW=2026-10-03T09:00:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetryClass"], d["settingsBlock"]["kind"], d["settingsBlock"]["contexts"], d["settingsBlock"]["due"]]')" \
+  '["infra","unreported-context",["build"],true]' "A18 R4: unreported-context on a second head is the same stop: due for free"
+ok "$(lastev set-aside 'd["reasonClass"]')" '"unreported-context"' "A18: its set-aside's reasonClass is unreported-context"
+
 # ── A15: the pins ───────────────────────────────────────────────────────────────────────────────────────────
 pin() {
   python3 - "$SCRIPT" <<'PY'
@@ -1062,6 +1121,7 @@ spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.
 print(json.dumps({"fix": list(m.MERGE_TASK_FIXABLE), "gone": m.BRANCH_GONE_MARK, "declined": m.DECLINED_MARK,
                   "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS),
                   "mtInfra": list(m.MERGE_TASK_INFRA), "settling": m.MERGE_TASK_SETTLING_MARK, "noRunner": m.NO_RUNNER_OPENING,
+                  "unreported": m.UNREPORTED_OPENING,
                   "ghOpening": m.MERGE_TASK_GITHUB_OPENING, "lastWait": m.MERGE_TASK_LAST_WAIT_MARK,
                   "sameStop": list(m.SAME_STOP_OPENINGS), "waitWords": list(m.MERGE_TASK_WAIT_WORDS)}))
 PY
@@ -1076,6 +1136,9 @@ while IFS= read -r frag; do
 done < <(j "$P" '"\n".join(d["mtInfra"])')
 ok "$(grep -c -F -- "$(j "$P" 'd["settling"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_SETTLING_MARK is merge-task.sh's text"
 ok "$(grep -c -F -- "$(j "$P" 'd["noRunner"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: NO_RUNNER_OPENING is merge-task.sh's exit-4 text"
+ok "$(grep -c -F -- "set_aside \"$(j "$P" 'd["unreported"]') " "$MT" | awk '{print ($1 > 0)}')" 1 "A15: UNREPORTED_OPENING is merge-task.sh's exit-4 text"
+ok "$(grep -F -- 'set_aside "unreported-context:' "$MT" | grep -cE 'IHEAD|S_HEAD')" 0 \
+  "A15: merge-task's unreported-context set-aside names no head sha (_stop_key reads two heads alike)"
 ok "$(grep -c -F -- "$(j "$P" 'd["ghOpening"]')" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_GITHUB_OPENING is execute SKILL.md's reason"
 ok "$(grep -c -F -- "$(j "$P" 'd["lastWait"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_LAST_WAIT_MARK is merge-task.sh's signal line"
 # Every wait merge-task.sh names (each wait_line call) holds a wait word, so a SIGKILL's bare wait line reads as a wait.
@@ -1089,8 +1152,8 @@ print("none" if not calls else "; ".join(bad) or "ok")
 PY
 }
 ok "$(unworded "$(j "$P" '"|".join(d["waitWords"])')")" ok "A15: every wait_line in merge-task.sh names its wait by one of MERGE_TASK_WAIT_WORDS"
-ok "$(j "$P" 'd["sameStop"]')" '["merge-task signalled twice","merge-task exit 1, GitHub-side:","no-runner:"]' \
-  "A15: SAME_STOP_OPENINGS (the held Integration routes)"
+ok "$(j "$P" 'd["sameStop"]')" '["merge-task signalled twice","merge-task exit 1, GitHub-side:","no-runner:","unreported-context:"]' \
+  "A15: SAME_STOP_OPENINGS (the held Integration routes, the two settings blocks among them)"
 for frag in "same stop twice running" "last real reason"; do
   ok "$(grep -c -F -- "$frag" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: execute SKILL.md states \"$frag\""
 done

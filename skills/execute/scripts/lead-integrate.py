@@ -2432,7 +2432,7 @@ def _revise_shaped(inp):
 
 AUTO_RETRY_KEYS = ("autoRetry", "autoRetryWhy", "autoRetryError", "autoRetryClass", "autoRetryBudget",
                    "autoRetriesUsed", "quotaRetriesUsed", "fingerprint", "autoRetryRaise", "autoRetryAfter",
-                   "humanFix", "answerRecorded")
+                   "humanFix", "answerRecorded", "settingsBlock")
 
 # The fixed acts a Human fix names (ADR 0035 decision 1), one per refusal cause a person owns. auto_retry_verdict sets
 # `humanFix.act` to one of these; execute § 6.5 (c), status's Needs-you block and repair § 2 print it and never
@@ -2452,6 +2452,7 @@ HUMAN_FIX_ACTS = (
     "raise max_iterations, hand back or defer",
     "hand back or defer",                              # H10 every other refusal; H11 a code-writing review with no PR
     "fix the round budget",                            # H12 an invalid budget stamp
+    "change the merge setting, hand back or defer",    # H13 a settings block merge-settings.py left (ADR 0080)
 )
 # The fixed openings the engine, its prompts and the lead write for a code-writing task's own run. None of them spends a
 # budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks, the lead's own
@@ -2571,7 +2572,19 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          the stamp reads valid it falls through;
      17. an unresolvable budget: H9 or H10;
      18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
-     22. a quota block past its 5 free retries; 23. an infra block at Integration that repeats the stop last re-entered
+     22. a quota block past its 5 free retries; 22a. a settings block (reconcile-rollout.py _settings_block, ADR 0080)
+         whose merge setting merge-settings.py changed or cleared, its one re-entry not yet consumed: `autoRetry: true`
+         at once, skipping 23, 24 and the cool-down once (the change is the new fact); then, for a settings block, the
+         settings point, where 23 or 24 would refuse it (`settingsBlock.due` true): `unfreed` is a null humanFix, its
+         why `settings block: merge-settings.py free changes the merge setting (ADR 0080); <23's or 24's why>`, with
+         `autoRetryAfter` a `tried` row's retry (SETTINGS_RETRY_MIN after it, rounded up to the minute; `freeNow`
+         false until then) or else the deadline, SETTINGS_FREE_DEADLINE_MIN after the latest of the block's run stamp,
+         `auto_retry_at`, the last `re-entered` row and the last try, and at or past that deadline H10 `hand back or
+         defer` (`settings repair did not run within 60 minutes of <anchor>: …`, `due` and `freeNow` still true);
+         `left` is H13 `change the merge setting, hand back or defer` (its cause and why), handBack true; `changed`
+         with its re-entry consumed is H10, `<23's or 24's why>; the merge setting changed for you on <stamp> did not
+         free it`. Before the settings point today's path runs (its infra cool-down, ADR 0069 d3's one retry);
+     23. an infra block at Integration that repeats the stop last re-entered
          (reconcile-rollout.py _same_stop: a kill, a GitHub-side exit 1 or a no-runner set-aside whose _stop_key equals
          the `auto_retry_sha` run's, ADR 0033 d4 as amended 2026-11-12), `same stop twice running at Integration:
          <its first line>`, then `; <its last real reason line>` when its run carries one; 24. an agent or infra
@@ -2584,6 +2597,10 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
      ADR 0069) refuses with a null humanFix: the lead retries it once the cool-down ends.
     Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
     max_review_rounds is <= lastRound (one round per retry).
+
+    `settingsBlock` is null, or for a note with a settings block {kind, contexts, fingerprint, state (unfreed | changed |
+    left), due, freeNow, why}: `due` and `freeNow` are false unless the verdict reached the settings point above, so a
+    question, an answer or any of causes 1 to 22 leaves it false. merge-settings.py `free` acts only on a due one.
 
     --max-review-rounds is an overlay the core ignores, so humanFix never depends on a hand-resolved K: only with no
     answer recorded and the core past the budget point (autoRetryBudget non-null), a K other than the resolved one sets
@@ -2620,6 +2637,11 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     used = rr._stamp_value(note.get(rr.AUTO_RETRIES_USED_KEY), 0) if note.get(rr.AUTO_RETRIES_USED_KEY) is not None else 0
     quota = rr._stamp_value(note.get(rr.QUOTA_RETRIES_USED_KEY), 0) if note.get(rr.QUOTA_RETRIES_USED_KEY) is not None else 0
     out.update(autoRetriesUsed=used, quotaRetriesUsed=quota, fingerprint=rr._block_fingerprint(note))
+    sblock = rr._settings_block(note)
+    if sblock is not None:
+        out["settingsBlock"] = {"kind": sblock["kind"], "contexts": sblock["contexts"],
+                                "fingerprint": sblock["fingerprint"], "state": sblock["state"], "due": False,
+                                "freeNow": False, "why": sblock["why"]}
     label = human_fix_label(note)
 
     def fix(act, detail, hand_back, raise_=None):
@@ -2764,6 +2786,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         if refused:
             return refused
     else:
+        if at == "integration" and cls == "infra" and sblock is not None:
+            settled = _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix)
+            if settled is not None:
+                return settled
         # Cause 23 (ADR 0033 d4 as amended 2026-11-12): a held infra stop at Integration that repeats the stop last
         # re-entered spends no more retries, before the budget, so the why names the cause.
         if at == "integration" and cls == "infra" and rr._same_stop(note):
@@ -2781,6 +2807,58 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         out["autoRetryRaise"] = inp["lastRound"] + 1
     out["autoRetry"] = True
     return out
+
+
+def _ceil_minute(t):
+    """`t` rounded up to the whole minute (a stamp _stamp prints with minute precision never reads early)."""
+    whole = t.replace(second=0, microsecond=0)
+    return whole if whole == t else whole + timedelta(minutes=1)
+
+
+def _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix):
+    """Cause 22a and the settings point (ADR 0080; auto_retry_verdict's docstring), for an infra settings block at
+    Integration: the verdict, or None when today's path (cause 23, the budget, the cool-down) decides."""
+    sb = out["settingsBlock"]
+    if sblock["state"] == "changed" and sblock["reentry"]:
+        out["autoRetry"] = True   # 22a: the change is the new fact, so this one re-entry skips 23, 24 and the cool-down
+        return out
+    if rr._same_stop(note):
+        carried = _carried_line(note.latest_run_text(rr.BLOCKED_SECTIONS["blocked"]))
+        why = f"same stop twice running at Integration: {first}" + (f"; {carried}" if carried else "")
+    elif used >= n:
+        why = f"budget: {used}/{n} used"
+    else:
+        return None
+    sb["due"] = True
+    if sblock["state"] == "left":
+        detail = f"{sblock['cause']}: {sblock['why']}"
+        sb["why"] = detail
+        return no(f"settings block left for you: {detail}",
+                  fix("change the merge setting, hand back or defer", detail, True))
+    if sblock["state"] == "changed":
+        why = f"{why}; the merge setting changed for you on {sblock['changedAt']} did not free it"
+        sb["why"] = why
+        return no(why, fix("hand back or defer", why, True))
+    stamps = [t for t in (rr._block_stamp(note), last_at, rr._parse_ts(sblock["boundary"]) if sblock["boundary"] else None,
+                          rr._parse_ts(sblock["lastTried"]) if sblock["lastTried"] else None) if t is not None]
+    anchor = max(stamps) if stamps else now
+    deadline = _ceil_minute(anchor + timedelta(minutes=rr.SETTINGS_FREE_DEADLINE_MIN))
+    tried = rr._parse_ts(sblock["lastTried"]) if sblock["lastTried"] else None
+    if tried is not None:
+        retry = tried + timedelta(minutes=rr.SETTINGS_RETRY_MIN)
+        sb["freeNow"] = now >= retry
+        after = _ceil_minute(retry) if now < _ceil_minute(retry) else deadline
+    else:
+        sb["freeNow"] = True
+        after = deadline
+    if now >= deadline:
+        detail = (f"settings repair did not run within {rr.SETTINGS_FREE_DEADLINE_MIN} minutes of {rr._stamp(anchor)}: "
+                  f"/thread:repair runs merge-settings.py free (ADR 0080); {why}")
+        sb["why"] = detail
+        return no(detail, fix("hand back or defer", detail, True))
+    out["autoRetryAfter"] = rr._stamp(after)
+    sb["why"] = f"settings block: merge-settings.py free changes the merge setting (ADR 0080); {why}"
+    return no(sb["why"])
 
 
 def _rollout_note_of(path, note):
