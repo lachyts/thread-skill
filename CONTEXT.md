@@ -1484,7 +1484,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   can open with a click from the quiet Stage line, and work through as one
   board in a sitting; he never has to visit rollout notes one by one to find
   them (2026-11-10: seven stops sat in seven notes with nothing collecting
-  them). Only a
+  them). `unfinished-rollout.py needs-you` reads that list (p48-1): each
+  stop with its rollout, project and kind (`spend`, `irreversible`,
+  `credential`, `hands-on`, `sign-in`), a spend gate the Standing approval
+  signs never on it. Only a
   halt that stops the whole rollout can lead anywhere, and only through
   Chorus's Companion while he is at the Stage, when Chorus reads it as his
   (d3); a single set-aside stays listed. The rollout note's
