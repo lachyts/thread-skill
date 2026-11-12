@@ -228,10 +228,6 @@ class Transient(Exception):
     pass
 
 
-class Usage(Exception):
-    pass
-
-
 # ---- gh and git ----------------------------------------------------------------------------------------------------
 
 def _env():
@@ -999,7 +995,7 @@ def cmd_free(args):
 def _free_locked(run, pair):
     args, block, now = run.args, run.block, run.now
     gh_bin, repo = args.gh_bin, run.repo
-    owner, branch = _owned(gh_bin, repo)
+    _owner, branch = _owned(gh_bin, repo)
     contexts = block["contexts"]
     if not contexts:
         raise Leave("unreadable", "the set-aside reason names no context it could parse")
