@@ -1080,6 +1080,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
   required check is set aside with reasonClass `merge-gate`, distinct from
   `integration-red` (a red of the verifier at Integration). _Avoid_: CI
   green, CLEAN.
+- **Settings block** — a task set aside at Integration because a merge
+  setting of its repo requires what cannot happen (ADR 0080): a required
+  check no runner will take (reasonClass `no-runner`), or a required context
+  no job reports, a renamed job (`unreported-context`). It retries as infra
+  first; at the **settings point** (the same stop after its cool-down retry,
+  or a spent budget) `merge-settings.py free` makes the smallest change that
+  frees it, replacing a renamed context before ever removing one, on a repo
+  Lachy owns, and never loosens a rule that can still be met. Its record is
+  the task note's `## Merge settings` rows; a change it left for him reads
+  his H13. _Avoid_: dead check, stuck rule.
+- **Changed-for-you row** — a merge setting the system changed to free a
+  settings block, listed on the needs-you list with its before, its after
+  and the one command that undoes it (`merge-settings.py rows`, execute
+  § 6.5 (i)). It lives on the task note whose block it freed, so it outlives
+  the rollout, and stays open until the setting is restored or the row
+  dismissed; a dismissal keeps the change and its Run record line (ADR 0080
+  d5). _Avoid_: settings change notice.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier
   suite runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and

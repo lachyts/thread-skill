@@ -1,13 +1,36 @@
 # 0080 — a stuck rollout changes its repo's merge settings
 
 Date: 2026-11-12
-Status: accepted, not built (grilled with Lachy 2026-11-12, the "rollouts resolve themselves" grill; builds in
+Status: accepted, built in part 2026-11-12 (p47-9, below; grilled with Lachy 2026-11-12, the "rollouts resolve themselves" grill; builds in
 Phase 47). Amends ADR 0025's by-hand lift of a protection rule, for a rule that cannot be met, and reopens on his
 word the no-bypass ADR 0025 kept because agents act as him; extends ADR 0069 as amended 2026-11-11 (the `no-runner`
 set-aside), ADR 0075 and ADR 0078.
 
 *(Amended 2026-11-12 by thread-skill-p46-8: findings 5, 8, 10 and 11 of review round 45adf20/cdf93d are settled in
 decisions 4 to 6, the Consequences and the Decided list, each marked "review #N".)*
+
+*Built 2026-11-12 (p47-9), for two of decision 1's kinds: a required check no runner will take (ADR 0069's `no-runner`
+set-aside) and a required context no job reports (merge-task's new `unreported-context` set-aside, a renamed job). Each
+is a **settings block**: it retries as infra first, and only at the **settings point**, where the same stop comes back
+after its cool-down retry or the budget is spent (the H10 it ended in before), does `lead-integrate.py inputs` read it
+due (`settingsBlock`), so a sleeping self-hosted runner keeps its check through one retry (decision 2). One script,
+`skills/execute/scripts/merge-settings.py`, under one lock per origin, frees it: the lead's step 1.2 *Settings repair*,
+repair's **settings block** row and, through repair, the Companion run its `free` (decision 4). It refuses a block the
+Run record does not name, a repo he does not own, a token without admin rights and another app's check, and every
+refusal is a `left` row, his H13. It edits only a rule's contexts: `strict` and a ruleset's up-to-date policy are
+copied. A no-runner context is removed; an unreported one is replaced, never dropped (decision 3), and only on exact
+evidence: GitHub's expanded job names at each rev it reads (matrix suffixes included), merge-gate's matcher used only to
+leave, and every rename gated on the new name having passed on the PR's head. The task's own rename is replaced once
+its new name passed on the head; a required job its own PR deletes is left for him. Each change is written to the task
+note's `## Merge settings` before the write (its before, after and one-command undo, then `changed` once read back), with
+a `setting-changed` Run record line, and listed as a changed-for-you row (execute § 6.5 (i)) until restored or dismissed
+(decision 5). A changed block re-enters once past the same stop and the budget; the `re-entered` boundary row its
+re-entry writes consumes that, so a change that did not free it reads H10. merge-task gains the probe that sets a
+renamed job aside, a bounded wait while the renamed job still runs, one re-watch after it, and a re-poll of a BLOCKED PR
+whose every required context is reported, so GitHub's lazy fold of a changed setting merges instead of stopping at the
+NON-check gate. A rule naming a gone reviewer or app, a stuck infrastructure run, and the contexts this build leaves for
+him (an expression or include matrix, a reusable workflow's `a / b`, a dropped matrix combination) are follow-up p47-15;
+the needs-you list's and decision 6's repo check's read of the rows is p47-16.*
 
 ## Context
 
