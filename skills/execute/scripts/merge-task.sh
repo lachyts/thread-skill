@@ -61,7 +61,7 @@
 #      job "<name>" queued <n> minutes with no runner (run <r>, job <j>)` (No runner, below); (d) `integration:
 #      unreported-context: required check "<name>" is reported by no check run or status on the PR's head, and no run
 #      on it is in flight` (`; `-joined per context, no sha: Unreported context, below). (c) and (d) are settings blocks:
-#      retried as infra, then freed by merge-settings.py at the same stop or a spent budget (ADR 0080).
+#      retried as infra, then freed by merge-settings.py at the same stop after one cool-down retry (ADR 0080).
 #                                                                        counter cleared    lead: mark blocked;
 #      the diagnosis's first line is the text after `set-aside reason: `, which reconcile reads as
 #      `setAsideAt: integration` (reconcile-rollout.py INTEGRATION_PREFIX).
@@ -214,9 +214,11 @@
 # Unreported context (ADR 0080). A required context that no check run or status reports on the integrated head while no
 # run on it is in flight (a job renamed by master or by the task's own PR) is never coming. At the never-appeared site
 # and the NON-check site the probe sets the task aside at Integration with exit 4 (d), reasonClass unreported-context, a
-# settings block merge-settings.py frees once its cool-down retry comes back the same (the same stop) or the budget is
-# spent; a transient probe read is 8, and a definitive one (a 404 or 422: GitHub answers 200 with an empty list for a
-# commit with no runs, so a 404 means a repo this account cannot read) keeps today's 1.
+# settings block merge-settings.py frees once its cool-down retry comes back the same (the same stop), a budget spent
+# before it included; a transient probe read is 8, and a definitive one (a 404 or 422: GitHub answers 200 with an empty
+# list for a commit with no runs, so a 404 means a repo this account cannot read) keeps today's 1. Every wait it starts
+# is bounded: the NON-check site's by UNREPORTED_WAIT_MAX (then 8); at the never-appeared site only a run in flight is
+# waited on, through the in-flight wait, and a context the probe reads pending where gh read none keeps today's 1.
 #
 # No runner (ADR 0069, amended 2026-11-11). A job GitHub queued that no runner took (a self-hosted runner that no longer
 # exists) stays queued about 24 hours, and read as CI in flight the whole time. A job is "no runner" when it is `queued`
@@ -1506,7 +1508,8 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
 #             runs are held only by jobs no runner took (no-runner's own block), or an unreported context from another
 #             app with nothing in flight;
 #   inflight  a context is unreported and a run on the head is in flight (NR_RUNS > NR_HELD);
-#   pending   every context is reported, one by a check run not `completed` or a `pending` status;
+#   pending   every context is reported, one by a check run not `completed` or a `pending` status (the NON-check site
+#             waits on it; the never-appeared site, where gh just read none reported, reads it as unknown);
 #   reported  every context is reported and complete;
 #   yes       a context is unreported, nothing is in flight, no run is held, and every unreported context's app is
 #             GitHub Actions (15368) or none: UNREP_ITEMS is the set-aside's text, one `required check "<C>" is …` per
@@ -1742,13 +1745,16 @@ wait_required_checks() {  # wait_required_checks <the state machine's mergeState
             return 8
           fi
           # A required context nothing reports on the head (a renamed job) is its own set-aside, a settings block
-          # merge-settings.py frees (ADR 0080); a run started since the loop's own read is waited on; a probe read that
-          # failed transiently is 8, never 1.
+          # merge-settings.py frees (ADR 0080); a probe read that failed transiently is 8, never 1. A run started since
+          # the loop's own read is waited on: the next pass's ci_runs_in_flight reads that same run, so it is the
+          # in-flight wait above, never a wait of its own. `pending` here disagrees with `gh pr checks --required`,
+          # which has just read no required check reported (a status of the required name from another source:
+          # statuses_of reads any app's), so it reads as unknown: today's exit 1 below, never a re-wait with no bound.
           unreported_required
           case "$UNREP" in
             yes) set_aside "unreported-context: $UNREP_ITEMS" ;;
             retry) WAIT_MSG="retryable: cannot read $UNREP_WHY; nothing merged; re-run"; return 8 ;;
-            inflight|pending) absent=0; sleep "$CHECK_INTERVAL"; continue ;;
+            inflight) absent=0; sleep "$CHECK_INTERVAL"; continue ;;
           esac
           # A required roll-up check that `needs:` a job no runner took is never created: name those jobs on this
           # line, which the lead copies as the reason. ci_runs_in_flight just read nothing in flight, so with

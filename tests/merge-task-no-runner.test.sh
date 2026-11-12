@@ -342,6 +342,27 @@ for form in green red; do
   lacks "$out" "NON-check gate" "9g ($form). never the NON-check gate"
 done
 
+# 9h. The never-appeared site, the probe reading `pending`: build is required from GitHub Actions, and only a commit
+#     status named build, from another source, is pending (statuses_of ignores the app), so `gh pr checks --required`
+#     reports none while the probe reads it pending. They disagree, so it reads as unknown: today's exit 1, never a
+#     re-wait with no bound. Run under a 60 s guard, so a wait with no bound fails (143) instead of hanging the suite.
+brun() {  # brun <pr> <head> <base>: run, stopped by TERM once 60 s pass
+  local pid i=0
+  : > "$MT_STATE/gh.log"
+  PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" "$@" > "$tmp/brun.out" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
+  kill -0 "$pid" 2>/dev/null && kill -TERM "$pid"
+  wait "$pid"; rc=$?; out=$(cat "$tmp/brun.out")
+}
+fresh; pair; mkpr 5 "$I" BLOCKED
+rsc '{"strict": true, "checks": [{"context": "build", "app_id": 15368}]}'; absent; cruns "$I" lint > "$MT_STATE/checkruns.$I"
+echo '{"total_count": 1, "statuses": [{"context": "build", "state": "pending"}]}' > "$MT_STATE/statuses.$I"
+brun 5 "$I" "$B"
+ok "$rc|$(nmerge)" "1|0" "9h. never-appeared site, the probe pending where gh reports none: today's exit 1, nothing merged"
+has "$(printf '%s\n' "$out" | grep '^ERROR:' | tail -1)" "ERROR: required checks never appeared for PR #5" "9h. … the never-appeared text"
+ok "$(grep -c 'commits/.*/check-runs' "$MT_STATE/gh.log")" 1 "9h. … after one probe, never a second wait"
+
 # 10. Today's exit 1 at the NON-check site whenever the probe cannot tell: a check-runs 404, a page cut, a status that
 #     reports build (after the re-polls), another app's context, an empty required list, a run held only by no-runner jobs.
 for c in 404 page status app empty held; do
