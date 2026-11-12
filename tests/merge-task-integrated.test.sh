@@ -282,12 +282,12 @@ run 5 "$I" "$B"; ok "$rc" 0 "15. the re-run merges"
 
 # 16. the kept required-checks logic
 row() { printf '%s\t%s\t1m\thttps://github.com/o/r/actions/runs/7/job/8\t' "$1" "$2"; }
-chk() {  # chk <rc> <stdout> <stderr> — append one `pr checks --watch` result
-  python3 -c 'import json,sys; print(json.dumps({"rc": int(sys.argv[1]), "out": sys.argv[2], "err": sys.argv[3]}))' "$@" >> "$MT_STATE/checks.seq"
-}
 fresh; pair; mkpr 5 "$I" UNSTABLE
 run 5 "$I" "$B"; ok "$rc" 0 "16a. UNSTABLE with required checks green merges"; ok "$(nmerge)" 1 "16a. merged"
+# 16b. the wait's sample reads BLOCKED (a required check its CI has yet to create), so the absent check is waited on
+#      through the in-flight read. Every mergeStateStatus.seq counts the pre-pass's read first.
 fresh; pair; mkpr 5 "$I" UNSTABLE; echo 1 > "$MT_STATE/inflight"
+printf '%s\n' UNSTABLE UNSTABLE BLOCKED UNSTABLE > "$MT_STATE/pr/5/mergeStateStatus.seq"
 chk 1 "" "no checks reported on the 'audit-fix/t5' branch"; chk 0 "$(row ci pass)" ""
 : > "$tmp/sleeps"; MERGE_TASK_CHECK_INTERVAL=7 PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
 ok "$rc" 0 "16b. an absent check with CI in flight waits, then merges"
@@ -492,13 +492,14 @@ ok "$rc" 1 "25e2. protected by a ruleset: exits 1 (12c)"; has "$(glog)" "pr chec
 lacks "$(glog)" "rules/" "25e2. protected true needs no rules read"
 # (e3) Animately/optimizer's develop (the 2026-11-07 incident): protected with `contexts: []` and `checks: []`, so the
 #      gate reads some (branches/<b> cannot show a non-check gate). An UNSTABLE PR (red only on optional checks) with no
-#      required check reported and nothing in flight merges on the checks wait's first pass, never 'never appeared'.
+#      required check reported merges on the checks wait's first pass, never 'never appeared', with no in-flight read.
 fresh; pair; mkpr 5 "$I" UNSTABLE; echo nochecks > "$MT_STATE/branch"
 chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
 run 5 "$I" "$B"
 ok "$rc" 0 "25e3. protected with empty contexts, UNSTABLE: merges"; ok "$(sent)" "ok" "25e3. ok"; ok "$(nmerge)" 1 "25e3. one merge"
 has "$out" "required gate: some" "25e3. the gate stays some"; lacks "$out" "never appeared" "25e3. never 'never appeared'"
-has "$out" "no required checks, nothing in flight on head, and mergeStateStatus=UNSTABLE — nothing to wait for" "25e3. the guard takes UNSTABLE"
+has "$out" "no required checks and mergeStateStatus=UNSTABLE — nothing to wait for" "25e3. the wait's sample takes UNSTABLE"
+lacks "$(glog)" "actions/runs" "25e3. no in-flight read"
 ok "$(nlog '^pr checks')" 1 "25e3. one checks wait, no absent-poll budget spent"
 # (e4) the same with the gate unreadable (a 502 on the branch read): UNSTABLE with no required check still merges
 fresh; pair; mkpr 5 "$I" UNSTABLE; echo "gh: Server Error (HTTP 502)" > "$MT_STATE/err.branch"
@@ -513,6 +514,40 @@ chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$
 run 5 "$I" "$B"
 ok "$rc" 1 "25e5. the guard reads BLOCKED: exits 1"; ok "$(nmerge)" 0 "25e5. nothing merged"
 has "$out" "required checks never appeared for PR #5" "25e5. the never-appeared text"
+# (e6) the compression-engine incident (PRs #151/#152): UNSTABLE, no required check reported, an optional run still
+#      going on the head (or parked on a deployment approval). The wait's UNSTABLE sample is taken before any in-flight
+#      read, so it merges at once and never holds the Integration lane on an optional run.
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo nochecks > "$MT_STATE/branch"
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; chk 0 "$(row ci pass)"; echo 1 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e6. UNSTABLE with an optional run in flight: merges"; ok "$(nmerge)" 1 "25e6. one merge"
+ok "$(nlog '^pr checks')" 1 "25e6. one checks wait: never waits on the optional run"
+lacks "$out" "CI in flight on head — waiting" "25e6. the optional run is never waited on"
+lacks "$(glog)" "actions/runs" "25e6. no in-flight read: a probe error cannot decide the merge"
+# (e7) a BLOCKED entry whose wait samples UNSTABLE once (a flap: BLOCKED, BLOCKED, UNSTABLE, BLOCKED) does not trust it:
+#      the base's wait, ending in the never-appeared exit 1 (retried as GitHub-side infra), never the NON-check gate's.
+fresh; pair; mkpr 5 "$I"; echo nochecks > "$MT_STATE/branch"; mss BLOCKED BLOCKED UNSTABLE BLOCKED
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 1 "25e7. a BLOCKED entry flapping to UNSTABLE: exits 1"; ok "$(nmerge)" 0 "25e7. nothing merged"
+has "$out" "required checks never appeared for PR #5" "25e7. the never-appeared text, an infra retry"
+lacks "$out" "NON-check gate" "25e7. never the NON-check gate's human stop"
+# (e8) a BLOCKED entry that settles UNSTABLE: the never-appeared exit 1, then its infra retry enters from UNSTABLE and
+#      merges.
+fresh; pair; mkpr 5 "$I"; echo nochecks > "$MT_STATE/branch"; mss BLOCKED BLOCKED UNSTABLE
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 1 "25e8. a BLOCKED entry, the wait reading UNSTABLE: exits 1"; ok "$(nmerge)" 0 "25e8. nothing merged"
+has "$out" "required checks never appeared for PR #5" "25e8. the never-appeared text"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e8. the infra retry enters from UNSTABLE: merges"; ok "$(nmerge)" 1 "25e8. one merge on the retry"
+# (e9) an UNSTABLE entry whose wait sample fails (an empty mergeStateStatus fails the read; one try) never merges on
+#      the state machine's stale UNSTABLE: it counts an absent pass and merges on the next pass's UNSTABLE sample.
+fresh; pair; mkpr 5 "$I"; echo nochecks > "$MT_STATE/branch"; mss UNSTABLE UNSTABLE "" UNSTABLE
+chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
+run 5 "$I" "$B"
+ok "$rc" 0 "25e9. a failed wait sample, then UNSTABLE: merges"; ok "$(nmerge)" 1 "25e9. one merge"
+ok "$(nlog '^pr checks')" 2 "25e9. the failed sample fell through: a second checks pass"
 # (f) the branch read fails transiently: unknown, so today's wait; checks absent with nothing in flight → 8, not 1
 fresh; pair; mkpr 5 "$I" BLOCKED; echo "gh: Server Error (HTTP 502)" > "$MT_STATE/err.branch"
 chk 1 "" "no required checks reported on the 'audit-fix/t5' branch"; echo 0 > "$MT_STATE/inflight"
