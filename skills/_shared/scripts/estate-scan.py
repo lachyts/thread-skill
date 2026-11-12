@@ -134,7 +134,9 @@ Output, one JSON object (schema 1; --compact for one line):
                ordered crowned, active, queued, parked, other, none, then by name, then by note;
   tasks[]     {slug, note, title, status, statusClass: active|review|hold, projects[] (live project names),
                deadLinks[] {link, why, raw}, phase, priority, scope, work_depth, launch, due, scheduled, captured,
-               dependsOn[], rollout, rolloutLive, inFlight}, by slug;
+               dependsOn[] (`depends-on:` and `blocked-by:`), bodyDependsOn[] (the links of the body's *Depends on*
+               lines and of the first paragraph under a `## Depends on` heading, BODY_DEPENDS and DEPENDS_HEADING:
+               schedule § 1.5's Pre-flight reads them, the ranker never), rollout, rolloutLive, inFlight}, by slug;
   unhomed[]   {slug, why, links[] {link, why, raw}}: an open task with no live project; why is its first link's, or
                `no projects`. A link's why: missing, project archived, not a project, ambiguous, area note, project
                unreadable, project done, or other; raw is next-action's resolve_project reason (or RT.dead_why's);
@@ -212,6 +214,17 @@ KILL_GRACE = 1.0  # declared-check.py's TERM-to-KILL grace
 REAP_BOUND = 2.0  # how long a killed probe's reap may take before it is left to init
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 H1 = re.compile(r"#[ \t]+(\S.*?)[ \t]*#*[ \t]*$")
+# A body's *Depends on* (schedule § 3), outside a fenced block: a line, `Depends on [[x]]`, `**Depends on:** [[x|alias]]
+# (why).` or a list item of either, at a line's start; or a `## Depends on` heading (any level, the bare words), whose
+# first paragraph is read, its lines joined. Its links are read up to the clause's end (`;`, or a `.` that does not
+# close a dotted abbreviation such as `e.g.` or `i.e.`, before a space or the end), so a later sentence's link ("Pairs
+# with [[y]]") is never one, and a clause that opens with *nothing* or *none* names none.
+BODY_DEPENDS = re.compile(r"^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?[*_]{0,2}depends[ \t]+on\b[*_]{0,2}:?[*_]{0,2}(.*)$", re.I)
+DEPENDS_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+[*_]{0,2}depends[ \t]+on[*_]{0,2}:?[*_]{0,2}[ \t]*#*[ \t]*$", re.I)
+ATX_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]|$)")
+BODY_CLAUSE = re.compile(r"\[\[[^\]\n]*\]\]|;(?=\s|$)|(?<!\.[A-Za-z])\.(?=\s|$)")
+BODY_NONE = re.compile(r"^[\s*_:]*(?:nothing|none)\b", re.I)
+FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)")
 VERIFIER_LINE = re.compile(r"Verifier:\s*`([^`\n]+)`")
 # schedule § 2.5 step 1's section, which a model reads: a heading, a `Tests:`-style line, or a test command in code.
 VERIFIER_HEADING = re.compile(r"^#{1,6}[ \t]+[^\n]*?\b(?:Verifier|Verification|Tests?|Testing)\b", re.M | re.I)
@@ -721,6 +734,45 @@ class Scan:
                         out.append(g)
         return out
 
+    def body_deps(self, note):
+        """The links of the body's *Depends on* lines (BODY_DEPENDS) and of the first paragraph under each `## Depends
+        on` heading (DEPENDS_HEADING), each clause read to its end (BODY_CLAUSE), in order, without duplicates: schedule
+        § 1.5's Pre-flight reads them beside `dependsOn`."""
+        plain, fence = [], False   # the body's lines, None for a fenced one
+        for line in (note.lines[note.span[1] + 1:] if note.span else note.lines):
+            line = line.rstrip("\r\n")
+            if FENCE_LINE.match(line):
+                fence = not fence
+                plain.append(None)
+            else:
+                plain.append(None if fence else line)
+        clauses = []
+        for i, line in enumerate(plain):
+            m = BODY_DEPENDS.match(line) if line is not None else None
+            if m:
+                clauses.append(m.group(1))
+            elif line is not None and DEPENDS_HEADING.match(line):
+                j = i + 1
+                while j < len(plain) and plain[j] is not None and not plain[j].strip():
+                    j += 1
+                para = []
+                while j < len(plain) and plain[j] is not None and plain[j].strip() and not ATX_HEADING.match(plain[j]):
+                    para.append(plain[j].strip())
+                    j += 1
+                clauses.append(" ".join(para))
+        out, seen = [], set()
+        for clause in clauses:
+            if BODY_NONE.match(clause):
+                continue
+            for tok in BODY_CLAUSE.finditer(clause):
+                if not tok.group(0).startswith("[["):
+                    break
+                for g in self.NA.links_in([tok.group(0)]):
+                    if g.lower() not in seen:
+                        seen.add(g.lower())
+                        out.append(g)
+        return out
+
     def first_link(self, value):
         return first_link(self.NA, value)
 
@@ -751,7 +803,7 @@ class Scan:
             }
             for key in ("phase", "priority", "scope", "work_depth", "launch", "due", "scheduled", "captured"):
                 row[key] = jsonable(note.get(key))
-            row.update(dependsOn=self.deps(note), rollout=rollout, rolloutLive=rollout_live,
+            row.update(dependsOn=self.deps(note), bodyDependsOn=self.body_deps(note), rollout=rollout, rolloutLive=rollout_live,
                        inFlight=in_flight(st, rollout_live))
             tasks.append(row)
             homes[slug] = (live, note)
