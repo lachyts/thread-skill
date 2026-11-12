@@ -22,6 +22,10 @@ a session that's automatically initiated after lunch. It's messy to have things 
 launch." "Never during a run" still holds: the Routine is a sitting, not a rollout. The p22-7 note's readings above are
 unchanged.)*
 
+*(Amended 2026-11-12 by ADR 0079 decision 5: d4's "on Opus at xhigh effort" reads "on the model `~/.agents/AGENTS.md`
+§ Model tier gives it", which the lock's edit of 2026-11-12 made Fable (workspaces ADR 0014). The arms' comparison is
+computed by script and a ceiling changes only by d5, so the reader's model decides nothing.)*
+
 ## Context
 
 ADR 0032 gave rollouts a Run record and a Retro that scored it on Throughput and proposed knob
@@ -60,7 +64,8 @@ and both of them automatic.
    traced to why the schedule-time grill did not catch it.
 4. **Score each rollout, read weekly.** Every completion ceremony runs the script score and writes
    its `tunings.jsonl` line on its own, at no model cost. A model Reflection runs on its own once
-   a week over all the week's rollouts, on Opus at xhigh effort with no token cap. The current
+   a week over all the week's rollouts, on Opus at xhigh effort *(amended 2026-11-12: the model the lock
+   gives it, ADR 0079)* with no token cap. The current
    rollout's Escapes are not known at completion; each weekly reading counts the Escapes against
    the earlier rollouts that landed them.
 5. **What lands without Lachy** (decision 5 of ADR 0032, decided here):

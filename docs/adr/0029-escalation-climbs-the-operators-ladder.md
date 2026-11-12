@@ -6,7 +6,11 @@ amends ADR 0006's single opus→fable flip, ADR 0007's engine-fixed effort matri
 ceiling; grilled with Lachy 2026-09-30)
 
 *(Amended 2026-11-12 by ADR 0079: a rung may name a plan model and a role its own, the plan judge rides with the
-planner, and the record gains arms. Decisions 1, 4 and 7 read with it; 2, 3, 5 and 6 stand.)*
+planner, Integration never runs on an all-Fable rung but on the highest rung below it, and the record gains arms.
+Decisions 1, 4, 5 and 7 read with it; 2 and 6 stand. Decision 3 stands, but a plan-stage climb no longer changes the
+plan's model or effort (on a ladder that names a plan model; on one that names none, planning climbs with the rung
+as before). A plan still rejected after its rounds is set aside as today; the Overrun (PR lachyts/thread-skill#312)
+and task p39-21 take it from there.)*
 
 ## Context
 
