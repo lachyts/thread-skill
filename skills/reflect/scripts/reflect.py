@@ -122,12 +122,14 @@ parallel with no note). For each:
             sweepMiss too (p51-3, ADR 0034's 2026-11-12 amendment): on a signOff, sweep_miss()'s kinds (credential,
             irreversible) of the gates Lachy signed that act's Melbourne day (its `## Approved gates` lines whose
             bare `(approved <date>)` is that date) that gated_inputs.sweep() hits in the note's brief() (its body less
-            the sections the run or the schedule wrote: the gate, plan, log, answer and feedback sections, `## Decisions`
-            and `## Decided for you`), so a gate the sweep could have seen was asked mid-run; a credential on a note
-            holding a recorded test-credential or test-Login Planner line is none (recorded, by design). [] on every
-            other act, with no note, or with no such kind. It reads the note as it stands at span, never as it was
-            swept: a note edited since reads its edits. A gate he declined ahead and signed mid-run reads as a miss
-            (no record of a decline exists); askedAhead beside it says so.
+            the sections the run or the schedule wrote: the gate, plan, log, answer and feedback sections, leg.py's
+            `## Security check`, `## Decisions` and `## Decided for you`), so a gate the sweep could have seen was asked
+            mid-run; a credential on a note holding a recorded test-credential or test-Login Planner line is none
+            (recorded, by design: it reached Lachy only because the standing approval turned it down). [] on every
+            other act, with no note (a signOff whose task note is not found or not read also gets a cannotShow line, so
+            its [] is never read as a word-list miss), or with no such kind. It reads the note as it stands at span, never as
+            it was swept: a note edited since reads its edits. A gate he declined ahead and signed mid-run reads as a
+            miss (no record of a decline exists); askedAhead beside it says so.
   set-aside a set-aside line in the window: stage, reasonClass, setAsideAt, taskNote (Work/Tasks, then Archive, or
             null) and movedBy, the first later event of auto-retry, handed-back (with its via), answer-recorded,
             gate-signed, race-decided, carried, slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
@@ -586,11 +588,12 @@ SIGNED_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d\)\s*$")
 SIGNED_ON_RE = re.compile(r"\(approved (\d{4}-\d\d-\d\d)\)\s*$")
 # sweepMiss (p51-3): the gate kinds schedule § 3.6 and orient R3 (c) ask ahead, the recorded Planner lines that record a
 # credential instead (a declared test credential or test Login, signed or asked at the stop by design), and the
-# sections the run or the schedule wrote, which the brief the sweep reads leaves out
+# sections the run or the schedule wrote, which the brief the sweep reads leaves out (`## Security check` is leg.py's
+# SECURITY_SECTION: its secret-scan rules and findings, `stripe-access-token` or `secret`, hit the credential list)
 ASKED_AHEAD_KINDS = ("credential", "irreversible")
 RECORDED_CREDENTIAL_RE = re.compile(r"^- Planner: word each test-(?:credential|Login) gate", re.M)
 BRIEF_DROP = ("## Decisions", "## Decided for you", "## Plan-blocked feedback", "## Review-blocked feedback",
-              "## Blocker diagnosis")
+              "## Blocker diagnosis", "## Security check")
 # A held trade (ADR 0037 d1): tune.py auto_check's two Lachy-decides reasons, and the decision task's lines for it
 TRADE_HELD_RE = re.compile(r"^a (?:trade \(.*\)|caution): Lachy decides$")
 DECISION_SLUG_RE = re.compile(r"^thread-skill-decisions-\d{4}-\d\d-\d\d(?:-\d+)?$")
@@ -709,8 +712,9 @@ def date_in(day, since, until):
 
 def brief(body):
     """A task note's body as schedule § 3.6 swept it (sweepMiss, p51-3): every `## ` section the run wrote
-    (reconcile-rollout.py's gate, plan, log and answer sections) or the schedule wrote (`## Decisions`, `## Decided for
-    you`), and the workflow's feedback sections, left out, each to the next `## ` heading."""
+    (reconcile-rollout.py's gate, plan, log and answer sections, and leg.py's `## Security check`, whose secret-scan
+    rules and findings name credential words) or the schedule wrote (`## Decisions`, `## Decided for you`), and the
+    workflow's feedback sections, left out, each to the next `## ` heading."""
     drop = BRIEF_DROP + (REC.GATE_PENDING_SECTION, REC.APPROVED_GATES_SECTION, REC.GATE_BOUNCE_SECTION,
                          REC.NEEDS_YOU_LOG_SECTION, REC.PAUSE_LOG_SECTION, REC.REVIEW_HISTORY_SECTION,
                          REC.INTEGRATION_LOG_SECTION, REC.APPROVED_PLAN_SECTION, REC.NEEDS_HUMAN_SECTION,
@@ -1664,6 +1668,9 @@ class Span:
             item["needsYou"] = ny[:NEEDS_YOU_MAX] if ny else None
             if act == "signOff":
                 item["sweepMiss"] = sweep_miss(note, mdate(at))
+        elif act == "signOff":
+            self.cannot_show("[[%s]] (%s): a gate signed with no task note read (none in Work/Tasks or Archive, or "
+                             "unreadable): its sweepMiss cannot be read" % (task, slug))
         return item
 
     @staticmethod
