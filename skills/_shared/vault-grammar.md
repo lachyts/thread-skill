@@ -371,8 +371,19 @@ a dependant on that note (ADR 0078 d7):
 `- [[<dependant>]] waits on [[<x>]] (<Project>, not scheduled)`
 
 `<x>` is another project's task (it shares no `projects:` entry with the dependant) that has not landed and whose
-`rollout:` links no live rollout. `<Project>` is its first project, or `no project`. `waits-on.py write` is the
-section's one writer: schedule step 7, § Serial path S6 and orient-all § 2 run it, and it rewrites the section on every
+`rollout:` links no live rollout. `<Project>` is its first project, or `no project`.
+
+A **held line** has the same form, for a task schedule's Pre-flight left out because it waits on a task nobody is
+building (schedule § 3: `waits`, and each dependant out through one), which no `rollout:` links to the note: `<x>` is
+then any task, of its project or another. Schedule passes it as `waits-on.py write --rollout <note> --held <task>=<x>`
+(with an empty queue, only when § 0 named this project's live rollout: schedule § 1.5's **An empty queue.**). Every
+later rewrite re-reads each line whose dependant the note does not link, and keeps it while it is still true: the task
+is open on no live rollout, and `<x>` has not landed and is not in flight. That is a held line, and also a linked task's
+own line once a defer (schedule step 6's, or repair's dependency-aware one) clears its `rollout:`, so a task deferred
+out of a rollout keeps its line there while it still waits. A rewrite that meets another writer's change replays its
+edit on the fresh note, re-reading these lines there, so a held line written meanwhile is never lost.
+`waits-on.py write` is the section's one writer: schedule step 7 (and § 1.5 at an empty queue), § Serial path S6 and
+orient-all § 2 run it, and it rewrites the section on every
 live rollout note as it stands, one line per unit a dependant waits on, removing it when nothing waits. `estate-scan.py` reads the lines back for each live rollout (`rollouts[].waitsOn[]`, each kept
 only while its dependant is still open and its dependency is still an open task on no live rollout) and orient-all
 lists them (§ 3, § 8).

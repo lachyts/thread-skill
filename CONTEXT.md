@@ -109,9 +109,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `~/.agents/knowledge/how-lachy-decides.md`).
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
-  and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
-  and tasks whose note does not parse stay out with their Dependent closure;
-  it runs no plan gate (ADR 0047). Not
+  and Grill tasks first get a **Decision round** with Lachy, and Orient tasks,
+  tasks whose note does not parse and tasks that wait on a task outside the
+  rollout that nobody is building (ADR 0078 d7) stay out with their Dependent
+  closure; it runs no plan gate (ADR 0047). Not
   schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
   before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
