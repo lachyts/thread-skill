@@ -20,6 +20,9 @@ test_logins`) passes the standing approval too, so the 2026-11-01 line's "every 
 longer holds for a declared test Login.)*
 *(Amended by ADR 0075, 2026-11-07: decision 3's gate found mid-run is set aside and listed, never pushed; no
 rollout ever pushes, and the ntfy fallback ADR 0038 added is superseded.)*
+*(Amended 2026-11-13 by p48-4, § Amendment (2026-11-13) below: a spend plainly under the limit never asks. A gate
+neither earlier reading prices is read at its widest and signed within the limit and the month line; a gate that names
+no amount it can read, or none a cap word governs, still asks.)*
 
 ## Context
 
@@ -239,3 +242,87 @@ it is a verifier or review failure) and the annotation records the total exposur
   and conjunction steps are a reject list, not a whitelist, as ADR 0063 residual (i) is for the class: a second thing
   named in plain prose with none of them (`the dummy Login, to push to the npm registry`, `the dummy Login, then
   Lachy's Gmail`) passes, and the annotation names only the Login, so any other use is a review failure.
+
+## Amendment (2026-11-13, p48-4: a spend plainly under the limit never asks)
+
+The ruling, decided for Lachy at the `/thread:orient Thread Skill` grill of 2026-11-12 on his standing word (spend is
+never asked below US$200, for a single spend or the month: Chorus ADR 0108 d4, kept 2026-11-03; "a variation or
+nuance of a spend under that line must never stop a rollout, whatever its wording"): "A spend gate the pricer cannot
+read, but which is plainly under the cap, signs under the Standing approval. *Plainly under* means every amount the
+gate's line names, read at its widest (the top of a range, a rate times its stated most calls, a split summed), is
+under the cap. A gate that names no amount at all goes back to its planner once to restate it with one; only a gate
+that still names none asks him."
+
+The corpus: every spend gate under US$200 of `[[thread-skill-rollout-2026-10-26]]` and the 2026-11-03 smart-slider
+rollout already signs (p27-5's two from their caps, at US$20 and US$3; smart-slider's two in full, at US$5 and US$10),
+so the Verify is a regression pin. Of the vault's 35 distinct spend gates only three read null, and still do: the
+Cartesia free-tier gate (a `+` with no amount after it), `spend: none authorised. …` (no amount) and p18-7's
+fast-mode gate (a per-Login cap with no count). The wordings the pricer refused were the ruling's: a split (`2 cap
+clauses`), `plus US$5`, a range, a non-USD cap (`no cap clause`), a counted rate (`unrecognised clause: per call`),
+`US$1k`, `x 3` and `three times`, and a bound word other than `cap` (`up to US$5`, `max A$30`, `budget of €20`).
+
+- **The widest reading.** `gated_inputs.py`'s standing reading gains a third step, `widest_exposure()`, run only when
+  the full and cap-only readings both refuse (module docstring, 2, holds its one copy, W1-W7): only a spend gate; no
+  per-unit word, `%`, widening word, amount in words, minor units, unknown currency or approximate amount anywhere
+  (W2); every amount with a currency at one end or both, a range at its top, a magnitude read, a malformed one asking
+  (W3); at least one amount straight after a cap word (W4); each amount's qualifier (a month x1, a rate, a multiplier,
+  else a total; `before` asks) and no rate left beyond the amounts (W5, W5d); on a rate line every count's unit a
+  rate's, no stray number and each rate times the largest count of its unit (W5c); on a line with no rate the
+  unattached multipliers multiply every amount (W6); the sum rounded up to the cent (W7). A gate priced so is signed
+  or asked against the limit and the month line exactly as a fully priced one, annotated and logged the same, and its
+  approval line ends `; widest pricing, the cap-only reading refused: <why>`.
+- **W4, a governed cap word.** At least one amount must start exactly where a cap word ends: `cap`, `capped`, `max`,
+  `maximum`, `at most`, `up to`, `no more than`, `limit`, `limited`, `ceiling` or `budget`, at a strict word start (so
+  `rate-limit`, `--max-cost-usd` and `hard-cap` never count), then at most two of `:`, `at`, `of`, `to`. It mirrors
+  decision 1's rule 3 (a `cap` word straight before its amount), widened only to the bound synonyms, so a line that
+  states no cap (`US$10 so far`, `rate-limit probe — US$10`) still asks.
+- **WIDENING gains `±` and the uncapped words** (round 2 of the plan's review). Before p48-4 the full reading signed
+  `cap US$10 (no limit on retries)` and `cap US$10 (unlimited retries)` at 10, and the cap-only reading `cap US$10 ±
+  2`. WIDENING, the one list rules 5 and 7 share, now holds `±` and UNCAPPED: `uncapped`, `unlimited`, `unbounded`,
+  `no hard limit|cap`, `no cap|limit|max(imum)|budget|ceiling(s)`, `without a cap|limit|budget`, `not
+  capped|limited`, and a `cap|limit|max|budget|ceiling` then TBD, TBC, unknown, unset, none or `to be`. Inside the cap
+  clause every reading now asks on them; the widest reading asks on them anywhere. Outside the clause the cap-only
+  reading still waives them: the 2026-11-05 amendment's residual (i), a readable cap stays the implementer's ceiling
+  (`cap US$50; soft, no hard cap` is still covered at 50). A replay of 5,687 gates (every gate literal in the touched
+  tests and fixtures, and the vault's spend lines) flipped no real pin or vault gate.
+- **The ceiling table.** Another currency reads at its ceiling rate, at least 5% above its highest daily USD value
+  since 2000, rounded up: USD 1; AUD 1.17 (high 1.1081, 27 Jul 2011); NZD 0.93 (0.8843, 1 Aug 2011); CAD 1.16 (1.1042,
+  USD/CAD 0.9056, 7 Nov 2007); EUR 1.69 (1.6038, 15 Jul 2008); GBP 2.23 (2.1162, 9 Nov 2007); JPY 0.0140 (0.013277,
+  USD/JPY 75.32, 31 Oct 2011). The currency words name only the table's currencies: `dollars`/`bucks` the four listed
+  dollars, at the widest of them (1.17); `euros` 1.69; `pounds` 2.23; `yen` 0.0140; `cents` a cent of the four
+  dollars or the euro (0.0169); `pence` 0.0223. `cap 30 AUD` reads US$35.10.
+- **What still asks.** A gate that names no amount, or none straight after a cap word; a negated or undecided cap
+  (`no cap`, `cap TBD`, `unlimited`); a rate with no stated most (`cap US$0.10 per GB`); a count in another unit, a
+  count in words or a further rate beside it; a widening word, `%`, an approximate amount or an amount in words
+  anywhere; an unknown currency (`¥`, `HK$`); a per-unit word (a per-unit gate is the full reading's alone); and a
+  gate over the limit or past the month line, as before.
+- **The plan judge.** `exposure -` prints the standing reading's {usd, why}, so a gate neither earlier reading prices
+  now prints its widest amount, and the judge, which bounces only a null "usd", never bounces a one-cap gate in
+  another currency, a range or a counted rate. task.workflow.js and the prompt bytes are unchanged; ADR 0038's bounce
+  rule is unchanged, so a two-cap gate is still sent back for its format at plan time by ADR 0008's automatic
+  `changes` (the follow-up below names it), and a bounced note still signs nothing.
+- **The open half.** The ruling's second sentence, a gate that names no amount goes back to its planner once and only
+  then asks, is not built here: the engine's bounce still climbs a gates-only `changes` over a capless gate. It is
+  filed as `[[thread-skill-a-spend-gate-naming-no-amount-goes-back-once]]`.
+- **The line-up with chorus-p96-23.** Chorus's sign-off suite (`[[chorus-p96-23-upkeep-repairs-a-rollouts-infra-halt]]`:
+  Upkeep signs every sign-off whose effect can be undone) reads the halts the standing approval leaves. The widest
+  reading shrinks the spend ones to a gate with no amount or cap word it can read, a rate with no stated most, or one
+  over the line, so a variation of a spend under US$200 is signed here, by thread-skill's own reading, before any halt
+  reaches Upkeep or him.
+
+Accepted residuals, each safe because the gate's total is the implementer's ceiling (GATED_INPUTS_CHECK) and the
+annotation records the total exposure, each pinned in tests/gated-inputs.test.mjs:
+
+- (r1) A count beside a total amount, on a line with no rate, reads once: `cap 30 AUD for 3 runs` reads 35.10.
+- (r2) An unknown currency word on a line with no rate is not read (`1000 rupees`); on a rate line it is a count in
+  another unit, and asks.
+- (r3) A rate idiom off the lists, and not straight after its amount, reads x1.
+- (r4) The ceilings under-read a currency that rises more than 5% past its post-2000 high, or a currency word meant as
+  a currency off the table worth more than its word's ceiling: today only a `dollars` or `bucks` meant as the Cayman
+  Islands dollar (pegged at US$1.20).
+- (r5) A bare `$` is USD.
+
+Named over-asks, fail closed and pinned: prose `per`/`each`/`every`; a widening or uncapped word in the description
+(`soft launch`); stray numbers on a rate line; `¥`; a count noun not adjacent to its number; a bound word with any
+other word, or a parenthesis, between it and its amount (`the cap is US$10`, `cap (US$10)`); a hyphenated bound word
+(`hard-cap US$10`); and a line whose only bound word bounds a count (`US$0.50 per call, at most 40 calls`).

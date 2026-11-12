@@ -855,11 +855,16 @@ Subcommands:
               declared test Login (below). Each pending spend bullet is priced by
               skills/_shared/scripts/gated_inputs.py's standing reading, covered() (fail closed: irreversible
               gates, a credential outside the class and the test Logins, and any shape it cannot price even from
-              its cap, never pass): the full exposure() reading, else (p37-4, ADR 0034's 2026-11-05 amendment:
-              unpriceable never means asked) the cap-only reading, the cap times the clause's count plus every
-              other USD amount, where prose around a readable cap never asks; a gate priced so prints `; cap-only
-              pricing, the full reading refused: <the full reading's why>` at the end of its detail below, and
-              its annotation, log line and ASKs are a fully priced gate's. It is priced against the limit
+              its cap or at its widest, never pass): the full exposure() reading, else (p37-4, ADR 0034's
+              2026-11-05 amendment: unpriceable never means asked) the cap-only reading, the cap times the
+              clause's count plus every other USD amount, where prose around a readable cap never asks; a gate
+              priced so prints `; cap-only pricing, the full reading refused: <the full reading's why>` at the end
+              of its detail below, and its annotation, log line and ASKs are a fully priced gate's; else (p48-4,
+              ADR 0034's 2026-11-13 amendment) the widest reading, every amount the gate's line names at its
+              widest (a range at its top, a rate times its stated most count, a split summed, another currency at
+              its ceiling rate), one amount straight after a cap word; a gate priced so prints `; widest pricing,
+              the cap-only reading refused: <the cap-only reading's why>` at the end of its detail, the
+              annotation, log line and ASKs again a fully priced gate's. It is priced against the limit
               `spend_approval_usd`, resolved task frontmatter -> rollout frontmatter -> rollouts.toml
               (_resolved_settings: file:repo, file:defaults) -> built-in 0, which is off (sources `task`,
               `rollout`, `file:repo`, `file:defaults`, `built-in`; _retry_budget's order), lazily: at a slug's
@@ -919,8 +924,8 @@ Subcommands:
               otherwise the remaining bullets stay pending (rewritten without the covered ones) and the note
               stays gate-pending. Each remaining gate prints `ASK: <slug>: <gate>: <why>` (with a built-in
               limit, a priceable gate's why is `standing approval off (built-in 0): set [defaults]
-              spend_approval_usd in ~/.config/thread/rollouts.toml`; a gate neither reading prices asks with the
-              cap-only reading's why). A note carrying "## Gate bounce (awaiting
+              spend_approval_usd in ~/.config/thread/rollouts.toml`; a gate none of the three readings prices asks
+              with the cap-only reading's why). A note carrying "## Gate bounce (awaiting
               sign-off)" (ADR 0038: the plan judge bounced its plan, reconcile wrote the section) has nothing
               covered, whatever its gates price: each gate is an ASK whose why starts `the plan judge bounced
               this plan (ADR 0038; …)` and ends with the pricer's reading, and nothing is written (exit 3). Lachy's
@@ -13332,19 +13337,20 @@ def _credential_verdict(g, ctx, gi):
 def _approve_standing(args) -> int:
     """approve-gates --standing (ADR 0034, ADR 0063, p37-4; the module docstring): sign each pending gate the standing
     approval covers, leave the rest pending with an ASK line. A spend gate is covered when its standing reading
-    (gated_inputs.covered(): the full reading, else the cap-only one, p37-4) prices within the resolved limit and,
-    unless it is already in `## Approved gates`, when this calendar month's standing approvals (_StandingLedger, the
-    month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A credential gate on a note the
-    plan judge never bounced is covered when it reads as the repo's declared test credential, the rollout's
-    env_bootstrap refreshes the declared file with a plain cp, and each key it names is in that file with its declared
-    form (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line, no spend lock, and the limit
-    is never resolved for it, so the class is its own switch. A credential gate holding a Login word and no env token
-    (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered when every Login it names is
-    a declared test Login and the reading finds nothing beside it (gated_inputs.login_reading: no deny word, env key,
-    other credential word, `@` or conjunction), under the same no-limit rules. The limit resolves
-    lazily, at a slug's first gate that is not such a credential gate. A slug's new spend signings are logged in the
-    rollout note's `## Needs-you log` first, then its task note is written, so a failure between the two over-counts
-    (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock included)."""
+    (gated_inputs.covered(): the full reading, else the cap-only one, p37-4, else the widest one, p48-4) prices within
+    the resolved limit and, unless it is already in `## Approved gates`, when this calendar month's standing approvals
+    (_StandingLedger, the month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A
+    credential gate on a note the plan judge never bounced is covered when it reads as the repo's declared test
+    credential, the rollout's env_bootstrap refreshes the declared file with a plain cp, and each key it names is in
+    that file with its declared form (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line,
+    no spend lock, and the limit is never resolved for it, so the class is its own switch. A credential gate holding a
+    Login word and no env token (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered
+    when every Login it names is a declared test Login and the reading finds nothing beside it
+    (gated_inputs.login_reading: no deny word, env key, other credential word, `@` or conjunction), under the same
+    no-limit rules. The limit resolves lazily, at a slug's first gate that is not such a credential gate. A slug's new
+    spend signings are logged in the rollout note's `## Needs-you log` first, then its task note is written, so a
+    failure between the two over-counts (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held
+    standing-spend lock included)."""
     if not args.rollout:
         print("ERROR: --standing needs --rollout", file=sys.stderr)
         return 1
@@ -13461,6 +13467,8 @@ def _approve_standing(args) -> int:
                                 f"{limit['source']}")
                 if verdict.get("capOnly"):   # p37-4: priced from its cap alone; the stdout detail names the refusal
                     spend_detail += f"; cap-only pricing, the full reading refused: {verdict['capOnly']}"
+                if verdict.get("widest"):   # p48-4: priced at its widest; never with capOnly (standing_exposure)
+                    spend_detail += f"; widest pricing, the cap-only reading refused: {verdict['widest']}"
                 if norm in approved:
                     covered.append((g, spend_ann, spend_detail))   # signed already, or listed twice: no month check, no log
                     continue
@@ -16686,7 +16694,8 @@ def _parser():
                     help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
                          "rollouts.toml, built-in 0 = off), and while this calendar month's standing-approved spend "
                          "(every rollout note's ## Needs-you log) stays within the same limit; each signing is logged "
-                         "there (a gate the full reading cannot price is priced from its cap alone, p37-4); the "
+                         "there (a gate the full reading cannot price is priced from its cap alone, p37-4, and one "
+                         "neither prices at its widest, p48-4); the "
                          "credential gates the repo's declared test-credential class covers (rollouts.toml "
                          "test_credentials, each key proved present in its file; ADR 0063); and the credential gates "
                          "naming only a declared test Login ([defaults] test_logins, p37-4); the rest stay pending as "

@@ -96,8 +96,11 @@ calendar-month line: a gate it covers still reaches you once this month's
 standing approvals, summed from every rollout note's `## Needs-you log`, would
 pass it with that gate. Spend is never asked ahead of a run. A gate whose
 wording the full exposure reading cannot price is priced from its stated cap
-alone (the cap times its count, plus every other USD amount it names), so
-only a gate with no readable cap, or one over the line, reaches you.
+alone (the cap times its count, plus every other USD amount it names); one
+whose cap cannot be read either is read at its widest (every amount its line
+names: a range at its top, a rate times its stated most count, a split
+summed, another currency at its ceiling rate), so only a gate with no amount
+and cap it can read at its widest, or one over the line, reaches you.
 `skills/_shared/scripts/gated_inputs.py` holds the exposure reading it applies
 and schedule's gated-input sweep.
 

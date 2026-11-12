@@ -40,7 +40,13 @@
 #          irreversible gate still ask. The dummy Claude Login, declared in `[defaults] test_logins` (schema 5), signs
 #          its credential gate (on a serial note too: it is machine-wide); another Login, a deny word, another
 #          credential, an `@` or a conjunction beside it, a bounce and no declaration ask; a per/each on the cap
-#          itself asks; a refused file is exit 1; an env token keeps the ADR 0063 path.
+#          itself asks; a refused file is exit 1; an env token keeps the ADR 0063 path. Since p48-4 `cap 1 USD x 3`
+#          signs at its widest (US$3) and the A$500 gate prices at its ceiling rate (US$586, over the line).
+#   S12    a spend plainly under the limit never asks (p48-4, ADR 0034's 2026-11-13 amendment): the Verify's four
+#          verbatim gates (thread-skill-rollout-2026-10-26's two, the 11-03 smart-slider two) sign as before, with no
+#          widest suffix; the ruling's split, range, counted rate and other currency sign at their widest, each detail
+#          naming the cap-only reading's why, each annotated with its total exposure; an undecided cap, a further
+#          rate, a count in another unit and an approximate amount still ask; a bounced note signs none of them.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -761,37 +767,41 @@ ok "$(section a '## Approved gates')" "- $STEER (approved $DATE under the standi
 ok "$(section ro '## Needs-you log')" "$(logl a 1 1 "$STEER")" "S11a: one Needs-you log line, US\$1"
 ok "$(fm a status)" "status: in_progress" "S11a: it flips to in_progress"
 
-# S11b: prose around a readable cap signs at the cap; a rate, multiplier, plural, per-Login word, other currency, a
-# malformed amount, no cap, and an amount over the line all still ask; irreversible gates still ask; a per/each on the
-# cap itself asks whatever follows it (`per GB`, `each for the images`: review round 1, never priced as a bare total)
+# S11b: prose around a readable cap signs at the cap; a rate, plural, per-Login word, malformed amount, no cap, and an
+# amount over the line all still ask; irreversible gates still ask; a per/each on the cap itself asks whatever follows
+# it (`per GB`, `each for the images`: review round 1, never priced as a bare total). Since p48-4 a multiplier on the
+# cap signs at its widest, and another currency prices at its ceiling rate (A$500 reads 586, over the line).
 scen s11b
 S11_SIGN=('spend: probe — cap 1 USD (Haiku 4.5)' 'spend: probe — cap 1 USD for the 3 probes' 'spend: soft probe — cap 1 USD')
 S11_WHY=('unrecognised clause: (Haiku 4.5)' 'unrecognised clause: for the 3 probes' 'widening word outside the cap clause: soft')
-S11_ASK=('spend: probe — cap 1 USD x 3' 'spend: probe, US$500 per run — cap 1 USD' 'spend: probe, US$5k per run — cap 1 USD'
+S11_WIDE=('spend: probe — cap 1 USD x 3')
+S11_ASK=('spend: probe, US$500 per run — cap 1 USD' 'spend: probe, US$5k per run — cap 1 USD'
   'spend: fast mode — cap 50 USD, per Login per month' 'spend: fast mode at US$2 per-Login — cap 5 USD'
   'spend: probe, A$500 of credits — cap 1 USD' 'spend: 3 runs — cap 500 USD' 'spend: probe — no cap' "$FAST"
   "irreversible: wipe the dummy Login's history" 'spend: egress — cap US$0.10 per GB'
   'spend: probes — cap US$5 each for the images')
-S11_ASKWHY=('unrecognised clause: x 3' "total exposure US\$501 is over the standing approval's US\$200 (file:defaults)"
+S11_ASKWHY=("total exposure US\$501 is over the standing approval's US\$200 (file:defaults)"
   'malformed amount: US$5k' 'per-Login cap with no Login count' 'per-Login cap with no Login count'
-  'non-USD or ambiguous currency: A$5' "total exposure US\$500 is over the standing approval's US\$200 (file:defaults)"
+  "total exposure US\$586 is over the standing approval's US\$200 (file:defaults)"
+  "total exposure US\$500 is over the standing approval's US\$200 (file:defaults)"
   'no cap clause' 'per-Login cap with no Login count' 'not a spend gate' 'unrecognised clause: per GB'
   'unrecognised clause: each for the images')
 ord=""; i=0
-for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[g$i]]"$'\n'; done
+for g in "${S11_SIGN[@]}" "${S11_WIDE[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[g$i]]"$'\n'; done
 ORDER="$ord" mkro
 i=0; slugs=""
-for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); mkt "g$i" gate-pending; gate "g$i" "$g"; slugs="$slugs${slugs:+,}g$i"; done
+for g in "${S11_SIGN[@]}" "${S11_WIDE[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); mkt "g$i" gate-pending; gate "g$i" "$g"; slugs="$slugs${slugs:+,}g$i"; done
 HH="$H200" sa "$slugs"
 ok "$rc" 3 "S11b: the readable caps sign, the rest ask: exit 3"
 for k in 0 1 2; do
   has "$out" "g$((k + 1)): gate approved under the standing approval: ${S11_SIGN[$k]} (exposure US\$1 of US\$200, file:defaults; $CAPONLY ${S11_WHY[$k]})" "S11b: ${S11_SIGN[$k]} signs at US\$1 from its cap"
 done
+has "$out" "g4: gate approved under the standing approval: ${S11_WIDE[0]} (exposure US\$3 of US\$200, file:defaults; widest pricing, the cap-only reading refused: unrecognised clause: x 3)" "S11b: ${S11_WIDE[0]} signs at its widest, US\$3 (p48-4)"
 for k in $(seq 0 $((${#S11_ASK[@]} - 1))); do
-  has "$out" "ASK: g$((k + 4)): ${S11_ASK[$k]}: ${S11_ASKWHY[$k]}" "S11b: ${S11_ASK[$k]} asks (${S11_ASKWHY[$k]})"
+  has "$out" "ASK: g$((k + 5)): ${S11_ASK[$k]}: ${S11_ASKWHY[$k]}" "S11b: ${S11_ASK[$k]} asks (${S11_ASKWHY[$k]})"
 done
 ok "$(printf '%s\n' "$out" | grep -c '^ASK: ')" "${#S11_ASK[@]}" "S11b: one ASK per gate that cannot be signed"
-ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "3|3" "S11b: three log lines, month to date US\$3 of the US\$200 line"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "4|6" "S11b: four log lines, month to date US\$6 of the US\$200 line"
 
 # S11c: the dummy Claude Login, a declared test Login, signs itself; a deny word, env key, credential noun, `@` or
 # conjunction beside it, or another Login, asks (a second thing in plain prose with none of these is the residual
@@ -866,6 +876,66 @@ mkro; mkt a gate-pending; gate a "$CLS_LOGIN"
 HH="$HL" sa a
 ok "$rc" 3 "S11g: an env-token gate naming a Login asks: exit 3"
 has "$out" "ASK: a: $CLS_LOGIN: $OFF" "S11g: … with the class path's why, never the Login reading's"
+
+# ── S12: a spend plainly under the limit never asks (p48-4, ADR 0034's 2026-11-13 amendment) ─────────────────────────
+# The Verify: every spend gate under US$200 of thread-skill-rollout-2026-10-26 (p27-5's two) and of the 2026-11-03
+# smart-slider rollout, verbatim from their archived notes' `## Approved gates`, ` (approved …)` stripped. They sign
+# before p48-4 too (a regression pin), so none carries the widest suffix.
+WIDEST='widest pricing, the cap-only reading refused:'
+V27='spend: scored `claude plugin eval` runs through `make evals` on Opus model and judge with transcripts kept, one invocation per case: `make evals EVAL_ARGS="--case <name> --runs 3 --concurrency 3 --max-cost-usd 5 --trust-plugin --keep-temp --output-dir <scratch>/invN --report <scratch>/invN/report.html --json <scratch>/invN/run.json"` for handoff-ends-with-next, handoff-router-dispatch-skips-next and handoff-manual-dry-run, the same with `--runs 1` for handoff-fork-now, then at most one reserve re-run of one case after a B1/B2 fix — cap 15 USD'
+V27R='spend: one scored `make evals` invocation of handoff-router-dispatch-skips-next at --runs 3 (Opus model and judge, --trust-plugin --keep-temp, scratch output) on the branch head, to score its amended grader — cap 3 USD'
+VSS1='spend: AWS Cost Explorer API requests — cap 5 USD'
+VSS2='spend: AWS CloudWatch Logs Insights queries and S3 reads for the caught-upload corpus and end-to-end timings — cap 10 USD'
+
+# S12a: the Verify's four gates sign at US$20, 3, 5 and 10, exit 0
+scen s12a
+ORDER=$'- [[v1]]\n- [[v2]]\n- [[v3]]\n- [[v4]]' mkro
+mkt v1 gate-pending; gate v1 "$V27"; mkt v2 gate-pending; gate v2 "$V27R"
+mkt v3 gate-pending; gate v3 "$VSS1"; mkt v4 gate-pending; gate v4 "$VSS2"
+HH="$H200" sa v1,v2,v3,v4
+ok "$rc" 0 "S12a: the Verify's four gates sign: exit 0"
+has "$out" "v1: gate approved under the standing approval: $V27 (exposure US\$20 of US\$200, file:defaults; $CAPONLY per/each outside the cap clause: per) [written]" "S12a: p27-5's gate signs at US\$20 from its cap"
+has "$out" "v2: gate approved under the standing approval: $V27R (exposure US\$3 of US\$200, file:defaults; $CAPONLY a number outside the cap clause: 3) [written]" "S12a: p27-5's re-score signs at US\$3 from its cap"
+has "$out" "v3: gate approved under the standing approval: $VSS1 (exposure US\$5 of US\$200, file:defaults) [written]" "S12a: smart-slider's US\$5 gate signs in full"
+has "$out" "v4: gate approved under the standing approval: $VSS2 (exposure US\$10 of US\$200, file:defaults) [written]" "S12a: smart-slider's US\$10 gate signs in full"
+hasnt "$out" "widest pricing" "S12a: … none priced at its widest"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9.]*\) of.*/\1/')" "4|38" "S12a: four log lines, month to date US\$38"
+
+# S12b: the ruling's wordings sign at their widest; what the widest reading cannot read still asks (S11b pins the per-GB,
+# no-cap and per-Login asks through all three readings)
+scen s12b
+W_SIGN=('spend: x — cap 10 USD for the runs; cap 5 USD for the judge' 'spend: x — cap US$40 to US$60'
+  'spend: x — cap US$0.50 per call, at most 40 calls' 'spend: x — cap 30 AUD')
+W_USD=(15 60 20 35.10)
+W_WHY=('2 cap clauses' 'range: US$40 to US$60' 'unrecognised clause: per call' 'no cap clause')
+W_ASK=('spend: x — cap TBD; last run cost US$10' 'spend: x — cap US$0.50 per call, at most 40 calls per day'
+  'spend: x — cap US$1 per run, up to 10 runs across 3 models' 'spend: x — cap ~US$5')
+W_ASKWHY=('no cap clause' 'unrecognised clause: per call' 'unrecognised clause: per run' 'no cap clause')
+ord=""; i=0
+for g in "${W_SIGN[@]}" "${W_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[w$i]]"$'\n'; done
+ORDER="$ord" mkro
+i=0; slugs=""
+for g in "${W_SIGN[@]}" "${W_ASK[@]}"; do i=$((i + 1)); mkt "w$i" gate-pending; gate "w$i" "$g"; slugs="$slugs${slugs:+,}w$i"; done
+HH="$H200" sa "$slugs"
+ok "$rc" 3 "S12b: the widest prices sign, the rest ask: exit 3"
+for k in 0 1 2 3; do
+  has "$out" "w$((k + 1)): gate approved under the standing approval: ${W_SIGN[$k]} (exposure US\$${W_USD[$k]} of US\$200, file:defaults; $WIDEST ${W_WHY[$k]}) [written]" "S12b: ${W_SIGN[$k]} signs at its widest, US\$${W_USD[$k]}"
+  ok "$(section "w$((k + 1))" '## Approved gates')" "- ${W_SIGN[$k]} (approved $DATE under the standing approval: total exposure US\$${W_USD[$k]}, limit US\$200 from file:defaults)" "S12b: … annotated with its total exposure"
+done
+for k in 0 1 2 3; do
+  has "$out" "ASK: w$((k + 5)): ${W_ASK[$k]}: ${W_ASKWHY[$k]}" "S12b: ${W_ASK[$k]} asks (${W_ASKWHY[$k]})"
+done
+ok "$(printf '%s\n' "$out" | grep -c '^ASK: ')" 4 "S12b: one ASK per gate the widest reading cannot read"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9.]*\) of.*/\1/')" "4|130.10" "S12b: four log lines, month to date US\$130.10"
+
+# S12c: a bounced note signs none of them, the widest gate included, naming the pricer's widest reading
+scen s12c
+mkro; mkt a gate-pending; gate a "${W_SIGN[0]}"
+printf '\n%s\n\nbounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce\n' "$BOUNCE_H" >> "$D/a.md"
+before=$(cat "$D/a.md")
+HH="$H200" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S12c: a bounced note signs nothing (exit 3), nothing written"
+has "$out" "ASK: a: ${W_SIGN[0]}: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: exposure US\$15" "S12c: the split gate asks, its pricer reading US\$15"
 
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"

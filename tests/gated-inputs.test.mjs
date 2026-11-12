@@ -23,6 +23,11 @@
 //   the cap-only clause signs prose and still asks on a rate, multiplier, %, plus, widening word, currency or per-unit
 //   noun; the accepted residuals; and the test-Login reading, each why (an `@` or a conjunction beside the Login
 //   asks) and its residual (a second thing in plain prose);
+// - p48-4 (ADR 0034's 2026-11-13 amendment, a spend plainly under the limit never asks): the ruling's wordings (a split,
+//   plus, a range, a counted rate, a multiplier, another currency, a bound synonym) priced at their widest, each with
+//   the cap-only reading's why as `widest`; the ceiling table; the CLI's widest line; WIDENING's `±` and uncapped
+//   words asking in both earlier readings; each widest step's why; the Verify corpus (a regression pin); per-unit gates
+//   left to the full reading; the residuals r1, r2 and r5 and the named over-asks;
 // - the test-credential reading (ADR 0063): each step's why, in order (the class-independent steps first); p8-1's two
 //   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
 //   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
@@ -72,7 +77,14 @@ for req in json.loads(sys.argv[3]):
     elif op == "covered":
         r = gi.covered(req["gate"], req["limit"]); out.append({"covered": r["covered"], "usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"]})
     elif op == "standing":
-        r = gi.standing_exposure(req["gate"]); out.append({"usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"], "capOnly": r["capOnly"]})
+        r = gi.standing_exposure(req["gate"]); o = {"usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"], "capOnly": r["capOnly"]}
+        if r.get("widest"):
+            o["widest"] = r["widest"]
+        out.append(o)
+    elif op == "widest":
+        r = gi.widest_exposure(req["gate"]); out.append({"usd": None if r["usd"] is None else str(r["usd"]), "why": r["why"]})
+    elif op == "ceiling":
+        out.append({k: str(v) for k, v in gi.CEILING_USD.items()})
     elif op == "login":
         out.append(gi.login_reading(req["gate"], req.get("logins")))
     elif op == "has_login":
@@ -524,7 +536,9 @@ test('ADR 0038: `exposure -` agrees with standing_exposure() and holds under LC_
   assert.deepEqual(cli(STEER + '\n').out, { usd: '1', why: '' }, 'the verbatim Steer gate prints exactly its cap, no capOnly key')
   const c = cli(P19_10_ONE_LINE + '\r\n', undefined, { LC_ALL: 'C', LANG: 'C' })
   assert.deepEqual(c.out, { usd: '24', why: '' }, 'a CRLF line under LC_ALL=C')
-  assert.equal(cli('spend: x — cap 2 USD for the €-priced tier').stdout.includes('€'), true, 'the why is UTF-8, never ASCII-escaped')
+  // p48-4: a `€` with no number beside it is no amount, so the widest reading prices the bare gate at 2; `, soft` keeps
+  // it asking, its why the cap-only reading's
+  assert.equal(cli('spend: x — cap 2 USD for the €-priced tier, soft').stdout.includes('€'), true, 'the why is UTF-8, never ASCII-escaped')
 })
 
 test('ADR 0038: `exposure` misuse exits 2 naming the stdin form; two lines ask; bad UTF-8 exits 1', () => {
@@ -648,7 +662,7 @@ test('p37-4 a per/each/every on the cap itself asks in both readings, whatever f
     ['spend: x — cap US$5 per org', 'per org'], ['spend: x — cap US$2 per sample', 'per sample'],
     ['spend: probes — cap US$5 each for the images', 'each for the images'],
     ['spend: probes — cap US$5 each across the models', 'each across the models'],
-    ['spend: x — cap US$2 per developer for 3 developers', 'per developer for 3 developers'],
+    // p48-4 moved `cap US$2 per developer for 3 developers` to its own block: the widest reading counts it, 6
     ['spend: x — cap US$5 per generated image', 'per generated image']]
   const got = py(gates.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'standing', gate }]))
   gates.forEach(([gate, c], i) => {
@@ -680,9 +694,10 @@ test('p37-4 the cap-only clause: prose beside the cap signs at it; a rate, multi
   const sign = ['(Haiku 4.5)', 'for the 3 probes', 'for 3 runs', 'for 10k tokens', 'for both probes']
   const signGot = py(sign.map((c) => ({ op: 'standing', gate: `spend: probe — cap 1 USD ${c}` })))
   sign.forEach((c, i) => assert.deepEqual(signGot[i], { usd: '1', why: '', capOnly: `unrecognised clause: ${c}` }, c))
-  // still asks, with the full reading's why
-  const ask = ['x 3', '3x', 'plus 20%', 'plus 30 more', '+ 2', 'per big run', '/1k tokens', 'a day', 'for 3 Logins', 'for the dummy Login',
-    '(US$15 with retries)', 'soft', 'before tax', 'each', 'per day', 'every run', 'daily', 'three times', 'per new Login']
+  // still asks, with the full reading's why (p48-4 moved `x 3`, `3x`, `three times`, `for the dummy Login` and `(US$15
+  // with retries)` to its own block: the widest reading prices them)
+  const ask = ['plus 20%', 'plus 30 more', '+ 2', 'per big run', '/1k tokens', 'a day', 'for 3 Logins',
+    'soft', 'before tax', 'each', 'per day', 'every run', 'daily', 'per new Login']
   const askGot = py(ask.flatMap((c) => [{ op: 'exposure', gate: `spend: probe — cap US$1 ${c}` }, { op: 'standing', gate: `spend: probe — cap US$1 ${c}` }]))
   ask.forEach((c, i) => {
     assert.deepEqual(askGot[2 * i], { usd: null, why: `unrecognised clause: ${c}` }, `${c}: full`)
@@ -694,11 +709,9 @@ test('p37-4 the cap-only clause: prose beside the cap signs at it; a rate, multi
 })
 
 test('p37-4 cap-only outside the clause: rules 1-4 and 6, plurals and per-unit words ask; other prose reads as the cap (accepted residuals)', () => {
+  // p48-4 moved `cap 1 USD and cap 2 USD`, `cap 30 AUD`, `cap US$1k`, `cap US$40 to US$60`, `A$500 of credits` and
+  // `probe in dollars` to its own block: the widest reading prices them
   const ask = [['credential: the dummy Login — cap 1 USD', 'not a spend gate'], ['spend: probe — no cap', 'no cap clause'],
-    ['spend: x — cap 1 USD and cap 2 USD', '2 cap clauses'], ['spend: x — cap 30 AUD', 'no cap clause'],
-    ['spend: x — cap US$1k', 'malformed amount: US$1k'], ['spend: x — cap US$40 to US$60', 'range: US$40 to US$60'],
-    ['spend: probe, A$500 of credits — cap 1 USD', 'non-USD or ambiguous currency: A$5'],
-    ['spend: probe in dollars — cap 1 USD', 'non-USD or ambiguous currency: dollars'],
     ['spend: fast mode on the Logins — cap 1 USD', 'plural unit outside the cap clause: Logins'],
     ['spend: fast mode — cap 50 USD, per Login per month', 'per-Login cap with no Login count'],
     ['spend: fast mode at US$2 per-Login — cap 5 USD', 'per-Login cap with no Login count'],
@@ -715,6 +728,205 @@ test('p37-4 cap-only outside the clause: rules 1-4 and 6, plurals and per-unit w
   waived.forEach(([gate, why], i) => assert.deepEqual(waivedGot[i], { usd: '1', why: '', capOnly: why }, gate))
   assert.deepEqual(standing('spend: CI on every push — cap 1 USD'), { usd: '1', why: '', capOnly: '' }, 'every push: x1 in full already')
   assert.equal(num(standing(PROBE).usd), 9, "control: p18-7's `every signed-in Claude Login` still passes in full")
+})
+
+// ---- p48-4: a spend plainly under the limit never asks (ADR 0034's 2026-11-13 amendment) ------------------------------
+// A gate neither earlier reading prices is read at its widest: every amount its line names (a range at its top, a rate
+// times its stated most count, a split summed, another currency at its ceiling rate), so long as one amount comes
+// straight after a cap word. `widest` carries the cap-only reading's why. The p37-4 pins above that still read null
+// (per developer, each for the images, per day, every run, daily, a day, /1k tokens, plus 30 more, + 2, US$5k per run,
+// …) now run through all three readings.
+
+// [gate, usd at its widest, the cap-only reading's why]
+const P48_RULING = [
+  ['spend: x — cap 10 USD for the runs; cap 5 USD for the judge', '15', '2 cap clauses'],
+  ['spend: x — cap US$10 plus US$5 for the judge', '15', 'unrecognised clause: plus US$5 for the judge'],
+  ['spend: probe — cap US$1 (US$15 with retries)', '16', 'unrecognised clause: (US$15 with retries)'],
+  ['spend: x — cap US$40 to US$60', '60', 'range: US$40 to US$60'],
+  ['spend: x — cap 10-15 USD', '15', 'no cap clause'],
+  ['spend: x — cap US$0.50 per call, at most 40 calls', '20', 'unrecognised clause: per call'],
+  ['spend: x — cap 2 USD per run for 5 runs', '10', 'unrecognised clause: per run for 5 runs'],
+  ['spend: x — cap 2 USD per run for five runs', '10', 'unrecognised clause: per run for five runs'],
+  ['spend: x — cap US$1 each, at most 5 images', '5', 'unrecognised clause: each'],
+  ['spend: x — cap US$1 per call, at most 10 calls; cap US$2 per run, at most 5 runs', '20', '2 cap clauses'],
+  ['spend: x — cap US$0.50 per call, 40-50 calls', '25', 'unrecognised clause: per call'],
+  ['spend: gpt-4.1 calls — cap 10 USD; cap US$0.01 per call, at most 500 calls', '15', '2 cap clauses'],
+  ['spend: probe — cap 1 USD x 3', '3', 'unrecognised clause: x 3'],
+  ['spend: probe — cap US$1 three times', '3', 'unrecognised clause: three times'],
+  ['spend: x — cap 10 USD; cap 5 USD, run twice', '30', '2 cap clauses'],
+  ['spend: x — cap US$2 per developer for 3 developers', '6', 'unrecognised clause: per developer for 3 developers'],
+  ['spend: x — up to US$5', '5', 'no cap clause'],
+  ['spend: x — max A$30', '35.10', 'no cap clause'],
+  ['spend: x — budget of €20', '33.80', 'no cap clause'],
+  ['spend: x — limit: US$10', '10', 'no cap clause'],
+]
+
+test('p48-4 the ruling\'s wordings price at their widest, `widest` naming the cap-only refusal, and are covered at 200', () => {
+  const got = py(P48_RULING.flatMap(([gate]) => [{ op: 'standing', gate }, { op: 'covered', gate, limit: 200 }]))
+  P48_RULING.forEach(([gate, usd, widest], i) => {
+    assert.deepEqual(got[2 * i], { usd, why: '', capOnly: '', widest }, gate)
+    assert.deepEqual([got[2 * i + 1].covered, got[2 * i + 1].usd], [true, usd], `${gate}: covered at 200`)
+  })
+})
+
+test('p48-4 the ceiling table, and another currency read at its ceiling rate (a word at the widest currency it names)', () => {
+  const cur = [['spend: x — cap 30 AUD', '35.10'], ['spend: x — cap A$30', '35.10'], ['spend: x — cap €20', '33.80'],
+    ['spend: x — cap £10', '22.30'], ['spend: x — cap 50 dollars', '58.50'], ['spend: x — cap 1000 JPY', '14'],
+    ['spend: x — cap 50 cents', '0.85']]
+  const [table, ...got] = py([{ op: 'ceiling' }, ...cur.map(([gate]) => ({ op: 'standing', gate }))])
+  assert.deepEqual(table, { USD: '1', AUD: '1.17', NZD: '0.93', CAD: '1.16', EUR: '1.69', GBP: '2.23', JPY: '0.0140' })
+  cur.forEach(([gate, usd], i) => assert.deepEqual(got[i], { usd, why: '', capOnly: '', widest: 'no cap clause' }, gate))
+})
+
+test('p48-4 the CLI prints the widest amount with an empty why, never the widest key', () => {
+  const r = cli('spend: x — cap 30 AUD\n')
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stdout, '{"usd": "35.10", "why": ""}\n')
+})
+
+// Round 2: WIDENING gains `±` and the uncapped words, so inside the cap clause both earlier readings ask on them (each
+// signed at 10 before p48-4). Control: the widening test's `cap US$50; soft, no hard cap` stays covered at 50, unedited
+// (outside the clause the cap-only reading still waives them, p37-4's residual).
+test('p48-4 WIDENING gains `±` and the uncapped words: on the cap they ask in both earlier readings', () => {
+  const cases = [['spend: x — cap US$10 ± 2', 'unrecognised clause: ± 2'],
+    ['spend: x — cap US$10 (no limit on retries)', 'unrecognised clause: (no limit on retries)'],
+    ['spend: x — cap US$10 (unlimited retries)', 'unrecognised clause: (unlimited retries)']]
+  const got = py(cases.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'standing', gate }, { op: 'covered', gate, limit: 200 }]))
+  cases.forEach(([gate, why], i) => {
+    assert.deepEqual(got[3 * i], { usd: null, why }, `${gate}: full`)
+    assert.deepEqual(got[3 * i + 1], { usd: null, why, capOnly: '' }, `${gate}: standing`)
+    assert.equal(got[3 * i + 2].covered, false, `${gate}: never covered`)
+  })
+})
+
+test('p48-4 still asks: each widest step names its why, and the standing reading keeps the cap-only why with no widest key', () => {
+  const steps = [
+    ['credential: x — cap 1 USD', 'not a spend gate'],
+    ['spend: x — cap US$5 per Login across 3 Logins; cap US$1 for the judge', 'a per-unit word: per Login'],
+    ['spend: x — cap US$5 plus 20%', 'a percentage: %'],
+    ['spend: x — cap US$50 soft', 'a widening word: soft'],
+    ['spend: x — US$10 so far, no cap', 'a widening word: no cap'],
+    ['spend: x — cap TBD; last run cost US$10', 'a widening word: cap TBD'],
+    ['spend: OpenAI usage — no limit set; last month US$12', 'a widening word: no limit'],
+    ['spend: x — not capped; US$10 so far', 'a widening word: not capped'],
+    ['spend: x — without a cap; US$10 so far', 'a widening word: without a cap'],
+    ['spend: x — cap: none; US$10 so far', 'a widening word: cap: none'],
+    ['spend: probe — no cap', 'a widening word: no cap'],
+    ['spend: x — cap US$10 ± 2', 'a widening word: ±'],
+    ['spend: x — cap 10 USD; cap 5 USD, typically', 'a widening word: typically'],
+    ['spend: x — cap 30 AUD, unlimited retries', 'a widening word: unlimited'],
+    ['spend: x — cap US$5; cap US$1 plus 30 more', 'a widening word: plus'],
+    ['spend: x — cap fifty USD', 'an amount in words: fifty USD'],
+    ['spend: x — cap 5000 minor units', 'minor units: 5000 minor units'],
+    ['spend: x — cap ¥1000', 'an unknown or ambiguous currency: ¥'],
+    ['spend: x — cap HK$5', 'an unknown or ambiguous currency: HK$'],
+    ['spend: x — cap ~US$5', 'an approximate amount: ~'],
+    ['spend: x — cap c. US$10', 'an approximate amount: c.'],
+    ['spend: x — cap est. US$10', 'an approximate amount: est.'],
+    ['spend: x — cap ≈US$10', 'an approximate amount: ≈'],
+    ['spend: x — cap US$5x', 'malformed amount: US$5x'],
+    ['spend: some API', 'it names no amount'],
+    ['spend: x — US$10 for the runs', 'it states no cap'],
+    ['spend: rate-limit probe — US$10', 'it states no cap'],
+    ['spend: x — run `--max-cost-usd 4`; US$10 so far', 'it states no cap'],
+    ['spend: x — the cap is US$10', 'it states no cap'], // a named over-ask: a word between the cap and its amount
+    ['spend: x — cap US$1 before discounts', 'a widening word: before'],
+    ['spend: x — cap US$5 per 1k tokens', 'a rate per a count: per 1'],
+    ['spend: x — cap US$0.50 per call, at most 40 calls per day', 'a rate beyond the amounts: per day'],
+    ['spend: x — cap US$1 per call, at most 5 calls, all models', 'a count in words: all'],
+    ['spend: x — cap US$1 per run, up to 10 runs across 3 models', 'a count in another unit: 3 models'],
+    ['spend: x — cap US$0.50 per call, at most 40 runs', 'a count in another unit: 40 runs'],
+    ['spend: Haiku 4.5 — cap US$0.01 per call, at most 500 calls', 'a number the rate cannot place: 4.5'],
+    ['spend: x — cap US$0.50 per call, at most 40', 'a number the rate cannot place: 40'],
+    ['spend: x — cap US$0.10 per GB', 'a rate with no stated most: US$0.10 per GB'],
+  ]
+  const got = py(steps.flatMap(([gate]) => [{ op: 'widest', gate }, { op: 'standing', gate }]))
+  steps.forEach(([gate, why], i) => {
+    assert.deepEqual(got[2 * i], { usd: null, why }, `${gate}: widest`)
+    const st = got[2 * i + 1]
+    assert.deepEqual([st.usd, 'widest' in st, st.capOnly], [null, false, ''], `${gate}: standing null, no widest key`)
+  })
+  // the standing reading keeps the cap-only reading's why, as before p48-4
+  assert.deepEqual(got[2 * 10 + 1], { usd: null, why: 'no cap clause', capOnly: '' }, 'spend: probe — no cap')
+  assert.deepEqual(got[2 * 5 + 1], { usd: null, why: 'no cap clause', capOnly: '' }, 'cap TBD')
+})
+
+test('p48-4 over the line, now priced: A$500 of credits reads 586 and is not covered at 200', () => {
+  const gate = 'spend: probe, A$500 of credits — cap 1 USD'
+  const [st, cov] = py([{ op: 'standing', gate }, { op: 'covered', gate, limit: 200 }])
+  assert.deepEqual(st, { usd: '586', why: '', capOnly: '', widest: 'non-USD or ambiguous currency: A$5' })
+  assert.deepEqual([cov.covered, cov.usd], [false, '586'])
+})
+
+// The Verify: the spend gates under US$200 of thread-skill-rollout-2026-10-26 (p27-5's two, from its archived note's
+// `## Approved gates`) and of the 2026-11-03 smart-slider rollout, verbatim with their ` (approved …)` suffixes
+// stripped. They already sign before p48-4 (a regression pin); Cartesia's free-tier gate, the vault's own null, still
+// asks.
+const P27_5 = 'spend: scored `claude plugin eval` runs through `make evals` on Opus model and judge with transcripts kept, one invocation per case: `make evals EVAL_ARGS="--case <name> --runs 3 --concurrency 3 --max-cost-usd 5 --trust-plugin --keep-temp --output-dir <scratch>/invN --report <scratch>/invN/report.html --json <scratch>/invN/run.json"` for handoff-ends-with-next, handoff-router-dispatch-skips-next and handoff-manual-dry-run, the same with `--runs 1` for handoff-fork-now, then at most one reserve re-run of one case after a B1/B2 fix — cap 15 USD'
+const P27_5_RESCORE = 'spend: one scored `make evals` invocation of handoff-router-dispatch-skips-next at --runs 3 (Opus model and judge, --trust-plugin --keep-temp, scratch output) on the branch head, to score its amended grader — cap 3 USD'
+const SS_COST = 'spend: AWS Cost Explorer API requests — cap 5 USD'
+const SS_SPEED = 'spend: AWS CloudWatch Logs Insights queries and S3 reads for the caught-upload corpus and end-to-end timings — cap 10 USD'
+const CARTESIA = 'spend: Cartesia API usage (adapter live verification: one voices listing + one short timestamp-granularity synth call; then bake-off auditions) — cap: free tier only, $0 — no subscription or paid plan; if free-tier credits cannot cover the felt test, stop and report rather than upgrade.'
+
+test('p48-4 the Verify: the 10-26 and 11-03 spend gates sign at 20, 3, 5 and 10 with no widest key; Cartesia still asks', () => {
+  const gates = [[P27_5, '20'], [P27_5_RESCORE, '3'], [SS_COST, '5'], [SS_SPEED, '10']]
+  const got = py([...gates.flatMap(([gate]) => [{ op: 'standing', gate }, { op: 'covered', gate, limit: 200 }]), { op: 'standing', gate: CARTESIA }])
+  gates.forEach(([gate, usd], i) => {
+    assert.deepEqual([got[2 * i].usd, 'widest' in got[2 * i]], [usd, false], gate)
+    assert.equal(got[2 * i + 1].covered, true, `${gate}: covered at 200`)
+  })
+  assert.deepEqual(got[8], { usd: null, why: 'no cap clause', capOnly: '' }, 'Cartesia: `+` with no amount after it')
+})
+
+test('p48-4 a per-unit gate is the full reading\'s alone', () => {
+  const [counted, split, aud] = py([{ op: 'standing', gate: 'spend: x — cap US$5 per Login across 3 Logins' },
+    { op: 'standing', gate: 'spend: x — cap US$5 per Login across 3 Logins; cap US$1 for the judge' },
+    { op: 'standing', gate: 'spend: x — cap 30 AUD per Login across 2 Logins' }])
+  assert.deepEqual(counted, { usd: '15', why: '', capOnly: '' })
+  assert.deepEqual(split, { usd: null, why: '2 cap clauses', capOnly: '' })
+  assert.deepEqual(aud, { usd: null, why: 'no cap clause', capOnly: '' })
+})
+
+test('p48-4 the pins the ruling flips, and the edges: bound words, ranges, magnitudes, months and several rates', () => {
+  // moved from the p37-4 tests above (the rest of their flips are rows of P48_RULING, the currency test and A$500's)
+  const flips = [['spend: probe — cap US$1 3x', '3', 'unrecognised clause: 3x'],
+    ['spend: probe — cap US$1 for the dummy Login', '1', 'unrecognised clause: for the dummy Login'],
+    ['spend: x — cap 1 USD and cap 2 USD', '3', '2 cap clauses'],
+    ['spend: x — cap US$1k', '1000', 'malformed amount: US$1k'],
+    ['spend: probe in dollars — cap 1 USD', '1', 'non-USD or ambiguous currency: dollars']]
+  const edges = [
+    ['spend: x — cap US$5 up to US$10', '15'], // two governed amounts
+    ['spend: x — budget: €20', '33.80'], ['spend: x — limited to US$10', '10'], ['spend: x — ceiling of US$5', '5'],
+    ['spend: x — no more than US$5', '5'], // a bound word, never a negation
+    ['spend: x — capped at most US$5', '5'], // overlapping bound words
+    ['spend: x — max US$5 — 10 USD', '15'], // a spaced em dash is the clause separator: two amounts
+    ['spend: x — max US$10–5', '10'], // a descending range reads its max
+    ['spend: x — max €10 to US$15', '25.35'], // a currency on either end, the higher ceiling
+    ['spend: x — max US$5 or US$10', '10'], ['spend: x — max 5k USD', '5000'],
+    ['spend: x — max US$20/month for 3 months', '20'], // a month counts x1, as in the full reading
+    ['spend: x — max US$1 per call, at most 5 calls; max US$2 per run, at most 3 runs', '11'], // several rates sum
+    ['spend: x — cap US$10; no capacity issues', '10'], // `no capacity` is no negation
+    ['spend: x — cap (US$10)', null], ['spend: x — hard-cap US$10', null], // over-asks: it states no cap
+    ['spend: x — max US$1 per run, at most 3 runs, --runs 3', null], // a stray number on a rate line
+    ['spend: x — max US$5-a-day', null], // a hyphenated rate is still a rate beyond the amounts
+    ['spend: x — cap US$5 plus fees', null], ['spend: x — cap US$5 + one short', null],
+  ]
+  const got = py([...flips.map(([gate]) => ({ op: 'standing', gate })), ...edges.map(([gate]) => ({ op: 'widest', gate }))])
+  flips.forEach(([gate, usd, widest], i) => assert.deepEqual(got[i], { usd, why: '', capOnly: '', widest }, gate))
+  edges.forEach(([gate, usd], i) => assert.equal(got[flips.length + i].usd, usd, `${gate}: ${got[flips.length + i].why}`))
+})
+
+test('p48-4 accepted residuals r1, r2 and r5, and the named over-asks', () => {
+  const cases = [
+    ['spend: x — cap 30 AUD for 3 runs', '35.10'], // r1: a count beside a total, on a line with no rate, reads once
+    ['spend: x — cap 10 USD; cap 5 USD; 1000 rupees for the API', '15'], // r2: an unknown currency word is not read…
+    ['spend: x — cap US$1 per call, at most 5 calls; 1000 rupees', null], // …but on a rate line it is a count in another unit
+    ['spend: x — cap $10; cap $5', '15'], // r5: a bare $ is USD
+    ['spend: x — cap 10 USD; cap 5 USD for the judge, per the brief', null], // over-ask: prose per
+    ['spend: soft launch probe — cap 10 USD; cap 5 USD', null], // over-ask: a widening word in the description
+  ]
+  const got = py(cases.map(([gate]) => ({ op: 'standing', gate })))
+  cases.forEach(([gate, usd], i) => assert.equal(got[i].usd, usd, `${gate}: ${got[i].why}`))
 })
 
 // ---- the test-Login reading (p37-4) ---------------------------------------------------------------------------------

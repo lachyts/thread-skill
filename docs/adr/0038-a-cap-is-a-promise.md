@@ -16,6 +16,10 @@ refuses is priced from its readable cap, in a form that keeps both of this ADR's
 bounced still signs nothing, and the per-Login gate behind a comma still asks (rule 7(ix)). A judge-less mid-run gate
 now signs at its cap plus its USD amounts. `exposure -` prints that standing reading, so the judge never bounces a
 gate whose cap reads.)*
+*(Amended 2026-11-13 by p48-4, ADR 0034's amendment of that date: a non-USD cap, a range, a split and a counted rate
+now price at their widest, so decision 2's "a gate the pricer can never price (a non-USD cap, a per-Login cap with no
+known count)" narrows to a gate that names no amount the widest reading can read or none a cap word governs, a rate
+with no stated most, or a per-Login cap with no known count; `exposure -` prints the widest amount.)*
 *(Superseded in part by ADR 0075, 2026-11-07: d3 is superseded. No rollout ever pushes, so an undelivered needs-you
 push has nothing to fall back from; the `[notify]` table is retired, tolerated with one warning and never refused.)*
 

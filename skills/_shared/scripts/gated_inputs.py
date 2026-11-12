@@ -110,10 +110,13 @@ no bytecode.
         `each`. The match is the word alone, so a why lists `per`/`each` as the gate writes it.
         WIDENING is one list for rules 5 and 7, so the two readings never disagree: words that say the cap is not
         the ceiling (`plus` or a bare `+` with no amount after it; `excluding`, `exclusive of`, `excl`, `ex`;
-        `tax(es)`, `VAT`, `GST`; `fee(s)`; `overage(s)`; `soft`; `uncapped`; `no hard limit|cap`; `exceed`;
-        `initially`, `to start`, `for now`; `or more`, `at least`, `minimum`; `approx(imately)`, `roughly`).
-        `plus US$30` is an amount, summed by rule 9. `before` is rule 5's alone, since p18-7's probe reads
-        "stopping before any Turn" outside its clause.
+        `tax(es)`, `VAT`, `GST`; `fee(s)`; `overage(s)`; `soft`; `exceed`; `initially`, `to start`, `for now`; `or
+        more`, `at least`, `minimum`; `approx(imately)`, `roughly`; and (p48-4) `±` and the UNCAPPED words that say
+        part of the spend has no ceiling: `uncapped`, `unlimited`, `unbounded`, `no hard limit|cap`, `no
+        cap|limit|max(imum)|budget|ceiling(s)`, `without a cap|limit|budget`, `not capped|limited`, and a
+        `cap|limit|max|budget|ceiling` then TBD, TBC, unknown, unset, none or `to be`). `plus US$30` is an amount,
+        summed by rule 9. `before` is rule 5's alone, since p18-7's probe reads "stopping before any Turn" outside its
+        clause.
      8. A bare number outside the clause, code spans and amount tokens (no letter, digit, `_`, `.`, `,` or `-`
         before it): "a number outside the cap clause".
      9. The value: the cap amount × the clause multiplier, plus every other USD token (each once), in Decimal.
@@ -130,10 +133,11 @@ no bytecode.
    the clause only 7(ii) (plurals) and 7(ix) (per-unit words) ask; the rest of rule 7, and rule 8, are waived; the
    value is rule 9's (the cap times the clause's count, plus every other USD amount the gate names, so it never reads
    below the full reading: `US$500 — cap 1 USD` and `US$500 per run — cap 1 USD` both read 501).
-   `standing_exposure(gate)` -> {"usd", "why", "capOnly"} is the standing reading covered() and the CLI apply: the
-   full reading when it prices (capOnly ""); else the cap-only reading when that prices (capOnly the full reading's
-   why); else {None, the cap-only reading's why, ""}, which for a rule 1-4 or 6 failure, and most rule 5 failures, is
-   the full reading's why.
+   `standing_exposure(gate)` -> {"usd", "why", "capOnly", "widest"} is the standing reading covered() and the CLI
+   apply: the full reading when it prices (capOnly and widest ""); else the cap-only reading when that prices (capOnly
+   the full reading's why); else the widest reading below when that prices (widest: the cap-only reading's why); else
+   {None, the cap-only reading's why, "", ""}, which for a rule 1-4 or 6 failure, and most rule 5 failures, is the full
+   reading's why.
 
    Accepted residuals (pinned in the tests; the first two are named in ADR 0034 § Consequences, *A fail-closed
    reading*, the rest in its 2026-11-05 amendment): a number word outside the clause with no Login/account/seat/user
@@ -147,10 +151,83 @@ no bytecode.
    after it, or one off RATE_UNITS: `per generated image`, `each such call`) reads x1 in the full reading, the value
    the cap-only reading gives anyway; inside the clause any `per`, `each` or `every` asks in both readings.
 
+   The widest reading (p48-4, ADR 0034's 2026-11-13 amendment: a spend plainly under the limit never asks),
+   `widest_exposure(gate)` -> {"usd": Decimal | None, "why"}, runs in the standing reading only when both earlier
+   readings refuse. It reads every amount the gate's line names at its widest (a list marker stripped, code spans
+   read) and fails closed, the first failure giving `why`:
+     W1. Only `spend` prices ("not a spend gate").
+     W2. Safety asks over the whole line, in order, each why `<label>: <its earliest match>`: (a) "a per-unit word"
+         (7(ii)'s plurals or 7(ix)'s PER_UNIT_OUTSIDE_RE: a per-unit gate is the full reading's alone); (b) "a
+         percentage" (`%`); (c) "a widening word" (WIDENING, its plus alternative read as a `plus` or `+` not
+         followed, after optional spaces, by a W3 amount, plus `or so`, `give or take`, `estimate(s|d)`, `typically`,
+         `usually`, `expected`, `as needed`, `if needed`, `as required`); (d) "an amount in words" (CURRENCY_RES[4],
+         or a CURRENCY_NUMBER_WORDS word beside a currency word, `€`, `£` or a dollar marker); (e) "minor units"
+         (CURRENCY_RES[2]); (f) "an unknown or ambiguous currency" (`¥`, any other Unicode currency symbol but `$ €
+         £`, or a letters-`$` marker but US$, A$, AU$, NZ$, C$ and CA$); (g) "an approximate amount" (`≈` or `est.`
+         anywhere; `~`, `about`, `around`, `circa`, `c.` or `ca.` before a W3 prefix marker or a digit, the why
+         naming the marker alone).
+     W3. Amounts (AMOUNT_RE), left to right without overlap, each with a currency at one end or both: a prefix marker
+         (`US$`, `USD`, a `$` with no letter, digit or `_` before it, `A$`/`AU$`, `NZ$`, `C$`/`CA$`, `€`, `£`, or a
+         word-start code `AUD NZD CAD EUR GBP JPY`) then at most one space; a number (with no prefix, not after a
+         letter, digit, `_`, `.`, `,`, `-` or `$`); a magnitude (`k`, `thousand`, `grand` x1e3; `m`, `mn`, `million`
+         x1e6; `bn`, `billion` x1e9); an optional range read at its top (`-`, `–`, an unspaced `—`, `to`, `or`: a
+         spaced `—` is the clause separator, so it is two amounts), its far end allowed its own marker; a suffix after
+         a digit or one space (a code, `dollars`, `bucks`, `euros`, `pounds`, `cents`, `yen`, `pence`, `€`, `£`).
+         Ends whose currencies differ read at the higher ceiling. A letter, digit or `_`, or `.`/`,` then a digit,
+         straight after an amount asks ("malformed amount: <m>"); a number with no currency, or a currency word or
+         marker with no number beside it, is no amount.
+     W4. No amount asks ("it names no amount"). At least one amount must start exactly where a BOUND_RE match ends
+         ("it states no cap"): a cap word (`cap`, `capped`, `max`, `maximum`, `at most`, `up to`, `no more than`,
+         `limit`, `limited`, `ceiling`, `budget`) at a strict word start (no letter, digit, `_` or `-` before it, so
+         `rate-limit`, `--max-cost-usd` and `hard-cap` never count), then at most two of `:`, `at`, `of` and `to`,
+         and spaces. It mirrors rule 3 (a `cap` word straight before its amount), widened only to the bound
+         synonyms. Every other amount on the line is summed too, since the reading is the widest.
+     W5. The qualifier straight after each amount, the first form that matches: `before` asks ("a widening word:
+         before"); a month (MONTH_RES) counts x1, as the full reading counts it; a rate (`per` + SEP + a word, `/` + a
+         word, `every` or `a`/`an` + a word, its unit that word; a PERIOD_ADVERBS word, its own unit; `each`/
+         `apiece`, no unit), and `per` or `/` before a digit asks ("a rate per a count: <m>"); a multiplier (`x N`,
+         `× N`, `N x`, `N ×`, `N times`, `twice`, `double`, `triple`) multiplies that amount; anything else is a
+         total, x1.
+     W5d. With the amounts and their qualifiers blanked, a `per`, `each` or `every` (with its next word), `apiece`, a
+         PERIOD_ADVERBS word, `night(s)`, a MONTH_RES phrase, `a`/`an` + a UNIT_NOUNS noun, or `/` + a letter or
+         digit left on the line asks ("a rate beyond the amounts: <m>").
+     Count phrases, read on that blanked line: a multiplier form (its unit "times"); N (digits >= 1, commas allowed,
+     or one to twelve in words, not inside a token; a range read at its top), whitespace, then the adjacent letter
+     word, its unit. Two units are one when they match ignoring case, `'s` and a plural ending.
+     W5c. A line with a rate amount: (i) a count in words asks ("a count in words: <m>": CURRENCY_NUMBER_WORDS beyond
+         twelve, `dozens`, `hundreds`, `thousands`, `millions`, `both`, `all`, `several`, `multiple`, `many`, `few`,
+         `numerous`, `various`); (ii) every count phrase's unit must be some rate's, an `each`/`apiece` rate taking
+         the one unit the phrases left over share ("a count in another unit: <phrase>"); (iii) any other digit run
+         asks unless its token starts with a letter ("a number the rate cannot place: <token>": `--runs 3` and
+         `Haiku 4.5` ask, `gpt-4.1` does not); (iv) each rate takes the largest N of its unit ("a rate with no stated
+         most: <amount and rate words>").
+     W6. A line with no rate amount: noun counts are waived (r1); the product of the multiplier phrases left
+         unattached multiplies every amount.
+     W7. The sum, each amount at its widest times its count, rounded up to the cent (ROUND_CEILING); an integral
+         result keeps no fractional digits.
+   The ceiling rule (CEILING_USD): each currency reads at a rate at least 5% above its highest daily USD value since
+   2000, rounded up: USD 1; AUD 1.17 (high 1.1081, 27 Jul 2011); NZD 0.93 (0.8843, 1 Aug 2011); CAD 1.16 (1.1042,
+   USD/CAD 0.9056, 7 Nov 2007); EUR 1.69 (1.6038, 15 Jul 2008); GBP 2.23 (2.1162, 9 Nov 2007); JPY 0.0140 (0.013277,
+   USD/JPY 75.32, 31 Oct 2011). The currency words name only the table's currencies: `dollars`/`bucks` the four listed
+   dollars (USD, AUD, NZD, CAD), at the widest of them, 1.17; `euros` 1.69; `pounds` 2.23; `yen` 0.0140; `cents` a cent
+   of the four dollars or the euro, 0.0169; `pence` 0.0223.
+   Accepted residuals (pinned), each safe because the gate's total is the implementer's ceiling (GATED_INPUTS_CHECK)
+   and the annotation records the total exposure: (r1) a count beside a total amount, on a line with no rate, reads
+   once (`cap 30 AUD for 3 runs` reads 35.10); (r2) an unknown currency word on a line with no rate is not read (`1000
+   rupees`; on a rate line it is a count in another unit and asks); (r3) a rate idiom off the lists, and not straight
+   after its amount, reads x1; (r4) the ceilings under-read a currency that rises more than 5% past its post-2000 high,
+   or a currency word meant as a currency off the table worth more than its word's ceiling (today only a `dollars`
+   meant as the Cayman Islands dollar, pegged at US$1.20); (r5) a bare `$` is USD. Named over-asks (fail closed,
+   pinned): prose `per`/`each`/`every`; a widening or uncapped word in the description (`soft launch`); stray numbers
+   on a rate line; `¥`; a count noun not adjacent to its number; a bound word with any other word, or a parenthesis,
+   between it and its amount (`the cap is US$10`, `cap (US$10)`); a hyphenated bound word (`hard-cap US$10`); a line
+   whose only bound word bounds a count (`US$0.50 per call, at most 40 calls`).
+
    CLI (ADR 0038): `exposure -` reads ONE gate on stdin and prints standing_exposure()'s {usd, why} as one JSON line,
-   {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, never its capOnly, then exits 0:
-   a gate whose cap reads prints its cap-only amount with why "", so the plan judge, which bounces only a null "usd",
-   never bounces it on wording alone (p37-4). The plan judge runs
+   {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, never its capOnly or widest, then
+   exits 0: a gate whose cap reads prints its cap-only amount with why "", and a gate neither earlier reading prices
+   prints its widest amount with why "" (p48-4), so the plan judge, which bounces only a null "usd", never bounces it
+   on wording alone (p37-4). The plan judge runs
    it on each top-level spend gate the engine parsed, the gate on stdin through a quoted heredoc (`<<'EOF'`), never as
    a shell argument, where `$` and backticks would expand. stdin is decoded as UTF-8 whatever the locale (bad UTF-8:
    exit 1) and split on newlines, a trailing CR dropped; exactly one non-blank line is a gate. Two or more print
@@ -277,9 +354,10 @@ no bytecode.
 
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
 OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
-PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, covered, annotation, format_usd, gate_kind, credential_reading,
-read_env, env_proof, bootstrap_refreshes, credential_covered, credential_annotation, MAX_ENV_BYTES, DENY_NOUNS,
-has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY, APPROVED_SUFFIX_RE.
+PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, widest_exposure, CEILING_USD, UNCAPPED, covered, annotation,
+format_usd, gate_kind, credential_reading, read_env, env_proof, bootstrap_refreshes, credential_covered,
+credential_annotation, MAX_ENV_BYTES, DENY_NOUNS, has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY,
+APPROVED_SUFFIX_RE.
 """
 import base64
 import binascii
@@ -289,7 +367,8 @@ import os
 import re
 import stat
 import sys
-from decimal import Decimal, ROUND_HALF_UP
+import unicodedata
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 # ---- the sweep -------------------------------------------------------------------------------------------------
 
@@ -450,14 +529,29 @@ COUNT_RES = [re.compile(p, re.I) for p in (
     WS + r"(?:across|for)\s+" + COUNT_N + r"\s+(?P<unit>" + _alt(PER_UNITS) + r")s?" + WE,
     r"×\s*" + COUNT_N + WE,
     WS + r"x ?" + COUNT_N + WE)]
+# Words that say part of the spend has no ceiling, p48-4: `uncapped`, `unlimited`, `unbounded`, `no hard limit|cap`, a
+# negated cap (`no cap(s)|limit(s)|max(imum)|budget(s)|ceiling(s)`, `without a/an cap|limit|budget`, `not
+# capped|limited`) and an undecided one (`cap|limit|max(imum)|budget|ceiling`, then an optional `is` or `:`, then TBD,
+# TBC, unknown, unset, none or `to be`). Each starts and ends at a word bound, so `no capacity` and `piano cap` hold
+# none, and `no more than US$5` is a bound word (the widest reading's BOUND_RE), never a negation.
+UNCAPPED = WS + r"(?:" + "|".join((
+    r"uncapped", r"unlimited", r"unbounded", r"no\s+hard\s+(?:limit|cap)",
+    r"no\s+(?:caps?|limits?|max(?:imum)?|budgets?|ceilings?)", r"without\s+(?:an?\s+)?(?:caps?|limits?|budgets?)",
+    r"not\s+(?:capped|limited)",
+    r"(?:cap|limit|max(?:imum)?|budget|ceiling)" + WE + r"\s*(?:is\s+|:\s*)?(?:TBD|TBC|unknown|unset|none|to\s+be)",
+)) + r")" + WE
+# `plus` or a bare `+` widens only with no amount after it: `plus US$30` is an amount, summed by rule 9, and `plus 20%`
+# or `plus 30 more` keep their own rule's why. The widest reading keeps its own plus alternative (WIDEST_WIDENING_RE).
+PLUS_ALT = r"(?:" + WS + r"plus" + WE + r"|\+)(?!\s*(?:US\$|USD|\$)?\s?\d)"
+WIDENING_WORDS = WS + r"(?:" + "|".join((
+    r"excluding", r"exclusive\s+of", r"excl", r"ex", r"tax(?:es)?", r"VAT", r"GST", r"fees?", r"overages?", r"soft",
+    r"exceed(?:s|ed|ing)?", r"initially", r"to\s+start", r"for\s+now", r"or\s+more", r"at\s+least", r"minimum",
+    r"approx(?:imately)?", r"roughly")) + r")" + WE
 # Words that say the cap is not the ceiling: a soft or open-ended cap, a cap before tax, fees or overage, an opening
 # amount (ADR 0034: anything it cannot price asks). One list for rule 5 (inside the clause) and rule 7 (outside it),
-# so the two fail-closed readings never disagree. `plus` or a bare `+` widens only with no amount after it: `plus
-# US$30` is an amount, summed by rule 9, and `plus 20%` or `plus 30 more` keep their own rule's why.
-WIDENING = (r"(?:" + WS + r"plus" + WE + r"|\+)(?!\s*(?:US\$|USD|\$)?\s?\d)|" + WS + r"(?:" + "|".join((
-    r"excluding", r"exclusive\s+of", r"excl", r"ex", r"tax(?:es)?", r"VAT", r"GST", r"fees?", r"overages?", r"soft",
-    r"uncapped", r"no\s+hard\s+(?:limit|cap)", r"exceed(?:s|ed|ing)?", r"initially", r"to\s+start", r"for\s+now",
-    r"or\s+more", r"at\s+least", r"minimum", r"approx(?:imately)?", r"roughly")) + r")" + WE)
+# so the two fail-closed readings never disagree. p48-4 adds UNCAPPED (a negated or undecided cap) and `±` (an amount
+# give or take), each of which a reading once signed at its cap: `cap US$10 (no limit on retries)`, `cap US$10 ± 2`.
+WIDENING = UNCAPPED + r"|±|" + PLUS_ALT + r"|" + WIDENING_WORDS
 MULTIPLIER = r"×|" + WS + r"x\d|" + WS + _alt(MULTIPLIER_WORDS) + WE
 # Do 2 (p37-4): outside the cap clause, `per` or `each` is a rate only before a unit, never in prose ("per the task
 # note", "per ADR 0038"); on the cap itself any per/each/every still asks (PER_EACH_EVERY_RE).
@@ -670,27 +764,343 @@ def _reading(gate, cap_only):
     return {"usd": usd, "why": ""}
 
 
+# ---- the widest reading (p48-4) ---------------------------------------------------------------------------------
+
+# The ceiling rate of each currency the widest reading reads, in USD per unit: at least 5% above that currency's
+# highest daily USD value since 2000, rounded up (module docstring, 2: the widest reading). A changed high is a
+# one-constant edit plus its pin in tests/gated-inputs.test.mjs.
+CEILING_USD = {
+    "USD": Decimal("1"),
+    "AUD": Decimal("1.17"),     # high 1.1081 (27 Jul 2011); x1.05 = 1.1635
+    "NZD": Decimal("0.93"),     # high 0.8843 (1 Aug 2011); x1.05 = 0.9285
+    "CAD": Decimal("1.16"),     # high 1.1042 (USD/CAD 0.9056, 7 Nov 2007); x1.05 = 1.1594
+    "EUR": Decimal("1.69"),     # high 1.6038 (15 Jul 2008); x1.05 = 1.6840
+    "GBP": Decimal("2.23"),     # high 2.1162 (9 Nov 2007); x1.05 = 2.2220
+    "JPY": Decimal("0.0140"),   # high 0.013277 (USD/JPY 75.32, 31 Oct 2011); x1.05 = 0.013941
+}
+# The currency words name only the table's currencies: `dollars`/`bucks` the four listed dollars (USD, AUD, NZD, CAD),
+# read at the widest of them; `euros` EUR; `pounds` and `pence` GBP; `yen` JPY; `cents` a cent of the four dollars or
+# the euro. A word meant as a currency off the table reads at its word's ceiling: today only a `dollars` meant as the
+# Cayman Islands dollar (pegged at US$1.20) reads below its value (residual r4). A bare `$` is USD (r5).
+_DOLLAR_CEILING = max(CEILING_USD[c] for c in ("USD", "AUD", "NZD", "CAD"))
+WORD_CEILING_USD = {"dollar": _DOLLAR_CEILING, "buck": _DOLLAR_CEILING, "euro": CEILING_USD["EUR"],
+                    "pound": CEILING_USD["GBP"], "yen": CEILING_USD["JPY"],
+                    "cent": max(_DOLLAR_CEILING, CEILING_USD["EUR"]) / 100, "pence": CEILING_USD["GBP"] / 100}
+MARKER_CURRENCY = {"us$": "USD", "usd": "USD", "$": "USD", "a$": "AUD", "au$": "AUD", "aud": "AUD", "nz$": "NZD",
+                   "nzd": "NZD", "c$": "CAD", "ca$": "CAD", "cad": "CAD", "€": "EUR", "eur": "EUR", "£": "GBP",
+                   "gbp": "GBP", "jpy": "JPY"}
+MAGNITUDE = {"k": 10 ** 3, "thousand": 10 ** 3, "grand": 10 ** 3, "m": 10 ** 6, "mn": 10 ** 6, "million": 10 ** 6,
+             "bn": 10 ** 9, "billion": 10 ** 9}
+# W3: an amount, a currency at one end or both. A prefix marker then at most one space; a number (with no prefix, not
+# after a letter, digit, `_`, `.`, `,`, `-` or `$`); a magnitude; a range read at its top (`-`, `–`, an unspaced `—`,
+# `to`, `or`: a spaced `—` is the clause separator, so it is two amounts), its far end with its own marker allowed; a
+# suffix after a digit or one space (a code, a currency word, `€`, `£`).
+WIDEST_PREFIX = (r"(?:" + WS + r"(?:US\$|AU\$|NZ\$|CA\$|A\$|C\$|USD|AUD|NZD|CAD|EUR|GBP|JPY)|" + WS + r"\$|€|£)")
+WIDEST_SUFFIX = (r"(?:(?:USD|AUD|NZD|CAD|EUR|GBP|JPY|dollars?|bucks|euros?|pounds?|cents?|yen|pence)" + WE + r"|€|£)")
+WIDEST_MAG = r"(?:k|mn|m|bn|thousand|million|billion|grand)" + WE
+AMOUNT_RE = re.compile(
+    r"(?:(?P<pre>" + WIDEST_PREFIX + r") ?|(?<![A-Za-z0-9_.,\-$]))(?P<num>" + NUM + r")"
+    + r"(?:\s?(?P<mag>" + WIDEST_MAG + r"))?"
+    + r"(?:(?:\s*[-–]\s*|—|\s+(?:to|or)\s+)(?:(?P<pre2>" + WIDEST_PREFIX + r") ?)?(?P<num2>" + NUM + r")"
+    + r"(?:\s?(?P<mag2>" + WIDEST_MAG + r"))?)?"
+    + r"(?:\s?(?P<suf>" + WIDEST_SUFFIX + r"))?", re.I)
+# W4: a cap word, at a strict word start (so `rate-limit`, `--max-cost-usd` and `hard-cap` never count), then at most
+# two connectors (`:`, `at`, `of`, `to`) and spaces; an amount must start exactly where one ends. It mirrors the full
+# reading's rule 3 (a `cap` word straight before its amount), widened only to the bound synonyms.
+BOUND_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:cap|capped|max|maximum|at\s+most|up\s+to|no\s+more\s+than|limit|limited|ceiling|budget)" + WE
+    + r"(?:\s*(?::|(?:at|of|to)" + WE + r")){0,2}\s*", re.I)
+# W2 (c): WIDENING with its plus alternative read in code (a `plus` or `+` followed by an amount is a split), plus the
+# widest reading's own words (an estimate is no ceiling).
+WIDEST_WIDENING_RE = re.compile(
+    UNCAPPED + r"|±|(?P<plus>" + WS + r"plus" + WE + r"|\+)|" + WIDENING_WORDS + r"|" + WS + r"(?:" + "|".join((
+        r"or\s+so", r"give\s+or\s+take", r"estimate[sd]?", r"typically", r"usually", r"expected", r"as\s+needed",
+        r"if\s+needed", r"as\s+required")) + r")" + WE, re.I)
+_NUMBER_WORD = _alt(CURRENCY_NUMBER_WORDS)
+_CURRENCY_WORD = r"(?:dollars?|bucks|euros?|pounds?|cents?|yen|pence)" + WE
+AMOUNT_IN_WORDS_RES = (
+    CURRENCY_RES[4],
+    re.compile(WS + _NUMBER_WORD + r"\s?(?:" + _CURRENCY_WORD + r"|€|£|(?:AU|NZ|CA|A|C)\$)", re.I),
+    re.compile(r"(?:€|£|" + WS + r"(?:AU|NZ|CA|A|C)\$)\s?" + _NUMBER_WORD + WE, re.I),
+)
+LETTERS_DOLLAR_RE = re.compile(WS + r"([A-Za-z]+)\$")
+KNOWN_DOLLARS = ("US", "A", "AU", "NZ", "C", "CA")
+APPROX_RE = re.compile(r"≈|" + WS + r"est\.|(?:~|" + WS + r"(?:about|around|circa)" + WE + r"|" + WS + r"ca?\.)"
+                       + r"(?=\s*(?:" + WIDEST_PREFIX + r"|\d))", re.I)
+# W5: the qualifier straight after an amount. A rate's unit is the word after `per`, `/`, `every`, `a` or `an`, an
+# adverb's own unit, or none for `each`/`apiece` (it takes the unit its counts share).
+ADVERB_UNIT = {"daily": "day", "nightly": "night", "weekly": "week", "fortnightly": "fortnight", "hourly": "hour",
+               "quarterly": "quarter", "yearly": "year", "annually": "year"}
+Q_BEFORE_RE = re.compile(r"before" + WE, re.I)
+Q_RATE_COUNT_RE = re.compile(r"(?:per" + WE + SEP + r"|/\s?)\d", re.I)
+Q_RATE_RE = re.compile(r"(?:per" + WE + SEP + r"|/\s?|every\s+|an?\s+)(?P<unit>[A-Za-z]+)" + WE
+                       + r"|(?P<adv>" + _alt(PERIOD_ADVERBS) + r")" + WE + r"|(?P<each>each|apiece)" + WE, re.I)
+_COUNT_WORD = _alt(COUNT_WORDS + ("eleven", "twelve"))
+_MULT_N = r"(?:[1-9]\d*|" + _COUNT_WORD + r")"
+_NUM_START = r"(?<![A-Za-z0-9_.,\-])"
+Q_MULT_RE = re.compile(r"(?:x\s?(?P<a>" + _MULT_N + r")|×\s?(?P<b>" + _MULT_N + r")|(?P<c>" + _MULT_N
+                       + r")\s?[x×]|(?P<d>" + _MULT_N + r")\s+times|(?P<w>twice|double|triple))" + WE, re.I)
+# Count phrases, read with the amounts and qualifiers blanked: a multiplier (unit "times"), or N (digits >= 1, commas
+# allowed, or one to twelve in words, not inside a token; a range read at its top) then whitespace then a letter word.
+MULT_PHRASE_RE = re.compile(r"(?:" + WS + r"x\s?(?P<a>" + _MULT_N + r")|×\s?(?P<b>" + _MULT_N + r")|" + _NUM_START
+                            + r"(?P<c>" + _MULT_N + r")\s?[x×]|" + _NUM_START + r"(?P<d>" + _MULT_N + r")\s+times|"
+                            + WS + r"(?P<w>twice|double|triple))" + WE, re.I)
+_NOUN_N = r"(?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*|" + _COUNT_WORD + r")"
+NOUN_COUNT_RE = re.compile(_NUM_START + r"(?P<lo>" + _NOUN_N + r")(?:(?:\s*[-–]\s*|\s+(?:to|or)\s+)(?P<hi>" + _NOUN_N
+                           + r"))?\s+(?P<unit>[A-Za-z]+(?:'s)?)" + WE, re.I)
+WORD_N = {"twice": 2, "double": 2, "triple": 3}
+# W5d: a rate left on the line once the amounts and their qualifiers are blanked.
+BEYOND_RES = (
+    re.compile(WS + r"(?:per|each|every)" + WE + r"(?:" + SEP + r"[A-Za-z0-9]+)?", re.I),
+    re.compile(WS + r"apiece" + WE, re.I),
+    re.compile(WS + _alt(PERIOD_ADVERBS) + WE, re.I),
+    re.compile(WS + r"nights?" + WE, re.I),
+    *MONTH_RES,
+    re.compile(WS + r"(?:a|an)" + SEP + UNIT_RE + WE, re.I),   # SEP, so a hyphenated `US$5-a-day` asks too
+    re.compile(r"/\s?[A-Za-z0-9]+"),
+)
+# W5c (i): a count in words the rate cannot read.
+QUANTITY_WORDS = tuple(w for w in CURRENCY_NUMBER_WORDS if w not in COUNT_WORDS + ("eleven", "twelve")) + (
+    "dozens", "hundreds", "thousands", "millions", "both", "all", "several", "multiple", "many", "few", "numerous",
+    "various")
+QUANTITY_RE = re.compile(WS + _alt(QUANTITY_WORDS) + WE, re.I)
+TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_.\-]")
+
+
+def _collapse(text):
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _earliest(regexes, text):
+    """The earliest match of any regex in the text, its text collapsed, or None (a tie goes to the earlier regex)."""
+    found = [m for m in (r.search(text) for r in regexes) if m]
+    return _collapse(min(found, key=lambda m: m.start()).group(0)) if found else None
+
+
+def _currency_ceiling(mark):
+    """The ceiling rate of one currency marker, code or word (CEILING_USD, WORD_CEILING_USD)."""
+    m = mark.strip().lower()
+    if m in MARKER_CURRENCY:
+        return CEILING_USD[MARKER_CURRENCY[m]]
+    return WORD_CEILING_USD.get(m) or WORD_CEILING_USD[m[:-1]]   # a plural word: `dollars`, `bucks`, `cents`
+
+
+def _amount_at(gate, pos):
+    """The W3 amount match starting at `pos`, after optional spaces, when it holds a currency; else None."""
+    m = AMOUNT_RE.match(gate, pos + len(gate[pos:]) - len(gate[pos:].lstrip()))
+    return m if m and (m.group("pre") or m.group("pre2") or m.group("suf")) else None
+
+
+def _widest_widening(gate):
+    """W2 (c): the earliest widening word, a `plus` or `+` followed by an amount skipped (a split, summed)."""
+    for m in WIDEST_WIDENING_RE.finditer(gate):
+        if m.group("plus") is not None and _amount_at(gate, m.end()):
+            continue
+        return _collapse(m.group(0))
+    return None
+
+
+def _unknown_currency(gate):
+    """W2 (f): the earliest `¥` or other currency symbol but `$ € £`, or a letters-`$` marker but the known dollars."""
+    found = [(m.start(), m.group(0)) for m in LETTERS_DOLLAR_RE.finditer(gate)
+             if m.group(1).upper() not in KNOWN_DOLLARS]
+    found += [(i, ch) for i, ch in enumerate(gate) if ch not in "$€£" and unicodedata.category(ch) == "Sc"]
+    return min(found)[1] if found else None
+
+
+WIDEST_SAFETY = (
+    ("a per-unit word", lambda g: _earliest((OUTSIDE_RES[1][1], PER_UNIT_OUTSIDE_RE), g)),
+    ("a percentage", lambda g: "%" if "%" in g else None),
+    ("a widening word", _widest_widening),
+    ("an amount in words", lambda g: _earliest(AMOUNT_IN_WORDS_RES, g)),
+    ("minor units", lambda g: _earliest((CURRENCY_RES[2],), g)),
+    ("an unknown or ambiguous currency", _unknown_currency),
+    ("an approximate amount", lambda g: _earliest((APPROX_RE,), g)),
+)
+
+
+def _widest_amounts(gate):
+    """W3: [(start, end, Decimal USD at its widest)] in text order, without overlap, or a malformed amount's why."""
+    out, pos = [], 0
+    while True:
+        m = AMOUNT_RE.search(gate, pos)
+        if not m:
+            return out
+        marks = [g for g in (m.group("pre"), m.group("pre2"), m.group("suf")) if g]
+        if not marks:   # a number with no currency is no amount
+            pos = m.start() + 1
+            continue
+        if TAIL_MALFORMED_RE.match(gate, m.end()):
+            return f"malformed amount: {gate[m.start():m.end() + 1].strip()}"
+        top = _dec(m.group("num")) * MAGNITUDE.get((m.group("mag") or "").lower(), 1)
+        if m.group("num2"):
+            top = max(top, _dec(m.group("num2")) * MAGNITUDE.get((m.group("mag2") or "").lower(), 1))
+        out.append((m.start(), m.end(), top * max(_currency_ceiling(g) for g in marks)))
+        pos = m.end()
+
+
+def _unit_forms(word):
+    """A unit's forms, its case, `'s` and plural endings dropped: two units are one when their forms meet."""
+    w = re.sub(r"'s$", "", word.lower())
+    forms = {w}
+    if w.endswith("ies"):
+        forms.add(w[:-3] + "y")
+    if w.endswith("es"):
+        forms.add(w[:-2])
+    if w.endswith("s"):
+        forms.add(w[:-1])
+    return forms
+
+
+def _same_unit(a, b):
+    return bool(_unit_forms(a) & _unit_forms(b))
+
+
+def _count_n(text):
+    """A count's N: digits (commas allowed), or a number word one to twelve."""
+    if text[0].isdigit():
+        return int(text.replace(",", ""))
+    return (COUNT_WORDS + ("eleven", "twelve")).index(text.lower()) + 1
+
+
+def _mult_n(m):
+    word = m.group("w")
+    return WORD_N[word.lower()] if word else _count_n(next(m.group(k) for k in "abcd" if m.group(k)))
+
+
+def _qualifier(gate, start, end):
+    """W5: the qualifier straight after one amount: (kind, n_or_unit, qualifier end), or a refusal's why. kind is
+    "total" (n 1), "month" (n 1), "mult" (n), or "rate" (its unit, None for each/apiece)."""
+    k = end + len(gate[end:]) - len(gate[end:].lstrip())
+    if Q_BEFORE_RE.match(gate, k):
+        return "a widening word: before"
+    for regex in MONTH_RES:
+        m = regex.match(gate, k)
+        if m:
+            return ("month", 1, m.end())
+    m = Q_RATE_COUNT_RE.match(gate, k)
+    if m:
+        return f"a rate per a count: {_collapse(m.group(0))}"
+    m = Q_RATE_RE.match(gate, k)
+    if m:
+        if m.group("adv"):
+            return ("rate", ADVERB_UNIT[m.group("adv").lower()], m.end())
+        return ("rate", m.group("unit"), m.end())   # None for each/apiece
+    m = Q_MULT_RE.match(gate, k)
+    if m:
+        return ("mult", _mult_n(m), m.end())
+    return ("total", 1, end)
+
+
+def widest_exposure(gate):
+    """{"usd": Decimal | None, "why": str}: the widest reading of one gate (module docstring, 2: W1-W7), every amount
+    its line names at its widest, so long as one comes straight after a cap word. It fails closed: the first failure
+    gives `why`."""
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    if gate_kind(gate) != "spend":   # W1
+        return _none("not a spend gate")
+    for label, find in WIDEST_SAFETY:   # W2
+        hit = find(gate)
+        if hit:
+            return _none(f"{label}: {hit}")
+    amounts = _widest_amounts(gate)   # W3
+    if isinstance(amounts, str):
+        return _none(amounts)
+    if not amounts:   # W4
+        return _none("it names no amount")
+    ends = {m.end() for m in (BOUND_RE.match(gate, i) for i in range(len(gate))) if m}
+    if not any(a[0] in ends for a in amounts):
+        return _none("it states no cap")
+    read, spans = [], []   # W5: [(kind, value, n_or_unit, its text)]
+    for a_start, a_end, value in amounts:
+        q = _qualifier(gate, a_start, a_end)
+        if isinstance(q, str):
+            return _none(q)
+        kind, n_or_unit, q_end = q
+        read.append((kind, value, n_or_unit, _collapse(gate[a_start:q_end])))
+        spans.append((a_start, q_end))
+    rest = _blank(gate, spans)
+    beyond = _earliest(BEYOND_RES, rest)   # W5d
+    if beyond:
+        return _none(f"a rate beyond the amounts: {beyond}")
+    phrases = [(_collapse(m.group(0)), _mult_n(m), "times") for m in MULT_PHRASE_RE.finditer(rest)]
+    rest = _blank(rest, [m.span() for m in MULT_PHRASE_RE.finditer(rest)])
+    rates = [r for r in read if r[0] == "rate"]
+    if not rates:   # W6: noun counts waived (r1); the unattached multipliers multiply every amount
+        product = 1
+        for _text, n, _unit in phrases:
+            product *= n
+        total = sum((value * (n if kind == "mult" else 1) for kind, value, n, _t in read), Decimal(0)) * product
+        return {"usd": _ceil_cents(total), "why": ""}
+    quantity = _earliest((QUANTITY_RE,), rest)   # W5c (i)
+    if quantity:
+        return _none(f"a count in words: {quantity}")
+    nouns = list(NOUN_COUNT_RE.finditer(rest))
+    phrases += [(_collapse(m.group(0)), max(_count_n(m.group("lo")), _count_n(m.group("hi") or m.group("lo"))),
+                 m.group("unit")) for m in nouns]
+    rest = _blank(rest, [m.span() for m in nouns])
+    units = [r[2] for r in rates if r[2]]
+    leftover = [p for p in phrases if not any(_same_unit(p[2], u) for u in units)]   # W5c (ii)
+    each_unit = None
+    if leftover:
+        odd = next((p for p in leftover if not _same_unit(p[2], leftover[0][2])), None)
+        if any(r[2] is None for r in rates) and odd is None:
+            each_unit = leftover[0][2]
+        else:
+            return _none(f"a count in another unit: {(odd or leftover[0])[0]}")
+    for m in re.finditer(r"\d+", rest):   # W5c (iii)
+        i, j = m.start(), m.end()
+        while i > 0 and TOKEN_CHAR_RE.match(rest[i - 1]):
+            i -= 1
+        while j < len(rest) and TOKEN_CHAR_RE.match(rest[j]):
+            j += 1
+        if not rest[i].isalpha():
+            return _none(f"a number the rate cannot place: {rest[i:j].rstrip('.-')}")
+    total = Decimal(0)
+    for kind, value, n_or_unit, text in read:   # W5c (iv)
+        if kind != "rate":
+            total += value * (n_or_unit if kind == "mult" else 1)
+            continue
+        unit = n_or_unit or each_unit
+        counts = [n for _t, n, u in phrases if unit and _same_unit(u, unit)]
+        if not counts:
+            return _none(f"a rate with no stated most: {text}")
+        total += value * max(counts)
+    return {"usd": _ceil_cents(total), "why": ""}
+
+
+def _ceil_cents(value):
+    """W7: rounded up to the cent; an integral result keeps no fractional digits."""
+    cents = value.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+    return cents.to_integral_value() if cents == cents.to_integral_value() else cents
+
+
 def standing_exposure(gate):
-    """{"usd": Decimal | None, "why": str, "capOnly": str}: the standing reading (module docstring, 2). The full
-    reading when it prices (capOnly ""); else the cap-only reading when that prices, capOnly then the full reading's
-    why; else None with the cap-only reading's why (for a rule 1-4 or 6 failure, and most rule 5 failures, the full
+    """{"usd": Decimal | None, "why": str, "capOnly": str, "widest": str}: the standing reading (module docstring, 2).
+    The full reading when it prices (capOnly and widest ""); else the cap-only reading when that prices, capOnly then
+    the full reading's why; else the widest reading when that prices (p48-4), widest then the cap-only reading's why;
+    else None with the cap-only reading's why (for a rule 1-4 or 6 failure, and most rule 5 failures, the full
     reading's why too)."""
     full = exposure(gate)
     if full["usd"] is not None:
-        return {"usd": full["usd"], "why": "", "capOnly": ""}
+        return {"usd": full["usd"], "why": "", "capOnly": "", "widest": ""}
     cap = _reading(gate, True)
     if cap["usd"] is not None:
-        return {"usd": cap["usd"], "why": "", "capOnly": full["why"]}
-    return {"usd": None, "why": cap["why"], "capOnly": ""}
+        return {"usd": cap["usd"], "why": "", "capOnly": full["why"], "widest": ""}
+    wide = widest_exposure(gate)
+    if wide["usd"] is not None:
+        return {"usd": wide["usd"], "why": "", "capOnly": "", "widest": cap["why"]}
+    return {"usd": None, "why": cap["why"], "capOnly": "", "widest": ""}
 
 
 def covered(gate, limit):
-    """{"covered": bool, "usd": Decimal | None, "why": str, "capOnly": str}: standing_exposure(gate) against the
-    standing approval's limit (an int >= 0; 0 is off). Covered iff limit > 0 and usd <= limit, inclusive. capOnly is
-    the full reading's why when the gate was priced from its cap alone, else ""."""
+    """{"covered": bool, "usd": Decimal | None, "why": str, "capOnly": str, "widest": str}: standing_exposure(gate)
+    against the standing approval's limit (an int >= 0; 0 is off). Covered iff limit > 0 and usd <= limit, inclusive.
+    capOnly is the full reading's why when the gate was priced from its cap alone, widest the cap-only reading's why
+    when it was priced at its widest (p48-4), else each is ""."""
     out = standing_exposure(gate)
     ok = out["usd"] is not None and limit > 0 and out["usd"] <= Decimal(limit)
-    return {"covered": ok, "usd": out["usd"], "why": out["why"], "capOnly": out["capOnly"]}
+    return {"covered": ok, "usd": out["usd"], "why": out["why"], "capOnly": out["capOnly"], "widest": out["widest"]}
 
 
 def format_usd(value):

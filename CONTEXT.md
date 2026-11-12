@@ -1422,9 +1422,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
   a limit Lachy named; built-in 0, which is off). Exposure counts every USD
   amount the gate names; a shape it cannot price, even from its cap alone,
-  asks (p37-4: a readable cap prices a gate the full reading refuses). Such a
-  gate passes
-  without him (`approve-gates --standing`, run by the lead) and is recorded
+  asks (p37-4: a readable cap prices a gate the full reading refuses) unless
+  every amount it names, read at its widest, is within the limit (p48-4: a
+  range at its top, a rate times its stated most count, a split summed,
+  another currency at its ceiling rate). Such a gate passes without him
+  (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; irreversible gates
   never pass under it (ADR 0034), and a credential gate only as a declared
