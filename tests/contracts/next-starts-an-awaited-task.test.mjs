@@ -2,19 +2,23 @@
 // "once the fix lands" closed a session while no session or rollout built the fix. next and close now read each task a
 // wait names and start an unstarted one, decided and never asked:
 //   w1  close step 2's **Tasks a wait names.**, after **Rollouts this session wrote.** and before **Repo state.**: its
-//       sources, the one `unfinished-rollout.py awaited` read, `unstarted` → sub-step 7.11 unless held, its rows and
-//       its holds (his not yet carries as a held wait; a live session, save and a Leg read fresh).
+//       sources (only this session's own waits under next's close for an unwritten process record, and no THREAD.md-
+//       only rollout note either), the one `unfinished-rollout.py awaited` read, `unstarted` → sub-step 7.11 unless
+//       held, its rows (no "start it" for a note schedule never takes) and its holds (his not yet carries as a held
+//       wait, in THREAD.md and in a paused rollout's Pause log; a live session, save and a Leg read fresh).
 //   w2  close step 4's Waits bullet, directly after its Rollout handovers bullet: the wording rule and the one held
 //       form.
 //   w3  close sub-step 7.11, directly after 7.10 and before § Commit hygiene: the one-task schedule (a join ranked
-//       first, or a note handed to a fresh lead), decided, after 7.10, its rows, skipped under save and a Leg; step 8
-//       names the wait rows; § Under a Leg skips 7.11.
+//       first, or a note handed to a fresh lead), decided, after 7.10, its rows, the held wait it writes in a paused
+//       rollout's Pause log and the plain wait that lifts it, skipped under save and a Leg; step 8 names the wait rows;
+//       § Under a Leg skips 7.11.
 //   w4  next: step 1's bullet just before the own-branch bullet (the prepared-rollout bullet stays step 1's last, its
 //       own test's p1), step 3's paragraph directly after the prepared rollout's, step 4's bullet directly after the
 //       launch's (with what his not yet after a start undoes), step 5's paragraph directly after **A launch first.**,
+//       the archive dispatch's opening exception naming it, the close dispatch reading only this session's own waits,
 //       and its § Don't line.
 //   w5  /thread:status renders an unstarted wait on a paused rollout and routes it to no repair.
-//   w6  ADR 0082's sections and d1-d6.
+//   w6  ADR 0082's sections and d1-d6, d4's not yet carried where the wait lives.
 // One pure function, check(files), returns the failed rule names; every rule has a control that fails it alone, and
 // every control asserts its swap changed the text. Phrase checks run on collapsed text. Reads files only.
 import { test } from 'node:test'
@@ -68,7 +72,15 @@ function check(F) {
     '`waits on [[<task>]]: nothing is building it (held: <why>); say "start it" to schedule it`',
     '`(held: not yet)`. It carries: step 4 writes the held wait again', '`(held: <session> may be building it)`',
     'off the Stage this check is skipped', '`(held: /thread:open save)`', "`(held: a Leg's close)`", 'Those three are read fresh.',
-    'A task this transcript already started'])
+    'A task this transcript already started',
+    "Under `next`'s close for an unwritten process record (next step 5: another session holds the thread), only a wait this session's own work names is read",
+    'for `held <task> (archived)`, `(not a task)` or `(a decisions task)` the row ends at `(held: <why>)`',
+    'so it holds in every later session on this thread until he says "start it"',
+    'for each paused rollout whose own read (`awaited --rollout <r>`, read-only) names the task, sub-step 7.11 appends the held wait to its `## Pause log`',
+    'every later read of that rollout prints `held <task> (not yet)`'])
+  const rwLead = cll[iRw] ?? ''
+  need('w1', "close step 2's **Rollouts this session wrote.**", rwLead, [
+    "Under `next`'s close for an unwritten process record (next step 5: another session holds the thread), a note only THREAD.md names is not checked"])
 
   // w2: close step 4's Waits bullet, directly after Rollout handovers.
   const s4 = linesOf(slice(cl, /^4\. \*\*Compute the thread-update diff/, /^5\. /))
@@ -87,7 +99,9 @@ function check(F) {
     "joins the task's project's running rollout in place, ranked first (ADR 0078 d6)", 'whose step 8 hands it to a fresh lead (ADR 0057)',
     'Decided, never asked (Owner *gate*', 'It runs after 7.10 and before step 8\'s report',
     '`waits on [[<task>]]: joined [[<rollout>]] (ranked first)`', '`waits on [[<task>]]: scheduled as [[<rollout>]], handed to a fresh lead`',
-    "`waits on [[<task>]]: not started (<schedule's line>)`", 'Skipped under `/thread:open save` and under a Leg'])
+    "`waits on [[<task>]]: not started (<schedule's line>)`", 'Skipped under `/thread:open save` and under a Leg',
+    "its held wait goes inside that rollout's `## Pause log`", '`- <ISO stamp> waits on [[<task>]] (held: not yet)`',
+    'appends `- <ISO stamp> waits on [[<task>]]` there before its schedule', 'so the plain line lifts the hold'])
   const s8 = cll[at(cll, /^8\. \*\*Print the "What landed" report/)] ?? ''
   need('w3', 'close step 8', s8, ["the wait rows from step 2's **Tasks a wait names.** and sub-step 7.11",
     '`waits on [[<task>]]: joined [[<rollout>]] (ranked first)`', '`waits on [[<task>]]: its rollout [[<rollout>]] is paused`'])
@@ -123,6 +137,11 @@ function check(F) {
     "Its output never ends the turn: `next` then dispatches this session's own move",
     'close step 2 reads the task as started by this transcript, so close starts nothing more',
     'When the move is not clear, the start runs before the menu is asked'])
+  need('w4', "next step 5's archive dispatch", s5[at(s5, /^\s*\*\*Archive this session, dispatched\.\*\*/)], [
+    'Apart from **A launch first.** and **A start, after the launches.**, which run before it and are no part of this move, write nothing'])
+  need('w4', "next step 5's close dispatch", s5[at(s5, /^\s*\*\*Close for an unwritten process record, dispatched\.\*\*/)], [
+    "**Tasks a wait names.** reads only a wait this session's own work names",
+    '**Rollouts this session wrote.** checks no note only THREAD.md names'])
   need('w4', "next § Don't", slice(nx, /^## Don't/, null), ["- Don't end a session with a wait on a task nothing builds (step 1)",
     'is never put to him as a question', 'no line says a task is coming unless something builds it'])
 
@@ -140,7 +159,8 @@ function check(F) {
   need('w6', 'ADR 0082 Status', slice(adr, /^Status:/, /^\s*$/), ['thread-skill-p47-4-paused-rollout-waits-on-an-unstarted-task'])
   need('w6', 'ADR 0082 § Decision', section(adr, /^## Decision$/), ['**d1. One read says what builds each awaited task.**',
     '**d2. Close starts an unstarted one.**', '**d3. `next` starts it first, as it launches a prepared rollout.**', '**d4. The holds.**',
-    '**d5. The wording rule.**', '**d6. Status shows the gap.**'])
+    '**d5. The wording rule.**', '**d6. Status shows the gap.**', 'It carries where the wait lives.',
+    "close sub-step 7.11 also appends the held wait to that rollout's `## Pause log`"])
 
   return { rules: [...fails.keys()].sort(), details: [...fails.values()].flat() }
 }
@@ -163,13 +183,21 @@ test('next, close and status start or show a wait on a task nobody builds (ADR 0
 test('controls: each rule fails alone', () => {
   only(swap(CLOSE, '→ sub-step 7.11 starts it, unless a hold applies (item 3)', '→ the `waits on` row'), 'w1', 'no start')
   only(swap(CLOSE, '`(held: not yet)`. It carries: step 4 writes the held wait again', '`(held: not yet)`.'), 'w1', 'not yet does not carry')
+  only(swap(CLOSE, ', sub-step 7.11 appends the held wait to its `## Pause log`', ', nothing records it'), 'w1', 'not yet carried only by THREAD.md')
+  only(swap(CLOSE, 'only a wait this session\'s own work names is read, as next step 1 reads it', 'every wait is read'), 'w1', 'close reads the other session\'s waits')
+  only(swap(CLOSE, 'a note only THREAD.md names is not checked, as next step 1 does not check it', 'every note is checked'), 'w1', 'close checks the other session\'s rollout')
+  only(swap(CLOSE, 'or `(a decisions task)` the row ends at `(held: <why>)`', 'or `(a decisions task)` the row is the same'), 'w1', 'start it offered for a note schedule never takes')
   only(swap(CLOSE, 'or sub-step 7.11 will start it', 'or it is filed'), 'w2', 'once-it-lands wording for a filed task')
   only(swap(CLOSE, 'Decided, never asked (Owner *gate*', 'Ask him first (Owner *yours*'), 'w3', '7.11 asks')
   only(swap(CLOSE, "Sub-step 7.11 is skipped too: a Leg's close starts no awaited task", 'Sub-step 7.11 runs'), 'w3', 'a Leg starts tasks')
+  only(swap(CLOSE, 'so the plain line lifts the hold', 'so the hold stands'), 'w3', 'start it never lifts the Pause log hold')
   // Anchored on the start's own sentence before it: **A launch first.** opens the same "Its output never ends the turn".
   only(swap(NEXT, "since the line says it. Its output never ends the turn: `next` then dispatches this session's own move", 'since the line says it. Its output ends the turn'), 'w4', 'start ends the turn')
   only(swap(NEXT, 'decided and never asked (Owner *gate*: the work is technical', 'offered to him (Owner *yours*: the work is technical'), 'w4', 'start offered')
   only(swap(NEXT, 'and a join is deferred out of its rollout by `/thread:repair [[<rollout>]]` (its § 5)', 'and a join stays'), 'w4', 'a not yet after a join undoes nothing')
+  only(swap(NEXT, '**Tasks a wait names.** reads only a wait this session\'s own work names', '**Tasks a wait names.** reads every wait'), 'w4', 'close dispatch reads the other session\'s waits')
+  only(swap(NEXT, 'Apart from **A launch first.** and **A start, after the launches.**, which run before it and are no part of this move, write nothing', 'Apart from **A launch first.**, write nothing'), 'w4', 'archive dispatch forgets the start')
   only(swap(STATUS, 'it is never drift and status routes it to no repair', 'it is drift, routed to /thread:repair'), 'w5', 'routed to repair')
   only(swap(ADR, '**d5. The wording rule.**', '**d5. Wording.**'), 'w6', 'ADR d5')
+  only(swap(ADR, 'It carries where the wait lives.', 'It carries in THREAD.md.'), 'w6', 'ADR d4 not yet only in THREAD.md')
 })

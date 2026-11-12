@@ -408,9 +408,11 @@ takes none of them, nor does a RACE revert in flight.
   drift: the lead waits on its merge and `next` releases and clears it itself, and a CLOSED or unreadable one is
   Lachy's edit to the note, so status never routes a hold to `/thread:repair`.
 - **Waits on a task nobody builds:** only while `paused` is set, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited --rollout <slug>`
-  (read-only: notes only, no git, no gh). It reads the links in the rollout's `## Pause log` and its unlanded tasks'
-  `depends-on:` / `blocked-by:` entries, its own queue left out (ADR 0082). Render each `unstarted <task> (<Project>)`
-  line as `WAITS ON [[<task>]]: nothing is building it (<Project>)`, each `scheduled <task> [[<r>]] (paused)` line as
+  (read-only: notes only, no git, no gh). It reads the waits the rollout's `## Pause log` states (a link a wait
+  phrase introduces: `until [[x]]`, `once [[x]]`, `waits on [[x]]`) and its unlanded tasks' `depends-on:` /
+  `blocked-by:` entries, its own queue and the tasks its `## Notes` records as deferred out of it left out
+  (ADR 0082). Render each `unstarted <task> (<Project>)` line as
+  `WAITS ON [[<task>]]: nothing is building it (<Project>)`, each `scheduled <task> [[<r>]] (paused)` line as
   `WAITS ON [[<task>]]: its rollout [[<r>]] is paused too`, each `missing <task>` as `WAITS ON [[<task>]]: no note`,
   and a non-zero exit as `WAITS ON: check failed (<first stderr line>)`; every other line renders nothing. Like a hold
   it is never drift and status routes it to no repair: the start is `next`'s and close's (their **Tasks a wait

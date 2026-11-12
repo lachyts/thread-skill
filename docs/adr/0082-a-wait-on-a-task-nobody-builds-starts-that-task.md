@@ -26,10 +26,16 @@ propose first" rule (ADR 0011) also meant a task an agent filed mid-session to u
 **d1. One read says what builds each awaited task.** `unfinished-rollout.py awaited [--rollout <slug>]... [--task
 <slug>]...` reads, read-only, each task named as awaited: the `--task`s the session read (THREAD.md's Where we are, Next
 steps or Resume instructions as they stood before this session's first write, a wait this session's own work names,
-a task it filed to unblock itself), and per paused rollout the session leads or THREAD.md names, the links in its
-`## Pause log` and its unlanded tasks' `depends-on:` / `blocked-by:` entries, its own queue left out. Each prints one
-line: `missing`, `rollout`, `landed`, `scheduled` (in a live rollout, `(paused)` when that rollout is), `building`
-(`in_progress` by hand), `held` (a `hold_until:` or a status other than open) or `unstarted <task> (<Project>)`.
+a task it filed to unblock itself), and per paused rollout the session leads or THREAD.md names, the waits its
+`## Pause log` states and its unlanded tasks' `depends-on:` / `blocked-by:` entries. A Pause log entry states a wait
+only by a link a wait phrase introduces (`until [[x]]`, `once [[x]]`, `waits on [[x]]`), so the engine's own lines, a
+sign-off's `awaiting sign-off: [[a]] (gate-pending)` among them, are never read as one. The rollout's own queue is
+left out, a name a fold tombstone resolves to its own unit included, and so is a task its `## Notes` records as
+`repair: [[x]] deferred` (`/thread:repair` § 5: his decline, which no later read may undo by starting the task). Each
+prints one line: `missing`, `rollout`, `landed`, `scheduled` (in a live rollout, `(paused)` when that rollout is),
+`building` (`in_progress` by hand), `held` (a `hold_until:`, a status other than open, a note schedule step 1 never
+takes: `archived`, `not a task` or `a decisions task`, or a held wait in the Pause log, d4) or
+`unstarted <task> (<Project>)`, which only a note schedule step 1 would take prints.
 
 **d2. Close starts an unstarted one.** Close step 2's **Tasks a wait names.** runs the read, and each
 `unstarted <task>` with no hold goes to sub-step 7.11, which runs `/thread:schedule --tasks <task>`: a one-task
@@ -41,18 +47,24 @@ schedule asks it. 7.11 runs after 7.10, before step 8's report; `/thread:open sa
 **d3. `next` starts it first, as it launches a prepared rollout.** `next` step 1 runs the same read (close step 2's
 check, exactly) and step 5 runs the start before this session's own move, in the same turn, with the line opening
 `Next move: start [[<task>]], then <move>, …`. While another session holds the thread, only a wait this session's own
-work names is checked, since the thread's are that session's.
+work names is checked, since the thread's are that session's; the close `next` then dispatches for an unwritten process
+record reads the same, and checks no rollout note only THREAD.md names.
 
 **d4. The holds.** Each gives close's row `waits on [[<task>]]: nothing is building it (held: <why>); say "start it" to
 schedule it` (next's line names it the same way) and starts nothing:
 
-- his "not yet" for that task: `(held: not yet)`. It carries: close step 4 writes the held wait
-  `waits on [[<task>]] (held: not yet)` in place of the wait's line, and a later session reads it as that hold again.
+- his "not yet" for that task: `(held: not yet)`. It carries where the wait lives. Close step 4 writes the held wait
+  `waits on [[<task>]] (held: not yet)` in place of the wait's line in THREAD.md, so a later session on this thread
+  reads it as that hold again. A wait a paused rollout states is read by any session that reads that rollout (a repair,
+  its next lead), whatever its thread, so close sub-step 7.11 also appends the held wait to that rollout's
+  `## Pause log`, and `awaited` reads it back as `held <task> (not yet)`. The latest wait the log states for a task
+  decides, so his "start it" appends the plain `waits on [[<task>]]` there before the start, which lifts the hold.
   A "not yet" after the start undoes it the way it went: a new note's launch is withdrawn as ADR 0072's is, and a join
   is deferred out of its rollout by `/thread:repair` § 5; the wait then holds as above;
 - on the Chorus Stage, `list_sessions` shows a session named for the task, or running, waiting on or resting after work
   on it: `(held: <session> may be building it)`, read fresh;
-- the read's own `held` line: `(held: <its why>)`, read fresh;
+- the read's own `held` line: `(held: <its why>)`, read fresh; for a note schedule step 1 never takes (`archived`, `not a
+  task`, `a decisions task`) the row offers no "start it", since schedule would not take it;
 - `/thread:open save`, and a Leg's close.
 
 **d5. The wording rule.** A Resume instruction, a THREAD.md line, `next`'s line or any carrier says a task is coming
@@ -80,6 +92,11 @@ start is next's and close's (d2, d3), or his `/thread:schedule --tasks <task>`.
   It is kept for a held wait only.
 - **A fresh session through a handoff of the task:** rejected. Handoff launches rollouts and threads; a task has no
   launch form, and schedule's join and grading would be skipped.
+- **Read every link in a Pause log:** rejected in review. The log is append-only and the engine's own lines name the
+  rollout's own tasks: once his decline deferred one out of the queue, a sign-off line still naming it read as a wait,
+  and the next close started the task he had declined.
+- **His "not yet" carried only by THREAD.md:** rejected in review. A session that leads the paused rollout from
+  another thread reads the Pause log's wait with no THREAD.md hold, and would start the task he said "not yet" to.
 - **Read every open task's `depends-on:` estate-wide:** rejected. A wait no session here named may be another
   session's; orient-all's pass and `waits-on.py`'s `## Waits on` lines (ADR 0078 d7) already show those.
 
