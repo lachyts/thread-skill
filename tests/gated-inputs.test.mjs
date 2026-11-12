@@ -29,8 +29,10 @@
 //   words asking in both earlier readings; each widest step's why; the Verify corpus (a regression pin); per-unit gates
 //   left to the full reading; the residuals r1, r2 and r5 and the named over-asks; the PR review's four under-reads,
 //   each gate not covered at 200 (a unit's counts summed, two multipliers on a rate asking; a multiplier range at its
-//   top; a dollar marker after its number; an ISO 4217 code off the table asking, in rule 6 too); and the plan judge's
-//   other-currency sentence coupled to the pricer;
+//   top; a dollar marker after its number; an ISO 4217 code off the table asking, in rule 6 too); its second review's
+//   (a repeated-marker range, a grouped N and an unspaced em dash read whole; W5e's backstop asking on a multiplier
+//   read only in part, each why pinned; `thrice`, `quadruple` and `N-fold` in every reading; an unknown letters-`$`
+//   marker asking in rule 6); and the plan judge's other-currency sentence coupled to the pricer;
 // - the test-credential reading (ADR 0063): each step's why, in order (the class-independent steps first); p8-1's two
 //   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
 //   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
@@ -1006,6 +1008,86 @@ test('p48-4 W2(f) and rule 6: a number beside an ISO 4217 code off the table ask
   })
 })
 
+// Round 3, the PR's second review: one range joiner for amounts and counts (an unspaced em dash included), one N for a
+// multiplier and a noun count (thousands grouped by commas), and a marked range whose far end repeats its marker. Each
+// read below its widest before; `3x-4x` names US$240, over the line.
+test('p48-4 round 3: a repeated-marker range, a grouped N and an unspaced em dash read whole, at the top', () => {
+  widestAt200([
+    ['spend: API, max US$60, 3x-4x', '240'], // read 180 before: covered at 200
+    ['spend: API, max US$60, run 3x-4x', '240'],
+    ['spend: API, max US$60 3x-4x', '240'], // straight after the amount
+    ['spend: API, max US$10, 3x–4x', '40'], // read 120 before: two multipliers
+    ['spend: API, max US$10, 3x—4x', '40'],
+    ['spend: API, max US$10, x3-x4', '40'], // read 120 before
+    ['spend: API, max US$10, ×3–×4', '40'],
+    ['spend: API, max US$10, 3×–4×', '40'],
+    ['spend: API, max US$0.25 x 1,000', '250'], // read 0.25 before: `x 1`, the WE passing on the comma
+    ['spend: API, max US$0.25 × 1,000 renders', '250'],
+    ['spend: API, max US$0.25, run 1,000 times', '250'],
+    ['spend: API, max US$60, x3—4', '240'], // read 180 before: an unspaced em dash joins a count as it joins an amount
+    ['spend: x — cap US$1 per call, at most 40—50 calls', '50'], // and a noun count's
+    ['spend: API, max US$10, run thrice', '30'], // a multiplier word, read as `triple` is
+  ])
+})
+
+// W5e, the multiplier backstop: a multiplier marker left once the phrases are read, or a number touching a read one,
+// asks; it never reads the multiplier at its bottom.
+test('p48-4 W5e: a multiplier the grammar reads only in part asks, its why naming it', () => {
+  const why = (m) => `a multiplier the reading cannot place: ${m}`
+  widestAt200([
+    ['spend: API, max US$60, 3x-4', null, why('3x-4')], // read 180 before
+    ['spend: API, max US$60, 3x or 4', null, why('3x or 4')], // read 180
+    ['spend: API, max US$10 x 1.5', null, why('x 1.5')], // read 10: a decimal multiplier asks (a named over-ask)
+    ['spend: API, max US$10, 1.5x', null, why('1.5x')],
+    ['spend: API, max US$10, x 1,0000', null, why('x 1,0000')],
+    ['spend: API, max US$10, 3 × 4 runs', null, why('3 × 4')], // read 30
+    ['spend: API, max US$10, 4 x3', null, why('4 x3')],
+    ['spend: API, max US$10, x three hundred', null, why('x three hundred')], // read 30
+    ['spend: API, max US$10, 2kx', null, why('2kx')], // read 10
+    ['spend: API, max US$10, x thirteen', null, why('x thirteen')], // read 10: N in words stops at twelve
+    ['spend: API, max US$10, x(3-4)', null, why('x(3-4)')], // read 10
+    ['spend: API, max US$0.25 * 1000 renders', null, why('* 1000')], // read 0.25
+    ['spend: API, max US$10, run several times', null, why('times')], // read 10
+    ['spend: API, max US$10, tenfold', null, why('tenfold')],
+    ['spend: x — cap US$5 each, run 3x-4', null, why('3x-4')], // on a rate line too, before W5c
+    ['spend: x — max US$10 for response times', null, why('times')], // a named over-ask: `times` in prose
+    ['spend: x — max US$10/month (cron `0 5 * * *`)', null, why('5 *')], // a named over-ask: a cron line's `*`
+    ['spend: x — max US$10 for 512x512 renders', '10'], // control: an `x` inside a token is no multiplier
+    ['spend: x — max US$10, run quintuple', '10'], // r3: a multiplier word off the lists reads x1
+  ])
+})
+
+test('p48-4 round 3: MULTIPLIER gains `thrice`, `quadruple` and `N-fold`, and the cap-only clause a `*`, each read x1 before', () => {
+  const cases = [['spend: x — cap US$1 thrice', 'unrecognised clause: thrice', '3'],
+    ['spend: x — cap US$1 * 3', 'unrecognised clause: * 3', null], // the cap-only reading signed it at 1
+    ['spend: x — cap US$1 quadruple', 'unrecognised clause: quadruple', '4'],
+    ['spend: x — cap US$1 tenfold', 'unrecognised clause: tenfold', null],
+    // outside the clause the cap-only reading waives a multiplier, as it does `run twice` (p37-4's residual)
+    ['spend: x — cap US$1, 3-fold', 'multiplier outside the cap clause: 3-fold', '1']]
+  const got = py(cases.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'standing', gate }]))
+  cases.forEach(([gate, why, usd], i) => {
+    assert.deepEqual(got[2 * i], { usd: null, why }, `${gate}: full`)
+    assert.equal(got[2 * i + 1].usd, usd, `${gate}: standing`)
+  })
+})
+
+test('p48-4 round 3: rule 6 asks on an unknown letters-`$` marker beside a number, so no reading signs at the cap', () => {
+  const cases = [['spend: API, cap US$10 and S$500 for the retries', 'non-USD or ambiguous currency: S$5', 'S$'],
+    ['spend: API, cap US$10 and HK$500 for the retries', 'non-USD or ambiguous currency: HK$5', 'HK$'],
+    ['spend: API, cap US$10 and 500 HK$ for the retries', 'non-USD or ambiguous currency: 500 HK$', 'HK$']]
+  // controls: a known dollar after its number still prices (round 2), and a shell variable is no marker
+  const controls = [['spend: API, cap US$10 and 500 A$ for the retries', '595'], ['spend: API, cap US$10 (`echo $HOME`)', '10']]
+  const got = py([...cases.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'standing', gate },
+    { op: 'widest', gate }, { op: 'covered', gate, limit: 200 }]), ...controls.map(([gate]) => ({ op: 'standing', gate }))])
+  cases.forEach(([gate, why, mark], i) => {
+    assert.deepEqual(got[4 * i], { usd: null, why }, `${gate}: full`)
+    assert.deepEqual(got[4 * i + 1], { usd: null, why, capOnly: '' }, `${gate}: the cap-only reading signed it at 10 before`)
+    assert.deepEqual(got[4 * i + 2], { usd: null, why: `an unknown or ambiguous currency: ${mark}` }, `${gate}: widest`)
+    assert.equal(got[4 * i + 3].covered, false, `${gate}: never covered`)
+  })
+  controls.forEach(([gate, usd], i) => assert.equal(got[4 * cases.length + i].usd, usd, gate))
+})
+
 test("p48-4 the plan judge's other-currency sentence is coupled to the pricer: its priced example prints an amount, its other null", () => {
   const T = loadEngine(['gatePricingBlock'])
   const frag = T.gatePricingBlock({ gatePricer: '/x/gated_inputs.py' }, 'Planned on: abc\n### Gated inputs\n- spend: x — cap 1 USD\n### Risks / unknowns\n- none')
@@ -1015,7 +1097,7 @@ test("p48-4 the plan judge's other-currency sentence is coupled to the pricer: i
   assert.deepEqual(cli(`spend: x — ${m[2]}\n`).out, { usd: null, why: 'no cap clause' })
 })
 
-// ---- the test-Login reading (p37-4)---------------------------------------------------------------------------------
+// ---- the test-Login reading (p37-4) ---------------------------------------------------------------------------------
 const LOGINS = ['dummy']
 const NO_LOGINS = 'no test Logins declared (set [defaults] test_logins in ~/.config/thread/rollouts.toml)'
 const DUMMY = 'credential: the dummy Claude Login, to run that probe'   // verbatim from the archived Steer note's line 55

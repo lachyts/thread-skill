@@ -269,7 +269,8 @@ clauses`), `plus US$5`, a range, a non-USD cap (`no cap clause`), a counted rate
   else a total; `before` asks) and no rate left beyond the amounts (W5, W5d); on a rate line every count's unit a
   rate's, no stray number and each rate times the sum of its unit's counts, each at its top (W5c); on a line with no
   rate the unattached multipliers multiply every amount (W6); a multiplier's count a range read at its top, as a noun
-  count's is; the sum rounded up to the cent (W7). A gate priced so is signed or asked against the limit and the
+  count's is, and a multiplier the grammar reads only in part asking (W5e); the sum rounded up to the cent (W7). A
+  gate priced so is signed or asked against the limit and the
   month line exactly as a fully priced one, annotated and logged the same, and its approval line ends `; widest
   pricing, the cap-only reading refused: <why>`.
 - **W4, a governed cap word.** At least one amount must start exactly where a cap word ends: `cap`, `capped`, `max`,
@@ -296,8 +297,9 @@ clauses`), `plus US$5`, a range, a non-USD cap (`no cap clause`), a counted rate
   (`no cap`, `cap TBD`, `unlimited`); a rate with no stated most (`cap US$0.10 per GB`); a count in another unit, a
   count in words or a further rate beside it; a widening word, `%`, an approximate amount or an amount in words
   anywhere; an unknown currency (`¥`, `HK$`, or an ISO 4217 code off the table beside a number: `50 KWD`, `CHF 500`);
-  two multipliers on a rate line (they may compound); a per-unit word (a per-unit gate is the full reading's alone);
-  and a gate over the limit or past the month line, as before.
+  two multipliers on a rate line (they may compound); a multiplier the reading cannot place (W5e: `3x-4`, `x 1.5`,
+  `3 × 4 runs`, `several times`); a per-unit word (a per-unit gate is the full reading's alone); and a gate over the
+  limit or past the month line, as before.
 - **The PR review's four under-reads** (2026-11-13, PR #392's review). Each read a gate below its widest, so a line
   naming more than the limit could sign:
   - W5c(iv) took the largest count of a rate's unit, so `cap US$1 per call, at most 150 calls; and 150 calls for the
@@ -307,7 +309,8 @@ clauses`), `plus US$5`, a range, a non-USD cap (`no cap clause`), a counted rate
     under-read their product.
   - A multiplier had no range form, and a digit after `-` started no count, so `max US$60, run 3-4 times` read 60
     (it names 240), `2-3x` read its amount once and `x3-4` its bottom. Every multiplier form (`x N`, `× N`, `N x`,
-    `N times`), straight after its amount or unattached, now reads `N-N`, `N–N`, `N to N` and `N or N` at its top.
+    `N ×`, `N times`), straight after its amount or unattached, now reads a range at its top; round 3 below names
+    the joiners and the forms it reads, and the backstop for the rest.
   - W3's suffix read `€` and `£` but no dollar marker, so `max US$10 and 500$ for the retries` read 10. The suffix
     now holds `$` (USD, r5) and the known letters-`$` markers, each at its ceiling rate (`500 A$` reads 585); a
     marker followed by a letter, digit, `_`, `{`, `(` or a space and a digit is none (`3 $5 runs`, `5 $HOME`).
@@ -320,6 +323,40 @@ clauses`), `plus US$5`, a range, a non-USD cap (`no cap clause`), a counted rate
   ran. Rule 6 (currency, whole gate, both earlier readings) now asks on a dollar marker after its number and on a
   code off the table beside one, so the first reaches the widest reading (510) and the second asks. A replay of the
   gate literals in the tests and fixtures and the vault's spend lines (354 gates) changed no reading.
+- **Round 3: the multiplier's separators, and its backstop** (2026-11-13, PR #392's second review, a step back after
+  two rounds). Round 2's range fix still under-read three shapes: a range whose far end repeats its marker read at
+  its bottom (`max US$60, 3x-4x` read 180, covered at 200; with an en dash `3x–4x` read as two multipliers, 12x); a
+  multiplier's N had no thousands separator (`max US$0.25 x 1,000` read `x 1` and signed at 0.25); and an unspaced
+  `—` joined an amount's range but not a count's (`max US$60, x3—4` read 180). They share one root cause: on a line
+  with no rate, a digit run the multiplier grammar could not place was dropped without a word. So the grammar is made
+  one, and a backstop asks on what it still cannot read:
+  - One range joiner (RANGE_TO) for an amount and a count alike: a `-` or `–` with optional spaces, an unspaced `—`,
+    a spaced `to` or `or`. A spaced `—` is the clause separator, never a range.
+  - One N (_COUNT_N) for a multiplier and a noun count: digits >= 1, their thousands grouped by commas or not
+    (`1,000`), or one to twelve in words.
+  - A marked multiplier's far end may repeat its marker (`x3-x4`, `3x-4x`, `3×–4×`), read at its top.
+  - `thrice` (3) and `quadruple` (4) read as `twice`, `double` and `triple` do. MULTIPLIER, the list rules 5 and
+    7(vi) share, gains them and an `N-fold` (`3-fold`, `tenfold`), which every reading read as x1 before
+    (`cap US$1 thrice` signed at 1), so the earlier readings now ask on them.
+  - W5e, the backstop, runs on every line once the multiplier phrases are read, and asks ("a multiplier the reading
+    cannot place: <m>") on a multiplier marker left on the line (one the cap-only reading's rule 5 asks on: `×`, an
+    `x` beside a digit, `times`, an `N-fold`, a `*` beside a digit; or an `x` beside a number word, a number with a
+    magnitude or a bracketed number: `x thirteen`, `2kx`, `x(3-4)`) and on a number, a digit run or a number word,
+    touching a read multiplier across a range joiner, a `,` or `.`, or whitespace (`3x-4`, `3x or 4`, `x 1.5`,
+    `x 1,0000`, `3 × 4 runs`, `x three hundred`, `4 x3`). The cap-only reading's rule 5 gains the `*`, so
+    `cap US$1 * 3`, which it signed at 1, asks.
+  So `max US$60, 3x-4x` reads 240 (not covered at 200), `max US$10, 3x–4x` 40, `max US$0.25 x 1,000` 250 and
+  `max US$60, x3—4` 240, and no multiplier the grammar knows reads at its bottom: it reads whole or asks. The shapes
+  left to ask are named over-asks, never silent under-reads: a decimal multiplier (`x 1.5`, `1.5x`), a number beside
+  a multiplier in another sense (`3 × 4 runs`, `x3 2 models`), a `×` or an `x` beside a digit that is no multiplier,
+  a `times` in prose (`response times`), a `*` beside a digit (`US$0.25 * 1000`, a cron line's `0 5 * * *`), an
+  `N-fold` and `x 0`. A multiplier word off the lists (`quintuple`) reads x1 in every reading, r3's class below.
+  Rule 6 also asks now, in both earlier readings, on a letters-`$` marker that is none of the known dollars beside a
+  number (`cap US$10 and S$500 for the retries`, `HK$500`, `500 HK$`): each signed at its cap before p48-4, though
+  `S$500` is about US$370; the widest reading's W2(f) already asked on it.
+  A replay of the gate literals in the tests and fixtures and the vault's spend lines (472 gates) changed no reading.
+  Of 7,548 splices of their short literals into three gate shapes, 9 changed, each now asking on arithmetic written
+  with an `x` (`15 x 3 = 45`) or on a lone `×`.
 - **The plan judge.** `exposure -` prints the standing reading's {usd, why}, so a gate neither earlier reading prices
   now prints its widest amount, and the judge, which bounces only a null "usd", never bounces a one-cap gate in
   another currency, a range or a counted rate. Its fragment (task.workflow.js gatePricingBlock) said `cap 30 AUD`
@@ -345,7 +382,8 @@ annotation records the total exposure, each pinned in tests/gated-inputs.test.mj
 - (r2) An unknown currency word on a line with no rate is not read (`1000 rupees`), nor an ISO 4217 code written in
   lower case (`50 kwd`), which is a word; on a rate line either is a count in another unit, and asks. An upper-case
   code off the table asks in every reading (W2(f) and rule 6).
-- (r3) A rate idiom off the lists, and not straight after its amount, reads x1.
+- (r3) A rate idiom off the lists, and not straight after its amount, reads x1, as does a multiplier word off the
+  lists (`quintuple`), in every reading.
 - (r4) The ceilings under-read a currency that rises more than 5% past its post-2000 high, or a currency word meant as
   a currency off the table worth more than its word's ceiling: today only a `dollars` or `bucks` meant as the Cayman
   Islands dollar (pegged at US$1.20).
@@ -356,4 +394,7 @@ Named over-asks, fail closed and pinned: prose `per`/`each`/`every`; a widening 
 other word, or a parenthesis, between it and its amount (`the cap is US$10`, `cap (US$10)`); a hyphenated bound word
 (`hard-cap US$10`); a line whose only bound word bounds a count (`US$0.50 per call, at most 40 calls`); an upper-case
 word that is an ISO 4217 code, beside a number in another sense (`PHP 8`, `ALL 3`); a count restated on a rate line,
-summed twice (`at most 40 calls (40 calls in all)` reads 80 calls); and two multipliers on a rate line.
+summed twice (`at most 40 calls (40 calls in all)` reads 80 calls); two multipliers on a rate line; and, from W5e, a
+decimal multiplier (`x 1.5`, `1.5x`), a number beside a multiplier in another sense (`3 × 4 runs`), a `×` or an `x`
+beside a digit that is no multiplier, a `times` in prose (`response times`), a `*` beside a digit (a cron line's
+`0 5 * * *` too), an `N-fold` and `x 0`.
