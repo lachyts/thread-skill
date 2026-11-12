@@ -660,10 +660,11 @@ test('p29-9: a blocked implementer\'s flakes ride on its row; IMPL_RESULT and IN
 // with no climb, and on a second bounce, or on the last plan round, takes the approve path: unapproved gates reach
 // Lachy as gate-pending (with the `bounced by the plan judge (ADR 0038)` paragraph, which reconcile keeps from the
 // standing approval, C15), never plan-blocked. Cases run on the bottom rung (opus-high) wherever a climb is observed.
-// G never prices: the pricer reads `cap 30 AUD` as "no cap clause", which ADR 0038 decision 2 bounces once, then sends
-// to sign-off.
+// G never prices: the pricer reads `cap 30 AUD per run` as "no cap clause" (a non-USD cap, and a rate with no stated
+// most at its widest; `cap 30 AUD` alone prices at its ceiling rate since p48-4), which ADR 0038 decision 2 bounces
+// once, then sends to sign-off.
 const PRICER = '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py'
-const G = 'spend: eval re-runs — cap 30 AUD'
+const G = 'spend: eval re-runs — cap 30 AUD per run'
 const planWith = (gates, marker = 'PLAN') => `Planned on: abc\n${marker}\n### Files to modify\n- x\n### Gated inputs\n${gates.map((g) => '- ' + g + '\n  - six runs at about four US dollars').join('\n')}\n### Risks / unknowns\n- none`
 const PLAN_G = planWith([G])
 const BOUNCED = 'bounced by the plan judge (ADR 0038)'

@@ -85,8 +85,10 @@ no bytecode.
         empty clause is a total.
      6. Currency, whole gate: a non-USD amount (`A$`, `AU$`, `NZ$`, `C$`, `CA$`, `€`, `£`, `¥`, `AUD`, `NZD`, `CAD`,
         `EUR`, `GBP`, `JPY` beside a number, or `minor units` after one), a currency word (dollar, bucks, euro,
-        pound, cent), a number word beside a currency, or a magnitude before a code ("non-USD or ambiguous
-        currency").
+        pound, cent), a number word beside a currency, a magnitude before a code, and (p48-4 round 2) a dollar
+        marker after its number (DOLLAR_SUFFIX: `500$`, `500 US$`, `500 A$`, which rule 2 never reads) or an ISO 4217
+        code off the table beside a number (OFF_TABLE_CODE_RE, upper case: `50 KWD`, `CHF 500`) ("non-USD or ambiguous
+        currency"). Rule 6 runs in the cap-only reading too, so neither signs at the cap alone.
      7. Multipliers, periods and widening words outside the clause (code spans included; `_` is a word
         character, so `per_call_cap` never matches): (i) a `per`/`each` rate (RATE_RE, below); (ii) a
         plural Logins/accounts/seats/users; (iii) `every`/`a`/`an` directly before a UNIT_NOUNS noun; (iv) `night(s)`
@@ -163,7 +165,9 @@ no bytecode.
          `usually`, `expected`, `as needed`, `if needed`, `as required`); (d) "an amount in words" (CURRENCY_RES[4],
          or a CURRENCY_NUMBER_WORDS word beside a currency word, `€`, `£` or a dollar marker); (e) "minor units"
          (CURRENCY_RES[2]); (f) "an unknown or ambiguous currency" (`¥`, any other Unicode currency symbol but `$ €
-         £`, or a letters-`$` marker but US$, A$, AU$, NZ$, C$ and CA$); (g) "an approximate amount" (`≈` or `est.`
+         £`, a letters-`$` marker but US$, A$, AU$, NZ$, C$ and CA$, or an ISO 4217 code off the table beside a
+         number, OFF_TABLE_CODE_RE, upper case only, the why naming the code: `50 KWD`, `CHF 500`; codes are a closed
+         list, unlike currency words, so `GPT 4` never asks); (g) "an approximate amount" (`≈` or `est.`
          anywhere; `~`, `about`, `around`, `circa`, `c.` or `ca.` before a W3 prefix marker or a digit, the why
          naming the marker alone).
      W3. Amounts (AMOUNT_RE), left to right without overlap, each with a currency at one end or both: a prefix marker
@@ -172,7 +176,10 @@ no bytecode.
          letter, digit, `_`, `.`, `,`, `-` or `$`); a magnitude (`k`, `thousand`, `grand` x1e3; `m`, `mn`, `million`
          x1e6; `bn`, `billion` x1e9); an optional range read at its top (`-`, `–`, an unspaced `—`, `to`, `or`: a
          spaced `—` is the clause separator, so it is two amounts), its far end allowed its own marker; a suffix after
-         a digit or one space (a code, `dollars`, `bucks`, `euros`, `pounds`, `cents`, `yen`, `pence`, `€`, `£`).
+         a digit or one space (a code, `dollars`, `bucks`, `euros`, `pounds`, `cents`, `yen`, `pence`, `€`, `£`, or a
+         dollar marker, DOLLAR_SUFFIX: `$`, `US$`, `A$`, `AU$`, `NZ$`, `C$`, `CA$`, so `500$` and `500 A$` read as
+         `$500` and `A$500` do; a marker followed by a letter, digit, `_`, `{`, `(` or a space and a digit is none,
+         so `3 $5 runs` keeps its `$5` and `5 $HOME` holds no amount).
          Ends whose currencies differ read at the higher ceiling. A letter, digit or `_`, or `.`/`,` then a digit,
          straight after an amount asks ("malformed amount: <m>"); a number with no currency, or a currency word or
          marker with no number beside it, is no amount.
@@ -186,21 +193,24 @@ no bytecode.
          before"); a month (MONTH_RES) counts x1, as the full reading counts it; a rate (`per` + SEP + a word, `/` + a
          word, `every` or `a`/`an` + a word, its unit that word; a PERIOD_ADVERBS word, its own unit; `each`/
          `apiece`, no unit), and `per` or `/` before a digit asks ("a rate per a count: <m>"); a multiplier (`x N`,
-         `× N`, `N x`, `N ×`, `N times`, `twice`, `double`, `triple`) multiplies that amount; anything else is a
-         total, x1.
+         `× N`, `N x`, `N ×`, `N times`, `twice`, `double`, `triple`; N may be a range, `-`, `–`, `to` or `or`, read
+         at its top: `x 3 to 4`, `2-3x`) multiplies that amount; anything else is a total, x1.
      W5d. With the amounts and their qualifiers blanked, a `per`, `each` or `every` (with its next word), `apiece`, a
          PERIOD_ADVERBS word, `night(s)`, a MONTH_RES phrase, `a`/`an` + a UNIT_NOUNS noun, or `/` + a letter or
          digit left on the line asks ("a rate beyond the amounts: <m>").
-     Count phrases, read on that blanked line: a multiplier form (its unit "times"); N (digits >= 1, commas allowed,
-     or one to twelve in words, not inside a token; a range read at its top), whitespace, then the adjacent letter
-     word, its unit. Two units are one when they match ignoring case, `'s` and a plural ending.
+     Count phrases, read on that blanked line: a multiplier form, its N a range read at its top as in W5 (`3-4
+     times`, `x3-4`, `2-3x`; its unit "times"); N (digits >= 1, commas allowed, or one to twelve in words, not inside
+     a token; a range read at its top), whitespace, then the adjacent letter word, its unit. Two units are one when
+     they match ignoring case, `'s` and a plural ending.
      W5c. A line with a rate amount: (i) a count in words asks ("a count in words: <m>": CURRENCY_NUMBER_WORDS beyond
          twelve, `dozens`, `hundreds`, `thousands`, `millions`, `both`, `all`, `several`, `multiple`, `many`, `few`,
          `numerous`, `various`); (ii) every count phrase's unit must be some rate's, an `each`/`apiece` rate taking
          the one unit the phrases left over share ("a count in another unit: <phrase>"); (iii) any other digit run
          asks unless its token starts with a letter ("a number the rate cannot place: <token>": `--runs 3` and
-         `Haiku 4.5` ask, `gpt-4.1` does not); (iv) each rate takes the largest N of its unit ("a rate with no stated
-         most: <amount and rate words>").
+         `Haiku 4.5` ask, `gpt-4.1` does not); (iv) each rate takes the sum of its unit's count phrases, each at its
+         top, since each counts its own share (`at most 150 calls; and 150 calls for the retry pass` reads 300 calls),
+         with none asking ("a rate with no stated most: <amount and rate words>") and two or more multiplier phrases
+         asking, since they may compound ("more than one multiplier on a rate: <phrases>").
      W6. A line with no rate amount: noun counts are waived (r1); the product of the multiplier phrases left
          unattached multiplies every amount.
      W7. The sum, each amount at its widest times its count, rounded up to the cent (ROUND_CEILING); an integral
@@ -214,14 +224,18 @@ no bytecode.
    Accepted residuals (pinned), each safe because the gate's total is the implementer's ceiling (GATED_INPUTS_CHECK)
    and the annotation records the total exposure: (r1) a count beside a total amount, on a line with no rate, reads
    once (`cap 30 AUD for 3 runs` reads 35.10); (r2) an unknown currency word on a line with no rate is not read (`1000
-   rupees`; on a rate line it is a count in another unit and asks); (r3) a rate idiom off the lists, and not straight
-   after its amount, reads x1; (r4) the ceilings under-read a currency that rises more than 5% past its post-2000 high,
-   or a currency word meant as a currency off the table worth more than its word's ceiling (today only a `dollars`
-   meant as the Cayman Islands dollar, pegged at US$1.20); (r5) a bare `$` is USD. Named over-asks (fail closed,
-   pinned): prose `per`/`each`/`every`; a widening or uncapped word in the description (`soft launch`); stray numbers
-   on a rate line; `¥`; a count noun not adjacent to its number; a bound word with any other word, or a parenthesis,
-   between it and its amount (`the cap is US$10`, `cap (US$10)`); a hyphenated bound word (`hard-cap US$10`); a line
-   whose only bound word bounds a count (`US$0.50 per call, at most 40 calls`).
+   rupees`, and an ISO 4217 code written in lower case, `50 kwd`, which is a word; on a rate line it is a count in
+   another unit and asks; an upper-case code off the table asks in every reading, W2(f) and rule 6); (r3) a rate
+   idiom off the lists, and not straight after its amount, reads x1; (r4) the ceilings under-read a currency that
+   rises more than 5% past its post-2000 high, or a currency word meant as a currency off the table worth more than its
+   word's ceiling (today only a `dollars` meant as the Cayman Islands dollar, pegged at US$1.20); (r5) a bare `$` is
+   USD, before its number or after it (`500$`). Named over-asks (fail closed, pinned): prose `per`/`each`/`every`; a
+   widening or uncapped word in the description (`soft launch`); stray numbers on a rate line; `¥`; a count noun not
+   adjacent to its number; a bound word with any other word, or a parenthesis, between it and its amount (`the cap is
+   US$10`, `cap (US$10)`); a hyphenated bound word (`hard-cap US$10`); a line whose only bound word bounds a count
+   (`US$0.50 per call, at most 40 calls`); an upper-case word that is an ISO 4217 code, beside a number in another
+   sense (`PHP 8`, `ALL 3`); a count restated on a rate line, summed twice (`at most 40 calls (40 calls in all)` reads
+   80 calls); and two multipliers on a rate line.
 
    CLI (ADR 0038): `exposure -` reads ONE gate on stdin and prints standing_exposure()'s {usd, why} as one JSON line,
    {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, never its capOnly or widest, then
@@ -494,6 +508,18 @@ CURRENCY_NUMBER_WORDS = COUNT_WORDS + ("eleven", "twelve", "thirteen", "fourteen
                                        "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
                                        "eighty", "ninety", "hundred", "thousand", "million", "billion", "dozen")
 NON_USD_CODES = ("AUD", "NZD", "CAD", "EUR", "GBP", "JPY")
+# ISO 4217's codes (its active list, and ANG, HRK, SLL and ZWL, replaced since 2023): a closed list, unlike currency
+# words, so a number beside one of them that is not USD or a NON_USD_CODES code asks in every reading (p48-4 round 2:
+# `50 KWD` is about US$163). Upper case only, as ISO writes them: `try 3`, `top 5` and `all 4` are words.
+ISO_4217_CODES = tuple("""
+    AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD BTN BWP BYN BZD CAD CDF CHE
+    CHF CHW CLF CLP CNY COP COU CRC CUC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ
+    GYD HKD HNL HRK HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL
+    LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN
+    PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD
+    TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED VES VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT
+    XSU XTS XUA XXX YER ZAR ZMW ZWG ZWL""".split())
+OFF_TABLE_CODES = tuple(c for c in ISO_4217_CODES if c not in ("USD",) + NON_USD_CODES)
 MAGNITUDES = ("k", "m", "bn", "mn", "thousand", "million", "billion", "grand")
 MULTIPLIER_WORDS = ("times", "twice", "double", "triple", "apiece")   # rules 5 and 7 share it
 # Login and account are one unit (p18-7's "per Login (per account)"), so a per-account cap counts across N Logins.
@@ -607,6 +633,13 @@ CAP_ONLY_LEFTOVER_RES = (
     ("a widening word", re.compile(WIDENING + r"|" + WS + r"plus" + WE + r"|\+|" + WS + r"before" + WE, re.I)),
 )
 CURRENCY_MARK = r"(?:US\$|USD" + WE + r"|\$|" + WS + _alt(NON_USD_CODES) + WE + ")"
+# A dollar marker after its number (`500$`, `500 US$`, `500 A$`): one not followed by a letter, digit, `_`, `{` or `(`,
+# nor by a space and a digit, so `3 $5 runs` keeps its `$5` and `5 $HOME` holds none. Its letters in any case.
+DOLLAR_SUFFIX = r"(?:(?i:US|AU|NZ|CA|A|C))?\$(?![A-Za-z0-9_{(]|\s\d)"
+# An ISO 4217 code off the table beside a number (`50 KWD`, `50KWD`, `CHF 500`), the match the code alone, in upper
+# case only.
+OFF_TABLE_CODE_RE = re.compile(r"(?:(?<=\d)|(?<=\d\s))" + _alt(OFF_TABLE_CODES) + WE
+                               + r"|" + WS + _alt(OFF_TABLE_CODES) + r"(?=\s?\d)")
 CURRENCY_RES = (
     re.compile(WS + r"(?:AU|NZ|CA|A|C)\$\s?\d|[€£¥]\s?\d|\d\s?[€£¥]"),
     re.compile(WS + _alt(NON_USD_CODES) + r"\s?\d|\d\s?" + _alt(NON_USD_CODES) + WE, re.I),
@@ -615,6 +648,10 @@ CURRENCY_RES = (
     re.compile(WS + _alt(CURRENCY_NUMBER_WORDS) + r"\s?" + CURRENCY_MARK + "|"
                + r"(?:US\$|" + WS + r"USD|" + WS + _alt(NON_USD_CODES) + r"|\$)\s?" + _alt(CURRENCY_NUMBER_WORDS) + WE, re.I),
     re.compile(r"\d[\d,.]*\s?" + _alt(MAGNITUDES) + r"\s?" + WS + _alt(("USD",) + NON_USD_CODES) + WE, re.I),
+    # p48-4 round 2: a dollar marker after its number, which rule 2 never reads (the widest reading does: W3), and an
+    # ISO 4217 code off the table beside a number, which no reading prices. Last, so an earlier entry keeps its why.
+    re.compile(r"\d[\d,.]*\s?" + DOLLAR_SUFFIX),
+    OFF_TABLE_CODE_RE,
 )
 # 7(ix) (p37-4): a per-unit word outside the clause, last, so relaxing per/each never lets a per-Login reading through:
 # `per`/`each`, up to three SEP-joined words, then a singular Login, account, seat or user (`per the dummy Login`, `each
@@ -794,9 +831,11 @@ MAGNITUDE = {"k": 10 ** 3, "thousand": 10 ** 3, "grand": 10 ** 3, "m": 10 ** 6, 
 # W3: an amount, a currency at one end or both. A prefix marker then at most one space; a number (with no prefix, not
 # after a letter, digit, `_`, `.`, `,`, `-` or `$`); a magnitude; a range read at its top (`-`, `–`, an unspaced `—`,
 # `to`, `or`: a spaced `—` is the clause separator, so it is two amounts), its far end with its own marker allowed; a
-# suffix after a digit or one space (a code, a currency word, `€`, `£`).
+# suffix after a digit or one space (a code, a currency word, `€`, `£`, or a dollar marker, DOLLAR_SUFFIX: `$`, `US$`,
+# `A$`, `AU$`, `NZ$`, `C$`, `CA$`).
 WIDEST_PREFIX = (r"(?:" + WS + r"(?:US\$|AU\$|NZ\$|CA\$|A\$|C\$|USD|AUD|NZD|CAD|EUR|GBP|JPY)|" + WS + r"\$|€|£)")
-WIDEST_SUFFIX = (r"(?:(?:USD|AUD|NZD|CAD|EUR|GBP|JPY|dollars?|bucks|euros?|pounds?|cents?|yen|pence)" + WE + r"|€|£)")
+WIDEST_SUFFIX = (r"(?:(?:USD|AUD|NZD|CAD|EUR|GBP|JPY|dollars?|bucks|euros?|pounds?|cents?|yen|pence)" + WE + r"|€|£|"
+                 + DOLLAR_SUFFIX + r")")
 WIDEST_MAG = r"(?:k|mn|m|bn|thousand|million|billion|grand)" + WE
 AMOUNT_RE = re.compile(
     r"(?:(?P<pre>" + WIDEST_PREFIX + r") ?|(?<![A-Za-z0-9_.,\-$]))(?P<num>" + NUM + r")"
@@ -838,15 +877,27 @@ Q_RATE_RE = re.compile(r"(?:per" + WE + SEP + r"|/\s?|every\s+|an?\s+)(?P<unit>[
 _COUNT_WORD = _alt(COUNT_WORDS + ("eleven", "twelve"))
 _MULT_N = r"(?:[1-9]\d*|" + _COUNT_WORD + r")"
 _NUM_START = r"(?<![A-Za-z0-9_.,\-])"
-Q_MULT_RE = re.compile(r"(?:x\s?(?P<a>" + _MULT_N + r")|×\s?(?P<b>" + _MULT_N + r")|(?P<c>" + _MULT_N
-                       + r")\s?[x×]|(?P<d>" + _MULT_N + r")\s+times|(?P<w>twice|double|triple))" + WE, re.I)
+# A count's range, read at its top: `-`, `–`, `to` or `or`, then the far end (NOUN_COUNT_RE's, and each multiplier's).
+_COUNT_TO = r"(?:\s*[-–]\s*|\s+(?:to|or)\s+)"
+
+
+def _mult_forms(start):
+    """The multiplier forms, each N a range allowed (`x3-4`, `×3 to 4`, `2-3x`, `3-4 times`), read at its top (its far
+    end the group `<k>2`). `start` guards a digit-led form (_NUM_START in the count phrases, nothing straight after an
+    amount)."""
+    def n(k):
+        return r"(?P<" + k + r">" + _MULT_N + r")(?:" + _COUNT_TO + r"(?P<" + k + r"2>" + _MULT_N + r"))?"
+    return (r"x\s?" + n("a") + r"|×\s?" + n("b") + r"|" + start + n("c") + r"\s?[x×]|" + start + n("d") + r"\s+times")
+
+
+Q_MULT_RE = re.compile(r"(?:" + _mult_forms("") + r"|(?P<w>twice|double|triple))" + WE, re.I)
 # Count phrases, read with the amounts and qualifiers blanked: a multiplier (unit "times"), or N (digits >= 1, commas
-# allowed, or one to twelve in words, not inside a token; a range read at its top) then whitespace then a letter word.
-MULT_PHRASE_RE = re.compile(r"(?:" + WS + r"x\s?(?P<a>" + _MULT_N + r")|×\s?(?P<b>" + _MULT_N + r")|" + _NUM_START
-                            + r"(?P<c>" + _MULT_N + r")\s?[x×]|" + _NUM_START + r"(?P<d>" + _MULT_N + r")\s+times|"
-                            + WS + r"(?P<w>twice|double|triple))" + WE, re.I)
+# allowed, or one to twelve in words, not inside a token) then whitespace then a letter word; either's N may be a range,
+# read at its top.
+MULT_PHRASE_RE = re.compile(r"(?:" + WS + _mult_forms(_NUM_START) + r"|" + WS + r"(?P<w>twice|double|triple))" + WE,
+                            re.I)
 _NOUN_N = r"(?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*|" + _COUNT_WORD + r")"
-NOUN_COUNT_RE = re.compile(_NUM_START + r"(?P<lo>" + _NOUN_N + r")(?:(?:\s*[-–]\s*|\s+(?:to|or)\s+)(?P<hi>" + _NOUN_N
+NOUN_COUNT_RE = re.compile(_NUM_START + r"(?P<lo>" + _NOUN_N + r")(?:" + _COUNT_TO + r"(?P<hi>" + _NOUN_N
                            + r"))?\s+(?P<unit>[A-Za-z]+(?:'s)?)" + WE, re.I)
 WORD_N = {"twice": 2, "double": 2, "triple": 3}
 # W5d: a rate left on the line once the amounts and their qualifiers are blanked.
@@ -901,10 +952,12 @@ def _widest_widening(gate):
 
 
 def _unknown_currency(gate):
-    """W2 (f): the earliest `¥` or other currency symbol but `$ € £`, or a letters-`$` marker but the known dollars."""
+    """W2 (f): the earliest `¥` or other currency symbol but `$ € £`, a letters-`$` marker but the known dollars, or an
+    ISO 4217 code off the table beside a number (OFF_TABLE_CODE_RE)."""
     found = [(m.start(), m.group(0)) for m in LETTERS_DOLLAR_RE.finditer(gate)
              if m.group(1).upper() not in KNOWN_DOLLARS]
     found += [(i, ch) for i, ch in enumerate(gate) if ch not in "$€£" and unicodedata.category(ch) == "Sc"]
+    found += [(m.start(), m.group(0)) for m in OFF_TABLE_CODE_RE.finditer(gate)]
     return min(found)[1] if found else None
 
 
@@ -964,8 +1017,12 @@ def _count_n(text):
 
 
 def _mult_n(m):
+    """A multiplier's N: its word's, or its count's, a range read at its top."""
     word = m.group("w")
-    return WORD_N[word.lower()] if word else _count_n(next(m.group(k) for k in "abcd" if m.group(k)))
+    if word:
+        return WORD_N[word.lower()]
+    k = next(k for k in "abcd" if m.group(k))
+    return max(_count_n(m.group(k)), _count_n(m.group(k + "2") or m.group(k)))
 
 
 def _qualifier(gate, start, end):
@@ -1023,12 +1080,13 @@ def widest_exposure(gate):
     beyond = _earliest(BEYOND_RES, rest)   # W5d
     if beyond:
         return _none(f"a rate beyond the amounts: {beyond}")
-    phrases = [(_collapse(m.group(0)), _mult_n(m), "times") for m in MULT_PHRASE_RE.finditer(rest)]
+    # [(its text, N, its unit, a multiplier)]
+    phrases = [(_collapse(m.group(0)), _mult_n(m), "times", True) for m in MULT_PHRASE_RE.finditer(rest)]
     rest = _blank(rest, [m.span() for m in MULT_PHRASE_RE.finditer(rest)])
     rates = [r for r in read if r[0] == "rate"]
     if not rates:   # W6: noun counts waived (r1); the unattached multipliers multiply every amount
         product = 1
-        for _text, n, _unit in phrases:
+        for _text, n, _unit, _mult in phrases:
             product *= n
         total = sum((value * (n if kind == "mult" else 1) for kind, value, n, _t in read), Decimal(0)) * product
         return {"usd": _ceil_cents(total), "why": ""}
@@ -1037,7 +1095,7 @@ def widest_exposure(gate):
         return _none(f"a count in words: {quantity}")
     nouns = list(NOUN_COUNT_RE.finditer(rest))
     phrases += [(_collapse(m.group(0)), max(_count_n(m.group("lo")), _count_n(m.group("hi") or m.group("lo"))),
-                 m.group("unit")) for m in nouns]
+                 m.group("unit"), False) for m in nouns]
     rest = _blank(rest, [m.span() for m in nouns])
     units = [r[2] for r in rates if r[2]]
     leftover = [p for p in phrases if not any(_same_unit(p[2], u) for u in units)]   # W5c (ii)
@@ -1062,10 +1120,12 @@ def widest_exposure(gate):
             total += value * (n_or_unit if kind == "mult" else 1)
             continue
         unit = n_or_unit or each_unit
-        counts = [n for _t, n, u in phrases if unit and _same_unit(u, unit)]
+        counts = [p for p in phrases if unit and _same_unit(p[2], unit)]
         if not counts:
             return _none(f"a rate with no stated most: {text}")
-        total += value * max(counts)
+        if len(counts) > 1 and any(p[3] for p in counts):   # multipliers may compound: their sum is no most
+            return _none(f"more than one multiplier on a rate: {', '.join(p[0] for p in counts)}")
+        total += value * sum(p[1] for p in counts)   # each count phrase its own share: their sum is the most
     return {"usd": _ceil_cents(total), "why": ""}
 
 

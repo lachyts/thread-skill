@@ -27,7 +27,10 @@
 //   plus, a range, a counted rate, a multiplier, another currency, a bound synonym) priced at their widest, each with
 //   the cap-only reading's why as `widest`; the ceiling table; the CLI's widest line; WIDENING's `±` and uncapped
 //   words asking in both earlier readings; each widest step's why; the Verify corpus (a regression pin); per-unit gates
-//   left to the full reading; the residuals r1, r2 and r5 and the named over-asks;
+//   left to the full reading; the residuals r1, r2 and r5 and the named over-asks; the PR review's four under-reads,
+//   each gate not covered at 200 (a unit's counts summed, two multipliers on a rate asking; a multiplier range at its
+//   top; a dollar marker after its number; an ISO 4217 code off the table asking, in rule 6 too); and the plan judge's
+//   other-currency sentence coupled to the pricer;
 // - the test-credential reading (ADR 0063): each step's why, in order (the class-independent steps first); p8-1's two
 //   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
 //   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
@@ -929,7 +932,90 @@ test('p48-4 accepted residuals r1, r2 and r5, and the named over-asks', () => {
   cases.forEach(([gate, usd], i) => assert.equal(got[i].usd, usd, `${gate}: ${got[i].why}`))
 })
 
-// ---- the test-Login reading (p37-4) ---------------------------------------------------------------------------------
+// Round 2 of the PR's review: four under-reads, each gate's true widest reading over the line (or off the table), so
+// each is pinned not covered at 200. `[gate, usd at its widest | null, why]`, read by the widest reading alone.
+function widestAt200(cases) {
+  const got = py(cases.flatMap(([gate]) => [{ op: 'widest', gate }, { op: 'covered', gate, limit: 200 }]))
+  cases.forEach(([gate, usd, why], i) => {
+    assert.deepEqual(got[2 * i], { usd, why: why || '' }, gate)
+    assert.equal(got[2 * i + 1].covered, usd !== null && Number(usd) <= 200, `${gate}: covered at 200 iff its widest is`)
+  })
+}
+
+test('p48-4 W5c(iv): a unit counted more than once sums its counts, each range at its top; two multipliers on a rate ask', () => {
+  widestAt200([
+    ['spend: API, cap US$1 per call, at most 150 calls; and 150 calls for the retry pass', '300'], // read 150 before
+    ['spend: x — cap US$1 each, at most 5 images, 3-4 images for the retry', '9'],
+    ['spend: x — cap US$0.50 per call, 40-50 calls', '25'], // control: one count, its range at its top
+    ['spend: x — cap US$5 each, x3, x4', null, 'more than one multiplier on a rate: x3, x4'], // they may compound
+    ['spend: x — cap US$5 each, x3', '15'], // control: one multiplier counts the each
+  ])
+  assert.deepEqual(standing('spend: API, cap US$1 per call, at most 150 calls; and 150 calls for the retry pass'),
+    { usd: '300', why: '', capOnly: '', widest: 'unrecognised clause: per call' })
+})
+
+test('p48-4 W5/W6: a multiplier range reads at its top, after the amount or unattached', () => {
+  widestAt200([
+    ['spend: API, max US$60, run 3-4 times', '240'], // read 60 before: `_NUM_START` refused the 4 after `-`
+    ['spend: API, max US$10, run 2-3x', '30'], // read 10
+    ['spend: API, max US$10, x3-4', '40'], // read 30
+    ['spend: API, max US$10, ×3–4', '40'],
+    ['spend: API, max US$10, run two or three times', '30'],
+    ['spend: API, max US$10, run 3 to 4 times', '40'], // control: read so before
+    ['spend: API, max US$10 x 3 to 4', '40'], // straight after the amount (Q_MULT_RE), read 30 before
+    ['spend: API, max US$10 2-3x', '30'],
+    ['spend: x — cap US$5 each, run 3-4 times', '20'], // on a rate line, the each's count
+  ])
+})
+
+test('p48-4 W3: a dollar marker after its number is an amount (r5: a bare `$` is USD), and rule 6 asks on it', () => {
+  widestAt200([
+    ['spend: API, max US$10 and 500$ for the retries', '510'], // read 10 before
+    ['spend: API, max US$10 and 500 US$ for the retries', '510'],
+    ['spend: API, max US$10 and 500 A$ for the retries', '595'],
+    ['spend: API, max US$10 and 500€ for the retries', '855'], // control: a trailing € read so before
+    ['spend: x — max US$10 for 3 $5 runs', '15'], // a `$` before a number is that number's prefix (r1 waives the 3)
+    ['spend: x — max US$10 (`echo 5 $HOME`)', '10'], // a `$` before a letter is a shell variable, no amount
+  ])
+  // the cap-only reading read rule 2's tokens alone, so `cap US$10 and 500$` signed at 10: rule 6 now asks on it, and
+  // the widest reading prices it
+  const gate = 'spend: API, cap US$10 and 500$ for the retries'
+  const [full, st, cov] = py([{ op: 'exposure', gate }, { op: 'standing', gate }, { op: 'covered', gate, limit: 200 }])
+  assert.deepEqual(full, { usd: null, why: 'non-USD or ambiguous currency: 500$' })
+  assert.deepEqual(st, { usd: '510', why: '', capOnly: '', widest: 'non-USD or ambiguous currency: 500$' })
+  assert.equal(cov.covered, false)
+  assert.equal(standing('spend: API, cap US$10 and 500 A$ for the retries').usd, '595')
+})
+
+test('p48-4 W2(f) and rule 6: a number beside an ISO 4217 code off the table asks in every reading; a word never', () => {
+  widestAt200([
+    ['spend: API, max US$10 and 50 KWD', null, 'an unknown or ambiguous currency: KWD'], // about US$163: read 10 before
+    ['spend: API, max US$10 and CHF 500', null, 'an unknown or ambiguous currency: CHF'],
+    ['spend: API, max US$10 and 50KWD', null, 'an unknown or ambiguous currency: KWD'],
+    ['spend: x — max US$10 on a PHP 8 runtime', null, 'an unknown or ambiguous currency: PHP'], // a named over-ask
+    ['spend: API, max US$10 (GPT 4)', '10'], // GPT is no ISO code
+    ['spend: API, max US$10, try 3 times', '30'], // upper case only: `try` is a word, never TRY
+    ['spend: API, max US$10 and 50 kwd', '10'], // r2: a code in lower case is a word, not read
+  ])
+  const cases = [['spend: API, cap US$10 and 50 KWD', 'non-USD or ambiguous currency: KWD'],
+    ['spend: API, cap US$10 and CHF 500', 'non-USD or ambiguous currency: CHF']]
+  const got = py(cases.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'standing', gate }]))
+  cases.forEach(([gate, why], i) => {
+    assert.deepEqual(got[2 * i], { usd: null, why }, `${gate}: full`)
+    assert.deepEqual(got[2 * i + 1], { usd: null, why, capOnly: '' }, `${gate}: the cap-only reading signed it at 10 before`)
+  })
+})
+
+test("p48-4 the plan judge's other-currency sentence is coupled to the pricer: its priced example prints an amount, its other null", () => {
+  const T = loadEngine(['gatePricingBlock'])
+  const frag = T.gatePricingBlock({ gatePricer: '/x/gated_inputs.py' }, 'Planned on: abc\n### Gated inputs\n- spend: x — cap 1 USD\n### Risks / unknowns\n- none')
+  const m = frag.replace(/\s+/g, ' ').match(/A cap in another currency counts as one cap amount, and the pricer prices it at its ceiling rate \(`([^`]+)` prints an amount\); one it still cannot read, such as `([^`]+)`, which it reports as "no cap clause", may be listed\./)
+  assert.ok(m, frag)
+  assert.deepEqual(cli(`spend: x — ${m[1]}\n`).out, { usd: '35.10', why: '' })
+  assert.deepEqual(cli(`spend: x — ${m[2]}\n`).out, { usd: null, why: 'no cap clause' })
+})
+
+// ---- the test-Login reading (p37-4)---------------------------------------------------------------------------------
 const LOGINS = ['dummy']
 const NO_LOGINS = 'no test Logins declared (set [defaults] test_logins in ~/.config/thread/rollouts.toml)'
 const DUMMY = 'credential: the dummy Claude Login, to run that probe'   // verbatim from the archived Steer note's line 55

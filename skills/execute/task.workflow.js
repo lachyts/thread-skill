@@ -784,7 +784,8 @@ function touchedOf(a) {
 
 // A gate's `cap`/`capped` clauses followed by an amount (any currency): the backstop that keeps a spend gate without
 // exactly one cap on ADR 0008's automatic, climbing `changes`, never a bounce. Keyed on the gate's own line, never on
-// the pricer's why: the pricer reports a non-USD cap (`cap 30 AUD`) as "no cap clause" too.
+// the pricer's why: a non-USD cap it cannot read even at its widest (`cap 30 AUD per run`) reports "no cap clause" too,
+// while `cap 30 AUD` prices at its ceiling rate (p48-4).
 const CAP_AMOUNT_RE = /\bcap(?:ped)?\b\s*(?:(?:at|of)\b\s*)?:?\s*(?:US\$|AU\$|NZ\$|CA\$|A\$|C\$|\$|€|£|¥|(?:USD|AUD|NZD|CAD|EUR|GBP|JPY)\b\s?)?\d/gi
 function capAmounts(gate) {
   return (String(gate || '').match(CAP_AMOUNT_RE) || []).length
@@ -820,8 +821,10 @@ for sign-off, never to the standing approval. Never list a gate whose "usd" is a
 prices but whose sub-bullets name spend its Cap does not hold is an ordinary "changes" (its planner
 raises the Cap or trims the split), never a bounce. Never list a gate whose own line has no \`cap\`
 amount, or more than one: a spend gate without exactly one cap is the automatic "changes" above (ADR
-0008), never a bounce. A cap in another currency, such as \`cap 30 AUD\`, which the pricer also reports
-as "no cap clause", may be listed. Leave gateBounce empty otherwise.`
+0008), never a bounce. A cap in another currency counts as one cap amount, and the pricer prices it at
+its ceiling rate (\`cap 30 AUD\` prints an amount); one it still cannot read, such as
+\`cap 30 AUD per run\`, which it reports as "no cap clause", may be listed. Leave gateBounce empty
+otherwise.`
 }
 
 // The validated gates-only bounce of a plan judge's verdict, or null (an ordinary `changes`): null without a usable
