@@ -20,6 +20,9 @@ test_logins`) passes the standing approval too, so the 2026-11-01 line's "every 
 longer holds for a declared test Login.)*
 *(Amended by ADR 0075, 2026-11-07: decision 3's gate found mid-run is set aside and listed, never pushed; no
 rollout ever pushes, and the ntfy fallback ADR 0038 added is superseded.)*
+*(Amended 2026-11-12 by p51-3, § Amendment (2026-11-12) below: decision 2's ask ahead reads every gate kind the
+same way, by its name and by the thing itself, and a gate signed mid-run that the sweep could have seen is a miss the
+weekly Reflection counts.)*
 
 ## Context
 
@@ -239,3 +242,38 @@ it is a verifier or review failure) and the annotation records the total exposur
   and conjunction steps are a reject list, not a whitelist, as ADR 0063 residual (i) is for the class: a second thing
   named in plain prose with none of them (`the dummy Login, to push to the npm registry`, `the dummy Login, then
   Lachy's Gmail`) passes, and the annotation names only the Login, so any other use is a review failure.
+
+## Amendment (2026-11-12, p51-3: every gate kind is asked ahead)
+
+Three gates decision 2 should have asked ahead were signed mid-run (Watches `4fe713ab`, twice, and `c8bd9cd4`):
+`[[chorus-rollout-2026-10-18]]`'s p84-7 (credentials `CARTESIA_API_KEY` and `ELEVENLABS_API_KEY`, signed after two
+days; the rollout closed short), `[[smart-slider-rollout-2026-10-28]]`'s p8-1 (Stripe test-mode keys and the staging
+Supabase service-role key; its four dependants then stopped on credential gates of their own) and
+`[[thread-skill-rollout-2026-10-31]]`'s p33-4 (irreversible: create, merge into and delete a scratch GitHub repo, signed
+after a day). Swept as they stood before the first Slot, the three notes hit no credential or irreversible word.
+p84-7's note named "Cartesia and ElevenLabs", p8-1's "Stripe test mode … no live keys", p33-4's "a scratch GitHub repo":
+each named the thing, never the kind. Spend's list already read the thing (a currency amount); the credential and
+irreversible lists read only the kind's own names.
+
+- **Every kind is read the same way.** The sweep (`gated_inputs.py`, part 1) reads each kind by its name and by the
+  thing itself. A credential's thing is the account a run signs in to: an env key name, a key prefix, a mode (`test
+  mode`, `live mode`, `live keys`, `service role`), `.env`, or an outside service by name (the header's SERVICES).
+  An irreversible act's thing is an act on a live thing the run cannot take back: a scratch repo, `gh repo create` or
+  `delete`, a force-push, `drop table`, a deploy to production, a deleted repo, user, account, bucket or database.
+  Swept again, the three notes flag p84-7's and p8-1's credentials and p33-4's irreversible act, and the old lists,
+  kept as `OLD_CREDENTIAL` and `OLD_IRREVERSIBLE`, still flag none (tests/gated-inputs.test.mjs). The credential and
+  test-Login readings' deny list stays the old irreversible words: the standing approval's readings do not move.
+- **The sweep stays the recall floor.** The wider lists hit more notes that name a service in passing; schedule
+  § 3.6's dismissal rule (a hit whose context names nothing the task authorises, listed on one line) is the filter, as
+  it is for spend. Every caller of the sweep (schedule § 3.6, orient R3 (c), the pickup sweep and estate-rank's
+  sign-off backstop) reads the wider lists.
+- **A miss is counted.** reflect.py's `ask` friction item for a sign-off carries `sweepMiss`: the credential and
+  irreversible gates Lachy signed that day whose kind the sweep hits in the note's brief (its body less the sections
+  the run and the schedule wrote). span.json's `gateMisses` counts them over the window, and the weekly reading
+  traces each to schedule § 3.6 or orient R3 (c). A gate on a note that names neither the kind nor the thing
+  (smart-slider p8-2's staging key, reached only through its dependency's hook) is still first seen at the plan gate:
+  its sign-off carries an empty `sweepMiss`, traced to the word lists instead.
+
+Accepted residuals: `sweepMiss` reads the note as it stands at span, so an edit since the schedule reads; a gate Lachy
+declined ahead and signed mid-run counts as a miss, since no decline is recorded (`askedAhead` beside it says so); and
+the services list names the services Lachy's repos use, so a new service is a word-list miss until it is added.

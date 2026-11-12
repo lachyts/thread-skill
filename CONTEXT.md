@@ -109,9 +109,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `~/.agents/knowledge/how-lachy-decides.md`).
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
-  and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
-  and tasks whose note does not parse stay out with their Dependent closure;
-  it runs no plan gate (ADR 0047). Not
+  and Grill tasks first get a **Decision round** with Lachy, and Orient tasks,
+  tasks whose note does not parse and tasks that wait on a task outside the
+  rollout that nobody is building (ADR 0078 d7) stay out with their Dependent
+  closure; it runs no plan gate (ADR 0047). Not
   schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
   before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
@@ -1501,7 +1502,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   can open with a click from the quiet Stage line, and work through as one
   board in a sitting; he never has to visit rollout notes one by one to find
   them (2026-11-10: seven stops sat in seven notes with nothing collecting
-  them). Only a
+  them). `unfinished-rollout.py needs-you` reads that list (p48-1): each
+  stop with its rollout, project and kind (`spend`, `irreversible`,
+  `credential`, `hands-on`, `sign-in`), a spend gate the Standing approval
+  signs never on it. Only a
   halt that stops the whole rollout can lead anywhere, and only through
   Chorus's Companion while he is at the Stage, when Chorus reads it as his
   (d3); a single set-aside stays listed. The rollout note's

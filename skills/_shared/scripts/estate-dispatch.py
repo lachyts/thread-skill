@@ -360,6 +360,13 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   - graded Ready (the rank's tasks[]): in, `ready`;
   - One call or Grill: in when decided (`decided`), else out (`undecided`);
   - Orient: out (`orient`, with its `home`), decided or not;
+  - waiting (schedule § 3, ADR 0078 d7): a candidate not kept, not Orient and readable, one of whose dependencies (its
+    scan `dependsOn`, then its `bodyDependsOn`, the body's *Depends on* lines and `## Depends on` paragraph) is no
+    candidate and is nobody's to build: a scan task not in flight (its `rollout:` links no live rollout, its status
+    neither in_progress nor Review), or an unread note. It is out (`waits`, decided or not, never asked), via that
+    first dependency as the scan shows it, its reason `<status>, on no live rollout` (WAITS_UNREAD for an unread
+    note) and its `project` the dependency's first project when it has one. A dependency the scan lacks (done, merged,
+    dropped, or no task) and one in flight hold nothing: the queue holds the dependant until a rollout lands it;
   - not readable (the scan's unreadTasks[], a key no scan task holds): out (`unreadable`, its reason the scan's why
     and its note), decided or not; no schedule can stamp a note that does not parse;
   - not graded (the rank's invalid[], ungraded[] or skipped[], or no scan row): ungraded, its reason `invalid: <the
@@ -367,11 +374,11 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
     reason `in flight` or `hold` when the scan row's statusClass is `hold` (its own status is the cause: a carried
     task at an empty status, which carry queues but ES.still_to_start does not); in when decided (`queued as it
     stands`), else out (`ungraded`).
-  The Dependent closure, in two steps. The edges are each candidate's scan `dependsOn`, matched by ER.slug_key among
-  the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose dependency is out gives
-  one warnings[] line naming them. First what leaves whatever Lachy answers (LEAVES): every candidate that depends on
-  an Orient or unreadable one, directly or through others, leaves as `dependency` (Ready, decided, undecided or
-  ungraded alike), via its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a
+  The Dependent closure, in two steps. The edges are each candidate's scan `dependsOn` and `bodyDependsOn`, matched by
+  ER.slug_key among the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose
+  dependency is out, or that waits as above, gives one warnings[] line naming it. First what leaves whatever Lachy
+  answers (LEAVES): every candidate that depends on an Orient, unreadable or waiting one, directly or through others,
+  leaves as `dependency` (Ready, decided, undecided or ungraded alike), via its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a
   dependency is out: `dependency`, via the first such dependency.
   The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
   so never an unreadable task nor one already out through an Orient or unreadable dependency, which leaves whatever the
@@ -383,7 +390,7 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   (label_for, the recommendation first and marked, framing()'s descriptions); HEADERS gives each header. An ungraded answer is never recorded (schedule § 1.5).
   Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
   (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
-  reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, note?}, asks[][]
+  reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, project?, note?}, asks[][]
   (one question each), index[] {question, kind (one-call | grill | ungraded), slug, note, decision {question,
   options[], recommendation, why?, fork?} (an ungraded one's synthesised from UNGRADED_QUESTION), labels[], texts[],
   recommended (texts[0]), k?, n?, fork?}, warnings[]}.
@@ -438,9 +445,11 @@ UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that de
 UNGRADED_WHY = ("nobody could read it for a decision of yours; queued unread it can build the wrong thing, and quality "
                 "over speed outweighs one schedule's wait")
 STATUS_OUTSIDE = "status outside Active"  # an ungraded candidate's reason when its own status is the cause
-# The Pre-flight whys that leave whatever Lachy answers, with their Dependent closure: an Orient task (ADR 0047), and a
-# task whose note the scan could not read, which no schedule can stamp.
-LEAVES = ("orient", "unreadable")
+# The Pre-flight whys that leave whatever Lachy answers, with their Dependent closure: an Orient task (ADR 0047), a
+# task whose note the scan could not read, which no schedule can stamp, and a task that waits on a task outside the
+# candidates that nobody is building (schedule § 3, ADR 0078 d7), which would only block mid-run.
+LEAVES = ("orient", "unreadable", "waits")
+WAITS_UNREAD = "its note does not parse"  # a `waits` leaver's reason when its dependency is an unread note
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
@@ -2453,11 +2462,18 @@ class Preflight:
         self.kept = {inside("--kept", s) for s in kept}
         self.decided = {inside("--decided", s) for s in decided}
         self.edges = {k: [] for k in self.order}
+        self.waits = {}  # candidate key -> (the dependency as shown, its reason, its project or None): schedule § 3
         for k in self.order:
-            for link in (self.scanned.get(k) or {}).get("dependsOn") or []:
+            row = self.scanned.get(k) or {}
+            for link in list(row.get("dependsOn") or []) + list(row.get("bodyDependsOn") or []):
                 d = key(link)
-                if d in self.shown and d != k and d not in self.edges[k]:
-                    self.edges[k].append(d)
+                if d in self.shown:
+                    if d != k and d not in self.edges[k]:
+                        self.edges[k].append(d)
+                elif d and k not in self.waits:
+                    held = self.unbuilt(d)
+                    if held:
+                        self.waits[k] = held
         for raw in deps:
             a, sep, b = raw.partition("=")
             if not sep or not a.strip() or not b.strip():
@@ -2467,6 +2483,23 @@ class Preflight:
                 fail(2, "--dep %s: both tasks must be among --tasks" % raw)
             if ka != kb and kb not in self.edges[ka]:
                 self.edges[ka].append(kb)
+
+    def unbuilt(self, d):
+        """A dependency outside the candidates that nobody is building, as (shown, reason, project), else None. The
+        scan holds every task note not done, merged or dropped, so a key it lacks has landed or is no task: it holds
+        nothing. A scan task holds when it is not in flight (its `rollout:` links no live rollout, and its status is
+        neither in_progress nor Review), so no rollout lands it first and the dependant would only block mid-run. An
+        unread note holds as the ranker holds it: nobody can tell whether it landed."""
+        row = self.scanned.get(d)
+        if row is not None:
+            if row.get("inFlight"):
+                return None
+            status = row.get("status") if isinstance(row.get("status"), str) and row.get("status") else "no status"
+            projects = [p for p in row.get("projects") or [] if isinstance(p, str)]
+            return row["slug"], "%s, on no live rollout" % status, projects[0] if projects else None
+        if d in self.unread:
+            return self.unread[d]["slug"], WAITS_UNREAD, None
+        return None
 
     def note_of(self, k):
         row = self.scanned.get(k) or self.rows.get(k) or self.unread.get(k) or {}
@@ -2507,20 +2540,25 @@ class Preflight:
                 e.update({"in": True, "why": "kept"})
             elif k in self.unread:  # no schedule can stamp a note that does not parse, so it is out, decided or not
                 e.update({"in": False, "why": "unreadable", "reason": self.unread[k]["why"]})
+            elif grade == "Orient":
+                e.update({"in": False, "why": "orient", "home": row.get("home")})
+            elif k in self.waits:  # schedule § 3: held before the first Slot, decided or not, never asked
+                via, reason, project = self.waits[k]
+                e.update({"in": False, "why": "waits", "via": via, "reason": reason})
+                if project:
+                    e["project"] = project
             elif grade == "Ready":
                 e.update({"in": True, "why": "ready"})
             elif grade in ("One call", "Grill"):
                 e.update({"in": k in self.decided, "why": "decided" if k in self.decided else "undecided"})
-            elif grade == "Orient":
-                e.update({"in": False, "why": "orient", "home": row.get("home")})
             else:
                 reason = self.reason(k)
                 e.update({"in": k in self.decided, "why": "queued as it stands" if k in self.decided else "ungraded",
                           "reason": reason})
             entry[k] = e
-        # The Dependent closure, in two steps. First what leaves whatever Lachy answers: the Orient and unreadable
-        # candidates (LEAVES) and every task that depends on one, directly or through another, whatever its grade or
-        # answer. Those are out as `dependency` before the round is built, so none of them is asked.
+        # The Dependent closure, in two steps. First what leaves whatever Lachy answers: the Orient, unreadable and
+        # waiting candidates (LEAVES) and every task that depends on one, directly or through another, whatever its
+        # grade or answer. Those are out as `dependency` before the round is built, so none of them is asked.
         fixed = self.closure(k for k in self.order if entry[k]["why"] in LEAVES)
         for k in self.order:
             if k in fixed and entry[k]["why"] not in LEAVES:
@@ -2537,6 +2575,9 @@ class Preflight:
                 if gone:
                     warnings.append("[[%s]] keeps its place (a carried task that has started) but depends on %s, which "
                                     "this rollout leaves out" % (self.shown[k], ", ".join("[[%s]]" % g for g in gone)))
+                if k in self.waits:
+                    warnings.append("[[%s]] keeps its place (a carried task that has started) but waits on [[%s]] (%s), "
+                                    "which nobody is building" % (self.shown[k], self.waits[k][0], self.waits[k][1]))
         questions, index = [], []
         asked = [k for k in self.order if not entry[k]["in"] and entry[k]["why"] == "undecided"]
         pos = {k: i for i, k in enumerate(self.rows)}
@@ -2555,7 +2596,7 @@ class Preflight:
             if e["in"]:
                 queue.append(e["slug"])
                 continue
-            o = {x: e[x] for x in ("slug", "grade", "why", "via", "reason", "home") if x in e}
+            o = {x: e[x] for x in ("slug", "grade", "why", "via", "reason", "home", "project") if x in e}
             if self.note_of(k):
                 o["note"] = self.note_of(k)
             left.append(o)
