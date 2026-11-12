@@ -79,11 +79,13 @@
 #   WL1-WL15 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
 #           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
 #           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
-#   NY1-NY11 `needs-you` (p48-1): every open needs-you item as one list: each gate kind verbatim, a spend gate the
+#   NY1-NY12 `needs-you` (p48-1): every open needs-you item as one list: each gate kind verbatim, a spend gate the
 #           standing approval signs never listed (its limit and month line read as approve-gates --standing reads them),
-#           a set-aside only a person moves on (a parallel one's Human fix, a chain's every one, a Leg preflight's as a
-#           sign-in), a hold_until or merge hold that waits on him, a row schedule left out for a sign-in; each drops
-#           out once signed, handed back, released or taken; an archived or done rollout never read
+#           a gate-pending task with no gate listed as one item (fail closed), a set-aside only a person moves on (a
+#           parallel one's Human fix, a chain's every one, a Leg preflight's as a sign-in), a hold_until or merge hold
+#           that waits on him, a row schedule left out for a sign-in (its section pinned to schedule's S3.7, S4 and S6);
+#           each drops out once signed, handed back, released or taken; an archived or done rollout never read; an
+#           unreadable note's WARN carried in the JSON's warns (NY12)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   J1-J10  this project's running rollout is joined (ADR 0078 d6): the check's `join`, the verb's rows, File-sets,
@@ -3343,7 +3345,7 @@ blocked() {
 
 scen ny1
 ny
-ok "$out|$rc" '{"count": 0, "items": []}|0' "NY1: an empty vault lists nothing"
+ok "$out|$rc" '{"count": 0, "items": [], "warns": []}|0' "NY1: an empty vault lists nothing"
 
 # NY2: every gate kind, verbatim; a spend gate the standing approval is off for is listed with its ASK why.
 scen ny2
@@ -3382,7 +3384,19 @@ ok "$(fm g1.md status)|$(grep -c 'Needs-you log' "$T/ro-a.md")" "status: gate-pe
 fmset g2.md status open
 fmset g1.md status open
 ny
-ok "$out" '{"count": 0, "items": []}' "NY4: once its gates are signed, nothing is listed"
+ok "$out" '{"count": 0, "items": [], "warns": []}' "NY4: once its gates are signed, nothing is listed"
+# … but a gate-pending task whose section lists no gate (blank lines only, or no section) is one item, fail closed:
+# approve-gates refuses it, so only he moves it on.
+gatepend g3.md ro-a
+printf '\n\n' >> "$T/g3.md"
+mkt g4.md ro-a gate-pending "$DEMO"
+ny
+ok "$(rows)" "irreversible|gate|ro-a|g3|gate-pending, but its ## Gated inputs (awaiting sign-off) lists no gate|sign off gated input
+irreversible|gate|ro-a|g4|gate-pending, but its ## Gated inputs (awaiting sign-off) lists no gate|sign off gated input" \
+  "NY4: a gate-pending task with no gate listed is one irreversible item, fail closed"
+HOME="$EH" python3 "$RR" approve-gates --tasks g3 --rollout "$T/ro-a.md" --tasks-dir "$T" --dry-run > "$S.ag" 2>&1
+has "$(cat "$S.ag")" "g3: no gates under '## Gated inputs (awaiting sign-off)' — nothing to sign off" \
+  "NY4: … (approve-gates refuses it: nothing to sign off)"
 
 # NY5: a parallel set-aside only a person moves on (its Human fix), never one the lead re-enters itself; handed back, gone.
 scen ny5
@@ -3399,14 +3413,14 @@ fmset b1.md status open
 fmset b1.md auto_retries -
 fmset b2.md status open
 ny
-ok "$out" '{"count": 0, "items": []}' "NY5: handed back, they drop out"
+ok "$out" '{"count": 0, "items": [], "warns": []}' "NY5: handed back, they drop out"
 # a block the lead retries itself (a retry left, a feedback fingerprint) is no item
 python3 "$RR" reconcile --result - --tasks-dir "$T" --now 2026-11-12T08:00:00Z > /dev/null 2>&1 <<'JSON'
 {"rolloutSlug": "ro-a", "tasks": [{"slug": "b1", "scope": "single-file", "status": "blocked", "prUrl": "", "blockerDiagnosis": "the verifier was red on test_x"}]}
 JSON
 ok "$(fm b1.md status)" "status: blocked" "NY5: … (b1 is set aside again, at its run)"
 ny
-ok "$out" '{"count": 0, "items": []}' "NY5: a block the lead's own automatic retry re-enters is no item"
+ok "$out" '{"count": 0, "items": [], "warns": []}' "NY5: a block the lead's own automatic retry re-enters is no item"
 
 # NY6: a serial chain's set-aside is always his (no Leg retries one); a Leg preflight's set-aside is a sign-in. Each
 # diagnosis is the first line leg.py set-aside writes (pinned below, with legs.md § Preflight's reason).
@@ -3455,7 +3469,7 @@ ny
 ok "$(rows)" "hands-on|hold|ro-m|m1|merge hold: awaiting your go-ahead ($U7/9)|go ahead or decline the merge" "NY8: an open merge hold is listed"
 python3 "$RR" hold --tasks m1 --hold merge --state end --tasks-dir "$T" > /dev/null 2>&1
 ny
-ok "$out" '{"count": 0, "items": []}' "NY8: … and drops out once it ends"
+ok "$out" '{"count": 0, "items": [], "warns": []}' "NY8: … and drops out once it ends"
 
 # NY9: a row schedule left out for a sign-in (its ## Left out at schedule line) is listed until a live rollout takes it.
 scen ny9
@@ -3468,7 +3482,18 @@ ok "$(rows)" "sign-in|left-out|None|l1|2026-11-10 l1: needs mcp__claude_ai_Webfl
 mkro ro-l.md - "$DEMO" 'shape: serial'
 fmset l1.md rollout '"[[ro-l]]"'
 ny
-ok "$out" '{"count": 0, "items": []}' "NY9: … once a live rollout takes it, it drops out"
+ok "$out" '{"count": 0, "items": [], "warns": []}' "NY9: … once a live rollout takes it, it drops out"
+# … and its one producer writes what it reads: schedule § Serial path names LEFT_OUT_SECTION, with the line's form, in
+# S3.7 and S4's re-run, and S6 removes it, so a rename on either side fails here.
+LO=$(sed -n 's/^LEFT_OUT_SECTION = "\([^"]*\)".*/\1/p' "$CHECK")
+skpara() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 {on = 1} index($0, b) == 1 {on = 0} on' \
+  "$root/skills/schedule/SKILL.md" | tr '\n' ' '; }   # skpara <from> <to>: a schedule step, its lines joined
+has "$(skpara '**S3.7. ' '**S4. ')" "gets one line under its task note's \`$LO\` (the section made at the note's end when absent): \`- <YYYY-MM-DD> <its leftOut line>\`" \
+  "NY9: … schedule S3.7 writes LEFT_OUT_SECTION ($LO), one \`- <YYYY-MM-DD> <its leftOut line>\` line per row left out"
+has "$(skpara '**S4. ' '**S5. ')" "writes the \`$LO\` line (S3.7) of each row its \`leftOut\` names" \
+  "NY9: … and a later S4 re-run writes it for each row it leaves out"
+has "$(skpara '**S6. ' '**S7. ')" "its \`$LO\` section, when an earlier run (S3.7 or S4) wrote one, is removed" \
+  "NY9: … and S6 removes it from each member it stamps"
 
 # NY10: an archived rollout, or a done one, is never read, whatever its tasks still hold.
 scen ny10
@@ -3477,7 +3502,7 @@ gatepend g1.md ro-old 'irreversible: delete the old branch'
 ST=done mkro ro-done.md "$R" "$DEMO"
 gatepend g2.md ro-done 'irreversible: delete another branch'
 ny
-ok "$out|$rc" '{"count": 0, "items": []}|0' "NY10: an archived or a done rollout lists nothing"
+ok "$out|$rc" '{"count": 0, "items": [], "warns": []}|0' "NY10: an archived or a done rollout lists nothing"
 
 # NY11: usage.
 scen ny11
@@ -3486,6 +3511,32 @@ ok "$rc|$out" "2|" "NY11: a --now that is no ISO time is exit 2, no stdout"
 has "$err" "unfinished-rollout: --now nope: not an ISO time" "NY11: … with one line saying so"
 HOME="$EH" python3 "$CHECK" needs-you --tasks-dir "$S/none" > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc|$(cat "$S.out")" "2|" "NY11: a missing tasks dir is exit 2"
+
+# NY12: a note that cannot be read, anywhere under the tasks dir (Archive included), leaves every live rollout's items
+# unlisted; its WARN rides in the JSON's warns as well as on stderr, so a partial list never reads as all clear.
+scen ny12
+if [ "$(id -u)" = 0 ]; then
+  echo "ok   - NY12: skipped as root (chmod 000 reads anyway)"
+else
+  mkro ro-a.md "$R" "$DEMO"
+  gatepend g1.md ro-a 'irreversible: delete the release branch'
+  mkt Archive/old.md - done "$DEMO"
+  chmod 000 "$T/Archive/old.md"
+  ny
+  ok "$(nyj 'd["count"], len(d["warns"])')" "(0, 1)" "NY12: one unrelated unreadable archived note leaves the rollout's items unlisted"
+  has "$(nyj 'd["warns"][0]')" "WARN: ro-a: a note under the tasks dir cannot be read (" "NY12: … its WARN is in the JSON"
+  has "$err" "WARN: ro-a: a note under the tasks dir cannot be read (" "NY12: … and on stderr"
+  chmod 644 "$T/Archive/old.md"
+  # with no live rollout, one directly in the tasks dir still warns: an item it holds (a left-out row) is not listed
+  fmset ro-a.md status done
+  mkt l1.md - open "$DEMO"
+  chmod 000 "$T/l1.md"
+  ny
+  ok "$(nyj 'd["count"], len(d["warns"])')|$rc" "(0, 1)|0" "NY12: an unreadable note in the tasks dir, no live rollout: one WARN"
+  has "$(nyj 'd["warns"][0]')" "WARN: l1: cannot be read (" "NY12: … naming it in the JSON"
+  has "$(nyj 'd["warns"][0]')" "): an item it holds is not listed" "NY12: … and saying what is not listed"
+  chmod 644 "$T/l1.md"
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

@@ -26,10 +26,10 @@ every open needs-you item (p48-1).
 
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
-python >= 3.9. No network but `needs-you`'s gh read of a `hold_until` PR (below). Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
-hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origin` and, in `check` and `clone`, `git -C
-<dir> rev-parse --show-toplevel` for the nested-checkout rule (below), each Project root's checkout and each serial
-row's launch-folder checkout; plus one child,
+python >= 3.9. No network but `needs-you`'s gh read of a `hold_until` PR (below). Git runs only as `git rev-parse
+--local-env-vars` (to scrub repo-local env vars such as a hook's GIT_DIR, landing-register.py's rule), `git -C <path>
+remote get-url origin` and, in `check` and `clone`, `git -C <dir> rev-parse --show-toplevel` for the nested-checkout
+rule (below), each Project root's checkout and each serial row's launch-folder checkout; plus one child,
 `bash skills/execute/scripts/self-rollout-check.sh --in-place <path>` (check's step 2c, `clone`) and `--resolve <Local:>
 <slug>` (`clone`'s rule 3 only), both read-only and memoised (SelfRollout), which run git and land.sh themselves. It
 writes nothing, except `check --surface-wait`'s surface-wait marker (no note; *Surface wait*, below). The surface
@@ -553,7 +553,10 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   stripped). A spend gate approve-gates --standing would sign never appears: the reading is _approve_standing's, read
   only (the limit, the exposure, a bounce, the gate already in `## Approved gates`, and this month's standing approvals
   summed as _StandingLedger sums them, never locked, plus the spend this read let through before it). Its ASK why is
-  the item's `detail`. Once signed (the task leaves gate-pending) it drops out.
+  the item's `detail`. A gate-pending task whose section lists no gate (absent, empty or blank lines only, read as
+  approve-gates reads it) is one item, fail closed: approve-gates refuses it (`nothing to sign off`), so only he moves
+  it; kind `irreversible`, its `text` saying the section lists no gate. Once signed (the task leaves gate-pending) it
+  drops out.
 - set-aside (kind `sign-in` when its reason is a Leg preflight's `preflight: <namespace> did not answer`, legs.md §
   Preflight, after the `Set aside by Leg <n> of [[<rollout>]]: ` leg.py set-aside opens it with, else `hands-on`):
   each task set aside at its run or at Integration that only a person moves on. In a parallel rollout that is
@@ -569,15 +572,19 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   [[<note>]]`; and each open merge hold in the rollout's Run record (_record_state's `merge` holds: a `--gated`
   merge or a `review required:` PR), act `go ahead or decline the merge`.
 Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `status: open` and in no live rollout,
-whose `## Left out at schedule` section holds an entry (schedule § Serial path S3.7 writes one per row it leaves out
-for a sign-in; S6 removes it once the row is stamped): kind `sign-in`, `text` its latest entry, rollout null, act
-`sign in, then /thread:orient --steer`.
+whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row its final S2
+JSON's `leftOut` names, whether S3.7's re-run or a later S4 re-run left it out; S6 removes it once the row is
+stamped): kind `sign-in`, `text` its latest entry, rollout null, act `sign in, then /thread:orient --steer`.
 stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out, "rollout":
-<slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}]}, `project` the task's
-`projects:` names comma-joined (the rollout's when it has none, `no project` with neither). Items run in rollout order
-(case-folded slug); within a rollout, its gates and set-asides by task, then its hold_until holds (the rollout's, then
-its tasks' by task), then its merge holds by task; the left-out rows come last, by task. `WARN:` lines go to stderr (a
-rollout with a task that cannot be read, so its items are not listed). Exit 0, or 2 (no stdout, one
+<slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}], "warns": ["WARN: ...", ...]},
+`project` the task's `projects:` names comma-joined (the rollout's when it has none, `no project` with neither). Items
+run in rollout order (case-folded slug); within a rollout, its gates and set-asides by task, then its hold_until holds
+(the rollout's, then its tasks' by task), then its merge holds by task; the left-out rows come last, by task. `warns`
+holds every `WARN:` line, each also on stderr, so a list some note kept partial never reads as all clear, even at
+`"count": 0`. A note that cannot be read (an OSError) is one: _scan raises on the first such note anywhere under the
+tasks dir, Archive included, not only on a rollout's own tasks, so one unrelated unreadable note leaves every live
+rollout's items unlisted, each rollout with its WARN; and each such note directly in the tasks dir has its own WARN,
+since an item it holds (a rollout note's, or its left-out row) is not listed either. Exit 0, or 2 (no stdout, one
 `unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or reconcile-rollout.py (or, once a
 parallel set-aside needs it, lead-integrate.py) unloadable.
 """
@@ -2670,19 +2677,20 @@ def cmd_waiting(args, rr) -> int:
 
 # ---- the needs-you list (p48-1) ----------------------------------------------------------------------------------------
 
-LEFT_OUT_SECTION = "## Left out at schedule"   # schedule § Serial path S3.7's line for a row left out for a sign-in
+# schedule § Serial path's line for a row its final S2 JSON's `leftOut` names (S3.7's re-run or a later S4 re-run)
+LEFT_OUT_SECTION = "## Left out at schedule"
 # legs.md § Preflight's set-aside reason, `preflight: <namespace> did not answer`, as leg.py set-aside writes it: the
 # first line of its Blocker diagnosis run, after its `Set aside by Leg <n> of [[<rollout>]]: ` opening.
-PREFLIGHT_SIGN_IN_RE = re.compile(r"^(?:Set aside by Leg \d+ of \[\[[^\]]*\]\]:\s*)?preflight:\s*\S+\s+did not answer\b",
-                                  re.I)
+PREFLIGHT_SIGN_IN_RE = re.compile(
+    r"^(?:Set aside by Leg \d+ of \[\[[^\]]*\]\]:\s*)?preflight:\s*\S+\s+did not answer\b", re.I)
 BLOCKER_SECTION = "## Blocker diagnosis"
 
 
 class StandingRead:
     """approve-gates --standing's spend reading (_approve_standing), read-only: never a lock, a ledger line or a save.
     asks() is None when the standing approval would sign the gate, else its ASK why. The month's standing approvals are
-    _StandingLedger's sum for the gate's rollout note (on --dry-run, so unlocked), plus every spend this read already let
-    through, as one approve-gates call adds its own."""
+    _StandingLedger's sum for the gate's rollout note (on --dry-run, so unlocked), plus every spend this read already
+    let through, as one approve-gates call adds its own."""
 
     def __init__(self, rr, tasks_dir, now):
         self.rr, self.gi, self.tasks_dir = rr, rr._gated(), tasks_dir
@@ -2734,7 +2742,9 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
     try:
         linked, _index = rr._scan(path, tasks_dir)
     except OSError as e:
-        warns.append(f"WARN: {path.stem}: a task note cannot be read ({e}): its items are not listed")
+        # _scan raises on the first unreadable note anywhere under the tasks dir, Archive included, not only this
+        # rollout's: whether it is one of this rollout's tasks cannot be read, so none of its items is listed
+        warns.append(f"WARN: {path.stem}: a note under the tasks dir cannot be read ({e}): its items are not listed")
         return []
     slug, serial = path.stem, rr._shape(note) == "serial"
     label, root = project_label(rr, note), rr._project_root(note)
@@ -2749,10 +2759,16 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
         if state != "set-aside":
             continue
         if at == "gate":
-            for line in t.section_text(rr.GATE_PENDING_SECTION).split("\n"):
-                gate = re.sub(r"^[-*]\s+", "", line.strip())
-                if not gate:
-                    continue
+            # approve-gates' own read of the section: with no gate it refuses (`nothing to sign off`), so only he
+            # moves the task on, and it is one item, fail closed
+            gates = [re.sub(r"^[-*]\s+", "", line.strip())
+                     for line in t.section_text(rr.GATE_PENDING_SECTION).split("\n") if line.strip()]
+            if not gates:
+                out.append(needs_you_item("irreversible", "gate", slug, project(t), tp.stem,
+                                          f"gate-pending, but its {rr.GATE_PENDING_SECTION} lists no gate",
+                                          "sign off gated input", "approve-gates has nothing to sign off: list its "
+                                          "gates there, or hand it back"))
+            for gate in gates:
                 kind = gi.gate_kind(gate)
                 why = standing.asks(t, path, note, gate) if kind == "spend" else None
                 if kind == "spend" and why is None:
@@ -2816,7 +2832,11 @@ def cmd_needs_you(args, rr) -> int:
     live = [(p, n) for p, n, _w in rollout_notes(rr, tasks_dir, archive=False) if rr._status(n) not in CLOSED]
     for path, note in sorted(live, key=lambda e: e[0].stem.lower()):
         items += rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns)
-    for path, note in sorted(rr._walk_of(tasks_dir).entries, key=lambda e: e[0].stem.lower()):
+    walk = rr._walk_of(tasks_dir)
+    for path, e in sorted(walk.errors, key=lambda x: x[0].stem.lower()):
+        if path.parent == tasks_dir:   # a rollout note (rollout_notes skips it) or a left-out row, either way unread
+            warns.append(f"WARN: {path.stem}: cannot be read ({e}): an item it holds is not listed")
+    for path, note in sorted(walk.entries, key=lambda e: e[0].stem.lower()):
         if path.parent != tasks_dir or rr._status(note) != "open" or rr._live_rollout(tasks_dir, note.get("rollout")):
             continue
         tags = tags_of(rr, note)
@@ -2827,9 +2847,10 @@ def cmd_needs_you(args, rr) -> int:
             text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
             items.append(needs_you_item("sign-in", "left-out", None, project_label(rr, note), path.stem, text,
                                         "sign in, then /thread:orient --steer"))
-    for w in dict.fromkeys(warns):
+    warns = list(dict.fromkeys(warns))
+    for w in warns:
         print(w, file=sys.stderr)
-    print(json.dumps({"count": len(items), "items": items}, ensure_ascii=False))
+    print(json.dumps({"count": len(items), "items": items, "warns": warns}, ensure_ascii=False))
     return 0
 
 
