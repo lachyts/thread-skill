@@ -780,6 +780,7 @@ class Run:
         self.rollout = rr._note_rollout(note)
         self.repo = None
         self.emits = []
+        self.pre = []   # rows a run decided before its outcome (a dangling change's `void`), written with that outcome
 
     def fp(self):
         return self.block["fingerprint"]
@@ -790,7 +791,8 @@ class Run:
 
     def leave(self, cause, why, rows=()):
         why = " ".join(str(why).split()) or cause
-        lines = list(rows) + ["- %s left %s: %s: %s" % (_stamp(self.now), self.fp(), cause, why)]
+        lines = list(self.pre) + list(rows) + ["- %s left %s: %s: %s" % (_stamp(self.now), self.fp(), cause, why)]
+        self.pre = []
         self.note = rr.Note(self.path)
         rr._append_settings_rows(self.note, lines)
         _save(self.note)
@@ -806,7 +808,9 @@ class Run:
                    else "%s (%d tries)" % (text, rr.SETTINGS_TRIES_MAX))
             return self.leave("unreadable", why)
         self.note = rr.Note(self.path)
-        _row(self.note, self.now, "tried %s: %s: %s" % (self.fp(), kind, text))
+        rr._append_settings_rows(self.note, list(self.pre) + ["- %s tried %s: %s: %s" % (_stamp(self.now), self.fp(), kind,
+                                                                                        text)])
+        self.pre = []
         _save(self.note)
         print("[[%s]]: tried (%s): %s" % (self.slug, kind, text))
         return rc
@@ -1000,7 +1004,7 @@ def _free_locked(run, pair):
     if not contexts:
         raise Leave("unreadable", "the set-aside reason names no context it could parse")
     sources = _read_sources(gh_bin, repo, branch, contexts)
-    pre = []   # rows to write before any decision
+    pre = run.pre
     if block["pending"]:
         all_rows = rr._settings_rows(run.note)
         closed = {x["id"] for x in all_rows if x["verb"] in ("changed", "void")}
@@ -1087,6 +1091,7 @@ def _free_locked(run, pair):
     run.note = rr.Note(run.path)
     rr._append_settings_rows(run.note, rows)
     _save(run.note)
+    run.pre = []
     out_rows, left = [], None
     for p, fields in zip(plan, records):
         wrc, code, text = _write(gh_bin, p["source"], p["where"], p["after"])
@@ -1110,12 +1115,14 @@ def _free_locked(run, pair):
             left = left or ("no-change", "write did not take (%s)" % (text or "read back as neither"))
     for fields in run.emits:
         run.emit("setting-changed", fields)
-    if left is not None and left[0] == "transient":
+    if left is not None and left[0] == "transient" and not run.emits:
         run.note = rr.Note(run.path)
         rr._append_settings_rows(run.note, out_rows)
         _save(run.note)
         run.block = rr._settings_block(run.note) or run.block
         return run.tried("transient", left[1], 8)
+    if left is not None and left[0] == "transient":   # another source changed: a half change is no try to repeat
+        left = ("unreadable", "one source changed and another's write failed transiently: %s" % left[1])
     if left is not None:
         return run.leave(left[0], left[1], rows=out_rows)
     run.note = rr.Note(run.path)
@@ -1161,6 +1168,7 @@ def _changed_fields(row, block):
 def _cleared(run, pre, why):
     run.note = rr.Note(run.path)
     rr._append_settings_rows(run.note, list(pre) + ["- %s cleared %s: %s" % (_stamp(run.now), run.fp(), why)])
+    run.pre = []
     _save(run.note)
     print("[[%s]]: cleared: %s" % (run.slug, why))
     return 0
