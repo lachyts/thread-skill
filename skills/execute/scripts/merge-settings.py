@@ -1289,8 +1289,10 @@ def cmd_rows(args):
         if not d.is_dir():
             print("ERROR: merge-settings rows: no tasks dir at %s" % d, file=sys.stderr)
             return 2
-        want = rr._wikilink_slug(args.rollout) if args.rollout else None
-        want = (want or args.rollout or "").lower() or None
+        want = None
+        if args.rollout:   # a slug, a wikilink or the rollout note's path
+            want = (Path(args.rollout).stem if args.rollout.endswith(".md")
+                    else rr._wikilink_slug(args.rollout) or args.rollout).lower()
         for path in sorted(d.glob("*.md")):
             try:
                 text = path.read_text()

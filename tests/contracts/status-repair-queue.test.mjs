@@ -835,9 +835,11 @@ const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-inte
 // RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
 // task), PR CLOSED ahead of awaiting Integration, a plan-block after a descope ahead of the descopable one, and both
 // ahead of the automatic retry (a descope is judged first, as execute's step 1.2 judges it) and of the own run they
-// also match; the automatic retry and a `## Needs you` question ahead of at Integration and every class below it.
+// also match; a due settings block (ADR 0080) ahead of the automatic retry (it carries an autoRetryAfter too, and only
+// merge-settings.py free moves it); the automatic retry and a `## Needs you` question ahead of at Integration and every
+// class below it.
 const LABELS = ['RACE re-verify in flight', 'RACE revert in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'lane held', 'origin lane wait', 'live', 'PR CLOSED / branch missing',
-  'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'retry (automatic)', 'needs you', 'at Integration',
+  'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'settings block', 'retry (automatic)', 'needs you', 'at Integration',
   'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
 // Status's recommended actions, first-match in this order: the lineage before the version (a legacy note can be
@@ -857,7 +859,8 @@ const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr
   'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'primary-refresh.py stuck',
   'unfinished-rollout.py hold',   // § 4's Hold line (ADR 0060): read-only, one JSON line
   'unfinished-rollout.py awaited',   // § 3's Waits on flag (ADR 0082 d6): reads notes only, no git, no gh
-  'reconcile-rollout.py prove']   // § 4's Carried line (ADR 0078 d1): --dry-run --no-gh, a read that writes nothing
+  'reconcile-rollout.py prove',   // § 4's Carried line (ADR 0078 d1): --dry-run --no-gh, a read that writes nothing
+  'merge-settings.py rows']   // § 4's Needs you (ADR 0080 d5): the changed-for-you rows, read-only JSON
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
@@ -1034,9 +1037,12 @@ function check({ status, repair, execute, fx }) {
   const calls = invocations(sb.replace(sDonts, ''))
   // A prove read (§ 4's Carried line) is a read only with --dry-run, and never with --land or --seen (ADR 0078 d1).
   const proveSpans = spansOf(sb).filter((s) => /python3 \S*reconcile-rollout\.py prove/.test(s))
+  // merge-settings.py (ADR 0080) is a read only as `rows`: status never frees, restores or dismisses a setting.
+  const msSpans = spansOf(sb).filter((s) => /merge-settings\.py/.test(s))
   if (!calls.includes('reconcile-rollout.py status') || !calls.includes('lead-integrate.py inputs') || calls.some((c) => !READS.includes(c)) ||
     !collapse(sDonts).includes('`reconcile-rollout.py next`') ||
-    proveSpans.some((s) => !/--dry-run/.test(s) || /--land|--seen/.test(s))) fails.push('read-only')
+    proveSpans.some((s) => !/--dry-run/.test(s) || /--land|--seen/.test(s)) ||
+    msSpans.some((s) => !/merge-settings\.py rows\b/.test(s))) fails.push('read-only')
 
   // reverse-lineage: status § 1 reads the lineage before the version and finds a rollout whose supersedes: names
   // this one, as unfinished-rollout.py reads the link (its grep, run on fixture D, finds N's aliased, differently
@@ -1079,7 +1085,8 @@ function check({ status, repair, execute, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 23 classes (ADR 0064's origin lane wait among them), each once, and § 4's per-stage routes.
+  // stages: the 24 classes (ADR 0064's origin lane wait and ADR 0080's settings block among them), each once, and § 4's
+  // per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
@@ -1095,6 +1102,7 @@ function check({ status, repair, execute, fx }) {
   if (JSON.stringify(order) !== JSON.stringify(LABELS.filter((l) => order.includes(l))) ||
     !collapse(r2raw).includes('Each unmerged task takes the **first** class in table order whose signal it matches') ||
     !collapse(r2raw).includes('**retry (automatic)** and **needs you** come before **at Integration** and every class below it') ||
+    !collapse(r2raw).includes('A due **settings block** comes before **retry (automatic)**: it also carries an `autoRetryAfter`, and only `merge-settings.py free` moves it.') ||
     !(cls.RACE ?? '').includes('with no decision recorded (§ 3c)') || !(cls.RACE ?? '').includes("while it is undecided § 3a's `resume` does not run") ||
     !r3a.includes('no RACE / UNVERIFIED escalation is undecided') || !ho.includes('or an undecided UNVERIFIED escalation (§ 3c;') ||
     !c3.includes('`- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>`') ||
@@ -1552,6 +1560,21 @@ function check({ status, repair, execute, fx }) {
     !exeC.includes('reports a non-null `humanFix`') || exeC.includes('autoRetryWhy') || exeC.includes('the first of these that applies') ||
     [...exe12.matchAll(/autoRetryWhy/g)].length !== 1 || !exe12.includes("its `autoRetryWhy` is the log line only, never Lachy's reason") ||
     statusWhy !== allowedStatus || repairWhy !== [...r2intro.matchAll(/autoRetryWhy/g)].length) fails.push('human-fix-cited')
+
+  // settings-block (ADR 0080): repair § 2's **settings block** row runs merge-settings.py free with no ask (d5), under no
+  // pause, its exit 3 going to **at Integration**'s ask; § 3i restores or dismisses only on Lachy's word; a Don't keeps
+  // every other change of a merge setting out; status's Set aside line names a pending repair and a change.
+  const setRow = cls['settings block'] ?? ''
+  const rep3i = labelled(r3raw, '3i')
+  if (!setRow.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py free --note <task note> --repo <repoPath>` with no ask (ADR 0080 d5)') ||
+    !setRow.includes('`settingsBlock.due: true` and `settingsBlock.state: unfreed`') ||
+    !setRow.includes('under a pause it is reported, not run') ||
+    !setRow.includes("exit 3: it reads H13 (`change the merge setting, hand back or defer`), so **at Integration**'s ask follows") ||
+    !rep3i.includes("On Lachy's word only, and never on a guess") ||
+    !rep3i.includes('merge-settings.py restore --note <task note> --id <id>') || !rep3i.includes('merge-settings.py dismiss --note <task note> --id <id>') ||
+    !collapse(raw(repair, /^## Don'ts/)).includes("Don't change a merge or CI setting except through `merge-settings.py`;") ||
+    !collapse(sb).includes('`settings repair pending (retries at <autoRetryAfter>)`') ||
+    !collapse(sb).includes('`merge setting changed for you on <changedAt>`')) fails.push('settings-block')
   return [...new Set(fails)]
 }
 
@@ -1629,7 +1652,7 @@ test('status and repair hold every queue rule', () => {
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
   'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings', 'queued-solo', 'auto-retry', 'retries', 'needs-you', 'answer-key',
-  'human-fix-cited', 'hold-until']
+  'human-fix-cited', 'hold-until', 'settings-block']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -2387,8 +2410,36 @@ test('control: a hold read off budget, a headline without it, or a hold routed t
   only(st('so status never routes a hold to `/thread:repair`', 'so status routes a CLOSED hold to `/thread:repair`'), 'hold-until', 'a hold routed to repair')
 })
 
-test('the rules are all named (36) and each has a control', () => {
-  assert.equal(RULES.length, 36)
+// settings-block (ADR 0080)
+test('control: a settings block row that asks first, runs another command or runs under a pause fails settings-block', () => {
+  only(rp('with no ask (ADR 0080 d5)', 'once Lachy agrees'), 'settings-block', 'asks first')
+  only(rp('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py free --note <task note> --repo <repoPath>` with no ask',
+    'edit the rule by hand with no ask'), 'settings-block', 'another command')
+  only(rp('; under a pause it is reported, not run', ''), 'settings-block', 'runs under a pause')
+  only(rp("exit 3: it reads H13 (`change the merge setting, hand back or defer`), so **at Integration**'s ask follows", 'exit 3: retry'),
+    'settings-block', 'exit 3 route')
+  only(rp('`settingsBlock.due: true` and `settingsBlock.state: unfreed`', '`settingsBlock` set'), 'settings-block', 'no due signal')
+})
+test('control: 3i without his word, or status without its forms, fails settings-block', () => {
+  only(rp("On Lachy's word only, and never on a guess:", 'When the lead judges it:'), 'settings-block', '3i not on his word')
+  only(rp("- **Don't change a merge or CI setting except through `merge-settings.py`;**", "- **Do change merge settings as needed;**"), 'settings-block', "no Don't")
+  only(st('`settings repair pending (retries at <autoRetryAfter>)`', '`pending`'), 'settings-block', 'status pending form')
+  only(st('`merge setting changed for you on <changedAt>`', '`changed`'), 'settings-block', 'status changed form')
+})
+test('control: a settings block row after the automatic retry fails first-match; one gone fails stages', () => {
+  const row = lineWith(real.repair, '| **settings block** |')
+  const retry = lineWith(real.repair, '| **retry (automatic)** |')
+  only({ repair: real.repair.replace(row + '\n', '').replace(retry, retry + '\n' + row) }, 'first-match', 'settings block after the retry')
+  only(rp('A due **settings block** comes before **retry (automatic)**: it also carries an `autoRetryAfter`, and only `merge-settings.py free` moves it.', ''),
+    'first-match', 'no intro sentence')
+})
+test('control: status invoking merge-settings.py free fails read-only', () => {
+  only(st('`settings repair pending (retries at <autoRetryAfter>)` while', '`settings repair pending (retries at <autoRetryAfter>)` (run `merge-settings.py free --note <n>` now) while'),
+    'read-only', 'status runs free')
+})
+
+test('the rules are all named (37) and each has a control', () => {
+  assert.equal(RULES.length, 37)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
 

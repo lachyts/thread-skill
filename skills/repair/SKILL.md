@@ -229,7 +229,8 @@ escalates them before repair reaches for `resume` or `hand-back`, both of which 
 (§ 3c). A RACE re-verify in flight comes first of all, then a RACE revert in flight: each is the lead's own
 procedure, so repair neither escalates it nor asks Lachy while the lead decides or finishes it. A plan-block is judged for a descope before the automatic retry, as
 execute's step 1.2 judges it, and **retry (automatic)** and **needs you** come before **at Integration** and every
-class below it.
+class below it. A due **settings block** comes before **retry (automatic)**: it also carries an `autoRetryAfter`, and
+only `merge-settings.py free` moves it.
 
 | Class | Signal | Action |
 |---|---|---|
@@ -248,6 +249,7 @@ class below it.
 | **queued** | `open`, its `waitingOn` unmet | nothing: it starts when its dependencies land (or defer it with its blocker, § 5) |
 | **plan-blocked after a descope** | `plan-blocked` with a `## Scope decision (automatic)` section and no `descope_armed:`: it restarted after an automatic descope and blocked again | input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back, never a second descope (the verb refuses one, exit 3) |
 | **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b; judged before **retry (automatic)**, as execute's step 1.2 judges a descope before its automatic retry: a refusal (exit 3) is recorded on the task note, so its `humanFix` reads `decide scope or defer` and the verdict `autoRetry: false` |
+| **settings block** | set aside at Integration, and `inputs` reads `settingsBlock.due: true` and `settingsBlock.state: unfreed` (a past-deadline H10 included): a `no-runner` or `unreported-context` block at its settings point, a merge setting that requires what cannot happen (ADR 0080) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py free --note <task note> --repo <repoPath>` with no ask (ADR 0080 d5), wherever `descope` may run (§ 3d); under a pause it is reported, not run. Exit 0: the lead (or § 4's hand-off) re-enters the task, and tell Lachy afterwards, with its undo; exit 3: it reads H13 (`change the merge setting, hand back or defer`), so **at Integration**'s ask follows; exits 5, 8 and 75: nothing now; exit 2: report it. Each row is freed at most once per run (the Leash) |
 | **retry (automatic)** | set aside at its run or at Integration, and `inputs` reads `autoRetry: true` or a non-empty `autoRetryAfter`; a `plan-blocked` task reaches it only once the class above judged it not descopable | nothing: the lead re-enters it (execute § 4.5 step 1.2's *Automatic retry*), now or once its cool-down ends, and with no lead live § 4's hand-off does; never a hand-back, which would reset its budget |
 | **needs you** | set aside at its run or at Integration (`setAsideAt: run` or `integration`, never a gate) with a `## Needs you` question (status's `needsHuman`) | input-gated: § 3b asks the question verbatim, writes the answer into `## Repair input`, removes the `## Needs you` section, then hands back at its stage (§ 4) |
 | **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | input-gated (§ 3b): ask its `humanFix` (the act and the detail), then on his word `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, and nothing before Integration is redone (§ 4). One with no `pr:` is **PR CLOSED / branch missing**'s. An Integration conflict (`integrationBlock: conflict`) quotes its resolution brief, the latest Blocker diagnosis run, as the feedback beside its `humanFix`, so Lachy decides which intent wins or hands it back |
@@ -268,7 +270,7 @@ reads `inputs`' verdict. A set-aside at its run or at Integration that § 2 does
 reaches repair because its automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or
 `needsHuman` is set), or because its `humanFix` names another cause that is his: `auto_retries: 0`, an unresolved
 budget, a quota block past its five free retries, a declined merge, a gone branch, a merge-task text a human must
-clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
+clear, a merge setting left for him (H13), a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
 review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `humanFix` (its act and its detail). A non-empty
 `autoRetryError` is an invalid round-budget stamp: its `humanFix` is H12 `fix the round budget`. Report it; the fix is
 the stamp it names, on Lachy's word; once the stamp reads valid the verdict falls through to the lead's own retry or to
@@ -665,6 +667,19 @@ this evidence and notify Lachy, never ack: every lane hold is his.
   `archived but review`: TaskNotes' `archived` tag, then the vault's daily sweep moved it). On his word, move it back
   to `Work/Tasks/` (and drop the `archived` tag) so prove resumes its proof, or leave it set aside.
 
+**3i — a merge setting changed for you → restore or dismiss (ADR 0080 d5).** Status's Needs you lists each open row
+`merge-settings.py rows` reads (a merge setting the system changed to free a stuck rollout, with its before, after and
+undo). On Lachy's word only, and never on a guess:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py restore --note <task note> --id <id>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py dismiss --note <task note> --id <id>
+```
+
+`restore` writes the setting's before back once the live setting still reads as the change left it, and closes the
+row; a live setting that drifted since (exit 3) is reported with its undo, nothing written. `dismiss` is his decision
+to keep the change: the row closes, and the Run record keeps its line. Neither re-enters a task.
+
 ### 4. Hand back: re-enter at the stage it stopped
 
 Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block (§ 3b's
@@ -1019,6 +1034,8 @@ record, and its Completion log is the last Leg's.
 - **Don't write an answer, a raise or a spend by hand.** `record-answer` is the only writer of a `## Repair input`
   answer (it supersedes an earlier one and carries the raise and the `pr:`, the entry last), and `hand-back` spends it;
   never edit a key, and never hand back on an answer but through `hand-back --answer <stamp>`.
+- **Don't change a merge or CI setting except through `merge-settings.py`;** `restore` and `dismiss` only on
+  Lachy's word (§ 3i), and never a `## Merge settings` row by hand.
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
   for a RACE.
 - **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided, but through an undecided RACE's
