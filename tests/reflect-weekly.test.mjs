@@ -2084,7 +2084,7 @@ test('rung: the built-in ladder is opus-xhigh with no note; no opus rung is exit
   assert.equal(r.stderr, '')
 })
 
-test('rung: an operator ladder whose top is fable and whose opus rung is high: the effort note only (ADR 0079 d2); no opus rung is exit 2', { skip: !hasTomllib && 'no tomllib' }, (t) => {
+test('rung: an operator ladder whose top is fable and whose opus rung is high: no note, the rung is a reference only (ADR 0079 d5); no opus rung is exit 2', { skip: !hasTomllib && 'no tomllib' }, (t) => {
   const h = setup(t)
   const p = path.join(h.home, '.config', 'thread', 'ladder.toml')
   fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -2092,11 +2092,12 @@ test('rung: an operator ladder whose top is fable and whose opus rung is high: t
   fs.writeFileSync(p, rung('opus-high', 'opus', 'high') + rung('fable-xhigh', 'fable', 'xhigh'))
   const r = ok(h, ['rung'])
   assert.deepEqual(JSON.parse(r.stdout), { rung: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh', top: 'fable-xhigh', topModel: 'fable' })
-  assert.equal(r.stderr, 'rung: opus-high\'s effort is high; ADR 0037 d4 names xhigh\n')
+  assert.equal(r.stderr, '', 'the Reflection runs on the lock\'s model, so no rung effort is noted')
   fs.writeFileSync(p, rung('fable-xhigh', 'fable', 'xhigh'))
   const none = reflect(h, ['rung'])
   assert.equal(none.status, 2)
-  assert.match(none.stderr, /has no opus rung/)
+  assert.match(none.stderr, /has no opus rung to report/)
+  assert.doesNotMatch(none.stderr, /xhigh/, 'no rule the lock retired is cited')
   fs.writeFileSync(p, 'nonsense = [\n')
   const bad = reflect(h, ['rung'])
   assert.equal(bad.status, 2)

@@ -566,7 +566,9 @@ test('plan model: the planner, plan reviser and plan judge run on it at high; im
   assert.deepEqual(rowRan(r), ranOf(r))
 })
 
-test('plan model: a planner retry after a climb that kept the plan model is a second pass, not a takeover', async (t) => {
+// The planner's retry framing reads its dispatch on both rungs (planHeld): the same model and effort is a second pass.
+const HELD = "runs on the same model and effort on this rung as on the one below"
+test('plan model: a planner retry after a climb that kept the planner\'s model and effort is a second pass, not a takeover', async (t) => {
   const ladder = ladderFrom(t, P3)
   const S = 'proj-planretry'
   const r = await run(mkArgs(mkTask(S, { scope: 'cross-cutting', planGate: true }), { ladder }), {
@@ -579,7 +581,7 @@ test('plan model: a planner retry after a climb that kept the plan model is a se
   clean(r)
   assert.deepEqual(me(r, `plan:${S}@opus-xhigh`), ['fable', 'high'])
   const retry = callOf(r, `plan:${S}@opus-xhigh`).prompt
-  assert.ok(retry.includes("SECOND PASS: a first attempt at this plan did not complete") && retry.includes("the ladder's plan model, which a climb does not change"), retry.slice(-800))
+  assert.ok(retry.includes("SECOND PASS: a first attempt at this plan did not complete") && retry.includes(HELD), retry.slice(-800))
   assert.ok(!retry.includes('ONE RUNG UP') && !retry.includes("ladder's top rung"), 'neither a takeover nor a top-rung claim')
   assert.ok(retry.includes('first planner produced no plan'))
   assertNoCodeFraming(retry, 'the plan-model planner retry')
@@ -592,7 +594,22 @@ test('plan model: a planner retry after a climb that kept the plan model is a se
   })
   clean(u)
   assert.deepEqual(triples(u).slice(0, 3), [[`plan:${B}`, 'fable', 'high'], [`plan:${B}@opus-xhigh`, 'opus', 'xhigh'], [`plan-judge:${B} r1`, 'opus', 'high']])
-  assert.ok(callOf(u, `plan:${B}@opus-xhigh`).prompt.includes('ESCALATION: you take this plan over ONE RUNG UP'))
+  const up = callOf(u, `plan:${B}@opus-xhigh`).prompt
+  assert.ok(up.includes('ESCALATION: you take this plan over ONE RUNG UP') && !up.includes(HELD))
+  // ADR 0079 decision 2's shape: a rung that plans on Fable at high climbs into the all-Fable rung, which names no plan
+  // model and plans on its own model at its own effort, fable at high: the planner is unchanged, so a second pass.
+  const X = 'proj-planfable'
+  const f = await run(mkArgs(mkTask(X, { rung: 'opus-xhigh', scope: 'cross-cutting', planGate: true }), { ladder }), {
+    [`plan:${X}`]: noPlan, [`plan:${X}@fable-high`]: plan, [`plan-judge:${X} r1`]: approve, [`implement:${X}`]: green(`implement:${X}`), [`review:${X} r1`]: approve,
+  })
+  clean(f)
+  assert.deepEqual(triples(f).slice(0, 2), [[`plan:${X}`, 'fable', 'high'], [`plan:${X}@fable-high`, 'fable', 'high']])
+  assert.deepEqual(f.row.climbs, [{ stage: 'plan', from: 'opus-xhigh', to: 'fable-high' }])
+  const held = callOf(f, `plan:${X}@fable-high`).prompt
+  assert.ok(held.includes('SECOND PASS: a first attempt at this plan did not complete') && held.includes(HELD), held.slice(-800))
+  assert.ok(!held.includes('ONE RUNG UP') && !held.includes("ladder's top rung"), 'neither a takeover nor a top-rung claim')
+  assertNoCodeFraming(held, 'the planner retry into the all-Fable rung')
+  assert.deepEqual(rowRan(f), ranOf(f))
 })
 
 test('role models: each moves its own role only, at high', async (t) => {

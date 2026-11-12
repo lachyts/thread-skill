@@ -1263,12 +1263,14 @@ function escalationContext(prior, st, stage, kind) {
     const contract = kind === 'planner'
       ? 'The plan-only contract above still holds in full: produce the plan, write no code — no source edits, no commits, no PR.'
       : 'The read-only contract above still holds in full: no source edits, no commits, no PR.'
-    // A plan-stage climb on a ladder whose plan model held on both rungs (ADR 0079 decision 1) moved the task's
-    // rung but not the planner: the same model and effort, so a same-rung second pass, never a takeover.
-    if (kind === 'planner' && moved && planModelHeld(st, c)) return `
+    // A plan-stage climb that left the planner's dispatch as it was (planHeld: the same model and effort on both
+    // rungs, ADR 0079 decision 1) moved the task's rung but not the planner, so a same-rung second pass, never a
+    // takeover.
+    if (kind === 'planner' && moved && planHeld(st, c)) return `
 
 SECOND PASS: a first attempt at this plan did not complete, and you own it from here. The plan
-runs on the ladder's plan model, which a climb does not change, so there is no hand-over — finish the plan yourself.
+runs on the same model and effort on this rung as on the one below, so the climb changed nothing for it and
+there is no hand-over — finish the plan yourself.
 ${contract}
 The prior attempt's diagnosis (verbatim):
 ${prior}`
@@ -1305,12 +1307,16 @@ Any committed work from that attempt is already on your branch — build on or r
 warrants; do not blindly repeat the failed approach.`
 }
 
-// Whether a plan-stage climb `c` left the plan dispatch as it was: both rungs name the same plan model, which
-// runs at OWN_EFFORT on either (runOn).
-function planModelHeld(st, c) {
+// Whether a plan-stage climb `c` left the planner's dispatch as it was: planOn gives the same model and the same
+// effort on both rungs. Two rungs that name the same plan model hold it, and so does a rung that plans on Fable at
+// OWN_EFFORT below an all-Fable rung whose own effort is OWN_EFFORT (ADR 0079 decision 2's ladder shape).
+function planHeld(st, c) {
   const from = st.rungs.find((r) => r.name === c.from)
   const to = st.rungs.find((r) => r.name === c.to)
-  return !!(from && to && from.plan !== undefined && from.plan === to.plan)
+  if (!from || !to) return false
+  const a = planOn(from)
+  const b = planOn(to)
+  return a.model === b.model && a.effort === b.effort
 }
 
 // ---- Review-round memory (review-loop-memory, 2026-08-14) --------------------
@@ -1967,8 +1973,9 @@ checkout at "${a.repoPath}".`
 // review (`review`). Rungs may share a model, so an effort step and a model step are the same kind of move.
 // The top rung is the ceiling: there is no other cap, and a quota that runs out is an edit to the file.
 // - Plan model (ADR 0079 decision 1): a rung may name `plan`, the model its planner, plan reviser and plan
-//   judge run on, at OWN_EFFORT; the judge rides with the planner. A plan-stage climb still moves the rung
-//   (so implement and review start higher) but leaves the plan dispatch as it was while the plan model holds.
+//   judge run on, at OWN_EFFORT; the judge rides with the planner. A rung that names none plans on its own model
+//   at its own `effort` (planOn). A plan-stage climb still moves the rung (so implement and review start higher)
+//   and leaves the planner's dispatch as it was only when planOn gives the same model and effort on both rungs.
 // - Role models (decision 3): the ladder's optional `roles` gives a role (LADDER_ROLES) its own model in place
 //   of the rung's: at OWN_EFFORT when it differs from the rung's model, at the rung's own effort for that role
 //   when it names it. On an all-Fable rung (allFable) the rung wins for every role (decision 4, settled #3).
@@ -2180,14 +2187,20 @@ function judgeEffort(st, role) { return cur(st)[role] }
 function allFable(rung) {
   return rung.model === 'fable' && (rung.plan === undefined || rung.plan === 'fable')
 }
+// The planner's { model, effort } on `rung` (plan and plan-revise): the rung's plan model at OWN_EFFORT when it names
+// one, else the rung's own model at its own `effort`. runOn reads it for the planner, and planHeld on both rungs of a
+// plan-stage climb.
+function planOn(rung) {
+  return rung.plan !== undefined ? { model: rung.plan, effort: OWN_EFFORT } : { model: rung.model, effort: rung.effort }
+}
 // { model, effort } for a dispatch `role` on the task's CURRENT rung, the one place a task-mode dispatch takes them
 // (see the section header). role: 'planner' (plan and plan-revise), 'plan-judge', 'builder' (implement and
-// revise), 'investigator' (the read-only task's agent) or 'master-review'. The rung's plan model wins for the
-// planner and the plan judge; a role's own model (st.roles) wins below an all-Fable rung; else the rung's own model
-// at its own effort for that role (implEffort, judgeEffort).
+// revise), 'investigator' (the read-only task's agent) or 'master-review'. The planner runs on planOn, and the plan
+// judge rides with it when the rung names a plan model; a role's own model (st.roles) wins below an all-Fable rung;
+// else the rung's own model at its own effort for that role (implEffort, judgeEffort).
 function runOn(st, role) {
   const rung = cur(st)
-  if ((role === 'planner' || role === 'plan-judge') && rung.plan !== undefined) return { model: rung.plan, effort: OWN_EFFORT }
+  if (role === 'planner' || (role === 'plan-judge' && rung.plan !== undefined)) return planOn(rung)
   const roles = st.roles || {}
   const own = !allFable(rung) && Object.prototype.hasOwnProperty.call(roles, role) ? roles[role] : undefined
   if (own !== undefined && own !== rung.model) return { model: own, effort: OWN_EFFORT }

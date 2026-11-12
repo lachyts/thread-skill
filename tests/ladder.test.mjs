@@ -547,6 +547,9 @@ test('L11 (c) a [role] table loads as roles, in ROLES order, after the rungs', (
   const inl = tmpHome(t)
   writeLadder(inl, render(TWO, ['# the ladder', 'role = { builder = "fable" }']))
   assert.deepEqual(loads(inl).roles, { builder: 'fable' }, 'the inline form, before the first rung')
+  const dotted = tmpHome(t)
+  writeLadder(dotted, render(TWO, ['role.investigator = "fable"', 'role.builder = "opus"']))
+  assert.deepEqual(loads(dotted).roles, { builder: 'opus', investigator: 'fable' }, 'the dotted-key form, before the first rung')
 })
 
 // [label, file content, line, reason]. With render's one-line head, TWO's keys end at line 14, [role] is line 16.
@@ -564,6 +567,11 @@ const ROLE_INVALID = [
   ['a [roles] typo is an unknown top-level key', render(TWO) + '\n[roles]\nbuilder = "fable"\n', 16, /unknown top-level key "roles"/],
   ['a [role.builder] table is not a string, at its header', render(TWO) + '\n[role.builder]\nx = 1\n', 16, /role builder must be a string, not a table/],
   ['an inline role table names the `role =` line', render(TWO, ['# the ladder', 'role = { lead = "fable" }']), 2, /unknown role "lead"/],
+  ['a dotted role key names its own line, not the first `role.` line', render(TWO, ['role.builder = "fable"', 'role.lead = "opus"']), 2,
+    /unknown role "lead"/],
+  ['a dotted role key\'s bad value names its own line', render(TWO, ['role.builder = "fable"', 'role . "investigator" = 3']), 2,
+    /role investigator must be a string, not an integer/],
+  ['a string role is told its type', render(TWO, ['role = "fable"']), 1, /role must be a table \(\[role\]\), not a string$/m],
   ['a [role] between rungs: its keys are its own', render([TWO[0]]) + '\n[role]\nbuilder = "fable"\nlead = "fable"\n\n' + render([TWO[1]], []), 11,
     /unknown role "lead"/],
   ['a [role] between rungs: the next rung\'s keys are the rung\'s, and its errors come first',

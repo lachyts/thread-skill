@@ -7,8 +7,7 @@ The ladder is `~/.config/thread/ladder.toml`: named rungs, bottom first. It repl
 file and the rollout ceiling: the top rung is the ceiling, and escalation climbs one rung at a time. Stdlib
 only. No arguments, no network, and it writes nothing.
 
-The file. One `[[rung]]` table per rung, bottom first, each with these five string keys and an optional sixth,
-`plan`, and at most one `[role]` table for the whole ladder:
+The file. One `[[rung]]` table per rung, bottom first, each with these five string keys:
 
     # ~/.config/thread/ladder.toml: bottom rung first, the top rung is the ceiling
     [[rung]]
@@ -24,31 +23,45 @@ The file. One `[[rung]]` table per rung, bottom first, each with these five stri
     effort = "xhigh"
     judge = "high"
     review = "xhigh"
-    plan = "fable"         # optional: the plan model (ADR 0079 decision 1)
-
-    [role]                 # optional: a role's own model in place of the rung's (ADR 0079 decision 3)
-    master-review = "fable"  # every master-review round
-    builder = "fable"        # the implementer (its first pass and its retry) and the reviser
-    investigator = "fable"   # the agent of a scope: read-only task
 
 Each effort is one of low, medium, high, xhigh, max. Rungs may share a model, so an effort step and a model
 step are the same kind of move. The order is the operator's statement: a rung may sit above one with more
-effort, and nothing is clamped. The inline forms `rung = [{ name = "...", ... }, ...]` and
-`role = { builder = "...", ... }` (before the first `[[rung]]`) are accepted too.
+effort, and nothing is clamped. The inline form `rung = [{ name = "...", ... }, ...]` is accepted too.
+
+Two keys are optional (ADR 0079 decisions 1 and 3): a sixth key on any rung, `plan`, and at most one `[role]` table
+for the whole ladder. An operator's file that uses both might read:
+
+    [[rung]]
+    name = "opus-high"
+    model = "opus"
+    effort = "high"
+    judge = "high"
+    review = "xhigh"
+    plan = "fable"         # the plan model (ADR 0079 decision 1)
+
+    [role]                 # a role's own model in place of the rung's (ADR 0079 decision 3)
+    master-review = "fable"  # every master-review round
+    builder = "opus"         # the implementer (its first pass and its retry) and the reviser
+    investigator = "fable"   # the agent of a scope: read-only task
+
+The table may also be written inline, `role = { builder = "...", ... }`, or as dotted keys, `role.builder = "..."`,
+each before the first `[[rung]]`.
 
 The plan model and the role models. `plan` and each role's value are a model alias, as `model` is. A rung's `plan`
-is the model its planner, plan reviser and plan judge run on, always at `high`: the judge rides with the planner,
-and a plan-stage climb moves the task's rung but leaves the plan's model and effort as they are. A role's own model
-replaces the rung's for that role only: at `high` when it differs from the rung's model, at the rung's own effort for
-that role when it names the rung's model. On an all-Fable rung (`model = "fable"` and `plan` absent or "fable") the
-rung wins for every role; below it a role's own model wins. Integration takes neither: it runs on the highest rung
-that is not all-Fable (the top rung when every rung is), at that rung's own model and efforts. This loader only
-validates and passes them on; the engine (task.workflow.js runOn, integrationRungOf) applies them.
+is the model its planner, plan reviser and plan judge run on, always at `high`: the judge rides with the planner. A
+rung that names no `plan` plans on its own model at its own `effort`. So a plan-stage climb moves the task's rung,
+and while both rungs name the same plan model it leaves the plan's model and effort as they are; a climb into a rung
+that names no plan model plans on that rung. A role's own model replaces the rung's for that role only: at
+`high` when it differs from the rung's model, at the rung's own effort for that role when it names the rung's model.
+On an all-Fable rung (`model = "fable"` and `plan` absent or "fable") the rung wins for every role; below it a
+role's own model wins. Integration takes neither: it runs on the highest rung that is not all-Fable (the top rung
+when every rung is), at that rung's own model and efforts. This loader only validates and passes them on; the engine
+(task.workflow.js runOn, planOn, integrationRungOf) applies them.
 
-No file gives the built-in ladder: the two rungs above. It names no model above Opus and no `max` (ADR 0029
-decision 2), and reading it needs no tomllib, so it works on any python 3. Reading a present file needs
-python >= 3.11 (tomllib). "No file" means only that nothing is at the path: it, or a directory on the way
-to it, does not exist, or a step on the way is a plain file. Anything else is refused, never read as no
+No file gives the built-in ladder: the first example's two rungs, with no `plan` and no `[role]`. It names no model
+above Opus and no `max` (ADR 0029 decision 2), and reading it needs no tomllib, so it works on any python 3. Reading
+a present file needs python >= 3.11 (tomllib). "No file" means only that nothing is at the path: it, or a directory
+on the way to it, does not exist, or a step on the way is a plain file. Anything else is refused, never read as no
 file: a dangling symlink at the path or on the way to it, and a path that cannot be checked at all (a
 directory on the way that cannot be searched, say).
 
@@ -63,13 +76,14 @@ first found in this order, which is not always the earliest line in the file:
    the error on the earliest line among: a missing key (named at the rung's own line), a value that is
    not a string, and a value that is not valid as above (an optional `plan` included). A duplicate name names
    its first line too;
-5. the role table: it is a table (`[role]`, never `[[role]]`); then its unknown role names, the first in the
-   file; then the error on the earliest line among a value that is not a string and an unknown model.
+5. the role table: it is a table (`[role]`, never `[[role]]` or a value of another type); then its unknown role
+   names, the first in the file; then the error on the earliest line among a value that is not a string and an
+   unknown model.
 The line named is tomllib's for a syntax error, and the bad key's own line otherwise. A rung's own line is
 its `[[rung]]` header, or in the inline form the line its `{` opens on (so there every key of a rung names
 that line). A key the line scan cannot place falls back to its rung's own line, then the `rung =` line,
-then no line. A role's line is its key's line in `[role]` (a `[role.<name>]` header's line for a table value),
-else the `role =` or `[role]` line.
+then no line. A role's line is its key's line in `[role]` (a `[role.<name>]` header's line for a table value, and
+a top-level dotted `role.<name> =` key's own line), else the `role =` or `[role]` line.
 
 Output. Exit 0 and one JSON line on stdout:
 
@@ -154,7 +168,8 @@ class _Index:
     top: each top-level name's first line (a key, a [table] or [[table]] header's first segment).
     headers: each [[rung]] header's line. keys: per [[rung]], each key's first line until the next header.
     inline: in the inline form `rung = [...]`, the line each rung's `{` opens on, in order.
-    role_keys: each key's first line in the [role] table, and each [role.<name>] header's line under <name>.
+    role_keys: each key's first line in the [role] table, each [role.<name>] header's line under <name>, and each
+    top-level dotted `role.<name> =` key's line under <name> (the role table written as dotted keys).
 
     Only a line that starts outside every value is read as a header or a key. The rest of each line is
     scanned as TOML values: strings and comments are skipped, so a quote or bracket inside one counts for
@@ -208,6 +223,10 @@ class _Index:
                 if self._table is None:
                     self.top.setdefault(key, n)
                     opens_rung = key == "rung" and m.group(2) == "="
+                    if key == "role" and m.group(2) == ".":
+                        d = _DOTTED_RE.match(s, m.end() - 1)
+                        if d:
+                            self.role_keys.setdefault(_unquote(d.group(1)), n)
                 elif self._table == "role":
                     self.role_keys.setdefault(key, n)
                 elif self._table != "other":
@@ -276,6 +295,8 @@ class _Index:
 
 
 def _type_name(value):
+    if isinstance(value, str):
+        return "a string"
     if isinstance(value, bool):
         return "a boolean"
     if isinstance(value, int):
@@ -406,7 +427,9 @@ def _validate_roles(roles, idx):
         return None
     table_line = idx.top.get("role")
     if not isinstance(roles, dict):
-        raise LadderError("role must be a table: write [role], not [[role]]", line=table_line)
+        if isinstance(roles, list) and roles and all(isinstance(r, dict) for r in roles):
+            raise LadderError("role must be a table: write [role], not [[role]]", line=table_line)
+        raise LadderError("role must be a table ([role]), not %s" % _type_name(roles), line=table_line)
 
     def line_of(key):
         return idx.role_keys.get(key) or table_line

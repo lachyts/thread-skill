@@ -319,10 +319,11 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
 mkdir -p /tmp/thread-reflect-week-<YYYY-MM-DD>
 ```
 
-`rung` prints the ladder's highest Opus rung with its own effort (ADR 0037 d4, as ADR 0079 decision 5 amends it: the
-model the lock gives the Reflection, no token cap) and notes on stderr when that rung's effort is not xhigh. A Fable
-top rung is ADR 0079 decision 2's intended shape, so it gets no note. A skill cannot set its own
-model: if this session is not on that model and effort, say so and go on. `<YYYY-MM-DD>` is today's Melbourne date.
+`rung` prints the ladder's highest Opus rung with its own efforts, and the top rung's name and model, as a reference
+only. The Reflection runs on the model and effort `~/.agents/AGENTS.md` § Model tier gives reflections (ADR 0037 d4, as
+ADR 0079 decision 5 amends it), never on a ladder rung, with no token cap. So `rung` notes nothing on stderr, and its
+exit 2 on a ladder with no Opus rung stops nothing: say so and go on. A skill cannot set its own model: if this session
+is not on the lock's model and effort, say so and go on. `<YYYY-MM-DD>` is today's Melbourne date.
 
 ### 10. Span
 

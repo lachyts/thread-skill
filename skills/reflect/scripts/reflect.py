@@ -519,8 +519,9 @@ Note.append_line into the last section that lists the item with no moot line for
 <from> in [[<slug>]]`. A moot item is no decision: the next reading that holds the trade offers it again.
 
 rung. The ladder (ladder.py's load()): it prints {rung, model "opus", effort, judge, review, top, topModel}, the own
-values of the highest opus rung, with a stderr note when that rung's effort is not xhigh (`rung: <name>'s effort is
-<effort>; ADR 0037 d4 names xhigh`). A Fable top rung gets no note: it is ADR 0079 decision 2's intended shape. No opus rung is exit 2; a refused ladder exits with ladder.py's code and line.
+values of the highest opus rung and the top rung's name and model, as a reference only. The Reflection runs on the
+model `~/.agents/AGENTS.md` § Model tier gives it (ADR 0037 d4, as ADR 0079 decision 5 amends it), never on a ladder
+rung, so `rung` writes nothing on stderr. No opus rung is exit 2; a refused ladder exits with ladder.py's code and line.
 
 Exit codes: 0 done (exists and no-op answers included); 1 a file cannot be read or written (the events directory,
 tunings.jsonl, reflections.jsonl, --out, a note, a --tasks-dir that is no directory); 2 usage or a refusal (a path that
@@ -3377,12 +3378,10 @@ def cmd_rung(_a):
     top = rungs[-1]
     opus = [r for r in rungs if r["model"] == "opus"]
     if not opus:
-        raise Stop("the ladder (%s) has no opus rung: ADR 0037 d4 names Opus at xhigh" % ladder["source"], 2)
+        raise Stop("the ladder (%s) has no opus rung to report" % ladder["source"], 2)
     r = opus[-1]
     print(json.dumps({"rung": r["name"], "model": "opus", "effort": r["effort"], "judge": r["judge"],
                       "review": r["review"], "top": top["name"], "topModel": top["model"]}))
-    if r["effort"] != "xhigh":
-        sys.stderr.write("rung: %s's effort is %s; ADR 0037 d4 names xhigh\n" % (r["name"], r["effort"]))
     return 0
 
 
