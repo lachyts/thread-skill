@@ -4,9 +4,10 @@
 # off the base, an unreadable, missing or CLOSED PR, an unreadable default — halts before the merge (1 when
 # definitive, 8 when transient). A clean PR merges into the default and a re-run takes the already-merged
 # path; the local refresh names stranded and queued close-outs through a working fetch; an inherited GIT_DIR
-# never reaches another repo (8a–8c); a SIGTERM never reads `ok` (9); a clone root's in-place twin fast-forwards
-# after the merge, or is named diverged with its remedy and never moved (10, ADR 0042). Hermetic: temp repos, PATH
-# shim, ssh disabled but for scenario 10's fake ssh.
+# never reaches another repo (8a–8c); a SIGTERM never reads `ok`, and names the wait it cut, only that (9, 9b);
+# stdout ends with the run (9c); a clone root's in-place twin fast-forwards after the merge, or is named diverged
+# with its remedy and never moved (10, ADR 0042). Hermetic: temp repos, PATH shim, ssh disabled but for scenario
+# 10's fake ssh.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -162,6 +163,28 @@ ok "$(sent)" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
 ok "$(ctr 91)" "$B" "9. SIGTERM: the counter is byte-unchanged"
 ok "$(nmerge)" 0 "9. SIGTERM: nothing merged"
 has "$(tail -1 "$tmp/9.out")" "last wait: PR #91 — waiting on required checks" "9. SIGTERM: the last line names the wait it was in"
+# 9b. A signal outside any wait names none: SIGTERM in verify_merged's confirm sleep, after the checks wait has ended
+#     (UNSTABLE takes the wait and the merge in one pass), prints no `last wait:`, so the kill never reads as that wait.
+fresh; pair; mkpr 92 "$I" UNSTABLE; echo 100 > "$MT_STATE/pr/92/mergeCommit.lag"
+MERGE_TASK_CONFIRM_INTERVAL=1 PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 92 "$I" "$B" > "$tmp/9b.out" 2>&1 &
+pid=$!
+i=0; while [ "$i" -lt 300 ] && ! grep -q 'verifying the squash commit' "$tmp/9b.out" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+kill -TERM "$pid"; wait "$pid"; rc=$?
+out=$(cat "$tmp/9b.out")
+ok "$rc" 143 "9b. SIGTERM in verify_merged's confirm sleep exits 143"
+has "$out" "PR #92 — waiting on required checks" "9b. (the checks wait ran first)"
+lacks "$out" "last wait:" "9b. no last wait: the checks wait had ended"
+# 9c. stdout reaches EOF when the run exits: a child that outlives it and closes only fds 0-2 (git's auto-gc daemon, a
+#     watch that outlives its group's KILL) holds no other copy of the run's stdout, so the lead's read ends.
+fresh; pair; mkpr 93 "$I"; echo 60 > "$MT_STATE/daemon"
+mkfifo "$tmp/9c.fifo"
+{ cat "$tmp/9c.fifo" > "$tmp/9c.out"; : > "$tmp/9c.eof"; } &
+PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 93 "$I" "$B" > "$tmp/9c.fifo" 2>&1; rc=$?
+i=0; while [ "$i" -lt 200 ] && [ ! -e "$tmp/9c.eof" ]; do sleep 0.1; i=$((i+1)); done
+dpid=$(cat "$MT_STATE/daemon.pid" 2>/dev/null); alive=no
+[ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null && alive=yes
+ok "$rc|$alive|$([ -e "$tmp/9c.eof" ] && echo eof)" "0|yes|eof" "9c. the reader reaches EOF at the run's exit, the child it left still running"
+[ -n "$dpid" ] && kill "$dpid" 2>/dev/null
 
 # 10. a clone root (ADR 0042): $tmp/r-rollout is the Project root and $tmp/r its in-place twin, both clones of
 #     git@github.com:o/r.git served from $MT_SRV by the fake ssh. After the merge the twin fast-forwards too; a twin

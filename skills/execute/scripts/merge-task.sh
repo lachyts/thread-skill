@@ -102,10 +102,10 @@
 #      A revert PR's 70 still halts the rollout (it protects main).
 #   143 130 129  A signal: TERM, INT, HUP (their traps). Sentinel `failed:<rc>`. When it cut a wait, the last line is
 #      `  last wait: <the wait it was in>` (LAST_WAIT: the head-lag re-read, the required-checks wait and its pending
-#      checks, the in-flight wait and the jobs it waits on, a settling or BEHIND re-poll), on the run's own stdout (fd
-#      7, since the trap runs inside the redirection of the call it cut): the lead's `signalled twice` reason copies it,
-#      so a kill reads as what it was waiting on (ADR 0033 d4 as amended 2026-11-12). A KILL skips the trap; then the
-#      last line is the wait line itself.
+#      checks, the in-flight wait and the jobs it waits on, a settling or BEHIND re-poll), on stdout: the lead's
+#      `signalled twice` reason copies it, so a kill reads as what it was waiting on (ADR 0033 d4 as amended
+#      2026-11-12). A KILL skips the trap; then the last line is the wait line itself, which names its wait by one of
+#      reconcile-rollout.py's MERGE_TASK_WAIT_WORDS (`waiting`, `re-polling`, `re-reading`).
 #                                                                        counter UNTOUCHED  lead: re-run
 #                                                                                          (idempotent)
 #
@@ -790,9 +790,6 @@ fi
 # FINAL_RC is set only by finish, SIG_RC only by a signal trap; SENTINEL, PR and COUNTER only once known. LAST_WAIT is
 # the wait the run is in (wait_line), cleared once that wait ends: a signal's last line names it.
 SENTINEL=''; FINAL_RC=''; SIG_RC=''; LAST_WAIT=''; PR=''; COUNTER=''; tmp=''
-# The run's own stdout, kept on fd 7: bash runs a signal's trap inside the redirection of the function call the signal
-# cut (a watch slice writes to $tmp/checks.out), so on_exit writes its `last wait:` line here, never into that file.
-{ exec 7>&1; } 2>/dev/null
 ABORT_RC=70   # an exit outside finish and the signal traps: a defect, never 0 and never a table code
 on_exit() {  # EXIT trap — $? MUST be captured first, before any other command overwrites it
   local code=$? out
@@ -816,10 +813,11 @@ on_exit() {  # EXIT trap — $? MUST be captured first, before any other command
   fi
   [ -n "$tmp" ] && rm -rf "$tmp"
   # A signal's last line is the wait it cut, never the signal (ADR 0033 d4 as amended 2026-11-12): the lead's reason is
-  # `merge-task signalled twice (<code>): <its last line>`. On fd 7, the run's own stdout; in a subshell, so a closed
-  # stdout's SIGPIPE ends only it.
+  # `merge-task signalled twice (<code>): <its last line>`. On stdout, which no function call's redirection holds when
+  # a trap runs (bash runs a trap inside the redirection of a function call the signal cut, so checks_watch runs its
+  # redirected slice in a subshell); in a subshell, so a closed stdout's SIGPIPE ends only it.
   if [ -n "$SIG_RC" ] && [ "$out" = "$SIG_RC" ] && [ -n "$LAST_WAIT" ]; then
-    ( printf '  last wait: %s\n' "$LAST_WAIT" >&7 ) 2>/dev/null || true
+    ( printf '  last wait: %s\n' "$LAST_WAIT" ) 2>/dev/null || true
   fi
   exit "$out"
 }
@@ -1474,8 +1472,10 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
 checks_watch() {  # one slice of the required-checks watch: gh's rc, or 142 once NO_RUNNER_POLL cut it
   [ "$(type -t lc_loaded)" = function ] || . "$LIVE_CHECKOUT" 2>/dev/null
   if [ "$(type -t lc_bounded)" = function ]; then
-    lc_bounded "$NO_RUNNER_POLL" gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast \
-      --interval "$CHECK_INTERVAL" >"$tmp/checks.out" 2>"$tmp/checks.err"
+    # In a subshell: lc_bounded is a function, so its redirection would hold this shell's stdout while the slice runs,
+    # and a signal's trap, run once the slice returns, would write on_exit's `last wait:` line into checks.out.
+    ( lc_bounded "$NO_RUNNER_POLL" gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast \
+      --interval "$CHECK_INTERVAL" >"$tmp/checks.out" 2>"$tmp/checks.err" )
   else
     gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" \
       >"$tmp/checks.out" 2>"$tmp/checks.err"

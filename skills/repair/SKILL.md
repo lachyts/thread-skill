@@ -382,10 +382,11 @@ later than the note's last re-entry. A `-` entry never counts, nor a spent or su
   then the first text again with the budget spent): a repeated block is Lachy's again (ADR 0033 decision 6), never
   handed back on the old answer.
 - An entry recorded before the block's last re-entry never counts, whatever the verdict's why: ask again and quote
-  it, so his word can be the answer. One recorded since counts whatever the why, a block whose fingerprint equals
-  `auto_retry_sha` included (`same feedback as the block last re-entered`, `same stop twice running at Integration: …`,
-  or a spent budget on a repeated block). A tie, an unparseable stamp or two live entries sharing one fail closed: it
-  is asked again.
+  it, so his word can be the answer. One recorded since counts whatever the why: a block whose fingerprint equals
+  `auto_retry_sha` included (`same feedback as the block last re-entered`, or a spent budget on a repeated block), and
+  a block that repeats the Integration stop last re-entered, its fingerprint equal or not (`same stop twice running at
+  Integration: …`, its reason equal but for its numbers). A tie, an unparseable stamp or two live entries sharing one
+  fail closed: it is asked again.
 
 With one found, never ask again; act on it by its form, where hand-back may run (§ 1, § 4):
 

@@ -65,6 +65,9 @@ State (a missing file takes the default in brackets):
   merge.lag <N>           see pr/<N>/lag.   merge.hook <sh>: run after a successful squash.
   squash-parent           the squash commit's parent [base.cur, else srv's default branch].
   squash.tree             the squash commit's tree: `head` (the PR head's tree) or a 40-hex tree [the empty tree].
+  daemon <secs>           the next gh call (any) leaves a child behind, as git's daemonize does for an auto gc: its own
+                          session, fds 0-2 on /dev/null, every other fd it inherited kept; it sleeps <secs>. Its pid is
+                          written to daemon.pid, for the test to stop.
 
 Opt-in verbs for lead-integrate.py revert (no existing suite calls them):
   pr create [-R o/r] --head <br> --base <b> --title <t> --body-file <f>
@@ -143,6 +146,20 @@ def pop(path):
 
 def peek(path):
     return (rd(path, "") or "").split("\n")[0]
+
+
+if has("daemon"):
+    secs = float(rd(p("daemon")) or 0)
+    rm(p("daemon"))
+    child = os.fork()
+    if child == 0:
+        os.setsid()
+        null = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(null, fd)
+        time.sleep(secs)
+        os._exit(0)
+    wr(p("daemon.pid"), str(child))
 
 
 def guard_jq(call):

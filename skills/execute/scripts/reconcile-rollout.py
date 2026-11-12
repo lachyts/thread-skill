@@ -10959,6 +10959,11 @@ KILL_OPENING = INFRA_LEAD_OPENINGS[1]
 # merge-task.sh's last line on a signal, `last wait: <the wait it was in>` (its on_exit): a kill reads as that wait, never
 # as the signal. Pinned against merge-task.sh by the auto-retry suite.
 MERGE_TASK_LAST_WAIT_MARK = "last wait:"
+# The words merge-task.sh's wait lines (its wait_line) name their wait by: `waiting` (the required-checks and in-flight
+# waits), `re-polling` (a settling or BEHIND re-poll), `re-reading` (the head-lag re-read). A SIGKILL skips the trap, so
+# its last line is the bare wait line: one of these words, not MERGE_TASK_LAST_WAIT_MARK, says it named its wait.
+# Pinned against every wait_line in merge-task.sh by the auto-retry suite.
+MERGE_TASK_WAIT_WORDS = ("waiting", "re-polling", "re-reading")
 # The second line lead-integrate.py set-aside writes under a kill that names no wait: `last real reason (Blocker
 # diagnosis run <n>, <stamp>): <the block last re-entered>` (_carried_reason there). No first-line reader sees it.
 LAST_REAL_REASON_MARK = "last real reason ("
@@ -11022,7 +11027,7 @@ def _retry_class(note) -> str:
     return "infra" if TRANSIENT_MARK in _blocker_summary(note) else "agent"
 
 
-_WAITING_RE = re.compile(r"\bwaiting\b", re.I)
+_WAIT_WORD_RE = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, MERGE_TASK_WAIT_WORDS)), re.I)
 
 
 def _lead_first(reason) -> str:
@@ -11032,22 +11037,24 @@ def _lead_first(reason) -> str:
 
 
 def _kill_without_wait(reason) -> bool:
-    """Whether a reason is a kill (KILL_OPENING) that names no wait: neither MERGE_TASK_LAST_WAIT_MARK nor the word
-    `waiting` in it (merge-task.sh's own wait lines say it). lead-integrate.py set-aside carries the last real reason
-    under such a kill (_carried_reason there), so a later retry never overwrites the cause with the signal."""
+    """Whether a reason is a kill (KILL_OPENING) that names no wait: neither MERGE_TASK_LAST_WAIT_MARK (the trap's form)
+    nor one of MERGE_TASK_WAIT_WORDS (a SIGKILL's form, the bare wait line) in it. lead-integrate.py set-aside carries
+    the last real reason under such a kill (_carried_reason there), so a later retry never overwrites the cause with the
+    signal."""
     text = _lead_first(str(reason or "").replace("\n", " "))
-    return text.startswith(KILL_OPENING) and MERGE_TASK_LAST_WAIT_MARK not in text and not _WAITING_RE.search(text)
+    return text.startswith(KILL_OPENING) and MERGE_TASK_LAST_WAIT_MARK not in text and not _WAIT_WORD_RE.search(text)
 
 
 def _stop_key(reason) -> str:
     """One key per stop, from a reason's first line (`integration:` dropped), so two stops equal but for their numbers
     read alike: the `last wait: ` mark dropped (the trap's form then equals a SIGKILL's, whose last line is the wait line
-    itself); for a kill, everything after the word `waiting` cut (a wait's job or check list, the old `…`), since what a
-    kill waited on is its wait, whatever jobs that wait listed; then lowercased, each digit run `#`, whitespace collapsed
-    and a trailing `…`, `.` or space stripped. Read by _same_stop only."""
+    itself); for a kill, everything after its first wait word (MERGE_TASK_WAIT_WORDS) cut (a wait's job or check list, a
+    re-poll's counter, the old `…`), since what a kill waited on is its wait, whatever jobs that wait listed; then
+    lowercased, each digit run `#`, whitespace collapsed and a trailing `…`, `.` or space stripped. Read by _same_stop
+    only."""
     s = re.sub(re.escape(MERGE_TASK_LAST_WAIT_MARK) + r"\s*", "", _lead_first(reason), count=1, flags=re.I)
     if s.startswith(KILL_OPENING):
-        m = _WAITING_RE.search(s)
+        m = _WAIT_WORD_RE.search(s)
         s = s[:m.end()] if m else s
     s = re.sub(r"\s+", " ", re.sub(r"[0-9]+", "#", s.lower()))
     return s.rstrip("…. ")

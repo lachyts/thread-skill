@@ -959,12 +959,23 @@ workflow call failed: no result row
 $TRANSIENT
 EOF
 
-# A17d: the controls
-a17int d-different
-a17first "d different" "$R1"
-lead "$A" integration "no-runner: required$HELD" 2026-10-03T08:30:00Z
-ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"infra"]' \
-  "A17d: a held stop, then a different one (a kill, then no-runner) → retryable"
+# A17d: the controls. A held stop, then a different one, stays retryable after the cool-down: another route, or the same
+# opening with another stop (_stop_key): a kill in one wait then in another, one no-runner job then another, a
+# GitHub-side never-appeared then a CANCELLED.
+i=0
+while IFS='|' read -r label first second; do
+  i=$((i+1)); a17int "d-$i"
+  a17first "d $label" "$first"
+  lead "$A" integration "$second" 2026-10-03T08:30:00Z
+  ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"infra"]' \
+    "A17d $label: a held stop, then a different one → retryable"
+done <<EOF
+a kill, then no-runner|$R1|no-runner: required$HELD
+a kill in the in-flight wait, then in the required-checks wait|$R1|merge-task signalled twice (143): last wait: PR #5 — waiting on required checks: ci
+a kill in the in-flight wait, then in a BEHIND re-poll|$R1|merge-task signalled twice (143): last wait: PR #5 reads BEHIND on an unmoved base — re-polling (1/6)…
+one no-runner job, then another|no-runner: required$HELD|no-runner: required job "arm64" queued 47 minutes with no runner (run 7, job 9)
+a GitHub-side never-appeared, then a CANCELLED|merge-task exit 1, GitHub-side: $GH_NEVER|merge-task exit 1, GitHub-side: $GH_CANCEL
+EOF
 # p1-1's shape: auto_retry_sha came from a plan block, so the first Integration stop is no repeat; its identical second,
 # with the budget spent too, names the same stop, never `budget: 2/2 used`.
 scen a17-d-plan-sha
@@ -1012,11 +1023,18 @@ ok "$(grep -c '^### Run ' "$D/$A.md")" 2 "A17e: the second identical kill re-car
 I=$(INOW=2026-10-03T11:00:00Z inp "$A")
 ok "$(refused "$I")" "$REFUSED" "A17e: the same kill twice running → refused"
 has "$(j "$I" 'd["autoRetryWhy"]')" "${SAME}$KILL; $CARRIED" "A17e: the why holds the kill and the reason it carries"
-# A kill that names its wait carries nothing.
-a17int e-wait
-a17first "e wait" "$NR"
-lead "$A" integration "$R1" 2026-10-03T08:30:00Z
-hasnt "$(sec "$A" '## Blocker diagnosis')" "last real reason" "A17e: a kill naming its wait carries nothing"
+# A kill that names its wait carries nothing: the trap's `last wait:` form, and a SIGKILL's bare wait line, here a
+# re-poll's, which never says `waiting`.
+i=0
+while IFS='|' read -r label kill; do
+  i=$((i+1)); a17int "e-wait-$i"
+  a17first "e wait $i" "$NR"
+  lead "$A" integration "$kill" 2026-10-03T08:30:00Z
+  hasnt "$(sec "$A" '## Blocker diagnosis')" "last real reason" "A17e: a kill naming its wait ($label) carries nothing"
+done <<EOF
+the trap's form|$R1
+a SIGKILL's re-poll|merge-task signalled twice (137): PR #5 reads BEHIND on an unmoved base — re-polling (1/6)…
+EOF
 # The bounds: no auto_retry_sha; an own-run block on top (retried); auto_retry_sha naming another block.
 a17int e-no-sha
 lead "$A" integration "$NR"
@@ -1045,7 +1063,7 @@ print(json.dumps({"fix": list(m.MERGE_TASK_FIXABLE), "gone": m.BRANCH_GONE_MARK,
                   "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS),
                   "mtInfra": list(m.MERGE_TASK_INFRA), "settling": m.MERGE_TASK_SETTLING_MARK, "noRunner": m.NO_RUNNER_OPENING,
                   "ghOpening": m.MERGE_TASK_GITHUB_OPENING, "lastWait": m.MERGE_TASK_LAST_WAIT_MARK,
-                  "sameStop": list(m.SAME_STOP_OPENINGS)}))
+                  "sameStop": list(m.SAME_STOP_OPENINGS), "waitWords": list(m.MERGE_TASK_WAIT_WORDS)}))
 PY
 }
 P=$(pin)
@@ -1060,6 +1078,17 @@ ok "$(grep -c -F -- "$(j "$P" 'd["settling"]')" "$MT" | awk '{print ($1 > 0)}')"
 ok "$(grep -c -F -- "$(j "$P" 'd["noRunner"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: NO_RUNNER_OPENING is merge-task.sh's exit-4 text"
 ok "$(grep -c -F -- "$(j "$P" 'd["ghOpening"]')" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_GITHUB_OPENING is execute SKILL.md's reason"
 ok "$(grep -c -F -- "$(j "$P" 'd["lastWait"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_LAST_WAIT_MARK is merge-task.sh's signal line"
+# Every wait merge-task.sh names (each wait_line call) holds a wait word, so a SIGKILL's bare wait line reads as a wait.
+unworded() {  # the wait_line calls in merge-task.sh holding none of the words in $1 (`|`-joined): `ok`, or `none` found
+  python3 - "$MT" "$1" <<'PY'
+import re, sys
+words = sys.argv[2].split("|")
+calls = [l.strip() for l in open(sys.argv[1]) if re.match(r"\s*wait_line \"", l)]
+bad = [c for c in calls if not any(w in c for w in words)]
+print("none" if not calls else "; ".join(bad) or "ok")
+PY
+}
+ok "$(unworded "$(j "$P" '"|".join(d["waitWords"])')")" ok "A15: every wait_line in merge-task.sh names its wait by one of MERGE_TASK_WAIT_WORDS"
 ok "$(j "$P" 'd["sameStop"]')" '["merge-task signalled twice","merge-task exit 1, GitHub-side:","no-runner:"]' \
   "A15: SAME_STOP_OPENINGS (the held Integration routes)"
 for frag in "same stop twice running" "last real reason"; do
