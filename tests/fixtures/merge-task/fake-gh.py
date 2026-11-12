@@ -30,9 +30,9 @@ State (a missing file takes the default in brackets):
                           `unprotected` ⇒ lachyts/chorus's live shape (private, free plan: protected false, enforcement
                           off); `ruleset` ⇒ lachyts/thread-skill's (protected true by a ruleset, classic protection off);
                           `nochecks` ⇒ Animately/optimizer's develop (protected, enforcement everyone, `contexts: []`,
-                          `checks: []`); `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form; `404-branch` ⇒ "Branch
-                          not found"; `403-integration` ⇒ "Resource not accessible by integration"; `403-rate` ⇒ the
-                          primary rate limit. err.branch: its text, rc 1, on every read.
+                          `checks: []`); `noflag` ⇒ 200 with no `protected`; `404-notfound` ⇒ the Not Found form;
+                          `404-branch` ⇒ "Branch not found"; `403-integration` ⇒ "Resource not accessible by
+                          integration"; `403-rate` ⇒ the primary rate limit. err.branch: its text, rc 1, on every read.
   rules                   rules/branches/<b>, read 2 (the same segment check). Absent ⇒ []; a JSON array literal ⇒
                           served as-is; `403-plan` ⇒ chorus's live "Upgrade to GitHub Pro" text; `403-rate` ⇒ the
                           secondary rate limit; `404` ⇒ the Not Found form. err.rules: its text, rc 1, on every read.
@@ -512,8 +512,9 @@ if args[:1] == ["api"]:
             mode = rd(p("branch"))
             off = {"enforcement_level": "off", "contexts": [], "checks": []}
             if mode is None:
-                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": True, "required_status_checks": {
-                    "enforcement_level": "everyone", "contexts": ["ci"], "checks": [{"context": "ci", "app_id": None}]}}}))
+                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {
+                    "enabled": True, "required_status_checks": {"enforcement_level": "everyone", "contexts": ["ci"],
+                                                                "checks": [{"context": "ci", "app_id": None}]}}}))
             elif mode == "unprotected":
                 print(json.dumps({"name": DEFAULT, "protected": False, "protection": {"enabled": False,
                                                                                      "required_status_checks": off}}))
@@ -521,8 +522,9 @@ if args[:1] == ["api"]:
                 print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": False,
                                                                                     "required_status_checks": off}}))
             elif mode == "nochecks":
-                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {"enabled": True, "required_status_checks": {
-                    "enforcement_level": "everyone", "contexts": [], "checks": []}}}))
+                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {
+                    "enabled": True, "required_status_checks": {"enforcement_level": "everyone", "contexts": [],
+                                                                "checks": []}}}))
             elif mode == "noflag":
                 print(json.dumps({"name": DEFAULT}))
             elif mode == "404-notfound":

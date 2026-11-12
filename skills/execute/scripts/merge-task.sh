@@ -85,9 +85,10 @@
 #      mergeability (ADR 0069 d2; each such text carries `GitHub has not settled its mergeability`): it stays
 #      UNKNOWN or BLOCKED with nothing required on the default branch, or UNKNOWN after its required checks
 #      went green, for LAZY_REPOLL_MAX re-polls, or no required check is reported and nothing runs on its
-#      head while the default branch's gate is unreadable; or MERGED, but the head or parent unreadable
-#      within the bound (`UNVERIFIED: PR #N merged as <oid or unknown>; not verifiable yet; re-run to
-#      verify`).                                                         counter UNTOUCHED  lead: re-run the
+#      head while the default branch's gate is unreadable, and the wait never samples CLEAN, nor UNSTABLE when
+#      entered from UNSTABLE; or MERGED, but the head or parent unreadable within the bound (`UNVERIFIED: PR
+#      #N merged as <oid or unknown>; not verifiable yet; re-run to verify`).
+#                                                                        counter UNTOUCHED  lead: re-run the
 #                                                                                          same args after a
 #                                                                                          backoff, bounded
 #                                                                                          by p12-9, then pause
@@ -114,8 +115,9 @@
 # to a`); the PR's head branch is absent on origin while GitHub's PR head ≠ the integrated head (a
 # cross-repository PR or a deleted branch); the head does not contain the base; DIRTY, or BEHIND after a
 # bounded re-poll, on an unmoved base; a red required check on a genuine step; required checks that never
-# appeared while something is required (the lead sets it aside at Integration, GitHub-side: no code fix
-# clears it, ADR 0069 d3); a required check CANCELLED (a CI timeout or another stop on GitHub's side, no test
+# appeared while something is required, and the wait never sampled CLEAN, nor UNSTABLE when entered from
+# UNSTABLE (the lead sets it aside at Integration and retries it as GitHub-side infra: no code fix clears it,
+# ADR 0069 d3); a required check CANCELLED (a CI timeout or another stop on GitHub's side, no test
 # failed) again after one re-run of its failed jobs, or whose re-run cannot start (GitHub-side too, its own
 # reasonClass ci-timeout, ADR 0073 d4; gh exits 0 on it, so a 0 with a red cell is never read as green); a
 # non-check gate (checks green, still BLOCKED, no review pending); a merge queue
@@ -194,9 +196,10 @@
 # read UNKNOWN or BLOCKED for hours on a PR nothing gates. Off the CLEAN path the state machine first reads the
 # default branch's required gate once (required_gate: some, none or unknown). With none (two clean GitHub answers
 # deny any gate) an UNSTABLE PR merges at once, and a BLOCKED or UNKNOWN one is re-polled LAZY_REPOLL_MAX times,
-# then exits 8; with some or unknown the required checks are waited on as before. After that wait, UNKNOWN is
-# re-polled the same way, while BLOCKED stays the non-check gate's 1. Checks that never appear while the gate is
-# unreadable are 8, never 1.
+# then exits 8; with some or unknown the required checks are waited on; a wait that finds no required check
+# reported hands back on a CLEAN sample, and merges on an UNSTABLE sample when the state machine entered from
+# UNSTABLE, before any in-flight read. After that wait, UNKNOWN is re-polled the same way, while BLOCKED stays the
+# non-check gate's 1. Checks that never appear while the gate is unreadable are 8, never 1.
 #
 # No runner (ADR 0069, amended 2026-11-11). A job GitHub queued that no runner took (a self-hosted runner that no longer
 # exists) stays queued about 24 hours, and read as CI in flight the whole time. A job is "no runner" when it is `queued`
@@ -1491,8 +1494,9 @@ pending_checks() {  # the required checks pending at the watch slice's last refr
 }
 
 WAIT_MSG=''
-wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
-  local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held pending seen=''
+wait_required_checks() {  # wait_required_checks <the state machine's mergeStateStatus> — 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
+  # The entry state is captured here, because each snapshot_once below overwrites S_MSS.
+  local from="$1" absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held pending seen=''
   wait_line "PR #$PR — waiting on required checks…"
   while : ; do
     checks_watch; rc=$?
@@ -1542,33 +1546,38 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
       # empty). Without this re-poll, the loop counted absent polls while the PR quietly turned
       # CLEAN and then halted with "never appeared" — reproduced twice (narcissus-avp PRs #3, #5,
       # 2026-07-18), where an immediate re-run merged the same PR CLEAN first try. Re-poll
-      # mergeStateStatus every pass (one read attempt; a failed read counts as "not CLEAN"): CLEAN means
-      # branch protection has nothing left to wait for — hand back to the state machine, which re-reads
-      # the state and merges. A genuinely red required check never takes this branch (gh pr checks
-      # reports the failure, not absence), so BLOCKED semantics are untouched. One CLEAN sample is not
-      # GitHub settled: when the state machine's next read is UNKNOWN again, it re-polls it lazily
-      # (settle_repoll, ADR 0069 d2), never the NON-check gate's exit 1.
+      # mergeStateStatus every pass (one read attempt; a failed read counts as neither CLEAN nor UNSTABLE, and
+      # never falls back on the state machine's S_MSS): CLEAN means branch protection has nothing left to wait
+      # for — hand back to the state machine, which re-reads the state and merges. A genuinely red required check
+      # never takes this branch (gh pr checks reports the failure, not absence), so BLOCKED semantics are
+      # untouched. One CLEAN sample is not GitHub settled: when the state machine's next read is UNKNOWN again,
+      # it re-polls it lazily (settle_repoll, ADR 0069 d2), never the NON-check gate's exit 1.
+      # UNSTABLE ⇒ every required check passed (the one statement of it; ADR 0069 d2 and d4): GitHub gives UNSTABLE
+      # only once every required check has passed (a pending, failing or not-yet-reported required check reads
+      # BLOCKED); only a non-required check is red or pending. So an UNSTABLE sample with no required check reported
+      # merges, and both the state machine's UNSTABLE case and this sample lean on it. It is trusted only when the
+      # state machine entered this wait from UNSTABLE: from BLOCKED or UNKNOWN one UNSTABLE sample in a flap would
+      # set checks_done and turn the next BLOCKED read into the NON-check gate's exit 1, a human's stop, so that
+      # entry keeps the absent count below. The sample is taken BEFORE the in-flight read, so neither an optional
+      # run still going nor one parked on a deployment approval holds the Integration lane (compression-engine-
+      # rollout-2026-11-08, PRs #151/#152: an optional job on a dead runner), and a probe error cannot decide it. A
+      # required check its CI has yet to create reads BLOCKED, so it is still waited on through the in-flight
+      # read (16b). Without the sample a protected base requiring no check (Animately/optimizer's develop:
+      # `contexts: []`, `checks: []`) held every PR red only on optional jobs here until "never appeared"
+      # (animately-app-rollout-2026-11-07, five of seven PRs). The gate read stays `some` for any protected base:
+      # branches/<b> never shows a classic protection's non-check gates (conversation resolution, deployments, a
+      # lock), so a BLOCKED PR there exits 1 `required checks never appeared` below: MERGE_TASK_INFRA, retried once
+      # as GitHub-side infra and then Lachy's (ADR 0033 d4 as amended 2026-11-12), never the NON-check gate's
+      # exit 1 (ADR 0069, amended 2026-11-07 and 2026-11-12).
       mss=''
       snapshot_once "$tmp/clean.json" && mss=$S_MSS
-      if [ "$mss" = "CLEAN" ]; then
-        echo "  PR #$PR — no required checks and mergeStateStatus=CLEAN — nothing to wait for."
+      if [ "$mss" = CLEAN ] || { [ "$mss" = UNSTABLE ] && [ "$from" = UNSTABLE ]; }; then
+        echo "  PR #$PR — no required checks and mergeStateStatus=$mss — nothing to wait for."
         return 0
       fi
       if ci_runs_in_flight; then
         absent=0
         wait_line "PR #$PR — required checks not created yet; CI in flight on head — waiting${NR_LIVE:+ on: $NR_LIVE}…"
-      elif [ "$mss" = "UNSTABLE" ]; then
-        # UNSTABLE with no required check reported and nothing running on the head: nothing left to wait for, as
-        # CLEAN. GitHub gives UNSTABLE only once every required check has passed (a pending, failing or
-        # not-yet-reported required check reads BLOCKED); only a non-required check is red or pending. Taken only
-        # once no run is in flight, so a required check its CI has yet to create is still waited on (16b). Without
-        # it a protected base requiring no check (Animately/optimizer's develop: `contexts: []`, `checks: []`)
-        # held every PR red only on optional jobs here until "never appeared" (animately-app-rollout-2026-11-07,
-        # five of seven PRs). The gate read stays `some` for any protected base: branches/<b> never shows a
-        # classic protection's non-check gates (conversation resolution, deployments, a lock), so a BLOCKED PR
-        # there keeps its exit 1 (ADR 0069, amended 2026-11-07).
-        echo "  PR #$PR — no required checks, nothing in flight on head, and mergeStateStatus=UNSTABLE — nothing to wait for."
-        return 0
       else
         absent=$((absent+1))
         if [ "$absent" -gt "$CHECK_RETRY_MAX" ]; then
@@ -1837,7 +1846,7 @@ while : ; do
           # Nothing can be required on $BASE, so no check is coming: BLOCKED or UNKNOWN is GitHub's lazy recompute.
           settle_repoll "$S_MSS with nothing required on $BASE ($REQ_WHY)"
         else
-          wait_required_checks; rc=$?; LAST_WAIT=''
+          wait_required_checks "$S_MSS"; rc=$?; LAST_WAIT=''
           case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
           checks_done=1
         fi
@@ -1858,7 +1867,7 @@ while : ; do
       if [ "$checks_done" -eq 0 ]; then
         required_gate
         if [ "$REQ_GATE" != none ]; then
-          wait_required_checks; rc=$?; LAST_WAIT=''
+          wait_required_checks UNSTABLE; rc=$?; LAST_WAIT=''
           case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
         fi
         checks_done=1

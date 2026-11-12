@@ -18,9 +18,6 @@ tmp=$(mktemp -d); trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 # which the no-bytecode checks read as a failure.
 export HOME="$tmp/home" PYTHONDONTWRITEBYTECODE=1; mkdir -p "$HOME"
 RR="$root/skills/execute/scripts/reconcile-rollout.py"
-chk() {  # chk <rc> <stdout> — append one `pr checks --watch` result
-  python3 -c 'import json,sys; print(json.dumps({"rc": int(sys.argv[1]), "out": sys.argv[2], "err": ""}))' "$@" >> "$MT_STATE/checks.seq"
-}
 row() { printf '%s\t%s\t40m\thttps://github.com/o/r/actions/runs/%s/job/%s\t' "$1" "$2" "$3" "$4"; }
 jobs() {  # jobs <run> <job> <conclusion> — what `gh run view <run> --json jobs` reads for that run
   printf '{"jobs": [{"databaseId": %s, "name": "ci", "status": "completed", "conclusion": "%s", "steps": []}]}\n' \
