@@ -1207,10 +1207,12 @@ names, each with its line (`sign in to <server>, then /thread:orient --steer`), 
 depending on one, directly or through another member (a session-lane member on that path stays in the lane, never
 left out). Those rows stay unstamped, since S6 stamps only the members of
 notes written, and their `## Decisions` and `## Decided for you` bullets from S3.5 stay in their notes, as § 1.5 keeps
-a dropped task's. S4 then reads every chain-level value from that re-run's JSON. A member that a later S4 dependency
+a dropped task's. Each row left out gets one line under its task note's `## Left out at schedule` (the section made at
+the note's end when absent): `- <YYYY-MM-DD> <its leftOut line>`, so `unfinished-rollout.py needs-you` lists it for
+him with every other stop (p48-1) until a live rollout takes it; S6 removes the section from each member it stamps. S4 then reads every chain-level value from that re-run's JSON. A member that a later S4 dependency
 leaves out the same way drops its § 3.5 kept gates and § 3.6 ask-ahead answers unstamped, and S7 names them. With
 every member left out, the run stops before S4 with the `leftOut` lines, as S3.5's empty queue stops: nothing is
-written.
+written but those `## Left out at schedule` lines.
 
 Under orient-all the parent settled these at its § 6 step 2, so S3.7 checks nothing and puts no question: every pair
 its prompt line's `signed in` part does not name goes as `--signed-out`, and a line with no such part reads as
@@ -1265,7 +1267,7 @@ bullet), its `depends-on:` entries from S4, on every run step 7's `## Decisions 
 section for a member with a spend hit or a declared test Login's hit (the test-Login Planner line) and, on a
 standalone run, § 3.6's ask-ahead writes (step 7's
 `spend_approval_usd:` and `## Decisions (asked ahead <date>)` for a limit Lachy named, and the `## Approved gates`
-bullets). Nothing else is
+bullets), and its `## Left out at schedule` section, when an earlier run's S3.7 wrote one, is removed. Nothing else is
 stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then run step
 7's cross-project waits once, over every live rollout note, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write` (each note written has
 its lines in S7's summary, a non-zero exit a `WARN:` there, never a stop). Then remove the note's `incomplete: true`

@@ -532,6 +532,44 @@ restart_of leaves null (anyLaunch: begin takes any), reads `claude`, so every en
 re-check's) go to stderr, each once.
 Exit 0, or 2 (no stdout, one `unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or
 reconcile-rollout.py, serial-chains.py or leg.py unloadable.
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py needs-you [--now <iso>] [--gh-bin <gh>]
+        [--tasks-dir <dir>]
+
+`needs-you` (p48-1; CONTEXT.md **Needs-you item**) gathers every open stop that is Lachy's alone, across every rollout,
+into one list the Chorus Stage opens as one board, so he never visits the rollout notes one by one. Read-only, one
+process like `waiting`: one walk of the tasks dir, reconcile-rollout.py's readers in-process, and lead-integrate.py's
+Human fix (ADR 0035) loaded in-process only once a parallel set-aside needs it. It runs no git but what
+rollout-settings.py's resolve runs, and gh only for a `hold_until` PR (--gh-bin, default `gh`, memoised per PR). --now
+(an ISO time; a naive one reads local) is the clock for a cool-down and the standing approval's month; default now.
+The rollouts read: each rollout note directly in the tasks dir that is neither done nor dropped (rollout_notes, root
+only), so an archived rollout, done or not, is never read. In each, its linked tasks (reconcile-rollout.py _scan):
+- gate (kind `spend`, `credential` or `irreversible`, gated_inputs.py's gate_kind; any other kind reads `irreversible`,
+  fail closed): each bullet of a gate-pending task's `## Gated inputs (awaiting sign-off)`, verbatim (its list marker
+  stripped). A spend gate approve-gates --standing would sign never appears: the reading is _approve_standing's, read
+  only (the limit, the exposure, a bounce, the gate already in `## Approved gates`, and this month's standing approvals
+  summed as _StandingLedger sums them, never locked, plus the spend this read let through before it). Its ASK why is
+  the item's `detail`. Once signed (the task leaves gate-pending) it drops out.
+- set-aside (kind `sign-in` when its reason is a Leg preflight's `preflight: <namespace> did not answer`, legs.md §
+  Preflight, else `hands-on`): each task set aside at its run or at Integration that only a person moves on. In a
+  parallel rollout that is lead-integrate.py's auto_retry_verdict with a non-null humanFix (execute § 6.5 (c): a null
+  one is the lead's own retry); its `act` is humanFix.act and its `detail` humanFix.detail. In a serial chain every
+  such task (no Leg retries one: leg.py needs_you's rule), its act `hand back or defer`. `text` is the set-aside
+  reason, the first line of its latest block. Handed back, it drops out.
+- hold (kind `hands-on`), parallel rollouts only: a rollout's or an unlanded task's `hold_until` that waits on him
+  (_resolve_holds' `waits: you`: an unreadable hold, or a PR CLOSED unmerged), act `remove or fix hold_until on
+  [[<note>]]`; and each open merge hold in the rollout's Run record (_record_state's `merge` holds: a `--gated`
+  merge or a `review required:` PR), act `go ahead or decline the merge`.
+Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `status: open` and in no live rollout,
+whose `## Left out at schedule` section holds an entry (schedule § Serial path S3.7 writes one per row it leaves out
+for a sign-in; S6 removes it once the row is stamped): kind `sign-in`, `text` its latest entry, rollout null, act
+`sign in, then /thread:orient --steer`.
+stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out, "rollout":
+<slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}]}, `project` the task's
+`projects:` names comma-joined (the rollout's when it has none, `no project` with neither); items in rollout order
+(case-folded slug), each rollout's by task, then the left-out rows by task. `WARN:` lines go to stderr (a rollout with a
+task that cannot be read, so its items are not listed). Exit 0, or 2 (no stdout, one
+`unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or reconcile-rollout.py unloadable.
 """
 import argparse
 import importlib.util
@@ -553,6 +591,7 @@ SC_SRC = Path(__file__).resolve().parent / "serial-chains.py"
 GI_SRC = Path(__file__).resolve().parent / "gated_inputs.py"
 RUN_RECORD_SRC = Path(__file__).resolve().parent / "run_record.py"
 LEG_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/leg.py"
+LI_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/lead-integrate.py"
 TEMPLATE = Path(__file__).resolve().parent.parent.parent / "schedule/rollout-template.md"
 SELF_ROLLOUT_SH = Path(__file__).resolve().parent.parent.parent / "execute/scripts/self-rollout-check.sh"
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
@@ -561,7 +600,11 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_record_read", "_stop_state", "_truthy_flag", "_parse_ts", "_share_walks", "_walk_of", "_note_index",
             "_capacity_state", "_cap_in_force", "_away_state", "_running_by_rollout", "_Leases", "_surface_wait_read",
             "_surface_wait_write", "_surface_wait_drop", "_surface_wait_path", "_surface_wait_live",
-            "LEG_LEASE_LAPSE")   # leg_session's closing-Leg clock (P44-4), read through LEG.rr
+            "LEG_LEASE_LAPSE",   # leg_session's closing-Leg clock (P44-4), read through LEG.rr
+            # needs-you's readers (p48-1)
+            "_gated", "_standing_limit", "_ask_why", "_bounce_why", "_month_why", "_StandingLedger", "_norm_gate",
+            "_hold_until", "_resolve_holds", "_record_state", "_pr", "BLOCKED_SECTIONS", "GATE_PENDING_SECTION",
+            "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -573,6 +616,8 @@ PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
 SC = None   # serial-chains.py, loaded by cmd_check and cmd_pickups (load_sc)
 LEG = None  # leg.py, loaded once the first unfinished serial note is read (load_leg)
+LI = None   # lead-integrate.py, loaded by needs-you once a parallel set-aside needs its Human fix (load_li)
+LI_NAMES = ("task_inputs", "auto_retry_verdict")
 CHAINS = {}  # chain_read_of's reads: one leg.py read per serial note per process (every verb here writes no note)
 ENGINES = {}  # legacy_engine's reads: one probe read per distinct Engine snapshot per process, keyed by its path
 # The text that marks an engine from P41-3 on (legacy_engine): argparse names this flag in every copy of this script
@@ -637,6 +682,16 @@ def load_leg(rr):
         LEG = load_module("thread_leg", LEG_SRC, LEG_NAMES, "skills/execute/scripts/leg.py")
         LEG.rr, LEG.sc = rr, load_sc()
     return LEG
+
+
+def load_li(rr):
+    """lead-integrate.py as a module (its auto_retry_verdict is the Human fix's one copy, ADR 0035), sharing this
+    script's reconcile-rollout.py. Loaded only once needs-you reads a parallel set-aside."""
+    global LI
+    if LI is None:
+        LI = load_module("thread_lead_integrate", LI_SRC, LI_NAMES, "skills/execute/scripts/lead-integrate.py")
+        LI.rr = rr
+    return LI
 
 
 # ---- git ---------------------------------------------------------------------------------------
@@ -2531,19 +2586,23 @@ def leg_session(leg, ctx, chain, read, leases) -> bool:
     return True
 
 
+def now_of(args):
+    """--now as an aware datetime (a naive one reads local), else the clock's now; exit 2 on no ISO time."""
+    if not args.now:
+        return datetime.now().astimezone()
+    try:
+        now = datetime.fromisoformat(args.now.strip().replace("Z", "+00:00"))
+    except ValueError:
+        die(f"--now {args.now}: not an ISO time")
+    return now if now.tzinfo else now.astimezone()
+
+
 def cmd_waiting(args, rr) -> int:
     """`waiting` (ADR 0076 d3): the Waiting list and its room, one JSON line (the module docstring)."""
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     if not tasks_dir.is_dir():
         die(f"tasks dir {tasks_dir} not found")
-    if args.now:
-        try:
-            now = datetime.fromisoformat(args.now.strip().replace("Z", "+00:00"))
-        except ValueError:
-            die(f"--now {args.now}: not an ISO time")
-        now = now if now.tzinfo else now.astimezone()
-    else:
-        now = datetime.now().astimezone()
+    now = now_of(args)
     load_sc()
     warns, warned = [], set()
     vault = vault_root(tasks_dir)
@@ -2596,6 +2655,167 @@ def cmd_waiting(args, rr) -> int:
     why = None if by == "capacity" else capacity["why"] or capacity["maxWhy"]
     print(json.dumps({"room": room, "running": running, "cap": {"n": cap["n"], "by": by, "why": why},
                       "waiting": waiting, "next": nxt}, ensure_ascii=False))
+    return 0
+
+
+# ---- the needs-you list (p48-1) ----------------------------------------------------------------------------------------
+
+LEFT_OUT_SECTION = "## Left out at schedule"   # schedule § Serial path S3.7's line for a row left out for a sign-in
+PREFLIGHT_SIGN_IN_RE = re.compile(r"^preflight:\s*\S+\s+did not answer\b", re.I)   # legs.md § Preflight's set-aside
+BLOCKER_SECTION = "## Blocker diagnosis"
+
+
+class StandingRead:
+    """approve-gates --standing's spend reading (_approve_standing), read-only: never a lock, a ledger line or a save.
+    asks() is None when the standing approval would sign the gate, else its ASK why. The month's standing approvals are
+    _StandingLedger's sum for the gate's rollout note (on --dry-run, so unlocked), plus every spend this read already let
+    through, as one approve-gates call adds its own."""
+
+    def __init__(self, rr, tasks_dir, now):
+        self.rr, self.gi, self.tasks_dir = rr, rr._gated(), tasks_dir
+        self.month = now.astimezone().strftime("%Y-%m")
+        self.ledgers, self.added = {}, 0
+
+    def asks(self, note, rollout_path, rollout_note, gate):
+        rr, gi = self.rr, self.gi
+        limit, err = rr._standing_limit(note, rollout_note)
+        if err:
+            return err
+        verdict = gi.covered(gate, limit["value"])
+        if note.has_heading(rr.GATE_BOUNCE_SECTION):
+            return rr._bounce_why(verdict, gi)
+        if not verdict["covered"]:
+            return rr._ask_why(verdict, limit, gi)
+        approved = {rr._norm_gate(line) for line in note.section_text(rr.APPROVED_GATES_SECTION).split("\n")
+                    if line.strip()}
+        if rr._norm_gate(gate) in approved:
+            return None
+        ledger = self.ledgers.get(rollout_path)
+        if ledger is None:
+            ledger = self.ledgers[rollout_path] = rr._StandingLedger(self.tasks_dir, rollout_path, self.month, True)
+        spent, why = ledger.spent()
+        if why:
+            return why
+        total = spent + self.added + verdict["usd"]
+        if total > limit["value"]:
+            return rr._month_why(self.month, total, limit, gi)
+        self.added += verdict["usd"]
+        return None
+
+
+def set_aside_reason(rr, note) -> str:
+    """A set-aside's reason: the first non-empty line of its status's latest block (`## Blocker diagnosis` for a status
+    with no section of its own), as leg.py needs_you reads it."""
+    text = note.latest_run_text(rr.BLOCKED_SECTIONS.get(rr._status(note), BLOCKER_SECTION))
+    return next((line.strip() for line in text.split("\n") if line.strip()), "")
+
+
+def needs_you_item(kind, source, rollout, project, task, text, act, detail=None):
+    return {"kind": kind, "source": source, "rollout": rollout, "project": project, "task": task, "text": text,
+            "act": act, "detail": detail or None}
+
+
+def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
+    """One live rollout's needs-you items: its gates, its set-asides only a person moves on, and its holds that wait on
+    him (the module docstring's `needs-you`)."""
+    try:
+        linked, _index = rr._scan(path, tasks_dir)
+    except OSError as e:
+        warns.append(f"WARN: {path.stem}: a task note cannot be read ({e}): its items are not listed")
+        return []
+    slug, serial = path.stem, rr._shape(note) == "serial"
+    label = project_label(rr, note)
+    gi = standing.gi
+    out = []
+
+    def project(t):
+        return project_label(rr, t) if t.get_list("projects") else label
+
+    for tp, t in sorted(linked, key=lambda e: e[0].stem.lower()):
+        state, at = rr._queue_state(t)
+        if state != "set-aside":
+            continue
+        if at == "gate":
+            for line in t.section_text(rr.GATE_PENDING_SECTION).split("\n"):
+                gate = re.sub(r"^[-*]\s+", "", line.strip())
+                if not gate:
+                    continue
+                kind = gi.gate_kind(gate)
+                why = standing.asks(t, path, note, gate) if kind == "spend" else None
+                if kind == "spend" and why is None:
+                    continue   # the standing approval signs it: it never needs him
+                out.append(needs_you_item(kind if kind in GATE_KINDS else "irreversible", "gate", slug, project(t),
+                                          tp.stem, gate, "sign off gated input", why))
+            continue
+        reason = set_aside_reason(rr, t)
+        kind = "sign-in" if PREFLIGHT_SIGN_IN_RE.match(reason) else "hands-on"
+        if serial:
+            out.append(needs_you_item(kind, "set-aside", slug, project(t), tp.stem, reason or f"set aside "
+                                      f"({rr._status(t)})", "hand back or defer"))
+            continue
+        li = load_li(rr)
+        fix = li.auto_retry_verdict(tp, t, li.task_inputs(tp, t), note, now)["humanFix"]
+        if fix is None:
+            continue   # the lead's own re-entry: a retry, a cool-down, a seeded revise
+        text = reason or fix["detail"] or f"set aside {fix['label']}"
+        out.append(needs_you_item(kind, "set-aside", slug, project(t), tp.stem, text, fix["act"],
+                                  fix["detail"] if fix["detail"] != text else None))
+    if serial:
+        return out
+    root = rr._project_root(note)
+    holds = []
+    ro_hold = rr._hold_until(note, root)
+    if ro_hold is not None:
+        holds.append((slug, "rollout", ro_hold))
+    for tp, t in sorted(linked, key=lambda e: e[0].stem.lower()):
+        if rr._queue_state(t)[0] in UNLANDED:
+            h = rr._hold_until(t, root)
+            if h is not None:
+                holds.append((tp.stem, "task", h))
+    notes = {tp.stem: t for tp, t in linked}
+    for entry, reason in rr._resolve_holds(args.gh_bin, holds, memo) if holds else []:
+        if not entry["held"] or entry["waits"] != "you":
+            continue
+        task = entry["note"] if entry["scope"] == "task" else None
+        out.append(needs_you_item("hands-on", "hold", slug, project(notes[task]) if task else label, task, reason,
+                                  f"remove or fix hold_until on [[{entry['note']}]]", entry["url"] or entry["error"]))
+    record = rr._record_state(slug)
+    for hold, task in sorted((record or {}).get("holds", ()), key=lambda h: (str(h[0]), str(h[1]))):
+        if hold != "merge":
+            continue
+        t = rr._walk_of(tasks_dir).index.get(str(task).lower())
+        pr = rr._pr(t[1]) if t else ""
+        out.append(needs_you_item("hands-on", "hold", slug, project(t[1]) if t else label, t[0].stem if t else task,
+                                  "merge hold: awaiting your go-ahead" + (f" ({pr})" if pr else ""),
+                                  "go ahead or decline the merge"))
+    return out
+
+
+def cmd_needs_you(args, rr) -> int:
+    """`needs-you` (p48-1): every open needs-you item across every rollout, one JSON line (the module docstring)."""
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        die(f"tasks dir {tasks_dir} not found")
+    now = now_of(args)
+    warns, items, memo = [], [], {}
+    standing = StandingRead(rr, tasks_dir, now)
+    live = [(p, n) for p, n, _w in rollout_notes(rr, tasks_dir, archive=False) if rr._status(n) not in CLOSED]
+    for path, note in sorted(live, key=lambda e: e[0].stem.lower()):
+        items += rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns)
+    for path, note in sorted(rr._walk_of(tasks_dir).entries, key=lambda e: e[0].stem.lower()):
+        if path.parent != tasks_dir or rr._status(note) != "open" or rr._live_rollout(tasks_dir, note.get("rollout")):
+            continue
+        tags = tags_of(rr, note)
+        if "task" not in tags or "rollout" in tags:
+            continue
+        entries = log_entries(note.section_text(LEFT_OUT_SECTION))
+        if entries:
+            text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
+            items.append(needs_you_item("sign-in", "left-out", None, project_label(rr, note), path.stem, text,
+                                        "sign in, then /thread:orient --steer"))
+    for w in dict.fromkeys(warns):
+        print(w, file=sys.stderr)
+    print(json.dumps({"count": len(items), "items": items}, ensure_ascii=False))
     return 0
 
 
@@ -2818,6 +3038,10 @@ def main() -> int:
     wl = sub.add_parser("waiting", help="the Waiting list (ADR 0076): which serial chain starts next, and the room")
     wl.add_argument("--now", default=None, help="the clock for the Capacity, Away and lease reads (an ISO time)")
     wl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    ny = sub.add_parser("needs-you", help="every open needs-you item across every rollout, as one list (p48-1)")
+    ny.add_argument("--now", default=None, help="the clock for a cool-down and the standing approval's month (ISO)")
+    ny.add_argument("--gh-bin", default="gh", help="the gh executable a hold_until's PR is read through (tests stub it)")
+    ny.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
     if args.cmd == "check":
         # check --surface-wait's flags, validated before anything is loaded or touched, so a standing marker stays
@@ -2835,7 +3059,7 @@ def main() -> int:
     rr._share_walks()
     verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
              "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting,
-             "awaited": cmd_awaited}
+             "awaited": cmd_awaited, "needs-you": cmd_needs_you}
     return verbs[args.cmd](args, rr)
 
 
