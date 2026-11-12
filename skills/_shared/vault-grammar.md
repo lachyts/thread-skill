@@ -371,7 +371,13 @@ a dependant on that note (ADR 0078 d7):
 `- [[<dependant>]] waits on [[<x>]] (<Project>, not scheduled)`
 
 `<x>` is another project's task (it shares no `projects:` entry with the dependant) that has not landed and whose
-`rollout:` links no live rollout. `<Project>` is its first project, or `no project`. `waits-on.py write` is the
+`rollout:` links no live rollout. `<Project>` is its first project, or `no project`.
+
+A **held line** has the same form, for a task schedule's Pre-flight left out because it waits on a task nobody is
+building (schedule § 3: `waits`, and each dependant out through one), which no `rollout:` links to the note: `<x>` is
+then any task, of its project or another. Schedule passes it as `waits-on.py write --rollout <note> --held <task>=<x>`,
+and every later rewrite keeps it while it is still true: the task is open on no live rollout, and `<x>` has not landed
+and is not in flight. `waits-on.py write` is the
 section's one writer: schedule step 7, § Serial path S6 and orient-all § 2 run it, and it rewrites the section on every
 live rollout note as it stands, one line per unit a dependant waits on, removing it when nothing waits. `estate-scan.py` reads the lines back for each live rollout (`rollouts[].waitsOn[]`, each kept
 only while its dependant is still open and its dependency is still an open task on no live rollout) and orient-all

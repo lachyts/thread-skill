@@ -434,6 +434,8 @@ the round, and the rest stay undecided.
 **The final call.** `preflight` with the same four flags and `--decided <each decided slug>`. Its `queue[]` is the
 candidate set from step 2 on.
 - A task in `out[]` that is not carried leaves now: no `rollout:` stamp, no `## Queue` row, no `## File-sets` line.
+- A task out as `waits` (§ 3's hold: a dependency outside the candidates that nobody is building) leaves the same way,
+  and so does each dependant out through it; step 7's cross-project waits write both on this note.
 - A carried `queued` task in `out[]` leaves through step 6's `defer`, run from the prior's root before the carry.
 - Its `warnings[]` (a kept task that depends on a task left out) go to step 8.
 
@@ -589,6 +591,21 @@ Look for:
 - Body phrases like "gated on", "after X lands", "depends on" — one between two candidates, on a dependant in the `queued` state (step 5 says why), is written into the dependant's frontmatter `depends-on:` at step 7, so the queue holds it back, and listed in the confirm batch (step 5); one naming a task outside the candidates is named there, never written
 - On a supersede, step 1's `order` lines (and, after an `interrupted` finish, § 0's): each is an order the prior rollout kept only in prose. Read each `order` line's clause: when it states that a `queued` carried task waits on another candidate, that `depends-on:` is written at step 7 and listed in the confirm batch (step 5). Skip one the dependant already records, and a clause that orders no two candidates (such as a kept task's own order: "p37-4 after p36-2, p36-6" with p37-4 landed)
 - A body dependency or order line this step takes whose dependency is in § 1.5's `out[]` re-runs § 1.5's final `preflight` with `--dep <dependant>=<dependency>`, keeping the earlier `--dep`s, and a § 4.5 combined note passed as its members. Every task the re-run newly leaves out leaves before step 6 as § 1.5's leavers do, a carried `queued` one through step 6's `defer`; a combined note leaves when any member does
+
+**A dependency nobody is building holds its task (ADR 0078 d7).** A task whose dependency is outside the candidates and
+open, and that no rollout will land first, would only block mid-run: queued, it never starts and its rollout cannot
+close (the Watches `0620581c`, `b45914c3`, `b61fa236`: a body-only *Depends on* another repo's unbuilt task, twice, and
+a `depends-on:` another repo's open task). § 1.5's `preflight` holds it before the first Slot, so no step here reads
+it by eye. It reads each candidate's `depends-on:` and `blocked-by:` (the scan's `dependsOn`) and its body's *Depends
+on* lines (`bodyDependsOn`: `Depends on [[x]]` or `**Depends on:** [[x]] (why).` at a line's start, read to the
+clause's end, fenced blocks skipped). A dependency that is no candidate holds the task when its note is open on no
+live rollout and neither in_progress nor in Review (nobody is building it), or does not parse: the task is out as
+`waits`, via that dependency, decided or not and never asked, and its dependants leave with it as `dependency`. A
+dependency that is done (or merged, or dropped) holds nothing, nor does one in flight: the queue holds the dependant
+until its rollout lands it. A held task is never stamped; step 8's left-out block names it `waits on [[x]]`, and step
+7's cross-project waits write it, and each dependant out through it, on this note's `## Waits on`, so the next
+schedule, orient or estate pass sees what it waits on and where. A carried task that has started keeps its place, with
+a `warnings[]` line.
 
 ### 3.5. Detect human/release gates
 
@@ -834,7 +851,7 @@ and this run writes no note of its own. In order:
 There is no `incomplete:` stamp to clear and no step 7.5: the running rollout's own lead starts the joined tasks at its
 next `next`.
 
-**Cross-project waits (ADR 0078 d7).** With every task stamped and before the stamp below comes off, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write`: on every live rollout note, this one and every other project's, a dependency that belongs to another project, that has not landed and that no live rollout holds gets one `- [[<dependant>]] waits on [[x]] (<Project>, not scheduled)` line in the note's `## Waits on` section (`_shared/vault-grammar.md` § Waits on), so a cross-project dependency is never dropped silently, one released since a note was last written gets its line there, and orient-all's next pass lists it. It writes only that section of each note; this note's block of its stdout (`<this-slug>: N waits` and the lines under it) goes to step 8's `Waits on:` line, and a non-zero exit is a `WARN:` there, never a stop.
+**Cross-project waits (ADR 0078 d7).** With every task stamped and before the stamp below comes off, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write`, adding `--rollout <this-slug>` and one `--held <slug>=<via>` per task § 1.5 left out as `waits` and per task out as `dependency` through one (its own via), with § 3's re-runs (on a join, `--rollout` names the joined rollout; with no such leaver, neither flag): each held task gets `- [[<task>]] waits on [[x]] (<Project>, not scheduled)` on this note, kept by every later rewrite while it is still true (`_shared/vault-grammar.md` § Waits on). On every live rollout note, this one and every other project's, a dependency that belongs to another project, that has not landed and that no live rollout holds gets one `- [[<dependant>]] waits on [[x]] (<Project>, not scheduled)` line in the note's `## Waits on` section (`_shared/vault-grammar.md` § Waits on), so a cross-project dependency is never dropped silently, one released since a note was last written gets its line there, and orient-all's next pass lists it. It writes only that section of each note; this note's block of its stdout (`<this-slug>: N waits` and the lines under it) goes to step 8's `Waits on:` line, and a non-zero exit is a `WARN:` there, never a stop.
 
 **Then clear this note's stamp.** Once every task above has its stamps (a carried task that has started keeps what `carry` wrote), remove the `incomplete: true` line from this rollout note's frontmatter: it is step 7's last write, after every task stamp and before step 7.5's close-out. A run that stops anywhere earlier leaves the stamp, so `reconcile-rollout.py next` refuses the note and § 0 offers it to the next `--regenerate`. Remove only the stamp on the note this run wrote: one § 0 put on an interrupted supersede's note ends only when a supersede closes that note.
 
@@ -932,6 +949,7 @@ Left out by the Pre-flight (none is stamped; each waits on what its line names):
   - [[task-u]] — ungraded (no grade), left out at your answer: the next schedule asks again
   - [[task-n]] — unreadable (frontmatter does not parse (line 9, due)): fix its frontmatter; the next schedule grades it
   - [[task-d]] — depends on [[x]], which is left out (the Dependent closure)
+  - [[task-w]] — waits on [[x]] (<Project>; open, on no live rollout): nobody is building it; schedule or land it, and the next schedule takes this one
   - [[task-q]] — Grill, waiting on your answer; carried from [[<prior>]], deferred out of it at step 6
 answered, not written: [[task-g]] Cache? → lru (record refused: <its estate-dispatch line>)
 queued as it stands: [[task-v]] (ungraded: status outside Active), at your answer, for this run only
@@ -1268,7 +1286,9 @@ standalone run, § 3.6's ask-ahead writes (step 7's
 bullets). Nothing else is
 stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then run step
 7's cross-project waits once, over every live rollout note, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write` (each note written has
-its lines in S7's summary, a non-zero exit a `WARN:` there, never a stop). Then remove the note's `incomplete: true`
+its lines in S7's summary, a non-zero exit a `WARN:` there, never a stop), with step 7's `--rollout` and `--held` for
+S3.5's `waits` leavers and the dependants out through them, `--rollout` naming the note whose chain they left (one
+call per such note). Then remove the note's `incomplete: true`
 line, as its last write, once every member is stamped.
 
 **S7. Summary.** Per note: its name, its chain order with each row's launch, its surfaces, and the completion

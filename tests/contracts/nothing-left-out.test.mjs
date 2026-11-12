@@ -9,6 +9,9 @@
 //   n3 waits-on.py writes only a live dependant's unheld other-project dependency, follows a fold to its unit once per
 //      dependant, reaches every live rollout note and no closed or archived one, and rewrites the section as it stands,
 //      a dependency released since the last write included.
+//   n4 a task the Pre-flight held (schedule § 3, p51-1: it waits on a task nobody is building) is written with its
+//      dependants on the note `--rollout` names (`--held A=B`), kept by a plain rewrite while still true, and dropped
+//      once its dependency lands or a rollout takes it; schedule § 3, step 7 and step 8 say so.
 // Spawns git once and each script a handful of times; it reads no real vault.
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -56,7 +59,10 @@ test('n1. the prose carries every listing', () => {
     ['schedule § 0', s0, ['clone --repo <the Local: path> --project <§ 0\'s project> [--tasks <this run\'s --tasks list>]',
       '`this run would have taken:`']],
     ['schedule step 7', s7, ['scripts/waits-on.py write`', 'every live rollout note', 'waits on [[x]] (<Project>, not scheduled)']],
-    ['schedule step 8', s8, ['Waits on:']],
+    ['schedule step 8', s8, ['Waits on:', '— waits on [[x]] (<Project>; open, on no live rollout)']],
+    ['schedule § 3', flat(schedule, /^### 3\. Extract/), ['**A dependency nobody is building holds its task (ADR 0078 d7).**',
+      'body\'s *Depends on* lines', 'out as `waits`', 'holds nothing']],
+    ['schedule step 7 held', s7, ['`--rollout <this-slug>`', '`--held <slug>=<via>`']],
     ['schedule S3', s3, ['`this run would have taken:`', 'reports as left out, never drops']],
     ['schedule S6', serialPath, ['**S6. Stamp.**', 'scripts/waits-on.py write`']],
     ['orient-all § 2', oa2, ['Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write`']],
@@ -169,4 +175,46 @@ test('n3. waits-on writes one line per unheld other-project dependency of a live
   for (const name of ['fold-unit', 'stale-dep', 'later']) write(path.join(V, `${name}.md`), taskNote('done', ['Far']))
   assert.match(run(), /^ro-d: none$/m)
   assert.ok(!fs.readFileSync(ro, 'utf8').includes('## Waits on'), 'nothing waiting removes the section')
+})
+
+test('n4. a task the Pre-flight held is written with its dependants on its note and kept while it still waits', () => {
+  const V = path.join(TMP, 'held/Work/Tasks')
+  const ro = path.join(V, 'ro-h.md')
+  write(ro, rolloutNote(['Demo'], '/tmp/held'))
+  write(path.join(V, 'ro-other.md'), rolloutNote(['Other'], '/tmp/other-held'))
+  write(path.join(V, 'h-a.md'), taskNote('open', ['Demo'], { deps: ['x-dep'] }))
+  write(path.join(V, 'h-b.md'), taskNote('open', ['Demo'], { deps: ['h-a'] }))
+  write(path.join(V, 'x-dep.md'), taskNote('open', ['Other']))
+  const run = (...more) => spawnSync('python3', [WAITS, 'write', '--tasks-dir', V, ...more], { encoding: 'utf8', env: ENV })
+  const waits = () => fs.readFileSync(ro, 'utf8').split('\n').filter((l) => l.includes('waits on'))
+  const HELD = ['- [[h-a]] waits on [[x-dep]] (Other, not scheduled)', '- [[h-b]] waits on [[h-a]] (Demo, not scheduled)']
+  const r = run('--rollout', 'ro-h', '--held', 'h-b=h-a', '--held', '[[h-a]]=x-dep')
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(waits(), HELD, 'one line per held pair, sorted by dependant')
+  assert.match(r.stdout, /^ro-h: 2 waits$/m)
+  assert.ok(!fs.readFileSync(path.join(V, 'ro-other.md'), 'utf8').includes('## Waits on'), 'only the named note takes them')
+  // A plain rewrite (orient-all's, another schedule's) keeps them while they are still true, byte for byte.
+  const once = fs.readFileSync(ro, 'utf8')
+  assert.equal(run().status, 0)
+  assert.equal(fs.readFileSync(ro, 'utf8'), once)
+  // h-a taken by a rollout: h-a's line goes (no longer held) and so does h-b's (its dependency is in flight).
+  write(path.join(V, 'h-a.md'), taskNote('open', ['Demo'], { rollout: 'ro-other', deps: ['x-dep'] }))
+  assert.equal(run().status, 0)
+  assert.deepEqual(waits(), [])
+  assert.ok(fs.readFileSync(path.join(V, 'ro-other.md'), 'utf8').includes('- [[h-a]] waits on [[x-dep]] (Other, not scheduled)'),
+    'its own rollout now carries its cross-project wait')
+  // Held again, then the dependency lands: h-a's line goes, h-b's stays while h-a is still unbuilt.
+  write(path.join(V, 'h-a.md'), taskNote('open', ['Demo'], { deps: ['x-dep'] }))
+  assert.equal(run('--rollout', '[[ro-h]]', '--held', 'h-a=x-dep', '--held', 'h-b=h-a').status, 0)
+  assert.deepEqual(waits(), HELD)
+  write(path.join(V, 'x-dep.md'), taskNote('done', ['Other']))
+  assert.equal(run().status, 0)
+  assert.deepEqual(waits(), [HELD[1]])
+  // Usage: exit 2, nothing written.
+  const before = fs.readFileSync(ro, 'utf8')
+  for (const args of [['--held', 'h-b=h-a'], ['--rollout', 'ro-h', '--held', 'h-b'], ['--rollout', 'no-such', '--held', 'h-b=h-a']]) {
+    const bad = run(...args)
+    assert.equal(bad.status, 2, `${args.join(' ')}: ${bad.stderr}`)
+  }
+  assert.equal(fs.readFileSync(ro, 'utf8'), before)
 })

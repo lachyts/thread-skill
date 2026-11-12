@@ -2,7 +2,7 @@
 """waits-on.py: the cross-project wait lines on every live rollout note (ADR 0078 d7; schedule step 7, § Serial path S6,
 orient-all § 2).
 
-    write [--tasks-dir <dir>]
+    write [--tasks-dir <dir>] [--rollout <slug> --held <dependant>=<dependency>...]
 
 Rewrites the `## Waits on` section (skills/_shared/vault-grammar.md § Waits on, at the note's end, gone when nothing
 waits) of every live rollout note: tagged `rollout`, directly in the tasks dir, neither done nor dropped (_live_rollout's
@@ -19,8 +19,18 @@ shares no `projects:` entry with the dependant, and whose `rollout:` links no li
 step 1's rule). A dependency on the dependant's own project is the queue's own hold, and a missing note is
 `_dep_status`'s `note not found`. `<Project>` is the dependency's first project, or `no project`.
 
+A held line has the same form, for a task schedule's Pre-flight left out (schedule § 3: a `waits` leaver, or a
+dependant out through one), which no `rollout:` links to the note. `--held A=B` (repeatable, with `--rollout`, the
+live rollout note the schedule wrote or joined) writes `- [[A]] waits on [[B]] (...)` on that note; every later rewrite,
+by any caller, keeps a held line already in a note's section (one whose dependant the note does not link) while it is
+still true, and drops it once it is not: A has a note, has not landed, been folded or dropped, and its `rollout:` links
+no live rollout (no schedule has taken it since); B, followed through _fold_unit, has a note, has not landed, and is
+not in flight (its `rollout:` links no live rollout, its status neither in_progress nor review). The held lines follow
+the linked ones, sorted by dependant then dependency, one per pair.
+
 Stdout, per note by path: `<slug>: N waits` then its lines, or `<slug>: none`. Exit 0; 1 a note unreadable or unwritable
-(one `ERROR: waits-on:` line each, the others still written) or no tasks dir; 2 usage. It writes only that section of
+(one `ERROR: waits-on:` line each, the others still written) or no tasks dir; 2 usage (a `--held` without `--rollout`,
+one not given as A=B, or a `--rollout` that names no live rollout note: nothing written). It writes only that section of
 each note, through Note.save's lock and journal, so a running rollout's note keeps its other writers' lines. It is
 idempotent, and never blocks a schedule: its caller carries a non-zero exit to its summary. estate-scan.py reads the
 section back for orient-all's pass.
@@ -28,10 +38,13 @@ section back for orient-all's pass.
 import argparse
 import importlib.util
 import os
+import re
 import sys
 from pathlib import Path
 
 HEADING = "## Waits on"
+LINE = re.compile(r"^- \[\[(.+?)\]\] waits on \[\[(.+?)\]\] \((.+?), not scheduled\)$")  # estate-scan.py's WAITS_ON
+IN_FLIGHT = ("in_progress", "in-progress", "review")
 HERE = os.path.dirname(os.path.abspath(__file__))
 RR_SRC = os.path.join(HERE, "..", "..", "execute", "scripts", "reconcile-rollout.py")
 
@@ -52,8 +65,7 @@ def project_names(rr, note):
     return [(name.lower(), name) for name in (rr._wikilink_slug(rr._scalar(v)) for v in note.get_list("projects")) if name]
 
 
-def wait_lines(rr, rollout_path: Path, tasks_dir: Path):
-    linked, index = rr._scan(rollout_path, tasks_dir)
+def wait_lines(rr, tasks_dir: Path, linked, index):
     out = []
     for path, task in sorted(linked, key=lambda pair: pair[0].stem.lower()):
         if rr._landed(task) or rr._status(task) in ("merged", "dropped"):
@@ -73,6 +85,43 @@ def wait_lines(rr, rollout_path: Path, tasks_dir: Path):
     return out
 
 
+def line_of(rr, dependant, unit, entry):
+    theirs = project_names(rr, entry[1]) if entry else []
+    return f"- [[{dependant}]] waits on [[{unit}]] ({theirs[0][1] if theirs else 'no project'}, not scheduled)"
+
+
+def held_line(rr, tasks_dir: Path, index, dependant, dependency):
+    """A held pair's line while it is still true (the module docstring), else None."""
+    mine = index.get(dependant.lower())
+    if mine is None or rr._landed(mine[1]) or rr._status(mine[1]) in ("merged", "dropped") \
+            or rr._live_rollout(tasks_dir, mine[1].get("rollout")):
+        return None
+    unit, entry, _folded = rr._fold_unit(dependency, index)
+    if entry is None or rr._dep_status(dependency, index)[0] or rr._status(entry[1]) in IN_FLIGHT \
+            or rr._live_rollout(tasks_dir, entry[1].get("rollout")):
+        return None
+    return line_of(rr, mine[0].stem, unit, entry)
+
+
+def held_lines(rr, note, tasks_dir: Path, linked, index, new_pairs=()):
+    """The note's held lines: those already in its section whose dependant it does not link, and new_pairs, each kept
+    only while still true, sorted and one per (dependant, unit)."""
+    own = {path.stem.lower() for path, _task in linked}
+    pairs = []
+    for line in note.section_text(HEADING).split("\n"):
+        m = LINE.match(line.strip())
+        if m and m.group(1).lower() not in own:
+            pairs.append((m.group(1), m.group(2)))
+    pairs += list(new_pairs)
+    out, seen = [], set()
+    for dependant, dependency in pairs:
+        line = held_line(rr, tasks_dir, index, dependant, dependency)
+        if line and line.lower() not in seen:
+            seen.add(line.lower())
+            out.append(line)
+    return sorted(out, key=lambda x: tuple(g.lower() for g in LINE.match(x).group(1, 2)))
+
+
 def live_rollouts(rr, tasks_dir: Path):
     """Every live rollout note's path, sorted: tagged `rollout`, directly in the tasks dir, neither done nor dropped."""
     return sorted(path for path, note in rr._walk_of(tasks_dir).notes.items()
@@ -80,10 +129,11 @@ def live_rollouts(rr, tasks_dir: Path):
                   and rr._status(note) not in rr.CLOSED_ROLLOUT_STATUSES)
 
 
-def rewrite(rr, path: Path, tasks_dir: Path):
+def rewrite(rr, path: Path, tasks_dir: Path, new_pairs=()):
     """Rewrite one rollout note's section as it stands and return its lines. OSError or ValueError: nothing written."""
     note = rr.Note(path)
-    lines = wait_lines(rr, path, tasks_dir)
+    linked, index = rr._scan(path, tasks_dir)
+    lines = wait_lines(rr, tasks_dir, linked, index) + held_lines(rr, note, tasks_dir, linked, index, new_pairs)
     if lines:
         note.upsert_section(HEADING, "\n".join(lines))
     else:
@@ -92,21 +142,46 @@ def rewrite(rr, path: Path, tasks_dir: Path):
     return lines
 
 
+def rr_slug(raw):
+    """A --held side as a bare slug: `[[x|alias]]`, `x.md` and a path cut as _wikilink_slug cuts them."""
+    s = raw.strip().strip('"').strip("'").replace("[[", "").replace("]]", "")
+    s = re.split(r"[|#^]", s, maxsplit=1)[0].strip().split("/")[-1].strip()
+    return s[:-3] if s.endswith(".md") else s
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="waits-on.py", description="Cross-project wait lines on every live rollout note (ADR 0078 d7).")
     sub = p.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("write", help="rewrite `## Waits on` on every live rollout note")
     w.add_argument("--tasks-dir", default=os.path.expanduser("~/repos/obsidian/Work/Tasks"), help="the task-note dir")
+    w.add_argument("--rollout", help="the live rollout note the --held lines go on (schedule's own, or the one it joined)")
+    w.add_argument("--held", action="append", default=[], help="<dependant>=<dependency>: a task the Pre-flight held")
     args = p.parse_args()
+    pairs = []
+    for raw in args.held:
+        a, sep, b = raw.partition("=")
+        a, b = rr_slug(a), rr_slug(b)
+        if not sep or not a or not b:
+            p.error(f"--held {raw}: give it as <dependant>=<dependency>")
+        pairs.append((a, b))
+    if pairs and not args.rollout:
+        p.error("--held needs --rollout")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     if not tasks_dir.is_dir():
         print(f"ERROR: waits-on: {tasks_dir}: no such directory", file=sys.stderr)
         return 1
     rr = load_rr()
+    notes = live_rollouts(rr, tasks_dir)
+    target = None
+    if args.rollout:
+        want = (rr._wikilink_slug(args.rollout) or "").lower()
+        target = next((path for path in notes if path.stem.lower() == want), None)
+        if target is None:
+            p.error(f"--rollout {args.rollout}: no live rollout note of that name in {tasks_dir}")
     rc = 0
-    for path in live_rollouts(rr, tasks_dir):
+    for path in notes:
         try:
-            lines = rewrite(rr, path, tasks_dir)
+            lines = rewrite(rr, path, tasks_dir, pairs if path == target else ())
         except (OSError, ValueError) as e:
             print(f"ERROR: waits-on: {path}: {e}", file=sys.stderr)
             rc = 1

@@ -1419,11 +1419,13 @@ test('D18. preflight: Ready and kept tasks queue, One calls and Grills wait on t
     { slug: 's', grade: null, why: 'dependency', via: 'o', reason: 'in flight', note: 'Work/Tasks/s.md' })
   assert.ok(!noKept.asks.some((call) => call[0].question.includes('[[s]]')), 'no question names s')
   assert.deepEqual(noKept.warnings, [])
-  // With o no candidate, nothing takes s out regardless: it is asked as ungraded, in flight.
+  // With o no candidate, s waits on it (open, on no live rollout: nobody is building it), so it is out, never asked
+  // (schedule § 3); kept, it keeps its place and is named.
   const alone = ok(preflight(['--tasks', 'r,s']))
-  assert.deepEqual(outOf(alone), [['s', 'ungraded', null]])
-  assert.deepEqual(alone.asks.map((call) => call[0].question),
-    [`[[s]] could not be graded (in flight): leave it out of this rollout, or queue it as it stands? ${INVITE}`])
+  assert.deepEqual(outOf(alone), [['s', 'waits', 'o']])
+  assert.deepEqual(alone.asks, [])
+  assert.deepEqual(ok(preflight(['--tasks', 'r,s', '--kept', 's'])).warnings, ['[[s]] keeps its place (a carried task that has ' +
+    'started) but waits on [[o]] (open, on no live rollout), which nobody is building'])
   // A carried task at an empty status: carry queues it, but the ranker skips it (in flight, as still_to_start reads
   // `open` alone). Its reason is its status, the real cause, never `in flight`.
   const empty = ok(preflight(['--tasks', 'r,e']))
@@ -2132,4 +2134,79 @@ test('D17b. slices, rank and preflight name a task whose frontmatter did not par
   const kept = ok(preflight(['--tasks', 'ok,foo', '--kept', 'ok', '--dep', 'ok=foo'], rankFile, scanFile))
   assert.deepEqual([kept.queue, kept.warnings], [['ok'], ['[[ok]] keeps its place (a carried task that has started) but depends on ' +
     '[[foo]], which this rollout leaves out']])
+})
+
+// ---- D17c. a dependency nobody is building holds its task (schedule § 3, ADR 0078 d7, p51-1) ----------------------
+// The three Watches replayed through the Pre-flight, each over its own shape: 0620581c (chorus-rollout-2026-10-23), a
+// body-only `**Depends on:** [[x|alias]] (why).` another repo's open task; b45914c3 (smart-slider-rollout-2026-10-28),
+// a body-only `Depends on [[x]].` an open task of a shared umbrella project; b61fa236 (thread-skill-rollout-2026-10-26),
+// a `depends-on:` another repo's open task. Each is held as `waits` before the first Slot, with its dependants; a
+// dependency that is done, or on a live rollout, holds nothing, and a fenced or later-sentence link is never read.
+test('D17c. preflight holds a task whose dependency outside the candidates nobody is building, with its dependants', () => {
+  const VW = path.join(S, 'vw')
+  const WT = path.join(VW, 'Work', 'Tasks')
+  for (const p of ['Chorus', 'Thread Skill', 'Animately App', 'Animately', 'Agent Stable']) {
+    write(path.join(VW, 'Work', 'Projects', `${p}.md`), fm('tags:\n  - project\nstatus: active'))
+  }
+  const task = (slug, status, projects, rest = '', body = '') => write(path.join(WT, `${slug}.md`),
+    fm(`tags:\n  - task\nstatus: ${status}${links('projects', projects)}${rest}`, `\n# Task ${slug}\n\n## Notes\n\n${body}`))
+  write(path.join(WT, 'ro-live.md'), fm('tags:\n  - rollout\nstatus: open\nprotocol_version: 5\nprojects:\n  - "[[Thread Skill]]"'))
+  // 0620581c: the Watch's own line, its later sentence's link included.
+  task('chorus-recovers', 'open', ['Chorus'], '', '**Depends on:** [[ts-p29-7|thread-skill p29-7]] (the verdict). The Login ' +
+    'choice depends on [[chorus-spreads]] but can start with today\'s roomiest.\n')
+  task('ts-p29-7', 'open', ['Thread Skill'])
+  task('chorus-spreads', 'open', ['Chorus'])
+  // b45914c3: the umbrella project is shared, and p8-2 depends on p8-1.
+  task('slider-p8-1', 'open', ['Animately App', 'Animately'], '', 'Depends on [[animately-github-org-billing]].\n')
+  task('animately-github-org-billing', 'open', ['Animately'])
+  task('slider-p8-2', 'open', ['Animately App'], links('depends-on', ['slider-p8-1']))
+  // b61fa236: frontmatter, another repo's open task; a One call is held too, and never asked.
+  task('ts-p31-2', 'open', ['Thread Skill'], links('depends-on', ['agent-stable-p2-3']))
+  task('agent-stable-p2-3', 'open', ['Agent Stable'])
+  task('ts-call', 'open', ['Thread Skill'], links('depends-on', ['agent-stable-p2-3']))
+  // Controls: a done dependency, one on a live rollout, one only in a fence, one after "Depends on nothing;".
+  task('ts-done', 'open', ['Thread Skill'], links('depends-on', ['dep-done']))
+  task('dep-done', 'done', ['Agent Stable'])
+  task('ts-flight', 'open', ['Thread Skill'], '', 'Depends on [[dep-flight]].\n')
+  task('dep-flight', 'open', ['Agent Stable'], '\nrollout: "[[ro-live]]"')
+  task('ts-fence', 'open', ['Thread Skill'], '', '```\nDepends on [[chorus-spreads]]\n```\n')
+  task('ts-nothing', 'open', ['Thread Skill'], '', 'Depends on nothing; build order puts [[chorus-spreads]] first.\n')
+  // A carried task that has started keeps its place, and is named.
+  task('ts-kept', 'in_progress', ['Thread Skill'], '\nrollout: "[[ro-live]]"' + links('depends-on', ['agent-stable-p2-3']))
+  const scanRun = spawnSync('python3', [SCAN, '--vault', VW, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(scanRun.status, 0, scanRun.stderr)
+  const scan = JSON.parse(scanRun.stdout)
+  const row = (slug) => scan.tasks.find((t) => t.slug === slug)
+  assert.deepEqual(row('chorus-recovers').bodyDependsOn, ['ts-p29-7'], 'the clause ends at its sentence: no later link')
+  assert.deepEqual([row('slider-p8-1').bodyDependsOn, row('ts-fence').bodyDependsOn, row('ts-nothing').bodyDependsOn,
+    row('ts-p31-2').bodyDependsOn], [['animately-github-org-billing'], [], [], []])
+  const scanFile = keep('vw-scan.json', scanRun.stdout)
+  const CANDS = ['chorus-recovers', 'slider-p8-1', 'slider-p8-2', 'ts-p31-2', 'ts-call', 'ts-done', 'ts-flight', 'ts-fence',
+    'ts-nothing', 'ts-kept']
+  const grades = keep('vw-grades.json', JSON.stringify([
+    ...['Chorus', 'Animately App'].map((project) => ({ project, tasks: CANDS.filter((s) => (project === 'Chorus' ? s.startsWith('chorus') : s.startsWith('slider')))
+      .map((s) => R(s, 'serial')) })),
+    { project: 'Thread Skill', tasks: [...['ts-p31-2', 'ts-done', 'ts-flight', 'ts-fence', 'ts-nothing'].map((s) => R(s, 'serial')),
+      G('ts-call', 'One call', 'serial', { decisions: one() })] }]))
+  const rankRun = spawnSync('python3', [RANK, 'rank', '--scan', scanFile, '--today', TODAY, '--grades', grades], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(rankRun.status, 0, rankRun.stderr)
+  const rankFile = keep('vw-rank.json', rankRun.stdout)
+  const j = ok(preflight(['--tasks', CANDS.join(','), '--kept', 'ts-kept'], rankFile, scanFile))
+  assert.deepEqual(j.queue, ['ts-done', 'ts-flight', 'ts-fence', 'ts-nothing', 'ts-kept'])
+  assert.deepEqual(j.out, [
+    { slug: 'chorus-recovers', grade: 'Ready', why: 'waits', via: 'ts-p29-7', reason: 'open, on no live rollout', project: 'Thread Skill',
+      note: 'Work/Tasks/chorus-recovers.md' },
+    { slug: 'slider-p8-1', grade: 'Ready', why: 'waits', via: 'animately-github-org-billing', reason: 'open, on no live rollout',
+      project: 'Animately', note: 'Work/Tasks/slider-p8-1.md' },
+    { slug: 'slider-p8-2', grade: 'Ready', why: 'dependency', via: 'slider-p8-1', note: 'Work/Tasks/slider-p8-2.md' },
+    { slug: 'ts-p31-2', grade: 'Ready', why: 'waits', via: 'agent-stable-p2-3', reason: 'open, on no live rollout', project: 'Agent Stable',
+      note: 'Work/Tasks/ts-p31-2.md' },
+    { slug: 'ts-call', grade: 'One call', why: 'waits', via: 'agent-stable-p2-3', reason: 'open, on no live rollout', project: 'Agent Stable',
+      note: 'Work/Tasks/ts-call.md' }])
+  assert.deepEqual([j.asks, j.index], [[], []], 'a held One call is never asked')
+  assert.deepEqual(j.warnings, ['[[ts-kept]] keeps its place (a carried task that has started) but waits on [[agent-stable-p2-3]] ' +
+    '(open, on no live rollout), which nobody is building'])
+  // Decided or not, a held task stays out.
+  assert.ok(ok(preflight(['--tasks', CANDS.join(','), '--kept', 'ts-kept', '--decided', 'ts-call'], rankFile, scanFile)).out
+    .some((o) => o.slug === 'ts-call' && o.why === 'waits'))
 })
