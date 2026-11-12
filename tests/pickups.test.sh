@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # The pickup sweep, the unstarted read and the awaited read (ADR 0057, ADR 0082; schedule § 1.2, close step 2): three
-# read-only verbs of
-# skills/_shared/scripts/unfinished-rollout.py.
+# read-only verbs of skills/_shared/scripts/unfinished-rollout.py.
 #   P1-P10  `pickups --repo <path> --tasks <slugs> [--misfit <slug>=<why>]...`: the pool, its order, the Repo rule
 #           (counted aggregate only), the gate rule, misfits, the needed set and the extras' dependency closures under
 #           the cap of 5, the umbrella project, and its exit 2s, read-only and byte-equal on a rerun

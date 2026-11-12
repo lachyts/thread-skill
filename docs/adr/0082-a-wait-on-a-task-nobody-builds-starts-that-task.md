@@ -47,7 +47,9 @@ work names is checked, since the thread's are that session's.
 schedule it` (next's line names it the same way) and starts nothing:
 
 - his "not yet" for that task: `(held: not yet)`. It carries: close step 4 writes the held wait
-  `waits on [[<task>]] (held: not yet)` in place of the wait's line, and a later session reads it as that hold again;
+  `waits on [[<task>]] (held: not yet)` in place of the wait's line, and a later session reads it as that hold again.
+  A "not yet" after the start undoes it the way it went: a new note's launch is withdrawn as ADR 0072's is, and a join
+  is deferred out of its rollout by `/thread:repair` § 5; the wait then holds as above;
 - on the Chorus Stage, `list_sessions` shows a session named for the task, or running, waiting on or resting after work
   on it: `(held: <session> may be building it)`, read fresh;
 - the read's own `held` line: `(held: <its why>)`, read fresh;

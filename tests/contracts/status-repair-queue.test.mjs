@@ -856,6 +856,7 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
   'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'primary-refresh.py stuck',
   'unfinished-rollout.py hold',   // § 4's Hold line (ADR 0060): read-only, one JSON line
+  'unfinished-rollout.py awaited',   // § 3's Waits on flag (ADR 0082 d6): reads notes only, no git, no gh
   'reconcile-rollout.py prove']   // § 4's Carried line (ADR 0078 d1): --dry-run --no-gh, a read that writes nothing
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep

@@ -9,8 +9,9 @@
 //   w3  close sub-step 7.11, directly after 7.10 and before § Commit hygiene: the one-task schedule (a join ranked
 //       first, or a note handed to a fresh lead), decided, after 7.10, its rows, skipped under save and a Leg; step 8
 //       names the wait rows; § Under a Leg skips 7.11.
-//   w4  next: step 1's bullet just before the prepared-rollout bullet, step 3's paragraph directly after the prepared
-//       rollout's, step 4's bullet directly after the launch's, step 5's paragraph directly after **A launch first.**,
+//   w4  next: step 1's bullet just before the own-branch bullet (the prepared-rollout bullet stays step 1's last, its
+//       own test's p1), step 3's paragraph directly after the prepared rollout's, step 4's bullet directly after the
+//       launch's (with what his not yet after a start undoes), step 5's paragraph directly after **A launch first.**,
 //       and its § Don't line.
 //   w5  /thread:status renders an unstarted wait on a paused rollout and routes it to no repair.
 //   w6  ADR 0082's sections and d1-d6.
@@ -95,8 +96,8 @@ function check(F) {
   // w4: next.
   const nx = F[NEXT] ?? ''
   const s1 = linesOf(slice(nx, /^1\. \*\*Read the situation/, /^2\. /))
-  const iTask = at(s1, /^\s*- \*\*A task a wait names, not started\*\*/), iPrep = at(s1, /^\s*- \*\*A rollout prepared, not started\*\*/)
-  if (iTask < 0 || iPrep !== iTask + 1) flag('w4', `next step 1's wait bullet is not just before the prepared-rollout bullet (${iTask}, ${iPrep})`)
+  const iTask = at(s1, /^\s*- \*\*A task a wait names, not started\*\*/), iOwn = at(s1, /^\s*- \*\*This session's own branch\*\*/)
+  if (iTask < 0 || iOwn !== iTask + 1) flag('w4', `next step 1's wait bullet is not just before the own-branch bullet (${iTask}, ${iOwn})`)
   need('w4', "next step 1's wait bullet", s1[iTask], ["read exactly as close step 2's **Tasks a wait names.** reads it",
     'its one read-only `unfinished-rollout.py awaited` run (it writes nothing)', 'Only `unstarted <task> (<Project>)` with no hold counts',
     "While another session holds the thread, only a wait this session's own work names is checked here."])
@@ -111,6 +112,7 @@ function check(F) {
   if (iLaunch < 0 || iWl !== iLaunch + 1) flag('w4', `next step 4's wait bullet is not right after the launch's (${iLaunch}, ${iWl})`)
   need('w4', "next step 4's wait bullet", s4n[iWl], ['`Next move: start [[<task>]], then <move>, because <the work> waits on it and nothing builds it, and <reason>.`',
     '`/thread:schedule --tasks <task> takes it; say "not yet" to hold it.`',
+    'His "not yet" after the start undoes it the way it went: a new note\'s launch is withdrawn as a launch\'s is, and a join is deferred out of its rollout by `/thread:repair [[<rollout>]]` (its § 5)',
     '`[[<task>]] is filed, not started (<the hold>); say "start it" to schedule it.`',
     'a task is coming ("once [[<task>]] lands") only when step 1\'s read printed `scheduled` (not paused) or `building` for it, or step 5 starts it',
     'ADR 0082 d5', 'just before the menu'])
@@ -164,8 +166,10 @@ test('controls: each rule fails alone', () => {
   only(swap(CLOSE, 'or sub-step 7.11 will start it', 'or it is filed'), 'w2', 'once-it-lands wording for a filed task')
   only(swap(CLOSE, 'Decided, never asked (Owner *gate*', 'Ask him first (Owner *yours*'), 'w3', '7.11 asks')
   only(swap(CLOSE, "Sub-step 7.11 is skipped too: a Leg's close starts no awaited task", 'Sub-step 7.11 runs'), 'w3', 'a Leg starts tasks')
-  only(swap(NEXT, "Its output never ends the turn: `next` then dispatches this session's own move", 'Its output ends the turn'), 'w4', 'start ends the turn')
+  // Anchored on the start's own sentence before it: **A launch first.** opens the same "Its output never ends the turn".
+  only(swap(NEXT, "since the line says it. Its output never ends the turn: `next` then dispatches this session's own move", 'since the line says it. Its output ends the turn'), 'w4', 'start ends the turn')
   only(swap(NEXT, 'decided and never asked (Owner *gate*: the work is technical', 'offered to him (Owner *yours*: the work is technical'), 'w4', 'start offered')
+  only(swap(NEXT, 'and a join is deferred out of its rollout by `/thread:repair [[<rollout>]]` (its § 5)', 'and a join stays'), 'w4', 'a not yet after a join undoes nothing')
   only(swap(STATUS, 'it is never drift and status routes it to no repair', 'it is drift, routed to /thread:repair'), 'w5', 'routed to repair')
   only(swap(ADR, '**d5. The wording rule.**', '**d5. Wording.**'), 'w6', 'ADR d5')
 })
