@@ -100,7 +100,12 @@
 #                                                                                          re-run aborts
 #                                                                                          again; ADR 0048)
 #      A revert PR's 70 still halts the rollout (it protects main).
-#   143 130 129  A signal: TERM, INT, HUP (their traps). Sentinel `failed:<rc>`.
+#   143 130 129  A signal: TERM, INT, HUP (their traps). Sentinel `failed:<rc>`. When it cut a wait, the last line is
+#      `  last wait: <the wait it was in>` (LAST_WAIT: the head-lag re-read, the required-checks wait and its pending
+#      checks, the in-flight wait and the jobs it waits on, a settling or BEHIND re-poll), on the run's own stdout (fd
+#      7, since the trap runs inside the redirection of the call it cut): the lead's `signalled twice` reason copies it,
+#      so a kill reads as what it was waiting on (ADR 0033 d4 as amended 2026-11-12). A KILL skips the trap; then the
+#      last line is the wait line itself.
 #                                                                        counter UNTOUCHED  lead: re-run
 #                                                                                          (idempotent)
 #
@@ -207,7 +212,10 @@
 # "never appeared" names the held jobs. Required (a pending row of `gh pr checks --required` whose link names that job,
 # or, a row with no job link, the job's name): the watch is cut every MERGE_TASK_NO_RUNNER_POLL seconds to look, and
 # exit 4 sets the task aside at Integration at once, because `--watch` would otherwise hold the lane until GitHub drops
-# the job. A live-checkout.sh that cannot be loaded leaves the watch uncut, today's wait.
+# the job. A live-checkout.sh that cannot be loaded leaves the watch uncut, today's wait. While CI is in flight the wait
+# line names what it waits on (NR_LIVE): each unfinished job on the head as `<name> (<status>)`, a no-runner one
+# `(queued, no runner)`, deduped and capped at 8 plus `+N more`, no minutes or ids (an unread jobs page adds nothing,
+# and none read leaves today's line). Each cut slice names the required checks still pending, once per change.
 #
 # Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
@@ -779,8 +787,12 @@ fi
 
 # ---- args, environment, sentinel (no gh call precedes the end of this block) ----------------------------
 # The EXIT trap and finish come first, so every exit below, the usage ones included, goes through them.
-# FINAL_RC is set only by finish, SIG_RC only by a signal trap; SENTINEL, PR and COUNTER only once known.
-SENTINEL=''; FINAL_RC=''; SIG_RC=''; PR=''; COUNTER=''; tmp=''
+# FINAL_RC is set only by finish, SIG_RC only by a signal trap; SENTINEL, PR and COUNTER only once known. LAST_WAIT is
+# the wait the run is in (wait_line), cleared once that wait ends: a signal's last line names it.
+SENTINEL=''; FINAL_RC=''; SIG_RC=''; LAST_WAIT=''; PR=''; COUNTER=''; tmp=''
+# The run's own stdout, kept on fd 7: bash runs a signal's trap inside the redirection of the function call the signal
+# cut (a watch slice writes to $tmp/checks.out), so on_exit writes its `last wait:` line here, never into that file.
+{ exec 7>&1; } 2>/dev/null
 ABORT_RC=70   # an exit outside finish and the signal traps: a defect, never 0 and never a table code
 on_exit() {  # EXIT trap — $? MUST be captured first, before any other command overwrites it
   local code=$? out
@@ -803,6 +815,12 @@ on_exit() {  # EXIT trap — $? MUST be captured first, before any other command
     esac
   fi
   [ -n "$tmp" ] && rm -rf "$tmp"
+  # A signal's last line is the wait it cut, never the signal (ADR 0033 d4 as amended 2026-11-12): the lead's reason is
+  # `merge-task signalled twice (<code>): <its last line>`. On fd 7, the run's own stdout; in a subshell, so a closed
+  # stdout's SIGPIPE ends only it.
+  if [ -n "$SIG_RC" ] && [ "$out" = "$SIG_RC" ] && [ -n "$LAST_WAIT" ]; then
+    ( printf '  last wait: %s\n' "$LAST_WAIT" >&7 ) 2>/dev/null || true
+  fi
   exit "$out"
 }
 trap on_exit EXIT
@@ -814,6 +832,11 @@ finish() {  # finish <rc> [message…] — every deliberate exit; never call it 
     if [ "$FINAL_RC" = 0 ]; then printf '%s\n' "$*"; else printf '%s\n' "$*" >&2; fi
   fi
   exit "$FINAL_RC"
+}
+
+wait_line() {  # wait_line <the wait> — print a wait this run is in, and keep it as LAST_WAIT until the wait ends
+  LAST_WAIT="$1"
+  echo "  $LAST_WAIT"
 }
 
 # The result sentinel (see the header), cleared before the arg count: one call per PR means the previous
@@ -1039,8 +1062,8 @@ set_aside() {  # set_aside <why> — exit 4 with the reconcile-routable reason o
 pin_head() {  # pin_head <snapshot-file> — 0 once GitHub's head is the integrated head (or the state left OPEN)
   local f="$1" round=0 rc
   while : ; do
-    [ "$S_STATE" = OPEN ] || return 0          # the caller re-routes MERGED / CLOSED
-    [ "$S_HEAD" = "$IHEAD" ] && return 0
+    [ "$S_STATE" = OPEN ] || { LAST_WAIT=''; return 0; }          # the caller re-routes MERGED / CLOSED
+    [ "$S_HEAD" = "$IHEAD" ] && { LAST_WAIT=''; return 0; }       # the head-lag wait, if any, is over
     round=$((round+1))
     if [ "$round" -gt "$HEAD_LAG_MAX" ]; then
       finish 8 "retryable: GitHub's PR #$PR head $S_HEAD still lags origin $S_HEADREF = integrated head $IHEAD after $HEAD_LAG_MAX reads; nothing merged; re-run"
@@ -1052,7 +1075,7 @@ pin_head() {  # pin_head <snapshot-file> — 0 once GitHub's head is the integra
       *) finish 8 "retryable: cannot read origin $S_HEADREF ($READ_ERR) to tell a moved head from GitHub lag; nothing merged" ;;
     esac
     [ "$RH" = "$IHEAD" ] || set_aside "head moved after Integration (PR head $S_HEAD, origin $S_HEADREF at $RH, integrated head $IHEAD)"
-    echo "  PR #$PR: GitHub's head $S_HEAD lags origin $S_HEADREF = the integrated head; re-reading ($round/$HEAD_LAG_MAX)…"
+    wait_line "PR #$PR: GitHub's head $S_HEAD lags origin $S_HEADREF = the integrated head; re-reading ($round/$HEAD_LAG_MAX)…"
     sleep "$HEAD_LAG_INTERVAL"
     snap_or_finish "$f" "while GitHub's head caught up with origin $S_HEADREF"
   done
@@ -1091,7 +1114,7 @@ record_base_moved() {  # record_base_moved <live> — the cap, inline before exi
 }
 check_base() { read_base; [ "$LIVE" = "$IBASE" ] || record_base_moved "$LIVE"; }
 
-NR_RUNS=0; NR_HELD=0; NR_ROWS=''
+NR_RUNS=0; NR_HELD=0; NR_ROWS=''; NR_LIVE=''
 no_runner_scan() {  # no_runner_scan <runs.json> <jobs-file prefix> <limit> — shell assignments for the NR_* fields (eval'd)
   python3 - "$1" "$2" "$3" <<'PY'
 import json, shlex, sys, time
@@ -1133,6 +1156,7 @@ if not isinstance(runs, list):
 unfinished = [r for r in runs if isinstance(r, dict) and r.get("status") != "completed"]
 held = 0
 rows = []
+live_names = []   # NR_LIVE: each unfinished job on the head, `<name> (<status>)`, a no-runner one `(queued, no runner)`
 for r in unfinished:
     body = load("%s%s" % (prefix, r.get("id")))
     jobs = body.get("jobs") if isinstance(body, dict) else None
@@ -1142,19 +1166,25 @@ for r in unfinished:
     stuck = 0
     for j in live:
         age = queued_for(j)
+        name = " ".join(str(j.get("name") or "").replace("\t", " ").splitlines())   # one row, four cells
+        live_names.append("%s (%s)" % (name, "queued, no runner" if age is not None else
+                                        " ".join(str(j.get("status") or "?").split())))
         if age is not None:
             stuck += 1
-            name = " ".join(str(j.get("name") or "").replace("\t", " ").splitlines())   # one row, four cells
             rows.append("\t".join((name, str(r.get("id")), str(j.get("id")), str(int(age // 60)))))
     # Every unfinished job no-runner, on a page that holds them all (a longer run may hide a live job).
     if live and stuck == len(live) and len(jobs) >= int(body.get("total_count") or 0):
         held += 1
-print("NR_RUNS=%d NR_HELD=%d NR_ROWS=%s" % (len(unfinished), held, shlex.quote("\n".join(rows))))
+# Deduped (a matrix's twins), capped at 8 plus `+N more`; no minutes or ids, so the wait line reads the same each poll.
+names = list(dict.fromkeys(live_names))
+waits_on = ", ".join(names[:8]) + (", +%d more" % (len(names) - 8) if len(names) > 8 else "")
+print("NR_RUNS=%d NR_HELD=%d NR_ROWS=%s NR_LIVE=%s" % (len(unfinished), held, shlex.quote("\n".join(rows)),
+                                                       shlex.quote(waits_on)))
 PY
 }
-no_runner_read() {  # sets NR_RUNS, NR_HELD and NR_ROWS (`<name>\t<run>\t<job>\t<minutes>`); 0 read, 1 the runs list unreadable
+no_runner_read() {  # sets NR_RUNS, NR_HELD, NR_ROWS (`<name>\t<run>\t<job>\t<minutes>`) and NR_LIVE; 0 read, 1 the runs list unreadable
   local id assigns
-  NR_RUNS=0; NR_HELD=0; NR_ROWS=''   # a failed read holds nothing: never an earlier poll's jobs
+  NR_RUNS=0; NR_HELD=0; NR_ROWS=''; NR_LIVE=''   # a failed read holds nothing: never an earlier poll's jobs
   gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$IHEAD&per_page=100" >"$tmp/nr.runs" 2>/dev/null || return 1
   for id in $(python3 -c 'import json,sys
 for r in json.load(open(sys.argv[1])).get("workflow_runs") or []:
@@ -1452,16 +1482,30 @@ checks_watch() {  # one slice of the required-checks watch: gh's rc, or 142 once
   fi
 }
 
+pending_checks() {  # the required checks pending at the watch slice's last refresh, `, `-joined; nothing when it does not parse
+  # Off a TTY `--watch` appends one tab-separated table per refresh (name, state, elapsed, link, description), so a
+  # check's last row is its state as it stands. A line with no tab (gh's own notices) is no row.
+  awk -F'\t' 'NF >= 2 && $1 != "" { if (!($1 in st)) order[++n] = $1; st[$1] = $2 }
+    END { for (i = 1; i <= n; i++) if (st[order[i]] == "pending") printf "%s%s", (k++ ? ", " : ""), order[i] }' \
+    "$tmp/checks.out" 2>/dev/null
+}
+
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
-  local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held
-  echo "  PR #$PR — waiting on required checks…"
+  local absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held pending seen=''
+  wait_line "PR #$PR — waiting on required checks…"
   while : ; do
     checks_watch; rc=$?
     if [ "$rc" -eq 142 ]; then
       # The slice ended with a required check still pending. A required job no runner took would hold the watch until
       # GitHub drops it, about 24 hours: set the task aside now, and free the lane (No runner, the header).
       no_runner_required && set_aside "no-runner: $NR_WHY"
+      # Otherwise name what the wait is on, once per change, so a kill mid-wait names it (on_exit's `last wait:`).
+      pending=$(pending_checks)
+      if [ -n "$pending" ] && [ "$pending" != "$seen" ]; then
+        seen=$pending
+        wait_line "PR #$PR — waiting on required checks: $pending"
+      fi
       continue
     fi
     if [ $rc -eq 0 ]; then
@@ -1512,7 +1556,7 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
       fi
       if ci_runs_in_flight; then
         absent=0
-        echo "  PR #$PR — required checks not created yet; CI in flight on head — waiting…"
+        wait_line "PR #$PR — required checks not created yet; CI in flight on head — waiting${NR_LIVE:+ on: $NR_LIVE}…"
       elif [ "$mss" = "UNSTABLE" ]; then
         # UNSTABLE with no required check reported and nothing running on the head: nothing left to wait for, as
         # CLEAN. GitHub gives UNSTABLE only once every required check has passed (a pending, failing or
@@ -1662,7 +1706,7 @@ settle_repoll() {  # settle_repoll <why> — one re-poll of a PR GitHub has not 
   if [ "$lazy" -gt "$LAZY_REPOLL_MAX" ]; then
     finish 8 "retryable: PR #$PR stays $1 after $LAZY_REPOLL_MAX re-polls: GitHub has not settled its mergeability yet; nothing merged; re-run"
   fi
-  echo "  PR #$PR reads $1 — GitHub has not settled its mergeability; re-polling ($lazy/$LAZY_REPOLL_MAX)…"
+  wait_line "PR #$PR reads $1 — GitHub has not settled its mergeability; re-polling ($lazy/$LAZY_REPOLL_MAX)…"
   sleep "$STATE_INTERVAL"
 }
 
@@ -1757,7 +1801,7 @@ check_base
 # ---- the state machine (up to STATE_GUARD_MAX passes; each takes a snapshot and pins the head) --------------
 guard=0; checks_done=0; behind=0
 while : ; do
-  guard=$((guard+1))
+  guard=$((guard+1)); LAST_WAIT=''   # a pass ends the wait the last one printed (a re-poll's sleep)
   [ "$guard" -gt "$STATE_GUARD_MAX" ] && finish 1 "ERROR: PR #$PR did not converge to a mergeable state"
   snap_or_finish "$tmp/snap.json" "in the state machine"
   [ "$S_STATE" = OPEN ] || route_not_open
@@ -1769,7 +1813,7 @@ while : ; do
       check_base
       behind=$((behind+1))
       [ "$behind" -gt "$BEHIND_REPOLL_MAX" ] && finish 1 "ERROR: PR #$PR stays BEHIND although origin/$BASE is still the integrated base $IBASE — nothing was merged. Inspect it on GitHub: $S_URL"
-      echo "  PR #$PR reads BEHIND on an unmoved base — re-polling ($behind/$BEHIND_REPOLL_MAX)…"
+      wait_line "PR #$PR reads BEHIND on an unmoved base — re-polling ($behind/$BEHIND_REPOLL_MAX)…"
       sleep "$STATE_INTERVAL" ;;
     DIRTY)
       check_base
@@ -1793,7 +1837,7 @@ while : ; do
           # Nothing can be required on $BASE, so no check is coming: BLOCKED or UNKNOWN is GitHub's lazy recompute.
           settle_repoll "$S_MSS with nothing required on $BASE ($REQ_WHY)"
         else
-          wait_required_checks; rc=$?
+          wait_required_checks; rc=$?; LAST_WAIT=''
           case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
           checks_done=1
         fi
@@ -1814,7 +1858,7 @@ while : ; do
       if [ "$checks_done" -eq 0 ]; then
         required_gate
         if [ "$REQ_GATE" != none ]; then
-          wait_required_checks; rc=$?
+          wait_required_checks; rc=$?; LAST_WAIT=''
           case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
         fi
         checks_done=1

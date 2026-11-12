@@ -383,8 +383,9 @@ later than the note's last re-entry. A `-` entry never counts, nor a spent or su
   handed back on the old answer.
 - An entry recorded before the block's last re-entry never counts, whatever the verdict's why: ask again and quote
   it, so his word can be the answer. One recorded since counts whatever the why, a block whose fingerprint equals
-  `auto_retry_sha` included (`same feedback as the block last re-entered`, or a spent budget on a repeated block). A
-  tie, an unparseable stamp or two live entries sharing one fail closed: it is asked again.
+  `auto_retry_sha` included (`same feedback as the block last re-entered`, `same stop twice running at Integration: …`,
+  or a spent budget on a repeated block). A tie, an unparseable stamp or two live entries sharing one fail closed: it
+  is asked again.
 
 With one found, never ask again; act on it by its form, where hand-back may run (§ 1, § 4):
 

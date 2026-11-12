@@ -148,7 +148,8 @@ ok "$(sent)" "ok" "8c. (guard) sentinel records success"
 ok "$(gc rev-parse HEAD)" "$held" "8c. (guard) \$tmp/repo is left where it was"
 gc switch -q master
 
-# 9. SIGTERM during a required-checks wait: exit 143, the sentinel never reads ok, the counter untouched.
+# 9. SIGTERM during a required-checks wait: exit 143, the sentinel never reads ok, the counter untouched, and the last
+#    line is `last wait: <the wait>` (the reason the lead copies, ADR 0033 d4 as amended).
 fresh; pair; mkpr 91 "$I" BLOCKED; seed 91 "$B"
 printf '%s\n' '{"rc":0,"out":"ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n","err":"","sleep":2}' > "$MT_STATE/checks.seq"
 : > "$MT_STATE/gh.log"
@@ -160,6 +161,7 @@ ok "$rc" 143 "9. SIGTERM in a checks wait exits 143"
 ok "$(sent)" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
 ok "$(ctr 91)" "$B" "9. SIGTERM: the counter is byte-unchanged"
 ok "$(nmerge)" 0 "9. SIGTERM: nothing merged"
+has "$(tail -1 "$tmp/9.out")" "last wait: PR #91 — waiting on required checks" "9. SIGTERM: the last line names the wait it was in"
 
 # 10. a clone root (ADR 0042): $tmp/r-rollout is the Project root and $tmp/r its in-place twin, both clones of
 #     git@github.com:o/r.git served from $MT_SRV by the fake ssh. After the merge the twin fast-forwards too; a twin

@@ -28,6 +28,14 @@ job "<name>" queued <n> minutes with no runner (run <r>, job <j>)`, reasonClass 
 decision 3's budget. A failed read, labels missing or not a list, or an unparseable timestamp is never "no runner", so
 it waits as before.)*
 
+*(Amended 2026-11-12 by thread-skill-p47-2-a-repeat-stall-frees-the-lane-and-keeps-its-diagnosis, ADR 0033 d4 as
+amended: decision 3's exemption from the same-fingerprint stop is split. A third exit 8 while GitHub settles stays
+exempt: GitHub's lazy mergeability clears by itself. The never-appeared or CANCELLED exit 1 and the no-runner set-aside
+are held to the same-stop rule at Integration: checks that still never appear after a cool-down and a fresh `prepare`,
+or a runner still gone, is CI that will not start without a person's act, so one that comes back as the same stop
+(equal but for its numbers) after a retry is Lachy's (H10). Found in compression-engine-rollout-2026-11-08, where the
+same stop retried until the budget ran out while two PRs held the Integration lane for about 18 hours.)*
+
 ## Context
 
 `chorus-rollout-2026-11-04` halted at 26/27 overnight on one task, `chorus-p96-12` (PR #632), until Lachy woke:
@@ -48,7 +56,7 @@ Nothing about the task was wrong, and no person's act was needed: a re-run once 
 
 2. **A PR GitHub has not settled is re-polled, then exits 8.** With `none`, an UNSTABLE PR merges at once (there is no required check to wait on), and a BLOCKED or UNKNOWN one is re-polled `LAZY_REPOLL_MAX` (6) times, `STATE_INTERVAL` (10 s) apart, then exits 8. With `some` or `unknown`, the required checks are waited on as before; a wait that finds no required check reported, no run in flight on the head and the PR UNSTABLE merges at once, as one that samples CLEAN already did (amended 2026-11-07). GitHub gives UNSTABLE only once every required check has passed: a pending, failing or not-yet-reported one reads BLOCKED. The in-flight test keeps a required check its CI has yet to create waited on. After that wait, UNKNOWN is re-polled the same way, as is an UNKNOWN after the no-CI recompute guard's one CLEAN sample; BLOCKED after green checks stays the non-check gate's exit 1, a gate GitHub has decided. Checks that never appear while nothing runs on the head are exit 1 under `some`, and exit 8 under `unknown`. Each of the three exit-8 texts carries `GitHub has not settled its mergeability` (`MERGE_TASK_SETTLING_MARK`). The state machine's guard is derived, `BEHIND_REPOLL_MAX + LAZY_REPOLL_MAX + 2`: a run takes at most three BEHIND passes, one checks-wait pass and six lazy re-polls before its final pass, so "did not converge" never pre-empts the settling 8.
 
-3. **The lead retries a GitHub stop as infra.** Three routes, each bounded by the budget (`auto_retries`, the infra cool-downs of 15 then 60 minutes, then H10), and each exempt from the same-fingerprint stop, since a second identical GitHub block is no feedback an agent or Lachy can act on:
+3. **The lead retries a GitHub stop as infra.** Three routes, each bounded by the budget (`auto_retries`, the infra cool-downs of 15 then 60 minutes, then H10). The settling exit 8 is exempt from the same-fingerprint stop, since GitHub's lazy mergeability clears by itself. The never-appeared exit 1 (and the no-runner set-aside, 2026-11-11's amendment) is held to the same-stop rule at Integration instead (ADR 0033 d4 as amended 2026-11-12): checks that still never appear after a cool-down and a fresh `prepare`, or a runner still gone, is CI that will not start without a person's act, so the same stop after one retry is Lachy's:
    - merge-task's exit 1 whose own cause (`_merge_task_cause`) starts `ERROR: required checks never appeared for PR` (`MERGE_TASK_INFRA`), with no red check in it, is set aside at Integration, reason `merge-task exit 1, GitHub-side: <that cause>` (execute § 4.5 step 4, row 1). No code fix clears it, so it never re-enters at its own run.
    - A third exit 8 whose message carries `MERGE_TASK_SETTLING_MARK` is `infra`. Every other `merge-task exit 8 three times` text stays `agent`.
    - A legacy note set aside at its own run with that same exit-1 cause (p96-12's shape) reads `infra` on its next `inputs` and re-enters at its own run, never `merge-task needs a human`.
@@ -70,7 +78,7 @@ Nothing about the task was wrong, and no person's act was needed: a re-run once 
 
 - A protection-less repo never waits on checks, and a PR GitHub has not settled exits 8, never 1. On such a repo, a revert PR stopped the same way gives the pending halt `origin unreachable while reverting` after a third 8, not a lasting *Did not land*.
 - UNSTABLE under `none` merges at once. Before, a protection-less repo with red non-required CI waited on required checks that never came, then halted "never appeared".
-- The budget can still run out first: about 60 s of re-polls in one run, backoffs of 60 s and 120 s, then infra cool-downs of 15 and 60 minutes, roughly 80 minutes before H10. `auto_retries` is Lachy's knob.
+- The budget can still run out first: about 60 s of re-polls in one run, backoffs of 60 s and 120 s, then infra cool-downs of 15 and 60 minutes, roughly 80 minutes before H10, on the settling path. A never-appeared, CANCELLED or no-runner stop that comes back the same after one retry reaches Lachy then (2026-11-12). `auto_retries` is Lachy's knob.
 - A BEHIND on an unmoved base still exits 1 after its re-polls ("stays BEHIND", a human's text). With a strict up-to-date rule it is GitHub's stale state too; a possible follow-on.
 - **Amends ADR 0033 decision 8.** merge-task's exit 1 stays an allowlist of fixable texts, but a GitHub-side exit 1 is no human's text either: it retries as `infra`.
 - **Amends ADR 0048's retry classes.** `merge-task exit 8 three times` stays `agent`, except when its message carries `MERGE_TASK_SETTLING_MARK`.

@@ -41,6 +41,7 @@ State (a missing file takes the default in brackets):
   runjobs.<id>            actions/runs/<id>/jobs, served as written (absent ⇒ the 404 form).
   checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
                           sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
+                          Its out is printed before its sleep, as gh prints its first table, then err after.
                           A `pr checks` without --watch prints checks.cur's out with its rc (no stderr): the
                           checks as they stand. `pr checks --json` is gh 2.43.1's "unknown flag: --json", rc 1,
                           unless checks.json is present (a newer gh): with -q it prints `links`; without -q (merge-task's
@@ -311,9 +312,11 @@ if args[:2] == ["pr", "checks"]:
     if has("checks.seq"):
         e = json.loads(pop(p("checks.seq")))
         wr(p("checks.cur"), json.dumps(e))
+    # gh prints its first table before it waits for the next refresh, so a watch cut mid-sleep has written its rows.
+    sys.stdout.write(e.get("out", ""))
+    sys.stdout.flush()
     if e.get("sleep"):
         time.sleep(float(e["sleep"]))
-    sys.stdout.write(e.get("out", ""))
     sys.stderr.write(e.get("err", ""))
     sys.exit(int(e.get("rc", 0)))
 

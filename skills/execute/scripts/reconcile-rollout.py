@@ -10954,6 +10954,27 @@ def _note_reason(note):
 # merge-task's exit-8 text stays `agent` (ADR 0033's tested contract), except while GitHub settles a PR's mergeability
 # (MERGE_TASK_SETTLING_MARK, ADR 0069 d3).
 INFRA_LEAD_OPENINGS = ("prepare: origin unreachable three times", "merge-task signalled twice")
+# The kill's opening (execute § 4.5 step 4, row 143): merge-task signalled twice in one Integration.
+KILL_OPENING = INFRA_LEAD_OPENINGS[1]
+# merge-task.sh's last line on a signal, `last wait: <the wait it was in>` (its on_exit): a kill reads as that wait, never
+# as the signal. Pinned against merge-task.sh by the auto-retry suite.
+MERGE_TASK_LAST_WAIT_MARK = "last wait:"
+# The second line lead-integrate.py set-aside writes under a kill that names no wait: `last real reason (Blocker
+# diagnosis run <n>, <stamp>): <the block last re-entered>` (_carried_reason there). No first-line reader sees it.
+LAST_REAL_REASON_MARK = "last real reason ("
+# The Integration stops that spend no more retries once the same stop comes back after a re-entry (_same_stop, ADR 0033
+# d4 as amended 2026-11-12, p47-2): each holds the lane in a wait, or needs a person's act once it repeats.
+#   - a kill (KILL_OPENING): twice per attempt merge-task waited until it was killed, about 2 hours each
+#     (compression-engine-rollout-2026-11-08: two PRs took turns holding the lane for 18 hours);
+#   - a GitHub-side exit 1 (MERGE_TASK_GITHUB_OPENING, a _merge_task_infra_stop): checks that still never appear after a
+#     cool-down and a fresh `prepare` (ADR 0069 d3), or a required check CANCELLED again (ADR 0073 d4), will not start
+#     or finish without a person's act;
+#   - a no-runner set-aside (NO_RUNNER_OPENING): a runner gone through a cool-down does not come back by itself.
+# Exempt, as decision 4 had them (each still bounded by the budget): `prepare: origin unreachable three times` (an
+# origin outage clears by itself, and no task integrates without origin anyway), a third exit 8 while GitHub settles
+# (MERGE_TASK_SETTLING_MARK: its lazy mergeability clears by itself, and an attempt holds the lane about 5 minutes), a
+# dead call (`workflow call failed:`) and the engine's TRANSIENT, at any stage.
+SAME_STOP_OPENINGS = (KILL_OPENING, MERGE_TASK_GITHUB_OPENING, NO_RUNNER_OPENING)
 
 
 def _merge_task_infra_stop(reason) -> bool:
@@ -10999,6 +11020,61 @@ def _retry_class(note) -> str:
     if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"
     return "infra" if TRANSIENT_MARK in _blocker_summary(note) else "agent"
+
+
+_WAITING_RE = re.compile(r"\bwaiting\b", re.I)
+
+
+def _lead_first(reason) -> str:
+    """A lead-written reason's first line, stripped, with one leading `integration:` dropped."""
+    first = str(reason or "").split("\n", 1)[0].strip()
+    return re.sub(r"^integration:\s*", "", first, flags=re.I)
+
+
+def _kill_without_wait(reason) -> bool:
+    """Whether a reason is a kill (KILL_OPENING) that names no wait: neither MERGE_TASK_LAST_WAIT_MARK nor the word
+    `waiting` in it (merge-task.sh's own wait lines say it). lead-integrate.py set-aside carries the last real reason
+    under such a kill (_carried_reason there), so a later retry never overwrites the cause with the signal."""
+    text = _lead_first(str(reason or "").replace("\n", " "))
+    return text.startswith(KILL_OPENING) and MERGE_TASK_LAST_WAIT_MARK not in text and not _WAITING_RE.search(text)
+
+
+def _stop_key(reason) -> str:
+    """One key per stop, from a reason's first line (`integration:` dropped), so two stops equal but for their numbers
+    read alike: the `last wait: ` mark dropped (the trap's form then equals a SIGKILL's, whose last line is the wait line
+    itself); for a kill, everything after the word `waiting` cut (a wait's job or check list, the old `…`), since what a
+    kill waited on is its wait, whatever jobs that wait listed; then lowercased, each digit run `#`, whitespace collapsed
+    and a trailing `…`, `.` or space stripped. Read by _same_stop only."""
+    s = re.sub(re.escape(MERGE_TASK_LAST_WAIT_MARK) + r"\s*", "", _lead_first(reason), count=1, flags=re.I)
+    if s.startswith(KILL_OPENING):
+        m = _WAITING_RE.search(s)
+        s = s[:m.end()] if m else s
+    s = re.sub(r"\s+", " ", re.sub(r"[0-9]+", "#", s.lower()))
+    return s.rstrip("…. ")
+
+
+def _same_stop(note) -> bool:
+    """Whether a set-aside note repeats the Integration stop it was last re-entered from (ADR 0033 d4 as amended
+    2026-11-12): blocked and set aside at Integration, an `infra` block (_retry_class) whose reason opens one of
+    SAME_STOP_OPENINGS, with `auto_retry_sha` set, and either its block's fingerprint equals that sha (an identical
+    reason writes no new run, append_run rule 2) or the latest `## Blocker diagnosis` run carrying that sha is an
+    `integration:` run whose _stop_key equals this one's. A sha in another section (a plan block's) is a different
+    stop. Stateless and offline: no marker beyond AUTO_RETRY_KEYS. lead-integrate.py's verdict refuses such a block
+    (`same stop twice running at Integration`), Lachy's H10, before the budget."""
+    if _status(note) != "blocked" or _queue_state(note) != ("set-aside", "integration") or _retry_class(note) != "infra":
+        return False
+    kind, reason = _note_reason(note)
+    first = reason.split("\n", 1)[0].strip()
+    sha = _scalar(note.get(AUTO_RETRY_SHA_KEY))
+    if kind != "integration" or not first.startswith(SAME_STOP_OPENINGS) or not sha:
+        return False
+    if _block_fingerprint(note) == sha:
+        return True
+    runs = [r for r in note.run_blocks(BLOCKED_SECTIONS["blocked"]) if r["sha"] == sha]
+    if not runs:
+        return False
+    prior = _top_run(runs)["content"].split("\n", 1)[0].strip()
+    return prior.lower().startswith(INTEGRATION_PREFIX) and _stop_key(prior) == _stop_key(first)
 
 
 def _stamp_value(raw, minimum):

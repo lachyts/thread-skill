@@ -12,6 +12,8 @@
 #   A9  an Integration set-aside   A10 infra blocks and their cool-down   A11 quota blocks and theirs   A12 the budget lifetime
 #   A13 the queue   A14 the Run record   A15 the pins (merge-task.sh, lead-integrate.py, execute SKILL.md, the cool-downs)
 #   A16 an answered block (ADR 0035: `inputs`' answerRecorded) is never retried
+#   A17 a repeat stall at Integration (ADR 0033 d4 as amended): the same held stop twice running is Lachy's, the exempt
+#       routes still cool, and a kill that names no wait carries the last real reason on its second line
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
 # scenario's Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the
@@ -416,7 +418,8 @@ ok "$rc|$(fm "$A" status)" "0|status: review" "A5c-cancel: past the cool-down �
 ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","infra"]' \
   "A5c-cancel: stage integrate, setAsideAt integration, retryClass infra"
 # A5c-no-runner (ADR 0069, amended 2026-11-11): merge-task's exit-4 no-runner set-aside is infra too: no code fix clears
-# it and a runner coming back does, so it cools down rather than reaching Lachy on its second identical block.
+# it and a runner coming back does, so it cools down on its first block; a second naming the same job, its minutes and
+# ids aside, is Lachy's: a runner gone through a cool-down needs his act (ADR 0033 d4 as amended, A17b).
 scen a5c-no-runner
 mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration 'integration: no-runner: required job "self-hosted" queued 47 minutes with no runner (run 7, job 8)'
@@ -858,6 +861,181 @@ ar "$A" --auto-retries 2 --fingerprint "$SHA_A"
 ok "$rc|$(snap)|$(since "$M")" "1|$before|" "A16: the verb exits 1, writes and records nothing"
 has "$out" "not auto-retryable: answered for this block" "A16: its ERROR line"
 
+# ── A17: a repeat stall at Integration (compression-engine-rollout-2026-11-08 replay; ADR 0033 d4 as amended) ──────
+# A kill, a GitHub-side exit 1 or a no-runner set-aside that comes back as the stop last re-entered (_stop_key: equal
+# but for its numbers, a kill read as the wait it was in) spends no more retries: H10, so the lane goes to work that can
+# move. An origin outage, a settling exit 8, a dead call and a transient keep d4's exemption; an agent keeps d6's.
+mig() { python3 "$SCRIPT" mark-integrating --tasks "$1" --tasks-dir "$D" --now "$2" >/dev/null 2>&1 || { echo "FAIL - mark-integrating $1"; fail=1; }; }
+# a17int <name>: a fresh scenario with A awaiting Integration (a pr:, integrating:)
+a17int() { scen "a17-$1"; mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open; }
+# a17first <label> <reason>: A's first stop at 08:00 cools 15 minutes as infra, is retried at 08:15 and re-enters
+# Integration at 08:20
+a17first() {
+  lead "$A" integration "$2"
+  ok "$(j "$(INOW=2026-10-03T08:05:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" \
+    '["infra",false,"2026-10-03T08:15+00:00"]' "A17 $1: the first stop → infra, cooling 15 minutes"
+  ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "A17 $1: (the first stop retried)"
+  mig "$A" 2026-10-03T08:20:00Z
+}
+REFUSED='[false,null,"hand back or defer",true,null]'
+refused() { j "$1" '[d["autoRetry"], d["autoRetryAfter"], d["humanFix"]["act"], d["humanFix"]["handBack"], d["humanFix"]["raise"]] if d["humanFix"] else [d["autoRetry"], d["autoRetryAfter"], None]'; }
+SAME="same stop twice running at Integration: "
+WAITING="PR #5 — required checks not created yet; CI in flight on head — waiting"
+
+# A17a: p2-1's shape: the same kill twice running, its reason written whole the second time (no Run 2)
+R1="merge-task signalled twice (143): last wait: $WAITING on: build (in_progress), alpine (queued, no runner)…"
+a17int a
+a17first a "$R1"
+lead "$A" integration "$R1" 2026-10-03T08:30:00Z
+ok "$(grep -c '^### Run ' "$D/$A.md")" 1 "A17a: the identical kill wrote no Run 2"
+I=$(INOW=2026-10-03T09:30:00Z inp "$A")
+ok "$(refused "$I")" "$REFUSED" "A17a: the same kill twice running → autoRetry false, no cool-down, H10 hand back or defer"
+has "$(j "$I" 'd["autoRetryWhy"]')" "${SAME}merge-task signalled twice (143)" "A17a: the why names the same stop"
+has "$(j "$I" 'd["autoRetryWhy"]')" "alpine (queued, no runner)" "A17a: … and the job it waited on"
+ok "$(j "$I" 'd["autoRetriesUsed"]')" 1 "A17a: with budget left"
+before=$(snap)
+ANOW=2026-10-03T09:30:00Z ar "$A"
+ok "$rc|$(snap)" "1|$before" "A17a: the verb exits 1 and writes nothing"
+has "$out" "not auto-retryable: ${SAME}merge-task signalled twice" "A17a: its ERROR names the same stop"
+# After a same-stop refusal Lachy's hand-back re-stamps the sha: an identical stop goes straight back to him.
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now 2026-10-03T10:00:00Z >/dev/null 2>&1
+ok "$(fm "$A" status)|$(fm "$A" auto_retries_used)" "status: review|<none>" "A17a: (handed back, the counters cleared)"
+mig "$A" 2026-10-03T10:05:00Z
+lead "$A" integration "$R1" 2026-10-03T10:10:00Z
+I=$(INOW=2026-10-03T12:00:00Z inp "$A")
+ok "$(refused "$I")" "$REFUSED" "A17a: after a hand-back the identical stop is refused at once"
+has "$(j "$I" 'd["autoRetryWhy"]')" "$SAME" "A17a: … as the same stop"
+
+# A17a pairs: each second stop is a new run and the same stop: a kill's numbers, its job list, its form (the trap's
+# `last wait:` or a SIGKILL's bare wait line) and the old text before `waiting on:` existed all read alike.
+i=0
+while IFS='|' read -r first second; do
+  i=$((i+1)); a17int "a-pair-$i"
+  a17first "a pair $i" "$first"
+  lead "$A" integration "$second" 2026-10-03T08:30:00Z
+  ok "$(grep -c '^### Run ' "$D/$A.md")" 2 "A17a pair $i: (the second stop is a run of its own)"
+  I=$(INOW=2026-10-03T09:30:00Z inp "$A")
+  ok "$(refused "$I")" "$REFUSED" "A17a pair $i: the same stop → refused"
+  has "$(j "$I" 'd["autoRetryWhy"]')" "$SAME" "A17a pair $i: the why names the same stop"
+done <<EOF
+merge-task signalled twice (143): last wait: $WAITING on: build (in_progress), alpine (queued)…|merge-task signalled twice (130): last wait: $WAITING on: alpine (queued)…
+merge-task signalled twice (143): last wait: $WAITING on: alpine (queued)…|merge-task signalled twice (143): last wait: $WAITING on: alpine (queued, no runner)…
+merge-task signalled twice (143): last wait: $WAITING on: alpine (queued)…|merge-task signalled twice (143): $WAITING on: alpine (queued)…
+merge-task signalled twice (143): ${WAITING}…|merge-task signalled twice (143): last wait: $WAITING on: alpine (queued)…
+EOF
+
+# A17b: the other held routes, a GitHub-side exit 1 (never appeared, CANCELLED) and a no-runner set-aside
+HELD=" job \"alpine\" queued 47 minutes with no runner (run 7, job 8)"
+HELD2=" job \"alpine\" queued 112 minutes with no runner (run 9, job 11)"
+i=0
+while IFS='|' read -r first second; do
+  i=$((i+1)); a17int "b-$i"
+  a17first "b $i" "$first"
+  lead "$A" integration "$second" 2026-10-03T08:30:00Z
+  I=$(INOW=2026-10-03T09:30:00Z inp "$A")
+  ok "$(refused "$I")" "$REFUSED" "A17b $i: ${first:0:40}… twice running → refused"
+  has "$(j "$I" 'd["autoRetryWhy"]')" "$SAME${first:0:20}" "A17b $i: the why names the same stop"
+done <<EOF
+merge-task exit 1, GitHub-side: $GH_NEVER|merge-task exit 1, GitHub-side: $GH_NEVER
+merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD|merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD2
+merge-task exit 1, GitHub-side: $GH_CANCEL|merge-task exit 1, GitHub-side: ${GH_CANCEL/ci (run 7)/ci (run 9)}
+no-runner: required$HELD|no-runner: required$HELD2
+EOF
+
+# A17c: the exempt routes keep d4's exemption: the identical second stop cools 60 minutes from auto_retry_at
+# (INFRA_COOLDOWN_MIN[1]) with no human fix, then reads retryable
+i=0
+while IFS= read -r reason; do
+  i=$((i+1)); a17int "c-$i"
+  a17first "c $i" "$reason"
+  lead "$A" integration "$reason" 2026-10-03T08:30:00Z
+  ok "$(j "$(INOW=2026-10-03T09:00:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"], d["humanFix"]]')" \
+    '[false,"infra","2026-10-03T09:15+00:00",null]' "A17c $i: ${reason:0:40}… twice → still cooling, no human fix"
+  ok "$(j "$(INOW=2026-10-03T09:15:00Z inp "$A")" 'd["autoRetry"]')" true "A17c $i: … then retryable (exempt)"
+done <<EOF
+prepare: origin unreachable three times: fatal: unable to access 'https://github.com/o/r/'
+merge-task exit 8 three times: retryable: PR #5 stays UNKNOWN with nothing required on main (not protected, and this plan holds no rulesets) after 6 re-polls: GitHub has not settled its mergeability yet; nothing merged; re-run
+workflow call failed: no result row
+$TRANSIENT
+EOF
+
+# A17d: the controls
+a17int d-different
+a17first "d different" "$R1"
+lead "$A" integration "no-runner: required$HELD" 2026-10-03T08:30:00Z
+ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"infra"]' \
+  "A17d: a held stop, then a different one (a kill, then no-runner) → retryable"
+# p1-1's shape: auto_retry_sha came from a plan block, so the first Integration stop is no repeat; its identical second,
+# with the budget spent too, names the same stop, never `budget: 2/2 used`.
+scen a17-d-plan-sha
+mkro; mkt "$A" open; mkt "$B" open
+planblock "$A" "$FA"; ar "$A"
+ok "$(fm "$A" auto_retry_sha)" "auto_retry_sha: $SHA_A" "A17d p1-1: (the sha is a plan block's)"
+setfm "$A" status review; setfm "$A" pr "$PR"; setfm "$A" integrating "2026-10-03T09:10+00:00"
+lead "$A" integration "$R1" 2026-10-03T09:20:00Z
+ok "$(j "$(INOW=2026-10-03T10:20:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetriesUsed"]]')" '[true,"infra",1]' \
+  "A17d p1-1: the first Integration stop after a plan-block retry → retryable (a sha in another section is no repeat)"
+ANOW=2026-10-03T10:20:00Z ar "$A"; ok "$rc|$(fm "$A" auto_retries_used)" "0|auto_retries_used: 2" "A17d p1-1: (retried, the budget spent)"
+mig "$A" 2026-10-03T10:25:00Z
+lead "$A" integration "$R1" 2026-10-03T10:40:00Z
+I=$(INOW=2026-10-03T12:00:00Z inp "$A")
+ok "$(refused "$I")" "$REFUSED" "A17d p1-1: the identical second stop → refused"
+has "$(j "$I" 'd["autoRetryWhy"]')" "$SAME" "A17d p1-1: … as the same stop, not the budget"
+# An agent keeps d6: an exit 8 that differs only in its numbers is new feedback.
+a17int d-agent
+lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)"
+ar "$A"; ok "$rc" 0 "A17d agent: (retried)"
+mig "$A" 2026-10-03T09:05:00Z
+lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 503)" 2026-10-03T09:10:00Z
+ok "$(j "$(INOW=2026-10-03T09:10:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"agent"]' \
+  "A17d agent: an agent stop equal but for its numbers stays retryable (d6 unchanged)"
+
+# A17e: a kill that names no wait carries the last real reason (the block last re-entered) on its second line, which
+# no first-line reader sees: it stays infra and merge-task, a different stop from the reason it carries.
+NR="no-runner: required$HELD"
+KILL="merge-task signalled twice (143): Terminated"
+CARRIED="last real reason (Blocker diagnosis run 1, 2026-10-03T08:00+00:00): $NR"
+a17int e
+a17first e "$NR"
+lead "$A" integration "$KILL" 2026-10-03T08:30:00Z
+ok "$(sec "$A" '## Blocker diagnosis' | awk '/^### Run 2 /{on=1; next} on && NF {print; n++} n == 2 {exit}')" "integration: $KILL
+$CARRIED" "A17e: Run 2 is the kill, then the last real reason, labelled with its run and stamp"
+I=$(INOW=2026-10-03T09:00:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" '["infra",false,"2026-10-03T09:30+00:00"]' \
+  "A17e: the kill stays infra and is a different stop from the one it carries (cooling)"
+ok "$(lastev set-aside 'd["reasonClass"]')" '"merge-task"' "A17e: the set-aside's reasonClass is the kill's (merge-task)"
+ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" 'd["autoRetry"]')" true "A17e: … then retryable"
+ANOW=2026-10-03T09:30:00Z ar "$A"; ok "$rc" 0 "A17e: (the kill retried)"
+mig "$A" 2026-10-03T09:35:00Z
+lead "$A" integration "$KILL" 2026-10-03T09:40:00Z
+ok "$(grep -c '^### Run ' "$D/$A.md")" 2 "A17e: the second identical kill re-carries the same line verbatim: no Run 3"
+I=$(INOW=2026-10-03T11:00:00Z inp "$A")
+ok "$(refused "$I")" "$REFUSED" "A17e: the same kill twice running → refused"
+has "$(j "$I" 'd["autoRetryWhy"]')" "${SAME}$KILL; $CARRIED" "A17e: the why holds the kill and the reason it carries"
+# A kill that names its wait carries nothing.
+a17int e-wait
+a17first "e wait" "$NR"
+lead "$A" integration "$R1" 2026-10-03T08:30:00Z
+hasnt "$(sec "$A" '## Blocker diagnosis')" "last real reason" "A17e: a kill naming its wait carries nothing"
+# The bounds: no auto_retry_sha; an own-run block on top (retried); auto_retry_sha naming another block.
+a17int e-no-sha
+lead "$A" integration "$NR"
+setfm "$A" status review; setfm "$A" integrating "2026-10-03T08:20+00:00"
+lead "$A" integration "$KILL" 2026-10-03T08:30:00Z
+ok "$(grep -c '^### Run ' "$D/$A.md")|$(sec "$A" '## Blocker diagnosis' | grep -c 'last real reason')" "2|0" "A17e: no auto_retry_sha → no carry"
+scen a17-e-own
+mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" own "merge-task: ERROR: PR #5 has a MERGE CONFLICT with main (mergeStateStatus=DIRTY) on the integrated base — nothing was merged."
+ar "$A"; ok "$rc" 0 "A17e own: (the own-run block retried)"
+setfm "$A" status review; setfm "$A" integrating "2026-10-03T09:10+00:00"
+lead "$A" integration "$KILL" 2026-10-03T09:20:00Z
+hasnt "$(sec "$A" '## Blocker diagnosis')" "last real reason" "A17e: an own-run block on top → no carry"
+a17int e-other-sha
+a17first "e other sha" "$NR"
+setfm "$A" auto_retry_sha 0123456789ab
+lead "$A" integration "$KILL" 2026-10-03T08:30:00Z
+hasnt "$(sec "$A" '## Blocker diagnosis')" "last real reason" "A17e: auto_retry_sha naming another block → no carry"
+
 # ── A15: the pins ───────────────────────────────────────────────────────────────────────────────────────────
 pin() {
   python3 - "$SCRIPT" <<'PY'
@@ -866,7 +1044,8 @@ spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.
 print(json.dumps({"fix": list(m.MERGE_TASK_FIXABLE), "gone": m.BRANCH_GONE_MARK, "declined": m.DECLINED_MARK,
                   "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS),
                   "mtInfra": list(m.MERGE_TASK_INFRA), "settling": m.MERGE_TASK_SETTLING_MARK, "noRunner": m.NO_RUNNER_OPENING,
-                  "ghOpening": m.MERGE_TASK_GITHUB_OPENING}))
+                  "ghOpening": m.MERGE_TASK_GITHUB_OPENING, "lastWait": m.MERGE_TASK_LAST_WAIT_MARK,
+                  "sameStop": list(m.SAME_STOP_OPENINGS)}))
 PY
 }
 P=$(pin)
@@ -880,6 +1059,12 @@ done < <(j "$P" '"\n".join(d["mtInfra"])')
 ok "$(grep -c -F -- "$(j "$P" 'd["settling"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_SETTLING_MARK is merge-task.sh's text"
 ok "$(grep -c -F -- "$(j "$P" 'd["noRunner"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: NO_RUNNER_OPENING is merge-task.sh's exit-4 text"
 ok "$(grep -c -F -- "$(j "$P" 'd["ghOpening"]')" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_GITHUB_OPENING is execute SKILL.md's reason"
+ok "$(grep -c -F -- "$(j "$P" 'd["lastWait"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_LAST_WAIT_MARK is merge-task.sh's signal line"
+ok "$(j "$P" 'd["sameStop"]')" '["merge-task signalled twice","merge-task exit 1, GitHub-side:","no-runner:"]' \
+  "A15: SAME_STOP_OPENINGS (the held Integration routes)"
+for frag in "same stop twice running" "last real reason"; do
+  ok "$(grep -c -F -- "$frag" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: execute SKILL.md states \"$frag\""
+done
 for frag in "(not OPEN/MERGED)" "is not on origin" "not the default branch" "merge queue required" "a NON-check gate" \
             "GitHub refused to merge" "is not confirmed merged" "stays BEHIND" "unexpected mergeStateStatus"; do
   ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: the human text \"$frag\" (A4) is merge-task.sh's"
