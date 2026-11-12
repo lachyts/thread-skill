@@ -26,6 +26,29 @@ no bytecode.
    the honest controls in tests/gated-inputs.test.mjs. The output is the RECALL FLOOR for schedule § 3.6, never its
    verdict: a hit whose context names nothing the task pays for or authorises is dismissed there, and listed.
 
+   Every gate kind is read the same way (p51-3, ADR 0034's 2026-11-12 amendment): by what the gate is called and by
+   the thing itself, as spend reads its words and an amount. A note names a credential by the account it signs in to
+   and an irreversible act by what it does, seldom by the kind's own name: the three gates signed mid-run that p51-3
+   traced (chorus p84-7's "Cartesia and ElevenLabs", smart-slider p8-1's "Stripe test mode … no live keys", thread-skill
+   p33-4's "a scratch GitHub repo") hit no word of OLD_CREDENTIAL or OLD_IRREVERSIBLE, the lists before it, kept for
+   the honest controls. So CREDENTIAL is OLD_CREDENTIAL plus CREDENTIAL_THINGS, each reported by its own word:
+     - `env key`: an upper-snake env name ending `_KEY`, `_TOKEN`, `_SECRET`, `_PAT` or `_PASSWORD`, case-sensitive
+       (`CARTESIA_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`; `FAL_KEY` too, whatever its prefix);
+     - `key prefix`: `sk_`, `pk_` or `rk_` then `test_` or `live_`, case-sensitive;
+     - `test mode`, `live mode` (a space or a `-`), `live key(s)` and `service role` (a space or a `-`), any case;
+     - `.env` as a word (`.env.local` holds it; `.environment` does not), case-sensitive;
+     - SERVICES: an outside service's name, whole and case-sensitive (`Stripe`, `Supabase`, `PostHog`, `Cartesia`,
+       `ElevenLabs`, …), each reported as its name. Never Claude or Codex: the agents run on those Logins.
+   IRREVERSIBLE is IRREVERSIBLE_WORDS (OLD_IRREVERSIBLE) plus IRREVERSIBLE_THINGS, any case, each an act on a live
+   thing the run cannot take back: `scratch repo` (`scratch`, at most two words, then repo, repos or repository),
+   `gh repo` (`gh repo create` or `delete`), `force-push` (`force push`, `force-push`, `push --force`), `drop table`,
+   `to production` (deploy, push, publish, promote, release or migrate, in any form, at most two words, then `to
+   production`) and `delete the` (delete in any form, an optional article, at most two words, then a repo, repository,
+   user, account, bucket or database, plural allowed). The credential and test-Login readings' deny list (parts 4 and
+   5) reads IRREVERSIBLE_WORDS alone, unchanged. Accepted residual: a gate whose note names neither (smart-slider
+   p8-2's staging key, reached only through its dependency's hook) is still first seen at the plan gate; the
+   Reflection counts each gate signed mid-run whose note the sweep does hit as a miss (reflect.py's `sweepMiss`).
+
    The `login` field (p39-3: schedule § 3.6 and orient reshuffle R3 (c) record a declared test Login ahead instead of
    asking it). `sweep(text, logins)`, with `logins` a list (possibly empty) of declared test Logins, gives each
    credential hit whose source line is a Login gate a `"login": login_reading(<that line>, logins)` field (part 5's
@@ -177,8 +200,9 @@ no bytecode.
        2. The deny rules, case-insensitive; the first match in text order (the longest at one place) gives `deny word:
           <the match through the end of its letters, a leading _ dropped>`: (a) `live` or `prod` at a word start or
           after `_` (DENY_LIVE_PROD_RE: `sk_live_`, `STRIPE_LIVE_KEY`, `SUPABASE_PROD_KEY`, `Production`, `livemode`);
-          (b) the IRREVERSIBLE list; (c) DENY_NOUNS at a word start (password, passphrase, private key, ssh, oauth,
-          api key, access key, access, token, secret, 1password, keychain, cookie).
+          (b) IRREVERSIBLE_WORDS (never the things the sweep reads); (c) DENY_NOUNS at a word start (password,
+          passphrase, private key, ssh, oauth, api key, access key, access, token, secret, 1password, keychain,
+          cookie).
        3. A mode word (MODE_RE): `test`, `test-mode`, `testmode`, `staging` or `sandbox` at a word start, not followed
           by a letter or digit ("no test-mode, staging or sandbox word").
        4. The class is set ("no test-credential class for this repo (set test_credentials in its
@@ -246,7 +270,7 @@ no bytecode.
        1. The kind is `credential` ("not a credential gate").
        2. The deny rules, each why `deny word: <match>`, the first in text order: DENY_LIVE_PROD_RE, except a `live`
           directly followed (whitespace or `-`) by probe, run or test, plural allowed (`a live probe on the dummy
-          Login`; `livemode` and `live Stripe` still deny); the IRREVERSIBLE list; DENY_NOUNS, unchanged.
+          Login`; `livemode` and `live Stripe` still deny); IRREVERSIBLE_WORDS; DENY_NOUNS, unchanged.
        3. No upper-snake env token ("an env key beside a Login: <TOKEN>").
        4. No other credential noun: `account(s)`, `key(s)`, `credential(s)`, `API` (any case), `PAT(s)` (case
           sensitive), `.env` ("another credential beside the Login: <match>").
@@ -276,7 +300,8 @@ no bytecode.
    A record ahead is only a hint, never a grant: the stop re-reads the plan's declared gate in full and asks then.
 
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
-OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
+OLD_SPEND, CREDENTIAL, IRREVERSIBLE, OLD_CREDENTIAL, OLD_IRREVERSIBLE, IRREVERSIBLE_WORDS, CREDENTIAL_THINGS,
+IRREVERSIBLE_THINGS, SERVICES, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
 PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, covered, annotation, format_usd, gate_kind, credential_reading,
 read_env, env_proof, bootstrap_refreshes, credential_covered, credential_annotation, MAX_ENV_BYTES, DENY_NOUNS,
 has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY, APPROVED_SUFFIX_RE.
@@ -319,8 +344,53 @@ OLD_SPEND = (
     _word("credits"), _word("paid API"), ("$", re.compile(r"\$"), False), _word("budget"), _word("billable"),
     _word("API cost"),
 )
-CREDENTIAL = (_word("API key"), _word("token"), _word("secret"), _word("credential"), _word("prod access"))
-IRREVERSIBLE = (_word("irreversible"), _word("cannot be undone"), _word("delete production"), _word("wipe"))
+# The credential and irreversible lists before p51-3: each kind's own names alone. IRREVERSIBLE_WORDS is also the
+# credential and test-Login readings' deny list (parts 4 and 5), which the things below never widen.
+OLD_CREDENTIAL = (_word("API key"), _word("token"), _word("secret"), _word("credential"), _word("prod access"))
+IRREVERSIBLE_WORDS = (_word("irreversible"), _word("cannot be undone"), _word("delete production"), _word("wipe"))
+OLD_IRREVERSIBLE = IRREVERSIBLE_WORDS
+
+
+def _case(word, pattern):
+    """A list entry matched case-sensitively, as `pattern` spells it (a service's name, an env key, a key prefix)."""
+    return (word, re.compile(pattern), False)
+
+
+def _anycase(word, pattern):
+    """A list entry matched in any case, as `pattern` spells it."""
+    return (word, re.compile(pattern, re.I), False)
+
+
+WE_ = r"(?![A-Za-z0-9_])"           # a word end (the sweep's; the exposure reading's WE is the same pattern)
+# The outside services a task's run signs in to (p51-3), each a whole, case-sensitive name: the account the credential
+# gate is for. Never a model provider's own Login (Claude, Codex): the agents run on those.
+SERVICES = ("Stripe", "Supabase", "PostHog", "Cartesia", "ElevenLabs", "Eleven Labs", "Replicate", "fal.ai", "Twilio",
+            "SendGrid", "Mailgun", "Cloudflare", "Vercel", "Netlify", "Firebase", "AWS", "Sentry", "Ahrefs", "Apify",
+            "Deepgram", "AssemblyAI", "Google Ads", "Shopify", "PayPal", "Paddle", "OpenAI API", "Gemini API")
+CREDENTIAL_THINGS = (
+    _case("env key", WS + r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:KEY|TOKEN|SECRET|PAT|PASSWORD)" + WE_),
+    _case("key prefix", WS + r"(?:sk|pk|rk)_(?:test|live)_"),
+    _anycase("test mode", WS + r"test[- ]mode" + WE_),
+    _anycase("live mode", WS + r"live[- ]mode" + WE_),
+    _anycase("live keys", WS + r"live\s+keys?" + WE_),
+    _anycase("service role", WS + r"service[- ]role" + WE_),
+    _case(".env", r"(?<![A-Za-z0-9_.])\.env(?![A-Za-z0-9_])"),
+    *(_case(s, WS + r"\s+".join(re.escape(p) for p in s.split(" ")) + WE_) for s in SERVICES),
+)
+IRREVERSIBLE_THINGS = (
+    _anycase("scratch repo", WS + r"scratch\s+(?:[A-Za-z0-9-]+\s+){0,2}repo(?:s|sitory|sitories)?" + WE_),
+    _anycase("gh repo", WS + r"gh\s+repo\s+(?:create|delete)" + WE_),
+    _anycase("force-push", WS + r"(?:force[- ]push|push\s+--force)"),
+    _anycase("drop table", WS + r"drop\s+table" + WE_),
+    _anycase("to production", WS + r"(?:deploy|push|publish|promot|releas|migrat)[a-z]*\s+(?:[A-Za-z0-9-]+\s+){0,2}"
+             r"to\s+production" + WE_),
+    _anycase("delete the", WS + r"delet(?:e|es|ed|ing)\s+(?:(?:a|an|the|its|that)\s+)?(?:[A-Za-z0-9-]+\s+){0,2}"
+             r"(?:repo|repository|user|account|bucket|database)s?" + WE_),
+)
+# Every gate kind is read the same way (p51-3): by what the gate is called and by the thing itself, as spend reads
+# its words and the currency amount marker.
+CREDENTIAL = OLD_CREDENTIAL + CREDENTIAL_THINGS
+IRREVERSIBLE = IRREVERSIBLE_WORDS + IRREVERSIBLE_THINGS
 
 FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 INLINE_CODE_RE = re.compile(r"(`+)(?:(?!\1).)+?\1")
@@ -724,7 +794,7 @@ DENY_NOUNS = ("password", "passphrase", "private key", "ssh", "oauth", "api key"
               "secret", "1password", "keychain", "cookie")
 DENY_RES = (DENY_LIVE_PROD_RE,) + tuple(
     re.compile(WS + r"\s+".join(re.escape(p) for p in phrase.split(" ")) + r"[A-Za-z]*", re.I)
-    for phrase in tuple(w for w, _r, _p in IRREVERSIBLE) + DENY_NOUNS)
+    for phrase in tuple(w for w, _r, _p in IRREVERSIBLE_WORDS) + DENY_NOUNS)
 MODE_RE = re.compile(WS + r"(?:test-mode|testmode|test|staging|sandbox)(?![A-Za-z0-9])", re.I)
 ENV_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])")
 PREFIX_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])[a-z][a-z0-9]*(?:_[a-z0-9]+)*_(?![A-Za-z0-9_])")
