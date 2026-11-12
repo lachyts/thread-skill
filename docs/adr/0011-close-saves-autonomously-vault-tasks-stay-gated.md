@@ -12,6 +12,8 @@ its Verify line ran green; proposing new tasks stays gated.)*
 *(Amended by ADR 0028, 2026-09-29: close, which once never pushed, now lands its own close-out
 commits and the session's own branch (push, PR, review, merge); another session's branch is still
 only reported.)*
+*(Amended by ADR 0082, 2026-11-12: the vault-task gate is on creating a task. Starting a task already filed, one a
+wait names and nothing builds, is no new task: close and `next` start it without asking.)*
 
 ## Context
 

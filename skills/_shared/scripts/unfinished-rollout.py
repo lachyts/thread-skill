@@ -18,6 +18,8 @@ ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of re
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py branches --repo <path> --tasks <slug,...>
         [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited [--rollout <slug>]...
+        [--task <slug>]... [--tasks-dir <dir>]
 
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
@@ -432,6 +434,50 @@ directly in each --handoffs dir; it writes nothing and runs no git. It prints on
   unstarted <slug> <Project root>       none of the above: no lead has started it
 Exit 0, or 2 (no stdout, one `unfinished-rollout:` line) when no note is found, on a usage error, or when
 reconcile-rollout.py or run_record.py will not load.
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited [--rollout <slug>]...
+        [--task <slug>]... [--tasks-dir <dir>]
+
+`awaited` answers close step 2's and next step 1's **Tasks a wait names.** (ADR 0082): whether anything is building
+each task a wait names. The awaited tasks are each --task, as given (the waits the session read in THREAD.md or the
+conversation), then, per --rollout (a paused rollout the session leads or its THREAD.md names), each wait its
+`## Pause log` states and every `depends-on:` / `blocked-by:` entry (reconcile-rollout.py's _dep_entries) of its linked
+tasks that have not landed. A Pause log entry (a list item with its continuation lines) states a wait only by a
+wikilink a wait phrase introduces (WAIT_PHRASE_RE: `until [[x]]`, `once [[x]]`, `waits on [[x]]`, `waiting for [[x]]`,
+a run of links joined by `,`, `&`, `and` or `or` included), so the engine's own lines (a sign-off's `awaiting
+sign-off: [[a]] (gate-pending)`, a hard pause's in-flight calls) name no wait. A --rollout's own queue is never a wait:
+the rollout itself, one of its linked tasks, or a name a fold tombstone resolves to one of them (a tombstone carries no
+`rollout:`, schedule step 4.5), and nor is a task its `## Notes` records as `repair: [[<slug>]] deferred` (repair § 5:
+his decline, which a later read must not undo). Each is followed through a fold tombstone to the unit that lands it
+(_fold_unit), and named once (case-folded), in that order. It reads notes only (one walk of the tasks dir); it writes
+nothing and runs no git and no gh. One line per awaited task, the first that applies, `<slug>` the unit's:
+  missing <slug>                        no note at the root or under Archive/
+  rollout <slug>                        a note tagged `rollout`: close step 2's **Rollouts this session wrote.** reads
+                                        a wait on a rollout, never this verb
+  landed <slug> (<status>)              reconcile-rollout.py's _landed (done, a carried fix, an approved read-only task)
+  scheduled <slug> [[<rollout>]]        its `rollout:` links a live rollout note (schedule step 1's rule,
+                                        _live_rollout); ` (paused)` is appended when that rollout carries `paused:`
+  building <slug> (status: in_progress) in no live rollout, but `in_progress` (vault-grammar § Statuses: lower-cased,
+                                        `-` read as `_`): a session holds it by hand
+  held <slug> (hold_until: <pr>)        its frontmatter carries `hold_until:` (vault-grammar § Hold until), read with no
+                                        gh call; one with no readable pr reads `(hold_until unreadable: <why>)`
+  held <slug> (status: <status>)        any status but `open` (`review`, `blocked`, `parked`, `dropped`, … ; `none`
+                                        when it has none)
+  held <slug> (archived)                `open`, but not directly in the tasks dir (under Archive/): schedule step 1
+                                        never takes it
+  held <slug> (not a task)              `open`, but its `tags:` lack `task` (a phase note, a reference note): schedule
+                                        step 1 never takes it
+  held <slug> (a decisions task)        `open`, but tagged `decisions` (ADR 0037 d5: Lachy decides it at the
+                                        Reflection Routine, so schedule step 1 never takes it)
+  held <slug> (<why>)                   one that would read `unstarted`, held by a --rollout's held wait: the latest
+                                        wait its `## Pause log` states for the unit carries `(held: <why>)` right
+                                        after the link (close step 4's held form, `waits on [[<slug>]] (held: not
+                                        yet)`, which close sub-step 7.11 writes there); a later plain wait lifts it
+  unstarted <slug> (<Project>)          `open`, directly in the tasks dir, tagged `task` and not `decisions`, in no live
+                                        rollout, with no hold: schedule step 1 would take it and nothing is building
+                                        it; <Project> is its `projects:` names, comma-joined, or `no project`
+Exit 0 (no lines when nothing is awaited), or 2 (no stdout, one `unfinished-rollout:` line) on a usage error (neither
+--rollout nor --task), no tasks dir, a --rollout with no note or an unreadable one, or reconcile-rollout.py unloadable.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
 
@@ -2331,6 +2377,136 @@ def cmd_unstarted(args, rr) -> int:
     return 0
 
 
+# ---- the tasks a wait names (ADR 0082) ---------------------------------------------------------------------------------
+
+PAUSE_LOG = "## Pause log"
+# A wait a `## Pause log` entry states (the header's awaited table): a wikilink a wait phrase introduces, the phrases
+# close step 2 reads in THREAD.md ("until [[x]] lands", "once [[x]] lands", "waits on [[x]]", "waiting for [[x]]"), a
+# run of links joined by `,`, `&`, `and` or `or` included. The engine's own lines name the rollout's own tasks with no
+# such phrase (a sign-off's `awaiting sign-off: [[a]] (gate-pending), [[b]] (depends on [[a]])`, a hard pause's
+# in-flight calls; a room stop holds no link), so a task that leaves the queue is never read from them as a wait.
+WAIT_PHRASE_RE = re.compile(r"\b(?:until|once|(?:wait|waits|waiting)\s+(?:on|for))\s+(?=\[\[)", re.I)
+# A link with the held wait's mark right after it (close step 4's one held form, `waits on [[x]] (held: <why>)`).
+WAIT_LINK_RE = re.compile(r"\[\[([^\]]+?)\]\](?:\s*\(held:\s*([^)]+?)\s*\))?")
+WAIT_JOIN_RE = re.compile(r"\s*(?:,|&|\band\b|\bor\b)\s*(?=\[\[)", re.I)
+# repair § 5's clean defer, on the rollout's `## Notes`: `- <date> repair: [[<slug>]] deferred: <reason>`, matched on the
+# link's target (an alias or a heading after it allowed), as reconcile-rollout.py's RACE_DECIDED_RE matches its line.
+DEFERRED_RE = re.compile(r"repair:\s*\[\[([^\]|#^\\]+)[^\]]*\]\]\s*deferred\b", re.I)
+
+
+def log_entries(text: str):
+    """A log section's entries: each list item with its continuation lines, joined by one space."""
+    out = []
+    for line in text.split("\n"):
+        if LIST_LINE_RE.match(line) or not out:
+            out.append(line.strip())
+        elif line.strip():
+            out[-1] = f"{out[-1]} {line.strip()}".strip()
+    return [e for e in out if e]
+
+
+def pause_waits(rr, note):
+    """(slug, held) for each wait the note's `## Pause log` states (WAIT_PHRASE_RE), in order; held is the `<why>` of a
+    `(held: <why>)` right after the link, else None."""
+    out = []
+    for entry in log_entries(note.section_text(PAUSE_LOG)):
+        for m in WAIT_PHRASE_RE.finditer(entry):
+            link = WAIT_LINK_RE.match(entry, m.end())
+            while link is not None:
+                slug = rr._wikilink_slug(link.group(1))
+                if slug:
+                    out.append((slug, link.group(2)))
+                join = WAIT_JOIN_RE.match(entry, link.end())
+                link = WAIT_LINK_RE.match(entry, join.end()) if join is not None else None
+    return out
+
+
+def deferred_out(rr, note) -> set:
+    """The lowercased slugs the rollout's `## Notes` records as deferred out of it (repair § 5): his decline."""
+    return {(rr._wikilink_slug(m.group(1)) or "").lower() for m in DEFERRED_RE.finditer(note.section_text("## Notes"))}
+
+
+def awaited_line(rr, tasks_dir: Path, unit: str, entry) -> str:
+    """The `awaited` line for one awaited unit (the header's table, first match, a Pause log's held wait aside)."""
+    if entry is None:
+        return f"missing {unit}"
+    path, note = entry
+    tags = tags_of(rr, note)
+    if "rollout" in tags:
+        return f"rollout {unit}"
+    status = rr._status(note).replace("-", "_")
+    if rr._landed(note):
+        return f"landed {unit} ({status or 'none'})"
+    if rr._live_rollout(tasks_dir, note.get("rollout")):
+        ro = rr._wikilink_slug(rr._scalar(note.get("rollout")))
+        try:
+            paused = rr._valued(rr.Note(tasks_dir / f"{ro}.md").get("paused"))
+        except (OSError, ValueError):
+            paused = False
+        return f"scheduled {unit} [[{ro}]]" + (" (paused)" if paused else "")
+    if status == "in_progress":
+        return f"building {unit} (status: in_progress)"
+    hold = rr._hold_until(note, None)
+    if hold is not None:
+        # A readable pr is the hold whatever else its value lacks (a bare number needs the Project root only for gh).
+        return f"held {unit} (hold_until: {hold['pr']})" if hold["pr"] \
+            else f"held {unit} (hold_until unreadable: {hold['error']})"
+    if status != "open":
+        return f"held {unit} (status: {status or 'none'})"
+    # Schedule step 1's filter: it takes only a note directly in the tasks dir, tagged `task` and not `decisions`.
+    if path.parent != tasks_dir:
+        return f"held {unit} (archived)"
+    if "task" not in tags:
+        return f"held {unit} (not a task)"
+    if "decisions" in tags:
+        return f"held {unit} (a decisions task)"
+    return f"unstarted {unit} ({project_label(rr, note)})"
+
+
+def cmd_awaited(args, rr) -> int:
+    if not args.rollout and not args.task:
+        die("awaited needs --rollout or --task")
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        die(f"no tasks dir at {tasks_dir}")
+    index = rr._walk_of(tasks_dir).index
+
+    def unit_of(slug):
+        return rr._fold_unit(slug, index)[0].lower()
+
+    named = [s for s in (rr._wikilink_slug(t) for t in args.task or []) if s]
+    held = {}  # unit -> why, for each unit a --rollout's Pause log holds (its latest wait line naming it decides)
+    for value in args.rollout or []:
+        slug = rr._wikilink_slug(value) or ""
+        path = find_task(tasks_dir, slug) if slug else None
+        if path is None:
+            die(f"--rollout {value}: no note at {tasks_dir / (slug + '.md')} or under Archive/")
+        try:
+            note = rr.Note(path)
+            linked, _index = rr._scan(path, tasks_dir)
+        except (ValueError, OSError) as e:
+            die(f"--rollout {slug}: {e}")
+        # Its own queue (a fold tombstone carries no `rollout:`, so a name is checked again once folded) and the
+        # tasks deferred out of it are never a wait.
+        skip = {slug.lower()} | {p.stem.lower() for p, _n in linked} | deferred_out(rr, note)
+        waits = [(s, why) for s, why in pause_waits(rr, note) if s.lower() not in skip and unit_of(s) not in skip]
+        latest = {unit_of(s): why for s, why in waits}  # the latest wait line naming a unit decides
+        held.update({u: why for u, why in latest.items() if why is not None})
+        deps = [d for _p, task in linked if not rr._landed(task) for d in rr._dep_entries(task)]
+        named += [s for s, _why in waits] + [s for s in deps if s.lower() not in skip and unit_of(s) not in skip]
+    seen = set()
+    for slug in named:
+        unit, entry, _folded = rr._fold_unit(slug, index)
+        if unit.lower() in seen:
+            continue
+        seen.add(unit.lower())
+        line = awaited_line(rr, tasks_dir, unit, entry)
+        if line.startswith("unstarted ") and unit.lower() in held:
+            line = f"held {unit} ({held[unit.lower()]})"
+        print(line)
+    return 0
+
+
 # ---- the Waiting list (ADR 0076) --------------------------------------------------------------------------------------
 
 def leg_session(leg, ctx, chain, read, leases) -> bool:
@@ -2634,6 +2810,11 @@ def main() -> int:
     u.add_argument("--handoffs", action="append", default=None,
                    help="a docs/handoffs dir close's scan read (repeatable): a doc there with `launches:` names a launch")
     u.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    aw = sub.add_parser("awaited", help="whether anything builds each task a wait names (ADR 0082; close step 2)")
+    aw.add_argument("--rollout", action="append", default=None,
+                    help="a paused rollout's slug (repeatable): its ## Pause log links and its tasks' dependencies")
+    aw.add_argument("--task", action="append", default=None, help="an awaited task's slug or [[wikilink]] (repeatable)")
+    aw.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     wl = sub.add_parser("waiting", help="the Waiting list (ADR 0076): which serial chain starts next, and the room")
     wl.add_argument("--now", default=None, help="the clock for the Capacity, Away and lease reads (an ISO time)")
     wl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
@@ -2653,7 +2834,8 @@ def main() -> int:
     # share it, and nothing outlives the process.
     rr._share_walks()
     verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
-             "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting}
+             "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting,
+             "awaited": cmd_awaited}
     return verbs[args.cmd](args, rr)
 
 
