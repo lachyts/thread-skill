@@ -1418,7 +1418,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   limit itself included. It also holds a month line (ADR 0034's 2026-10-27
   amendment; spend is never asked ahead): a gate passes only while this
   calendar month's standing approvals, summed from every rollout note's
-  `## Needs-you log`, stay at most the operator's limit with it. The limit is
+  `## Needs-you log`, stay at most the operator's limit with it. The month
+  line is per limit (p48-2): a task's own limit keeps its own line, and a
+  signing under it never counts toward the operator's. The limit is
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
   a limit Lachy named; built-in 0, which is off). Exposure counts every USD
   amount the gate names; a shape it cannot price, even from its cap alone,
