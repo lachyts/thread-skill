@@ -1,0 +1,3 @@
+<!-- Provenance (p51-3): copied byte for byte from the vault note Work/Tasks/thread-skill-parallel-rollouts-share-a-repo.md at vault commit b59a0571b, later thread-skill-p33-4-parallel-rollouts-share-a-repo: its **Verify:** line, as /thread:schedule swept it for thread-skill-rollout-2026-10-31. Its irreversible gate (create, merge into and delete a scratch GitHub repo) was signed mid-run (Watch c8bd9cd4). Never edit these lines. -->
+
+**Verify:** a test schedules two projects' parallel rollouts on one repo (two clones, both accepted by § 0), and an end-to-end rig on a scratch GitHub repo runs one task from each to merge with Integration serialised (the second merge re-runs its verifier on the first's `main`).
