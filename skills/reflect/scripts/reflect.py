@@ -118,7 +118,16 @@ parallel with no note). For each:
             it (holds paired as score.py pairs them). Each carries askedAhead (the task note holds a `## Decisions
             (asked ahead` section or an `asked ahead at schedule` gate), needsYou (its `## Needs you`, at most 600
             characters) and grade: the Grade log's line in force for the task at the act (grades.py's Log.at:
-            {grade, agentGrade, raised, gates, pass}), null with no task or no grade line before it.
+            {grade, agentGrade, raised, gates, pass}), null with no task or no grade line before it. Each carries
+            sweepMiss too (p51-3, ADR 0034's 2026-11-12 amendment): on a signOff, sweep_miss()'s kinds (credential,
+            irreversible) of the gates Lachy signed that act's Melbourne day (its `## Approved gates` lines whose
+            bare `(approved <date>)` is that date) that gated_inputs.sweep() hits in the note's brief() (its body less
+            the sections the run or the schedule wrote: the gate, plan, log, answer and feedback sections, `## Decisions`
+            and `## Decided for you`), so a gate the sweep could have seen was asked mid-run; a credential on a note
+            holding a recorded test-credential or test-Login Planner line is none (recorded, by design). [] on every
+            other act, with no note, or with no such kind. It reads the note as it stands at span, never as it was
+            swept: a note edited since reads its edits. A gate he declined ahead and signed mid-run reads as a miss
+            (no record of a decline exists); askedAhead beside it says so.
   set-aside a set-aside line in the window: stage, reasonClass, setAsideAt, taskNote (Work/Tasks, then Archive, or
             null) and movedBy, the first later event of auto-retry, handed-back (with its via), answer-recorded,
             gate-signed, race-decided, carried, slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
@@ -297,8 +306,9 @@ rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring,
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
 ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
 overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
-warnings} | null} | null, suite{budget, local[], ci[], breaches[], audit} (above), cannotShow[], flags[]}. stderr gets
-one summary line.
+warnings} | null} | null, suite{budget, local[], ci[], breaches[], audit} (above), gateMisses{count, items[{rollout,
+task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is non-empty, the count
+the Reflection reads; p51-3), cannotShow[], flags[]}. stderr gets one summary line.
 
 The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
 blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
@@ -315,8 +325,8 @@ score's merges.tasks carries task names alone); then `freshReview` (an entry is 
 [since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
 until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
 `nights.nights` (each morning), `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
-first and last both in [since, until], the one outside printed), and `suite.local` and `suite.ci` (a group is one row,
-the same way). span calls score.py with no --since, so a score's
+first and last both in [since, until], the one outside printed), `suite.local` and `suite.ci` (a group is one row,
+the same way), and `gateMisses.items` (each item's at). span calls score.py with no --since, so a score's
 window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
 ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
 read the run start instead. Not checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly
@@ -573,6 +583,14 @@ SERIAL_MOVERS = ("answer-recorded", "gate-signed", "handed-back", "race-decided"
 # `(approved <date>)` (Lachy's sign-off, reconcile-rollout.py)
 STANDING_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d under the standing approval\b[^)]*\)\s*$")
 SIGNED_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d\)\s*$")
+SIGNED_ON_RE = re.compile(r"\(approved (\d{4}-\d\d-\d\d)\)\s*$")
+# sweepMiss (p51-3): the gate kinds schedule § 3.6 and orient R3 (c) ask ahead, the recorded Planner lines that record a
+# credential instead (a declared test credential or test Login, signed or asked at the stop by design), and the
+# sections the run or the schedule wrote, which the brief the sweep reads leaves out
+ASKED_AHEAD_KINDS = ("credential", "irreversible")
+RECORDED_CREDENTIAL_RE = re.compile(r"^- Planner: word each test-(?:credential|Login) gate", re.M)
+BRIEF_DROP = ("## Decisions", "## Decided for you", "## Plan-blocked feedback", "## Review-blocked feedback",
+              "## Blocker diagnosis")
 # A held trade (ADR 0037 d1): tune.py auto_check's two Lachy-decides reasons, and the decision task's lines for it
 TRADE_HELD_RE = re.compile(r"^a (?:trade \(.*\)|caution): Lachy decides$")
 DECISION_SLUG_RE = re.compile(r"^thread-skill-decisions-\d{4}-\d\d-\d\d(?:-\d+)?$")
@@ -620,6 +638,7 @@ ATTN = _load("thread_attention", os.path.join(HERE, "attention.py"))  # the atte
 REC = _load("thread_reconcile_rollout", RECONCILE_PY)
 RP = _load("thread_reconcile_project", os.path.join(SHARED, "reconcile-project.py"))
 LADDER = _load("thread_ladder", os.path.join(SHARED, "ladder.py"))
+GI = _load("thread_gated_inputs", os.path.join(SHARED, "gated_inputs.py"))  # the gated-input sweep (sweepMiss, p51-3)
 Note, NOTES_SECTION, RACE_DECIDED_RE = REC.Note, REC.NOTES_SECTION, REC.RACE_DECIDED_RE
 WIKILINK_OPEN_RE, _wikilink_slug = REC.WIKILINK_OPEN_RE, REC._wikilink_slug
 LANDED = RP.LANDED
@@ -686,6 +705,54 @@ def date_in(day, since, until):
     including, until's, so the Reflection after this one (whose since is this until) reads until's date, once. span
     reads such evidence from every record, so that reading needs no line of the rollout in its own window."""
     return mdate(since) <= day < mdate(until)
+
+
+def brief(body):
+    """A task note's body as schedule § 3.6 swept it (sweepMiss, p51-3): every `## ` section the run wrote
+    (reconcile-rollout.py's gate, plan, log and answer sections) or the schedule wrote (`## Decisions`, `## Decided for
+    you`), and the workflow's feedback sections, left out, each to the next `## ` heading."""
+    drop = BRIEF_DROP + (REC.GATE_PENDING_SECTION, REC.APPROVED_GATES_SECTION, REC.GATE_BOUNCE_SECTION,
+                         REC.NEEDS_YOU_LOG_SECTION, REC.PAUSE_LOG_SECTION, REC.REVIEW_HISTORY_SECTION,
+                         REC.INTEGRATION_LOG_SECTION, REC.APPROVED_PLAN_SECTION, REC.NEEDS_HUMAN_SECTION,
+                         REC.RACE_LOG_SECTION, REC.LANE_LOG_SECTION, REC.FLAKE_LOG_SECTION, REC.FLAKE_TWICE_SECTION,
+                         REC.SCOPE_AUTO_SECTION, REC.REPAIR_INPUT_SECTION, REC.DESCOPE_REFUSED_SECTION,
+                         REC.COMPLETION_VERIFY_SECTION, REC.PROOF_LOG_SECTION, REC.GIT_ENV_LOG_SECTION)
+    out, skip = [], False
+    for line in body.split("\n"):
+        if line.startswith("## "):
+            skip = line.startswith(drop)
+        if not skip:
+            out.append(line)
+    return "\n".join(out)
+
+
+def gate_misses(entries):
+    """The window's sweep misses (p51-3): {count, items}, one item {rollout, task, at, kinds} per in-window `ask` friction
+    item whose sweepMiss is non-empty, in the rollouts' order then the items'. The friction is already windowed, so this
+    holds only its rows."""
+    items = [{"rollout": x.get("rollout"), "task": x.get("task"), "at": x.get("at"), "kinds": list(x["sweepMiss"])}
+             for e in entries for x in e.get("friction") or [] if x.get("kind") == "ask" and x.get("sweepMiss")]
+    return {"count": len(items), "items": items}
+
+
+def sweep_miss(note, day):
+    """The gate kinds Lachy signed mid-run on `day` that the sweep could have seen (p51-3): the kinds schedule § 3.6 asks
+    ahead (credential, irreversible) of the note's `## Approved gates` lines whose bare `(approved <day>)` is
+    approve-gates' sign-off that day, each kept when gated_inputs.sweep() hits that kind in the note's brief(). A
+    credential is no miss when the note holds a recorded test-credential or test-Login Planner line: recorded ahead,
+    it is signed or asked at the stop by design. Sorted as ASKED_AHEAD_KINDS; [] when none."""
+    kinds = set()
+    for line in note.section_text(REC.APPROVED_GATES_SECTION).split("\n"):
+        m = SIGNED_ON_RE.search(line.strip())
+        if m and m.group(1) == day:
+            kinds.add(GI.gate_kind(line))
+    if RECORDED_CREDENTIAL_RE.search(note._body):
+        kinds.discard("credential")
+    kinds &= set(ASKED_AHEAD_KINDS)
+    if not kinds:
+        return []
+    hits = GI.sweep(brief(note._body))
+    return [k for k in ASKED_AHEAD_KINDS if k in kinds and hits.get(k)]
 
 
 # ---- files -----------------------------------------------------------------------------------------------------
@@ -1588,13 +1655,15 @@ class Span:
         """An `ask` friction item for the act at `at` (ms), with the grade in force for its task then."""
         grade = self.grade_log.at(task, at) if task and self.grade_log is not None else None
         item = {"kind": "ask", "rollout": slug, "task": task, "at": fmt(at), "act": act, "detail": detail,
-                "askedAhead": False, "needsYou": None, "grade": grade}
+                "askedAhead": False, "needsYou": None, "grade": grade, "sweepMiss": []}
         p = self.task_note(task)
         note = read_note(p) if p else None
         if note is not None:
             item["askedAhead"] = bool(ASKED_AHEAD_RE.search(note._body))
             ny = note.section_text(REC.NEEDS_HUMAN_SECTION)
             item["needsYou"] = ny[:NEEDS_YOU_MAX] if ny else None
+            if act == "signOff":
+                item["sweepMiss"] = sweep_miss(note, mdate(at))
         return item
 
     @staticmethod
@@ -2208,7 +2277,7 @@ class Span:
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
                "attention": attention, "nights": nights, "noteOverlaps": overlaps, "suite": suite,
-               "cannotShow": self.cannot,
+               "gateMisses": gate_misses(entries), "cannotShow": self.cannot,
                "flags": self.flags}
         for f in window_flags(doc, scores):  # the window check: doc["flags"] is self.flags, so each lands in span.json
             self.flag(f)
@@ -2314,6 +2383,8 @@ def window_flags(doc, scores):
     report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
     report("suite.local", spans(items(part(doc, "suite", "local"))), ss, us)
     report("suite.ci", spans(items(part(doc, "suite", "ci"))), ss, us)
+    misses = items(part(doc, "gateMisses", "items"))
+    report("gateMisses.items", [(_row_in(x.get("at"), S, U), x.get("at")) for x in misses], ss, us)
     return out
 
 

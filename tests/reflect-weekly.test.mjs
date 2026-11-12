@@ -302,6 +302,37 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
   assert.ok(s.cannotShow.some((c) => c.startsWith('[[fixed]] (demo) moved on with no recorded act')), JSON.stringify(s.cannotShow))
 })
 
+// p51-3: a gate Lachy signed mid-run that the sweep could have seen in its note is a miss the Reflection counts.
+test('span: sweepMiss names a signed gate the sweep could have seen; gateMisses counts only the window\'s', (t) => {
+  const h = setup(t)
+  const signed = (ts, task) => [ts, 'gate-signed', task, { standing: false, gates: 1 }]
+  emitAll(h, 'demo', byTs([
+    ...life('anchor', W(4, '00:00'), W(4, '01:00')),
+    ['2026-09-01T02:00:00Z', 'gate-signed', 'early', { standing: false, gates: 1 }],   // before the window
+    signed(W(4, '02:00'), 'missed'), signed(W(4, '03:00'), 'unseen'), signed(W(4, '04:00'), 'recorded'),
+    [W(4, '05:00'), 'gate-signed', 'standing', { standing: true, gates: 1 }],
+  ]))
+  rolloutNote(h, 'demo')
+  const gates = (...lines) => `## Approved gates\n\n${lines.map((l) => `- ${l}`).join('\n')}`
+  // its Verify names the services; the drop-table line was signed another day, so only the credential is this act's
+  taskNote(h, 'missed', { body: ['**Verify:** first audio on fresh text (Cartesia and ElevenLabs); then drop table x.', '',
+    gates('credential: CARTESIA_API_KEY into the Host (approved 2026-09-04)', 'irreversible: drop table x (approved 2026-08-01)'),
+  ].join('\n') })
+  // its note names nothing; the gate's own words sit only in the sections the run wrote
+  taskNote(h, 'unseen', { body: ['**Verify:** the rig passes.', '', '## Approved plan', '', '- a scratch GitHub repo, then delete the repo', '',
+    gates('irreversible: create and delete a scratch GitHub repo (approved 2026-09-04)')].join('\n') })
+  // a declared test credential is recorded ahead and signed or asked at the stop by design
+  taskNote(h, 'recorded', { body: ['Stripe test mode end to end.', '', '## Decisions (recorded 2026-09-01)', '',
+    '- Planner: word each test-credential gate as one line', '', gates('credential: test-mode STRIPE_SECRET (sk_test_) (approved 2026-09-04)')].join('\n') })
+  taskNote(h, 'early', { body: ['Read the Supabase table.', '', gates('credential: the Supabase key (approved 2026-09-01)')].join('\n') })
+  taskNote(h, 'standing', { body: ['Stripe test mode.', '', gates('credential: x (approved 2026-09-04 under the standing approval: test credential X present in f, class from repo)')].join('\n') })
+  const s = span(h)
+  const asks = Object.fromEntries(entryOf(s, 'demo').friction.filter((x) => x.kind === 'ask').map((x) => [x.task, x.sweepMiss]))
+  assert.deepEqual(asks, { missed: ['credential'], unseen: [], recorded: [] }, 'one signOff ask per in-window sign-off; standing is no ask')
+  assert.deepEqual(s.gateMisses, { count: 1, items: [{ rollout: 'demo', task: 'missed', at: '2026-09-04T02:00:00.000Z', kinds: ['credential'] }] },
+    'the sign-off before the window adds nothing, though its note names Supabase')
+})
+
 // The writers' own wording (p22-7): tune.py's auto_check gives a held trade's reason, gated_inputs.annotation() the
 // standing approval's `## Approved gates` suffix, so a change in either fails these fixtures.
 function pyOut(h, body, input) {
