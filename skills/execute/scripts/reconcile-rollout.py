@@ -13246,7 +13246,13 @@ class _StandingLedger:
     directory that exists but cannot be listed, is (None, why), cached, so every later gate asks with it. A lock not
     taken in time raises OSError, cached too, so every later slug that needs the month read fails at once with the same
     message; a slug that never needs it is still written or asked. add(key, usd) keeps the call's own running total per
-    key (on --dry-run too, so its lines read as a real run's), which spent(key) includes."""
+    key (on --dry-run too, so its lines read as a real run's), which spent(key) includes.
+
+    spent() with no key is the whole month in one sum, every logged line and every addition of the call counted once,
+    as before p48-2: unfinished-rollout.py's needs-you reading (p48-1) until p48-5
+    (thread-skill-p48-5-needs-you-reads-each-limits-own-month-line) moves it to its own limit's line. It never
+    under-counts (fails closed), so until then needs-you can list a gate approve-gates signs; _approve_standing always
+    passes a key."""
 
     def __init__(self, tasks_dir, rollout_path, month, dry_run):
         self.tasks_dir, self.rollout_path = Path(tasks_dir), Path(rollout_path)
@@ -13285,7 +13291,7 @@ class _StandingLedger:
                 totals[key] = totals.get(key, Decimal(0)) + usd
         return totals, None
 
-    def spent(self, key):
+    def spent(self, key=None):
         if self._lock_error is not None:
             raise OSError(self._lock_error)
         if self._base is None and self._why is None:
@@ -13300,6 +13306,8 @@ class _StandingLedger:
             self._base, self._why = self._read()
         if self._why:
             return None, self._why
+        if key is None:   # the whole month, every line once; p48-5 removes this form along with its one caller
+            return sum(self._base.values(), Decimal(0)) + sum(self._added.values(), Decimal(0)), None
         untagged = self._base.get(UNTAGGED, Decimal(0)) if key != UNTAGGED else Decimal(0)
         return self._base.get(key, Decimal(0)) + untagged + self._added.get(key, Decimal(0)), None
 
