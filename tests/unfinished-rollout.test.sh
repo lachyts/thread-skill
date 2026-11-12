@@ -85,7 +85,7 @@
 #           parallel one's Human fix, a chain's every one, a Leg preflight's as a sign-in), a hold_until or merge hold
 #           that waits on him, a row schedule left out for a sign-in (its section pinned to schedule's S3.7, S4 and S6);
 #           each drops out once signed, handed back, released or taken; an archived or done rollout never read; an
-#           unreadable note's WARN carried in the JSON's warns (NY12); each limit's own month line (NY13, p48-2)
+#           unreadable note's WARN carried in the JSON's warns (NY12)
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   J1-J10  this project's running rollout is joined (ADR 0078 d6): the check's `join`, the verb's rows, File-sets,
@@ -3537,25 +3537,6 @@ else
   has "$(nyj 'd["warns"][0]')" "): an item it holds is not listed" "NY12: … and saying what is not listed"
   chmod 644 "$T/l1.md"
 fi
-
-# NY13 (p48-2): the list reads each limit's own month line, as approve-gates --standing does: a US$200 signing under
-# gx's task stamp never counts toward the rollout's US$10 line, and still counts toward gx's own US$1500 line.
-scen ny13
-BODY=$(printf '%s\n\n%s' '## Needs-you log' '- 2026-11-05T10:00+11:00 [[gx]] signed under the standing approval: US$200 (month to date US$200 of US$1500, task): spend: crowd pilot — cap 200 USD') \
-  mkro ro-a.md "$R" "$DEMO" 'spend_approval_usd: 10'
-gatepend g1.md ro-a 'spend: image calls — cap 5 USD'
-gatepend gx.md ro-a 'spend: more crowd pilot — cap 1400 USD'
-fmset gx.md spend_approval_usd 1500
-ny
-ok "$(rows)" "spend|gate|ro-a|gx|spend: more crowd pilot — cap 1400 USD|sign off gated input" \
-  "NY13: gx's task-limited US\$200 is off the rollout's line (g1 signs itself), and on gx's own (200 + 1400 > 1500)"
-has "$(nyj 'd["items"][0]["detail"]')" "would reach US\$1600 with this gate, past the US\$1500 month line (task)" \
-  "NY13: … gx's ASK names its own line's total"
-HOME="$EH" python3 "$RR" approve-gates --standing --dry-run --tasks g1,gx --rollout "$T/ro-a.md" --tasks-dir "$T" \
-  --now 2026-11-12T09:00:00Z > "$S.ag" 2>&1
-ok "$(grep -c '^g1: gate approved under the standing approval: spend: image calls — cap 5 USD ' "$S.ag")|$(grep -c \
-  '^ASK: ' "$S.ag")|$(grep -c '^ASK: gx: spend: more crowd pilot — cap 1400 USD: ' "$S.ag")" "1|1|1" \
-  "NY13: … approve-gates --standing's dry run signs g1 and asks exactly gx"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

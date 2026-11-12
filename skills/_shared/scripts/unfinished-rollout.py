@@ -552,11 +552,11 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   fail closed): each bullet of a gate-pending task's `## Gated inputs (awaiting sign-off)`, verbatim (its list marker
   stripped). A spend gate approve-gates --standing would sign never appears: the reading is _approve_standing's, read
   only (the limit, the exposure, a bounce, the gate already in `## Approved gates`, and this month's standing approvals
-  on the gate's own limit's month line, summed as _StandingLedger sums them (p48-2), never locked, plus the spend this
-  read let through on that line before it). Its ASK why is the item's `detail`. A gate-pending task whose section lists
-  no gate (absent, empty or blank lines only, read as approve-gates reads it) is one item, fail closed: approve-gates
-  refuses it (`nothing to sign off`), so only he moves it; kind `irreversible`, its `text` saying the section lists no
-  gate. Once signed (the task leaves gate-pending) it drops out.
+  summed as _StandingLedger sums them, never locked, plus the spend this read let through before it). Its ASK why is
+  the item's `detail`. A gate-pending task whose section lists no gate (absent, empty or blank lines only, read as
+  approve-gates reads it) is one item, fail closed: approve-gates refuses it (`nothing to sign off`), so only he moves
+  it; kind `irreversible`, its `text` saying the section lists no gate. Once signed (the task leaves gate-pending) it
+  drops out.
 - set-aside (kind `sign-in` when its reason is a Leg preflight's `preflight: <namespace> did not answer`, legs.md §
   Preflight, after the `Set aside by Leg <n> of [[<rollout>]]: ` leg.py set-aside opens it with, else `hands-on`):
   each task set aside at its run or at Integration that only a person moves on. In a parallel rollout that is
@@ -620,7 +620,6 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "LEG_LEASE_LAPSE",   # leg_session's closing-Leg clock (P44-4), read through LEG.rr
             # needs-you's readers (p48-1)
             "_gated", "_standing_limit", "_ask_why", "_bounce_why", "_month_why", "_StandingLedger", "_norm_gate",
-            "_month_line_key",   # each limit's own month line (p48-2)
             "_hold_until", "_resolve_holds", "_record_state", "_pr", "needs_human", "BLOCKED_SECTIONS",
             "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
@@ -2690,14 +2689,13 @@ BLOCKER_SECTION = "## Blocker diagnosis"
 class StandingRead:
     """approve-gates --standing's spend reading (_approve_standing), read-only: never a lock, a ledger line or a save.
     asks() is None when the standing approval would sign the gate, else its ASK why. The month's standing approvals are
-    _StandingLedger's sum for the gate's rollout note (on --dry-run, so unlocked) on the month line of the limit the
-    gate resolves (_month_line_key, p48-2: a task stamp's line is that task's own, keyed by its note's slug), plus every
-    spend this read already let through on that line, as one approve-gates call adds its own."""
+    _StandingLedger's sum for the gate's rollout note (on --dry-run, so unlocked), plus every spend this read already
+    let through, as one approve-gates call adds its own."""
 
     def __init__(self, rr, tasks_dir, now):
         self.rr, self.gi, self.tasks_dir = rr, rr._gated(), tasks_dir
         self.month = now.astimezone().strftime("%Y-%m")
-        self.ledgers, self.added = {}, {}
+        self.ledgers, self.added = {}, 0
 
     def asks(self, note, rollout_path, rollout_note, gate):
         rr, gi = self.rr, self.gi
@@ -2716,14 +2714,13 @@ class StandingRead:
         ledger = self.ledgers.get(rollout_path)
         if ledger is None:
             ledger = self.ledgers[rollout_path] = rr._StandingLedger(self.tasks_dir, rollout_path, self.month, True)
-        line_key = rr._month_line_key(limit["source"], note.path.stem, os.path.realpath(str(rollout_path)))
-        spent, why = ledger.spent(line_key)
+        spent, why = ledger.spent()
         if why:
             return why
-        total = spent + self.added.get(line_key, 0) + verdict["usd"]
+        total = spent + self.added + verdict["usd"]
         if total > limit["value"]:
             return rr._month_why(self.month, total, limit, gi)
-        self.added[line_key] = self.added.get(line_key, 0) + verdict["usd"]
+        self.added += verdict["usd"]
         return None
 
 
