@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The pickup sweep and the unstarted read (ADR 0057; schedule § 1.2, close step 2): the two read-only verbs of
+# The pickup sweep, the unstarted read and the awaited read (ADR 0057, ADR 0082; schedule § 1.2, close step 2): three
+# read-only verbs of
 # skills/_shared/scripts/unfinished-rollout.py.
 #   P1-P10  `pickups --repo <path> --tasks <slugs> [--misfit <slug>=<why>]...`: the pool, its order, the Repo rule
 #           (counted aggregate only), the gate rule, misfits, the needed set and the extras' dependency closures under
@@ -7,6 +8,9 @@
 #   N1-N12  `unstarted --rollout <slug> [--handoffs <dir>]...`: closed, serial, started (approved_unrun, or a Run record
 #           lead-entry), stamped, incomplete, launched (a handoff doc's `launches:`) or unstarted with its Project root
 #           (N12: close step 2's **Stale launch.** read of a launch doc's own `launches:`, with the peer guard)
+#   A1-A5   `awaited [--rollout <slug>]... [--task <slug>]...` (ADR 0082; close step 2's **Tasks a wait names.**): a
+#           paused rollout's Pause log links and its unlanded tasks' dependencies, its own queue left out; each
+#           line's kind; a fold tombstone named once by its unit; its exit 2s; read-only
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them), a stub HOME and the Run
 # record in temp. No vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -382,6 +386,53 @@ ok "$(f="$HS/ro-ss-fresh.md" bash "$S.guard")" "keep fresh" "N12: … and a fres
 before_v=$(snap "$S/vault")
 un --rollout ro-fresh --handoffs "$HD"
 ok "$(snap "$S/vault")" "$before_v" "N: unstarted writes nothing"
+
+# ── A1-A5: awaited ──────────────────────────────────────────────────────────────────────────────────────────
+# aw [args...] -> $out, $err, $rc
+aw() { HOME="$H" python3 "$CHECK" awaited --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+scen a
+BODY=$'## Pause log\n\n- 2026-11-07T10:00+11:00 paused until [[fix-merge]] lands; [[own]] waits on it; see [[ro-p]]' \
+  mkro ro-p 'paused: 2026-11-07T10:00+11:00'
+mkt own - 'rollout: "[[ro-p]]"' 'depends-on: ["[[dep-blocked]]", "[[dep-ip]]", "[[own2]]", "[[dep-done]]"]'
+mkt own2 - 'rollout: "[[ro-p]]"'
+ST=done mkt own-done - 'rollout: "[[ro-p]]"' 'depends-on: ["[[dep-late]]"]'
+PROJ='"[[Thread Skill]]", "[[AI]]"' mkt fix-merge -
+ST=blocked mkt dep-blocked -; ST=in-progress mkt dep-ip -; ST=done mkt dep-done -; mkt dep-late -
+aw --rollout ro-p
+ok "$out|$rc" "unstarted fix-merge (Thread Skill, AI)
+held dep-blocked (status: blocked)
+building dep-ip (status: in_progress)
+landed dep-done (done)|0" \
+  "A1: a paused rollout's Pause log link and its unlanded tasks' dependencies, its own queue and a landed task's left out"
+ok "$err" "" "A1: nothing on stderr"
+aw --rollout '[[ro-p]]' --task fix-merge
+ok "$(printf '%s\n' "$out" | head -1)" "unstarted fix-merge (Thread Skill, AI)" "A2: --task first, and a task named twice prints once"
+ok "$(printf '%s\n' "$out" | grep -c fix-merge)" 1 "A2: … once"
+
+mkro ro-live; mkt sch - 'rollout: "[[ro-live]]"'; mkt sch-p - 'rollout: "[[ro-p]]"'
+mkt held - 'hold_until: {pr: o/r#3, merged: true}'; mkt held-bad - 'hold_until: {pr: , merged: true}'
+ST=review mkt rev -; ST=merged mkt tomb - 'merged_into: "[[fix-merge]]"'
+mkt in-arch -; mkdir -p "$T/Archive"; mv "$T/in-arch.md" "$T/Archive/"
+aw --task sch --task sch-p --task held --task held-bad --task rev --task ghost --task ro-live --task in-arch
+ok "$out" "scheduled sch [[ro-live]]
+scheduled sch-p [[ro-p]] (paused)
+held held (hold_until: o/r#3)
+held held-bad (hold_until unreadable: no pr)
+held rev (status: review)
+missing ghost
+rollout ro-live
+unstarted in-arch (Demo)" "A3: each line's kind, in the order named"
+aw --task tomb --task fix-merge
+ok "$out" "unstarted fix-merge (Thread Skill, AI)" "A4: a fold tombstone is named by its unit, once"
+
+aw
+ok "$rc|$out" "2|" "A5: neither --rollout nor --task exits 2"
+has "$err" "awaited needs --rollout or --task" "A5: … with its line"
+aw --rollout ro-ghost
+ok "$rc|$out" "2|" "A5: a --rollout with no note exits 2"
+before_v=$(snap "$S/vault")
+aw --rollout ro-p --task held
+ok "$(snap "$S/vault")" "$before_v" "A5: awaited writes nothing"
 
 [ "$fail" = 0 ] && echo "pickups: ALL PASS" || echo "pickups: SOME FAILED"
 exit "$fail"

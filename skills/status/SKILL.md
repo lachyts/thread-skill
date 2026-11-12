@@ -407,6 +407,14 @@ takes none of them, nor does a RACE revert in flight.
   UNREADABLE: <why>`, waiting silently while the PR is open and holding on Lachy at the merge. A hold is never
   drift: the lead waits on its merge and `next` releases and clears it itself, and a CLOSED or unreadable one is
   Lachy's edit to the note, so status never routes a hold to `/thread:repair`.
+- **Waits on a task nobody builds:** only while `paused` is set, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited --rollout <slug>`
+  (read-only: notes only, no git, no gh). It reads the links in the rollout's `## Pause log` and its unlanded tasks'
+  `depends-on:` / `blocked-by:` entries, its own queue left out (ADR 0082). Render each `unstarted <task> (<Project>)`
+  line as `WAITS ON [[<task>]]: nothing is building it (<Project>)`, each `scheduled <task> [[<r>]] (paused)` line as
+  `WAITS ON [[<task>]]: its rollout [[<r>]] is paused too`, each `missing <task>` as `WAITS ON [[<task>]]: no note`,
+  and a non-zero exit as `WAITS ON: check failed (<first stderr line>)`; every other line renders nothing. Like a hold
+  it is never drift and status routes it to no repair: the start is `next`'s and close's (their **Tasks a wait
+  names.**), or his `/thread:schedule --tasks <task>`. It reads only the vault, so it holds offline too.
 - **Approved queue, unstamped:** a non-null `chainStart`: an approved queue's regenerate wrote this note and
   closed `[[<prior>]]` out when `<pr>` merged, and its lead died, or its `stamp-start` stopped, before the start
   stamp, so the Chorus Stage will not start it. Render `APPROVED QUEUE, UNSTAMPED: superseded [[<prior>]] when <pr>

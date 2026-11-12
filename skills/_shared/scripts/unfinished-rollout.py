@@ -18,6 +18,8 @@ ADR 0040, ADR 0060, ADR 0064, ADR 0067); and the estate's one Waiting list of re
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py branches --repo <path> --tasks <slug,...>
         [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited [--rollout <slug>]...
+        [--task <slug>]... [--tasks-dir <dir>]
 
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
@@ -432,6 +434,34 @@ directly in each --handoffs dir; it writes nothing and runs no git. It prints on
   unstarted <slug> <Project root>       none of the above: no lead has started it
 Exit 0, or 2 (no stdout, one `unfinished-rollout:` line) when no note is found, on a usage error, or when
 reconcile-rollout.py or run_record.py will not load.
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py awaited [--rollout <slug>]...
+        [--task <slug>]... [--tasks-dir <dir>]
+
+`awaited` answers close step 2's and next step 1's **Tasks a wait names.** (ADR 0082): whether anything is building
+each task a wait names. The awaited tasks are each --task, as given (the waits the session read in THREAD.md or the
+conversation), then, per --rollout (a paused rollout the session leads or its THREAD.md names), every wikilink in its
+`## Pause log` and every `depends-on:` / `blocked-by:` entry (reconcile-rollout.py's _dep_entries) of its linked tasks
+that have not landed; a wikilink to the rollout itself or to one of its own linked tasks is its own queue, never a
+wait. Each is followed through a fold tombstone to the unit that lands it (_fold_unit), and named once (case-folded),
+in that order. It reads notes only (one walk of the tasks dir); it writes nothing and runs no git and no gh. One line
+per awaited task, the first that applies, `<slug>` the unit's:
+  missing <slug>                        no note at the root or under Archive/
+  rollout <slug>                        a note tagged `rollout`: close step 2's **Rollouts this session wrote.** reads
+                                        a wait on a rollout, never this verb
+  landed <slug> (<status>)              reconcile-rollout.py's _landed (done, a carried fix, an approved read-only task)
+  scheduled <slug> [[<rollout>]]        its `rollout:` links a live rollout note (schedule step 1's rule,
+                                        _live_rollout); ` (paused)` is appended when that rollout carries `paused:`
+  building <slug> (status: in_progress) in no live rollout, but `in_progress` (vault-grammar § Statuses: lower-cased,
+                                        `-` read as `_`): a session holds it by hand
+  held <slug> (hold_until: <pr>)        its frontmatter carries `hold_until:` (vault-grammar § Hold until), read with no
+                                        gh call; one with no readable pr reads `(hold_until unreadable: <why>)`
+  held <slug> (status: <status>)        any status but `open` (`review`, `blocked`, `parked`, `dropped`, … ; `none`
+                                        when it has none)
+  unstarted <slug> (<Project>)          `open`, in no live rollout, with no hold: nothing is building it; <Project> is
+                                        its `projects:` names, comma-joined, or `no project`
+Exit 0 (no lines when nothing is awaited), or 2 (no stdout, one `unfinished-rollout:` line) on a usage error (neither
+--rollout nor --task), no tasks dir, a --rollout with no note or an unreadable one, or reconcile-rollout.py unloadable.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py waiting [--now <iso>] [--tasks-dir <dir>]
 
@@ -2331,6 +2361,79 @@ def cmd_unstarted(args, rr) -> int:
     return 0
 
 
+# ---- the tasks a wait names (ADR 0082) ---------------------------------------------------------------------------------
+
+def pause_log_links(rr, note):
+    """Every wikilink's slug in the note's `## Pause log` section, in order."""
+    lines, sections = rr._body_sections(note)
+    out = []
+    for heading, idxs in sections:
+        if heading == "## Pause log":
+            for i in idxs:
+                out += [s for s in (rr._wikilink_slug(m) for m in rr.WIKILINK_RE.findall(lines[i])) if s]
+    return out
+
+
+def awaited_line(rr, tasks_dir: Path, unit: str, entry) -> str:
+    """The `awaited` line for one awaited unit (the header's table, first match)."""
+    if entry is None:
+        return f"missing {unit}"
+    note = entry[1]
+    if "rollout" in tags_of(rr, note):
+        return f"rollout {unit}"
+    status = rr._status(note).replace("-", "_")
+    if rr._landed(note):
+        return f"landed {unit} ({status or 'none'})"
+    if rr._live_rollout(tasks_dir, note.get("rollout")):
+        ro = rr._wikilink_slug(rr._scalar(note.get("rollout")))
+        try:
+            paused = rr._valued(rr.Note(tasks_dir / f"{ro}.md").get("paused"))
+        except (OSError, ValueError):
+            paused = False
+        return f"scheduled {unit} [[{ro}]]" + (" (paused)" if paused else "")
+    if status == "in_progress":
+        return f"building {unit} (status: in_progress)"
+    hold = rr._hold_until(note, None)
+    if hold is not None:
+        # A readable pr is the hold whatever else its value lacks (a bare number needs the Project root only for gh).
+        return f"held {unit} (hold_until: {hold['pr']})" if hold["pr"] \
+            else f"held {unit} (hold_until unreadable: {hold['error']})"
+    if status != "open":
+        return f"held {unit} (status: {status or 'none'})"
+    return f"unstarted {unit} ({project_label(rr, note)})"
+
+
+def cmd_awaited(args, rr) -> int:
+    if not args.rollout and not args.task:
+        die("awaited needs --rollout or --task")
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        die(f"no tasks dir at {tasks_dir}")
+    index = rr._walk_of(tasks_dir).index
+    named = [s for s in (rr._wikilink_slug(t) for t in args.task or []) if s]
+    for value in args.rollout or []:
+        slug = rr._wikilink_slug(value) or ""
+        path = find_task(tasks_dir, slug) if slug else None
+        if path is None:
+            die(f"--rollout {value}: no note at {tasks_dir / (slug + '.md')} or under Archive/")
+        try:
+            note = rr.Note(path)
+            linked, _index = rr._scan(path, tasks_dir)
+        except (ValueError, OSError) as e:
+            die(f"--rollout {slug}: {e}")
+        own = {slug.lower()} | {p.stem.lower() for p, _n in linked}
+        deps = [d for _p, task in linked if not rr._landed(task) for d in rr._dep_entries(task)]
+        named += [s for s in pause_log_links(rr, note) + deps if s.lower() not in own]
+    seen = set()
+    for slug in named:
+        unit, entry, _folded = rr._fold_unit(slug, index)
+        if unit.lower() in seen:
+            continue
+        seen.add(unit.lower())
+        print(awaited_line(rr, tasks_dir, unit, entry))
+    return 0
+
+
 # ---- the Waiting list (ADR 0076) --------------------------------------------------------------------------------------
 
 def leg_session(leg, ctx, chain, read, leases) -> bool:
@@ -2634,6 +2737,11 @@ def main() -> int:
     u.add_argument("--handoffs", action="append", default=None,
                    help="a docs/handoffs dir close's scan read (repeatable): a doc there with `launches:` names a launch")
     u.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    aw = sub.add_parser("awaited", help="whether anything builds each task a wait names (ADR 0082; close step 2)")
+    aw.add_argument("--rollout", action="append", default=None,
+                    help="a paused rollout's slug (repeatable): its ## Pause log links and its tasks' dependencies")
+    aw.add_argument("--task", action="append", default=None, help="an awaited task's slug or [[wikilink]] (repeatable)")
+    aw.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     wl = sub.add_parser("waiting", help="the Waiting list (ADR 0076): which serial chain starts next, and the room")
     wl.add_argument("--now", default=None, help="the clock for the Capacity, Away and lease reads (an ISO time)")
     wl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
@@ -2653,7 +2761,8 @@ def main() -> int:
     # share it, and nothing outlives the process.
     rr._share_walks()
     verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
-             "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting}
+             "hold": cmd_hold, "clone": cmd_clone, "branches": cmd_branches, "waiting": cmd_waiting,
+             "awaited": cmd_awaited}
     return verbs[args.cmd](args, rr)
 
 
