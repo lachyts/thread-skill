@@ -51,4 +51,8 @@ seed() {  # seed <n> <line…> — pre-seed PR n's base-moved counter
   local n="$1"; shift; mkdir -p "$tmp/repo/.claude/merge-task"; printf '%s\n' "$@" > "$tmp/repo/.claude/merge-task/$n.base-moved"
 }
 ctr() { cat "$tmp/repo/.claude/merge-task/$1.base-moved" 2>/dev/null; }
+chk() {  # chk <rc> <stdout> [<stderr>] [<sleep>] — append one `pr checks --watch` result; a sleep of 0 is none
+  python3 -c 'import json,sys; a = sys.argv + ["", "0"][len(sys.argv) - 3:]
+print(json.dumps({"rc": int(a[1]), "out": a[2], "err": a[3], "sleep": float(a[4])}))' "$@" >> "$MT_STATE/checks.seq"
+}
 lacks() { case "$1" in *"$2"*) ok "[$1]" "no '$2'" "$3";; *) ok y y "$3";; esac; }

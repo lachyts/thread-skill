@@ -16,9 +16,6 @@ export MERGE_TASK_NO_RUNNER_POLL=1
 
 OLD=2026-01-01T00:00:00Z   # past the default 15-minute limit on any run; NEVER below lifts the limit over it
 NEVER=999999999
-chk() {  # chk <rc> <stdout> <stderr> <sleep> — append one `pr checks --watch` result
-  python3 -c 'import json,sys; print(json.dumps({"rc": int(sys.argv[1]), "out": sys.argv[2], "err": sys.argv[3], "sleep": float(sys.argv[4])}))' "$@" >> "$MT_STATE/checks.seq"
-}
 row() { printf '%s\t%s\t1m\thttps://github.com/o/r/actions/runs/7/job/%s\t' "$1" "$2" "$3"; }
 hang() { chk 8 "$(row "$1" pending "$2")" "" 30; }        # the watch a required queued job holds open
 green() { chk 0 "$(row "$1" pass "$2")" "" 0; }
@@ -33,6 +30,9 @@ queued() {  # queued <job json>… — run 7 unfinished on the head, holding tho
   echo '[{"id": 7, "status": "queued"}]' > "$MT_STATE/runs"
 }
 SH=self-hosted
+# A required roll-up check its CI has yet to create reads BLOCKED: the wait's sample (the third read, after the pre-pass
+# and the state machine's) is BLOCKED, so an UNSTABLE entry still reads what is in flight on the head.
+unreported() { printf '%s\n' UNSTABLE UNSTABLE BLOCKED UNSTABLE > "$MT_STATE/pr/5/mergeStateStatus.seq"; }
 
 # 1. A required job queued past the limit: the watch is cut, the job read, the task set aside in this one run. A row
 #    whose link names no job is matched by the job's name.
@@ -50,14 +50,16 @@ for form in link no-link; do
   ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 1 "1 ($form). one watch: no second wait"
 done
 
-# 2. The same job not required, and no required check reported: it stops counting as CI in flight, and an UNSTABLE PR
-#    merges at once.
+# 2. The compression-engine incident's shape (PRs #151/#152): UNSTABLE, the same job not required, no required check
+#    reported. The wait's UNSTABLE sample comes before any in-flight read, so it merges at once. That the held run
+#    stops counting as CI in flight is tests 5 and 6's.
 fresh; pair; mkpr 5 "$I" UNSTABLE
 queued "$(job 8 'self-hosted (arm)' null "$OLD" $SH)"
 absent
 run 5 "$I" "$B"
 ok "$rc" 0 "2. an optional job no runner took: merges"; ok "$(nmerge)" 1 "2. merged once"
 lacks "$out" "CI in flight on head — waiting" "2. not read as CI in flight"
+lacks "$(glog)" "actions/runs" "2. no in-flight read"
 
 # 3. An optional no-runner job beside a required check still pending: the cut finds it not required, the watch goes on,
 #    also when it shares the required check's name (another workflow's job: the row's link names job 8, this one is 9).
@@ -87,8 +89,8 @@ EOF
   ok "$rc" 0 "4a ($label). required: waited on, then merges"; ok "$(nmerge)" 1 "4a ($label). merged once"
   ok "$(grep -c -- '--watch' "$MT_STATE/gh.log")" 2 "4a ($label). the watch went on after the cut"
   lacks "$out" "no-runner" "4a ($label). never set aside"
-  # 4b. no required check reported: the job still reads as CI in flight, so the absent check is waited on.
-  fresh; pair; mkpr 5 "$I" UNSTABLE
+  # 4b. no required check reported, one not created yet: the job still reads as CI in flight, so it is waited on.
+  fresh; pair; mkpr 5 "$I" UNSTABLE; unreported
   queued "$(job 8 "build ($lab)" "$runner" "$OLD" "$lab")"
   absent; green ci 8
   MERGE_TASK_NO_RUNNER_LIMIT=$limit run 5 "$I" "$B"
@@ -97,9 +99,10 @@ EOF
 done
 
 # 5. A run is held only when every job in it is no-runner: a no-runner job beside a live one, or on a jobs page that
-#    lists fewer jobs than its total_count (a live job may be on the next page), leaves the run in flight.
+#    lists fewer jobs than its total_count (a live job may be on the next page), leaves the run in flight. A required
+#    check not created yet keeps the wait reading it.
 for form in 'beside a live job' 'a partial page'; do
-  fresh; pair; mkpr 5 "$I" UNSTABLE
+  fresh; pair; mkpr 5 "$I" UNSTABLE; unreported
   if [ "$form" = 'a partial page' ]; then
     TOTAL=2 queued "$(job 8 'self-hosted (arm)' null "$OLD" $SH)"
   else
