@@ -373,7 +373,8 @@ One message of statements, no question:
 - each fork's Pre-flight leavers, listed by the `why` the fork returns, as schedule step 8's left-out block lists
   them: `undecided` as "waiting on your answer, so it reaches the next round"; `orient` with its pointer,
   `/thread:orient [[<home>]]`; `dependency` as "depends on [[<via>]], which is left out"; `waits` as "waits on
-  [[<via>]] (<reason>): nobody is building it"; `ungraded` as "could not be
+  [[<via>]] (<project>; <reason>): nobody is building it; schedule or land it, and the next pass takes this one", its
+  `<project>` the row's `project`, or `no project` when it has none; `ungraded` as "could not be
   graded (<reason>): the next pass grades it again"; `unreadable` as "could not be read (<reason>): fix its
   frontmatter, and the next pass grades it";
 - each task the rank skipped as `unreadable` (its `skipped[]` row in `$S/rank.json`, a task note whose frontmatter the

@@ -361,12 +361,12 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   - One call or Grill: in when decided (`decided`), else out (`undecided`);
   - Orient: out (`orient`, with its `home`), decided or not;
   - waiting (schedule § 3, ADR 0078 d7): a candidate not kept, not Orient and readable, one of whose dependencies (its
-    scan `dependsOn`, then its `bodyDependsOn`, the body's *Depends on* lines) is no candidate and is nobody's to
-    build: a scan task not in flight (its `rollout:` links no live rollout, its status neither in_progress nor
-    Review), or an unread note. It is out (`waits`, decided or not, never asked), via that first dependency as the
-    scan shows it, its reason `<status>, on no live rollout` (WAITS_UNREAD for an unread note) and its `project` the
-    dependency's first project when it has one. A dependency the scan lacks (done, merged, dropped, or no task) and one
-    in flight hold nothing: the queue holds the dependant until a rollout lands it;
+    scan `dependsOn`, then its `bodyDependsOn`, the body's *Depends on* lines and `## Depends on` paragraph) is no
+    candidate and is nobody's to build: a scan task not in flight (its `rollout:` links no live rollout, its status
+    neither in_progress nor Review), or an unread note. It is out (`waits`, decided or not, never asked), via that
+    first dependency as the scan shows it, its reason `<status>, on no live rollout` (WAITS_UNREAD for an unread
+    note) and its `project` the dependency's first project when it has one. A dependency the scan lacks (done, merged,
+    dropped, or no task) and one in flight hold nothing: the queue holds the dependant until a rollout lands it;
   - not readable (the scan's unreadTasks[], a key no scan task holds): out (`unreadable`, its reason the scan's why
     and its note), decided or not; no schedule can stamp a note that does not parse;
   - not graded (the rank's invalid[], ungraded[] or skipped[], or no scan row): ungraded, its reason `invalid: <the

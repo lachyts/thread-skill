@@ -11,7 +11,9 @@
 //      a dependency released since the last write included.
 //   n4 a task the Pre-flight held (schedule § 3, p51-1: it waits on a task nobody is building) is written with its
 //      dependants on the note `--rollout` names (`--held A=B`), kept by a plain rewrite while still true, and dropped
-//      once its dependency lands or a rollout takes it; schedule § 3, step 7 and step 8 say so.
+//      once its dependency lands or a rollout takes it; a plain rewrite that read the note before a `--held` write
+//      saved keeps that write's line; an unknown `--rollout` writes no held line but still rewrites every live note;
+//      schedule § 3, step 7 and step 8 say so.
 // Spawns git once and each script a handful of times; it reads no real vault.
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -59,17 +61,22 @@ test('n1. the prose carries every listing', () => {
     ['schedule § 0', s0, ['clone --repo <the Local: path> --project <§ 0\'s project> [--tasks <this run\'s --tasks list>]',
       '`this run would have taken:`']],
     ['schedule step 7', s7, ['scripts/waits-on.py write`', 'every live rollout note', 'waits on [[x]] (<Project>, not scheduled)']],
-    ['schedule step 8', s8, ['Waits on:', '— waits on [[x]] (<Project>; open, on no live rollout)']],
+    ['schedule step 8', s8, ['Waits on:', '— waits on [[x]] (<Project>; open, on no live rollout)', 'or `no project` when the row has none']],
     ['schedule § 3', flat(schedule, /^### 3\. Extract/), ['**A dependency nobody is building holds its task (ADR 0078 d7).**',
-      'body\'s *Depends on* lines', 'out as `waits`', 'holds nothing']],
+      'body\'s *Depends on*', 'the first paragraph under a `## Depends on` heading', 'out as `waits`', 'holds nothing',
+      'otherwise its stop report is their only record']],
     ['schedule step 7 held', s7, ['`--rollout <this-slug>`', '`--held <slug>=<via>`']],
+    ['schedule § 1.5 empty queue', flat(schedule, /^### 1\.5\. /), ['when § 0 named this project\'s live rollout',
+      'with `--rollout` naming that note and one `--held` per such task', 'the stop\'s report is their only record']],
     ['schedule S3', s3, ['`this run would have taken:`', 'reports as left out, never drops']],
-    ['schedule S6', serialPath, ['**S6. Stamp.**', 'scripts/waits-on.py write`']],
+    ['schedule S6', serialPath, ['**S6. Stamp.**', 'scripts/waits-on.py write`', 'goes on the note S5 wrote for its first project',
+      'so `--rollout` always names a note this run wrote', 'gets no `--held`']],
     ['orient-all § 2', oa2, ['Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/waits-on.py write`']],
     ['orient-all Scope', flat(orientAll, /^## Scope/), ['`waits-on.py write`', 'never on a dry run']],
     ['orient-all § 9', flat(orientAll, /^### 9\. /), ['`waits-on.py write`']],
     ['orient-all § 3', flat(orientAll, /^### 3\. /), ['`rounds.waitsOn[]`']],
-    ['orient-all § 8', flat(orientAll, /^### 8\. /), ['`rounds.waitsOn[]`', 'not scheduled', '`this run would have taken:`']],
+    ['orient-all § 8', flat(orientAll, /^### 8\. /), ['`rounds.waitsOn[]`', 'not scheduled', '`this run would have taken:`',
+      '"waits on [[<via>]] (<project>; <reason>): nobody is building it', 'or `no project` when it has none']],
     ['vault-grammar', read('skills/_shared/vault-grammar.md'), ['## Waits on', '`waits-on.py write`']],
   ]
   for (const [name, text, patterns] of rows) {
@@ -212,9 +219,48 @@ test('n4. a task the Pre-flight held is written with its dependants on its note 
   assert.deepEqual(waits(), [HELD[1]])
   // Usage: exit 2, nothing written.
   const before = fs.readFileSync(ro, 'utf8')
-  for (const args of [['--held', 'h-b=h-a'], ['--rollout', 'ro-h', '--held', 'h-b'], ['--rollout', 'no-such', '--held', 'h-b=h-a']]) {
+  for (const args of [['--held', 'h-b=h-a'], ['--rollout', 'ro-h', '--held', 'h-b']]) {
     const bad = run(...args)
     assert.equal(bad.status, 2, `${args.join(' ')}: ${bad.stderr}`)
   }
   assert.equal(fs.readFileSync(ro, 'utf8'), before)
+  // An unknown --rollout (schedule S6's note never written): an ERROR line, no held line anywhere, and every live note
+  // still rewritten, ro-other's released wait included.
+  write(path.join(V, 'h-o.md'), taskNote('open', ['Other'], { rollout: 'ro-other', deps: ['x-o'] }))
+  write(path.join(V, 'x-o.md'), taskNote('open', ['Far']))
+  const unknown = run('--rollout', 'no-such', '--held', 'h-a=h-b')
+  assert.equal(unknown.status, 1, unknown.stderr)
+  assert.match(unknown.stderr, /^ERROR: waits-on: --rollout no-such: no live rollout note of that name in .*; its --held lines are written nowhere$/m)
+  assert.equal(fs.readFileSync(ro, 'utf8'), before)
+  assert.ok(fs.readFileSync(path.join(V, 'ro-other.md'), 'utf8').includes('- [[h-o]] waits on [[x-o]] (Far, not scheduled)'),
+    'the plain rewrite still runs')
+  // A plain rewrite (B) reads ro-h after a linked task was stamped; a --held write (A) lands before B saves. B's save
+  // replays its edit on the fresh note, so A's held line, which nothing else stores, survives (Note.apply).
+  write(path.join(V, 'x-dep.md'), taskNote('open', ['Other']))
+  write(path.join(V, 'h-l.md'), taskNote('open', ['Demo'], { rollout: 'ro-h', deps: ['x-l'] }))
+  write(path.join(V, 'x-l.md'), taskNote('open', ['Other']))
+  const RACE = [
+    'import importlib.util, subprocess, sys',
+    'from pathlib import Path',
+    'waits, tasks, ro = sys.argv[1:4]',
+    'spec = importlib.util.spec_from_file_location("waits_on", waits)',
+    'mod = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(mod)',
+    'rr = mod.load_rr()',
+    'save = rr.Note.save',
+    'def late_save(self, *a, **k):',
+    '    rr.Note.save = save',
+    '    a_run = subprocess.run([sys.executable, "-B", waits, "write", "--tasks-dir", tasks, "--rollout", "ro-h", "--held", "h-a=x-dep"], capture_output=True, text=True)',
+    '    assert a_run.returncode == 0, a_run.stderr',
+    '    return save(self, *a, **k)',
+    'rr.Note.save = late_save',
+    'print("\\n".join(mod.rewrite(rr, Path(ro), Path(tasks))))',
+  ].join('\n')
+  const race = spawnSync('python3', ['-B', '-c', RACE, WAITS, V, ro], { encoding: 'utf8', env: ENV })
+  assert.equal(race.status, 0, race.stderr)
+  const ALL = ['- [[h-l]] waits on [[x-l]] (Other, not scheduled)', '- [[h-a]] waits on [[x-dep]] (Other, not scheduled)', HELD[1]]
+  assert.deepEqual(waits(), ALL, 'the --held line written between B\'s read and its save is kept')
+  assert.deepEqual(race.stdout.trim().split('\n'), ALL, 'B reports the lines it saved')
+  assert.equal(run().status, 0)
+  assert.deepEqual(waits(), ALL, 'and every later plain rewrite keeps it')
 })

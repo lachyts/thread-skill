@@ -2141,7 +2141,9 @@ test('D17b. slices, rank and preflight name a task whose frontmatter did not par
 // body-only `**Depends on:** [[x|alias]] (why).` another repo's open task; b45914c3 (smart-slider-rollout-2026-10-28),
 // a body-only `Depends on [[x]].` an open task of a shared umbrella project; b61fa236 (thread-skill-rollout-2026-10-26),
 // a `depends-on:` another repo's open task. Each is held as `waits` before the first Slot, with its dependants; a
-// dependency that is done, or on a live rollout, holds nothing, and a fenced or later-sentence link is never read.
+// dependency that is done, or on a live rollout, holds nothing, and a fenced or later-sentence link is never read. A
+// `## Depends on` heading's first paragraph is read too (15 open vault notes write it so), its clause running past an
+// `e.g.`, and a paragraph that opens with "Nothing" names none.
 test('D17c. preflight holds a task whose dependency outside the candidates nobody is building, with its dependants', () => {
   const VW = path.join(S, 'vw')
   const WT = path.join(VW, 'Work', 'Tasks')
@@ -2171,6 +2173,10 @@ test('D17c. preflight holds a task whose dependency outside the candidates nobod
   task('dep-flight', 'open', ['Agent Stable'], '\nrollout: "[[ro-live]]"')
   task('ts-fence', 'open', ['Thread Skill'], '', '```\nDepends on [[chorus-spreads]]\n```\n')
   task('ts-nothing', 'open', ['Thread Skill'], '', 'Depends on nothing; build order puts [[chorus-spreads]] first.\n')
+  // A heading's first paragraph, its links mirrored in no `depends-on:`, held; and one that names nothing.
+  task('ts-heading', 'open', ['Thread Skill'], '', '## Depends on\n\n[[agent-stable-p2-3]] and [[dep-done]] (e.g. [[dep-flight]]).\n' +
+    'Pairs with [[chorus-spreads]].\n\n## Done when\n\nSee [[ts-p29-7]].\n')
+  task('ts-heading-none', 'open', ['Thread Skill'], '', '### Depends on\n\nNothing (if [[chorus-spreads]] lands first, reuse it).\n')
   // A carried task that has started keeps its place, and is named.
   task('ts-kept', 'in_progress', ['Thread Skill'], '\nrollout: "[[ro-live]]"' + links('depends-on', ['agent-stable-p2-3']))
   const scanRun = spawnSync('python3', [SCAN, '--vault', VW, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
@@ -2179,20 +2185,23 @@ test('D17c. preflight holds a task whose dependency outside the candidates nobod
   const row = (slug) => scan.tasks.find((t) => t.slug === slug)
   assert.deepEqual(row('chorus-recovers').bodyDependsOn, ['ts-p29-7'], 'the clause ends at its sentence: no later link')
   assert.deepEqual([row('slider-p8-1').bodyDependsOn, row('ts-fence').bodyDependsOn, row('ts-nothing').bodyDependsOn,
-    row('ts-p31-2').bodyDependsOn], [['animately-github-org-billing'], [], [], []])
+    row('ts-p31-2').bodyDependsOn, row('ts-heading-none').bodyDependsOn], [['animately-github-org-billing'], [], [], [], []])
+  assert.deepEqual(row('ts-heading').bodyDependsOn, ['agent-stable-p2-3', 'dep-done', 'dep-flight'],
+    'a heading\'s first paragraph, to its clause end, past an e.g.')
   const scanFile = keep('vw-scan.json', scanRun.stdout)
   const CANDS = ['chorus-recovers', 'slider-p8-1', 'slider-p8-2', 'ts-p31-2', 'ts-call', 'ts-done', 'ts-flight', 'ts-fence',
-    'ts-nothing', 'ts-kept']
+    'ts-nothing', 'ts-heading', 'ts-heading-none', 'ts-kept']
   const grades = keep('vw-grades.json', JSON.stringify([
     ...['Chorus', 'Animately App'].map((project) => ({ project, tasks: CANDS.filter((s) => (project === 'Chorus' ? s.startsWith('chorus') : s.startsWith('slider')))
       .map((s) => R(s, 'serial')) })),
-    { project: 'Thread Skill', tasks: [...['ts-p31-2', 'ts-done', 'ts-flight', 'ts-fence', 'ts-nothing'].map((s) => R(s, 'serial')),
+    { project: 'Thread Skill', tasks: [...['ts-p31-2', 'ts-done', 'ts-flight', 'ts-fence', 'ts-nothing', 'ts-heading', 'ts-heading-none']
+      .map((s) => R(s, 'serial')),
       G('ts-call', 'One call', 'serial', { decisions: one() })] }]))
   const rankRun = spawnSync('python3', [RANK, 'rank', '--scan', scanFile, '--today', TODAY, '--grades', grades], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
   assert.equal(rankRun.status, 0, rankRun.stderr)
   const rankFile = keep('vw-rank.json', rankRun.stdout)
   const j = ok(preflight(['--tasks', CANDS.join(','), '--kept', 'ts-kept'], rankFile, scanFile))
-  assert.deepEqual(j.queue, ['ts-done', 'ts-flight', 'ts-fence', 'ts-nothing', 'ts-kept'])
+  assert.deepEqual(j.queue, ['ts-done', 'ts-flight', 'ts-fence', 'ts-nothing', 'ts-heading-none', 'ts-kept'])
   assert.deepEqual(j.out, [
     { slug: 'chorus-recovers', grade: 'Ready', why: 'waits', via: 'ts-p29-7', reason: 'open, on no live rollout', project: 'Thread Skill',
       note: 'Work/Tasks/chorus-recovers.md' },
@@ -2202,7 +2211,9 @@ test('D17c. preflight holds a task whose dependency outside the candidates nobod
     { slug: 'ts-p31-2', grade: 'Ready', why: 'waits', via: 'agent-stable-p2-3', reason: 'open, on no live rollout', project: 'Agent Stable',
       note: 'Work/Tasks/ts-p31-2.md' },
     { slug: 'ts-call', grade: 'One call', why: 'waits', via: 'agent-stable-p2-3', reason: 'open, on no live rollout', project: 'Agent Stable',
-      note: 'Work/Tasks/ts-call.md' }])
+      note: 'Work/Tasks/ts-call.md' },
+    { slug: 'ts-heading', grade: 'Ready', why: 'waits', via: 'agent-stable-p2-3', reason: 'open, on no live rollout', project: 'Agent Stable',
+      note: 'Work/Tasks/ts-heading.md' }])
   assert.deepEqual([j.asks, j.index], [[], []], 'a held One call is never asked')
   assert.deepEqual(j.warnings, ['[[ts-kept]] keeps its place (a carried task that has started) but waits on [[agent-stable-p2-3]] ' +
     '(open, on no live rollout), which nobody is building'])
