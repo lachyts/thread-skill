@@ -15,8 +15,9 @@
 #   A17 a repeat stall at Integration (ADR 0033 d4 as amended): the same held stop twice running is Lachy's, the exempt
 #       routes still cool, and a kill that names no wait carries the last real reason on its second line
 #   A18 a settings block (ADR 0080): the same stop is the settings point, 22a re-enters a changed block exactly once
-#       (the `re-entered` boundary in the verb's one save, a set-aside in the same minute included), and an
-#       unreported-context block on another head is the same stop
+#       (the `re-entered` boundary in the verb's one save, a set-aside in the same minute included), an
+#       unreported-context block on another head is the same stop, and a budget spent at the first sighting gets its one
+#       cool-down retry free before the same stop is due (once: a second first sighting past it is H10)
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
 # scenario's Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the
@@ -1112,6 +1113,39 @@ I=$(INOW=2026-10-03T09:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetryClass"], d["settingsBlock"]["kind"], d["settingsBlock"]["contexts"], d["settingsBlock"]["due"]]')" \
   '["infra","unreported-context",["build"],true]' "A18 R4: unreported-context on a second head is the same stop: due for free"
 ok "$(lastev set-aside 'd["reasonClass"]')" '"unreported-context"' "A18: its set-aside's reasonClass is unreported-context"
+# A18 spent (ADR 0080 d2): a budget already spent at a settings block's first sighting (auto_retries_used equal to
+# auto_retries, 2 of 2) never makes it due: it gets its one infra cool-down retry, 15 minutes, free of the budget (the
+# verb takes the counter one past it, as 22a's re-entry does), and only the identical stop after that retry is the
+# settings point. No-runner and unreported-context alike.
+for k in nr ur; do
+  r="no-runner: required$HELD"; r2="no-runner: required$HELD2"; [ "$k" = ur ] && { r=$UR; r2=$UR; }
+  a17int "spent-$k"; setfm "$A" auto_retries_used 2
+  lead "$A" integration "$r"
+  I=$(INOW=2026-10-03T08:05:00Z inp "$A")
+  ok "$(j "$I" '[d["autoRetry"], d["humanFix"], d["autoRetryAfter"], d["settingsBlock"]["state"], d["settingsBlock"]["due"], d["settingsBlock"]["freeNow"]]')" \
+    '[false,null,"2026-10-03T08:15+00:00","unfreed",false,false]' "A18 spent ($k): the first sighting with 2/2 used → not due, the 15-minute cool-down"
+  ok "$(j "$(INOW=2026-10-03T08:15:00Z inp "$A")" '[d["autoRetry"], d["settingsBlock"]["due"]]')" '[true,false]' \
+    "A18 spent ($k): … then retryable, still not due"
+  ANOW=2026-10-03T08:15:00Z ar "$A"
+  ok "$rc|$(fm "$A" status)|$(fm "$A" auto_retries_used)" "0|status: review|auto_retries_used: 3" \
+    "A18 spent ($k): auto-retry re-enters it, its counter one past the budget"
+  mig "$A" 2026-10-03T08:20:00Z
+  lead "$A" integration "$r2" 2026-10-03T08:30:00Z
+  I=$(INOW=2026-10-03T08:35:00Z inp "$A")
+  ok "$(j "$I" '[d["autoRetry"], d["humanFix"], d["settingsBlock"]["state"], d["settingsBlock"]["due"], d["settingsBlock"]["freeNow"]]')" \
+    '[false,null,"unfreed",true,true]' "A18 spent ($k): the identical stop after that retry → the settings point, due"
+  has "$(j "$I" 'd["autoRetryWhy"]')" "; same stop twice running at Integration: " "A18 spent ($k): … its why the same stop, never the budget"
+done
+# The free retry is given once: another settings stop after it, its counter past the budget, is cause 24's H10.
+a17int spent-once; setfm "$A" auto_retries_used 2
+lead "$A" integration "no-runner: required$HELD"
+ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "A18 spent: (the free retry)"
+mig "$A" 2026-10-03T08:20:00Z
+lead "$A" integration 'no-runner: required job "arm64" queued 47 minutes with no runner (run 7, job 9)' 2026-10-03T08:30:00Z
+I=$(INOW=2026-10-03T09:40:00Z inp "$A")
+ok "$(refused "$I")|$(j "$I" 'd["settingsBlock"]["due"]')" "$REFUSED|false" \
+  "A18 spent: a second first sighting past the budget → 24's H10, never a second free retry"
+has "$(j "$I" 'd["autoRetryWhy"]')" "budget: 3/2 used" "A18 spent: … its why the budget"
 
 # ── A15: the pins ───────────────────────────────────────────────────────────────────────────────────────────
 pin() {

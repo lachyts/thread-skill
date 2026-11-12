@@ -540,7 +540,7 @@ plan-block after a descope, the seeded revise's own, a gate) shows no count, and
 block (below). A cool-down adds `cooling until <autoRetryAfter>`. A settings block (ADR 0080, `settingsBlock`) shows
 `settings repair pending (retries at <autoRetryAfter>)` while it reads `due` and `unfreed` with a null `humanFix`
 (merge-settings.py `free`, the lead's step 1.2 *Settings repair* or repair's **settings block** row, changes the
-setting), and `merge setting changed for you on <changedAt>` once it reads `changed` (`settingsBlock.why` carries it). The route: the live lead (execute § 4.5 step 1.2's
+setting), and `merge setting changed for you on <changedAt>` once it reads `changed` from a change, or `cleared on <changedAt>, no setting changed` from a `cleared` row (another change, or origin's branch, already freed it) (`settingsBlock.why` carries either). The route: the live lead (execute § 4.5 step 1.2's
 *Automatic retry*) re-enters a set-aside task at its run or at Integration while `inputs` reads `autoRetry: true`,
 or once its `autoRetryAfter` ends; an `autoRevise: true` row is the seeded revise's, and a gate is never retried. A
 `plan-blocked` one is judged for a descope first (the lead's step 1.2, or repair § 3): a refused descope is

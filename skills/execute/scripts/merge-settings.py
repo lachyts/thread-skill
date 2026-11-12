@@ -34,10 +34,12 @@ the PR's head). Only the contexts list of a rule is ever edited: `strict` and a 
   1. The Engine snapshot guard (ADR 0043): a wrong root exits 2 with its `engine-snapshot:` line.
   2. The note; unreadable: exit 2.
   3. No settings block (a red required check, reasonClass merge-gate, is none): exit 5, no gh call, no row.
-  4. Idempotence, with no gh call: a block reading `changed` prints its row and exits 0; `left`, exits 3.
-  5. Due: lead-integrate.py's verdict's `settingsBlock`. `due` false: exit 5 (before the settings point a rule can
-     still be met: a sleeping runner gets its cool-down retry first), no row. `freeNow` false (a try's
-     SETTINGS_RETRY_MIN wait): exit 75, no row: the `tried` row's retry is the wait.
+  4. Idempotence, with no gh call: a block reading `changed` prints `already changed for you: <its row>` (or `already
+     cleared, no setting changed: <why>` for a `cleared` row) and exits 0; `left`, exits 3.
+  5. Due: lead-integrate.py's verdict's `settingsBlock`. `due` false: exit 5 (before the settings point, the same stop
+     after one cool-down retry, a rule can still be met: a sleeping runner gets that retry first, a budget spent before
+     its first sighting included), no row. `freeNow` false (a try's SETTINGS_RETRY_MIN wait): exit 75, no row: the
+     `tried` row's retry is the wait.
   6. The Run record (ADR 0080 d4): the task's latest `set-aside` line must carry reasonClass = the block's kind and
      setAsideAt integration; else `left` (not-recorded), no gh call.
   7. The environment: gh missing, no GitHub origin, or, for unreported-context, PyYAML missing or an Integration log
@@ -131,7 +133,11 @@ Comparisons read -1 and a null app_id as one value.
 
 Exits of `free`: 0 changed or cleared, now or already; 3 left, now or already; 5 not due, or no settings block (no gh
 call, no row: nothing waits on `free`); 8 transient, with a `tried` row; 75 busy (a `tried` row) or a try's retry not
-reached (no row); 2 usage, a wrong root, or a note that cannot be read or saved.
+reached (no row); 2 usage, a wrong root, or a note that cannot be read or saved. An exit 0's stdout tells changed from
+cleared, and the lead prints it verbatim (execute § 4.5 step 1.2's *Settings repair*): a change prints one
+`[[<slug>]]: merge setting changed for you (<source> <repo>@<branch>[ ruleset <id>]: <change>); undo: <command>` line
+per source; a cleared block prints `[[<slug>]]: cleared, no setting changed: <why>`, which names no undo (nothing
+changed).
 
 `restore --id X` (guarded, under the lock, on Lachy's word only: /thread:repair 3i): ownership and rights read again,
 then the live setting of X's source: equal to X's after, its stored before is written through _write_argv, read back,
@@ -818,8 +824,11 @@ class Run:
 
 def _settled_exit(block, slug):
     """Step 4: the exit of a block a row already settled, or None."""
+    if block["state"] == "changed" and block["cleared"] is not None:
+        print("[[%s]]: already cleared, no setting changed: %s" % (slug, block["cleared"]))
+        return 0
     if block["state"] == "changed":
-        print("[[%s]]: already %s" % (slug, block["row"] or "changed"))
+        print("[[%s]]: already changed for you: %s" % (slug, block["row"] or "changed"))
         return 0
     if block["state"] == "left":
         print("[[%s]]: already left: %s: %s" % (slug, block["cause"], block["why"]))
@@ -1170,7 +1179,7 @@ def _cleared(run, pre, why):
     rr._append_settings_rows(run.note, list(pre) + ["- %s cleared %s: %s" % (_stamp(run.now), run.fp(), why)])
     run.pre = []
     _save(run.note)
-    print("[[%s]]: cleared: %s" % (run.slug, why))
+    print("[[%s]]: cleared, no setting changed: %s" % (run.slug, why))
     return 0
 
 

@@ -331,6 +331,8 @@ newrepo; put .github/workflows/ci.yml "$(ci "$(job lint)")"; HB=$(cm c0); pushm;
 put .github/workflows/ci.yml "$(ci "$(job lint)" "$(job build)")"; cm add >/dev/null; pushm
 ur_case ur build ''; free
 ok "$rc|$(nwrites)|$(nrow cleared)|$(nev setting-changed)" "0|0|1|0" "M3t: origin names C since the integration: cleared, no write, no event"
+has "$out" "[[t]]: cleared, no setting changed: origin/master names it since the integration" "M3t: its stdout says no setting changed"
+hasnt "$out" "merge setting changed for you" "M3t: … never the changed-for-you line (nothing to undo)"
 has "$(rows)" "origin/master names it since the integration" "M3t: … saying why"
 ok "$(j "$(INOW=2026-10-03T09:01:00Z inp)" 'd["autoRetry"]')" true "M3t: the verdict reads 22a"
 # left, no write: M3n no evidence, M3c still met at H, M3a another app, M3u a reusable a / b
@@ -430,7 +432,7 @@ use nr; rsc "$RSC_NR"; free --gh-bin "$tmp/no-gh"
 ok "$rc|$(nrow left)" "3|1" "M8c: gh missing: left"; has "$(rows)" "unreadable: gh not found" "M8c: … unreadable"
 # M9: a second free after changed: 0, no gh call
 use nr; rsc "$RSC_NR"; free; free --now 2026-10-03T09:00:30Z
-ok "$rc|$(ncalls)" "0|0" "M9: free on a changed block exits 0 with no gh call"; has "$out" "already" "M9: … already"
+ok "$rc|$(ncalls)" "0|0" "M9: free on a changed block exits 0 with no gh call"; has "$out" "[[t]]: already changed for you: - " "M9: … already changed for you"
 
 # ════ M10-M17 ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # M10: rows, restore, a drifted restore, dismiss, --unrestored
@@ -497,7 +499,10 @@ use nr2; rsc "$RSC_NR"; free t; ok "$rc" 0 "M15: (t changes the setting)"
 free u
 ok "$rc|$(nwrites)|$(nrow cleared u)|$(nev setting-changed)" "0|0|1|1" "M15: u's free reads cleared: no write, no event"
 ok "$(j "$(INOW=2026-10-03T09:01:00Z inp u)" 'd["autoRetry"]')" true "M15: u's verdict reads 22a once"
+has "$out" "[[u]]: cleared, no setting changed: another task's change freed it" "M15: u's stdout says no setting changed"
+hasnt "$out" "merge setting changed for you" "M15: … never the changed-for-you line"
 free u; ok "$rc|$(ncalls)" "0|0" "M9b: free on a cleared block exits 0 with no gh call"
+has "$out" "[[u]]: already cleared, no setting changed: another task's change freed it" "M9b: … already cleared, no setting changed"
 use nr2; rsc '{"strict": true, "checks": [{"context": "ci", "app_id": null}]}'; free u
 ok "$rc|$(nrow left u)" "3|1" "M15b: not required and no record of a change: left"
 # M16: the block boundary (T2)

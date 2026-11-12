@@ -2575,19 +2575,27 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
      22. a quota block past its 5 free retries; 22a. a settings block (reconcile-rollout.py _settings_block, ADR 0080)
          whose merge setting merge-settings.py changed or cleared, its one re-entry not yet consumed: `autoRetry: true`
          at once, skipping 23, 24 and the cool-down once (the change is the new fact); then, for a settings block, the
-         settings point, where 23 or 24 would refuse it (`settingsBlock.due` true): `unfreed` is a null humanFix, its
-         why `settings block: merge-settings.py free changes the merge setting (ADR 0080); <23's or 24's why>`, with
+         settings point, and only there: the same stop after one cool-down retry (23's _same_stop; ADR 0080 d2, a
+         sleeping runner keeps its check through that retry), `settingsBlock.due` true: `unfreed` is a null humanFix,
+         its why `settings block: merge-settings.py free changes the merge setting (ADR 0080); <23's why>`, with
          `autoRetryAfter` a `tried` row's retry (SETTINGS_RETRY_MIN after it, rounded up to the minute; `freeNow`
          false until then) or else the deadline, SETTINGS_FREE_DEADLINE_MIN after the latest of the block's run stamp,
          `auto_retry_at`, the last `re-entered` row and the last try, and at or past that deadline H10 `hand back or
          defer` (`settings repair did not run within 60 minutes of <anchor>: …`, `due` and `freeNow` still true);
          `left` is H13 `change the merge setting, hand back or defer` (its cause and why), handBack true; `changed`
-         with its re-entry consumed is H10, `<23's or 24's why>; the merge setting changed for you on <stamp> did not
-         free it`. Before the settings point today's path runs (its infra cool-down, ADR 0069 d3's one retry);
+         with its re-entry consumed is H10, `<23's why>; the merge setting changed for you on <stamp> did not free
+         it`, or for a `cleared` row (no write) `<23's why>; merge-settings.py cleared it on <stamp> with no setting
+         changed, and that did not free it: <its why>`. Before the settings point a settings block is retried as
+         infra: with budget left today's path runs (24's budget, its cool-down); at its first sighting with the budget
+         spent exactly (`auto_retries_used` equal to `auto_retries`) it gets that one cool-down retry free of the
+         budget, INFRA_COOLDOWN_MIN[0] from the later of its run stamp and `auto_retry_at`, then `autoRetry: true` (the
+         verb takes the counter one past the budget, as 22a's re-entry does, so a later first sighting past it is 24's
+         H10); `due` stays false throughout;
      23. an infra block at Integration that repeats the stop last re-entered
-         (reconcile-rollout.py _same_stop: a kill, a GitHub-side exit 1 or a no-runner set-aside whose _stop_key equals
-         the `auto_retry_sha` run's, ADR 0033 d4 as amended 2026-11-12), `same stop twice running at Integration:
-         <its first line>`, then `; <its last real reason line>` when its run carries one; 24. an agent or infra
+         (reconcile-rollout.py _same_stop: a kill, a GitHub-side exit 1, a no-runner set-aside or an unreported-context
+         set-aside whose _stop_key equals the `auto_retry_sha` run's, ADR 0033 d4 as amended 2026-11-12, ADR 0080),
+         `same stop twice running at Integration: <its first line>`, then `; <its last real reason line>` when its
+         run carries one (a settings block's same stop is its settings point, 22a above); 24. an agent or infra
          block past its budget; 25. an agent block whose fingerprint equals `auto_retry_sha`: each H9 `raise <field>,
          hand back or defer` when _raise_field names the source run's spent budget, else H10 `hand back or defer`, the
          detail its autoRetryWhy;
@@ -2787,7 +2795,7 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
             return refused
     else:
         if at == "integration" and cls == "infra" and sblock is not None:
-            settled = _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix)
+            settled = _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix, cooling)
             if settled is not None:
                 return settled
         # Cause 23 (ADR 0033 d4 as amended 2026-11-12): a held infra stop at Integration that repeats the stop last
@@ -2815,20 +2823,27 @@ def _ceil_minute(t):
     return whole if whole == t else whole + timedelta(minutes=1)
 
 
-def _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix):
-    """Cause 22a and the settings point (ADR 0080; auto_retry_verdict's docstring), for an infra settings block at
-    Integration: the verdict, or None when today's path (cause 23, the budget, the cool-down) decides."""
+def _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix, cooling):
+    """Cause 22a, a settings block's free cool-down retry and the settings point (ADR 0080; auto_retry_verdict's
+    docstring), for an infra settings block at Integration: the verdict, or None when today's path (the budget, its
+    cool-down) decides. The settings point is the same stop alone (_same_stop): a spent budget never makes a block due,
+    so a rule that can still be met (a sleeping runner) keeps its one cool-down retry first (ADR 0080 d2)."""
     sb = out["settingsBlock"]
     if sblock["state"] == "changed" and sblock["reentry"]:
         out["autoRetry"] = True   # 22a: the change is the new fact, so this one re-entry skips 23, 24 and the cool-down
         return out
-    if rr._same_stop(note):
-        carried = _carried_line(note.latest_run_text(rr.BLOCKED_SECTIONS["blocked"]))
-        why = f"same stop twice running at Integration: {first}" + (f"; {carried}" if carried else "")
-    elif used >= n:
-        why = f"budget: {used}/{n} used"
-    else:
-        return None
+    if not rr._same_stop(note):
+        if used != n:
+            return None           # budget left: today's cool-down retry; one past it: 24's H10
+        # The first sighting with the budget spent exactly: its one cool-down retry, free of the budget (the verb takes
+        # the counter one past it, as 22a's re-entry does, so this is given once).
+        refused = cooling(rr.INFRA_COOLDOWN_MIN[0])
+        if refused:
+            return refused
+        out["autoRetry"] = True
+        return out
+    carried = _carried_line(note.latest_run_text(rr.BLOCKED_SECTIONS["blocked"]))
+    why = f"same stop twice running at Integration: {first}" + (f"; {carried}" if carried else "")
     sb["due"] = True
     if sblock["state"] == "left":
         detail = f"{sblock['cause']}: {sblock['why']}"
@@ -2836,7 +2851,11 @@ def _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix):
         return no(f"settings block left for you: {detail}",
                   fix("change the merge setting, hand back or defer", detail, True))
     if sblock["state"] == "changed":
-        why = f"{why}; the merge setting changed for you on {sblock['changedAt']} did not free it"
+        if sblock["cleared"] is not None:
+            why = (f"{why}; merge-settings.py cleared it on {sblock['changedAt']} with no setting changed, and that "
+                   f"did not free it: {sblock['cleared']}")
+        else:
+            why = f"{why}; the merge setting changed for you on {sblock['changedAt']} did not free it"
         sb["why"] = why
         return no(why, fix("hand back or defer", why, True))
     stamps = [t for t in (rr._block_stamp(note), last_at, rr._parse_ts(sblock["boundary"]) if sblock["boundary"] else None,

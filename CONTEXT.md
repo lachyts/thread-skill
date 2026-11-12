@@ -1084,10 +1084,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   setting of its repo requires what cannot happen (ADR 0080): a required
   check no runner will take (reasonClass `no-runner`), or a required context
   no job reports, a renamed job (`unreported-context`). It retries as infra
-  first; at the **settings point** (the same stop after its cool-down retry,
-  or a spent budget) `merge-settings.py free` makes the smallest change that
-  frees it, replacing a renamed context before ever removing one, on a repo
-  Lachy owns, and never loosens a rule that can still be met. Its record is
+  first, one cool-down retry even with its budget already spent; only at
+  the **settings point** (the same stop after that retry) does
+  `merge-settings.py free` make the smallest change that frees it,
+  replacing a renamed context before ever removing one, on a repo Lachy
+  owns, and never loosens a rule that can still be met. Its record is
   the task note's `## Merge settings` rows; a change it left for him reads
   his H13. _Avoid_: dead check, stuck rule.
 - **Changed-for-you row** — a merge setting the system changed to free a

@@ -627,8 +627,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // settings-repair (ADR 0080, p47-9): step 1.2's **Settings repair** shares sub-step 2's line after *Automatic descope*
   // (and before *Automatic retry*, which auto-retry pins, so a changed block re-enters the same turn). Skipped under a
   // pause; it reads `inputs … --repo` per Integration set-aside, acts only on a settingsBlock due, unfreed and freeNow,
-  // runs the one `free` command and routes each exit (0: § 6's line and the retry; 3: H13, a (c) item; 5: nothing; 8 and
-  // 75: the noted autoRetryAfter; 2: the deadline). § 6 has its event line, § 8 names the verb as the lead's and why
+  // runs the one `free` command and routes each exit (0: § 6's changed-for-you line, or its cleared line when `free`
+  // printed `cleared, no setting changed`, and the retry; 3: H13, a (c) item; 5: nothing; 8 and 75: the noted
+  // autoRetryAfter; 2: the deadline). § 6 has both event lines (a cleared block names no undo), § 8 names the verb as the lead's and why
   // repair runs it with no ask, § 6.5 (c) counts a due settings block as the lead's own, a Don't bars any other change of
   // a merge setting, and step 4's exit-4 row names the unreported-context block.
   const sr0 = s2t.indexOf('**Settings repair')
@@ -639,12 +640,13 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !sr.includes('For each `setAside` entry with `setAsideAt: integration`, in `next` order, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath>`') ||
     !sr.includes('Act only when its `settingsBlock.due` is true, its `settingsBlock.state` is `unfreed` and its `settingsBlock.freeNow` is true') ||
     !sr.includes('run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py free --note <task note> --repo <repoPath>`') ||
-    !sr.includes("Exit 0: print § 6's changed-for-you line; *Automatic retry* below re-enters the task this turn") ||
+    !sr.includes("Exit 0: print § 6's changed-for-you line for each `merge setting changed for you` line it printed, or § 6's cleared line when it printed `cleared, no setting changed` (another change, or origin's branch, already freed the block: nothing changed, so there is no undo); *Automatic retry* below re-enters the task this turn") ||
     !sr.includes('Exit 3: its `left` row makes the block a (c) item through its `humanFix` H13') ||
     !sr.includes('Exit 5: nothing (the note moved since `inputs`)') ||
     !sr.includes('Exit 8 or 75: nothing now; its `autoRetryAfter` is noted by *Automatic retry* like any infra cool-down') ||
     !sr.includes('Exit 2: print its ERROR line; the deadline (H10 once 60 minutes pass with no change) is the backstop') ||
     !collapse(s6raw).includes('"[[task-s]] → merge setting changed for you (<change>); its undo is on the task note"') ||
+    !collapse(s6raw).includes('per settings block cleared with no change ("[[task-s]] → cleared, no setting changed (<why>)", the same sub-step: it names no undo, and no § 6.5 (i) row follows)') ||
     !never.includes("The lead runs `merge-settings.py free` itself too (§ 4.5 step 1.2's *Settings repair*, ADR 0080)") ||
     !never.includes('which runs `free` without asking for the same reason, as it runs `descope`') ||
     !S(skill, S65).includes('its *Settings repair* of a due settings block,') ||
@@ -1690,7 +1692,8 @@ test('control: a Settings repair that runs another command fails settings-repair
     'settings-repair', 'no free command')
 })
 test("control: a Settings repair missing an exit's route fails settings-repair", () => {
-  only(sk("Exit 0: print § 6's changed-for-you line; *Automatic retry* below re-enters the task this turn", 'Exit 0: done'), 'settings-repair', 'exit 0')
+  only(sk("Exit 0: print § 6's changed-for-you line for each `merge setting changed for you` line it printed, or § 6's cleared line when it printed `cleared, no setting changed` (another change, or origin's branch, already freed the block: nothing changed, so there is no undo); *Automatic retry* below re-enters the task this turn", 'Exit 0: done'), 'settings-repair', 'exit 0')
+  only(sk(", or § 6's cleared line when it printed `cleared, no setting changed` (another change, or origin's branch, already freed the block: nothing changed, so there is no undo);", ';'), 'settings-repair', 'exit 0 prints a cleared block as a change')
   only(sk('Exit 3: its `left` row makes the block a (c) item through its `humanFix` H13', 'Exit 3: halt'), 'settings-repair', 'exit 3')
   only(sk('Exit 5: nothing (the note moved since `inputs`).', ''), 'settings-repair', 'exit 5')
   only(sk('Exit 8 or 75: nothing now; its `autoRetryAfter` is noted by *Automatic retry* like any infra cool-down.', ''), 'settings-repair', 'exit 8')
@@ -1699,6 +1702,10 @@ test("control: a Settings repair missing an exit's route fails settings-repair",
 test('control: § 6 without the changed-for-you line fails settings-repair', () => {
   only(sk(', per merge setting changed ("[[task-s]] → merge setting changed for you (<change>); its undo is on the task note", §4.5 step 1.2\'s *Settings repair*, ADR 0080: Lachy is told afterwards and through § 6.5 (i), never beforehand)', ''),
     'settings-repair', 'no § 6 line')
+})
+test('control: § 6 without the cleared line fails settings-repair', () => {
+  only(sk(', per settings block cleared with no change ("[[task-s]] → cleared, no setting changed (<why>)", the same sub-step: it names no undo, and no § 6.5 (i) row follows)', ''),
+    'settings-repair', 'no § 6 cleared line')
 })
 test('control: § 8 without the merge-settings sentence fails settings-repair', () => {
   only(sk(" The lead runs `merge-settings.py free` itself too (§ 4.5 step 1.2's *Settings repair*, ADR 0080)", ' Repair runs `merge-settings.py free` (ADR 0080)'),
@@ -1713,7 +1720,7 @@ test("control: no Don't on a setting changed by hand fails settings-repair", () 
   only(sk(l + '\n', ''), 'settings-repair', "no Don't")
 })
 test("control: step 4's exit-4 row without the unreported-context block fails settings-repair", () => {
-  only(sk(' A required context nothing reports (a renamed job, the task\'s own rename included) comes here too, as `unreported-context: required check "<name>" …`, reasonClass `unreported-context`; both are settings blocks, which step 1.2\'s *Settings repair* frees at the same stop or a spent budget', ''),
+  only(sk(' A required context nothing reports (a renamed job, the task\'s own rename included) comes here too, as `unreported-context: required check "<name>" …`, reasonClass `unreported-context`; both are settings blocks, which step 1.2\'s *Settings repair* frees at the same stop after one cool-down retry', ''),
     'settings-repair', 'no exit-4 block')
 })
 test('control: a Settings repair after the Automatic retry fails auto-retry', () => {

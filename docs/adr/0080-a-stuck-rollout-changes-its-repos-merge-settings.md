@@ -12,8 +12,10 @@ decisions 4 to 6, the Consequences and the Decided list, each marked "review #N"
 *Built 2026-11-12 (p47-9), for two of decision 1's kinds: a required check no runner will take (ADR 0069's `no-runner`
 set-aside) and a required context no job reports (merge-task's new `unreported-context` set-aside, a renamed job). Each
 is a **settings block**: it retries as infra first, and only at the **settings point**, where the same stop comes back
-after its cool-down retry or the budget is spent (the H10 it ended in before), does `lead-integrate.py inputs` read it
-due (`settingsBlock`), so a sleeping self-hosted runner keeps its check through one retry (decision 2). One script,
+after its cool-down retry (the H10 it ended in before), does `lead-integrate.py inputs` read it due (`settingsBlock`), so
+a sleeping self-hosted runner keeps its check through one retry (decision 2). A budget already spent at the block's first
+sighting does not make it due: that one cool-down retry is given free of the budget, as a changed block's re-entry is,
+and only the same stop after it is the settings point. One script,
 `skills/execute/scripts/merge-settings.py`, under one lock per origin, frees it: the lead's step 1.2 *Settings repair*,
 repair's **settings block** row and, through repair, the Companion run its `free` (decision 4). It refuses a block the
 Run record does not name, a repo he does not own, a token without admin rights and another app's check, and every

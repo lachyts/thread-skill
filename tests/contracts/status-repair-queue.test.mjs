@@ -1563,18 +1563,21 @@ function check({ status, repair, execute, fx }) {
 
   // settings-block (ADR 0080): repair § 2's **settings block** row runs merge-settings.py free with no ask (d5), under no
   // pause, its exit 3 going to **at Integration**'s ask; § 3i restores or dismisses only on Lachy's word; a Don't keeps
-  // every other change of a merge setting out; status's Set aside line names a pending repair and a change.
+  // every other change of a merge setting out; status's Set aside line names a pending repair, a change and a clear
+  // (no setting changed), and repair tells Lachy with `free`'s own line, a cleared one naming no undo.
   const setRow = cls['settings block'] ?? ''
   const rep3i = labelled(r3raw, '3i')
   if (!setRow.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py free --note <task note> --repo <repoPath>` with no ask (ADR 0080 d5)') ||
     !setRow.includes('`settingsBlock.due: true` and `settingsBlock.state: unfreed`') ||
     !setRow.includes('under a pause it is reported, not run') ||
     !setRow.includes("exit 3: it reads H13 (`change the merge setting, hand back or defer`), so **at Integration**'s ask follows") ||
+    !setRow.includes("tell Lachy afterwards with `free`'s own line: a change names its undo, and `cleared, no setting changed` names none (nothing changed)") ||
     !rep3i.includes("On Lachy's word only, and never on a guess") ||
     !rep3i.includes('merge-settings.py restore --note <task note> --id <id>') || !rep3i.includes('merge-settings.py dismiss --note <task note> --id <id>') ||
     !collapse(raw(repair, /^## Don'ts/)).includes("Don't change a merge or CI setting except through `merge-settings.py`;") ||
     !collapse(sb).includes('`settings repair pending (retries at <autoRetryAfter>)`') ||
-    !collapse(sb).includes('`merge setting changed for you on <changedAt>`')) fails.push('settings-block')
+    !collapse(sb).includes('`merge setting changed for you on <changedAt>`') ||
+    !collapse(sb).includes('`cleared on <changedAt>, no setting changed` from a `cleared` row')) fails.push('settings-block')
   return [...new Set(fails)]
 }
 
@@ -2425,6 +2428,9 @@ test('control: 3i without his word, or status without its forms, fails settings-
   only(rp("- **Don't change a merge or CI setting except through `merge-settings.py`;**", "- **Do change merge settings as needed;**"), 'settings-block', "no Don't")
   only(st('`settings repair pending (retries at <autoRetryAfter>)`', '`pending`'), 'settings-block', 'status pending form')
   only(st('`merge setting changed for you on <changedAt>`', '`changed`'), 'settings-block', 'status changed form')
+  only(st('`cleared on <changedAt>, no setting changed` from a `cleared` row', '`changed`'), 'settings-block', 'status cleared form')
+  only(rp("tell Lachy afterwards with `free`'s own line: a change names its undo, and `cleared, no setting changed` names none (nothing changed)",
+    'tell Lachy afterwards, with its undo'), 'settings-block', 'repair names an undo for a clear')
 })
 test('control: a settings block row after the automatic retry fails first-match; one gone fails stages', () => {
   const row = lineWith(real.repair, '| **settings block** |')

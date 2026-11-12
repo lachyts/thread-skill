@@ -6,8 +6,8 @@
 # answered block is never retried.
 #   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H1-H13,
 #      H12 under an answer and a question; H10-same-infra, the same held stop twice running at Integration, a settings
-#      block (ADR 0080) due for merge-settings.py free and its deadline, anchor, left, restored and spent change; the null
-#      cases)
+#      block (ADR 0080) due for merge-settings.py free and its deadline, anchor, left, restored, spent change and spent
+#      clear, and no H10 for a budget spent at its first sighting; the null cases)
 #   K  --max-review-rounds is an overlay humanFix ignores; the keys today's callers read are unchanged
 #   L  the label forms, and `ask 2` after a spent answer
 #   N  answerRecorded: the live forms, the dead keys, each re-entry stamp, ties and unparseable stamps
@@ -452,6 +452,30 @@ msrow "$A" "- 2026-10-03T08:40:00+00:00 changing aaaaaaaaaaaa $FP_NR: protection
 I=$(INOW=2026-10-03T09:05:00Z inp "$A")
 ok "$(hf "$I")|$(sb "$I")" '["hand back or defer",true,null]|["changed",true,false]' "H10: a change whose re-entry is spent and the block back"
 has "$(fix "$I" detail)" "; the merge setting changed for you on 2026-10-03T08:40:01+00:00 did not free it" "H10: … it did not free it"
+# A cleared block (a `cleared` row: no write, another change had freed it) back after its one re-entry: H10 too, worded
+# so it never says a setting changed.
+nr_point h10-cleared
+msrow "$A" "- 2026-10-03T08:40:01+00:00 cleared $FP_NR: another task's change freed it (no source requires \"alpine\")" \
+  "- 2026-10-03T08:45:00+00:00 re-entered"
+I=$(INOW=2026-10-03T09:05:00Z inp "$A")
+ok "$(hf "$I")|$(sb "$I")" '["hand back or defer",true,null]|["changed",true,false]' "H10 cleared: a cleared block back after its re-entry"
+has "$(fix "$I" detail)" "; merge-settings.py cleared it on 2026-10-03T08:40:01+00:00 with no setting changed, and that did not free it: another task's change freed it" \
+  "H10 cleared: … its detail says nothing changed"
+hasnt "$(fix "$I" detail)" "changed for you" "H10 cleared: … never \"changed for you\""
+# H10 is no longer a spent budget's at a settings block's first sighting (ADR 0080 d2): with auto_retries_used equal to
+# auto_retries, a no-runner or an unreported-context block reads no humanFix and is not due (its free cool-down retry,
+# 15 minutes); the identical stop after that retry is due (A18 spent).
+UR='unreported-context: required check "build" is reported by no check run or status on the PR'"'"'s head, and no run on it is in flight'
+for r in "$NR" "$UR"; do
+  scen "h-spent-${r%%:*}"
+  mkro; mkt "$B" open
+  mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00" "auto_retries_used: 2"
+  lead "$A" integration "$r"
+  I=$(INOW=2026-10-03T08:05:00Z inp "$A")
+  ok "$(hf "$I")|$(sb "$I")|$(j "$I" '[d["autoRetry"], d["autoRetryAfter"]]')" 'null|["unfreed",false,false]|[false,"2026-10-03T08:15+00:00"]' \
+    "H spent (${r%%:*}): the first sighting with 2/2 used → no humanFix, not due, the 15-minute cool-down"
+  hasnt "$(j "$I" 'd["autoRetryWhy"]')" "budget:" "H spent (${r%%:*}): … never the budget's H10"
+done
 # A red required check (reasonClass merge-gate, the Verify line's real red) is no settings block.
 scen sb-red
 mkro; mkt "$B" open

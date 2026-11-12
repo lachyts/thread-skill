@@ -10889,8 +10889,9 @@ NO_RUNNER_OPENING = "no-runner:"
 # auto-retry suite.
 UNREPORTED_OPENING = "unreported-context:"
 # The two settings blocks (ADR 0080): a required check no runner will take, and a required context no job reports. Each
-# retries as infra, and at the settings point (cause 23's same stop, or cause 24's spent budget, lead-integrate.py's
-# verdict) merge-settings.py `free` changes the merge setting that asks for it (_settings_block).
+# retries as infra first (one cool-down retry, free of a budget already spent), and only at the settings point (cause
+# 23's same stop after that retry, lead-integrate.py's verdict) merge-settings.py `free` changes the merge setting that
+# asks for it (_settings_block).
 SETTINGS_OPENINGS = (NO_RUNNER_OPENING, UNREPORTED_OPENING)
 SETTINGS_RETRY_MIN = 5           # a `tried` row's wait before `free` runs again (the verdict's freeNow)
 SETTINGS_FREE_DEADLINE_MIN = 60  # a due block no `free` moved within this many minutes reads H10 (the backstop)
@@ -11238,15 +11239,16 @@ def _settings_rows(note):
 def _settings_block(note):
     """A note's settings block (ADR 0080), or None: blocked and set aside at Integration, its latest block's first line
     opening one of SETTINGS_OPENINGS. Otherwise {kind, contexts, fingerprint, state, cause, why, row, changedAt,
-    reentry, tries, lastTried, pending, boundary}, read off `## Merge settings` (the grammar above) by position, with
-    `cut` the index of its last `re-entered` row (none: -1):
+    cleared, reentry, tries, lastTried, pending, boundary}, read off `## Merge settings` (the grammar above) by position,
+    with `cut` the index of its last `re-entered` row (none: -1):
       - a `restored <id>` row, anywhere, for any `changing <id> <fp>` of this fingerprint: state `left`, cause
         `restored` (Lachy restored it: never changed again);
       - else the last `left <fp>` row after `cut`: state `left`, its cause and why (a `left` row before `cut` was a past
         block's, so his hand-back of it lets `free` run again);
       - else a `changed <id>` row of this fingerprint's change, or a `cleared <fp>` row, anywhere: state `changed`,
         `changedAt` its stamp, `reentry` true only while no `re-entered` row follows it (the one re-entry it earns),
-        a dismissed id included;
+        a dismissed id included; `cleared` is the latest such row's why when it is a `cleared` row (no setting
+        changed, so its `why` and the verdict's H10 never say one did), else None;
       - else `unfreed`: `tries` and `lastTried` from its `tried <fp>` rows after `cut`; `pending` the id of a `changing`
         row of this fingerprint with no `changed` or `void` row (a crash between a write and its confirmation).
     `boundary` is the last `re-entered` row's stamp (the deadline's anchor, lead-integrate.py)."""
@@ -11263,8 +11265,8 @@ def _settings_block(note):
     cuts = [r["i"] for r in rows if r["verb"] == "re-entered"]
     cut = cuts[-1] if cuts else -1
     out = {"kind": block, "contexts": contexts, "fingerprint": fp, "state": "unfreed", "cause": None, "why": None,
-           "row": None, "changedAt": None, "reentry": False, "tries": 0, "lastTried": None, "pending": None,
-           "boundary": rows[cut]["stamp"] if cut >= 0 else None}
+           "row": None, "changedAt": None, "cleared": None, "reentry": False, "tries": 0, "lastTried": None,
+           "pending": None, "boundary": rows[cut]["stamp"] if cut >= 0 else None}
     mine = {r["id"]: r for r in rows if r["verb"] == "changing" and r["fp"] == fp and r["id"]}
     restored = [r for r in rows if r["verb"] == "restored" and r["id"] in mine]
     if restored:
@@ -11279,7 +11281,10 @@ def _settings_block(note):
     done = [r for r in rows if (r["verb"] == "changed" and r["id"] in mine) or (r["verb"] == "cleared" and r["fp"] == fp)]
     if done:
         r = done[-1]
-        out.update(state="changed", row=r["line"], changedAt=r["stamp"], why=f"changed for you on {r['stamp']}",
+        cleared = (r["why"] or "no write was needed") if r["verb"] == "cleared" else None
+        out.update(state="changed", row=r["line"], changedAt=r["stamp"], cleared=cleared,
+                   why=(f"cleared on {r['stamp']}, no setting changed: {cleared}" if cleared is not None
+                        else f"changed for you on {r['stamp']}"),
                    reentry=not any(x["verb"] == "re-entered" and x["i"] > r["i"] for x in rows))
         return out
     tried = [r for r in rows if r["verb"] == "tried" and r["fp"] == fp and r["i"] > cut]
