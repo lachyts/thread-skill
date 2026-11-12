@@ -45,9 +45,10 @@ hours in total; rollouts resume on wake), and what he meets on return is the one
 4. **One script makes the change, under a lock, and its guard is technical, never prose.** The change lives in one
    script. The lead, `/thread:repair` and the Companion each run it, so a stuck rollout with no live lead is still
    freed, and the script's lock keeps two changes from crossing (review #11). This reopens ADR 0025's no bypass on
-   his word ("any merge setting"), and the guard is code (review #8): no agent prompt names the rulesets or the
-   branch-protection API, a contract test pins that, and the script refuses unless the Run record already names the
-   block it frees. No separate token is minted for it.
+   his word ("any merge setting"), and the guard is code (review #8): no agent prompt names a call that writes the
+   rulesets or the branch-protection settings (read-only calls, like schedule § 2.5's merge gate, stay), a contract
+   test pins that, and the script refuses unless the Run record already names the block it frees. No separate token
+   is minted for it.
 5. **Every change is logged with its undo:** one Run record line and one "changed for you" row on his needs-you
    list, each with the setting before, the setting after and the one command that restores it. Nothing asks him
    first. The row is written on the task note whose block the change freed, which outlives its rollout, so the
@@ -67,11 +68,12 @@ guard would move from code the tests read to a secret they cannot, review #8).
 ## Consequences
 
 - **The residual risk** (review #8): the script runs as Lachy, so an agent that called the GitHub API by hand, as
-  him, could still change a protection rule. The guard narrows the way to one script and keeps it out of every
-  agent prompt, where a contract test can see it; it does not close it, and nothing short of a separate identity
-  would.
-- A changed setting is never lost: a restored one closes its row, a dismissed one is kept by his decision and
-  stays in the Run record, and both stay listed by the repo check until restored or kept (decisions 5 and 6).
+  him, could still change a protection rule. The guard narrows the way to one script and keeps every call that
+  writes those settings out of the agent prompts, where a contract test can see it; it does not close it, and
+  nothing short of a separate identity would.
+- A changed setting is never lost: a restored one closes its row; a dismissed one is kept by his decision and stays
+  in the Run record; every setting not yet restored, a dismissed one's included, stays listed by the repo check at
+  each rollout's start (decisions 5 and 6).
 
 ## Decided for him (overturnable)
 
@@ -85,8 +87,9 @@ guard would move from code the tests read to a secret they cannot, review #8).
   notify him).
 - Who changes a setting → one script with a lock, run by the lead, `/thread:repair` or the Companion (technical,
   review #11: a stuck rollout often has no live lead).
-- The guard → the one script, no agent prompt naming the rulesets or branch-protection API, a contract test, and a
-  refusal unless the Run record names the block; no separate token (technical, review #8).
+- The guard → the one script, no agent prompt naming a call that writes the rulesets or branch-protection settings
+  (read-only calls, like schedule § 2.5's merge gate, stay), a contract test, and a refusal unless the Run record
+  names the block; no separate token (technical, review #8).
 - A dismissed row → his decision to keep the change, its Run record line kept, and listed by the repo check at
   each rollout's start until restored (technical, review #5).
 - Where the row lives → the task note whose block it freed, so it outlives the rollout (technical, review #10).

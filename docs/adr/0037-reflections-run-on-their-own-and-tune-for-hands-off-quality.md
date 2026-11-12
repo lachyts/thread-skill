@@ -24,7 +24,8 @@ unchanged.)*
 
 *(Amended 2026-11-12 by ADR 0079 decision 5: d4's "on Opus at xhigh effort" reads "on the model `~/.agents/AGENTS.md`
 § Model tier gives it", which the lock's edit of 2026-11-12 made Fable (workspaces ADR 0014). The arms' comparison is
-computed by script and a ceiling changes only by d5, so the reader's model decides nothing.)*
+computed by script and a role's Fable ceiling (ADR 0079 decision 6) changes only by d5, so the reader's model decides
+nothing.)*
 
 ## Context
 

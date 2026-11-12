@@ -841,7 +841,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
 - **Parallel ceiling** — the most Slots a Queue holds at once, set per
-  rollout. Not the retired model-tier **Ceiling** (see **Top rung**).
+  rollout. Not the retired model-tier **Ceiling** (see **Top rung**), nor a
+  role's **Fable ceiling** (see **Fable share**).
   _Avoid_: bare "ceiling", concurrency, max agents.
 - **Capacity** — the most Rollout tasks, Leg task claims and full suites that
   run across the whole Mac at once, rising and falling on its own with heat,
@@ -1823,10 +1824,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   tier, variant, last resort, fallback.
 - **Fable share** — the live part of a Login's work drawn into Fable Arms,
   which pacing moves so its Fable allowance and its general allowance run
-  down together, never above the role's ceiling. The ceiling is a rollout
-  setting and the only part a Tuning changes. Plans, the Fable rung and an
+  down together, never above the role's **Fable ceiling**: the most of a
+  drawn role's work its Fable arm may take, a rollout setting, one per drawn
+  role, and the only part a Tuning changes. Not the **Parallel ceiling** or
+  the retired **Ceiling**. Plans, the Fable rung and an
   **Unreachable surface**'s first reviewer take Fable first; the arms get
-  what is left (ADR 0079). _Avoid_: reserve, cap, quota (alone).
+  what is left (ADR 0079). _Avoid_: reserve, cap, quota (alone), bare
+  "ceiling".
 - **Top rung** — the Ladder's last rung, the ceiling for every task and every
   Integration (ADR 0029). Integration never runs on an all-Fable rung: it
   runs on the highest rung below it (ADR 0079). _Avoid_: top tier, ceiling,

@@ -5,11 +5,11 @@ Status: accepted, not built (two sittings with Lachy on 2026-11-12: Chorus's thi
 ADR 0119, and a `/thread:orient Thread Skill` reshuffle; builds as Phase 46). Amends ADR 0029 decisions 1 (a rung
 may name a plan model, and a role its own), 4 (the plan judge rides with the planner), 5 (Integration never runs on
 an all-Fable rung) and 7 (the record gains arms), and ADR 0037 decision 4 (the weekly Reflection's model). ADR 0029
-decision 3 stands, but a plan-stage climb no longer changes the plan's model or effort; its decisions 2 and 6 and
-ADR 0037's other decisions stand as written. Within rollouts it overturns Chorus ADR 0119 decision 9 ("everything
-else stays on Opus"), on his later word. The lock (`~/.agents/AGENTS.md` § Model tier) was amended on 2026-11-12
-and names this ADR (its wording as applied is at the end); what still gates Fable in a rollout is the operator's
-ladder file (task p46-7), written once Phase 46 has landed.
+decision 3 stands, but on a ladder that names a plan model a plan-stage climb no longer changes the plan's model or
+effort; its decisions 2 and 6 and ADR 0037's other decisions stand as written. Within rollouts it overturns Chorus
+ADR 0119 decision 9 ("everything else stays on Opus"), on his later word. The lock (`~/.agents/AGENTS.md` § Model
+tier) was amended on 2026-11-12 and names this ADR (its wording as applied is at the end); what still gates Fable
+in a rollout is the operator's ladder file (task p46-7), written once Phase 46 has landed.
 
 *(Amended 2026-11-12 by thread-skill-p46-8: the 15 findings of review round 45adf20/cdf93d are settled in the
 decisions and the Decided list, each marked "review #N", and the lock's edit later the same day outdated the
@@ -92,17 +92,18 @@ His, at this repo's orient:
    and audits run on the model Chorus's footing gives their Session (Chorus ADR 0119) and record it. Nothing
    measures their outcome today, so nothing here widens or shrinks them. The weekly Reflection runs on the model
    the lock gives it (reflections are Fable's under workspaces ADR 0014), though Fable is one of the arms it
-   judges: the comparison of arms is computed by script, and a ceiling changes only by ADR 0037 decision 5 (three
-   agreeing Reflections, no Guardrail breached), so the reader's model decides nothing.
+   judges: the comparison of arms is computed by script, and a role's Fable ceiling (decision 6) changes only by
+   ADR 0037 decision 5 (three agreeing Reflections, no Guardrail breached), so the reader's model decides nothing.
    *(Amended 2026-11-12: this read "stays on Opus at `xhigh`" until the lock's edit.)*
-6. **The Fable share is paced to the allowance, under a ceiling.** Per Login, pacing moves the live share of work
-   drawn into Fable arms with what is left, so that the Fable window and the general window run down together
-   through the week, never above the role's ceiling. The ceiling is a rollout setting, one per drawn role. One
-   mechanism each: pacing moves the live share, and only the ceiling is a Tuning (decision 9; review #7). It need
-   not be exact, and allowance left over at the week's end is fine. Nothing is held in reserve for hand sessions.
-   The rule takes any number of Logins. Pacing governs the drawn arms only: plans (decision 1), the Fable rung
-   (decision 2) and ADR 0081's first reviewer take Fable first, whenever there is room, and the arms get what is
-   left (review #4).
+6. **The Fable share is paced to the allowance, under a Fable ceiling.** Per Login, pacing moves the live share of
+   work drawn into Fable arms with what is left, so that the Fable window and the general window run down together
+   through the week, never above the role's **Fable ceiling**: the most of a drawn role's work its Fable arm may
+   take, a rollout setting, one per drawn role. It is not the **Parallel ceiling** (the most Slots a Queue holds)
+   or the retired model-tier **Ceiling**. One mechanism each: pacing moves the live share, and only the Fable
+   ceiling is a Tuning (decision 9; review #7). Pacing need not be exact, and allowance left over at the week's end
+   is fine. Nothing is held in reserve for hand sessions. The rule takes any number of Logins. Pacing governs the
+   drawn arms only: plans (decision 1), the Fable rung (decision 2) and ADR 0081's first reviewer take Fable first,
+   whenever there is room, and the arms get what is left (review #4).
 7. **Nothing locks.** When a Login's Fable allowance is spent, a call that would run on Fable (a plan, the top rung,
    a Fable arm) runs on Opus, the Run record says so, and that task is left out of the comparison. An allowance
    refusal is its own outcome, never a transient failure and never a stop. A lead cannot change its own model
@@ -113,7 +114,7 @@ His, at this repo's orient:
 9. **The weekly Reflection reads each drawn role's two arms** inside its window: rejected plans, the first review's
    verdict, review rounds, climbs (review #3), Escapes, tokens per merge and the Hands-off rate. It also reports
    Fable calls by kind (plans, the Fable rung, ADR 0081's first reviewer and each drawn role), so what took Fable
-   first is visible beside the arms (review #4). A change of a role's ceiling is a Tuning and lands by ADR 0037
+   first is visible beside the arms (review #4). A change of a role's Fable ceiling is a Tuning and lands by ADR 0037
    decision 5: three Reflections agree and no Guardrail is breached, tokens per merge among them. Pacing's moves
    are no Tuning (review #7). A trade (ADR 0037 decision 1) goes to Lachy's decision task. The same reading says
    when another Login would have carried Fable work that fell back to Opus.
@@ -151,8 +152,9 @@ Considered:
 - fresh-review draws its own lead and checker Opus or Fable for hand sessions only (workspaces ADR 0014), and
   rollouts keep this ADR's draw, so no change is drawn twice. That comparison is read in the weekly Reflection too
   (task p46-9).
-- CONTEXT.md gains **Role**, **Arm**, **Fable share** and **Shaping session**; **Rung** names the plan model and
-  the two judges that do not ride with it, and **Top rung** no longer carries an Integration when it is all-Fable.
+- CONTEXT.md gains **Role**, **Arm**, **Fable share** (with its **Fable ceiling**) and **Shaping session**;
+  **Parallel ceiling** names the Fable ceiling it is not; **Rung** names the plan model and the two judges that do
+  not ride with it, and **Top rung** no longer carries an Integration when it is all-Fable.
 
 ## The lock's wording, as applied (`~/.agents/AGENTS.md` § Model tier)
 
@@ -187,15 +189,17 @@ The wording this ADR proposed, for the record:
   stronger planner costs rounds).
 - Which tasks get a plan → those `plan_approval` gives a plan gate, as before (technical, review #1: his ruling was
   about plans, and a plan for every one-file task would add a judge round to each).
-- A plan-stage climb → moves the task's rung, never the plan's model or effort (technical, review #2: the plan
-  already runs on the strongest model; a plan still rejected is set aside, and the Overrun takes it from there).
+- A plan-stage climb → on a ladder that names a plan model, moves the task's rung, never the plan's model or effort
+  (technical, review #2: there the plan already runs on the strongest model; a plan still rejected is set aside,
+  and the Overrun takes it from there). On a ladder that names none, the built-in one among them, planning climbs
+  with the rung as before (decisions 1 and 10).
 - Role model against rung model → the rung's on an all-Fable rung, the role's below it; a Fable arm's climbs are
   recorded no-ops, read per arm (technical, review #3).
 - Integration → the highest rung below the all-Fable one; pacing governs the drawn arms only, and the rest take
   Fable first (technical, review #4: a Fable top rung moved every Integration to Fable, and pacing only the share
   could not balance the windows).
-- The share → pacing moves it under a per-role ceiling, and only the ceiling is a Tuning (technical, review #7: two
-  mechanisms setting one number would fight).
+- The share → pacing moves it under a per-role Fable ceiling, and only the Fable ceiling is a Tuning (technical,
+  review #7: two mechanisms setting one number would fight).
 - The drawn roles → the engine's names: the master review, the builder of a hard task, the investigator and the
   lead (technical, review #12).
 - Hardness → `work_depth: deep` or `scope: cross-cutting`, read once at first dispatch and stamped with the arm
@@ -205,10 +209,10 @@ The wording this ADR proposed, for the record:
 - Session-run work → recorded, no arm yet (technical: nothing measures its outcome, so an arm would decide
   nothing).
 - The Reflection → runs on the model the lock gives it (technical: the comparison is computed by script and a
-  ceiling moves only by ADR 0037 decision 5, so the reader's model decides nothing).
+  Fable ceiling moves only by ADR 0037 decision 5, so the reader's model decides nothing).
 - The pacing rule → per Login, Fable and general allowance run down together (priorities: his words, "balanced",
   "not locked", "doesn't have to be perfect").
-- Who changes a ceiling → three agreeing Reflections inside the Guardrails; a trade is his (technical: ADR 0037
+- Who changes a Fable ceiling → three agreeing Reflections inside the Guardrails; a trade is his (technical: ADR 0037
   decisions 1 and 5 already draw that line).
 - The order → the allowance-refusal outcome and the prompt check land before anything is switched on (technical:
   the refusal stalled two rollouts in September).
