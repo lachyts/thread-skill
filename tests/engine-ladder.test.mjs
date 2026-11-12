@@ -6,8 +6,9 @@
 // climbs one rung at its first evidence of hardness, once per call, never past the top; on the top rung a climb
 // is a recorded no-op. Below the top a stage's first pass verifies one-shot; the retry after a real climb and
 // every pass on the top rung run the full Ralph loop, and a top-rung retry keeps CAPPED_RETRY_ITERATIONS. Judges
-// run on the current rung. Integration runs on the top rung. The row records startRung, rung, climbs, rungDrift
-// and what each dispatch ran.
+// run on the current rung. Integration runs on the highest rung that is not all-Fable (ADR 0079 decision 2). A rung
+// may name a plan model and the ladder a role's own model (ADR 0079 decisions 1 and 3). The row records startRung,
+// rung, climbs, rungDrift and what each dispatch ran.
 //
 // The ladders here are ladder.py's real output under a temp HOME, fed in as args.ladder, and the whole script
 // runs through tests/lib/engine.mjs runTask() with a label-keyed agent stub that records every dispatch's opts.
@@ -29,16 +30,19 @@ const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\n
 // ---- ladders: ladder.py's own output ------------------------------------------------------------------
 
 function rungToml(r) {
-  return `[[rung]]\nname = "${r.name}"\nmodel = "${r.model}"\neffort = "${r.effort}"\njudge = "${r.judge}"\nreview = "${r.review}"\n`
+  return `[[rung]]\nname = "${r.name}"\nmodel = "${r.model}"\neffort = "${r.effort}"\njudge = "${r.judge}"\nreview = "${r.review}"\n` +
+    (r.plan !== undefined ? `plan = "${r.plan}"\n` : '')
 }
-// ladder.py run under a temp HOME holding `rungs` as its ladder.toml (none: no file, the built-in ladder).
-function ladderFrom(t, rungs) {
+// ladder.py run under a temp HOME holding `rungs` as its ladder.toml (none: no file, the built-in ladder), and
+// `roles` (ADR 0079 decision 3) as its [role] table when given.
+function ladderFrom(t, rungs, roles) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-ladder-'))
   t.after(() => fs.rmSync(home, { recursive: true, force: true }))
   if (rungs) {
     const p = path.join(home, '.config', 'thread', 'ladder.toml')
     fs.mkdirSync(path.dirname(p), { recursive: true })
-    fs.writeFileSync(p, rungs.map(rungToml).join('\n'))
+    const roleToml = roles ? '\n[role]\n' + Object.entries(roles).map(([k, v]) => `${k} = "${v}"\n`).join('') : ''
+    fs.writeFileSync(p, rungs.map(rungToml).join('\n') + roleToml)
   }
   const r = spawnSync('python3', ['-B', LADDER_PY], { encoding: 'utf8', env: { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: '1' } })
   assert.equal(r.status, 0, r.stderr)
@@ -50,6 +54,11 @@ const THREE = [
   { name: 'fable-high', model: 'fable', effort: 'high', judge: 'xhigh', review: 'max' },
 ]
 const ONE = [{ name: 'solo', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' }]
+// The built-in ladder's two rungs, written as a file (so a [role] table can join them).
+const BUILT_IN_RUNGS = [
+  { name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' },
+  { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh' },
+]
 
 // ---- the run harness ----------------------------------------------------------------------------------
 
@@ -379,6 +388,12 @@ test('a malformed args.ladder is refused before any dispatch, in both modes', as
     ['a missing review', { source: 'x', rungs: [R({ review: undefined })] }],
     ['a duplicate name', { source: 'x', rungs: [R(), R({ effort: 'xhigh' })] }], ['a YAML word', { source: 'x', rungs: [R({ name: 'yes' })] }],
     ['an uppercase name', { source: 'x', rungs: [R({ name: 'Opus' })] }], ['a prototype-key model', { source: 'x', rungs: [R({ model: 'constructor' })] }],
+    ['an unknown plan model', { source: 'x', rungs: [R({ plan: 'haiku' })] }], ['a null plan model', { source: 'x', rungs: [R({ plan: null })] }],
+    ['roles as an array', { source: 'x', rungs: [R()], roles: [['builder', 'fable']] }], ['roles as a string', { source: 'x', rungs: [R()], roles: 'fable' }],
+    ['roles null', { source: 'x', rungs: [R()], roles: null }],
+    ['an unknown role: lead', { source: 'x', rungs: [R()], roles: { lead: 'fable' } }],
+    ['a prototype-key role', { source: 'x', rungs: [R()], roles: { constructor: 'fable' } }],
+    ['a role on an unknown model', { source: 'x', rungs: [R()], roles: { builder: 'gpt' } }],
   ]
   for (const [what, ladder] of bad) {
     for (const args of [mkArgs(mkTask('proj-bad'), { ladder }), integrateArgs(mkI(), { ladder })]) {
@@ -391,6 +406,8 @@ test('a malformed args.ladder is refused before any dispatch, in both modes', as
   assert.equal(E.ladderArgsError(undefined), '')
   assert.equal(E.ladderArgsError(null), '')
   assert.equal(E.ladderArgsError(E.BUILT_IN_LADDER), '')
+  assert.equal(E.ladderArgsError({ source: 'x', rungs: [R({ plan: 'fable' })], roles: { 'master-review': 'fable', builder: 'opus', investigator: 'fable' } }), '')
+  assert.equal(E.ladderArgsError({ source: 'x', rungs: [R()], roles: {} }), '', 'an empty roles object names no role')
 })
 
 // ---- Integration runs on the top rung -------------------------------------------------------------------
@@ -406,19 +423,19 @@ const integrateScript = {
   [`integration-review:${SLUG} r2`]: { verdict: 'approve', feedback: [], unreadable: false, finishedAt: '2026-10-03T10:30:00Z' },
 }
 
-test('integrate: the integrator and the judge run on the top rung — its effort and its review effort', async (t) => {
+test('integrate: the integrator and the judge run on the highest rung below an all-Fable top — its effort and its review effort', async (t) => {
   const three = ladderFrom(t, THREE)
-  const climbed = { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }
+  const climbed = { startRung: 'opus-high', rung: 'fable-high', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }, { stage: 'review', from: 'opus-xhigh', to: 'fable-high' }] }
   const r = await run(integrateArgs(mkI({ rung: climbed }), { ladder: three }), integrateScript)
   clean(r)
   assert.deepEqual(r.calls.map((c) => [c.label, c.model, c.effort, c.phase]), [
-    [`integrate:${SLUG}`, 'fable', 'high', 'Integration'], [`integration-review:${SLUG} r2`, 'fable', 'max', 'Integration'],
+    [`integrate:${SLUG}`, 'opus', 'xhigh', 'Integration'], [`integration-review:${SLUG} r2`, 'opus', 'xhigh', 'Integration'],
   ])
-  assert.deepEqual(r.row.integration.agents.map((g) => [g.role, g.rung, g.model, g.effort]), [['integrator', 'fable-high', 'fable', 'high'], ['judge', 'fable-high', 'fable', 'max']])
+  assert.deepEqual(r.row.integration.agents.map((g) => [g.role, g.rung, g.model, g.effort]), [['integrator', 'opus-xhigh', 'opus', 'xhigh'], ['judge', 'opus-xhigh', 'opus', 'xhigh']])
   assert.deepEqual([r.row.startRung, r.row.rung, r.row.climbs, r.row.rungDrift], [climbed.startRung, climbed.rung, climbed.climbs, ''], "the task's own record passes through")
   assert.deepEqual(r.row.ran, [
-    { label: `integrate:${SLUG}`, rung: 'fable-high', model: 'fable', effort: 'high' },
-    { label: `integration-review:${SLUG} r2`, rung: 'fable-high', model: 'fable', effort: 'max' },
+    { label: `integrate:${SLUG}`, rung: 'opus-xhigh', model: 'opus', effort: 'xhigh' },
+    { label: `integration-review:${SLUG} r2`, rung: 'opus-xhigh', model: 'opus', effort: 'xhigh' },
   ])
   assert.ok(r.logs.includes(`ladder: ${three.source} — opus-high, opus-xhigh, fable-high`), r.logs.join('\n'))
   const builtIn = await run(integrateArgs(mkI()), integrateScript)
@@ -499,4 +516,187 @@ test('static: the tier vocabulary is gone from skills/execute but for SKILL.md\'
   for (const word of [/judgeModel/, /TIER_RANK/, /\bEFFORT\b/, /\bst\.tier\b/, /INTEGRATION_EFFORT/, /\btierCap\(/]) {
     assert.ok(!word.test(src), `the engine has no ${word}`)
   }
+})
+
+// ---- the plan model and role models (ADR 0079 decisions 1 to 4) --------------------------------------------
+
+// Two Opus rungs that plan on Fable, then an all-Fable rung.
+const P3 = [
+  { name: 'opus-high', model: 'opus', effort: 'high', judge: 'medium', review: 'high', plan: 'fable' },
+  { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh', plan: 'fable' },
+  { name: 'fable-high', model: 'fable', effort: 'high', judge: 'high', review: 'high' },
+]
+const rowRan = (r) => r.row.ran.map((x) => ({ label: x.label, model: x.model, effort: x.effort }))
+const triples = (r) => r.calls.map((c) => [c.label, c.model, c.effort])
+
+test('plan model: the planner, plan reviser and plan judge run on it at high; implement runs on the rung', async (t) => {
+  const ladder = ladderFrom(t, P3)
+  assert.deepEqual(ladder.rungs.map((g) => g.plan), ['fable', 'fable', undefined])
+  const S = 'proj-plan'
+  const gated = (slug) => mkTask(slug, { scope: 'cross-cutting', planGate: true })
+  const c = await run(mkArgs(gated(S), { ladder }), {
+    [`plan:${S}`]: plan, [`plan-judge:${S} r1`]: approve, [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve,
+  })
+  clean(c)
+  assert.deepEqual(triples(c), [
+    [`plan:${S}`, 'fable', 'high'], [`plan-judge:${S} r1`, 'fable', 'high'], [`implement:${S}`, 'opus', 'high'], [`review:${S} r1`, 'opus', 'high'],
+  ])
+  assert.deepEqual(rowRan(c), ranOf(c))
+  const F = 'proj-planfight'
+  const r = await run(mkArgs(gated(F), { ladder }), {
+    [`plan:${F}`]: plan,
+    [`plan-judge:${F} r1`]: changes('tighten it'),
+    [`plan-revise:${F} r2`]: plan,
+    [`plan-judge:${F} r2`]: approve,
+    [`implement:${F}`]: green(`implement:${F}`),
+    [`review:${F} r1`]: approve,
+  })
+  clean(r)
+  assert.deepEqual(triples(r), [
+    [`plan:${F}`, 'fable', 'high'],
+    [`plan-judge:${F} r1`, 'fable', 'high'],
+    [`plan-revise:${F} r2`, 'fable', 'high'], // the climb moved the rung, not the plan model
+    [`plan-judge:${F} r2`, 'fable', 'high'],
+    [`implement:${F}`, 'opus', 'xhigh'], // implement starts on the rung the plan stage reached
+    [`review:${F} r1`, 'opus', 'xhigh'],
+  ])
+  assert.deepEqual(r.row.climbs, [{ stage: 'plan', from: 'opus-high', to: 'opus-xhigh' }])
+  assert.deepEqual([r.row.startRung, r.row.rung], ['opus-high', 'opus-xhigh'])
+  assert.deepEqual(r.row.ran.map((x) => x.rung), ['opus-high', 'opus-high', 'opus-xhigh', 'opus-xhigh', 'opus-xhigh', 'opus-xhigh'])
+  assert.deepEqual(rowRan(r), ranOf(r))
+})
+
+test('plan model: a planner retry after a climb that kept the plan model is a second pass, not a takeover', async (t) => {
+  const ladder = ladderFrom(t, P3)
+  const S = 'proj-planretry'
+  const r = await run(mkArgs(mkTask(S, { scope: 'cross-cutting', planGate: true }), { ladder }), {
+    [`plan:${S}`]: noPlan,
+    [`plan:${S}@opus-xhigh`]: plan,
+    [`plan-judge:${S} r1`]: approve,
+    [`implement:${S}`]: green(`implement:${S}`),
+    [`review:${S} r1`]: approve,
+  })
+  clean(r)
+  assert.deepEqual(me(r, `plan:${S}@opus-xhigh`), ['fable', 'high'])
+  const retry = callOf(r, `plan:${S}@opus-xhigh`).prompt
+  assert.ok(retry.includes("SECOND PASS: a first attempt at this plan did not complete") && retry.includes("the ladder's plan model, which a climb does not change"), retry.slice(-800))
+  assert.ok(!retry.includes('ONE RUNG UP') && !retry.includes("ladder's top rung"), 'neither a takeover nor a top-rung claim')
+  assert.ok(retry.includes('first planner produced no plan'))
+  assertNoCodeFraming(retry, 'the plan-model planner retry')
+  assert.deepEqual(r.row.climbs, [{ stage: 'plan', from: 'opus-high', to: 'opus-xhigh' }])
+  // A climb into a rung that names no plan model changes the planner: a takeover one rung up, as before.
+  const bottomOnly = ladderFrom(t, [P3[0], { ...P3[1], plan: undefined }])
+  const B = 'proj-planup'
+  const u = await run(mkArgs(mkTask(B, { scope: 'cross-cutting', planGate: true }), { ladder: bottomOnly }), {
+    [`plan:${B}`]: noPlan, [`plan:${B}@opus-xhigh`]: plan, [`plan-judge:${B} r1`]: approve, [`implement:${B}`]: green(`implement:${B}`), [`review:${B} r1`]: approve,
+  })
+  clean(u)
+  assert.deepEqual(triples(u).slice(0, 3), [[`plan:${B}`, 'fable', 'high'], [`plan:${B}@opus-xhigh`, 'opus', 'xhigh'], [`plan-judge:${B} r1`, 'opus', 'high']])
+  assert.ok(callOf(u, `plan:${B}@opus-xhigh`).prompt.includes('ESCALATION: you take this plan over ONE RUNG UP'))
+})
+
+test('role models: each moves its own role only, at high', async (t) => {
+  const two = (roles) => ladderFrom(t, BUILT_IN_RUNGS, roles)
+  const S = 'proj-rmr'
+  const fight = (slug) => ({
+    [`implement:${slug}`]: green(`implement:${slug}`), [`review:${slug} r1`]: changes('fix it'),
+    [`revise:${slug} r2`]: green(`revise:${slug} r2`), [`review:${slug} r2`]: approve,
+  })
+  const mr = await run(mkArgs(mkTask(S), { ladder: two({ 'master-review': 'fable' }) }), fight(S))
+  clean(mr)
+  assert.deepEqual(triples(mr), [
+    [`implement:${S}`, 'opus', 'high'], [`review:${S} r1`, 'fable', 'high'], [`revise:${S} r2`, 'opus', 'xhigh'], [`review:${S} r2`, 'fable', 'high'],
+  ])
+  assert.deepEqual(rowRan(mr), ranOf(mr))
+  const B = 'proj-rbuild'
+  const b = await run(mkArgs(mkTask(B), { ladder: two({ builder: 'fable' }) }), {
+    ...fight(B), [`implement:${B}`]: redOneShot, [`implement:${B}@opus-xhigh`]: green(`implement:${B}@opus-xhigh`),
+  })
+  clean(b)
+  assert.deepEqual(triples(b), [
+    [`implement:${B}`, 'fable', 'high'], [`implement:${B}@opus-xhigh`, 'fable', 'high'], [`review:${B} r1`, 'opus', 'xhigh'],
+    [`revise:${B} r2`, 'fable', 'high'], [`review:${B} r2`, 'opus', 'xhigh'],
+  ])
+  assert.deepEqual(rowRan(b), ranOf(b))
+  const I = 'proj-rinv'
+  const inv = await run(mkArgs(mkTask(I, { scope: 'read-only' }), { ladder: two({ investigator: 'fable' }) }), {
+    [`investigate:${I}`]: { ...green(`investigate:${I}`), prUrl: '', branch: '' },
+  })
+  clean(inv)
+  assert.deepEqual(triples(inv), [[`investigate:${I}`, 'fable', 'high']])
+  // A role that names the rung's own model dispatches exactly as with no role.
+  const O = 'proj-rown'
+  const same = await run(mkArgs(mkTask(O), { ladder: two({ builder: 'opus', 'master-review': 'opus' }) }), fight(O))
+  const none = await run(mkArgs(mkTask(O), { ladder: two() }), fight(O))
+  clean(same)
+  clean(none)
+  assert.deepEqual(triples(same), triples(none))
+  assert.deepEqual(same.calls.map((c) => c.prompt), none.calls.map((c) => c.prompt))
+})
+
+test('role models: on an all-Fable rung the rung wins for every role', async (t) => {
+  const ladder = ladderFrom(t, THREE, { builder: 'opus', 'master-review': 'opus' })
+  const S = 'proj-allfable'
+  const r = await run(mkArgs(mkTask(S, { rung: 'fable-high' }), { ladder }), { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve })
+  clean(r)
+  assert.deepEqual(triples(r), [[`implement:${S}`, 'fable', 'high'], [`review:${S} r1`, 'fable', 'max']])
+  const below = await run(mkArgs(mkTask(S, { rung: 'opus-xhigh' }), { ladder: ladderFrom(t, THREE, { builder: 'fable' }) }), { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve })
+  clean(below)
+  assert.deepEqual(triples(below), [[`implement:${S}`, 'fable', 'high'], [`review:${S} r1`, 'opus', 'xhigh']], 'below it the role wins')
+  const E = loadEngine(['allFable'])
+  assert.equal(E.allFable({ model: 'fable' }), true)
+  assert.equal(E.allFable({ model: 'fable', plan: 'fable' }), true)
+  assert.equal(E.allFable({ model: 'fable', plan: 'opus' }), false, 'a fable rung that plans on opus is not all-Fable')
+  assert.equal(E.allFable({ model: 'opus', plan: 'fable' }), false)
+})
+
+test('a task that fights at two stages climbs to the all-Fable rung', async (t) => {
+  const ladder = ladderFrom(t, P3, { builder: 'opus' })
+  const S = 'proj-twofights'
+  const r = await run(mkArgs(mkTask(S), { ladder }), {
+    [`implement:${S}`]: redOneShot,
+    [`implement:${S}@opus-xhigh`]: green(`implement:${S}@opus-xhigh`),
+    [`review:${S} r1`]: changes('fix the edge case'),
+    [`revise:${S} r2`]: green(`revise:${S} r2`),
+    [`review:${S} r2`]: approve,
+  })
+  clean(r)
+  assert.deepEqual(triples(r), [
+    [`implement:${S}`, 'opus', 'high'], [`implement:${S}@opus-xhigh`, 'opus', 'xhigh'], [`review:${S} r1`, 'opus', 'xhigh'],
+    [`revise:${S} r2`, 'fable', 'high'], [`review:${S} r2`, 'fable', 'high'],
+  ])
+  assert.deepEqual([r.row.status, r.row.startRung, r.row.rung], ['review', 'opus-high', 'fable-high'])
+  assert.deepEqual(r.row.climbs, [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }, { stage: 'review', from: 'opus-xhigh', to: 'fable-high' }])
+  assert.deepEqual(rowRan(r), ranOf(r))
+})
+
+test('integrate: the Integration rung takes no plan or role model; a top that is not all-Fable is the Integration rung', async (t) => {
+  const agentsOf = (r) => r.row.integration.agents.map((g) => [g.role, g.rung, g.model, g.effort])
+  const p3 = await run(integrateArgs(mkI(), { ladder: ladderFrom(t, P3, { 'master-review': 'fable', builder: 'fable' }) }), integrateScript)
+  clean(p3)
+  assert.deepEqual(agentsOf(p3), [['integrator', 'opus-xhigh', 'opus', 'xhigh'], ['judge', 'opus-xhigh', 'opus', 'xhigh']], 'its own model, never the plan or a role model')
+  const plansOnOpus = [BUILT_IN_RUNGS[0], { name: 'fable-high', model: 'fable', effort: 'high', judge: 'high', review: 'max', plan: 'opus' }]
+  const top = await run(integrateArgs(mkI(), { ladder: ladderFrom(t, plansOnOpus) }), integrateScript)
+  clean(top)
+  assert.deepEqual(agentsOf(top), [['integrator', 'fable-high', 'fable', 'high'], ['judge', 'fable-high', 'fable', 'max']])
+  const one = await run(integrateArgs(mkI(), { ladder: ladderFrom(t, [THREE[2]]) }), integrateScript)
+  clean(one)
+  assert.deepEqual(agentsOf(one), [['integrator', 'fable-high', 'fable', 'high'], ['judge', 'fable-high', 'fable', 'max']], 'one all-Fable rung: nothing is below it')
+  const both = await run(integrateArgs(mkI(), { ladder: ladderFrom(t, [{ ...THREE[2], name: 'fable-a' }, THREE[2]]) }), integrateScript)
+  clean(both)
+  assert.deepEqual(agentsOf(both).map((g) => g[1]), ['fable-high', 'fable-high'], 'every rung all-Fable: the top')
+  const roles = await run(integrateArgs(mkI(), { ladder: ladderFrom(t, BUILT_IN_RUNGS, { 'master-review': 'fable' }) }), integrateScript)
+  clean(roles)
+  assert.deepEqual(roles.calls.map((c) => [c.model, c.effort]), [['opus', 'xhigh'], ['opus', 'xhigh']], 'a master-review role does not move the Integration judge')
+})
+
+test('log: the ladder line names plan models and roles only when the file does', async (t) => {
+  const ladder = ladderFrom(t, P3, { 'master-review': 'fable', investigator: 'opus' })
+  const S = 'proj-log'
+  const r = await run(mkArgs(mkTask(S), { ladder }), { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve })
+  clean(r)
+  assert.ok(r.logs.includes(`ladder: ${ladder.source} — opus-high (plan fable), opus-xhigh (plan fable), fable-high; roles: master-review fable, investigator opus`), r.logs.join('\n'))
+  const plain = ladderFrom(t, BUILT_IN_RUNGS)
+  const p = await run(mkArgs(mkTask(S), { ladder: plain }), { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve })
+  assert.ok(p.logs.includes(`ladder: ${plain.source} — opus-high, opus-xhigh`), p.logs.join('\n'))
 })

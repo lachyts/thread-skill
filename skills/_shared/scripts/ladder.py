@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ladder.py — load the operator's ladder file (ADR 0029 decisions 1 and 2).
+"""ladder.py — load the operator's ladder file (ADR 0029 decisions 1 and 2, as amended by ADR 0079 decisions 1 to 3).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py
 
@@ -7,7 +7,8 @@ The ladder is `~/.config/thread/ladder.toml`: named rungs, bottom first. It repl
 file and the rollout ceiling: the top rung is the ceiling, and escalation climbs one rung at a time. Stdlib
 only. No arguments, no network, and it writes nothing.
 
-The file. One `[[rung]]` table per rung, bottom first, each with exactly these five string keys:
+The file. One `[[rung]]` table per rung, bottom first, each with these five string keys and an optional sixth,
+`plan`, and at most one `[role]` table for the whole ladder:
 
     # ~/.config/thread/ladder.toml: bottom rung first, the top rung is the ceiling
     [[rung]]
@@ -23,10 +24,26 @@ The file. One `[[rung]]` table per rung, bottom first, each with exactly these f
     effort = "xhigh"
     judge = "high"
     review = "xhigh"
+    plan = "fable"         # optional: the plan model (ADR 0079 decision 1)
+
+    [role]                 # optional: a role's own model in place of the rung's (ADR 0079 decision 3)
+    master-review = "fable"  # every master-review round
+    builder = "fable"        # the implementer (its first pass and its retry) and the reviser
+    investigator = "fable"   # the agent of a scope: read-only task
 
 Each effort is one of low, medium, high, xhigh, max. Rungs may share a model, so an effort step and a model
 step are the same kind of move. The order is the operator's statement: a rung may sit above one with more
-effort, and nothing is clamped. The inline form `rung = [{ name = "...", ... }, ...]` is accepted too.
+effort, and nothing is clamped. The inline forms `rung = [{ name = "...", ... }, ...]` and
+`role = { builder = "...", ... }` (before the first `[[rung]]`) are accepted too.
+
+The plan model and the role models. `plan` and each role's value are a model alias, as `model` is. A rung's `plan`
+is the model its planner, plan reviser and plan judge run on, always at `high`: the judge rides with the planner,
+and a plan-stage climb moves the task's rung but leaves the plan's model and effort as they are. A role's own model
+replaces the rung's for that role only: at `high` when it differs from the rung's model, at the rung's own effort for
+that role when it names the rung's model. On an all-Fable rung (`model = "fable"` and `plan` absent or "fable") the
+rung wins for every role; below it a role's own model wins. Integration takes neither: it runs on the highest rung
+that is not all-Fable (the top rung when every rung is), at that rung's own model and efforts. This loader only
+validates and passes them on; the engine (task.workflow.js runOn, integrationRungOf) applies them.
 
 No file gives the built-in ladder: the two rungs above. It names no model above Opus and no `max` (ADR 0029
 decision 2), and reading it needs no tomllib, so it works on any python 3. Reading a present file needs
@@ -39,28 +56,35 @@ Validation. A present file that does not validate is refused, never replaced by 
 empty or comment-only file included, because the operator wrote it. One error is reported per run: the
 first found in this order, which is not always the earliest line in the file:
 1. the path can be read, and the bytes are UTF-8 and valid TOML (tomllib's first syntax error);
-2. the only top-level key is `rung`. Any other key or table, a `[[rungs]]` typo included, is an unknown
-   key, reported ahead of every rung's own errors;
+2. the only top-level keys are `rung` and `role`. Any other key or table, a `[[rungs]]` or `[roles]` typo
+   included, is an unknown key, reported ahead of every rung's own errors;
 3. `rung` holds at least one rung and is an array of tables (`[[rung]]`, never a single `[rung]`);
 4. the rungs in order. Within a rung its unknown keys come first, since each implies a missing key. Then
    the error on the earliest line among: a missing key (named at the rung's own line), a value that is
-   not a string, and a value that is not valid as above. A duplicate name names its first line too.
+   not a string, and a value that is not valid as above (an optional `plan` included). A duplicate name names
+   its first line too;
+5. the role table: it is a table (`[role]`, never `[[role]]`); then its unknown role names, the first in the
+   file; then the error on the earliest line among a value that is not a string and an unknown model.
 The line named is tomllib's for a syntax error, and the bad key's own line otherwise. A rung's own line is
 its `[[rung]]` header, or in the inline form the line its `{` opens on (so there every key of a rung names
 that line). A key the line scan cannot place falls back to its rung's own line, then the `rung =` line,
-then no line.
+then no line. A role's line is its key's line in `[role]` (a `[role.<name>]` header's line for a table value),
+else the `role =` or `[role]` line.
 
 Output. Exit 0 and one JSON line on stdout:
 
-    {"source": "<the file's path>" | "built-in", "rungs": [{"name", "model", "effort", "judge", "review"}, ...]}
+    {"source": "<the file's path>" | "built-in", "rungs": [{"name", "model", "effort", "judge", "review"[, "plan"]}, ...]
+     [, "roles": {"<role>": "<model>", ...}]}
 
 `source` is the expanded path (HOME honoured, symlinks not resolved). The rungs come bottom first, each
-with its keys in that order. Exit 2 when the file is refused (or on a usage error), exit 3 when a present
+with its keys in that order. A rung carries `plan` only when the file names it, and the ladder carries `roles`
+(in ROLES order) only when the file names at least one, so no file, and a file with neither, print the same bytes
+as before ADR 0079. Exit 2 when the file is refused (or on a usage error), exit 3 when a present
 file needs tomllib and this python has none. On failure stdout is empty and stderr carries one line,
 `ladder: <path>:<line>: <reason>`, or `ladder: <path>: <reason>` when no line applies.
 
 Importable: load(path=None), read_toml(path) (shared with rollout-settings.py), BUILT_IN, MODELS, EFFORTS,
-FIELDS, LadderError.
+FIELDS, OPTIONAL_FIELDS, ROLES, LadderError.
 """
 import argparse
 import json
@@ -73,7 +97,13 @@ import sys
 MODELS = ("opus", "fable")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 FIELDS = ("name", "model", "effort", "judge", "review")
+# A rung's optional keys, each a model alias: `plan`, the plan model (ADR 0079 decision 1).
+OPTIONAL_FIELDS = ("plan",)
 EFFORT_FIELDS = ("effort", "judge", "review")
+# The roles a `[role]` table may give their own model (ADR 0079 decision 3, the engine's names). Must equal the
+# engine's LADDER_ROLES; tests/ladder.test.mjs pins it. A rollout's lead is no dispatch the engine makes, so its name
+# joins only when something acts on it.
+ROLES = ("master-review", "builder", "investigator")
 
 BUILT_IN = (
     {"name": "opus-high", "model": "opus", "effort": "high", "judge": "high", "review": "xhigh"},
@@ -89,7 +119,8 @@ YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "y", "n", "nu
 # One TOML key segment: bare, "basic" or 'literal'.
 _SEG = r'(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|\'[^\']*\')'
 _AOT_RE = re.compile(r"\[\[\s*(" + _SEG + r")\s*(\.[^\]]*)?\]\]\s*(?:#.*)?\Z")
-_TABLE_RE = re.compile(r"\[\s*(" + _SEG + r")\s*(?:\.[^\]]*)?\]\s*(?:#.*)?\Z")
+_TABLE_RE = re.compile(r"\[\s*(" + _SEG + r")\s*(\.[^\]]*)?\]\s*(?:#.*)?\Z")
+_DOTTED_RE = re.compile(r"\.\s*(" + _SEG + r")")
 _KEY_RE = re.compile(r"(" + _SEG + r")\s*([.=])")
 _TOML_POS_RE = re.compile(r"\s*\(at (?:line (\d+), column (\d+)|end of document)\)\s*\Z")
 
@@ -123,6 +154,7 @@ class _Index:
     top: each top-level name's first line (a key, a [table] or [[table]] header's first segment).
     headers: each [[rung]] header's line. keys: per [[rung]], each key's first line until the next header.
     inline: in the inline form `rung = [...]`, the line each rung's `{` opens on, in order.
+    role_keys: each key's first line in the [role] table, and each [role.<name>] header's line under <name>.
 
     Only a line that starts outside every value is read as a header or a key. The rest of each line is
     scanned as TOML values: strings and comments are skipped, so a quote or bracket inside one counts for
@@ -134,7 +166,8 @@ class _Index:
         self.headers = []
         self.keys = []
         self.inline = []
-        self._table = None  # index into headers while inside a [[rung]]; "other" inside any other table
+        self.role_keys = {}
+        self._table = None  # index into headers inside a [[rung]]; "role" inside [role]; "other" inside any other
         self._string = None  # the delimiter of a multi-line string left open at the end of a line
         self._brackets = []  # the [ and { of the values left open at the end of a line, outermost first
         self._rung_array = False  # the outermost open [ is the top-level `rung = [`
@@ -159,8 +192,15 @@ class _Index:
                 return
             m = _TABLE_RE.match(s)
             if m:
-                self.top.setdefault(_unquote(m.group(1)), n)
+                name = _unquote(m.group(1))
+                self.top.setdefault(name, n)
                 self._table = "other"
+                if name == "role" and m.group(2) is None:
+                    self._table = "role"
+                elif name == "role":
+                    d = _DOTTED_RE.match(m.group(2))
+                    if d:
+                        self.role_keys.setdefault(_unquote(d.group(1)), n)
                 return
             m = _KEY_RE.match(s)
             if m:
@@ -168,6 +208,8 @@ class _Index:
                 if self._table is None:
                     self.top.setdefault(key, n)
                     opens_rung = key == "rung" and m.group(2) == "="
+                elif self._table == "role":
+                    self.role_keys.setdefault(key, n)
                 elif self._table != "other":
                     self.keys[self._table].setdefault(key, n)
         self._scan(n, s, opens_rung)
@@ -280,8 +322,8 @@ def _validate(text, doc):
     rung_line = idx.top.get("rung")
 
     for key in doc:
-        if key != "rung":
-            raise LadderError("unknown top-level key %s (a ladder file holds only [[rung]] tables)"
+        if key not in ("rung", "role"):
+            raise LadderError("unknown top-level key %s (a ladder file holds only [[rung]] tables and one [role] table)"
                               % json.dumps(key), line=idx.top.get(key))
     rungs = doc.get("rung")
     if rungs is None or rungs == []:
@@ -311,8 +353,9 @@ def _validate(text, doc):
         label = "rung %d (%s)" % (number, json.dumps(name)) if usable else "rung %d" % number
 
         for key in rung:
-            if key not in FIELDS:
-                raise LadderError("%s: unknown key %s (a rung has %s)" % (label, json.dumps(key), ", ".join(FIELDS)),
+            if key not in FIELDS and key not in OPTIONAL_FIELDS:
+                raise LadderError("%s: unknown key %s (a rung has %s, and optionally %s)"
+                                  % (label, json.dumps(key), ", ".join(FIELDS), ", ".join(OPTIONAL_FIELDS)),
                                   line=line_of(key))
 
         errors = []  # (line, reason); the first in file order wins
@@ -340,16 +383,52 @@ def _validate(text, doc):
             elif key in EFFORT_FIELDS and value not in EFFORTS:
                 errors.append((line_of(key), "%s: %s %s is not one of %s"
                                % (label, key, json.dumps(value), ", ".join(EFFORTS))))
+        for key in OPTIONAL_FIELDS:
+            if key not in rung:
+                continue
+            value = rung[key]
+            if not isinstance(value, str):
+                errors.append((line_of(key), "%s: %s must be a string, not %s" % (label, key, _type_name(value))))
+            elif value not in MODELS:
+                errors.append((line_of(key), "%s: unknown %s model %s: a model is a tier alias, never a version "
+                               "(known: %s)" % (label, key, json.dumps(value), ", ".join(MODELS))))
         if errors:
             line, reason = min(errors, key=lambda e: e[0] if e[0] is not None else float("inf"))
             raise LadderError(reason, line=line)
         seen[name] = (number, line_of("name") if aligned else None)
-        out.append({key: rung[key] for key in FIELDS})
-    return out
+        out.append({key: rung[key] for key in FIELDS + OPTIONAL_FIELDS if key in rung})
+    return out, _validate_roles(doc.get("role"), idx)
+
+
+def _validate_roles(roles, idx):
+    """The [role] table (validation step 5) as {role: model} in ROLES order, or None when the file names no role."""
+    if roles is None:
+        return None
+    table_line = idx.top.get("role")
+    if not isinstance(roles, dict):
+        raise LadderError("role must be a table: write [role], not [[role]]", line=table_line)
+
+    def line_of(key):
+        return idx.role_keys.get(key) or table_line
+
+    for key in roles:
+        if key not in ROLES:
+            raise LadderError("unknown role %s (known: %s)" % (json.dumps(key), ", ".join(ROLES)), line=line_of(key))
+    errors = []
+    for key, value in roles.items():
+        if not isinstance(value, str):
+            errors.append((line_of(key), "role %s must be a string, not %s" % (key, _type_name(value))))
+        elif value not in MODELS:
+            errors.append((line_of(key), "role %s: unknown model %s: a model is a tier alias, never a version "
+                           "(known: %s)" % (key, json.dumps(value), ", ".join(MODELS))))
+    if errors:
+        line, reason = min(errors, key=lambda e: e[0] if e[0] is not None else float("inf"))
+        raise LadderError(reason, line=line)
+    return {key: roles[key] for key in ROLES if key in roles} or None
 
 
 def load(path=None):
-    """The resolved ladder: {"source": <path> | "built-in", "rungs": [rung, ...]}, bottom first.
+    """The resolved ladder: {"source": <path> | "built-in", "rungs": [rung, ...][, "roles": {...}]}, bottom first.
 
     Raises LadderError (with .line and .code) when a present file cannot be read or does not validate.
     """
@@ -358,7 +437,11 @@ def load(path=None):
     if read is None:
         return {"source": "built-in", "rungs": [dict(r) for r in BUILT_IN]}
     text, doc = read
-    return {"source": path, "rungs": _validate(text, doc)}
+    rungs, roles = _validate(text, doc)
+    ladder = {"source": path, "rungs": rungs}
+    if roles:
+        ladder["roles"] = roles
+    return ladder
 
 
 def read_toml(path):

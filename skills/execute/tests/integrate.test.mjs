@@ -1000,22 +1000,30 @@ test('arg validation: every bad field throws before any dispatch', async () => {
 
 // ---- the rung -------------------------------------------------------------------------------------
 
-test('rung: Integration runs on the top rung whatever rung the task reached; the task\'s own rung: and effort: do not apply', async () => {
+test('rung: Integration runs on the Integration rung whatever rung the task reached; the task\'s own rung: and effort: do not apply', async () => {
   const res = { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() }
+  // r-top is all-Fable, so Integration runs on the highest rung below it, r-low (ADR 0079 decision 2).
   const L3 = { source: '/home/x/.config/thread/ladder.toml', rungs: [
     { name: 'r-low', model: 'opus', effort: 'low', judge: 'medium', review: 'high' },
     { name: 'r-top', model: 'fable', effort: 'high', judge: 'xhigh', review: 'max' },
   ] }
+  // A top that plans on Opus is not all-Fable: it is the Integration rung, on its own model and efforts.
+  const L4 = { ...L3, rungs: [L3.rungs[0], { ...L3.rungs[1], plan: 'opus' }] }
   const bottom = { startRung: 'r-low', rung: 'r-low', climbs: [] }
+  const topped = { startRung: 'r-low', rung: 'r-top', climbs: [{ stage: 'review', from: 'r-low', to: 'r-top' }] }
   const builtIn = await run(mkArgs(mkI(), {}, { rung: 'opus-high', effort: 'low' }), res)
-  const file = await run(mkArgs(mkI({ rung: bottom }), { ladder: L3 }, { rung: 'r-low', effort: 'low' }), res)
+  const file = await run(mkArgs(mkI({ rung: topped }), { ladder: L3 }, { rung: 'r-top', effort: 'max' }), res)
+  const top = await run(mkArgs(mkI({ rung: bottom }), { ladder: L4 }, { rung: 'r-low', effort: 'low' }), res)
   assert.deepEqual(builtIn.opts.map((o) => [o.model, o.effort, o.phase]), [['opus', 'xhigh', 'Integration'], ['opus', 'xhigh', 'Integration']])
-  assert.deepEqual(file.opts.map((o) => [o.label, o.model, o.effort]), [[ILABEL, 'fable', 'high'], [JLABEL(2), 'fable', 'max']], "the integrator at the top rung's effort, the judge at its review effort")
+  assert.deepEqual(file.opts.map((o) => [o.label, o.model, o.effort]), [[ILABEL, 'opus', 'low'], [JLABEL(2), 'opus', 'high']], "the integrator at the Integration rung's effort, the judge at its review effort")
+  assert.deepEqual(top.opts.map((o) => [o.label, o.model, o.effort]), [[ILABEL, 'fable', 'high'], [JLABEL(2), 'fable', 'max']], 'a top rung that is not all-Fable, on its own model')
   assert.deepEqual(builtIn.row.integration.agents.map((g) => [g.rung, g.effort]), [['opus-xhigh', 'xhigh'], ['opus-xhigh', 'xhigh']])
-  assert.deepEqual(file.row.integration.agents.map((g) => [g.rung, g.model]), [['r-top', 'fable'], ['r-top', 'fable']])
+  assert.deepEqual(file.row.integration.agents.map((g) => [g.rung, g.model]), [['r-low', 'opus'], ['r-low', 'opus']])
+  assert.deepEqual(top.row.integration.agents.map((g) => [g.rung, g.model]), [['r-top', 'fable'], ['r-top', 'fable']])
   assert.deepEqual([builtIn.row.startRung, builtIn.row.rung, builtIn.row.climbs, builtIn.row.rungDrift], [RUNG.startRung, RUNG.rung, RUNG.climbs, ''], "the task's record passes through")
-  assert.deepEqual([file.row.startRung, file.row.rung, file.row.climbs], ['r-low', 'r-low', []], 'never the top rung: the task\'s own')
-  assert.deepEqual(file.row.ran.map((x) => [x.label, x.rung, x.model, x.effort]), [[ILABEL, 'r-top', 'fable', 'high'], [JLABEL(2), 'r-top', 'fable', 'max']])
+  assert.deepEqual([file.row.startRung, file.row.rung, file.row.climbs], ['r-low', 'r-top', topped.climbs], 'never the Integration rung: the task\'s own')
+  assert.deepEqual(file.row.ran.map((x) => [x.label, x.rung, x.model, x.effort]), [[ILABEL, 'r-low', 'opus', 'low'], [JLABEL(2), 'r-low', 'opus', 'high']])
+  assert.deepEqual(top.row.ran.map((x) => [x.label, x.rung, x.model, x.effort]), [[ILABEL, 'r-top', 'fable', 'high'], [JLABEL(2), 'r-top', 'fable', 'max']])
 })
 
 // ---- seeded revise (task.resume) -----------------------------------------------------------------
