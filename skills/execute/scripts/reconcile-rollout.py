@@ -894,7 +894,12 @@ Subcommands:
               standing approval: <gate> (test Login <n1, n2>, <source>)`. A spend gate is covered iff
               the limit is > 0, its total exposure is at most the limit, and (p30-8, ADR 0034's 2026-10-27
               amendment: spend is never asked ahead) this calendar month's standing-approved spend with it stays
-              within the same limit, the month line, inclusive. The month (local time, from --now) sums the
+              within the same limit, the month line, inclusive. Each limit keeps its own month line (p48-2, ADR
+              0034's 2026-11-12 amendment): a logged line counts only toward the line of the limit its `(…,
+              <source>)` tag names (a task stamp's: that task's own lines, by slug; a rollout stamp's: the lines
+              logged in that rollout note; rollouts.toml's and the built-in's: every line with its tag, so every
+              repo's file:repo lines share one), and a line with no readable tag counts toward every line (fails
+              closed). The month (local time, from --now) sums the
               `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …` lines under `## Needs-you log`
               of the --rollout note and of every note directly in the tasks dir, Archive/ and Archive/Rollouts/
               whose name is a dated rollout note's (`-rollout-<YYYY-MM-DD>[-N].md`), each once by real path, plus
@@ -1778,11 +1783,19 @@ SPEND_APPROVAL_KEY = "spend_approval_usd"
 # signs in the rollout note's `## Needs-you log` as `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …`,
 # and sums this calendar month's such lines across every rollout note (ROLLOUT_NOTE_NAME_RE's dated names in the tasks
 # dir, Archive/ and Archive/Rollouts/, plus --rollout) under the machine-wide STANDING_SPEND_LOCK. The mark must follow
-# the line's first wikilink directly, so a push line that quotes it never counts.
+# the line's first wikilink directly, so a push line that quotes it never counts. Each limit keeps its own month line
+# (p48-2, ADR 0034's 2026-11-12 amendment): a line counts only toward the line of the limit its `(month to date US$<m>
+# of US$<t>, <source>)` tag names (_month_line_key), and a line whose tag STANDING_SOURCE_RE cannot read, or names no
+# STANDING_SOURCES entry, is UNTAGGED and counts toward every line (fails closed).
 NEEDS_YOU_LOG_SECTION = "## Needs-you log"
 STANDING_SPEND_MARK = "signed under the standing approval:"
 STANDING_SPEND_RE = re.compile(
-    r"^- (\d{4}-\d{2})-\d{2}T\S+ \[\[[^\]]+\]\] signed under the standing approval: US\$(\d+(?:\.\d+)?)(?:\s|$)")
+    r"^- (\d{4}-\d{2})-\d{2}T\S+ \[\[([^\]|#]+)[^\]]*\]\] signed under the standing approval: "
+    r"US\$(\d+(?:\.\d+)?)(?:\s|$)")
+STANDING_SOURCE_RE = re.compile(
+    r"\(month to date US\$\d+(?:\.\d+)?\s+of\s+US\$\d+(?:\.\d+)?,\s*([^)]+?)\)")
+STANDING_SOURCES = ("task", "rollout", "file:repo", "file:defaults", "built-in")
+UNTAGGED = ("untagged",)
 ROLLOUT_NOTE_NAME_RE = re.compile(r"-rollout-\d{4}-\d\d-\d\d(?:-\d+)?\.md\Z")
 STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
@@ -13418,12 +13431,28 @@ def _bounce_why(verdict, gi):
             f"standing approval signs none of its gates; the pricer reads: {reading}")
 
 
-def _standing_month_spend(text, month) -> Decimal:
-    """The standing approvals one rollout note's text logs for `month` (YYYY-MM): the STANDING_SPEND_RE lines under
-    every `## Needs-you log` heading (line.strip() equal to it), each to the next line starting `## ` (Note.section_text's
-    bounds), summed. A line outside the section, of another month, or with the mark anywhere but right after its first
+def _month_line_key(source, slug, note_real):
+    """The month line a standing signing under a limit from `source` belongs to (p48-2, ADR 0034's 2026-11-12
+    amendment): a task stamp's is that task's own, ("task", <slug casefolded>); a rollout stamp's is that rollout's,
+    ("rollout", <the real path of the rollout note the line is logged in>); rollouts.toml's and the built-in's are one
+    shared line per tag, (<source>,). file:repo lines carry no repo, so every repo's share one line (over-counts, fails
+    closed)."""
+    if source == "task":
+        return ("task", slug.strip().casefold())
+    if source == "rollout":
+        return ("rollout", note_real)
+    return (source,)
+
+
+def _standing_month_spend(text, month, note_real) -> dict:
+    """The standing approvals one rollout note's text logs for `month` (YYYY-MM), per month line: {_month_line_key:
+    Decimal} over the STANDING_SPEND_RE lines under every `## Needs-you log` heading (line.strip() equal to it), each to
+    the next line starting `## ` (Note.section_text's bounds). A line counts toward the key its `(…, <source>)` tag
+    (STANDING_SOURCE_RE, read straight after the amount) names, with its own slug and `note_real`, the note's real
+    path; a line with no readable tag, or one outside STANDING_SOURCES, counts under UNTAGGED, which every line adds
+    (fails closed). A line outside the section, of another month, or with the mark anywhere but right after its first
     wikilink (a push line quoting it) never counts."""
-    total, on = Decimal(0), False
+    totals, on = {}, False
     for line in text.split("\n"):
         if line.strip() == NEEDS_YOU_LOG_SECTION:
             on = True
@@ -13434,8 +13463,11 @@ def _standing_month_spend(text, month) -> Decimal:
         if on:
             m = STANDING_SPEND_RE.match(line)
             if m and m.group(1) == month:
-                total += Decimal(m.group(2))
-    return total
+                tag = STANDING_SOURCE_RE.match(line, m.end())
+                source = tag.group(1).strip() if tag else None
+                key = _month_line_key(source, m.group(2), note_real) if source in STANDING_SOURCES else UNTAGGED
+                totals[key] = totals.get(key, Decimal(0)) + Decimal(m.group(3))
+    return totals
 
 
 class _StandingLedger:
@@ -13443,31 +13475,38 @@ class _StandingLedger:
     2026-10-27 amendment), built once per call and used lazily: only a gate that first prices under its limit asks for
     it, so an off limit, a bounced note or an over-limit gate never reads or locks anything.
 
-    spent() -> (Decimal, None) or (None, why). On first need it takes the standing-spend lock (_spend_lock_path; never
-    on --dry-run) and holds it until close(), from the month read to the call's last save, then sums
+    spent(key) -> (Decimal, None) or (None, why), for one month line (_month_line_key, p48-2): that line's own logged
+    lines plus every UNTAGGED one (fail closed). On first need it takes the standing-spend lock (_spend_lock_path; never
+    on --dry-run) and holds it until close(), from the month read to the call's last save, then merges, per key,
     _standing_month_spend over the --rollout note and every file directly in the tasks dir, Archive/ and
     Archive/Rollouts/ whose name matches ROLLOUT_NOTE_NAME_RE (schedule step 6's names, `-N` ordinals included), each
     once by real path and read fresh from disk. A missing directory is skipped; a note that cannot be read, or a
     directory that exists but cannot be listed, is (None, why), cached, so every later gate asks with it. A lock not
     taken in time raises OSError, cached too, so every later slug that needs the month read fails at once with the same
-    message; a slug that never needs it is still written or asked. add() keeps the call's own running total (on
-    --dry-run too, so its lines read as a real run's), which spent() includes."""
+    message; a slug that never needs it is still written or asked. add(key, usd) keeps the call's own running total per
+    key (on --dry-run too, so its lines read as a real run's), which spent(key) includes.
+
+    spent() with no key is the whole month in one sum, every logged line and every addition of the call counted once,
+    as before p48-2: unfinished-rollout.py's needs-you reading (p48-1) until p48-5
+    (thread-skill-p48-5-needs-you-reads-each-limits-own-month-line) moves it to its own limit's line. It never
+    under-counts (fails closed), so until then needs-you can list a gate approve-gates signs; _approve_standing always
+    passes a key."""
 
     def __init__(self, tasks_dir, rollout_path, month, dry_run):
         self.tasks_dir, self.rollout_path = Path(tasks_dir), Path(rollout_path)
         self.month, self.dry_run = month, dry_run
         self._lock = self._lock_error = self._base = self._why = None
-        self._added = Decimal(0)
+        self._added = {}
 
     def _read(self):
-        """(sum, None) over the month's notes, or (None, why) on the first one it cannot read."""
+        """({key: sum}, None) over the month's notes, or (None, why) on the first one it cannot read."""
         files, seen = [], set()
 
         def take(path):
             real = os.path.realpath(str(path))
             if real not in seen:
                 seen.add(real)
-                files.append(path)
+                files.append((path, real))
 
         take(self.rollout_path)
         for d in (self.tasks_dir, self.tasks_dir / "Archive", self.tasks_dir / "Archive" / "Rollouts"):
@@ -13480,16 +13519,17 @@ class _StandingLedger:
             for name in names:
                 if ROLLOUT_NOTE_NAME_RE.search(name) and (d / name).is_file():
                     take(d / name)
-        total = Decimal(0)
-        for path in files:
+        totals = {}
+        for path, real in files:
             try:
                 text = Path(path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as e:
                 return None, f"cannot read {path} for this month's standing approvals ({e})"
-            total += _standing_month_spend(text, self.month)
-        return total, None
+            for key, usd in _standing_month_spend(text, self.month, real).items():
+                totals[key] = totals.get(key, Decimal(0)) + usd
+        return totals, None
 
-    def spent(self):
+    def spent(self, key=None):
         if self._lock_error is not None:
             raise OSError(self._lock_error)
         if self._base is None and self._why is None:
@@ -13504,10 +13544,13 @@ class _StandingLedger:
             self._base, self._why = self._read()
         if self._why:
             return None, self._why
-        return self._base + self._added, None
+        if key is None:   # the whole month, every line once; p48-5 removes this form along with its one caller
+            return sum(self._base.values(), Decimal(0)) + sum(self._added.values(), Decimal(0)), None
+        untagged = self._base.get(UNTAGGED, Decimal(0)) if key != UNTAGGED else Decimal(0)
+        return self._base.get(key, Decimal(0)) + untagged + self._added.get(key, Decimal(0)), None
 
-    def add(self, usd):
-        self._added += usd
+    def add(self, key, usd):
+        self._added[key] = self._added.get(key, Decimal(0)) + usd
 
     def close(self):
         if self._lock is not None:
@@ -13516,8 +13559,8 @@ class _StandingLedger:
 
 
 def _month_why(month, total, limit, gi):
-    """Why a gate the per-gate limit covers still asks: this month's standing approvals would pass the month line, the
-    same resolved limit (inclusive, as covered() is)."""
+    """Why a gate the per-gate limit covers still asks: this month's standing approvals on the same resolved limit's own
+    month line (_month_line_key) would pass that limit (inclusive, as covered() is)."""
     return (f"this month's ({month}) standing approvals would reach US${gi.format_usd(total)} with this gate, past the "
             f"US${gi.format_usd(limit['value'])} month line ({limit['source']})")
 
@@ -13571,8 +13614,9 @@ def _approve_standing(args) -> int:
     """approve-gates --standing (ADR 0034, ADR 0063, p37-4; the module docstring): sign each pending gate the standing
     approval covers, leave the rest pending with an ASK line. A spend gate is covered when its standing reading
     (gated_inputs.covered(): the full reading, else the cap-only one, p37-4) prices within the resolved limit and,
-    unless it is already in `## Approved gates`, when this calendar month's standing approvals (_StandingLedger, the
-    month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A credential gate on a note the
+    unless it is already in `## Approved gates`, when this calendar month's standing approvals on that limit's own month
+    line (_StandingLedger, keyed by _month_line_key: ADR 0034's 2026-10-27 amendment, and p48-2's 2026-11-12 one) stay
+    within the same limit with it. A credential gate on a note the
     plan judge never bounced is covered when it reads as the repo's declared test credential, the rollout's
     env_bootstrap refreshes the declared file with a plain cp, and each key it names is in that file with its declared
     form (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line, no spend lock, and the limit
@@ -13639,6 +13683,7 @@ def _approve_standing(args) -> int:
             # covered: (gate, annotation, detail); slug_err (the limit's, or the class's resolver error) and lock_err
             # stop the slug with nothing written.
             covered, left, logged, slug_new, lock_err, slug_err, limit = [], [], [], Decimal(0), None, None, None
+            line_key = None   # the limit's own month line (_month_line_key), once the limit resolves
             for g in gates:
                 if not bounced and gi.gate_kind(g) == "credential" and gi.has_login_phrase(g):
                     # p37-4: a declared test Login (machine-wide [defaults] test_logins); no limit, ledger, month line,
@@ -13686,6 +13731,7 @@ def _approve_standing(args) -> int:
                     if err:
                         slug_err = err
                         break
+                    line_key = _month_line_key(limit["source"], slug, os.path.realpath(str(rollout_path)))
                 verdict = gi.covered(g, limit["value"])
                 if bounced:
                     left.append((g, _bounce_why(verdict, gi)))
@@ -13702,10 +13748,10 @@ def _approve_standing(args) -> int:
                 if norm in approved:
                     covered.append((g, spend_ann, spend_detail))   # signed already, or listed twice: no month check, no log
                     continue
-                # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals, the earlier slugs
-                # and gates of this call included, plus this gate, within the same limit.
+                # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals on this limit's
+                # own line (p48-2), the earlier slugs and gates of this call on it included, plus this gate, within it.
                 try:
-                    spent, why = ledger.spent()
+                    spent, why = ledger.spent(line_key)
                 except OSError as e:
                     lock_err = e
                     break
@@ -13741,7 +13787,7 @@ def _approve_standing(args) -> int:
                     errors.append(f"{slug}: cannot log the standing approval in [[{rollout_path.stem}]]: {e}; "
                                   "nothing written")
                     continue
-                ledger.add(slug_new)
+                ledger.add(line_key, slug_new)
             if covered:
                 existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
                 have = {_norm_gate(l) for l in existing}
@@ -16929,7 +16975,8 @@ def _parser():
     ag.add_argument("--standing", action="store_true",
                     help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
                          "rollouts.toml, built-in 0 = off), and while this calendar month's standing-approved spend "
-                         "(every rollout note's ## Needs-you log) stays within the same limit; each signing is logged "
+                         "(every rollout note's ## Needs-you log) stays within that limit's own month line; each "
+                         "signing is logged "
                          "there (a gate the full reading cannot price is priced from its cap alone, p37-4); the "
                          "credential gates the repo's declared test-credential class covers (rollouts.toml "
                          "test_credentials, each key proved present in its file; ADR 0063); and the credential gates "

@@ -93,8 +93,8 @@ The standing approval is off until `~/.config/thread/rollouts.toml` sets
 installing a version that knows the key, because an older `rollout-settings.py`
 refuses it, and every rollout's settings with it. The same limit is also a
 calendar-month line: a gate it covers still reaches you once this month's
-standing approvals, summed from every rollout note's `## Needs-you log`, would
-pass it with that gate. Spend is never asked ahead of a run. A gate whose
+standing approvals under the same limit, summed per limit from every rollout
+note's `## Needs-you log`, would pass it with that gate. Spend is never asked ahead of a run. A gate whose
 wording the full exposure reading cannot price is priced from its stated cap
 alone (the cap times its count, plus every other USD amount it names), so
 only a gate with no readable cap, or one over the line, reaches you.

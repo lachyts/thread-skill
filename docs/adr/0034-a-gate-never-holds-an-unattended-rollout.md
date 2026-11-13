@@ -20,9 +20,11 @@ test_logins`) passes the standing approval too, so the 2026-11-01 line's "every 
 longer holds for a declared test Login.)*
 *(Amended by ADR 0075, 2026-11-07: decision 3's gate found mid-run is set aside and listed, never pushed; no
 rollout ever pushes, and the ntfy fallback ADR 0038 added is superseded.)*
-*(Amended 2026-11-12 by p51-3, § Amendment (2026-11-12) below: decision 2's ask ahead reads every gate kind the
-same way, by its name and by the thing itself, and a gate signed mid-run that the sweep could have seen is a miss the
-weekly Reflection counts.)*
+*(Amended 2026-11-12 by p51-3, § Amendment (2026-11-12, p51-3) below: decision 2's ask ahead reads every gate kind
+the same way, by its name and by the thing itself, and a gate signed mid-run that the sweep could have seen is a miss
+the weekly Reflection counts.)*
+*(Amended 2026-11-12 by p48-2, § Amendment (2026-11-12, p48-2) below: each limit keeps its own month line; a signing
+under a task's or rollout's own limit never counts toward `[defaults]`'s.)*
 
 ## Context
 
@@ -277,3 +279,28 @@ irreversible lists read only the kind's own names.
 Accepted residuals: `sweepMiss` reads the note as it stands at span, so an edit since the schedule reads; a gate Lachy
 declined ahead and signed mid-run counts as a miss, since no decline is recorded (`askedAhead` beside it says so); and
 the services list names the services Lachy's repos use, so a new service is a word-list miss until it is added.
+
+## Amendment (2026-11-12, p48-2: each limit keeps its own month line)
+
+The 2026-10-27 month line said "within the same resolved limit", and execute § 3.7 said a `spend_approval_usd:` stamp
+sets the month line "for that task alone", but `approve-gates --standing` summed every logged standing line of the
+month into one number, whatever its source. In giflab-rollout-2026-11-10, GifLab p16-1's US$200 crowd pilot was signed
+under its task's own US$1,500 limit; two US$1 Animately gates under the `[defaults]` US$200 line then read "would reach
+US$264" (200 + the 63 already signed under defaults + 1) and asked, stopping their chain. Lachy's rule (2026-11-04): a
+spend under US$200 is never a stop.
+
+- **The keying.** Each logged line already carries its limit's source, `(month to date US$<m> of US$<t>, <source>)`.
+  `approve-gates --standing` now reads that tag and counts the line only toward its own limit's month line, and checks
+  a gate only against the line of the limit it resolved: a `task` stamp's line is that task's own task-tagged lines
+  (by the line's `[[slug]]`), so two stamped tasks never share one; a `rollout` stamp's line is the rollout-tagged
+  lines logged in that rollout note (by real path); `file:repo`, `file:defaults` and `built-in` each keep one line per
+  tag. The window, the section rule and the log-line format are unchanged; the logged `month to date` is that line's
+  own total.
+- **Fail closed.** A standing line whose tag cannot be read, or names no known source (hand-edited, or a pre-tag
+  form; no live or archived note held one when this landed), counts toward every line.
+- **Residual: one `file:repo` line.** A log line carries no repo, so `file:repo` signings in different repos share one
+  line. That over-counts (fails closed) and can still ask on a small gate when two repos both carry repo limits.
+  Adding the repo would change a line format older engine snapshots read (engine-snapshot.md), so it is left out.
+- **Loosening, on purpose.** A task's or rollout's stamped spend no longer counts toward `[defaults]`, so a month's
+  total machine spend can pass the defaults line by the stamped amounts: those are limits Lachy named. An older engine
+  snapshot reads the same lines with one shared sum, the old, stricter behaviour.

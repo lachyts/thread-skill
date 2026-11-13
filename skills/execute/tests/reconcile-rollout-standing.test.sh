@@ -23,8 +23,10 @@
 #          once by real path) would pass the limit with it: Verify's US$30 signs and US$250 asks; the sum runs across
 #          notes, calls, gates and slugs, inclusive; dry-run writes and locks nothing; bare sign-offs, push lines, other
 #          sections, undated notes and task notes never count; an unreadable dated note or an unlistable directory
-#          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; a task stamp is
-#          its own line.
+#          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; each limit keeps
+#          its own month line (p48-2): a logged signing counts only toward the line its `(…, <source>)` tag names (a
+#          task stamp's: that task's lines; a rollout stamp's: that rollout note's; rollouts.toml's: every line with its
+#          tag), and a line with no readable tag counts toward every line.
 #   S10    a declared test credential signs itself (ADR 0063, p34-8): p8-1's two verbatim credential gates
 #          (smart-slider-rollout-2026-10-28) are signed at the built-in 0 spend limit when the repo's one-line
 #          `test_credentials` class declares their keys, its file holds them with their declared prefix or Supabase
@@ -326,8 +328,8 @@ ok "$(fm d status)|$(section d "$BOUNCE_H")" "status: plan-blocked|" "S8: a row 
 
 # ── S9: the month line (p30-8; ADR 0034's 2026-10-27 amendment, Chorus ADR 0108 d4) ───────────────────────────────
 # Spend is never asked ahead: a covered gate is signed and its signing logged in the rollout note's `## Needs-you log`,
-# and it still asks when this calendar month's standing-approved spend (summed from every rollout note's log) would
-# pass the limit with it. LOG(x, m, gate) is that line at NOW, under the H200 limit unless named.
+# and it still asks when this calendar month's standing-approved spend on its limit's own line (summed per limit from
+# every rollout note's log) would pass the limit with it. LOG(x, m, gate) is that line at NOW, under the H200 limit unless named.
 logl() {  # logl <slug> <x> <m> <gate> [limit] [source] — the standing approval's Needs-you log line at NOW
   printf -- '- 2026-10-14T09:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s, %s): %s' \
     "$1" "$2" "$3" "${5:-200}" "${6:-file:defaults}" "$4"
@@ -490,15 +492,15 @@ has "$out" "standing-spend.lock" "S9h: … naming the lock"
 has "$out" "ASK: b: $R250: total exposure US\$250 is over the standing approval's US\$200 (file:defaults)" "S9h: b, after it and needing no month read, still asks"
 ok "$(cat "$D/a.md" "$D/b.md" "$D/ro.md")" "$before" "S9h: a.md, b.md and ro.md byte-identical"
 
-# S9i: a task stamp sets its own per-gate limit and its own month line
+# S9i: a task stamp sets its own per-gate limit and its own month line (p48-2: the defaults' lines are not on it)
 scen s9i
 R120='spend: replicate credits — cap 120 USD'
 mkro; mkt a gate-pending 'spend_approval_usd: 300'; gate a "$R120"
 printf '\n## Needs-you log\n\n%s\n' \
   '- 2026-10-02T10:00+00:00 [[old1]] signed under the standing approval: US$170 (month to date US$170 of US$200, file:defaults): spend: x — cap 170 USD' >> "$D/ro.md"
 HH="$H200" sa a
-ok "$rc" 0 "S9i: 170 + 120 is within the task's own US\$300 line: signed"
-ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 120 290 "$R120" 300 task)" "S9i: … logged against the task's line"
+ok "$rc" 0 "S9i: 120 is within the task's own US\$300 line: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 120 120 "$R120" 300 task)" "S9i: … logged against the task's line: the defaults' 170 is not on the task's line"
 
 # S9j: the live layout. A dated rollout note sits in the tasks dir beside its tasks, so the dir's listing finds it as
 # well as --rollout, here given by a second spelling of the same file (`repo/..`: pathlib collapses a `./` but keeps a
@@ -526,6 +528,79 @@ RONOTE="$XP" HH="$H200" sa b
 ok "$rc" 3 "S9j: a later call's US\$10 is past the month line: exit 3"
 has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9j: … at US\$210, each note still counted once"
 ok "$(cat "$D/b.md" "$D/$X.md")" "$before" "S9j: b.md and the rollout note byte-identical across the call"
+
+# S9k: each limit keeps its own month line (p48-2). The incident, from giflab-rollout-2026-11-10: GifLab p16-1's US$200
+# crowd pilot was signed under its task's own US$1,500 limit, then two US$1 Animately gates under the [defaults] US$200
+# line read "would reach US$264" and asked. A logged signing counts only toward the line of the limit its tag names.
+SL() {  # SL <date> <slug> <x> <m> <t> <tag> <gate> — a standing line on <date> (<tag> empty: the pre-tag form)
+  if [ -n "$6" ]; then
+    printf -- '- %sT10:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s, %s): %s' "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+  else
+    printf -- '- %sT10:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s): %s' "$1" "$2" "$3" "$4" "$5" "$7"
+  fi
+}
+P1='spend: one probe — cap 1 USD'; P5='spend: a small batch — cap 5 USD'; P140='spend: a bigger batch — cap 140 USD'
+G50='spend: crowd-rating follow-up — cap 50 USD'
+scen s9k
+ORDER=$'- [[a]]\n- [[b]]\n- [[c]]\n- [[g1]]' mkro
+printf '\n## Needs-you log\n\n%s\n%s\n%s\n' \
+  "$(SL 2026-10-10 g1 200 263 1500 task 'spend: crowd-rating pilot — cap 200 USD')" \
+  "$(SL 2026-10-11 d1 45 45 200 file:defaults 'spend: d1 — cap 45 USD')" \
+  "$(SL 2026-09-28 c 500 500 600 task 'spend: c last month — cap 500 USD')" >> "$D/ro.md"
+mkdir -p "$D/Archive/Rollouts"
+mkarch "$D/Archive/Rollouts/x-rollout-2026-10-01.md" "$(SL 2026-10-05 d2 18 63 200 file:defaults 'spend: d2 — cap 18 USD')"
+mkarch "$D/Archive/Rollouts/o-rollout-2026-10-05.md" "$(SL 2026-10-06 r0 190 190 200 rollout 'spend: r0 — cap 190 USD')"
+mkt a gate-pending; gate a "$P1"
+HH="$H200" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S9k: Verify's US\$1 under file:defaults signs: the task-limited US\$200 and another rollout's US\$190 are not on its line"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 1 64 "$P1")" "S9k: … logged at month to date US\$64 (45 + 18 + 1)"
+hasnt "$out" "ASK:" "S9k: … and nothing asks"
+mkt b gate-pending; gate b "$P140"
+before=$(cat "$D/b.md" "$D/ro.md")
+HH="$H200" sa b
+ok "$rc" 3 "S9k: a default-source total past US\$200 still asks: exit 3"
+has "$out" "ASK: b: $P140: this month's (2026-10) standing approvals would reach US\$204 with this gate, past the US\$200 month line (file:defaults)" "S9k: … at US\$204, the defaults' own line"
+ok "$(cat "$D/b.md" "$D/ro.md")" "$before" "S9k: b.md and ro.md byte-identical"
+mkt c gate-pending 'spend_approval_usd: 100'; gate c "$P5"
+HH="$H200" sa c
+ok "$rc" 0 "S9k: a task stamp's line is the task's alone: c's US\$5 signs under its US\$100"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl c 5 5 "$P5" 100 task)" "S9k: … at month to date US\$5 (g1's 200, the defaults' 64 and c's September 500 not counted)"
+mkt g1 gate-pending 'spend_approval_usd: 1500'; gate g1 "$G50"
+HH="$H200" sa g1
+ok "$rc" 0 "S9k: g1's own new US\$50 signs"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl g1 50 250 "$G50" 1500 task)" "S9k: … its earlier task line counts: month to date US\$250"
+
+# S9k2: a rollout stamp's line is that rollout note's: its own rollout lines count, another note's never do
+scen s9k2
+P20='spend: a probe — cap 20 USD'; P160='spend: a batch — cap 160 USD'
+ORDER=$'- [[r]]\n- [[s]]' mkro 'spend_approval_usd: 200'
+printf '\n## Needs-you log\n\n%s\n' "$(SL 2026-10-08 r1 30 30 200 rollout 'spend: r1 — cap 30 USD')" >> "$D/ro.md"
+mkdir -p "$D/Archive/Rollouts"
+mkarch "$D/Archive/Rollouts/o-rollout-2026-10-05.md" "$(SL 2026-10-06 r0 190 190 200 rollout 'spend: r0 — cap 190 USD')"
+mkt r gate-pending; gate r "$P20"
+HH="$H200" sa r
+ok "$rc" 0 "S9k2: another rollout's US\$190 is not on this rollout's line: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl r 20 50 "$P20" 200 rollout)" "S9k2: … at month to date US\$50 (its own note's 30 counts)"
+mkt s gate-pending; gate s "$P160"
+HH="$H200" sa s
+ok "$rc" 3 "S9k2: past this rollout's own line: exit 3"
+has "$out" "ASK: s: $P160: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (rollout)" "S9k2: … at US\$210"
+
+# S9k3: fail closed: a standing line with no tag, or an unknown one, counts toward every line
+scen s9k3
+P60='spend: a batch — cap 60 USD'
+ORDER=$'- [[a]]\n- [[t]]' mkro
+printf '\n## Needs-you log\n\n%s\n%s\n' \
+  "$(SL 2026-10-03 u1 100 100 200 '' 'spend: u1 — cap 100 USD')" \
+  "$(SL 2026-10-04 u2 50 150 200 bogus 'spend: u2 — cap 50 USD')" >> "$D/ro.md"
+mkt a gate-pending; gate a "$P60"
+mkt t gate-pending 'spend_approval_usd: 200'; gate t "$P60"
+before=$(cat "$D/a.md" "$D/t.md" "$D/ro.md")
+HH="$H200" sa a,t
+ok "$rc" 3 "S9k3: both ask: exit 3"
+has "$out" "ASK: a: $P60: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9k3: the untagged and unknown-tag lines count toward the defaults' line"
+has "$out" "ASK: t: $P60: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (task)" "S9k3: … and toward a task stamp's line"
+ok "$(cat "$D/a.md" "$D/t.md" "$D/ro.md")" "$before" "S9k3: a.md, t.md and ro.md byte-identical"
 
 # ── S10: a declared test credential signs itself (ADR 0063, p34-8) ─────────────────────────────────────────────────
 # The Verify: p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md, and its rollout's
