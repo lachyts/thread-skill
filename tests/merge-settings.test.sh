@@ -12,6 +12,9 @@
 #   M4-M9   a red check, ownership, rights, the Run record, the lock, transient reads, gh missing, idempotence
 #   M10-M17 restore, dismiss and rows; quoting; the fake's 422s; an over-long line; a dangling change; a context two
 #           tasks share; the block boundary; two identical rows
+#   M18     check, the repo check before the first Slot: nothing found (a young queue, a quick cancel, a hosted job),
+#           a no-runner check cleared, restored and dismissed, a registered runner listed, no recent run, not
+#           owned, a failed read
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -532,6 +535,95 @@ for _ in range(2):
     n = rr.Note(Path(sys.argv[2])); rr._append_settings_rows(n, lines); n.save()
 PY
 ok "$(grep -c '^  aaaaaaaaaaaa before: {}$' "$T/n.md")|$(grep -c '^## Merge settings$' "$T/n.md")" "2|1" "M17: two identical rows keep both indented lines, one section"
+
+# ════ M18: check, the repo check before the first Slot (ADR 0080 d6, p51-5) ══════════════════════════════════════
+# The rollout note holds the rows; the recent workflow runs are `runs` and `runjobs.<id>` (ids newest first), and the
+# runners registered `runners` (none by default).
+OLD=2026-10-03T07:00:00Z; NEW=2026-10-03T08:55:00Z   # 2 hours and 5 minutes before $NOW
+jb() {  # jb <name> <status> <conclusion|-> <self|hosted> <runner|-> <created> [<completed>]: one job object
+  python3 -c 'import json,sys
+n, st, co, kind, rn, at = sys.argv[1:7]
+print(json.dumps({"name": n, "status": st, "conclusion": None if co == "-" else co, "created_at": at,
+                  "completed_at": sys.argv[7] if len(sys.argv) > 7 else None,
+                  "labels": ["self-hosted", "arm64"] if kind == "self" else ["ubuntu-latest"],
+                  "runner_id": None if rn == "-" else 3, "runner_name": None if rn == "-" else rn}))' "$@"
+}
+rj() { local id="$1"; shift; printf '{"total_count": %d, "jobs": [%s]}\n' "$#" "$(IFS=,; echo "$*")" > "$MT_STATE/runjobs.$id"; }
+SH='self-hosted (arm)'
+CI_OK=$(jb ci completed success hosted gh-1 "$OLD" "$OLD")
+STUCK_Q=$(jb "$SH" queued - self - "$OLD")                                       # queued 2 hours
+STUCK_C=$(jb "$SH" completed cancelled self - "$OLD" 2026-10-03T08:00:00Z)       # cancelled after an hour's wait
+ck() {  # ck [args…]: check on $T/tasks/ro.md
+  : > "$MT_STATE/gh.log"; rm -f "$MT_STATE/writes.log"
+  out=$(PATH="$tmp/bin:$PATH" python3 "$MS" check --note "$T/tasks/ro.md" --repo "$REPO" --now "$NOW" "$@" 2>&1); rc=$?
+}
+ckro() { rm -rf "$T"; mkdir -p "$T/tasks" "$T/events"; export THREAD_EVENTS_DIR="$T/events"; fresh; mkro; rsc "$RSC_NR"
+  echo '[{"id": 9}, {"id": 7}]' > "$MT_STATE/runs"; }
+changed_id() { rows ro | sed -n 's/^- [^ ]* changed \([0-9a-f]\{12\}\)$/\1/p'; }
+line_of() { evs "$1" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["task"], d["id"])'; }
+# M18a: nothing found when each required check's only jobs are no stop: "self-hosted (arm)" queued 5 minutes, or
+# cancelled 30 s after it was created (a hand's or a concurrency group's cancel); ci's only job GitHub-hosted and
+# queued 2 hours (beside a "self-hosted (arm)" job a runner took)
+for c in "queued 5 minutes|$(jb "$SH" queued - self - "$NEW")|$CI_OK" \
+         "cancelled after 30 s|$(jb "$SH" completed cancelled self - "$OLD" 2026-10-03T07:00:30Z)|$CI_OK" \
+         "hosted, queued 2 hours|$(jb "$SH" completed success self mac-1 "$OLD" "$OLD")|$(jb ci queued - hosted - "$OLD")"; do
+  IFS='|' read -r label job ci <<EOF
+$c
+EOF
+  ckro; rj 9 "$ci" "$job"; rj 7; ck
+  ok "$rc|$(nwrites)|$(rows ro | grep -c .)" "0|0|0" "M18a ($label): exit 0, no write, no row"
+  has "$out" "repo check: nothing found on o/r@master (2 required checks against 2 recent workflow runs)" "M18a ($label): … nothing found"
+done
+# M18b: a required check whose only jobs no runner took, queued and cancelled, and whose labels the one registered
+# runner (self-hosted, x64) does not cover: found and cleared, its undo logged; restore and dismiss on the rollout note
+ckb() { ckro; rj 9 "$CI_OK" "$STUCK_Q"; rj 7 "$CI_OK" "$STUCK_C"
+  echo '[{"name": "linux-1", "status": "online", "busy": false, "labels": [{"name": "self-hosted"}, {"name": "x64"}]}]' > "$MT_STATE/runners"
+  before=$(canon "$MT_STATE/rsc.json"); ck; }
+ckb
+ok "$rc|$(nwrites)|$(nrow changing ro)|$(nrow changed ro)" "0|1|1|1" "M18b: exit 0, one write, a changing and a changed row on the rollout note"
+has "$(cat "$MT_STATE/writes.log")" '{"checks":[{"app_id":-1,"context":"ci"}],"strict":true}' "M18b: … the PATCH removes only that check"
+ok "$(evs setting-changed | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["task"], d["block"], d["context"])')" \
+  "ro no-runner self-hosted (arm)" "M18b: a setting-changed line in the rollout's Run record"
+has "$out" "[[ro]]: merge setting changed for you (protection o/r@master: removed \"self-hosted (arm)\"); undo: printf" "M18b: … listed as changed for you"
+ms rows --tasks-dir "$T/tasks" --rollout ro
+ok "$(j "$out" '[(r["task"], r["state"]) for r in d["rows"]]')" '[["ro","changed"]]' "M18b: rows reads it off the rollout note"
+ID=$(changed_id); ms restore --note "$T/tasks/ro.md" --id "$ID" --now 2026-10-03T10:00:00Z
+ok "$rc|$(canon "$MT_STATE/rsc.json")|$(nrow restored ro)" "0|$before|1" "M18b: restore on the rollout note writes the before back, a restored row"
+ok "$(line_of setting-restored)" "ro $ID" "M18b: … a setting-restored line, task ro, in the rollout's Run record"
+ckb; ID=$(changed_id); ms dismiss --note "$T/tasks/ro.md" --id "$ID" --now 2026-10-03T10:00:00Z
+ok "$rc|$(nrow dismissed ro)|$(line_of setting-dismissed)" "0|1|ro $ID" "M18b: dismiss on the rollout note: a dismissed row and a setting-dismissed line, task ro"
+mkdir -p "$T/tasks/Archive/Rollouts"; mv "$T/tasks/ro.md" "$T/tasks/Archive/Rollouts/"; ms rows --tasks-dir "$T/tasks" --rollout ro --unrestored
+ok "$(j "$out" '[(r["task"], r["state"]) for r in d["rows"]]')" '[["ro","dismissed"]]' "M18b: … still listed once the rollout note is archived"
+# M18f: a registered runner whose labels cover the stuck job's (case folded), offline or busy, or the owning org's:
+# listed, never freed (it may yet take the job, ADR 0080 d2); M18g: the runners unread: left
+for c in 'runners|"mac-1" (offline)|{"name": "mac-1", "status": "offline", "busy": false, "labels": [{"name": "Self-Hosted"}, {"name": "macOS"}, {"name": "ARM64"}]}' \
+         'runners|"mac-1" (online, busy)|{"name": "mac-1", "status": "online", "busy": true, "labels": [{"name": "self-hosted"}, {"name": "arm64"}]}' \
+         'runners.org|"org-mac" (online)|{"name": "org-mac", "status": "online", "busy": false, "labels": [{"name": "self-hosted"}, {"name": "arm64"}]}'; do
+  IFS='|' read -r file want runner <<EOF
+$c
+EOF
+  ckro; rj 9 "$CI_OK" "$STUCK_Q"; rj 7 "$CI_OK"; echo "[$runner]" > "$MT_STATE/$file"
+  if [ "$file" = runners.org ]; then echo admin > "$MT_STATE/orgrole.org"
+    echo '{"owner": {"login": "org", "type": "Organization"}, "default_branch": "master", "permissions": {"admin": true}}' > "$MT_STATE/repo.json"; fi
+  ck
+  ok "$rc|$(nwrites)|$(rows ro | grep -c .)|$(nev setting-left)" "3|0|0|0" "M18f ($want): exit 3, no write, no row"
+  has "$out" "[[ro]]: not changed (runner): required check \"$SH\": runner $want is registered for its jobs' labels: listed for you" \
+    "M18f ($want): … listed for you"
+done
+ckro; rj 9 "$CI_OK" "$STUCK_Q"; rj 7 "$CI_OK"; echo 'gh: Must have admin rights to Repository. (HTTP 403)' > "$MT_STATE/err.runners"; ck
+ok "$rc|$(nwrites)|$(nrow left ro)" "3|0|1" "M18g: the runners unread: left, no write"; has "$(rows ro)" "unreadable: repos/o/r/actions/runners: HTTP 403" "M18g: … unreadable"
+# M18c: a required check with no recent run is listed, never changed; M18d: one he cannot change is left, listed
+ckro; rsc '{"strict": true, "checks": [{"context": "ci", "app_id": null}, {"context": "gone", "app_id": null}]}'
+rj 9 "$CI_OK"; rj 7 "$CI_OK"; ck
+ok "$rc|$(nwrites)|$(rows ro | grep -c .)" "3|0|0" "M18c: no recent run: exit 3, no write, no row"
+has "$out" 'repo check: required check "gone" has no job in the last 2 workflow runs of o/r' "M18c: … listed for you"
+ckro; rj 9 "$CI_OK" "$STUCK_Q"; rj 7 "$CI_OK"
+echo '{"owner": {"login": "someone", "type": "User"}, "default_branch": "master", "permissions": {"admin": true}}' > "$MT_STATE/repo.json"
+ck
+ok "$rc|$(nwrites)|$(nrow left ro)|$(nev setting-left)" "3|0|1|1" "M18d: a repo he does not own: left, no write, a left row and line"
+# M18e: a read that fails is no finding
+ckro; echo 'gh: Server Error (HTTP 502)' > "$MT_STATE/err.runs"; ck
+ok "$rc|$(nwrites)" "8|0" "M18e: the runs unread: exit 8, nothing written"; has "$out" "repo check: not read (" "M18e: … not read"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-settings: ALL PASS" || echo "merge-settings: SOME FAILED"
 exit "$fail"

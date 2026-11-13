@@ -11536,9 +11536,11 @@ def _same_stop(note) -> bool:
 
 # ---- the merge settings a stuck rollout changes (ADR 0080, p47-9) --------------------------------------------------
 # A task note's `## Merge settings` section: the one record of what merge-settings.py did for a settings block of this
-# task (SETTINGS_OPENINGS), with each change's undo. This comment is the grammar's one copy. Rows are read in note
-# order, and position is the order: a stamp (datetime.isoformat(timespec="seconds"), local time with its offset) is read
-# only for display and for the deadline's latest stamp, never to tell which row is newer. <fp> is a block's fingerprint
+# task (SETTINGS_OPENINGS), with each change's undo; a rollout note's holds what its repo check (`merge-settings.py
+# check`, schedule step 6, ADR 0080 d6) did before the first Slot, the same rows for the no-runner block it found, never
+# a `cleared`, `tried` or `re-entered` one. This comment is the grammar's one copy. Rows are read in note order, and
+# position is the order: a stamp (datetime.isoformat(timespec="seconds"), local time with its offset) is read only for
+# display and for the deadline's latest stamp, never to tell which row is newer. <fp> is a block's fingerprint
 # (_settings_block: _sha12 of its kind and sorted contexts), <id> a change's 12-hex id.
 #   - <stamp> changing <id> <fp>: <source> <owner/repo>@<branch>[ ruleset <rid>]: <removed|replaced> <json C>[ -> <json C'>]
 #     followed by its three indented lines, each written in the same save:
@@ -11549,8 +11551,8 @@ def _same_stop(note) -> bool:
 #   - <stamp> changed <id>            the write read back as `after`;
 #   - <stamp> void <id>: <why>        the write did not take (live reads `before`): never listed as unconfirmed;
 #   - <stamp> cleared <fp>: <why>     no write was needed: positive evidence that one re-entry meets the block freed;
-#   - <stamp> left <fp>: <cause>: <why>     `free` left the block for Lachy (H13); cause not-owned, no-rights,
-#                                     no-change, not-recorded or unreadable;
+#   - <stamp> left <fp>: <cause>: <why>     `free` (or `check`) left the block for Lachy (H13); cause not-owned,
+#                                     no-rights, no-change, not-recorded or unreadable;
 #   - <stamp> tried <fp>: transient|busy: <text>   a try that read nothing decisive (a 5xx, a busy lock);
 #   - <stamp> re-entered              the block boundary: the transition a hand-back or an automatic retry made
 #                                     (_hand_back_note), written in the same save;

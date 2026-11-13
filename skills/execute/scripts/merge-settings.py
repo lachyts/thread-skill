@@ -6,10 +6,12 @@
     python3 … merge-settings.py restore --note <task note> --id <id> [--gh-bin gh] [--now <stamp>] [--tasks-dir <dir>]
     python3 … merge-settings.py dismiss --note <task note> --id <id> [--now <stamp>] [--tasks-dir <dir>]
     python3 … merge-settings.py rows (--tasks-dir <dir> [--rollout <slug>] | --note <task note>) [--unrestored]
+    python3 … merge-settings.py check --note <rollout note> --repo <repoPath> [--gh-bin gh] [--now <stamp>]
 
 The one script that changes a repo's merge settings (ADR 0080 d4): the lead (execute § 4.5 step 1.2's *Settings
-repair*), /thread:repair's **settings block** row and the Companion's Upkeep (through /thread:repair) run it, each under
-its one lock per origin. No other script or prompt names a call that writes a branch protection or a ruleset
+repair*), /thread:repair's **settings block** row and the Companion's Upkeep (through /thread:repair) run it, and
+schedule step 6's *Repo check* runs its `check` (ADR 0080 d6), each under its one lock per origin. No other script or
+prompt names a call that writes a branch protection or a ruleset
 (tests/contracts/merge-settings-guard.test.mjs: its writes live in WRITES and _write_argv alone). This header is the
 one copy of its rules; reconcile-rollout.py's MERGE_SETTINGS_SECTION comment holds the `## Merge settings` row grammar.
 
@@ -146,7 +148,46 @@ printed, nothing written. `dismiss --id X` (guarded): `dismissed X` and a `setti
 `setting-changed` line stays. Both exit 0 when X already is. `rows` (read-only, never guarded): one JSON line, {rows:
 […]}, every open `changed` row (neither restored nor dismissed) and every dangling `changing` row (`unconfirmed`), each
 with its task, change, before, after and undo; --unrestored adds dismissed ones. `cleared` and `void` rows are never
-listed.
+listed. A note's rows belong to its `rollout:`, or, on a rollout note (`protocol_version:` and no `rollout:`), to the
+rollout itself: `check` writes there, `rows --rollout` lists them, `restore` and `dismiss` record in its Run record, and
+the Engine snapshot guard of every guarded verb reads that rollout note itself (guard_task reads a task note's rollout).
+`rows --tasks-dir` reads every note directly in the dir and every rollout note in its Archive/Rollouts/, where a
+finished rollout's note moves, so a repo check's row outlives its rollout as a task note's does.
+
+`check` (the repo check, ADR 0080 d6, p51-5): before the first Slot, schedule step 6 runs it on the rollout note it just
+wrote, so a required job that cannot run is freed or listed before any task waits on it at Integration. A note with a
+`rollout:` or no `protocol_version:` is refused (exit 2), and the Engine snapshot guard reads the note itself.
+  1. The reads, read-only and needing no admin rights: repos/<o>/<r> (its default branch <b>), branches/<b> and
+     rules/branches/<b>?per_page=100 (merge-gate.py's _from_branch and _from_rules; the plan's no-rulesets 403 is an
+     empty list), then, when a required context has no app id or ACTIONS_APP_ID (another app's check is not read),
+     actions/runs?per_page=RECENT_RUNS and each run's jobs?per_page=100. Anything not read whole (gh missing, no GitHub
+     origin, a non-200, protection not visible, a run's jobs past one page) prints `repo check: not read (<why>)` and
+     exits 8: no finding, no row, nothing written.
+  2. Each such required context C, by the jobs named exactly C in those runs:
+     - none: `repo check: required check "C" has no job in the last <n> workflow runs of <o/r>: …; listed for you`.
+       Listed only, never changed: a renamed job's replacement needs a PR's head to prove it (`free`'s
+       unreported-context path), and a context another service reports by status can read so too;
+     - every one never taken (_never_taken: self-hosted by merge-task.sh's label rule, no runner_id or runner_name, and
+       either queued with its created_at NO_RUNNER_LIMIT or more before --now, or cancelled with its completed_at
+       NO_RUNNER_LIMIT or more after its created_at; a cancel sooner, by hand or by a concurrency group, or one with
+       no readable completed_at, is no evidence): a no-runner stop;
+     - else nothing (a runner took one: the check can be met, ADR 0080 d2).
+  3. The no-runner stops are one block (kind no-runner, its fingerprint _settings_fingerprint's) freed as `free` frees
+     one, under the lock: ownership and admin rights (_owned), then the runners (_runners: repos/<o>/<r>/actions/runners
+     and, for an Organization owner, orgs/<org>/actions/runners, ?per_page=100, needing those admin rights). A stop C
+     whose jobs' labels some registered runner covers (each label of one of C's jobs among the runner's, case
+     folded), busy or offline, may yet be taken (a sleeping runner, a long job ahead of it): `[[<rollout>]]: not
+     changed (runner): …: listed for you`, no row, never freed. A runner list not read whole is `left` (unreadable).
+     The stops no registered runner covers are the block (its fingerprint taken again over them): _read_sources,
+     another app's check left, then _apply with C removed from every source naming it. Its rows go on the rollout
+     note's `## Merge settings` and its `setting-changed` or `setting-left` line in the rollout's Run record, task the
+     rollout's slug. The evidence is read in the same call (the run history and the runners), never a recorded
+     set-aside (free's step 6 guard is for a task's block). Nothing asks first; a `left` row is listed for him. A busy
+     lock or a transient read writes no `tried` row: the stop is listed, and the next check reads it again.
+  `repo check: nothing found on <o/r>@<b> (<n> required checks against <m> recent workflow runs)` when nothing is found.
+  Exits: 0 nothing left for him (nothing found, or every stop changed, each printed as free prints it); 3 something
+  listed (no recent run, a `left` row, a stop a registered runner covers, or a stop not changed now); 8 not read; 2
+  usage, a wrong root, or a note that cannot be read or is no rollout note.
 """
 import argparse
 import importlib.util
@@ -194,6 +235,9 @@ LOCK_WAIT_ENV = "THREAD_MERGE_SETTINGS_LOCK_S"   # tests only: shortens the lock
 MAX_COMBINATIONS = 256
 HISTORY_MAX = 50
 MAX_RULES = 100
+RECENT_RUNS = 30        # check: the workflow runs it reads, newest first
+NO_RUNNER_LIMIT = 900   # check: merge-task.sh's NO_RUNNER_LIMIT, seconds a self-hosted job waits before it reads as no runner
+HOSTED = ("ubuntu-", "macos-", "windows-")   # merge-task.sh's no_runner_scan: a GitHub-hosted image's label prefixes
 SCRIPT_REL = "skills/execute/scripts/merge-settings.py"
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 HTTP_RE = re.compile(r"\(HTTP (\d{3})\)|\bHTTP (\d{3})\b")
@@ -784,7 +828,7 @@ class Run:
         self.args, self.path, self.note, self.block, self.now = args, path, note, block, now
         self.slug = path.stem
         self.rollout = rr._note_rollout(note)
-        self.repo = None
+        self.repo = self.branch = None
         self.emits = []
         self.pre = []   # rows a run decided before its outcome (a dangling change's `void`), written with that outcome
 
@@ -844,7 +888,8 @@ def _recorded(rollout, slug, kind):
 
 
 def _owned(gh_bin, repo):
-    """(owner, branch) of a repo Lachy owns with admin rights, else Leave (or Transient)."""
+    """(owner, branch, org) of a repo Lachy owns with admin rights, org the owner's login when an Organization owns it
+    (else None), else Leave (or Transient)."""
     kind, *rest = _get(gh_bin, "repos/%s" % repo)
     if kind != "ok":
         raise Leave("unreadable", "repos/%s: HTTP %s %s" % (repo, rest[0], rest[1]))
@@ -866,7 +911,7 @@ def _owned(gh_bin, repo):
         raise Leave("not-owned", "%s is owned by %s, not by %s" % (repo, login, viewer))
     if not (data.get("permissions") or {}).get("admin"):
         raise Leave("no-rights", "this gh token has no admin rights on %s" % repo)
-    return login, branch
+    return login, branch, login if otype == "Organization" else None
 
 
 def _read_sources(gh_bin, repo, branch, contexts):
@@ -1008,7 +1053,8 @@ def cmd_free(args):
 def _free_locked(run, pair):
     args, block, now = run.args, run.block, run.now
     gh_bin, repo = args.gh_bin, run.repo
-    _owner, branch = _owned(gh_bin, repo)
+    _owner, branch, _org = _owned(gh_bin, repo)
+    run.branch = branch
     contexts = block["contexts"]
     if not contexts:
         raise Leave("unreadable", "the set-aside reason names no context it could parse")
@@ -1072,6 +1118,16 @@ def _free_locked(run, pair):
                 changes.append((c, val))
     if not changes:
         return _cleared(run, pre, "; ".join(dict.fromkeys(cleared)))
+    return _apply(run, sources, required, changes)
+
+
+def _apply(run, sources, required, changes):
+    """Steps 11 to 14 for `changes` [(C, C' | None)] of run.block, under the lock: the Run-record check, one `changing`
+    row per source saved before its write, one write and read-back per source, then the rows and events (free's and
+    check's one copy). Exits 0 changed, 3 left, or run.tried's."""
+    args, block, now, pre = run.args, run.block, run.now, run.pre
+    gh_bin, repo = args.gh_bin, run.repo
+    branch = run.branch
     plan = []
     for key, (source, rid, body) in sources.items():
         mine = [x for x in changes if any(k == key for k, _a in required.get(x[0], []))]
@@ -1183,7 +1239,236 @@ def _cleared(run, pre, why):
     return 0
 
 
+# ---- check: the repo check before the first Slot (ADR 0080 d6, p51-5) -------------------------------------------------
+
+def _github_hosted(job):
+    """merge-task.sh's no_runner_scan rule: a job waits in GitHub's own queue, never a lost runner's, when a label names
+    a GitHub-hosted image (HOSTED) and none is `self-hosted`. Labels missing, empty or not strings read as hosted: a job
+    that cannot be placed is never one no runner will take."""
+    labels = job.get("labels")
+    if not isinstance(labels, list) or not labels or not all(isinstance(l, str) for l in labels):
+        return True
+    low = [l.lower() for l in labels]
+    return "self-hosted" not in low and any(l.startswith(HOSTED) for l in low)
+
+
+def _when(v):
+    """A GitHub timestamp (`…Z`, or with an offset) as an aware datetime, else None."""
+    try:
+        at = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else None
+
+
+def _never_taken(job, now):
+    """Whether no runner took this job: self-hosted, no runner_id or runner_name, and either still queued with its
+    created_at NO_RUNNER_LIMIT or more before now, or cancelled with its completed_at NO_RUNNER_LIMIT or more after its
+    created_at (GitHub cancels a job queued 24 hours). A cancel sooner, by hand or by a concurrency group's
+    cancel-in-progress, is no evidence, and nor is a cancel whose completed_at cannot be read."""
+    if _github_hosted(job) or job.get("runner_id") or job.get("runner_name"):
+        return False
+    at = _when(job.get("created_at"))
+    if at is None:
+        return False
+    if job.get("status") == "queued":
+        return (now - at).total_seconds() >= NO_RUNNER_LIMIT
+    if job.get("status") == "completed" and job.get("conclusion") == "cancelled":
+        done = _when(job.get("completed_at"))
+        return done is not None and (done - at).total_seconds() >= NO_RUNNER_LIMIT
+    return False
+
+
+def _runners(gh_bin, repo, org):
+    """[(name, status, busy, {label})] of every self-hosted runner registered to the repo, and to its org when an
+    Organization owns it (org from _owned, whose admin rights these reads need), status and busy as GitHub reports
+    them. Not read whole (a non-200, a list past one page, a runner whose labels cannot be read): Leave (unreadable),
+    or Transient."""
+    out = []
+    for ep in ["repos/%s/actions/runners" % repo] + (["orgs/%s/actions/runners" % org] if org else []):
+        kind, *rest = _get(gh_bin, "%s?per_page=100" % ep)
+        body = rest[0] if kind == "ok" and isinstance(rest[0], dict) else {}
+        listed, total = body.get("runners"), body.get("total_count")
+        if not isinstance(listed, list) or (isinstance(total, int) and len(listed) < total):
+            raise Leave("unreadable", "%s: %s" % (ep, "HTTP %s %s" % (rest[0], rest[1]) if kind != "ok"
+                                                  else "not a whole list of runners"))
+        for r in listed:
+            labels = r.get("labels") if isinstance(r, dict) else None
+            if not isinstance(labels, list) or not all(isinstance(l, dict) and isinstance(l.get("name"), str)
+                                                       for l in labels):
+                raise Leave("unreadable", "%s: a runner whose labels cannot be read" % ep)
+            out.append((str(r.get("name") or r.get("id") or "?"), str(r.get("status") or "?"), r.get("busy") is True,
+                        {l["name"].lower() for l in labels}))
+    return out
+
+
+class NotRead(Exception):
+    pass
+
+
+def _check_reads(gh_bin, repo):
+    """(branch, the required contexts GitHub Actions may report, {job name: [job]} over the last RECENT_RUNS workflow
+    runs, runs read). Read-only, no admin rights needed; anything not read whole raises NotRead (or Transient)."""
+    kind, *rest = _get(gh_bin, "repos/%s" % repo)
+    data = rest[0] if kind == "ok" and isinstance(rest[0], dict) else {}
+    branch = data.get("default_branch")
+    if not isinstance(branch, str) or not branch:
+        raise NotRead("repos/%s: %s" % (repo, "HTTP %s %s" % (rest[0], rest[1]) if kind != "ok" else "no default branch"))
+    enc = quote(branch, safe="")
+    kind, *rest = _get(gh_bin, "repos/%s/branches/%s" % (repo, enc))
+    if kind != "ok" or not isinstance(rest[0], dict):
+        raise NotRead("branches/%s: %s" % (branch, "HTTP %s %s" % (rest[0], rest[1]) if kind != "ok" else "not an object"))
+    required, why = [], []
+    if not MG._from_branch(rest[0], branch, required, why):
+        raise NotRead(why[0] if why else "branches/%s: protection not read" % branch)
+    kind, *rest = _get(gh_bin, "repos/%s/rules/branches/%s?per_page=%d" % (repo, enc, MAX_RULES))
+    if kind == "ok":
+        if not isinstance(rest[0], list) or len(rest[0]) >= MAX_RULES:
+            raise NotRead("rules/branches/%s: not a whole list of rules" % branch)
+        MG._from_rules(rest[0], required, [])
+    elif not (rest[0] == 403 and "Upgrade to GitHub Pro" in rest[1]):
+        raise NotRead("rules/branches/%s: HTTP %s %s" % (branch, rest[0], rest[1]))
+    ours = [r["context"] for r in required if r.get("appId") in (None, ACTIONS_APP_ID)]
+    if not ours:
+        return branch, [], {}, 0
+    kind, *rest = _get(gh_bin, "repos/%s/actions/runs?per_page=%d" % (repo, RECENT_RUNS))
+    runs = rest[0].get("workflow_runs") if kind == "ok" and isinstance(rest[0], dict) else None
+    if not isinstance(runs, list):
+        raise NotRead("actions/runs: %s" % ("HTTP %s %s" % (rest[0], rest[1]) if kind != "ok" else "no workflow_runs"))
+    jobs = {}
+    for r in runs[:RECENT_RUNS]:
+        rid = r.get("id") if isinstance(r, dict) else None
+        if not isinstance(rid, int) or isinstance(rid, bool):
+            raise NotRead("actions/runs: a run with no id")
+        kind, *rest = _get(gh_bin, "repos/%s/actions/runs/%d/jobs?per_page=100" % (repo, rid))
+        body = rest[0] if kind == "ok" and isinstance(rest[0], dict) else {}
+        listed = body.get("jobs")
+        total = body.get("total_count")
+        if not isinstance(listed, list) or (isinstance(total, int) and len(listed) < total):
+            raise NotRead("actions/runs/%d/jobs: %s" % (rid, "HTTP %s %s" % (rest[0], rest[1]) if kind != "ok"
+                                                       else "not every job on one page"))
+        for j in listed:
+            if isinstance(j, dict) and isinstance(j.get("name"), str):
+                jobs.setdefault(j["name"], []).append(j)
+    return branch, ours, jobs, len(runs[:RECENT_RUNS])
+
+
+class CheckRun(Run):
+    """`check`'s run: the rollout note holds the rows, and the rollout's own Run record its lines (task: its slug)."""
+
+    def __init__(self, args, path, note, block, now):
+        super().__init__(args, path, note, block, now)
+        self.rollout = path.stem
+
+    def tried(self, kind, text, rc):
+        print("[[%s]]: not changed (%s): %s: listed for you; the next check reads it again" % (
+            self.slug, kind, " ".join(str(text).split())))
+        return 3
+
+
+def cmd_check(args):
+    now = args.now_dt
+    path = Path(os.path.expanduser(args.note))
+    try:
+        note = rr.Note(path)
+    except (OSError, ValueError) as e:
+        print("ERROR: merge-settings check: cannot read %s: %s" % (path, e), file=sys.stderr)
+        return 2
+    if not _rollout_note(note):
+        print("ERROR: merge-settings check: %s is no rollout note (no protocol_version:, or a rollout: of its own)" % path,
+              file=sys.stderr)
+        return 2
+
+    def not_read(why):
+        print("repo check: not read (%s)" % " ".join(str(why).split()))
+        return 8
+    if shutil.which(args.gh_bin) is None:
+        return not_read("gh not found (%s)" % args.gh_bin)
+    repo = _origin(args.repo)
+    if repo is None:
+        return not_read("no GitHub origin in %s" % args.repo)
+    try:
+        branch, required, jobs, nruns = _check_reads(args.gh_bin, repo)
+    except (NotRead, Transient) as e:
+        return not_read(e)
+    stuck, silent = [], []
+    for c in required:
+        found = jobs.get(c) or []
+        if not found:
+            silent.append(c)
+        elif all(_never_taken(j, now) for j in found):
+            stuck.append(c)
+    rc = 0
+    for c in silent:
+        print("repo check: required check %s has no job in the last %d workflow runs of %s: a PR would wait on it; "
+              "listed for you" % (json.dumps(c), nruns, repo))
+        rc = 3
+    if stuck:
+        block = {"kind": "no-runner", "contexts": stuck, "fingerprint": rr._settings_fingerprint("no-runner", stuck),
+                 "tries": 0}
+        run = CheckRun(args, path, note, block, now)
+        run.repo = repo
+        labels = {c: [{l.lower() for l in j["labels"]} for j in jobs[c]] for c in stuck}
+        rc = max(rc, _check_free(run, labels))
+    if not silent and not stuck:
+        print("repo check: nothing found on %s@%s (%d required checks against %d recent workflow runs)" % (
+            repo, branch, len(required), nruns))
+    return rc
+
+
+def _check_free(run, labels):
+    """Free check's no-runner contexts under the lock, as `free` does a no-runner block, once the runners are read: a
+    context whose jobs' labels ({context: [{label}]}) a registered runner covers, busy or offline, is listed, never
+    freed (it may yet take them, ADR 0080 d2). 0 changed, 3 left or listed."""
+    with SettingsLock(run.repo) as lock:
+        if not lock.ok:
+            return run.tried("busy", "the merge-settings lock of %s is held" % run.repo, 3)
+        try:
+            run.note = rr.Note(run.path)
+            _owner, run.branch, org = _owned(run.args.gh_bin, run.repo)
+            runners = _runners(run.args.gh_bin, run.repo, org)
+            rc, contexts = 0, []
+            for c in run.block["contexts"]:
+                by = next((r for r in runners if any(want <= r[3] for want in labels[c])), None)
+                if by is None:
+                    contexts.append(c)
+                    continue
+                rc = run.tried("runner", "required check %s: runner %s (%s%s) is registered for its jobs' labels" % (
+                    json.dumps(c), json.dumps(by[0]), by[1], ", busy" if by[2] else ""), 3)
+            if not contexts:
+                return rc
+            run.block = dict(run.block, contexts=contexts, fingerprint=rr._settings_fingerprint("no-runner", contexts))
+            sources = _read_sources(run.args.gh_bin, run.repo, run.branch, contexts)
+            required = {}
+            for key, (source, _rid, body) in sources.items():
+                for c, app in _source_checks(source, body):
+                    required.setdefault(c, []).append((key, app))
+            live = [c for c in contexts if c in required]
+            if not live:
+                print("[[%s]]: no source requires %s now: nothing changed" % (run.slug, ", ".join(map(json.dumps, contexts))))
+                return rc
+            for c in live:
+                bad = [app for _k, app in required[c] if app not in (None, ACTIONS_APP_ID)]
+                if bad:
+                    raise Leave("no-change", "another app's check: %s is required from app %s" % (json.dumps(c), bad[0]))
+            return max(rc, _apply(run, sources, required, [(c, None) for c in live]))
+        except Leave as e:
+            return run.leave(e.cause, e.why)
+        except Transient as e:
+            return run.tried("transient", str(e), 3)
+
+
 # ---- restore, dismiss, rows ------------------------------------------------------------------------------------------
+
+def _rollout_note(note):
+    """Whether a note is a rollout note (`protocol_version:` and no `rollout:`), whose own rows are check's."""
+    return note.get("rollout") is None and note.get("protocol_version") is not None
+
+
+def _record_of(path, note):
+    """The Run record a note's rows belong to: a task note's `rollout:`, or a rollout note's own slug (check's rows)."""
+    return path.stem if _rollout_note(note) else rr._note_rollout(note)
+
 
 def _find(note, rid):
     rows = rr._settings_rows(note)
@@ -1211,7 +1496,7 @@ def cmd_restore(args):
             print("[[%s]]: the merge-settings lock of %s is held: run it again" % (path.stem, row["repo"]))
             return 75
         try:
-            _owner, _branch = _owned(args.gh_bin, row["repo"])
+            _owned(args.gh_bin, row["repo"])
             rid = int(row["ruleset"]) if row["ruleset"] else None
             live = _live(args.gh_bin, row["repo"], row["branch"], row["source"], rid)
             before, after = json.loads(row["before"]), json.loads(row["after"])
@@ -1235,7 +1520,7 @@ def cmd_restore(args):
         note = rr.Note(path)
         _row(note, now, "restored %s" % args.id)
         _save(note)
-        rollout = rr._note_rollout(note)
+        rollout = _record_of(path, note)
         if rollout:
             rr._event(rollout, "setting-restored", path.stem.lower(), {"id": args.id}, ts=now.isoformat())
     print("[[%s]]: restored %s" % (path.stem, args.id))
@@ -1259,7 +1544,7 @@ def cmd_dismiss(args):
         return 0
     _row(note, now, "dismissed %s" % args.id)
     _save(note)
-    rollout = rr._note_rollout(note)
+    rollout = _record_of(path, note)
     if rollout:
         rr._event(rollout, "setting-dismissed", path.stem.lower(), {"id": args.id}, ts=now.isoformat())
     print("[[%s]]: dismissed %s: the change stays, its Run record line kept" % (path.stem, args.id))
@@ -1306,7 +1591,7 @@ def cmd_rows(args):
         if args.rollout:   # a slug, a wikilink or the rollout note's path
             want = (Path(args.rollout).stem if args.rollout.endswith(".md")
                     else rr._wikilink_slug(args.rollout) or args.rollout).lower()
-        for path in sorted(d.glob("*.md")):
+        for path in sorted(d.glob("*.md")) + sorted((d / "Archive" / "Rollouts").glob("*.md")):
             try:
                 text = path.read_text()
             except OSError:
@@ -1317,7 +1602,7 @@ def cmd_rows(args):
                 note = rr.Note(path, text)
             except ValueError:
                 continue
-            if want and (rr._note_rollout(note) or "").lower() != want:
+            if want and (_record_of(path, note) or "").lower() != want:
                 continue
             out += _open_rows(path, note, args.unrestored)
     print(json.dumps({"rows": out}, ensure_ascii=False))
@@ -1327,11 +1612,19 @@ def cmd_rows(args):
 # ---- main -------------------------------------------------------------------------------------------------------------
 
 def _guard(note, tasks_dir):
-    """engine-snapshot.py's guard_task() for the note's rollout, loaded from this tree: its refusal, else None."""
+    """engine-snapshot.py's guard, loaded from this tree: guard() of the note itself when it is a rollout note (the
+    rows check writes there, and restore and dismiss of them, _rollout_note's test as _record_of's), else guard_task()
+    for its rollout. Its refusal, else None."""
     try:
         es = _load("thread_engine_snapshot_ms", ROOT / "skills" / "_shared" / "scripts" / "engine-snapshot.py")
     except Exception:  # noqa: BLE001 — only positive evidence refuses
         return None
+    try:
+        own = _rollout_note(rr.Note(Path(note)))
+    except Exception:  # noqa: BLE001 — a note that cannot be read is the verb's own error
+        own = False
+    if own:
+        return es.guard(note, es.ROOT, SCRIPT_REL)
     return es.guard_task(note, es.ROOT, SCRIPT_REL, tasks_dir)
 
 
@@ -1347,7 +1640,10 @@ def main(argv=None):
     dm = sub.add_parser("dismiss", help="keep a change (on Lachy's word); its Run record line stays")
     dm.add_argument("--note", required=True)
     dm.add_argument("--id", required=True)
-    for sp in (fr, rs, dm):
+    ck = sub.add_parser("check", help="the repo check before the first Slot: find required jobs that cannot run")
+    ck.add_argument("--note", required=True, help="the rollout note, which holds the rows")
+    ck.add_argument("--repo", required=True)
+    for sp in (fr, rs, dm, ck):
         sp.add_argument("--gh-bin", default="gh")
         sp.add_argument("--now", default=None)
         sp.add_argument("--tasks-dir", default=None, help="the vault's task notes (the Engine snapshot guard)")
@@ -1369,14 +1665,14 @@ def main(argv=None):
     if args.now_dt is None:
         print("ERROR: merge-settings %s: usage: --now %r is not a stamp" % (args.cmd, args.now), file=sys.stderr)
         return 2
-    if args.cmd == "free":
+    if args.cmd in ("free", "check"):
         args.repo = Path(os.path.expanduser(args.repo))
     refusal = _guard(os.path.expanduser(args.note), args.tasks_dir)
     if refusal:   # ADR 0043: before any read; nothing written
         print(refusal, file=sys.stderr)
         return 2
     try:
-        return {"free": cmd_free, "restore": cmd_restore, "dismiss": cmd_dismiss}[args.cmd](args)
+        return {"free": cmd_free, "restore": cmd_restore, "dismiss": cmd_dismiss, "check": cmd_check}[args.cmd](args)
     except OSError as e:
         print("ERROR: merge-settings %s: %s" % (args.cmd, e), file=sys.stderr)
         return 2

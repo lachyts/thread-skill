@@ -676,6 +676,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py restore -
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py dismiss --note <task note> --id <id>
 ```
 
+`<task note>` is the note the row is on, its `task` in `rows`: a task note, or, for a change schedule step 6's *Repo
+check* made before the first Slot, the rollout note itself (in `Archive/Rollouts/` once the rollout is archived).
 `restore` writes the setting's before back once the live setting still reads as the change left it, and closes the
 row; a live setting that drifted since (exit 3) is reported with its undo, nothing written. `dismiss` is his decision
 to keep the change: the row closes, and the Run record keeps its line. Neither re-enters a task.

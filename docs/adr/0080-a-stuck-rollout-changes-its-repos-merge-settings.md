@@ -34,6 +34,24 @@ NON-check gate. A rule naming a gone reviewer or app, a stuck infrastructure run
 him (an expression or include matrix, a reusable workflow's `a / b`, a dropped matrix combination) are follow-up p47-15;
 the needs-you list's and decision 6's repo check's read of the rows is p47-16.*
 
+*Decision 6's repo check built 2026-11-13 (p51-5): `merge-settings.py check`, run by schedule step 6 on the rollout note
+it just wrote. It reads the required checks and the last 30 workflow runs, read-only; a required check whose every
+recent job is a self-hosted one no runner took (queued 15 minutes or more, or cancelled after waiting that long), and
+whose jobs' labels no runner registered to the repo or its organisation covers, is freed through `free`'s writer and
+lock, its row on the rollout note and its line in that rollout's Run record; a required check with no recent run, one
+a registered runner covers (busy or offline: it may come back, decision 2), and a change it could not make, is listed.
+Listing the changes not yet restored at each rollout's start stays p47-16's.*
+
+*It amends two accepted decisions, on purpose, because it runs before the first Slot, when no task has been set aside
+and no task's block exists. First, decision 4's guard and the Decided list's "a refusal unless the Run record names the
+block": `check` has no set-aside line to point at, so its guard is the evidence it reads in the same call, the run
+history (every recent job of the check one no runner took) and the registered runners (none covers its labels). The
+runner read does for a sleeping or busy runner what the settings point's cool-down retry does for `free`: it keeps the
+check (decision 2), so only a runner that is gone frees it. Second, decision 5 and the Decided list's "Where the row lives → the task note whose block it freed": no
+task's block was freed, so the row lives on the rollout note it ran for. It still outlives the rollout (review #10):
+`rows --tasks-dir` reads the rollout notes in `Archive/Rollouts/` too, where a finished rollout's note moves, and
+`rows --rollout` lists it and `restore` and `dismiss` record it in that rollout's Run record, as for a task's row.*
+
 ## Context
 
 Lachy, 2026-11-10: *"a system where things don't get stuck or they can resolve themselves."* On 2026-11-04 he had
