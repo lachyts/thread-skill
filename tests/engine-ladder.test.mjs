@@ -627,14 +627,18 @@ test('role models: each moves its own role only, at high', async (t) => {
   assert.deepEqual(rowRan(mr), ranOf(mr))
   const B = 'proj-rbuild'
   const b = await run(mkArgs(mkTask(B), { ladder: two({ builder: 'fable' }) }), {
-    ...fight(B), [`implement:${B}`]: redOneShot, [`implement:${B}@opus-xhigh`]: green(`implement:${B}@opus-xhigh`),
+    ...fight(B), [`implement:${B}`]: ralphBlocked, [`implement:${B}@opus-high`]: green(`implement:${B}@opus-high`),
   })
   clean(b)
   assert.deepEqual(triples(b), [
-    [`implement:${B}`, 'fable', 'high'], [`implement:${B}@opus-xhigh`, 'fable', 'high'], [`review:${B} r1`, 'opus', 'xhigh'],
+    [`implement:${B}`, 'fable', 'high'], [`implement:${B}@opus-high`, 'fable', 'high'], [`review:${B} r1`, 'opus', 'xhigh'],
     [`revise:${B} r2`, 'fable', 'high'], [`review:${B} r2`, 'opus', 'xhigh'],
   ])
   assert.deepEqual(rowRan(b), ranOf(b))
+  // A builder on its own model has no stronger pass (decision 4, p46-2), so a `[role]` model takes the full loop and
+  // recorded no-op climbs too, on purpose: the rung stays where it was.
+  assert.ok(!oneShot(callOf(b, `implement:${B}`).prompt) && callOf(b, `implement:${B}`).prompt.includes('Max iterations: 3'))
+  assert.deepEqual(b.row.climbs, [{ stage: 'implement', from: 'opus-high', to: 'opus-high' }, { stage: 'review', from: 'opus-high', to: 'opus-high' }])
   const I = 'proj-rinv'
   const inv = await run(mkArgs(mkTask(I, { scope: 'read-only' }), { ladder: two({ investigator: 'fable' }) }), {
     [`investigate:${I}`]: { ...green(`investigate:${I}`), prUrl: '', branch: '' },
@@ -716,4 +720,127 @@ test('log: the ladder line names plan models and roles only when the file does',
   const plain = ladderFrom(t, BUILT_IN_RUNGS)
   const p = await run(mkArgs(mkTask(S), { ladder: plain }), { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve })
   assert.ok(p.logs.includes(`ladder: ${plain.source} — opus-high, opus-xhigh`), p.logs.join('\n'))
+})
+
+// ---- arms (ADR 0079 decisions 3 and 4, p46-2) -----------------------------------------------------------------
+// args.task.arms is the task's stamped arms: an opus or fable arm is the role's own model, `none` takes `roles`, then
+// the rung. A role on its own model has no stronger pass, so its climbs are recorded no-ops and its first pass runs
+// the full loop. The planner and plan judge never take an arm, and an all-Fable rung wins for every role.
+
+const OWN_TEXT = "its own model, not the rung's, so a climb would not strengthen it"
+const fightOf = (slug) => ({
+  [`implement:${slug}`]: green(`implement:${slug}`), [`review:${slug} r1`]: changes('fix it'),
+  [`revise:${slug} r2`]: green(`revise:${slug} r2`), [`review:${slug} r2`]: approve,
+})
+
+test('arms: a master-review fable arm sends every review round to fable at high, and implement stays on the rung', async (t) => {
+  const ladder = ladderFrom(t, BUILT_IN_RUNGS)
+  const S = 'proj-arm-mr'
+  const r = await run(mkArgs(mkTask(S, { arms: { 'master-review': 'fable', builder: 'none' } }), { ladder }), fightOf(S))
+  clean(r)
+  assert.deepEqual(triples(r), [
+    [`implement:${S}`, 'opus', 'high'], [`review:${S} r1`, 'fable', 'high'], [`revise:${S} r2`, 'opus', 'xhigh'], [`review:${S} r2`, 'fable', 'high'],
+  ])
+  assert.ok(oneShot(callOf(r, `implement:${S}`).prompt), 'a builder in no arm keeps the one-shot below the top')
+  assert.deepEqual(r.row.climbs, [{ stage: 'review', from: 'opus-high', to: 'opus-xhigh' }], 'the reviser in no arm still climbs')
+  assert.deepEqual(rowRan(r), ranOf(r))
+  assert.ok(r.logs.includes('arms: master-review fable, builder none'), r.logs.join('\n'))
+})
+
+test('arms: a builder fable arm runs the full loop, records its climbs as no-ops and retries at CAPPED_RETRY_ITERATIONS', async (t) => {
+  const ladder = ladderFrom(t, BUILT_IN_RUNGS)
+  const S = 'proj-arm-b'
+  const r = await run(mkArgs(mkTask(S, { arms: { 'master-review': 'opus', builder: 'fable' } }), { ladder }), {
+    ...fightOf(S), [`implement:${S}`]: ralphBlocked, [`implement:${S}@opus-high`]: green(`implement:${S}@opus-high`),
+  })
+  clean(r)
+  assert.deepEqual(triples(r), [
+    [`implement:${S}`, 'fable', 'high'], [`implement:${S}@opus-high`, 'fable', 'high'], [`review:${S} r1`, 'opus', 'xhigh'],
+    [`revise:${S} r2`, 'fable', 'high'], [`review:${S} r2`, 'opus', 'xhigh'],
+  ])
+  const first = callOf(r, `implement:${S}`).prompt
+  assert.ok(first.includes('Max iterations: 3') && !first.includes('EXACTLY ONCE'), 'the first pass is the full loop')
+  const retry = callOf(r, `implement:${S}@opus-high`).prompt
+  assert.ok(retry.includes('Max iterations: 2'), 'the same-rung retry gets CAPPED_RETRY_ITERATIONS')
+  assert.ok(retry.includes('SECOND PASS') && retry.includes(OWN_TEXT) && !retry.includes("the ladder's top rung") && !retry.includes('ONE RUNG UP'), retry.slice(-900))
+  assert.deepEqual(r.row.climbs, [{ stage: 'implement', from: 'opus-high', to: 'opus-high' }, { stage: 'review', from: 'opus-high', to: 'opus-high' }])
+  assert.deepEqual([r.row.startRung, r.row.rung], ['opus-high', 'opus-high'])
+  assert.ok(r.logs.includes(`climb: ${S} stays on opus-high (implement, a recorded no-op: builder runs on its own model)`), r.logs.join('\n'))
+  assert.ok(r.logs.includes(`climb: ${S} stays on opus-high (review, a recorded no-op: builder runs on its own model)`), r.logs.join('\n'))
+  // The read-only investigator in its fable arm: the same no-op, with the read-only contract.
+  const R = 'proj-arm-ro'
+  const ro = await run(mkArgs(mkTask(R, { scope: 'read-only', arms: { investigator: 'fable' } }), { ladder }), {
+    [`investigate:${R}`]: { ...ralphBlocked, worktreePath: '' },
+    [`investigate:${R}@opus-high`]: { ...green(`investigate:${R}@opus-high`), prUrl: '', branch: '' },
+  })
+  clean(ro)
+  assert.deepEqual(triples(ro), [[`investigate:${R}`, 'fable', 'high'], [`investigate:${R}@opus-high`, 'fable', 'high']])
+  const second = callOf(ro, `investigate:${R}@opus-high`).prompt
+  assert.ok(second.includes('SECOND PASS: a first attempt at this investigation') && second.includes(OWN_TEXT), second.slice(-700))
+  assertNoCodeFraming(second, 'the own-model investigator retry')
+  assert.deepEqual(ro.row.climbs, [{ stage: 'implement', from: 'opus-high', to: 'opus-high' }])
+})
+
+test('arms: an opus arm over a fable role model runs on the rung; a none arm lets the role model apply', async (t) => {
+  const ladder = ladderFrom(t, BUILT_IN_RUNGS, { builder: 'fable' })
+  const S = 'proj-arm-over'
+  const script = { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve }
+  const opus = await run(mkArgs(mkTask(S, { arms: { builder: 'opus' } }), { ladder }), script)
+  clean(opus)
+  assert.deepEqual(triples(opus), [[`implement:${S}`, 'opus', 'high'], [`review:${S} r1`, 'opus', 'xhigh']])
+  assert.ok(oneShot(callOf(opus, `implement:${S}`).prompt), 'an opus arm on an opus rung is the rung: one-shot below the top')
+  const none = await run(mkArgs(mkTask(S, { arms: { builder: 'none' } }), { ladder }), script)
+  clean(none)
+  assert.deepEqual(triples(none), [[`implement:${S}`, 'fable', 'high'], [`review:${S} r1`, 'opus', 'xhigh']])
+})
+
+test('arms: plan dispatches are unchanged under any arms', async (t) => {
+  for (const ladder of [ladderFrom(t, P3), ladderFrom(t, BUILT_IN_RUNGS)]) {
+    const S = 'proj-arm-plan'
+    const script = {
+      [`plan:${S}`]: plan, [`plan-judge:${S} r1`]: changes('tighten'), [`plan-revise:${S} r2`]: plan, [`plan-judge:${S} r2`]: approve,
+      [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve,
+    }
+    const task = (arms) => mkTask(S, { scope: 'cross-cutting', planGate: true, ...(arms ? { arms } : {}) })
+    const armed = await run(mkArgs(task({ 'master-review': 'fable', builder: 'fable' }), { ladder }), script)
+    const bare = await run(mkArgs(task(), { ladder }), script)
+    clean(armed)
+    clean(bare)
+    const planOnly = (r) => r.calls.filter((c) => c.label.startsWith('plan')).map((c) => [c.label, c.model, c.effort, c.prompt])
+    assert.deepEqual(planOnly(armed), planOnly(bare))
+    assert.deepEqual(armed.row.climbs.filter((c) => c.stage === 'plan'), bare.row.climbs.filter((c) => c.stage === 'plan'), 'the plan stage climbs as before')
+  }
+})
+
+test('arms: on an all-Fable start rung the rung wins, and its climbs are top-rung no-ops', async (t) => {
+  const ladder = ladderFrom(t, THREE)
+  const S = 'proj-arm-top'
+  const r = await run(mkArgs(mkTask(S, { rung: 'fable-high', arms: { builder: 'opus', 'master-review': 'opus' } }), { ladder }), {
+    [`implement:${S}`]: ralphBlocked, [`implement:${S}@fable-high`]: green(`implement:${S}@fable-high`), [`review:${S} r1`]: approve,
+  })
+  clean(r)
+  assert.deepEqual(triples(r), [[`implement:${S}`, 'fable', 'high'], [`implement:${S}@fable-high`, 'fable', 'high'], [`review:${S} r1`, 'fable', 'max']])
+  const retry = callOf(r, `implement:${S}@fable-high`).prompt
+  assert.ok(retry.includes("the ladder's top rung") && !retry.includes(OWN_TEXT), 'the top-rung text keeps its bytes')
+})
+
+test('arms: none everywhere is byte-identical to no arms, and logs no arms line', async (t) => {
+  const ladder = ladderFrom(t, BUILT_IN_RUNGS)
+  const S = 'proj-arm-none'
+  const script = { ...fightOf(S), [`implement:${S}`]: redOneShot, [`implement:${S}@opus-xhigh`]: green(`implement:${S}@opus-xhigh`) }
+  const none = await run(mkArgs(mkTask(S, { arms: { 'master-review': 'none', builder: 'none' } }), { ladder }), script)
+  const bare = await run(mkArgs(mkTask(S), { ladder }), script)
+  clean(none)
+  clean(bare)
+  assert.deepEqual(none.calls, bare.calls)
+  assert.deepEqual(none.logs, bare.logs)
+  assert.deepEqual(none.row, bare.row)
+  assert.ok(!none.logs.some((l) => l.startsWith('arms:')))
+  const E = loadEngine(['taskArmsError', 'ARM_ROLES', 'ARM_VALUES', 'armOf', 'fixedPass'])
+  assert.deepEqual(JSON.parse(JSON.stringify(E.ARM_ROLES)), ['master-review', 'builder', 'investigator'])
+  assert.deepEqual(JSON.parse(JSON.stringify(E.ARM_VALUES)), ['opus', 'fable', 'none'])
+  assert.equal(E.taskArmsError({ 'master-review': 'fable', builder: 'none', investigator: 'opus' }), '')
+  const st = { rungs: BUILT_IN_RUNGS, at: 0, roles: {}, arms: { builder: 'fable', 'master-review': 'none' } }
+  assert.deepEqual([E.armOf(st, 'builder'), E.armOf(st, 'master-review'), E.armOf(st, 'investigator')], ['fable', '', ''])
+  assert.deepEqual([E.fixedPass(st, 'builder'), E.fixedPass(st, 'master-review'), E.fixedPass(st, null)], [true, false, false])
 })

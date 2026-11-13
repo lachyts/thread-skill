@@ -29,8 +29,9 @@ export const meta = {
 //   ladder      : object,            // the operator's ladder (ADR 0029), ladder.py's JSON as the lead resolved
 //                                    //   it at THIS call's start: { source: <the file's path> | 'built-in',
 //                                    //   rungs: [{ name, model, effort, judge, review[, plan] }, …][, roles:
-//                                    //   { <LADDER_ROLES>: <model> }] }, bottom first (ADR 0079: a rung's plan
-//                                    //   model and the ladder's role models, runOn). Fixed for the call: a
+//                                    //   { <LADDER_ROLES>: <model> }][, share: { <LADDER_SHARE_ROLES>: <0..1> }] },
+//                                    //   bottom first (ADR 0079: a rung's plan model and the ladder's role models,
+//                                    //   runOn; the share is reconcile's draw, accepted here and unused). Fixed for the call: a
 //                                    //   resume re-passes its call's own ladder, so an edit reaches a task at
 //                                    //   its next call. Validated (ladderArgsError)
 //                                    //   before any dispatch (argsRefused), in both modes. Absent ⇒ the built-in ladder (a
@@ -126,6 +127,14 @@ export const meta = {
 //                                    //   re-dispatch starts there). Absent or '' ⇒ the legacy fields below,
 //                                    //   else the bottom rung. A name the ladder lacks (or a non-string)
 //                                    //   is read as the TOP rung and reported as drift (the row's rungDrift).
+//       arms            : object,    // optional (p46-2, ADR 0079 decisions 3 and 4); the task's stamped arms, the
+//                                    //   JSON of `reconcile-rollout.py mark-started`'s `<slug>: arms {…}` line on a
+//                                    //   fresh call (a resume re-passes its own): { <ARM_ROLES>: 'opus' | 'fable' |
+//                                    //   'none' }. An opus or fable arm is that role's own model (armOf, runOn);
+//                                    //   'none' or no entry takes the ladder's `roles`, then the rung. The planner,
+//                                    //   the plan judge and the lead are refused, as is any other shape, before
+//                                    //   any dispatch in both modes (taskArmsError, argsRefused); mode 'integrate'
+//                                    //   ignores it. Absent ⇒ prompts, opts, logs and the row byte-identical.
 //       model, effort   : string,    // optional, LEGACY: a note with no `rung:` passes its stale `model:`
 //                                    //   and `effort:` stamps. They only choose the starting rung (p13-3's
 //                                    //   mapping, startRung): `model: fable`, or `effort: xhigh | max`, starts
@@ -1062,9 +1071,10 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
 // Rung-selected verification block for code-writing prompts (ADR 0029 decision 3): the implement stage's
 // first pass BELOW the top rung gets the one-shot (hand over one rung up on the first red); the retry after
 // the stage's climb, and every pass on the top rung, get the full Ralph loop — on the top there is no rung
-// to hand to. touched: touchedOf(a), passed through to either.
+// to hand to. A builder on its own model (fixedPass, ADR 0079 decision 4) has no stronger pass to hand to either,
+// so it gets the full loop on every rung. touched: touchedOf(a), passed through to either.
 function verifyBlock(st, verifier, maxIterations, baseline, slot, touched) {
-  return !onTop(st) && !climbOf(st, 'implement')
+  return !onTop(st) && !climbOf(st, 'implement') && !fixedPass(st, 'builder')
     ? oneShotVerify(verifier, baseline, slot, touched)
     : ralphLoop(verifier, maxIterations, baseline, slot, touched)
 }
@@ -1249,7 +1259,9 @@ The engine shows at most the agent's first ${DEPS_SHOWN} lines, each cut at ${DE
 // attempt's diagnosis/feedback verbatim.
 // `st` and the builder's own `stage` decide the framing, so no caller can pick the wrong one: when that
 // stage's climb MOVED the task, this is a takeover one rung up; anything else with a prior is the stage's
-// climb recorded as a no-op on the top rung, so a same-rung second pass. `kind` picks the body: the
+// climb recorded as a no-op, so a same-rung second pass: on the top rung, or (ADR 0079 decision 4) because the
+// role runs on its own model (fixedPass: the builder, or the investigator for 'readonly'), each with its own
+// text; the top rung's keep their bytes. `kind` picks the body: the
 // code-writing roles (none given) get the verification loop and the committed work on their branch; the
 // read-only investigator ('readonly') and the planner ('planner') work in the task tree with no source
 // edits, no commits and no PR, so their two arms restate that contract and never mention verification or
@@ -1258,6 +1270,7 @@ function escalationContext(prior, st, stage, kind) {
   if (!prior) return ''
   const c = climbOf(st, stage)
   const moved = !!(c && c.from !== c.to)
+  const own = !moved && fixedPass(st, kind === 'planner' ? null : kind === 'readonly' ? 'investigator' : 'builder')
   if (kind === 'readonly' || kind === 'planner') {
     const work = kind === 'planner' ? 'plan' : 'investigation'
     const contract = kind === 'planner'
@@ -1271,6 +1284,14 @@ function escalationContext(prior, st, stage, kind) {
 SECOND PASS: a first attempt at this plan did not complete, and you own it from here. The plan
 runs on the same model and effort on this rung as on the one below, so the climb changed nothing for it and
 there is no hand-over — finish the plan yourself.
+${contract}
+The prior attempt's diagnosis (verbatim):
+${prior}`
+    if (own) return `
+
+SECOND PASS: a first attempt at this ${work} did not complete, and you own it from here. This
+role runs on its own model, not the rung's, so a climb would not strengthen it and there is no hand-over —
+finish the ${work} yourself.
 ${contract}
 The prior attempt's diagnosis (verbatim):
 ${prior}`
@@ -1290,6 +1311,15 @@ The prior attempt's diagnosis (verbatim):
 ${prior}
 Do not blindly repeat the failed approach.`
   }
+  if (own) return `
+
+SECOND PASS: a first attempt did not land this task, and you own it from here. This role runs on
+its own model, not the rung's, so a climb would not strengthen it and there is no hand-over: run the FULL
+verification loop and finish the work.
+The prior attempt's diagnosis (verbatim):
+${prior}
+Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
+warrants.`
   if (!moved) return `
 
 SECOND PASS: a first attempt did not land this task, and you own it from here. This task is on
@@ -1981,6 +2011,12 @@ checkout at "${a.repoPath}".`
 //   when it names it. On an all-Fable rung (allFable) the rung wins for every role (decision 4, settled #3).
 // - runOn(st, role) is the one place a dispatch reads its model and effort; integrationRungOf picks the rung
 //   Integration runs on: the highest one that is not all-Fable, the top when every rung is (decision 2).
+// - Arms and no-op climbs (decisions 3 and 4, p46-2): args.task.arms is the task's stamped arms (reconcile draws them
+//   by the task's name at its first dispatch; the engine never draws). armOf is the one place an arm is read: an
+//   opus or fable arm is the role's own model and wins over `roles`, below an all-Fable rung (ownModel). A role on
+//   its own model that is not the rung's (fixedPass: a Fable arm, or a `roles` model) has no stronger pass to climb
+//   to: the stage's climb that would strengthen it is recorded as a no-op { stage, from, to: from } and the rung
+//   stays (escalate), its retry gets CAPPED_RETRY_ITERATIONS, and the builder's first pass runs the full loop.
 //
 // Per call, no snapshot (decision 6). The lead runs ladder.py at each call's start and passes its JSON as
 // args.ladder; the call keeps it to the end, and a resume re-passes it. With none, BUILT_IN_LADDER applies
@@ -2009,6 +2045,15 @@ const LADDER_MODELS = ['opus', 'fable']   // ladder.py's MODELS (tests/ladder.te
 const LADDER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // ladder.py's ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.roles may give their own model.
 const LADDER_ROLES = ['master-review', 'builder', 'investigator']
+// ladder.py's SHARE_ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.share may give a Fable share.
+// The engine never draws (reconcile-rollout.py does, at a task's first dispatch, and stamps `arms:`): it validates the
+// share and leaves it unused.
+const LADDER_SHARE_ROLES = ['master-review', 'builder', 'investigator', 'lead']
+// The roles args.task.arms may place in an arm (ADR 0079 decision 3): the drawn roles the engine dispatches. Never the
+// planner or the plan judge (planning is never drawn) and never the lead (no dispatch the engine makes).
+const ARM_ROLES = ['master-review', 'builder', 'investigator']
+// An arm: the role's own model for this task, or `none` (in no arm: it takes `roles`, then the rung).
+const ARM_VALUES = ['opus', 'fable', 'none']
 // The effort a model of its own runs at: a rung's plan model, and a role model that is not the rung's (ADR 0079,
 // "Fable's effort is high on every rung").
 const OWN_EFFORT = 'high'
@@ -2086,6 +2131,28 @@ function ladderArgsError(l) {
       if (!LADDER_MODELS.includes(l.roles[k])) return `roles: ${k}: unknown model ${refusedEcho(l.roles[k])} (known: ${LADDER_MODELS.join(', ')})`
     }
   }
+  if (l.share !== undefined) {
+    if (!l.share || typeof l.share !== 'object' || Array.isArray(l.share)) return `share must be one object { <role>: <number> }, got ${refusedEcho(l.share)}`
+    for (const k of Object.keys(l.share)) {
+      if (!LADDER_SHARE_ROLES.includes(k)) return `share: unknown role ${refusedEcho(k)} (known: ${LADDER_SHARE_ROLES.join(', ')})`
+      const v = l.share[k]
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) return `share: ${k}: ${refusedEcho(v)} is not a number in [0, 1]`
+    }
+  }
+  return ''
+}
+
+// args.task.arms (ADR 0079 decision 3, p46-2): '' when absent (or null) or usable, else why not. One object of
+// { <ARM_ROLES>: opus | fable | none }: the stamp reconcile-rollout.py mark-started prints as the task's arms line.
+// The planner, the plan judge and the lead are refused. A bad value is a lead bug, refused before any dispatch in both
+// modes (argsRefused); mode 'integrate' then ignores it.
+function taskArmsError(arms) {
+  if (arms === undefined || arms === null) return ''
+  if (typeof arms !== 'object' || Array.isArray(arms)) return `must be one object { <role>: ${ARM_VALUES.join(' | ')} }, got ${refusedEcho(arms)}`
+  for (const k of Object.keys(arms)) {
+    if (!ARM_ROLES.includes(k)) return `unknown role ${refusedEcho(k)} (known: ${ARM_ROLES.join(', ')}; the planner, the plan judge and the lead take no arm here)`
+    if (!ARM_VALUES.includes(arms[k])) return `${k}: ${refusedEcho(arms[k])} is not one of ${ARM_VALUES.join(', ')}`
+  }
   return ''
 }
 
@@ -2135,7 +2202,9 @@ function rungState(task, a) {
   }
   // verdicts (p21-3): every master-review round this call judged, pushed by reviewLoop (reviewVerdictOf).
   // flakes (p29-9): every Flake the call's code-writing agents returned, pushed by runAgent (flakesOf).
-  return { source: L.source, rungs: L.rungs, roles: L.roles || {}, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
+  // arms (p46-2): the task's stamped arms (args.task.arms), read only through armOf.
+  const arms = task && task.arms && typeof task.arms === 'object' ? { ...task.arms } : {}
+  return { source: L.source, rungs: L.rungs, roles: L.roles || {}, arms, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
 }
 
 function cur(st) { return st.rungs[st.at] }
@@ -2163,12 +2232,20 @@ function reviewVerdictOf(round, verdict) {
 }
 
 // The stage's climb (see above): once per stage per call, never past the top, where it is recorded as a
-// no-op. Returns whether the rung MOVED. Prompt framing does not read this return: every builder derives
-// its own from `st` and its stage (escalationContext off the stage's climb, verifyBlock off onTop and the
-// implement climb). The one live consumer of the return is implement()'s retry budget.
-function escalate(st, slug, stage) {
+// no-op. Returns whether the rung MOVED. `role` is the role a climb would strengthen (the implement stage's builder
+// or investigator, the review stage's reviser, the builder; none for the plan stage): when it runs on its own model
+// (fixedPass), a climb would not strengthen it, so the climb is recorded as a no-op and the rung stays (ADR 0079
+// decision 4). Prompt framing does not read this return: every builder derives its own from `st` and its stage
+// (escalationContext off the stage's climb and fixedPass, verifyBlock off onTop, the implement climb and fixedPass).
+// The one live consumer of the return is implement()'s retry budget.
+function escalate(st, slug, stage, role) {
   if (climbOf(st, stage)) return false
   const from = cur(st).name
+  if (fixedPass(st, role)) {
+    st.climbs.push({ stage, from, to: from })
+    log(`climb: ${slug} stays on ${from} (${stage}, a recorded no-op: ${role} runs on its own model)`)
+    return false
+  }
   if (!onTop(st)) st.at += 1
   const to = cur(st).name
   st.climbs.push({ stage, from, to })
@@ -2193,16 +2270,40 @@ function allFable(rung) {
 function planOn(rung) {
   return rung.plan !== undefined ? { model: rung.plan, effort: OWN_EFFORT } : { model: rung.model, effort: rung.effort }
 }
+// The task's arm for a drawn `role` (args.task.arms, stamped by reconcile at the task's first dispatch): 'opus' or
+// 'fable', or '' when the role sits in no arm (`none`, or no entry). The one place the engine reads an arm, so an
+// exclusion from the draw (p52-2's Unreachable surface, for the master review) lands here.
+function armOf(st, role) {
+  const arms = st.arms || {}
+  const v = Object.prototype.hasOwnProperty.call(arms, role) ? arms[role] : undefined
+  return v === 'opus' || v === 'fable' ? v : ''
+}
+// The model `role` names for itself on the task's CURRENT rung, or undefined when it takes the rung's: on an all-Fable
+// rung the rung wins for every role (decision 4); below it the role's arm wins, then the ladder's role model (st.roles).
+function ownModel(st, role) {
+  if (allFable(cur(st))) return undefined
+  const arm = armOf(st, role)
+  if (arm) return arm
+  const roles = st.roles || {}
+  return Object.prototype.hasOwnProperty.call(roles, role) ? roles[role] : undefined
+}
+// Whether `role` runs on its own model, not the rung's, below an all-Fable rung: a Fable arm on an Opus rung, or a
+// `[role]` model that is not the rung's. A climb would not strengthen it, so escalate records the climb as a no-op,
+// and its first pass runs the full verification loop (verifyBlock). No role (the plan stage) is never fixed.
+function fixedPass(st, role) {
+  if (!role) return false
+  const own = ownModel(st, role)
+  return own !== undefined && own !== cur(st).model
+}
 // { model, effort } for a dispatch `role` on the task's CURRENT rung, the one place a task-mode dispatch takes them
 // (see the section header). role: 'planner' (plan and plan-revise), 'plan-judge', 'builder' (implement and
 // revise), 'investigator' (the read-only task's agent) or 'master-review'. The planner runs on planOn, and the plan
-// judge rides with it when the rung names a plan model; a role's own model (st.roles) wins below an all-Fable rung;
-// else the rung's own model at its own effort for that role (implEffort, judgeEffort).
+// judge rides with it when the rung names a plan model; a role's own model (ownModel: its arm, then st.roles) wins
+// below an all-Fable rung; else the rung's own model at its own effort for that role (implEffort, judgeEffort).
 function runOn(st, role) {
   const rung = cur(st)
   if (role === 'planner' || (role === 'plan-judge' && rung.plan !== undefined)) return planOn(rung)
-  const roles = st.roles || {}
-  const own = !allFable(rung) && Object.prototype.hasOwnProperty.call(roles, role) ? roles[role] : undefined
+  const own = ownModel(st, role)
   if (own !== undefined && own !== rung.model) return { model: own, effort: OWN_EFFORT }
   const effort = role === 'plan-judge' ? judgeEffort(st, 'judge') : role === 'master-review' ? judgeEffort(st, 'review') : implEffort(st)
   return { model: rung.model, effort }
@@ -2453,7 +2554,7 @@ async function implement(task, st, prev, a) {
     if (r.blocked && askOf(r)) return { ...r, blocked: true, needsHuman: askOf(r) }
     if (r.blocked) {
       // The implement stage's first evidence of hardness: climb (a no-op on the top rung), one retry.
-      escalate(st, task.slug, 'implement')
+      escalate(st, task.slug, 'implement', 'investigator')
       r = await runAgent(readOnlyPrompt(task, a, st, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
         label: `investigate:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, ...runOn(st, 'investigator'),
       }, st)
@@ -2498,9 +2599,10 @@ async function implement(task, st, prev, a) {
   if (r.escalate || r.blocked) {
     // One-shot red or a first-pass block: the task has proven non-mechanical. The implement stage climbs
     // and the next rung takes over in the same worktree (the committed attempt + note diagnosis carry
-    // over; an approved plan is NOT re-planned) with the full Ralph budget. On the top rung the climb is a
-    // recorded no-op and the same rung retries once.
-    const moved = escalate(st, task.slug, 'implement')
+    // over; an approved plan is NOT re-planned) with the full Ralph budget. On the top rung, or for a builder on
+    // its own model (fixedPass, whose first pass also ran the full loop), the climb is a recorded no-op and the same
+    // rung retries once.
+    const moved = escalate(st, task.slug, 'implement', 'builder')
     const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
       || 'first-pass attempt did not verify green'
     // On the top rung the first pass ran the full loop, so it ALREADY spent a FULL Ralph budget; a second
@@ -2538,9 +2640,10 @@ async function implement(task, st, prev, a) {
 // round being revised for; `seeded` is the task.resume seed (the reviser's COLD ENTRY) or null.
 async function reviseRound(task, st, current, priorFeedback, round, a, planText, seeded) {
   // A review-judge `changes` is the review stage's evidence of hardness: revision is iteration, and
-  // iteration runs one rung up (once per stage per call; a no-op on the top rung). A seeded revise is its
-  // own call, so it climbs from the rung its note was stamped with.
-  escalate(st, task.slug, 'review')
+  // iteration runs one rung up (once per stage per call; a no-op on the top rung, and when the reviser, the
+  // builder, runs on its own model). A seeded revise is its own call, so it climbs from the rung its note was
+  // stamped with.
+  escalate(st, task.slug, 'review', 'builder')
   const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: implSchema(a), ...runOn(st, 'builder') }
   let revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts, st)
   // A replayed (or fresh) stop for gates the note has since approved: continuations (pastSignedGates), on the
@@ -3747,6 +3850,10 @@ try { defaultBranch(a) } catch (e) { throw argsRefused(e.message) }
 // pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
 if (a.waves !== undefined) throw argsRefused('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
 if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRefused('args.task must be one task object')
+// args.task.arms (p46-2): the task's stamped arms. A malformed one is a lead bug, refused before any dispatch in both
+// modes; mode 'integrate' takes no arms and ignores a usable one.
+const badArms = taskArmsError(a.task.arms)
+if (badArms) throw argsRefused('args.task.arms: ' + badArms)
 // args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
@@ -3812,6 +3919,10 @@ logLadder()
 // Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-rollout.py
 // next / mark-started) from the task notes' started:/merged: stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
+// The task's arms (p46-2), once, only when one names a model: a call with no arms, or only `none`, logs nothing new.
+if (a.task.arms && ARM_ROLES.some((k) => a.task.arms[k] === 'opus' || a.task.arms[k] === 'fable')) {
+  log(`arms: ${ARM_ROLES.filter((k) => a.task.arms[k] !== undefined).map((k) => `${k} ${a.task.arms[k]}`).join(', ')}`)
+}
 // args.gatePricer (ADR 0038): a value pricerOf refuses reads as absent. The plan judge's pricing check is advisory
 // (approve-gates --standing still prices fail-closed), so a bad value is logged once and never throws.
 if (a.gatePricer !== undefined && a.gatePricer !== null && a.gatePricer !== '' && !pricerOf(a)) {
