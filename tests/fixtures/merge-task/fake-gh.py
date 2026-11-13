@@ -71,6 +71,9 @@ State (a missing file takes the default in brackets):
                           default_branch <default>, permissions {admin true}}. err.repo-api: its text, rc 1.
   user                    the viewer's login for `api user` [o].
   orgrole.<org>           user/memberships/orgs/<org>: `admin` or `member` (state active); absent ⇒ the 404 form.
+  runners, runners.<org>  repos/o/r/actions/runners and orgs/<org>/actions/runners (merge-settings.py check's runner
+                          read): a JSON list of runner objects {name, status, busy, labels: [{name}]}, served as
+                          {total_count, runners}; absent ⇒ none registered. err.runners: its text, rc 1, on both.
   rsc.json                branches/<b>/protection/required_status_checks, stored in the write's body form {strict,
                           checks: [{context, app_id}]}; GET serves {url, strict, contexts, contexts_url, checks} with a
                           stored app_id -1 read back as null; absent ⇒ the 404 form. A PATCH (--input -) rewrites it:
@@ -571,6 +574,12 @@ if args[:1] == ["api"]:
         if role is None:
             not_found()
         gh_out({"state": "active", "role": role, "organization": {"login": parts[3]}})
+    if (len(parts) == 5 and parts[0] == "repos" or len(parts) == 4 and parts[0] == "orgs") and parts[-2:] == ["actions", "runners"]:
+        if has("err.runners"):
+            die(rd(p("err.runners")))
+        name = "runners" if parts[0] == "repos" else "runners." + parts[1]
+        runners = json.loads(rd(p(name))) if has(name) else []
+        gh_out({"total_count": len(runners), "runners": runners})
     if len(parts) == 3 and parts[0] == "repos":
         if has("err.repo-api"):
             die(rd(p("err.repo-api")))

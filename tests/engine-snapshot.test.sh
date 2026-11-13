@@ -532,6 +532,13 @@ py "$P" skills/execute/scripts/merge-settings.py free --note "$TASKS/gt1.md" --r
 refused "merge-settings free" gt1 g1
 py "$P" skills/execute/scripts/merge-settings.py dismiss --note "$TASKS/gt1.md" --id aaaaaaaaaaaa --tasks-dir "$TASKS"
 refused "merge-settings dismiss" gt1 g1
+# … and on a rollout note, which holds the repo check's own rows (ADR 0080 d6): the guard reads the note itself
+py "$P" skills/execute/scripts/merge-settings.py check --note "$TASKS/g1.md" --repo "$T/target" --tasks-dir "$TASKS"
+refused "merge-settings check" g1
+py "$P" skills/execute/scripts/merge-settings.py restore --note "$TASKS/g1.md" --id aaaaaaaaaaaa --tasks-dir "$TASKS"
+refused "merge-settings restore of a rollout note's row" g1
+py "$P" skills/execute/scripts/merge-settings.py dismiss --note "$TASKS/g1.md" --id aaaaaaaaaaaa --tasks-dir "$TASKS"
+refused "merge-settings dismiss of a rollout note's row" g1
 rm -f "$T/gh.log"
 out=$(bash "$P/skills/execute/scripts/merge-task.sh" "$T/target" https://github.com/o/r/pull/7 "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" 2>"$T/err"); rc=$?
 err=$(cat "$T/err"); refused "merge-task" gt1 g1
