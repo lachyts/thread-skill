@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # fold-journals (p15-3): the rollout's Workflow journals fold into its Run record as call-journal lines,
-# through run_record.emit (ADR 0032), and (p46-2, case 11) each terminal journal segment as one role-call line per role. The record's run-bound lines name each call's runId and journal dir;
+# through run_record.emit (ADR 0032), and (p46-2, case 11) each terminal journal segment as one role-call line per role,
+# only into the record of a rollout whose engine reads the kind (11g: an old-root fixture writes none). The record's
+# run-bound lines name each call's runId and journal dir;
 # a fold is idempotent, skips a runId already folded with a terminal status (so a journal cleaned up after
 # ~30 days never warns), warns and continues on anything missing or malformed, and never writes outside
 # run_record.py. Also pins execute SKILL §4.5 step 5's ceremony bullet. Temp dirs only.
@@ -37,7 +39,8 @@ d = {"runId": run_id, "status": status, "totalTokens": json.loads(tokens), "dura
 json.dump(d, open(path, "w"))
 PY
 }
-fold() { python3 "$SCRIPT" fold-journals "$@" 2>"$TMP/err" >"$TMP/out"; echo $?; }
+TK="$TMP/tasks"; mkdir -p "$TK"   # the role-call gate's rollout notes (11g); a slug with no note here reads True
+fold() { python3 "$SCRIPT" fold-journals --tasks-dir "$TK" "$@" 2>"$TMP/err" >"$TMP/out"; echo $?; }
 cj() {  # cj <rollout> <py expr over the list of call-journal dicts L>
   python3 - "$(rec "$1")" "$2" <<'PY'
 import json, sys
@@ -233,9 +236,10 @@ ok "$([ -n "$f" ] && [ -n "$c" ] && [ "$f" -lt "$c" ] && echo y || echo n)" y "f
 ok "$([ -n "$f" ] && [ -n "$m" ] && [ "$f" -lt "$m" ] && echo y || echo n)" y "fold before Move the rollout note"
 
 echo "== 11. (p46-2) role-call: one line per role per journal segment"
-# rjournal <path> <runId> <seg1|seg2> [status]: a real-shape journal with args (ladder, task.arms), result.tasks[0]
+# rjournal <path> <runId> <seg1|seg2|seg3> [status]: a real-shape journal with args (ladder, task.arms), result.tasks[0]
 # (status, ran, climbs), workflowProgress and startTime. seg1 is the call's first run; seg2 the same journal rewritten
-# by a resume: a new startTime, seg1's agents replayed (cached, an alias model, no tokens), two fresh agents after them.
+# by a resume: a new startTime, seg1's agents replayed (cached, an alias model, no tokens), two fresh agents after them;
+# seg3 a second resume, seg2's shape at a later startTime.
 rjournal() {
   python3 - "$1" "$2" "$3" "${4:-completed}" <<'PY'
 import json, sys
@@ -254,7 +258,7 @@ if seg == "seg1":
     start = 1794000000000
     prog += [{"type": "workflow_agent", "label": a, "model": m, "tokens": t, "state": "done"} for a, m, t in agents]
 else:
-    start = 1794000900000
+    start = {"seg2": 1794000900000, "seg3": 1794001800000}[seg]
     ran += [("revise:x r2", "fable-high", "fable", "high"), ("review:x r2", "fable-high", "fable", "max")]
     prog += [{"type": "workflow_agent", "label": a, "model": m.split("-")[1], "state": "done", "cached": True} for a, m, _ in agents]
     prog += [{"type": "workflow_agent", "label": "revise:x r2", "model": "claude-fable-5-2", "tokens": 400, "state": "done"},
@@ -325,7 +329,6 @@ ok "$(rc rcp-r '[(d["role"], d.get("replayed"), d.get("tokensPartial")) for d in
   "11c: one set, every role with replayed agents marked tokensPartial (the limit, pinned)"
 
 echo "== 11d. a terminal call never resumed is never read again: its journal corrupted, no write, no WARN"
-printf '{"runId": "wf_rc", ' > "$W5/wf_rc.json"
 bind rcq-r q "{\"runId\":\"wf_rcq\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
 rjournal "$W5/wf_rcq.json" wf_rcq seg1
 fold --rollout rcq-r >/dev/null
@@ -334,10 +337,31 @@ before=$(sha "$(rec rcq-r)")
 fold --rollout rcq-r >/dev/null
 ok "$(sha "$(rec rcq-r)")" "$before" "11d: nothing written"
 ok "$(warns)" 0 "11d: no WARN"
+
+echo "== 11d2. a third resume, bound after the last role-call: its journal is read silently"
+bind rc-r x "{\"runId\":\"wf_rc\",\"journalDir\":\"$W5\",\"call\":\"task\",\"resumedFrom\":\"wf_rc\"}"
+printf '{"runId": "wf_rc", ' > "$W5/wf_rc.json"
 before=$(sha "$(rec rc-r)")
-ok "$(fold --rollout rc-r)" 0 "11d: a resumed call's corrupted journal: exit 0"
-ok "$(sha "$(rec rc-r)")" "$before" "11d: its record unchanged"
-ok "$(warns)" 0 "11d: and no WARN (the role-call pass reads silently)"
+ok "$(fold --rollout rc-r)" 0 "11d2: a resumed call's corrupted journal: exit 0"
+ok "$(sha "$(rec rc-r)")" "$before" "11d2: its record unchanged"
+ok "$(warns)" 0 "11d2: and no WARN (the role-call pass reads silently)"
+rm -f "$W5/wf_rc.json"
+ok "$(fold --rollout rc-r)" 0 "11d2: its journal deleted: exit 0"
+ok "$(sha "$(rec rc-r)")" "$before" "11d2: its record unchanged"
+ok "$(warns)" 0 "11d2: and no WARN"
+rjournal "$W5/wf_rc.json" wf_rc seg3 running
+fold --rollout rc-r >/dev/null
+ok "$(sha "$(rec rc-r)")" "$before" "11d2: the resumed journal still running: nothing written"
+ok "$(warns)" 0 "11d2: and no WARN"
+rjournal "$W5/wf_rc.json" wf_rc seg3
+fold --rollout rc-r >/dev/null
+ok "$(grep -c '^role-call wf_rc \[\[x\]\] 4 roles (segment 1794001800000)$' "$TMP/out")" 1 "11d2: terminal, the next fold writes its segment"
+ok "$(rc rc-r '[d["role"] for d in L if d["startTime"] == 1794001800000]')" "['planner', 'plan-judge', 'builder', 'master-review']" \
+  "11d2: once, a line per role"
+ok "$(cj rc-r 'len(L)')" 1 "11d2: call-journal stays one line"
+before=$(sha "$(rec rc-r)")
+fold --rollout rc-r >/dev/null
+ok "$(sha "$(rec rc-r)")" "$before" "11d2: a further fold writes none"
 
 echo "== 11e. a journal with no result, or no workflowProgress, or a running one, writes no role-call"
 ok "$(rc fold-r 'len(L)')" 0 "11e: the trimmed journals of 1-9 (no result, no progress) wrote none"
@@ -362,6 +386,63 @@ before=$(sha "$(rec rcd-r)")
 fold --rollout rcd-r --dry-run >/dev/null
 ok "$(sha "$(rec rcd-r)")" "$before" "11f: nothing written"
 ok "$(grep -c '^would write role-call wf_rcd \[\[d\]\] 4 roles (segment 1794000000000)$' "$TMP/out")" 1 "11f: the would-write line"
+
+echo "== 11g. the gate: role-call only into the record of a rollout whose engine reads the kind"
+# An old-root fixture: a snapshot whose reconcile-rollout.py has no ROLE_CALL_ENGINE line (p46-2's marker), as
+# 89f5429b175c has none; and this tree, which has it.
+OLDROOT="$TMP/snaps/old"; mkdir -p "$OLDROOT/skills/execute/scripts"
+printf 'print("an engine before p46-2")\n' > "$OLDROOT/skills/execute/scripts/reconcile-rollout.py"
+NEWROOT="$(cd "$HERE/../../.." && pwd)"
+ok "$(grep -c '^ROLE_CALL_ENGINE = 1$' "$NEWROOT/skills/execute/scripts/reconcile-rollout.py")" 1 "11g: this tree carries the marker line once"
+ronote() {  # ronote <path> <status> <engine root>: a rollout note stamped on that root
+  mkdir -p "$(dirname "$1")"
+  printf -- '---\ntags: [task, rollout]\nstatus: %s\nprotocol_version: 5\nengine_snapshot: "%s"\nengine_sha: 89f5429b175c0123456789abcdef0123456789ab\n---\n\n## Queue\n\n' \
+    "$2" "$3" > "$1"
+}
+ronote "$TK/rco-r.md" open "$OLDROOT"
+bind rco-r o "{\"runId\":\"wf_rco\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rco.json" wf_rco seg1
+ok "$(fold --rollout rco-r)" 0 "11g: a live rollout on the old root: exit 0"
+ok "$(rc rco-r 'len(L)')" 0 "11g: no role-call written"
+ok "$(cj rco-r '[d["status"] for d in L]')" "['completed']" "11g: its call-journal still folds"
+ok "$(warns)" 0 "11g: no WARN"
+ok "$(grep -c '^no role-call for 1 segment: engine 89f5429b175c reads a role-call line as live (it predates p46-2) (engine-snapshot.md § Cross-version state)$' "$TMP/out")" 1 \
+  "11g: one line names why"
+ok "$(tail -1 "$TMP/out")" "fold-journals: rco-r: 1 folded, 0 already folded, 0 unchanged, 0 warnings" "11g: the summary stays last"
+bind rco-r o2 "{\"runId\":\"wf_rco2\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rco2.json" wf_rco2 seg1
+before=$(sha "$(rec rco-r)")
+fold --rollout rco-r --dry-run >/dev/null
+ok "$(grep -c '^would write role-call' "$TMP/out")" 0 "11g: --dry-run names no role-call either"
+ok "$(sha "$(rec rco-r)")" "$before" "11g: and writes nothing"
+ok "$(python3 "$SCRIPT" fold-journals --rollout "$TK/rco-r.md" 2>/dev/null | grep -c '^no role-call for 1 segment: engine 89f5429b175c')" 1 \
+  "11g: a note path, no --tasks-dir: the gate reads the same note"
+ok "$(rc rco-r 'len(L)')" 0 "11g: still no role-call"
+echo "== 11g2. the rollout moves to this tree: a resume's segment is written, the segments folded before are lost"
+ronote "$TK/rco-r.md" open "$NEWROOT"
+rjournal "$W5/wf_rco.json" wf_rco seg2
+bind rco-r o "{\"runId\":\"wf_rco\",\"journalDir\":\"$W5\",\"call\":\"task\",\"resumedFrom\":\"wf_rco\"}"
+fold --rollout rco-r >/dev/null
+ok "$(rc rco-r 'sorted({(d["runId"], d["startTime"]) for d in L})')" "[('wf_rco', 1794000900000)]" \
+  "11g2: wf_rco's resumed segment alone; wf_rco2, folded on the old root and never resumed, has none"
+ok "$(grep -c '^no role-call' "$TMP/out")" 0 "11g2: no held line"
+echo "== 11g3. a finished rollout reads the kind, whatever its root"
+ronote "$TK/rcf-r.md" done "$OLDROOT"
+bind rcf-r f "{\"runId\":\"wf_rcf\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rcf.json" wf_rcf seg1
+fold --rollout rcf-r >/dev/null
+ok "$(rc rcf-r 'len(L)')" 4 "11g3: status done on the old root: its role-call lines written"
+ronote "$TK/Archive/Rollouts/rca-r.md" open "$OLDROOT"
+bind rca-r a "{\"runId\":\"wf_rca\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rca.json" wf_rca seg1
+python3 "$SCRIPT" fold-journals --rollout "$TK/Archive/Rollouts/rca-r.md" >/dev/null 2>&1
+ok "$(rc rca-r 'len(L)')" 4 "11g3: a note path filed under Archive/Rollouts/ is finished: written"
+ronote "$TK/rcm-r.md" open "$TMP/snaps/gone"
+bind rcm-r m "{\"runId\":\"wf_rcm\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rcm.json" wf_rcm seg1
+fold --rollout rcm-r >/dev/null
+ok "$(rc rcm-r 'len(L)')" 0 "11g3: a live rollout whose snapshot is gone fails closed"
+ok "$(grep -c "^no role-call for 1 segment: engine $TMP/snaps/gone unreadable" "$TMP/out")" 1 "11g3: and says so"
 
 [ "$fail" = 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

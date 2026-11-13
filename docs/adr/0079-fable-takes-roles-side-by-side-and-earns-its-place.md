@@ -27,7 +27,8 @@ kind by its slug at the task's first dispatch, the builder only when the task is
 with no share. Decision 4: the engine reads the stamp only through `armOf`; a role on its own model (a Fable arm, or a
 `[role]` model) records its climbs as no-ops and runs the full verification loop. Decision 8: `fold-journals` writes
 one `role-call` Run record line per role per journal segment, a resume's segment its own, with `tokensPartial` where
-the earlier segment's tokens are missing. The lead's arm is stamped on the rollout note only (`record-entry`), the seam
+the earlier segment's tokens are missing, and only into the record of a rollout whose engine reads the kind (an older
+one reads a role-call line as live: engine-snapshot.md § Cross-version state). The lead's arm is stamped on the rollout note only (`record-entry`), the seam
 Chorus Phase 104 reads: the model a lead ran on is Chorus's to record, so no Run record line carries a lead arm. Across
 versions, each rollout reads `ladder.toml` through its own snapshot, which refuses a key added after its cut: task
 p46-7 writes `[share]` (or `[role]`, or `plan`) only once every live rollout's engine root reads the file
