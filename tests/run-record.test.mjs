@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -1667,6 +1668,56 @@ test('role-call refusals: its required fields, its closed enums, an arm off a dr
   const noTask = cli(home, ['emit', '--rollout', 'r', '--kind', 'role-call', '--json', JSON.stringify(ROLE_CALL)], { env: EV(home) })
   assert.equal(noTask.status, 2, 'a task is required')
   assert.equal(listing(ev(home)).length, 0, 'nothing written')
+})
+
+// p46-4 (ADR 0079 d9): the arms reading's line, at most one per Reflection, reflect.py close its writer.
+const LADDER_PY = path.join(root, 'skills', '_shared', 'scripts', 'ladder.py')
+function armsLine(home) {
+  const r = api(home, 'print(json.dumps({"kid": m.arms_key("master-review", "win"), "roles": m.ARMS_ROLES, "counts": m.ARMS_COUNT_KEYS}))')
+  assert.equal(r.status, 0, r.stderr)
+  const { kid, roles, counts } = JSON.parse(r.stdout)
+  const zero = Object.fromEntries(counts.map((k) => [k, 0]))
+  const role = { verdict: 'win', from: 50, to: 60, signal: 'win', kid, agreement: 3, held: 'a held reason', item: 'ceiling', ready: true,
+    opus: { ...zero, landed: 3 }, fable: { ...zero, landed: 3 }, excluded: { fellBack: 1, fableRung: 0, none: 2 } }
+  const side = { before: { tasks: 2, rejected: 1, leftOut: 0, onFable: 0 }, after: { tasks: 1, rejected: 0, fellBack: 0, onOpus: 0 } }
+  return { kid, roles, fields: { reflection: RID, since: '2026-11-02T13:00:00.000Z', until: '2026-11-09T13:00:00.000Z',
+    roles: { 'master-review': role, lead: { verdict: 'thin', from: null, opus: zero, fable: zero, excluded: { fellBack: 0, fableRung: 0, none: 0 } } },
+    plans: { split: '2026-11-04T00:05:00.000Z', week: side, toDate: side },
+    fableCalls: { fableRung: 0, plans: 2, 'master-review': 1, builder: 0, investigator: 0, other: 0, firstReviewer: null, leads: 1 },
+    fellBack: { calls: 1, byKind: { 'master-review': 1 } } } }
+}
+
+test('arms (p46-4) lands in reflections.jsonl; arms_key is pinned; ARMS_ROLES is ladder.py\'s SHARE_ROLES', (t) => {
+  const home = tmpHome(t)
+  const { kid, roles, fields } = armsLine(home)
+  assert.equal(kid, crypto.createHash('sha1').update('arms\nmaster-review\nwin').digest('hex').slice(0, 8))
+  const lr = spawnSync('python3', ['-B', '-c', `${LOAD}\nprint(json.dumps(m.SHARE_ROLES))`, LADDER_PY], { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(lr.status, 0, lr.stderr)
+  assert.deepEqual(roles, JSON.parse(lr.stdout), 'the roles a Reflection reads are the roles [share] may give a Fable share')
+  emitOk(home, ['--kind', 'arms', '--json', JSON.stringify(fields)], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'reflections.jsonl'))
+  assert.deepEqual([l.v, l.rollout, l.task, l.kind, l.roles['master-review'].kid], [1, null, null, 'arms', kid])
+})
+
+test('arms refusals: an unknown role, a negative count, a bad verdict or signal, an item other than ceiling, a from of 101, a missing opus, a kid of another signal', (t) => {
+  const home = tmpHome(t)
+  const { fields } = armsLine(home)
+  const mr = fields.roles['master-review']
+  const withRole = (o) => ({ ...fields, roles: { ...fields.roles, 'master-review': { ...mr, ...o } } })
+  const { opus, ...noOpus } = mr
+  for (const [what, f] of [
+    ['an unknown role', { ...fields, roles: { planner: mr } }], ['no role', { ...fields, roles: {} }],
+    ['a negative count', withRole({ fable: { ...mr.fable, escapes: -1 } })], ['a bad verdict', withRole({ verdict: 'draw' })],
+    ['a bad signal', withRole({ signal: 'trade' })], ['an item other than ceiling', withRole({ item: 'trade' })],
+    ['a from of 101', withRole({ from: 101 })], ['a missing opus', { ...fields, roles: { 'master-review': noOpus } }],
+    ['a kid of another signal', withRole({ signal: 'loss' })], ['ready false', withRole({ ready: false })],
+    ['a plans side with per100', { ...fields, plans: { ...fields.plans, week: { ...fields.plans.week, after: { ...fields.plans.week.after, per100: 0 } } } }],
+  ]) {
+    const r = cli(home, ['emit', '--kind', 'arms', '--json', JSON.stringify(f)], { env: EV(home) })
+    assert.equal(r.status, 2, `${what}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: arms: .*\n$/, what)
+  }
+  assert.deepEqual(listing(ev(home)), [], 'nothing written')
 })
 
 test('call-journal takes startTime as the journal\'s epoch-ms integer, verbatim', (t) => {

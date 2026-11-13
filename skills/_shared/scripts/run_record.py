@@ -21,6 +21,8 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
     watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
                                            identities, p21-7: reflect.py writes them, tune.py reads them back)
+    arms_key(role, signal) -> str          (a Fable ceiling's identity, p46-4: arms.py computes it, reflect.py's
+                                           decide lists it, its moot and close read it back)
     cadence(lines) -> (days, streak)       (the cadence rule, p21-8: reflect.py's close writes it, reflect-due.py
                                            reads it)
     line_bytes(kind, fields, rollout=None, task=None) -> int   (the bytes emit would write for these fields now, on
@@ -41,7 +43,7 @@ there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the r
 the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
-weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention) to reflections.jsonl, the
+weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention, arms) to reflections.jsonl, the
 Grade log's kind (grade) to grades.jsonl, and the Note overlap's kind (note-overlap) to overlaps.jsonl. All five names
 are RESERVED: refused as a rollout slug and as a carried `from`.
 
@@ -91,7 +93,9 @@ reads it for the agreement, the load hold and to refuse a closed Reflection): a 
 `watch-raised` line per decided Watch, a `proposal` line per (Reflection, Tuning) at each altitude, a `time-lost` line per
 (Reflection, source) (the Time-lost ledger, p29-11: reflect.py `ledger` its one writer), an `attention` line per
 Reflection (the attention ledger, p30-7: reflect.py `attention` its one writer; a changed re-run appends one, and readers
-take the last), and one `reflection` line that closes the Reflection. None carries a rollout or a task.
+take the last), at most one `arms` line per Reflection (the arms reading, p46-4: reflect.py `close` its one writer, just
+before the `reflection` line, and only when the reading's arms block holds a row; the next span's agreement walk reads it
+back), and one `reflection` line that closes the Reflection. None carries a rollout or a task.
 - Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
   line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Reflection run late
@@ -116,7 +120,7 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's and
              role-call's startTime are the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round, grade and the six reflections.jsonl kinds; a tuning's is
+    rollout  the rollout slug (null only for review-round, grade and the seven reflections.jsonl kinds; a tuning's is
              a provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
@@ -423,6 +427,20 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      still reads, since its readers, attention.py's trend and reflect.py's attention_record, take
                      reflections.jsonl's lines as they stand and never through this check). No rollout, no task;
                      lands in reflections.jsonl.
+  arms               reflection, since, until, roles; plans?, fableCalls?, fellBack? (p46-4, ADR 0079 d9: the arms
+                     reading's line, at most one per Reflection, reflect.py `close` its one writer;
+                     skills/reflect/scripts/arms.py's docstring holds the rules. reflection an r- id; since and until UTC
+                     Z stamps, since <= until; roles a non-empty object keyed by ARMS_ROLES (the drawn roles and the
+                     lead), each {verdict (one of ARMS_VERDICTS), from (an integer 0 to 100, or null: the role's Fable
+                     ceiling in percent, ladder.toml's [share]), opus, fable (each exactly ARMS_COUNT_KEYS, integers >=
+                     0), excluded (exactly fellBack, fableRung and none, integers >= 0); to? (an integer 0 to 100),
+                     signal? (one of ARMS_SIGNALS), kid? (arms_key(role, signal), with signal), agreement? (an integer
+                     >= 1), held? (at most 300 characters), item? (one of ARMS_ITEMS), ready? (true only)}; plans
+                     {split (a UTC Z stamp or null), week and toDate, each {before {tasks, rejected, leftOut, onFable},
+                     after {tasks, rejected, fellBack, onOpus}}, integers >= 0}; fableCalls {kind: an integer >= 0, or
+                     null}, its kinds ARMS_FABLE_KINDS, firstReviewer and leads; fellBack {calls (an integer >= 0),
+                     byKind {kind: an integer >= 0}, its kinds ARMS_FABLE_KINDS}). No rollout, no task; lands in
+                     reflections.jsonl.
   note-overlap    T  note (at most 400 characters: the vault-relative path), holderRollout, holderTask (slugs, not
                      reserved: the run already in the note); holderSince? (a UTC Z stamp: the holder's first write),
                      tool? (Edit | Write | MultiEdit), via? (agent | leg: how the editor was identified). ADR 0067 d6:
@@ -569,6 +587,14 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   Reflection whose auto line made the last move: its lines were that move's evidence). Walking them with an empty set
   seen, a line agrees when it names a rollout not yet seen, and its rollouts then join seen. The agreement is the
   agreeing lines plus one when X is not seen; a knob lands at 3. tune.py's auto_check computes it.
+- The arms Agreement rule (p46-4, ADR 0079 d9 and ADR 0037 d5: a role's Fable ceiling moves once three Reflections
+  agree). For a drawn role R (ARMS_ROLES) whose reading has a signal S (one of ARMS_SIGNALS) at the Fable ceiling F (its
+  `from`), the agreement is 1, for this Reflection, plus the walk over the earlier `arms` lines of closed Reflections (a
+  `reflection` line carries its id; this Reflection's own line is never read), newest first in file order: a line whose
+  roles lack R, or whose R reads verdict thin, is skipped; one whose R carries signal S at from F adds 1; any other (an
+  even week, the opposite signal, the other trade, or another from) ends the walk. A ceiling's id is arms_key(R, S); it
+  is ready at 3, and skills/reflect/scripts/arms.py's docstring holds the hold order after it. A moved ceiling gives the
+  next reading another from, so its agreement starts again at 1.
 - The cadence rule (p21-7 and p21-8, ADR 0037 d6). A `reflection` line's `quiet` is newWatches, rules, bugs and
   breaches all 0. The quiet streak is the number of `reflection` lines at the end of the file, in file order (the
   first line per id), whose quiet is true; the cadence is 14 days (fortnightly) when the streak is 3 or more, else 7
@@ -867,7 +893,7 @@ def _applied(v):
 # ---- the weekly reading's kinds (skills/reflect/scripts/reflect.py; p21-7, ADR 0037 d3-d5) --------------------
 
 # The kinds that land in reflections.jsonl: no rollout, no task (the Files rule).
-REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection", "time-lost", "attention")
+REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection", "time-lost", "attention", "arms")
 RULE_MAX = 120             # a Watch's rule and shape
 MAX_ROLLOUTS = 64          # a watch's or proposal's rollouts
 VIAS = ("recurring", "confirmed", "declined")
@@ -907,6 +933,12 @@ def knob_key(repo, key, rule, direction):
     direction, one per line; its first 8 hex."""
     text = "knob\n%s\n%s\n%s\n%s" % (repo.lower(), key, rule, direction)
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+
+
+def arms_key(role, signal):
+    """A Fable ceiling's id across Reflections (p46-4): sha1 over "arms", the role and the signal, one per line; its first
+    8 hex. A ceiling's `from` sits beside it on the decision task's line, as a knob trade's does."""
+    return hashlib.sha1(("arms\n%s\n%s" % (role, signal)).encode("utf-8")).hexdigest()[:8]
 
 
 def _rid(v):
@@ -1344,6 +1376,102 @@ ROLE_CALL_ROLES = ("planner", "plan-judge", "builder", "investigator", "master-r
 # The roles a role-call line may carry an `arm` on: the drawn roles the engine dispatches (task.workflow.js ARM_ROLES).
 ARM_ROLES = ("master-review", "builder", "investigator")
 ROLE_CALL_MODELS_MAX = 8
+
+# ---- the arms reading's line (skills/reflect/scripts/arms.py, reflect.py `close`; p46-4, ADR 0079 d9) -------------------
+# The roles a Reflection reads in two arms: the drawn roles and the rollout's lead (ladder.py's SHARE_ROLES; a test pins
+# the two equal). A role's verdict, its signal (a Fable ceiling's move: a win, a loss or a trade named by Fable's better
+# headline), the decision-task item every listed ceiling is, and the counts each arm carries on the line.
+ARMS_ROLES = ARM_ROLES + ("lead",)
+ARMS_VERDICTS = ("thin", "win", "loss", "trade", "even")
+ARMS_SIGNALS = ("win", "loss", "trade-handsOff", "trade-quality")
+ARMS_ITEMS = ("ceiling",)
+ARMS_COUNT_KEYS = ("landed", "handsOff", "handsOffUnknown", "firstApprove", "firstChanges", "reviewRounds", "reviewedTasks",
+                   "escapes", "climbs", "calls", "tokens", "tokenTasks", "tokensLeftOut")
+ARMS_EXCLUDED = ("fellBack", "fableRung", "none")
+ARMS_FABLE_KINDS = ("fableRung", "plans") + ARM_ROLES + ("other",)
+ARMS_HELD = 300
+ARMS_PLAN_SIDES = {"before": ("tasks", "rejected", "leftOut", "onFable"), "after": ("tasks", "rejected", "fellBack", "onOpus")}
+ARMS_KID_RE = re.compile(r"[0-9a-f]{8}\Z")
+
+
+def _exact_counts(v, keys):
+    return isinstance(v, dict) and set(v) == set(keys) and all(_count0(v[k]) for k in keys)
+
+
+def _percent(v):
+    return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100
+
+
+def _arms_roles(v):
+    """arms' roles: {role: {verdict, from, opus, fable, excluded; to?, signal?, kid?, agreement?, held?, item?, ready?}}."""
+    if not isinstance(v, dict) or not v or not set(v) <= set(ARMS_ROLES):
+        return "a non-empty object keyed by %s only" % ", ".join(ARMS_ROLES)
+    need = {"verdict", "from", "opus", "fable", "excluded"}
+    allowed = need | {"to", "signal", "kid", "agreement", "held", "item", "ready"}
+    for role, r in v.items():
+        if not isinstance(r, dict) or not need <= set(r) or set(r) - allowed:
+            return "an object whose %s holds verdict, from, opus, fable and excluded (and to?, signal?, kid?, agreement?, " \
+                "held?, item?, ready? only)" % role
+        if r["verdict"] not in ARMS_VERDICTS:
+            return "an object whose %s verdict is one of %s" % (role, ", ".join(ARMS_VERDICTS))
+        if not (r["from"] is None or _percent(r["from"])) or ("to" in r and not _percent(r["to"])):
+            return "an object whose %s from (or null) and to are integers from 0 to 100" % role
+        if "signal" in r and r["signal"] not in ARMS_SIGNALS:
+            return "an object whose %s signal is one of %s" % (role, ", ".join(ARMS_SIGNALS))
+        if "kid" in r and not (isinstance(r["kid"], str) and ARMS_KID_RE.match(r["kid"])):
+            return "an object whose %s kid is 8 lowercase hex" % role
+        if "agreement" in r and _int(1)(r["agreement"]):
+            return "an object whose %s agreement is an integer >= 1" % role
+        if "held" in r and _text(ARMS_HELD)(r["held"]):
+            return "an object whose %s held is a non-empty string of at most %d characters" % (role, ARMS_HELD)
+        if "item" in r and r["item"] not in ARMS_ITEMS:
+            return "an object whose %s item is one of %s" % (role, ", ".join(ARMS_ITEMS))
+        if "ready" in r and r["ready"] is not True:
+            return "an object whose %s ready is true (omit it otherwise)" % role
+        for arm in ("opus", "fable"):
+            if not _exact_counts(r[arm], ARMS_COUNT_KEYS):
+                return "an object whose %s %s holds exactly %s, integers >= 0" % (role, arm, ", ".join(ARMS_COUNT_KEYS))
+        if not _exact_counts(r["excluded"], ARMS_EXCLUDED):
+            return "an object whose %s excluded holds exactly %s, integers >= 0" % (role, ", ".join(ARMS_EXCLUDED))
+    return None
+
+
+def _arms_plans(v):
+    """arms' plans: {split, week, toDate}, each part {before {...}, after {...}} of integer counts."""
+    if not isinstance(v, dict) or set(v) != {"split", "week", "toDate"}:
+        return "an object of exactly split, week and toDate"
+    if v["split"] is not None and not _utcz(v["split"]):
+        return "an object whose split is a UTC Z stamp or null"
+    for part in ("week", "toDate"):
+        p = v[part]
+        if not isinstance(p, dict) or set(p) != set(ARMS_PLAN_SIDES) or \
+                not all(_exact_counts(p[side], keys) for side, keys in ARMS_PLAN_SIDES.items()):
+            return "an object whose %s is {before {%s}, after {%s}}, integers >= 0" % (
+                part, ", ".join(ARMS_PLAN_SIDES["before"]), ", ".join(ARMS_PLAN_SIDES["after"]))
+    return None
+
+
+def _arms_fable_calls(v):
+    keys = ARMS_FABLE_KINDS + ("firstReviewer", "leads")
+    ok = isinstance(v, dict) and set(v) <= set(keys) and all(n is None or _count0(n) for n in v.values())
+    return None if ok else "an object of {kind: an integer >= 0, or null}, each kind among %s" % ", ".join(keys)
+
+
+def _arms_fell_back(v):
+    ok = isinstance(v, dict) and set(v) == {"calls", "byKind"} and _count0(v["calls"]) and isinstance(v["byKind"], dict) \
+        and set(v["byKind"]) <= set(ARMS_FABLE_KINDS) and all(_count0(n) for n in v["byKind"].values())
+    return None if ok else "an object of exactly calls (an integer >= 0) and byKind ({kind: an integer >= 0}, each " \
+        "kind among %s)" % ", ".join(ARMS_FABLE_KINDS)
+
+
+def _check_arms(f):
+    """arms' cross-field rules: since <= until, and a kid is arms_key(role, signal) of its role's signal."""
+    if _z_time(f["since"]) > _z_time(f["until"]):
+        raise Refused("arms: since %s is after until %s" % (f["since"], f["until"]))
+    for role, r in f["roles"].items():
+        if "kid" in r and ("signal" not in r or r["kid"] != arms_key(role, r["signal"])):
+            raise Refused("arms: %s's kid %r is not arms_key(role, signal) %r" % (
+                role, r["kid"], arms_key(role, r.get("signal")) if "signal" in r else "with no signal"))
 SUITE_BYS = ("task", "integration", "race", "completion")
 SUITE_RUNNERS = ("agent", "lead")
 SUITE_OUTCOMES = ("green", "red", "timeout", "stopped", "unrun", "noslot", "heat")
@@ -1568,6 +1696,9 @@ KINDS = {
     "attention": (False, {"reflection": _rid, "since": _stampz, "until": _stampz, "questions": _att_questions,
                           "trails": _att_trails},
                   {"waits": _att_waits, "circling": _att_circling}),
+    # The arms reading's line (p46-4, ADR 0079 d9): at most one per Reflection, reflect.py `close` its writer.
+    "arms": (False, {"reflection": _rid, "since": _stampz, "until": _stampz, "roles": _arms_roles},
+             {"plans": _arms_plans, "fableCalls": _arms_fable_calls, "fellBack": _arms_fell_back}),
     # The time-lost ledger (p29-10, ADR 0051): stops and resumes, suites with the load around them, why main moved.
     "stopped": (False, {"cause": _enum(*STOP_CAUSES), "inferred": _bool, "calls": _calls},
                 {"at": _stampz, "boot": _stampz, "wake": _stampz, "reason": _short(REASON_MAX)}),
@@ -1784,6 +1915,8 @@ def _check_fields(kind, fields):
         _check_time_lost(fields)
     elif kind == "attention":
         _check_attention(fields)
+    elif kind == "arms":
+        _check_arms(fields)
     elif kind == "role-call" and "arm" in fields and fields["role"] not in ARM_ROLES:
         raise Refused("role-call: arm is only on a drawn role (%s), not %s" % (", ".join(ARM_ROLES), fields["role"]))
 

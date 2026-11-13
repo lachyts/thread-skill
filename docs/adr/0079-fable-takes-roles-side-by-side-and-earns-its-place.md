@@ -35,6 +35,26 @@ p46-7 writes `[share]` (or `[role]`, or `plan`) only once every live rollout's e
 (engine-snapshot.md § Cross-version state). The exclusion of an Unreachable surface from the master review's draw is
 p52-2's, at `armOf`.)*
 
+*(Amended 2026-11-14 by thread-skill-p46-4: decision 9 is built. `skills/reflect/scripts/arms.py`, loaded by the weekly
+Reflection's `span`, reads each drawn role's two arms and the lead's inside the reading's window, each row by its own
+unit and every wider read declared in its header, with the plans' before and after and the Fable calls by kind; a
+role's Fable ceiling is read from `ladder.toml`'s `[share]` until p46-3, and `close` writes the reading's `arms` line,
+which the next reading's agreement reads back. Four readings are declared, the reading's own:*
+
+1. *Agreement: a ceiling moves only once three consecutive closed Reflections read the same signal (a win, a loss, or
+   a trade named by Fable's better headline) at the same ceiling, a thin week skipped and any other ending the run. It
+   is checked before the trade and the caution, so one week's trade or caution never reaches Lachy.*
+2. *Landing: every agreed, traded or cautioned ceiling becomes a `- ceiling` item on the decision task, and the session
+   deciding that task applies a yes to `[share]`. This departs from "three Reflections agree" landing it on its own
+   (ADR 0037 decision 5): no writer can land a ceiling until p46-3 gives it a writable home, and task p46-10 removes
+   the departure.*
+3. *The plans' split: the first planner call on Fable that is not on the Fable rung. Before it a task's plan model is
+   its first Slot's rung, after it its planner calls'; each side counts every task, planned or not, and leaves out only
+   a planned task whose plan ran on the other model (and, before the split, a task on a rung no built-in ladder names).*
+4. *Decision 7's "left out of the comparison": a fall-back leaves a task out of that role's comparison only, because
+   roles draw on their own (decision 3); a climb to the Fable rung runs every role on Fable, so it leaves every role,
+   the lead's included.*
+
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.

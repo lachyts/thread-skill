@@ -23,11 +23,14 @@ passes Lachy's answer on:
   Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
   or write a Tuning in the conversation.
 - `skills/reflect/scripts/reflect.py` is the **only writer** of `reflections.jsonl` (the weekly reading's Watches,
-  proposals, Time-lost ledger lines, attention lines and close), and of the bug and decision tasks it files. Its header
+  proposals, Time-lost ledger lines, attention lines, arms lines and close), and of the bug and decision tasks it files. Its header
   is the one copy of its rules.
 - `skills/reflect/scripts/ledger.py` prices the **Time-lost ledger** (ADR 0051): the hours each cause class cost,
   summed from the Run record across every rollout. reflect.py loads it; it reads only, and its header is the one copy
   of the model (the classes, the precedence, the waits on Lachy, the baseline and the Monthly audit's month rule).
+- `skills/reflect/scripts/arms.py` reads the **arms** (ADR 0079 d9): each drawn role's Opus and Fable arms side by
+  side, the plans' before and after, and the Fable calls by kind, and proposes a role's Fable ceiling once three
+  Reflections agree. reflect.py loads it; it reads only, and its header is the one copy of its rules.
 - `skills/reflect/scripts/attention.py` reads the **attention ledger** (ADR 0056): the questions put to Lachy, from the
   session transcripts, each PR's /fresh-review trail, each rollout's wait to start, and the work items and rollouts that
   circle without merging. reflect.py loads it; it reads only, and its header is the one copy of its rules.
@@ -290,8 +293,9 @@ change a live rollout, Lachy edits its note.
 `/thread:reflect --weekly` reads every rollout since the last weekly Reflection, on its own, once a week (ADR 0037
 d4), or once a fortnight on a quiet streak (d6): the scripts score and sweep, the model traces each cost to its rule,
 and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a
-rule proposal (with any Watch to confirm beside it), a held trade (a knob ADR 0037 d1 leaves to Lachy) or a Monthly
-audit's gap goes into one decision task for Chorus's Thursday Reflection Routine. It also keeps the **Time-lost ledger** (ADR 0051):
+rule proposal (with any Watch to confirm beside it), a held trade (a knob ADR 0037 d1 leaves to Lachy), a role's Fable
+ceiling (ADR 0079 d9) or a Monthly audit's gap goes into one decision task for Chorus's Thursday Reflection Routine. It
+also reads each drawn role's two **arms**, Opus and Fable, side by side (ADR 0079 d9). It also keeps the **Time-lost ledger** (ADR 0051):
 the hours each cause class cost across every rollout, ranked by cause and trended week on week, with a Monthly audit
 on the month's first reading. And it keeps the **attention ledger** (ADR 0056): the questions put to Lachy by Owner, each
 PR's review trail, each rollout's wait to start, and the work items and rollouts that circle without merging. Every
@@ -366,6 +370,14 @@ queue's tasks, a carried or joined row's aside) and from its scheduling; `circli
 while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours with nothing merged) and `readings` (the
 reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
 rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed cycle named); and `trend`.
+
+Its `arms` block is the **arms** reading (ADR 0079 d9; `skills/reflect/scripts/arms.py`'s header holds every rule), each
+row placed by its own time and every wider read declared there: `roles`, the master review's, the builder's, the
+investigator's and the lead's `opus` and `fable` arms with their counts, `excluded` (the tasks out of both arms), the
+`verdict`, and the Fable ceiling it proposes (`from`, `to`, `agreement`, `held`, `item`) from `ladder.toml`'s `[share]`;
+`plans`, the rejected plans per 100 tasks before and after planning moved to Fable; `fableCalls` and `fellBack`; and the
+rows the window check reads (`tasks`, `calls`, `reviews`, `escapes`, `planTasks`, `rejections`). Its flags and
+`cannotShow` lines join span's only when it holds a row.
 
 Its `suite` block is the **Suite budget** and **CI headroom** (ADR 0073 d5; `reflect.py`'s header holds the rules),
 each on the week's median over the window's rows: `local`, each repo's suites by tier (`integration`, a rollout's
@@ -585,6 +597,20 @@ unlabelled, and close never waits on labels. Read `trails` and `waits` as report
 item to what held it: a set-aside item starts at its `heldBy` (the stage and reasonClass that stopped it), the others at
 the Sessions that touched it. Name the rule the trace reaches: step 15's `amends` cites it.
 
+**The arms** (`span.json`'s `arms`, ADR 0079 d9) are reported, never traced as friction: a script counts them, so no part
+becomes a sighting, a bug or a knob of yours. For the master review, the builder, the investigator and the lead, put the
+two arms side by side, `opus` beside `fable`, each figure with its count: `landed`; the Hands-off rate (`handsOff`, with
+`handsOffUnknown` outside it); the first review's verdict (`firstApprove`, `firstChanges`); `reviewRounds` over
+`reviewedTasks`; `escapes` and `escapesPerLanded`; `climbs` and `calls`; and `tokensPerMerge` over `tokenTasks`, with
+`tokensLeftOut`. Name the tasks left out of both arms on a line of their own (`excluded`: `fellBack`, `fableRung` and
+`none`), then the role's `verdict` with its `held` reason (its `caution` beside it), and its `from` and `to`. Read `plans`
+as a before and after, not a comparison: planning has no Opus arm, so name its `split` (the first Fable planner call off
+the Fable rung, or none yet), each side's rejected plans per 100 tasks for the week and to date, and the tasks each side
+leaves out (`leftOut` and `onFable` before, `fellBack` and `onOpus` after). Report `fableCalls` by kind (`fableRung`,
+`plans`, each drawn role, `other` and `leads`; `firstReviewer` is null until p52-2), and quote `fellBack.line` verbatim
+when it is there. The reading never edits `ladder.toml`: a Fable ceiling moves only on Lachy's yes to its decision-task
+item, which the session deciding the task applies (§ Deciding the decision task).
+
 **The nights** (`span.json`'s `nights`, p28-7) read as step 5's do, over every record this week: per night, keyed by
 host and Morning, its held starts and its ran-past tasks split fallback / underestimate / unchecked, the `totals`, its
 `flags` and its `suggest` entries. Report them, never traced as friction: a `suggest` entry is Lachy's to act on by
@@ -708,6 +734,10 @@ It refuses (`run ledger`, exit 2, nothing written) while step 13a's `ledger` has
 ledger's Watch and the audit's gaps reach the task only through its lines, and the task's section is written once. It
 refuses (`run attention`) for the same reason while step 13b has not written this reading's `attention` line: the
 circling Watches reach the task only through it.
+A Fable ceiling (an `arms` role whose `item` is `ceiling`: three Reflections agreed on a move, a trade or a caution) is
+held for Lachy as a trade is: it follows the trades under its own lead, one `- ceiling <kid> at <from>: ...` line per
+(ceiling id, `from`), listed once, kept open on a `## Still open` line (`ceiling <kid> at <from> still open ...`), and
+decided or moot as a trade is. No writer lands a ceiling until p46-10, so even an agreed one is his yes.
 It writes a decision task only with a rule proposal or a held trade, or a Monthly audit that names a gap: a week with
 Watches to confirm alone writes none, and they wait (a task a held trade alone writes lists none). An audit's gaps come
 after the trades, in an audit part of their own: the hours it found and the record's by class, the sources read and
@@ -726,6 +756,10 @@ unchecked line from that day's page: the task was written before this rule (ADR 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
 ```
+
+When `span.json`'s `arms` block holds a row, `close` first writes its `arms` line, once (a re-run writes none): the next
+reading's agreement walk reads it back. An empty week, an all-`none` week and a plans-only week before the split write
+none.
 
 Exactly once, quiet weeks included: its line is the Reflection's record, and its `quiet` feeds the cadence (ADR
 0037 d6). Three quiet readings in a row move the reading to fortnightly (`cadence` 14), and any that is not quiet
@@ -769,7 +803,10 @@ held), the Monthly audit's row when one ran (its hours found against the record'
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
-docs-only PRs; the waits to start; each circling item and any Watch it opened), the carried read's three lists (above), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+docs-only PRs; the waits to start; each circling item and any Watch it opened), the arms (each role's two arms with
+their counts, its left-out tasks, its verdict and held reason, a widening held behind a breached Guardrail with the
+Guardrail it names, each ceiling the decision task lists, the plans' before and after, the Fable calls by kind and the
+fell-back line), the carried read's three lists (above), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -801,6 +838,16 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <
   carry what the gap names, citing ADR 0051 d4 (the record carries what the ledger needs), so the weekly reading needs
   the audit less each month.
 - **A no to a gap**: nothing to run. Its `- gap` line is the record once the task is done.
+- **A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason): the session deciding the task applies it,
+  since no writer lands a ceiling until p46-10. Read `[share] <role>` in `~/.config/thread/ladder.toml`. When round(100 ×
+  it) is not the item's `from`, the yes cannot apply: record it with `moot --trade <kid> --from <from>` (below).
+  Otherwise set that one value to the item's `to` / 100, leaving every other byte of the file as it was, and run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` to see the new share read. On a refusal, put the old
+  value back and record the item moot. A value change adds no key, so every live rollout's snapshot reads it
+  (`ladder.py`'s header, *Across versions*), and the next first dispatch draws by it. Apply the items on one role in the
+  task's order: a later one whose `from` the earlier yes moved is moot.
+- **A no to a Fable ceiling**: nothing to run. Its `- ceiling` line is the record once the task is done, and `decide`
+  never offers that ceiling at that `from` again.
 - **Not now, or not reached**: nothing. The Watch stays open, and the next weekly reading lists it under `## Still
   open`; a held trade stays listed, and the next weekly reading that holds it adds a `## Still open` line.
 
@@ -812,7 +859,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py moot --task <slu
 
 Then mark the task done (`status: done` and `completed: <Melbourne today>`) only once every item it lists has had a
 yes or a no (each `raised` printed `raised` or `exists`; each trade's yes went through tune.py or `moot` printed `moot`
-or `exists`). An item left open keeps the task open.
+or `exists`; each ceiling's yes saw `ladder.py` print the new share, or `moot` printed `moot` or `exists`). An item left
+open keeps the task open.
 
 ## What the record cannot show
 
@@ -947,6 +995,13 @@ or `exists`). An item left open keeps the task open.
 - A rollout note with no record is judged by its status now, so one closed after until is never W2's for that week.
 - The ask behind a wait to start is known only to the day: a `captured:` date.
 - A decided circling item never returns on its rule, and a later cycle's first reading leaves the week quiet.
+- The arms read no lead's own tokens or fall-backs: the model a lead ran on is Chorus's to record, so the lead's arm
+  reads its tasks' calls and tokens, never its own.
+- ADR 0081's first reviewer is no call kind until p52-2: `fableCalls.firstReviewer` stays null.
+- Whether another Login had Fable room is in no Run record line: the fell-back line counts the Fable calls that fell
+  back to Opus, never the Login that would have carried them.
+- A task whose first Slot came before the first Fable planner call sits on the plans' before side, so the task that
+  placed the split counts there as `onFable`: the split dates the change only to its first planner call.
 - A `tunings.jsonl` line can carry several Tunings: the contract's ledger has one line per Tuning, but tune.py writes
   a run's Tunings on ONE `tuning` line, an `applied` entry per knob, for a by-hand `--pick` of several (step 7) and
   for an `--auto` call that lands several (step 14). Only the weekly reading's `proposal` lines in
