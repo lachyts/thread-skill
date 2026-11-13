@@ -20,6 +20,20 @@ Status, decision 5 and the wording section, which now say what holds.)*
 rung included), and Integration runs on the highest rung that is not all-Fable (`ladder.py`, the engine's `runOn` and
 `integrationRungOf`). Decision 3's draw, its arms and their stamps are p46-2's.)*
 
+*(Amended 2026-11-13 by thread-skill-p46-2: decisions 3, 4 and 8 are built. Decision 3: the share comes from the
+ladder's `[share]` table (`ladder.py`) until p46-3; `reconcile-rollout.py mark-started` draws each role of a task's
+kind by its slug at the task's first dispatch, the builder only when the task is hard (read then, once), and stamps
+`arms:` on the note; a resume never stamps, and a task begun before the draw sits in no arm (`none`), as does a role
+with no share. Decision 4: the engine reads the stamp only through `armOf`; a role on its own model (a Fable arm, or a
+`[role]` model) records its climbs as no-ops and runs the full verification loop. Decision 8: `fold-journals` writes
+one `role-call` Run record line per role per journal segment, a resume's segment its own, with `tokensPartial` where
+the earlier segment's tokens are missing. The lead's arm is stamped on the rollout note only (`record-entry`), the seam
+Chorus Phase 104 reads: the model a lead ran on is Chorus's to record, so no Run record line carries a lead arm. Across
+versions, each rollout reads `ladder.toml` through its own snapshot, which refuses a key added after its cut: task
+p46-7 writes `[share]` (or `[role]`, or `plan`) only once every live rollout's engine root reads the file
+(engine-snapshot.md § Cross-version state). The exclusion of an Unreachable surface from the master review's draw is
+p52-2's, at `armOf`.)*
+
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.
