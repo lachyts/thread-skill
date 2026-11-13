@@ -21,7 +21,12 @@ passes Lachy's answer on:
   `skills/reflect/scripts/escapes.py` beside it, which it loads, holds the rules for the Escapes and Quality.
 - `skills/reflect/scripts/tune.py` is the **only writer** of `rollouts.toml` and of `tunings.jsonl` (the
   Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
-  or write a Tuning in the conversation.
+  or write a Tuning in the conversation, save the one by-hand edit below.
+- `~/.config/thread/ladder.toml`'s `[share]` values (each role's Fable ceiling, ADR 0079 d9) have **no script writer**
+  until p46-10: arms.py proposes a move and reflect.py lists it on the decision task, and neither writes the file. A
+  ceiling's yes in § Deciding the decision task is the one by-hand edit this skill makes: that one value, and no
+  other byte of the file. ADR 0079 d9 calls the change a Tuning, yet no script records it (§ What the record cannot
+  show).
 - `skills/reflect/scripts/reflect.py` is the **only writer** of `reflections.jsonl` (the weekly reading's Watches,
   proposals, Time-lost ledger lines, attention lines, arms lines and close), and of the bug and decision tasks it files. Its header
   is the one copy of its rules.
@@ -838,10 +843,11 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <
   carry what the gap names, citing ADR 0051 d4 (the record carries what the ledger needs), so the weekly reading needs
   the audit less each month.
 - **A no to a gap**: nothing to run. Its `- gap` line is the record once the task is done.
-- **A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason): the session deciding the task applies it,
-  since no writer lands a ceiling until p46-10. Read `[share] <role>` in `~/.config/thread/ladder.toml`. When round(100 ×
-  it) is not the item's `from`, the yes cannot apply: record it with `moot --trade <kid> --from <from>` (below).
-  Otherwise set that one value to the item's `to` / 100, leaving every other byte of the file as it was, and run
+- **A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason): the session deciding the task applies
+  it, since no writer lands a ceiling until p46-10: the one by-hand edit this skill makes (the writers, above). Read
+  `[share] <role>` in `~/.config/thread/ladder.toml`. When round(100 × it) is not the item's `from`, the yes cannot
+  apply: record it with `moot --trade <kid> --from <from>` (below). Otherwise set that one value to the item's
+  `to` / 100, leaving every other byte of the file as it was, and run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` to see the new share read. On a refusal, put the old
   value back and record the item moot. A value change adds no key, so every live rollout's snapshot reads it
   (`ladder.py`'s header, *Across versions*), and the next first dispatch draws by it. Apply the items on one role in the
@@ -932,6 +938,10 @@ open keeps the task open.
   marked done with a trade unanswered reads as his no; and a hand edit that removes a `- trade` line forgets the no. A
   no holds for that (knob id, `from`) whatever later rollouts show, unlike a declined Watch, which returns when two
   later rollouts show it afresh: the trade is offered again only once its value moves to a new `from`.
+- An applied Fable ceiling's yes writes no Run record line: no `tuning` line in `tunings.jsonl` and nothing in
+  `reflections.jsonl`. Only `ladder.toml`'s new `[share]` value and the done decision task's `- ceiling` line show it,
+  so a yes and a no look the same in the record, and a later Guardrail breach cannot be traced back to the move until
+  p46-10 gives the ceiling a writer.
 - A held trade on a partial window is held `partial window`, so it reaches the decision task only in a later week
   that reads the rollout whole; one on a rollout with no repo, note or settings is never a knob candidate, so it is
   never offered.

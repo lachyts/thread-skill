@@ -150,17 +150,19 @@ test('both arms per drawn role and the lead, each figure with its count; a plant
   assert.deepEqual(block.escapes.map((x) => x.task), ['a3'], 'an Escape the sweep dated outside the window is no row')
 })
 
-test('each row by its own unit: a carried task lands once, at its first merge, its lead Escape with it; a resume\'s earlier segment, a re-merge and an earlier rejection add nothing; a whole-life token line before since counts', (t) => {
+test('each row by its own unit: a carried task lands once, at its first merge, its lead Escape with it; a resume\'s earlier segment, a re-merge, an earlier rejection and an earlier round 1 add nothing; a whole-life token line before since counts', (t) => {
   const h = setup(t)
   const a = rec('ra', [...build('c1', 4),
     // a resumed call: its first segment before since (climbs 2), its second in the window (climbs 1); one runId
     slot(BEFORE('00:30'), 'k1'), rc(BEFORE('04:00'), 'k1', 'master-review', BEFORE('02:00'), { arm: 'opus', tokens: 500, climbs: 2 }),
     rc(W(5, '04:00'), 'k1', 'master-review', W(5, '02:00'), { arm: 'opus', tokens: 700, climbs: 1 }), merged(W(5, '03:00'), 'k1'),
     merged(BEFORE('05:00'), 'o1'),
-    slot(BEFORE('06:00'), 'p1'), [BEFORE('07:00'), 'set-aside', 'p1', { stage: 'plan', reasonClass: 'plan-rejected', setAsideAt: 'run' }]])
+    slot(BEFORE('06:00'), 'p1'), [BEFORE('07:00'), 'set-aside', 'p1', { stage: 'plan', reasonClass: 'plan-rejected', setAsideAt: 'run' }],
+    // two round-1 lines (two digests): the first review, a changes, came before since; the in-window approve is no first
+    verdict(BEFORE('08:00'), 'v1', 1, 'changes', 'dA'), verdict(W(5, '06:00'), 'v1', 1, 'approve', 'dB')])
   // the carried task re-merged in rb, and o1 (first merged before since) re-merged in the window
   const b = rec('rb', [merged(W(6, '03:00'), 'c1', 2), merged(W(6, '04:00'), 'o1', 2)])
-  const { block } = reading(h, { records: { ra: a, rb: b }, stamps: { c1: stampOf('opus'), k1: stampOf('opus'), o1: stampOf('fable') },
+  const { block } = reading(h, { records: { ra: a, rb: b }, stamps: { c1: stampOf('opus'), k1: stampOf('opus'), o1: stampOf('fable'), v1: stampOf('fable') },
     leads: { ra: 'opus', rb: 'fable' }, handsOff: handsOff({ ra: ['c1', 'k1'], rb: ['c1', 'o1'] }),
     escapes: [{ kind: 'escape', rollout: 'rb', task: 'c1', source: 'fixes', at: '2026-11-07', inWindow: true }] })
   const lead = block.roles.lead
@@ -172,6 +174,9 @@ test('each row by its own unit: a carried task lands once, at its first merge, i
   assert.deepEqual([mr.calls, mr.climbs], [2, 1], 'the resume\'s earlier segment adds no call and no climb')
   assert.equal(block.calls.find((c) => c.task === 'k1').startTime, W(5, '02:00'))
   assert.deepEqual([mr.tokens, mr.roleTokens, mr.tokenTasks], [3200, 2200, 2], 'k1\'s whole life, its segment before since included')
+  const fv = block.roles['master-review'].fable
+  assert.deepEqual([fv.firstApprove, fv.firstChanges, fv.reviewRounds, fv.reviewedTasks], [0, 0, 1, 1],
+    'v1\'s first round 1 came before since: its in-window round 1 is a review row, never a first verdict')
   assert.deepEqual([block.plans.week.before.rejected, block.plans.toDate.before.rejected, block.plans.toDate.before.tasks], [0, 1, 3])
   assert.deepEqual(block.rejections, [], 'the earlier rejection is no row of this week')
 })
@@ -215,6 +220,8 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
   const h = setup(t)
   const win = (o = {}) => ({ ...week(), ...o })
   const W2 = [earlierLine(R(1), 'win', 'win'), earlierLine(R(2), 'win', 'win')]
+  const TRADES = [earlierLine(R(1), 'trade', 'trade-handsOff'), earlierLine(R(2), 'trade', 'trade-handsOff')]
+  const OVER = 'tokens per merge: fable 6000.0 over opus 2000.0 by more than 25 %'
   const cases = [
     ['one winning week', win(), { held: 'agreement 1 of 3', item: null, agreement: 1 }],
     ['three agreeing weeks', win({ earlier: W2 }), { held: 'agreed by 3 Reflections (ADR 0037 d5); no writer lands a Fable ceiling until [[thread-skill-p46-10-an-agreed-fable-ceiling-lands-on-its-own]]: Lachy decides', item: 'ceiling', agreement: 3, ready: true, to: 60, agreedWith: [R(2), R(1)] }],
@@ -231,8 +238,10 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
       earlier: [earlierLine(R(1), 'loss', 'loss'), earlierLine(R(2), 'loss', 'loss')] },
     { held: 'a caution: Lachy decides', caution: 'risks [[rz]] throughput: a Guardrail against a Guardrail', item: 'ceiling', direction: -1 }],
     ['a single trade week', week({ trade: true }), { verdict: 'trade', signal: 'trade-handsOff', held: 'agreement 1 of 3', item: null }],
-    ['three agreeing trade weeks', { ...week({ trade: true }), earlier: [earlierLine(R(1), 'trade', 'trade-handsOff'), earlierLine(R(2), 'trade', 'trade-handsOff')] },
-      { held: 'a trade (gains handsOffRate, costs quality): Lachy decides', item: 'ceiling', to: 60, direction: 1 }],
+    ['three agreeing trade weeks', { ...week({ trade: true }), earlier: TRADES },
+      { held: 'a trade (gains handsOffRate, costs quality): Lachy decides', caution: '', item: 'ceiling', to: 60, direction: 1 }],
+    ['a trade with Fable\'s tokens over the bound names the breach as its caution', { ...week({ trade: true, fableTokens: 3000 }), earlier: TRADES },
+      { held: 'a trade (gains handsOffRate, costs quality): Lachy decides', caution: `risks ${OVER}`, breached: [OVER], item: 'ceiling' }],
     ['no [share] for the role', win({ share: { builder: 0.5 } }), { from: null, held: 'no Fable ceiling for master-review (ladder.toml [share])', item: null }],
     ['a refused ladder', win({ share: null, shareError: 'unknown key' }), { from: null, item: null }],
     ['at the edge', win({ share: { 'master-review': 1 }, earlier: W2 }), { from: 100, held: 'at the edge: a Fable ceiling of 100% cannot move up', item: null }],
@@ -243,9 +252,20 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
     assert.deepEqual(pick(got, Object.keys(want)), want, what)
   })
   assert.equal(out[1].block.roles['master-review'].kid, out[2].block.roles['master-review'].kid)
-  assert.ok(out[14].block.flags.includes('arms: the ladder is refused (unknown key): no Fable ceiling is read'))
-  assert.ok(!out[13].block.flags.some((f) => f.includes('ladder')), 'a share with no role is no flag')
+  assert.ok(out[15].block.flags.includes('arms: the ladder is refused (unknown key): no Fable ceiling is read'))
+  assert.ok(!out[14].block.flags.some((f) => f.includes('ladder')), 'a share with no role is no flag')
   assert.equal(out[0].block.roles.lead.verdict, 'thin', 'the lead, in no arm, is thin')
+  // the over-bound trade's decision-task line prints its caution and both arms' tokens per merge
+  const r = spawnSync('python3', ['-B', '-c', ['import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("m", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'print(json.dumps([m.arms_item_line(x) for x in m.arms_items({"arms": json.load(sys.stdin)})]))'].join('\n'), REFLECT],
+  { encoding: 'utf8', cwd: h.home, env: env(h), input: JSON.stringify(out[13].block) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [`- ceiling ${out[13].block.roles['master-review'].kid} at 50: Fable ceiling master-review 50% -> 60% ` +
+    `(trade-handsOff); a trade (gains handsOffRate, costs quality): Lachy decides; caution risks ${OVER}; evidence opus 3 landed, ` +
+    'Hands-off 0.6667, 0 Escape(s), tokens per merge 2000; fable 3 landed, Hands-off 1, 2 Escape(s), tokens per merge 6000; ' +
+    `agreed with ${R(2)}, ${R(1)}; rollouts [[rw]]; a yes: the deciding session sets ~/.config/thread/ladder.toml [share] master-review = 0.6 ` +
+    'and runs ladder.py'])
 })
 
 test('plans: the split at the first Fable planner call off the Fable rung; each side counts its tasks, planned or not, and leaves out only the other model\'s; per100 for the week and to date', (t) => {
@@ -354,13 +374,14 @@ test('a ceiling on the decision task: decide lists it under its own lead, close 
   const sp1 = armsSpan(h, RID(1), block)
   const early = reflect(h, ['close', '--span', sp1, '--tasks-dir', h.tasks])
   assert.equal(early.status, 2)
-  assert.match(early.stderr, new RegExp(`held trade ${kid} at 50 has no decision task line from this Reflection: run decide`))
+  assert.match(early.stderr, new RegExp(`held ceiling ${kid} at 50 has no decision task line from this Reflection: run decide`))
   assert.equal(ok(h, ['decide', '--span', sp1, '--tasks-dir', h.tasks, '--now', '2026-11-10T09:00+11:00']).stdout,
     'decision task thread-skill-decisions-2026-11-10 (new)\n')
   const slug = 'thread-skill-decisions-2026-11-10'
   const p = path.join(h.tasks, `${slug}.md`)
   const item = `- ceiling ${kid} at 50: Fable ceiling master-review 50% -> 60% (trade-handsOff); a trade (gains handsOffRate, costs quality): Lachy decides; ` +
-    `evidence opus 3 landed, Hands-off 0.6667, 0 Escape(s); fable 3 landed, Hands-off 1, 2 Escape(s); agreed with ${R(2)}, ${R(1)}; rollouts [[rw]]; ` +
+    `evidence opus 3 landed, Hands-off 0.6667, 0 Escape(s), tokens per merge 2000; fable 3 landed, Hands-off 1, 2 Escape(s), tokens per merge 2000; ` +
+    `agreed with ${R(2)}, ${R(1)}; rollouts [[rw]]; ` +
     'a yes: the deciding session sets ~/.config/thread/ladder.toml [share] master-review = 0.6 and runs ladder.py'
   assert.ok(fs.readFileSync(p, 'utf8').endsWith(`## Reflection ${RID(1)}\n\n${ARMS_LEAD}\n${item}\n`), fs.readFileSync(p, 'utf8'))
   assert.match(ok(h, ['close', '--span', sp1, '--tasks-dir', h.tasks]).stdout, /; arms written\n$/)
@@ -380,7 +401,7 @@ test('a ceiling on the decision task: decide lists it under its own lead, close 
   assert.equal(rlines(h).filter((l) => l.kind === 'arms' && l.reflection === RID(2)).length, 1, 'a re-run writes no second arms line')
   // a yes that cannot apply: moot, under the item's own section
   assert.equal(ok(h, ['moot', '--task', slug, '--trade', kid, '--from', '50', '--why', 'ladder.toml read 0.6 already', '--tasks-dir', h.tasks,
-    '--now', '2026-11-18T09:00+11:00']).stdout, `moot trade ${kid} at 50 in [[${slug}]] (## Reflection ${RID(1)})\n`)
+    '--now', '2026-11-18T09:00+11:00']).stdout, `moot ceiling ${kid} at 50 in [[${slug}]] (## Reflection ${RID(1)})\n`)
   // a week whose block holds no row writes no arms line
   ok(h, ['close', '--span', armsSpan(h, RID(3), allNone.block, '2026-11-23T13:00:00.000Z'), '--tasks-dir', h.tasks])
   assert.deepEqual(rlines(h).filter((l) => l.reflection === RID(3) || l.id === RID(3)).map((l) => l.kind), ['reflection'])

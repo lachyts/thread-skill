@@ -35,8 +35,10 @@ Row units. Each row is placed by its own time and held to [since, until]:
   a startTime there, never by ts, which is the fold's. Its arm, model, climbs and fableRung are its latest in-window
   segment's, and fellBack holds when any in-window segment holds it;
 - a review: a review-verdict line by its ts. The lines up to until are deduped once by RR.verdict_key, the first line
-  per key (by time, then record) kept, as score.py keeps them; firstApprove and firstChanges count each task's round-1
-  verdict, its earliest in the window, so a round 1 before since gives the task no first verdict this week;
+  per key (by time, then record) kept, as score.py keeps them. firstApprove and firstChanges read each task's first
+  verdict: its earliest deduped round-1 line over every record up to until (a task may hold several, two head-less
+  lines for one round or a re-run after a hand-back), counted only when that line's ts is in the window, so a round 1
+  before since gives the task no first verdict this week, whatever a later round-1 line says;
 - a landed task: placed by its FIRST `merged` line across every record up to until, in the record that holds it (the
   task's landing rollout), as score.py's hands_off places a landing, never by score.py's landed_from (the latest line).
   It counts when that line is in the window, and a later re-merge, in its own record or another, never counts again;
@@ -103,7 +105,9 @@ Hold order, one rule, in this order (every listed item is item "ceiling", a deci
 writer lands a ceiling: the session deciding the task applies a yes, until p46-10):
 1. thin or even: no proposal (held says which);
 2. agreement under AGREE: held "agreement <n> of 3", no item;
-3. a trade: held "a trade (gains <h>, costs <q>): Lachy decides", item;
+3. a trade: held "a trade (gains <h>, costs <q>): Lachy decides", item; a trade is posed as a widening, so with a
+   Guardrail breached (read as a widening's, below) its caution is "risks <which>", which the decision-task line
+   prints beside the held reason;
 4. a widening while a Guardrail is breached: held "a Guardrail is breached (<which>)", no item; step 17 reports it;
 5. a narrowing while a Guardrail is breached: caution "risks <which>: a Guardrail against a Guardrail" and held "a
    caution: Lachy decides", item (as score.py's lowers);
@@ -325,6 +329,8 @@ def propose(role, o, f, frm, earlier, breaches, bound):
         gains = "handsOffRate" if signal == "trade-handsOff" else "quality"
         costs = "quality" if gains == "handsOffRate" else "handsOffRate"
         out.update(held="a trade (gains %s, costs %s): Lachy decides" % (gains, costs), item="ceiling")
+        if breached:
+            out["caution"] = "risks %s" % "; ".join(breached)
     elif direction > 0 and breached:
         out["held"] = ("a Guardrail is breached (%s)" % "; ".join(breached))[:RR.ARMS_HELD]
     elif direction < 0 and breached:
@@ -546,15 +552,16 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
             stats[r][a]["climbs"] += climbs
             fed[r].add(c["rollout"])
 
-    # reviews: deduped up to until, in the window by ts; round 1's earliest in the window is the first verdict
+    # reviews: deduped up to until, in the window by ts; a task's first verdict is its earliest round-1 line up to until,
+    # counted only when that line is in the window
     review_rows, first = [], {}
     for t, slug, task, d in sorted(verdicts.values(), key=lambda x: (x[0], x[1], x[2])):
+        if d.get("round") == 1 and task not in first:
+            first[task] = (t, slug, d.get("verdict"))
         if not since <= t <= until:
             continue
         review_rows.append({"task": task, "rollout": slug, "round": d.get("round"), "verdict": d.get("verdict"),
                             "at": _fmt(t)})
-        if d.get("round") == 1 and task not in first:
-            first[task] = (slug, d.get("verdict"))
         for r in ROLES:
             a = place(r, task, slug)
             if a is None:
@@ -562,7 +569,9 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
             stats[r][a]["reviewRounds"] += 1
             reviewed[r][a].add(task)
             fed[r].add(slug)
-    for task, (slug, v) in sorted(first.items()):
+    for task, (t, slug, v) in sorted(first.items()):
+        if not since <= t <= until:
+            continue
         for r in ROLES:
             a = place(r, task, slug)
             if a is not None and v in ("approve", "changes"):

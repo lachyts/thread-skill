@@ -885,7 +885,9 @@ test('control: the carried read without --dry-run, an owed entry worded done, or
 })
 
 // The arms (p46-4, ADR 0079 d9): step 11 reads plans as a before and after, never a comparison, and says the reading never
-// edits ladder.toml; § Deciding says the session deciding the task applies a ceiling's yes, by ladder.py's read.
+// edits ladder.toml; § Deciding says the session deciding the task applies a ceiling's yes, by ladder.py's read; the
+// writers at the top name [share] as having no script writer, its yes the one by-hand edit; and § What the record cannot
+// show says an applied yes writes no Run record line.
 const ARMS_PLANS = 'Read `plans` as a before and after, not a comparison: planning has no Opus arm'
 const ARMS_NEVER = 'The reading never edits `ladder.toml`: a Fable ceiling moves only on Lachy\'s yes to its decision-task item, which the session deciding the task applies'
 const ARMS_DEC = ['**A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason): the session deciding the task applies it',
@@ -893,13 +895,19 @@ const ARMS_DEC = ['**A yes to a Fable ceiling** (a `- ceiling` item, whatever it
   'set that one value to the item\'s `to` / 100, leaving every other byte of the file as it was',
   'run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` to see the new share read',
   '**A no to a Fable ceiling**: nothing to run.', 'each ceiling\'s yes saw `ladder.py` print the new share']
+const ARMS_WRITER = ['`~/.config/thread/ladder.toml`\'s `[share]` values (each role\'s Fable ceiling, ADR 0079 d9) have **no script writer** until p46-10',
+  'A ceiling\'s yes in § Deciding the decision task is the one by-hand edit this skill makes']
+const ARMS_RECORD = 'An applied Fable ceiling\'s yes writes no Run record line: no `tuning` line in `tunings.jsonl` and nothing in `reflections.jsonl`'
 function armsFails(skill) {
   const s11 = collapse(sectionOf(skill, /^### 11\. /))
   const dec = collapse(sectionOf(skill, /^## Deciding the decision task$/))
+  const top = collapse(skill.slice(0, skill.indexOf('\n## ')))
   const out = []
   if (!s11.includes(ARMS_PLANS)) out.push('plans')
   if (!s11.includes(ARMS_NEVER)) out.push('never')
   if (!ARMS_DEC.every((n) => dec.includes(n))) out.push('decide')
+  if (!ARMS_WRITER.every((n) => top.includes(n))) out.push('writer')
+  if (!collapse(sectionOf(skill, /^## What the record cannot show$/)).includes(ARMS_RECORD)) out.push('record')
   return out
 }
 
@@ -907,9 +915,11 @@ test('the arms: plans are a before and after, the reading never edits ladder.tom
   assert.deepEqual(armsFails(real.skill), [])
 })
 
-test('control: the plans sentence, the never-edits sentence or the ceiling\'s yes bullet dropped fails', () => {
+test('control: the plans sentence, the never-edits sentence, the ceiling\'s yes bullet, its writer line or its record line dropped fails', () => {
   const swap = (from, to) => { assert.ok(real.skill.includes(from), `control setup: ${from}`); return real.skill.replace(from, to) }
   assert.deepEqual(armsFails(swap('as a before and after, not a comparison:', 'as a comparison:')), ['plans'])
   assert.deepEqual(armsFails(swap('The reading never edits `ladder.toml`:', 'The reading may edit `ladder.toml`:')), ['never'])
   assert.deepEqual(armsFails(swap('to see the new share read', 'when it can')), ['decide'])
+  assert.deepEqual(armsFails(swap('have **no script writer**', 'have a writer')), ['writer'])
+  assert.deepEqual(armsFails(swap('An applied Fable ceiling\'s yes writes no Run record line', 'An applied Fable ceiling\'s yes is recorded')), ['record'])
 })
