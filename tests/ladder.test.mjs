@@ -605,3 +605,74 @@ test('L11 (f) ROLES equals the engine\'s LADDER_ROLES, OPTIONAL_FIELDS is plan, 
   writeLadder(home, render(P3, undefined, { 'master-review': 'fable', builder: 'fable', investigator: 'opus' }))
   assert.equal(E.ladderArgsError(loads(home)), '', "the engine accepts ladder.py's output for a file using plan and [role]")
 })
+
+// ---- L12: the [share] table, each drawn role's Fable share (ADR 0079 decision 3, task p46-2) ----------------
+
+const SHARE_ROLES = [...ROLES, 'lead']
+// TWO, then `[role]` (when given), then a `[share]` table: with no roles, [share] is line 16 and its first key 17.
+function renderShare(share, roles) {
+  const lines = render(TWO, undefined, roles).replace(/\n$/, '').split('\n')
+  const kv = ([k, v]) => `${k} = ${typeof v === 'object' ? v.raw : JSON.stringify(v)}`
+  lines.push('', '[share]', ...Object.entries(share).map(kv))
+  return lines.join('\n') + '\n'
+}
+
+test('L12 (a) a [share] table loads as share, in SHARE_ROLES order, after roles, each value as written', (t) => {
+  const home = tmpHome(t)
+  writeLadder(home, renderShare({ lead: 0.25, investigator: 1, builder: 0, 'master-review': 0.5 }))
+  const ladder = loads(home)
+  assert.deepEqual(Object.keys(ladder), ['source', 'rungs', 'share'])
+  assert.deepEqual(Object.keys(ladder.share), SHARE_ROLES)
+  assert.deepEqual(ladder.share, { 'master-review': 0.5, builder: 0, investigator: 1, lead: 0.25 })
+  const both = tmpHome(t)
+  writeLadder(both, renderShare({ 'master-review': 0.5 }, { investigator: 'fable' }))
+  assert.deepEqual(Object.keys(loads(both)), ['source', 'rungs', 'roles', 'share'], 'share comes after roles')
+  const inl = tmpHome(t)
+  writeLadder(inl, render(TWO, ['share = { lead = 1 }']))
+  assert.deepEqual(loads(inl).share, { lead: 1 }, 'the inline form, before the first rung')
+  const dotted = tmpHome(t)
+  writeLadder(dotted, render(TWO, ['share.builder = 0.5', 'share.lead = 0']))
+  assert.deepEqual(loads(dotted).share, { builder: 0.5, lead: 0 }, 'the dotted-key form, before the first rung')
+  const empty = tmpHome(t)
+  writeLadder(empty, renderShare({}))
+  assert.deepEqual(Object.keys(loads(empty)), ['source', 'rungs'], 'an empty [share] names no share')
+})
+
+// [label, file content, line, reason]. With no [role], [share] is line 16 and its first key line 17.
+const SHARE_INVALID = [
+  ['an unknown role', renderShare({ reviewer: 0.5 }), 17, /unknown share role "reviewer" \(known: master-review, builder, investigator, lead\)/],
+  ['the planner is never drawn', renderShare({ builder: 0.5, planner: 0.5 }), 18, /share "planner": planning is never drawn/],
+  ['the plan judge is never drawn', renderShare({ 'plan-judge': 0.5 }), 17, /share "plan-judge": planning is never drawn/],
+  ['a boolean', renderShare({ builder: raw('true') }), 17, /share builder must be a number in \[0, 1\], not a boolean/],
+  ['a string', renderShare({ lead: '0.5' }), 17, /share lead must be a number in \[0, 1\], not a string/],
+  ['below 0', renderShare({ investigator: raw('-0.1') }), 17, /share investigator: -0\.1 is outside \[0, 1\]/],
+  ['above 1', renderShare({ 'master-review': raw('1.5') }), 17, /share master-review: 1\.5 is outside \[0, 1\]/],
+  ['the earliest bad value wins', renderShare({ lead: raw('2'), builder: raw('true') }), 17, /share lead: 2 is outside/],
+  ['[[share]] is not a table', render(TWO) + '\n[[share]]\nbuilder = 0.5\n', 16, /share must be a table: write \[share\], not \[\[share\]\]/],
+  ['a number is told its type', render(TWO, ['share = 0.5']), 1, /share must be a table \(\[share\]\), not a float$/m],
+  ['a role in both [role] and [share], at its [share] line', renderShare({ lead: 0.5, builder: 0.5 }, { builder: 'fable' }), 21,
+    /share builder: \[role\] gives it its own model \(fable\), so it is never drawn/],
+]
+
+for (const [label, content, line, reason] of SHARE_INVALID) {
+  test(`L12 (b) refused, exit 2: ${label}`, (t) => {
+    const home = tmpHome(t)
+    writeLadder(home, content)
+    refused(home, { line, reason })
+  })
+}
+
+test('L12 (c) SHARE_ROLES equals the engine\'s LADDER_SHARE_ROLES, and the engine accepts the output with share', (t) => {
+  const r = run(tmpHome(t), ['-B', '-c', "import json, runpy, sys; print(json.dumps(list(runpy.run_path(sys.argv[1])['SHARE_ROLES'])))", SCRIPT])
+  assert.equal(r.status, 0, r.stderr)
+  const E = loadEngine(['LADDER_SHARE_ROLES', 'ladderArgsError'])
+  assert.deepEqual(JSON.parse(r.stdout), JSON.parse(JSON.stringify(E.LADDER_SHARE_ROLES)))
+  assert.deepEqual(JSON.parse(r.stdout), SHARE_ROLES)
+  const home = tmpHome(t)
+  writeLadder(home, renderShare({ 'master-review': 0.5, builder: 1, investigator: 0, lead: 0.25 }))
+  assert.equal(E.ladderArgsError(loads(home)), '', "the engine accepts ladder.py's output for a file using [share]")
+  for (const [bad, why] of [[{ planner: 0.5 }, /share: unknown role "planner"/], [{ builder: 1.5 }, /share: builder: 1\.5 is not a number in \[0, 1\]/],
+    [{ builder: true }, /share: builder: true is not a number/], [[0.5], /share must be one object/]]) {
+    assert.match(E.ladderArgsError({ source: 'x', rungs: TWO, share: bad }), why)
+  }
+})

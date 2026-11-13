@@ -178,6 +178,17 @@ Subcommands:
               (a whole-rollout hold); else 2 (an arm failure or refusal, a missing or unpaired flag, the flags with no
               rollout note); else 1 (a refused note); else 0. --dry-run never runs the canary: it prints `<slug>:
               would arm the task window (dry-run)`, and the flag requirement still applies.
+              Arms (p46-2, ADR 0079 decisions 3 and 4; the `arms` section's comment holds the draw): beside the
+              `started:` write, per note: `--start resume` draws, stamps and prints nothing (a resume re-passes its
+              call's own args). A note with `arms:` keeps it and prints `<slug>: arms <compact JSON>`, roles in order
+              (e.g. `{"master-review":"fable","builder":"none"}`), which the lead passes as args.task.arms on a fresh
+              call; one that does not parse is kept, with one `WARN:` and no line. With no `arms:` and a ladder that
+              has a [share] table (ladder.py, read once per run), it stamps `arms: <role>=<opus|fable|none> ...` and
+              prints the line: a first dispatch (no `started:` before this call) draws every role of the task's kind
+              (the master review and the builder, or the investigator for `scope: read-only`; the builder only when
+              the task is hard: `work_depth: deep` or `scope: cross-cutting`); a later one stamps them all `none`, the
+              task having begun outside the draw. No [share] table: nothing, the note's bytes as before. A refused
+              ladder: nothing stamped, no line, one `WARN:` per run. defer keeps the stamp, as it keeps `rung:`.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads. The origin lane (ADR 0064 d5): one
@@ -423,8 +434,9 @@ Subcommands:
               blocks on a peer clone's ahead commits only when they touch one of these.
 
   fold-journals  For execute's completion ceremony and every Reflection (p15-3, ADR 0032): `--rollout <note path |
-              [[slug]] | slug> [--dry-run]`. Resolves the slug with run_record.normalise_slug and never opens
-              the note, so a superseded, dropped or archived rollout folds the same way. Reads the rollout's
+              [[slug]] | slug> [--tasks-dir DIR] [--dry-run]`. Resolves the slug with run_record.normalise_slug and
+              opens the note only for the role-call gate below, so a superseded, dropped or archived rollout folds
+              the same way. Reads the rollout's
               Run record: each `run-bound` runId (the last line for a runId wins its journalDir and call) is
               folded from `<journalDir>/<runId>.json` into one `call-journal` line through run_record.emit
               (the module's flock and dedupe; nothing else writes the record): status verbatim; mode = the
@@ -435,7 +447,25 @@ Subcommands:
               the runId's latest line is `unchanged`. A missing journal, an unsafe runId (a path separator
               or `..`), a relative journalDir, an unreadable or non-object journal, a journal naming another
               runId, no status, or an unparsable record line is one stderr `WARN:` line, and the fold goes
-              on. Ends with `fold-journals: <slug>: N folded, M already folded, K unchanged, W warnings`.
+              on. Role calls (p46-2, ADR 0079 decision 8): each terminal journal segment (a terminal status, an int
+              startTime, result.tasks[0] with a `ran` list and a status, a workflowProgress list) also folds into one
+              `role-call` line per role its `ran` names (run_record.py's docstring holds the fields and the reading
+              rule): (a) in the pass that writes a runId's first terminal call-journal, from the same journal; (b)
+              for a runId already terminal whose latest run-bound line (a resume, which keeps its runId and rewrites
+              its journal with a new startTime) sits after its last role-call line, or after its terminal call-journal
+              when it has none, from the rewritten journal, a missing or unreadable one skipped silently. A (runId,
+              startTime) the record holds already writes nothing, and a call folded before p46-2 and never resumed is
+              never read again. The gate: role-call lines are written only into the record of a rollout whose engine
+              reads the kind (_engine_reads_role_call: its note's `engine_snapshot:` root, or the root an unstamped
+              note runs on, has the ROLE_CALL_ENGINE line; a finished rollout, or no note found, reads it), since an
+              older engine's record-entry, score.py and ledger.py read a role-call line as live; the note is
+              --rollout's path, else `<slug>.md` in --tasks-dir (default the vault's) or its Archive/. A segment the
+              gate holds back is lost: a later fold reopens a terminal call only after a resume bound after its last
+              fold, and then writes only the resumed segment, once the gate reads True (engine-snapshot.md §
+              Cross-version state); the run prints one `no role-call for <n> segments: <why>` line. Each segment
+              written prints `role-call <runId> [[<task>]] <n> roles (segment
+              <startTime>)` (`would write role-call …` on --dry-run) before the summary line. Ends with
+              `fold-journals: <slug>: N folded, M already folded, K unchanged, W warnings`.
               Exit 0 (warnings included; no record file prints `no run record at <path>`), 1 the events
               directory cannot be resolved or the record cannot be read, 2 usage, a bad slug or the reserved
               `reviews`.
@@ -473,8 +503,9 @@ Subcommands:
   record-entry  `--rollout <note> --by lachy|stage|watchdog|heartbeat|repair [--cause usage-limit|dead-lead|watchdog]
               [--session ID] [--now T] [--dry-run]` (p29-10, ADR 0051; execute § 4.5 *Run record*): the lead's loop
               entry in the Run record, run at every loop entry (right after § 2's lineage, version and shape lines) and
-              by every heartbeat tick that finds no pause or room stop (its clause 2b). It writes only the Run record
-              and the lead's lease (p28-4, renewed before the record is read; Trickle and Away, below): the stops the
+              by every heartbeat tick that finds no pause or room stop (its clause 2b). It writes only the Run record,
+              the lead's lease (p28-4, renewed before the record is read; Trickle and Away, below) and the lead's arm
+              stamp on the rollout note (below): the stops the
               record does not hold yet, as inferred `stopped` lines, then exactly one `lead-entry` {by,
               session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause, the open
               stop, --cause, a boot after the latest live line, a session change but on --by heartbeat, --by
@@ -483,8 +514,14 @@ Subcommands:
               wake (THREAD_MACHINE_TIMES replaces every read). A pause invocation runs none (it is no loop entry). A
               serial, superseded, done or dropped note prints `[skip] <stem>: <why>: no entry recorded` and writes
               nothing, no lease either. Prints one line naming what it wrote (`(dry-run)`: nothing written, no
-              lease); a lease it cannot write prints one `lease: warning: …` line on stderr. Exit 0 (written, skipped,
-              or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the Engine snapshot guard.
+              lease); a lease it cannot write prints one `lease: warning: …` line on stderr. The lead's arm (p46-2,
+              ADR 0079 decision 3): off --dry-run, while the ladder has a [share] table and the rollout note has no
+              `arms:`, it also stamps `arms: lead=<opus|fable|none>` on the rollout note (drawn by the rollout's slug
+              when `lead` has a share; `none` when it has none, or when the record already held a lead-entry) and prints
+              a second line, `<stem>: arms lead=<arm> (stamped)`. The stamp is kept whatever the share is later. It
+              is the seam Chorus reads: nothing here runs the lead on it, and the lead-entry line carries no arm.
+              Exit 0 (written, skipped, or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the
+              Engine snapshot guard.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
@@ -1707,9 +1744,10 @@ note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on s
 command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
 that names no rollout (or one not found), pass from any root. The five exemptions run from any root: `status` writes
 nothing (/thread:status and the estate scan read every rollout with it), `moving` writes nothing either and is the
-Watchdog's reading of any rollout from any root, `fold-journals` never reads the note
-and writes only call-journal lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
-state) that reflect folds across rollouts from its own root, and `join` (ADR 0078 d6) is run by a newer
+Watchdog's reading of any rollout from any root, `fold-journals` reads the note only for its role-call gate
+and writes only call-journal and role-call lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
+state) that reflect folds across rollouts from its own root, a role-call line only into the record of a rollout
+whose engine reads the kind, and `join` (ADR 0078 d6) is run by a newer
 /thread:schedule on a running rollout whose snapshot predates the verb, and writes only the forms every protocol-5
 engine reads (a `## Queue` row whose Mode starts `joined `, a `- <slug>: a, b` `## File-sets` line, a task's `rollout:`
 stamp) under the same note lock, a cross-version contract that changes only by migration, and `prove`'s judge writes
@@ -4038,9 +4076,10 @@ LADDER_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts
 
 
 def _ladder():
-    """The operator's ladder, read through ladder.py's load(): {source, rungs: [names, bottom first], error}.
-    `error` is None when it reads. When it cannot be read (a refused file: LadderError, exit 2 or 3 from the
-    CLI; or a ladder.py that will not load) `rungs` is [], `source` the path load() reads (ladder.py's
+    """The operator's ladder, read through ladder.py's load(): {source, rungs: [names, bottom first], share, error}.
+    `share` is the ladder's [share] table ({role: number}, p46-2), {} when the file names none. `error` is None when
+    it reads. When it cannot be read (a refused file: LadderError, exit 2 or 3 from the
+    CLI; or a ladder.py that will not load) `rungs` is [], `share` {}, `source` the path load() reads (ladder.py's
     default_path(), '' when ladder.py itself will not load) and `error` the CLI's own words without its
     `ladder: ` prefix: `<path>:<line>: <reason>`, or `<path>: <reason>` when no line applies."""
     mod = None
@@ -4049,7 +4088,8 @@ def _ladder():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         ladder = mod.load()
-        return {"source": ladder["source"], "rungs": [r["name"] for r in ladder["rungs"]], "error": None}
+        return {"source": ladder["source"], "rungs": [r["name"] for r in ladder["rungs"]],
+                "share": dict(ladder.get("share") or {}), "error": None}
     except Exception as e:  # any failure is the caller's ERROR or flag, never a guessed rung
         path = ""
         try:
@@ -4059,7 +4099,7 @@ def _ladder():
         reason = str(getattr(e, "reason", "") or e) or type(e).__name__
         line = getattr(e, "line", None)
         where = path if line is None else f"{path}:{line}"
-        return {"source": path, "rungs": [], "error": f"{where}: {reason}" if where else reason}
+        return {"source": path, "rungs": [], "share": {}, "error": f"{where}: {reason}" if where else reason}
 
 
 def _ladder_top():
@@ -4068,6 +4108,103 @@ def _ladder_top():
     if ladder["error"]:
         return None, ladder["error"]
     return ladder["rungs"][-1], ladder["source"]
+
+
+# ---- arms (p46-2, ADR 0079 decisions 3 and 4) -----------------------------------------------------------------------
+# A drawn role falls in its Opus or its Fable arm by a draw fixed by the task's name (a rollout's lead by the rollout's),
+# compared with the role's Fable share: the ladder's [share] table until p46-3 supplies the paced one. The draw is made
+# once, at a task's first dispatch (mark-started), and stamped on its note as `arms:`, as its rung is, so a resume or a
+# later dispatch keeps it whatever the share is by then. A task's builder is drawn only when the task is hard
+# (`work_depth: deep` or `scope: cross-cutting`, read once, at that first stamp); every other role of the task's kind is
+# drawn when it has a share. `none` is a role in no arm: no share, a builder that is not hard, or a task begun before
+# the draw. The engine (task.workflow.js armOf) reads only the stamp, through the lead's args.task.arms. The planner and
+# the plan judge are never drawn: planning takes the rung's plan model. The lead's arm is stamped on the rollout note
+# (record-entry) as the seam Chorus reads (Chorus Phase 104); nothing here makes the lead run on it.
+ARMS_KEY = "arms"
+ARM_ROLES = ("master-review", "builder", "investigator")   # a task's stamp: task.workflow.js ARM_ROLES
+LEAD_ROLE = "lead"                                         # the rollout note's stamp
+ARM_VALUES = ("opus", "fable", "none")
+NEVER_DRAWN = ("planner", "plan-judge")
+
+
+def _draw_arm(role, name, share) -> str:
+    """`role`'s arm for `name` (a task's slug, a rollout's for the lead) at Fable share `share` (0 to 1): "fable" when
+    u < share, else "opus", u the first 13 hex digits of the sha256 of `role`, a newline and `name`, over 16**13. Pure
+    and fixed by its inputs; the role is in the hash, so each role draws on its own. The planner and plan judge are
+    refused."""
+    if role in NEVER_DRAWN or role not in ARM_ROLES + (LEAD_ROLE,):
+        raise ValueError(f"{role!r} is never drawn (drawn: {', '.join(ARM_ROLES + (LEAD_ROLE,))})")
+    u = int(hashlib.sha256(f"{role}\n{name}".encode()).hexdigest()[:13], 16) / 16 ** 13
+    return "fable" if u < share else "opus"
+
+
+def _hard(note) -> bool:
+    """A hard task (ADR 0079 decision 3, settled #15): `work_depth: deep` or `scope: cross-cutting`. A reached `rung:`
+    never counts."""
+    return _scalar(note.get("work_depth")).lower() == "deep" or _scope(note) == "cross-cutting"
+
+
+def _task_roles(note) -> tuple:
+    """The drawn roles of a task's kind: the investigator for `scope: read-only`, else the master review and the
+    builder."""
+    return ("investigator",) if _scope(note) == "read-only" else ("master-review", "builder")
+
+
+def _task_arms(note, share, slug=None) -> dict:
+    """A task's arms at its first dispatch, by its slug (`slug`, else its note's file stem): each role of its kind
+    drawn when `share` names it, the builder only when the task is also hard (_hard), else `none`."""
+    name = slug or note.path.stem
+    return {role: _draw_arm(role, name, share[role]) if role in share and (role != "builder" or _hard(note)) else "none"
+            for role in _task_roles(note)}
+
+
+def _format_arms(arms) -> str:
+    """The `arms:` stamp, a raw frontmatter scalar as `rung:` is: `role=arm` pairs, space-separated, in role order."""
+    return " ".join(f"{r}={arms[r]}" for r in ARM_ROLES + (LEAD_ROLE,) if r in arms)
+
+
+def _parse_arms(value, roles=ARM_ROLES):
+    """An `arms:` stamp as {role: arm} in role order, or None when it does not parse: empty, a token that is not
+    `role=arm`, a role outside `roles`, an arm outside ARM_VALUES, or a role twice."""
+    text = _scalar(value)
+    if not text:
+        return None
+    out = {}
+    for tok in text.split():
+        role, sep, arm = tok.partition("=")
+        if not sep or role not in roles or arm not in ARM_VALUES or role in out:
+            return None
+        out[role] = arm
+    return {r: out[r] for r in roles if r in out}
+
+
+def _arms_json(arms) -> str:
+    """The arms line's JSON, compact, in role order: the lead copies it into args.task.arms verbatim."""
+    return json.dumps(arms, separators=(",", ":"))
+
+
+def _start_arms(note, slug, first, explicit, ladder_once):
+    """mark-started's arms for one note (p46-2): the stamp to print as `<slug>: arms <json>`, or None for no line.
+    `--start resume` draws, stamps and prints nothing (a resume re-passes its call's own args). A note with `arms:`
+    keeps it (one WARN and no line when it does not parse). Else, with a [share] table: a first dispatch (`first`:
+    no `started:` before this call's writes) draws every role of the task's kind (_task_arms); a later one stamps them
+    all `none` (the task began outside the draw). No [share] table, or a refused ladder: nothing. Sets ARMS_KEY when
+    it stamps; the caller saves the note."""
+    if explicit == "resume":
+        return None
+    raw = note.get(ARMS_KEY)
+    if raw is not None:
+        arms = _parse_arms(raw)
+        if arms is None:
+            print(f"WARN: {slug}: arms: {raw!r} does not parse (role=opus|fable|none pairs, roles "
+                  f"{', '.join(ARM_ROLES)}): kept as it is; this call runs with no arms", file=sys.stderr)
+        return arms
+    ladder = ladder_once()
+    if ladder["error"] or not ladder["share"]:
+        return None
+    arms = _task_arms(note, ladder["share"], slug) if first else {role: "none" for role in _task_roles(note)}
+    note.set(ARMS_KEY, _format_arms(arms), after=("rung", "started", "owner", "status"))
+    return arms
 
 
 def _gate_bounce(task) -> str:
@@ -6992,6 +7129,17 @@ def cmd_mark_started(args) -> int:
         return away["state"]
 
     worst = 0  # 3 an arm's trip or hold, 2 an arm failure or a flag refusal (D5)
+    # The ladder for the arms (p46-2): read once per run, on first use; a refused one is one WARN and no arms drawn.
+    ladder = {}
+
+    def ladder_once():
+        if "l" not in ladder:
+            ladder["l"] = _ladder()
+            if ladder["l"]["error"]:
+                print(f"WARN: mark-started: the ladder is refused ({ladder['l']['error']}): no arms are drawn or "
+                      "stamped this run", file=sys.stderr)
+        return ladder["l"]
+
     for slug, _path, note in _each_note(args):
         status = _status(note)
         if status in FINISHED_STATUSES:
@@ -7023,6 +7171,7 @@ def cmd_mark_started(args) -> int:
         existing = _scalar(note.get("started"))
         if not existing:
             note.set("started", _stamp(now))
+        arms = _start_arms(note, slug, not existing, args.start, ladder_once)
         note.remove("integrating")
         signed = _scalar(note.get(GATES_SIGNED_KEY))
         note.remove(GATES_SIGNED_KEY)
@@ -7031,6 +7180,8 @@ def cmd_mark_started(args) -> int:
         note.remove(HANDED_BACK_KEY)
         note.save(dry_run=args.dry_run)
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
+        if arms is not None:
+            print(f"{slug}: arms {_arms_json(arms)}")
         if signed:
             print(f"{slug}: signed-gate restart (gates signed {signed}; {GATES_SIGNED_KEY}: cleared) — "
                   "a fresh call, not a resume of its gate-pending call, prints execute § 3.7's warning first")
@@ -8027,8 +8178,9 @@ def cmd_status(args) -> int:
         # Run record's folded call journals for the history, silently, and writes nothing.
         "lastStarts": last.output(),
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
-        # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
-        "ladder": ladder,
+        # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start). Never the
+        # share (p46-2): it is mark-started's and record-entry's, so status prints the bytes it printed before.
+        "ladder": {key: ladder[key] for key in ("source", "rungs", "error")},
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*), each with its `scope`: [] when
         # none. Vault-only, so status § 3's Git-env trip flag holds offline too.
         "gitEnvHold": git_env,
@@ -8164,6 +8316,117 @@ JOURNAL_INTS = (("totalTokens", "tokens"), ("durationMs", "durationMs"), ("agent
                 ("startTime", "startTime"))
 
 
+# role-call (p46-2, ADR 0079 decision 8): a dispatch label's prefix -> its role (run_record.py ROLE_CALL_ROLES).
+ROLE_OF_LABEL = {"plan": "planner", "plan-revise": "planner", "plan-judge": "plan-judge", "implement": "builder",
+                 "revise": "builder", "investigate": "investigator", "review": "master-review",
+                 "integrate": "integrator", "integration-review": "integration-judge"}
+ROLE_CALL_ORDER = ("planner", "plan-judge", "builder", "investigator", "master-review", "integrator",
+                   "integration-judge")
+# The stages whose climb is a role's (a no-op included): plan the planner's, implement the builder's or the
+# investigator's, review the builder's (the reviser a review-stage climb would strengthen).
+ROLE_CLIMB_STAGES = {"planner": ("plan",), "builder": ("implement", "review"), "investigator": ("implement",)}
+ROLE_CALL_MODELS_MAX = 8
+# The marker _engine_reads_role_call greps for in an engine's own copy of this file, as PROVEN_ENGINE is for a carried
+# fix: an engine whose reconcile-rollout.py has this exact line reads a role-call Run record line as after the fact,
+# never a live line, task activity or the record's tail (record-entry's NOT_LIVE_KINDS here, score.py's pair and
+# ledger.py's NOT_TAIL in the same tree). Never rename it, change its value or reference it in code.
+ROLE_CALL_ENGINE = 1
+ROLE_CALL_MARK_RE = re.compile(r"^ROLE_CALL_ENGINE = 1$", re.M)
+ROLE_CALL_LACKS = "reads a role-call line as live (it predates p46-2)"
+
+
+def _label_role(label):
+    """The role a dispatch label names by its prefix (ROLE_OF_LABEL), continuations (` signed`) included; else None."""
+    if not isinstance(label, str) or ":" not in label:
+        return None
+    return ROLE_OF_LABEL.get(label.split(":", 1)[0])
+
+
+def _journal_args(journal):
+    """A journal's args as a dict: the object, or a JSON string of one; {} otherwise."""
+    a = journal.get("args")
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except ValueError:
+            return {}
+    return a if isinstance(a, dict) else {}
+
+
+def _role_segment(journal, rr):
+    """(startTime, row, agents) of a journal segment role-call can read, else None: a terminal status, an int
+    startTime >= 0, result.tasks[0] an object with a `ran` list and a string status, and a workflowProgress list
+    (its workflow_agent entries are the agents)."""
+    if journal.get("status") not in rr.TERMINAL_STATUSES:
+        return None
+    start = journal.get("startTime")
+    if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+        return None
+    result = journal.get("result")
+    tasks = result.get("tasks") if isinstance(result, dict) else None
+    row = tasks[0] if isinstance(tasks, list) and tasks else None
+    if not isinstance(row, dict) or not isinstance(row.get("ran"), list) or not isinstance(row.get("status"), str):
+        return None
+    progress = journal.get("workflowProgress")
+    if not isinstance(progress, list):
+        return None
+    agents = [e for e in progress if isinstance(e, dict) and e.get("type") == "workflow_agent"]
+    return start, row, agents
+
+
+def _role_calls(run_id, call, segment, args_, earlier_fresh):
+    """The role-call fields of one journal segment (_role_segment), one dict per role its `ran` names, in
+    ROLE_CALL_ORDER (run_record.py's docstring holds each field). earlier_fresh: {role: the `fresh` summed over the
+    record's earlier segment lines for this runId}, which tokensPartial is read against."""
+    start, row, agents = segment
+    ran = [r for r in row["ran"] if isinstance(r, dict) and _label_role(r.get("label"))]
+    asked = {r["label"]: r.get("model") for r in ran}
+    task = args_.get("task") if isinstance(args_.get("task"), dict) else {}
+    arms = task.get("arms") if isinstance(task.get("arms"), dict) else {}
+    ladder = args_.get("ladder") if isinstance(args_.get("ladder"), dict) else {}
+    rungs = {g.get("name"): g for g in ladder.get("rungs") or [] if isinstance(g, dict)}
+    all_fable = lambda g: isinstance(g, dict) and g.get("model") == "fable" and g.get("plan") in (None, "fable")  # noqa: E731
+    fable_rung = any(all_fable(rungs.get(r.get("rung"))) for r in ran)
+    climbs = [c for c in row.get("climbs") or [] if isinstance(c, dict)]
+    out = []
+    for role in ROLE_CALL_ORDER:
+        mine = [r for r in ran if _label_role(r["label"]) == role]
+        if not mine or not isinstance(mine[0].get("model"), str) or not mine[0].get("model") \
+                or not isinstance(mine[0].get("effort"), str) or not mine[0].get("effort"):
+            continue
+        fields = {"runId": run_id, "startTime": start, "call": call, "role": role, "model": mine[0]["model"],
+                  "effort": mine[0]["effort"], "dispatches": len(mine), "outcome": row["status"]}
+        agents_of = [g for g in agents if _label_role(g.get("label")) == role]
+        fresh = [g for g in agents_of if g.get("cached") is not True]
+        replayed = len(agents_of) - len(fresh)
+        fields["tokens"] = sum(g["tokens"] for g in fresh if isinstance(g.get("tokens"), int)
+                               and not isinstance(g.get("tokens"), bool) and g["tokens"] >= 0)
+        fields["fresh"] = len(fresh)
+        if replayed:
+            fields["replayed"] = replayed
+            if replayed > earlier_fresh.get(role, 0):
+                fields["tokensPartial"] = True
+        models = []
+        for g in fresh:
+            m = g.get("model")
+            if isinstance(m, str) and m and m not in models and len(models) < ROLE_CALL_MODELS_MAX:
+                models.append(m)
+        if models:
+            fields["models"] = models
+        if role in ARM_ROLES and arms.get(role) in ("opus", "fable"):
+            fields["arm"] = arms[role]
+        n = sum(1 for c in climbs if c.get("stage") in ROLE_CLIMB_STAGES.get(role, ()))
+        if n:
+            fields["climbs"] = n
+        if any(asked.get(g.get("label")) == "fable" and isinstance(g.get("model"), str)
+               and "fable" not in g["model"].lower() for g in fresh):
+            fields["fellBack"] = True
+        if fable_rung:
+            fields["fableRung"] = True
+        out.append(fields)
+    return out
+
+
 def _record_lines(path):
     """(the record's parsed lines (dicts only), the 1-based numbers of the lines that do not parse)."""
     out, bad = [], []
@@ -8179,8 +8442,42 @@ def _record_lines(path):
     return out, bad
 
 
+def _fold_role_gate(rollout_arg, slug, tasks_dir_arg):
+    """(bool, why): fold-journals may write role-call lines into this rollout's record: _engine_reads_role_call on its
+    note, so a newer root never writes a line the rollout's own older engine would read as live. The note: --rollout's
+    path when it names a file (its tasks dir --tasks-dir, else the folder above the Archive/ it is filed under, else
+    its own folder), else `<slug>.md` in --tasks-dir (the vault's by default) or under its Archive/. No note found is
+    True, as for prove: no engine runs a rollout with no note. A note that cannot be read is False (fails closed)."""
+    tasks_dir = Path(os.path.expanduser(tasks_dir_arg)) if tasks_dir_arg else None
+    raw = rollout_arg.strip()
+    path = None
+    if raw.endswith(".md") and not raw.startswith("[["):
+        given = Path(os.path.expanduser(raw))
+        if given.is_file():
+            path = given
+            if tasks_dir is None:
+                tasks_dir = next((p.parent for p in (given.parent, given.parent.parent) if p.name == "Archive"),
+                                 given.parent)
+    if path is None:
+        tasks_dir = tasks_dir or DEFAULT_TASKS_DIR
+        path = _find_note(tasks_dir, slug)
+        if path is None:
+            return True, None
+    try:
+        note = Note(path)
+    except (OSError, ValueError) as e:
+        return False, f"rollout note {path} unreadable ({e})"
+    return _engine_reads_role_call(path, note, tasks_dir)
+
+
 def cmd_fold_journals(args) -> int:
-    """Fold each bound Workflow call's journal into the rollout's Run record as a call-journal line."""
+    """Fold each bound Workflow call's journal into the rollout's Run record as a call-journal line, and each terminal
+    journal segment as its role-call lines (p46-2): (a) in the pass that writes a runId's first terminal call-journal,
+    from the same journal; (b) for a runId already terminal whose latest run-bound line (a resume) sits after its last
+    role-call line, or after its terminal call-journal when it has none, from the journal the resume rewrote, read
+    silently. A (runId, startTime) already in the record writes nothing. Role-call lines are written only when the
+    rollout's engine reads the kind (_fold_role_gate, read once, at the first segment there is to write); else each
+    such segment is counted and one `no role-call` line names why."""
     rr = _run_record()
     try:
         slug = rr.normalise_slug(args.rollout, "rollout")
@@ -8205,22 +8502,103 @@ def cmd_fold_journals(args) -> int:
         return 1
 
     bound = {}  # runId -> the latest run-bound line for it, in first-appearance order
-    for d in lines:
-        if d.get("kind") == "run-bound" and isinstance(d.get("runId"), str):
-            bound[d["runId"]] = d
+    bound_at, terminal_at, role_at = {}, {}, {}  # runId -> the record index of its latest such line
+    segments, earlier = set(), {}  # (runId, startTime) with role-call lines; runId -> {role: fresh summed}
+    for i, d in enumerate(lines):
+        rid = d.get("runId")
+        if not isinstance(rid, str):
+            continue
+        if d.get("kind") == "run-bound":
+            bound[rid] = d
+            bound_at[rid] = i
+        elif d.get("kind") == "role-call":
+            role_at[rid] = i
+            segments.add((rid, d.get("startTime")))
+            f = d.get("fresh")
+            if isinstance(f, int) and not isinstance(f, bool) and isinstance(d.get("role"), str):
+                earlier.setdefault(rid, {})
+                earlier[rid][d["role"]] = earlier[rid].get(d["role"], 0) + f
     terminal, latest = set(), {}
-    for d in lines:
+    for i, d in enumerate(lines):
         if d.get("kind") == "call-journal" and isinstance(d.get("runId"), str):
             latest[d["runId"]] = d
             if d.get("status") in rr.TERMINAL_STATUSES:
                 terminal.add(d["runId"])
+                terminal_at[d["runId"]] = i
 
-    folded = already = unchanged = warnings = 0
+    folded = already = unchanged = warnings = held = 0
+    gate = []  # [(bool, why)]: _fold_role_gate, read once, at the first segment there is to write
 
     def warn(msg):
         nonlocal warnings
         warnings += 1
         print(f"WARN: {msg}", file=sys.stderr)
+
+    def quiet(_msg):
+        pass
+
+    def read_journal(run_id, b, say):
+        """(the bound call's journal, its path), read once and shared by the call-journal and role-call passes; (None,
+        None) after one `say` line: an unsafe runId, a journal dir that is not absolute, no journal, an unreadable or
+        non-object one, or one naming another runId."""
+        who = f"{run_id} [[{b.get('task')}]]"
+        if not RUN_ID_RE.fullmatch(run_id) or ".." in run_id:
+            say(f"{who}: runId is not a journal file name ([A-Za-z0-9][A-Za-z0-9_.-]*, no ..); skipped")
+            return None, None
+        jdir = b.get("journalDir")
+        jdir = os.path.expanduser(jdir) if isinstance(jdir, str) else ""
+        if not jdir or not os.path.isabs(jdir):
+            say(f"{who}: journalDir {b.get('journalDir')!r} is not an absolute path; skipped")
+            return None, None
+        jpath = os.path.join(jdir, run_id + ".json")
+        if not os.path.exists(jpath):
+            say(f"{who}: no journal at {jpath} (still in flight, or cleaned up)")
+            return None, None
+        try:
+            with open(jpath, "rb") as f:
+                journal = json.load(f)
+        except (OSError, ValueError) as e:
+            say(f"{who}: cannot read the journal {jpath}: {e}")
+            return None, None
+        if not isinstance(journal, dict):
+            say(f"{who}: the journal {jpath} is not a JSON object; skipped")
+            return None, None
+        if journal.get("runId") != run_id:
+            say(f"{who}: the journal {jpath} names runId {journal.get('runId')!r}; skipped")
+            return None, None
+        return journal, jpath
+
+    def call_of(b, journal):
+        """mode, as call-journal takes it: the bound call, else the journal's args.mode, else task."""
+        jmode = _journal_args(journal).get("mode")
+        return b.get("call") or (jmode if isinstance(jmode, str) and jmode else "task")
+
+    def write_roles(run_id, b, journal):
+        """One journal segment's role-call lines (_role_calls), through run_record.emit; nothing for a segment
+        _role_segment cannot read, or one the record holds already, and nothing but a count while the rollout's engine
+        predates the kind (the gate). Prints one line per segment written."""
+        nonlocal held
+        segment = _role_segment(journal, rr)
+        if segment is None or (run_id, segment[0]) in segments:
+            return
+        task = b.get("task")
+        calls = _role_calls(run_id, call_of(b, journal), segment, _journal_args(journal), earlier.get(run_id, {}))
+        if not calls:
+            return
+        if not gate:
+            gate.append(_fold_role_gate(args.rollout, slug, args.tasks_dir))
+        if not gate[0][0]:
+            held += 1
+            return
+        desc = f"role-call {run_id} [[{task}]] {len(calls)} roles (segment {segment[0]})"
+        if args.dry_run:
+            print(f"would write {desc}")
+            return
+        if all([rr.emit(slug, "role-call", task, fields) for fields in calls]):
+            print(desc)
+        else:
+            warn(f"{run_id} [[{task}]]: the run record refused or could not write a role-call (see run_record above)")
+        segments.add((run_id, segment[0]))
 
     for n in bad:  # a crash can leave a partial line (run_record's docstring): skipped, never fatal
         warn(f"{path}:{n}: the record line does not parse; skipped")
@@ -8231,39 +8609,21 @@ def cmd_fold_journals(args) -> int:
         if run_id in terminal:
             print(f"already folded {who}")
             already += 1
+            # (b) a resume after the call's last fold: its rewritten journal's segment, read silently.
+            if bound_at[run_id] > role_at.get(run_id, terminal_at[run_id]):
+                journal, _jpath = read_journal(run_id, b, quiet)
+                if journal is not None:
+                    write_roles(run_id, b, journal)
             continue
-        if not RUN_ID_RE.fullmatch(run_id) or ".." in run_id:
-            warn(f"{who}: runId is not a journal file name ([A-Za-z0-9][A-Za-z0-9_.-]*, no ..); skipped")
-            continue
-        jdir = b.get("journalDir")
-        jdir = os.path.expanduser(jdir) if isinstance(jdir, str) else ""
-        if not jdir or not os.path.isabs(jdir):
-            warn(f"{who}: journalDir {b.get('journalDir')!r} is not an absolute path; skipped")
-            continue
-        jpath = os.path.join(jdir, run_id + ".json")
-        if not os.path.exists(jpath):
-            warn(f"{who}: no journal at {jpath} (still in flight, or cleaned up)")
-            continue
-        try:
-            with open(jpath, "rb") as f:
-                journal = json.load(f)
-        except (OSError, ValueError) as e:
-            warn(f"{who}: cannot read the journal {jpath}: {e}")
-            continue
-        if not isinstance(journal, dict):
-            warn(f"{who}: the journal {jpath} is not a JSON object; skipped")
-            continue
-        if journal.get("runId") != run_id:
-            warn(f"{who}: the journal {jpath} names runId {journal.get('runId')!r}; skipped")
+        journal, jpath = read_journal(run_id, b, warn)
+        if journal is None:
             continue
         status = journal.get("status")
         if not isinstance(status, str) or not status:
             warn(f"{who}: the journal {jpath} has no status; skipped")
             continue
 
-        jargs = journal.get("args")
-        jmode = jargs.get("mode") if isinstance(jargs, dict) else None
-        mode = b.get("call") or (jmode if isinstance(jmode, str) and jmode else "task")
+        mode = call_of(b, journal)
         fields = {"runId": run_id, "status": status, "mode": mode}
         for key, field in JOURNAL_INTS:
             if key not in journal:
@@ -8285,13 +8645,19 @@ def cmd_fold_journals(args) -> int:
         if args.dry_run:
             print(f"would fold {desc}")
             folded += 1
-            continue
-        if rr.emit(slug, "call-journal", task, fields):
+        elif rr.emit(slug, "call-journal", task, fields):
             print(f"folded {desc}")
             folded += 1
         else:
             warn(f"{who}: the run record refused or could not write the fold (see run_record above)")
+            continue
+        # (a) the runId's first terminal fold: its role-call lines, from the same journal.
+        if status in rr.TERMINAL_STATUSES:
+            write_roles(run_id, b, journal)
 
+    if held:
+        print(f"no role-call for {held} segment{'s' if held != 1 else ''}: {gate[0][1]} "
+              "(engine-snapshot.md § Cross-version state)")
     verb = "would fold" if args.dry_run else "folded"
     print(f"fold-journals: {slug}: {folded} {verb}, {already} already folded, {unchanged} unchanged, "
           f"{warnings} warnings")
@@ -8405,9 +8771,9 @@ ENTRY_CAUSES = ("usage-limit", "dead-lead", "watchdog")                 # record
 OPEN_STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog")  # a stop an entry resumes from
 CALL_KINDS = ("task", "revise", "integrate", "resume")                  # run-bound's `call`
 # A line that is no sign of the lead's life: the night record (written at a later `next`), a suite-ended (an orphaned
-# suite can outlive its lead), a call-journal (folded at completion or by a Reflection, at fold time) and an inferred
-# stopped line (written by the entry that found it).
-NOT_LIVE_KINDS = NIGHT_KINDS + ("suite-ended", "call-journal")
+# suite can outlive its lead), a call-journal and a role-call (folded at completion or by a Reflection, at fold time)
+# and an inferred stopped line (written by the entry that found it).
+NOT_LIVE_KINDS = NIGHT_KINDS + ("suite-ended", "call-journal", "role-call")
 MACHINE_TIMES_ENV = "THREAD_MACHINE_TIMES"   # a test's {boot, sleeps: [[S, W], ...], wake?} in place of the Mac's reads
 PMSET_TIMEOUT = 15
 PMSET_LINE_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}) (Sleep|Wake|DarkWake)\s*\t")
@@ -8856,7 +9222,10 @@ def cmd_record_entry(args) -> int:
     stopped line, when new, then exactly one lead-entry {by, session?, stop?}. Every stopped line carries the calls in
     flight at its `at`. Before the record is read, once the skip passes and off --dry-run, it renews the lead's lease
     (_lease_write, by "entry"; p28-4), so a lapsed lead counts in the Trickle again from its first entry, naming its
-    Login (_caller_login, p36-7) as `next`'s does."""
+    Login (_caller_login, p36-7) as `next`'s does. Off --dry-run, it stamps the lead's arm (p46-2, _lead_arm) on the
+    rollout note while the ladder has a [share] table and the note has no `arms:`: `arms: lead=<arm>`, drawn by the
+    rollout's slug when `lead` has a share, `none` when it has none or the record already held a lead-entry (the
+    rollout was led before the draw). The lead-entry line itself carries no arm."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.is_file():
         print(f"ERROR: record-entry: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -8928,10 +9297,38 @@ def cmd_record_entry(args) -> int:
         entry["session"] = session
     if gap is not None:
         entry["stop"] = gap["stop"]
+    led = any(d.get("kind") == "lead-entry" for d in lines)   # read before this entry's own line
     _event(ro, "lead-entry", None, entry, args)
     said.append(f"lead-entry by={args.by}" + (f" stop={gap['stop']}" if gap is not None else ""))
     print(f"{ro}: " + "; ".join(said) + (" (dry-run)" if args.dry_run else ""))
+    if not args.dry_run:
+        arm = _lead_arm(note, ro, led)
+        if arm is not None:
+            print(f"{ro}: arms lead={arm} (stamped)")
     return 0
+
+
+def _lead_arm(note, ro, led):
+    """record-entry's stamp of the lead's arm on the rollout note (p46-2): the arm stamped, or None when it stamps
+    nothing (the note has `arms:`, parsed or not; the ladder has no [share] table; or the ladder is refused, which
+    the lead's own ladder.py call at each Workflow call names, so a heartbeat tick never repeats it). The arm is
+    drawn by the rollout's slug when `lead` has a share, else `none`; `none` too when the record already held a
+    lead-entry (`led`), since the rollout was led before the draw. Nothing makes the lead run on it: it is the seam
+    Chorus reads (Chorus Phase 104)."""
+    if note.get(ARMS_KEY) is not None:
+        return None
+    ladder = _ladder()
+    if ladder["error"] or not ladder["share"]:
+        return None
+    share = ladder["share"]
+    arm = _draw_arm(LEAD_ROLE, ro, share[LEAD_ROLE]) if LEAD_ROLE in share and not led else "none"
+    note.set(ARMS_KEY, _format_arms({LEAD_ROLE: arm}), after=("status",))
+    try:
+        note.save()
+    except OSError as e:  # never fails the entry; the next one stamps `none`, as for a rollout led before the draw
+        print(f"WARN: record-entry: cannot stamp {ARMS_KEY}: on {note.path}: {e}", file=sys.stderr)
+        return None
+    return arm
 
 
 def _record_sleeps(rollout, note, now, args):
@@ -15217,14 +15614,17 @@ def _rollout_finished(path, note, tasks_dir) -> bool:
         _valued(note.get("superseded_by"))
 
 
-_ENGINE_MARKERS = {}   # engine root -> (bool, why), per process (one prove, mark-done or apply call)
+CARRIED_LACKS = "reads a carried fix as awaiting Integration"
+_ENGINE_MARKERS = {}   # (engine root, marker) -> (bool, why), per process (one prove, mark-done, apply or fold call)
 _UNSTAMPED_ENGINE = {}
+_UNSTAMPED_ROOT = {}
 
 
-def _engine_marker(root, label):
-    """(True, None) when `root`'s skills/execute/scripts/reconcile-rollout.py has the PROVEN_ENGINE marker line, else
-    (False, why): `<label> reads a carried fix as awaiting Integration`, or `engine <root> unreadable`."""
-    key = str(root)
+def _engine_marker(root, label, mark=PROVEN_MARK_RE, lacks=CARRIED_LACKS):
+    """(True, None) when `root`'s skills/execute/scripts/reconcile-rollout.py has `mark`'s marker line (the
+    PROVEN_ENGINE line by default; fold-journals' gate asks for ROLE_CALL_ENGINE's), else (False, why): `<label>
+    <lacks>`, or `engine <root> unreadable`."""
+    key = (str(root), mark.pattern)
     if key not in _ENGINE_MARKERS:
         try:
             text = (Path(root) / "skills" / "execute" / "scripts" / "reconcile-rollout.py").read_text(
@@ -15232,8 +15632,7 @@ def _engine_marker(root, label):
         except OSError:
             _ENGINE_MARKERS[key] = (False, f"engine {root} unreadable")
         else:
-            _ENGINE_MARKERS[key] = (True, None) if PROVEN_MARK_RE.search(text) else \
-                (False, f"{label} reads a carried fix as awaiting Integration")
+            _ENGINE_MARKERS[key] = (True, None) if mark.search(text) else (False, f"{label} {lacks}")
     return _ENGINE_MARKERS[key]
 
 
@@ -15246,20 +15645,50 @@ def _unstamped_engine(rollout_path):
     return _UNSTAMPED_ENGINE["v"]
 
 
-def _unstamped_verdict(rollout_path):
+def _unstamped_verdict(rollout_path, mark=PROVEN_MARK_RE, lacks=CARRIED_LACKS):
+    """`mark`'s verdict (_engine_marker) for the root an unstamped rollout runs on (_unstamped_root)."""
+    root, label = _unstamped_root(rollout_path)
+    return (False, label) if root is None else _engine_marker(root, label, mark, lacks)
+
+
+def _unstamped_root(rollout_path):
+    """(root, its label) of the engine an unstamped rollout runs on, computed once per call (every unstamped rollout
+    runs on the same root); (None, why) when engine-snapshot.py will not load or names no readable root."""
+    if "v" not in _UNSTAMPED_ROOT:
+        _UNSTAMPED_ROOT["v"] = _unstamped_root_read(rollout_path)
+    return _UNSTAMPED_ROOT["v"]
+
+
+def _unstamped_root_read(rollout_path):
     mod = _engine_snapshot_mod()
     if mod is None:
-        return False, "engine-snapshot.py would not load: the unstamped engine is unknown"
+        return None, "engine-snapshot.py would not load: the unstamped engine is unknown"
     try:
         root = mod.engine_root(str(rollout_path), str(PLUGIN_ROOT))["root"]
         primary = mod.git_primary(str(PLUGIN_ROOT))[0]
     except Exception as e:  # noqa: BLE001 — an engine root that cannot be read fails closed
-        return False, f"engine root unreadable: {e}"
+        return None, f"engine root unreadable: {e}"
     if not root:
-        return False, "engine root unreadable: engine-snapshot.py names none"
+        return None, "engine root unreadable: engine-snapshot.py names none"
     label = "the Primary checkout" if primary and os.path.realpath(root) == os.path.realpath(primary) else \
         "the plugin root"
-    return _engine_marker(root, f"engine {root} ({label})")
+    return root, f"engine {root} ({label})"
+
+
+def _engine_reads(rollout_path, rollout_note, tasks_dir, mark, lacks, unstamped):
+    """(bool, why): the engine that runs this rollout has `mark`'s marker line, by _engine_reads_carried's four
+    clauses; `unstamped(rollout_path)` answers clause 3."""
+    if rollout_path is None or rollout_note is None:
+        return True, None
+    if _rollout_finished(rollout_path, rollout_note, tasks_dir):
+        return True, None
+    stamp = _scalar(rollout_note.get("engine_snapshot"))
+    if not _valued(stamp):
+        return unstamped(rollout_path)
+    root = os.path.expanduser(stamp)
+    sha = _scalar(rollout_note.get("engine_sha"))
+    return _engine_marker(root, f"engine {(sha if _valued(sha) else os.path.basename(root.rstrip('/')))[:12]}",
+                          mark, lacks)
 
 
 def _engine_reads_carried(rollout_path, rollout_note, tasks_dir):
@@ -15273,16 +15702,17 @@ def _engine_reads_carried(rollout_path, rollout_note, tasks_dir):
          snapshot; engine-snapshot.py that will not load, or a root that cannot be read, is False;
       4. stamped -> the marker in `os.path.expanduser(engine_snapshot)`'s copy (no usability check: a live note's
          unusable snapshot runs nothing until it is put back at the same sha, so a missing file fails closed)."""
-    if rollout_path is None or rollout_note is None:
-        return True, None
-    if _rollout_finished(rollout_path, rollout_note, tasks_dir):
-        return True, None
-    stamp = _scalar(rollout_note.get("engine_snapshot"))
-    if not _valued(stamp):
-        return _unstamped_engine(rollout_path)
-    root = os.path.expanduser(stamp)
-    sha = _scalar(rollout_note.get("engine_sha"))
-    return _engine_marker(root, f"engine {(sha if _valued(sha) else os.path.basename(root.rstrip('/')))[:12]}")
+    return _engine_reads(rollout_path, rollout_note, tasks_dir, PROVEN_MARK_RE, CARRIED_LACKS, _unstamped_engine)
+
+
+def _engine_reads_role_call(rollout_path, rollout_note, tasks_dir):
+    """(bool, why): the engine that runs this rollout reads a role-call Run record line as after the fact (its copy has
+    the ROLE_CALL_ENGINE line), by _engine_reads_carried's four clauses: no note -> True; finished -> True (no lead of
+    it reads its record again, and a Reflection reads it from its own root); unstamped -> the marker in the root an
+    unstamped note runs on; stamped -> the marker in its snapshot's copy (a missing one fails closed). fold-journals'
+    gate (_fold_role_gate)."""
+    return _engine_reads(rollout_path, rollout_note, tasks_dir, ROLE_CALL_MARK_RE, ROLE_CALL_LACKS,
+                         lambda path: _unstamped_verdict(path, ROLE_CALL_MARK_RE, ROLE_CALL_LACKS))
 
 
 def _carry_readers(note, tasks_dir, walk, memo=None):
@@ -16778,7 +17208,10 @@ def _parser():
 
     fj = sub.add_parser("fold-journals", help="fold each bound Workflow call's journal into the rollout's Run record "
                                               "as call-journal lines (idempotent; ADR 0032)")
-    fj.add_argument("--rollout", required=True, help="the rollout: a note path, [[slug]] or a bare slug (the note is never read)")
+    fj.add_argument("--rollout", required=True, help="the rollout: a note path, [[slug]] or a bare slug (the note is "
+                                                      "read only for the role-call gate)")
+    fj.add_argument("--tasks-dir", default=None, help="where a slug's rollout note is found for the role-call gate "
+                                                      f"(default: a note path's own folder, else {DEFAULT_TASKS_DIR})")
     fj.add_argument("--dry-run", action="store_true", help="print what would fold; write nothing")
     fj.set_defaults(func=cmd_fold_journals)
 
@@ -17081,8 +17514,9 @@ ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" /
 PLUGIN_ROOT = ENGINE_SNAPSHOT_PY.parent.parent.parent.parent   # the running plugin root (this file's tree)
 GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
 # The five verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write nothing
-# (moving is the Watchdog's reading, which must read any rollout from any root); fold-journals never reads the note and
-# writes only the Run record, a cross-version store; join (ADR 0078 d6) is run by a newer schedule on a running
+# (moving is the Watchdog's reading, which must read any rollout from any root); fold-journals reads the note only for
+# its role-call gate and writes only the Run record, a cross-version store (a role-call line only for an engine that
+# reads the kind); join (ADR 0078 d6) is run by a newer schedule on a running
 # rollout whose snapshot predates the verb, and writes only forms every protocol-5 engine reads, under the same note
 # lock: a `## Queue` row (a wikilink on a ranked line, its Mode `joined <date>` or `joined <date>, solo`), a
 # `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp. Those forms and the note lock's path are a

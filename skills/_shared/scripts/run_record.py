@@ -113,8 +113,8 @@ with its newline. The common keys come first, in this order:
              explicit --ts / ts= is converted to UTC and must match, on every python version,
              YYYY-MM-DD(T| )HH:MM[:SS[(.|,)fraction]] then Z, +HH, +HHMM or +HH:MM (a naive one is
              refused; the fraction is cut to microseconds). So `date +%Y-%m-%dT%H:%M:%S%z` works.
-             Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
-             startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
+             Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's and
+             role-call's startTime are the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
     rollout  the rollout slug (null only for review-round, grade and the six reflections.jsonl kinds; a tuning's is
              a provenance stamp)
@@ -232,6 +232,26 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      reconcile-rollout.py record-verify writes it).
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
+  role-call       T  runId; startTime (int >= 0: the journal segment's own epoch ms, verbatim); call (task | revise |
+                     integrate | resume: as call-journal's mode, the bound call, else the journal's args.mode, else
+                     task); role (planner | plan-judge | builder | investigator | master-review | integrator |
+                     integration-judge, from the dispatch label's prefix: plan and plan-revise the planner, implement
+                     and revise the builder, investigate the investigator, review the master review, integrate the
+                     integrator, integration-review the Integration judge); model, effort (the role's first `ran` entry:
+                     what the engine asked); dispatches (int >= 1: its `ran` entries); outcome (the row's status, a
+                     string); tokens? (int >= 0: summed over this segment's journal agents of the role that are not
+                     `cached`), fresh? (int >= 0: how many such agents), replayed? (int >= 1: its agents with `cached:
+                     true`, a resume's replay); tokensPartial? (true: replayed exceeds the fresh summed over the
+                     record's earlier segment lines for this runId and role, so tokens this call spent are in no line);
+                     models? (1 to 8 distinct model ids its fresh agents ran on); arm? (opus | fable: only on
+                     master-review, builder or investigator, and only when the call's args.task.arms gives that role
+                     one; refused anywhere else); climbs? (int >= 1: the row's climbs at this role's stage, no-ops
+                     included: plan the planner's, implement the builder's or the investigator's, review the
+                     builder's); fellBack? (true: a fresh agent of a `ran` label that asked fable ran on a model id
+                     without "fable"); fableRung? (true: any `ran` entry of the call is on an all-Fable rung of its
+                     args.ladder, so the call left the comparison of arms). ADR 0079 decision 8 (p46-2): one line per
+                     role per journal segment, written only by reconcile-rollout.py fold-journals (its docstring holds
+                     when), after the fact, keyed by (runId, startTime, role).
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
                      (ints >= 0); verdict? (legacy, a string and no enum: stop or continue, written only before
                      fresh-review ADR 0001 and ADR 0065 retired the ledger's STOP rule; review-round.py writes none
@@ -489,6 +509,16 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   numbers, a close Reflection's terminal fold always lands, and re-folding is safe. An unknown status counts
   as non-terminal: appended and later superseded, never dropped. Write call-journal only through this
   module, so every writer takes part in the lock.
+- role-call (p46-2, ADR 0079 decision 8): one line per role per journal segment, keyed by (runId, startTime, role). A
+  Workflow resume keeps its runId and rewrites the same journal with a new startTime, so each segment of a call has its
+  own lines. Per (runId, role), the latest segment's line (the greatest startTime) gives model, effort, dispatches,
+  outcome, arm, climbs, fableRung and tokensPartial; `tokens` is summed over that pair's segment lines, and `fellBack`
+  holds if any of them holds it. A reader that compares tokens leaves a tokensPartial call out and counts it on its own
+  line, as it does fell-back and Fable-rung calls. A windowed reader places a role-call by its call (`startTime`), never
+  by `ts`, which is the time of the fold. Like call-journal it is written after the fact: never activity of the task's
+  call, a sign of the lead's life or a record's last line. The writer takes the same flock as call-journal and skips a
+  line whose (runId, startTime, role) is already there, so two folds at once never duplicate it: write role-call only
+  through this module.
 - Human acts (p21-2; a Reflection's Hands-off rate, skills/reflect/scripts/score.py). Each is recorded by the verb
   that acts on it, never model-written. Acts: `answer-recorded` (a Recorded answer); `gate-signed` standing=false (a
   bare approve-gates sign-off); `handed-back` via=retry (a "retry [[task]]" or repair hand-back that re-enters a block
@@ -642,7 +672,7 @@ import unicodedata
 
 try:
     import fcntl
-except ImportError:  # Windows: call-journal folds scan unlocked, with a warning
+except ImportError:  # Windows: the call-journal and role-call folds scan unlocked, with a warning
     fcntl = None
 
 VERSION = 1
@@ -699,6 +729,13 @@ def _bool(v):
 def _strlist(v):
     ok = isinstance(v, list) and all(isinstance(x, str) for x in v)
     return None if ok else "a list of strings"
+
+
+def _model_ids(v):
+    """role-call's models: 1 to ROLE_CALL_MODELS_MAX distinct non-empty strings."""
+    ok = isinstance(v, list) and 1 <= len(v) <= ROLE_CALL_MODELS_MAX and \
+        all(isinstance(x, str) and x for x in v) and len(set(v)) == len(v)
+    return None if ok else "a list of 1 to %d distinct non-empty strings" % ROLE_CALL_MODELS_MAX
 
 
 def _pr(v):
@@ -1300,6 +1337,12 @@ STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "halt", "
 ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")
 ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause")
 CALL_KINDS = ("task", "revise", "integrate", "resume")      # run-bound's `call`
+# role-call's `role` (p46-2): the engine's dispatch roles, from each label's prefix.
+ROLE_CALL_ROLES = ("planner", "plan-judge", "builder", "investigator", "master-review", "integrator",
+                   "integration-judge")
+# The roles a role-call line may carry an `arm` on: the drawn roles the engine dispatches (task.workflow.js ARM_ROLES).
+ARM_ROLES = ("master-review", "builder", "investigator")
+ROLE_CALL_MODELS_MAX = 8
 SUITE_BYS = ("task", "integration", "race", "completion")
 SUITE_RUNNERS = ("agent", "lead")
 SUITE_OUTCOMES = ("green", "red", "timeout", "stopped", "unrun", "noslot", "heat")
@@ -1470,6 +1513,12 @@ KINDS = {
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),
+    # p46-2 (ADR 0079 decision 8): reconcile-rollout.py fold-journals, one line per role per journal segment.
+    "role-call": (True, {"runId": _str, "startTime": _int(0), "call": _enum(*CALL_KINDS), "role": _enum(*ROLE_CALL_ROLES),
+                         "model": _str, "effort": _str, "dispatches": _int(1), "outcome": _str},
+                  {"tokens": _int(0), "fresh": _int(0), "replayed": _int(1), "tokensPartial": _true,
+                   "models": _model_ids, "arm": _enum("opus", "fable"), "climbs": _int(1), "fellBack": _true,
+                   "fableRung": _true}),
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str, "status": _enum("pending", "consumed"),
@@ -1734,6 +1783,8 @@ def _check_fields(kind, fields):
         _check_time_lost(fields)
     elif kind == "attention":
         _check_attention(fields)
+    elif kind == "role-call" and "arm" in fields and fields["role"] not in ARM_ROLES:
+        raise Refused("role-call: arm is only on a drawn role (%s), not %s" % (", ".join(ARM_ROLES), fields["role"]))
 
 
 def _check_tuning(f):
@@ -1867,15 +1918,27 @@ def _same_fold(a, b):
     return {k: v for k, v in a.items() if k not in drop} == {k: v for k, v in b.items() if k not in drop}
 
 
+# The folds (_fold): kind -> the fields that make a line's key. A role-call line is skipped when its key is there.
+FOLD_KINDS = ("call-journal", "role-call")
+_ROLE_CALL_KEY = ("runId", "startTime", "role")
+
+
 def _fold_skips(path, new):
-    """True when the call-journal line `new` adds nothing: its runId has a terminal line, or it equals the latest."""
+    """True when the fold line `new` adds nothing. A call-journal line: its runId has a terminal line, or it equals the
+    latest. A role-call line: a role-call with its (runId, startTime, role) is already there."""
     latest = None
+    kind = new.get("kind")
     try:
         with open(path, "rb") as f:
             for raw in f:
                 try:
                     d = json.loads(raw)
                 except ValueError:
+                    continue
+                if kind == "role-call":
+                    if isinstance(d, dict) and d.get("kind") == "role-call" and \
+                            all(d.get(k) == new.get(k) for k in _ROLE_CALL_KEY):
+                        return True
                     continue
                 if not isinstance(d, dict) or d.get("kind") != "call-journal" or d.get("runId") != new["runId"]:
                     continue
@@ -1888,12 +1951,12 @@ def _fold_skips(path, new):
 
 
 def _fold(path, data, new):
-    """Append a call-journal line under an exclusive flock, unless _fold_skips. Returns True (written or skipped)."""
+    """Append a fold line (FOLD_KINDS) under an exclusive flock, unless _fold_skips. Returns True (written or skipped)."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
     try:
         if fcntl is None:
-            _say("warning: no file locking here; the call-journal fold for %s scans %s unlocked" % (new["runId"], path))
+            _say("warning: no file locking here; the %s fold for %s scans %s unlocked" % (new["kind"], new["runId"], path))
         else:
             deadline = time.monotonic() + LOCK_WAIT
             while True:
@@ -1913,7 +1976,7 @@ def _fold(path, data, new):
 
 def _write(path, data, new, kind):
     try:
-        if kind == "call-journal":
+        if kind in FOLD_KINDS:
             return _fold(path, data, new)
         return _append(path, data)
     except Exception as e:

@@ -1113,6 +1113,31 @@ test('a night-record line never extends an untimed call\'s Slot (p28-2)', (t) =>
   assert.deepEqual(flags(out), flags(bare), 'and so does every flag')
 })
 
+// p46-2: fold-journals writes role-call lines after the fact, as it writes call-journal lines. A role-call stamped long
+// after an untimed call's last line moves neither that task's last activity (its never-finished cap) nor the record's
+// last line (the window's active end): the score reads as with no role-call at all.
+test('a role-call line never moves a task\'s last activity or the record\'s last line (p46-2)', (t) => {
+  const slot = [
+    [at('07:30'), 'slot-taken', 's1', { settings: S(2) }],
+    [at('07:30'), 'run-bound', 's1', { runId: 'wf_1', journalDir: '/nonexistent' }],
+  ]
+  const roles = ['planner', 'builder', 'master-review'].map((role) => [at('12:00'), 'role-call', 's1',
+    { runId: 'wf_1', startTime: ms(at('07:30')), call: 'task', role, model: 'opus', effort: 'high', dispatches: 1, outcome: 'review', tokens: 10, fresh: 1 }])
+  const run = (events) => {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(events))
+    return scored(home, ['--since', at('07:30'), '--until', at('14:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  }
+  const bare = run(slot)
+  const out = run([...slot, ...roles])
+  for (const o of [bare, out]) {
+    assert.equal(o.runningTime.hours, 0.5, 'the Slot ends at its last activity (07:30) + 30 min, not at 12:30')
+    assert.equal(o.window.activeEnd, Z(at('08:00')))
+  }
+  const flags = (o) => o.flags.map((f) => f.replace(/reflect-score-[^/]+/g, 'HOME')) // each run its own temp HOME
+  assert.deepEqual(flags(out), flags(bare), 'every flag reads as with no role-call')
+})
+
 // p29-10 (ADR 0051): the time-lost ledger's kinds (stopped, lead-entry, suite-started, suite-ended, base-moved) are not
 // scored yet (p29-11 scores them). Interleaved anywhere, a task's suites inside an untimed call's Slot and a halt after
 // the record's last line included, they leave every score, flag and window byte-equal; and a concurrent record whose

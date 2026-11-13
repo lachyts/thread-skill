@@ -405,6 +405,21 @@ test('L1: a stop open across a window with no line in it is counted on a live ro
   assert.deepEqual([closed.row.hours, closed.row.top], [H0, null], 'archived: the stop ends at the last line, before the window')
 })
 
+// p46-2: fold-journals writes role-call lines after the fact, as it writes call-journal lines: never a record's tail.
+test('L1: a role-call line is never the tail: an archived rollout\'s open stop still ends at its last real line', (t) => {
+  const h = setup(t)
+  const role = { runId: 'wf_h1', startTime: Date.parse(T('04', '00:00')), call: 'task', role: 'builder', model: 'opus', effort: 'high', dispatches: 1, outcome: 'review' }
+  emitAll(h, 'l-role', [
+    [T('04', '00:00'), 'slot-taken', 'h1', S('start')],
+    [T('04', '01:00'), 'slot-freed', 'h1', { outcome: 'ready' }],
+    [T('04', '02:00'), 'stopped', null, { cause: 'watchdog', inferred: false, calls: [] }],
+    [T('06', '03:00'), 'role-call', 'h1', role],
+  ])
+  done(h, 'l-role')
+  const closed = ledgerCli(h, LSINCE, LUNTIL)
+  assert.deepEqual([closed.row.hours, closed.row.top], [H0, null], 'the stop ends at the stopped line, never at the fold')
+})
+
 for (const reasonClass of ['no-runner', 'unreported-context']) {
   test(`L1: a wait still open on a ${reasonClass} set-aside reads stalls/cool-down, never a hand-back`, (t) => {
     const h = setup(t)
