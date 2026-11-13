@@ -37,7 +37,9 @@ round 1's own fix.
   one), H6 `restore, recut or defer` (at Integration with no `pr:`), H7 `fix the note's pr: or defer`, H8 `restore,
   recut or defer` (a gone branch), H9 `raise <field>, hand back or defer` (the source run's own spent budget, its
   `raise` the field: `max_review_rounds`, `max_plan_rounds` or `max_iterations`), H10 `hand back or defer`, H11 the
-  same for a code-writing review with no PR, H12 `fix the round budget`. A null `humanFix` is the lead's own re-entry
+  same for a code-writing review with no PR, H12 `fix the round budget`. H13 `change the merge setting, hand back or
+  defer` (amended 2026-11-12 by ADR 0080, p47-9: a settings block `merge-settings.py free` left for him; `handBack`
+  true). A null `humanFix` is the lead's own re-entry
   (a seeded revise, an automatic retry now or after a cool-down, a recorded `hand-back` answer). `handBack` is true only
   when, once Lachy has answered, a bare `hand-back` is the whole way back; H6, H7 and H8 change the note first, so they
   are false. The label is `(<status>, <section> run <n>)` (`(review, no PR)`, `(gate-pending)`), with `, ask <k+1>` once

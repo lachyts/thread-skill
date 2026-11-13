@@ -43,6 +43,10 @@ change. To lift or restore: `gh api -X PUT repos/lachyts/thread-skill/rulesets/2
 enforcement=disabled` (or `=active`); `gh api repos/lachyts/thread-skill/rulesets/24028790`
 prints the full payload.
 
+*(Amended 2026-11-12 by ADR 0080, p47-9: a rule that cannot be met, a required check no runner will take or a
+required context no job reports, is changed by `skills/execute/scripts/merge-settings.py` alone, logged with its undo;
+the by-hand lift above stays his for every other rule.)*
+
 **Local commits on master are stranded.** `thread:close` and `thread:handoff` commit to
 whatever branch is checked out. On `master` those commits can no longer be pushed: they wait
 until the next PR carries them, and meanwhile the checkout diverges from `origin/master`. Task

@@ -56,7 +56,7 @@ FOREIGN-ONLY SKILL.md tests/serial-chains.test.sh tests/estate-dispatch.test.mjs
 ** ALSO tests/contracts/execute-handoff.test.mjs tests/contracts/execute-legs.test.mjs
 ** ALSO tests/contracts/execution-fit-shapes.test.mjs tests/contracts/handoff-ends-with-next.test.mjs
 ** ALSO tests/contracts/manifest.test.mjs tests/contracts/queue-only.test.mjs tests/contracts/schedule-serial.test.mjs
-** ALSO tests/contracts/thread-placement-wiring.test.mjs
+** ALSO tests/contracts/thread-placement-wiring.test.mjs tests/contracts/merge-settings-guard.test.mjs
 ** ALSO tests/background-job.test.mjs tests/engine-ladder.test.mjs
 ** ALSO tests/engine-snapshot.test.sh tests/release-check.test.sh tests/release-check-missing-tree-dir.test.sh
 ** ALSO tests/release-check-symlinked-dir.test.sh tests/release-check-quoting-diff.test.sh tests/test-jobs.test.sh
@@ -115,7 +115,7 @@ skills/execute/scripts/reconcile-rollout.py HUB tests/contracts/vault-grammar.te
 skills/execute/scripts/reconcile-rollout.py HUB tests/execution-fit-remote.test.sh tests/fast-tier-wiring.test.mjs tests/fast-tier.test.sh tests/gated-inputs.test.mjs tests/git-env-canary.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/integration-marker-roundtrip.test.mjs tests/ladder.test.mjs tests/lead-integrate.test.sh tests/leg-capacity.test.sh tests/leg.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/merge-task-cancelled.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh tests/pickups.test.sh
-skills/execute/scripts/reconcile-rollout.py HUB tests/primary-refresh.test.sh
+skills/execute/scripts/reconcile-rollout.py HUB tests/primary-refresh.test.sh tests/merge-settings.test.sh tests/merge-task-no-runner.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/reconcile-project.test.sh tests/reflect-score.test.mjs tests/run-record.test.mjs tests/schedule-queue.test.sh tests/serial-chains.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/unfinished-rollout.test.sh tests/vault-note-overlap.test.sh tests/verify-slot-wait.test.sh tests/verify-slot.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/integration-inputs.test.sh skills/execute/tests/reconcile-rollout-auto-retry.test.sh
@@ -134,6 +134,7 @@ skills/execute/scripts/lead-integrate.py HUB tests/contracts/verify-slot-hermeti
 skills/execute/scripts/lead-integrate.py HUB tests/integration-marker-roundtrip.test.mjs tests/ladder.test.mjs tests/lead-integrate.test.sh tests/merge-task-base-moved.test.sh
 skills/execute/scripts/lead-integrate.py HUB tests/merge-task-ci-headroom.test.sh tests/parallel-rollouts-one-repo.test.sh tests/reflect-weekly.test.mjs tests/run-record.test.mjs
 skills/execute/scripts/lead-integrate.py HUB tests/schedule-queue.test.sh tests/unfinished-rollout.test.sh tests/verify-slot-heat.test.sh tests/verify-slot-own.test.sh tests/verify-slot.test.sh
+skills/execute/scripts/lead-integrate.py HUB tests/merge-settings.test.sh tests/merge-task-no-runner.test.sh
 skills/_shared/scripts/run_record.py HUB tests/reflect*.test.mjs skills/execute/tests/reconcile-rollout-approved-queue.test.sh skills/execute/tests/reconcile-rollout-auto-retry.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-churn.test.sh skills/execute/tests/reconcile-rollout-descope.test.sh skills/execute/tests/reconcile-rollout-fold.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-heat.test.sh skills/execute/tests/reconcile-rollout-hold.test.sh
@@ -152,12 +153,14 @@ skills/_shared/scripts/run_record.py HUB tests/git-env-canary.test.sh tests/inte
 skills/_shared/scripts/run_record.py HUB tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh tests/merge-task-cancelled.test.sh tests/merge-task-ci-headroom.test.sh
 skills/_shared/scripts/run_record.py HUB tests/merge-task-integrated.test.sh tests/merge-task-no-runner.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh tests/pickups.test.sh
 skills/_shared/scripts/run_record.py HUB tests/rollout-settings.test.mjs tests/run-record.test.mjs tests/schedule-queue.test.sh tests/unfinished-rollout.test.sh
+skills/_shared/scripts/run_record.py HUB tests/merge-settings.test.sh
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/approved-gates-resume.test.mjs skills/execute/tests/args-refusal.test.mjs skills/execute/tests/integrate.test.mjs
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/prompt-invariants.test.mjs skills/execute/tests/reconcile-rollout-auto-retry.test.sh skills/execute/tests/reconcile-rollout-heat.test.sh
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/reconcile-rollout-standing.test.sh skills/execute/tests/reconcile-rollout.test.sh skills/execute/tests/room-stop.test.mjs
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/task-engine.test.mjs tests/background-job.test.mjs tests/contracts/cap-promise.test.mjs tests/contracts/execute-args-refusal.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/contracts/execute-legs.test.mjs tests/contracts/execute-queue.test.mjs tests/contracts/note-overlap-opener.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/contracts/run-record-hermetic.test.mjs tests/contracts/run-record-writers.test.mjs tests/contracts/security-check.test.mjs
+skills/execute/scripts/verify-slot.py HUB tests/merge-settings.test.sh
 skills/execute/scripts/verify-slot.py HUB tests/contracts/status-repair-queue.test.mjs tests/contracts/verify-slot-hermetic.test.mjs tests/default-branch.test.mjs tests/default-branch.test.sh
 skills/execute/scripts/verify-slot.py HUB tests/engine-ladder.test.mjs tests/fast-tier-wiring.test.mjs tests/fast-tier.test.sh tests/gated-inputs.test.mjs tests/git-env-scrub.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/git-env-scrub.test.sh tests/integration-marker-roundtrip.test.mjs tests/integration-tree.test.sh tests/ladder.test.mjs tests/lead-integrate.test.sh
@@ -209,6 +212,7 @@ tests/fixtures/merge-task/** tests/lead-integrate.test.sh tests/merge-task-integ
 tests/fixtures/merge-task/** tests/merge-task-bare-blocked.test.sh tests/merge-task-base-moved.test.sh tests/merge-task-base.test.sh
 tests/fixtures/merge-task/** tests/merge-task-cancelled.test.sh tests/merge-task-ci-headroom.test.sh tests/merge-task-no-runner.test.sh
 tests/fixtures/merge-task/** tests/contracts/run-record-hermetic.test.mjs tests/contracts/verify-slot-hermetic.test.mjs
+tests/fixtures/merge-task/** tests/merge-settings.test.sh
 tests/fixtures/note-overlap/** tests/contracts/note-overlap-opener.test.mjs tests/vault-note-overlap.test.sh
 tests/fixtures/reconcile/** tests/contracts/queue-only.test.mjs tests/reconcile-project.test.sh
 

@@ -4,7 +4,7 @@
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
 #   S1 stop_spans' reason and index   M1-M23 the verdicts (M23 a surface wait, P41-3)   N1-N9b the narrowings, each
-#   through the real verbs
+#   through the real verbs   W1-W2 a due settings block (ADR 0080): reentry, or a cool-down until a try's retry
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR per scenario and ignores THREAD_TEST_EVENTS_DIR.
@@ -891,6 +891,33 @@ MNOW=2026-10-26T08:20:00Z
 out=$(python3 "$SCRIPT" auto-retry --tasks b --rollout "$D/$RO.md" --tasks-dir "$D" --now "$MNOW" 2>&1); rc=$?
 ok "$rc" 0 "N9b: at T0+20 auto-retry exits 0"
 ok "$(j "$(nx --running "")" 'd["restart"]')" '["b"]' "N9b: next restarts it"
+unset MNOW
+
+# ── W1 / W2: a due settings block (ADR 0080) is the lead's work, never a cool-down; a fresh try's retry is ───────
+NR='no-runner: required job "alpine" queued 47 minutes with no runner (run 7, job 8)'
+w_point() {  # w_point <scenario>: b's no-runner block retried at 08:15, the same stop at 08:30 (the settings point)
+  scen "$1"
+  QUEUE="b"; mkro; integrating b
+  lead b integration "$NR" 2026-10-26T08:00:00Z
+  python3 "$SCRIPT" auto-retry --tasks b --rollout "$D/$RO.md" --tasks-dir "$D" --now 2026-10-26T08:15:00Z >/dev/null 2>&1 \
+    || { echo "FAIL - $1: auto-retry"; fail=1; }
+  python3 "$SCRIPT" mark-integrating --tasks b --tasks-dir "$D" --now 2026-10-26T08:20:00Z >/dev/null 2>&1
+  lead b integration "${NR/47 minutes/112 minutes}" 2026-10-26T08:30:00Z
+  entry 2026-10-26T08:59:00Z
+}
+w_point w1
+MNOW=2026-10-26T09:00:00Z
+ok "$(j "$(INOW=$MNOW inp b)" '[d["settingsBlock"]["due"], d["settingsBlock"]["freeNow"], d["humanFix"], d["autoRetryAfter"]]')" \
+  '[true,true,null,"2026-10-26T09:30+00:00"]' "W1: (b's settings block is due, its deadline its autoRetryAfter)"
+ok "$(j "$(mv)" '[d["verdict"], d["work"]["reentry"], d["work"]["coolDown"]]')" '["moving",["b"],[]]' \
+  "W1: a due settings block step 1.2 frees now is reentry, never a 30-minute cool-down"
+w_point w2
+fp=$(python3 -c 'import hashlib; print(hashlib.sha256(b"no-runner\nalpine").hexdigest()[:12])')
+printf -- '- 2026-10-26T09:00:50+00:00 tried %s: busy: the merge-settings lock of o/r is held\n' "$fp" >> "$D/b.md"
+MNOW=2026-10-26T09:01:00Z
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["until"], d["work"]["coolDown"]]')" \
+  '["waiting","cool-down","2026-10-26T09:06+00:00",[{"slug":"b","class":"infra","until":"2026-10-26T09:06+00:00"}]]' \
+  "W2: with a fresh tried row, a cool-down until its retry"
 unset MNOW
 
 echo

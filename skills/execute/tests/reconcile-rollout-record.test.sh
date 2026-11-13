@@ -435,6 +435,11 @@ ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","merge-task","integration
 out=$(mgc mg12 121 'integration: no-runner: required job "self-hosted" queued 47 minutes with no runner (run 7, job 8)' integration)
 ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg12 set-aside:mg12" "mg12 a required job no runner took: lane-freed, set-aside"
 ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","no-runner","integration"]' "mg12 a required job no runner took: integrate, no-runner, integration"
+# mg13 (ADR 0080): merge-task's exit-4 unreported-context set-aside (a renamed required job): reasonClass
+# unreported-context, set aside at Integration, the lane freed.
+out=$(mgc mg13 122 'integration: unreported-context: required check "build" is reported by no check run or status on the PR'"'"'s head, and no run on it is in flight' integration)
+ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg13 set-aside:mg13" "mg13 a required context nothing reports: lane-freed, set-aside"
+ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","unreported-context","integration"]' "mg13 a required context nothing reports: integrate, unreported-context, integration"
 ok "$(python3 - "$SCRIPT" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
