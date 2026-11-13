@@ -29,8 +29,9 @@ Times. --since and --until take Z or an offset (run_record's `_stamp` rule; a na
 everything printed is UTC `Z`. --since defaults to the record's first slot-taken, else its first line;
 --until to now (the Reflection's moment). Lines after --until are not read, except `call-journal` lines: fold-journals
 stamps them with the fold time (completion, or the Reflection's start), so each is read whatever its ts, and its call's
-startTime + durationMs is clamped to --until (a call still running at --until is read as running then). With no
-line the score is empty and flagged "no record".
+startTime + durationMs is clamped to --until (a call still running at --until is read as running then). A `role-call`
+line (p46-2, fold-journals, after the fact like call-journal) is never read as a task's activity or the record's last
+line: this reading takes nothing from it. With no line the score is empty and flagged "no record".
 
 Running time is the time in [since, until] when the run is active and not paused. Active: a Slot is open (to
 its effective end, below), or the lane is held with no merge, race or git-env hold open and no Slot open, for
@@ -905,6 +906,10 @@ class Score:
                 if prev is None or prev.get("status") not in RR.TERMINAL_STATUSES or \
                         d.get("status") in RR.TERMINAL_STATUSES:
                     self.journals[d["runId"]] = d
+                continue
+            if kind == "role-call":
+                # p46-2: fold-journals writes these after the fact, as it writes call-journal lines: never a task's
+                # activity (last_line, task_lines) or the record's last line (last_t)
                 continue
             if kind == "review-verdict":
                 # reconcile writes these with the row's other events: read for Review churn only, never as a task's

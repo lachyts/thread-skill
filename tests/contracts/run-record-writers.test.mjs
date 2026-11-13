@@ -64,6 +64,18 @@ test('note-overlap is emitted by the PreToolUse hook alone, never by prose', () 
   assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*note-overlap/.test(text)).map(({ file }) => file), [])
 })
 
+// p46-2 (ADR 0079 decision 8): role-call is written after the fact, from a call's journal, by fold-journals alone.
+test('role-call is emitted by reconcile-rollout.py alone, inside cmd_fold_journals, never by prose', () => {
+  const by = scripts().filter(({ text }) => emits(text, 'role-call')).map(({ file }) => file)
+  assert.deepEqual(by, ['skills/execute/scripts/reconcile-rollout.py'])
+  const rr = read('skills/execute/scripts/reconcile-rollout.py')
+  const fold = defBody(rr, 'cmd_fold_journals')
+  assert.ok(emits(fold, 'role-call'), 'the emit sits inside cmd_fold_journals')
+  assert.ok(!emits(rr.replace(fold, ''), 'role-call'), 'and nowhere else in the file')
+  const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
+  assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*role-call/.test(text)).map(({ file }) => file), [])
+})
+
 test('no skill or doc tells an agent to run run_record.py emit', () => {
   const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
   for (const f of ['README.md', 'CONTEXT.md']) md.push({ file: f, text: read(f) })

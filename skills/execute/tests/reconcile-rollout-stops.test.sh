@@ -5,7 +5,8 @@
 # own rollout's record (run_record.py emit with --ts for the past), and THREAD_MACHINE_TIMES stands in for the Mac's
 # kern.boottime, kern.waketime and pmset log, so nothing reads this machine's history.
 #   E1 a first entry   E2 a heartbeat's plain entry   E3 a room stop and its resume   E3b --cause with nothing open
-#   E3c a line stamped at its call's end (p29-12) is the lead's sign of life at its reconciledAt   E4 a session change: dead-lead   E5 a boot after the last live line: mac-restart   E5b a sleep with lines after it
+#   E3c a line stamped at its call's end (p29-12) is the lead's sign of life at its reconciledAt   E4 a session change: dead-lead
+#   E4b (p46-2) a role-call is no sign of life   E5 a boot after the last live line: mac-restart   E5b a sleep with lines after it
 #   E5c a sleep before the first live line   E5d two sleeps, in at order   E6 --cause owns a later boot   E7 a pause
 #   owns a later boot   E7b a boot before the pause is written first   E8 an open halt, then a plain entry   E8b the
 #   hook's halt after a boot: both stops   E8c a sleep inside a halt   E9 next's sleep, once   E9b next writes no sleep
@@ -132,6 +133,15 @@ ent e4 --by stage --session B --now 2026-10-26T12:00:00Z >/dev/null
 ok "$(q e4 '[[d["kind"], d.get("cause") or d.get("stop"), d.get("at")] for d in L[2:]]')" \
   '[["stopped","dead-lead","2026-10-26T10:20:00.000Z"],["lead-entry","dead-lead",null]]' "E4: dead-lead at A's last heartbeat, inferred"
 ok "$(q e4 'L[2]["inferred"]')" true "E4: marked inferred"
+
+echo "== E4b. (p46-2) a role-call folded after A's last heartbeat is no sign of life: the dead-lead stays at that heartbeat"
+mkro e4b
+ent e4b --by stage --session A --now 2026-10-26T10:00:00Z >/dev/null
+ent e4b --by heartbeat --session A --now 2026-10-26T10:20:00Z >/dev/null
+em e4b role-call a '{"runId":"wf_a1","startTime":1793000000000,"call":"task","role":"builder","model":"opus","effort":"high","dispatches":1,"outcome":"review"}' 2026-10-26T11:30:00Z
+ent e4b --by stage --session B --now 2026-10-26T12:00:00Z >/dev/null
+ok "$(q e4b '[[d["kind"], d.get("cause") or d.get("stop"), d.get("at")] for d in L[3:]]')" \
+  '[["stopped","dead-lead","2026-10-26T10:20:00.000Z"],["lead-entry","dead-lead",null]]' "E4b: dead-lead at A's last heartbeat, never at the fold"
 
 echo "== E5. a boot after the last live line: mac-restart with its boot, no dead-lead despite the session change"
 mkro e5

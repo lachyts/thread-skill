@@ -1848,7 +1848,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   A task falls in one arm for a role by a draw fixed by its name, never by
   how hard the work looks, and the arm drawn is stamped on its note. A role
   in its Fable arm has no stronger pass to climb to: its climbs are recorded
-  as no-ops (ADR 0079). Not the canary's `arm`, a verb (see **Window**). _Avoid_:
+  as no-ops (ADR 0079). A role with no share, the builder of a task that is
+  not hard, and every role of a task begun before the draw sit in no arm
+  (`none`). Not the canary's `arm`, a verb (see **Window**). _Avoid_:
   tier, variant, last resort, fallback.
 - **Fable share** — the live part of a Login's work drawn into Fable Arms,
   which pacing moves so its Fable allowance and its general allowance run

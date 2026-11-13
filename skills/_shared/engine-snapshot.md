@@ -84,8 +84,9 @@ names the root to re-run from. They are:
 
 The exemptions run from any root: `reconcile-rollout.py status` writes nothing (status and the estate scan read every
 rollout with it); `moving` writes nothing either, and is the Watchdog's reading of any rollout from any root (status §
-The Watchdog's reading); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
-cross-version state (below); `join` (ADR 0078 d6) is run by a newer `/thread:schedule` on this project's running
+The Watchdog's reading); `fold-journals` reads the note only for its role-call gate and writes only call-journal and
+role-call lines to the Run record, cross-version state (below), a role-call line only where the rollout's engine reads
+the kind; `join` (ADR 0078 d6) is run by a newer `/thread:schedule` on this project's running
 rollout, whose snapshot predates the verb, and writes only the forms § Cross-version state names for it, under the same
 note lock; `prove` writes only proof stamps, which every engine reads as landed, and gates each write a queue reads per
 note on `_carry_readers` (the note's own rollout and the rollouts of its unstarted dependants): when that gate reads
@@ -176,7 +177,24 @@ waits; it never waits for the newer one, so the two can integrate at once, and m
 correct (exit 3 re-integrates the second). An engine older than leases leaves lease state `none` and never holds.
 The Trickle claims file's `woken` list (p28-9) widens it at `version: 1`, as `waiting` did: a snapshot from before p28-9
 ignores it and drops it on rewrite, which costs a waiting lead only its wake (it re-checks at its trickle wait's timeout
-or its tick).
+or its tick). `ladder.toml` is machine-wide state with no `schema`: each running rollout reads it through its own
+snapshot's `ladder.py`, whose validation refuses every key added after its cut (`plan` and `[role]` before ADR 0079,
+`[share]` before p46-2), and a refused ladder halts that rollout at its next call. So a file that uses a newer key is
+written only once every live rollout's engine root reads it: for each, `HOME=<tmp> python3 <its
+root>/skills/_shared/scripts/ladder.py` with the candidate file at `<tmp>/.config/thread/ladder.toml` exits 0; else wait
+for those rollouts to finish or move (ladder.py's docstring, *Across versions*). A task note's `arms:` stamp and a
+rollout note's `arms: lead=…` (p46-2) are note lines an older engine ignores. A `role-call` Run record line (p46-2) is
+not: an engine from before it reads one as a live line, task activity and the record's tail (`record-entry`'s
+`NOT_LIVE_KINDS`, `score.py`'s `pair`, `ledger.py`'s `NOT_TAIL`), so a role-call stamped after a heartbeat would move
+the time of a `dead-lead` stop. `fold-journals` runs from any root (every Reflection runs it from the newest), so it
+writes role-call lines into a rollout's record only when that rollout's engine reads the kind
+(`_engine_reads_role_call`, by the clauses `prove`'s `_engine_reads_carried` keeps for a carried fix: the
+`ROLE_CALL_ENGINE` line in its `engine_snapshot:` root's `reconcile-rollout.py`, or in the root an unstamped note runs
+on; a finished rollout, or no note, reads it). A fold the gate holds back still writes the call-journal line, and
+prints `no role-call for <n> segments: <why>`. Those segments are lost: a later fold reopens a terminal call only when a
+resume was bound after its last fold, and then reads only the journal the resume rewrote. So of the calls folded while
+a rollout's engine predates the kind, only a resumed call's latest segment can still be written, by a fold after the
+rollout moves to an engine that reads it or finishes.
 
 Schedule's `join` (ADR 0078 d6) writes a running rollout's note from a newer root, so its forms are a cross-version
 contract:
