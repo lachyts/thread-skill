@@ -31,7 +31,7 @@ The model. The ledger prices the hours each cause class cost, ranked by cause, n
 - The live span runs from the record's first engine line (ENGINE_KINDS: a Slot, a lane, a hold, an idle-slots marker, a
   stop, a lead-entry or a suite; never an act, a pause or a `carried` line, which a supersede's carry writes to the new
   rollout's record at schedule time, before it runs) to until while the rollout is live, else to the record's last line
-  (a call-journal, review-verdict or night-record line is never the last: each is written after the fact), clipped to
+  (a call-journal, role-call, review-verdict or night-record line is never the last: each is written after the fact), clipped to
   [since, until]. A record with no engine line yet prices nothing (flagged when it has a line in the window). An
   interval still open at the record's last line runs to that end, until on a live rollout, and is flagged either way
   (score.py's open-interval flags, and one per open stop).
@@ -173,7 +173,7 @@ MAX_WATCH_ROLLOUTS = RR.MAX_ROLLOUTS
 union, intersect, subtract, total, fmt, hours = SCORE.union, SCORE.intersect, SCORE.subtract, SCORE.total, SCORE.fmt, \
     SCORE.hours
 # Lines written after the fact, never a record's last line (score.py's pair keeps them out of last_t too).
-NOT_TAIL = ("call-journal", "review-verdict") + SCORE.NIGHT_KINDS
+NOT_TAIL = ("call-journal", "role-call", "review-verdict") + SCORE.NIGHT_KINDS
 # The lines the engine writes as it runs a rollout: the first starts its live span. Never an act (answer-recorded,
 # gate-signed, handed-back, race-decided), a pause, or a `carried` line, which a supersede's carry writes at schedule time.
 ENGINE_KINDS = ("slot-taken", "slot-freed", "run-bound", "lane-taken", "lane-freed", "hold-started", "hold-ended",

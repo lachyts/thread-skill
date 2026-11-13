@@ -1574,6 +1574,56 @@ print(json.dumps({k: [v["status"], v["tokens"]] for k, v in latest.items()}))`, 
   assert.deepEqual(JSON.parse(r.stdout), { w1: ['completed', 900], w2: ['killed', 7], w3: ['completed', 2] })
 })
 
+// p46-2 (ADR 0079 decision 8): one role-call line per role per journal segment, keyed by (runId, startTime, role).
+const ROLE_CALL = {
+  runId: 'wf_a', startTime: 1794522596016, call: 'task', role: 'master-review', model: 'fable', effort: 'high',
+  dispatches: 2, outcome: 'review',
+}
+const ROLE_CALL_ALL = {
+  ...ROLE_CALL, tokens: 1200, fresh: 2, replayed: 1, tokensPartial: true, models: ['claude-fable-5-2', 'claude-opus-5-5'],
+  arm: 'fable', climbs: 1, fellBack: true, fableRung: true,
+}
+const omitKey = (o, k) => Object.fromEntries(Object.entries(o).filter(([x]) => x !== k))
+
+test('role-call validates with every optional field, and a duplicate (runId, startTime, role) writes one line', (t) => {
+  const home = tmpHome(t)
+  const f = path.join(ev(home), 'r.jsonl')
+  const emit = (o) => emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'role-call', '--json', JSON.stringify(o)], { env: EV(home) })
+  emit(ROLE_CALL_ALL)
+  const [l] = lines(f)
+  assert.deepEqual(omitKey(omitKey(omitKey(omitKey(omitKey(omitKey(l, 'v'), 'ts'), 'host'), 'rollout'), 'task'), 'kind'), ROLE_CALL_ALL)
+  emit({ ...ROLE_CALL_ALL, tokens: 9 })
+  assert.equal(lines(f).length, 1, 'the same (runId, startTime, role) is skipped, whatever else it holds')
+  emit({ ...ROLE_CALL, role: 'builder' })
+  emit({ ...ROLE_CALL, startTime: 1794522999999 })
+  emit({ ...ROLE_CALL, runId: 'wf_b' })
+  assert.equal(lines(f).length, 4, 'another role, segment or runId appends')
+  emit({ ...ROLE_CALL, role: 'integrator', call: 'integrate' })
+  assert.equal(lines(f).length, 5)
+})
+
+test('role-call refusals: its required fields, its closed enums, an arm off a drawn role, a non-int tokens', (t) => {
+  const home = tmpHome(t)
+  const bad = [
+    ['no runId', omitKey(ROLE_CALL, 'runId')], ['no startTime', omitKey(ROLE_CALL, 'startTime')],
+    ['no role', omitKey(ROLE_CALL, 'role')], ['no outcome', omitKey(ROLE_CALL, 'outcome')],
+    ['a role off the enum', { ...ROLE_CALL, role: 'lead' }], ['a call off the enum', { ...ROLE_CALL, call: 'restart' }],
+    ['an arm on the planner', { ...ROLE_CALL, role: 'planner', arm: 'fable' }], ['an arm none', { ...ROLE_CALL, arm: 'none' }],
+    ['tokens a string', { ...ROLE_CALL, tokens: '12' }], ['dispatches 0', { ...ROLE_CALL, dispatches: 0 }],
+    ['replayed 0', { ...ROLE_CALL, replayed: 0 }], ['fellBack false', { ...ROLE_CALL, fellBack: false }],
+    ['nine models', { ...ROLE_CALL, models: Array.from({ length: 9 }, (_, i) => `m${i}`) }],
+    ['a repeated model', { ...ROLE_CALL, models: ['a', 'a'] }], ['startTime a string', { ...ROLE_CALL, startTime: '2026-11-13' }],
+  ]
+  for (const [what, o] of bad) {
+    const r = cli(home, ['emit', '--rollout', 'r', '--task', 't', '--kind', 'role-call', '--json', JSON.stringify(o)], { env: EV(home) })
+    assert.equal(r.status, 2, what)
+    assert.match(r.stderr, /^run_record: refused: role-call: .*\n$/, what)
+  }
+  const noTask = cli(home, ['emit', '--rollout', 'r', '--kind', 'role-call', '--json', JSON.stringify(ROLE_CALL)], { env: EV(home) })
+  assert.equal(noTask.status, 2, 'a task is required')
+  assert.equal(listing(ev(home)).length, 0, 'nothing written')
+})
+
 test('call-journal takes startTime as the journal\'s epoch-ms integer, verbatim', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'call-journal', '--json', '{"runId":"w1","status":"running","startTime":1788422612019}'], { env: EV(home) })

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fold-journals (p15-3): the rollout's Workflow journals fold into its Run record as call-journal lines,
-# through run_record.emit (ADR 0032). The record's run-bound lines name each call's runId and journal dir;
+# through run_record.emit (ADR 0032), and (p46-2, case 11) each terminal journal segment as one role-call line per role. The record's run-bound lines name each call's runId and journal dir;
 # a fold is idempotent, skips a runId already folded with a terminal status (so a journal cleaned up after
 # ~30 days never warns), warns and continues on anything missing or malformed, and never writes outside
 # run_record.py. Also pins execute SKILL §4.5 step 5's ceremony bullet. Temp dirs only.
@@ -231,6 +231,137 @@ m=$(lno 'Move the rollout note')
 ok "$([ -n "$f" ] && echo y || echo n)" y "step 5 carries the fold-journals command"
 ok "$([ -n "$f" ] && [ -n "$c" ] && [ "$f" -lt "$c" ] && echo y || echo n)" y "fold before Close the phases"
 ok "$([ -n "$f" ] && [ -n "$m" ] && [ "$f" -lt "$m" ] && echo y || echo n)" y "fold before Move the rollout note"
+
+echo "== 11. (p46-2) role-call: one line per role per journal segment"
+# rjournal <path> <runId> <seg1|seg2> [status]: a real-shape journal with args (ladder, task.arms), result.tasks[0]
+# (status, ran, climbs), workflowProgress and startTime. seg1 is the call's first run; seg2 the same journal rewritten
+# by a resume: a new startTime, seg1's agents replayed (cached, an alias model, no tokens), two fresh agents after them.
+rjournal() {
+  python3 - "$1" "$2" "$3" "${4:-completed}" <<'PY'
+import json, sys
+path, run_id, seg, status = sys.argv[1:]
+L = {"source": "/l.toml", "rungs": [
+    {"name": "opus-high", "model": "opus", "effort": "high", "judge": "high", "review": "xhigh"},
+    {"name": "fable-high", "model": "fable", "effort": "high", "judge": "high", "review": "max"}]}
+ran = [("plan:x", "opus-high", "opus", "high"), ("plan-judge:x r1", "opus-high", "opus", "high"),
+       ("implement:x", "opus-high", "opus", "high"), ("implement:x@fable-high", "fable-high", "fable", "high"),
+       ("review:x r1", "fable-high", "fable", "max")]
+agents = [("plan:x", "claude-opus-5-5", 100), ("plan-judge:x r1", "claude-opus-5-5", 50),
+          ("implement:x", "claude-opus-5-5", 300), ("implement:x@fable-high", "claude-opus-5-5", 200),
+          ("review:x r1", "claude-fable-5-2", 80)]
+prog = [{"type": "workflow_phase", "index": 1, "title": "Plan-gate"}]
+if seg == "seg1":
+    start = 1794000000000
+    prog += [{"type": "workflow_agent", "label": a, "model": m, "tokens": t, "state": "done"} for a, m, t in agents]
+else:
+    start = 1794000900000
+    ran += [("revise:x r2", "fable-high", "fable", "high"), ("review:x r2", "fable-high", "fable", "max")]
+    prog += [{"type": "workflow_agent", "label": a, "model": m.split("-")[1], "state": "done", "cached": True} for a, m, _ in agents]
+    prog += [{"type": "workflow_agent", "label": "revise:x r2", "model": "claude-fable-5-2", "tokens": 400, "state": "done"},
+             {"type": "workflow_agent", "label": "review:x r2", "model": "claude-fable-5-2", "tokens": 90, "state": "done"}]
+row = {"slug": "x", "status": "review", "ran": [{"label": a, "rung": g, "model": m, "effort": e} for a, g, m, e in ran],
+       "climbs": [{"stage": "implement", "from": "opus-high", "to": "fable-high"}]}
+d = {"runId": run_id, "status": status, "totalTokens": 730, "durationMs": 61000, "agentCount": len(prog) - 1,
+     "startTime": start, "args": {"ladder": L, "task": {"slug": "x", "arms": {"master-review": "fable", "builder": "none"}}},
+     "result": {"rolloutSlug": "rc-r", "tasks": [row]}, "workflowProgress": prog, "script": "...", "logs": []}
+json.dump(d, open(path, "w"))
+PY
+}
+rc() {  # rc <rollout> <py expr over the list of role-call dicts L>
+  python3 - "$(rec "$1")" "$2" <<'PY'
+import json, sys
+L = [d for d in (json.loads(x) for x in open(sys.argv[1]) if x.strip()) if d.get("kind") == "role-call"]
+print(eval(sys.argv[2]))
+PY
+}
+W5="$TMP/wf5"; mkdir -p "$W5"
+bind rc-r x "{\"runId\":\"wf_rc\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rc.json" wf_rc seg1
+ok "$(fold --rollout rc-r)" 0 "11a: exit 0"
+ok "$(warns)" 0 "11a: no WARN"
+ok "$(rc rc-r '[d["role"] for d in L]')" "['planner', 'plan-judge', 'builder', 'master-review']" "11a: one line per role, in order"
+ok "$(rc rc-r '[(d["task"], d["runId"], d["startTime"], d["call"], d["outcome"]) for d in L][0]')" \
+  "('x', 'wf_rc', 1794000000000, 'task', 'review')" "11a: task, runId, the segment's startTime, call, outcome"
+ok "$(rc rc-r '[(d["role"], d["model"], d["effort"], d["dispatches"], d["tokens"], d["fresh"]) for d in L]')" \
+  "[('planner', 'opus', 'high', 1, 100, 1), ('plan-judge', 'opus', 'high', 1, 50, 1), ('builder', 'opus', 'high', 2, 500, 2), ('master-review', 'fable', 'max', 1, 80, 1)]" \
+  "11a: model and effort from the first ran entry, dispatches counted, tokens summed per role"
+ok "$(rc rc-r '[(d["role"], d.get("arm")) for d in L]')" \
+  "[('planner', None), ('plan-judge', None), ('builder', None), ('master-review', 'fable')]" "11a: an arm on master-review only (builder=none)"
+ok "$(rc rc-r '[(d["role"], d.get("fellBack"), d.get("climbs"), d.get("fableRung")) for d in L]')" \
+  "[('planner', None, None, True), ('plan-judge', None, None, True), ('builder', True, 1, True), ('master-review', None, None, True)]" \
+  "11a: fellBack where ran asked fable and claude-opus ran; climbs per stage; fableRung on every line of the call"
+ok "$(rc rc-r '[d["models"] for d in L]')" "[['claude-opus-5-5'], ['claude-opus-5-5'], ['claude-opus-5-5'], ['claude-fable-5-2']]" "11a: the model ids that ran"
+ok "$(rc rc-r 'sum("replayed" in d or "tokensPartial" in d for d in L)')" 0 "11a: no replay, nothing partial"
+ok "$(grep -c '^role-call wf_rc \[\[x\]\] 4 roles (segment 1794000000000)$' "$TMP/out")" 1 "11a: one line for the segment"
+ok "$(tail -1 "$TMP/out")" "fold-journals: rc-r: 1 folded, 0 already folded, 0 unchanged, 0 warnings" "11a: the summary line keeps its bytes and stays last"
+before=$(sha "$(rec rc-r)")
+fold --rollout rc-r >/dev/null
+ok "$(sha "$(rec rc-r)")" "$before" "11a: a re-run writes none"
+
+echo "== 11b. a resume rewrites the journal: the next fold writes a second set, call-journal as it was"
+rjournal "$W5/wf_rc.json" wf_rc seg2
+bind rc-r x "{\"runId\":\"wf_rc\",\"journalDir\":\"$W5\",\"call\":\"task\",\"resumedFrom\":\"wf_rc\"}"
+ok "$(fold --rollout rc-r)" 0 "11b: exit 0"
+ok "$(grep -c '^already folded wf_rc' "$TMP/out")" 1 "11b: call-journal is already folded"
+ok "$(cj rc-r 'len(L)')" 1 "11b: call-journal stays one line"
+ok "$(grep -c '^role-call wf_rc \[\[x\]\] 4 roles (segment 1794000900000)$' "$TMP/out")" 1 "11b: the resume's segment written"
+ok "$(rc rc-r '[(d["role"], d["dispatches"], d["tokens"], d["fresh"], d.get("replayed"), d.get("tokensPartial")) for d in L if d["startTime"] == 1794000900000]')" \
+  "[('planner', 1, 0, 0, 1, None), ('plan-judge', 1, 0, 0, 1, None), ('builder', 3, 400, 1, 2, None), ('master-review', 2, 90, 1, 1, None)]" \
+  "11b: replayed matches, tokens are the fresh agents only, nothing partial"
+ok "$(rc rc-r '[d["models"] for d in L if d["startTime"] == 1794000900000 and d["role"] == "builder"]')" "[['claude-fable-5-2']]" \
+  "11b: a replayed agent's alias is no model id that ran"
+ok "$(rc rc-r '[d.get("fellBack") for d in L if d["startTime"] == 1794000900000]')" "[None, None, None, None]" \
+  "11b: a replayed fallback is the first segment's, not this one's"
+before=$(sha "$(rec rc-r)")
+fold --rollout rc-r >/dev/null
+ok "$(sha "$(rec rc-r)")" "$before" "11b: a further fold writes none"
+
+echo "== 11c. no fold between the segments: a journal first seen at its second segment is partial"
+bind rcp-r x "{\"runId\":\"wf_rcp\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rcp.json" wf_rcp seg2
+fold --rollout rcp-r >/dev/null
+ok "$(rc rcp-r '[(d["role"], d.get("replayed"), d.get("tokensPartial")) for d in L]')" \
+  "[('planner', 1, True), ('plan-judge', 1, True), ('builder', 2, True), ('master-review', 1, True)]" \
+  "11c: one set, every role with replayed agents marked tokensPartial (the limit, pinned)"
+
+echo "== 11d. a terminal call never resumed is never read again: its journal corrupted, no write, no WARN"
+printf '{"runId": "wf_rc", ' > "$W5/wf_rc.json"
+bind rcq-r q "{\"runId\":\"wf_rcq\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rcq.json" wf_rcq seg1
+fold --rollout rcq-r >/dev/null
+printf 'not json' > "$W5/wf_rcq.json"
+before=$(sha "$(rec rcq-r)")
+fold --rollout rcq-r >/dev/null
+ok "$(sha "$(rec rcq-r)")" "$before" "11d: nothing written"
+ok "$(warns)" 0 "11d: no WARN"
+before=$(sha "$(rec rc-r)")
+ok "$(fold --rollout rc-r)" 0 "11d: a resumed call's corrupted journal: exit 0"
+ok "$(sha "$(rec rc-r)")" "$before" "11d: its record unchanged"
+ok "$(warns)" 0 "11d: and no WARN (the role-call pass reads silently)"
+
+echo "== 11e. a journal with no result, or no workflowProgress, or a running one, writes no role-call"
+ok "$(rc fold-r 'len(L)')" 0 "11e: the trimmed journals of 1-9 (no result, no progress) wrote none"
+bind rcn-r n "{\"runId\":\"wf_rcn\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rcn.json" wf_rcn seg1 running
+fold --rollout rcn-r >/dev/null
+ok "$(rc rcn-r 'len(L)')" 0 "11e: a running journal writes no role-call"
+ok "$(cj rcn-r '[d["status"] for d in L]')" "['running']" "11e: its call-journal folds in flight"
+python3 - "$W5/wf_rcn.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["status"] = "completed"; d.pop("workflowProgress")
+json.dump(d, open(sys.argv[1], "w"))
+PY
+fold --rollout rcn-r >/dev/null
+ok "$(cj rcn-r '[d["status"] for d in L]')" "['running', 'completed']" "11e: the terminal call-journal lands"
+ok "$(rc rcn-r 'len(L)')" 0 "11e: with no workflowProgress, no role-call"
+
+echo "== 11f. --dry-run names the role-call it would write, and writes nothing"
+bind rcd-r d "{\"runId\":\"wf_rcd\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+rjournal "$W5/wf_rcd.json" wf_rcd seg1
+before=$(sha "$(rec rcd-r)")
+fold --rollout rcd-r --dry-run >/dev/null
+ok "$(sha "$(rec rcd-r)")" "$before" "11f: nothing written"
+ok "$(grep -c '^would write role-call wf_rcd \[\[d\]\] 4 roles (segment 1794000000000)$' "$TMP/out")" 1 "11f: the would-write line"
 
 [ "$fail" = 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"
