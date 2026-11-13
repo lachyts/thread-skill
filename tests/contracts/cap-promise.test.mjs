@@ -115,9 +115,11 @@ function checkCap(f, E) {
     fails.push('judge-usd-null')
   }
 
-  // judge-capless: the fragment keeps a spend gate without exactly one cap on ADR 0008's automatic `changes`.
+  // judge-capless: the fragment keeps a spend gate without exactly one cap on ADR 0008's automatic `changes`. A cap in
+  // another currency is one cap amount, priced at its ceiling rate since p48-4 (tests/gated-inputs.test.mjs pins both
+  // of the sentence's examples against the pricer).
   if (!has(jPriced, 'Never list a gate whose own line has no `cap` amount, or more than one: a spend gate without exactly one cap is the automatic "changes" above (ADR 0008), never a bounce.',
-    'A cap in another currency, such as `cap 30 AUD`, which the pricer also reports as "no cap clause", may be listed.')) {
+    'A cap in another currency counts as one cap amount, and the pricer prices it at its ceiling rate (`cap 30 AUD` prints an amount); one it still cannot read, such as `cap 30 AUD per run`, which it reports as "no cap clause", may be listed.')) {
     fails.push('judge-capless')
   }
 
