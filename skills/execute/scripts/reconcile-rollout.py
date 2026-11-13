@@ -460,9 +460,10 @@ Subcommands:
               note runs on, has the ROLE_CALL_ENGINE line; a finished rollout, or no note found, reads it), since an
               older engine's record-entry, score.py and ledger.py read a role-call line as live; the note is
               --rollout's path, else `<slug>.md` in --tasks-dir (default the vault's) or its Archive/. A segment the
-              gate holds back is never written later unless its call is resumed after its rollout moves or finishes
-              (engine-snapshot.md § Cross-version state); the run prints one `no role-call for <n> segments: <why>`
-              line. Each segment written prints `role-call <runId> [[<task>]] <n> roles (segment
+              gate holds back is lost: a later fold reopens a terminal call only after a resume bound after its last
+              fold, and then writes only the resumed segment, once the gate reads True (engine-snapshot.md §
+              Cross-version state); the run prints one `no role-call for <n> segments: <why>` line. Each segment
+              written prints `role-call <runId> [[<task>]] <n> roles (segment
               <startTime>)` (`would write role-call …` on --dry-run) before the summary line. Ends with
               `fold-journals: <slug>: N folded, M already folded, K unchanged, W warnings`.
               Exit 0 (warnings included; no record file prints `no run record at <path>`), 1 the events
