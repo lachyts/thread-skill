@@ -164,18 +164,19 @@ mkt m4b "scope: read-only" "started: 2026-11-12T09:00+11:00"
 ok "$(ms m4b | armline m4b)" 'm4b: arms {"investigator":"none"}' "M4: a restart of a read-only task begun before the draw"
 
 echo "== M5. hardness is read once, at the first stamp"
-ladder $'[share]\nmaster-review = 1'
+ladder $'[share]\nmaster-review = 1\nbuilder = 1'
 mkt m5 "scope: single-file" "work_depth: standard"
 ms m5 >/dev/null
-ok "$(fm m5 arms)" "arms: master-review=fable builder=none" "M5: a standard task first stamped with only a master-review share"
-ladder $'[share]\nmaster-review = 1\nbuilder = 1'
+ok "$(fm m5 arms)" "arms: master-review=fable builder=none" "M5: a builder share of 1, a standard single-file task: builder=none (not hard)"
 python3 - "$V/m5.md" <<'PY'
 import sys
 p = sys.argv[1]
 t = open(p).read()
 open(p, "w").write(t.replace("work_depth: standard", "work_depth: deep"))
 PY
-ok "$(ms m5 --start restart | armline m5)" 'm5: arms {"master-review":"fable","builder":"none"}' "M5: a builder share added and the task made deep: still builder=none"
+ok "$(fm m5 work_depth)" "work_depth: deep" "M5: the task made deep"
+ok "$(ms m5 --start restart | armline m5)" 'm5: arms {"master-review":"fable","builder":"none"}' "M5: at the same share, a restart still prints builder none"
+ok "$(fm m5 arms)" "arms: master-review=fable builder=none" "M5: and keeps the stamp"
 
 echo "== M6. no [share] table: no stamp, no line, the note's bytes as with no ladder file"
 mkdir -p "$TMP/v6a" "$TMP/v6b"
