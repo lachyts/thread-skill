@@ -12,6 +12,7 @@
 #      one WARN; a refused ladder stamps nothing.
 #   R  record-entry: the lead's arm on the rollout note, kept at a later share, none for a rollout led before the
 #      draw, nothing with no share; the lead-entry line carries no arm.
+#   S  status: its ladder keeps source, rungs and error, never the share.
 # HOME points at a temp dir holding each case's ~/.config/thread/ladder.toml. Temp dirs only.
 # Usage: bash reconcile-rollout-arms.test.sh   (exit 0 = pass)
 set -uo pipefail
@@ -250,6 +251,12 @@ ladder $'[share]\nlead = 1'
 before=$(sha "$V/r6.md")
 ent r6 --dry-run >/dev/null
 ok "$(sha "$V/r6.md")" "$before" "R6: --dry-run stamps nothing"
+
+echo "== S. status reads the ladder as before: its share is mark-started's and record-entry's"
+ladder $'[share]\nmaster-review = 1\nlead = 1'
+ok "$(python3 "$SCRIPT" status --rollout "$V/ro.md" --tasks-dir "$V" --now "$NOW" 2>/dev/null \
+  | python3 -c 'import json,sys; print(list(json.load(sys.stdin)["ladder"]))')" "['source', 'rungs', 'error']" \
+  "S: status's ladder holds source, rungs and error, never the share"
 
 [ "$fail" = 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

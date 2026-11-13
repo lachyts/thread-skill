@@ -8133,8 +8133,9 @@ def cmd_status(args) -> int:
         # Run record's folded call journals for the history, silently, and writes nothing.
         "lastStarts": last.output(),
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
-        # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
-        "ladder": ladder,
+        # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start). Never the
+        # share (p46-2): it is mark-started's and record-entry's, so status prints the bytes it printed before.
+        "ladder": {key: ladder[key] for key in ("source", "rungs", "error")},
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*), each with its `scope`: [] when
         # none. Vault-only, so status § 3's Git-env trip flag holds offline too.
         "gitEnvHold": git_env,
