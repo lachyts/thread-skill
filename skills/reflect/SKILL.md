@@ -319,9 +319,12 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
 mkdir -p /tmp/thread-reflect-week-<YYYY-MM-DD>
 ```
 
-`rung` prints the ladder's highest Opus rung with its own effort (ADR 0037 d4 names Opus at xhigh, no token cap)
-and notes on stderr when the top rung is not Opus or that rung's effort is not xhigh. A skill cannot set its own
-model: if this session is not on that model and effort, say so and go on. `<YYYY-MM-DD>` is today's Melbourne date.
+`rung` prints the ladder's highest Opus rung with its own efforts, and the top rung's name and model, as a reference
+only. The Reflection runs on the model and effort the lock gives reflections (the Model tier section of
+`~/.agents/AGENTS.md`; ADR 0037 d4, as ADR 0079 decision 5 amends it), never on a ladder rung, with no token cap. So
+`rung` notes nothing on stderr, and its exit 2 on a ladder with no Opus rung stops nothing: say so and go on. A skill
+cannot set its own model: if this session is not on the lock's model and effort, say so and go on. `<YYYY-MM-DD>` is
+today's Melbourne date.
 
 ### 10. Span
 
@@ -422,8 +425,17 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   spend, a credential or an irreversible action, schedule § 3.5 (Detect human/release gates) or schedule § 3.6 (Sweep for
   gated-input smell), or `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R3 (Grill the unclear), item (c),
   asked ahead. An ask whose `askedAhead` is true was asked at the top and still came back: trace why the answer
-  did not hold. span reads each ask from the record in the week it happened, on a landed task or one still waiting
-  (the Hands-off rate counts landed tasks only).
+  did not hold. A signOff whose `sweepMiss` names a kind (credential or irreversible, p51-3) is a gate the sweep
+  could have seen and nobody asked ahead: a miss of schedule § 3.6 or `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`
+  § R3 (Grill the unclear), item (c), counted in span.json's `gateMisses` and traced there, never to the word lists. A
+  signOff on a credential or irreversible gate with `sweepMiss` empty is read in this order. A credential on a note
+  holding a recorded `- Planner: word each test-credential gate` or `- Planner: word each test-Login gate` line was
+  recorded ahead on purpose and reached Lachy mid-run only because the standing approval turned it down: trace it to
+  that refusal (execute § 3.7, *Test credentials* or *A declared test Login*), never to the word lists. A sign-off
+  whose task note span could not read is named in `cannotShow` (its `sweepMiss` cannot be read): report it, never
+  trace it. Only otherwise is it a gate its note never named: trace it to the sweep's word lists
+  (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py`'s header, part 1). span reads each ask from the
+  record in the week it happened, on a landed task or one still waiting (the Hands-off rate counts landed tasks only).
 - A `set-aside` is traced by its stage and `reasonClass` to the rule that stopped it: execute § 3.5 (the plan
   gate), execute § 3.7 (gated inputs, ADR 0034), execute § 4.5 (the queue, ADR 0030) or execute § 6.5 (Needs
   you), and by its `movedBy` to what moved it on. `integration-conflict` traces to execute § 4.5 step 3
@@ -749,8 +761,9 @@ accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySi
 unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
 confirm-rate risk included), the precision per level (`freshReviewLevels`), the late /fresh-review rounds' count, the
 Note overlaps (`noteOverlaps`: the warnings, notes and runs, or `none`, ADR 0067 d6's trigger when step 11 named it, and
-unread when the block is null), the Watches written (and any `extended` line), the bugs filed or found, the suite
-block's breaches (each repo's, with the suite audit filed, cited or not due), the Time-lost
+unread when the block is null), the gate misses (`gateMisses`: the count and each item's rollout, task and kinds, with
+the rule step 11 traced it to, or none), the Watches written (and any `extended` line), the bugs filed or found, the
+suite block's breaches (each repo's, with the suite audit filed, cited or not due), the Time-lost
 ledger (its top class and hours, each class against last week, the trend, any Watch it opened, any ceiling raise it
 held), the Monthly audit's row when one ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or

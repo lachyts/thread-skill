@@ -28,9 +28,11 @@ export const meta = {
 //   date        : string,            // YYYY-MM-DD (passed in; Date.now() is unavailable here)
 //   ladder      : object,            // the operator's ladder (ADR 0029), ladder.py's JSON as the lead resolved
 //                                    //   it at THIS call's start: { source: <the file's path> | 'built-in',
-//                                    //   rungs: [{ name, model, effort, judge, review }, …] }, bottom first.
-//                                    //   Fixed for the call: a resume re-passes its call's own ladder, so an
-//                                    //   edit reaches a task at its next call. Validated (ladderArgsError)
+//                                    //   rungs: [{ name, model, effort, judge, review[, plan] }, …][, roles:
+//                                    //   { <LADDER_ROLES>: <model> }] }, bottom first (ADR 0079: a rung's plan
+//                                    //   model and the ladder's role models, runOn). Fixed for the call: a
+//                                    //   resume re-passes its call's own ladder, so an edit reaches a task at
+//                                    //   its next call. Validated (ladderArgsError)
 //                                    //   before any dispatch (argsRefused), in both modes. Absent ⇒ the built-in ladder (a
 //                                    //   Lost-call resume of a call from before 3.0.0); that call's retired
 //                                    //   tier-ceiling and judge-pin args are ignored, never an error.
@@ -186,7 +188,9 @@ export const meta = {
 //                                    //   The neutral { startRung: '', rung: '', climbs: [] } when the note has
 //                                    //   none, and a pre-3.0.0 tier record { model, escalated, escalatedAt,
 //                                    //   tierCapped, tierCappedAt } reads as neutral. Integration itself runs
-//                                    //   on the ladder's TOP rung whatever this record says (ADR 0029 decision 5).
+//                                    //   on the ladder's Integration rung (integrationRungOf: the highest rung
+//                                    //   that is not all-Fable) whatever this record says (ADR 0029 decision 5,
+//                                    //   as ADR 0079 decision 2 amends it).
 //       leadMerge       : object,    // optional: { mergeCommit, headSha, baseSha, verified } — ONLY in a
 //                                    //   shared-file-only case where the lead merged and verified green itself.
 //       readyAt, startedAt : string, // optional ISO stamps for the merge-line metrics.
@@ -322,7 +326,7 @@ export const meta = {
 // label, rung, model, effort, finishedAt }], metrics: { readyAt, startedAt, finishedAt, waitMinutes,
 // durationMinutes } } — the payload the Integration log line records. Its status is one of the
 // five above; startRung/rung/climbs pass integration.rung through (integrationRung), rungDrift is '', and
-// ran lists its agents, each on the ladder's top rung.
+// ran lists its agents, each on the ladder's Integration rung (integrationRungOf).
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -1262,6 +1266,17 @@ function escalationContext(prior, st, stage, kind) {
     const contract = kind === 'planner'
       ? 'The plan-only contract above still holds in full: produce the plan, write no code — no source edits, no commits, no PR.'
       : 'The read-only contract above still holds in full: no source edits, no commits, no PR.'
+    // A plan-stage climb that left the planner's dispatch as it was (planHeld: the same model and effort on both
+    // rungs, ADR 0079 decision 1) moved the task's rung but not the planner, so a same-rung second pass, never a
+    // takeover.
+    if (kind === 'planner' && moved && planHeld(st, c)) return `
+
+SECOND PASS: a first attempt at this plan did not complete, and you own it from here. The plan
+runs on the same model and effort on this rung as on the one below, so the climb changed nothing for it and
+there is no hand-over — finish the plan yourself.
+${contract}
+The prior attempt's diagnosis (verbatim):
+${prior}`
     if (!moved) return `
 
 SECOND PASS: a first attempt at this ${work} did not complete, and you own it from here. This
@@ -1293,6 +1308,18 @@ one rung down did not land it, and you own it from here. The prior attempt's dia
 ${prior}
 Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
 warrants; do not blindly repeat the failed approach.`
+}
+
+// Whether a plan-stage climb `c` left the planner's dispatch as it was: planOn gives the same model and the same
+// effort on both rungs. Two rungs that name the same plan model hold it, and so does a rung that plans on Fable at
+// OWN_EFFORT below an all-Fable rung whose own effort is OWN_EFFORT (ADR 0079 decision 2's ladder shape).
+function planHeld(st, c) {
+  const from = st.rungs.find((r) => r.name === c.from)
+  const to = st.rungs.find((r) => r.name === c.to)
+  if (!from || !to) return false
+  const a = planOn(from)
+  const b = planOn(to)
+  return a.model === b.model && a.effort === b.effort
 }
 
 // ---- Review-round memory (review-loop-memory, 2026-08-14) --------------------
@@ -1942,12 +1969,21 @@ line as your diagnosis. Every repo read and command runs in this tree, never in 
 checkout at "${a.repoPath}".`
 }
 
-// ---- The ladder (ADR 0029) ----------------------------------------------------
+// ---- The ladder (ADR 0029, as amended by ADR 0079) ----------------------------
 // The operator's ladder is the ONE place models and efforts live: named rungs, bottom first, each a model
 // (a tier alias, never a version) plus the efforts of the code-writing roles (`effort`: planner, plan
 // reviser, implementer, reviser, read-only investigator), the plan-gate judge (`judge`) and the master
 // review (`review`). Rungs may share a model, so an effort step and a model step are the same kind of move.
 // The top rung is the ceiling: there is no other cap, and a quota that runs out is an edit to the file.
+// - Plan model (ADR 0079 decision 1): a rung may name `plan`, the model its planner, plan reviser and plan
+//   judge run on, at OWN_EFFORT; the judge rides with the planner. A rung that names none plans on its own model
+//   at its own `effort` (planOn). A plan-stage climb still moves the rung (so implement and review start higher)
+//   and leaves the planner's dispatch as it was only when planOn gives the same model and effort on both rungs.
+// - Role models (decision 3): the ladder's optional `roles` gives a role (LADDER_ROLES) its own model in place
+//   of the rung's: at OWN_EFFORT when it differs from the rung's model, at the rung's own effort for that role
+//   when it names it. On an all-Fable rung (allFable) the rung wins for every role (decision 4, settled #3).
+// - runOn(st, role) is the one place a dispatch reads its model and effort; integrationRungOf picks the rung
+//   Integration runs on: the highest one that is not all-Fable, the top when every rung is (decision 2).
 //
 // Per call, no snapshot (decision 6). The lead runs ladder.py at each call's start and passes its JSON as
 // args.ladder; the call keeps it to the end, and a resume re-passes it. With none, BUILT_IN_LADDER applies
@@ -1964,8 +2000,8 @@ checkout at "${a.repoPath}".`
 //   red one-shot or a blocked first implementer pass, a blocked investigator, a review-judge `changes`. On
 //   the top rung the climb is recorded as a no-op. A gate stop and a dead agent are never evidence, and nor
 //   is a plan judge's gates-only bounce (ADR 0038, planLoop).
-// - Effort and judges: every dispatch reads the CURRENT rung (implEffort, judgeEffort), so a climb carries
-//   the model and every role's effort at once, judges included.
+// - Effort and judges: every dispatch reads the CURRENT rung (runOn, through implEffort and judgeEffort), so a
+//   climb carries the model and every role's effort at once, judges included, but for a plan or role model.
 // - Verify shape: below the top, the implement stage's first pass verifies one-shot (verifyBlock); the retry
 //   after a real climb keeps the full max_iterations, which is what the hand-over buys. On the top rung
 //   every pass runs the full loop, so its first pass has ALREADY spent a full budget: its same-rung retry
@@ -1974,6 +2010,11 @@ checkout at "${a.repoPath}".`
 //   the rung reached, so a re-dispatch starts there and never re-pays the lower rungs.
 const LADDER_MODELS = ['opus', 'fable']   // ladder.py's MODELS (tests/ladder.test.mjs pins them equal)
 const LADDER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+// ladder.py's ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.roles may give their own model.
+const LADDER_ROLES = ['master-review', 'builder', 'investigator']
+// The effort a model of its own runs at: a rung's plan model, and a role model that is not the rung's (ADR 0079,
+// "Fable's effort is high on every rung").
+const OWN_EFFORT = 'high'
 // A rung name is written raw into YAML frontmatter (`rung: <name>`), so it is a plain lowercase token that
 // YAML reads back as the same string: ladder.py's NAME_RE and YAML_WORDS, and reconcile-rollout.py's
 // is_rung_name (tests/ladder.test.mjs L9 feeds all three the same names and pins that they agree).
@@ -2039,6 +2080,14 @@ function ladderArgsError(l) {
     for (const k of ['effort', 'judge', 'review']) {
       if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${refusedEcho(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
     }
+    if (r.plan !== undefined && !LADDER_MODELS.includes(r.plan)) return `${at} (${r.name}): unknown plan model ${refusedEcho(r.plan)} (known: ${LADDER_MODELS.join(', ')})`
+  }
+  if (l.roles !== undefined) {
+    if (!l.roles || typeof l.roles !== 'object' || Array.isArray(l.roles)) return `roles must be one object { <role>: <model> }, got ${refusedEcho(l.roles)}`
+    for (const k of Object.keys(l.roles)) {
+      if (!LADDER_ROLES.includes(k)) return `roles: unknown role ${refusedEcho(k)} (known: ${LADDER_ROLES.join(', ')})`
+      if (!LADDER_MODELS.includes(l.roles[k])) return `roles: ${k}: unknown model ${refusedEcho(l.roles[k])} (known: ${LADDER_MODELS.join(', ')})`
+    }
   }
   return ''
 }
@@ -2089,7 +2138,7 @@ function rungState(task, a) {
   }
   // verdicts (p21-3): every master-review round this call judged, pushed by reviewLoop (reviewVerdictOf).
   // flakes (p29-9): every Flake the call's code-writing agents returned, pushed by runAgent (flakesOf).
-  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
+  return { source: L.source, rungs: L.rungs, roles: L.roles || {}, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
 }
 
 function cur(st) { return st.rungs[st.at] }
@@ -2136,6 +2185,37 @@ function escalate(st, slug, stage) {
 // the task's CURRENT rung.
 function implEffort(st) { return cur(st).effort }
 function judgeEffort(st, role) { return cur(st)[role] }
+
+// A rung on which every role runs on Fable (ADR 0079 decision 2): its model is fable and it names no other plan model.
+function allFable(rung) {
+  return rung.model === 'fable' && (rung.plan === undefined || rung.plan === 'fable')
+}
+// The planner's { model, effort } on `rung` (plan and plan-revise): the rung's plan model at OWN_EFFORT when it names
+// one, else the rung's own model at its own `effort`. runOn reads it for the planner, and planHeld on both rungs of a
+// plan-stage climb.
+function planOn(rung) {
+  return rung.plan !== undefined ? { model: rung.plan, effort: OWN_EFFORT } : { model: rung.model, effort: rung.effort }
+}
+// { model, effort } for a dispatch `role` on the task's CURRENT rung, the one place a task-mode dispatch takes them
+// (see the section header). role: 'planner' (plan and plan-revise), 'plan-judge', 'builder' (implement and
+// revise), 'investigator' (the read-only task's agent) or 'master-review'. The planner runs on planOn, and the plan
+// judge rides with it when the rung names a plan model; a role's own model (st.roles) wins below an all-Fable rung;
+// else the rung's own model at its own effort for that role (implEffort, judgeEffort).
+function runOn(st, role) {
+  const rung = cur(st)
+  if (role === 'planner' || (role === 'plan-judge' && rung.plan !== undefined)) return planOn(rung)
+  const roles = st.roles || {}
+  const own = !allFable(rung) && Object.prototype.hasOwnProperty.call(roles, role) ? roles[role] : undefined
+  if (own !== undefined && own !== rung.model) return { model: own, effort: OWN_EFFORT }
+  const effort = role === 'plan-judge' ? judgeEffort(st, 'judge') : role === 'master-review' ? judgeEffort(st, 'review') : implEffort(st)
+  return { model: rung.model, effort }
+}
+// The rung Integration runs on (ADR 0079 decision 2, amending ADR 0029 decision 5): the highest rung that is not
+// all-Fable, else (every rung is) the top. It takes no plan or role model: Integration keeps the rung's own.
+function integrationRungOf(L) {
+  for (let i = L.rungs.length - 1; i >= 0; i--) if (!allFable(L.rungs[i])) return L.rungs[i]
+  return L.rungs[L.rungs.length - 1]
+}
 
 // ---- Dispatch resilience: transient agent death -----------------------------
 // A terminal API/connection error (observed 2026-07-18: "API Error: Connection closed mid-response") kills
@@ -2246,7 +2326,7 @@ async function planLoop(task, st, a) {
   const badBudget = roundBudgetDiagnosis(task, ['maxPlanRounds'])
   if (badBudget) return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: badBudget, planRoundsUsed: 0 }
   let plan = await runAgent(plannerPrompt(task, a, st, ''), {
-    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
+    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, ...runOn(st, 'planner'),
   }, st)
   if (plan.__dead) return transientPlanBlock(task, 0)
   if (plan.blocked || !plan.ready) {
@@ -2254,7 +2334,7 @@ async function planLoop(task, st, a) {
     // the top rung) and the planner gets one retry, on the rung it is now on, before plan-blocked.
     escalate(st, task.slug, 'plan')
     plan = await runAgent(plannerPrompt(task, a, st, plan.blockerCause || 'first-pass planner produced no plan'), {
-      label: `plan:${task.slug}@${cur(st).name}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
+      label: `plan:${task.slug}@${cur(st).name}`, phase: 'Plan-gate', schema: PLAN_VERDICT, ...runOn(st, 'planner'),
     }, st)
     if (plan.__dead) return transientPlanBlock(task, 0)
   }
@@ -2296,7 +2376,7 @@ async function planLoop(task, st, a) {
   }
   while (round <= task.maxPlanRounds) {
     const verdict = await runAgent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: pricerOf(a) ? PLAN_JUDGE_PRICED : PLAN_JUDGE, model: cur(st).model, effort: judgeEffort(st, 'judge'),
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: pricerOf(a) ? PLAN_JUDGE_PRICED : PLAN_JUDGE, ...runOn(st, 'plan-judge'),
     }, st)
     if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve' && askOf(verdict)) log(`plan-judge:${task.slug} r${round}: needsHuman on an approve verdict ignored`)
@@ -2348,7 +2428,7 @@ async function planLoop(task, st, a) {
       escalate(st, task.slug, 'plan')
     }
     plan = await runAgent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
-      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
+      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, ...runOn(st, 'planner'),
     }, st)
     if (plan.__dead) return transientPlanBlock(task, round + 1)
     if (plan.blocked || !plan.ready) {
@@ -2369,7 +2449,7 @@ async function implement(task, st, prev, a) {
   const planExtra = (task.planGate && prev && prev.plan) ? { planRoundsUsed: prev.planRoundsUsed || 0 } : undefined
   if (task.scope === 'read-only') {
     let r = await runAgent(readOnlyPrompt(task, a, st, ''), {
-      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st),
+      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, ...runOn(st, 'investigator'),
     }, st)
     if (r.__dead) return transientImplBlock()
     // A question only a person can answer (p16-3): a stop, never a climb or a retry.
@@ -2378,7 +2458,7 @@ async function implement(task, st, prev, a) {
       // The implement stage's first evidence of hardness: climb (a no-op on the top rung), one retry.
       escalate(st, task.slug, 'implement')
       r = await runAgent(readOnlyPrompt(task, a, st, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
-        label: `investigate:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st),
+        label: `investigate:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, ...runOn(st, 'investigator'),
       }, st)
       if (r.__dead) return transientImplBlock()
     }
@@ -2409,7 +2489,7 @@ async function implement(task, st, prev, a) {
   // The opts are held, and the builder call re-rendered (a pure function of unchanged inputs), so a signed
   // stop's continuation (pastSignedGates) carries the same bytes on the same rung; the cached call itself
   // is unchanged. Each runAgent() keeps a builder call as its first argument (git-env-scrub's e2 guard).
-  const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: implSchema(a), model: cur(st).model, effort: implEffort(st) }
+  const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: implSchema(a), ...runOn(st, 'builder') }
   let r = await runAgent(prompt(''), firstOpts, st)
   r = await pastSignedGates(task, r, prompt(''), firstOpts, st)
   // A dead agent is transient infra, NOT evidence of hardness — do NOT climb; report a clean block.
@@ -2437,7 +2517,7 @@ async function implement(task, st, prev, a) {
     // `1 + max_iterations` — one extra iteration at every n, no edge cases. A climb that really moved keeps
     // its full budget: that is what the hand-over buys.
     const retryTask = moved ? task : { ...task, maxIterations: CAPPED_RETRY_ITERATIONS }
-    const retryOpts = { label: `implement:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: implSchema(a), model: cur(st).model, effort: implEffort(st) }
+    const retryOpts = { label: `implement:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: implSchema(a), ...runOn(st, 'builder') }
     r = await runAgent(prompt(prior, retryTask), retryOpts, st)
     r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts, st)
     if (r.__dead) return transientImplBlock(planExtra)
@@ -2464,7 +2544,7 @@ async function reviseRound(task, st, current, priorFeedback, round, a, planText,
   // iteration runs one rung up (once per stage per call; a no-op on the top rung). A seeded revise is its
   // own call, so it climbs from the rung its note was stamped with.
   escalate(st, task.slug, 'review')
-  const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: implSchema(a), model: cur(st).model, effort: implEffort(st) }
+  const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: implSchema(a), ...runOn(st, 'builder') }
   let revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts, st)
   // A replayed (or fresh) stop for gates the note has since approved: continuations (pastSignedGates), on the
   // same reviser prompt re-rendered from the same inputs. A dead result passes through (signedStop is false).
@@ -2521,7 +2601,7 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
   }
   while (round <= task.maxReviewRounds) {
     const verdict = await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: cur(st).model, effort: judgeEffort(st, 'review'),
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, ...runOn(st, 'master-review'),
     }, st)
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
@@ -2942,8 +3022,8 @@ function prIdentityError(a, o) {
 // - the neutral record { startRung: '', rung: '', climbs: [] }, for a task whose note has no `rung:`
 //   (lead-integrate.py inputs gives it, and a note stamped `rung:` gives only that name);
 // - a pre-3.0.0 tier record { model: opus | fable, escalated, escalatedAt, tierCapped, tierCappedAt } (a
-//   Lost-call resume of an old integrate call), which reads as neutral: Integration runs on the top rung
-//   anyway, so the old record decides nothing.
+//   Lost-call resume of an old integrate call), which reads as neutral: Integration runs on the Integration
+//   rung anyway (integrationRungOf), so the old record decides nothing.
 function rungRecordError(g) {
   if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${refusedEcho(g)}`
   if ('model' in g) {
@@ -3188,8 +3268,8 @@ function integrationJudgeCheck(a, task, I, j) {
   ].join('\n')
 }
 
-// The integrator's verification: the full-suite loop (Integration runs on the top rung, so there is no
-// one-shot hand-over, and it is a Checkpoint, so every try runs the verifier: fullSuiteLoop, p31-1) with the note
+// The integrator's verification: the full-suite loop (Integration runs on its Integration rung and never climbs, so
+// there is no one-shot hand-over, and it is a Checkpoint, so every try runs the verifier: fullSuiteLoop, p31-1) with the note
 // write replaced — the engine records the diagnosis with its marker.
 function integrationVerify(task, a) {
   const noteWrite = 'Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.'
@@ -3490,20 +3570,21 @@ function integrationTriggers(I, r) {
 // so a fresh integrate call re-reads the latest main (ADR 0030 decision 3) and is never a resume.
 async function integrate(task, a, trace) {
   const I = a.integration
-  // Integration runs on the ladder's TOP rung whatever rung the task reached (ADR 0029 decision 5): the
-  // integrator at the top rung's effort, the judge at its review effort. Integration is not the task's own
-  // run, so the task's record (integration.rung) decides nothing here; it only passes through to the row.
+  // Integration runs on the ladder's Integration rung whatever rung the task reached (ADR 0029 decision 5, as
+  // ADR 0079 decision 2 amends it): the highest rung that is not all-Fable (integrationRungOf), the integrator at
+  // its effort, the judge at its review effort, on its own model: no plan or role model applies. Integration is
+  // not the task's own run, so the task's record (integration.rung) decides nothing here; it only passes through.
   const L = ladderOf(a)
-  const top = L.rungs[L.rungs.length - 1]
-  const effortOf = { integrator: top.effort, judge: top.review }
+  const ir = integrationRungOf(L)
+  const effortOf = { integrator: ir.effort, judge: ir.review }
   const R = I.reviewRoundsUsed
   const lm = I.leadMerge
-  const opts = (label, schema, role) => ({ label, phase: 'Integration', schema, model: top.model, effort: effortOf[role] })
+  const opts = (label, schema, role) => ({ label, phase: 'Integration', schema, model: ir.model, effort: effortOf[role] })
   // Each dispatch is recorded on the trace BEFORE it runs, as task mode records on st.ran (ADR 0029 decision
   // 7): an integrator or judge that throws is still in the row's `ran` and `integration.agents`. `finished`
   // fills its finishedAt in once it returns ('' for a dead or thrown one).
   const record = (role, label) => {
-    const rec = { role, label, rung: top.name, model: top.model, effort: effortOf[role], finishedAt: '' }
+    const rec = { role, label, rung: ir.name, model: ir.model, effort: effortOf[role], finishedAt: '' }
     trace.agents.push(rec)
     return rec
   }
@@ -3514,7 +3595,7 @@ async function integrate(task, a, trace) {
   const jlabel = `integration-review:${task.slug} r${R + 1}`
   let j
   if (lm && lm.verified && I.trouble.length === 1 && I.trouble[0] === 'shared-file' && lm.headSha === lm.mergeCommit && lm.baseSha !== I.taskBase) {
-    // P1: the lead merged cleanly and its verifier went green — no top-rung agent only to re-run it.
+    // P1: the lead merged cleanly and its verifier went green — no Integration-rung agent only to re-run it.
     trace.path = 'judge-only'
     j = { mergeCommit: lm.mergeCommit, headSha: lm.headSha, baseSha: lm.baseSha, triggers: ['shared-file'], path: trace.path }
   } else {
@@ -3692,7 +3773,9 @@ if (badSecurity) throw argsRefused('args.securityCheck: ' + badSecurity)
 function logLadder() {
   const L = ladderOf(a)
   const none = a.ladder === undefined || a.ladder === null
-  log(`ladder: ${L.source} — ${L.rungs.map((g) => g.name).join(', ')}` +
+  const roles = Object.keys(L.roles || {})
+  log(`ladder: ${L.source} — ${L.rungs.map((g) => g.name + (g.plan !== undefined ? ` (plan ${g.plan})` : '')).join(', ')}` +
+    (roles.length ? `; roles: ${roles.map((k) => `${k} ${L.roles[k]}`).join(', ')}` : '') +
     (none ? ' (no args.ladder: a call from before 3.0.0 runs on the built-in ladder)' : ''))
 }
 if (mode === 'integrate') {

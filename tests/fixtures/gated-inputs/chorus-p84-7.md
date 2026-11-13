@@ -1,0 +1,5 @@
+<!-- Provenance (p51-3): copied byte for byte from the vault note Work/Tasks/chorus-p84-7-the-voice-starts-at-once-on-a-skip.md at vault commit 669231ea, its first commit: its **Decided:** and **Verify:** paragraphs, as /thread:schedule swept them for chorus-rollout-2026-10-18. Its credential gate (CARTESIA_API_KEY, ELEVENLABS_API_KEY) was signed mid-run (Watch 4fe713ab). Never edit these lines. -->
+
+**Decided:** find and name the cause of the pause before a Chunk plays, on ↓/→ and in plain play-through (fetch on demand vs warm ahead, the decode, ADR 0063's sentence pause `{` `}`). Remove what is waste (warm the next Chunk before it is reached, start on the first bytes); what is a deliberate gap becomes a dial on the Settings card with **0 as his starting value** ("I want to start with zero"). Measure first-audio latency on a skip before and after on fresh text, twice (memory: a local engine's cache lies).
+
+**Verify:** the PR names the cause with timings; a skip's first audio before/after on fresh text (Cartesia and ElevenLabs); the gap dial at 0 by default; suite green.

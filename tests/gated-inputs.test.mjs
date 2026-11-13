@@ -448,6 +448,59 @@ test('the currency amount marker: shell variables never flag, the old literal $ 
   assert.ok(words(old).includes('$'), 'honest control: the old literal $ flags it (the regression a mechanical old list brings)')
 })
 
+// p51-3: the three gates signed mid-run (Watches 4fe713ab twice, c8bd9cd4), each note's lines as schedule swept them.
+// The provenance comment is dropped first: it names the gate, the note never did.
+const swept = (name) => fs.readFileSync(path.join(FIXTURES, name), 'utf8').replace(/<!--[\s\S]*?-->/g, '')
+
+test('p51-3: the three notes whose gates were signed mid-run flag them now; the old lists flag none (honest control)', () => {
+  const cases = [
+    ['chorus-p84-7.md', 'credential', ['Cartesia', 'ElevenLabs']],
+    ['smart-slider-p8-1.md', 'credential', ['Stripe', 'live keys', 'test mode']],
+    ['thread-skill-p33-4.md', 'irreversible', ['scratch repo']],
+  ]
+  const reqs = cases.flatMap(([name]) => [{ op: 'sweep_text', text: swept(name) },
+    { op: 'hits', text: swept(name), list: 'OLD_CREDENTIAL' }, { op: 'hits', text: swept(name), list: 'OLD_IRREVERSIBLE' }])
+  const got = py(reqs)
+  cases.forEach(([name, kind, want], i) => {
+    const [s, oldCred, oldIrr] = got.slice(3 * i, 3 * i + 3)
+    assert.deepEqual(words(s[kind]), want, `${name}: the sweep flags its ${kind} by the thing it names`)
+    assert.deepEqual([oldCred, oldIrr], [[], []], `${name}: the lists before p51-3 flag nothing (the miss)`)
+  })
+})
+
+test('p51-3: each credential and irreversible thing flags by its word; near misses stay quiet', () => {
+  const flag = [
+    ['credential', 'set CARTESIA_API_KEY in the env', 'env key'], ['credential', 'FAL_KEY loads', 'env key'],
+    ['credential', 'GH_CROSS_REPO_TOKEN is missing', 'env key'], ['credential', 'a sk_test_ key', 'key prefix'],
+    ['credential', 'pk_live_ only', 'key prefix'], ['credential', 'the test-mode keys', 'test mode'],
+    ['credential', 'switch to live mode', 'live mode'], ['credential', 'no live key here', 'live keys'],
+    ['credential', 'the service-role key', 'service role'], ['credential', 'copy .env.local over', '.env'],
+    ['credential', 'the PostHog insight', 'PostHog'], ['credential', 'via Eleven Labs', 'Eleven Labs'],
+    ['irreversible', 'on a scratch private GitHub repo', 'scratch repo'], ['irreversible', 'gh repo delete it', 'gh repo'],
+    ['irreversible', 'then force-push the branch', 'force-push'], ['irreversible', 'git push --force', 'force-push'],
+    ['irreversible', 'DROP TABLE gifs', 'drop table'], ['irreversible', 'deploying the app to production', 'to production'],
+    ['irreversible', 'then deletes the throwaway staging user', 'delete the'],
+  ]
+  const quiet = ['the KEY_COUNT and KEYS map', 'a desk_test_ prefix', 'the .environment var', 'stripe the rows',
+    'supabase in lower case', 'the scratch dir', 'promote the default branch', 'delete the branch', 'a striped AWSOME']
+  const got = py([...flag.map(([, text]) => ({ op: 'sweep_text', text })), ...quiet.map((text) => ({ op: 'sweep_text', text }))])
+  flag.forEach(([kind, text, word], i) => assert.deepEqual(words(got[i][kind]), [word], text))
+  quiet.forEach((text, i) => {
+    const s = got[flag.length + i]
+    assert.deepEqual([s.credential, s.irreversible], [[], []], text)
+  })
+})
+
+test('p51-3: the credential readings still deny only the old irreversible words, never the things the sweep reads', () => {
+  const cls = { file: '~/.env.local', keys: [{ name: 'STRIPE_SECRET', prefix: 'sk_test_' }] }
+  const [scratch, wipe] = py([
+    { op: 'credential', gate: 'credential: test-mode STRIPE_SECRET (sk_test_), then delete the scratch repo', cls },
+    { op: 'credential', gate: 'credential: test-mode STRIPE_SECRET (sk_test_), then wipe it', cls },
+  ])
+  assert.deepEqual(scratch, { names: ['STRIPE_SECRET'], why: '' }, 'a thing the sweep reads never denies a test credential')
+  assert.equal(wipe.why, 'deny word: wipe', 'control: an old irreversible word still denies')
+})
+
 test('the currency amount marker: amounts flag as `$ amount`, code-only bare amounts and shell text do not', () => {
   const flag = ['about $5 of calls', 'about $ 5', 'US$5', '~A$690', 'AU$ 8.50/mo', 'NZ$5', 'C$5', 'a sub-$5 dust', '`US$5`']
   const quiet = ['`$5`', 'PATH=$PATH:bin', '$HOME/x']

@@ -302,6 +302,45 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
   assert.ok(s.cannotShow.some((c) => c.startsWith('[[fixed]] (demo) moved on with no recorded act')), JSON.stringify(s.cannotShow))
 })
 
+// p51-3: a gate Lachy signed mid-run that the sweep could have seen in its note is a miss the Reflection counts.
+test('span: sweepMiss names a signed gate the sweep could have seen; gateMisses counts only the window\'s', (t) => {
+  const h = setup(t)
+  const signed = (ts, task) => [ts, 'gate-signed', task, { standing: false, gates: 1 }]
+  emitAll(h, 'demo', byTs([
+    ...life('anchor', W(4, '00:00'), W(4, '01:00')),
+    ['2026-09-01T02:00:00Z', 'gate-signed', 'early', { standing: false, gates: 1 }],   // before the window
+    signed(W(4, '02:00'), 'missed'), signed(W(4, '03:00'), 'unseen'), signed(W(4, '04:00'), 'recorded'),
+    [W(4, '05:00'), 'gate-signed', 'standing', { standing: true, gates: 1 }],
+    signed(W(4, '06:00'), 'scanned'), signed(W(4, '07:00'), 'noteless'),
+  ]))
+  rolloutNote(h, 'demo')
+  const gates = (...lines) => `## Approved gates\n\n${lines.map((l) => `- ${l}`).join('\n')}`
+  // its Verify names the services; the drop-table line was signed another day, so only the credential is this act's
+  taskNote(h, 'missed', { body: ['**Verify:** first audio on fresh text (Cartesia and ElevenLabs); then drop table x.', '',
+    gates('credential: CARTESIA_API_KEY into the Host (approved 2026-09-04)', 'irreversible: drop table x (approved 2026-08-01)'),
+  ].join('\n') })
+  // its note names nothing; the gate's own words sit only in the sections the run wrote
+  taskNote(h, 'unseen', { body: ['**Verify:** the rig passes.', '', '## Approved plan', '', '- a scratch GitHub repo, then delete the repo', '',
+    gates('irreversible: create and delete a scratch GitHub repo (approved 2026-09-04)')].join('\n') })
+  // a declared test credential is recorded ahead and signed or asked at the stop by design
+  taskNote(h, 'recorded', { body: ['Stripe test mode end to end.', '', '## Decisions (recorded 2026-09-01)', '',
+    '- Planner: word each test-credential gate as one line', '', gates('credential: test-mode STRIPE_SECRET (sk_test_) (approved 2026-09-04)')].join('\n') })
+  taskNote(h, 'early', { body: ['Read the Supabase table.', '', gates('credential: the Supabase key (approved 2026-09-01)')].join('\n') })
+  taskNote(h, 'standing', { body: ['Stripe test mode.', '', gates('credential: x (approved 2026-09-04 under the standing approval: test credential X present in f, class from repo)')].join('\n') })
+  // its only credential words sit in leg.py's ## Security check, a section the run wrote; noteless has no note at all
+  taskNote(h, 'scanned', { body: ['**Verify:** the rig passes.', '', '## Security check', '',
+    '- /w at abc123: secret: stripe-access-token in .env, commit abc1234, line 3; rewrite from abc123', 'Ask: rotate the secret', '',
+    gates('credential: the probe key (approved 2026-09-04)')].join('\n') })
+  const s = span(h)
+  const asks = Object.fromEntries(entryOf(s, 'demo').friction.filter((x) => x.kind === 'ask').map((x) => [x.task, x.sweepMiss]))
+  assert.deepEqual(asks, { missed: ['credential'], unseen: [], recorded: [], scanned: [], noteless: [] }, 'one signOff ask per in-window sign-off; standing is no ask')
+  assert.deepEqual(s.cannotShow.filter((c) => c.includes('sweepMiss')),
+    ['[[noteless]] (demo): a gate signed with no task note read (none in Work/Tasks or Archive, or unreadable): its sweepMiss cannot be read'],
+    'only the sign-off with no note is named: its [] is no word-list miss')
+  assert.deepEqual(s.gateMisses, { count: 1, items: [{ rollout: 'demo', task: 'missed', at: '2026-09-04T02:00:00.000Z', kinds: ['credential'] }] },
+    'the sign-off before the window adds nothing, though its note names Supabase')
+})
+
 // The writers' own wording (p22-7): tune.py's auto_check gives a held trade's reason, gated_inputs.annotation() the
 // standing approval's `## Approved gates` suffix, so a change in either fails these fixtures.
 function pyOut(h, body, input) {
@@ -1063,6 +1102,7 @@ test('window_flags: one flag per block holding a row outside its window; a score
     nights: { nights: [{ morning: '2026-09-02T00:00:00.000Z' }] },
     // an overlap is one row: its first in the window, its last a second past until, printed as the one outside
     noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: '2026-09-05T00:00:00.000Z', last: '2026-09-09T14:00:01.000Z' }] },
+    gateMisses: { count: 1, items: [{ rollout: 'r', task: 'a', at: '2026-09-01T00:00:00.000Z', kinds: ['credential'] }] },
   })
   const CS = '2026-09-04T00:00:00.000Z' // chain c's Leg 1 began
   const badScores = {
@@ -1079,6 +1119,7 @@ test('window_flags: one flag per block holding a row outside its window; a score
     attention: { questions: { items: [{ id: 'q#0', at: S0 }] } },
     nights: { nights: [{ morning: U0 }] },
     noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: S0, last: U0 }] },
+    gateMisses: { count: 2, items: [{ rollout: 'r', task: 'a', at: S0, kinds: ['credential'] }, { rollout: 'r', task: 'b', at: U0, kinds: ['irreversible'] }] },
   })
   const goodScores = {
     // scored whole: an act weeks before span's since, inside the score's own window, is no flag
@@ -1101,6 +1142,7 @@ test('window_flags: one flag per block holding a row outside its window; a score
     F('attention.questions', 1, SPAN, '2026-09-01T00:00:00.000Z'),
     F('nights.nights', 1, SPAN, '2026-09-02T00:00:00.000Z'),
     F('noteOverlaps.overlaps', 1, SPAN, '2026-09-09T14:00:01.000Z'),
+    F('gateMisses.items', 1, SPAN, '2026-09-01T00:00:00.000Z'),
   ])
   assert.deepEqual(none, [], 'rows on the boundaries, a stamp in another form and a score read by its own window flag nothing')
   assert.deepEqual(unread, [], 'an unread noteOverlaps (a null block) holds no row')
@@ -2042,7 +2084,7 @@ test('rung: the built-in ladder is opus-xhigh with no note; no opus rung is exit
   assert.equal(r.stderr, '')
 })
 
-test('rung: an operator ladder whose top is fable and whose opus rung is high: both notes; no opus rung is exit 2', { skip: !hasTomllib && 'no tomllib' }, (t) => {
+test('rung: an operator ladder whose top is fable and whose opus rung is high: no note, the rung is a reference only (ADR 0079 d5); no opus rung is exit 2', { skip: !hasTomllib && 'no tomllib' }, (t) => {
   const h = setup(t)
   const p = path.join(h.home, '.config', 'thread', 'ladder.toml')
   fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -2050,11 +2092,12 @@ test('rung: an operator ladder whose top is fable and whose opus rung is high: b
   fs.writeFileSync(p, rung('opus-high', 'opus', 'high') + rung('fable-xhigh', 'fable', 'xhigh'))
   const r = ok(h, ['rung'])
   assert.deepEqual(JSON.parse(r.stdout), { rung: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh', top: 'fable-xhigh', topModel: 'fable' })
-  assert.equal(r.stderr, 'rung: the ladder\'s top rung fable-xhigh is fable; ADR 0037 d4 names Opus\nrung: opus-high\'s effort is high; ADR 0037 d4 names xhigh\n')
+  assert.equal(r.stderr, '', 'the Reflection runs on the lock\'s model, so no rung effort is noted')
   fs.writeFileSync(p, rung('fable-xhigh', 'fable', 'xhigh'))
   const none = reflect(h, ['rung'])
   assert.equal(none.status, 2)
-  assert.match(none.stderr, /has no opus rung/)
+  assert.match(none.stderr, /has no opus rung to report/)
+  assert.doesNotMatch(none.stderr, /xhigh/, 'no rule the lock retired is cited')
   fs.writeFileSync(p, 'nonsense = [\n')
   const bad = reflect(h, ['rung'])
   assert.equal(bad.status, 2)

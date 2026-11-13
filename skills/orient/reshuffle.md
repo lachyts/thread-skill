@@ -171,7 +171,8 @@ Resolving:
   runnable prompt, verify line, the shape `add-task.md` prescribes). An unbundled task quotes its
   slice of the brain dump verbatim as **His words**.
 - **(c) gates ahead** (ADR 0034) — a task the gated-input sweep flags (a hit of schedule § 3.6's
-  `gated_inputs.py sweep` that its dismissal rule keeps), clear item or not:
+  `gated_inputs.py sweep` that its dismissal rule keeps, every kind read by its name and by the thing itself, p51-3),
+  clear item or not:
   a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
   Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
   gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names

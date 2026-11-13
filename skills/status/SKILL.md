@@ -249,7 +249,8 @@ refused flag). When K is not an integer
 nothing (`--repo` only computes a path). Status reads `branch`, `worktreePath`, `readyAt`, `resumeAt`,
 `autoRevise`, `lastRound` and `lastIntegration` from it, and the automatic retry's verdict (ADR 0033): `autoRetry`,
 `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `autoRetryClass`, `autoRetryBudget`, `autoRetriesUsed`,
-`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`, `humanFix` and `answerRecorded` (ADR 0035). `humanFix` is the
+`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`, `humanFix` and `answerRecorded` (ADR 0035), and
+`settingsBlock` (ADR 0080: a settings block's {kind, contexts, fingerprint, state, due, freeNow, why}, or null). `humanFix` is the
 one act that moves a block only Lachy may move ({act, detail, handBack, label, raise}), named by the script, so status
 never re-derives a cause; it ignores K. `answerRecorded` is the live answer to the task's current block ({stamp, kind,
 form, line}), the one read status shares with execute and repair. `autoRetryWhy` is read only by § 4's count rule
@@ -536,7 +537,10 @@ closed) shows no count, and `autoRetryClass` alone never shows a count: it is se
 verdict's first rule, a refused one included. `auto-retry <autoRetriesUsed>/?` shows only when `autoRetryBudget` is
 null and `autoRetryWhy` starts `auto_retries unresolved`; any other null budget (a question, a human cause, a
 plan-block after a descope, the seeded revise's own, a gate) shows no count, and its `humanFix` is in the Needs you
-block (below). A cool-down adds `cooling until <autoRetryAfter>`. The route: the live lead (execute § 4.5 step 1.2's
+block (below). A cool-down adds `cooling until <autoRetryAfter>`. A settings block (ADR 0080, `settingsBlock`) shows
+`settings repair pending (retries at <autoRetryAfter>)` while it reads `due` and `unfreed` with a null `humanFix`
+(merge-settings.py `free`, the lead's step 1.2 *Settings repair* or repair's **settings block** row, changes the
+setting), and `merge setting changed for you on <changedAt>` once it reads `changed` from a change, or `cleared on <changedAt>, no setting changed` from a `cleared` row (another change, or origin's branch, already freed it) (`settingsBlock.why` carries either). The route: the live lead (execute § 4.5 step 1.2's
 *Automatic retry*) re-enters a set-aside task at its run or at Integration while `inputs` reads `autoRetry: true`,
 or once its `autoRetryAfter` ends; an `autoRevise: true` row is the seeded revise's, and a gate is never retried. A
 `plan-blocked` one is judged for a descope first (the lead's step 1.2, or repair § 3): a refused descope is
@@ -592,6 +596,11 @@ data (§ 2's per-task keys and each task's `inputs`), so it renders offline too.
   answer* waits for it). An answer counts only while `answerRecorded` reads it: a re-entry since (a run, an automatic
   retry, an automatic descope, a new `started:`) or a hand-back, which spends it, makes the block a fresh ask, and its
   label's `ask <k>` tells it apart;
+- each row `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py rows --tasks-dir ~/repos/obsidian/Work/Tasks --rollout <slug>`
+  reads (a read: a merge setting changed for you, ADR 0080 d5, its `unconfirmed` ones included), worded as execute
+  § 6.5 (i): `[[<task>]] merge setting changed for you: <change>: restore or dismiss with /thread:repair [[<rollout>]]`,
+  with `→ before:`, `→ after:` and `→ undo:` lines beneath it; it stays until the setting is restored or the row
+  dismissed;
 - each task whose `inputs` failed, with its failure line.
 
 A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible

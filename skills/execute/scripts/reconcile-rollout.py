@@ -899,7 +899,12 @@ Subcommands:
               standing approval: <gate> (test Login <n1, n2>, <source>)`. A spend gate is covered iff
               the limit is > 0, its total exposure is at most the limit, and (p30-8, ADR 0034's 2026-10-27
               amendment: spend is never asked ahead) this calendar month's standing-approved spend with it stays
-              within the same limit, the month line, inclusive. The month (local time, from --now) sums the
+              within the same limit, the month line, inclusive. Each limit keeps its own month line (p48-2, ADR
+              0034's 2026-11-12 amendment): a logged line counts only toward the line of the limit its `(…,
+              <source>)` tag names (a task stamp's: that task's own lines, by slug; a rollout stamp's: the lines
+              logged in that rollout note; rollouts.toml's and the built-in's: every line with its tag, so every
+              repo's file:repo lines share one), and a line with no readable tag counts toward every line (fails
+              closed). The month (local time, from --now) sums the
               `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …` lines under `## Needs-you log`
               of the --rollout note and of every note directly in the tasks dir, Archive/ and Archive/Rollouts/
               whose name is a dated rollout note's (`-rollout-<YYYY-MM-DD>[-N].md`), each once by real path, plus
@@ -1045,7 +1050,9 @@ Subcommands:
                  race-held, with no task `holdUntil`, under no held rollout hold, no `pauseRequested` and no
                  `surfaceWait` (a surface wait relaunches nothing, P41-3), read as step
                  1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
-                 with that k and auto_retry_verdict). A null `humanFix` with a future `autoRetryAfter` goes to
+                 with that k and auto_retry_verdict). A null `humanFix` whose `settingsBlock` reads `due`, state
+                 `unfreed` and `freeNow` (a settings block step 1.2's *Settings repair* frees now, ADR 0080) goes to
+                 `reentry`, ahead of the cool-down test; another null `humanFix` with a future `autoRetryAfter` goes to
                  `coolDown`; an `autoRevise` seeded revise is W only while `slotsInUse` plus the revises before it is
                  below `slotLimit`, else `capHeld` (cause `heat` at verify-slot's HEAT_HOLD or worse, `quota` while
                  `trickle.capacity` is in force with its quota, the lead's Login (step 6), inside (p36-7), `away-cap`
@@ -1215,6 +1222,8 @@ ci-timeout (ADR 0073 d4: a reason starting `merge-task` whose own cause is a CAN
 _merge_task_ci_timeout: a CI timeout, a stop on GitHub's side that retries as infra);
 no-runner (exit 4's `no-runner:` set-aside, ADR 0069 amended 2026-11-11: a required job no runner took, a stop that
 retries as infra);
+unreported-context (exit 4's `unreported-context:` set-aside, ADR 0080: a required context nothing reports on the PR's
+head while no run on it is in flight, a renamed job; a stop that retries as infra, a settings block like no-runner);
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
@@ -1779,11 +1788,19 @@ SPEND_APPROVAL_KEY = "spend_approval_usd"
 # signs in the rollout note's `## Needs-you log` as `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …`,
 # and sums this calendar month's such lines across every rollout note (ROLLOUT_NOTE_NAME_RE's dated names in the tasks
 # dir, Archive/ and Archive/Rollouts/, plus --rollout) under the machine-wide STANDING_SPEND_LOCK. The mark must follow
-# the line's first wikilink directly, so a push line that quotes it never counts.
+# the line's first wikilink directly, so a push line that quotes it never counts. Each limit keeps its own month line
+# (p48-2, ADR 0034's 2026-11-12 amendment): a line counts only toward the line of the limit its `(month to date US$<m>
+# of US$<t>, <source>)` tag names (_month_line_key), and a line whose tag STANDING_SOURCE_RE cannot read, or names no
+# STANDING_SOURCES entry, is UNTAGGED and counts toward every line (fails closed).
 NEEDS_YOU_LOG_SECTION = "## Needs-you log"
 STANDING_SPEND_MARK = "signed under the standing approval:"
 STANDING_SPEND_RE = re.compile(
-    r"^- (\d{4}-\d{2})-\d{2}T\S+ \[\[[^\]]+\]\] signed under the standing approval: US\$(\d+(?:\.\d+)?)(?:\s|$)")
+    r"^- (\d{4}-\d{2})-\d{2}T\S+ \[\[([^\]|#]+)[^\]]*\]\] signed under the standing approval: "
+    r"US\$(\d+(?:\.\d+)?)(?:\s|$)")
+STANDING_SOURCE_RE = re.compile(
+    r"\(month to date US\$\d+(?:\.\d+)?\s+of\s+US\$\d+(?:\.\d+)?,\s*([^)]+?)\)")
+STANDING_SOURCES = ("task", "rollout", "file:repo", "file:defaults", "built-in")
+UNTAGGED = ("untagged",)
 ROLLOUT_NOTE_NAME_RE = re.compile(r"-rollout-\d{4}-\d\d-\d\d(?:-\d+)?\.md\Z")
 STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
@@ -2762,6 +2779,8 @@ class _note_lock:
     lock, inside it. So is the origin-lane lock (ORIGIN_LANE_LOCK, ADR 0064): only mark-integrating takes it, with note locks and
     the Run record's flock inside it, and never nested with the trickle lock. The trigger lock (TRIGGER_LOCK, p45-7) is
     taken only by `triggers fire`, around its record, with the note's lock inside it and never across a child process.
+    The merge-settings lock (merge-settings.py, one per origin, ADR 0080) is taken outermost: note locks (Note.save) and
+    the Run record's flock go inside it, and its gh and git calls run under it; nothing takes it inside a note lock.
     No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
@@ -7560,18 +7579,29 @@ def _hand_back_note(note, now):
     review-blocked or plan-blocked note set aside at its run, or a PR-less code-writing review note -> in_progress,
     `owner:` removed and `handed_back: <now>` stamped (arm "run": the restart's mark-started consumes the marker and
     records start=hand-back). Anything else is (None, why) and the note is untouched. `said` is the stdout tail
-    after `<slug>: `. Shared by cmd_hand_back and cmd_auto_retry (p16-4), so the two re-enter a task identically."""
+    after `<slug>: `. Shared by cmd_hand_back and cmd_auto_retry (p16-4), so the two re-enter a task identically.
+    A transition also writes the `re-entered` boundary row of `## Merge settings` (ADR 0080, MERGE_SETTINGS_SECTION)
+    when the block it re-enters is a settings block (_settings_block, read before the transition) or the note already
+    holds that section: it ends the block, so a change's one re-entry is consumed, and a past block's `left` or `tried`
+    row never reads on a later one. It lands in the caller's one save with the transition, or not at all."""
     status = _status(note)
     state, at = _queue_state(note)
+    block = _settings_block(note)
+
+    def boundary():
+        if block is not None or note.has_heading(MERGE_SETTINGS_SECTION):
+            _append_settings_rows(note, [f"- {_settings_stamp(now)} re-entered"])
     if state == "set-aside" and at == "integration" and _pr(note):
         note.set("status", "review")
         note.set("ready", _stamp(now))
         note.remove("integrating")
+        boundary()
         return "integration", f"blocked->review (set aside at Integration; ready: {_stamp(now)})"
     if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
         note.set("status", "in_progress")
         note.remove("owner")
         note.set(HANDED_BACK_KEY, _stamp(now))  # the restart's mark-started records start=hand-back
+        boundary()
         return "run", f"{status}->in_progress (set aside at its run; owner: cleared)"
     return None, ("set aside at Integration with no pr:" if at == "integration"
                   else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
@@ -9431,6 +9461,8 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "ci-timeout"
     if lead and first.startswith(NO_RUNNER_OPENING):
         return "no-runner"
+    if lead and first.startswith(UNREPORTED_OPENING):
+        return "unreported-context"
     if lead and (first.startswith("merge-task") or first.startswith("base moved")
                  or first.startswith("head moved after integration")):
         return "merge-task"
@@ -10869,6 +10901,19 @@ MERGE_TASK_INFRA = ("required checks never appeared for PR", MERGE_TASK_CI_TIMEO
 # no-runner, and it retries as `infra` (_retry_class): no code fix clears it, and a runner coming back does. The first
 # line of a set-aside's reason, with `integration: ` already stripped. Pinned against merge-task.sh by the auto-retry suite.
 NO_RUNNER_OPENING = "no-runner:"
+# merge-task.sh's exit-4 set-aside for a required context that nothing reports on the PR's head while no run on it is in
+# flight (ADR 0080: a renamed job, the task's own rename included): reasonClass unreported-context, an `infra` retry like
+# no-runner. Its first line carries no sha, so _stop_key reads two heads alike. Pinned against merge-task.sh by the
+# auto-retry suite.
+UNREPORTED_OPENING = "unreported-context:"
+# The two settings blocks (ADR 0080): a required check no runner will take, and a required context no job reports. Each
+# retries as infra first (one cool-down retry, free of a budget already spent), and only at the settings point (cause
+# 23's same stop after that retry, lead-integrate.py's verdict) merge-settings.py `free` changes the merge setting that
+# asks for it (_settings_block).
+SETTINGS_OPENINGS = (NO_RUNNER_OPENING, UNREPORTED_OPENING)
+SETTINGS_RETRY_MIN = 5           # a `tried` row's wait before `free` runs again (the verdict's freeNow)
+SETTINGS_FREE_DEADLINE_MIN = 60  # a due block no `free` moved within this many minutes reads H10 (the backstop)
+SETTINGS_TRIES_MAX = 3           # the third busy or transient try in one block writes `left` (unreadable)
 # The mark each of merge-task.sh's exit-8 texts carries while GitHub settles a PR's mergeability (ADR 0069 d2): a third
 # exit 8 with it retries as `infra`. Pinned against merge-task.sh by the auto-retry suite.
 MERGE_TASK_SETTLING_MARK = "GitHub has not settled its mergeability"
@@ -10979,12 +11024,15 @@ LAST_REAL_REASON_MARK = "last real reason ("
 #   - a GitHub-side exit 1 (MERGE_TASK_GITHUB_OPENING, a _merge_task_infra_stop): checks that still never appear after a
 #     cool-down and a fresh `prepare` (ADR 0069 d3), or a required check CANCELLED again (ADR 0073 d4), will not start
 #     or finish without a person's act;
-#   - a no-runner set-aside (NO_RUNNER_OPENING): a runner gone through a cool-down does not come back by itself.
+#   - a no-runner set-aside (NO_RUNNER_OPENING): a runner gone through a cool-down does not come back by itself;
+#   - an unreported-context set-aside (UNREPORTED_OPENING): a required context no job reports after a cool-down and a
+#     fresh `prepare` will not be reported by itself. Both are settings blocks: the same stop is the settings point,
+#     where merge-settings.py frees them (ADR 0080, _settings_block).
 # Exempt, as decision 4 had them (each still bounded by the budget): `prepare: origin unreachable three times` (an
 # origin outage clears by itself, and no task integrates without origin anyway), a third exit 8 while GitHub settles
 # (MERGE_TASK_SETTLING_MARK: its lazy mergeability clears by itself, and an attempt holds the lane about 5 minutes), a
 # dead call (`workflow call failed:`) and the engine's TRANSIENT, at any stage.
-SAME_STOP_OPENINGS = (KILL_OPENING, MERGE_TASK_GITHUB_OPENING, NO_RUNNER_OPENING)
+SAME_STOP_OPENINGS = (KILL_OPENING, MERGE_TASK_GITHUB_OPENING, NO_RUNNER_OPENING, UNREPORTED_OPENING)
 
 
 def _merge_task_infra_stop(reason) -> bool:
@@ -11010,8 +11058,8 @@ def _retry_class(note) -> str:
     a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
     Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS, or a stop on GitHub's side, ADR 0069 d3:
     an Integration set-aside opening MERGE_TASK_GITHUB_OPENING whose rest is a _merge_task_infra_stop, a third exit 8
-    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 no-runner set-aside
-    (NO_RUNNER_OPENING), or a legacy own-run `merge-task` reason that is a
+    (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 settings set-asides
+    (SETTINGS_OPENINGS: no-runner and unreported-context, ADR 0080), or a legacy own-run `merge-task` reason that is a
     _merge_task_infra_stop) or `agent` (everything else: an agent can act on its feedback; every other exit-8 text
     included)."""
     kind, reason = _note_reason(note)
@@ -11025,7 +11073,7 @@ def _retry_class(note) -> str:
         return "infra"
     if kind == "integration" and first.startswith(MERGE_TASK_EXIT8_OPENING) and MERGE_TASK_SETTLING_MARK in first:
         return "infra"
-    if kind == "integration" and first.startswith(NO_RUNNER_OPENING):
+    if kind == "integration" and first.startswith(SETTINGS_OPENINGS):
         return "infra"
     if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"
@@ -11087,6 +11135,209 @@ def _same_stop(note) -> bool:
         return False
     prior = _top_run(runs)["content"].split("\n", 1)[0].strip()
     return prior.lower().startswith(INTEGRATION_PREFIX) and _stop_key(prior) == _stop_key(first)
+
+
+# ---- the merge settings a stuck rollout changes (ADR 0080, p47-9) --------------------------------------------------
+# A task note's `## Merge settings` section: the one record of what merge-settings.py did for a settings block of this
+# task (SETTINGS_OPENINGS), with each change's undo. This comment is the grammar's one copy. Rows are read in note
+# order, and position is the order: a stamp (datetime.isoformat(timespec="seconds"), local time with its offset) is read
+# only for display and for the deadline's latest stamp, never to tell which row is newer. <fp> is a block's fingerprint
+# (_settings_block: _sha12 of its kind and sorted contexts), <id> a change's 12-hex id.
+#   - <stamp> changing <id> <fp>: <source> <owner/repo>@<branch>[ ruleset <rid>]: <removed|replaced> <json C>[ -> <json C'>]
+#     followed by its three indented lines, each written in the same save:
+#       <id> before: <json>      the setting's body before (the write's own shape, merge-settings.py's _body)
+#       <id> after: <json>       the body written
+#       <id> undo: <command>     the one command that restores `before`
+#     written and saved BEFORE the write, so a crash between the write and its confirmation leaves the undo on the note;
+#   - <stamp> changed <id>            the write read back as `after`;
+#   - <stamp> void <id>: <why>        the write did not take (live reads `before`): never listed as unconfirmed;
+#   - <stamp> cleared <fp>: <why>     no write was needed: positive evidence that one re-entry meets the block freed;
+#   - <stamp> left <fp>: <cause>: <why>     `free` left the block for Lachy (H13); cause not-owned, no-rights,
+#                                     no-change, not-recorded or unreadable;
+#   - <stamp> tried <fp>: transient|busy: <text>   a try that read nothing decisive (a 5xx, a busy lock);
+#   - <stamp> re-entered              the block boundary: the transition a hand-back or an automatic retry made
+#                                     (_hand_back_note), written in the same save;
+#   - <stamp> restored <id> and <stamp> dismissed <id>   Lachy's word on a change (/thread:repair 3i).
+# Writers: merge-settings.py writes every row but `re-entered`, which only _hand_back_note writes; both go through
+# _append_settings_rows (Note.apply), never append_line, whose dedupe would drop a second change's identical indented
+# line. Readers: _settings_block (the verdict, `free`'s idempotence, the boundary) and merge-settings.py `rows`.
+MERGE_SETTINGS_SECTION = "## Merge settings"
+SETTINGS_ROW_RE = re.compile(r"^- (\S+) (changing|changed|void|cleared|left|tried|re-entered|restored|dismissed)\b ?(.*)$")
+SETTINGS_SUB_RE = re.compile(r"^\s+([0-9a-f]{12}) (before|after|undo): (.*)$")
+SETTINGS_CHANGING_RE = re.compile(r"^([0-9a-f]{12}) ([0-9a-f]{12}): (protection|ruleset) (\S+?)@(\S+)(?: ruleset (\d+))?: "
+                                  r"(removed|replaced) (.*)$")
+NO_RUNNER_JOB_RE = re.compile(r'required job "(.*?)" queued')
+UNREPORTED_CHECK_RE = re.compile(r'required check ("(?:[^"\\]|\\.)*")')
+
+
+def _settings_kind(first):
+    """`no-runner` or `unreported-context` for a reason's first line (integration: dropped), else None."""
+    if first.startswith(NO_RUNNER_OPENING):
+        return "no-runner"
+    if first.startswith(UNREPORTED_OPENING):
+        return "unreported-context"
+    return None
+
+
+def _settings_contexts(kind, first):
+    """The required contexts a settings block's first line names, in its order, deduplicated: a no-runner reason's
+    `required job "<name>" queued` names, an unreported-context reason's JSON-quoted name after `required check `."""
+    if kind == "no-runner":
+        found = NO_RUNNER_JOB_RE.findall(first)
+    else:
+        found = []
+        for q in UNREPORTED_CHECK_RE.findall(first):
+            try:
+                v = json.loads(q)
+            except ValueError:
+                continue
+            if isinstance(v, str):
+                found.append(v)
+    return list(dict.fromkeys(c for c in found if c))
+
+
+def _settings_fingerprint(kind, contexts):
+    return _sha12(kind + "\n" + "\n".join(sorted(contexts)))
+
+
+def _settings_rows(note):
+    """The `## Merge settings` rows in note order: [{i, stamp, verb, id, fp, text, line, ...}]. A `changing` row also
+    carries source, repo, branch, ruleset, change, context, newContext (None when its head does not parse) and its
+    before, after and undo lines; `void`, `cleared`, `left` and `tried` carry `why` (a `left` row its `cause` too)."""
+    found = note._section_bounds(MERGE_SETTINGS_SECTION)
+    if found is None:
+        return []
+    lines, start, end = found
+    rows = []
+    for raw in lines[start + 1:end]:
+        sub = SETTINGS_SUB_RE.match(raw)
+        if sub and rows and rows[-1]["verb"] == "changing" and rows[-1]["id"] == sub.group(1):
+            rows[-1][sub.group(2)] = sub.group(3)
+            continue
+        m = SETTINGS_ROW_RE.match(raw.rstrip())
+        if not m:
+            continue
+        stamp, verb, rest = m.group(1), m.group(2), m.group(3)
+        row = {"i": len(rows), "stamp": stamp, "verb": verb, "id": None, "fp": None, "text": rest, "line": raw.rstrip(),
+               "why": None, "cause": None}
+        if verb == "changing":
+            c = SETTINGS_CHANGING_RE.match(rest)
+            parts = rest.split(" ", 2)
+            row["id"] = parts[0] if parts and re.fullmatch(r"[0-9a-f]{12}", parts[0]) else None
+            row["fp"] = parts[1].rstrip(":") if len(parts) > 1 else None
+            row.update(source=None, repo=None, branch=None, ruleset=None, change=None, context=None, newContext=None,
+                       before=None, after=None, undo=None)
+            if c:
+                row.update(source=c.group(3), repo=c.group(4), branch=c.group(5), ruleset=c.group(6),
+                           change=c.group(7))
+                dec, tail = json.JSONDecoder(), c.group(8)
+                try:
+                    row["context"], at = dec.raw_decode(tail)
+                    if tail[at:].startswith(" -> "):
+                        row["newContext"], _ = dec.raw_decode(tail[at + 4:])
+                except ValueError:
+                    pass
+        elif verb in ("changed", "restored", "dismissed"):
+            row["id"] = rest.strip() or None
+        elif verb == "void":
+            head, _, why = rest.partition(": ")
+            row["id"], row["why"] = head.strip() or None, why
+        elif verb in ("cleared", "left", "tried"):
+            head, _, why = rest.partition(": ")
+            row["fp"] = head.strip() or None
+            if verb == "cleared":
+                row["why"] = why
+            else:
+                cause, _, text = why.partition(": ")
+                row["cause"], row["why"] = cause, text
+        rows.append(row)
+    return rows
+
+
+def _settings_block(note):
+    """A note's settings block (ADR 0080), or None: blocked and set aside at Integration, its latest block's first line
+    opening one of SETTINGS_OPENINGS. Otherwise {kind, contexts, fingerprint, state, cause, why, row, changedAt,
+    cleared, reentry, tries, lastTried, pending, boundary}, read off `## Merge settings` (the grammar above) by position,
+    with `cut` the index of its last `re-entered` row (none: -1):
+      - a `restored <id>` row, anywhere, for any `changing <id> <fp>` of this fingerprint: state `left`, cause
+        `restored` (Lachy restored it: never changed again);
+      - else the last `left <fp>` row after `cut`: state `left`, its cause and why (a `left` row before `cut` was a past
+        block's, so his hand-back of it lets `free` run again);
+      - else a `changed <id>` row of this fingerprint's change, or a `cleared <fp>` row, anywhere: state `changed`,
+        `changedAt` its stamp, `reentry` true only while no `re-entered` row follows it (the one re-entry it earns),
+        a dismissed id included; `cleared` is the latest such row's why when it is a `cleared` row (no setting
+        changed, so its `why` and the verdict's H10 never say one did), else None;
+      - else `unfreed`: `tries` and `lastTried` from its `tried <fp>` rows after `cut`; `pending` the id of a `changing`
+        row of this fingerprint with no `changed` or `void` row (a crash between a write and its confirmation).
+    `boundary` is the last `re-entered` row's stamp (the deadline's anchor, lead-integrate.py)."""
+    if _status(note) != "blocked" or _queue_state(note) != ("set-aside", "integration"):
+        return None
+    kind, reason = _note_reason(note)
+    first = reason.split("\n", 1)[0].strip()
+    block = _settings_kind(first) if kind == "integration" else None
+    if block is None:
+        return None
+    contexts = _settings_contexts(block, first)
+    fp = _settings_fingerprint(block, contexts)
+    rows = _settings_rows(note)
+    cuts = [r["i"] for r in rows if r["verb"] == "re-entered"]
+    cut = cuts[-1] if cuts else -1
+    out = {"kind": block, "contexts": contexts, "fingerprint": fp, "state": "unfreed", "cause": None, "why": None,
+           "row": None, "changedAt": None, "cleared": None, "reentry": False, "tries": 0, "lastTried": None,
+           "pending": None, "boundary": rows[cut]["stamp"] if cut >= 0 else None}
+    mine = {r["id"]: r for r in rows if r["verb"] == "changing" and r["fp"] == fp and r["id"]}
+    restored = [r for r in rows if r["verb"] == "restored" and r["id"] in mine]
+    if restored:
+        r = restored[-1]
+        out.update(state="left", cause="restored", why=f"you restored it on {r['stamp']}", row=r["line"])
+        return out
+    left = [r for r in rows if r["verb"] == "left" and r["fp"] == fp and r["i"] > cut]
+    if left:
+        r = left[-1]
+        out.update(state="left", cause=r["cause"], why=r["why"], row=r["line"])
+        return out
+    done = [r for r in rows if (r["verb"] == "changed" and r["id"] in mine) or (r["verb"] == "cleared" and r["fp"] == fp)]
+    if done:
+        r = done[-1]
+        cleared = (r["why"] or "no write was needed") if r["verb"] == "cleared" else None
+        out.update(state="changed", row=r["line"], changedAt=r["stamp"], cleared=cleared,
+                   why=(f"cleared on {r['stamp']}, no setting changed: {cleared}" if cleared is not None
+                        else f"changed for you on {r['stamp']}"),
+                   reentry=not any(x["verb"] == "re-entered" and x["i"] > r["i"] for x in rows))
+        return out
+    tried = [r for r in rows if r["verb"] == "tried" and r["fp"] == fp and r["i"] > cut]
+    closed = {r["id"] for r in rows if r["verb"] in ("changed", "void")}
+    pending = [i for i in mine if i not in closed]
+    out.update(tries=len(tried), lastTried=tried[-1]["stamp"] if tried else None, pending=pending[-1] if pending else None,
+               row=tried[-1]["line"] if tried else None)
+    return out
+
+
+def _append_settings_rows(note, lines):
+    """Append `lines` (row lines and their indented lines, verbatim) to `## Merge settings` as one journaled edit
+    (Note.apply), after the section's last non-blank line, creating the section at the note's end when it is absent.
+    Never append_line: its dedupe would drop a repeated indented line. The caller saves the note."""
+    def put(n, block):
+        found = n._section_bounds(MERGE_SETTINGS_SECTION)
+        if found is None:
+            body = n._body.rstrip("\n")
+            n._set_body_lines((body + ("\n\n" if body else "") + MERGE_SETTINGS_SECTION + "\n").split("\n")
+                              + list(block) + [""])
+            return
+        ls, start, end = found
+        filled = [i for i in range(start + 1, end) if ls[i].strip()]
+        if not filled:
+            n._set_body_lines(ls[:start + 1] + [""] + list(block) + [""] + ls[end:])
+            return
+        j = filled[-1] + 1
+        tail = [""] if j == len(ls) or ls[j].strip() else []
+        n._set_body_lines(ls[:j] + list(block) + tail + ls[j:])
+    note.apply(put, list(lines))
+
+
+def _settings_stamp(now):
+    """A `## Merge settings` row's stamp: local time to the second, with its offset."""
+    return now.astimezone().isoformat(timespec="seconds")
 
 
 def _stamp_value(raw, minimum):
@@ -13185,12 +13436,28 @@ def _bounce_why(verdict, gi):
             f"standing approval signs none of its gates; the pricer reads: {reading}")
 
 
-def _standing_month_spend(text, month) -> Decimal:
-    """The standing approvals one rollout note's text logs for `month` (YYYY-MM): the STANDING_SPEND_RE lines under
-    every `## Needs-you log` heading (line.strip() equal to it), each to the next line starting `## ` (Note.section_text's
-    bounds), summed. A line outside the section, of another month, or with the mark anywhere but right after its first
+def _month_line_key(source, slug, note_real):
+    """The month line a standing signing under a limit from `source` belongs to (p48-2, ADR 0034's 2026-11-12
+    amendment): a task stamp's is that task's own, ("task", <slug casefolded>); a rollout stamp's is that rollout's,
+    ("rollout", <the real path of the rollout note the line is logged in>); rollouts.toml's and the built-in's are one
+    shared line per tag, (<source>,). file:repo lines carry no repo, so every repo's share one line (over-counts, fails
+    closed)."""
+    if source == "task":
+        return ("task", slug.strip().casefold())
+    if source == "rollout":
+        return ("rollout", note_real)
+    return (source,)
+
+
+def _standing_month_spend(text, month, note_real) -> dict:
+    """The standing approvals one rollout note's text logs for `month` (YYYY-MM), per month line: {_month_line_key:
+    Decimal} over the STANDING_SPEND_RE lines under every `## Needs-you log` heading (line.strip() equal to it), each to
+    the next line starting `## ` (Note.section_text's bounds). A line counts toward the key its `(…, <source>)` tag
+    (STANDING_SOURCE_RE, read straight after the amount) names, with its own slug and `note_real`, the note's real
+    path; a line with no readable tag, or one outside STANDING_SOURCES, counts under UNTAGGED, which every line adds
+    (fails closed). A line outside the section, of another month, or with the mark anywhere but right after its first
     wikilink (a push line quoting it) never counts."""
-    total, on = Decimal(0), False
+    totals, on = {}, False
     for line in text.split("\n"):
         if line.strip() == NEEDS_YOU_LOG_SECTION:
             on = True
@@ -13201,8 +13468,11 @@ def _standing_month_spend(text, month) -> Decimal:
         if on:
             m = STANDING_SPEND_RE.match(line)
             if m and m.group(1) == month:
-                total += Decimal(m.group(2))
-    return total
+                tag = STANDING_SOURCE_RE.match(line, m.end())
+                source = tag.group(1).strip() if tag else None
+                key = _month_line_key(source, m.group(2), note_real) if source in STANDING_SOURCES else UNTAGGED
+                totals[key] = totals.get(key, Decimal(0)) + Decimal(m.group(3))
+    return totals
 
 
 class _StandingLedger:
@@ -13210,31 +13480,38 @@ class _StandingLedger:
     2026-10-27 amendment), built once per call and used lazily: only a gate that first prices under its limit asks for
     it, so an off limit, a bounced note or an over-limit gate never reads or locks anything.
 
-    spent() -> (Decimal, None) or (None, why). On first need it takes the standing-spend lock (_spend_lock_path; never
-    on --dry-run) and holds it until close(), from the month read to the call's last save, then sums
+    spent(key) -> (Decimal, None) or (None, why), for one month line (_month_line_key, p48-2): that line's own logged
+    lines plus every UNTAGGED one (fail closed). On first need it takes the standing-spend lock (_spend_lock_path; never
+    on --dry-run) and holds it until close(), from the month read to the call's last save, then merges, per key,
     _standing_month_spend over the --rollout note and every file directly in the tasks dir, Archive/ and
     Archive/Rollouts/ whose name matches ROLLOUT_NOTE_NAME_RE (schedule step 6's names, `-N` ordinals included), each
     once by real path and read fresh from disk. A missing directory is skipped; a note that cannot be read, or a
     directory that exists but cannot be listed, is (None, why), cached, so every later gate asks with it. A lock not
     taken in time raises OSError, cached too, so every later slug that needs the month read fails at once with the same
-    message; a slug that never needs it is still written or asked. add() keeps the call's own running total (on
-    --dry-run too, so its lines read as a real run's), which spent() includes."""
+    message; a slug that never needs it is still written or asked. add(key, usd) keeps the call's own running total per
+    key (on --dry-run too, so its lines read as a real run's), which spent(key) includes.
+
+    spent() with no key is the whole month in one sum, every logged line and every addition of the call counted once,
+    as before p48-2: unfinished-rollout.py's needs-you reading (p48-1) until p48-5
+    (thread-skill-p48-5-needs-you-reads-each-limits-own-month-line) moves it to its own limit's line. It never
+    under-counts (fails closed), so until then needs-you can list a gate approve-gates signs; _approve_standing always
+    passes a key."""
 
     def __init__(self, tasks_dir, rollout_path, month, dry_run):
         self.tasks_dir, self.rollout_path = Path(tasks_dir), Path(rollout_path)
         self.month, self.dry_run = month, dry_run
         self._lock = self._lock_error = self._base = self._why = None
-        self._added = Decimal(0)
+        self._added = {}
 
     def _read(self):
-        """(sum, None) over the month's notes, or (None, why) on the first one it cannot read."""
+        """({key: sum}, None) over the month's notes, or (None, why) on the first one it cannot read."""
         files, seen = [], set()
 
         def take(path):
             real = os.path.realpath(str(path))
             if real not in seen:
                 seen.add(real)
-                files.append(path)
+                files.append((path, real))
 
         take(self.rollout_path)
         for d in (self.tasks_dir, self.tasks_dir / "Archive", self.tasks_dir / "Archive" / "Rollouts"):
@@ -13247,16 +13524,17 @@ class _StandingLedger:
             for name in names:
                 if ROLLOUT_NOTE_NAME_RE.search(name) and (d / name).is_file():
                     take(d / name)
-        total = Decimal(0)
-        for path in files:
+        totals = {}
+        for path, real in files:
             try:
                 text = Path(path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as e:
                 return None, f"cannot read {path} for this month's standing approvals ({e})"
-            total += _standing_month_spend(text, self.month)
-        return total, None
+            for key, usd in _standing_month_spend(text, self.month, real).items():
+                totals[key] = totals.get(key, Decimal(0)) + usd
+        return totals, None
 
-    def spent(self):
+    def spent(self, key=None):
         if self._lock_error is not None:
             raise OSError(self._lock_error)
         if self._base is None and self._why is None:
@@ -13271,10 +13549,13 @@ class _StandingLedger:
             self._base, self._why = self._read()
         if self._why:
             return None, self._why
-        return self._base + self._added, None
+        if key is None:   # the whole month, every line once; p48-5 removes this form along with its one caller
+            return sum(self._base.values(), Decimal(0)) + sum(self._added.values(), Decimal(0)), None
+        untagged = self._base.get(UNTAGGED, Decimal(0)) if key != UNTAGGED else Decimal(0)
+        return self._base.get(key, Decimal(0)) + untagged + self._added.get(key, Decimal(0)), None
 
-    def add(self, usd):
-        self._added += usd
+    def add(self, key, usd):
+        self._added[key] = self._added.get(key, Decimal(0)) + usd
 
     def close(self):
         if self._lock is not None:
@@ -13283,8 +13564,8 @@ class _StandingLedger:
 
 
 def _month_why(month, total, limit, gi):
-    """Why a gate the per-gate limit covers still asks: this month's standing approvals would pass the month line, the
-    same resolved limit (inclusive, as covered() is)."""
+    """Why a gate the per-gate limit covers still asks: this month's standing approvals on the same resolved limit's own
+    month line (_month_line_key) would pass that limit (inclusive, as covered() is)."""
     return (f"this month's ({month}) standing approvals would reach US${gi.format_usd(total)} with this gate, past the "
             f"US${gi.format_usd(limit['value'])} month line ({limit['source']})")
 
@@ -13339,18 +13620,18 @@ def _approve_standing(args) -> int:
     approval covers, leave the rest pending with an ASK line. A spend gate is covered when its standing reading
     (gated_inputs.covered(): the full reading, else the cap-only one, p37-4, else the widest one, p48-4) prices within
     the resolved limit and, unless it is already in `## Approved gates`, when this calendar month's standing approvals
-    (_StandingLedger, the month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A
-    credential gate on a note the plan judge never bounced is covered when it reads as the repo's declared test
-    credential, the rollout's env_bootstrap refreshes the declared file with a plain cp, and each key it names is in
-    that file with its declared form (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line,
-    no spend lock, and the limit is never resolved for it, so the class is its own switch. A credential gate holding a
-    Login word and no env token (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered
-    when every Login it names is a declared test Login and the reading finds nothing beside it
-    (gated_inputs.login_reading: no deny word, env key, other credential word, `@` or conjunction), under the same
-    no-limit rules. The limit resolves lazily, at a slug's first gate that is not such a credential gate. A slug's new
-    spend signings are logged in the rollout note's `## Needs-you log` first, then its task note is written, so a
-    failure between the two over-counts (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held
-    standing-spend lock included)."""
+    on that limit's own month line (_StandingLedger, keyed by _month_line_key: ADR 0034's 2026-10-27 amendment, and
+    p48-2's 2026-11-12 one) stay within the same limit with it. A credential gate on a note the plan judge never
+    bounced is covered when it reads as the repo's declared test credential, the rollout's env_bootstrap refreshes the
+    declared file with a plain cp, and each key it names is in that file with its declared form
+    (gated_inputs.credential_covered): no ledger, no month line, no Needs-you line, no spend lock, and the limit is
+    never resolved for it, so the class is its own switch. A credential gate holding a Login word and no env token
+    (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered when every Login it names is
+    a declared test Login and the reading finds nothing beside it (gated_inputs.login_reading: no deny word, env key,
+    other credential word, `@` or conjunction), under the same no-limit rules. The limit resolves lazily, at a slug's
+    first gate that is not such a credential gate. A slug's new spend signings are logged in the rollout note's
+    `## Needs-you log` first, then its task note is written, so a failure between the two over-counts (fails closed).
+    Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock included)."""
     if not args.rollout:
         print("ERROR: --standing needs --rollout", file=sys.stderr)
         return 1
@@ -13407,6 +13688,7 @@ def _approve_standing(args) -> int:
             # covered: (gate, annotation, detail); slug_err (the limit's, or the class's resolver error) and lock_err
             # stop the slug with nothing written.
             covered, left, logged, slug_new, lock_err, slug_err, limit = [], [], [], Decimal(0), None, None, None
+            line_key = None   # the limit's own month line (_month_line_key), once the limit resolves
             for g in gates:
                 if not bounced and gi.gate_kind(g) == "credential" and gi.has_login_phrase(g):
                     # p37-4: a declared test Login (machine-wide [defaults] test_logins); no limit, ledger, month line,
@@ -13454,6 +13736,7 @@ def _approve_standing(args) -> int:
                     if err:
                         slug_err = err
                         break
+                    line_key = _month_line_key(limit["source"], slug, os.path.realpath(str(rollout_path)))
                 verdict = gi.covered(g, limit["value"])
                 if bounced:
                     left.append((g, _bounce_why(verdict, gi)))
@@ -13472,10 +13755,10 @@ def _approve_standing(args) -> int:
                 if norm in approved:
                     covered.append((g, spend_ann, spend_detail))   # signed already, or listed twice: no month check, no log
                     continue
-                # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals, the earlier slugs
-                # and gates of this call included, plus this gate, within the same limit.
+                # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals on this limit's
+                # own line (p48-2), the earlier slugs and gates of this call on it included, plus this gate, within it.
                 try:
-                    spent, why = ledger.spent()
+                    spent, why = ledger.spent(line_key)
                 except OSError as e:
                     lock_err = e
                     break
@@ -13511,7 +13794,7 @@ def _approve_standing(args) -> int:
                     errors.append(f"{slug}: cannot log the standing approval in [[{rollout_path.stem}]]: {e}; "
                                   "nothing written")
                     continue
-                ledger.add(slug_new)
+                ledger.add(line_key, slug_new)
             if covered:
                 existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
                 have = {_norm_gate(l) for l in existing}
@@ -16256,6 +16539,12 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
                 raise MovingError(f"inputs on [[{e['slug']}]] raised {type(ex).__name__}: {ex}")
             if v.get("humanFix") is not None:
                 continue
+            sb = v.get("settingsBlock") or {}
+            if sb.get("due") and sb.get("state") == "unfreed" and sb.get("freeNow"):
+                # A due settings block step 1.2's *Settings repair* frees now (ADR 0080): the lead's work, never a
+                # cool-down, though its verdict carries the deadline as autoRetryAfter.
+                work["reentry"].append(e["slug"])
+                continue
             after = _parse_ts(v["autoRetryAfter"]) if v.get("autoRetryAfter") else None
             if after is not None and after > now:
                 work["coolDown"].append({"slug": e["slug"], "class": v.get("autoRetryClass"), "until": v["autoRetryAfter"]})
@@ -16693,7 +16982,8 @@ def _parser():
     ag.add_argument("--standing", action="store_true",
                     help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
                          "rollouts.toml, built-in 0 = off), and while this calendar month's standing-approved spend "
-                         "(every rollout note's ## Needs-you log) stays within the same limit; each signing is logged "
+                         "(every rollout note's ## Needs-you log) stays within that limit's own month line; each "
+                         "signing is logged "
                          "there (a gate the full reading cannot price is priced from its cap alone, p37-4, and one "
                          "neither prices at its widest, p48-4); the "
                          "credential gates the repo's declared test-credential class covers (rollouts.toml "
