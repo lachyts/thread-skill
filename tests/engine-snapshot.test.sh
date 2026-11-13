@@ -527,6 +527,11 @@ refused "lead-integrate prepare" gt1 g1
 ok "$(git -C "$T/target" rev-parse HEAD)|$(git -C "$T/target" rev-list --merges --count HEAD)" "$th|0" "G1: … the task tree's HEAD unchanged, no merge"
 echo "own reason" | python3 "$P/skills/execute/scripts/lead-integrate.py" set-aside --note "$TASKS/gt1.md" --kind own > "$T/out" 2> "$T/err"; rc=$?
 err=$(cat "$T/err"); refused "lead-integrate set-aside" gt1; ok "$(cat "$T/out")" "" "G1: … set-aside printed no row"
+# merge-settings.py (ADR 0080): free, restore and dismiss are guarded; rows is a read, exempt (G2)
+py "$P" skills/execute/scripts/merge-settings.py free --note "$TASKS/gt1.md" --repo "$T/target" --tasks-dir "$TASKS"
+refused "merge-settings free" gt1 g1
+py "$P" skills/execute/scripts/merge-settings.py dismiss --note "$TASKS/gt1.md" --id aaaaaaaaaaaa --tasks-dir "$TASKS"
+refused "merge-settings dismiss" gt1 g1
 rm -f "$T/gh.log"
 out=$(bash "$P/skills/execute/scripts/merge-task.sh" "$T/target" https://github.com/o/r/pull/7 "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" 2>"$T/err"); rc=$?
 err=$(cat "$T/err"); refused "merge-task" gt1 g1
@@ -538,6 +543,8 @@ py "$B" skills/execute/scripts/leg.py next --rollout "$TASKS/sg1.md" --tasks-dir
 py "$B" skills/reflect/scripts/close-score.py --rollout "$TASKS/g1.md" --close completion; hasnt "$err" "engine-snapshot:" "G1: from B: close-score passes"
 py "$B" skills/execute/scripts/lead-integrate.py prepare --repo "$T/target" --slug gt1 --default master --note "$TASKS/gt1.md"
 hasnt "$err" "engine-snapshot:" "G1: from B: lead-integrate prepare passes"
+py "$B" skills/execute/scripts/merge-settings.py free --note "$TASKS/gt1.md" --repo "$T/target" --tasks-dir "$TASKS"
+hasnt "$err" "engine-snapshot:" "G1: from B: merge-settings free passes the guard"; ok "$rc" 5 "G1: … to its own reading (no settings block: 5)"
 echo "own reason" | python3 "$B/skills/execute/scripts/lead-integrate.py" set-aside --note "$TASKS/gt1.md" --kind own > "$T/setaside.row" 2> "$T/err"
 hasnt "$(cat "$T/err")" "engine-snapshot:" "G1: from B: set-aside passes"
 py "$B" skills/execute/scripts/reconcile-rollout.py approve-gates --tasks gt1 --tasks-dir "$TASKS"
@@ -573,6 +580,7 @@ py "$P" skills/execute/scripts/step-boundary.py stands --rollout "$TASKS/g1.md";
 py "$P" skills/execute/scripts/leg.py status --rollout "$TASKS/sg1.md" --tasks-dir "$TASKS"; pass "leg.py status"
 py "$P" skills/execute/scripts/lead-integrate.py inputs --note "$TASKS/gt1.md"; pass "lead-integrate inputs"
 py "$P" skills/execute/scripts/lead-integrate.py plan --note "$TASKS/gt1.md"; pass "lead-integrate plan"
+py "$P" skills/execute/scripts/merge-settings.py rows --note "$TASKS/gt1.md"; pass "merge-settings rows"
 rm -f "$T/gh.log"
 out=$(bash "$P/skills/execute/scripts/merge-task.sh" "$T/target" https://github.com/o/r/pull/8 "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" 2>&1)
 hasnt "$out" "engine-snapshot:" "G2: merge-task on a PR no live note names passes"; ok "$([ -s "$T/gh.log" ] && echo called)" called "G2: … and reaches gh"

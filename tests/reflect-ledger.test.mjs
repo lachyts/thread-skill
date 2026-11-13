@@ -405,18 +405,20 @@ test('L1: a stop open across a window with no line in it is counted on a live ro
   assert.deepEqual([closed.row.hours, closed.row.top], [H0, null], 'archived: the stop ends at the last line, before the window')
 })
 
-test('L1: a wait still open on a no-runner set-aside reads stalls/cool-down, never a hand-back', (t) => {
-  const h = setup(t)
-  emitAll(h, 'l-github', [
-    [T('11', '20:00'), 'slot-taken', 'n1', S('start')],
-    [T('11', '21:00'), 'set-aside', 'n1', { stage: 'integrate', reasonClass: 'no-runner', setAsideAt: 'integration' }],
-    [T('11', '21:00'), 'slot-freed', 'n1', { outcome: 'set-aside' }],
-    [T('11', '21:00'), 'idle-slots', null, idle('awaiting-hand-back')],
-  ])
-  rolloutNote(h, 'l-github')
-  const b = ledgerCli(h, LSINCE, LUNTIL)
-  assert.deepEqual(b.row.byCause.stalls, { 'cool-down': 3 }, b.flags.join('\n'))
-})
+for (const reasonClass of ['no-runner', 'unreported-context']) {
+  test(`L1: a wait still open on a ${reasonClass} set-aside reads stalls/cool-down, never a hand-back`, (t) => {
+    const h = setup(t)
+    emitAll(h, 'l-github', [
+      [T('11', '20:00'), 'slot-taken', 'n1', S('start')],
+      [T('11', '21:00'), 'set-aside', 'n1', { stage: 'integrate', reasonClass, setAsideAt: 'integration' }],
+      [T('11', '21:00'), 'slot-freed', 'n1', { outcome: 'set-aside' }],
+      [T('11', '21:00'), 'idle-slots', null, idle('awaiting-hand-back')],
+    ])
+    rolloutNote(h, 'l-github')
+    const b = ledgerCli(h, LSINCE, LUNTIL)
+    assert.deepEqual(b.row.byCause.stalls, { 'cool-down': 3 }, b.flags.join('\n'))
+  })
+}
 
 test('L1 controls: a live serial chain and a superseding rollout not yet run price 0 h, flagged; re-shaped parallel, the chain prices from its first engine line; the carried rollout from its first Slot', (t) => {
   const h = setup(t)

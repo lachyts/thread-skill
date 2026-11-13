@@ -17,7 +17,8 @@
 // p21-7's reflect.py, which writes reflections.jsonl (and folds through `span --fold`), and p25-4's estate-dispatch.py,
 // whose `log` writes grades.jsonl. p29-10's ledger adds verify-slot.py (an agent suite's lines), step-boundary.py (a room
 // stop's) and the Stop hook, hooks/rollout-stop-driver.py (a halt's). ADR 0067 d6 adds the PreToolUse hook,
-// hooks/vault-note-overlap.py, which writes overlaps.jsonl's note-overlap lines.
+// hooks/vault-note-overlap.py, which writes overlaps.jsonl's note-overlap lines. ADR 0080 adds merge-settings.py, whose
+// setting-changed and setting-left lines land in the rollout's record.
 // Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -29,7 +30,7 @@ const SELF = `tests/contracts/${path.basename(fileURLToPath(import.meta.url))}`
 // A contract test whose only path.join-and-spawn of an engine script is a control string (its own matcher's fixture),
 // never a run: verify-slot-hermetic.test.mjs binds verify-slot.py and spawns python3 only inside quoted controls.
 const CONTROL_ONLY = ['tests/contracts/verify-slot-hermetic.test.mjs']
-const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py|verify-slot\\.py|step-boundary\\.py|rollout-stop-driver\\.py|vault-note-overlap\\.py)'
+const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py|verify-slot\\.py|step-boundary\\.py|rollout-stop-driver\\.py|vault-note-overlap\\.py|merge-settings\\.py)'
 // p29-10: a script under skills/*/scripts, or a hook under hooks/ (the Stop hook records each halt, the PreToolUse hook
 // each Note overlap).
 const DIRS = '(?:scripts|hooks)'

@@ -1511,6 +1511,51 @@ test('the ledger kinds are refused, exit 2 and nothing written, when malformed',
   }
 })
 
+// ADR 0080 (p47-9): merge-settings.py's four kinds, one line per change of a repo's merge settings and per verdict on it.
+const CHANGED = { id: 'a'.repeat(12), repo: 'o/r', branch: 'master', source: 'ruleset', rulesetId: 42, block: 'unreported-context',
+  change: 'replaced', context: 'build', newContext: 'build-and-test', before: '{"rules":[]}', after: '{"rules":[]}',
+  undo: "printf '%s' '{}' | gh api …", fingerprint: 'b'.repeat(12) }
+const LEFT = { repo: 'o/r', block: 'no-runner', cause: 'no-rights', why: 'this gh token has no admin rights on o/r', fingerprint: 'b'.repeat(12) }
+
+test('the merge-settings kinds (ADR 0080) land with their fields, a task required', (t) => {
+  const home = tmpHome(t)
+  const emit = (kind, f) => emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emit('setting-changed', CHANGED)
+  emit('setting-changed', { ...CHANGED, source: 'protection', rulesetId: undefined, change: 'removed', newContext: undefined, block: 'no-runner' })
+  emit('setting-left', LEFT)
+  emit('setting-restored', { id: 'a'.repeat(12) })
+  emit('setting-dismissed', { id: 'a'.repeat(12) })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.kind, l.task]), [['setting-changed', 't'], ['setting-changed', 't'], ['setting-left', 't'],
+    ['setting-restored', 't'], ['setting-dismissed', 't']])
+  assert.deepEqual([all[0].rulesetId, all[0].newContext, 'rulesetId' in all[1], all[2].cause], [42, 'build-and-test', false, 'no-rights'])
+})
+
+test('the merge-settings kinds are refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const drop = (o, k) => { const c = { ...o }; delete c[k]; return c }
+  const cases = [
+    ['setting-changed', 'no task', CHANGED, ['--rollout', 'r']],
+    ['setting-changed', 'an id that is not 12 hex', { ...CHANGED, id: 'abc' }],
+    ['setting-changed', 'a bad source', { ...CHANGED, source: 'branch' }],
+    ['setting-changed', 'a bad block', { ...CHANGED, block: 'merge-gate' }],
+    ['setting-changed', 'a bad change', { ...CHANGED, change: 'loosened' }],
+    ['setting-changed', 'no undo', drop(CHANGED, 'undo')],
+    ['setting-changed', 'rulesetId 0', { ...CHANGED, rulesetId: 0 }],
+    ['setting-changed', 'a fingerprint that is not 12 hex', { ...CHANGED, fingerprint: 'x' }],
+    ['setting-left', 'a bad cause', { ...LEFT, cause: 'busy' }],
+    ['setting-left', 'no why', drop(LEFT, 'why')],
+    ['setting-restored', 'no id', {}],
+    ['setting-dismissed', 'an id that is not 12 hex', { id: 'zz' }],
+  ]
+  for (const [kind, name, fields, args = ['--rollout', 'r', '--task', 't']] of cases) {
+    const r = cli(home, ['emit', ...args, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, `${kind} ${name}`)
+    assert.deepEqual(listing(ev(home)), [], `${kind} ${name}: nothing written`)
+  }
+})
+
 test('rollout and task slugs normalise from wikilinks, note paths and any case', (t) => {
   const home = tmpHome(t)
   for (const r of ['[[Foo]]', '/p/Foo.md', 'FOO']) emitOk(home, ['--rollout', r, '--kind', 'resumed'], { env: EV(home) })

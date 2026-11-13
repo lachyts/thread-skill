@@ -140,6 +140,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed | ci-timeout |
                      no-runner (a required job no runner took, merge-task's exit-4 set-aside, ADR 0069) |
+                     unreported-context (a required context nothing reports on the PR's head, merge-task's exit-4
+                     set-aside, ADR 0080) |
                      merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
                      needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
@@ -417,6 +419,17 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      limitSource (workflow: the job's own `timeout-minutes` | default: none declared, GitHub's 360 |
                      unread: no workflow file, job or plain number matched); runId? (an int >= 1), workflow? (str).
                      ADR 0073 d5, **CI headroom**: one line per required job of a read run at each merge.
+  setting-changed T  id (12 lowercase hex: the change's, its `## Merge settings` row's), repo (owner/name), branch,
+                     source (protection | ruleset), rulesetId? (an int >= 1, with source ruleset), block (no-runner |
+                     unreported-context), change (removed | replaced), context, newContext? (the name it was replaced
+                     with), before, after, undo (strings: the setting's body before and after, and the one command
+                     that writes the before back), fingerprint (12 lowercase hex: the block's). ADR 0080:
+                     merge-settings.py `free`, one line per merge setting it changed, once the write read back.
+  setting-left    T  repo, block (as setting-changed), cause (not-owned | no-rights | no-change | not-recorded |
+                     unreadable), why, fingerprint. ADR 0080: `free` left a settings block for Lachy (his H13).
+  setting-restored T id. ADR 0080: merge-settings.py `restore` wrote that change's before back, on his word.
+  setting-dismissed T id. ADR 0080: merge-settings.py `dismiss`, his decision to keep that change; its
+                     setting-changed line stays.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -1402,6 +1415,8 @@ def _check_stopped(f):
 SUITE_REQUIRED = {"suite": _suite_id, "by": _enum(*SUITE_BYS), "runner": _enum(*SUITE_RUNNERS)}
 
 HOLDS = ("merge", "git-env", "race")
+SETTINGS_BLOCKS = ("no-runner", "unreported-context")   # ADR 0080's settings blocks (setting-changed, setting-left)
+SETTING_LEFT_CAUSES = ("not-owned", "no-rights", "no-change", "not-recorded", "unreadable")
 # p29-12: reconcile-rollout.py's call-end stamp on the events of a row that ends a Slot (Reading the record).
 CALL_END = {"stamp": _enum("call-end", "fallback"), "reconciledAt": _stampz}
 # kind -> (task required, required fields, optional fields)
@@ -1520,6 +1535,15 @@ KINDS = {
                           "moversTotal": _int(0), "movers": _movers},
                    {"nonInert": _capped(MAX_NON_INERT), "pathsTotal": _int(0), "globs": _capped(MAX_GLOBS),
                     "refusal": _int(1), "error": _error}),
+    # ADR 0080 (p47-9): merge-settings.py, the one writer of a repo's merge settings, and its record of each change.
+    "setting-changed": (True, {"id": _hex12, "repo": _str, "branch": _str, "source": _enum("protection", "ruleset"),
+                               "block": _enum(*SETTINGS_BLOCKS), "change": _enum("removed", "replaced"),
+                               "context": _str, "before": _str, "after": _str, "undo": _str, "fingerprint": _hex12},
+                        {"rulesetId": _int(1), "newContext": _str}),
+    "setting-left": (True, {"repo": _str, "block": _enum(*SETTINGS_BLOCKS), "cause": _enum(*SETTING_LEFT_CAUSES),
+                            "why": _str, "fingerprint": _hex12}, {}),
+    "setting-restored": (True, {"id": _hex12}, {}),
+    "setting-dismissed": (True, {"id": _hex12}, {}),
     # ADR 0073 d5, CI headroom: lead-integrate.py ci-headroom (merge-task.sh's land_and_finish), one line per required job.
     "ci-headroom": (True, {"repo": _str, "pr": _pr, "job": _short(CI_JOB_MAX), "seconds": _or_null(_int(0)),
                            "conclusion": _or_null(_short(40)), "timeoutMinutes": _or_null(_int(1)),
