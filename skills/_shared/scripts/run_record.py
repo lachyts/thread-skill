@@ -444,7 +444,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      unreported-context), change (removed | replaced), context, newContext? (the name it was replaced
                      with), before, after, undo (strings: the setting's body before and after, and the one command
                      that writes the before back), fingerprint (12 lowercase hex: the block's). ADR 0080:
-                     merge-settings.py `free`, one line per merge setting it changed, once the write read back.
+                     merge-settings.py `free`, one line per merge setting it changed, once the write read back;
+                     `check` (the repo check, ADR 0080 d6) writes the same line, task the rollout's own slug.
   setting-left    T  repo, block (as setting-changed), cause (not-owned | no-rights | no-change | not-recorded |
                      unreadable), why, fingerprint. ADR 0080: `free` left a settings block for Lachy (his H13).
   setting-restored T id. ADR 0080: merge-settings.py `restore` wrote that change's before back, on his word.

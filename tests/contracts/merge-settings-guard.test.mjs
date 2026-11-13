@@ -14,7 +14,8 @@
 //   G2 scripts: every file under skills/*/scripts/ and hooks/ but merge-settings.py holds none.
 //   G3 merge-settings.py: one WRITES table holding exactly the classic PATCH and the ruleset PUT; a quoted write method
 //      only inside it; --method and --input once each, inside _write_argv; no -X, --request, -f, -F, --field or
-//      --raw-field literal; _undo_text and _write render through _write_argv(, and free and restore write through _write(.
+//      --raw-field literal; _undo_text and _write render through _write_argv(, and _apply (free's and check's one
+//      writer) and restore write through _write(.
 // Pure matchers over contract-text's file reads, so the real tree and the controls run through the same code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -122,7 +123,7 @@ export function msFailures(text) {
   for (const fn of ['_undo_text', '_write']) {
     if (!(defBody(text, fn) ?? '').includes('_write_argv(')) fails.push(`${fn} renders through _write_argv(`)
   }
-  for (const fn of ['cmd_restore', '_free_locked']) {
+  for (const fn of ['cmd_restore', '_apply']) {
     if (!(defBody(text, fn) ?? '').includes('_write(')) fails.push(`${fn} writes through _write(`)
   }
   return fails

@@ -34,6 +34,12 @@ NON-check gate. A rule naming a gone reviewer or app, a stuck infrastructure run
 him (an expression or include matrix, a reusable workflow's `a / b`, a dropped matrix combination) are follow-up p47-15;
 the needs-you list's and decision 6's repo check's read of the rows is p47-16.*
 
+*Decision 6's repo check built 2026-11-13 (p51-5): `merge-settings.py check`, run by schedule step 6 on the rollout note
+it just wrote. It reads the required checks and the last 30 workflow runs, read-only; a required check whose every
+recent job is a self-hosted one no runner took is freed through `free`'s writer and lock, its row on the rollout note
+and its line in that rollout's Run record; a required check with no recent run, and a change it could not make, is
+listed. Listing the changes not yet restored at each rollout's start stays p47-16's.*
+
 ## Context
 
 Lachy, 2026-11-10: *"a system where things don't get stuck or they can resolve themselves."* On 2026-11-04 he had

@@ -1098,7 +1098,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   § 6.5 (i)). It lives on the task note whose block it freed, so it outlives
   the rollout, and stays open until the setting is restored or the row
   dismissed; a dismissal keeps the change and its Run record line (ADR 0080
-  d5). _Avoid_: settings change notice.
+  d5). A change the **Repo check** made lives on the rollout note it ran
+  for. _Avoid_: settings change notice.
+- **Repo check** — `merge-settings.py check`, run by schedule step 6 on the
+  rollout note it just wrote, before the first Slot (ADR 0080 d6): it reads
+  the repo's required checks against its recent workflow runs, frees a
+  required check whose every recent job is a self-hosted one no runner
+  took, and lists a required check with no recent run, and any change it
+  could not make. _Avoid_: preflight CI check.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier
   suite runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and
