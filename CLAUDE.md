@@ -45,7 +45,13 @@ check, is another thing).
    - a Review trail (attention.py) is read whole, back to since - `TRAIL_DAYS`, once any of its rounds is in the
      window; a wait to start is a row per rollout that started in the window or is open at until; circling reads
      its own [until - `TOUCH_DAYS`, until];
-   - the Monthly audit (ledger.py) reads its month.
+   - the Monthly audit (ledger.py) reads its month;
+   - the arms reading (arms.py) places each row by its own unit: a call by its segment's startTime, a review by its
+     ts, a task's first verdict by its earliest round-1 line up to until, a landed task by its first merge, an Escape
+     by the sweep's evidence date (credited, for the lead, to the task's landing rollout), a plan task by its first
+     slot-taken, a rejection by its ts. It reads wider, as attributes and up to until: a landed task's Hands-off acts
+     and its tokens over its whole life, a task's arm and exclusion from its stamp and every role-call line of it, a
+     plan task's side and model, and the plans' `toDate`.
    A reader that reads wider says so in its docstring, the one copy of its rule, and is named here.
 2. A test pins it: for each windowed reader, plant one row outside the window and assert it is absent, or adds
    nothing to a sum, as tests/reflect-weekly.test.mjs's "freshReview holds only rounds reviewed in the window"

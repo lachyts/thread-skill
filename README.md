@@ -258,7 +258,9 @@ ADR 0051: the hours each cause class cost across rollouts, and a Monthly audit) 
 the attention ledger (`skills/reflect/scripts/attention.py`, ADR 0056: the questions
 put to Lachy, read from the session transcripts and labelled by Owner, each PR's
 /fresh-review trail, each rollout's wait to start, and the circling detector's
-Watches).
+Watches). It also reads each drawn role's two arms (`skills/reflect/scripts/arms.py`,
+ADR 0079 d9: Opus beside Fable per role, the plans' before and after, the Fable
+calls by kind, and a role's Fable ceiling once three Reflections agree).
 `skills/reflect/scripts/reflect-due.py` tells Chorus's weekly Runner, and the
 daily sweep as its fallback, when the weekly reading is due: the Thursday after
 the last one, or the Thursday after that once three Reflections in a row were

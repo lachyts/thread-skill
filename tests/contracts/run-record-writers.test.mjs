@@ -76,6 +76,28 @@ test('role-call is emitted by reconcile-rollout.py alone, inside cmd_fold_journa
   assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*role-call/.test(text)).map(({ file }) => file), [])
 })
 
+// p46-4 (ADR 0079 d9): the arms line is the Reflection's own, written once by reflect.py close before its reflection line.
+export const armsWriters = (rx) => {
+  const close = defBody(rx, 'cmd_close')
+  const at = close.indexOf('write_line("arms"')
+  return { inClose: at >= 0 && at < close.indexOf('write_line("reflection"'), elsewhere: rx.replace(close, '').includes('write_line("arms"') }
+}
+
+test('the arms line is written by reflect.py cmd_close alone, before its reflection line', () => {
+  assert.deepEqual(armsWriters(read('skills/reflect/scripts/reflect.py')), { inClose: true, elsewhere: false })
+})
+
+test('control: an arms write outside cmd_close, or after the reflection line, fails', () => {
+  const rx = read('skills/reflect/scripts/reflect.py')
+  const close = defBody(rx, 'cmd_close')
+  const late = close.replace('        write_line("arms", arms_fields, a.dry_run)\n    write_line("reflection", fields, a.dry_run)\n',
+    '    write_line("reflection", fields, a.dry_run)\n    if arms_fields is not None:\n        write_line("arms", arms_fields, a.dry_run)\n')
+  assert.notEqual(late, close, 'the mutation applied')
+  assert.equal(armsWriters(rx.replace(close, late)).inClose, false)
+  const decide = defBody(rx, 'cmd_decide')
+  assert.equal(armsWriters(rx.replace(decide, `${decide}    write_line("arms", {}, False)\n`)).elsewhere, true)
+})
+
 test('no skill or doc tells an agent to run run_record.py emit', () => {
   const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
   for (const f of ['README.md', 'CONTEXT.md']) md.push({ file: f, text: read(f) })

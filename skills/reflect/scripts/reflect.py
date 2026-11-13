@@ -26,11 +26,13 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
 
 Writes. reflect.py is the only writer of reflections.jsonl (run_record.py's REFLECTIONS file, through run_record.emit:
-the kinds watch, watch-raised, proposal, reflection, time-lost and attention; run_record's docstring holds their schema,
-the Watch rule, the Agreement rule and the cadence rule) and of three kinds of vault task: a bug task
+the kinds watch, watch-raised, proposal, reflection, time-lost, attention and arms; run_record's docstring holds their
+schema, the Watch rule, the Agreement rule, the arms Agreement rule and the cadence rule) and of three kinds of vault
+task: a bug task
 (Work/Tasks/thread-skill-bug-<words>.md), the suite audit (Work/Tasks/thread-skill-suite-audit-<date>.md, through bug's
 path) and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
-never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and `--auto`),
+never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and `--auto`)
+nor ladder.toml (a Fable ceiling moves only on Lachy's yes, which the session deciding the decision task applies),
 never commits, and never touches git. `span --fold` runs reconcile-rollout.py fold-journals, whose call-journal lines
 are span's only write outside --out's directory (the Time-lost ledger's intervals file, <dir of F>/ledger-intervals.json,
 is inside it). Every writer takes --dry-run: it prints the lines and the file text it
@@ -295,6 +297,18 @@ parallel with no note). For each:
   another's is reported alone), key (watch_id(SUITE_RULE, SUITE_SHAPE): the audit's bug_key), due (a breach on that
   repo), open ({slug, status} of the open task carrying that key, else null)}. Reported for the reading; suite-audit
   files from it.
+- arms (p46-4, ADR 0079 d9): skills/reflect/scripts/arms.py's block (ARMS.reading(); its docstring holds every rule: the
+  row units, the attributes read wider, the verdict, the proposal, the hold order, the Guardrails read, the plans and the
+  Fable calls by kind), after the sweep and the escapes-only entries, over whole() (every record read whole, its fold's
+  role-call lines included) and what span passes it: arm_stamp(task) and lead_stamp(rollout) (memoised: the note through
+  Vault.find or rollout_note, its `arms:` through reconcile-rollout.py's _parse_arms, a stamp that does not parse flagged
+  and read as none), hands_off ({rollout: {task: acts}} from each read rollout's score.json handsOff.tasks, keyed by
+  escapes.py's _canon), escapes (every entry's escape friction items, read and escapes-only), breaches (the (rollout,
+  Guardrail) pairs close counts), share (ladder.py load()'s `share`, or None with a refused ladder's reason), bounds
+  (score.py's guardrail_bounds of rollout-settings.py's resolve with no repo and --config, else the built-ins, flagged),
+  earlier (the `arms` lines of closed Reflections, never this one's), canon (escapes.py's _canon) and built_in
+  (ladder.py's BUILT_IN names). Its flags and cannotShow join span's only when the block holds a row (ARMS.holds_row); a
+  fault is the flag `arms: read failed (...)` and a null block, never a stop.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
@@ -310,7 +324,8 @@ ledger (above), attention (above), nights{nights[], totals, flags, suggest} (abo
 overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
 warnings} | null} | null, suite{budget, local[], ci[], breaches[], audit} (above), gateMisses{count, items[{rollout,
 task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is non-empty, the count
-the Reflection reads; p51-3), cannotShow[], flags[]}. stderr gets one summary line.
+the Reflection reads; p51-3), arms (arms.py's block, above, or null), cannotShow[], flags[]}. stderr gets one summary
+line.
 
 The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
 blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
@@ -328,7 +343,9 @@ score's merges.tasks carries task names alone); then `freshReview` (an entry is 
 until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
 `nights.nights` (each morning), `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
 first and last both in [since, until], the one outside printed), `suite.local` and `suite.ci` (a group is one row,
-the same way), and `gateMisses.items` (each item's at). span calls score.py with no --since, so a score's
+the same way), `gateMisses.items` (each item's at), and the arms' rows, each by its own unit (arms.py's docstring):
+`arms.tasks` (landedAt), `arms.calls` (startTime), `arms.reviews`, `arms.planTasks` and `arms.rejections` (at), and
+`arms.escapes` (at, with inWindow true, as a friction escape is). span calls score.py with no --since, so a score's
 window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
 ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
 read the run start instead. Not checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly
@@ -337,7 +354,9 @@ alone pin their windows (reflect-score's (l) and (e2), reflect-weekly's freshRev
 for the ledger, whose header clips every interval to [since, until]); a score's escapes block reads its evidence up to
 now by design (score.py's header); grades' window and all are sums; noteOverlaps' warnings, notes and rollouts are its
 overlaps' sum and sets, and its previous reads the last Reflection's window by design; attention's trails, waits and
-circling and the ledger's Monthly audit declare wider units in their own docstrings; knobs, watches, bugsOpen and
+circling and the ledger's Monthly audit declare wider units in their own docstrings, and so does each arms attribute
+(a landed task's Hands-off and tokens, a task's arm and exclusion, the plans' sides and toDate: arms.py's
+docstring), whose per-arm sums and plans are sums over the rows checked above; knobs, watches, bugsOpen and
 decisionTask are state at until; cannotShow and flags are no rows. A `window: ` flag is a Thread Skill bug, never
 friction (SKILL.md step 10).
 
@@ -472,7 +491,18 @@ still open: <ids> (see ## Still open)". Then, after a blank line when both are p
 one `- trade <kid> at <from>: <key> <from> -> <to> (<rule>); <held>[; caution <caution>]; evidence <evidence>; repo
 <repo>; rollouts ...; a yes runs /thread:reflect [[<newest>]] and picks <key> (<rule>)` line per new trade (evidence and
 caution the newest proposer's, folded and cut to 200), or, with no new trade and a still one, "No new trades; still
-open: trade <kid> at <from>[, ...] (see ## Still open)". Each rule item an earlier section lists gets one
+open: trade <kid> at <from>[, ...] (see ## Still open)". Then the Fable ceilings part (p46-4, ADR 0079 d9): held_trades()
+also returns arms_items(span), one per arms role whose item is `ceiling` (arms.py's hold order: three Reflections agreed,
+a trade or a caution; no writer lands one until p46-10), keyed by (its kid, arms_key(role, signal), and its from, the
+ceiling in percent) and read against every decision task exactly as a trade is (TRADE_LINE_RE and TRADE_STILL_RE read
+both words, so trade_listings, the decided, still and moot rules, close's check and moot cover it unchanged; decided
+prints `ceiling <kid> at <from>: decided in [[<slug>]]`). Its part is ARMS_LEAD and one `- ceiling <kid> at <from>:
+Fable ceiling <role> <from>% -> <to>% (<signal>); <held>[; caution <caution>]; evidence <both arms' landed, Hands-off
+rate, Escapes and tokens per merge, and the agreeing Reflections>; rollouts ...; a yes: the deciding session sets
+~/.config/thread/ladder.toml [share] <role> = <to/100> and runs ladder.py` line per new ceiling (arms_item_line()), or,
+with none new and a still one, "No new Fable ceilings; still open: ceiling <kid> at <from>[, ...] (see ## Still open)",
+its `## Still open` line `ceiling <kid> at <from> still open <D>: Reflection <rid>, rollouts ...`. Each rule item an
+earlier section lists gets one
 `## Still open` line, `<id> still open <D>: Reflection <rid>, rollouts ...`, then each still trade `trade <kid>
 at <from> still open <D>: Reflection <rid>, rollouts ...`, with `; listed in [[<slug>]]` when the open task listing it
 is not the one written; D is the Melbourne date of until. A re-run finds the heading and moves nothing, so it is
@@ -488,12 +518,17 @@ Reflection) is not in reflections.jsonl (`run knobs`), when a recurring Watch (t
 from this Reflection) has no rule `proposal` line from it (`run decide`), or when a held trade (decide's, the revert's
 skipped ones aside) meets none of (i) a non-moot item in a DECIDED task, (ii) an item under `## Reflection <this id>`
 in a task that is not dropped, (iii) a `still open` line naming this Reflection in a task that is not dropped (`held
-trade <kid> at <from> has no decision task line from this Reflection: run decide`). p29-11 adds two: a span with a
-ledger block and no `time-lost` record line from this Reflection (`run ledger`, named first), and a Monthly audit line
-from it whose gaps have no `- gap <n> <month>: ` line under `## Reflection <this id>` in a decision task that is not
-dropped (`audit gap <n> of <month> has no decision task line from this Reflection: run decide`). A span from before
+trade <kid> at <from> has no decision task line from this Reflection: run decide`, each held item named by its word,
+item_word(): `ceiling <kid> at <from>` for a Fable ceiling). p29-11 adds two: a span with a ledger block and no
+`time-lost` record line from this Reflection (`run ledger`, named first), and a Monthly audit line from it whose gaps
+have no `- gap <n> <month>: ` line under `## Reflection <this id>` in a decision task that is not dropped (`audit gap
+<n> of <month> has no decision task line from this Reflection: run decide`). A span from before
 p29-11, with no ledger key, closes as before. p30-7 adds one more, after ledger's: a span with an attention block and no
 `attention` line from this Reflection (`run attention`); a span with no attention key, or a null one, closes as before.
+p46-4 adds the arms line: when span's arms block holds a row (ARMS.holds_row) and reflections.jsonl holds no `arms` line
+from this Reflection, close writes ARMS.line() (run_record's arms kind) just before the `reflection` line, both checked
+first (run_record.check), so a re-run after a failed reflection write writes no second one, and the outcome line ends
+`; arms written`. A Fable ceiling is a held trade to the check above (held_trades() returns it).
 Only with a held trade or an audit gap does close read the vault: --tasks-dir (default the vault's Work/Tasks), exit 1 when it is no directory. A `knobs` refusal (a
 run_record.check() of any of its lines) therefore blocks close too: it is a fault to fix, never a step to skip. The
 line: since, until, rollouts (read), escapesOnly, counts (sightings: Watch ids with a line from this Reflection;
@@ -508,15 +543,17 @@ decide refuse a closed Reflection. reflect-due.py beside it reads the same rule 
 0037 d4 and d6).
 
 moot. Lachy's yes to a held trade that cannot apply (the fresh score no longer proposes its key and rule, or tune.py
-refuses a stale from) is answered here, at decide time, so it never refuses a closed Reflection and writes no
+refuses a stale from), or to a Fable ceiling whose `[share]` no longer reads its from (p46-4: --trade takes its kid, and
+its `- ceiling` line is read as a `- trade` one), is answered here, at decide time, so it never refuses a closed Reflection and writes no
 reflections.jsonl line. The note is <tasks>/<slug>.md directly under Work/Tasks; exit 2, nothing written, when --why is
 empty, the note is absent, it has no frontmatter or no `decisions` tag, its status is Landed
 (`<slug> is <status>: a done task is never written`), or no `## Reflection <id>` section lists
 `- trade <kid> at <from>: ` (`[[<slug>]] lists no trade <kid> at <from>`). It writes
 `moot <kid> at <from> <D>: <why>` (D the Melbourne date of --now, else now; why folded and cut to 200) through
-Note.append_line into the last section that lists the item with no moot line for it, and prints `moot trade <kid> at
-<from> in [[<slug>]] (## Reflection <id>)`; when every such section has one it prints `exists moot <kid> at
-<from> in [[<slug>]]`. A moot item is no decision: the next reading that holds the trade offers it again.
+Note.append_line into the last section that lists the item with no moot line for it, and prints `moot <word> <kid> at
+<from> in [[<slug>]] (## Reflection <id>)`, word the listed line's (`trade`, or `ceiling` for a `- ceiling` line);
+when every such section has one it prints `exists moot <kid> at <from> in [[<slug>]]`. A moot item is no decision: the
+next reading that holds the trade offers it again.
 
 rung. The ladder (ladder.py's load()): it prints {rung, model "opus", effort, judge, review, top, topModel}, the own
 values of the highest opus rung and the top rung's name and model, as a reference only. The Reflection runs on the
@@ -597,8 +634,9 @@ BRIEF_DROP = ("## Decisions", "## Decided for you", "## Plan-blocked feedback", 
 # A held trade (ADR 0037 d1): tune.py auto_check's two Lachy-decides reasons, and the decision task's lines for it
 TRADE_HELD_RE = re.compile(r"^a (?:trade \(.*\)|caution): Lachy decides$")
 DECISION_SLUG_RE = re.compile(r"^thread-skill-decisions-\d{4}-\d\d-\d\d(?:-\d+)?$")
-TRADE_LINE_RE = re.compile(r"^- trade ([0-9a-f]{8}) at (-?\d+): ")
-TRADE_STILL_RE = re.compile(r"^trade ([0-9a-f]{8}) at (-?\d+) still open \S+: Reflection (r-[^,]+),")
+# A knob trade's line or a Fable ceiling's (p46-4): the same groups, so trade_listings, decide, close and moot read both
+TRADE_LINE_RE = re.compile(r"^- (?:trade|ceiling) ([0-9a-f]{8}) at (-?\d+): ")
+TRADE_STILL_RE = re.compile(r"^(?:trade|ceiling) ([0-9a-f]{8}) at (-?\d+) still open \S+: Reflection (r-[^,]+),")
 TRADE_MOOT_RE = re.compile(r"^moot ([0-9a-f]{8}) at (-?\d+) \S+: ")
 TRADE_TEXT_MAX = 200
 # A Monthly audit's gap in the decision task (p29-11): `- gap <n> <YYYY-MM>: <what>; evidence <evidence>`
@@ -618,6 +656,12 @@ SUITE_SHAPE = "Thread Skill's suite or CI ran past its budget on the week's medi
 SUITE_AUDIT_TITLE = "Thread Skill: the suite audit (the Suite budget or CI headroom breached)"
 TRADE_LEAD = ("Trades for Lachy (ADR 0037 d1: a knob that trades one headline against the other, or a caution, is his "
               "call; a yes runs the by-hand Reflection, a no is recorded when this task is done):")
+# The decision task's Fable ceilings (p46-4, ADR 0079 d9): every agreed, traded or cautioned ceiling is Lachy's yes or
+# no until p46-10 gives an agreed one a writer
+ARMS_LEAD = ("Fable ceilings for Lachy (ADR 0079 d9: three Reflections agreed on a move, a trade or a caution; no writer "
+             "lands a ceiling until [[thread-skill-p46-10-an-agreed-fable-ceiling-lands-on-its-own]], so the session "
+             "deciding this task applies a yes: it sets ladder.toml [share] <role> to the item's to, then runs ladder.py; "
+             "a no is recorded when this task is done):")
 
 
 def _load(name, path):
@@ -638,6 +682,7 @@ ESC = _load("thread_escapes", os.path.join(HERE, "escapes.py"))
 GR = _load("thread_grades", os.path.join(HERE, "grades.py"))
 LEDGER = _load("thread_ledger", os.path.join(HERE, "ledger.py"))  # the Time-lost ledger (p29-11) and the set-aside mover
 ATTN = _load("thread_attention", os.path.join(HERE, "attention.py"))  # the attention ledger (p30-7)
+ARMS = _load("thread_arms", os.path.join(HERE, "arms.py"))  # the arms: each drawn role's two arms (p46-4)
 REC = _load("thread_reconcile_rollout", RECONCILE_PY)
 RP = _load("thread_reconcile_project", os.path.join(SHARED, "reconcile-project.py"))
 LADDER = _load("thread_ladder", os.path.join(SHARED, "ladder.py"))
@@ -1135,6 +1180,7 @@ class Span:
         self.ledger_lines = {}  # {slug: the record's LEDGER_KINDS lines}, kept by records() for the Time-lost ledger
         self.quiet_origins = {}  # the attention ledger's origins (attention.py's repo labels): never flagged
         self.folded = set()     # the records --fold folded: the ledger re-reads them, journals and all
+        self._whole = None      # whole(), read once: the arms, the ledger and the attention ledger share it
 
     def flag(self, text):
         if text not in self.flags:
@@ -1231,8 +1277,12 @@ class Span:
         return out
 
     def whole(self, ev, records):
-        """{slug: every line} for the Time-lost ledger: each record's lines and its ledger lines, merged back in time then
-        file order; a record --fold folded is read again, so its journals are the fold's."""
+        """{slug: every line} for the arms, the Time-lost ledger and the attention ledger: each record's lines and its
+        ledger lines, merged back in time then file order; a record --fold folded is read again, so its journals (and
+        the role-call lines the fold wrote) are the fold's. Memoised: read once, after every read rollout's fold, and
+        never changed by a reader."""
+        if self._whole is not None:
+            return self._whole
         out = {}
         for slug, lines in records.items():
             out[slug] = sorted(lines + self.ledger_lines.get(slug, []), key=lambda x: (x[0], x[1]))
@@ -1241,6 +1291,7 @@ class Span:
                 out[slug], _skipped = SCORE.read_lines(os.path.join(ev, slug + ".jsonl"))
             except OSError as e:
                 self.flag("ledger: %s.jsonl cannot be read again after its fold (%s): its pre-fold lines are read" % (slug, e))
+        self._whole = out
         return out
 
     def live(self, slug):
@@ -2103,6 +2154,76 @@ class Span:
         block["holds"] = []
         return block
 
+    # -- the arms (p46-4, ADR 0079 d9) ------------------------------------------------------------------------------------
+
+    def arms(self, ev, records, read, entries, scores, reflections, since, until, rid):
+        """arms.py's block (its docstring holds every rule) over every record read whole, with what span passes it: the
+        task and rollout notes' `arms:` stamps (memoised; a stamp that does not parse is flagged and reads as none), the
+        read rollouts' score.json Hands-off, the Escape items of every entry, the Guardrail breaches close counts,
+        ladder.toml's [share], the [guardrails] bounds and the closed Reflections' earlier `arms` lines. Its flags and
+        cannotShow join span's only when the block holds a row (ARMS.holds_row); a fault in the reading is a flag and a
+        null block, never a stop."""
+        aflags, stamps, leads = [], {}, {}
+
+        def parsed(path, roles, what):
+            note = read_note(path) if path is not None else None
+            raw = note.get(REC.ARMS_KEY) if note is not None else None
+            if raw is None:
+                return None
+            out = REC._parse_arms(raw, roles=roles)
+            if out is None:
+                aflags.append("arms: %s's arms: %r does not parse: read as no stamp" % (what, REC._scalar(raw)))
+            return out
+
+        def arm_stamp(task):
+            if task not in stamps:
+                stamps[task] = parsed(self.vault.find(task), REC.ARM_ROLES, "[[%s]]" % task)
+            return stamps[task]
+
+        def lead_stamp(rollout):
+            if rollout not in leads:
+                got = parsed(self.vault.rollout_note(rollout), (REC.LEAD_ROLE,), "[[%s]]" % rollout)
+                leads[rollout] = (got or {}).get(REC.LEAD_ROLE)
+            return leads[rollout]
+
+        hands_off = {}
+        for slug, sc in scores.items():
+            listed = ((sc or {}).get("handsOff") or {}).get("tasks") if isinstance(sc, dict) else None
+            if isinstance(listed, list):
+                hands_off[slug.lower()] = {ESC._canon(x.get("task")): x.get("acts") or [] for x in listed
+                                           if isinstance(x, dict)}
+        escapes = [x for e in entries for x in e.get("friction") or [] if x.get("kind") == "escape"]
+        breaches = sorted({(e.get("rollout"), g) for e in entries if e.get("breachCounts") for g in e.get("breached") or []})
+        try:
+            share, share_error = LADDER.load().get("share"), None
+        except LADDER.LadderError as e:
+            share, share_error = None, e.reason
+        try:
+            bounds, bounds_error = SCORE.guardrail_bounds(
+                RS.resolve(repo=None, path=expand(self.a.config) if self.a.config else None)), None
+        except RS.SettingsError as e:
+            bounds, bounds_error = dict(SCORE.GUARDRAILS_BUILT_IN), str(e)
+        done_ids = {d.get("id") for d in reflections if d.get("kind") == "reflection"}
+        earlier = [d for d in reflections if d.get("kind") == "arms" and d.get("reflection") != rid
+                   and d.get("reflection") in done_ids]
+        try:
+            block = ARMS.reading(self.whole(ev, records), since, until, read=sorted(read), arm_stamp=arm_stamp,
+                                 lead_stamp=lead_stamp, hands_off=hands_off, escapes=escapes, breaches=breaches,
+                                 share=share, share_error=share_error, bounds=bounds, bounds_error=bounds_error,
+                                 earlier=earlier, canon=ESC._canon, built_in=[r["name"] for r in LADDER.BUILT_IN])
+        except Stop:
+            raise
+        except Exception as e:
+            self.flag("arms: read failed (%s: %s): no arms block" % (type(e).__name__, e))
+            return None
+        block["flags"] = aflags + block["flags"]
+        if ARMS.holds_row(block):
+            for f in block["flags"]:
+                self.flag(f)
+            for c in block["cannotShow"]:
+                self.cannot_show(c)
+        return block
+
     # -- the attention ledger (p30-7, ADR 0056) -------------------------------------------------------------------------
 
     def attention(self, ev, records, reflections, since, until, rid):
@@ -2255,6 +2376,7 @@ class Span:
                             "binding": None, "proposals": [], "flags": [], "friction": inw + reps, "laneTime": None})
         self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
                          "repair: line on a rollout with no Run record")
+        arms = self.arms(ev, records, read, entries, scores, reflections, since, until, rid)
         fresh, levels = self.fresh_review(ev, since, until)
         ws = watches(reflections, rid, until)
         led = self.ledger(ev, records, reflections, since, until, rid)
@@ -2284,7 +2406,7 @@ class Span:
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
                "attention": attention, "nights": nights, "noteOverlaps": overlaps, "suite": suite,
-               "gateMisses": gate_misses(entries), "cannotShow": self.cannot,
+               "gateMisses": gate_misses(entries), "arms": arms, "cannotShow": self.cannot,
                "flags": self.flags}
         for f in window_flags(doc, scores):  # the window check: doc["flags"] is self.flags, so each lands in span.json
             self.flag(f)
@@ -2392,6 +2514,13 @@ def window_flags(doc, scores):
     report("suite.ci", spans(items(part(doc, "suite", "ci"))), ss, us)
     misses = items(part(doc, "gateMisses", "items"))
     report("gateMisses.items", [(_row_in(x.get("at"), S, U), x.get("at")) for x in misses], ss, us)
+    # the arms (arms.py's rows: each placed by its own time; an Escape needs inWindow too)
+    for block, stamp in (("tasks", "landedAt"), ("calls", "startTime"), ("reviews", "at"), ("planTasks", "at"),
+                         ("rejections", "at")):
+        rows = items(part(doc, "arms", block))
+        report("arms.%s" % block, [(_row_in(x.get(stamp), S, U), x.get(stamp)) for x in rows], ss, us)
+    rows = items(part(doc, "arms", "escapes"))
+    report("arms.escapes", [(_row_in(x.get("at"), S, U) and x.get("inWindow") is True, x.get("at")) for x in rows], ss, us)
     return out
 
 
@@ -2959,9 +3088,10 @@ def fold(text, cap=TRADE_TEXT_MAX):
 
 def held_trades(span, tunings):
     """(trades, skipped): the knobs knob_lines() holds as Lachy's call (ADR 0037 d1: its held reason is tune.py
-    auto_check's trade or caution), one per knob id. A trade on a repo and key a revert line of this Reflection moved is
-    skipped as (kid, from, key): the revert comes first, and that from is stale. Each trade carries the newest
-    proposer's (Span.newest_key, knob_lines' pick) evidence and caution, folded."""
+    auto_check's trade or caution), one per knob id, then the Fable ceilings span's arms block lists (arms_items(), p46-4).
+    A trade on a repo and key a revert line of this Reflection moved is skipped as (kid, from, key): the revert comes
+    first, and that from is stale. Each knob trade carries the newest proposer's (Span.newest_key, knob_lines' pick)
+    evidence and caution, folded. A ceiling never enters skipped: no revert moves [share]."""
     lines = knob_lines(span, tunings)
     reverted = {(f["repo"].lower(), f["key"]) for f in lines if f.get("reverts")}
     newest = {}
@@ -2988,15 +3118,66 @@ def held_trades(span, tunings):
                        "repo": f["repo"], "held": f["held"], "rollouts": f["rollouts"],
                        "newest": e.get("rollout") or f["rollouts"][-1],
                        "evidence": fold(p.get("evidence")), "caution": fold(p.get("caution"))})
-    return trades, skipped
+    return trades + arms_items(span), skipped
+
+
+def _pct(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def arms_items(span):
+    """The Fable ceilings span's arms block lists (p46-4; arms.py's hold order): one item per role whose item is set, in
+    arms.py's role order, each {kind arms, item, kid, from and to (integer percents), role, signal, direction, agreement,
+    ready, held, caution ("" when none: arms.py sets it on a caution, and on a trade that breaches a Guardrail),
+    evidence (both arms' landed, Hands-off rate, Escapes and tokens per merge, `unknown` when null, and the agreeing
+    Reflections, folded), rollouts (the read rollouts whose rows fed the role, sorted, cut to MAX_ROLLOUTS)}. decide
+    reads its kid, from, rollouts and item, close its kid and from (as a knob trade's), arms_item_line() every field. A
+    span with no arms block (one from before p46-4) lists none."""
+    block = span.get("arms")
+    roles = block.get("roles") if isinstance(block, dict) else None
+    out = []
+    for role in ARMS.ROLES:
+        r = roles.get(role) if isinstance(roles, dict) else None
+        if not isinstance(r, dict) or r.get("item") not in RR.ARMS_ITEMS:
+            continue
+        if not _pct(r.get("from")) or not _pct(r.get("to")) or not isinstance(r.get("kid"), str):
+            say("arms %s: a %s item with no integer from or to, or no kid: not listed" % (role, r.get("item")))
+            continue
+        evidence = "; ".join("%s %s landed, Hands-off %s, %s Escape(s), tokens per merge %s" % (
+            a, s.get("landed"), s.get("handsOffRate"), s.get("escapes"),
+            "unknown" if s.get("tokensPerMerge") is None else s["tokensPerMerge"])
+            for a, s in (("opus", r.get("opus") or {}), ("fable", r.get("fable") or {})))
+        if r.get("agreedWith"):
+            evidence += "; agreed with %s" % ", ".join(str(x) for x in r["agreedWith"])
+        out.append({"kind": "arms", "item": r["item"], "kid": r["kid"], "from": r["from"], "to": r["to"], "role": role,
+                    "signal": r.get("signal"), "direction": r.get("direction"), "agreement": r.get("agreement"),
+                    "ready": r.get("ready") is True, "held": fold(r.get("held"), RR.ARMS_HELD),
+                    "caution": fold(r.get("caution"), RR.ARMS_HELD), "evidence": fold(evidence, RR.ARMS_HELD),
+                    "rollouts": sorted(x for x in r.get("rollouts") or [] if isinstance(x, str))[:RR.MAX_ROLLOUTS]})
+    return out
+
+
+def share_text(percent):
+    """A ceiling in percent as ladder.toml's [share] value: 60 -> 0.6, 100 -> 1, 0 -> 0."""
+    return ("%.2f" % (percent / 100.0)).rstrip("0").rstrip(".")
+
+
+def arms_item_line(tr):
+    """A new Fable ceiling's item line in the decision task (p46-4)."""
+    return "- ceiling %s at %s: Fable ceiling %s %s%% -> %s%% (%s); %s%s; evidence %s; rollouts %s; a yes: the deciding " \
+           "session sets ~/.config/thread/ladder.toml [share] %s = %s and runs ladder.py" % (
+               tr["kid"], tr["from"], tr["role"], tr["from"], tr["to"], tr["signal"], tr["held"],
+               "; caution %s" % tr["caution"] if tr["caution"] else "", tr["evidence"] or "not given",
+               ", ".join("[[%s]]" % r for r in tr["rollouts"]) or "none", tr["role"], share_text(tr["to"]))
 
 
 def trade_listings(vault):
     """One record per held-trade line of every decision task (thread-skill-decisions-<date>[-N].md tagged decisions,
-    Work/Tasks and Archive alike): {slug, status, root, section, where, rid, kid, from}. where is item (a `- trade`
-    line under `## Reflection <rid>`), moot (a `moot` line there) or still (a `## Still open` line, its rid read from
-    the line); section is the rid of the `## Reflection` section a line sits under, else None. An item is moot when its
-    slug and section hold a moot line for its (kid, from). A note with no frontmatter is skipped on stderr."""
+    Work/Tasks and Archive alike): {slug, status, root, section, where, word, rid, kid, from}. where is item (a `- trade`
+    or `- ceiling` line under `## Reflection <rid>`), moot (a `moot` line there) or still (a `## Still open` line, its
+    rid read from the line); word is the line's own, `trade` or `ceiling` (None on a moot line); section is the rid of
+    the `## Reflection` section a line sits under, else None. An item is moot when its slug and section hold a moot line
+    for its (kid, from). A note with no frontmatter is skipped on stderr."""
     out = []
     if not vault.root.is_dir():
         return out
@@ -3020,13 +3201,20 @@ def trade_listings(vault):
                                      ("still", TRADE_STILL_RE, heading == "## Still open")):
                 m = regex.match(line) if ok else None
                 if m:
-                    out.append(dict(base, section=section, where=where, rid=m.group(3) if where == "still" else section,
+                    word = {"item": line[2:].split(" ", 1)[0], "still": line.split(" ", 1)[0]}.get(where)
+                    out.append(dict(base, section=section, where=where, word=word,
+                                    rid=m.group(3) if where == "still" else section,
                                     kid=m.group(1), **{"from": int(m.group(2))}))
                     break
     moots = {(r["slug"], r["section"], r["kid"], r["from"]) for r in out if r["where"] == "moot"}
     for r in out:
         r["moot"] = r["where"] == "item" and (r["slug"], r["section"], r["kid"], r["from"]) in moots
     return out
+
+
+def item_word(tr):
+    """A held item's word on the decision task's lines: `ceiling` for a Fable ceiling (p46-4), else `trade`."""
+    return "ceiling" if tr.get("kind") == "arms" else "trade"
 
 
 def trade_line(tr):
@@ -3088,7 +3276,7 @@ def cmd_decide(a):
             rows = [r for r in listings if (r["kid"], r["from"]) == (tr["kid"], tr["from"])]
             decided = sorted(r["slug"] for r in rows if r["status"] in DECIDED)
             if decided:
-                print("trade %s at %s: decided in [[%s]]" % (tr["kid"], tr["from"], decided[0]))
+                print("%s %s at %s: decided in [[%s]]" % (item_word(tr), tr["kid"], tr["from"], decided[0]))
                 continue
             open_ = sorted(r["slug"] for r in rows if r["root"] and r["status"] not in LANDED and r["section"] != rid)
             if open_:
@@ -3173,14 +3361,18 @@ def cmd_decide(a):
         if not new_items:
             lead = "No new rule items; still open: %s (see ## Still open)" % ", ".join(w["id"] for w in still)
             body = [lead] + ([""] + body if body else [])
-    part = []  # the trade part
-    if new_trades:
-        part = [TRADE_LEAD] + [trade_line(tr) for tr in new_trades]
-    elif still_trades:
-        part = ["No new trades; still open: %s (see ## Still open)" % ", ".join(
-            "trade %s at %s" % (tr["kid"], tr["from"]) for tr, _s in still_trades)]
+    parts = []  # the trade part (knobs), then the Fable ceilings part (p46-4): each its lead and new items, else its still
+    for kind, lead, line_of, none_new in ((False, TRADE_LEAD, trade_line, "No new trades"),
+                                          (True, ARMS_LEAD, arms_item_line, "No new Fable ceilings")):
+        new = [tr for tr in new_trades if (tr.get("kind") == "arms") == kind]
+        old = [tr for tr, _s in still_trades if (tr.get("kind") == "arms") == kind]
+        if new:
+            parts.append([lead] + [line_of(tr) for tr in new])
+        elif old:
+            parts.append(["%s; still open: %s (see ## Still open)" % (none_new, ", ".join(
+                "%s %s at %s" % (item_word(tr), tr["kid"], tr["from"]) for tr in old))])
     text = []
-    for chunk in (body, part, audit_part(audit) if gaps else []):
+    for chunk in [body] + parts + [audit_part(audit) if gaps else []]:
         if chunk:
             text += ([""] if text else []) + chunk
     note.append_section(heading, "\n".join(text))
@@ -3188,8 +3380,8 @@ def cmd_decide(a):
         note.append_line("## Still open", "%s still open %s: Reflection %s, rollouts %s" % (
             w["id"], seen_until, rid, ", ".join("[[%s]]" % r for r in w["rollouts"])))
     for tr, lister in still_trades:
-        note.append_line("## Still open", "trade %s at %s still open %s: Reflection %s, rollouts %s%s" % (
-            tr["kid"], tr["from"], seen_until, rid, ", ".join("[[%s]]" % r for r in tr["rollouts"]),
+        note.append_line("## Still open", "%s %s at %s still open %s: Reflection %s, rollouts %s%s" % (
+            item_word(tr), tr["kid"], tr["from"], seen_until, rid, ", ".join("[[%s]]" % r for r in tr["rollouts"]),
             "" if lister == path.stem else "; listed in [[%s]]" % lister))
     try:
         note.save(dry_run=a.dry_run)
@@ -3264,9 +3456,9 @@ def cmd_close(a):
                     and r["where"] in ("item", "still")}
             listed_in |= here
             if not decided and not here:
-                unlisted.append("%s at %s" % (tr["kid"], tr["from"]))
+                unlisted.append("%s %s at %s" % (item_word(tr), tr["kid"], tr["from"]))
         if unlisted:
-            missing.append("held trade %s ha%s no decision task line from this Reflection: run decide"
+            missing.append("held %s ha%s no decision task line from this Reflection: run decide"
                            % (", ".join(unlisted), "s" if len(unlisted) == 1 else "ve"))
     # a Monthly audit's gaps (p29-11) need their `- gap` lines in a decision task that is not dropped
     audit = ledger_audit(lines, rid)
@@ -3314,10 +3506,23 @@ def cmd_close(a):
         fields["decisionTask"] = task
     was, _ = RR.cadence(lines)
     fields["cadence"], _ = RR.cadence(lines + [{"kind": "reflection", "id": rid, "quiet": quiet}])
+    # the arms line (p46-4): once per Reflection, before its reflection line, only when the block holds a row
+    block, arms_fields = span.get("arms"), None
+    if isinstance(block, dict) and ARMS.holds_row(block) and \
+            not any(d.get("kind") == "arms" and d.get("reflection") == rid for d in lines):
+        try:
+            arms_fields = ARMS.line(block, rid, fmt(since), fmt(until))
+        except (KeyError, TypeError, AttributeError) as e:
+            raise Stop("--span %s's arms block is not arms.py's (%s: %s): nothing written" % (a.span, type(e).__name__, e), 2)
+        check_line("arms", arms_fields)
+    check_line("reflection", fields)
+    if arms_fields is not None:
+        write_line("arms", arms_fields, a.dry_run)
     write_line("reflection", fields, a.dry_run)
-    done(a, "closed %s: %s, %s%s" % (rid, "quiet" if quiet else "not quiet",
-                                     ", ".join("%s %d" % (k, v) for k, v in counts.items()),
-                                     "; cadence %d -> %d" % (was, fields["cadence"]) if was != fields["cadence"] else ""))
+    done(a, "closed %s: %s, %s%s%s" % (rid, "quiet" if quiet else "not quiet",
+                                       ", ".join("%s %d" % (k, v) for k, v in counts.items()),
+                                       "; cadence %d -> %d" % (was, fields["cadence"]) if was != fields["cadence"] else "",
+                                       "; arms written" if arms_fields is not None else ""))
     return 0
 
 
@@ -3360,7 +3565,7 @@ def cmd_moot(a):
         raise Stop("cannot write %s: %s" % (path, e), 1)
     if a.dry_run:
         print("would write %s:\n%s" % (path, note.render()))
-    done(a, "moot trade %s at %s in [[%s]] (%s)" % (a.trade, a.from_, a.task, heading))
+    done(a, "moot %s %s at %s in [[%s]] (%s)" % (open_[-1]["word"], a.trade, a.from_, a.task, heading))
     return 0
 
 
