@@ -382,6 +382,18 @@ function checkNeedsYou(skill, context = realContext, legs = realLegs, close = re
     !entry.includes("never the task note's `## Needs you` (p16-3), which holds the question the engine stopped on")) {
     fails.push('glossary')
   }
+  // changed-for-you (ADR 0080 d5): (i) lists, on every turn, every open row `merge-settings.py rows` reads (a read), its
+  // unconfirmed ones included, worded alike in every session, with its before, after and undo on `→` lines; it stays
+  // open until the setting is restored or the row dismissed, and it is never pushed.
+  const kindI = kind(items, '- (i) **A merge setting changed for you**')
+  if (!kindI.includes('every row of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py rows --tasks-dir <dir> --rollout <rollout-note>` (a read)') ||
+    !kindI.includes('its `unconfirmed` ones included') ||
+    !kindI.includes('`[[<slug>]] merge setting changed for you: <change>: restore or dismiss with /thread:repair [[<rollout>]]`') ||
+    !kindI.includes('`→ before: <its before>`, `→ after: <its after>` and `→ undo: <its undo>` lines under it') ||
+    !kindI.includes('stays open until the setting is restored or the row dismissed') ||
+    !kindI.includes('it is never pushed (ADR 0075 d2)')) {
+    fails.push('changed-for-you')
+  }
   return [...new Set(fails)]
 }
 
@@ -443,7 +455,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 const RULES = ['no-ask-in-flight', 'no-push', 'ledger', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
   'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'answers', 'answered-items', 'glossary',
-  'hold-until', 'git-env-item']
+  'hold-until', 'git-env-item', 'changed-for-you']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -642,7 +654,18 @@ test('control: (f) without its item, its every-turn rule or its act line, or its
   only(edit(real, 'is an (f) needs-you item on this turn (§ 6.5), whatever the halt', 'is reported'), 'hold-until', 'step 1.1 without (f)')
 })
 
-test('the rules are all named (18) and each has a control', () => {
-  assert.equal(RULES.length, 18)
+test('control: (i) without its rows read, its unconfirmed rows, its text, its undo line, its open rule or its no-push, fails changed-for-you', () => {
+  only(edit(real, 'every row of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py rows --tasks-dir <dir> --rollout <rollout-note>` (a read)',
+    'every changed setting the lead remembers'), 'changed-for-you', 'no rows read')
+  only(edit(real, ', its `unconfirmed` ones included (a change whose write was never read back)', ''), 'changed-for-you', 'unconfirmed dropped')
+  only(edit(real, '`[[<slug>]] merge setting changed for you: <change>: restore or dismiss with /thread:repair [[<rollout>]]`',
+    '`[[<slug>]] a setting changed`'), 'changed-for-you', 'the item text')
+  only(edit(real, ' and `→ undo: <its undo>` lines under it', ' lines under it'), 'changed-for-you', 'no undo line')
+  only(edit(real, 'so it stays open until the setting is restored or the row dismissed', 'so it shows once'), 'changed-for-you', 'shown once')
+  only(edit(real, ', and it is never pushed (ADR 0075 d2).\n', '.\n'), 'changed-for-you', 'no-push dropped')
+})
+
+test('the rules are all named (19) and each has a control', () => {
+  assert.equal(RULES.length, 19)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

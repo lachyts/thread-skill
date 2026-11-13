@@ -5,6 +5,7 @@ within Lachy's standing approval passes without him.)*
 *(Amended by ADR 0063, 2026-11-01: a credential gate that reads as its repo's declared test credential, present in its
 declared file, passes without him too.)*
 *(Amended 2026-11-05 by p37-4, ADR 0034's amendment of that date: a spend gate whose cap reads is priced from its cap when the full reading refuses it, and a credential gate naming only a declared test Login passes without him too.)*
+*(Amended 2026-11-13 by p48-4, ADR 0034's amendment of that date: a spend gate neither the full nor the cap-only reading prices is read at its widest, and passes without him when that is within the limit and the month line.)*
 
 Every implementer plan must carry a **Gated inputs** section declaring any human authorisation the
 task will need — API spend with a cap, credentials, or an irreversible action — or an explicit

@@ -58,7 +58,10 @@
 #      (a) the cap: `integration: base moved before the merge 4 times in a row after 3 re-integrations
 #      (bases …)`; (b) `integration: head moved after Integration (PR head <h>, origin <b> at <r>, integrated
 #      head <i>)`, only when origin's branch (ls-remote) ≠ the integrated head; (c) `integration: no-runner: required
-#      job "<name>" queued <n> minutes with no runner (run <r>, job <j>)` (No runner, below).
+#      job "<name>" queued <n> minutes with no runner (run <r>, job <j>)` (No runner, below); (d) `integration:
+#      unreported-context: required check "<name>" is reported by no check run or status on the PR's head, and no run
+#      on it is in flight` (`; `-joined per context, no sha: Unreported context, below). (c) and (d) are settings blocks:
+#      retried as infra, then freed by merge-settings.py at the same stop after one cool-down retry (ADR 0080).
 #                                                                        counter cleared    lead: mark blocked;
 #      the diagnosis's first line is the text after `set-aside reason: `, which reconcile reads as
 #      `setAsideAt: integration` (reconcile-rollout.py INTEGRATION_PREFIX).
@@ -86,7 +89,9 @@
 #      UNKNOWN or BLOCKED with nothing required on the default branch, or UNKNOWN after its required checks
 #      went green, for LAZY_REPOLL_MAX re-polls, or no required check is reported and nothing runs on its
 #      head while the default branch's gate is unreadable, and the wait never samples CLEAN, nor UNSTABLE when
-#      entered from UNSTABLE; or MERGED, but the head or parent unreadable within the bound (`UNVERIFIED: PR
+#      entered from UNSTABLE; a probe read of the PR head's check runs, statuses or runs failed transiently, or a
+#      required context stayed unreported while CI ran on its head past UNREPORTED_WAIT_MAX polls (Unreported
+#      context, below); or MERGED, but the head or parent unreadable within the bound (`UNVERIFIED: PR
 #      #N merged as <oid or unknown>; not verifiable yet; re-run to verify`).
 #                                                                        counter UNTOUCHED  lead: re-run the
 #                                                                                          same args after a
@@ -120,7 +125,9 @@
 # ADR 0069 d3); a required check CANCELLED (a CI timeout or another stop on GitHub's side, no test
 # failed) again after one re-run of its failed jobs, or whose re-run cannot start (GitHub-side too, its own
 # reasonClass ci-timeout, ADR 0073 d4; gh exits 0 on it, so a 0 with a red cell is never read as green); a
-# non-check gate (checks green, still BLOCKED, no review pending); a merge queue
+# non-check gate (checks green, still BLOCKED, no review pending, with every required context reported and complete
+# after LAZY_REPOLL_MAX re-polls, or a probe that cannot tell: a 404 or 422 read, a page cut, another app's context, an
+# empty required list, a run held only by no-runner jobs); a merge queue
 # is required, or `isMergeQueueEnabled` is absent from the schema; GitHub refused the merge with a known
 # text (`is not mergeable|HTTP 405|HTTP 409|HTTP 422|
 # Required status check|protected branch|merges are not allowed|Repository rule violations found`: a repo
@@ -198,8 +205,20 @@
 # deny any gate) an UNSTABLE PR merges at once, and a BLOCKED or UNKNOWN one is re-polled LAZY_REPOLL_MAX times,
 # then exits 8; with some or unknown the required checks are waited on; a wait that finds no required check
 # reported hands back on a CLEAN sample, and merges on an UNSTABLE sample when the state machine entered from
-# UNSTABLE, before any in-flight read. After that wait, UNKNOWN is re-polled the same way, while BLOCKED stays the
+# UNSTABLE, before any in-flight read. After that wait, UNKNOWN is re-polled the same way, while BLOCKED goes to the
+# NON-check site (non_check_gate, ADR 0080): the unreported-context probe (unreported_required) there, a bounded wait
+# while a required context is unreported with CI in flight (UNREPORTED_WAIT_MAX), one re-watch of the required checks
+# after that wait, and LAZY_REPOLL_MAX re-polls of a BLOCKED PR whose every required context is reported, before the
 # non-check gate's 1. Checks that never appear while the gate is unreadable are 8, never 1.
+#
+# Unreported context (ADR 0080). A required context that no check run or status reports on the integrated head while no
+# run on it is in flight (a job renamed by master or by the task's own PR) is never coming. At the never-appeared site
+# and the NON-check site the probe sets the task aside at Integration with exit 4 (d), reasonClass unreported-context, a
+# settings block merge-settings.py frees once its cool-down retry comes back the same (the same stop), a budget spent
+# before it included; a transient probe read is 8, and a definitive one (a 404 or 422: GitHub answers 200 with an empty
+# list for a commit with no runs, so a 404 means a repo this account cannot read) keeps today's 1. Every wait it starts
+# is bounded: the NON-check site's by UNREPORTED_WAIT_MAX (then 8); at the never-appeared site only a run in flight is
+# waited on, through the in-flight wait, and a context the probe reads pending where gh read none keeps today's 1.
 #
 # No runner (ADR 0069, amended 2026-11-11). A job GitHub queued that no runner took (a self-hosted runner that no longer
 # exists) stays queued about 24 hours, and read as CI in flight the whole time. A job is "no runner" when it is `queued`
@@ -244,9 +263,12 @@ STATE_INTERVAL=${MERGE_TASK_STATE_INTERVAL:-10}          # re-poll of a BEHIND s
                                                          # PR GitHub has not settled
 BEHIND_REPOLL_MAX=3    # BEHIND re-polls on an unmoved base before halting (within the guard)
 LAZY_REPOLL_MAX=6      # re-polls of a PR GitHub has not settled (ADR 0069 d2), STATE_INTERVAL apart: ~60 s, then 8
-# Bound the state machine. A run takes at most BEHIND_REPOLL_MAX BEHIND passes, one checks-wait pass and
-# LAZY_REPOLL_MAX lazy re-polls before its final pass, so "did not converge" never pre-empts the settling 8.
-STATE_GUARD_MAX=$((BEHIND_REPOLL_MAX + LAZY_REPOLL_MAX + 2))
+UNREPORTED_WAIT_MAX=${MERGE_TASK_UNREPORTED_WAIT_MAX:-240}   # NON-check site polls, CHECK_INTERVAL apart (~60 min), while
+                                                           # a required context is unreported and CI runs on the head
+# Bound the state machine. A run takes at most BEHIND_REPOLL_MAX BEHIND passes, two checks-wait passes (the second the
+# one re-watch after an unreported wait, ADR 0080), the NON-check pass that starts that re-watch, and LAZY_REPOLL_MAX
+# lazy re-polls before its final pass, so "did not converge" never pre-empts the settling 8 or the NON-check exit.
+STATE_GUARD_MAX=$((BEHIND_REPOLL_MAX + LAZY_REPOLL_MAX + 4))
 INFRA_RERUN_MAX=2      # finding #4: transient-infra reruns of a failed required job before halting
 CANCEL_RERUN_MAX=1     # ADR 0073 d4: re-runs of a CANCELLED required check's failed jobs before its GitHub-side exit 1
 MERGE_CONFIRM_MAX=5    # re-reads of state (after gh merge) and of mergeCommit (verify) before giving up
@@ -873,7 +895,7 @@ done
 int_re='^(0|[1-9][0-9]{0,8})$'
 for v in MERGE_TASK_CHECK_INTERVAL MERGE_TASK_STATE_INTERVAL MERGE_TASK_CONFIRM_INTERVAL MERGE_TASK_READ_TRIES \
          MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX MERGE_TASK_FETCH_TIMEOUT \
-         MERGE_TASK_NO_RUNNER_LIMIT MERGE_TASK_NO_RUNNER_POLL; do
+         MERGE_TASK_NO_RUNNER_LIMIT MERGE_TASK_NO_RUNNER_POLL MERGE_TASK_UNREPORTED_WAIT_MAX; do
   val=${!v:-}
   [ -z "$val" ] || [[ $val =~ $int_re ]] \
     || finish 2 "ERROR: $v='$val' is not a non-negative integer (at most 9 digits) — nothing was read or merged."
@@ -1472,6 +1494,140 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
   echo "  $BASE's required gate: $REQ_GATE ($REQ_WHY)."
 }
 
+# ---- the unreported-context probe (ADR 0080) ------------------------------------------------------------------------
+# Whether a required context of $BASE is reported by nothing on the integrated head: a renamed job (the task's own
+# rename included) leaves its old context required and unreported for good. Read at the never-appeared site and at
+# the NON-check site, never elsewhere; it never exits. Its reads, in order, each through gh_read (a `HTTP 404` or `HTTP
+# 422` is definitive, anything else after READ_TRIES transient): commits/<head>/check-runs?per_page=100 first (its 404
+# stops the probe), commits/<head>/status?per_page=100 (one page each: a total_count larger than the list reads
+# unknown), the required contexts with their app ids (classic from gate-branch.json, rulesets from gate-rules.json or
+# one rules/branches read when the gate stopped at `protected: true`), and, only once a context is unreported, its own
+# no_runner_read (an unreadable runs list is transient). UNREP:
+#   retry     a read failed transiently (UNREP_WHY names it and gh's first line);
+#   unknown   a definitive read failure, a page cut, an empty or unreadable required list, an unreported context while
+#             runs are held only by jobs no runner took (no-runner's own block), or an unreported context from another
+#             app with nothing in flight;
+#   inflight  a context is unreported and a run on the head is in flight (NR_RUNS > NR_HELD);
+#   pending   every context is reported, one by a check run not `completed` or a `pending` status (the NON-check site
+#             waits on it; the never-appeared site, where gh just read none reported, reads it as unknown);
+#   reported  every context is reported and complete;
+#   yes       a context is unreported, nothing is in flight, no run is held, and every unreported context's app is
+#             GitHub Actions (15368) or none: UNREP_ITEMS is the set-aside's text, one `required check "<C>" is …` per
+#             context, joined by `; `, with no sha (_stop_key reads two heads alike).
+UNREP=''; UNREP_WHY=''; UNREP_NAMES=''; UNREP_ITEMS=''; UNREP_RULES=''
+unreported_scan() {  # unreported_scan <check-runs.json> <status.json> <branch.json> <rules.json|''> — P_* assignments
+  python3 - "$1" "$2" "$3" "$4" <<'PY'
+import json, shlex, sys
+ACTIONS = 15368
+runs_p, status_p, branch_p, rules_p = sys.argv[1:5]
+def load(path):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+def out(kind, why="", names=(), items="", apps=1):
+    print("P_KIND=%s P_WHY=%s P_NAMES=%s P_ITEMS=%s P_APPS=%d" % (kind, shlex.quote(why), shlex.quote(", ".join(names)),
+                                                                 shlex.quote(items), apps))
+    sys.exit(0)
+cr, st = load(runs_p), load(status_p)
+runs = cr.get("check_runs") if isinstance(cr, dict) else None
+statuses = st.get("statuses") if isinstance(st, dict) else None
+if not isinstance(runs, list) or not isinstance(statuses, list):
+    out("unknown", "the check runs or statuses do not parse")
+if (cr.get("total_count") or 0) > len(runs) or (st.get("total_count") or 0) > len(statuses):
+    out("unknown", "more check runs or statuses than one page")
+required = []
+def need(ctx, app):
+    if isinstance(ctx, str) and ctx and ctx not in [c for c, _a in required]:
+        required.append((ctx, None if app in (None, -1) else app))
+b = load(branch_p)
+if isinstance(b, dict) and b.get("protected") is True:
+    rsc = (b.get("protection") or {}).get("required_status_checks") or {}
+    for c in rsc.get("checks") or []:
+        if isinstance(c, dict):
+            need(c.get("context"), c.get("app_id"))
+    for c in rsc.get("contexts") or []:
+        need(c, None)
+if rules_p:
+    rules = load(rules_p)
+    if not isinstance(rules, list) or len(rules) >= 100:
+        out("unknown", "the rules of the default branch do not read as a whole list")
+    for r in rules:
+        if isinstance(r, dict) and r.get("type") == "required_status_checks":
+            for c in (r.get("parameters") or {}).get("required_status_checks") or []:
+                if isinstance(c, dict):
+                    need(c.get("context"), c.get("integration_id"))
+if not required:
+    out("unknown", "no required context reads off the default branch's gate")
+def runs_of(ctx, app):
+    return [r for r in runs if isinstance(r, dict) and r.get("name") == ctx
+            and (app is None or (r.get("app") or {}).get("id") == app)]
+def statuses_of(ctx):
+    return [x for x in statuses if isinstance(x, dict) and x.get("context") == ctx]
+unrep, pending = [], []
+for ctx, app in required:
+    rs, ss = runs_of(ctx, app), statuses_of(ctx)
+    if not rs and not ss:
+        unrep.append((ctx, app))
+    elif not any(r.get("status") == "completed" for r in rs) and not any(x.get("state") not in (None, "pending") for x in ss):
+        pending.append(ctx)
+if not unrep:
+    out("pending" if pending else "reported", names=pending)
+items = "; ".join("required check %s is reported by no check run or status on the PR's head, and no run on it is "
+                  "in flight" % json.dumps(c) for c, _a in unrep)
+out("unrep", names=[c for c, _a in unrep], items=items, apps=int(all(a in (None, ACTIONS) for _c, a in unrep)))
+PY
+}
+unreported_required() {  # sets UNREP, UNREP_WHY, UNREP_NAMES and UNREP_ITEMS (above); never exits
+  local rc enc rules=''
+  UNREP=''; UNREP_WHY=''; UNREP_NAMES=''; UNREP_ITEMS=''
+  gh_read "$tmp/probe-runs.json" "check runs on PR #$PR's head" total_count,check_runs -- \
+    gh api "repos/$OWNER/$REPO/commits/$IHEAD/check-runs?per_page=100"; rc=$?
+  case "$rc" in
+    0) ;;
+    1) UNREP=unknown; UNREP_WHY="the check runs on its head: $READ_ERR"; return 0 ;;
+    *) UNREP=retry; UNREP_WHY="the check runs on PR #$PR's head ($READ_ERR)"; return 0 ;;
+  esac
+  gh_read "$tmp/probe-status.json" "statuses on PR #$PR's head" total_count,statuses -- \
+    gh api "repos/$OWNER/$REPO/commits/$IHEAD/status?per_page=100"; rc=$?
+  case "$rc" in
+    0) ;;
+    1) UNREP=unknown; UNREP_WHY="the statuses on its head: $READ_ERR"; return 0 ;;
+    *) UNREP=retry; UNREP_WHY="the statuses on PR #$PR's head ($READ_ERR)"; return 0 ;;
+  esac
+  if [ -s "$tmp/gate-rules.json" ]; then
+    rules="$tmp/gate-rules.json"
+  elif [ "$(jf "$tmp/gate-branch.json" protected)" = true ]; then
+    if [ -z "$UNREP_RULES" ]; then   # read once per run
+      enc=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$BASE")
+      gate_read "$tmp/probe-rules.json" "repos/$OWNER/$REPO/rules/branches/$enc?per_page=100"; rc=$?
+      if [ "$rc" -eq 0 ]; then UNREP_RULES="$tmp/probe-rules.json"
+      elif [ "$rc" -eq 1 ] && grep -q 'Upgrade to GitHub Pro' "$tmp/gate.err" 2>/dev/null \
+           && ! grep -qi 'rate limit' "$tmp/gate.err" 2>/dev/null; then
+        printf '[]\n' > "$tmp/probe-rules.json"; UNREP_RULES="$tmp/probe-rules.json"
+      elif [ "$rc" -eq 1 ]; then UNREP=unknown; UNREP_WHY="the rules of $BASE: $GATE_ERR"; return 0
+      else UNREP=retry; UNREP_WHY="the rules of $BASE ($GATE_ERR)"; return 0
+      fi
+    fi
+    rules=$UNREP_RULES
+  fi
+  local P_KIND='' P_WHY='' P_NAMES='' P_ITEMS='' P_APPS=0
+  eval "$(unreported_scan "$tmp/probe-runs.json" "$tmp/probe-status.json" "$tmp/gate-branch.json" "$rules")"
+  UNREP_WHY=$P_WHY; UNREP_NAMES=$P_NAMES; UNREP_ITEMS=$P_ITEMS
+  case "$P_KIND" in
+    unrep) ;;
+    unknown|pending|reported) UNREP=$P_KIND; return 0 ;;
+    *) UNREP=unknown; UNREP_WHY="the probe did not read"; return 0 ;;
+  esac
+  if ! no_runner_read; then UNREP=retry; UNREP_WHY="the runs on PR #$PR's head (unreadable)"; return 0; fi
+  if [ "$NR_RUNS" -gt "$NR_HELD" ]; then UNREP=inflight
+  elif [ "$NR_HELD" -gt 0 ]; then UNREP=unknown; UNREP_WHY="its runs are held only by jobs no runner took"
+  elif [ "$P_APPS" != 1 ]; then UNREP=unknown; UNREP_WHY="an unreported context is another app's"
+  else UNREP=yes
+  fi
+}
+
 checks_watch() {  # one slice of the required-checks watch: gh's rc, or 142 once NO_RUNNER_POLL cut it
   [ "$(type -t lc_loaded)" = function ] || . "$LIVE_CHECKOUT" 2>/dev/null
   if [ "$(type -t lc_bounded)" = function ]; then
@@ -1588,6 +1744,18 @@ wait_required_checks() {  # wait_required_checks <the state machine's mergeState
             WAIT_MSG="retryable: no required check is reported for PR #$PR and nothing runs on its head, but $BASE's gate is unreadable ($REQ_WHY): GitHub has not settled its mergeability yet; nothing merged; re-run"
             return 8
           fi
+          # A required context nothing reports on the head (a renamed job) is its own set-aside, a settings block
+          # merge-settings.py frees (ADR 0080); a probe read that failed transiently is 8, never 1. A run started since
+          # the loop's own read is waited on: the next pass's ci_runs_in_flight reads that same run, so it is the
+          # in-flight wait above, never a wait of its own. `pending` here disagrees with `gh pr checks --required`,
+          # which has just read no required check reported (a status of the required name from another source:
+          # statuses_of reads any app's), so it reads as unknown: today's exit 1 below, never a re-wait with no bound.
+          unreported_required
+          case "$UNREP" in
+            yes) set_aside "unreported-context: $UNREP_ITEMS" ;;
+            retry) WAIT_MSG="retryable: cannot read $UNREP_WHY; nothing merged; re-run"; return 8 ;;
+            inflight) absent=0; sleep "$CHECK_INTERVAL"; continue ;;
+          esac
           # A required roll-up check that `needs:` a job no runner took is never created: name those jobs on this
           # line, which the lead copies as the reason. ci_runs_in_flight just read nothing in flight, so with
           # NR_HELD > 0 every unfinished run is held and NR_ROWS holds only held jobs. The prefix stays
@@ -1719,6 +1887,48 @@ settle_repoll() {  # settle_repoll <why> — one re-poll of a PR GitHub has not 
   sleep "$STATE_INTERVAL"
 }
 
+# The NON-check site (checks green, still BLOCKED, ADR 0080): the probe tells a renamed required job from a gate GitHub
+# decided. While a context is unreported with a run in flight, or reported and still running, it waits (the unreported
+# wait, UNREPORTED_WAIT_MAX polls, then 8), re-reading only the runs while they are in flight; `yes` sets the task aside
+# (unreported-context); a transient read is 8. After any wait it re-watches the required checks once (checks_done=0), so a
+# roll-up check the in-flight run creates is watched to its end and a red one takes the red path. Every context reported
+# and complete re-polls BLOCKED LAZY_REPOLL_MAX times (GitHub folding a changed merge setting in lazily); anything else,
+# or past that bound, is today's exit 1. A context once read `reported` is not read again.
+UNREP_POLLS=0; REWATCHED=0
+non_check_gate() {
+  [ "$UNREP" = reported ] || unreported_required
+  while [ "$UNREP" = inflight ] || [ "$UNREP" = pending ]; do
+    UNREP_POLLS=$((UNREP_POLLS+1))
+    if [ "$UNREP_POLLS" -gt "$UNREPORTED_WAIT_MAX" ]; then
+      finish 8 "retryable: required check $UNREP_NAMES still unreported on PR #$PR while CI runs on its head after $UNREPORTED_WAIT_MAX polls; nothing merged; re-run"
+    fi
+    wait_line "PR #$PR — required check $UNREP_NAMES not reported yet; CI in flight on head — waiting on: ${NR_LIVE:-its runs}…"
+    sleep "$CHECK_INTERVAL"
+    if [ "$UNREP" = inflight ]; then
+      if ! no_runner_read; then UNREP=retry; UNREP_WHY="the runs on PR #$PR's head (unreadable)"; break; fi
+      [ "$NR_RUNS" -gt "$NR_HELD" ] && continue
+    fi
+    unreported_required
+  done
+  LAST_WAIT=''
+  case "$UNREP" in
+    yes) set_aside "unreported-context: $UNREP_ITEMS" ;;
+    retry) finish 8 "retryable: cannot read $UNREP_WHY for PR #$PR's required checks; nothing merged; re-run" ;;
+  esac
+  if [ "$UNREP_POLLS" -gt 0 ] && [ "$REWATCHED" -eq 0 ]; then
+    REWATCHED=1; checks_done=0
+    echo "  PR #$PR — the unreported wait ended; re-watching its required checks once."
+    return 0
+  fi
+  if [ "$UNREP" = reported ] && [ "$lazy" -lt "$LAZY_REPOLL_MAX" ]; then
+    settle_repoll "BLOCKED with every required check reported"
+    return 0
+  fi
+  finish 1 "ERROR: PR #$PR is $S_MSS but required checks are already green — a NON-check gate is
+  blocking it (an unexpected required review or unresolved conversation). Resolve on
+  GitHub: $S_URL"
+}
+
 # ---- the merge ---------------------------------------------------------------------------------------------
 confirm_merged() {  # gh pr merge returned 0: re-read until MERGED; never trust the exit code alone
   local i=0 dis=n/a
@@ -1836,9 +2046,7 @@ while : ; do
         if [ "$S_MSS" = UNKNOWN ]; then
           settle_repoll "UNKNOWN after its required checks went green"
         else
-          finish 1 "ERROR: PR #$PR is $S_MSS but required checks are already green — a NON-check gate is
-  blocking it (an unexpected required review or unresolved conversation). Resolve on
-  GitHub: $S_URL"
+          non_check_gate
         fi
       else
         required_gate

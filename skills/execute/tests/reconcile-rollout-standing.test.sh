@@ -23,8 +23,10 @@
 #          once by real path) would pass the limit with it: Verify's US$30 signs and US$250 asks; the sum runs across
 #          notes, calls, gates and slugs, inclusive; dry-run writes and locks nothing; bare sign-offs, push lines, other
 #          sections, undated notes and task notes never count; an unreadable dated note or an unlistable directory
-#          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; a task stamp is
-#          its own line.
+#          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; each limit keeps
+#          its own month line (p48-2): a logged signing counts only toward the line its `(…, <source>)` tag names (a
+#          task stamp's: that task's lines; a rollout stamp's: that rollout note's; rollouts.toml's: every line with its
+#          tag), and a line with no readable tag counts toward every line.
 #   S10    a declared test credential signs itself (ADR 0063, p34-8): p8-1's two verbatim credential gates
 #          (smart-slider-rollout-2026-10-28) are signed at the built-in 0 spend limit when the repo's one-line
 #          `test_credentials` class declares their keys, its file holds them with their declared prefix or Supabase
@@ -40,7 +42,13 @@
 #          irreversible gate still ask. The dummy Claude Login, declared in `[defaults] test_logins` (schema 5), signs
 #          its credential gate (on a serial note too: it is machine-wide); another Login, a deny word, another
 #          credential, an `@` or a conjunction beside it, a bounce and no declaration ask; a per/each on the cap
-#          itself asks; a refused file is exit 1; an env token keeps the ADR 0063 path.
+#          itself asks; a refused file is exit 1; an env token keeps the ADR 0063 path. Since p48-4 `cap 1 USD x 3`
+#          signs at its widest (US$3) and the A$500 gate prices at its ceiling rate (US$586, over the line).
+#   S12    a spend plainly under the limit never asks (p48-4, ADR 0034's 2026-11-13 amendment): the Verify's four
+#          verbatim gates (thread-skill-rollout-2026-10-26's two, the 11-03 smart-slider two) sign as before, with no
+#          widest suffix; the ruling's split, range, counted rate and other currency sign at their widest, each detail
+#          naming the cap-only reading's why, each annotated with its total exposure; an undecided cap, a further
+#          rate, a count in another unit and an approximate amount still ask; a bounced note signs none of them.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -326,8 +334,8 @@ ok "$(fm d status)|$(section d "$BOUNCE_H")" "status: plan-blocked|" "S8: a row 
 
 # ── S9: the month line (p30-8; ADR 0034's 2026-10-27 amendment, Chorus ADR 0108 d4) ───────────────────────────────
 # Spend is never asked ahead: a covered gate is signed and its signing logged in the rollout note's `## Needs-you log`,
-# and it still asks when this calendar month's standing-approved spend (summed from every rollout note's log) would
-# pass the limit with it. LOG(x, m, gate) is that line at NOW, under the H200 limit unless named.
+# and it still asks when this calendar month's standing-approved spend on its limit's own line (summed per limit from
+# every rollout note's log) would pass the limit with it. LOG(x, m, gate) is that line at NOW, under the H200 limit unless named.
 logl() {  # logl <slug> <x> <m> <gate> [limit] [source] — the standing approval's Needs-you log line at NOW
   printf -- '- 2026-10-14T09:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s, %s): %s' \
     "$1" "$2" "$3" "${5:-200}" "${6:-file:defaults}" "$4"
@@ -490,15 +498,15 @@ has "$out" "standing-spend.lock" "S9h: … naming the lock"
 has "$out" "ASK: b: $R250: total exposure US\$250 is over the standing approval's US\$200 (file:defaults)" "S9h: b, after it and needing no month read, still asks"
 ok "$(cat "$D/a.md" "$D/b.md" "$D/ro.md")" "$before" "S9h: a.md, b.md and ro.md byte-identical"
 
-# S9i: a task stamp sets its own per-gate limit and its own month line
+# S9i: a task stamp sets its own per-gate limit and its own month line (p48-2: the defaults' lines are not on it)
 scen s9i
 R120='spend: replicate credits — cap 120 USD'
 mkro; mkt a gate-pending 'spend_approval_usd: 300'; gate a "$R120"
 printf '\n## Needs-you log\n\n%s\n' \
   '- 2026-10-02T10:00+00:00 [[old1]] signed under the standing approval: US$170 (month to date US$170 of US$200, file:defaults): spend: x — cap 170 USD' >> "$D/ro.md"
 HH="$H200" sa a
-ok "$rc" 0 "S9i: 170 + 120 is within the task's own US\$300 line: signed"
-ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 120 290 "$R120" 300 task)" "S9i: … logged against the task's line"
+ok "$rc" 0 "S9i: 120 is within the task's own US\$300 line: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 120 120 "$R120" 300 task)" "S9i: … logged against the task's line: the defaults' 170 is not on the task's line"
 
 # S9j: the live layout. A dated rollout note sits in the tasks dir beside its tasks, so the dir's listing finds it as
 # well as --rollout, here given by a second spelling of the same file (`repo/..`: pathlib collapses a `./` but keeps a
@@ -526,6 +534,79 @@ RONOTE="$XP" HH="$H200" sa b
 ok "$rc" 3 "S9j: a later call's US\$10 is past the month line: exit 3"
 has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9j: … at US\$210, each note still counted once"
 ok "$(cat "$D/b.md" "$D/$X.md")" "$before" "S9j: b.md and the rollout note byte-identical across the call"
+
+# S9k: each limit keeps its own month line (p48-2). The incident, from giflab-rollout-2026-11-10: GifLab p16-1's US$200
+# crowd pilot was signed under its task's own US$1,500 limit, then two US$1 Animately gates under the [defaults] US$200
+# line read "would reach US$264" and asked. A logged signing counts only toward the line of the limit its tag names.
+SL() {  # SL <date> <slug> <x> <m> <t> <tag> <gate> — a standing line on <date> (<tag> empty: the pre-tag form)
+  if [ -n "$6" ]; then
+    printf -- '- %sT10:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s, %s): %s' "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+  else
+    printf -- '- %sT10:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s): %s' "$1" "$2" "$3" "$4" "$5" "$7"
+  fi
+}
+P1='spend: one probe — cap 1 USD'; P5='spend: a small batch — cap 5 USD'; P140='spend: a bigger batch — cap 140 USD'
+G50='spend: crowd-rating follow-up — cap 50 USD'
+scen s9k
+ORDER=$'- [[a]]\n- [[b]]\n- [[c]]\n- [[g1]]' mkro
+printf '\n## Needs-you log\n\n%s\n%s\n%s\n' \
+  "$(SL 2026-10-10 g1 200 263 1500 task 'spend: crowd-rating pilot — cap 200 USD')" \
+  "$(SL 2026-10-11 d1 45 45 200 file:defaults 'spend: d1 — cap 45 USD')" \
+  "$(SL 2026-09-28 c 500 500 600 task 'spend: c last month — cap 500 USD')" >> "$D/ro.md"
+mkdir -p "$D/Archive/Rollouts"
+mkarch "$D/Archive/Rollouts/x-rollout-2026-10-01.md" "$(SL 2026-10-05 d2 18 63 200 file:defaults 'spend: d2 — cap 18 USD')"
+mkarch "$D/Archive/Rollouts/o-rollout-2026-10-05.md" "$(SL 2026-10-06 r0 190 190 200 rollout 'spend: r0 — cap 190 USD')"
+mkt a gate-pending; gate a "$P1"
+HH="$H200" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S9k: Verify's US\$1 under file:defaults signs: the task-limited US\$200 and another rollout's US\$190 are not on its line"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 1 64 "$P1")" "S9k: … logged at month to date US\$64 (45 + 18 + 1)"
+hasnt "$out" "ASK:" "S9k: … and nothing asks"
+mkt b gate-pending; gate b "$P140"
+before=$(cat "$D/b.md" "$D/ro.md")
+HH="$H200" sa b
+ok "$rc" 3 "S9k: a default-source total past US\$200 still asks: exit 3"
+has "$out" "ASK: b: $P140: this month's (2026-10) standing approvals would reach US\$204 with this gate, past the US\$200 month line (file:defaults)" "S9k: … at US\$204, the defaults' own line"
+ok "$(cat "$D/b.md" "$D/ro.md")" "$before" "S9k: b.md and ro.md byte-identical"
+mkt c gate-pending 'spend_approval_usd: 100'; gate c "$P5"
+HH="$H200" sa c
+ok "$rc" 0 "S9k: a task stamp's line is the task's alone: c's US\$5 signs under its US\$100"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl c 5 5 "$P5" 100 task)" "S9k: … at month to date US\$5 (g1's 200, the defaults' 64 and c's September 500 not counted)"
+mkt g1 gate-pending 'spend_approval_usd: 1500'; gate g1 "$G50"
+HH="$H200" sa g1
+ok "$rc" 0 "S9k: g1's own new US\$50 signs"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl g1 50 250 "$G50" 1500 task)" "S9k: … its earlier task line counts: month to date US\$250"
+
+# S9k2: a rollout stamp's line is that rollout note's: its own rollout lines count, another note's never do
+scen s9k2
+P20='spend: a probe — cap 20 USD'; P160='spend: a batch — cap 160 USD'
+ORDER=$'- [[r]]\n- [[s]]' mkro 'spend_approval_usd: 200'
+printf '\n## Needs-you log\n\n%s\n' "$(SL 2026-10-08 r1 30 30 200 rollout 'spend: r1 — cap 30 USD')" >> "$D/ro.md"
+mkdir -p "$D/Archive/Rollouts"
+mkarch "$D/Archive/Rollouts/o-rollout-2026-10-05.md" "$(SL 2026-10-06 r0 190 190 200 rollout 'spend: r0 — cap 190 USD')"
+mkt r gate-pending; gate r "$P20"
+HH="$H200" sa r
+ok "$rc" 0 "S9k2: another rollout's US\$190 is not on this rollout's line: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl r 20 50 "$P20" 200 rollout)" "S9k2: … at month to date US\$50 (its own note's 30 counts)"
+mkt s gate-pending; gate s "$P160"
+HH="$H200" sa s
+ok "$rc" 3 "S9k2: past this rollout's own line: exit 3"
+has "$out" "ASK: s: $P160: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (rollout)" "S9k2: … at US\$210"
+
+# S9k3: fail closed: a standing line with no tag, or an unknown one, counts toward every line
+scen s9k3
+P60='spend: a batch — cap 60 USD'
+ORDER=$'- [[a]]\n- [[t]]' mkro
+printf '\n## Needs-you log\n\n%s\n%s\n' \
+  "$(SL 2026-10-03 u1 100 100 200 '' 'spend: u1 — cap 100 USD')" \
+  "$(SL 2026-10-04 u2 50 150 200 bogus 'spend: u2 — cap 50 USD')" >> "$D/ro.md"
+mkt a gate-pending; gate a "$P60"
+mkt t gate-pending 'spend_approval_usd: 200'; gate t "$P60"
+before=$(cat "$D/a.md" "$D/t.md" "$D/ro.md")
+HH="$H200" sa a,t
+ok "$rc" 3 "S9k3: both ask: exit 3"
+has "$out" "ASK: a: $P60: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9k3: the untagged and unknown-tag lines count toward the defaults' line"
+has "$out" "ASK: t: $P60: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (task)" "S9k3: … and toward a task stamp's line"
+ok "$(cat "$D/a.md" "$D/t.md" "$D/ro.md")" "$before" "S9k3: a.md, t.md and ro.md byte-identical"
 
 # ── S10: a declared test credential signs itself (ADR 0063, p34-8) ─────────────────────────────────────────────────
 # The Verify: p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md, and its rollout's
@@ -761,37 +842,41 @@ ok "$(section a '## Approved gates')" "- $STEER (approved $DATE under the standi
 ok "$(section ro '## Needs-you log')" "$(logl a 1 1 "$STEER")" "S11a: one Needs-you log line, US\$1"
 ok "$(fm a status)" "status: in_progress" "S11a: it flips to in_progress"
 
-# S11b: prose around a readable cap signs at the cap; a rate, multiplier, plural, per-Login word, other currency, a
-# malformed amount, no cap, and an amount over the line all still ask; irreversible gates still ask; a per/each on the
-# cap itself asks whatever follows it (`per GB`, `each for the images`: review round 1, never priced as a bare total)
+# S11b: prose around a readable cap signs at the cap; a rate, plural, per-Login word, malformed amount, no cap, and an
+# amount over the line all still ask; irreversible gates still ask; a per/each on the cap itself asks whatever follows
+# it (`per GB`, `each for the images`: review round 1, never priced as a bare total). Since p48-4 a multiplier on the
+# cap signs at its widest, and another currency prices at its ceiling rate (A$500 reads 586, over the line).
 scen s11b
 S11_SIGN=('spend: probe — cap 1 USD (Haiku 4.5)' 'spend: probe — cap 1 USD for the 3 probes' 'spend: soft probe — cap 1 USD')
 S11_WHY=('unrecognised clause: (Haiku 4.5)' 'unrecognised clause: for the 3 probes' 'widening word outside the cap clause: soft')
-S11_ASK=('spend: probe — cap 1 USD x 3' 'spend: probe, US$500 per run — cap 1 USD' 'spend: probe, US$5k per run — cap 1 USD'
+S11_WIDE=('spend: probe — cap 1 USD x 3')
+S11_ASK=('spend: probe, US$500 per run — cap 1 USD' 'spend: probe, US$5k per run — cap 1 USD'
   'spend: fast mode — cap 50 USD, per Login per month' 'spend: fast mode at US$2 per-Login — cap 5 USD'
   'spend: probe, A$500 of credits — cap 1 USD' 'spend: 3 runs — cap 500 USD' 'spend: probe — no cap' "$FAST"
   "irreversible: wipe the dummy Login's history" 'spend: egress — cap US$0.10 per GB'
   'spend: probes — cap US$5 each for the images')
-S11_ASKWHY=('unrecognised clause: x 3' "total exposure US\$501 is over the standing approval's US\$200 (file:defaults)"
+S11_ASKWHY=("total exposure US\$501 is over the standing approval's US\$200 (file:defaults)"
   'malformed amount: US$5k' 'per-Login cap with no Login count' 'per-Login cap with no Login count'
-  'non-USD or ambiguous currency: A$5' "total exposure US\$500 is over the standing approval's US\$200 (file:defaults)"
+  "total exposure US\$586 is over the standing approval's US\$200 (file:defaults)"
+  "total exposure US\$500 is over the standing approval's US\$200 (file:defaults)"
   'no cap clause' 'per-Login cap with no Login count' 'not a spend gate' 'unrecognised clause: per GB'
   'unrecognised clause: each for the images')
 ord=""; i=0
-for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[g$i]]"$'\n'; done
+for g in "${S11_SIGN[@]}" "${S11_WIDE[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[g$i]]"$'\n'; done
 ORDER="$ord" mkro
 i=0; slugs=""
-for g in "${S11_SIGN[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); mkt "g$i" gate-pending; gate "g$i" "$g"; slugs="$slugs${slugs:+,}g$i"; done
+for g in "${S11_SIGN[@]}" "${S11_WIDE[@]}" "${S11_ASK[@]}"; do i=$((i + 1)); mkt "g$i" gate-pending; gate "g$i" "$g"; slugs="$slugs${slugs:+,}g$i"; done
 HH="$H200" sa "$slugs"
 ok "$rc" 3 "S11b: the readable caps sign, the rest ask: exit 3"
 for k in 0 1 2; do
   has "$out" "g$((k + 1)): gate approved under the standing approval: ${S11_SIGN[$k]} (exposure US\$1 of US\$200, file:defaults; $CAPONLY ${S11_WHY[$k]})" "S11b: ${S11_SIGN[$k]} signs at US\$1 from its cap"
 done
+has "$out" "g4: gate approved under the standing approval: ${S11_WIDE[0]} (exposure US\$3 of US\$200, file:defaults; widest pricing, the cap-only reading refused: unrecognised clause: x 3)" "S11b: ${S11_WIDE[0]} signs at its widest, US\$3 (p48-4)"
 for k in $(seq 0 $((${#S11_ASK[@]} - 1))); do
-  has "$out" "ASK: g$((k + 4)): ${S11_ASK[$k]}: ${S11_ASKWHY[$k]}" "S11b: ${S11_ASK[$k]} asks (${S11_ASKWHY[$k]})"
+  has "$out" "ASK: g$((k + 5)): ${S11_ASK[$k]}: ${S11_ASKWHY[$k]}" "S11b: ${S11_ASK[$k]} asks (${S11_ASKWHY[$k]})"
 done
 ok "$(printf '%s\n' "$out" | grep -c '^ASK: ')" "${#S11_ASK[@]}" "S11b: one ASK per gate that cannot be signed"
-ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "3|3" "S11b: three log lines, month to date US\$3 of the US\$200 line"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9]*\) of.*/\1/')" "4|6" "S11b: four log lines, month to date US\$6 of the US\$200 line"
 
 # S11c: the dummy Claude Login, a declared test Login, signs itself; a deny word, env key, credential noun, `@` or
 # conjunction beside it, or another Login, asks (a second thing in plain prose with none of these is the residual
@@ -866,6 +951,66 @@ mkro; mkt a gate-pending; gate a "$CLS_LOGIN"
 HH="$HL" sa a
 ok "$rc" 3 "S11g: an env-token gate naming a Login asks: exit 3"
 has "$out" "ASK: a: $CLS_LOGIN: $OFF" "S11g: … with the class path's why, never the Login reading's"
+
+# ── S12: a spend plainly under the limit never asks (p48-4, ADR 0034's 2026-11-13 amendment) ─────────────────────────
+# The Verify: every spend gate under US$200 of thread-skill-rollout-2026-10-26 (p27-5's two) and of the 2026-11-03
+# smart-slider rollout, verbatim from their archived notes' `## Approved gates`, ` (approved …)` stripped. They sign
+# before p48-4 too (a regression pin), so none carries the widest suffix.
+WIDEST='widest pricing, the cap-only reading refused:'
+V27='spend: scored `claude plugin eval` runs through `make evals` on Opus model and judge with transcripts kept, one invocation per case: `make evals EVAL_ARGS="--case <name> --runs 3 --concurrency 3 --max-cost-usd 5 --trust-plugin --keep-temp --output-dir <scratch>/invN --report <scratch>/invN/report.html --json <scratch>/invN/run.json"` for handoff-ends-with-next, handoff-router-dispatch-skips-next and handoff-manual-dry-run, the same with `--runs 1` for handoff-fork-now, then at most one reserve re-run of one case after a B1/B2 fix — cap 15 USD'
+V27R='spend: one scored `make evals` invocation of handoff-router-dispatch-skips-next at --runs 3 (Opus model and judge, --trust-plugin --keep-temp, scratch output) on the branch head, to score its amended grader — cap 3 USD'
+VSS1='spend: AWS Cost Explorer API requests — cap 5 USD'
+VSS2='spend: AWS CloudWatch Logs Insights queries and S3 reads for the caught-upload corpus and end-to-end timings — cap 10 USD'
+
+# S12a: the Verify's four gates sign at US$20, 3, 5 and 10, exit 0
+scen s12a
+ORDER=$'- [[v1]]\n- [[v2]]\n- [[v3]]\n- [[v4]]' mkro
+mkt v1 gate-pending; gate v1 "$V27"; mkt v2 gate-pending; gate v2 "$V27R"
+mkt v3 gate-pending; gate v3 "$VSS1"; mkt v4 gate-pending; gate v4 "$VSS2"
+HH="$H200" sa v1,v2,v3,v4
+ok "$rc" 0 "S12a: the Verify's four gates sign: exit 0"
+has "$out" "v1: gate approved under the standing approval: $V27 (exposure US\$20 of US\$200, file:defaults; $CAPONLY per/each outside the cap clause: per) [written]" "S12a: p27-5's gate signs at US\$20 from its cap"
+has "$out" "v2: gate approved under the standing approval: $V27R (exposure US\$3 of US\$200, file:defaults; $CAPONLY a number outside the cap clause: 3) [written]" "S12a: p27-5's re-score signs at US\$3 from its cap"
+has "$out" "v3: gate approved under the standing approval: $VSS1 (exposure US\$5 of US\$200, file:defaults) [written]" "S12a: smart-slider's US\$5 gate signs in full"
+has "$out" "v4: gate approved under the standing approval: $VSS2 (exposure US\$10 of US\$200, file:defaults) [written]" "S12a: smart-slider's US\$10 gate signs in full"
+hasnt "$out" "widest pricing" "S12a: … none priced at its widest"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9.]*\) of.*/\1/')" "4|38" "S12a: four log lines, month to date US\$38"
+
+# S12b: the ruling's wordings sign at their widest; what the widest reading cannot read still asks (S11b pins the per-GB,
+# no-cap and per-Login asks through all three readings)
+scen s12b
+W_SIGN=('spend: x — cap 10 USD for the runs; cap 5 USD for the judge' 'spend: x — cap US$40 to US$60'
+  'spend: x — cap US$0.50 per call, at most 40 calls' 'spend: x — cap 30 AUD')
+W_USD=(15 60 20 35.10)
+W_WHY=('2 cap clauses' 'range: US$40 to US$60' 'unrecognised clause: per call' 'no cap clause')
+W_ASK=('spend: x — cap TBD; last run cost US$10' 'spend: x — cap US$0.50 per call, at most 40 calls per day'
+  'spend: x — cap US$1 per run, up to 10 runs across 3 models' 'spend: x — cap ~US$5')
+W_ASKWHY=('no cap clause' 'unrecognised clause: per call' 'unrecognised clause: per run' 'no cap clause')
+ord=""; i=0
+for g in "${W_SIGN[@]}" "${W_ASK[@]}"; do i=$((i + 1)); ord="$ord- [[w$i]]"$'\n'; done
+ORDER="$ord" mkro
+i=0; slugs=""
+for g in "${W_SIGN[@]}" "${W_ASK[@]}"; do i=$((i + 1)); mkt "w$i" gate-pending; gate "w$i" "$g"; slugs="$slugs${slugs:+,}w$i"; done
+HH="$H200" sa "$slugs"
+ok "$rc" 3 "S12b: the widest prices sign, the rest ask: exit 3"
+for k in 0 1 2 3; do
+  has "$out" "w$((k + 1)): gate approved under the standing approval: ${W_SIGN[$k]} (exposure US\$${W_USD[$k]} of US\$200, file:defaults; $WIDEST ${W_WHY[$k]}) [written]" "S12b: ${W_SIGN[$k]} signs at its widest, US\$${W_USD[$k]}"
+  ok "$(section "w$((k + 1))" '## Approved gates')" "- ${W_SIGN[$k]} (approved $DATE under the standing approval: total exposure US\$${W_USD[$k]}, limit US\$200 from file:defaults)" "S12b: … annotated with its total exposure"
+done
+for k in 0 1 2 3; do
+  has "$out" "ASK: w$((k + 5)): ${W_ASK[$k]}: ${W_ASKWHY[$k]}" "S12b: ${W_ASK[$k]} asks (${W_ASKWHY[$k]})"
+done
+ok "$(printf '%s\n' "$out" | grep -c '^ASK: ')" 4 "S12b: one ASK per gate the widest reading cannot read"
+ok "$(section ro '## Needs-you log' | wc -l | tr -d ' ')|$(section ro '## Needs-you log' | tail -1 | sed 's/.*month to date US\$\([0-9.]*\) of.*/\1/')" "4|130.10" "S12b: four log lines, month to date US\$130.10"
+
+# S12c: a bounced note signs none of them, the widest gate included, naming the pricer's widest reading
+scen s12c
+mkro; mkt a gate-pending; gate a "${W_SIGN[0]}"
+printf '\n%s\n\nbounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce\n' "$BOUNCE_H" >> "$D/a.md"
+before=$(cat "$D/a.md")
+HH="$H200" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S12c: a bounced note signs nothing (exit 3), nothing written"
+has "$out" "ASK: a: ${W_SIGN[0]}: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: exposure US\$15" "S12c: the split gate asks, its pricer reading US\$15"
 
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"

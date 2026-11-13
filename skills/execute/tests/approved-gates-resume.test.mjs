@@ -354,7 +354,7 @@ test('S-plan-r2: a gate declared on a revised plan — the revise and the climb 
 })
 
 test('S-plan-bounce (ADR 0038): two gates-only bounces stop gate-pending; the signed resume replays them and implements plan r2', async () => {
-  const GA = 'spend: Replicate API — cap 30 AUD'
+  const GA = 'spend: Replicate API — cap 30 AUD per render'   // unpriceable: `cap 30 AUD` alone prices since p48-4
   const R1 = `Planned on: abc\n### Files to modify\n- x.js: the change (r1)\n### Gated inputs\n- ${GA}\n  - two re-renders\n### Risks / unknowns\n- none`
   const R2 = R1.replace('(r1)', '(r2)')
   const bounced = { verdict: 'changes', feedback: ['the Cap does not price'], gateBounce: [GA] }

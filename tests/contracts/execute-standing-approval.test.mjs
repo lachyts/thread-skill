@@ -29,7 +29,10 @@
 // CONTEXT.md's **Test Login** entry and the README (test-login). p39-3: schedule § 3.6, reshuffle R3 (c) and R5.2,
 // the Under the chain, orient-all and Backlog orient lists, and the docs record a declared test Login's hit, never asking
 // it ahead; in § 3.6's and R3 (c)'s paragraphs each keeps-the-ask sentence follows its re-sweep sentence (b), so (b)
-// never exempts a task's other credential hits (test-credential, test-login-sweep).
+// never exempts a task's other credential hits (test-credential, test-login-sweep). p48-4 (ADR 0034's 2026-11-13
+// amendment): § 3.7's *Widest pricing* sentence with its governed cap word and what still asks after it, "nor read at
+// its widest", *The Cap's format*'s widest-amount sentence, ADR 0008's p48-4 line, CONTEXT.md's "read at its widest,
+// is within the limit" and the README's widest clause (widest).
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -284,11 +287,27 @@ function checkStanding(f) {
     fails.push('cap-only')
   }
 
+  // widest (p48-4, ADR 0034's 2026-11-13 amendment): a gate neither earlier reading prices is read at its widest, so
+  // long as a cap word governs one of its amounts; what still asks after it is named; the limit's ask adds "nor read at
+  // its widest"; *The Cap's format* says `exposure -` prints the widest amount; ADR 0008, CONTEXT.md and the README
+  // carry it.
+  const cap37 = labelled(f.execute, S37, "The Cap's format (ADR 0038).")
+  if (!standing.includes("**Widest pricing** (p48-4, ADR 0034's 2026-11-13 amendment: a spend plainly under the limit never asks)") ||
+    !standing.includes('so long as one amount comes straight after a cap word') ||
+    !standing.includes('Still asking after it: a gate that names no amount, or none straight after a cap word, a negated or undecided cap') ||
+    !standing.includes(', nor read at its widest.') ||
+    !cap37.includes('Since p48-4 a gate neither of those readings prices prints its widest amount') ||
+    !f.adr0008.includes('*(Amended 2026-11-13 by p48-4') ||
+    !collapse(f.context).includes('read at its widest, is within the limit') ||
+    !collapse(f.readme).includes('one whose cap cannot be read either is read at its widest')) {
+    fails.push('widest')
+  }
+
   // test-login (p37-4): a credential gate naming only a declared test Login signs itself; machine-wide, operator-only.
   const tl = labelled(f.execute, S37, "A declared test Login (p37-4, ADR 0034's 2026-11-05 amendment).")
   const row3 = collapse((section(f.execute, /^### 3\. /) ?? '').split('\n').find((l) => l.startsWith('| `test_logins` |')) ?? '')
   // § 4.5 step 1.2's Exit 3 and § 6.5 (a) list the same ASK reasons as § 3.7 (review round 1: sibling sites)
-  const askReasons = 'unpriceable even from its cap, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, a key missing from it, or a Login gate that names an undeclared Login or anything beside it'
+  const askReasons = 'unpriceable even at its widest, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, a key missing from it, or a Login gate that names an undeclared Login or anything beside it'
   if (collapse(f.execute).split(askReasons).length !== 3 ||
     !tl.includes('nothing joined beside it (an `@` address, or a conjunction that joins a second thing') ||
     !standing.includes('or a declared test Login (*A declared test Login* below)') ||
@@ -366,7 +385,7 @@ test('execute, schedule, reshuffle, status, README and CONTEXT.md hold every sta
 
 const RULES = ['step12', 'halt-guard', 'form', 'question-tool', 'standing-37', 's7', 'reinstate', 'exclusion-e',
   'schedule-sweep', 'spend-recorded', 'reshuffle', 'month-line', 'one-unfinished', 'docs', 'test-credential', 'cap-only', 'test-login',
-  'test-login-sweep']
+  'test-login-sweep', 'widest']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -469,8 +488,8 @@ test('control: § 6.5 without the standing lines, or step 1.2 without the month 
   assert.ok(from.length > 1 && from.includes(END), 'control setup: the standing-lines sentence')
   const sentence = from.slice(0, from.indexOf(END) + END.length)
   only('execute', sentence, '', 'month-line', 'no standing lines')
-  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable even from its cap,",
-    "the item's `→` detail (over the limit, unpriceable even from its cap,", 'month-line', 'no month line in step 1.2')
+  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable even at its widest,",
+    "the item's `→` detail (over the limit, unpriceable even at its widest,", 'month-line', 'no month line in step 1.2')
 })
 
 test('control: schedule § 0 without the sign-off sentence fails one-unfinished', () => {
@@ -515,10 +534,24 @@ test('control: each cap-only pin, removed in one place, fails cap-only alone', (
   only('execute', '**Cap-only pricing** (p37-4,', 'Pricing (p37-4,', C, '§ 3.7: no label')
   only('execute', ', and prose around the cap never asks (', ', and prose around the cap asks (', C, '§ 3.7: prose asks')
   only('execute', ' Still asking: a non-USD amount, a rate,', ' Still asking: a rate,', C, '§ 3.7: currency dropped from what asks')
-  only('execute', 'or when it cannot be priced even from its cap.', 'or when it cannot be priced.', C, '§ 3.7: no cap in the limit sentence')
+  only('execute', 'or when it cannot be priced even from its cap, nor', 'or when it cannot be priced, nor', C, '§ 3.7: no cap in the limit sentence')
   only('execute', "with `gated_inputs.py`'s standing reading,", "with `gated_inputs.py`'s exposure reading,", C, '§ 3.7: the exposure reading')
   only('adr0008', '*(Amended 2026-11-05 by p37-4', '*(Amended 2026-11-05 by a later task', C, 'ADR 0008: no p37-4 line')
   only('context', 'a shape it cannot price, even from its cap alone,\n  asks', 'a shape it cannot price\n  asks', C, 'CONTEXT.md: no cap alone')
+})
+
+test('control: each widest pin, removed in one place, fails widest alone', () => {
+  const W = 'widest'
+  only('execute', '**Widest pricing** (p48-4,', 'Pricing (p48-4,', W, '§ 3.7: no label')
+  only('execute', 'so long as one amount comes straight after a cap word', 'whatever its words', W, '§ 3.7: no governed cap word')
+  only('execute', 'Still asking after it: a gate that names no amount, or none straight after a cap word, a negated or undecided cap',
+    'Still asking after it: a gate that names no amount', W, '§ 3.7: what still asks')
+  only('execute', ', nor read at its widest.', '.', W, '§ 3.7: no widest in the limit sentence')
+  only('execute', 'Since p48-4 a gate neither of those readings prices prints its widest amount', 'Since p48-4 a gate neither of those readings prices prints null',
+    W, "the Cap's format: no widest amount")
+  only('adr0008', '*(Amended 2026-11-13 by p48-4', '*(Amended 2026-11-13 by a later task', W, 'ADR 0008: no p48-4 line')
+  only('context', 'read at its widest, is within the limit', 'read at its cap, is within the limit', W, 'CONTEXT.md: no widest')
+  only('readme', 'is read at its widest', 'asks', W, 'README: no widest')
 })
 
 test('control: each test-login pin, removed in one place, fails test-login alone', () => {
@@ -597,7 +630,7 @@ test('control: each test-login-sweep pin, removed in one place, fails test-login
   only('readme', 'Schedule and orient\nrecord such a gate ahead and never ask it', 'Schedule and orient\nask such a gate ahead', TLS, 'README: asked ahead')
 })
 
-test('the rules are all named (18) and each has a control', () => {
-  assert.equal(RULES.length, 18)
+test('the rules are all named (19) and each has a control', () => {
+  assert.equal(RULES.length, 19)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

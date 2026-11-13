@@ -79,7 +79,8 @@ names the root to re-run from. They are:
   `hand-back`, `mark-started`, `mark-integrating`, `origin-wait`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
   `defer`, `approve-gates`) is guarded too;
 - `git-env-canary.py`, `step-boundary.py begin` and `end`, `leg.py` but `status`, `close-score.py`,
-  `lead-integrate.py prepare` and `set-aside`, and `merge-task.sh` through `guard-pr`.
+  `lead-integrate.py prepare` and `set-aside`, `merge-settings.py` but `rows` (ADR 0080: `free`, `restore` and
+  `dismiss`, on the rollout the task note names), and `merge-task.sh` through `guard-pr`.
 
 The exemptions run from any root: `reconcile-rollout.py status` writes nothing (status and the estate scan read every
 rollout with it); `moving` writes nothing either, and is the Watchdog's reading of any rollout from any root (status §

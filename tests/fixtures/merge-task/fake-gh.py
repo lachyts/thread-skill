@@ -38,6 +38,8 @@ State (a missing file takes the default in brackets):
                           secondary rate limit; `404` ⇒ the Not Found form. err.rules: its text, rc 1, on every read.
   inflight [0]            actions/runs (the whole object; -q is rc 99): that many unfinished runs, ids 9000 on.
   runs                    a JSON list served as workflow_runs instead of inflight's.
+  runs.seq                JSON lines, each a list served as workflow_runs, one per read, the last sticky; read before
+                          runs and inflight. err.runs: its text, rc 1, on every actions/runs list read.
   runjobs.<id>            actions/runs/<id>/jobs, served as written (absent ⇒ the 404 form).
   checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
                           sticky; absent ⇒ rc 0 with one passing row. Each popped entry is kept as checks.cur.
@@ -58,6 +60,34 @@ State (a missing file takes the default in brackets):
                           run.<id>.err: its text on stderr, rc 1, nothing printed, for that `run view <id> --json`.
                           Any `run view --json` field outside gh 2.43.1's RUN_VIEW_FIELDS is its
                           `Unknown JSON field: "<f>"` and field list on stderr, rc 1, before anything is served.
+  checkruns.<sha>         commits/<sha>/check-runs (merge-task's probe and merge-settings.py's rename gate, ADR 0080): a
+                          JSON object {total_count, check_runs: [{name, status, conclusion, app: {id}}]}, or a bare list
+                          (total_count its length). checkruns.<sha>.seq: JSON lines, one per read, the last sticky,
+                          read first. Absent ⇒ the 404 form. A `check_name=` query keeps only the runs of that exact
+                          name, total_count recomputed. err.checkruns: its text, rc 1 (a 5xx: transient).
+  statuses.<sha>          commits/<sha>/status: {total_count, statuses: [{context, state}]}, or a bare list. Absent ⇒
+                          GitHub's answer for a commit with no status, 200 and an empty list. err.status: its text, rc 1.
+  repo.json               repos/o/r (merge-settings.py's ownership read). Absent ⇒ {owner {login o, type User},
+                          default_branch <default>, permissions {admin true}}. err.repo-api: its text, rc 1.
+  user                    the viewer's login for `api user` [o].
+  orgrole.<org>           user/memberships/orgs/<org>: `admin` or `member` (state active); absent ⇒ the 404 form.
+  rsc.json                branches/<b>/protection/required_status_checks, stored in the write's body form {strict,
+                          checks: [{context, app_id}]}; GET serves {url, strict, contexts, contexts_url, checks} with a
+                          stored app_id -1 read back as null; absent ⇒ the 404 form. A PATCH (--input -) rewrites it:
+                          a body with both `contexts` and `checks`, or a check whose app_id is null, is GitHub's 422.
+                          While it exists, branches/<b> reports its checks, and `pr checks --required` drops the rows
+                          of any check it does not require.
+  rulesets/<id>.json      rulesets/<id>: the whole ruleset object; a PUT replaces its `rules` whole. A rule whose
+                          `parameters` is null, or any `parameters` key on deletion, non_fast_forward,
+                          required_linear_history, required_signatures or creation, is GitHub's 422. While the dir
+                          exists and `rules` does not, rules/branches/<b> lists each ruleset's rules with its
+                          ruleset_id (ruleset_source_type its `source_type`, Repository by default).
+  write.err               its text, rc 1, nothing changed, on every write of rsc.json or a ruleset (a 403).
+  err.<route>             a 5xx-like text, rc 1, on that route's reads: err.rsc, err.rulesets, err.user.
+  writes.log              every non-GET api call outside graphql (its method, endpoint and body, one line), the
+                          merge-task DELETE of the head branch included (still rc 0). A method is read from --method X,
+                          --method=X, -X X or -XX; a call that carries -f, -F, --field, --raw-field or --input and no
+                          method is a POST, as gh's.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
   merge.queue             rc 0, autoMergeRequest set, stays OPEN.   merge.noop: rc 0, nothing changed.
@@ -300,6 +330,30 @@ if args[:2] == ["pr", "list"]:
     print(json.dumps(out))
     sys.exit(0)
 
+def required_names():
+    """The contexts rsc.json and the rulesets require, or None when neither is stored (no filtering)."""
+    names, any_ = set(), False
+    if has("rsc.json"):
+        any_ = True
+        names |= {c.get("context") for c in json.loads(rd(p("rsc.json"))).get("checks") or []}
+    if os.path.isdir(p("rulesets")):
+        any_ = True
+        for f in os.listdir(p("rulesets")):
+            if f.endswith(".json"):
+                for r in json.loads(rd(p("rulesets", f))).get("rules") or []:
+                    if r.get("type") == "required_status_checks":
+                        names |= {c.get("context") for c in (r.get("parameters") or {}).get("required_status_checks") or []}
+    return names if any_ else None
+
+
+def keep_required(table):
+    names = required_names()
+    if names is None or not table:
+        return table
+    out = [l for l in table.split("\n") if len(l.split("\t")) < 2 or l.split("\t")[0] in names]
+    return "\n".join(out)
+
+
 # ---- pr checks ------------------------------------------------------------------------------------------
 if args[:2] == ["pr", "checks"]:
     guard_num()
@@ -324,13 +378,13 @@ if args[:2] == ["pr", "checks"]:
     if "--watch" not in args:  # a one-shot read: the checks as they stand, the last watch's result
         if has("checks.cur"):
             e = json.loads(rd(p("checks.cur")))
-        sys.stdout.write(e.get("out", ""))
+        sys.stdout.write(keep_required(e.get("out", "")))
         sys.exit(int(e.get("rc", 0)))
     if has("checks.seq"):
         e = json.loads(pop(p("checks.seq")))
         wr(p("checks.cur"), json.dumps(e))
     # gh prints its first table before it waits for the next refresh, so a watch cut mid-sleep has written its rows.
-    sys.stdout.write(e.get("out", ""))
+    sys.stdout.write(keep_required(e.get("out", "")))
     sys.stdout.flush()
     if e.get("sleep"):
         time.sleep(float(e["sleep"]))
@@ -445,7 +499,21 @@ if args[:1] == ["api"]:
             endpoint = args[i]
             break
         i += 1
-    method = args[args.index("--method") + 1] if "--method" in args else "GET"
+    method = None
+    for k, a in enumerate(args):
+        if a in ("--method", "-X") and k + 1 < len(args):
+            method = args[k + 1].upper()
+            break
+        if a.startswith("--method="):
+            method = a.split("=", 1)[1].upper()
+            break
+        if a.startswith("-X") and len(a) > 2:
+            method = a[2:].upper()
+            break
+    if method is None:
+        fielded = any(a in ("-f", "-F", "--field", "--raw-field", "--input") or
+                      a.startswith(("--field=", "--raw-field=", "--input=")) for a in args)
+        method = "POST" if fielded else "GET"
     if endpoint == "graphql":
         guard_jq("api graphql")
         if has("err.graphql"):
@@ -455,9 +523,127 @@ if args[:1] == ["api"]:
         mq = rd(p("mq")) == "true"
         print(json.dumps({"data": {"repository": {"pullRequest": {"isMergeQueueEnabled": mq}}}}))
         sys.exit(0)
-    parts = (endpoint or "").split("?")[0].split("/")
+    path_only, _, query = (endpoint or "").partition("?")
+    parts = path_only.split("/")
+    body = None
+    if method != "GET":
+        if "--input" in args and args[args.index("--input") + 1] == "-":
+            body = sys.stdin.read()
+        with open(p("writes.log"), "a") as fh:
+            fh.write("%s %s %s\n" % (method, endpoint, (body or "").replace("\n", " ")))
     if method == "DELETE":
         sys.exit(0)
+
+    def serve_list(name, key, filt=None):
+        """A JSON object {total_count, <key>} from <name>.seq (popped) or <name>; a bare list is wrapped."""
+        raw = pop(p(name + ".seq")) if has(name + ".seq") else rd(p(name))
+        d = json.loads(raw)
+        if isinstance(d, list):
+            d = {"total_count": len(d), key: d}
+        if filt is not None:
+            d[key] = [x for x in d.get(key) or [] if filt(x)]
+            d["total_count"] = len(d[key])
+        print(json.dumps(d))
+        sys.exit(0)
+
+    def gh_out(d):
+        print(json.dumps(d))
+        sys.exit(0)
+
+    def unprocessable(msg):
+        die("gh: %s (HTTP 422)" % msg, out=json.dumps({"message": msg, "status": "422"}))
+
+    def rsc_get():
+        d = json.loads(rd(p("rsc.json")))
+        checks = [{"context": c.get("context"), "app_id": None if c.get("app_id") in (None, -1) else c.get("app_id")}
+                  for c in d.get("checks") or []]
+        return {"url": "https://api.github.com/" + path_only, "strict": d.get("strict"),
+                "contexts": [c["context"] for c in checks], "contexts_url": "https://api.github.com/x", "checks": checks}
+
+    PARAMLESS = ("deletion", "non_fast_forward", "required_linear_history", "required_signatures", "creation")
+    # merge-settings.py's routes (ADR 0080): ahead of the generic commits and branches routes.
+    if path_only == "user":
+        if has("err.user"):
+            die(rd(p("err.user")))
+        gh_out({"login": rd(p("user"), "o")})
+    if len(parts) == 4 and parts[:3] == ["user", "memberships", "orgs"]:
+        role = rd(p("orgrole." + parts[3]))
+        if role is None:
+            not_found()
+        gh_out({"state": "active", "role": role, "organization": {"login": parts[3]}})
+    if len(parts) == 3 and parts[0] == "repos":
+        if has("err.repo-api"):
+            die(rd(p("err.repo-api")))
+        gh_out(json.loads(rd(p("repo.json"))) if has("repo.json") else {
+            "owner": {"login": parts[1], "type": "User"}, "default_branch": DEFAULT, "permissions": {"admin": True}})
+    if len(parts) == 7 and parts[3] == "branches" and parts[5:] == ["protection", "required_status_checks"]:
+        if unquote(parts[4]) != DEFAULT:
+            die("fake gh: the branch must be one percent-encoded segment naming %s, got %s" % (DEFAULT, parts[4]), rc=99)
+        if method == "GET":
+            if has("err.rsc"):
+                die(rd(p("err.rsc")))
+            if not has("rsc.json"):
+                die("gh: Required status checks not enabled (HTTP 404)", out=json.dumps({"message": "Required status checks not enabled"}))
+            gh_out(rsc_get())
+        if method != "PATCH":
+            die("fake gh: %s on required_status_checks" % method, rc=99)
+        if has("write.err"):
+            die(rd(p("write.err")))
+        if not has("rsc.json"):
+            not_found()
+        new = json.loads(body or "{}")
+        if "contexts" in new and "checks" in new:
+            unprocessable("Invalid request. Only one of contexts or checks may be given.")
+        if any(c.get("app_id", 0) is None for c in new.get("checks") or []):
+            unprocessable("Invalid request. For 'properties/app_id', nil is not an integer.")
+        cur_ = json.loads(rd(p("rsc.json")))
+        if "strict" in new:
+            cur_["strict"] = new["strict"]
+        if "checks" in new:
+            cur_["checks"] = new["checks"]
+        wr(p("rsc.json"), json.dumps(cur_))
+        gh_out(rsc_get())
+    if len(parts) == 5 and parts[3] == "rulesets":
+        f = p("rulesets", parts[4] + ".json")
+        if method == "GET":
+            if has("err.rulesets"):
+                die(rd(p("err.rulesets")))
+            if not os.path.exists(f):
+                not_found()
+            gh_out(json.loads(rd(f)))
+        if method != "PUT":
+            die("fake gh: %s on rulesets" % method, rc=99)
+        if has("write.err"):
+            die(rd(p("write.err")))
+        if not os.path.exists(f):
+            not_found()
+        new = json.loads(body or "{}")
+        for r in new.get("rules") or []:
+            if "parameters" in r and r["parameters"] is None:
+                unprocessable("Invalid property /rules/0/parameters: data cannot be null.")
+            if "parameters" in r and r.get("type") in PARAMLESS:
+                unprocessable("Invalid property /rules: %s takes no parameters." % r.get("type"))
+        rs = json.loads(rd(f))
+        if "rules" in new:
+            rs["rules"] = new["rules"]
+        wr(f, json.dumps(rs))
+        gh_out(rs)
+    if len(parts) == 6 and parts[3] == "commits" and parts[5] == "check-runs":
+        guard_jq("api commits/<sha>/check-runs")
+        if has("err.checkruns"):
+            die(rd(p("err.checkruns")))
+        if not has("checkruns." + parts[4]) and not has("checkruns." + parts[4] + ".seq"):
+            not_found()
+        want_name = next((unquote(q.split("=", 1)[1]) for q in query.split("&") if q.startswith("check_name=")), None)
+        serve_list("checkruns." + parts[4], "check_runs",
+                   (lambda r: r.get("name") == want_name) if want_name is not None else None)
+    if len(parts) == 6 and parts[3] == "commits" and parts[5] == "status":
+        guard_jq("api commits/<sha>/status")
+        if has("err.status"):
+            die(rd(p("err.status")))
+        if not has("statuses." + parts[4]):
+            gh_out({"state": "pending", "total_count": 0, "statuses": []})
+        serve_list("statuses." + parts[4], "statuses")
     if len(parts) >= 6 and parts[3:5] == ["git", "ref"]:
         guard_jq("api git/ref")
         if has("err.ref"):
@@ -494,6 +680,12 @@ if args[:1] == ["api"]:
         sys.exit(0)
     if len(parts) >= 5 and parts[3:5] == ["actions", "runs"]:
         guard_jq("api actions/runs")
+        if has("err.runs"):
+            die(rd(p("err.runs")))
+        if has("runs.seq"):
+            runs = json.loads(pop(p("runs.seq")))
+            print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
+            sys.exit(0)
         runs = json.loads(rd(p("runs"))) if has("runs") else [
             {"id": 9000 + i, "status": "in_progress"} for i in range(int(rd(p("inflight"), "0")))]
         print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
@@ -511,7 +703,12 @@ if args[:1] == ["api"]:
                 die(rd(p("err.branch")))
             mode = rd(p("branch"))
             off = {"enforcement_level": "off", "contexts": [], "checks": []}
-            if mode is None:
+            if mode is None and has("rsc.json"):
+                g = rsc_get()
+                print(json.dumps({"name": DEFAULT, "protected": True, "protection": {
+                    "enabled": True, "required_status_checks": {"enforcement_level": "everyone",
+                                                                "contexts": g["contexts"], "checks": g["checks"]}}}))
+            elif mode is None:
                 print(json.dumps({"name": DEFAULT, "protected": True, "protection": {
                     "enabled": True, "required_status_checks": {"enforcement_level": "everyone", "contexts": ["ci"],
                                                                 "checks": [{"context": "ci", "app_id": None}]}}}))
@@ -544,7 +741,16 @@ if args[:1] == ["api"]:
         if has("err.rules"):
             die(rd(p("err.rules")))
         mode = rd(p("rules"))
-        if mode is None:
+        if mode is None and os.path.isdir(p("rulesets")):
+            out = []
+            for f in sorted(os.listdir(p("rulesets"))):
+                if f.endswith(".json"):
+                    rs = json.loads(rd(p("rulesets", f)))
+                    for r in rs.get("rules") or []:
+                        out.append(dict(r, ruleset_id=rs.get("id"), ruleset_source_type=rs.get("source_type", "Repository"),
+                                        ruleset_source="o/r"))
+            print(json.dumps(out))
+        elif mode is None:
             print("[]")
         elif mode.lstrip().startswith("["):
             print(json.dumps(json.loads(mode)))
