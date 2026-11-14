@@ -612,6 +612,25 @@ for (const [name, files] of BINDING_HOLDS) {
   })
 }
 
+// ---- object literals (p47-5: an interpolated template before a `:` crashed propose on the optimizer) -------------------
+
+test('object literals: an instanceof ternary with a template branch holds; no key an out-of-step read meets drops a value; a computed lit key keeps its name', (t) => {
+  holds(prove(fixture(t, {
+    'tests/run.test.ts': 'const report = { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) }\n',
+  }), ['THREAD.md']), 'THREAD.md')
+  // `in` and `x!` stop the value's parse, so the object reads on token by token: a template key, a [ROOT] array read as a
+  // computed key, a stray `x` key met twice (by a `:` and by a shorthand) and every spread keep their values.
+  const ts = (call) => ({ 'tests/t.test.ts': "import fs from 'node:fs'\nimport path from 'node:path'\n" +
+    `const ROOT = path.resolve(import.meta.dirname, '..')\nconst x = fs.mkdtempSync('/tmp/x-')\n${call}\n` })
+  for (const call of ['fs.readdirSync({ a: k in o ? `${k}` : ROOT })', "fs.readdirSync({ ...ROOT, ...fs.mkdtempSync('/tmp/x-') })",
+    'fs.readdirSync({ a: x! ? [ROOT] : x })', 'fs.readdirSync({ a: x! ? x : ROOT, b: x! ? x : x })', 'fs.readdirSync({ a: x! ? x : ROOT, x })']) {
+    fails(prove(fixture(t, ts(call), { home: tmpHome(t) }), ['THREAD.md']), 'THREAD.md', { kind: 'walk', origin: 'repo' }, call)
+  }
+  // The glob reads a tmp cwd only when the computed ['cwd'] key is named "cwd".
+  holds(prove(fixture(t, { 'tests/t.test.ts': "import fs from 'node:fs'\nfs.globSync('*.md', { ['cwd']: fs.mkdtempSync('/tmp/x-') })\n" }),
+    ['THREAD.md']), 'THREAD.md')
+})
+
 // ---- git env, errors ------------------------------------------------------------------------------------------------------
 
 test('every git call scrubs the repo-local env: a decoy GIT_DIR is never read', (t) => {
