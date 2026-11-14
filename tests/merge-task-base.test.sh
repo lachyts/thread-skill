@@ -119,15 +119,20 @@ snap() {  # the decoy's refs, its core.bare, its config bytes, and its remote's 
   git -C "$d" for-each-ref; echo "bare=$(git -C "$d" config --get core.bare)"
   cat "$d/.git/config"; echo "-- remote"; git -C "$dr" for-each-ref
 }
+# stfails <out>: the self-test's own failed assertions under a red 8a/8b, as context lines with no `FAIL - ` of their own,
+# so a red names the case inside it and the test names read from the run stay 8a's and 8b's.
+stfails() { printf '%s\n' "$1" | sed -n 's/^FAIL - /    the self-test failed: /p'; }
 before=$(snap)
 out=$(GIT_DIR="$d/.git" bash "$MT" --self-test-base 2>&1); rc=$?
 ok "$rc" 0 "8a. --self-test-base under an inherited GIT_DIR exits 0"
 has "$out" "base: ALL PASS" "8a. --self-test-base under an inherited GIT_DIR: ALL PASS"
+stfails "$out"
 ok "$(snap)" "$before" "8a. the decoy and its remote are unchanged"
 mkdecoy; before=$(snap)
 out=$(GIT_DIR="$d/.git" GIT_WORK_TREE="$d" bash "$MT" --self-test-base 2>&1); rc=$?
 ok "$rc" 0 "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE exits 0"
 has "$out" "base: ALL PASS" "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE: ALL PASS"
+stfails "$out"
 ok "$(snap)" "$before" "8b. the decoy and its remote are unchanged"
 # 8c. a clean merge while the decoy's remote holds a commit the decoy lacks: an unscrubbed script fetches it
 #     (and fast-forwards the decoy's master). $tmp/repo sits on a side branch, so its own refresh fetches but
