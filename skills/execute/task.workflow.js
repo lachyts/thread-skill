@@ -394,6 +394,22 @@ const IMPL_RESULT = {
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap N USD", one line whose Cap holds the whole spend, with how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
     flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
+    // p31-2 (estate ADR 0011 d3): the counts are 'number' (the keywords the engine's schemas already use); testDeltaOf
+    // enforces whole numbers and bounds, and drops a malformed delta whole.
+    testDelta: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        unit: { type: 'string', enum: ['test', 'check'] },
+        added: { type: 'number' },
+        removed: { type: 'number' },
+        seconds: { type: 'number' },
+        unmeasured: { type: 'number' },
+        tiers: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { tier: { type: 'string' }, added: { type: 'number' }, seconds: { type: 'number' } }, required: ['tier', 'added', 'seconds'] } },
+      },
+      required: ['unit', 'added', 'removed', 'seconds', 'unmeasured'],
+      description: "ONLY from a code-writing pass whose verification went green, as the prompt's Test delta section says: what the whole PR adds to the suite against its base. Omit it otherwise.",
+    },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
@@ -608,6 +624,81 @@ Before you open or update a PR, run these preflight checks:
 - Sibling-site blindness: after a fix, grep the whole file AND codebase for the same code shape; fix every sibling occurrence in this PR (or justify leaving them).
 - Worktree safety: run \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${GIT_ENV_SCRUB} git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.
 - Worktree path discipline: your worktree root is the absolute path \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints — call it $WT. Every Read/Edit/Write MUST target a path UNDER $WT (e.g. \`$WT/src/foo.py\`). Edit requires an absolute path — do NOT absolutize against the project root you were handed (that is the MAIN checkout): an edit to a \`<project-root>/…\` path lands in the main checkout, OUTSIDE your branch and invisible to your PR — which looks exactly like a "silent Edit no-op" but is really a wrong-tree edit. After editing, \`${GIT_ENV_SCRUB} git -C $WT diff\` MUST show your change; if it does not, you edited the wrong tree — redo it against the \`$WT/…\` path.`.trim()
+
+// The test rules and the test delta (p31-2, estate ADR 0011 d3: a suite keeps its budget).
+// LEAN_TESTS_SHORT is the writing-lean-tests skill's short form, ~/.agents/skills/writing-lean-tests/SHORT.md as of
+// ~/.agents ac22e3e, copied verbatim with its trailing newline dropped: a workflow script reads no file, so this is the
+// brief's "copied with a drift pin" route. prompt-invariants pins sha256(LEAN_TESTS_SHORT + '\n') to 08e190de…, and its
+// opt-in live check (WRITING_LEAN_TESTS_SHORT=<the skill's SHORT.md>) compares the copy with the file. Re-copy and
+// re-pin together, never one without the other. Static: no backtick, no interpolation, no apostrophe.
+const LEAN_TESTS_SHORT = `Tests stay cheap. Before you add or change a test:
+1. Test a rule once, at its lowest layer. A route gets one HTTP smoke test; the rule behind it is tested on the plain function. If a sibling test already fails when this code breaks, add nothing.
+2. Use one table test (subTest, parametrize, a loop of cases) over per-kind copies. The same contract across kinds is one test with a row per kind.
+3. No source-text pin where a test runs the code. Grep the source only for what no running test can see: an absence, an order, a count, CSS or HTML.
+4. No wall-clock bound. Never assert elapsed time. Wait on the thing itself. A positive wait is a liveness bound of 10 s or more, which costs nothing when healthy. A negative check (never fired) reads an injected or virtual clock, never a short real sleep.
+5. A new test is fast-tier unless declared slow. Slow means a real subprocess, git, node, browser, compile or sleep of 1 s or more, and its marker says why.
+6. Build an expensive fixture once per class and copy it per test. Use the smallest input that proves the rule.
+7. A new test class goes in a feature file, never appended to a giant one.
+State how many tests you added and why each is not covered by one that already exists.`
+
+// Every code-writer (the implementer, the approved-plan implementer, the reviser) carries TEST_RULES right after
+// BUG_PREFLIGHTS, then TEST_DELTA_TASK; the review judge carries it right after its depth paragraph, then the test delta
+// line and TEST_DELTA_REVIEW. The read-only tree agents and Integration's two never carry these.
+const TEST_RULES = `Test rules (estate ADR 0011 d3: the writing-lean-tests skill's short form, for every test you write or review; where the repo's CLAUDE.md or AGENTS.md names its own markers, runner or fixtures, use those):
+${LEAN_TESTS_SHORT}`
+
+// The code-writers' side of the delta: the result's optional testDelta, counted against the PR's base and read only from
+// the runs the agent already made (no extra run, so the one-shot's EXACTLY ONCE holds), plus the rules' last line,
+// answered in the PR body. Static text.
+const TEST_DELTA_TASK = `Test delta (estate ADR 0011 d3): once your verification is green, return the result's optional \`testDelta\`, what the whole PR adds to the suite against its base (the default-branch commit its branch forked from), never only this round's change:
+- unit: "test" when the project's tests are test functions or test() calls, a table test counting once; "check" when its harness has neither (an exit-code script of ok or assert calls), each check counting once, a loop of checks over rows once, and a whole new test file as all its checks.
+- added and removed: how many of that unit the PR adds and removes.
+- seconds: the added ones' own time, read only from the test runs you already made (your touched-tests runs and your verifier run): a per-test time where the runner printed one, else a whole new test file's per-file time. Make no test run for the delta.
+- unmeasured: how many added ones had no such time (an added block inside an existing file, or a runner that printed no times); they never count as 0 s.
+- tiers: only when the project marks each test's tier (a slow marker, a slow directory), one entry per tier with its tier name, added and seconds. A fast tier picked by what a diff reaches marks no test: leave tiers out there.
+Answer the test rules' last line in the PR body: how many tests you added, and for each why no existing test covers it (a reviser whose round adds or removes tests updates that answer). The delta informs the review and never refuses: never drop a test the brief needs to shrink it, and leave \`testDelta\` out rather than guess a count.`
+
+// The review judge's side: how it applies the rules (written for a writer) and reads the delta line. Static text.
+const TEST_DELTA_REVIEW = `How you apply the test rules above: each numbered rule is a check on every test this PR adds or changes, and a test that breaks one is a finding like any other. Their last line is the code-writer's to answer in the PR body: check that answer against the diff, and a PR that adds tests with no answer is a finding. The test delta line above is the code-writer's own count: check it against the PR diff. It informs and never refuses: there is no cap, and its numbers alone, or a count the diff contradicts, are never a reason for "changes". You may ask for consolidation where the PR's tests repeat one another or an existing test.`
+
+const TIER_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,23}$/
+const round1 = (x) => Math.round(x * 10) / 10
+
+// A code-writer's testDelta, sanitised whole or nothing (pure, never throws): a fresh { unit, added, removed, seconds,
+// unmeasured, tiers } built from those fields only, or null. unit is 'test' or 'check'; the counts are whole numbers
+// 0..100000 with unmeasured <= added; seconds a finite 0..1e6, rounded to 0.1; tiers absent or null is [], else at most
+// 6 entries { tier, added, seconds }, each tier a unique TIER_NAME. Only numbers, the enum and a bound tier name ever
+// reach a prompt: an extra key is never read.
+function testDeltaOf(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const count = (n) => Number.isInteger(n) && n >= 0 && n <= 100000
+  const secs = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1e6
+  const { unit, added, removed, seconds, unmeasured } = v
+  if (unit !== 'test' && unit !== 'check') return null
+  if (!count(added) || !count(removed) || !count(unmeasured) || unmeasured > added || !secs(seconds)) return null
+  const raw = v.tiers == null ? [] : v.tiers
+  if (!Array.isArray(raw) || raw.length > 6) return null
+  const tiers = []
+  for (const t of raw) {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) return null
+    if (typeof t.tier !== 'string' || !TIER_NAME.test(t.tier) || tiers.some((x) => x.tier === t.tier)) return null
+    if (!count(t.added) || !secs(t.seconds)) return null
+    tiers.push({ tier: t.tier, added: t.added, seconds: round1(t.seconds) })
+  }
+  return { unit, added, removed, seconds: round1(seconds), unmeasured, tiers }
+}
+
+// The review judge's one test delta line: the latest code-writer's sanitised delta, or the none line (absent or
+// malformed). reviseRound replaces the delta with each reviser's, so it always belongs to the push being judged.
+function testDeltaLine(v) {
+  const d = testDeltaOf(v)
+  if (!d) return "Test delta (estate ADR 0011 d3): none reported for the PR's latest push; count the tests its diff adds and removes yourself."
+  const noun = (n) => (n === 1 ? d.unit : d.unit + 's')
+  const net = d.added - d.removed
+  const tiers = d.tiers.length ? `; by tier (${d.tiers.map((t) => `${t.tier}: ${t.added} added, ${t.seconds} s`).join('; ')})` : ''
+  const untimed = d.unmeasured ? `; ${d.unmeasured} added ${noun(d.unmeasured)} had no runner time` : ''
+  return `Test delta (estate ADR 0011 d3), the code-writer's own count against the PR's base: ${d.added} ${noun(d.added)} added, ${d.removed} removed (net ${net > 0 ? '+' + net : net}), ${d.seconds} s added${tiers}${untimed}.`
+}
 
 // Re-dispatch awareness. A resumed blocked task carries the prior attempt's diagnosis in its note —
 // reconcile-rollout.py appends `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked
@@ -1442,6 +1533,10 @@ ${FLAKE_CHECK_TASK}${securityCheckBlock(a, task)}
 
 ${BUG_PREFLIGHTS}
 
+${TEST_RULES}
+
+${TEST_DELTA_TASK}
+
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'implement')}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.${NEEDS_HUMAN_RULE}`
@@ -1658,6 +1753,10 @@ ${FLAKE_CHECK_TASK}${securityCheckBlock(a, task)}
 
 ${BUG_PREFLIGHTS}
 
+${TEST_RULES}
+
+${TEST_DELTA_TASK}
+
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'implement')}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.${NEEDS_HUMAN_RULE}`
@@ -1677,6 +1776,11 @@ Task note (the brief): ${task.taskPath}
 Task tree: ${worktreeDir(a.repoPath, task.slug)}
 
 ${depth}
+
+${TEST_RULES}
+
+${testDeltaLine(prevImpl.testDelta)}
+${TEST_DELTA_REVIEW}
 
 ${GIT_ENV_RULE}
 
@@ -1739,6 +1843,10 @@ ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFail
 ${FLAKE_CHECK_TASK}${securityCheckBlock(a, task)}
 
 ${BUG_PREFLIGHTS}
+
+${TEST_RULES}
+
+${TEST_DELTA_TASK}
 
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}
 
@@ -2662,7 +2770,8 @@ async function reviseRound(task, st, current, priorFeedback, round, a, planText,
     }
     return { stop: { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis, needsHuman: askOf(revised) } }
   }
-  return { current: { ...current, ...revised, needsHuman: '' } }
+  // p31-2: the judge reads only this reviser's test delta (or none), never an earlier push's.
+  return { current: { ...current, ...revised, testDelta: revised.testDelta, needsHuman: '' } }
 }
 
 // seed (p12-6, the `task.resume` revise after an Integration rejection): { history, roundsUsed }. The

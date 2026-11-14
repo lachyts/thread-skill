@@ -653,6 +653,74 @@ test('p29-9: a blocked implementer\'s flakes ride on its row; IMPL_RESULT and IN
   }
 })
 
+// ---- p31-2: the test delta (estate ADR 0011 d3). A code-writer whose verification went green returns `testDelta`, what
+// the whole PR adds to the suite against its base; testDeltaOf sanitises it whole or nothing, testDeltaLine renders it
+// as the review judge's one line (the none line when absent or malformed), a reviser's result replaces it, and it never
+// reaches the row. Values from the engine's realm are JSON round-tripped before deepEqual.
+const DT = loadEngine(['testDeltaOf', 'testDeltaLine', 'IMPL_RESULT', 'IMPL_RESULT_SECURED'])
+const plain = (x) => JSON.parse(JSON.stringify(x))
+const D1 = { unit: 'test', added: 3, removed: 1, seconds: 2.46, unmeasured: 1, tiers: [{ tier: 'fast', added: 2, seconds: 0.5 }, { tier: 'slow', added: 1, seconds: 1.96 }] }
+const D2 = { unit: 'check', added: 1, removed: 4, seconds: 0, unmeasured: 1 }
+const NONE_LINE = "Test delta (estate ADR 0011 d3): none reported for the PR's latest push; count the tests its diff adds and removes yourself."
+
+test('p31-2: testDeltaOf keeps a valid delta, rounded, with only its known fields, and drops anything malformed whole', () => {
+  const tier = (t, over = {}) => ({ tier: t, added: 1, seconds: 1, ...over })
+  const V = { unit: 'check', added: 2, removed: 0, seconds: 1, unmeasured: 0 }
+  for (const [what, input, want] of [
+    ['tiered', D1, { ...D1, seconds: 2.5, tiers: [{ tier: 'fast', added: 2, seconds: 0.5 }, { tier: 'slow', added: 1, seconds: 2 }] }],
+    ['tiers absent', V, { ...V, tiers: [] }],
+    ['tiers null', { ...V, tiers: null }, { ...V, tiers: [] }],
+    ['extra keys', { ...V, head: 'abc', note: 'x', tiers: [{ ...tier('t-1.x_y'), why: 'x' }] }, { ...V, tiers: [tier('t-1.x_y')] }],
+    ['undefined', undefined, null], ['null', null, null], ['an array', [], null], ['a string', 'x', null],
+    ['unit missing', { ...V, unit: undefined }, null], ['unit tests', { ...V, unit: 'tests' }, null],
+    ['added -1', { ...V, added: -1 }, null], ['added 1.5', { ...V, added: 1.5 }, null], ['added 100001', { ...V, added: 100001 }, null],
+    ['seconds NaN', { ...V, seconds: NaN }, null], ['seconds Infinity', { ...V, seconds: Infinity }, null], ['seconds -0.1', { ...V, seconds: -0.1 }, null],
+    ['seconds 1000001', { ...V, seconds: 1000001 }, null], ['seconds a string', { ...V, seconds: '2' }, null],
+    ['unmeasured over added', { ...V, unmeasured: 3 }, null],
+    ['7 tiers', { ...V, tiers: Array.from({ length: 7 }, (_, i) => tier(`t${i}`)) }, null],
+    ['a duplicate tier', { ...V, tiers: [tier('fast'), tier('fast')] }, null], ['tier a b', { ...V, tiers: [tier('a b')] }, null],
+    ['tier empty', { ...V, tiers: [tier('')] }, null], ['a tier with seconds NaN', { ...V, tiers: [tier('fast', { seconds: NaN })] }, null],
+  ]) {
+    assert.deepEqual(plain(DT.testDeltaOf(input)), want, what)
+  }
+})
+
+test('p31-2: testDeltaLine renders one line: counts, net, seconds, tiers and untimed tests, or the none line', () => {
+  const HEAD = "Test delta (estate ADR 0011 d3), the code-writer's own count against the PR's base: "
+  for (const [input, want] of [
+    [D1, HEAD + '3 tests added, 1 removed (net +2), 2.5 s added; by tier (fast: 2 added, 0.5 s; slow: 1 added, 2 s); 1 added test had no runner time.'],
+    [D2, HEAD + '1 check added, 4 removed (net -3), 0 s added; 1 added check had no runner time.'],
+    [{ unit: 'test', added: 0, removed: 0, seconds: 0, unmeasured: 0 }, HEAD + '0 tests added, 0 removed (net 0), 0 s added.'],
+    [null, NONE_LINE],
+    [{ ...D1, added: -1 }, NONE_LINE],
+  ]) {
+    const line = DT.testDeltaLine(input)
+    assert.equal(line, want)
+    assert.ok(!line.includes('\n'), 'one line')
+  }
+})
+
+test('p31-2: a fixture PR: each judge reads its latest code-writer\'s delta line, never a stale one, and no row carries it', async () => {
+  const script = (d1) => ({
+    review: (l) => (l.endsWith(' r3') ? 'approve' : 'changes'),
+    result: (l) => (l.startsWith('implement:') ? { testDelta: d1 } : l === 'revise:proj-fix-a r2' ? { testDelta: D2 } : {}),
+  })
+  const r = await run(mkArgs(mkTask('proj-fix-a')), script(D1))
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  const judge = (n, x = r) => x.calls.find((c) => c.label === `review:proj-fix-a r${n}`).prompt
+  const [L1, L2] = [DT.testDeltaLine(D1), DT.testDeltaLine(D2)]
+  assert.equal(judge(1).split(L1).length - 1, 1, 'r1 reads the implementer\'s delta once')
+  assert.ok(judge(2).includes(L2) && !judge(2).includes(L1), 'r2 reads the first reviser\'s, never the implementer\'s')
+  assert.ok(judge(3).includes(NONE_LINE) && !judge(3).includes(L2), 'r3 reads the none line: its reviser returned none')
+  assert.deepEqual(Object.keys(r.result.tasks[0]).sort(), [...ROW_KEYS].sort())
+  const bad = await run(mkArgs(mkTask('proj-fix-a')), script({ ...D1, added: -1 }))
+  assert.ok(judge(1, bad).includes(NONE_LINE), 'a malformed delta renders the none line')
+  const d = DT.IMPL_RESULT.properties.testDelta
+  assert.ok(d && d.type === 'object' && !DT.IMPL_RESULT.required.includes('testDelta'), 'IMPL_RESULT: testDelta is optional')
+  assert.equal(DT.IMPL_RESULT_SECURED.properties.testDelta, d, 'IMPL_RESULT_SECURED inherits the same testDelta')
+})
+
 // ---- ADR 0038: a Cap is a promise. The plan judge prices spend gates while args.gatePricer is set ---------------
 // A judge `changes` whose every bullet is about spend gates the pricer could not price (`"usd": null`) names them in
 // gateBounce; a priced gate whose sub-bullets break its Cap is an ordinary `changes` (C14). The engine validates the

@@ -1160,6 +1160,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite within 20 unless the project sets its own (a looser one only with its
   reason stated; estate ADR 0011 d2). A breach files that project's suite
   audit. _Avoid_: test timeout, `verify_timeout` (a deadline, not a budget).
+- **Test delta** — what a task's PR adds to its project's suite against the
+  PR's base: tests added and removed, in the project's own unit (a test
+  function, or a check where the harness has none), the added ones' seconds,
+  read only from runs the code-writing agent already made (untimed ones
+  counted apart, never as 0 s), and by tier where the project marks tiers.
+  The code-writer returns it with its result, and the review judge sees it as
+  one line beside the carried test rules (the writing-lean-tests skill's short
+  form). It informs and never refuses: no cap, and the judge may ask for
+  consolidation (estate ADR 0011 d3). _Avoid_: test budget, test cap.
 - **CI headroom** — how far a required GitHub check's job runs below its time
   limit (`timeout-minutes`), per merge and on the week's median. A job whose
   week's median runs past 80 % of its limit is a finding; a job cancelled at
