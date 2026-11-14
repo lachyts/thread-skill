@@ -96,7 +96,8 @@
 #           refuses another project's rollout on this run's checkout (its clone, or that clone's in-place twin) and
 #           drops one in its own clone with a WARN (P1-P5); the `clone` verb picks the default clone, this project's
 #           `<T>-<slug>-rollout`, or refuses, with reuse by recorded root and every clone-name collision (P6-P8j); a
-#           resume meets another project's rollout in its own clone, by the tie rule (P9-P10); `branches` (P11);
+#           resume meets another project's rollout in its own clone, by the tie rule (P9-P10); `branches`, its
+#           `unslug` lines included (P11, P11b);
 #           hold's why (P12); usage (P13).
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -1977,6 +1978,12 @@ brs --repo "$R-rollout" --tasks demo-p6-v,ai-p6-v,demo-p7
 ok "$out|$rc" "collide ai-p6-v audit-fix/p6-v - [[demo-p6-v]]|0" "P11: two named tasks on one branch: the later collides"
 brs --repo "$R-rollout" --tasks demo-p7
 ok "$out|$rc" "none|0" "P11: … none otherwise"
+# P11b: the 2026-11-02 halt (p47-6): a note named with spaces has no branch git takes, so it never reaches a queue;
+# capitals and `_` are refused as non-slugs, and a name with no ASCII letter or digit folds to no slug: `-`.
+brs --repo "$R-rollout" --tasks "demo-p7,Chorus multi-photo import workflow,Demo-P8_x,写真"
+ok "$out|$rc" "unslug [[Chorus multi-photo import workflow]] chorus-multi-photo-import-workflow
+unslug [[Demo-P8_x]] demo-p8-x
+unslug [[写真]] -|0" "P11b: a task note whose name is not a slug: one unslug line naming the slug to rename it to, or - for none"
 ok "$(python3 - "$CHECK" "$root/skills/execute/scripts/lead-integrate.py" <<'PYP'
 import importlib.util, sys
 sys.dont_write_bytecode = True
