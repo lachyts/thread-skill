@@ -290,10 +290,13 @@ ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["stalled"]')|$(q 'd["logged"
 ok "$(WAITING)|$(LEASE)" "[[\"$RO\",1]]|[\"leg\",\"2026-10-20T10:00:00Z\",true]" \
    "L9: … its waiting record and its lease are written at its start, the lease \`waiting: true\` (P41-4)"
 ok "$(grep -c 'rank wait\|rank retry' "$T/$RO.md")" 0 "L9: … and the Leg log has no rank line"
+# The room is planted only once the background wait has written its own waiting record, so its gate read is past: a
+# fixed sleep let a slow start read the room inside capacity_record and drop the record the quota step needs.
+rm -f "${THREAD_NOTE_LOCK_DIR:?}/trickle-claims.json"
 ( cd "$F" && python3 "$LEG" wait --task t1 --for 40 --rollout "$T/$RO.md" --tasks-dir "$T" --vault "$V" --now "$NOW" \
     --session s1 > "$S/wait.json" 2>/dev/null; echo $? > "$S/wait.rc" ) &
 wpid=$!
-sleep 2
+k=0; while [ "$(WAITING)" != "[[\"$RO\",1]]" ] && [ "$k" -lt 600 ]; do sleep 0.1; k=$((k+1)); done
 python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("status: in_progress", "status: done", 1))' "$T/p1.md"
 wait "$wpid"
 out=$(cat "$S/wait.json")
