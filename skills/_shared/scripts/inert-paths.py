@@ -1517,16 +1517,22 @@ class _Parser:
             self.eat("]")
             return ("union", items)
         if tok == ("p", "{"):
-            # A key it cannot name (a spread, a computed [k], an interpolated template or f-string, or the stray token a
-            # parse out of step lands on) keeps its value under its own non-str key, so no value is dropped from the
-            # object's union and a name lookup ("cwd" in obj) never matches it.
+            # No value is dropped from the object's union. A key it cannot name (a spread, a computed [k], an
+            # interpolated template or f-string) keeps its value under its own non-str key, which a name lookup ("cwd"
+            # in obj) never matches; a key met twice (a real duplicate, or a stray id or punctuation token a parse out
+            # of step lands on) holds the union of its values; a computed [k] keeps k too, as out of step the [ may
+            # open an array value. Each is a superset of what the object holds.
             obj = {}
+
+            def put(name, v):
+                obj[name] = ("union", [obj[name], v]) if name in obj else v
+
             while self.peek() != ("p", "}"):
                 if self.peek() == ("eof", ""):
                     raise ValueError("eof")
                 if self.peek() == ("p", "..."):
                     self.eat()
-                    obj[("...", len(obj))] = self.expr()
+                    put(("...", len(obj)), self.expr())
                 else:
                     key = self.eat()
                     name = key[1] if isinstance(key[1], str) else ("?", len(obj))
@@ -1535,14 +1541,16 @@ class _Parser:
                         try:
                             k = self.expr()
                             self.eat("]")
-                            name = k[1] if k[0] == "lit" else ("[]", len(obj))
                         except ValueError:
                             self.i = at
+                        else:
+                            put(("[]k", len(obj)), k)
+                            name = k[1] if k[0] == "lit" else ("[]", len(obj))
                     if self.peek() == ("p", ":"):
                         self.eat()
-                        obj[name] = self.expr()
+                        put(name, self.expr())
                     elif key[0] == "id":
-                        obj[key[1]] = ("name", key[1])
+                        put(key[1], ("name", key[1]))
                 if self.peek() == ("p", ","):
                     self.eat()
             self.eat("}")
