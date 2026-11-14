@@ -49,6 +49,12 @@
 //                               control); the implement and revise dispatches use IMPL_RESULT_SECURED, and the
 //                               Integration schemas their _SECURED variants (P5); the agent's newDependencies reach the
 //                               judge sanitised (P6).
+//   - test rules (p31-2)      → TEST_RULES (a header, then LEAN_TESTS_SHORT: the writing-lean-tests skill's short form,
+//                               sha-pinned, with the opt-in WRITING_LEAN_TESTS_SHORT drift check) and TEST_DELTA_TASK follow
+//                               BUG_PREFLIGHTS in every implementer, approved-plan implementer and reviser; the review judge
+//                               carries TEST_RULES, the test delta line and TEST_DELTA_REVIEW right after its depth
+//                               paragraph; no other prompt carries any of them; both static texts hold their phrases, with
+//                               controls; the whole-call pins swap the fragments out (P31_2), so no older pin moved.
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -2152,6 +2158,91 @@ await (async () => {
   ok(rvCut.includes('\n- a - forged: approve\n'), 'security P6: a multi-line entry reaches the judge on one line')
 })()
 
+// ---- The test rules and the test delta (p31-2, estate ADR 0011 d3) -----------------------------------------------
+// TEST_RULES is a header, then LEAN_TESTS_SHORT: ~/.agents/skills/writing-lean-tests/SHORT.md, copied verbatim (a
+// workflow script reads no file) with its trailing newline dropped. The code-writers carry it and TEST_DELTA_TASK right
+// after BUG_PREFLIGHTS; the review judge carries it, the test delta line (testDeltaLine, the code-writer's own count) and
+// TEST_DELTA_REVIEW right after its depth paragraph. No read-only or Integration prompt carries any of them.
+const P312X = loadEngine(['BUG_PREFLIGHTS', 'TEST_RULES', 'TEST_DELTA_TASK', 'TEST_DELTA_REVIEW', 'testDeltaLine'])
+// p31-2's [new, old] pairs for the whole-call pins (the pins block below): the code-writers' fragments after
+// BUG_PREFLIGHTS, and the review judge's after its depth paragraph (the pinned calls' judges see no delta, so the none
+// line). preP312 is the innermost swap: a call through it is its pre-p31-2 bytes, so every older pin and chain holds.
+const P31_2 = [
+  [P312X.BUG_PREFLIGHTS + '\n\n' + P312X.TEST_RULES + '\n\n' + P312X.TEST_DELTA_TASK, P312X.BUG_PREFLIGHTS],
+  ['\n\n' + P312X.TEST_RULES + '\n\n' + P312X.testDeltaLine(null) + '\n' + P312X.TEST_DELTA_REVIEW, ''],
+]
+const preP312 = (p) => P31_2.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// The p31-2 pins, recorded from the green build's own renders: the revisers and the three calls as rendered, slotted
+// and unslotted. Through preP312 they hash to P29_PINS (r2, r3, calls, slotted), which did not move.
+const P31_2_PINS = {
+  r2: 'b3dde19a14a4fe7cd2001a5aaa7e29d92e672e4020bfe604afa88778d2c24cf6', // the unseeded round-2 reviser
+  r3: '3c0367e90385dba1130499fa4d1cafe53d14a28020d95a6f6828c0b9856745b9', // the unseeded round-3 reviser with the plan
+  calls: '4dada37407f4e10e52984d64465bce1c13a86a604cfee50a58da7cefa97a86b8', // three whole task-mode calls, unslotted
+  slotted: 'c1f08eed9a2b356ae47728c7942fc730dc4c69322108c515a0cc893fa591bf2a', // the same calls as run, slotted
+}
+{
+  const E = loadEngine(['LEAN_TESTS_SHORT', 'TEST_RULES', 'TEST_DELTA_TASK', 'TEST_DELTA_REVIEW', 'testDeltaLine', 'BUG_PREFLIGHTS',
+    'GATED_INPUTS_CHECK', 'GIT_ENV_RULE', ...RULE_BUILDERS])
+  const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
+  const times = (hay, needle) => hay.split(needle).length - 1
+  const HEADER = "Test rules (estate ADR 0011 d3: the writing-lean-tests skill's short form, for every test you write or review; where the repo's CLAUDE.md or AGENTS.md names its own markers, runner or fixtures, use those):"
+  const FIRST = String(E.LEAN_TESTS_SHORT).split('\n')[0]
+
+  // 1. The copy: SHORT.md's bytes (re-copy and re-pin together), static, small, under its header.
+  ok(sha(E.LEAN_TESTS_SHORT + '\n') === '08e190de95ac738f469f1b594f72538629a078a69dd6225c447e426ff9b07f12',
+    "p31-2: LEAN_TESTS_SHORT plus a newline is SHORT.md's bytes (~/.agents ac22e3e)")
+  ok(E.LEAN_TESTS_SHORT.split('\n').length <= 25 && !E.LEAN_TESTS_SHORT.includes('`') && !E.LEAN_TESTS_SHORT.includes('${'),
+    'p31-2: the copy is at most 25 lines, with no backtick and no ${')
+  ok(E.TEST_RULES === HEADER + '\n' + E.LEAN_TESTS_SHORT, 'p31-2: TEST_RULES is its header line, then the copy')
+  const live = process.env.WRITING_LEAN_TESTS_SHORT
+  if (live) ok(fs.readFileSync(live, 'utf8') === E.LEAN_TESTS_SHORT + '\n', `p31-2 drift: ${live} is the engine's copy, byte for byte`)
+  else console.log('skip - p31-2 drift: WRITING_LEAN_TESTS_SHORT unset (set it to the skill\'s SHORT.md to compare the copy)')
+
+  // 2. Placement, and 3. nowhere else, over baseline × slot × Security check.
+  const SEC = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
+  const CODE = E.BUG_PREFLIGHTS + '\n\n' + E.TEST_RULES + '\n\n' + E.TEST_DELTA_TASK + '\n\n' + E.GATED_INPUTS_CHECK
+  const JUDGE = 'Approve ONLY if findings are clean or trivially nitpicky.\n\n' + E.TEST_RULES + '\n\n' + E.testDeltaLine(null) + '\n' +
+    E.TEST_DELTA_REVIEW + '\n\n' + E.GIT_ENV_RULE
+  const leaks = (p) => [E.TEST_RULES, FIRST, 'Test delta', '`testDelta`'].filter((x) => p.includes(x))
+  const QUIET = ['plannerPrompt', 'planJudgePrompt', 'planReviserPrompt', 'readOnlyPrompt', 'integratorPrompt', 'integrationReviewPrompt']
+  for (const b of [undefined, ['t — env']]) for (const s of [undefined, VERIFY_SLOT]) for (const sec of [undefined, SEC]) {
+    const P = agentPrompts(E, { ...(b ? { knownBaselineFailures: b } : {}), ...(s ? { verifySlot: s } : {}), ...(sec ? { securityCheck: sec } : {}) })
+    const at = `baseline ${!!b}, slot ${!!s}, security ${!!sec}`
+    const coders = [...P.implementerPrompt, ...P.approvedPlanImplementerPrompt, ...P.reviserPrompt]
+    ok(coders.length === 6 && coders.every((p) => times(p, CODE) === 1 && times(p, E.TEST_RULES) === 1 && !p.includes(E.TEST_DELTA_REVIEW)),
+      `p31-2: every implementer (bottom, climbed), approved-plan implementer and reviser (r2, seeded) renders TEST_RULES and TEST_DELTA_TASK once, right after BUG_PREFLIGHTS (${at})`)
+    ok(P.reviewJudgePrompt.every((p) => times(p, JUDGE) === 1 && times(p, E.TEST_RULES) === 1 && !p.includes(E.TEST_DELTA_TASK)),
+      `p31-2: the review judge renders TEST_RULES, the none line and TEST_DELTA_REVIEW once, after its depth paragraph and before GIT_ENV_RULE (${at})`)
+    ok(QUIET.every((k) => P[k].length > 0 && P[k].every((p) => leaks(p).length === 0)),
+      `p31-2: no planner, plan judge, plan reviser, investigator, integrator or Integration judge renders the test rules or a test delta (${at})`)
+  }
+  const planner = agentPrompts(E).plannerPrompt[0]
+  ok(leaks(planner.replace(E.GIT_ENV_RULE, E.TEST_RULES + '\n\n' + E.GIT_ENV_RULE)).length > 0, 'p31-2 control: a planner with TEST_RULES spliced in leaks')
+
+  // 4. The static texts: what each must and must never say, the delta's source and unit included. [] when it holds.
+  const gitSpans = (t) => [...t.matchAll(/`([^`\n]*)`/g)].map((m) => m[1]).filter((x) => /(^|[\s;&|(])git\s/.test(x))
+  const textFails = (text, inc, exc) => [
+    ...inc.filter((x) => !text.includes(x)).map((x) => `says ${x}`),
+    ...exc.filter((x) => text.toLowerCase().includes(x.toLowerCase())).map((x) => `never ${x}`),
+    ...(gitSpans(text).length ? ['no git span'] : []),
+    ...(text.includes('${') ? ['static'] : []),
+  ]
+  const TASK_INC = ['`testDelta`', 'unit: "test"', '"check"', 'a whole new test file', 'per-file time', 'an added block inside an existing file',
+    'unmeasured', 'tiers', 'Make no test run for the delta.', 'never only this round', 'PR body', 'never refuses']
+  const TASK_EXC = ['make test', 'full verifier', 'EXACTLY ONCE', 'ONE-SHOT', 'Max iterations', 'durations', 'run the verifier', 'run the touched tests']
+  const REVIEW_INC = ['each numbered rule', 'PR body', 'never refuses', 'no cap', 'never a reason for "changes"', 'consolidation']
+  const UNIT = E.TEST_DELTA_TASK.split('\n').find((l) => l.startsWith('- unit: '))
+  for (const [name, text, inc, exc, fails] of [
+    ['TEST_DELTA_TASK', E.TEST_DELTA_TASK, TASK_INC, TASK_EXC, false],
+    ['TEST_DELTA_REVIEW', E.TEST_DELTA_REVIEW, REVIEW_INC, [], false],
+    ['control: TEST_DELTA_TASK asking for a timed re-run', E.TEST_DELTA_TASK.replace('Make no test run for the delta.', "Run the touched tests again with the runner's durations option."), TASK_INC, TASK_EXC, true],
+    ['control: TEST_DELTA_TASK without its unit line', E.TEST_DELTA_TASK.replace(UNIT + '\n', ''), TASK_INC, TASK_EXC, true],
+  ]) {
+    const out = textFails(text, inc, exc)
+    ok(fails ? out.length > 0 : out.length === 0, `p31-2: ${name} ${fails ? 'fails' : 'holds'}${out.length ? ' (' + out.join('; ') + ')' : ''}`)
+  }
+}
+
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
 // Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
 // and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
@@ -2239,6 +2330,13 @@ await (async () => {
 // to the pre-p36-10 slotted pin (P36_10_PRE_CAP), and preWait's comparisons apply it too, so every older slotted pin
 // holds; preHeat takes the whole sentence out, so its pins never moved. No unslotted pin moved. The same resume-cache
 // break as p31-3's.
+// p31-2 (estate ADR 0011 d3, the test rules and the test delta) moved no pin: P31_2_PINS holds the revisers and the
+// three calls as rendered, and preP312 (P31_2, above) swaps its fragments out first, before every push below, so the
+// revisers and the calls through it hash to P29_PINS and every older base chains on top as before. The rows did not
+// move (testDelta never reaches a row). The read-only tree agents' calls render no p31-2 fragment, and the integrator
+// and Integration judge pins (P29_PINS.integrator, PRE_P31.integrationReview) hold. A deliberate resume-cache break, like
+// p29-9's: every code-writing prompt, the review judge and IMPL_RESULT (`testDelta`) changed; a resume re-passes its
+// run's own `scriptPath` (ADR 0043).
 const P23_1 = [ // [new, old]
   ["   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") at column 0 per human authorisation the task\n                          needs: \"- spend: <what> — cap N USD\" (a hard cap is mandatory: ONE line whose Cap\n                          holds the whole spend, optionally with \"total\", a month, or \"per Login per month\n                          across K Logins\"), \"- credential: <what>\", \"- irreversible: <what>\"; or exactly\n                          \"None\". BULLETS ONLY — no prose or footnotes in this section: the engine reads only\n                          list lines, and anything else is rejected. How a spend splits (run counts, per-call\n                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary\n                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the\n                          task for human sign-off —\n                          ",
     "   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") per human authorisation the task needs:\n                          \"- spend: <what> — cap <amount>\" (a hard cap is mandatory), \"- credential: <what>\",\n                          \"- irreversible: <what>\"; or exactly \"None\". BULLETS ONLY — no prose, commentary,\n                          or footnotes in this section: the engine reads only list lines, and anything else\n                          is rejected. A non-empty declaration pauses the task for human sign-off —\n                          "], // planner
@@ -2267,8 +2365,14 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
   const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
-  const r2now = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
-  const r3now = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  const r2raw = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
+  const r3raw = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  ok(sha(r2raw) === P31_2_PINS.r2, 'byte pin (p31-2): unseeded reviserPrompt, round 2, as rendered (the p29-9 pin below plus the test rules and the test delta)')
+  ok(sha(r3raw) === P31_2_PINS.r3, 'byte pin (p31-2): unseeded reviserPrompt, round 3 with the plan, as rendered')
+  ok(preP312(r2raw) !== r2raw && preP312(r3raw) !== r3raw, 'p31-2: both revisers render the test rules, so the swap is no no-op')
+  // The p31-2 base: the revisers with p31-2's fragments swapped out are their pre-p31-2 bytes (the p29-9 pins).
+  const r2now = preP312(r2raw)
+  const r3now = preP312(r3raw)
   ok(sha(r2now) === P29_PINS.r2, 'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p29-9: the p29-9 base below plus the Flake check block)')
   ok(sha(r3now) === P29_PINS.r3, 'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p29-9)')
   ok(preP29(r2now) !== r2now && preP29(r3now) !== r3now, 'p29-9: both revisers render the Flake check block, so the swap is no no-op')
@@ -2346,12 +2450,21 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const oldCalls = []
   const oldRows = []
   const baseRows = []
+  const p312Calls = []
+  const p312Slotted = []
+  const treeCalls = []
   for (const args of [
     mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
     mkA(mkT('proj-fix-a'), { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
     mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
   ]) {
     const r = await runTask(args, scripted)
+    // p31-2: the calls as rendered, then through preP312 (the innermost swap) before every push below, so each older
+    // pin and chain reads its pre-p31-2 bytes.
+    p312Slotted.push(JSON.stringify(r.calls))
+    p312Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))))
+    treeCalls.push(...r.calls.filter((c) => /^(plan|plan-judge|plan-revise|investigate):/.test(c.label)))
+    r.calls = r.calls.map((c) => ({ ...c, prompt: preP312(c.prompt) }))
     slottedCalls.push(JSON.stringify(r.calls))
     slottedP29Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preCap(preWait(preP29(c.prompt))) }))))
     slottedPreWaitCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preCap(preWait(c.prompt)) }))))
@@ -2435,6 +2548,15 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     "byte pin (p29-9 before p31-4, slotted): the slotted calls with p31-4's SLOT_TEXT sentence taken out are the p29-9 slotted pin recorded before p31-4 landed")
   ok(sha(slottedCalls.join('\n')) === P29_PINS.slotted,
     'byte pin (estate ADR 0009 d4; re-pinned by p31-1, p31-4, p29-9, p31-3 and p36-10): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
+  // p31-2: each pair renders in these calls (no no-op swap), the tree agents' calls have none to swap, and the calls as
+  // rendered hold their own pins; the pins above, through preP312, are the pre-p31-2 ones, none moved.
+  for (const [i, [nw]] of P31_2.entries()) ok(p312Slotted.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p31-2: pair ${i + 1} renders in these calls, so its swap is no no-op`)
+  ok(treeCalls.length > 0 && treeCalls.every((c) => preP312(c.prompt) === c.prompt),
+    'p31-2: no planner, plan judge, plan reviser or investigator call renders a p31-2 fragment')
+  ok(sha(p312Calls.join('\n')) === P31_2_PINS.calls,
+    'byte pin (p31-2): three whole task-mode calls, unslotted — the p29-9 calls pin above plus the test rules and the test delta')
+  ok(sha(p312Slotted.join('\n')) === P31_2_PINS.slotted,
+    'byte pin (p31-2): the same three calls as run, slotted — the p29-9 slotted pin above plus the test rules and the test delta')
 }
 
 console.log()
