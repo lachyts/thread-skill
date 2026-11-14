@@ -663,9 +663,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `chain/<rollout-slug>` after each `done` and at each close (never a
   rebase), then fast-forwards the primary to it, never stashing, under a
   per-repo lock (ADR 0067 d3); each land carries the copy's ignored outputs
-  under the chain's places (media a Leg renders, say) into the primary, never
-  over a newer file; after Complete, `leg.py land --retire` carries them once
-  more, then removes the copy and deletes its branch with `-d`, never `-D`.
+  under the chain's surfaces (media a Leg renders, say) into the primary,
+  never over a newer file; after Complete, `leg.py land --retire` carries
+  them once more, then removes the copy and deletes its branch with `-d`,
+  never `-D`.
   Never a **Rollout clone** (a parallel rollout's) and never read as a thread.
   _Avoid_: chain clone, chain worktree, sandbox.
 - **Note overlap** — two live runs editing the same vault note while both

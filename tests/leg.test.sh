@@ -62,7 +62,8 @@
 #        strictly behind the chain branch and unmoved since step 4, after live-checkout.sh's overlap mode, so a stand
 #        or a no-op leaves R's ORIG_HEAD absent (L17s: s1 in L17c, s2 a moved <d> before the overlap, s3 <d> already
 #        the tip, s4 the branch at <d>, s5 the branch unreadable, s6 the overlap mode unrunnable); the carry of a
-#        copy's ignored outputs into the primary at land and --retire, never over a newer file (L17t, p36-13).
+#        copy's ignored outputs under the chain's surfaces into the primary at land and --retire, never over a newer
+#        file nor out of a Python environment, a re-render carried and logged again, its log lines capped (L17t, p36-13).
 #   L18  same-file waits go by rank, wait-die at claim (ADR 0067 d9): order_key and first_by (L18a); a higher-ranked chain
 #        waits on a running lower-ranked holder, then goes first (L18b), its reservation sets a third chain's row aside
 #        (L18c); a lower-ranked chain sets its row aside and claims another (L18d); aging lifts a waiter, and only its open
@@ -1789,23 +1790,36 @@ unset CWD
 
 # ---- L17t: a land, then --retire, carry the copy's ignored outputs into the primary (p36-13) ----
 lscen l17t
-printf '*.mp4\nnode_modules/\n' >> "$R/.gitignore"; pcommit "$R" .gitignore "$(cat "$R/.gitignore")" "ignore media"
-mkro '' "a1~cc-r~$R/sub/l~\`repo:$R//media/\`"; mkt a1
+printf '*.mp4\nnode_modules/\npydeps/\n' >> "$R/.gitignore"; pcommit "$R" .gitignore "$(cat "$R/.gitignore")" "ignore media"
+mkro '' "a1~cc-r~$R/sub/l~\`repo:$R//media/\` \`repo:$R//sub/l/\`"; mkt a1
 CWD="$R" leg copies; CWD="$C1/sub/l" leg begin --cwd "$C1/sub/l"; CWD="$C1/sub/l" work "$C1" a1 a1.txt "a1 work"
-mkdir -p "$C1/media" "$C1/other" "$C1/sub/l/node_modules" "$R/media"
+mkdir -p "$C1/media" "$C1/other" "$C1/sub/l/node_modules" "$R/media" "$C1/sub/l/tools/env/bin" "$C1/sub/l/pydeps/site-packages"
 echo clip > "$C1/media/clip.mp4"; echo out > "$C1/sub/l/out.mp4"; echo x > "$C1/other/x.mp4"; echo m > "$C1/sub/l/node_modules/m.js"
 echo "copy's old" > "$C1/media/old.mp4"; touch -t 202001010000 "$C1/media/old.mp4"; echo "primary's newer" > "$R/media/old.mp4"
+# a uv venv by another name (its own `*` .gitignore, so git lists its files one by one), and a bare site-packages
+echo '*' > "$C1/sub/l/tools/env/.gitignore"; echo v > "$C1/sub/l/tools/env/pyvenv.cfg"; echo p > "$C1/sub/l/tools/env/bin/pip"
+echo p > "$C1/sub/l/pydeps/site-packages/p.pth"
 CWD="$C1/sub/l" leg land
 ok "$rc|$(lands)|$(q 'd["lands"][0]["carried"]')|$(q '[k["path"] for k in d["lands"][0]["carryKept"]]')" \
    "0|landed|None|None|['media/clip.mp4', 'sub/l/out.mp4']|['media/old.mp4']" \
-   "L17t: land carries the ignored files under the chain's surface and launch folder, never over a newer one"
-ok "$(cat "$R/media/clip.mp4")|$(cat "$R/sub/l/out.mp4")|$(cat "$R/media/old.mp4")|$(test -e "$R/other/x.mp4" && echo y || echo n)|$(test -e "$R/sub/l/node_modules" && echo y || echo n)" \
-   "clip|out|primary's newer|n|n" "L17t: … the primary's newer file intact; nothing outside the chain's places, no node_modules"
+   "L17t: land carries the ignored files under the chain's surfaces, never over a newer one"
+ok "$(cat "$R/media/clip.mp4")|$(cat "$R/sub/l/out.mp4")|$(cat "$R/media/old.mp4")|$(ls -A "$R/sub/l" | tr '\n' ' ')|$(test -e "$R/other/x.mp4" && echo y || echo n)" \
+   "clip|out|primary's newer|.mcp.json keep.txt out.mp4 |n" \
+   "L17t: … the primary's newer file intact; nothing outside the surfaces, no node_modules, venv or site-packages"
 ok "$(logn "Leg 1 carried: media/clip.mp4, sub/l/out.mp4 into $R\$")|$(logn "Leg 1 carry kept: $R/media/old.mp4: ")" "1|1" \
    "L17t: … each listed in the Leg log"
+echo clip2 > "$C1/media/clip.mp4"; for i in 0 1 2 3 4 5 6 7 8 9; do echo n > "$C1/media/n$i.mp4"; done
+for i in 1 2 3 4 5; do echo k > "$C1/media/k$i.mp4"; touch -t 202001010000 "$C1/media/k$i.mp4"; echo newer > "$R/media/k$i.mp4"; done
 CWD="$C1/sub/l" leg land
-ok "$rc|$(q 'd["lands"][0]["carried"]')|$(logn 'carried: ')|$(logn 'carry kept: ')" "0|[]|1|1" \
-   "L17t: a second land carries nothing again and logs nothing twice"
+ok "$rc|$(cat "$R/media/clip.mp4")|$(q 'len(d["lands"][0]["carried"])')|$(q 'len(d["lands"][0]["carryKept"])')" "0|clip2|11|6" \
+   "L17t: a land after a re-render carries the file again"
+ok "$(logn 'carried: ')|$(logn "Leg 1 carried: 11 files (media/clip.mp4, media/n0.mp4, .*, media/n8.mp4, … and 1 more) into $R\$")" "2|1" \
+   "L17t: … and logs it again, past ten files as a count and the first ten"
+ok "$(logn 'carry kept: ')|$(logn "Leg 1 carry kept: $R/media/k5.mp4: ")|$(logn "Leg 1 carry kept: 1 more file in $R: the primary's file is newer (1)\$")" \
+   "7|1|1" "L17t: … past five files kept, one line for the rest"
+CWD="$C1/sub/l" leg land
+ok "$rc|$(q 'd["lands"][0]["carried"]')|$(logn 'carried: ')|$(logn 'carry kept: ')" "0|[]|2|7" \
+   "L17t: a land with nothing new carries nothing and logs no kept line twice"
 CWD="$C1/sub/l" leg close --outcome complete --cwd "$C1/sub/l" --reflection "$REFL"; ok "$rc" 0 "L17t: complete"
 echo late > "$C1/media/late.mp4"; echo d > "$C1/media/d.mp4"; mkdir -p "$R/media/d.mp4"
 CWD="$R" leg land --retire
@@ -1814,7 +1828,7 @@ ok "$rc|$(q '[(e["removed"], e["carried"]) for e in d["retired"]]')|$(cat "$R/me
 has "$(q 'd["retired"][0]["why"]')" "media/d.mp4 cannot be carried into $R" "L17t: … naming it"
 rmdir "$R/media/d.mp4"; CWD="$R" leg land --retire
 ok "$rc|$(q '[(e["removed"], e["branchDeleted"], e["carried"]) for e in d["retired"]]')|$(cat "$R/media/d.mp4")|$(cat "$R/media/clip.mp4")" \
-   "0|[(True, True, ['media/d.mp4'])]|d|clip" "L17t: … then carries it and removes the copy; the carried files stay in the primary"
+   "0|[(True, True, ['media/d.mp4'])]|d|clip2" "L17t: … then carries it and removes the copy; the carried files stay in the primary"
 unset CWD
 
 # ---- L17e: interim (1) retired: a dependency another chain landed is claimed ----
