@@ -687,7 +687,12 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g init -q "$tmp/sshroot"; g -C "$tmp/sshroot" commit -q --allow-empty -m base
   g -C "$tmp/sshroot" remote add origin git@github.com:o/r.git
   g -C "$tmp/sshroot" update-ref refs/remotes/origin/master HEAD; held=$(git -C "$tmp/sshroot" rev-parse HEAD)
-  printf '#!/bin/sh\necho $$ >> "%s"\nexec sleep 30 2>/dev/null\n' "$tmp/ssh.pids" > "$tmp/hang-ssh"; chmod +x "$tmp/hang-ssh"
+  #     The fake ssh is run once (`warm`, exits at once) before the timed tries: macOS checks a newly written executable
+  #     on its first exec, about 0.45 s on a quiet machine and over the 1-s budget under a loaded suite, so a cold first
+  #     try timed out before its ssh started and "one ssh per try" read 1 (the p47-7 flake). Warm, git reaches the ssh
+  #     in about 0.03 s.
+  printf '#!/bin/sh\n[ "$1" = warm ] && exit 0\necho $$ >> "%s"\nexec sleep 30 2>/dev/null\n' "$tmp/ssh.pids" > "$tmp/hang-ssh"
+  chmod +x "$tmp/hang-ssh"; "$tmp/hang-ssh" warm
   : > "$tmp/ssh.pids"; s0=$SECONDS
   out=$( export GIT_SSH_COMMAND="$tmp/hang-ssh" GIT_SSH_VARIANT=ssh GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
          FETCH_TIMEOUT=1; refresh_local_base "$tmp/sshroot" master 2>&1 ); rc=$?
