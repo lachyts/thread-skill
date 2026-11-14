@@ -173,7 +173,9 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !lost.includes('the row is still reconciled whatever the exit') || !lost.includes('act on no `integration.outcome`') ||
     !bullet(canRaw, 'Check sites:').includes('a *Lost call* resume that returns a row') ||
     !bullet(canRaw, 'Check sites:').includes('is the Bookkeeping miss `record not armed`') ||
-    !bullet(canRaw, 'Check sites:').includes('it runs the state check and trips only when that fails')) fails.push('check-sites')
+    !bullet(canRaw, 'Check sites:').includes('it runs the state check and trips only when that fails') ||
+    // p47-6: a launch refused before its arm (the 2026-11-02 space-named note) opens no window, so no check.
+    !bullet(canRaw, 'Check sites:').includes('A launch refused before its arm opens no window: run no `check` for it')) fails.push('check-sites')
 
   // check-all-sites: every entry after verify_timeout; step 3 before mark-integrating; before every merge-task
   // launch (step 4, the hold release, the backoff, the two re-runs); completion before the sweep, retire before the move.

@@ -179,6 +179,18 @@ mkt A in_progress
 chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-missing: a check with no record on a clean clone → 0, one miss line"
 has "$(grep 'git-env miss' "$RO")" "task: record missing;" "bm-missing: … logged as record missing"
 call; ok "$rc" 0 "bm-missing: … check-all → 0"
+# bm-refused: the 2026-11-02 halt (p47-6). A space-named note's restart was refused before mark-started armed it
+# (here: no --arm flags), and the lead's check then met the first window's tombstone: on a clean clone that is a
+# miss, never a trip, and nothing holds.
+scen bm-refused
+N="Chorus multi-photo import workflow"
+mkt "$N" in_progress
+arm "$N"; chk "$N"
+HOME="$EH" THREAD_EVENTS_DIR="$S/events" python3 "$RR" mark-started --tasks "$N" --rollout "$RO" --tasks-dir "$V" --start restart > "$S/out" 2> "$S/err"
+ok "$?|$(recf "$N" task state)" '2|"checked"' "bm-refused: a restart's mark-started refused before its arm → 2, the tombstone unchanged"
+chk "$N"; ok "$rc|$(trips "$N")|$(misses "$N")" "0|0|1" "bm-refused: … the lead's check of the unarmed window → 0, no trip, one miss line"
+has "$(grep 'git-env miss' "$RO")" "task: record not armed;" "bm-refused: … logged as record not armed"
+call; ok "$rc" 0 "bm-refused: … check-all → 0: nothing holds"
 scen bm-unread
 mkt A in_progress; mkt I review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'
 arm A; echo '{not json' > "$(recp A)"
