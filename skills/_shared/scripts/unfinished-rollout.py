@@ -313,9 +313,13 @@ running, awaiting Integration, integrating or set aside) of every unfinished par
 of a named slug excepted (the same task, carried), and against the earlier named tasks. One line per collision, `collide
 <slug> <branch> [[<rollout>]] [[<task>]]` (`-` in the rollout's place for an earlier named task), else `none`; exit 0, or
 2 on a usage error (no line). A named task whose note name is not a slug (project_slug would change it: spaces,
-capitals, `_`, `.`) takes no branch git would make, and a refused branch never arms its task window (the 2026-11-02
-halt, p47-6): it is checked for nothing else and gets one `unslug [[<task>]] <its project_slug>` line, the slug to
-rename the note to, in its place in the order.
+capitals, `_`, `.`) is checked for nothing else and gets one `unslug [[<task>]] <its project_slug>` line, the slug to
+rename the note to, in its place in the order; `-` stands in the slug's place when the name folds to an empty slug (no
+ASCII letter or digit: an all-CJK or emoji-only title), meaning no slug to offer: choose a slug name. The reasons
+differ by class. A space, or another character git refuses in a branch name, breaks the engine's branch, and a refused
+branch never arms its task window (the 2026-11-02 halt, p47-6). Capitals, `_` and `.` make a branch git takes; they
+are refused because schedule queues only a note whose name is already a project slug (p47-6's non-slug rule), not
+because git refuses them.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
 
@@ -2978,7 +2982,7 @@ def cmd_branches(args, rr) -> int:
     """`branches` (ADR 0064; schedule step 5's Branch check): each named task's branch `audit-fix/<shortAlias(slug)>`
     against the unlanded tasks of every other unfinished parallel rollout on the same repo, and against the earlier
     named tasks. One `collide <slug> <branch> <[[rollout]] | -> [[<task>]]` line per collision, and one `unslug
-    [[<task>]] <slug>` line per task whose name is not a slug (p47-6), else `none`."""
+    [[<task>]] <slug | ->` line per task whose name is not a slug (p47-6; `-` when it folds to no slug), else `none`."""
     repo = Path(os.path.expanduser(args.repo))
     if not repo.is_dir():
         die(f"--repo {args.repo}: not a directory")

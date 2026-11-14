@@ -188,6 +188,7 @@ mkt "$N" in_progress
 arm "$N"; chk "$N"
 HOME="$EH" THREAD_EVENTS_DIR="$S/events" python3 "$RR" mark-started --tasks "$N" --rollout "$RO" --tasks-dir "$V" --start restart > "$S/out" 2> "$S/err"
 ok "$?|$(recf "$N" task state)" '2|"checked"' "bm-refused: a restart's mark-started refused before its arm → 2, the tombstone unchanged"
+has "$(cat "$S/err")" "--arm-repo <repoPath> --arm-default <B>" "bm-refused: … refused for its missing arm flags"
 chk "$N"; ok "$rc|$(trips "$N")|$(misses "$N")" "0|0|1" "bm-refused: … the lead's check of the unarmed window → 0, no trip, one miss line"
 has "$(grep 'git-env miss' "$RO")" "task: record not armed;" "bm-refused: … logged as record not armed"
 call; ok "$rc" 0 "bm-refused: … check-all → 0: nothing holds"
