@@ -612,6 +612,20 @@ for (const [name, files] of BINDING_HOLDS) {
   })
 }
 
+// ---- object literals (p47-5: an interpolated template before a `:` crashed propose on the optimizer) -------------------
+
+test('object literals: an instanceof ternary with a template branch holds; a template key and every spread keep their values', (t) => {
+  holds(prove(fixture(t, {
+    'tests/run.test.ts': 'const report = { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) }\n',
+  }), ['THREAD.md']), 'THREAD.md')
+  // `in` stops the value's parse, so the object reads on token by token to a template before a `:`: its value is kept.
+  const js = (call) => ({ 'tests/t.test.mjs': "import fs from 'node:fs'\nimport path from 'node:path'\n" +
+    `const ROOT = path.resolve(import.meta.dirname, '..')\n${call}\n` })
+  for (const call of ['fs.readdirSync({ a: k in o ? `${k}` : ROOT })', "fs.readdirSync({ ...ROOT, ...fs.mkdtempSync('/tmp/x-') })"]) {
+    fails(prove(fixture(t, js(call), { home: tmpHome(t) }), ['THREAD.md']), 'THREAD.md', { kind: 'walk', origin: 'repo' }, call)
+  }
+})
+
 // ---- git env, errors ------------------------------------------------------------------------------------------------------
 
 test('every git call scrubs the repo-local env: a decoy GIT_DIR is never read', (t) => {
