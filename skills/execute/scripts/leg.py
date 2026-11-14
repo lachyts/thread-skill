@@ -451,8 +451,24 @@ clear-halt, restarted, copies, land):
         8. the repo lock released.
       Then `leg_landed: <stamp>` (after `leg_claims:`, else `leg_head:`) on each done row whose every `leg_head` entry on
       a copy is on its primary's d (git's read), the task notes first, and the Leg log: a `land:` line per copy landed,
-      a `land stood:` line per stand (none when the chain's last land line for P is that same stand) and `land
-      verified:`. Every stand exits 0. The in-place peer check, on each try right before the ff in P: every other live
+      a `land stood:` line per stand (none when the chain's last land line for P is that same stand), `land
+      verified:`, and the carry's lines. Every stand exits 0. The carry (p36-13), per copy that ends landed or current
+      (or a plan that would land, under --dry-run, which writes nothing), run in land_copy under the repo lock still
+      held: a Chain copy is a worktree, so a file the repo ignores (media a Leg renders under ~/Projects, say) lives
+      only there and would go with the copy. Each ignored, untracked regular file of C (`git ls-files --others
+      --ignored --exclude-standard --directory`, each whole ignored directory walked) under the chain's places in P
+      (every `repo:` or `any` token of the note's `surfaces:` and the Queue cells; never a row's launch folder, most
+      often the repo's root, so a task names its outputs' folder as a surface) goes to the same relative path in P,
+      its mtime kept: never a symlink (the linked config), a dependency or tool cache (CARRY_SKIP: node_modules,
+      __pycache__, .venv, …), anything in a Python environment (a site-packages, or a folder holding a pyvenv.cfg: a
+      venv by any name), a nested checkout (a WARN), or a path P tracks. Every such file is the chain's (a copy is made
+      with only the tracked files), so no mtime bound is read. A file in P of the same size and mtime, or else the same
+      bytes, is skipped; a file in P as new as the copy's or newer is never overwritten. The Leg log gets `carried:
+      <rel>, … into <P>` on every carry that wrote a file (past CARRY_LOG_PATHS, `carried: <n> files (<the first
+      ones>, … and <k> more) into <P>`), and `carry kept: <P>/<rel>: <why>` per file not carried (past CARRY_LOG_KEPT,
+      one `carry kept: <k> more files in <P>: <why> (<n>); …`), a `carry kept` line the log holds never twice; the
+      entry's `carried` [rel] and `carryKept` [{path, why}] hold the whole lists.
+      The in-place peer check, on each try right before the ff in P: every other live
       root-level serial note that works in place (no `chain_copies:`; a malformed key reads as in place, as
       unfinished-rollout.py's copied_of reads it), read as a Chain, with a Leg open or a counted row in progress, whose
       open Leg's write set and launch folders (write_set, write_rows: begin's surface re-check's) or running rows'
@@ -461,22 +477,26 @@ clear-halt, restarted, copies, land):
       stands it only when its `surfaces:` names P or reads as any, `[[X]] could not be read (<why>) and may work <P> in
       place: fix its note`, else a WARN. No peer check runs for update-ref: no working tree moves. Prints {verb,
       rollout, leg, inPlace, lands [{checkout, copy, branch, default, state (landed, current, verify or stood), head,
-      merged, verify, landed (its tasks landed), why, waits}], stamped, warns, dryRun}: `waits` is true on a stand that
-      clears by itself (an earlier chain's claim, another land's lock, an in-place peer, P off d mid-land, d kept
-      moving), false on any other stand, null otherwise. --dry-run prints each copy's `plan` {unl, claim, bring,
-      verify, ff, peer} as state `plan`, takes no lock, and merges, moves and writes nothing.
+      merged, verify, landed (its tasks landed), why, waits, carried, carryKept}], stamped, warns, dryRun}: `waits` is
+      true on a stand that clears by itself (an earlier chain's claim, another land's lock, an in-place peer, P off d
+      mid-land, d kept moving), false on any other stand, null otherwise. --dry-run prints each copy's `plan` {unl,
+      claim, bring, verify, ff, peer} as state `plan`, takes no lock, and merges, moves and writes nothing.
       --red <why>: logs `land stood: <P>: Verify red after a land merge: <why>` for each copy whose chain branch holds
       commits its d lacks (every copy when none does), runs no git write and keeps the merge (no verified tip, so the
       next land asks again); a closed Leg may run it, and then writes that one line only.
       --retire, after Complete (the archived note is never written): resolves its paths, primes the git env and moves
       the cwd to the first primary (the copy it removes may be the cwd), then per copy, under its repo lock, lands its
       close-out commits by 4 and 7 (the peer check included; a done row off d, or any stand, keeps the copy and its
-      branch), removes the copy (`git worktree remove`, never --force; a copy already gone gets `worktree prune`, then 7
-      alone when d is an ancestor of the branch) and deletes the branch (`branch --set-upstream-to=<d>`, then `branch
-      -d`, never -D; a refusal unsets the upstream and keeps the branch). Prints `retired` [{checkout, copy, branch,
-      landed, removed, branchDeleted, why}]; any WARN files one loose follow-on, `<project>-followup-retire-chain-<date>`
-      (no pointer), naming each kept copy or branch and the `leg.py land --retire` command that finishes it (once
-      [[X]]'s Leg closes, for a peer's stand), printed as `followup`.
+      branch), runs the carry (above, under that lock still: the close-out's outputs too; nothing is logged, the note
+      being archived), keeps the copy and its branch when a file cannot be carried for any reason but a newer one in P
+      (its why names it, `<rel> cannot be carried into <P> (<why>)`), else removes the copy (`git worktree remove`,
+      never --force; a copy already gone gets `worktree prune`, then 7 alone when d is an ancestor of the branch) and
+      deletes the branch (`branch --set-upstream-to=<d>`, then `branch -d`, never -D; a refusal unsets the upstream and
+      keeps the branch).
+      Prints `retired` [{checkout, copy, branch, landed, removed, branchDeleted, why, carried, carryKept}]; any WARN
+      files one loose follow-on, `<project>-followup-retire-chain-<date>` (no pointer), naming each kept copy or branch
+      and the `leg.py land --retire` command that finishes it (once [[X]]'s Leg closes, for a peer's stand), printed as
+      `followup`.
   status                                     (read-only, no lock, no git; an archived note is read too; the restart's
                                              surface re-check is one read-only unfinished-rollout.py subprocess)
       The whole chain at a glance, for /thread:status § 5, /thread:repair § 7 and reflect's serial-score.py. A note
@@ -544,6 +564,8 @@ by position:
   - <stamp> Leg <N> land: [[t1]], [[t2]] on <d> in <P> (<sha12>) | close-outs on <d> in <P> (<sha12>)
   - <stamp> Leg <N> land stood: <P>: <why>
   - <stamp> Leg <N> land verified: <P> at <sha40>
+  - <stamp> Leg <N> carried: <rel>, <rel> into <P> | <n> files (<rel>, …, … and <k> more) into <P>
+  - <stamp> Leg <N> carry kept: <P>/<rel>: <why> | <k> more files in <P>: <why> (<n>); …
   - <stamp> Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)
   - <stamp> Leg <N> rank retry: [[t]] on [[X]] (<token>; [[X]] ranks above)
   - <stamp> halt cleared: <reason>
@@ -743,6 +765,14 @@ DEFAULT_VAULT = "~/repos/obsidian"
 # A Chain copy's gitignored config, linked from its primary checkout (ADR 0067 d2), and the generated launch aliases a
 # copy's manual launch line reads (each alias `cd`s into the primary, so a copy's line runs the alias's command without it).
 CONFIG_LINKS = (".mcp.json", ".claude/settings.local.json")
+# What a carry (land's, and --retire's before it removes a copy: p36-13) never takes from a copy into its primary: the
+# dependency and tool caches each checkout builds for itself (a copy is made with none: legs.md § Preflight), and git's,
+# by name. A Python environment under any other name is found by its own marks (carry_candidates' pyenv).
+CARRY_SKIP = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv", ".tox", ".nox", ".pytest_cache",
+                        ".mypy_cache", ".ruff_cache", ".cache", ".gradle", ".next", ".turbo", ".parcel-cache"})
+CARRY_SKIP_FILES = frozenset({".DS_Store"})
+# A carry's Leg log lines name at most this many carried paths, and this many kept files one line each (carry_lines).
+CARRY_LOG_PATHS, CARRY_LOG_KEPT = 10, 5
 DEFAULT_ALIASES = "~/repos/workspaces/_shared/generated/launch-aliases.zsh"
 
 LEG_LOG = "## Leg log"
@@ -1234,7 +1264,8 @@ class Chain:
 
 
 KINDS = ("began:", "resumed:", "smoke:", "filed ", "claimed ", "took ", "done ", "set aside ", "reverted ", "closed:",
-         "hand-over:", "follow-on ", "land:", "land stood:", "land verified:", "rank wait:", "rank retry:")
+         "hand-over:", "follow-on ", "land:", "land stood:", "land verified:", "rank wait:", "rank retry:", "carried:",
+         "carry kept:")
 
 
 def parse_log(note):
@@ -4115,7 +4146,195 @@ def needs_verify(P, C, r, dm, tip, tips):
 
 def land_entry(P, C, br):
     return {"checkout": P, "copy": C, "branch": br, "default": None, "state": None, "head": None, "merged": None,
-            "verify": None, "landed": [], "why": None, "waits": None}
+            "verify": None, "landed": [], "why": None, "waits": None, "carried": [], "carryKept": []}
+
+
+# ---- the carry: a copy's ignored outputs into its primary (p36-13) ----
+
+def carry_scope(chain):
+    """The places a carry reads, as tokens: every `repo:` or `any` token of the note's `surfaces:` and of each Queue
+    row's cell, and nothing else. A row's launch folder is no place of its own (it is most often the repo's root, whose
+    ignored files are the dependencies § Preflight sets up in the copy): a task that renders outputs names their folder
+    as a surface. An unparseable token is skipped."""
+    toks = []
+    for raw in list(sc.read_surfaces(chain.note)) + [t for r in chain.rows for t in r.surfaces]:
+        try:
+            tok = sc.parse_token(raw)
+        except ValueError:
+            continue
+        if tok[0] in ("repo", "any") and tok not in toks:
+            toks.append(tok)
+    return toks
+
+
+def carry_candidates(P, C, scope, warns):
+    """The copy's ignored, untracked regular files under scope, as sorted paths relative to C: `git ls-files --others
+    --ignored --exclude-standard --directory` in C, each whole ignored directory walked. Never a symlink (the linked
+    config among them), a CARRY_SKIP directory, a CARRY_SKIP_FILES name, anything in a Python environment (a folder
+    named site-packages, or one that holds a pyvenv.cfg: a venv by any name, giflab's `.gate/gifprep` say, whose
+    scripts and .pth files point into the copy), or a nested checkout (a WARN names it: it is no file of this repo's).
+    Every file there is the chain's: a copy is made with only the tracked files."""
+    if not scope:
+        return []
+    r = git(C, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+    if r.returncode != 0:
+        warns.append(f"WARN: {C}: its ignored files cannot be listed, so none is carried into {P}: "
+                     f"{reason_text((r.stderr or '').strip(), 160)}")
+        return []
+    pf = P.rstrip("/")
+    pyenvs = {}
+
+    def within(rel, folder=False):
+        tok = ("repo", f"{pf}//{rel}" + ("/" if folder else ""))
+        return any(sc.overlaps(tok, s) for s in scope)
+
+    def nested(rel):
+        if os.path.lexists(os.path.join(C, rel, ".git")):
+            warns.append(f"WARN: {C}/{rel} is a nested checkout: it is not carried into {P}")
+            return True
+        return False
+
+    def pyenv(drel):   # a Python environment's folder, whatever its name
+        if drel not in pyenvs:
+            pyenvs[drel] = (drel.rsplit("/", 1)[-1] == "site-packages"
+                            or os.path.isfile(os.path.join(C, drel, "pyvenv.cfg")))
+        return pyenvs[drel]
+
+    out = []
+    for ent in (r.stdout or "").split("\0"):
+        if not ent:
+            continue
+        rel = ent.rstrip("/")
+        parts = rel.split("/")
+        if any(p in CARRY_SKIP for p in parts) or parts[-1] in CARRY_SKIP_FILES:
+            continue
+        src = os.path.join(C, rel)
+        if os.path.islink(src):
+            continue
+        folder = os.path.isdir(src)
+        # git lists a file inside an environment one by one when the folder itself is not ignored whole
+        if any(pyenv("/".join(parts[:i])) for i in range(1, len(parts) + (1 if folder else 0))):
+            continue
+        if not folder:
+            if os.path.isfile(src) and within(rel):
+                out.append(rel)
+            continue
+        if not within(rel, folder=True) or nested(rel):
+            continue
+        for d, dirs, files in os.walk(src):
+            drel = os.path.relpath(d, C)
+            keep = []
+            for x in sorted(dirs):
+                xr = f"{drel}/{x}"
+                if (x in CARRY_SKIP or os.path.islink(os.path.join(d, x)) or not within(xr, folder=True) or pyenv(xr)
+                        or nested(xr)):
+                    continue
+                keep.append(x)
+            dirs[:] = keep
+            for x in files:
+                xr = f"{drel}/{x}"
+                fp = os.path.join(d, x)
+                if x in CARRY_SKIP_FILES or os.path.islink(fp) or not os.path.isfile(fp) or not within(xr):
+                    continue
+                out.append(xr)
+    return sorted(set(out))
+
+
+def _same_file(a, b):
+    """Whether a and b hold the same bytes. Same size and same st_mtime_ns read as the same file with nothing read
+    (shutil.copy2 keeps the mtime to the nanosecond, so every file a carry wrote reads so on each later land: a GB-sized
+    render is never re-read). Only a pair of one size whose mtimes differ is compared byte by byte."""
+    try:
+        sa, sb = os.stat(a), os.stat(b)
+        if sa.st_size != sb.st_size:
+            return False
+        if sa.st_mtime_ns == sb.st_mtime_ns:
+            return True
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                x, y = fa.read(1 << 20), fb.read(1 << 20)
+                if x != y:
+                    return False
+                if not x:
+                    return True
+    except OSError:
+        return False
+
+
+def carry_copy(ctx, chain, P, C, warns):
+    """Each carry_candidates file of C into the same relative path in P, its mtime kept (shutil.copy2 through a temp
+    file in the target folder, then os.replace). A file already there with the same bytes is skipped, unlisted; one
+    that is as new as the copy's or newer is never overwritten. (carried [rel], kept [{path, why, blocks}]): kept is
+    each file not carried, blocks True when the copy's file would be lost with the copy (anything but a newer primary
+    file), which keeps the copy at --retire. A file P tracks is never written (that would be an edit of the primary).
+    It runs under P's repo lock (land_copy's, --retire's), so no other chain's land moves P's tracked files between
+    the `git ls-files` read and the write. --dry-run writes nothing and reports what it would carry."""
+    carried, kept = [], []
+    rels = carry_candidates(P, C, carry_scope(chain), warns)
+    if not rels:
+        return carried, kept
+    ls = git(P, "ls-files", "-z")
+    tracked = {x.casefold() for x in (ls.stdout or "").split("\0") if x} if ls.returncode == 0 else None
+    for rel in rels:
+        src, dst = os.path.join(C, rel), os.path.join(P, rel)
+        why = None
+        if tracked is None:
+            why = "the primary's tracked files cannot be read"
+        elif rel.casefold() in tracked:
+            why = "the primary tracks it"
+        elif os.path.lexists(dst) and (os.path.islink(dst) or not os.path.isfile(dst)):
+            why = "the primary holds something other than a file there"
+        elif os.path.lexists(dst):
+            if _same_file(src, dst):
+                continue
+            if os.stat(dst).st_mtime_ns >= os.stat(src).st_mtime_ns:
+                kept.append({"path": rel, "why": "the primary's file is newer", "blocks": False})
+                continue
+        if why is None and not ctx.dry:
+            tmp = None
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                fd, tmp = tempfile.mkstemp(prefix=".carry-", suffix=".tmp", dir=os.path.dirname(dst))
+                os.close(fd)
+                shutil.copy2(src, tmp)
+                os.replace(tmp, dst)
+                tmp = None
+            except OSError as e:
+                why = f"cannot copy it: {e.strerror or e}"
+            finally:
+                if tmp is not None:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp)
+        if why is not None:
+            kept.append({"path": rel, "why": why, "blocks": True})
+            continue
+        carried.append(rel)
+    return carried, kept
+
+
+def carry_lines(chain, P, carried, kept):
+    """The Leg log lines of one copy's carry, each bounded (the whole lists are the entry's `carried` and `carryKept`):
+    `carried: <rel>, … into <P>`, or past CARRY_LOG_PATHS files `carried: <n> files (<the first CARRY_LOG_PATHS>, … and
+    <k> more) into <P>`, on every carry that wrote a file (a file a later Leg renders again is carried, and logged,
+    again); then `carry kept: <P>/<rel>: <why>` for each of the first CARRY_LOG_KEPT files not carried, and past them one
+    `carry kept: <k> more files in <P>: <why> (<n>); …`. Only the `carry kept` lines the log already holds are dropped
+    (so a newer primary file is logged once, and a kept set that stands unchanged logs nothing again)."""
+    lines = []
+    if carried:
+        head = ", ".join(carried[:CARRY_LOG_PATHS])
+        more = len(carried) - CARRY_LOG_PATHS
+        lines.append(f"carried: {head} into {P}" if more <= 0 else
+                     f"carried: {len(carried)} files ({head}, … and {more} more) into {P}")
+    have = {e["rest"] for e in chain.log if e["kind"] == "carry kept"}
+    keeps = [f"carry kept: {P}/{k['path']}: {k['why']}" for k in kept[:CARRY_LOG_KEPT]]
+    rest = kept[CARRY_LOG_KEPT:]
+    if rest:
+        whys = {}
+        for k in rest:
+            whys[k["why"]] = whys.get(k["why"], 0) + 1
+        keeps.append(f"carry kept: {len(rest)} more file{'s' if len(rest) > 1 else ''} in {P}: "
+                     + "; ".join(f"{w} ({n})" for w, n in whys.items()))
+    return lines + [x for x in keeps if x not in have]
 
 
 def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
@@ -4127,6 +4346,10 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
     def stand(why, waits):
         e.update(state="stood", why=why, waits=waits)
         return e, acc[0]
+
+    def carry():   # the primary holds the copy's work: its outputs join it, under the repo lock still held
+        e["carried"], ck = carry_copy(ctx, chain, P, C, warns)
+        e["carryKept"] = [{"path": k["path"], "why": k["why"]} for k in ck]
 
     d = default_branch(P)
     e["default"] = d
@@ -4154,6 +4377,7 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
             e.update(head=tip, merged=dm)
             if tip == dm:
                 e["state"] = "current"
+                carry()
                 return e, acc[0]
             if tip in verified and tip not in tips:
                 tips.append(tip)
@@ -4173,6 +4397,8 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
                                              "verify": [r.slug for r in unl if needs_verify(P, C, r, dm, tip, tips)],
                                              "ff": got if res == "plan" else None,
                                              "peer": got[0] if res == "stood" else None})
+                if res == "plan" and not e["plan"]["verify"]:   # a plan that lands: what it would carry
+                    carry()
                 return e, None
             need = [r for r in unl if needs_verify(P, C, r, dm, tip, tips)]
             if need:
@@ -4183,6 +4409,7 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
             res, s = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
             if res == "landed":
                 e.update(state="landed", landed=[r.slug for r in unl])
+                carry()
                 return e, acc[0]
             if res == "stood":
                 return stand(s[0], s[1])
@@ -4299,6 +4526,7 @@ def land_all(ctx, chain, leg, pairs, verified, out):
             text = stood_line(chain, P, e["why"])
             if text:
                 lines.append(text)
+        lines += carry_lines(chain, P, e["carried"], e["carryKept"])   # land_copy's carry, run under its repo lock
     if ctx.dry:
         return out
     out["stamped"] = stamp_landed(ctx, chain, pairs)   # the task notes first, the rollout note last
@@ -4334,9 +4562,10 @@ def land_red(ctx, chain, leg, pairs, why, out):
 
 def land_retire(ctx, chain, leg, pairs, out):
     """--retire, after Complete (the archived note is never written): per copy, under its repo lock, land its close-out
-    commits (steps 4 and 7, the peer check included), remove the copy (`git worktree remove`, never --force) and delete
-    its branch (`--set-upstream-to=<d>`, then `branch -d`, never -D). A done row off d, or any stand, keeps both, with a
-    WARN; any WARN files one loose follow-on that names the command that finishes it."""
+    commits (steps 4 and 7, the peer check included) and carry its ignored outputs (carry_copy), then remove the copy
+    (`git worktree remove`, never --force) and delete its branch (`--set-upstream-to=<d>`, then `branch -d`, never -D).
+    A done row off d, any stand, or a file the carry would lose keeps both, with a WARN; any WARN files one loose
+    follow-on that names the command that finishes it."""
     first = os.path.realpath(pairs[0][0]) if pairs else None
     if first and os.path.isdir(first):
         os.chdir(first)
@@ -4346,7 +4575,7 @@ def land_retire(ctx, chain, leg, pairs, out):
     for P0, C0 in pairs:
         P, C = os.path.realpath(P0), os.path.realpath(C0)
         ent = {"checkout": P, "copy": C, "branch": br, "landed": False, "removed": False, "branchDeleted": False,
-               "why": None}
+               "why": None, "carried": [], "carryKept": []}
         retired.append(ent)
         d = default_branch(P)
         has_branch = git(P, "show-ref", "--verify", "-q", f"refs/heads/{br}").returncode == 0
@@ -4386,6 +4615,14 @@ def land_retire(ctx, chain, leg, pairs, out):
                             ent["why"] = f"{br} has commits {d} lacks, and its Chain copy is gone"
                     else:
                         ent["landed"] = True
+                if ent["why"] is None and exists:   # the carry, under the lock, before the copy goes
+                    ent["carried"], ck = carry_copy(ctx, chain, P, C, out["warns"])
+                    ent["carryKept"] = [{"path": k["path"], "why": k["why"]} for k in ck]
+                    lost = [k for k in ck if k["blocks"]]   # a file it cannot carry keeps the copy
+                    if lost:
+                        ent["why"] = "; ".join(f"{k['path']} cannot be carried into {P} ({k['why']})" for k in lost[:3])
+                        if len(lost) > 3:
+                            ent["why"] += f"; and {len(lost) - 3} more"
         if ent["why"] is None and not ctx.dry:
             if exists:
                 r = git(P, "worktree", "remove", C)
