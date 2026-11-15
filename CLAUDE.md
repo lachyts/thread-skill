@@ -36,7 +36,9 @@ check, is another thing).
    declare a wider unit on purpose, and are held to that unit:
    - a rollout's score (score.py, serial-score.py) reads the rollout's whole life, from its first slot-taken or
      first Leg to until, so its sums run wider than the reading's week; its Escapes are read up to now, and
-     rounds per landed task count each landed task's rounds over its whole record;
+     rounds per landed task count each landed task's rounds over its whole record; its `weights` reads each
+     task's `scope:` from its note, and the Weight estimate (and the Weights' ranAt) from --settings, as
+     attributes, now;
    - the Escapes sweep (reflect.py) folds landed tasks of any age; its friction rows are only the evidence
      dated in the window, and cannotShow names only the Escapes no week's friction lists (a chain's line names
      every one dated outside the window);

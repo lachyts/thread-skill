@@ -869,23 +869,34 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Strain** — what **Capacity** yields to: pressure on the Mac that running
   fewer tasks would lift. By day it is strain from anything, Lachy's own apps
   included, so the Mac stays his; while he is **Away** it is only the strain
-  the Rollouts themselves cause (ADR 0083 d1, d2, proposed; thread-skill's
-  reader built by p53-1, Chorus's writer chorus-p109-2).
+  the Rollouts themselves cause (ADR 0083 d1, d2, accepted; thread-skill's
+  reader built by p53-1, Chorus's writer chorus-p109-2; the weekly
+  Reflection reads the budget's holds, p53-5).
   _Avoid_: load (one of its signals), pressure (macOS's reading).
 - **Weight** — what one Rollout task is expected to use at its heaviest, in
   memory and in cores: estimated from its repo (its setting, else 3 GB and 2
   cores) until its project and scope have three measured tasks (one peak per
   task, across its Slots), then measured.
   **Capacity** is the room the Rollouts may fill with it, so a notes task and
-  an Xcode build no longer count the same (ADR 0083 d4, proposed; the Weight
-  built by p53-3; `next` and a Leg's claim admit by it, built by p53-4).
+  an Xcode build no longer count the same (ADR 0083 d4, accepted; the Weight
+  built by p53-3; `next` and a Leg's claim admit by it, built by p53-4; the
+  weekly Reflection reads each kind's measure beside the estimate and tunes
+  the estimate a whole unit toward it, p53-5).
   _Avoid_: cost (a spend's), size, load.
 - **Mac fault** — pressure on the Mac that running fewer tasks cannot lift
   (a system process holding most of the memory). Never **Strain**: it does not
   lower or freeze **Capacity**, and it is repaired, by a reset of that process
-  or a restart of the Mac just before 7:00 (ADR 0083 d2, d3, proposed; d2's
+  or a restart of the Mac just before 7:00 (ADR 0083 d2, d3, accepted; d2's
   reader built by p53-1, which says a fault and never waits on it, Chorus's
-  writer chorus-p109-2; d3 not yet built). _Avoid_: leak (one cause), incident.
+  writer chorus-p109-2; d3 built by Chorus: chorus-p109-5 resets the faulted
+  process, `fseventsd` alone on its list, with `sudo -n killall fseventsd`
+  under the narrow admin rule, at most once in six hours, never closing an
+  app, and marks a fault still standing 30 minutes later as outliving it;
+  chorus-p109-6 then restarts the Mac at 06:30 by the Lunch restart's own
+  polite path, at most once a night, held by an app that will not quit or by
+  his input; each repair shows on the Stage's quiet line, chorus-p109-4; the
+  weekly Reflection reads the budget, p53-5). _Avoid_: leak (one cause),
+  incident.
 - **Waiting list** — the one estate-wide list of serial chains that are ready
   to run but have no Leg session yet, because **Capacity** has no room or
   another rollout holds their files. A chain on it has no session on the Stage;
@@ -1771,7 +1782,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Tuning** — one proposed change at one
   of three altitudes, as in Chorus: a **knob** (a value in the operator's
   rollout settings: a repo's Parallel ceiling, a round cap, read by the next
-  schedule); a **rule** (how a skill or the engine behaves: a grill and an
+  schedule; capacity_max and a repo's Weight estimate, read live by the next
+  `next`); a **rule** (how a skill or the engine behaves: a grill and an
   ADR before a build); a **bug** (the engine or a skill did not do what its
   rule says: a task). By hand Lachy picks the ones that land; the weekly
   reading lands some unasked under ADR 0037 d5 (a bug filed, a knob three

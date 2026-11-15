@@ -1134,7 +1134,8 @@ test('window_flags: one flag per block holding a row outside its window; a score
   })
   const CS = '2026-09-04T00:00:00.000Z' // chain c's Leg 1 began
   const badScores = {
-    r: { window: { since: '2026-09-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-31T23:00:00.000Z') }, // before the score's own since
+    r: { window: { since: '2026-09-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-31T23:00:00.000Z'), // before the score's own since
+      weights: { tasks: [{ task: 'a', at: '2026-08-31T22:00:00.000Z' }, { task: 'b', at: U0 }] } }, // p53-5: a peak read before it
     c: { shape: 'serial', window: { since: CS, until: U0 }, handsOff: acts('2026-09-09T14:01:30.000Z'), // past until's minute
       merges: { count: 1, tasks: [{ task: 'a', at: '2026-09-09T14:01:00.000Z' }] } },
   }
@@ -1151,7 +1152,8 @@ test('window_flags: one flag per block holding a row outside its window; a score
   })
   const goodScores = {
     // scored whole: an act weeks before span's since, inside the score's own window, is no flag
-    r: { window: { since: '2026-08-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-02T00:00:00.000Z', U0) },
+    r: { window: { since: '2026-08-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-02T00:00:00.000Z', U0),
+      weights: { tasks: [{ task: 'a', at: '2026-08-01T00:00:00.000Z' }, { task: 'b', at: U0 }] } }, // on the score's own bounds
     c: { shape: 'serial', window: { since: CS, until: U0 }, handsOff: acts('2026-09-09T14:00:30.000Z'), merges: { count: 1, tasks: [{ task: 'a', at: U0 }] } },
     w: { window: null, handsOff: acts('2026-01-01T00:00:00.000Z') }, // no window: skipped, as n (no score) is
   }
@@ -1163,6 +1165,7 @@ test('window_flags: one flag per block holding a row outside its window; a score
     F('rollouts[r].friction', 4, SPAN, '2026-09-02T13:59:00.000Z'),
     F('rollouts[r].laneTime', 1, SPAN, '2026-09-09T14:01:00.000Z'),
     F('rollouts[r].score.handsOff', 1, `[2026-09-01T00:00:00.000Z, ${U0}]`, '2026-08-31T23:00:00.000Z'),
+    F('rollouts[r].score.weights.tasks', 1, `[2026-09-01T00:00:00.000Z, ${U0}]`, '2026-08-31T22:00:00.000Z'),
     F('rollouts[c].score.handsOff', 1, `[${CS}, ${U0} + 60 s)`, '2026-09-09T14:01:30.000Z'),
     F('rollouts[c].score.merges', 1, `[${CS}, ${U0}]`, '2026-09-09T14:01:00.000Z'),
     F('freshReview', 1, SPAN, '2026-09-01T00:00:00.000Z'),

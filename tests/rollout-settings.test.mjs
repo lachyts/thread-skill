@@ -23,7 +23,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
-// KEYS are the four Tuning keys (run_record.py's TUNING_KEYS, tune.py and score.py read them); SETTING_KEYS adds
+// KEYS are the four Tuning keys a rollout note stamps (tune.py and score.py read them; TUNING_KEYS, which run_record.py's
+// pins, adds capacity_max and the two Weight keys, p53-5); SETTING_KEYS adds
 // `auto_retries` (p16-4: execute's automatic retries, >= 0, not Reflection-tunable) and `spend_approval_usd` (ADR 0034: the
 // standing approval's limit in US dollars, >= 0, built-in 0 = off, not Reflection-tunable), `verify_slots` (p23-4: the
 // machine's verify slots, >= 1, built-in 2, [defaults] only) and `capacity_max` (p36-7, ADR 0067 d8: the hard maximum

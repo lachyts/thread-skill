@@ -225,7 +225,13 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
   trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
   time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
-  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. Nor does a last-start-bound
+  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. A budget-bound one (p53-5: the
+  same share, held mostly while the budget admitted, its idle-slots markers carrying a `bound`) is read from `budget`:
+  say which part was short (`short`: the count, memory, cores, or memory and cores, with each part's held hours) and read
+  Throughput as under the budget. Memory and cores are Chorus's budget (capacity.json), not a rollout key: say "no
+  rollout key moves this". A count-bound one proposes a capacity_max raise, always with a caution, Lachy's call: the
+  record cannot show the Mac green at a count hold, since `next` tests the count before the Weight (ADR 0083 DfL 13).
+  Nor does a last-start-bound
   one (p28-7: the same reading over `hold-last-start`, the last starts holding starts toward the Morning): say "the
   last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below.
 - **The nights** (`nights`, p28-7; `skills/execute/away.md` § The night record), for each Morning this rollout
@@ -239,6 +245,11 @@ headlines first (ADR 0037 d1), then the Guardrails:
   Its N is the Trickle's cap only, never a Capacity's (a slot-taken `cap` with `by: capacity`, ADR 0067 d8): a window
   whose by-day caps were all the Capacity's suggests no trickle-raise and says so in `nights.flags`.
   Show `nights.flags` beside them.
+- **The Weights** (`weights`, p53-5; `skills/execute/away.md` § Capacity, *A task's Weight*): the repo's estimate
+  (`estimate`, each part with its source) beside the measure (`measured`, the pooled upper quartile of the window's
+  per-task peaks once 3 tasks have one), then each kind's (`kinds`: its tasks, its own measure or none yet, and the
+  Weight its tasks started with), and the tasks with no note (`noNote`). A Weight proposal steps the estimate one whole
+  unit toward its measure; show `weights:` flags beside them.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
   3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
@@ -291,7 +302,9 @@ printed. Then `rm -rf /tmp/thread-reflect-<rollout-slug>`.
 `--regenerate`, which stamps freshly resolved values). A rollout note already stamped, running, paused or not yet
 started, keeps its own frontmatter values: execute reads task frontmatter, then rollout frontmatter, then
 rollouts.toml, and only a legacy note missing a key reads rollouts.toml, at its next loop entry (execute § 3). To
-change a live rollout, Lachy edits its note.
+change a live rollout, Lachy edits its note. Two keys take effect sooner, since nothing stamps them: a capacity_max
+Tuning at every rollout's next `next` call on this Mac, whatever its repo, and a Weight Tuning at its repo's next `next`
+call or start, running rollouts included (both read live; ADR 0083).
 
 ## The weekly reading (ADR 0037 d3–d5)
 
@@ -719,7 +732,9 @@ moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a wr
 step 15's `decide` puts it in the decision task. A `held parallel_ceiling: machine load tops the Time-lost ledger (<h> h
 of <total> h): a Parallel ceiling raise waits (ADR 0051)` line is the load hold: a Parallel ceiling raise waits while
 machine load tops this reading's ledger (ADR 0051's "a load-topped ledger"; `span.json`'s `ledger.holds` lists it
-ahead). Lowers and round caps are never held by load, and an audit's hours never move it. `no Time-lost ledger line
+ahead). Lowers and round caps are never held by load, apart from a Weight lower, which admits more work as a raise
+does: `held capacity_max: … a capacity_max raise waits (ADR 0051, ADR 0083)` and `held weight_mem_gb: … a weight_mem_gb
+lower waits (ADR 0051, ADR 0083)` are the load hold too. A revert is never held, and an audit's hours never move it. `no Time-lost ledger line
 for Reflection <id>: run reflect.py ledger first` means step 13a was skipped: run it, then `--auto` again; `knobs`
 refuses (`run ledger`) for the same reason.
 

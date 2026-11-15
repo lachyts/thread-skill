@@ -816,6 +816,15 @@ test('a tuning with binding trickle-bound (p28-6) is recorded; an unknown bindin
   assert.equal(lines(path.join(ev(home), 'tunings.jsonl'))[0].binding, 'trickle-bound')
 })
 
+test('p53-5: a tuning with binding budget-bound, and applied entries on capacity_max and a Weight key, are recorded', (t) => {
+  const home = tmpHome(t)
+  const applied = [{ ...APPLIED, key: 'capacity_max', from: 6, to: 7, ranAt: 6, rule: 'budget-count-raise' },
+    { ...APPLIED, key: 'weight_mem_gb', from: 3, to: 2, ranAt: 3, rule: 'weight-measured-lower' }]
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ binding: 'budget-bound', applied }))], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'tunings.jsonl'))
+  assert.deepEqual([l.binding, l.applied.map((e) => e.key)], ['budget-bound', ['capacity_max', 'weight_mem_gb']])
+})
+
 test('a tuning with binding last-start-bound (p28-7) is recorded', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ binding: 'last-start-bound' }))], { env: EV(home) })
@@ -982,6 +991,19 @@ test('the four weekly kinds land in reflections.jsonl as v 1, rollout and task n
   const all = lines(path.join(ev(home), 'reflections.jsonl'))
   assert.deepEqual(all.map((l) => [l.v, l.rollout, l.task, l.kind]), [[1, null, null, 'watch'], [1, null, null, 'watch-raised'],
     [1, null, null, 'proposal'], [1, null, null, 'proposal'], [1, null, null, 'proposal'], [1, null, null, 'reflection']])
+})
+
+test('p53-5: a knob proposal on a Weight key or capacity_max is accepted, its id its knob_key', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, 'print(json.dumps([m.knob_key("o/r", "weight_cores", "weight-measured-lower", -1), m.knob_key("o/r", "capacity_max", "budget-count-raise", 1)]))')
+  assert.equal(r.status, 0, r.stderr)
+  const [wk, ck] = JSON.parse(r.stdout)
+  const [wid, kid] = ids(home)
+  const { knob } = kinds(wid, kid)
+  emitOk(home, ['--kind', 'proposal', '--json', JSON.stringify({ ...knob, id: wk, key: 'weight_cores', rule: 'weight-measured-lower', direction: -1, from: 2, to: 1, ranAt: 2 })], { env: EV(home) })
+  emitOk(home, ['--kind', 'proposal', '--json', JSON.stringify({ ...knob, id: ck, key: 'capacity_max', rule: 'budget-count-raise', from: 6, to: 7, ranAt: 6,
+    held: 'a caution: Lachy decides' })], { env: EV(home) })
+  assert.deepEqual(lines(path.join(ev(home), 'reflections.jsonl')).map((l) => l.key), ['weight_cores', 'capacity_max'])
 })
 
 test('watch-raised takes recurring, confirmed and declined; reflection takes cadence 14 or none, and repairsOnly', (t) => {
@@ -1232,15 +1254,16 @@ print(json.dumps(out))`, { env: EV(home), args: [JSON.stringify([
   assert.ok(!fs.existsSync(ev(path.join(home, 'other'))), 'check never creates the events dir')
 })
 
-test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds all five record files', (t) => {
+test('the tuning keys are rollout-settings.py\'s TUNING_KEYS, and RESERVED holds all five record files', (t) => {
   const home = tmpHome(t)
   const rs = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
   const r = api(home, `
 spec2 = importlib.util.spec_from_file_location("rs", sys.argv[2]); rs = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rs)
-print(json.dumps([list(m.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED), m.GRADE_LOG]))`, { args: [rs] })
+print(json.dumps([list(m.TUNING_KEYS), list(rs.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED), m.GRADE_LOG]))`, { args: [rs] })
   assert.equal(r.status, 0, r.stderr)
-  const [mine, theirs, reserved, gradeLog] = JSON.parse(r.stdout)
+  const [mine, theirs, four, reserved, gradeLog] = JSON.parse(r.stdout)
   assert.deepEqual(mine, theirs)
+  assert.deepEqual(mine, [...four, 'capacity_max', 'weight_mem_gb', 'weight_cores'], 'p53-5: the four a note stamps, then capacity_max and the Weights')
   assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades', 'overlaps'])
   assert.equal(gradeLog, 'grades')
 })

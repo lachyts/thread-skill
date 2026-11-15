@@ -1,7 +1,7 @@
 # 0083 — Capacity backs off only for strain it can relieve, and by day it protects his Mac
 
 Date: 2026-11-15
-Status: proposed (d2's and d12's reader built by p53-1: the restart hold and the suite stop's label follow Strain, a
+Status: accepted (2026-11-16: d2's and d12's reader built by p53-1: the restart hold and the suite stop's label follow Strain, a
 fault is said and never obeyed; the `signals.fault`/`holder`/`shares`, `budget` and slot-peaks.json contract written in
 execute away.md § Capacity; the writer is Chorus's, chorus-p109-2. d4's Run record built by p53-2: slot-taken's `cap`
 carries the budget in force and the task's Weight (the built-in 3 GB and 2 cores, DfL 8, until p53-3 replaced it), and
@@ -9,7 +9,7 @@ slot-freed each Slot's peak from slot-peaks.json, read per task, and the contrac
 (rewritten at least once every 2 minutes while it holds an entry). d4's Weight and DfL 8 and 9 built by p53-3: the
 repo's estimate as rollouts.toml's `weight_mem_gb` and `weight_cores` (schema 6, per repo, built-in 3 and 2); the
 measure, the upper quartile of the per-task peaks of the project and `scope:` over 30 days once 3 tasks have one,
-floored at 0.1; slot-taken's `cap.weight` records it, and status gives each queued row its Weight and its source). d4's
+floored at 0.1; slot-taken's `cap.weight` records it, and status gives each queued row its Weight and its source. d4's
 admission and DfL 11, 13 and 14 built by p53-4: while a fresh reading in force carries `budget`, `next` and a Leg's
 claim admit a start only when the Weights running across the Mac plus its own fit the budget in memory and in cores
 (compared to 2 places), behind `capacity_max` as the hard count (`trickle.limit`, `trickle.awayCap`, status and the
@@ -28,10 +28,39 @@ weighted view (the Mac can run over the budget by a later chain's 3 GB session u
 session alone holds 0 in the weighted share; and an idle Leg session weighs the built-in, never its last claim
 (parallel throughput is kept, and a heavy chain's next claim waits for its reserved turn and a drain). The Waiting
 list's room (`unfinished-rollout.py`) still counts C until the filed follow-up
-`thread-skill-followup-the-waiting-lists-room-reads-the-budget`. In grill with Lachy (`/grill-with-docs`,
-2026-11-15); the decisions below are added as he rules them, and the open questions are listed at the end. Amends ADR
-0067 d8 (Capacity is the limit, set automatically) and, through it, Chorus ADR 0104. Nothing else here is built yet:
-d3's repair is Chorus's, and the Waiting list's room is that follow-up.
+`thread-skill-followup-the-waiting-lists-room-reads-the-budget`. d4's reading and tuning, and DfL 13's, built by p53-5:
+the weekly Reflection's score reads the budget (`budget`: the Mac-wide cap's held time split by idle-slots' `bound`, the
+part held longest named `short`, and the Slots the budget admitted) and binds budget-bound when the budget's bounds held
+at least as long as C or the Trickle did; it reads each kind's measured Weight beside the repo's estimate (`weights`).
+A Tuning may raise `capacity_max` (into `[defaults]`) and move a repo's Weight estimate (into its repo table), raising the
+file's `schema` line in the same edit. A capacity_max raise (budget-count-raise) always carries a caution: DfL 13's
+green Mac cannot be read from the record, since `next` tests the count before the Weight, so a `bound: count` marker is
+no evidence that the budget had room; Lachy decides it as a held trade on the weekly decision task, and the filed
+follow-up `thread-skill-followup-a-count-hold-records-whether-the-weight-fit` would let the caution lift. A Weight
+Tuning steps one whole unit (a GB, a core) toward its measure rounded up, never below 1, its ranAt the file's value now
+(slot-taken's `cap.weight` carries no source), so a landing is never a jump and a fractional estimate is left to a hand
+edit. The load hold that guards a Parallel ceiling raise (ADR 0051) also holds a capacity_max raise and a Weight lower,
+the Tunings that admit more work, never a Weight raise; a revert is never held. capacity_max is one value for the whole
+Mac, so the score's cause and agreement and tune.py's last move read it across repos. Chorus built its side in its
+Phase 109 (chorus PRs 793 to 800): chorus-p109-1 the Stage's probe reads each process's memory footprint, splits
+memory and cores three ways (the Rollouts' trees, his apps, the system) naming the top holder, and keeps one `signals`
+line a minute, and one at a level change; chorus-p109-2 Capacity sorts memory, swap and load into Strain or a Mac fault
+from those shares, a fault filling `signals.fault`, `holder` and `shares` and never halving, freezing or stopping
+suites, and each capacity record carrying its cause; chorus-p109-3 the Lunch restart reads its admin rule fresh, from an
+exact `NOPASSWD` entry in the `sudo -n -l` listing, before any app is asked to quit, holds with its why when it is not
+armed, and says a refusal after a quit on the Stage; chorus-p109-4 the quiet line shows a standing Mac fault (what holds
+what, since when) and, opened, its week of onsets, ends, resets and restarts, through the `fault`, `fault_reset` and
+`fault_restart` record kinds, and a held restart leads him to it, never a notification; chorus-p109-5 the Companion
+resets a faulted `fseventsd`, the approved list's one name, with `sudo -n /usr/bin/killall fseventsd` (the trial of
+2026-11-16 freed about 98 GB, no app changed), at most once in six hours and never closing an app, and marks a fault
+still standing 30 minutes later as having outlived it; chorus-p109-6 a fault that outlived its reset restarts the Mac
+at 06:30 through the Lunch restart's own drain, polite quit, restart and resume, at most once a night, held by an app
+that will not quit, by his input in the last 10 minutes or by a stale reading; chorus-p109-7 Capacity's controller
+keeps a budget of memory and cores, one mid-weight task (3 GB and 2 cores) a step, halving on a Strain onset and frozen
+while Strain stands, written to capacity.json as `budget` beside `capacity`; chorus-p109-8 the live Stage samples each
+Rollout task's worktree at most every 30 seconds and writes slot-peaks.json, each tree's highest memory and cores, kept
+24 hours after its last sample). Ruled with Lachy in grill (`/grill-with-docs`, 2026-11-15). Amends ADR 0067 d8
+(Capacity is the limit, set automatically) and, through it, Chorus ADR 0104.
 
 ## Context
 

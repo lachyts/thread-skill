@@ -10,7 +10,8 @@ python >= 3.8, stdlib only. Called by skills/reflect/SKILL.md (step 4) as:
 
 --repo takes any directory in the Project root's clone, as tune.py's and rollout-settings.py's --repo do; --tasks-dir
 the vault's task notes, as unfinished-rollout.py's and reconcile-rollout.py's do (default ~/repos/obsidian/Work/Tasks,
-`~` read against the scored env's HOME). Both only feed the Escapes, below; without them those sources read unread.
+`~` read against the scored env's HOME). Both feed the Escapes, below, and --tasks-dir also the Weights' kinds (a
+task's `scope:`, The Weights below); without them those sources read unread.
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
 `<slug>.jsonl` there for load (the reserved files, run_record's RESERVED, are never read as rollouts, though
@@ -175,7 +176,13 @@ Slot open, over running time plus those spans; and, as dependency-bound's larges
 its idle Slot time plus each such excluded span times the ceiling in force at its start, at least every other idle
 reason's idle Slot time, so a run whose dependency waits left more Slots idle than the cap did is not the Trickle's;
 flagged that no rollout key moves it, and Throughput flagged as read under the cap, its value and Guardrail
-unchanged); last-start-bound (p28-7: the same rule over hold-last-start at LAST_START_BOUND, the last starts holding
+unchanged), read as budget-bound instead (p53-5) when `budget`'s held time (below) is above 0 and at least the time C or
+the Trickle held with no `bound`: why `the budget kept Slots free N% of the time (running time plus X h with no Slot
+open; held: the count C h, memory M h, cores K h, memory and cores B h)`, `short` the part held longest, Throughput
+flagged as read under the budget, and flagged either that memory and cores are the budget's (Chorus's capacity.json),
+moved by no rollout key, or, when `short` is count, that capacity_max held it and the record shows no green Mac there:
+a `bound: count` marker records the count binding before the Weight was tested (reconcile-rollout.py tests the count
+first), so it is no evidence that the budget had room, and a raise is Lachy's; last-start-bound (p28-7: the same rule over hold-last-start at LAST_START_BOUND, the last starts holding
 starts toward the Morning: flagged that no rollout key moves it, the night record's `nights` reading their fallback, and
 Throughput flagged as read under the last starts; a call holding rows on both the Away cap and the last starts records
 hold-away-cap, so it reads trickle-bound, which is checked first); dependency-bound (idle >=
@@ -183,11 +190,22 @@ DEPENDENCY_IDLE of Slot capacity, dependency plus solo the largest reason); else
 
 Proposals, one rule each: slot-bound -> parallel_ceiling +1, withheld ("lane N% busy, at or above 60%") when the
 lane is LANE_FREE_FOR_RAISE busy or more (so a Slot-bound run always shows its raise); quota-bound ->
-parallel_ceiling -1; >= ROUND_SET_ASIDES set-asides of reasonClass review-rounds ->
-max_review_rounds +1; of plan-rejected -> max_plan_rounds +1 (a needs-human set-aside, a stop on a question,
-counts toward neither: another round cannot answer it). `ranAt` is the value the run ran at: the ceiling
-in force for most of the running time (ties to the later), a round cap's most common value on the window's
-slot-taken lines. to = ranAt + direction; from = rollouts.toml's resolved value now (--settings). A proposal is
+parallel_ceiling -1; budget-bound with `short` count -> capacity_max +1 (budget-count-raise, p53-5), withheld by a busy
+lane as a ceiling raise is, and always carrying the caution NO_GREEN_MAC (a count hold never tests the Weight against
+the budget, ADR 0083 DfL 13: Lachy decides), so the weekly reading never lands it; >= ROUND_SET_ASIDES set-asides of
+reasonClass review-rounds -> max_review_rounds +1; of plan-rejected -> max_plan_rounds +1 (a needs-human set-aside, a
+stop on a question, counts toward neither: another round cannot answer it); and, whatever bound the run, each Weight
+part whose measure (The Weights, below) exists beside an estimate -> weight_<part> one whole unit toward target =
+max(1, ceil(measured)) (weight-measured-raise or weight-measured-lower; none when the estimate is the target), with
+evidence `measured upper quartile X over N tasks (target T); the estimate F (source)`: one unit per landing, so a
+landing is never a jump, and a fractional estimate (a hand edit) is withheld, `a Tuning moves a Weight in whole GB and
+cores: <key> is <v>, edit it by hand`. `ranAt` is the value the run ran at: the ceiling in force for most of the
+running time (ties to the later), a round cap's most common value on the window's slot-taken lines, capacity_max's
+most common int cap.max on them (ties to the later; null with no budget-admitted Slot), and a Weight part's estimate
+now (--settings' `weight`, an int when integral: slot-taken's cap.weight carries no source, so this reads wider, as an
+attribute, and is flagged `weights: rollouts.toml changed after the run began: the Weights' ranAt is its value now`
+when the settings file's mtime is after activeStart). to = ranAt + direction; from = rollouts.toml's resolved value now
+(--settings: `settings`, a Weight's from `weight`). A proposal is
 `from -> to` when sign(to - from) is the rule's direction; otherwise rollouts.toml is already at or past this
 run's evidence and the entry is withheld. to < 1 is dropped and flagged. With no repo identity nothing is
 proposed. Each rule's effect is a declared heuristic, RULE_EFFECTS (this header is the one copy of it):
@@ -198,6 +216,11 @@ proposed. Each rule's effect is a declared heuristic, RULE_EFFECTS (this header 
                         conflictRate, quotaStalls, reviewChurn
   plan-rejected-raise   serves handsOffRate; risks quality, throughput, tokensPerMerge, setAsideRate,
                         conflictRate, quotaStalls, reviewChurn
+  budget-count-raise    serves throughput; risks tokensPerMerge, setAsideRate, conflictRate, quotaStalls,
+                        reviewChurn
+  weight-measured-lower serves throughput; risks tokensPerMerge, setAsideRate, conflictRate, quotaStalls,
+                        reviewChurn
+  weight-measured-raise serves nothing; risks throughput
 Review churn sits in every raise's risks: its absolute bound (p21-3) withheld any raise when it landed, and still does.
 A rule missing from RULE_EFFECTS fails closed (UNDECLARED_EFFECT): it serves nothing and risks every Guardrail, so
 any breach withholds its raise.
@@ -207,24 +230,28 @@ in them is scored (non-null); else null. p21-4 scores Quality (escapes.quality),
 scored this static table makes both round raises standing trades: whether they stay so (which takes two knob rules
 out of ADR 0037 d5's unattended landing) or become evidence-based is Lachy's decision, still open. A Quality that
 rests on fewer sources (`escapes.partial`) still names the trade. Withheld, in
-this order: no settings, the sign, the lane hold, then a Guardrail: a raise (direction > 0) is withheld while a
+this order: no settings, a fractional Weight, the sign, the lane hold, then a Guardrail: a raise is withheld while a
 Guardrail in its `risks` is breached, naming only those ("a raise while a Guardrail is breached: ..."), so a
-slot-bound raise is never withheld by the Throughput it serves. A lower is never withheld by a Guardrail: when one it
+slot-bound raise is never withheld by the Throughput it serves. A raise here is a Tuning that admits more work,
+admits(key, direction) > 0: a raise of any key but a Weight, and a Weight lower (a lighter estimate fits more tasks
+beside it); a Weight raise admits less and is read as a lower. A lower is never withheld by a Guardrail: when one it
 risks is breached it stays in `proposals` with a `caution` ("risks <k>, breached (<value> against <bound>): a
-Guardrail against a Guardrail, Lachy decides"). A `trade` or a `caution` is Lachy's call (ADR 0037 d1); each is null
+Guardrail against a Guardrail, Lachy decides"), joined after a rule's own caution. A `trade` or a `caution` is Lachy's call (ADR 0037 d1); each is null
 otherwise. `ranAtCause`, when from != ranAt, is the
-first of: a later non-voided Tuning of this key ("Tuning <id> moved it on <ts>"); a mid-window ceiling change;
+first of: a later non-voided Tuning of this key ("Tuning <id> moved it on <ts>"; capacity_max is machine-wide, so
+another repo's Tuning of it counts, "... on <ts> (for <repo>)"); a mid-window ceiling change;
 round caps that differ across tasks; rollouts.toml's mtime after the first slot-taken; the note's value equal
 to ranAt with rollouts.toml absent or older than the note's `captured` (local midnight): a rollout-note
 override; the note now differing; else "unclear: rollouts.toml changed around schedule time". These are
 inferred (the record stamps effective values with no source): a label changes the wording only, never whether
-a proposal is made. `agreeing` counts earlier non-voided applied Tunings with the same repo, key, rule and
-direction: an auto landing's entries (tune.py --auto, the weekly reading, p21-7) count like a pick's, a revert's rule
+a proposal is made. `agreeing` counts earlier non-voided applied Tunings with the same repo (any repo for capacity_max,
+same_repo()), key, rule and direction: an auto landing's entries (tune.py --auto, the weekly reading, p21-7) count like a pick's, a revert's rule
 is `revert:<rule>`, so it never counts toward <rule>, and a close line's empty `applied` adds nothing. A round cap's
 spread (a task override) is flagged only for a key a proposal uses.
 
 Shared, at module level (bodies as the methods had them): load_tunings(base) and agreeing(tunings, repo, key, rule,
-direction), read by tune.py's --auto and --revert; landed_from(merge_lines, since, until), read by
+direction), read by tune.py's --auto and --revert; admits(key, direction) and same_repo(key, a, b) (p53-5), read by
+tune.py's load hold and _moves(); landed_from(merge_lines, since, until), read by
 skills/reflect/scripts/reflect.py's Escapes sweep; night_record(records, since, until, mornings), read by reflect.py's
 span (`nights`); and RULE_EFFECTS, whose risks tune.py --revert reads.
 
@@ -265,6 +292,27 @@ or ran past), held, ranPast, fallback, underestimate, unchecked}, flags, suggest
                              cap was the Capacity (by: capacity) in the window: no Trickle to raise`.
 Holds alone never lower the fallback: a held start never ran, so its length is unknown.
 
+The budget (p53-5, ADR 0083 d4 and DfL 13; budget_score, the one copy of its rules). While the budget admits, `next`
+stamps idle-slots' `bound` (count, memory, cores or memory and cores) on a hold-trickle or hold-away-cap marker, and
+slot-taken's cap.max. `budget` re-reads the markers with each such reason refined by its bound, an exact refinement of
+the coarse run, and splits trickle-bound's held time (its running time with a Slot free, plus its no-Slot time inside
+the coarse excluded spans, so a pause or a hold still wins) by bound: heldHours{count, memory, cores, memory and cores},
+countHeldHours (no bound: C or the Trickle), which sum to that rule's numerator; short, the bound held longest (ties:
+count, memory and cores, memory, cores), else null; admitted, the window's slot-taken lines with an int cap.max. Its
+window: time in [since, until] (a marker's span clipped to it) and slot-taken by ts in [since, until]. A line from
+before p53-4 (budget with no max, no bound) reads as C held it.
+
+The Weights (p53-5, ADR 0083 DfL 8 and 9; weights_score, the one copy of its rules): each task's measured peak beside
+the repo's estimate. A slot-freed `peak` counts when reconcile-rollout.py's _peak_room accepts it, each line windowed
+by its own ts in [since, until] BEFORE it is grouped; a task gives one figure, its per-part highest, at its latest
+contributing line. measured is reconcile's _weight over every task's figure (the pooled upper quartile, inclusive,
+rounded, floored at WEIGHT_FLOOR) once WEIGHT_MIN_TASKS tasks have one, else null; each kind (its note's `scope:`,
+else unscoped) the same over its own, with `started`, the latest in-window slot-taken cap.weight among its tasks. It
+reads wider, as attributes and now: each task's `scope:` from its note (--tasks-dir, else its Archive/), and the
+estimate from --settings. A task with no readable note stays in the pooled measure (noNote). reconcile-rollout.py is
+loaded only when a peak exists, and the weights' flags (fewer than 3 tasks; --settings with no `weight`; --tasks-dir
+unreadable; a task with no note) rise only then.
+
 Escapes and Quality. The landed set is every task with a `merged` line in the window (read-only ones included; the
 latest line wins, a later line with no pr keeping the earlier pr, two different prs flagged), keyed as `merges` is,
 so escapes.landed == merges.count. escapes.py scores it: an Escape is a task note whose `fixes:` names a landed task,
@@ -279,10 +327,14 @@ throughput, handsOff{rate, landed, handsOff, tasks[{task, acts[{kind, at, detail
 retry, mergeHold, raceDecided}, notCounted{standingApproval, automaticHandBack, raceReverified}, baseline}, slots,
 lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound, baseline, breached}, tokensPerMerge,
 setAsideRate, conflictRate, quotaStalls, reviewChurn{value | "unknown", bound "<=N%", baseline, breached,
-roundsPerLandedTask}}, load, nights (The nights, above), binding{constraint, why}, headline (the ten numbers tune.py
-records, its name kept for tune.py: throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
-quality (escapes.quality), reviewChurn (reviewChurn.value)), ranAt{parallel_ceiling, max_review_rounds, max_iterations,
-max_plan_rounds} (each key's ran-at value, the proposals' rule, or null), reviewChurn{value, findings, original, regression,
+roundsPerLandedTask}}, load, nights (The nights, above), binding{constraint, why, short (budget-bound only)},
+headline (the ten numbers tune.py records, its name kept for tune.py: throughput, runningHours, merges, tokensPerMerge,
+setAsideRate, conflictRate, quotaStalls, handsOffRate, quality (escapes.quality), reviewChurn (reviewChurn.value)),
+budget{admitted, heldHours{count, memory, cores, memory and cores}, countHeldHours, short} (The budget, above),
+weights{estimate{mem_gb, cores: {value, source}} | null, tasks[{task, kind, mem_gb, cores, at}], measured{mem_gb, cores,
+tasks} | null, kinds[{kind, tasks, measured, started}], noNote} (The Weights, above), ranAt{parallel_ceiling,
+max_review_rounds, max_iterations, max_plan_rounds, capacity_max, weight_mem_gb, weight_cores} (each key's ran-at
+value, the proposals' rule, or null), reviewChurn{value, findings, original, regression,
 unclassified, rounds, engine{rounds, findings, original, regression, unclassified, landedTasks (the landed tasks
 with a recorded round), roundsPerLandedTask}, freshReview{rounds, findings, original, regression, unclassified,
 unattributed}}, baseline{id, activeEnd, partial, v, scores}, proposals[{id, key, from, to, ranAt, ranAtCause, rule,
@@ -341,7 +393,24 @@ EVIDENCE_MAX = 300
 # (p21-2) Throughput's.
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
                        "quota_stalls": 0, "review_churn_pct": 40, "hours_per_task": 1.5}
+# The four keys a rollout note stamps (read_note reads them; the round caps' ranAt reads slot-taken's settings for them).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
+# p53-5: the machine-wide key a Tuning moves (rollout-settings.py's MACHINE_ONLY one): read across repos, never stamped.
+MACHINE_KEYS = ("capacity_max",)
+# p53-5: a repo's Weight estimate (rollout-settings.py's WEIGHT_KEYS), each a part of resolve()'s `weight`.
+WEIGHT_KEYS = ("weight_mem_gb", "weight_cores")
+WEIGHT_PART = {"weight_mem_gb": "mem_gb", "weight_cores": "cores"}
+# ranAt's keys, in output order.
+RAN_AT_KEYS = KEYS + MACHINE_KEYS + WEIGHT_KEYS
+# p53-4's idle-slots `bound` (run_record.py's IDLE_BOUNDS) and the order `budget.short` breaks a tie in.
+BUDGET_BOUNDS = ("count", "memory", "cores", "memory and cores")
+SHORT_ORDER = ("count", "memory and cores", "memory", "cores")
+# A Weight measures once this many tasks have a peak (reconcile-rollout.py's LAST_START_MIN_RUNS, DfL 9's threshold).
+WEIGHT_MIN_TASKS = 3
+# budget-count-raise's standing caution (ADR 0083 DfL 13): a count hold is read before the Weight is tested, so the record
+# shows no green Mac behind it, and the raise is Lachy's.
+NO_GREEN_MAC = ("no green-Mac evidence: a count hold never tests the Weight against the budget (ADR 0083 DfL 13): "
+                "Lachy decides")
 # The human acts' kinds (run_record.py's "Human acts"): never a task's call activity (pair keeps them out of last_line).
 ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 # The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
@@ -366,6 +435,11 @@ RULE_EFFECTS = {
     "quota-bound-lower": (("quotaStalls",), ("throughput",)),
     "review-rounds-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS + ("reviewChurn",)),
     "plan-rejected-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS + ("reviewChurn",)),
+    # p53-5: a capacity_max raise and a Weight lower admit more work, as a ceiling raise does; a Weight raise admits
+    # less, as a quota lower does
+    "budget-count-raise": (("throughput",), OLD_GUARDRAILS + ("reviewChurn",)),
+    "weight-measured-lower": (("throughput",), OLD_GUARDRAILS + ("reviewChurn",)),
+    "weight-measured-raise": ((), ("throughput",)),
 }
 # A rule missing from RULE_EFFECTS fails closed: it serves nothing and risks every Guardrail, so any breach withholds
 # its raise, as every breach withheld every raise before p21-2 weighed effects, instead of none.
@@ -405,6 +479,37 @@ def human_act(kind, d):
     if kind == "race-decided":
         return "raceDecided", "%s decided, acted on by %s" % (d.get("mark"), d.get("by"))
     return None
+
+
+def admits(key, direction):
+    """+1 when a Tuning of `key` in `direction` admits more work, -1 when less (p53-5): a Weight's estimate admits more
+    as it falls (a lighter task fits more beside it), every other key as it rises. propose()'s Guardrail withhold and
+    caution, and tune.py's load hold, read it."""
+    return -direction if key in WEIGHT_KEYS else direction
+
+
+def same_repo(key, a, b):
+    """Whether a Tuning on repo `a` speaks for repo `b` on `key`: always for a machine-wide key (MACHINE_KEYS, p53-5:
+    capacity_max is read across repos), else the two owner/names equal ignoring case. agreeing(), cause() and tune.py's
+    _moves() read it."""
+    return key in MACHINE_KEYS or (isinstance(a, str) and isinstance(b, str) and a.lower() == b.lower())
+
+
+def _base(reason):
+    """A refined idle-slots reason's base (p53-5: `hold-trickle/memory` -> `hold-trickle`); any other value as it is."""
+    return reason.split("/", 1)[0] if isinstance(reason, str) else reason
+
+
+def _bound_of(reason):
+    """A refined reason's bound (`hold-trickle/memory` -> `memory`), else None."""
+    return reason.split("/", 1)[1] if isinstance(reason, str) and "/" in reason else None
+
+
+def _int_if_whole(v):
+    """A Weight part as a Tuning reads it: an int when integral (3.0 reads 3), else the float; None for a non-number."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or (isinstance(v, float) and not math.isfinite(v)):
+        return None
+    return int(v) if v == int(v) else v
 
 
 class Usage(Exception):
@@ -527,12 +632,12 @@ def load_tunings(base):
 
 
 def agreeing(tunings, repo, key, rule, direction):
-    """Earlier non-voided applied Tunings (load_tunings' lines) with the same repo (case ignored), key, rule and
-    direction. A pick's entries and an auto landing's count alike; a revert's rule is `revert:<rule>`, so it never
+    """Earlier non-voided applied Tunings (load_tunings' lines) with the same repo (case ignored; any repo for a
+    machine-wide key, same_repo()), key, rule and direction. A pick's entries and an auto landing's count alike; a revert's rule is `revert:<rule>`, so it never
     counts toward <rule>; a close line's `applied` is [], so it adds nothing. Shared with tune.py."""
     n = 0
     for d in tunings:
-        if d["_voided"] or d["repo"].lower() != repo.lower():
+        if d["_voided"] or not same_repo(key, d["repo"], repo):
             continue
         for e in d.get("applied") or []:
             if not isinstance(e, dict) or e.get("key") != key or e.get("rule") != rule:
@@ -896,6 +1001,9 @@ class Score:
         self.journals, self.last_line, self.task_lines = {}, {}, {}
         self.acts, self.hand_back_starts = [], []
         self.verdict_lines, self.read_only = [], set()  # p21-3: review-verdict (n, t, task, d); read-only merges
+        # p53-5: each idle-slots marker with its p53-4 `bound` (t, reason, bound or None); each slot-taken's cap (t,
+        # task, cap); each slot-freed's raw peak (t, task, peak). self.markers stays (t, reason) for every other reader.
+        self.marker_bounds, self.caps, self.peaks = [], [], []
         last_t = None
         for t, n, d in lines:
             kind, task = d.get("kind"), d.get("task")
@@ -934,8 +1042,11 @@ class Score:
             if kind in ("slot-taken", "idle-slots") and _settings_value(settings, "parallel_ceiling") and \
                     (not self.steps or self.steps[-1][1] != settings["parallel_ceiling"]):
                 self.steps.append((t, settings["parallel_ceiling"]))  # a change only (lines arrive in time order)
+            if kind == "slot-freed" and isinstance(task, str) and task and "peak" in d:
+                self.peaks.append((t, task, d["peak"]))
             if kind == "slot-taken" and task:
                 self.slot_taken.append((t, task, settings if isinstance(settings, dict) else {}))
+                self.caps.append((t, task, d["cap"] if isinstance(d.get("cap"), dict) else {}))
                 if d.get("start") == "hand-back":
                     self.hand_back_starts.append((t, task))
                 if task not in open_slot:
@@ -997,6 +1108,8 @@ class Score:
                     pause["end"], pause = t, None
             elif kind == "idle-slots":
                 self.markers.append((t, d.get("reason")))
+                self.marker_bounds.append((t, d.get("reason"), d.get("bound") if d.get("bound") in BUDGET_BOUNDS
+                                           else None))
             elif kind == "merged" and task:
                 ends_integration(task)
                 self.merges.append((t, task))
@@ -1196,7 +1309,7 @@ class Score:
         self._excluded_ms = [(e["kind"], e["start"], e["end"]) for e in excluded]  # raw, for binding()'s trickle-bound
         self.run_ms = total(self.run_iv)
 
-    def _mac_hold_labels(self, rest, until):
+    def _mac_hold_labels(self, rest, until, markers=None, segs=None):
         """The Mac-wide holds' labels (MAC_HOLDS), after every other kind, so a pause or a hold wins: a marker at t
         labels [t, e), e the earliest of the next idle-slots marker (any reason), t + HOLD_MARKER_SPAN and --until, so a
         dead lead, who writes no markers, reads idle past the span. A not-running stretch (of `rest`) whose first marker
@@ -1204,23 +1317,27 @@ class Score:
         marker labels its idle span from the start"), unless another reason is in force at its start: the reason
         idle_segments gives the running segment it follows (a marker's reason holds until a change of reason, a stop or
         full Slots), so a queue-tail before the stop is never back-filled as the Trickle; the same Mac-wide reason
-        there, or none, back-fills."""
-        markers = sorted(self.markers)
-        in_force = {b: r for _a, b, _run, _n, _c, r in self.segs if r != "unexplained"}  # segment end -> its reason
+        there, or none, back-fills.
+
+        `markers` and `segs` default to the record's (self.markers, self.segs); budget_score passes its refined run
+        (p53-5), whose CAP_HOLDS reasons carry their bound (`hold-trickle/memory`): a refined reason reads as its base
+        reason for MAC_HOLDS and for the back-fill test and keeps its refined name as its label's kind, so the refined
+        labels are an exact refinement of these (a MAC_HOLDS kind is its reason's own name)."""
+        markers = sorted(self.markers if markers is None else markers)
+        segs = self.segs if segs is None else segs
+        in_force = {b: r for _a, b, _run, _n, _c, r in segs if r != "unexplained"}  # segment end -> its reason
         out = []
         for i, (t, r) in enumerate(markers):
-            if r not in MAC_HOLDS:
+            if _base(r) not in MAC_HOLDS:
                 continue
             e = min([t + HOLD_MARKER_SPAN, until] + [u for u, _r in markers[i + 1:] if u > t][:1])
             if e > t:
-                kind, why = MAC_HOLDS[r]
-                out.append((kind, why, (t, e)))
+                out.append((r, MAC_HOLDS[_base(r)][1], (t, e)))
         for a, b in rest:
             first = next(((t, r) for t, r in markers if a <= t < b), None)
-            if (first and first[1] in MAC_HOLDS and a < first[0] <= a + HOLD_MARKER_SPAN
-                    and in_force.get(a) in (None, first[1])):
-                kind, why = MAC_HOLDS[first[1]]
-                out.append((kind, why, (a, first[0])))
+            if (first and _base(first[1]) in MAC_HOLDS and a < first[0] <= a + HOLD_MARKER_SPAN
+                    and _base(in_force.get(a)) in (None, _base(first[1]))):
+                out.append((first[1], MAC_HOLDS[_base(first[1])][1], (a, first[0])))
         merged = {}  # one label per kind, its pieces unioned, so back-to-back ticks read as one excluded span
         for kind, why, iv in out:
             merged.setdefault(kind, (why, []))[1].append(iv)
@@ -1239,7 +1356,7 @@ class Score:
                 break
         return v
 
-    def idle_segments(self, since, until):
+    def idle_segments(self, since, until, markers=None):
         """The window's segments, each with the reason labelling its free Slots (the header's Scores: Slots): [(a, b,
         running ms, Slots open, ceiling in force, reason)], cut at every Slot interval's ends, ceiling step, idle-slots
         marker and running interval's end in [since, until]. A running segment with a free Slot takes the reason in
@@ -1247,13 +1364,15 @@ class Score:
         idle span labelling it from the span's start; "unexplained" where no marker reaches. Every other segment (not
         running, the Slots full, or before any ceiling) has reason None, and one not running or full ends the span and
         its reason. running() keeps them (self.segs): _mac_hold_labels reads the reason in force where a stretch stops
-        running, slots_score totals them."""
+        running, slots_score totals them. `markers` defaults to self.markers; budget_score passes its refined run
+        (p53-5), whose marker times are the same, so its segments are the same with each reason refined."""
+        markers = sorted(self.markers if markers is None else markers)
         cuts = {since, until}
         for s in self.slots:
             for x, y in s["iv"]:
                 cuts.update((x, y))
         cuts.update(t for t, _ in self.steps)
-        cuts.update(t for t, _ in self.markers)
+        cuts.update(t for t, _ in markers)
         for a, b in self.run_iv:
             cuts.update((a, b))
         cuts = sorted(c for c in cuts if since <= c <= until)
@@ -1264,7 +1383,6 @@ class Score:
             running = total(intersect([(a, b)], self.run_iv))
             n = sum(1 for s in self.slots if any(x <= a and y >= b for x, y in s["iv"]))
             segs.append([a, b, running, n, self.ceiling_at(a), None])
-        markers = sorted(self.markers)
         span, label = [], None  # the open idle span's segments awaiting a reason, and the reason in force
 
         def close_span():
@@ -1340,6 +1458,170 @@ class Score:
                           and s["outcome"] != "carried"),
         }
         self.idle, self.idle_ms, self.idle_total, self.capacity = idle, idle_ms, idle_total, cap
+
+    # ---- the budget (p53-5, ADR 0083 d4 and DfL 13) -----------------------------------------------------------------
+
+    def budget_score(self, since, until):
+        """The `budget` block: how the Mac-wide cap's held time splits by p53-4's idle-slots `bound`, and the Slots the
+        budget admitted. Window: time in [since, until] (a marker's span clipped to it, as runningTime is) and slot-taken
+        lines by ts in [since, until]; it reports sums and a count, no rows.
+
+        The refined run re-reads the markers with each CAP_HOLDS reason carrying its bound (`hold-trickle/memory`; one
+        with no bound keeps its name: C or the Trickle held it), through idle_segments and _mac_hold_labels, whose
+        refinement is exact: the same cuts and labels, each reason refined. heldHours[b] is the running time a CAP_HOLDS
+        reason with bound b was in force with a Slot free, plus the no-Slot time it labelled inside the coarse run's
+        excluded CAP_HOLDS spans (so a pause or a hold still wins), each refined label taking what of them is left in
+        start order; countHeldHours is the same with no bound. Their sum is trickle-bound's numerator exactly
+        (_mac_bound). short is the bound held longest (ties in SHORT_ORDER), null when none held. admitted counts the
+        window's slot-taken lines whose cap carries an int `max` (p53-4: the budget admitted the Slot)."""
+        refined = [(t, "%s/%s" % (r, b) if r in CAP_HOLDS and b else r) for t, r, b in self.marker_bounds]
+        segs = self.idle_segments(since, until, refined)
+        held, count = {b: 0 for b in BUDGET_BOUNDS}, 0
+        for _a, _b, running, _n, c, reason in segs:
+            if c is None or _base(reason) not in CAP_HOLDS:
+                continue
+            b = _bound_of(reason)
+            if b:
+                held[b] += running
+            else:
+                count += running
+        left = union((a, b) for kind, a, b in self._excluded_ms if kind in CAP_HOLDS)
+        rest = subtract([(since, until)], self.run_iv)
+        for kind, _why, iv in sorted(self._mac_hold_labels(rest, until, refined, segs), key=lambda x: x[2]):
+            if _base(kind) not in CAP_HOLDS:
+                continue
+            piece = total(intersect(left, [iv]))
+            left = subtract(left, [iv])
+            if _bound_of(kind):
+                held[_bound_of(kind)] += piece
+            else:
+                count += piece
+        count += total(left)  # none, the refinement being exact; kept so the parts always sum to the numerator
+        self.budget_ms, self.budget_count_ms = held, count
+        short = None
+        if any(held.values()):
+            short = max(SHORT_ORDER, key=lambda b: (held[b], -SHORT_ORDER.index(b)))
+        admitted = sum(1 for t, _task, cap in self.caps if since <= t <= until and _int_ge(cap.get("max"), 1))
+        self.budget = {"admitted": admitted, "heldHours": {b: hours(held[b]) for b in BUDGET_BOUNDS},
+                       "countHeldHours": hours(count), "short": short}
+
+    # ---- the Weights (p53-5, ADR 0083 d4, DfL 8 and 9) ---------------------------------------------------------------
+
+    def weights_score(self, settings, since, until, act_start):
+        """The `weights` block: each task's measured peak beside the repo's estimate, pooled and by kind. Window: each
+        slot-freed line by its own ts in [since, until], windowed BEFORE it is grouped, so a line outside adds nothing,
+        not even to a task with lines inside; a slot-taken's cap.weight (a kind's `started`) by its ts in [since, until].
+        It reads wider, as attributes and now: each task's `scope:` from its note under --tasks-dir (else its Archive/),
+        and the estimate from --settings (the Weights' ranAt reads it too: cap.weight carries no source).
+
+        A peak counts when reconcile-rollout.py's _peak_room accepts it (exactly mem_gb and cores, finite, >= 0, no
+        bool); each task gives one figure, its per-part highest (run_record.py's "a reader takes peaks per task"), and
+        `at`, its latest contributing line's ts. measured is reconcile's _weight over every task's figure (the pooled upper
+        quartile, inclusive, rounded to 2 places, floored at WEIGHT_FLOOR) once WEIGHT_MIN_TASKS tasks have one, else
+        null; each kind (_kind of its note: its `scope:`, else unscoped) the same over its own tasks. A task with no
+        readable note stays in the pooled measure and in no kind (noNote). reconcile-rollout.py loads only when a peak
+        exists, and the flags rise only then."""
+        est = (settings or {}).get("weight") if isinstance((settings or {}).get("weight"), dict) else None
+        estimate = None
+        if est and all(isinstance(est.get(p), dict) and _int_if_whole(est[p].get("value")) is not None
+                       for p in ("mem_gb", "cores")):
+            estimate = {p: {"value": _int_if_whole(est[p]["value"]), "source": est[p].get("source")}
+                        for p in ("mem_gb", "cores")}
+        self.weight_estimate = estimate
+        for key in WEIGHT_KEYS:
+            self.ran_at[key] = ((estimate or {}).get(WEIGHT_PART[key], {}).get("value"), None)
+        if estimate is not None and settings.get("file") and isinstance(settings.get("path"), str) and \
+                act_start is not None:
+            try:
+                mtime = int(os.stat(os.path.expanduser(settings["path"])).st_mtime * 1000)
+            except OSError:
+                mtime = None
+            if mtime is not None and mtime > act_start:
+                self.flag("weights: rollouts.toml changed after the run began: the Weights' ranAt is its value now")
+        out = {"estimate": estimate, "tasks": [], "measured": None, "kinds": [], "noNote": 0}
+        self.weight_measured = None
+        inside = [(t, task, peak) for t, task, peak in self.peaks if since <= t <= until]
+        if not inside:
+            return out
+        try:
+            rr = _load("reconcile_rollout", RECONCILE_PY)
+        except Exception as e:
+            self.flag("weights: reconcile-rollout.py did not load (%s: %s): no Weights read" % (type(e).__name__, e))
+            return out
+        figures, names = {}, {}
+        for t, task, peak in inside:  # windowed first, then grouped
+            room = rr._peak_room(peak)
+            if room is None:
+                continue
+            k = task.lower()
+            names.setdefault(k, task)
+            have = figures.get(k)
+            figures[k] = (dict(room), t) if have is None else (
+                {p: max(have[0][p], room[p]) for p in room}, max(have[1], t))
+        if not figures:
+            return out
+        tasks_dir = self._expand(self.args.tasks_dir) if self.args.tasks_dir else \
+            os.path.join(RR._home(self.env), "repos", "obsidian", "Work", "Tasks")
+        readable = os.path.isdir(tasks_dir)
+        kinds, no_note = {}, []
+        for k in sorted(figures):
+            task, (room, t) = names[k], figures[k]
+            kind = None
+            if readable:
+                for p in (os.path.join(tasks_dir, task + ".md"), os.path.join(tasks_dir, "Archive", task + ".md")):
+                    if os.path.isfile(p):
+                        try:
+                            kind = rr._kind(rr.Note(pathlib.Path(p)))
+                        except (OSError, ValueError):
+                            kind = None
+                        break
+            if kind is None:
+                no_note.append(task)
+            else:
+                kinds.setdefault(kind, []).append(k)
+            out["tasks"].append({"task": task, "kind": kind, "mem_gb": room["mem_gb"], "cores": room["cores"],
+                                 "at": fmt(t)})
+        fallback = {p: {"value": rr.WEIGHT_BUILT_IN[p], "source": "built-in"} for p in ("mem_gb", "cores")}
+
+        def measure(keys):
+            if len(keys) < WEIGHT_MIN_TASKS:
+                return None
+            w = rr._weight({k: figures[k][0] for k in keys}, estimate or fallback)
+            return {"mem_gb": w["mem_gb"], "cores": w["cores"], "tasks": w["history"]}
+
+        out["measured"] = self.weight_measured = measure(sorted(figures))
+        started = {}
+        for t, task, cap in self.caps:
+            if since <= t <= until and isinstance(cap.get("weight"), dict):
+                started[task.lower()] = (t, cap["weight"])
+        for kind in sorted(kinds):
+            mine = [started[k] for k in kinds[kind] if k in started]
+            out["kinds"].append({"kind": kind, "tasks": len(kinds[kind]), "measured": measure(kinds[kind]),
+                                 "started": max(mine, key=lambda x: x[0])[1] if mine else None})
+        out["noNote"] = len(no_note)
+        if len(figures) < WEIGHT_MIN_TASKS:
+            self.flag("weights: %d task(s) with a peak in the window, fewer than %d: no measured Weight"
+                      % (len(figures), WEIGHT_MIN_TASKS))
+        if estimate is None:
+            self.flag("weights: --settings carries no `weight`: no estimate to set the measure against, no Weight "
+                      "Tuning")
+        if not readable:
+            self.flag("weights: --tasks-dir %s cannot be read: no kinds" % tasks_dir)
+        elif no_note:
+            self.flag("weights: %d task(s) with a peak have no readable note (%s): pooled, in no kind"
+                      % (len(no_note), ", ".join("[[%s]]" % x for x in no_note)))
+        return out
+
+    def _ran_at_max(self, since, until):
+        """capacity_max's ran-at value (p53-5): the most common int cap.max on the window's slot-taken lines (ties to the
+        later), else None (no Slot the budget admitted)."""
+        count, latest = {}, {}
+        for t, _task, cap in self.caps:
+            v = cap.get("max")
+            if since <= t <= until and _int_ge(v, 1):
+                count[v] = count.get(v, 0) + 1
+                latest[v] = t
+        return max(count, key=lambda v: (count[v], latest[v])) if count else None
 
     # ---- the lane ----------------------------------------------------------------------------------------------
 
@@ -1531,16 +1813,20 @@ class Score:
         self.slot_ends(until)
         self.running(since, until)
         self.slots_score(since, until)
+        self.budget_score(since, until)
         self.lane_score(since, until)
         # each key's ran-at value, once: the ceiling in force for most of the running time, each round cap's most
-        # common value on the window's slot-taken lines (tune.py --revert and reflect.py read `ranAt`)
+        # common value on the window's slot-taken lines, capacity_max's most common cap.max (p53-5), and each Weight
+        # part's estimate now (weights_score: cap.weight carries no source); tune.py --revert and reflect.py read `ranAt`
         self.ran_at = {"parallel_ceiling": (self.slot_metrics["ceiling"], None)}
         for key in KEYS[1:]:
             self.ran_at[key] = self._ran_at(key, since, until)
+        self.ran_at["capacity_max"] = (self._ran_at_max(since, until), None)
         self.read_tunings(base)
         rt = self.run_ms
         act_start = self.run_iv[0][0] if self.run_iv else None
         act_end = self.run_iv[-1][1] if self.run_iv else None
+        weights = self.weights_score(settings, since, until, act_start)
         merged = sorted({task for t, task in self.merges if since <= t <= until})
         escapes = self.escapes(self.landed(since, until), repo)
         throughput = None
@@ -1585,7 +1871,9 @@ class Score:
             "load": self.load(base, slug, host, since, until),
             "nights": self.nights(base, slug, host, lines, since, until),
             "headline": headline,
-            "ranAt": {k: self.ran_at[k][0] for k in KEYS},
+            "budget": self.budget,
+            "weights": weights,
+            "ranAt": {k: self.ran_at[k][0] for k in RAN_AT_KEYS},
             "reviewChurn": churn,
             "baseline": base_line,
         })
@@ -1956,11 +2244,15 @@ class Score:
         return (held_ms + no_slot) / span, held, no_slot
 
     def _trickle_bound(self):
-        """The trickle-bound rule (the header's Binding) over CAP_HOLDS at TRICKLE_BOUND (_mac_bound), or None."""
+        """The trickle-bound rule (the header's Binding) over CAP_HOLDS at TRICKLE_BOUND (_mac_bound), or None; refined
+        to budget-bound (p53-5) when the budget's bounds held at least as long as C or the Trickle did."""
         hit = self._mac_bound(CAP_HOLDS, TRICKLE_BOUND)
         if hit is None:
             return None
         share, held, no_slot = hit
+        by_budget = sum(self.budget_ms.values())
+        if by_budget > 0 and by_budget >= self.budget_count_ms:
+            return self._budget_bound(share, no_slot)
         self.flag("trickle-bound: no rollout key moves this (the Trickle is the Mac-wide cap in "
                   "~/.config/thread/away.json)")
         self.flag("throughput: read under the Mac-wide cap (trickle-bound): merges per running hour at the Slots the "
@@ -1970,6 +2262,25 @@ class Score:
                        "Slot time it held: the Trickle %g h, the Away cap %g h)"
                        % (round(share * 100), hours(no_slot), hours(held["hold-trickle"]),
                           hours(held["hold-away-cap"]))}
+
+    def _budget_bound(self, share, no_slot):
+        """budget-bound (the header's Binding, p53-5): the trickle-bound share, its held time mostly the budget's
+        (idle-slots carried a `bound`), with the part held longest named as `short`."""
+        b, short = self.budget["heldHours"], self.budget["short"]
+        if short == "count":
+            self.flag("budget-bound: capacity_max, the hard count, held it; the record shows no green Mac at a count hold "
+                      "(the count is tested before the Weight): a raise is Lachy's")
+        else:
+            self.flag("budget-bound: memory and cores are the budget's (Chorus's capacity.json): no rollout key moves "
+                      "them")
+        self.flag("throughput: read under the budget (budget-bound): merges per running hour at the Slots the budget "
+                  "admitted, not at the ceiling %s" % self.slot_metrics["ceiling"])
+        return {"constraint": "budget-bound",
+                "why": "the budget kept Slots free %d%% of the time (running time plus %g h with no Slot open; held: the "
+                       "count %g h, memory %g h, cores %g h, memory and cores %g h)"
+                       % (round(share * 100), hours(no_slot), b["count"], b["memory"], b["cores"],
+                          b["memory and cores"]),
+                "short": short}
 
     def _last_start_bound(self):
         """The last-start-bound rule (the header's Binding, p28-7) over LAST_START_HOLDS at LAST_START_BOUND
@@ -2016,12 +2327,14 @@ class Score:
 
     def cause(self, key, ran_at, frm, spread, note, settings, first_taken):
         for d in sorted(self.tunings, key=lambda x: x["_t"], reverse=True):
-            if d["_voided"] or self.repo is None or d["repo"].lower() != self.repo.lower():
+            if d["_voided"] or self.repo is None or not same_repo(key, d["repo"], self.repo):
                 continue
             if first_taken is not None and d["_t"] <= first_taken:
                 continue
             if any(isinstance(e, dict) and e.get("key") == key for e in d.get("applied") or []):
-                return "Tuning %s moved it on %s" % (d.get("id"), fmt(d["_t"]))
+                # a machine-wide key is read across repos (same_repo): another repo's Tuning names its repo
+                other = "" if d["repo"].lower() == self.repo.lower() else " (for %s)" % d["repo"]
+                return "Tuning %s moved it on %s%s" % (d.get("id"), fmt(d["_t"]), other)
         if key == "parallel_ceiling" and self.ceiling_changes:
             x, y, t = self.ceiling_changes[0]
             return "changed mid-window %d → %d at %s (a note or task override)" % (x, y, fmt(t))
@@ -2045,41 +2358,77 @@ class Score:
             return "the rollout note now says %d; the run ran at %d" % (fm, ran_at)
         return "unclear: rollouts.toml changed around schedule time"
 
+    @staticmethod
+    def _from(settings, key):
+        """A proposal's `from`: rollouts.toml's resolved value now (--settings), a Weight key's from its `weight` part
+        (int when integral, p53-5), every other key's from `settings`."""
+        if key in WEIGHT_KEYS:
+            w = (settings or {}).get("weight")
+            part = w.get(WEIGHT_PART[key]) if isinstance(w, dict) else None
+            return _int_if_whole(part.get("value")) if isinstance(part, dict) else None
+        return (((settings or {}).get("settings") or {}).get(key) or {}).get("value")
+
     def propose(self, constraint, headline, guard, settings, note, first_taken, since, until, set_asides):
         if self.repo is None:
             return [], []
-        rules = []
+        rules = []  # (key, direction, rule, evidence, hold, caution)
         lane_busy = self.lane_metrics["busyShare"] or 0
         sm = self.slot_metrics
         rh = headline["runningHours"]
+        # a busy lane would take the extra Slot's work one task at a time: a raise of the count is withheld, never
+        # dropped
+        busy_lane = None
+        if lane_busy >= LANE_FREE_FOR_RAISE:
+            busy_lane = "lane %d%% busy, at or above %d%%: a raise would queue on the Integration lane" % (
+                round(lane_busy * 100), round(LANE_FREE_FOR_RAISE * 100))
         if constraint == "slot-bound":
-            # a busy lane would take the extra Slot's work one task at a time: the raise is withheld, never dropped
-            busy_lane = None
-            if lane_busy >= LANE_FREE_FOR_RAISE:
-                busy_lane = "lane %d%% busy, at or above %d%%: a raise would queue on the Integration lane" % (
-                    round(lane_busy * 100), round(LANE_FREE_FOR_RAISE * 100))
             rules.append(("parallel_ceiling", 1, "slot-bound-raise",
                           "Slot-bound: Slots full %d%% of %s running h at ceiling %s; lane %d%% busy"
-                          % (round(sm["fullShare"] * 100), rh, sm["ceiling"], round(lane_busy * 100)), busy_lane))
+                          % (round(sm["fullShare"] * 100), rh, sm["ceiling"], round(lane_busy * 100)), busy_lane, None))
         if constraint == "quota-bound":
             rules.append(("parallel_ceiling", -1, "quota-bound-lower",
                           "Quota-bound: %d quota stall(s) in %s running h at ceiling %s"
-                          % (headline["quotaStalls"], rh, sm["ceiling"]), None))
+                          % (headline["quotaStalls"], rh, sm["ceiling"]), None, None))
+        if constraint == "budget-bound" and self.budget["short"] == "count":
+            # p53-5, ADR 0083 DfL 13: the hard count held Slots the budget would have admitted; the record cannot show
+            # the Mac green there (the count is tested before the Weight), so the raise always carries a caution
+            rules.append(("capacity_max", 1, "budget-count-raise",
+                          "Budget-bound: capacity_max held Slots free %g h (the budget's other parts %g h) in %s running "
+                          "h; lane %d%% busy" % (self.budget["heldHours"]["count"],
+                                                  round(sum(v for k, v in self.budget["heldHours"].items()
+                                                            if k != "count"), 3), rh, round(lane_busy * 100)),
+                          busy_lane, NO_GREEN_MAC))
         for cls, key, rule in (("review-rounds", "max_review_rounds", "review-rounds-raise"),
                                ("plan-rejected", "max_plan_rounds", "plan-rejected-raise")):
             n = sum(1 for x in set_asides if x[2] == cls)
             if n >= ROUND_SET_ASIDES:
-                rules.append((key, 1, rule, "%d set-asides of reasonClass %s in the window" % (n, cls), None))
+                rules.append((key, 1, rule, "%d set-asides of reasonClass %s in the window" % (n, cls), None, None))
+        # p53-5: a Weight's estimate steps one whole unit toward its measure, whatever bound the run (ADR 0083 DfL 9)
+        measured_w, est = getattr(self, "weight_measured", None), getattr(self, "weight_estimate", None)
+        if measured_w and est:
+            for key in WEIGHT_KEYS:
+                part = WEIGHT_PART[key]
+                target = max(1, int(math.ceil(measured_w[part])))
+                frm = est[part]["value"]
+                direction = _sign(target - frm)
+                if not direction:
+                    continue
+                evidence = "measured upper quartile %s over %d tasks (target %d); the estimate %s (%s)" % (
+                    measured_w[part], measured_w["tasks"], target, frm, est[part].get("source"))
+                rules.append((key, direction, "weight-measured-raise" if direction > 0 else "weight-measured-lower",
+                              evidence, None, None))
         proposals, withheld = [], []
         breached = [k for k, v in guard.items() if v["breached"]]
         measured = {h: headline.get(h) for h in HEADLINES}
-        for key, direction, rule, evidence, hold in rules:
+        for key, direction, rule, evidence, hold, caution in rules:
             spread = None
             if key == "parallel_ceiling":
                 ran_at = sm["ceiling"]
             else:
                 ran_at, spread = self.ran_at_cap(key)
-            frm = (((settings or {}).get("settings") or {}).get(key) or {}).get("value")
+            frm = self._from(settings, key)
+            # a Weight moves in whole GB and cores: a fractional estimate is withheld, never stepped or dropped
+            fractional = key in WEIGHT_KEYS and isinstance(frm, float)
             if ran_at is None:
                 if not isinstance(frm, int):
                     self.flag("%s: %s needs a ran-at value and no slot-taken carries one" % (rule, key))
@@ -2087,18 +2436,23 @@ class Score:
                 ran_at = frm
                 self.flag("%s: no slot-taken carries %s; its ran-at value is rollouts.toml's %d" % (rule, key, frm))
             to = ran_at + direction
-            if to < 1:
+            if to < 1 and not fractional:
                 self.flag("%s: %s would drop to %d (ran at %d): dropped" % (rule, key, to, ran_at))
                 continue
-            evidence = ("%s (ran at %d)" % (evidence, ran_at))[:EVIDENCE_MAX]
+            evidence = ("%s (ran at %s)" % (evidence, ran_at))[:EVIDENCE_MAX]
             weight = weigh(rule, measured)
             entry = {"id": "p%d" % (len(proposals) + len(withheld) + 1), "key": key, "from": frm, "to": to,
                      "ranAt": ran_at, "ranAtCause": None, "rule": rule, "direction": direction,
                      "evidence": evidence, "agreeing": self.agreeing(key, rule, direction),
-                     "serves": weight["serves"], "risks": weight["risks"], "trade": weight["trade"], "caution": None}
+                     "serves": weight["serves"], "risks": weight["risks"], "trade": weight["trade"], "caution": caution}
             hit = [k for k in breached if k in weight["risks"]]  # the breached Guardrails this rule risks
-            if not isinstance(frm, int) or isinstance(frm, bool):
+            more = admits(key, direction)  # +1 when it admits more work (a raise of a count, a Weight lower)
+            if not fractional and (not isinstance(frm, int) or isinstance(frm, bool)):
                 entry["reason"] = "no rollout settings (--settings): rollouts.toml's current value is unknown"
+                withheld.append(entry)
+                continue
+            if fractional:
+                entry["reason"] = "a Tuning moves a Weight in whole GB and cores: %s is %s, edit it by hand" % (key, frm)
                 withheld.append(entry)
                 continue
             if frm != ran_at:
@@ -2112,12 +2466,12 @@ class Score:
             elif hold:
                 entry["reason"] = hold
                 withheld.append(entry)
-            elif direction > 0 and hit:
+            elif more > 0 and hit:
                 entry["reason"] = "a raise while a Guardrail is breached: %s" % ", ".join(_breach(k, guard[k]) for k in hit)
                 withheld.append(entry)
             else:
-                if direction < 0 and hit:  # a lower is never withheld by a Guardrail: Lachy weighs it
-                    entry["caution"] = _caution(hit, guard)
+                if more < 0 and hit:  # a lower is never withheld by a Guardrail: Lachy weighs it
+                    entry["caution"] = "; ".join(x for x in (caution, _caution(hit, guard)) if x)
                 proposals.append(entry)
         return proposals, withheld
 
