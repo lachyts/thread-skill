@@ -45,6 +45,11 @@
 #   C57a-c each also run slotted, as both lead call sites do (every step a guarded one)   C57d an unresolvable base:
 #   unset, a WARN, the verdict unchanged   C57e a project with no reach is byte-identical   C57f a TERM while the base
 #   resolves still removes the race tree.
+#   C58 (p47-11) the anchor is passed by the script, never by the lead: prepare writes its record, `call` prints the
+#   integrate call's integration whole from it (the trouble route's, and the verify route's --after shared-green, red
+#   and push-refused), the engine takes it unchanged and refuses a hand-altered headSha or taskBase before any dispatch
+#   with its line; `call` refuses a merge route, a wrong --after, no record and another slug's; an exit-8 prepare
+#   leaves no record behind.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -241,6 +246,7 @@ print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", 
            "maxReviewRounds": maxr, "maxPlanRounds": 3, "rung": "opus-xhigh"},
   "integration": {"prUrl": f"https://github.com/o/r/pull/{ord(slug[-1])}", "branch": f"audit-fix/{alias}",
     "worktreePath": f"/repo/.claude/worktrees/{slug}", "headSha": s("a"), "taskBase": s("b"), "mainSha": s("c"),
+    "prepared": {"anchor": s("a"), "taskBase": s("b")},
     "trouble": ["shared-file"], "landed": [], "reviewHistory": hist, "reviewRoundsUsed": used,
     "rung": {"startRung": "opus-high", "rung": "opus-xhigh", "climbs": [{"stage": "implement", "from": "opus-high", "to": "opus-xhigh"}]},
     "leadMerge": {"mergeCommit": s("d"), "headSha": s("d"), "baseSha": s("c"), "verified": True},
@@ -2467,6 +2473,107 @@ ok "$rc" 2 "C56c: push --head xyz (argparse) → exit 2"; lacks "$E" "task note 
 NOGIT="$F/nogit"; mkdir -p "$NOGIT"; ln -sf "$(command -v python3)" "$NOGIT/python3"
 E=$(PATH="$NOGIT" "$(command -v python3)" "$LI" push --repo "$R" --slug "$SLUG" --head "$H0" 2>&1 >/dev/null); rc=$?
 ok "$rc" 2 "C56d: push under a PATH with no git → exit 2"; has "$E" "lead-integrate push: git not runnable:" "C56d: … git not runnable"
+
+# ======== C58: the anchor is passed by the script, never by the lead (p47-11) =====================================
+# The 2026-10-26 Watch (6d994757): the lead typed a headSha other than prepare's anchor, and the integrator's anchor STOP
+# fired twice on one task. `call` builds the integrate call's integration from prepare's record; the engine holds its
+# headSha and taskBase to the `prepared` pair, so a retyped sha is refused before anything dispatches.
+call() { CJ=$(python3 "$LI" call --repo "$R" --slug "$SLUG" --note "$V/$SLUG.md" "$@" 2>"$F/call.err"); crc=$?; }
+# eargs <integration-json>: a mode-'integrate' call for $SLUG with that integration, unchanged.
+eargs() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+print(json.dumps({"rolloutSlug": "ro", "repoPath": os.environ["R"], "verifier": "true", "date": "2026-10-02", "mode": "integrate",
+  "verifySlot": json.loads(os.environ["VERIFY_SLOT_JSON"]),
+  "task": {"slug": os.environ["SLUG"], "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3,
+           "maxReviewRounds": 3, "maxPlanRounds": 3, "rung": "opus-xhigh"},
+  "integration": json.loads(sys.argv[1])}))
+PY
+}
+# edispatch <args-json>: `refused <message>` when the engine refused the args before any agent() call, else
+# `dispatched <n>` (the stub's agent() throws at once, so the run stops at its first dispatch).
+edispatch() {
+  node --input-type=module -e "
+    import { runTask } from './tests/lib/engine.mjs'
+    const r = await runTask(JSON.parse(process.argv[1]), async () => { throw new Error('stub: stop at the first dispatch') })
+    const m = r.error && typeof r.error.message === 'string' ? r.error.message : ''
+    process.stdout.write(m.startsWith('thread:args-refused') && r.calls.length === 0 ? 'refused ' + m : 'dispatched ' + r.calls.length)
+  " "$1"
+}
+fx c58
+main a.txt "$(printf 'A1 theirs\na2\na3\na4\na5')" "theirs: a1 (#7)"
+prep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')" '0|trouble|["conflict"]' "C58: a conflict → route trouble"
+REC="$R/.claude/integration/$SLUG.prepare.json"
+ok "$(j "$(cat "$REC")" '[d["anchor"], d["taskBase"], d["mainSha"], d["route"]]')" "$(j "$J" '[d["anchor"], d["taskBase"], d["mainSha"], d["route"]]')" \
+  "C58: prepare writes its printed verdict as the record"
+call
+ok "$crc" 0 "C58: call on the trouble route exits 0"
+CI=$(j "$CJ" 'd["integration"]')
+ok "$(j "$CI" '[d["headSha"], d["taskBase"], d["mainSha"], d["prepared"]]')" \
+  "$(j "$J" '[d["anchor"], d["taskBase"], d["mainSha"], {"anchor": d["anchor"], "taskBase": d["taskBase"]}]')" \
+  "C58: headSha is prepare's anchor, with its taskBase, mainSha and the prepared pair"
+ok "$(j "$CI" '[d["trouble"], d["branch"], d["worktreePath"], "leadMerge" in d]')" "[[\"conflict\"],\"$BR\",\"$WT\",false]" \
+  "C58: prepare's trouble, branch and tree; no leadMerge"
+ok "$(j "$CI" 'd["landed"]')|$(j "$CI" 'len(d["landed"])')" "$(j "$J" 'd["landed"]')|1" "C58: prepare's landed list, the one PR behind it"
+ok "$(j "$CI" '[d["prUrl"], d["reviewRoundsUsed"], d["readyAt"], bool(d["startedAt"])]')" "[\"$PR\",1,\"2026-10-02T11:00+00:00\",true]" \
+  "C58: prUrl, the rounds, readyAt from the note and a fresh startedAt"
+ok "$(j "$CJ" '[d["source"], d["rowRefused"], d["prUrlError"]]')" '["note","",""]' "C58: the note's record, nothing refused"
+out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$CI")")
+ok "$out" "dispatched 1" "C58: the engine takes call's integration unchanged (no args refusal; it dispatches)"
+BAD=$(j "$CI" 'dict(d, headSha="'"$(sha 9)"'")')
+out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$BAD")")
+has "$out" "refused thread:args-refused: args.integration: headSha $(sha 9) is not prepare's anchor $(j "$J" 'd["anchor"]') — pass lead-integrate.py call's integration whole" \
+  "C58: a hand-altered headSha is refused before any dispatch, with its line"
+BAD=$(j "$CI" 'dict(d, taskBase="'"$(sha 8)"'")')
+out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$BAD")")
+has "$out" "refused thread:args-refused: args.integration: taskBase $(sha 8) is not prepare's taskBase $(j "$J" 'd["taskBase"]')" \
+  "C58: a hand-altered taskBase is refused the same way"
+BAD=$(j "$CI" '{k: v for k, v in d.items() if k != "prepared"}')
+out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$BAD")")
+has "$out" "refused thread:args-refused: args.integration: prepared must be { anchor, taskBase }" "C58: an integration built by hand (no prepared pair) is refused"
+call --after red
+ok "$crc" 1 "C58: --after on the trouble route → exit 1"
+has "$(cat "$F/call.err")" "lead-integrate call: refused: prepare routed trouble, which takes no --after, not --after red; nothing launched" "C58: … with its line"
+python3 - "$REC" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["slug"] = "proj-other"; json.dump(d, open(sys.argv[1], "w"))
+PY
+call
+ok "$crc" 1 "C58: another slug's record → exit 1"; has "$(cat "$F/call.err")" "is \"proj-other\"'s, not $SLUG's" "C58: … named"
+rm -f "$REC"
+call
+ok "$crc|$CJ" "1|" "C58: no record → exit 1, nothing printed"; has "$(cat "$F/call.err")" "no prepare record at $REC: run prepare first" "C58: … named"
+
+# the verify route: a shared file (C3's), green, red and a refused push
+fx c58v
+main a.txt "$(printf 'a1\na2\na3\na4\nA5 theirs')" "theirs: a5 (#7)"
+prep
+M=$(j "$J" 'd["mergeCommit"]')
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["sharedFiles"]')" 'verify|["a.txt"]' "C58v: a shared file → route verify"
+call
+ok "$crc" 1 "C58v: the verify route with no --after → exit 1"
+call --after shared-green
+ok "$crc|$(j "$CJ" '[d["integration"]["trouble"], d["integration"]["leadMerge"]]')" \
+  "0|[[\"shared-file\"],{\"mergeCommit\":\"$M\",\"headSha\":\"$M\",\"baseSha\":\"$B\",\"verified\":true}]" "C58v: --after shared-green → trouble [shared-file], leadMerge (M, M, mainSha)"
+ok "$(j "$CJ" 'd["integration"]["headSha"]')" "$(j "$J" 'd["anchor"]')" "C58v: … its headSha still prepare's anchor, never M"
+out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$(j "$CJ" 'd["integration"]')")")
+ok "$out" "dispatched 1" "C58v: the engine takes the shared-green integration unchanged"
+call --after red
+ok "$crc|$(j "$CJ" '[d["integration"]["trouble"], "leadMerge" in d["integration"]]')" '0|[["red","shared-file"],false]' "C58v: --after red → trouble [red, shared-file], no leadMerge"
+call --after push-refused
+ok "$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '0|[]' "C58v: --after push-refused → trouble []"
+
+# a merge route launches no integrate call; an exit-8 prepare leaves no record
+fx c58m
+prep
+ok "$(j "$J" 'd["route"]')" merge "C58m: main unmoved → route merge"
+call
+ok "$crc" 1 "C58m: call on the merge route → exit 1"
+has "$(cat "$F/call.err")" "prepare routed \"merge\", which launches no integrate call" "C58m: … named"
+git -C "$R" remote set-url origin "$F/nowhere.git"
+prep
+ok "$prc|$([ -e "$R/.claude/integration/$SLUG.prepare.json" ] && echo kept || echo gone)" "8|gone" "C58m: an exit-8 prepare removes the old record"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

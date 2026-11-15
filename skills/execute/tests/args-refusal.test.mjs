@@ -34,7 +34,8 @@ const mkTask = (over = {}) => ({
   maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, ...over,
 })
 const mkI = (over = {}) => ({
-  prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), trouble: [], landed: [],
+  prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'),
+  prepared: { anchor: sha('a'), taskBase: sha('b') }, trouble: [], landed: [],
   reviewHistory: [], reviewRoundsUsed: 1, rung: { startRung: '', rung: '', climbs: [] }, startedAt: '2026-10-01T10:00:00Z', ...over,
 })
 const mkResume = (over = {}) => ({
@@ -76,6 +77,15 @@ const CASES = [
     ]
   }),
   ['a bad integration', integrateArgs({}, { headSha: 'x' }), 'args.integration: headSha must be a 40-hex commit sha'],
+  // p47-11: the anchor is passed by the script, never by the lead. An integration with no `prepared` pair (built by
+  // hand) and one whose headSha or taskBase was retyped away from prepare's pair are refused, each naming both shas.
+  ['an integration with no prepared pair', integrateArgs({}, { prepared: undefined }),
+    "args.integration: prepared must be { anchor, taskBase } (40-hex), as lead-integrate.py call prints it, got undefined"],
+  ['a prepared pair with a bad anchor', integrateArgs({}, { prepared: { anchor: 'x', taskBase: sha('b') } }), 'args.integration: prepared must be'],
+  ['a headSha retyped from the prepared anchor', integrateArgs({}, { headSha: sha('d') }),
+    `args.integration: headSha ${sha('d')} is not prepare's anchor ${sha('a')} — pass lead-integrate.py call's integration whole`],
+  ['a taskBase retyped from the prepared taskBase', integrateArgs({}, { taskBase: sha('e') }),
+    `args.integration: taskBase ${sha('e')} is not prepare's taskBase ${sha('b')}`],
   // A long string round budget: roundBudgetDiagnosis shows it cut (cutEcho), as refusedEcho cuts, never whole.
   ['a long string maxReviewRounds (integrate mode)', integrateArgs({}, {}, { maxReviewRounds: LONG_BUDGET }),
     "args.integration: invalid round budget: max_review_rounds = 'rrrr"],

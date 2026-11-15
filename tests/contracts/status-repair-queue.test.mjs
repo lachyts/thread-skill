@@ -80,7 +80,7 @@ const alias = (slug) => slug.slice(slug.indexOf('-') + 1)
 const mkTask = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, rung: 'opus-xhigh', ...over })
 const mkI = (slug, n) => ({
   prUrl: prOf(n), branch: `audit-fix/${alias(slug)}`, worktreePath: `/repo/.claude/worktrees/${slug}`, headSha: sha('a'), taskBase: sha('b'),
-  mainSha: sha('c'), trouble: [], landed: [], reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
+  mainSha: sha('c'), prepared: { anchor: sha('a'), taskBase: sha('b') }, trouble: [], landed: [], reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
   rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
 })
 // args.verifySlot is required (estate ADR 0009 d4): every call carries one.

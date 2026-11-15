@@ -179,6 +179,10 @@ export const meta = {
 //       headSha         : string,    // the ANCHOR (40-hex) — always ANCHOR_RECIPE's output, never "the
 //                                    //   approved head" by assumption (see the lead contract below).
 //       taskBase        : string,    // git merge-base <anchor> origin/<default> (40-hex).
+//       prepared        : object,    // { anchor, taskBase } (40-hex): prepare's own pair, as `lead-integrate.py
+//                                    //   call` prints it (p47-11). headSha must equal prepared.anchor and taskBase
+//                                    //   prepared.taskBase, else the call is refused before dispatch (argsRefused):
+//                                    //   the lead passes the script's object whole and never retypes a sha.
 //       mainSha         : string,    // origin/<default> as the lead last read it (40-hex), the end of the
 //                                    //   range `landed` covers. The integrator integrates onto whatever its
 //                                    //   fresh fetch gives; when that base is not mainSha, the integrator
@@ -243,8 +247,11 @@ export const meta = {
 // the PRs behind it; the integrator and the judge read mainSha..<base> themselves for anything later. A commit
 // pushed to the default branch without a PR is in no entry: a non-empty `landed` points the integrator and the
 // judge at the first-parent log taskBase..mainSha for those (an empty one already sends both to the whole log).
-// `prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are `lead-integrate.py inputs --row`'s `integrate`
-// record (execute § 4.5 step 3), passed verbatim. It uses the approving row the session holds only when that
+// The whole object is `lead-integrate.py call`'s `integration` (execute § 4.5 step 3, p47-11), passed verbatim:
+// headSha, taskBase, mainSha, landed and trouble from prepare's record, `prepared` its anchor pair
+// (integrationArgsError holds headSha and taskBase to it), and `prUrl`, `reviewHistory`, `reviewRoundsUsed` and
+// `rung` its `lead-integrate.py inputs --row` `integrate` record. That record uses the approving row the session
+// holds only when that
 // row matches the note (slug, `review`, the note's PR, at least its `review_rounds_used`) and its history and
 // rounds pass this call's args check (historyError; a row whose rung record fails rungRecordError keeps the
 // row and takes the note's rung record). Otherwise, or with no row, it falls back to the note: the cold
@@ -3273,6 +3280,15 @@ function integrationArgsError(a) {
   const budget = roundBudgetDiagnosis(t, ['maxReviewRounds'])
   if (budget) return budget
   for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${refusedEcho(I[k])}`
+  // The anchor is passed by the script, never by the lead (p47-11): `lead-integrate.py call` prints this whole
+  // object from prepare's record, `prepared` among it, so a headSha or taskBase retyped by hand differs from the
+  // prepared pair and is refused here, before the integrator's merge step could STOP on it.
+  const P = I.prepared
+  if (!isObj(P) || !isSha(P.anchor) || !isSha(P.taskBase)) {
+    return `prepared must be { anchor, taskBase } (40-hex), as lead-integrate.py call prints it, got ${refusedEcho(P)} — pass its integration whole`
+  }
+  if (I.headSha !== P.anchor) return `headSha ${I.headSha} is not prepare's anchor ${P.anchor} — pass lead-integrate.py call's integration whole, never a retyped sha`
+  if (I.taskBase !== P.taskBase) return `taskBase ${I.taskBase} is not prepare's taskBase ${P.taskBase} — pass lead-integrate.py call's integration whole, never a retyped sha`
   if (!Array.isArray(I.trouble) || I.trouble.some((x) => !INTEGRATION_TROUBLE.includes(x)) || new Set(I.trouble).size !== I.trouble.length) {
     return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${refusedEcho(I.trouble)}`
   }

@@ -240,9 +240,11 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
   // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
   // `unlisted`, `note` and `inert` only inform.
-  if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
+  if (!st3.includes('`startedAt` the fresh stamp `call` takes at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
-    !st3.includes('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim, the `integrate` record of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath> [--row') ||
+    !st3.includes('rung, readyAt, startedAt}` (`leadMerge` too on a green shared file): verbatim, the `integration` object of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --repo <repoPath> --slug <slug> --note <task note> [--row') ||
+    !st3.includes('**The anchor is passed by the script, never by the lead:** pass that object whole, retype no sha in it and add no key to it.') ||
+    !st3.includes("Its `prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are the `integrate` record `lead-integrate.py inputs --row` gives") ||
     !st3.includes('the lead prints a non-empty `rowRefused`') || st3.includes('from the approving row when this session holds it') ||
     !st3.includes("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason") ||
     !st3.includes("`rung` is the task's own rung record, the accepted row's (`startRung`, `rung`, `climbs`), else the note's `rung` record") ||
@@ -834,7 +836,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !before(skipB, 'then § 2.6', 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M') ||
     !before(skipB, '--head M`', 'log-integration --tasks <slug> --started "$S" --anchor <anchor> --head M --base <mainSha>') ||
     !before(skipB, 'log-integration', 'then step 4 with (M, `mainSha`)') ||
-    !skipB.includes('Push refused (exit 1): `undo') || !skipB.includes('then the integrate call with `trouble []`') ||
+    !skipB.includes('Push refused (exit 1): `undo') || !skipB.includes('then the integrate call with `--after push-refused` (`trouble []`)') ||
     !skipB.includes('Print `inert.why`') || !st3.includes('print `inert.why` whenever the route is `verify` or `skip` (an `inert check error: …` included') ||
     !(rows['3'] ?? '').includes('it may route `skip`') || !verifierRow.includes('`lead-integrate.py prepare --verifier`')) fails.push('skip-path')
 
@@ -1037,11 +1039,16 @@ test('control: an unbounded verify command fails verify-bound', () => {
 })
 
 test('control: leadMerge on a red verify fails trouble-path', () => {
-  only(sk('then the integrate call with `trouble ["red"]`', 'then the integrate call with `trouble ["red"]` and `leadMerge`'), 'trouble-path', 'red leadMerge')
+  only(sk('`--after red` (`trouble ["red"]`', '`--after red` (`trouble ["red"]` and `leadMerge`'), 'trouble-path', 'red leadMerge')
 })
 
 test('control: startedAt taken at prepare fails integrate-args', () => {
-  only(sk('`startedAt` a fresh `lead-integrate.py stamp` taken at launch', '`startedAt` the stamp S taken at prepare'), 'integrate-args', 'stale startedAt')
+  only(sk('`startedAt` the fresh stamp `call` takes at launch', '`startedAt` the stamp S taken at prepare'), 'integrate-args', 'stale startedAt')
+})
+
+test('control: an integrate call whose sha the lead types fails integrate-args', () => {
+  only(sk(' **The anchor is passed by the script, never by the lead:** pass that object whole, retype no sha in it and add no key to it.', ''),
+    'integrate-args', 'no pass-through rule')
 })
 
 test("control: the exit-4 reason not passed verbatim fails set-aside", () => {
@@ -1148,7 +1155,7 @@ test("control: a rung fallback naming the ladder's top rung fails integrate-args
 
 test('control: the approving row trusted unchecked fails integrate-args', () => {
   const p = real.skill.split('\n').find((l) => l.startsWith('   **The integrate call**'))
-  const from = p.slice(p.indexOf('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim,'), p.indexOf("; `rung` is the task's own rung record"))
+  const from = p.slice(p.indexOf('Its `prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are the `integrate` record'), p.indexOf("; `rung` is the task's own rung record"))
   only(sk(from, '`reviewHistory` and `reviewRoundsUsed` come from the approving row when this session holds it, else from `lead-integrate.py inputs`'),
     'integrate-args', 'unchecked row')
 })
@@ -1574,7 +1581,7 @@ test('control: step 3 without the skip bullet, its order, its undo or its why pr
     'skip-path', 'prepare with the default Bash timeout')
   only(sk('Re-run § 2.5, then § 2.6 (the push re-check, *Landing-register re-check*), then `python3',
     'Then `python3'), 'skip-path', 'no re-check before the push')
-  only(sk('Push refused (exit 1): `undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, then the integrate call with `trouble []`.',
+  only(sk('Push refused (exit 1): `undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, then the integrate call with `--after push-refused` (`trouble []`).',
     'Push refused (exit 1): halt.'), 'skip-path', 'a refused push halts')
   only(sk(' Print `inert.why`. Re-run', ' Re-run'), 'skip-path', 'no why print in the bullet')
   only(sk(', print `inert.why` whenever the route is `verify` or `skip` (an `inert check error: …` included: that check failed closed, so the verifier runs as before)', ''),
