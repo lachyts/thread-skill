@@ -103,5 +103,96 @@ ok "$rc" 1 "6. BLOCKED, green checks, no review pending: exits 1"; has "$out" "N
 lacks "$out" "$CANCELLED" "6. never the cancelled cause"
 ok "$(grep -c '^pr checks' "$MT_STATE/gh.log")" 1 "6. one checks call: the green wait reads nothing more"
 
+# 7-12 (p47-10): a step cut at its job's time limit beside another red check. gh exits 1 on the `fail` row, so the red
+# path's infra classifier reads it: run 7 failed on setup, run 9's e2e job was cancelled with no failed step. A cancelled
+# job its check run's annotations prove hit its time limit is re-run once with the setup failure; a second cut of it is
+# a genuine red naming the timeout; an unproven cancellation and a real red stay genuine, with no re-run.
+cjob() {  # cjob <run> <job> <conclusion> — run's jobs: e2e, its `Run make test` step concluded the same way
+  printf '{"jobs": [{"databaseId": %s, "name": "e2e", "status": "completed", "conclusion": "%s", "steps": [{"name": "Run make test", "status": "completed", "conclusion": "%s"}]}]}\n' \
+    "$2" "$3" "$3" > "$MT_STATE/jobs.$1"
+}
+limit() { printf '[{"message": "The job has exceeded the maximum execution time of 55m0s"}, {"message": "The operation was canceled."}]\n' > "$MT_STATE/annotations.$1"; }
+RED2="$(printf '%s\n%s' "$(row ci fail 7 8)" "$(row e2e fail 9 10)")"
+GREEN2="$(printf '%s\n%s' "$(row ci pass 7 8)" "$(row e2e pass 9 10)")"
+red2() { fresh; pair; mkpr 5 "$I" UNSTABLE; echo "Set up job" > "$MT_STATE/steps.7"; : > "$MT_STATE/steps.9"; cjob 9 10 cancelled; limit 10; }
+reruns() { grep -c "^run rerun $1 --failed" "$MT_STATE/gh.log"; }
+gate() {  # gate <merge-task output> — "<merge-gate> <ci-timeout>" for the lead's own-run reason
+  python3 - "$RR" "$1" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+reason = "merge-task: " + m._merge_task_cause(sys.argv[2]).replace("\n", " ")
+print(m._merge_gate_stop(reason), m._merge_task_ci_timeout(reason))
+PY
+}
+TL="cut at its job's time limit"; AGAIN="TIMED OUT again at its job's time limit"
+
+# 7. the timeout is classed infra beside the setup failure: both runs re-run once, then green merges.
+red2; chk 1 "$RED2"; chk 0 "$GREEN2"
+run 5 "$I" "$B"
+ok "$rc" 0 "7. a step cut at its time limit beside a setup failure: re-run, then merges"; ok "$(nmerge)" 1 "7. merged once"
+ok "$(reruns 7)" 1 "7. run 7 re-run once"; ok "$(reruns 9)" 1 "7. run 9 re-run once"
+has "$out" "e2e: Run make test" "7. names the timed-out step"; has "$out" "$TL" "7. says it was cut at its time limit"
+has "$(glog)" "api repos/o/r/check-runs/10/annotations" "7. reads the job's annotations for the proof"
+
+# 8. cut again after its one re-run: a genuine red naming the timeout (merge-gate, never ci-timeout), one re-run only.
+red2; chk 1 "$RED2"; chk 1 "$RED2"
+run 5 "$I" "$B"
+ok "$rc" 1 "8. cut at its time limit again: exits 1"; ok "$(reruns 9)" 1 "8. run 9 re-run once only"
+has "$out" "a REQUIRED check FAILED on PR #5" "8. the red required check's path"
+has "$out" "$AGAIN" "8. names the second timeout"; has "$out" "e2e: Run make test" "8. names its step"
+ok "$(gate "$out")" "True False" "8. reconcile reads a red required check (merge-gate), never ci-timeout"
+ok "$(nmerge)" 0 "8. nothing merged"
+
+# 9. fail-closed: a cancellation no annotation proves hit the time limit (another stop, an unreadable read) stays
+#    genuine, with no re-run.
+for a in other unreadable; do
+  red2; chk 1 "$RED2"
+  if [ "$a" = other ]; then echo '[{"message": "The operation was canceled."}]' > "$MT_STATE/annotations.10"
+  else echo "HTTP 502: Bad Gateway" > "$MT_STATE/err.annotations"; fi
+  run 5 "$I" "$B"
+  ok "$rc" 1 "9 ($a). an unproven cancellation exits 1"; has "$out" "run 9 has no failed step to classify" "9 ($a). names run 9"
+  lacks "$(glog)" "run rerun" "9 ($a). no re-run"; lacks "$out" "$TL" "9 ($a). never read as a timeout"
+done
+
+# 10. a real red is unchanged: a failed test step beside the timeout halts with no re-run.
+red2; echo "Run tests" > "$MT_STATE/steps.7"; chk 1 "$RED2"
+run 5 "$I" "$B"
+ok "$rc" 1 "10. a real red beside a timeout exits 1"; lacks "$(glog)" "run rerun" "10. no re-run"
+has "$out" "a genuine (non-infra) step failed" "10. the genuine verdict"; lacks "$out" "$AGAIN" "10. never a second timeout"
+
+# 11. one re-run per timeout across both paths: the cancelled path's re-run, then a red with the timeout again, is the
+#     second timeout (11a); the red path's re-run, then the check cancelled alone, is cancelled again (11b).
+red2; chk 0 "$(row e2e fail 9 10)"; chk 1 "$RED2"
+run 5 "$I" "$B"
+ok "$rc" 1 "11a. cancelled, then cut again beside a setup failure: exits 1"; has "$out" "$AGAIN" "11a. the second timeout"
+ok "$(reruns 9)" 1 "11a. run 9 re-run once only"; lacks "$(glog)" "run rerun 7" "11a. run 7 never re-run"
+red2; chk 1 "$RED2"; chk 0 "$(row e2e fail 9 10)"
+run 5 "$I" "$B"
+ok "$rc" 1 "11b. re-run as a timeout, then cancelled alone: exits 1"; has "$out" "cancelled again" "11b. cancelled again"
+has "$out" "$CANCELLED" "11b. the cancelled cause"; ok "$(reruns 9)" 1 "11b. run 9 re-run once only"
+# The re-run is the job's, never spent by another job's: lint (run 11) cancelled alone and re-run, then e2e's first cut
+# beside a setup failure is a first one (11c); e2e re-run as a timeout, then lint cancelled alone takes its own (11d).
+LINT="$(row lint pass 11 12)"; LINTX="$(row lint fail 11 12)"
+red2; jobs 11 12 cancelled; chk 0 "$(printf '%s\n%s' "$GREEN2" "$LINTX")"
+chk 1 "$(printf '%s\n%s' "$RED2" "$LINT")"; chk 0 "$(printf '%s\n%s' "$GREEN2" "$LINT")"
+run 5 "$I" "$B"
+ok "$rc" 0 "11c. lint re-run as cancelled, then e2e cut at its time limit: re-run, then merges"; ok "$(nmerge)" 1 "11c. merged once"
+ok "$(reruns 11)" 1 "11c. run 11 re-run once"; ok "$(reruns 9)" 1 "11c. run 9 re-run once"; lacks "$out" "$AGAIN" "11c. never a second timeout"
+red2; jobs 11 12 cancelled; chk 1 "$(printf '%s\n%s' "$RED2" "$LINT")"
+chk 0 "$(printf '%s\n%s' "$GREEN2" "$LINTX")"; chk 0 "$(printf '%s\n%s' "$GREEN2" "$LINT")"
+run 5 "$I" "$B"
+ok "$rc" 0 "11d. e2e re-run as a timeout, then lint cancelled alone: re-run, then merges"; ok "$(nmerge)" 1 "11d. merged once"
+ok "$(reruns 9)" 1 "11d. run 9 re-run once"; ok "$(reruns 11)" 1 "11d. run 11 re-run once"; lacks "$out" "cancelled again" "11d. never cancelled again"
+
+# 12. fail-closed: run 9's failed-step read errors (HTTP 502) while its job read still serves e2e proven cut at its time
+#     limit beside a test job's real red. The read proves nothing, so the cut is never read and nothing is re-run.
+red2; echo "HTTP 502: Bad Gateway" > "$MT_STATE/steps.9.err"
+printf '{"jobs": [{"databaseId": 13, "name": "test", "status": "completed", "conclusion": "failure", "steps": [{"name": "Run tests", "status": "completed", "conclusion": "failure"}]}, {"databaseId": 10, "name": "e2e", "status": "completed", "conclusion": "cancelled", "steps": [{"name": "Run make test", "status": "completed", "conclusion": "cancelled"}]}]}\n' > "$MT_STATE/jobs.9"
+chk 1 "$RED2"; chk 0 "$GREEN2"
+run 5 "$I" "$B"
+ok "$rc" 1 "12. a failed-step read that errors beside a proven cut exits 1"; ok "$(nmerge)" 0 "12. nothing merged"
+lacks "$(glog)" "run rerun" "12. no re-run"; has "$out" "run 9's failed steps could not be read" "12. names run 9's read"
+lacks "$(glog)" "check-runs/10/annotations" "12. never reads the cut's proof"
+
 echo; [ "$fail" -eq 0 ] && echo "merge-task cancelled: ALL PASS" || echo "merge-task cancelled: SOME FAILED"
 exit "$fail"

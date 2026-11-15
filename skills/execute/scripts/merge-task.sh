@@ -119,11 +119,13 @@
 # (DRAFT, HAS_HOOKS, anything else); a definitive not-found (`HTTP 404`, `HTTP 422`, `Could not resolve
 # to a`); the PR's head branch is absent on origin while GitHub's PR head ≠ the integrated head (a
 # cross-repository PR or a deleted branch); the head does not contain the base; DIRTY, or BEHIND after a
-# bounded re-poll, on an unmoved base; a red required check on a genuine step; required checks that never
-# appeared while something is required, and the wait never sampled CLEAN, nor UNSTABLE when entered from
-# UNSTABLE (the lead sets it aside at Integration and retries it as GitHub-side infra: no code fix clears it,
-# ADR 0069 d3); a required check CANCELLED (a CI timeout or another stop on GitHub's side, no test
-# failed) again after one re-run of its failed jobs, or whose re-run cannot start (GitHub-side too, its own
+# bounded re-poll, on an unmoved base; a red required check on a genuine step, or on a step cut at its job's time
+# limit again after that job's one re-run by either path (p47-10: the first cut is re-run as infra); required
+# checks that never appeared while something is required, and the wait never sampled CLEAN, nor UNSTABLE when
+# entered from UNSTABLE (the lead sets it aside at Integration and retries it as GitHub-side infra: no code fix
+# clears it, ADR 0069 d3); a required check CANCELLED (a CI timeout or another stop on GitHub's side, no test
+# failed) again after one re-run of its failed jobs (or after the red path re-ran its job as cut at its time
+# limit), or whose re-run cannot start (GitHub-side too, its own
 # reasonClass ci-timeout, ADR 0073 d4; gh exits 0 on it, so a 0 with a red cell is never read as green); a
 # non-check gate (checks green, still BLOCKED, no review pending, with every required context reported and complete
 # after LAZY_REPOLL_MAX re-polls, or a probe that cannot tell: a 404 or 422 read, a page cut, another app's context, an
@@ -1274,10 +1276,65 @@ ci_runs_in_flight() {  # success (0) when ≥1 workflow run on the integrated he
   [ "$NR_HELD" -lt "$NR_RUNS" ]
 }
 
+# ---- a step cut at its job's time limit (p47-10, ADR 0073 d4) ------------------------------------------------------
+# A job that hits its `timeout-minutes` concludes `cancelled`, the step it was in `cancelled` too, and no step `failure`
+# (lachyts/thread-skill run 43509372473: `make test (macos-latest)` at 55 minutes, its `Run make test-fast` step). Alone
+# it is the cancelled path's (cancelled_required). Beside another red check gh exits 1 and the red path reads it, where
+# a run with no failed step was genuine: a timeout waited for Lachy. Its check run's annotations tell it from every
+# other cancel (a person's, a newer run in its concurrency group, a fail-fast sibling): `The job has exceeded the
+# maximum execution time of <limit>`. A job proven so is a step cut at its time limit, infra, re-run once; cut again
+# after that one re-run of the same job, by either path, it is a genuine red naming the timeout: the job is too slow
+# for its limit. Each path keeps the jobs it re-ran by name, and a cut counts as a second one only on a job already in
+# one of them: a job's check-run name, cancelled_required's name column, is the job name `run view --json jobs` holds.
+TIMEOUT_RERUN=''      # the jobs the red path re-ran as cut at their time limit, one name per line
+CANCEL_RERUN_JOBS=''  # the jobs the cancelled path re-ran (it reads no step or annotation), one name per line
+cancelled_jobs() {  # cancelled_jobs <run view jobs json> — `<job id>\t<job>\t<its cancelled steps>` per job concluded cancelled or timed_out; 1 unreadable
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    jobs = json.load(open(sys.argv[1])).get("jobs")
+except Exception:
+    sys.exit(1)
+if not isinstance(jobs, list):
+    sys.exit(1)
+cut = ("cancelled", "timed_out")
+one = lambda t: " ".join(str(t or "").split()) or "-"
+for j in jobs:
+    if not isinstance(j, dict) or str(j.get("conclusion") or "").lower() not in cut or not j.get("databaseId"):
+        continue
+    steps = [one(s.get("name")) for s in j.get("steps") or []
+             if isinstance(s, dict) and str(s.get("conclusion") or "").lower() in cut]
+    print("%s\t%s\t%s" % (j["databaseId"], one(j.get("name")), "; ".join(steps) or "-"))
+PY
+}
+rerun_took() {  # rerun_took <job> <list> — 0 when that job's name is a line of the list (TIMEOUT_RERUN, CANCEL_RERUN_JOBS)
+  [ -n "$1" ] && printf '%s\n' "$2" | grep -qxF -- "$1"
+}
+TL_MSG=''
+at_time_limit() {  # at_time_limit <job id> — 0 when its check run's annotations say it hit its time limit (TL_MSG); 1 not proven
+  TL_MSG=''
+  gh api "repos/$OWNER/$REPO/check-runs/$1/annotations?per_page=100" >"$tmp/ann.json" 2>/dev/null || return 1
+  TL_MSG=$(python3 - "$tmp/ann.json" <<'PY'
+import json, sys
+try:
+    anns = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+for a in anns if isinstance(anns, list) else []:
+    m = " ".join(str(a.get("message") or "").split()) if isinstance(a, dict) else ""
+    if "exceeded the maximum execution time" in m:
+        print(m)
+        sys.exit(0)
+sys.exit(1)
+PY
+  )
+}
+
 infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wait), 1 to HALT
   # Finding #4: inspect the failed REQUIRED runs' failing STEP names, classify infra vs genuine
   # (fail-closed), and `gh run rerun --failed` only when EVERY failed step is provably setup/infra.
-  local links runs run_id steps s verdict reran=0
+  # A step cut at its job's time limit (above) is infra once, and a second cut of its job is genuine.
+  local links runs run_id steps s verdict reran=0 cj jid job cut tl timeouts='' again=''
   # Failed REQUIRED checks only (branch protection's definition) → their run ids via the details link. Either read
   # selects the same rows, gh's `fail` and `cancel` buckets: `fail` holds ERROR, FAILURE, TIMED_OUT and
   # ACTION_REQUIRED, `cancel` holds CANCELLED. A gh with `pr checks --json` reads them by bucket. gh 2.43.1 (this
@@ -1299,23 +1356,62 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
   [ -z "$runs" ] && { echo "  infra-classify: could not parse run ids — genuine (fail-closed)." >&2; return 1; }
   steps=""
   for run_id in $runs; do
-    s="$(gh run view "$run_id" -R "$OWNER/$REPO" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | .name' 2>/dev/null)" || s=""
-    # The per-run guard: a selected run with no failed step (cancelled, timed out, errored, or its read failed)
-    # cannot be proven setup, and re-running it could turn a hang or a flaky test green.
-    case "$s" in
+    # The run's failed steps, then its cancelled jobs, each proven cut at its time limit or not. An unproven one beside
+    # a proven failure is re-run with it as before (a fail-fast sibling); a read that fails proves no timeout. A run
+    # whose failed-step read fails proves nothing and stops here, before its timeouts are read: a real red in a job
+    # beside a proven cut would otherwise pass the per-run guard on the cut alone and be re-run.
+    if ! s="$(gh run view "$run_id" -R "$OWNER/$REPO" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | .name' 2>/dev/null)"; then
+      echo "  infra-classify: run $run_id's failed steps could not be read, so nothing in it is proven, a time limit included — genuine (fail-closed)." >&2
+      return 1
+    fi
+    tl=''
+    if gh run view "$run_id" -R "$OWNER/$REPO" --json jobs >"$tmp/flake.json" 2>/dev/null \
+       && cj=$(cancelled_jobs "$tmp/flake.json"); then
+      while IFS=$'\t' read -r jid job cut; do
+        [ -n "$jid" ] && at_time_limit "$jid" && tl="$(printf '%s\n%s\t%s\t%s' "$tl" "$job" "$cut" "$TL_MSG")"
+      done <<EOF
+$cj
+EOF
+    fi
+    # The per-run guard: a selected run with no failed step and no job cut at its time limit (cancelled another way,
+    # errored, or its time-limit proof unreadable) cannot be proven setup, and re-running it could turn a hang or a
+    # flaky test green.
+    case "$s$tl" in
       *[![:space:]]*) ;;
-      *) echo "  infra-classify: run $run_id has no failed step to classify — genuine (fail-closed)." >&2; return 1 ;;
+      *) echo "  infra-classify: run $run_id has no failed step to classify, and no job cut at its time limit — genuine (fail-closed)." >&2; return 1 ;;
     esac
     steps="$(printf '%s\n%s' "$steps" "$s")"
+    timeouts="$(printf '%s\n%s' "$timeouts" "$tl")"
   done
-  verdict="$(printf '%s\n' "$steps" | classify_failed_steps)"
+  timeouts="$(printf '%s\n' "$timeouts" | sed '/^[[:space:]]*$/d')"
+  case "$steps" in
+    *[![:space:]]*) verdict="$(printf '%s\n' "$steps" | classify_failed_steps)" ;;
+    *) verdict=infra ;;   # no failed step: the per-run guard proved a job cut at its time limit in every run
+  esac
   if [ "$verdict" != "infra" ]; then
     echo "  infra-classify: a genuine (non-infra) step failed — HALTING (fail-closed). Failed steps:" >&2
     printf '%s\n' "$steps" | sed '/^[[:space:]]*$/d; s/^/    - /' >&2
     return 1
   fi
-  echo "  infra-classify: only setup/infra steps failed — transient flake. Re-running failed jobs:" >&2
+  # A job cut again after its one re-run, by this path (TIMEOUT_RERUN) or by the cancelled path (CANCEL_RERUN_JOBS),
+  # is genuine. A job neither path re-ran is a first cut, whatever other job either re-ran before.
+  while IFS=$'\t' read -r job cut tl; do
+    [ -n "$job" ] || continue
+    if rerun_took "$job" "$TIMEOUT_RERUN" || rerun_took "$job" "$CANCEL_RERUN_JOBS"; then
+      again="${again:+$again; }$job: $cut ($tl)"
+    fi
+  done <<EOF
+$timeouts
+EOF
+  # A red check, never ADR 0073 d4's CI timeout: the lead retries it as merge-gate, an agent's (reconcile-rollout.py's
+  # MERGE_TASK_FIXABLE), where d4 hands a timeout to Lachy only after four cancellations, each retried as infra.
+  if [ -n "$again" ]; then
+    echo "  infra-classify: TIMED OUT again at its job's time limit after its one re-run — a genuine failure, the job too slow for its limit (p47-10), HALTING: $again" >&2
+    return 1
+  fi
+  echo "  infra-classify: only setup/infra steps failed, or a step was cut at its job's time limit (re-run once) — transient. Re-running failed jobs:" >&2
   printf '%s\n' "$steps" | sed '/^[[:space:]]*$/d; s/^/    - /' >&2
+  printf '%s\n' "$timeouts" | awk -F'\t' 'NF { printf "    - %s: %s: cut at its job'"'"'s time limit (%s)\n", $1, $2, $3 }' >&2
   for run_id in $runs; do
     if gh run rerun "$run_id" --failed -R "$OWNER/$REPO" >/dev/null 2>&1; then
       echo "    re-ran failed jobs of run $run_id." >&2; reran=1
@@ -1323,6 +1419,7 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
       echo "    WARN: gh run rerun $run_id --failed failed — HALTING (fail-closed)." >&2; return 1
     fi
   done
+  [ -n "$timeouts" ] && TIMEOUT_RERUN="$(printf '%s\n%s' "$TIMEOUT_RERUN" "$(printf '%s\n' "$timeouts" | cut -f1)")"
   [ "$reran" -eq 1 ] && return 0 || return 1
 }
 
@@ -1336,7 +1433,7 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
 # there, so its table's red rows are read by their job: `gh run view <run> --json jobs`, the job its link names, its
 # conclusion `cancelled`. Fail-closed: a red row that is no proven cancellation (a `fail` bucket, a job concluded any
 # other way, a link that names no run and job, a read that failed) is the red path's, never a timeout's.
-CANCEL_RUNS=''; CANCEL_NAMES=''; CANCEL_WHY=''
+CANCEL_RUNS=''; CANCEL_NAMES=''; CANCEL_JOBS=''; CANCEL_WHY=''
 red_rows() {  # red_rows <json|table> <file> — `<bucket>\t<run>\t<job>\t<name>` per red row, or NONE; exit 1 = not proven
   python3 - "$1" "$2" <<'PY'
 import json, re, sys
@@ -1363,7 +1460,7 @@ for bucket, link, name in rows:
     m = re.search(r"/runs/([0-9]+)(?:/job/([0-9]+))?", link)
     if not m or (bucket == "fail" and not m.group(2)):
         sys.exit(1)  # no run to re-run, or no job whose conclusion would tell
-    out.append("%s\t%s\t%s\t%s" % (bucket, m.group(1), m.group(2) or "-", name.replace("\t", " ") or "-"))
+    out.append("%s\t%s\t%s\t%s" % (bucket, m.group(1), m.group(2) or "-", " ".join(name.split()) or "-"))
 print("\n".join(out) if out else "NONE")
 PY
 }
@@ -1378,9 +1475,9 @@ print(next((str(j.get("conclusion") or "").lower() for j in jobs
             if isinstance(j, dict) and str(j.get("databaseId")) == sys.argv[2]), ""))
 PY
 }
-cancelled_required() {  # 0 every red required check is CANCELLED (CANCEL_RUNS, CANCEL_NAMES); 1 not proven; 2 none red
+cancelled_required() {  # 0 every red required check is CANCELLED (CANCEL_RUNS, CANCEL_NAMES, CANCEL_JOBS); 1 not proven; 2 none red
   local rows b run jid name
-  CANCEL_RUNS=''; CANCEL_NAMES=''
+  CANCEL_RUNS=''; CANCEL_NAMES=''; CANCEL_JOBS=''
   if gh pr checks "$PR" -R "$OWNER/$REPO" --required --json name,bucket,link >"$tmp/req.out" 2>/dev/null; then
     rows=$(red_rows json "$tmp/req.out") || return 1
   else
@@ -1396,6 +1493,7 @@ cancelled_required() {  # 0 every red required check is CANCELLED (CANCEL_RUNS, 
     fi
     case " $CANCEL_RUNS " in *" $run "*) ;; *) CANCEL_RUNS="${CANCEL_RUNS:+$CANCEL_RUNS }$run" ;; esac
     CANCEL_NAMES="${CANCEL_NAMES:+$CANCEL_NAMES, }$name (run $run)"
+    CANCEL_JOBS="$(printf '%s\n%s' "$CANCEL_JOBS" "$name")"   # its job's name, one per line (TIMEOUT_RERUN's unit)
   done <<EOF
 $rows
 EOF
@@ -1657,7 +1755,7 @@ pending_checks() {  # the required checks pending at the watch slice's last refr
 WAIT_MSG=''
 wait_required_checks() {  # wait_required_checks <the state machine's mergeStateStatus> — 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
   # The entry state is captured here, because each snapshot_once below overwrites S_MSS.
-  local from="$1" absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held pending seen=''
+  local from="$1" absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held pending seen='' again job
   wait_line "PR #$PR — waiting on required checks…"
   while : ; do
     checks_watch; rc=$?
@@ -1682,9 +1780,20 @@ wait_required_checks() {  # wait_required_checks <the state machine's mergeState
       [ "$crc" -eq 2 ] && return 0   # no red row as they stand: the red cell was an earlier refresh of the watch
       if [ "$crc" -eq 0 ]; then
         echo "  PR #$PR — required check CANCELLED, a CI timeout or another stop on GitHub's side: $CANCEL_NAMES." >&2
-        if [ "$cancel_reruns" -lt "$CANCEL_RERUN_MAX" ]; then
+        # A job the red path already re-ran as cut at its time limit has had its one re-run (p47-10): cancelled again,
+        # it stops here. Any other cancelled job takes this path's own budget, whatever the red path re-ran.
+        again=''
+        while IFS= read -r job; do
+          rerun_took "$job" "$TIMEOUT_RERUN" && again="${again:+$again, }$job"
+        done <<EOF
+$CANCEL_JOBS
+EOF
+        if [ -n "$again" ]; then
+          CANCEL_WHY="cancelled again after its one re-run as a step cut at its job's time limit ($again)"
+        elif [ "$cancel_reruns" -lt "$CANCEL_RERUN_MAX" ]; then
           if rerun_cancelled; then
             cancel_reruns=$((cancel_reruns+1))
+            CANCEL_RERUN_JOBS="$(printf '%s\n%s' "$CANCEL_RERUN_JOBS" "$CANCEL_JOBS")"
             echo "  cancelled-check rerun $cancel_reruns/$CANCEL_RERUN_MAX triggered — re-watching required checks…" >&2
             sleep "$CHECK_INTERVAL"
             continue

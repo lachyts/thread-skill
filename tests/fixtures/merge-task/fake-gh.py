@@ -52,14 +52,18 @@ State (a missing file takes the default in brackets):
                           fields asked for.
   links, steps            the infra-classify reads; `run rerun` is logged, rc 0 (rerun.fail present: rc 1). `run view
                           <id>` with -q serves steps.<id> when that file exists (an empty one: a run with no failed
-                          step), else steps; without -q (the whole --json object: merge-task's job conclusion read,
-                          `--json jobs`, and lead-integrate.py ci-headroom's, `--json jobs,workflowName`) it serves
-                          run.<id>.json, else jobs.<id>, else an "HTTP 404" error, rc 1.
+                          step), else steps; steps.<id>.err: its text on stderr, rc 1, for that run's -q read alone,
+                          the whole-object read still served. Without -q (the whole --json object: merge-task's job
+                          conclusion read, `--json jobs`, and lead-integrate.py ci-headroom's, `--json
+                          jobs,workflowName`) it serves run.<id>.json, else jobs.<id>, else an "HTTP 404" error, rc 1.
   run.<id>.json           lead-integrate.py ci-headroom's read (ADR 0073 d5): the whole run object (its jobs,
                           workflowName), served first by a `run view <id>` with no -q.
                           run.<id>.err: its text on stderr, rc 1, nothing printed, for that `run view <id> --json`.
                           Any `run view --json` field outside gh 2.43.1's RUN_VIEW_FIELDS is its
                           `Unknown JSON field: "<f>"` and field list on stderr, rc 1, before anything is served.
+  annotations.<id>        check-runs/<id>/annotations (merge-task's time-limit proof for a cancelled job, p47-10): a JSON
+                          list served as written; absent ⇒ [] (GitHub's answer for a check run with none).
+                          err.annotations: its text, rc 1, on every read.
   checkruns.<sha>         commits/<sha>/check-runs (merge-task's probe and merge-settings.py's rename gate, ADR 0080): a
                           JSON object {total_count, check_runs: [{name, status, conclusion, app: {id}}]}, or a bare list
                           (total_count its length). checkruns.<sha>.seq: JSON lines, one per read, the last sticky,
@@ -416,6 +420,8 @@ if args[:2] == ["run", "view"]:
                 sys.exit(0)
         not_found()
     own = "steps.%s" % rid if rid else ""
+    if own and has(own + ".err"):
+        die(rd(p(own + ".err"), ""))
     print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:
@@ -637,6 +643,12 @@ if args[:1] == ["api"]:
             rs["rules"] = new["rules"]
         wr(f, json.dumps(rs))
         gh_out(rs)
+    if len(parts) == 6 and parts[3] == "check-runs" and parts[5] == "annotations":
+        guard_jq("api check-runs/<id>/annotations")
+        if has("err.annotations"):
+            die(rd(p("err.annotations")))
+        print(rd(p("annotations." + parts[4]), "[]"))
+        sys.exit(0)
     if len(parts) == 6 and parts[3] == "commits" and parts[5] == "check-runs":
         guard_jq("api commits/<sha>/check-runs")
         if has("err.checkruns"):
