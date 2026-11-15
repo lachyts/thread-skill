@@ -81,7 +81,7 @@ Technical calls made in his place, each his to overturn. Under decision 3:
 4. **The approved list starts with `fseventsd` alone.** It is the one process the audit caught; a name joins the
    list only by a recorded decision.
 5. **The admin permission is one narrow rule naming those restarts and nothing else**, set up once by him
-   (`/etc/sudoers.d/chorus-restart`). Installing it also arms the weekly Lunch restart, as ADR 0101 designed.
+   (`/etc/sudoers.d/chorus-restart`). Installing it also arms the weekly Lunch restart, as Chorus ADR 0101 designed.
 6. **Every repair is logged and shows on the Stage's quiet line** (Chorus ADR 0122), never as a notification
    (ADR 0075).
 
@@ -115,7 +115,7 @@ Under decisions 1, 2 and 4:
 
 ## Consequences
 
-- Chorus records the matching change against its ADR 0104, and builds the measuring, the repair and the quiet line.
+- Chorus records the matching change against Chorus ADR 0104, and builds the measuring, the repair and the quiet line.
 - "Suites slowing against their median" (`chorus-capacity-reads-suites-slowing`) stays a separate, unbuilt signal.
 - The Run record gains each Slot's measured peak and each cut's cause, so a reading of them holds only its window's
   rows (CLAUDE.md, Review rule).
