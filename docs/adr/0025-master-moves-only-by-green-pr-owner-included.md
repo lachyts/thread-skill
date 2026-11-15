@@ -5,6 +5,9 @@ Status: accepted
 *(Amended by ADR 0073 d3, 2026-11-09 (p43-3): the two required jobs run the fast tier (`make test-fast` against the
 PR's base) on pull requests only, and the full suite runs on every push to master in `full-suite.yml`, split into
 shards. The ruleset and its two contexts are unchanged.)*
+*(Amended by ADR 0084 d3, 2026-11-16: `make test (macos-latest)` left the ruleset's required contexts, by hand with
+the PUT below; `master-green-pr-only` requires `make test (ubuntu-latest)` alone, still strict. macOS runs in the
+default branch's full suite, which decides what goes live.)*
 
 ## Context
 
