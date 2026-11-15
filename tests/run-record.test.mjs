@@ -345,6 +345,36 @@ except m.Refused as e:
   assert.match(JSON.parse(nan.stdout), /^slot-freed: peak must be /)
 })
 
+test('p53-4: slot-taken\'s cap carries max, idle-slots a bound, suite lines a runningWeight; each refused out of its shape', (t) => {
+  const home = tmpHome(t)
+  const cap = { away: false, n: 4, file: 'fresh', by: 'capacity', budget: { mem_gb: 12, cores: 16 }, weight: { mem_gb: 16, cores: 2 }, max: 8 }
+  const STARTED = { suite: 's-0123456789abcdef', by: 'integration', runner: 'lead', sha: 'a'.repeat(40), dirty: false, running: 2, runningWeight: { mem_gb: 12, cores: 5 } }
+  const ENDED = { suite: 's-0123456789abcdef', by: 'integration', runner: 'lead', outcome: 'green', seconds: 3, runningWeight: { mem_gb: 0, cores: 0 } }
+  const GOOD = [['ta', 'slot-taken', { settings: SETTINGS, start: 'start', cap }],
+    [null, 'idle-slots', { reason: 'hold-trickle', free: 2, settings: SETTINGS, bound: 'memory and cores' }],
+    [null, 'idle-slots', { reason: 'hold-away-cap', free: 1, settings: SETTINGS, bound: 'count' }],
+    ['ta', 'suite-started', STARTED], ['ta', 'suite-ended', ENDED]]
+  for (const [task, kind, fields] of GOOD) {
+    emitOk(home, ['--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+  }
+  const got = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(got.map((l) => l.cap ?? l.bound ?? l.runningWeight),
+    [cap, 'memory and cores', 'count', STARTED.runningWeight, ENDED.runningWeight], 'each line reads back as written')
+  const BAD = [
+    ['max 0', 'ta', 'slot-taken', 'cap', { settings: SETTINGS, cap: { ...cap, max: 0 } }],
+    ['max a string', 'ta', 'slot-taken', 'cap', { settings: SETTINGS, cap: { ...cap, max: '8' } }],
+    ['bound weight', null, 'idle-slots', 'bound', { reason: 'hold-trickle', free: 2, settings: SETTINGS, bound: 'weight' }],
+    ['runningWeight without cores', 'ta', 'suite-started', 'runningWeight', { ...STARTED, runningWeight: { mem_gb: 3 } }],
+    ['runningWeight negative', 'ta', 'suite-ended', 'runningWeight', { ...ENDED, runningWeight: { mem_gb: -1, cores: 0 } }],
+  ]
+  for (const [label, task, kind, key, fields] of BAD) {
+    const r = cli(home, ['emit', '--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
+    assert.match(r.stderr, new RegExp(`^run_record: refused: \\S.*${key}.*\\n$`), label)
+  }
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, GOOD.length, 'no refused line was written')
+})
+
 test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })

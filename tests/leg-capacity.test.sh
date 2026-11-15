@@ -22,6 +22,9 @@
 #   L16 a Leg's session holds its own place against a lead waiting ahead of it, and waiting Legs with no claim take
 #       turns by their waiting records' `since` (then stem), so more Legs than places never stand still; a Leg that is
 #       not waiting, or has a claim, always counts
+#   L17 (p53-4) the budget admits a Leg's claim by its Weight: a need-0 claim is never held by it, an unreachable
+#       waiter is passed over, a reachable one keeps room, a chain alone always fits, the lease carries the claim's
+#       Weight while it is in progress and an idle session weighs the built-in; L13g-j the suite's runningWeight
 # Temp vaults only; HOME, the lock dirs and the Run record are temp; --now and --session pinned. bash 3.2-compatible.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -523,6 +526,158 @@ wrecs "$RO@2026-10-20T09:00:00+00:00" "other@2026-10-20T09:30:00+00:00"
 leg next
 ok "$(q 'd["action"]')|$(q 'd["kind"]')|$(q 'd["capacity"]["elsewhere"]')" "wait|capacity|{'other': 1}" "L16b: a Leg with a claim is never passed over, even waiting behind this one: its claim counts"
 ok "$(q 'd["why"]')" "trickle: 1/1 tasks running on this Mac" "L16b: … on the Capacity"
+
+# ════ L17: the budget admits a Leg's claim by its Weight (p53-4) ═══════════════════════════════════════════════════
+# Each scenario keeps its own Run record; Weights are measured from planted peaks (3 done tasks per kind under an
+# archived rollout of project Demo): kinds w3, w5, w8, w10, w15, each <n> GB and 2 cores. The budget is 12 GB and 16
+# cores; capacity_max is the built-in 6. lkind <slug> <kind> gives a Leg row its kind (`scope:`).
+BUDGET='"budget": {"mem_gb": 12, "cores": 16}'
+lpeaks() { python3 - "$root/skills/_shared/scripts/run_record.py" "$T" <<'PY2'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("thread_run_record", sys.argv[1])
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+T = sys.argv[2]
+os.makedirs(os.path.join(T, "Archive", "Rollouts"), exist_ok=True)
+open(os.path.join(T, "Archive", "Rollouts", "old-ro.md"), "w").write(
+    '---\ntags: [task, rollout]\nstatus: done\nprotocol_version: 5\nprojects: ["[[Demo]]"]\n---\n')
+for gb in (3, 5, 8, 10, 15):
+    for i in (1, 2, 3):
+        slug = "w%d-past%d" % (gb, i)
+        open(os.path.join(T, "Archive", slug + ".md"), "w").write(
+            '---\ntags: [task]\nstatus: done\nscope: w%d\nrollout: "[[old-ro]]"\n---\n' % gb)
+        assert rr.emit("old-ro", "slot-freed", slug, {"outcome": "ready", "peak": {"mem_gb": gb, "cores": 2}},
+                       ts="2026-10-19T12:00:00Z", strict=True)
+PY2
+}
+lscen() { scen "$1"; export THREAD_EVENTS_DIR="$S/events"; lpeaks; }
+lkind() { python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("\nstatus: ", "\nscope: %s\nstatus: " % sys.argv[2], 1))' "$T/$1.md" "$2"; }
+# wrecw <rollout>@<since>[@<weight-json>]…: the claims file holds exactly these waiting records (want 1, at $NOW)
+wrecw() { mkdir -p "$THREAD_NOTE_LOCK_DIR"; python3 - "$THREAD_NOTE_LOCK_DIR/trickle-claims.json" "$T" "$NOW" "$@" <<'PY2'
+import json, os, sys
+path, tasks, now, *recs = sys.argv[1:]
+w = []
+for r in recs:
+    parts = r.split("@")
+    e = {"tasksDir": os.path.realpath(tasks), "rollout": parts[0], "since": parts[1], "at": now, "served": None, "want": 1}
+    if len(parts) > 2:
+        e["weight"] = json.loads(parts[2])
+    w.append(e)
+json.dump({"version": 1, "claims": [], "waiting": w, "woken": []}, open(path, "w"))
+PY2
+}
+WOKEN() { python3 -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except FileNotFoundError:
+    print("none"); sys.exit(0)
+print(json.dumps([[w["rollout"], w["by"]] for w in d.get("woken", [])], separators=(",", ":")))' "$THREAD_NOTE_LOCK_DIR/trickle-claims.json"; }
+RECW() { python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+print(json.dumps([[w["rollout"], w.get("weight")] for w in d.get("waiting", [])], separators=(",", ":"), sort_keys=True))' "$THREAD_NOTE_LOCK_DIR/trickle-claims.json"; }
+LEASEW() { python3 -c 'import json, sys
+print(json.dumps(json.load(open(sys.argv[1])).get("weight"), separators=(",", ":"), sort_keys=True))' "$HOME/.config/thread/leases/$RO.json"; }
+# other <kind> [status owner]: a second chain [[other]] with one row o1 of that kind and a fresh Leg lease
+other() {
+  printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nsurfaces:\n  - "ext:y"\n---\n\n## Queue\n\n| # | Task | Launch | Surfaces |\n|---|---|---|---|\n| 1 | [[o1\\|o1]] | `cc-demo` from `%s` | `ext:y` |\n' "$F" > "$T/other.md"
+  printf -- '---\ntags: [task]\nscope: %s\nstatus: %s\n%srollout: "[[other]]"\n---\n' "$1" "${2:-open}" "${3:+owner: $3
+}" > "$T/o1.md"
+  printf '{"rollout": "other", "written_at": "%s", "by": "leg"%s}' "$NOW" "${4:+, $4}" > "$HOME/.config/thread/leases/other.json"
+}
+
+# L17a: the session alone and an unreachable parallel waiter W (10 GB > 12 less the session's 3) at the head
+lscen l17a
+mkro t1 t2; lkind t1 w3; mkpar 0 0; cap 4 "$NOW" "$BUDGET"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 8\n---\n\n## Queue\n\n- [[w1]]\n' > "$T/w.md"
+printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[w]]"\n---\n' > "$T/w1.md"
+leg begin --cwd "$F"
+wrecw "w@2026-10-20T09:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+leg next; ok "$(q 'd["action"]')" claim "L17a: a 3 GB claim (need 0 beyond its session) is admitted, W ahead or not"
+sed -i.bak 's/^scope: w3$/scope: w5/' "$T/t1.md"; rm -f "$T/t1.md.bak"
+leg next; ok "$(q 'd["action"]')" claim "L17a: a 5 GB claim too: W, unreachable beside this chain's floor, is passed over"
+leg claim --task t1
+ok "$rc|$(fm t1 owner)|$(WOKEN)" '0|leg-1|[]' "L17a: … the claim lands, and W is not woken"
+# L17b: a reachable W (8 GB) with a parallel task running: a need-0 claim goes in, a need-2 claim waits behind W
+lscen l17b
+mkro t1 t2; lkind t1 w3; mkpar 1 0; cap 4 "$NOW" "$BUDGET"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 8\n---\n\n## Queue\n\n- [[w1]]\n' > "$T/w.md"
+printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[w]]"\n---\n' > "$T/w1.md"
+leg begin --cwd "$F"
+wrecw "w@2026-10-20T09:00:00+00:00@{\"mem_gb\": 8, \"cores\": 2}"
+leg next; ok "$(q 'd["action"]')" claim "L17b: a need-0 claim is never held by the weight"
+sed -i.bak 's/^scope: w3$/scope: w5/' "$T/t1.md"; rm -f "$T/t1.md.bak"
+before=$(sums)
+leg claim --task t1
+L17B="trickle: 2 tasks on this Mac hold 6/12 GB and 4/16 cores: memory short for [[t1]] (2 GB, 0 cores beyond its session), 1 kept for [[w]]"
+ok "$rc|$(q 'd["capacity"]["weight"]["why"]')|$(sums)" "3|$L17B|$before" "L17b: a 5 GB claim (2 GB beyond its session) stands exit 3: W, reachable, keeps the room"
+ok "$(RECW)" "[[\"$RO\",{\"cores\":2.0,\"mem_gb\":5.0}],[\"w\",{\"cores\":2.0,\"mem_gb\":8.0}]]" "L17b: … its waiting record carries its Weight"
+# L17c/d: a chain alone always fits, even above the budget; the claim writes its Weight on the lease
+lscen l17c
+mkro t1 t2; lkind t1 w15; mkpar 0 1; cap 4 "$NOW" "$BUDGET"
+leg begin --cwd "$F"; leg next; ok "$(q 'd["action"]')" claim "L17c: the chain's own session alone: a 15 GB claim is admitted"
+leg claim --task t1; ok "$rc|$(LEASEW)" '0|{"cores":2.0,"mem_gb":15.0}' "L17d: the claim writes the lease's weight"
+LNOW=$T1 leg next; ok "$(LEASEW)" '{"cores":2.0,"mem_gb":15.0}' "L17d: leg.py next renews the lease and keeps it"
+par; ok "$(pq 'd["trickle"]["capacity"]["weight"]["elsewhere"]')" "{\"$RO\":{\"cores\":2.0,\"mem_gb\":15.0}}" "L17d: a parallel next counts the Leg at it"
+# L17e: two idle chains take turns by their waiting records, at (a) 10 GB and (b) 15 GB claims
+lscen l17e
+mkro t1 t2; lkind t1 w10; mkpar 0 0; cap 4 "$NOW" "$BUDGET"
+leg begin --cwd "$F"; other w10
+wrecw "$RO@2026-10-20T09:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}" "other@2026-10-20T09:30:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+leg next; ok "$(q 'd["action"]')" claim "L17e(a): 10 GB claims: the chain waiting longer claims, the other's session behind it"
+wrecw "$RO@2026-10-20T09:30:00+00:00@{\"mem_gb\": 10, \"cores\": 2}" "other@2026-10-20T09:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+leg next
+ok "$(q 'd["action"]')|$(q 'd["why"]')" "wait|trickle: 2 tasks on this Mac hold 6/12 GB and 4/16 cores: memory short for [[t1]] (7 GB, 0 cores beyond its session), 1 kept for [[other]]" \
+  "L17e(a): … records swapped, the roles swap: this chain waits, room kept for [[other]]"
+other w10 in_progress leg-1 '"weight": {"mem_gb": 10, "cores": 2}'
+wrecw "$RO@2026-10-20T09:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+leg next
+ok "$(q 'd["action"]')|$(q 'd["why"]')" "wait|trickle: 2 tasks on this Mac hold 13/12 GB and 4/16 cores: memory short for [[t1]] (7 GB, 0 cores beyond its session)" \
+  "L17e(a): once [[other]] has claimed (10 GB in progress), this chain still waits"
+sed -i.bak 's/^scope: w10$/scope: w15/' "$T/t1.md"; rm -f "$T/t1.md.bak"; other w15
+wrecw "$RO@2026-10-20T09:00:00+00:00@{\"mem_gb\": 15, \"cores\": 2}" "other@2026-10-20T09:30:00+00:00@{\"mem_gb\": 15, \"cores\": 2}"
+leg next; ok "$(q 'd["action"]')" claim "L17e(b): 15 GB claims: the chain waiting longer claims alone (one task always fits in its turn)"
+wrecw "$RO@2026-10-20T09:30:00+00:00@{\"mem_gb\": 15, \"cores\": 2}" "other@2026-10-20T09:00:00+00:00@{\"mem_gb\": 15, \"cores\": 2}"
+leg next; ok "$(q 'd["action"]')|$(q 'd["kind"]')" "wait|capacity" "L17e(b): … records swapped, this chain waits"
+# L17f/g: a 15 GB claim with a parallel lead waiting behind it goes in alone; while it runs the lead is held, and once
+# it is done its idle session weighs the built-in, so the lead starts
+lscen l17f
+mkro t1 t2; lkind t1 w15; mkpar 0 2; cap 4 "$NOW" "$BUDGET"
+leg begin --cwd "$F"
+wrecw "$RO@2026-10-20T09:00:00+00:00@{\"mem_gb\": 15, \"cores\": 2}" "par@2026-10-20T09:30:00+00:00"
+leg claim --task t1; ok "$rc|$(fm t1 owner)" "0|leg-1" "L17f: a 15 GB claim with a parallel lead behind it is admitted alone"
+par
+ok "$(pq 'd["trickle"]["capacity"]["weight"]["elsewhere"]')" "{\"$RO\":{\"cores\":2.0,\"mem_gb\":15.0}}" "L17f: … and the lead counts the chain at 15 GB"
+ok "$(pq 'd["hold"][0]["reason"]')" '"trickle: 1 task on this Mac holds 15/12 GB and 2/16 cores: memory short for [[q1]] (3 GB, 2 cores)"' \
+  "L17g: while the claim runs, the lead's q1 waits on memory"
+leg done --task t1 --verify none 2>/dev/null
+ok "$(fm t1 status)|$(LEASEW)" 'done|{"cores":2.0,"mem_gb":15.0}' "L17g: (t1 done; the lease still fresh, its weight still 15)"
+par
+ok "$(pq 'd["trickle"]["capacity"]["weight"]["elsewhere"]')|$(pq 'd["start"]')" "{\"$RO\":{\"cores\":2.0,\"mem_gb\":3.0}}|[\"q1\",\"q2\"]" \
+  "L17g: … the idle session weighs the built-in, never its last claim: the lead starts q1 and q2"
+
+# ════ L13g-j: the suite's runningWeight (p53-4: record-only) ════════════════════════════════════════════════════════
+lscen l13w
+mkro t1 t2; mkpar 1 0; cap 2
+leg begin --cwd "$F"; leg claim --task t1; ok "$rc|$(fm t1 owner)" "0|leg-1" "L13g: (the Leg claims t1)"
+mkdir -p "$THREAD_EVENTS_DIR"
+printf '{"kind": "slot-taken", "rollout": "par", "task": "p2", "cap": {"away": false, "n": 2, "file": "missing", "weight": {"mem_gb": 4, "cores": 1}}}\n' >> "$THREAD_EVENTS_DIR/par.jsonl"
+# suitew <by> [task]: one suite-started line for par; prints `running|runningWeight` (<none> when absent)
+suitew() { python3 -B - "$RR" "$T" "$1" "${2:-}" <<'PY2'
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+rr.suite_started("par", sys.argv[4] or None, rr.new_suite_id(), sys.argv[3], "agent", {"sha": "a" * 40}, tasks_dir=sys.argv[2])
+d = json.loads(open(os.path.join(os.environ["THREAD_EVENTS_DIR"], "par.jsonl")).read().splitlines()[-1])
+rw = d.get("runningWeight")
+print(f'{d.get("running", "<none>")}|{json.dumps(rw, separators=(",", ":"), sort_keys=True) if rw else "<none>"}')
+PY2
+}
+cap 2 "$(ago 0)" "$BUDGET"; setlease "$(ago 0)" '"weight": {"mem_gb": 5, "cores": 2}'
+ok "$(suitew integration p2)" '2|{"cores":5.0,"mem_gb":12.0}' "L13g: an integration suite adds its task's slot-taken Weight (4 GB) to p1's 3 and the Leg's 5"
+ok "$(suitew race p2)" '2|{"cores":5.0,"mem_gb":12.0}' "L13h: a race suite the same"
+ok "$(suitew completion)" '2|{"cores":6.0,"mem_gb":11.0}' "L13i: a completion suite adds the built-in"
+ok "$(suitew task p1)" '2|{"cores":4.0,"mem_gb":8.0}' "L13j: a task suite adds nothing: its Slot already counts it"
+cap 2 "$(ago 0)"
+ok "$(suitew integration p2)" '2|<none>' "L13j: with no budget, no runningWeight"
 
 echo
 [ "$fail" -eq 0 ] && echo "leg-capacity.test.sh: ALL PASS" || echo "leg-capacity.test.sh: FAILED"

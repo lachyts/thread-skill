@@ -768,8 +768,8 @@ capfile "$TMP/sc-badbudget" '{"capacity": 5, "written_at": "'"$NOW"'", "budget":
 capfile "$TMP/sc-oldcap" '{"capacity": 5, "written_at": "2026-10-01T00:00:00Z", "budget": {"mem_gb": 12.0, "cores": 8}}'
 for s in sc7 sc8 sc9; do mkt $s sc in_progress; done
 ok "$(capof sc7 "$TMP/sc-budget")" \
-  '["start",{"away":false,"budget":{"cores":8,"mem_gb":12.0},"by":"capacity","file":"missing","n":5,"weight":{"cores":2.0,"mem_gb":3.0}}]' \
-  "a Capacity in force with a budget: C 5, by capacity, the budget's two keys (the extra one dropped), the Weight"
+  '["start",{"away":false,"budget":{"cores":8,"mem_gb":12.0},"by":"capacity","file":"missing","max":6,"n":5,"weight":{"cores":2.0,"mem_gb":3.0}}]' \
+  "a Capacity in force with a budget: C 5, by capacity, the budget's two keys (the extra one dropped), the Weight; p53-4: the budget now admits, so max 6 (capacity_max, the hard count) marks it"
 ok "$(capof sc8 "$TMP/sc-badbudget")" \
   '["start",{"away":false,"by":"capacity","file":"missing","n":5,"weight":{"cores":2.0,"mem_gb":3.0}}]' \
   "an ill-typed budget (cores 0) records none; the Capacity stays in force"

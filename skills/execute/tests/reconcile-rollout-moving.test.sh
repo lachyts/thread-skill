@@ -3,7 +3,8 @@
 # verdict (moving | stalled | waiting | skip), and the narrowings it reads: the Lane hold (`lane-hold` / `lane-ack`, `next`'s
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
-#   S1 stop_spans' reason and index   M1-M23 the verdicts (M23 a surface wait, P41-3)   N1-N9b the narrowings, each
+#   S1 stop_spans' reason and index   M1-M23 the verdicts (M23 a surface wait, P41-3; M20w a revise the budget's weight
+#   holds, p53-4)   N1-N9b the narrowings, each
 #   through the real verbs   W1-W2 a due settings block (ADR 0080): reentry, or a cool-down until a try's retry
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
@@ -558,6 +559,17 @@ setfm v max_review_rounds 0
 entry 2026-10-26T10:00:00Z
 ok "$(j "$(inp v)" '[d["autoRevise"], d["humanFix"]["act"]]')" '[false,"fix the round budget"]' "M20b: inputs with no flag: autoRevise false, H12"
 ok "$(vcr)" '["waiting","you","nothing can start: 1 set aside"]' "M20b: an invalid K is no work: you"
+# M20w (p53-4): while the budget admits, a revise held only by the weight (no hold row: slotLimit is the fitting prefix,
+# here none) waits on `trickle`, its reason `next`'s own weight line, never a count it never reached.
+m20 m20w
+mkdir -p "$D/home/.config/thread"
+printf '{"capacity": 4, "written_at": "%s", "budget": {"mem_gb": 8, "cores": 16}}' "$NOW" > "$D/home/.config/thread/capacity.json"
+entry 2026-10-26T10:00:00Z
+ok "$(j "$(nx)" '[d["slotLimit"], d["trickle"]["capacity"]["weight"]["why"]]')" \
+  '[0,"trickle: 2 tasks on this Mac hold 6/8 GB and 4/16 cores: memory short for [[v]] (3 GB, 2 cores)"]' \
+  "M20w: (next: o1 and o2 hold 6 of 8 GB, v's 3 GB does not fit: slotLimit 0, weight.why names it)"
+ok "$(vcr)" '["waiting","trickle","trickle: 2 tasks on this Mac hold 6/8 GB and 4/16 cores: memory short for [[v]] (3 GB, 2 cores)"]' \
+  "M20w: a revise the weight holds → trickle, the weight's line as its reason"
 
 # ── M21 family: the lane the lead holds for a RACE re-verify (or its landing tail) is work, judged by silence ───────
 # execute § 4.5's RACE procedure keeps the lane held through the re-verify (the Run record's lane-taken, no lane-freed),
