@@ -52,6 +52,27 @@ Subcommands:
       execute's Lane hold). A failure that threatens only this task (ADR 0048, p29-7: ANCHOR_RECIPE gave no anchor, a
       merge in progress its tree cannot abort, tracked changes it cannot stash, a stale anchor ref it cannot delete or
       that stays stale, no merge-base of the anchor) routes `set-aside` with its text as `reason`, exit 0.
+      The prepare record (p47-11): once its note is read and stamped, prepare removes <repo>/.claude/integration/
+      <slug>.prepare.json (a failed removal is exit 2), and writes its printed JSON there (tmp + rename) on every
+      exit 0, so a prepare that ends on exit 2 or 8 leaves no record; a failed write is one stderr WARN and never
+      changes the verdict (`call` then finds no record: its exit 2).
+
+  call --repo R --slug S --note N [--row FILE|-] [--after shared-green|red|push-refused]
+      The integrate call's `integration`, whole (p47-11, execute § 4.5 step 3): the lead passes it verbatim and
+      types no sha. From the prepare record: headSha = its anchor, taskBase, mainSha, landed, branch,
+      worktreePath, and prepared = {anchor, taskBase}, the pair the engine's args check holds headSha and
+      taskBase to (a retyped sha is refused before dispatch). trouble: the trouble route's own with no --after;
+      the verify route's `--after shared-green` (["shared-file"] and leadMerge {mergeCommit: M, headSha: M,
+      baseSha: mainSha, verified: true}, M its merge commit, a shared file required), `--after red` (["red"],
+      plus "shared-file" when it had one) or `--after push-refused` ([]), the skip route's `--after push-refused`.
+      prUrl, reviewHistory, reviewRoundsUsed and rung are `inputs --row`'s integrate record; readyAt the note's
+      `ready:` (absent with none); startedAt a fresh stamp. Prints {integration, source, rungSource, rowRefused,
+      prUrlError}: a non-empty prUrlError launches nothing (the lead's set-aside, as with inputs). Exit 2
+      (`lead-integrate call: …`, nothing launched; `call` runs on the task that holds the lane, so execute's
+      *lead-integrate's exit 2* routes it to the Lane hold, ADR 0048: the lane's own command stops merging, never
+      the whole rollout): no record, an unreadable one or another slug's, a route that launches no integrate call
+      (merge, set-aside), an --after the route does not take, a record sha that is not 40-hex, or a --note that is
+      not the slug's.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
          [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
@@ -308,7 +329,7 @@ Subcommands:
       escape for `own`; the history is `inputs`' history.
 
   stamp
-      Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
+      Now, in reconcile's `_stamp` form (log-integration's --started; `call` stamps the integrate call's startedAt).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
 integrating:, revert's guard), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
@@ -316,7 +337,7 @@ execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), o
 prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
-unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
+unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, call, plan, verify,
 push, undo, base-moved, ci-headroom and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
 or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
 76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
@@ -749,18 +770,33 @@ def cmd_prepare(args):
                       f"{args.slug} first (execute § 4.5 step 3); nothing fetched or merged")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
+    # The record `call` builds the integrate call from (p47-11): an earlier prepare's goes first, so a prepare that
+    # stops on an exit 2 or 8 leaves none behind for `call` to read.
+    record = prepared_path(repo, args.slug)
+    try:
+        record.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        raise EnvError(f"could not remove the old prepare record {record}: {e}")
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
            "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
            "abortedMerge": False, "stashed": "", "record": None, "note": "",
            "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
     try:
-        return _prepare_route(args, repo, note, tasks_dir, br, tree, out)
+        out = _prepare_route(args, repo, note, tasks_dir, br, tree, out)
     except TaskScoped as e:
         # A failure that threatens only this task (its anchor, its worktree, its anchor ref): set aside, exit 0, so
         # the lane runs on (ADR 0048). The environment's own failures stay exit 2, the lead's Lane hold.
         out.update(route="set-aside", reason=str(e))
-        return out
+    try:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(record, json.dumps(out, ensure_ascii=False) + "\n")
+    except OSError as e:
+        # Never fails the verdict: `call` finds no record and exits 2, so no integrate call launches without one.
+        print(f"lead-integrate prepare: WARN: the prepare record {record} was not written: {e}", file=sys.stderr)
+    return out
 
 
 def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
@@ -2239,6 +2275,87 @@ def cmd_revert(args):
 
 # ---- inputs / set-aside --------------------------------------------------------------------------------
 
+# ---- call: the integrate call's integration, whole (p47-11) -------------------------------------------------
+
+PREPARED_SUFFIX = ".prepare.json"
+# The routes whose run may end in an integrate call, and the --after each takes (None: prepare's own trouble).
+CALL_AFTER = {"trouble": (None,), "verify": ("shared-green", "red", "push-refused"), "skip": ("push-refused",)}
+
+
+def prepared_path(repo, slug):
+    """<repo>/.claude/integration/<slug>.prepare.json: prepare's last verdict, the one source of the integrate call's
+    anchor pair, base, landed list and trouble."""
+    return Path(os.path.expanduser(str(repo))) / ".claude" / "integration" / f"{slug}{PREPARED_SUFFIX}"
+
+
+def _read_prepared(repo, slug):
+    p = prepared_path(repo, slug)
+    try:
+        rec = json.loads(p.read_text())
+    except FileNotFoundError:
+        raise EnvError(f"no prepare record at {p}: run prepare first (execute § 4.5 step 3); nothing launched")
+    except (OSError, ValueError) as e:
+        raise EnvError(f"the prepare record {p} is unreadable: {_one_line(e)}; run prepare again; nothing launched")
+    if not isinstance(rec, dict) or rec.get("slug") != slug:
+        got = rec.get("slug") if isinstance(rec, dict) else None
+        raise EnvError(f"the prepare record {p} is {json.dumps(got)}'s, not {slug}'s; run prepare again; nothing launched")
+    return rec
+
+
+def _call_trouble(rec, after):
+    """(trouble, leadMerge or None) for the integrate call that follows prepare's route and the lead's --after."""
+    route = rec.get("route")
+    if route not in CALL_AFTER:
+        raise EnvError(f"prepare routed {json.dumps(route)}, which launches no integrate call (execute § 4.5 step 3); "
+                       "nothing launched")
+    if after not in CALL_AFTER[route]:
+        takes = " or ".join("no --after" if a is None else f"--after {a}" for a in CALL_AFTER[route])
+        given = "no --after" if after is None else f"--after {after}"
+        raise EnvError(f"prepare routed {route}, which takes {takes}, not {given}; nothing launched")
+    for k in ("anchor", "taskBase", "mainSha"):
+        if not re.fullmatch(r"[0-9a-f]{40}", rec.get(k) or ""):
+            raise EnvError(f"the prepare record's {k} is {json.dumps(rec.get(k))}, not a 40-hex sha; run prepare "
+                           "again; nothing launched")
+    shared = bool(rec.get("sharedFiles"))
+    if after is None:
+        return list(rec.get("trouble") or []), None
+    if after == "push-refused":
+        return [], None
+    if after == "red":
+        return ["red"] + (["shared-file"] if shared else []), None
+    m = rec.get("mergeCommit") or ""
+    if not shared or not re.fullmatch(r"[0-9a-f]{40}", m):
+        raise EnvError("--after shared-green needs prepare's verify route with a shared file and its merge commit; "
+                       "nothing launched")
+    return ["shared-file"], {"mergeCommit": m, "headSha": m, "baseSha": rec["mainSha"], "verified": True}
+
+
+def cmd_call(args):
+    """The integrate call's `integration`, whole: the lead passes it verbatim and types no sha (p47-11)."""
+    rec = _read_prepared(args.repo, args.slug)
+    trouble, lead_merge = _call_trouble(rec, args.after)
+    path, note = _load_note(args.note)
+    if path.stem != args.slug:
+        raise EnvError(f"--note {path} is not {args.slug}'s task note; nothing launched")
+    inp = task_inputs(path, note, None, args.repo, args.row)
+    got = inp["integrate"]
+    integration = {
+        "prUrl": got["prUrl"], "branch": rec.get("branch") or branch_of(args.slug),
+        "worktreePath": rec.get("worktreePath") or worktree_dir(os.path.expanduser(args.repo), args.slug),
+        "headSha": rec["anchor"], "taskBase": rec["taskBase"], "mainSha": rec["mainSha"],
+        "prepared": {"anchor": rec["anchor"], "taskBase": rec["taskBase"]},
+        "trouble": trouble, "landed": rec.get("landed") or [],
+        "reviewHistory": got["reviewHistory"], "reviewRoundsUsed": got["reviewRoundsUsed"], "rung": got["rung"],
+    }
+    if lead_merge:
+        integration["leadMerge"] = lead_merge
+    if inp.get("readyAt"):
+        integration["readyAt"] = inp["readyAt"]
+    integration["startedAt"] = rr._stamp(datetime.now())
+    return {"integration": integration, "source": got["source"], "rungSource": got["rungSource"],
+            "rowRefused": got["rowRefused"], "prUrlError": got["prUrlError"]}
+
+
 def _latest_run(note, heading):
     """{text, at} of a section's latest run (at: its heading's stamp, None for legacy text), or None."""
     found = note._section_bounds(heading)
@@ -2977,8 +3094,8 @@ def _sha(value):
 
 
 # The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row and
-# its RACE revert. inputs and plan are readers (status reads inputs); verify, push and undo follow a guarded prepare in
-# one flow.
+# its RACE revert. inputs and plan are readers (status reads inputs); verify, push, undo and call (a reader of prepare's
+# record) follow a guarded prepare in one flow.
 GUARDED = ("prepare", "set-aside", "revert")
 
 
@@ -3069,6 +3186,14 @@ def main(argv=None):
                     "against the note for the integrate record")
     ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time a retry cool-down is read against (default: now)")
 
+    cl = sub.add_parser("call", help="the integrate call's integration, whole, from prepare's record (p47-11)")
+    cl.add_argument("--repo", required=True)
+    cl.add_argument("--slug", required=True)
+    cl.add_argument("--note", required=True)
+    cl.add_argument("--row", default=None, help="the approving row's result JSON (file, or - for stdin), as inputs --row")
+    cl.add_argument("--after", default=None, choices=["shared-green", "red", "push-refused"],
+                    help="the verify or skip route's end that launches the call (none on the trouble route)")
+
     pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan")
     pl.add_argument("--note", required=True)
 
@@ -3106,7 +3231,7 @@ def main(argv=None):
             return cmd_base_moved(args)
         if args.cmd == "ci-headroom":
             return cmd_ci_headroom(args)
-        handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs,
+        handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs, "call": cmd_call,
                    "plan": cmd_plan, "set-aside": cmd_set_aside, "revert": cmd_revert}[args.cmd]
         emit(handler(args))
         return 0

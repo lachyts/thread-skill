@@ -919,7 +919,7 @@ function agentPrompts(E, over = {}) {
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
   const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r', ...over }
   const I = {
-    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), prepared: { anchor: H('a'), taskBase: H('b') }, trouble: ['conflict'],
     landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
     reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }], reviewRoundsUsed: 2,
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
@@ -1030,7 +1030,7 @@ function agentPrompts(E, over = {}) {
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
   const ar0 = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const I = {
-    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), prepared: { anchor: H('a'), taskBase: H('b') }, trouble: ['conflict'],
     landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
     reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
@@ -1111,7 +1111,7 @@ function agentPrompts(E, over = {}) {
   const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
   const I = {
-    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), prepared: { anchor: H('a'), taskBase: H('b') }, trouble: ['conflict'],
     landed: [], reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
   }
@@ -1739,7 +1739,7 @@ Never run the verifier unless the task brief asks the review for the full suite;
     pinnedRun.calls.find((c) => c.label.startsWith('review:')).prompt.includes(CLAUSE), 'runTask: a good touched reaches the implementer and the review judge, unlogged')
   const H = (c) => c.repeat(40)
   const I = {
-    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), prepared: { anchor: H('a'), taskBase: H('b') }, trouble: ['conflict'],
     landed: [], reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
     rung: { startRung: 'opus-high', rung: 'opus-high', climbs: [] }, startedAt: '2026-10-26T10:00:00Z',
   }

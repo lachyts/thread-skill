@@ -1020,7 +1020,7 @@ test("E4: mode 'integrate' with a securityCheck is not refused: the integrator s
   const args = mkArgs(mkTask('proj-fix-a'), {
     mode: 'integrate', securityCheck: SECURITY,
     integration: { prUrl: 'https://github.com/o/r/pull/7', branch: 'audit-fix/fix-a', worktreePath: '/repo/.claude/worktrees/proj-fix-a',
-      headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), trouble: [], landed: [], reviewHistory: [], reviewRoundsUsed: 1,
+      headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), prepared: { anchor: sha('a'), taskBase: sha('b') }, trouble: [], landed: [], reviewHistory: [], reviewRoundsUsed: 1,
       rung: { startRung: '', rung: '', climbs: [] } },
   })
   const r = await run(args)
