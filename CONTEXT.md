@@ -860,13 +860,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   them, never to open (ADR 0067 d8; execute away.md § Capacity). A fresh
   reading's `stop_suites` (memory critical) also holds and stops slotted
   suites, as the **Heat hold** does, and a stopped suite restarts only once
-  memory falls below warning. A Leg's wait for room is a `wait` of
+  memory **Strain** falls below warning. A Leg's wait for room is a `wait` of
   kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
   mechanism), throttle.
 - **Strain** — what **Capacity** yields to: pressure on the Mac that running
   fewer tasks would lift. By day it is strain from anything, Lachy's own apps
   included, so the Mac stays his; while he is **Away** it is only the strain
-  the Rollouts themselves cause (ADR 0083 d1, d2, proposed and not yet built).
+  the Rollouts themselves cause (ADR 0083 d1, d2, proposed; thread-skill's
+  reader built by p53-1, Chorus's writer chorus-p109-2).
   _Avoid_: load (one of its signals), pressure (macOS's reading).
 - **Weight** — what one Rollout task is expected to use at its heaviest, in
   memory and in cores: estimated from its kind until that kind has past runs,
@@ -876,8 +877,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Mac fault** — pressure on the Mac that running fewer tasks cannot lift
   (a system process holding most of the memory). Never **Strain**: it does not
   lower or freeze **Capacity**, and it is repaired, by a reset of that process
-  or a restart of the Mac just before 7:00 (ADR 0083 d2, d3, proposed and not
-  yet built). _Avoid_: leak (one cause), incident.
+  or a restart of the Mac just before 7:00 (ADR 0083 d2, d3, proposed; d2's
+  reader built by p53-1, which says a fault and never waits on it, Chorus's
+  writer chorus-p109-2; d3 not yet built). _Avoid_: leak (one cause), incident.
 - **Waiting list** — the one estate-wide list of serial chains that are ready
   to run but have no Leg session yet, because **Capacity** has no room or
   another rollout holds their files. A chain on it has no session on the Stage;

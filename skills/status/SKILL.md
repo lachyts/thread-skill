@@ -477,7 +477,10 @@ count elsewhere naming each open serial chain too, its Leg claims behind its Leg
 fresh one (ADR 0076 d3: a Leg counts from its session's start, so a Leg between claims reads 1), and appends
 `· capacity.json fresh (C <limit> of max <max>)`; a `stale` or `unreadable` reading, or a fresh one with `maxWhy`,
 appends `· capacity.json <file>: <why>, read as the Trickle`; a missing one adds nothing. Status reads no quota (its
-session is not the lead's).
+session is not the lead's). While `trickle.capacity.fault` is non-null (a Mac fault, ADR 0083 d2), one line follows
+the Trickle line, before the Moving line: `Mac fault: <signals, comma-joined> (<holder.name>, <holder.mem_gb> GB) · read
+from capacity.json, never waited on` (the parenthesis dropped when `holder` is null, and `, <mem_gb> GB` when `mem_gb`
+is); it is said, never obeyed, so it is never a blocker or a recommendation.
 
 **The Moving line**, right under the Trickle line, from § 2's *Moving*: `Moving: <verdict> <cause> (<ageMinutes>m since
 the last life sign)` (no cause for `moving`; `no life sign` when `ageMinutes` is null), then ` · until <until>` when it

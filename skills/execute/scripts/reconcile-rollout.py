@@ -1495,7 +1495,10 @@ on the ceiling alone. The Login is always the lead's own: its lease names it (`l
 `moving`, which runs in the Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run
 --quota-login`), never its own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy
 leg.py reads; the reads it takes that may run a child process (capacity_reads) a caller holding the trickle claim lock
-takes before the lock.
+takes before the lock. A Mac fault (ADR 0083 d2, p53-1: a fresh file's non-empty `signals.fault`) is said, never
+obeyed: _capacity_state reports it as `fault`, `next` prints one line for it (_capacity_fault_line) and status reports
+it, and no hold, slotLimit or waiting record reads it; the restart hold and the suite stop's label follow Strain in
+capacity.py itself.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -4582,17 +4585,20 @@ def _capacity_module():
 
 def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     """The Capacity a call reads (p36-7, ADR 0067 d8; execute away.md § Capacity): {file, why, suggested, max,
-    maxSource, maxWhy, limit, inForce, quota}. `file` and `why` are capacity.py read()'s (fresh, missing, stale or
-    unreadable; why null only when fresh), `suggested` the file's `capacity` when fresh. `capacity_max` (rollouts.toml's
-    [defaults], machine-wide, through _machine_settings) is resolved only for a fresh reading: `max` and `maxSource` are
-    its value and source, else null, and `maxWhy` why it would not resolve. In force only when fresh and resolved: then
-    `limit` is C = min(max(suggested, 1), max), else null, and every caller reads today's Trickle and Away cap. `quota`
-    (in force and `quota` true only) is capacity.py's quota(reading, env), `env` os.environ by default: {login, inside,
-    why}, or null for a caller that is no Claude Code session; with `login` (a string) it is quota_of(reading, login)
-    instead, that Login's line in place of the caller's own (`moving`'s dry run: the lead's Login off its lease,
-    _lead_login; "" reads none). Never raises: a capacity.py that will not load reads unreadable."""
+    maxSource, maxWhy, limit, inForce, quota, fault}. `file` and `why` are capacity.py read()'s (fresh, missing, stale
+    or unreadable; why null only when fresh), `suggested` the file's `capacity` when fresh. `fault` (ADR 0083 d2, p53-1)
+    is capacity.py's fault(reading) for a fresh reading, in force or not, else null: {signals, holder} while the writer
+    names a Mac fault. It is said, never obeyed: no hold, slotLimit or waiting record reads it (_capacity_fault_line).
+    `capacity_max` (rollouts.toml's [defaults], machine-wide, through _machine_settings) is resolved only for a fresh
+    reading: `max` and `maxSource` are its value and source, else null, and `maxWhy` why it would not resolve. In force
+    only when fresh and resolved: then `limit` is C = min(max(suggested, 1), max), else null, and every caller reads
+    today's Trickle and Away cap. `quota` (in force and `quota` true only) is capacity.py's quota(reading, env), `env`
+    os.environ by default: {login, inside, why}, or null for a caller that is no Claude Code session; with `login` (a
+    string) it is quota_of(reading, login) instead, that Login's line in place of the caller's own (`moving`'s dry run:
+    the lead's Login off its lease, _lead_login; "" reads none). Never raises: a capacity.py that will not load reads
+    unreadable."""
     out = {"file": "unreadable", "why": "capacity.py would not load", "suggested": None, "max": None,
-           "maxSource": None, "maxWhy": None, "limit": None, "inForce": False, "quota": None}
+           "maxSource": None, "maxWhy": None, "limit": None, "inForce": False, "quota": None, "fault": None}
     mod = _capacity_module()
     if mod is None:
         return out
@@ -4604,6 +4610,10 @@ def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     out.update(file=reading["file"], why=reading["why"])
     if reading["file"] != "fresh":
         return out
+    try:
+        out["fault"] = mod.fault(reading)
+    except Exception:  # noqa: BLE001 — fault() never raises; one that does (or an older capacity.py) names none
+        out["fault"] = None
     out["suggested"] = reading["capacity"]
     settings, err = _machine_settings()
     try:
@@ -4646,6 +4656,20 @@ def _capacity_warns(state) -> list:
     if state["file"] == "fresh" and not state["inForce"]:
         return [f"{prefix} capacity_max unresolved: {state['maxWhy']} — read as the Trickle"]
     return []
+
+
+def _capacity_fault_line(state):
+    """The stderr line a Mac fault prints (ADR 0083 d2, p53-1; execute away.md § Capacity), or None: `<CAPACITY_WARN>
+    fault: memory (held by <name>)[, <signal>…] — a Mac fault, never waited on` while the reading's `fault` names one.
+    The holder names the memory signal only, and the line carries no GB, so step 1.1's once-per-distinct-line relay
+    does not repeat it as the holder's memory drifts. Only `next` prints it, on every call, --dry-run included."""
+    fault = state.get("fault") if isinstance(state, dict) else None
+    if not fault or not fault.get("signals"):
+        return None
+    holder = (fault.get("holder") or {}).get("name")
+    names = [f"{n} (held by {holder})" if n == "memory" and holder else n for n in fault["signals"]]
+    prefix = _capacity_module().CAPACITY_WARN if _capacity_module() else "WARN: ~/.config/thread/capacity.json"
+    return f"{prefix} fault: {', '.join(names)} — a Mac fault, never waited on"
 
 
 def _quota_held(capacity) -> bool:
@@ -6313,21 +6337,23 @@ def cmd_next(args) -> int:
     `heat:` hold never lets the rollout halt either, and `heat` ({level, name}) is reported after `lastStarts`. The
     Capacity (p36-7, ADR 0067 d8; away.md § Capacity): right after the Away state, capacity.json is read
     (_capacity_state; a stale or unreadable file, or a capacity_max that will not resolve, prints one CAPACITY_WARN line
-    on stderr and reads as the Trickle). While a fresh reading is in force its C is the cap in force, Away or not (the
-    prefixes stay `trickle:` and `away cap:`), `trickle.limit` and `trickle.awayCap` read C, `trickle.capacity` reports
-    the reading, the count elsewhere counts each open serial chain's Leg claims behind its Leg lease, or 1 for its
-    session behind a fresh one (_leg_tasks, ADR 0076 d3; `trickle.lapsed` names a lapsed one), and a waiting Leg's
-    record keeps its place, asking one place fewer while its session is counted (_waiters, p44-2: that place is its
-    session's, never kept a second time); and when the caller's Login is inside its line (the quota hold) `slotLimit` is
-    0, a row it holds reads `quota: <login> is inside its line` (after the ceiling and the heat, before the cap), it
-    never halts, it writes no waiting record (removing an earlier one), and idle-slots reads `hold-quota`. Anything else
-    reads exactly as before. The caller's Login is its own (_capacity_state's, capacity.py login(os.environ)), and off
-    --dry-run the lease names it (_caller_login), so `moving` reads the lead's; the hidden `--quota-login NAME`, read
-    only with --dry-run (exit 2 without it, nothing read), reads NAME's line instead ("" reads no quota): `moving`'s dry
-    run passes the lead's Login off its lease (_lead_login), never its reader's. A surface wait (P41-3; the module
-    docstring's `next`): while the rollout's surface-wait marker stands, readable or not, nothing starts, restarts or
-    begins Integration (`surface wait: <why>`), `slotLimit` is 0, no seeded revise and no waiting record, `surfaceWait`
-    reports it, `halt` stays null while it holds a row and no pause stands, and idle-slots reads `hold-surface`."""
+    on stderr and reads as the Trickle; a fresh one naming a Mac fault, ADR 0083 d2, prints one more,
+    _capacity_fault_line, and holds nothing for it). While a fresh reading is in force its C is the cap in force, Away
+    or not (the prefixes stay `trickle:` and `away cap:`), `trickle.limit` and `trickle.awayCap` read C,
+    `trickle.capacity` reports the reading, the count elsewhere counts each open serial chain's Leg claims behind its
+    Leg lease, or 1 for its session behind a fresh one (_leg_tasks, ADR 0076 d3; `trickle.lapsed` names a lapsed one),
+    and a waiting Leg's record keeps its place, asking one place fewer while its session is counted (_waiters, p44-2:
+    that place is its session's, never kept a second time); and when the caller's Login is inside its line (the quota
+    hold) `slotLimit` is 0, a row it holds reads `quota: <login> is inside its line` (after the ceiling and the heat,
+    before the cap), it never halts, it writes no waiting record (removing an earlier one), and idle-slots reads
+    `hold-quota`. Anything else reads exactly as before. The caller's Login is its own (_capacity_state's, capacity.py
+    login(os.environ)), and off --dry-run the lease names it (_caller_login), so `moving` reads the lead's; the hidden
+    `--quota-login NAME`, read only with --dry-run (exit 2 without it, nothing read), reads NAME's line instead (""
+    reads no quota): `moving`'s dry run passes the lead's Login off its lease (_lead_login), never its reader's. A
+    surface wait (P41-3; the module docstring's `next`): while the rollout's surface-wait marker stands, readable or
+    not, nothing starts, restarts or begins Integration (`surface wait: <why>`), `slotLimit` is 0, no seeded revise and
+    no waiting record, `surfaceWait` reports it, `halt` stays null while it holds a row and no pause stands, and
+    idle-slots reads `hold-surface`."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     quota_login = getattr(args, "quota_login", None)
     if quota_login is not None and not args.dry_run:
@@ -6387,6 +6413,10 @@ def cmd_next(args) -> int:
     capacity = _capacity_state(now) if quota_login is None else _capacity_state(now, login=quota_login)
     for line in _capacity_warns(capacity):
         print(line, file=sys.stderr)
+    # A Mac fault (ADR 0083 d2, p53-1) is said on every call, never obeyed: nothing below reads capacity["fault"].
+    fault_line = _capacity_fault_line(capacity)
+    if fault_line:
+        print(fault_line, file=sys.stderr)
     legs = capacity["inForce"]
     quota_on = _quota_held(capacity)
     # The Heat hold (estate ADR 0009 d5; away.md § Heat), read once right after the Away state: at heavy or worse
@@ -8053,9 +8083,9 @@ def cmd_status(args) -> int:
     # lead's lease reads lapsed (p28-4). The leases are read as `next` reads them, never written: `lapsed` names the
     # other rollouts a lapsed lease leaves out, and `lease` is this rollout's own ({state, writtenAt, lapsesAt}). The
     # Capacity (p36-7) is read as `next` reads it, silently and without the quota (status runs in a session that is not
-    # the lead's): `capacity` reports it, and while it is in force `limit` and `awayCap` read its C and the count
-    # elsewhere counts each open serial chain's Leg claims behind its Leg lease, or 1 for its session behind a fresh
-    # one (ADR 0076 d3), as `next` counts it.
+    # the lead's): `capacity` reports it, its `fault` included (ADR 0083 d2: said by status SKILL.md, never obeyed),
+    # and while it is in force `limit` and `awayCap` read its C and the count elsewhere counts each open serial chain's
+    # Leg claims behind its Leg lease, or 1 for its session behind a fresh one (ADR 0076 d3), as `next` counts it.
     away = _away_state(now)
     capacity = _capacity_state(now, quota=False)
     leases, lapsed = _Leases(now), {}
