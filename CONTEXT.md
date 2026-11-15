@@ -1178,8 +1178,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   filed, not at its merge (estate ADR 0009 d6, ADR 0073). Not **Touched
   tests**, which an agent runs between Checkpoints. _Avoid_: quick suite,
   smoke tests, partial verify.
-- **Slow tier** — the suites a project's checks before a merge leave out
-  because each runs long, whatever the change reaches: they run in the default
+- **Slow tier** — the suites GitHub's check before a merge leaves out because
+  each runs long, whatever the change reaches, and the Mac's verify too once
+  the **Green tip** decides what goes live: they run in the default
   branch's full suite after every merge, which sets the **Green tip**, and at
   the **Completion verifier**. The set is declared, derived from each suite's
   measured seconds, and a suite that lets two **Escapes** through in four
@@ -1305,14 +1306,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a line of the Time-lost ledger, a suite audit's ranked change, a stall
   audit's cause. It names that evidence, and a task without it is never one.
   Speed fixes go first: their phase holds every other task of the project's
-  queue until its last task lands, and the hold releases by itself. Once one
-  is live at the **Green tip**, each running rollout takes it by an **Engine
-  catch-up** (ADR 0084 d4, d5, proposed; not yet built: Phase 54's hold is
+  queue until its releasing task lands (its last, unless the phase names an
+  earlier one), and the hold releases by itself. Once one in the engine's own
+  repo is live at the **Green tip**, each running rollout takes it by an
+  **Engine catch-up** (ADR 0084 d4, d5, proposed; not yet built: Phase 54's hold is
   made by hand). _Avoid_: perf task, optimisation, priority fix.
 - **Engine catch-up** — a running rollout moving itself onto a fresh **Engine
   snapshot** at the **Green tip** because a **Speed fix** went live there: it
   starts nothing new, lets what is running finish, moves, and carries on, with
-  no word from Lachy. Only a Speed fix causes one, never an ordinary merge. A
+  no word from Lachy. Only a Speed fix in the engine's own repo causes one,
+  never an ordinary merge nor another project's Speed fix, and a phase drains
+  a rollout once, for its releasing task: any other is taken when nothing of
+  the rollout is running. A
   **Reinstate** is the same move after a pause someone made (ADR 0084 d5,
   proposed; not yet built). _Avoid_: auto-update, hot reload, restart.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside

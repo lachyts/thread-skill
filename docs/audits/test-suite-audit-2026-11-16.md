@@ -151,7 +151,7 @@ commits since 11-12, replayed against today's map from tracked files only, selec
 | `docs/**` places `docs/spikes/2026-11-02-replan.py` as a carrier; it names serial-chains.py and so pulls in all 77 contracts | map:200 | 194 → 188; no risk (no test runs the spike) |
 | The FOREIGN `SKILL.md` matches by whole basename, so any SKILL.md edit selects leg, lead-integrate, unfinished-rollout, git-env-canary, land and auto-retry | map:22, `fast-tier.py:336,383-386` | A SKILL.md-only PR: about 43 → 13 to 15 min. Needs declared reader paths (auto-retry reads `$HERE/../SKILL.md`) |
 | `contract-text.mjs:108-110` names `SKILL.md`, pushing its 11 non-contract importers | | about −11 files on prose diffs |
-| The rr HUB lists 99 tests, all 9 slow suites among them; rr is touched in 34 % of commits | map:100-120 | Cannot be cut at file level |
+| The rr HUB lists 99 tests, 7 of the slowest 9 among them (`tests/land.test.sh` and `tests/merge-task-integrated.test.sh` are reached another way: land through FOREIGN-ONLY and fixture lines, merge-task-integrated through the `run_record.py` and `verify-slot.py` HUBs); rr is touched in 34 % of commits | map:100-120 | Those 7 cannot be cut at file level; the other 2 were not examined |
 
 The selection fixes top out at about −4 min on the median code PR. They pay more on prose-only PRs.
 
@@ -212,7 +212,7 @@ on the slower one, times 2.2 runs per merged PR. Master's full-suite shards are 
 | 7 | Fix the 5 worst timing-sensitive tests and the un-timed `spawnSync` | each avoided flake saves one 45-min re-run | No |
 | 8 | Selector ignores untracked files outside the map's roots | 0 on CI; a local `make test-fast` stops running FULL | No |
 | A | macOS leaves the required checks (stays on master's shards). **Ruled by Lachy 2026-11-16: "Drop it from PRs"** | 43.3 → 34.5 today; about 0 after (1) | **Yes** |
-| B | The slowest suites (≥ 180 s on macOS) leave the checks before a merge for master and the completion verifier. **Ruled by Lachy 2026-11-16: "Move them off PRs now"** | 43 → about 26 today; less after (1)-(3) | **Yes** |
+| B | The slowest suites (≥ 180 s on macOS: ten, the nine in § 1's table and `tests/merge-settings.test.sh` at 184 s, which that table's ranking by total share leaves out) leave the checks before a merge for master and the completion verifier. **Ruled by Lachy 2026-11-16: "Move them off PRs now"** | 43 → about 26 today; less after (1)-(3) | **Yes** |
 | C | The required checks stop being strict | little: the lead's integration push already brings each PR level with master and triggers its run; not recommended | Yes |
 
 Lachy then reframed the gate (ADR 0084): merging is light, and code goes live only from the newest master commit
@@ -230,11 +230,13 @@ Master's full-suite shards keep running on macOS either way.
 ## Proposed phase
 
 Phase 54, "Merging is light, going live waits for the Green tip" (ADR 0084, grilled with Lachy on 2026-11-16 from
-this audit). Every task is a **Speed fix**: its evidence is the row or section of this audit named beside it. Tasks 1
-to 8 are the core; the rest of Thread's queue is held until task 8 lands (ADR 0084 d4).
+this audit). Each task names the measured cause it answers: a row or section of this audit, or the lane and Run
+record numbers the ADR's decision rests on. Tasks 1 to 8 are the core, and task 8 is the phase's releasing task: the
+rest of Thread's queue is held until it lands (ADR 0084 d4). Tasks 16 and 17 run at normal priority.
 
 1. **The Slow tier is declared, and GitHub's check leaves it out** (rows B, 4; § 1). `SLOW` lines in
-   `tests/fast-tier.map`, checked by `tests/lib/fast-tier.py check` against measured seconds. `tests/run.sh --fast`
+   `tests/fast-tier.map`, checked by `tests/lib/fast-tier.py check` against measured seconds (CI's medians, checked in:
+   `tests/shard-weights.tsv`'s local seconds cannot reproduce the set). `tests/run.sh --fast`
    drops them only under a flag `test.yml` sets, after a FULL fallback too. Full mode and `--shard` keep them.
    **Verify:** `--fast` with the flag runs no SLOW suite and without it runs them; `bash tests/run.sh --shard-plan 4`
    still lists every suite; `python3 tests/lib/fast-tier.py check` passes.
@@ -251,19 +253,23 @@ to 8 are the core; the rest of Thread's queue is held until task 8 lands (ADR 00
    **Verify:** `select --paths skills/orient/SKILL.md` selects none of the Slow tier; `select --paths` on an ADR
    selects under 50; `tests/fast-tier.test.sh` passes.
 5. **Master's full-suite run publishes the Green tip** (ADR 0084 d1). A last job in `full-suite.yml` fast-forwards a
-   ref outside `refs/heads/` once every shard passed. A ruleset cannot guard it on this user-owned repo (GitHub
+   ref outside `refs/heads/` once every shard passed; a run whose commit the ref already holds moves nothing and still
+   passes. The job alone has `contents: write`. Master's runs coalesce when they queue (one running, the newest
+   waiting): a run uses about 65 macOS runner-minutes against 5 macOS jobs at once. A ruleset cannot guard it on this user-owned repo (GitHub
    refused the Actions app as a bypass actor, 2026-11-16), so the readers accept it only as an ancestor of master's tip
    and task 7 cross-checks it.
    **Verify:** `tests/ci-workflows.test.mjs` pins the job and its `needs:`; after a green master run the ref is that
    commit, and a run that finishes out of order never moves it back.
 6. **Live code follows the Green tip** (ADR 0084 d1, d2). The snapshot cut, the Primary refresh (its fast-forward,
    repair and self-update), merge-task's in-place refresh and land.sh S4 stop at the Green tip. The Rollout clone
-   stays on origin's tip. With no ref yet, origin's tip. A cut at a named commit, by hand.
+   stays on origin's tip, as do `refresh_local_base` on a rollout rooted in place and `leg.py land`, which Thread Skill
+   has none of; the task says what each does for a repo that publishes a Green tip. With no ref yet, origin's tip. A cut at a named commit, by hand.
    **Verify:** fixtures where origin's tip is ahead of the Green tip: `tests/engine-snapshot.test.sh`,
    `tests/primary-refresh.test.sh` and `tests/live-checkout.test.sh` gain cases where each stops at it.
 7. **A red master files its fix** (ADR 0084 Decided for you 3). The failed jobs re-run once; red again files a fix
    task first in the queue, with a Run record line.
-   **Verify:** fixtures of a red, a flake and a green master run produce a fix task, a Flake line and nothing.
+   **Verify:** fixtures of a red, a red that passes its re-run and a green master run produce a fix task naming the
+   merges since the last green, a re-run-pass line (never a Flake line) and nothing.
 8. **The Mac's check before a merge goes light** (ADR 0084 Decided for you 1). The rollout's verify takes task 1's
    flag, only once tasks 6 and 7 are live.
    **Verify:** an Integration verify's `suite-ended` line shows no Slow tier suite; the completion verifier still
@@ -281,12 +287,14 @@ to 8 are the core; the rest of Thread's queue is held until task 8 lands (ADR 00
     **Verify:** `node --test tests/ci-workflows.test.mjs` passes; a PR shows the one required context reported by
     the aggregator.
 13. **Schedule holds the queue for a Speed fix phase** (ADR 0084 d4).
-    **Verify:** a join of a Speed fix phase stamps the hold on every other queued task, and its last task's merge
-    leaves none held.
+    **Verify:** a join of a Speed fix phase stamps the hold on every other queued task, and its releasing task's
+    merge leaves none held.
 14. **Engine catch-up** (ADR 0084 d5). A running rollout drains, moves onto a snapshot at the Green tip and carries
-    on, once a Speed fix is live there.
-    **Verify:** a fixture rollout with a Speed fix live past its snapshot starts nothing new, then re-snapshots and
-    resumes with no hand in it; an ordinary merge causes none.
+    on, once an engine Speed fix phase's releasing task is live there; any other engine Speed fix is taken when
+    nothing of the rollout is running.
+    **Verify:** a fixture rollout with such a task live past its snapshot starts nothing new, then re-snapshots and
+    resumes with no hand in it; an ordinary merge, another project's Speed fix and a phase's second Speed fix cause no
+    drain.
 15. **The Mac's check and GitHub's run at the same time** (§ 5). Push first; a red after a push has its own route.
     **Verify:** the lane's Run record shows `suite-started` before the required checks end, and a red local verify
     after a push never merges.
@@ -298,7 +306,9 @@ to 8 are the core; the rest of Thread's queue is held until task 8 lands (ADR 00
 **Order and what must not run together.** 3 and 4 follow 1 (`tests/run.sh`, the map). 6 and 7 follow 5. 8 follows 1,
 6 and 7. 9 follows 4; 10 follows 3; 12 follows 2, 10 and 11 and runs Solo (it changes how the
 required check is reported). 14 follows 6; 15 follows 8; 16 follows 9. Tasks that edit `tests/fast-tier.map`,
-`tests/run.sh` or `.github/**` run the full suite in their own PR.
+`tests/run.sh` or `.github/**` fall back to the whole selection in their own PR: on GitHub that leaves the Slow tier
+out once task 1 lands, and the Mac's verify still runs it until task 8. Every task's Verify line ends on a full
+`make test`, which is where a task that could break a slow suite (3, 4, 9, 10, 12) runs them.
 
 ## Method and caveats
 
