@@ -342,7 +342,8 @@ fresh; pair; mkpr 5 "$I" BLOCKED
 chk 1 "ext-status	fail	0	https://example.com/status	" ""; echo "Set up job" > "$MT_STATE/steps"
 run 5 "$I" "$B"
 ok "$rc" 1 "16i. a red row with no run link exits 1"; lacks "$(glog)" "run rerun" "16i. no rerun"
-# 16j. two failed required runs: run 7 failed on setup, run 9 (cancelled, timed out or errored) holds no failed step.
+# 16j. two failed required runs: run 7 failed on setup, run 9 (cancelled, timed out or errored, with no annotation
+#      proving its job's time limit: merge-task-cancelled.test.sh 7-11) holds no failed step.
 #      The per-run guard stops as genuine on run 9 before any re-run, so run 7's setup failure never re-runs
 #      run 9. gh 2.43.1's table (whose `fail` holds CANCELLED too), then a --json gh's buckets: the same verdict.
 for j in table json; do
