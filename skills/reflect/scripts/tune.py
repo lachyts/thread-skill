@@ -384,8 +384,7 @@ def auto_check(scores, proposal, reflection, tunings, reflections):
     order (1) no trade and no caution, (2) no Guardrail breached and the window not partial, (3) ranAt == from, (4) no
     auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE, (6) the load hold
     (load_hold(): a Tuning that admits more work, a ceiling or capacity_max raise or a Weight lower, waits on a
-    load-topped Time-lost ledger, or on none). `agreed` is the agreement once (5)
-    is reached, else None. Pure: reflect.py's span calls it with the same reads, its ledger's record line appended."""
+    load-topped Time-lost ledger, or on none). `agreed` is the agreement once (5) is reached, else None. Pure: reflect.py's span calls it with the same reads, its ledger's record line appended."""
     if proposal.get("trade"):
         t = proposal["trade"]
         return False, "a trade (gains %s, costs %s): Lachy decides" % (
@@ -444,11 +443,11 @@ def now_values(resolved):
 
 def revert_check(scores, tid, tunings, now_values):
     """(entry, None) for the first entry of auto line `tid` a revert may undo now, else (None, why). `now_values` is
-    rollouts.toml's resolved {key: value} for the repo (now_values() of rollout-settings.py's resolve()). It passes only when the id is a
-    non-voided auto line of this repo that is no revert, the entry is not reverted yet, rollouts.toml still holds its
-    `to`, this score ran at that `to` (ranAt) in a window that started after the auto line and is not partial, and a
-    breached Guardrail is among score.py's RULE_EFFECTS risks for its rule. An auto line that moved several keys is
-    reverted one key per call."""
+    rollouts.toml's resolved {key: value} for the repo (now_values() of rollout-settings.py's resolve()). It passes
+    only when the id is a non-voided auto line of this repo that is no revert, the entry is not reverted yet,
+    rollouts.toml still holds its `to`, this score ran at that `to` (ranAt) in a window that started after the auto line
+    and is not partial, and a breached Guardrail is among score.py's RULE_EFFECTS risks for its rule. An auto line that
+    moved several keys is reverted one key per call."""
     line = next((d for d in tunings if d.get("id") == tid), None)
     if line is None:
         return None, "%s is no tuning line" % tid

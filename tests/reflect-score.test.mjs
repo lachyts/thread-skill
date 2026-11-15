@@ -446,7 +446,7 @@ test('budget-bound control: C or the Trickle holding longer than the budget keep
   assert.deepEqual([out2.budget.admitted, out2.budget.countHeldHours, out2.budget.short, out2.ranAt.capacity_max], [0, 5, null, null])
 })
 
-// capacity_max is machine-wide (rollout-settings.py's MACHINE_ONLY): another repo's Tuning of it is this one's cause and
+// capacity_max is machine-wide ([defaults] only): another repo's Tuning of it is this one's cause and
 // agreement, named with its repo; a parallel_ceiling Tuning there is neither.
 test('budget-count-raise reads capacity_max machine-wide: another repo\'s Tuning causes and agrees, named with its repo', (t) => {
   const home = tmpHome(t)
