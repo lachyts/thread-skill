@@ -251,9 +251,11 @@ to 8 are the core; the rest of Thread's queue is held until task 8 lands (ADR 00
    **Verify:** `select --paths skills/orient/SKILL.md` selects none of the Slow tier; `select --paths` on an ADR
    selects under 50; `tests/fast-tier.test.sh` passes.
 5. **Master's full-suite run publishes the Green tip** (ADR 0084 d1). A last job in `full-suite.yml` fast-forwards a
-   `green` ref once every shard passed; nothing else may move it.
-   **Verify:** `tests/ci-workflows.test.mjs` pins the job and its `needs:`; a probe push to `green` from the Mac is
-   refused; after a green master run the ref is that commit.
+   ref outside `refs/heads/` once every shard passed. A ruleset cannot guard it on this user-owned repo (GitHub
+   refused the Actions app as a bypass actor, 2026-11-16), so the readers accept it only as an ancestor of master's tip
+   and task 7 cross-checks it.
+   **Verify:** `tests/ci-workflows.test.mjs` pins the job and its `needs:`; after a green master run the ref is that
+   commit, and a run that finishes out of order never moves it back.
 6. **Live code follows the Green tip** (ADR 0084 d1, d2). The snapshot cut, the Primary refresh (its fast-forward,
    repair and self-update), merge-task's in-place refresh and land.sh S4 stop at the Green tip. The Rollout clone
    stays on origin's tip. With no ref yet, origin's tip. A cut at a named commit, by hand.
@@ -294,8 +296,8 @@ to 8 are the core; the rest of Thread's queue is held until task 8 lands (ADR 00
     **Verify:** no `sleep` precedes an assertion about a background process in the named files.
 
 **Order and what must not run together.** 3 and 4 follow 1 (`tests/run.sh`, the map). 6 and 7 follow 5. 8 follows 1,
-6 and 7. 9 follows 4; 10 follows 3; 12 follows 2, 10 and 11 and runs Solo, as does 2 (they change the gate every
-rollout merges through). 14 follows 6; 15 follows 8; 16 follows 9. Tasks that edit `tests/fast-tier.map`,
+6 and 7. 9 follows 4; 10 follows 3; 12 follows 2, 10 and 11 and runs Solo (it changes how the
+required check is reported). 14 follows 6; 15 follows 8; 16 follows 9. Tasks that edit `tests/fast-tier.map`,
 `tests/run.sh` or `.github/**` run the full suite in their own PR.
 
 ## Method and caveats
