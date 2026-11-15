@@ -52,9 +52,10 @@ State (a missing file takes the default in brackets):
                           fields asked for.
   links, steps            the infra-classify reads; `run rerun` is logged, rc 0 (rerun.fail present: rc 1). `run view
                           <id>` with -q serves steps.<id> when that file exists (an empty one: a run with no failed
-                          step), else steps; without -q (the whole --json object: merge-task's job conclusion read,
-                          `--json jobs`, and lead-integrate.py ci-headroom's, `--json jobs,workflowName`) it serves
-                          run.<id>.json, else jobs.<id>, else an "HTTP 404" error, rc 1.
+                          step), else steps; steps.<id>.err: its text on stderr, rc 1, for that run's -q read alone,
+                          the whole-object read still served. Without -q (the whole --json object: merge-task's job
+                          conclusion read, `--json jobs`, and lead-integrate.py ci-headroom's, `--json
+                          jobs,workflowName`) it serves run.<id>.json, else jobs.<id>, else an "HTTP 404" error, rc 1.
   run.<id>.json           lead-integrate.py ci-headroom's read (ADR 0073 d5): the whole run object (its jobs,
                           workflowName), served first by a `run view <id>` with no -q.
                           run.<id>.err: its text on stderr, rc 1, nothing printed, for that `run view <id> --json`.
@@ -419,6 +420,8 @@ if args[:2] == ["run", "view"]:
                 sys.exit(0)
         not_found()
     own = "steps.%s" % rid if rid else ""
+    if own and has(own + ".err"):
+        die(rd(p(own + ".err"), ""))
     print(rd(p(own) if own and has(own) else p("steps"), ""))
     sys.exit(0)
 if args[:2] == ["run", "rerun"]:

@@ -1172,8 +1172,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **CI headroom** — how far a required GitHub check's job runs below its time
   limit (`timeout-minutes`), per merge and on the week's median. A job whose
   week's median runs past 80 % of its limit is a finding; a job cancelled at
-  its limit is a CI timeout, a stop on GitHub's side, never a red check and
-  never a gate for Lachy (ADR 0073). Each merge records one `ci-headroom`
+  its limit is a CI timeout, a stop on GitHub's side, never a gate for Lachy
+  (ADR 0073), and never a red check but in one case: beside another red
+  required check, merge-task re-runs its first cut as infra, and a second cut
+  of the same job after that one re-run halts as a red check, merge-gate, which
+  the lead retries as an agent's (p47-10). Each merge records one `ci-headroom`
   Run-record line per required job (merge-task, through lead-integrate.py
   ci-headroom); the weekly Reflection reads them in span's `suite` block, and a
   breach on Thread Skill's repo files its suite audit (`reflect.py
