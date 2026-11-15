@@ -401,7 +401,10 @@ Subcommands:
               a Slot frees (_LastStarts.hold: its kind's usual length, or the fallback, past M), else null; null on
               every row while the rollout is `paused` or carries `pause_requested`, while `mainRed` stands or a
               `gitEnvHold` of scope `rollout` stands (those hold every row themselves in `next`), and while the
-              last starts do not apply. A set-aside task whose note holds a `## Needs you`
+              last starts do not apply. Each task also carries `weight` (p53-3): on a queued row, _weight's
+              {mem_gb, cores, source: {mem_gb, cores}, history}, each source `measured`, `file:repo` or
+              `built-in`; null on every other row, and shown on a paused or held rollout too (information, never
+              a hold). A set-aside task whose note holds a `## Needs you`
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
@@ -3813,8 +3816,8 @@ def _resolved_settings(rollout_note) -> dict:
     no Project root), and test_logins resolve()'s ({value, source}: the machine's declared test Logins, p37-4; value []
     with none; read from [defaults], so a note with no Project root resolves it too), and weight resolve()'s ({mem_gb,
     cores}, each {value, source}: the repo's estimated Weight, p53-3); each is None on an error. The one loader
-    _resolved_ceiling, _resolved_caps (through _root_resolved, as _weight_estimate), _retry_budget and the standing
-    approval share; it writes nothing and never raises."""
+    _resolved_ceiling and _resolved_caps (both through _root_resolved, as _weight_estimate), _retry_budget and the
+    standing approval share; it writes nothing and never raises."""
     root = _project_root(rollout_note)
 
     def failed(error, cause, where=""):
@@ -3843,10 +3846,11 @@ def _resolved_settings(rollout_note) -> dict:
 # (the note's own value is invalid: fix it), "file" (rollouts.toml was refused: fix the named line, or stamp the key),
 # "root" (the Project root is gone or its origin unreadable: stamp the key), "resolver" (it would not run: stamp it).
 def _resolved_ceiling(rollout_note):
-    """(ceiling, error, cause) for a note with no `parallel_ceiling`: _resolved_settings' parallel_ceiling. Any
-    failure is (None, error, cause), the error the resolver's own words plus the remedy that fits its cause, so
-    `next` exits 1 and status flags it; never a guessed ceiling."""
-    res = _resolved_settings(rollout_note)
+    """(ceiling, error, cause) for a note with no `parallel_ceiling`: _resolved_settings' parallel_ceiling, through
+    _root_resolved (once per process per root, the resolve the caps and the Weight share). Any failure is (None,
+    error, cause), the error the resolver's own words plus the remedy that fits its cause, so `next` exits 1 and
+    status flags it; never a guessed ceiling."""
+    res = _root_resolved(rollout_note)
     if res["settings"] is not None:
         try:
             return res["settings"]["parallel_ceiling"]["value"], None, None
@@ -9854,8 +9858,10 @@ _ROOT_RESOLVED = {}
 
 
 def _root_resolved(rollout_note) -> dict:
-    """_resolved_settings for the rollout note's Project root, once per process per root (p53-3): mark-started's caps
-    and Weight, and status's Weight, share one resolve, so land.sh runs at most once per root."""
+    """_resolved_settings for the rollout note's Project root, once per process per root (p53-3): the ceiling of a note
+    with no `parallel_ceiling` (_resolved_ceiling), the caps (_resolved_caps) and the Weight (_weight_estimate) share
+    one resolve, so mark-started and status each run land.sh at most once per root. _retry_budget, _resolved_cap and
+    the standing approval still resolve on their own."""
     key = str(_project_root(rollout_note))
     if key not in _ROOT_RESOLVED:
         _ROOT_RESOLVED[key] = _resolved_settings(rollout_note)

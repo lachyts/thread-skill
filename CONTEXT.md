@@ -871,7 +871,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: load (one of its signals), pressure (macOS's reading).
 - **Weight** — what one Rollout task is expected to use at its heaviest, in
   memory and in cores: estimated from its repo (its setting, else 3 GB and 2
-  cores) until its project and scope have three measured runs, then measured.
+  cores) until its project and scope have three measured tasks (one peak per
+  task, across its Slots), then measured.
   **Capacity** is the room the Rollouts may fill with it, so a notes task and
   an Xcode build no longer count the same (ADR 0083 d4, proposed; the Weight
   built by p53-3; p53-4 admits by it). _Avoid_: cost (a spend's), size, load.

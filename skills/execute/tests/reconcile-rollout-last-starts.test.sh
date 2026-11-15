@@ -575,6 +575,10 @@ ro; mkt w1 ro open 'scope: cross-cutting'; mkt w2 ro in_progress 'scope: cross-c
 J=$(st "$NOW_W")
 ok "$(q "$J" "$WT")" "{\"w1\":$BUILTIN,\"w2\":null}" "W1: no history, no setting: the queued row reads the built-in, the running row null"
 ok "$(lines)" 0 "W1: nothing on stderr"
+scen w1b-paused
+ro 'paused: 2026-10-03T07:00+00:00'; mkt w1 ro open 'scope: cross-cutting'
+ok "$(q "$(st "$NOW_W")" '[d["tasks"][0]["lastStart"], d["tasks"][0]["weight"]]')" "[null,$BUILTIN]" \
+  "W1: a paused rollout nulls lastStart, but the queued row still reads its Weight (information, never a hold)"
 
 scen w2-repo-setting
 ro; rooted; mkt w1 ro open 'scope: cross-cutting'
