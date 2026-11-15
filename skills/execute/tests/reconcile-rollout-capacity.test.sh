@@ -4,8 +4,10 @@
 # min(max(capacity, 1), capacity_max) takes the Trickle's (or the Away cap's) number; a missing, stale or unreadable
 # reading, or a capacity_max that will not resolve, falls back to today's Trickle and Away cap exactly, never to open.
 # While in force, Legs count behind their Leg lease (a dead Leg's lease lapses), and a lead whose Login is inside its
-# line starts nothing new (the quota hold). Every call pins HOME to its scenario's own dir and --now, and reads stdout
-# and stderr apart; the Login's env is unset unless a case sets it. Temp notes only.
+# line starts nothing new (the quota hold). A Mac fault (ADR 0083 d2: a non-empty `signals.fault`) is one stderr line
+# from `next` and `trickle.capacity.fault` from `next` and `status`, and holds nothing (C14). Every call pins HOME to
+# its scenario's own dir and --now, and reads stdout and stderr apart; the Login's env is unset unless a case sets it.
+# Temp notes only.
 # Usage: bash reconcile-rollout-capacity.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -314,6 +316,35 @@ before=$(cat "$D/$LEASES/ro.json")
 J=$(nx ro --quota-login login-a); rc=$?
 ok "$rc|$J|$(cat "$D/$LEASES/ro.json")" "2||$before" "C13: --quota-login without --dry-run: exit 2, no stdout, the lease untouched"
 has "$(err)" "--quota-login is read only with --dry-run" "C13: … naming why"
+
+# ── C14: a Mac fault is said, never obeyed (ADR 0083 d2, p53-1) ──────────────────────────────────────────────────
+scen c14-fault
+six
+FAULT_LINE="${WARN_CAP}fault: memory (held by fseventsd) — a Mac fault, never waited on"
+FAULT='{"holder":{"mem_gb":86.0,"name":"fseventsd"},"signals":["memory"]}'
+FAULT_SIGNALS='"signals": {"fault": ["memory"], "holder": {"name": "fseventsd", "mem_gb": 86.0}, "memory": 2, "freeze": []}'
+cap 5 "$MIN_AGO" "$FAULT_SIGNALS"
+J=$(nx ro)
+ok "$(q "$J" 'd["start"]')" '["r1","r2","r3","r4","r5"]' "C14: a memory fault holds nothing: five start under a Capacity of 5"
+ok "$(q "$J" "$holds")" '{"r6":"trickle: 5/5 tasks running on this Mac"}' "C14: the sixth waits on the Capacity alone"
+ok "$(q "$J" 'any("fault" in h["reason"] for h in d["hold"])')" 'false' "C14: no hold reason names the fault"
+ok "$(lines)|$(err)" "1|$FAULT_LINE" "C14: next prints one line naming the fault and its holder"
+ok "$(q "$J" 'd["trickle"]["capacity"]["fault"]')" "$FAULT" "C14: trickle.capacity.fault reports it"
+J=$(nx ro --dry-run)
+ok "$(lines)|$(err)" "1|$FAULT_LINE" "C14: --dry-run prints it too"
+cap 5 "$MIN_AGO" '"signals": {"fault": ["thermal", "memory"], "holder": {"mem_gb": 3}}'
+J=$(nx ro --dry-run)
+ok "$(err)" "${WARN_CAP}fault: thermal, memory — a Mac fault, never waited on" "C14: two faults, in the file's order; a holder with no name is not named"
+cap 5 "$MIN_AGO" '"signals": {"fault": [], "memory": 2, "freeze": []}'
+J=$(nx ro --dry-run)
+ok "$(lines)|$(q "$J" 'd["trickle"]["capacity"]["fault"]')" "0|null" "C14: fault [] prints nothing and reports null"
+cap 5 2026-10-02T13:54:00Z "$FAULT_SIGNALS"
+J=$(nx ro --dry-run)
+ok "$(lines)|$(q "$J" 'd["trickle"]["capacity"]["fault"]')" "1|null" "C14: a stale file's fault is not read: one line, null"
+has "$(err)" "${WARN_CAP}stale: " "C14: … that line the stale WARN"
+cap 5 "$MIN_AGO" "$FAULT_SIGNALS"
+J=$(st ro)
+ok "$(q "$J" 'd["trickle"]["capacity"]["fault"]')|$(lines)" "$FAULT|0" "C14: status reports trickle.capacity.fault, silently"
 
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-capacity: ALL PASS"; else echo "reconcile-rollout-capacity: FAILED"; fi
 exit "$fail"

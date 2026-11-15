@@ -1,9 +1,11 @@
 # 0083 — Capacity backs off only for strain it can relieve, and by day it protects his Mac
 
 Date: 2026-11-15
-Status: proposed. In grill with Lachy (`/grill-with-docs`, 2026-11-15); the decisions below are added as he rules
-them, and the open questions are listed at the end. Amends ADR 0067 d8 (Capacity is the limit, set automatically) and,
-through it, Chorus ADR 0104. Nothing here is built.
+Status: proposed (d2's and d12's reader built by p53-1: the restart hold and the suite stop's label follow Strain, a
+fault is said and never obeyed; the `signals.fault`/`holder`/`shares`, `budget` and slot-peaks.json contract written in
+execute away.md § Capacity; the writer is Chorus's, chorus-p109-2). In grill with Lachy (`/grill-with-docs`,
+2026-11-15); the decisions below are added as he rules them, and the open questions are listed at the end. Amends ADR
+0067 d8 (Capacity is the limit, set automatically) and, through it, Chorus ADR 0104. Nothing else here is built yet.
 
 ## Context
 

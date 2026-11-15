@@ -12,18 +12,29 @@ a fresh, well-formed file reads as no Capacity, and its callers then fall back t
                          only when fresh (else null, null, {}, {}).
     suite_stop(reading)  None, or the label of the Capacity stop (p36-10, ADR 0067 d8; verify-slot.py contract 7):
                          only for a fresh reading whose signals' CAPACITY_STOP_KEY is exactly JSON true; "memory:
-                         critical" when signals' `memory` is an integer (never a bool) >= CAPACITY_MEMORY_CRITICAL,
-                         else "capacity: stop_suites" (Chorus saw thermal trapping notifyutil did not). Any other
-                         value of the key (false, null, "true", 1, missing) is no stop and never makes the file
-                         unreadable, so it never drops C. Never raises.
+                         critical" when signals' `memory` is an integer (never a bool) >= CAPACITY_MEMORY_CRITICAL and
+                         memory is Strain (below), else "capacity: stop_suites" (Chorus saw thermal trapping notifyutil
+                         did not, or memory is a Mac fault). Any other value of the key (false, null, "true", 1,
+                         missing) is no stop and never makes the file unreadable, so it never drops C. A writer that
+                         tells Strain from a fault (ADR 0083 d2) sets stop_suites for Strain only: the flag is obeyed as
+                         written, and only its label asks whose memory it is. Never raises.
     restart_hold(reading)
                          None, or the level word of the restart hold (p39-7; verify-slot.py contract 7): the run a
-                         Capacity stop put back in line also waits while memory is at warning or worse. Only for a
-                         fresh reading whose signals' `memory` is an integer (never a bool) >= CAPACITY_MEMORY_WARN:
-                         "warning" below CAPACITY_MEMORY_CRITICAL, else "critical". It ignores stop_suites (the caller
-                         reads the stop first). `memory` is Chorus's `kern.memorystatus_vm_pressure_level`: 1 normal, 2
-                         warning, 4 critical (chorus-p96-28); a null, a bool, a string, a float or anything below 2
-                         holds nothing. Never raises.
+                         Capacity stop put back in line also waits while memory is Strain at warning or worse. Only for
+                         a fresh reading. Strain (ADR 0083 d2): while signals' CAPACITY_FAULT_KEY is a JSON list of
+                         strings (the writer tells Strain from a fault), memory is Strain only while "memory" is in
+                         signals' CAPACITY_FREEZE_KEY (a JSON list; anything else holds nothing), whatever the level;
+                         with no such key, or an ill-typed one (an older writer), it reads the raw level as before:
+                         signals' `memory` an integer (never a bool) >= CAPACITY_MEMORY_WARN. Then "critical" when
+                         `memory` is an integer of at least CAPACITY_MEMORY_CRITICAL, else "warning". It ignores
+                         stop_suites (the caller reads the stop first). `memory` is Chorus's
+                         `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical (chorus-p96-28); read
+                         raw, a null, a bool, a string, a float or anything below 2 holds nothing. Never raises.
+    fault(reading)       None, or the Mac fault a fresh reading names (ADR 0083 d2): {signals, holder} while signals'
+                         CAPACITY_FAULT_KEY is a non-empty JSON list of strings; signals is that list, holder
+                         {name, mem_gb} from signals' CAPACITY_HOLDER_KEY when it is an object with a non-empty string
+                         `name` (mem_gb a finite number, never a bool, else None), else None. It is said, never obeyed:
+                         nothing here holds or waits on it. Never raises.
     login(env)           The caller's Chorus Login name, or None: None unless env holds CLAUDE_CODE_SESSION_ID (a
                          Claude Code session; a Codex or other caller is never held, since the shell sets the pin in
                          every shell); else CLAUDE_ACCOUNT_PINNED stripped, else CLAUDE_CONFIG_DIR's basename (a
@@ -39,6 +50,7 @@ The file is ~/.config/thread/capacity.json under the home dir at call time (Path
 override, as for away.json). Chorus writes it (chorus-p96-28); a person may write it by hand.
 """
 import json
+import math
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -54,6 +66,12 @@ CAPACITY_STOP_KEY = "stop_suites"                    # signals' flag: JSON true 
 CAPACITY_MEMORY_CRITICAL = 4                         # signals' `memory` at this level or above: the stop reads memory
 CAPACITY_MEMORY_WARN = 2                             # signals' `memory` at this level or above: a Capacity-stopped
                                                      # run's restart waits (p39-7, restart_hold)
+CAPACITY_FAULT_KEY = "fault"                         # signals' list of the signals standing as a Mac fault (ADR 0083
+                                                     # d2): its presence says the writer tells Strain from a fault
+CAPACITY_FREEZE_KEY = "freeze"                       # signals' list of the signals freezing Capacity: Strain only
+                                                     # while CAPACITY_FAULT_KEY is present
+CAPACITY_HOLDER_KEY = "holder"                       # signals' {name, mem_gb}: the process a memory fault is read from
+CAPACITY_MEMORY_SIGNAL = "memory"                    # the memory signal's name in the fault and freeze lists
 
 
 def _stamp(value):
@@ -156,9 +174,30 @@ def read(now) -> dict:
     return out
 
 
+def _level(memory):
+    """Whether signals' `memory` is a level: an integer, never a bool."""
+    return isinstance(memory, int) and not isinstance(memory, bool)
+
+
+def _strain_told(signals):
+    """Whether the writer tells Strain from a Mac fault (ADR 0083 d2): signals' CAPACITY_FAULT_KEY is a JSON list of
+    strings. Absent or ill-typed reads as an older writer's file, the raw level as before."""
+    fault = signals.get(CAPACITY_FAULT_KEY)
+    return isinstance(fault, list) and all(isinstance(name, str) for name in fault)
+
+
+def _memory_strain(signals, memory):
+    """Whether memory is Strain (the module docstring's restart_hold): told, "memory" in signals' CAPACITY_FREEZE_KEY
+    (a JSON list), whatever the level; else the raw level, an integer of at least CAPACITY_MEMORY_WARN."""
+    if _strain_told(signals):
+        freeze = signals.get(CAPACITY_FREEZE_KEY)
+        return isinstance(freeze, list) and CAPACITY_MEMORY_SIGNAL in freeze
+    return _level(memory) and memory >= CAPACITY_MEMORY_WARN
+
+
 def suite_stop(reading):
     """None, or the Capacity stop's label for a fresh reading whose signals' stop_suites is JSON true (the module
-    docstring). Never raises."""
+    docstring): `memory: critical` only while memory is Strain. Never raises."""
     try:
         if reading.get("file") != "fresh":
             return None
@@ -166,7 +205,7 @@ def suite_stop(reading):
         if not isinstance(signals, dict) or signals.get(CAPACITY_STOP_KEY) is not True:
             return None
         memory = signals.get("memory")
-        if isinstance(memory, int) and not isinstance(memory, bool) and memory >= CAPACITY_MEMORY_CRITICAL:
+        if _level(memory) and memory >= CAPACITY_MEMORY_CRITICAL and _memory_strain(signals, memory):
             return "memory: critical"
         return "capacity: stop_suites"
     except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape stops nothing
@@ -174,8 +213,9 @@ def suite_stop(reading):
 
 
 def restart_hold(reading):
-    """None, or the restart hold's level word, "warning" or "critical", for a fresh reading whose signals' `memory` is
-    an integer (never a bool) of at least CAPACITY_MEMORY_WARN (the module docstring). Never raises."""
+    """None, or the restart hold's level word, "warning" or "critical", for a fresh reading whose memory is Strain
+    (the module docstring): told, "memory" in signals' freeze; else signals' `memory` an integer (never a bool) of at
+    least CAPACITY_MEMORY_WARN. Never raises."""
     try:
         if reading.get("file") != "fresh":
             return None
@@ -183,10 +223,29 @@ def restart_hold(reading):
         if not isinstance(signals, dict):
             return None
         memory = signals.get("memory")
-        if isinstance(memory, bool) or not isinstance(memory, int) or memory < CAPACITY_MEMORY_WARN:
+        if not _memory_strain(signals, memory):
             return None
-        return "critical" if memory >= CAPACITY_MEMORY_CRITICAL else "warning"
+        return "critical" if _level(memory) and memory >= CAPACITY_MEMORY_CRITICAL else "warning"
     except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape holds nothing
+        return None
+
+
+def fault(reading):
+    """None, or {signals, holder}: the Mac fault a fresh reading names (the module docstring). Said, never obeyed.
+    Never raises."""
+    try:
+        if reading.get("file") != "fresh":
+            return None
+        signals = reading.get("signals")
+        if not isinstance(signals, dict) or not _strain_told(signals) or not signals[CAPACITY_FAULT_KEY]:
+            return None
+        holder, raw = None, signals.get(CAPACITY_HOLDER_KEY)
+        if isinstance(raw, dict) and isinstance(raw.get("name"), str) and raw["name"].strip():
+            gb = raw.get("mem_gb")
+            ok = _level(gb) or (isinstance(gb, float) and math.isfinite(gb))
+            holder = {"name": raw["name"], "mem_gb": gb if ok else None}
+        return {"signals": list(signals[CAPACITY_FAULT_KEY]), "holder": holder}
+    except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape names no fault
         return None
 
 

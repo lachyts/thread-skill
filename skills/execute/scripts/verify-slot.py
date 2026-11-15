@@ -130,44 +130,48 @@ Contract.
    reads as heat-stopped and is rerun (no verdict, never red); a copy of this script from before the Heat hold
    (another rollout's Engine snapshot, an older plugin install) shares the pool and still runs hot.
    The Capacity stop (p36-10, ADR 0067 d8; execute away.md § Capacity): memory critical, read from a fresh
-   capacity.json's `signals.stop_suites` (Chorus sets it at memory critical, or at thermal trapping) through
+   capacity.json's `signals.stop_suites` (Chorus sets it at memory critical, or at thermal trapping; a writer that tells
+   Strain from a Mac fault, ADR 0083 d2, sets it for Strain only, and the flag is obeyed as written) through
    capacity_stop(), holds and stops slotted suites exactly as trapping does. While it is JSON true, no slot is free (as
    at heavy: no slot tried, no line reaped, the heartbeat kept, the head-age clock counting, a priority waiter keeping
    its waiter file; `waiting (<label>)`), and a running slotted suite is stopped at the same watch tick (the same
    HEAT_SETTLE, stop() and re-queue; `verify-slot: capacity stop (<label>): ended the suite after Ns; no verdict, never
    red: back in line to restart from the beginning once the Capacity stop clears and memory falls below warning`). The
-   label is `memory: critical` when `signals.memory` is an integer of at least 4, else `capacity: stop_suites` (Chorus
-   saw thermal trapping notifyutil did not). Its no-verdict lines name it in place of the heat: `verify-slot: no
-   verdict: stopped while the Capacity stopped suites (<label>); exit 76` and `… no verify slot within <S>s (<label>);
-   exit 76`; the Run record ends its suite `heat` and lead-integrate.py's verify reads `heat` (exit 76), so the outcome
-   vocabulary is unchanged. The heat is read first, so at heavy or worse the heat holds the wait and at trapping or
-   worse a stop is a heat stop, its lines unchanged (at heavy, below trapping, a running suite is still stopped by a
-   fresh stop_suites, with the capacity stop's line); acquire() reads capacity.json once per poll that the heat does not
-   hold, for both the stop and contract 10's eff. Fails open: a missing, stale or unreadable file, a flag that is
-   anything but JSON true, or a capacity.py that will not load stops nothing. Every capacity.json read (acquire()'s per
-   poll, and the watch's) and suite_stop() call runs with TERM, INT and HUP held (_stops_held), since capacity.py and
-   its callers here catch any exception: a stop that lands in it is delivered as it ends, so it still stops the run
-   (contract 4), never swallowed into a None reading.
-   The restart hold (p39-7), the Capacity stop's hysteresis, as the heat holds a trapping stop's restart at heavy: it
-   is armed only by a Capacity stop (acquire()'s `restart`, the last stop's hold, a label), so a fresh suite, and a run
-   a heat stop put back in line, never wait on it. Armed, each poll the heat and the stop leave free is held while that
-   same reading is fresh and its `signals.memory` an integer (never a bool) of at least CAPACITY_MEMORY_WARN (2,
-   warning), on Chorus's scale (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical; capacity.py's
-   restart_hold(), called with stops held as suite_stop() is): `waiting (memory: warning, after a capacity stop)`, or
-   `memory: critical, after a capacity stop` at 4 or more (a hand-written file with stop_suites not true), said once
-   while it holds. Its no-verdict lines name that label (`verify-slot: no verdict: stopped while the Capacity stopped
-   suites (memory: warning, after a capacity stop); exit 76`, and the slot wait's), still 76, a suite ended `heat` and
-   lead-integrate.py's `heat`. It holds no place in line (contract 5), so it never holds back a fresh suite. Fails
-   open: a missing, stale or unreadable reading, a `memory` that is null, a bool, a string, a float or below 2, or a
-   capacity.py with no restart_hold (or one that raises) holds nothing. It holds only a restart: a running suite at
-   warning is never stopped by it (Guarded.watch() still stops on stop_suites alone). Residuals: a fresh suite may
-   still start at warning and tip the Mac critical (it is then stopped and restart-held); a stop Chorus raised for
-   thermal trapping (`capacity: stop_suites`) gets the memory hold only (the heat, read first here, still holds its
-   restart at heavy); `status` shows no trace of a restart-held run (it holds no entry by design, so its own waiting
-   line is the view); a priority re-queue's entry-time waiter file lives until its first poll's reading (milliseconds:
-   a fresh run that scans then waits one more poll); and a copy of this script from before p39-7 still cycles stop
-   and restart (each no verdict, bounded by its one slot-wait deadline), and one from before p36-10 shares the pool
-   and never stops for memory.
+   label is `memory: critical` when `signals.memory` is an integer of at least 4 and memory is Strain (with
+   `signals.fault` present, "memory" in `signals.freeze`; else the raw level, as before), else `capacity: stop_suites`
+   (Chorus saw thermal trapping notifyutil did not, or memory is a Mac fault). Its no-verdict lines name it in place of
+   the heat: `verify-slot: no verdict: stopped while the Capacity stopped suites (<label>); exit 76` and `… no verify
+   slot within <S>s (<label>); exit 76`; the Run record ends its suite `heat` and lead-integrate.py's verify reads
+   `heat` (exit 76), so the outcome vocabulary is unchanged. The heat is read first, so at heavy or worse the heat holds
+   the wait and at trapping or worse a stop is a heat stop, its lines unchanged (at heavy, below trapping, a running
+   suite is still stopped by a fresh stop_suites, with the capacity stop's line); acquire() reads capacity.json once per
+   poll that the heat does not hold, for both the stop and contract 10's eff. Fails open: a missing, stale or unreadable
+   file, a flag that is anything but JSON true, or a capacity.py that will not load stops nothing. Every capacity.json
+   read (acquire()'s per poll, and the watch's) and suite_stop() call runs with TERM, INT and HUP held (_stops_held),
+   since capacity.py and its callers here catch any exception: a stop that lands in it is delivered as it ends, so it
+   still stops the run (contract 4), never swallowed into a None reading.
+   The restart hold (p39-7), the Capacity stop's hysteresis, as the heat holds a trapping stop's restart at heavy: it is
+   armed only by a Capacity stop (acquire()'s `restart`, the last stop's hold, a label), so a fresh suite, and a run a
+   heat stop put back in line, never wait on it. Armed, each poll the heat and the stop leave free is held while that
+   same reading is fresh and memory is Strain at warning or worse: with `signals.fault` present (ADR 0083 d2, the writer
+   tells Strain from a Mac fault), while "memory" is in `signals.freeze`, so a memory fault holds nothing; with no
+   `signals.fault` (an older writer), while its `signals.memory` is an integer (never a bool) of at least
+   CAPACITY_MEMORY_WARN (2, warning), on Chorus's scale (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4
+   critical; capacity.py's restart_hold(), called with stops held as suite_stop() is): `waiting (memory: warning, after
+   a capacity stop)`, or `memory: critical, after a capacity stop` at 4 or more (a hand-written file with stop_suites
+   not true), said once while it holds. Its no-verdict lines name that label (`verify-slot: no verdict: stopped while
+   the Capacity stopped suites (memory: warning, after a capacity stop); exit 76`, and the slot wait's), still 76, a
+   suite ended `heat` and lead-integrate.py's `heat`. It holds no place in line (contract 5), so it never holds back a
+   fresh suite. Fails open: a missing, stale or unreadable reading, a raw `memory` that is null, a bool, a string, a
+   float or below 2, a `signals.freeze` that is missing or no list while `signals.fault` is present, or a capacity.py
+   with no restart_hold (or one that raises) holds nothing. It holds only a restart: a running suite at warning is never
+   stopped by it (Guarded.watch() still stops on stop_suites alone). Residuals: a fresh suite may still start at warning
+   and tip the Mac critical (it is then stopped and restart-held); a stop Chorus raised for thermal trapping (`capacity:
+   stop_suites`) gets the memory hold only (the heat, read first here, still holds its restart at heavy); `status` shows
+   no trace of a restart-held run (it holds no entry by design, so its own waiting line is the view); a priority
+   re-queue's entry-time waiter file lives until its first poll's reading (milliseconds: a fresh run that scans then
+   waits one more poll); and a copy of this script from before p39-7 still cycles stop and restart (each no verdict,
+   bounded by its one slot-wait deadline), and one from before p36-10 shares the pool and never stops for memory.
 8. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
    such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
    suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
@@ -919,8 +923,9 @@ def _suite_stop(reading):
 
 def _restart_hold(reading):
     """The restart hold's label (contract 7, p39-7), `memory: <warning|critical>, after a capacity stop`, from
-    capacity.py's restart_hold(reading), else None. Never raises (a capacity.py with no restart_hold, or one that
-    raises, holds nothing), but a stop that lands meanwhile is held across the call and raised as it ends
+    capacity.py's restart_hold(reading), else None: it follows Strain ("memory" in `signals.freeze` while
+    `signals.fault` is present, ADR 0083 d2; else the raw level). Never raises (a capacity.py with no restart_hold, or
+    one that raises, holds nothing), but a stop that lands meanwhile is held across the call and raised as it ends
     (_stops_held), never swallowed."""
     if reading is None:
         return None
@@ -933,10 +938,10 @@ def _restart_hold(reading):
 
 
 def capacity_stop(reading=None):
-    """The Capacity stop (contract 7): None, or its label (`memory: critical`, or `capacity: stop_suites` when Chorus
-    saw thermal trapping notifyutil did not) while a fresh capacity.json's `signals.stop_suites` is JSON true. With no
-    `reading` it reads the file itself. Fails open: a missing, stale or unreadable file, any other value of the flag, or
-    a capacity.py that will not load is None."""
+    """The Capacity stop (contract 7): None, or its label (`memory: critical` while memory is Strain, or `capacity:
+    stop_suites` when Chorus saw thermal trapping notifyutil did not, or memory is a Mac fault, ADR 0083 d2) while a
+    fresh capacity.json's `signals.stop_suites` is JSON true. With no `reading` it reads the file itself. Fails open: a
+    missing, stale or unreadable file, any other value of the flag, or a capacity.py that will not load is None."""
     return _suite_stop(reading if reading is not None else _capacity_reading())
 
 

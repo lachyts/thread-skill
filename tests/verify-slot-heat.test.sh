@@ -34,7 +34,9 @@
 #   The restart hold (p39-7, verify-slot.py contract 7): after a Capacity stop the re-queue also waits while a fresh
 #   reading's `signals.memory` is an integer of at least 2 (warning), as the heat holds a trapping stop's restart at
 #   heavy; a fresh suite, and a heat stop's re-queue, never wait on it. M0 also pins capacity.py's restart_hold() and
-#   verify-slot's _restart_hold() (fail-open)   MS … a TERM inside restart_hold() is raised, never swallowed
+#   verify-slot's _restart_hold() (fail-open), and ADR 0083 d2 (p53-1): with `signals.fault` present the hold and the
+#   stop's `memory: critical` label follow Strain ("memory" in `signals.freeze`), a fault holding nothing, and
+#   capacity.py's fault()   MS … a TERM inside restart_hold() is raised, never swallowed
 #   MR the hold's unit harness on acquire(): a restart-held poll drops the line entry or waiter file before its waiting
 #   line, a priority waiter registers again (an OSError there waits unregistered with a WARN), its slot-wait deadline
 #   names it, and a fresh or heat re-queue is never held   M6 a capacity stop, then memory at warning: the restart waits
@@ -527,13 +529,14 @@ ok "$(recq "$D/events" ro "$PAIRS")" '[["suite-started",null,null,null],["suite-
   "L8: the heat-stopped pass ends its suite heat (step verifier); the re-queued pass is a suite of its own, green"
 
 # ======== M0–ML2: the Capacity stop (p36-10, ADR 0067 d8; verify-slot.py contract 7) =============================
-# capjson <home> <stop_suites JSON> [memory JSON] [age in minutes]: <home>'s capacity.json, written atomically (a temp
-# file and a rename), its written_at now (or <age> minutes ago: 20 is stale), capacity 4 (above --slots 1: no lowering).
+# capjson <home> <stop_suites JSON> [memory JSON] [age in minutes] [more signals]: <home>'s capacity.json, written
+# atomically (a temp file and a rename), its written_at now (or <age> minutes ago: 20 is stale), capacity 4 (above
+# --slots 1: no lowering); [more signals] are extra JSON members inside `signals` (ADR 0083's `fault`, `freeze`).
 capjson() {
-  local h=$1 stop=$2 mem=${3:-4} age=${4:-0} at
+  local h=$1 stop=$2 mem=${3:-4} age=${4:-0} more=${5:-} at
   at=$(python3 -c 'import sys, datetime as d; print((d.datetime.now(d.timezone.utc) - d.timedelta(minutes=int(sys.argv[1]))).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$age")
   mkdir -p "$h/.config/thread"
-  printf '{"capacity": 4, "written_at": "%s", "signals": {"stop_suites": %s, "memory": %s}}\n' "$at" "$stop" "$mem" > "$h/.config/thread/capacity.json.tmp"
+  printf '{"capacity": 4, "written_at": "%s", "signals": {"stop_suites": %s, "memory": %s%s}}\n' "$at" "$stop" "$mem" "${more:+, $more}" > "$h/.config/thread/capacity.json.tmp"
   mv "$h/.config/thread/capacity.json.tmp" "$h/.config/thread/capacity.json"
 }
 caprm() { rm -f "$1/.config/thread/capacity.json"; }
@@ -581,6 +584,18 @@ capjson "$HOME" false 2; ok "$(rh)" "memory: warning, after a capacity stop" "M0
 capjson "$HOME" false 4; ok "$(rh)" "memory: critical, after a capacity stop" "M0: … memory 4 with stop_suites false (a hand-written file) the critical label"
 capjson "$HOME" false 1; ok "$(rh)" None "M0: … memory 1 (normal) holds nothing"
 capjson "$HOME" false 2 20; ok "$(rh)" None "M0: … a stale memory 2 holds nothing (fail open)"
+# Strain and a Mac fault (ADR 0083 d2, p53-1): with `signals.fault` present the restart hold and the stop's memory label
+# follow Strain, "memory" in `signals.freeze`; with no `fault` key (every row above) they read the raw level as before.
+capjson "$HOME" false 2 0 '"fault": ["memory"], "freeze": []'
+ok "$(rh)|$(cs)" "None|None" "M0: a memory fault at warning (fault [memory], freeze []): no restart hold and no stop"
+capjson "$HOME" false 2 0 '"fault": ["memory"], "freeze": ["memory"]'
+ok "$(rh)" "memory: warning, after a capacity stop" "M0: … memory 2 with memory in signals.freeze (Strain): the warning label"
+capjson "$HOME" false 4 0 '"fault": ["memory"], "freeze": ["memory"]'
+ok "$(rh)" "memory: critical, after a capacity stop" "M0: … memory 4 with memory in signals.freeze: the critical label"
+capjson "$HOME" true 4 0 '"fault": ["memory"], "freeze": ["thermal"]'
+ok "$(cs)" "capacity: stop_suites" "M0: a thermal Strain stop while memory 4 is a fault: capacity: stop_suites, never memory: critical"
+capjson "$HOME" true 4 0 '"fault": [], "freeze": ["memory"]'
+ok "$(cs)" "memory: critical" "M0: a memory Strain stop at 4 (fault [], memory in signals.freeze): memory: critical"
 ok "$(rh "$D/lacks/verify-slot.py")" None "M0: a capacity.py with no restart_hold: no restart hold (fail open)"
 mkdir -p "$D/raises"
 printf 'def read(now):\n    return {"file": "fresh", "signals": {"stop_suites": False, "memory": 2}}\ndef restart_hold(reading):\n    raise ValueError("boom")\n' > "$D/raises/capacity.py"
@@ -603,6 +618,23 @@ cases = [None, {"file": "stale", "signals": {"memory": 4}}, f("x"), f({})] + [f(
 print(*[m.restart_hold(c) for c in cases], m.CAPACITY_MEMORY_WARN)' "$CP")" \
   "None None None None None None None None None warning warning critical critical 2" \
   "M0: restart_hold: None for no, a stale or an ill-shaped reading and a memory null, bool, 1, string or float; warning at 2 and 3, critical at 4 or more; the warning level 2"
+ok "$("$PY" -c 'import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+f = lambda **s: {"file": "fresh", "signals": {"memory": 2, **s}}
+older = [f(fault=v) for v in ("memory", None, [1], {"memory": 1})]
+told = [f(fault=[]), f(fault=[], freeze="memory"), f(fault=["memory"], freeze=["unread:memory"]), f(fault=[], freeze=["memory"], memory=None)]
+print(*[m.restart_hold(c) for c in older + told], m.suite_stop(f(fault="memory", stop_suites=True, memory=4)), m.CAPACITY_FAULT_KEY, m.CAPACITY_FREEZE_KEY)' "$CP")" \
+  "warning warning warning warning None None None warning memory: critical fault freeze" \
+  "M0: restart_hold: an ill-typed fault (a string, null, a list of a non-string, an object) reads as an older writer's raw level; told, a freeze that is missing, a string or holds only unread:memory holds nothing, and memory in it with no level is the warning word; suite_stop's label as before for an ill-typed fault"
+ok "$("$PY" -c 'import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("cap", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+f = lambda **s: {"file": "fresh", "signals": s}
+cases = [None, {"file": "stale", "signals": {"fault": ["memory"]}}, f(memory=2), f(fault=[]), f(fault="memory"),
+         f(fault=["memory"], holder={"name": "fseventsd", "mem_gb": 86.0}), f(fault=["memory"], holder={"name": 5, "mem_gb": 1}),
+         f(fault=["memory", "thermal"], holder={"name": "x", "mem_gb": True}), f(fault=["memory"], holder="fseventsd")]
+print(";".join(json.dumps(m.fault(c), sort_keys=True) for c in cases))' "$CP")" \
+  'null;null;null;null;null;{"holder": {"mem_gb": 86.0, "name": "fseventsd"}, "signals": ["memory"]};{"holder": null, "signals": ["memory"]};{"holder": {"mem_gb": null, "name": "x"}, "signals": ["memory", "thermal"]};{"holder": null, "signals": ["memory"]}' \
+  "M0: fault(): None for no, a stale, an untold or an empty-fault reading; the signals and holder while a fault stands (a holder with no string name is none, a bool mem_gb none)"
 export HOME="$H0"
 
 # M1: a fresh stop: no slot; a TERM exits 76.
