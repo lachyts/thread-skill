@@ -190,7 +190,7 @@ since is no drift, and under a refused file no task drifts.
 `{ slug, started, merged, durationMinutes }` sorted by start, plus `elapsedLabel`, `avgTaskMinutes`,
 `remainingLabel` (always a `~… (rough)` figure: the mean task duration × the chunks of running + queued tasks at
 the rollout's limit: its ceiling, or the Trickle's (the Away cap's) room left on this Mac, at least 1: `etaWidth`,
-`etaBy` `ceiling`, `trickle` or `away cap`) and `complete`. The stamps are durable frontmatter, so it renders **without any workflow run
+`etaBy` `ceiling`, `trickle` or `away cap`, or `memory` or `cores` when a Capacity budget's Weight binds it, p53-4) and `complete`. The stamps are durable frontmatter, so it renders **without any workflow run
 being alive**. `null` when no task has a `started:` stamp. `progress` is the one-line summary the lead
 relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed,
 ~45m remaining (rough)`.
@@ -482,7 +482,10 @@ are its C, so the line reads `Capacity <limit>` in place of `N <limit>` (and of 
 count elsewhere naming each open serial chain too, its Leg claims behind its Leg lease, or 1 for its session behind a
 fresh one (ADR 0076 d3: a Leg counts from its session's start, so a Leg between claims reads 1), and appends
 `· capacity.json fresh (C <limit> of max <max>)`; a `stale` or `unreadable` reading, or a fresh one with `maxWhy`,
-appends `· capacity.json <file>: <why>, read as the Trickle`; a missing one adds nothing. Status reads no quota (its
+appends `· capacity.json <file>: <why>, read as the Trickle`; a missing one adds nothing. While a budget admits
+(`trickle.capacity.weight` present, ADR 0083 d4, p53-4), `limit` and `awayCap` are capacity_max, the hard count, so the
+line reads `Capacity <limit>` the same way, and appends `· budget <budget.mem_gb> GB, <budget.cores> cores (held
+<running.mem_gb> GB, <running.cores> cores)` from `trickle.capacity.weight`. Status reads no quota (its
 session is not the lead's). While `trickle.capacity.fault` is non-null (a Mac fault, ADR 0083 d2), one line follows
 the Trickle line, before the Moving line: `Mac fault: <signals, comma-joined> (<holder.name>, <holder.mem_gb> GB) · read
 from capacity.json, never waited on` (the parenthesis dropped when `holder` is null, and `, <mem_gb> GB` when `mem_gb`
@@ -621,7 +624,8 @@ merge hold is no item: the Review required flag routes it (action 10). A cooling
 
 **Timing.** It comes from `timeline`, and the estimate is always rough: render it exactly as labelled
 (`~50m remaining (rough)`), never as a precise figure. Its chunks are the rollout's limit (`etaWidth`, by
-`etaBy`): by day under the Trickle that can be narrower than the ceiling. With no merged task yet (`avgTaskMinutes` null) show
+`etaBy`): by day under the Trickle that can be narrower than the ceiling, and under a Capacity budget `etaBy` may read
+`memory` or `cores`, the part its Weight fills first. With no merged task yet (`avgTaskMinutes` null) show
 elapsed only; `complete: true` → show the total instead ("completed in 2h 10m"); `timeline: null` → no timing
 line at all.
 

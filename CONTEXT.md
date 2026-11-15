@@ -861,8 +861,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reading's `stop_suites` (memory critical) also holds and stops slotted
   suites, as the **Heat hold** does, and a stopped suite restarts only once
   memory **Strain** falls below warning. A Leg's wait for room is a `wait` of
-  kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
-  mechanism), throttle.
+  kind `capacity` (or `quota`), never a **Rank wait**. While the reading carries
+  a budget of memory and cores, a start fits by its **Weight** against it, with
+  `capacity_max` as the hard count behind it and one task always fitting an
+  empty Mac (ADR 0083 d4, DfL 11, 13, 14; built by p53-4). _Avoid_: governor
+  (the mechanism), throttle.
 - **Strain** — what **Capacity** yields to: pressure on the Mac that running
   fewer tasks would lift. By day it is strain from anything, Lachy's own apps
   included, so the Mac stays his; while he is **Away** it is only the strain
@@ -875,7 +878,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   task, across its Slots), then measured.
   **Capacity** is the room the Rollouts may fill with it, so a notes task and
   an Xcode build no longer count the same (ADR 0083 d4, proposed; the Weight
-  built by p53-3; p53-4 admits by it). _Avoid_: cost (a spend's), size, load.
+  built by p53-3; `next` and a Leg's claim admit by it, built by p53-4).
+  _Avoid_: cost (a spend's), size, load.
 - **Mac fault** — pressure on the Mac that running fewer tasks cannot lift
   (a system process holding most of the memory). Never **Strain**: it does not
   lower or freeze **Capacity**, and it is repaired, by a reset of that process

@@ -138,9 +138,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      Away state file's reading), by? (capacity: p36-7, n is the Capacity's, never the Trickle's),
                      budget? (mem_gb and cores, numbers above 0: the Capacity's budget while it is in force, p53-2),
                      weight? (mem_gb and cores, numbers above 0: the task's Weight, p53-2; p53-3: measured,
-                     else the repo's setting, else the built-in)}
-                     (away, n and file, plus the optional by, budget and weight, and no other key; p29-8, ADR 0049: the
-                     cap the Slot started under, so a Reflection tunes it)
+                     else the repo's setting, else the built-in), max? (int >= 1: capacity_max, the hard count
+                     behind the budget, written only while the budget admitted the Slot, p53-4; n stays C, and a
+                     line from before p53-4 carries budget with no max, since C admitted it)}
+                     (away, n and file, plus the optional by, budget, weight and max, and no other key; p29-8, ADR
+                     0049: the cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
                      reconciledAt? (a UTC Z stamp); peak? (mem_gb and cores, finite numbers of at least 0: the tree's
@@ -183,6 +185,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      the Heat hold, execute away.md § Heat | hold-quota: a row waits while the lead's Login is
                      inside its line, the quota hold, p36-7, execute away.md § Capacity | hold-surface: a surface
                      wait holds every launch until the rollout's own Surface re-check passes, P41-3, execute § 4.5);
+                     bound? (count | memory | cores | memory and cores: while the budget admits, p53-4, on
+                     hold-trickle and hold-away-cap only, which bound held the row: the hard count, else the parts
+                     its Weight did not fit);
                      free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
@@ -384,7 +389,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      the verify-slot wait), running? (an int >= 0: the Mac-wide count of running Rollout tasks; while
                      Capacity is in force (p36-9) each open serial chain counts too, its Leg claims behind its Leg
                      lease, or 1 for its session behind a fresh one (ADR 0076 d3: a Leg counts from its session's
-                     start), so an idle Leg between claims adds 1 with no task running). A task is optional: a
+                     start), so an idle Leg between claims adds 1 with no task running), runningWeight? (mem_gb and
+                     cores, finite numbers of at least 0: while the budget admits, p53-4, the Weight those tasks hold,
+                     plus the suite's own where no Slot holds it: an integration or race suite's task at its latest
+                     slot-taken cap.weight, else the built-in; a completion suite at the built-in; record-only, so
+                     an Integration, race or completion suite holds no room at admission). A task is optional: a
                      completion suite has none.
   suite-ended        suite, by, runner (as suite-started), outcome (green | red | timeout | stopped | unrun | noslot |
                      heat: the Heat hold, verify-slot.py contract 7, or its Capacity stop (memory critical, a fresh
@@ -392,8 +401,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      slot wait), seconds (>= 0: the run, after any slot wait); load?, rc? (an int 0-255, never on noslot
                      or heat), failing? (at most 50 names of at most 200 characters each, read from the run's output on
                      red or timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
-                     verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running? (as
-                     suite-started).
+                     verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running?,
+                     runningWeight? (as suite-started).
   time-lost          id, source, since, until; month?, reflection?, hours?, recorded?, rank?, top?, byCause?, rollouts?,
                      other?, events?, streak?, audit?, ranges?, cites? (p29-11, ADR 0051: the Time-lost ledger, one line
                      per (Reflection, source), reflect.py `ledger` its one writer; skills/reflect/scripts/ledger.py's
@@ -519,7 +528,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   reconcile's clock.
 - Weight and peak (p53-2, ADR 0083 d4). A slot-taken's `cap.weight` is the Weight the task started with (p53-3: the
   upper quartile of its project and kind's per-task peaks once 3 tasks have one, else the repo's setting, else the
-  built-in 3 GB and 2 cores), and `cap.budget` the Capacity's budget while it was in force. A slot-freed's `peak` is
+  built-in 3 GB and 2 cores), and `cap.budget` the Capacity's budget while it was in force. `cap.max` (p53-4) is
+  capacity_max, the hard count behind the budget, on a Slot the budget admitted: its presence, never `budget`'s, says
+  the budget admitted (p53-2 and p53-3 recorded `budget` while C admitted), and `n` stays C. A slot-freed's `peak` is
   Chorus's slot-peaks.json entry for the task tree (execute away.md § Capacity), copied at the reconcile that ends the
   Slot: the tree's highest sample since that entry began. One tree serves every Slot of its task (ADR 0030), and Chorus
   keeps an entry 24 hours after its last sample, so a re-taken task's peak (a seeded revise, a restart) may cover its
@@ -818,16 +829,18 @@ def _room(positive):
 
 
 CAP_ROOM = _room(True)   # slot-taken cap's budget and weight (p53-2)
-CAP_KEYS = {"away", "n", "file", "by", "budget", "weight"}   # away, n and file required; the rest optional
+IDLE_BOUNDS = ("count", "memory", "cores", "memory and cores")   # idle-slots' bound (p53-4)
+CAP_KEYS = {"away", "n", "file", "by", "budget", "weight", "max"}   # away, n and file required; the rest optional
 
 
 def _cap(v):
     """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file}, plus an optional `by`
     (p36-7: "capacity" when the Capacity's C set n, so a Reflection never reads it as the Trickle) and, p53-2, an
     optional `budget` (the Capacity's budget while it is in force) and `weight` (the task's Weight), each a room of
-    mem_gb and cores above 0 (_room), and no other key."""
+    mem_gb and cores above 0 (_room), and, p53-4, an optional `max` (an int >= 1: capacity_max, the hard count, only
+    while the budget admitted the Slot; its presence marks a budget-admitted Slot), and no other key."""
     if not isinstance(v, dict) or not {"away", "n", "file"} <= set(v) <= CAP_KEYS:
-        return "an object of exactly away, n and file, and an optional by, budget and weight"
+        return "an object of exactly away, n and file, and an optional by, budget, weight and max"
     if "by" in v and v["by"] not in CAP_BY:
         return "an object with by one of %s" % ", ".join(CAP_BY)
     for k in ("budget", "weight"):
@@ -837,6 +850,8 @@ def _cap(v):
         return "an object with away true or false"
     if _int(1)(v["n"]):
         return "an object with n an integer >= 1"
+    if "max" in v and _int(1)(v["max"]):
+        return "an object with max an integer >= 1"
     if v["file"] not in CAP_FILES:
         return "an object with file one of %s" % ", ".join(CAP_FILES)
     return None
@@ -1651,7 +1666,8 @@ KINDS = {
                                            "hold-surface",
                                            "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
                                            "hold-away-cap", "hold-last-start", "hold-quota"),
-                           "free": _int(0), "settings": SETTINGS}, {}),
+                           "free": _int(0), "settings": SETTINGS},
+                   {"bound": _enum(*IDLE_BOUNDS)}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
     "away-night": (False, {"morning": _stampz}, {}),
     "last-start-held": (True, {"morning": _stampz, "scope": _str, "history": _int(0)}, {"usualMinutes": _int(1)}),
@@ -1740,11 +1756,12 @@ KINDS = {
                 {"at": _stampz, "boot": _stampz, "wake": _stampz, "reason": _short(REASON_MAX)}),
     "lead-entry": (False, {"by": _enum(*ENTRY_BYS)}, {"session": _str, "stop": _enum(*ENTRY_STOPS)}),
     "suite-started": (False, dict(SUITE_REQUIRED, sha=_str, dirty=_bool),
-                      {"load": _load3, "diff": _hex12, "waited": _seconds, "running": _int(0)}),
+                      {"load": _load3, "diff": _hex12, "waited": _seconds, "running": _int(0),
+                       "runningWeight": _room(False)}),
     "suite-ended": (False, dict(SUITE_REQUIRED, outcome=_enum(*SUITE_OUTCOMES), seconds=_seconds),
                     {"load": _load3, "rc": _int(0, 255), "failing": _names(MAX_FAILING, FAILING_NAME),
                      "timeout": _seconds, "step": _enum(*SUITE_STEPS), "sha": _str, "waited": _seconds,
-                     "running": _int(0)}),
+                     "running": _int(0), "runningWeight": _room(False)}),
     # ADR 0067 d6: hooks/vault-note-overlap.py, one line per warned Note overlap, in overlaps.jsonl.
     "note-overlap": (True, {"note": _short(400), "holderRollout": _slug, "holderTask": _slug},
                      {"holderSince": _stampz, "tool": _enum("Edit", "Write", "MultiEdit"), "via": _enum("agent", "leg")}),

@@ -696,7 +696,15 @@ and a Capacity wait's start and renewals (`moving` reads an open Leg's waiting l
 the open Leg by begin (any begin that runs it), next (its own session only), claim, wait, smoke, done, security,
 set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its last write, or
 LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback nothing is gated
-and nothing counts; the lease is still written.
+and nothing counts; the lease is still written. While the reading also carries a budget (p53-4, ADR 0083 d4; rr's
+_budget_on) a fresh claim fits by its Weight too (leg_weight: the row's kind's measured Weight, else the repo's
+estimate, computed before the trickle claim lock; claim computes it under the rollout's lock and the rank lock):
+rr.capacity_gate reads this chain's own room (its claims times the lease's `weight`, or the built-in for its session
+alone), its need beyond that, the weighted share (a waiting Leg is a weight-only contender, held 0) and one task always
+fits on a Mac its turn leaves empty; a claim whose need is 0 in both parts is never held by the weight. A claim that
+finds room writes its Weight as the lease's `weight`, every renewal carries it forward (leg_lease), a fresh claim with
+no Weight (no budget, or the fallback) writes the lease without one (LEASE_DROP_WEIGHT), and an idle session weighs the
+built-in in every view, whatever its last claim weighed; a waiting record carries the Weight too.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
@@ -1479,18 +1487,47 @@ def next_json(plan):
 # ---- the Capacity and the Leg lease (p36-7, ADR 0067 d8; execute away.md § Capacity) --------------------------
 
 CAPACITY_WAIT_REFRESH = 600   # a capacity wait re-records its waiting record and renews its lease this often (s)
+LEASE_DROP_WEIGHT = object()  # leg_lease's `weight` for a fresh claim with no Weight: the lease is written without one
 
 
-def leg_lease(ctx, leg, waiting=False, strict=False):
+def leg_lease(ctx, leg, waiting=False, strict=False, weight=None):
     """Write this Leg's lease (the module docstring's *The Leg lease*): rr._lease_write(<rollout>, now, "leg"), with
     `waiting: true` from `next --waiting`, off --dry-run, only for an open Leg (`leg`, my_leg's or the chain's). strict
     (`next`'s rule): only when this session is the Leg's own, both ids known and equal, so an `unknown` caller never
-    renews a dead Leg. Best-effort: a write that fails prints rr's one `lease: warning:` line."""
+    renews a dead Leg. `weight` (p53-4): a fresh claim's Weight under the budget (claim_save), written as the lease's
+    `weight`; LEASE_DROP_WEIGHT, a fresh claim with none (no budget, or the fallback), writes the lease without one,
+    so no earlier claim's Weight outlives the claim it weighed; with None (a renewal, or an inherited claim) the lease's
+    own valid `weight` is carried forward, so a claim in progress keeps its Weight across every renewal, and a lease
+    never weighted stays unweighted (a weight left from an ended claim is never read: an idle session weighs the
+    built-in, and the next claim, weighted or not, replaces it). Best-effort: a write that fails prints rr's one
+    `lease: warning:` line."""
     if ctx.dry or leg is None or leg.get("closed") is not None:
         return
     if strict and (ctx.session == "unknown" or leg.get("session") in (None, "unknown") or leg["session"] != ctx.session):
         return
-    rr._lease_write(ctx.slug, ctx.now, "leg", waiting=waiting)
+    if weight is LEASE_DROP_WEIGHT:
+        weight = None
+    elif weight is None:
+        weight = rr._lease_read(ctx.slug)[6]
+    rr._lease_write(ctx.slug, ctx.now, "leg", waiting=waiting, weight=weight)
+
+
+def leg_weight(ctx, row, chain=None):
+    """A claim's Weight (p53-4, ADR 0083 d4): rr._weight over the past peaks of this rollout's project and the row's
+    kind (its `scope:`, else unscoped) and the repo's estimate, as status and mark-started compute it, as a room
+    {mem_gb, cores}. The estimate (whose resolve may run land.sh once per root) and the peaks (file reads) are read once
+    per ctx and cached on it, so a wait computes it once. Read only while the budget admits, and always before the
+    trickle claim lock (claim computes it under the rollout's lock and the rank lock, as it runs the bases' git)."""
+    cache = getattr(ctx, "_leg_weights", None)
+    if cache is None:
+        chain = chain or Chain(ctx)
+        cache = ctx._leg_weights = {
+            "estimate": rr._weight_estimate(chain.note),
+            "peaks": rr._past_peaks(rr._project(chain.note), ctx.rollout, chain.note, rr._note_index(ctx.tasks),
+                                    ctx.now)}
+    kind = rr._kind(row.note) if row is not None and row.note is not None else rr.UNSCOPED_KIND
+    w = rr._weight(cache["peaks"].get(kind, {}), cache["estimate"])
+    return rr._weight_room({p: w[p] for p in rr.WEIGHT_PARTS}) or dict(rr.WEIGHT_BUILT_IN)
 
 
 def leg_mine(chain):
@@ -1503,11 +1540,15 @@ def leg_gate(ctx, chain, plan, quota=True):
     `quota` (rr.capacity_gate, read-only and lock-free): {action: wait, kind, task, row, why (the hold's prefix line),
     on: null, token: null, landFirst: [], stalled: false, lands: [], capacity, fix, held, setAside, claims}. Every other
     plan passes untouched, and so does a claim while Capacity is not in force (gate None for a plan it never reads).
-    quota: the caller's own Login is read (next, begin, wait); False reads the Capacity alone (status)."""
+    quota: the caller's own Login is read (next, begin, wait); False reads the Capacity alone (status). The reads
+    (rr.capacity_reads) come first, and the claim's Weight (leg_weight) is computed only while the budget admits
+    (p53-4), passed with the row's slug for the weight's hold line."""
     if plan.get("action") != "claim":
         return plan, None
-    g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1,
-                         quota_env=os.environ if quota else None)
+    reads = rr.capacity_reads(ctx.now, quota_env=os.environ if quota else None)
+    w = leg_weight(ctx, plan["row"], chain) if rr._budget_on(reads["state"]) is not None else None
+    g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1, reads=reads, weight=w,
+                         task=plan["row"].slug)
     if not g["held"]:
         return plan, g
     r = plan["row"]
@@ -2252,16 +2293,19 @@ def cmd_wait(ctx, a):
             return done(ch, plan, flipped=out["flipped"] or plan["kind"] != kind)
 
 
-def capacity_record(ctx, kind, warns):
+def capacity_record(ctx, kind, warns, row=None):
     """A Capacity wait's waiting record (p36-7): under the trickle claim lock alone (never with the rollout's lock or
     the rank lock), one fresh rr.capacity_gate read and its claims write: kind `capacity` records this chain waiting
     (want 1) while the gate still holds it, anything else drops its record. Its child-process reads (rr.capacity_reads)
-    and this chain's count are taken before the lock. A lock not taken within THREAD_NOTE_LOCK_TIMEOUT (30 s) adds one
-    `warns` entry and the wait reads on, read-only. Never under --dry-run."""
+    and this chain's count are taken before the lock, and so is the claim's Weight (leg_weight, `row`'s, only while
+    the budget admits, p53-4), which the record carries. A lock not taken within THREAD_NOTE_LOCK_TIMEOUT (30 s) adds
+    one `warns` entry and the wait reads on, read-only. Never under --dry-run."""
     if ctx.dry:
         return
     reads = rr.capacity_reads(ctx.now, quota_env=os.environ)
-    mine = leg_mine(Chain(ctx))
+    chain = Chain(ctx)
+    mine = leg_mine(chain)
+    w = leg_weight(ctx, row, chain) if row is not None and rr._budget_on(reads["state"]) is not None else None
     lock = rr._note_lock(lock_path=rr._trickle_paths()[0], label="trickle claim lock")
     try:
         lock.__enter__()
@@ -2269,10 +2313,11 @@ def capacity_record(ctx, kind, warns):
         warns.append(f"{rr.TRICKLE_WARN} {e} — this Leg's waiting record is not written; the wait reads on")
         return
     try:
-        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads)
-        w = g["write"]("waiting" if kind == "capacity" and g["held"] and g["kind"] == "capacity" else "drop")
-        if w:
-            warns.append(w)
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads, weight=w,
+                             task=row.slug if row is not None else None)
+        line = g["write"]("waiting" if kind == "capacity" and g["held"] and g["kind"] == "capacity" else "drop")
+        if line:
+            warns.append(line)
     finally:
         lock.__exit__(None, None, None)
 
@@ -2286,10 +2331,10 @@ def capacity_wait(ctx, a, r, kind, check, on_t, done, out, base_now, t0, lg):
     re-recording and renewing the Leg lease, `waiting: true` again, every CAPACITY_WAIT_REFRESH seconds (under
     TRICKLE_WAIT_TTL, so a lead on an older snapshot that dropped the record loses it for at most that long). It ends
     `cleared: true` once next is no `wait` on t (room), `flipped` when the kind changes, or when --for runs out; never
-    `stalled`."""
+    `stalled`. The claim's Weight (p53-4, leg_weight on `r`) is computed once per wait, cached on ctx."""
     warns = out["warns"]
     leg_lease(ctx, lg, waiting=True)   # P41-4: a Capacity wait from its start, so `moving` reads it `waiting`
-    capacity_record(ctx, kind, warns)
+    capacity_record(ctx, kind, warns, r)
     refreshed = time.monotonic()
     ch, lg, plan = check()
     while True:
@@ -2305,7 +2350,7 @@ def capacity_wait(ctx, a, r, kind, check, on_t, done, out, base_now, t0, lg):
         ch, lg, plan = check()
         if on_t(plan) and plan["kind"] == kind and time.monotonic() - refreshed >= CAPACITY_WAIT_REFRESH:
             leg_lease(ctx, lg, waiting=True)   # P41-4: still a Capacity wait, so `moving` reads it `waiting`
-            capacity_record(ctx, kind, warns)
+            capacity_record(ctx, kind, warns, r)
             refreshed = time.monotonic()
 
 
@@ -2480,26 +2525,32 @@ def capacity_stand(ctx, chain, n, row, why, capacity, quota=None):
 def claim_save(ctx, chain, leg, row, note, fresh):
     """claim's write of the task note (p36-7, ADR 0067 d8; the module docstring's claim). A fresh claim reads the
     Capacity, the Away state, the heat and the Mac's boot and wake first (rr.capacity_reads, every read that may run a
-    child process), before any lock. While Capacity is in force: the quota hold (the heat aside) stands at once, no lock
-    and nothing written; else under the trickle claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5,
-    nothing written: a Leg's stamp counts at once, so it never claims unlocked) the recount (rr.capacity_gate, from
-    those reads: under the lock only the notes, the leases and the claims file are read): no room writes this chain's
+    child process), before the trickle claim lock (cmd_claim already holds the rollout's lock and the rank lock).
+    While Capacity is in force: the quota hold (the heat aside) stands at once, no trickle claim lock and nothing
+    written; else under the trickle claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5, nothing
+    written: a Leg's stamp counts at once, so it never claims unlocked) the recount (rr.capacity_gate, from those
+    reads: under the lock only the notes, the leases and the claims file are read): no room writes this chain's
     waiting record and stands (exit 3); room writes the Leg lease, saves the note, then the claims write (its own
-    record and wake dropped, a wake for each rollout it keeps places for). --dry-run reads the gate and writes nothing.
-    Otherwise (the fallback, or an inherited claim, which is never gated) the lease best-effort, then the save, as
-    before."""
+    record and wake dropped, a wake for each rollout it keeps places for). --dry-run reads the gate and writes
+    nothing. Otherwise (the fallback, or an inherited claim, which is never gated) the lease best-effort, then the
+    save, as before. While the budget admits (p53-4) the claim's Weight (leg_weight) is computed before the trickle
+    claim lock, beside the reads: the gate fits it, a waiting record carries it and a claim that finds room writes it
+    as the lease's `weight`. A fresh claim with no Weight (no budget, or the fallback) writes the lease without one
+    (LEASE_DROP_WEIGHT), so a Weight an earlier claim left is never read as this claim's once a budget appears. An
+    inherited claim computes none (its lease carries the prior claim's valid `weight`, else none)."""
     n = leg["n"]
     reads = rr.capacity_reads(ctx.now, quota_env=os.environ) if fresh else None
     state = reads["state"] if reads else None
     if state is None or not state["inForce"]:
-        leg_lease(ctx, leg)
+        leg_lease(ctx, leg, weight=LEASE_DROP_WEIGHT if fresh else None)
         save(ctx, note)
         return
     if rr._quota_held(state) and not reads["heat"]["held"]:
         capacity_stand(ctx, chain, n, row, rr._quota_why(state), None, quota=state["quota"])
     mine = leg_mine(chain)
+    w = leg_weight(ctx, row, chain) if rr._budget_on(state) is not None else None
     if ctx.dry:
-        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads)
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads, weight=w, task=row.slug)
         if g["held"]:
             capacity_stand(ctx, chain, n, row, g["why"], g["capacity"], quota=state["quota"] if g["kind"] == "quota" else None)
         return
@@ -2510,17 +2561,17 @@ def claim_save(ctx, chain, leg, row, note, fresh):
         raise Refuse(5, f"{e}: a claim under the Capacity never claims unlocked; nothing written (retry once, then end "
                         "the turn halted)")
     try:
-        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads)
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads, weight=w, task=row.slug)
         if g["held"]:
-            w = g["write"]("waiting" if g["kind"] == "capacity" else "drop")
-            if w:
-                print(w, file=sys.stderr)
+            line = g["write"]("waiting" if g["kind"] == "capacity" else "drop")
+            if line:
+                print(line, file=sys.stderr)
             capacity_stand(ctx, chain, n, row, g["why"], g["capacity"], quota=state["quota"] if g["kind"] == "quota" else None)
-        leg_lease(ctx, leg)
+        leg_lease(ctx, leg, weight=LEASE_DROP_WEIGHT if w is None else w)
         save(ctx, note)
-        w = g["write"]("served")
-        if w:
-            print(w, file=sys.stderr)
+        line = g["write"]("served")
+        if line:
+            print(line, file=sys.stderr)
     finally:
         lock.__exit__(None, None, None)
 

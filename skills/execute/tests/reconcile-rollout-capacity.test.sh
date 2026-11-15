@@ -470,5 +470,337 @@ PY2
 )
 ok "$C16" "[]" "C16: every peak() and budget case reads as expected"
 
+# ── C17 (p53-4, ADR 0083 d4, DfL 11, 13, 14): while a fresh reading carries a budget, a start fits by its Weight ──────
+# Each scenario keeps its own Run record (events) and a rollouts.toml with capacity_max 8 (the hard count behind the
+# budget); its Weights are measured from planted slot-freed peaks (3 done tasks per kind under an archived rollout of
+# project Demo), so no land.sh runs. Kinds (each its `scope:`): light 1.5 GB / 1 core, heavy 4 / 2, huge 16 / 2, cpu
+# 2 / 5, both 4 / 5, tenth 1.2 / 1. The budget is 12 GB and 16 cores over a Capacity of 4. The peaks are slot-freed
+# lines appended to old-ro's record as the Run record writes them (the reader reads the lines, never the validator).
+cat > "$TMP/wpeaks.py" <<'PY2'
+import json, os, sys
+ev, D = sys.argv[1], sys.argv[2]
+os.makedirs(ev, exist_ok=True)
+os.makedirs(os.path.join(D, "Archive", "Rollouts"), exist_ok=True)
+rn = os.path.join(D, "Archive", "Rollouts", "old-ro.md")
+if not os.path.exists(rn):
+    open(rn, "w").write('---\ntags: [task, rollout]\nstatus: done\nprotocol_version: 5\nprojects: ["[[Demo]]"]\n---\n')
+for kspec in sys.argv[3:]:
+    kind, mem, cores = kspec.split(":")
+    for i in (1, 2, 3):
+        slug = "%s-past%d" % (kind, i)
+        open(os.path.join(D, "Archive", slug + ".md"), "w").write(
+            '---\ntags: [task]\nstatus: done\nscope: %s\nrollout: "[[old-ro]]"\n---\n' % kind)
+        with open(os.path.join(ev, "old-ro.jsonl"), "a") as f:
+            f.write(json.dumps({"ts": "2026-10-01T12:00:00.000Z", "rollout": "old-ro", "task": slug, "kind": "slot-freed",
+                                "outcome": "ready", "peak": {"mem_gb": float(mem), "cores": float(cores)}}) + "\n")
+PY2
+BUDGET='"budget": {"mem_gb": 12, "cores": 16}'
+wtoml() { mkdir -p "$D/home/.config/thread"; printf 'schema = 4\n\n[defaults]\ncapacity_max = %s\n' "${1:-8}" > "$D/home/.config/thread/rollouts.toml"; }
+wscen() {
+  scen "$1"; export THREAD_EVENTS_DIR="$D/events"; wtoml 8
+  python3 "$TMP/wpeaks.py" "$THREAD_EVENTS_DIR" "$D" light:1.5:1 heavy:4:2 huge:16:2 cpu:2:5 both:4:5 tenth:1.2:1
+  cap 4 "$MIN_AGO" "$BUDGET"
+}
+# wro <stem> [ceiling] [frontmatter…]: a parallel rollout of project Demo; wt <slug> <rollout> <kind> [status] [fm…]: a task.
+wro() { local s="$1" c="${2:-8}"; shift; [ $# -gt 0 ] && shift; mkro "$s" "$c" 'projects: ["[[Demo]]"]' "$@"; }
+wt() { local s="$1" ro="$2" k="$3" st="${4:-open}"; shift 3; [ $# -gt 0 ] && shift; mkt "$s" "$ro" "$st" "scope: $k" "$@"; }
+idle() { python3 -c 'import json,sys
+d = [json.loads(l) for l in open(sys.argv[1]) if json.loads(l).get("kind") == "idle-slots"][-1]
+print(json.dumps({k: d.get(k) for k in ("reason", "bound")}, separators=(",", ":"), sort_keys=True))' "$THREAD_EVENTS_DIR/$1.jsonl"; }
+W='d["trickle"]["capacity"]["weight"]'
+
+# C17a: eight light tasks start where three heavy ones fill the budget
+wscen c17a-light
+wro ro 10; for i in 1 2 3 4 5 6 7 8 9; do wt "l$i" ro light; done
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'd["start"]')" '["l1","l2","l3","l4","l5","l6","l7","l8"]' "C17a: eight light tasks (8 x 1.5 GB) all start in 12 GB, past C 4"
+ok "$(q "$J" "$holds")" '{"l9":"trickle: 8/8 tasks running on this Mac"}' "C17a: … the ninth waits on capacity_max 8, the hard count, in the count's words"
+ok "$(q "$J" '[d["trickle"]["limit"], d["trickle"]["awayCap"], d["slotLimit"]]')" '[8,8,8]' "C17a: trickle.limit and awayCap read capacity_max under the budget"
+wscen c17a-heavy
+wro ro; for i in 1 2 3 4; do wt "h$i" ro heavy; done
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'd["start"]')" '["h1","h2","h3"]' "C17a: three heavy tasks (3 x 4 GB) fill the budget"
+wscen c17a2-tenth
+wtoml 10; wro ro 10; for i in 1 2 3 4 5 6 7 8 9 10 11; do wt "e$i" ro tenth; done
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'len(d["start"])')|$(q "$J" "$W"'["running"]')" '10|{"cores":10.0,"mem_gb":12.0}' "C17a2: ten tasks at 1.2 GB fill 12 GB exactly (fits compared to 2 places)"
+
+# wrec <rollout>@<since>[@<weight-json>]…: the claims file holds exactly these waiting records (want 1, at MIN_AGO, never
+# served); wclaim <rollout> <slug> [weight-json]: a live start claim (at MIN_AGO) added to it.
+wrec() { mkdir -p "$THREAD_NOTE_LOCK_DIR"; python3 - "$THREAD_NOTE_LOCK_DIR/trickle-claims.json" "$D" "$@" <<'PY2'
+import json, os, sys
+path, tasks, *recs = sys.argv[1:]
+w = []
+for r in recs:
+    parts = r.split("@")
+    e = {"tasksDir": os.path.realpath(tasks), "rollout": parts[0], "since": parts[1], "at": "2026-10-02T14:04:00+00:00",
+         "served": None, "want": 1}
+    if len(parts) > 2:
+        e["weight"] = json.loads(parts[2])
+    w.append(e)
+json.dump({"version": 1, "claims": [], "waiting": w, "woken": []}, open(path, "w"))
+PY2
+}
+wclaim() { python3 - "$THREAD_NOTE_LOCK_DIR/trickle-claims.json" "$D" "$@" <<'PY2'
+import json, os, sys
+path, tasks, ro, slug, *w = sys.argv[1:]
+try:
+    d = json.load(open(path))
+except FileNotFoundError:
+    d = {"version": 1, "claims": [], "waiting": [], "woken": []}
+e = {"tasksDir": os.path.realpath(tasks), "rollout": ro, "slug": slug, "at": "2026-10-02T14:04:00+00:00"}
+if w:
+    e["weight"] = json.loads(w[0])
+d["claims"].append(e)
+json.dump(d, open(path, "w"))
+PY2
+}
+# slot <rollout> <task> <mem> <cores>: a slot-taken line carrying cap.weight, appended to the rollout's Run record as is.
+slot() { mkdir -p "$THREAD_EVENTS_DIR"; printf '{"kind": "slot-taken", "rollout": "%s", "task": "%s", "cap": {"away": false, "n": 4, "file": "missing", "weight": {"mem_gb": %s, "cores": %s}}}\n' "$1" "$2" "$3" "$4" >> "$THREAD_EVENTS_DIR/$1.jsonl"; }
+woke() { claims '[[w["rollout"], w["by"]] for w in d["woken"]]'; }
+
+# C17b: one task always fits, on an empty Mac only, and only when nothing is kept for another
+wscen c17b-always
+wro ro; wt h1 ro huge; wt h2 ro huge
+J=$(nx ro)
+ok "$(q "$J" 'd["start"]')|$(q "$J" "$W"'["alwaysFits"]')|$(q "$J" 'd["halt"]')" '["h1"]|true|null' "C17b(1): a 16 GB task with nothing running starts past the 12 GB budget (one task always fits)"
+ok "$(q "$J" "$holds")" '{"h2":"trickle: 1 task on this Mac holds 16/12 GB and 2/16 cores: memory short for [[h2]] (16 GB, 2 cores)"}' \
+  "C17b(1): … a second heavy one waits, its hold line naming memory"
+ok "$(idle ro)" '{"bound":"memory","reason":"hold-trickle"}' "C17b(1): … idle-slots keeps hold-trickle and adds bound memory"
+ok "$(claims '[[c["slug"], c.get("weight")] for c in d["claims"]]')" '[["h1",{"cores":2.0,"mem_gb":16.0}]]' "C17b(1): … its claim carries its Weight"
+ok "$(claims '[[w["rollout"], w["want"], w.get("weight")] for w in d["waiting"]]')" '[["ro",1,{"cores":2.0,"mem_gb":16.0}]]' "C17b(1): … and the waiting record h2's"
+wscen c17b-waiter-ahead
+wro ro; wt h1 ro huge; wro w; wt w1 w heavy
+wrec "w@2026-10-02T14:00:00+00:00@{\"mem_gb\": 4, \"cores\": 2}"
+J=$(nx ro)
+ok "$(q "$J" '[d["start"], d["trickle"]["kept"], '"$W"'["alwaysFits"]]')" '[[],{"w":1},false]' "C17b(2): an empty Mac with W waiting ahead: W has the empty grant, so the caller's 16 GB task waits"
+ok "$(q "$J" "$holds")" '{"h1":"trickle: 0 tasks on this Mac hold 0/12 GB and 0/16 cores: memory short for [[h1]] (16 GB, 2 cores), 1 kept for [[w]]"}' "C17b(2): … its line names what is kept for W"
+ok "$(woke)" '[["w","ro"]]' "C17b(2): … and W is woken"
+wscen c17b-caller-ahead
+wro ro; wt h1 ro huge; wro w; wt w1 w heavy
+wrec "ro@2026-10-02T13:50:00+00:00" "w@2026-10-02T14:00:00+00:00@{\"mem_gb\": 4, \"cores\": 2}"
+J=$(nx ro)
+ok "$(q "$J" '[d["start"], '"$W"'["alwaysFits"], '"$W"'["reserve"]]')" '[["h1"],true,"w"]' "C17b(3): the caller ahead of W takes the empty grant: its 16 GB task starts, W reserved next"
+ok "$(woke)" '[]' "C17b(3): … and W, only reserved, is not woken"
+wscen c17b-idle-leg
+wro ro; wt h1 ro huge; mkserial chain; mkt c1 chain open; leglease chain "$MIN_AGO"
+J=$(nx ro --dry-run)
+ok "$(q "$J" "$holds")" '{"h1":"trickle: 1 task on this Mac holds 3/12 GB and 2/16 cores: memory short for [[h1]] (16 GB, 2 cores)"}' \
+  "C17b(4): an idle Leg session makes the Mac non-empty: the 16 GB task waits (the session at the built-in)"
+
+# C17c: the fourth heavy task waits, naming memory, cores or both; the count can bind first
+wscen c17c-short
+wro ro; for i in 1 2 3 4; do wt "h$i" ro heavy; done
+J=$(nx ro)
+H4="trickle: 3 tasks on this Mac hold 12/12 GB and 6/16 cores: memory short for [[h4]] (4 GB, 2 cores)"
+ok "$(q "$J" "$holds")" "{\"h4\":\"$H4\"}" "C17c: the fourth heavy task waits on memory"
+ok "$(q "$J" "$W"'["why"]')|$(q "$J" "$W"'["short"]')" "\"$H4\"|\"memory\"" "C17c: … weight.why is its hold line, short memory"
+ok "$(claims '[w.get("weight") for w in d["waiting"]]')" '[{"cores":2.0,"mem_gb":4.0}]' "C17c: … the waiting record carries h4's Weight"
+ok "$(idle ro)" '{"bound":"memory","reason":"hold-trickle"}' "C17c: … bound memory"
+wscen c17c-cores
+wro ro; for i in 1 2 3 4; do wt "c$i" ro cpu; done
+J=$(nx ro)
+ok "$(q "$J" "$holds")" '{"c4":"trickle: 3 tasks on this Mac hold 6/12 GB and 15/16 cores: cores short for [[c4]] (2 GB, 5 cores)"}' "C17c: cores short"
+ok "$(idle ro)" '{"bound":"cores","reason":"hold-trickle"}' "C17c: … bound cores"
+wscen c17c-both
+wro ro; for i in 1 2 3 4; do wt "b$i" ro both; done
+J=$(nx ro)
+ok "$(q "$J" "$holds")" '{"b4":"trickle: 3 tasks on this Mac hold 12/12 GB and 15/16 cores: memory and cores short for [[b4]] (4 GB, 5 cores)"}' "C17c: both short"
+ok "$(idle ro)" '{"bound":"memory and cores","reason":"hold-trickle"}' "C17c: … bound memory and cores"
+wscen c17c-count
+wtoml 3; wro ro; for i in 1 2 3 4; do wt "l$i" ro light; done
+J=$(nx ro)
+ok "$(q "$J" "$holds")|$(q "$J" "$W"'["why"]')" '{"l4":"trickle: 3/3 tasks running on this Mac"}|null' "C17c: capacity_max 3 binds before the weight: the count's line, no weight why"
+ok "$(idle ro)" '{"bound":"count","reason":"hold-trickle"}' "C17c: … bound count"
+wscen c17c-nopack
+wro ro; wt h1 ro heavy; wt h2 ro heavy; wt x1 ro huge; wt l1 ro light
+J=$(nx ro --dry-run)
+X1="trickle: 2 tasks on this Mac hold 8/12 GB and 4/16 cores: memory short for [[x1]] (16 GB, 2 cores)"
+ok "$(q "$J" 'd["start"]')|$(q "$J" "$holds")" "[\"h1\",\"h2\"]|{\"l1\":\"$X1\",\"x1\":\"$X1\"}" \
+  "C17c: no packing: x1 (16 GB) stops the loop, so l1 (1.5 GB, it would fit) waits on x1's line"
+
+# C17d: another lead's live claim holds the Weight it carries (else the built-in); a consumed claim weighs it too
+wscen c17d-claims
+wro ro; for i in 1 2 3; do wt "h$i" ro heavy; done; wro oth; wt o1 oth heavy
+wrec; wclaim oth o1 '{"mem_gb": 10, "cores": 2}'
+J=$(nx ro --dry-run)
+H1D="trickle: 1 task on this Mac holds 10/12 GB and 2/16 cores: memory short for [[h1]] (4 GB, 2 cores)"
+ok "$(q "$J" 'd["start"]')|$(q "$J" 'd["hold"][0]["reason"]')" "[]|\"$H1D\"" "C17d: another lead's live 10 GB claim holds the room: no heavy task fits beside it"
+wrec; wclaim oth o1
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'd["start"]')|$(q "$J" 'd["hold"][0]["reason"]')" '["h1","h2"]|"trickle: 3 tasks on this Mac hold 11/12 GB and 6/16 cores: memory short for [[h3]] (4 GB, 2 cores)"' \
+  "C17d: a claim with no weight holds the built-in 3 GB and 2 cores"
+wrec; wclaim oth o1 '{"mem_gb": 10, "cores": 2}'
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("status: open", "status: in_progress\nowner: lead-oth", 1))' "$D/o1.md"
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'd["hold"][0]["reason"]')|$(q "$J" "$W"'["elsewhere"]')" "\"$H1D\"|{\"oth\":{\"cores\":2.0,\"mem_gb\":10.0}}" \
+  "C17d: o1 stamped, its claim consumed before its slot-taken lands: it weighs the claim's 10 GB"
+
+# C17e: the weighted share keeps room for a reachable waiter, passes over an unreachable one, and keeps a waiting
+# Leg's room with held 0
+wscen c17e-reserve
+wro ro; mkt r1 ro in_progress 'owner: lead-ro'; mkt r2 ro in_progress 'owner: lead-ro'; wt l1 ro light
+wro w; wt w1 w heavy
+wrec "w@2026-10-02T14:00:00+00:00@{\"mem_gb\": 8, \"cores\": 2}"
+J=$(nx ro)
+ok "$(q "$J" "$holds")" '{"l1":"trickle: 2 tasks on this Mac hold 6/12 GB and 4/16 cores: memory short for [[l1]] (1.5 GB, 1 core), 1 kept for [[w]]"}' \
+  "C17e(1): a reachable 8 GB W ahead: the light caller waits, room kept for W"
+ok "$(q "$J" '[d["trickle"]["kept"], '"$W"'["reserve"], '"$W"'["kept"]]')" '[{"w":1},"w",{"w":{"cores":2.0,"mem_gb":6.0}}]' "C17e(1): … W reserved with one place, its room clamped to what is free"
+ok "$(woke)" '[]' "C17e(1): … and not woken (its room is not free yet)"
+mkserial chain; mkt c1 chain open; leglease chain "$MIN_AGO"
+wrec "w@2026-10-02T14:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+J=$(nx ro --dry-run)
+ok "$(q "$J" '[d["start"], d["trickle"]["kept"], '"$W"'["reserve"]]')" '[["l1"],{},null]' \
+  "C17e(2): W at 10 GB, above the budget less a live chain's 3 GB floor: passed over, so the light caller starts"
+wscen c17e-leg
+wro ro; for i in 1 2 3 4; do mkt "p$i" ro in_progress 'owner: lead-ro'; slot ro "p$i" 1.5 1; done; wt p5 ro light
+mkserial a; mkt a1 a open; leglease a "$MIN_AGO"
+wrec "a@2026-10-02T14:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+J=$(nx ro)
+ok "$(q "$J" "$holds")" '{"p5":"trickle: 5 tasks on this Mac hold 9/12 GB and 6/16 cores: memory short for [[p5]] (1.5 GB, 1 core), 1 kept for [[a]]"}' \
+  "C17e(3): a waiting Leg A (10 GB beyond its 3 GB session) ahead: P's fifth light task waits, room kept for A"
+ok "$(q "$J" '[d["trickle"]["kept"], '"$W"'["kept"]]')|$(woke)" '[{},{"a":{"cores":0.0,"mem_gb":3.0}}]|[]' \
+  "C17e(3): … A takes no place (weight-only), its room clamped to the 3 GB free, and is not woken"
+for i in 2 3 4; do rm -f "$D/p$i.md"; done
+wrec "a@2026-10-02T14:00:00+00:00@{\"mem_gb\": 10, \"cores\": 2}"
+J=$(nx ro)
+ok "$(q "$J" "$holds")|$(woke)" '{"p5":"trickle: 2 tasks on this Mac hold 4.5/12 GB and 3/16 cores: memory short for [[p5]] (1.5 GB, 1 core), 1 kept for [[a]]"}|[["a","ro"]]' \
+  "C17e(3): with P at 1 running, A's 7 GB fits: granted and woken, P waits behind it"
+wscen c17e-held0
+wro ro; wt p1 ro light; mkt p0 ro done 'owner: lead-ro' 'started: 2026-10-02T14:00+00:00'
+mkserial a; mkt a1 a open; leglease a "$MIN_AGO"
+wrec "a@2026-10-02T14:00:00+00:00@{\"mem_gb\": 15, \"cores\": 2}"
+J=$(nx ro --dry-run)
+ok "$(q "$J" "$holds")" '{"p1":"trickle: 1 task on this Mac holds 3/12 GB and 2/16 cores: memory short for [[p1]] (1.5 GB, 1 core), 1 kept for [[a]]"}' \
+  "C17e(4): A at 15 GB, never served, holds 0 in the share: P (served at 14:00) waits behind it"
+
+# C17f: what a task elsewhere weighs
+wscen c17f-weights
+wro ro; wt l1 ro light; wro oth; mkt o1 oth in_progress 'owner: lead-oth'
+J=$(nx ro --dry-run)
+ok "$(q "$J" "$W"'["elsewhere"]')" '{"oth":{"cores":2.0,"mem_gb":3.0}}' "C17f: a running task elsewhere with no slot-taken weighs the built-in"
+slot oth o1 6 1
+J=$(nx ro --dry-run)
+ok "$(q "$J" "$W"'["elsewhere"]')" '{"oth":{"cores":1.0,"mem_gb":6.0}}' "C17f: … its latest slot-taken cap.weight once it has one"
+mkserial chain; mkt c1 chain in_progress 'owner: leg-1'; leglease chain "$MIN_AGO" '"weight": {"mem_gb": 5, "cores": 2}'
+J=$(nx ro --dry-run)
+ok "$(q "$J" "$W"'["elsewhere"]["chain"]')|$(q "$J" "$W"'["floors"]')" '{"cores":2.0,"mem_gb":5.0}|{"chain":{"cores":2.0,"mem_gb":3.0}}' "C17f: a Leg with a claim weighs its lease's weight; its floor stays the built-in"
+mkt c1 chain done 'owner: leg-1'; leglease chain "$MIN_AGO" '"weight": {"mem_gb": 15, "cores": 2}'
+J=$(nx ro --dry-run)
+ok "$(q "$J" "$W"'["elsewhere"]["chain"]')" '{"cores":2.0,"mem_gb":3.0}' "C17f: an idle Leg weighs the built-in, never its lease's last weight (15 GB)"
+
+# C17g: seeded revises fit by Weight too: slotLimit is the fitting prefix, and the record weighs the first held item
+wrev() {   # wrev <slug> <rollout> <kind>: a task owed a seeded revise (execute § 4.5 step 1.2)
+  mkt "$1" "$2" blocked "owner: lead-$2" "scope: $3" 'started: 2026-10-02T12:00+00:00' 'pr: https://github.com/o/r/pull/7' 'max_review_rounds: 3'
+  printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T13:40+00:00)\n\n%s\n\nRound 1 (Integration) rejection:\n- the merge dropped the retry guard\n\n<!-- run 1 end sha=0123456789ab -->\n\n## Integration log\n\n2026-10-02T13:30+00:00 rejected path=judge-only pr=7 anchor=- head=- base=- wait=- duration=- triggers=-\n' \
+    'revise: rejected at Integration re-review — revise on the branch, then re-integrate' >> "$D/$1.md"
+}
+wscen c17g-prefix
+wro ro; mkt r1 ro in_progress 'owner: lead-ro'; wrev v1 ro heavy; wrev v2 ro heavy; wrev v3 ro heavy
+J=$(nx ro)
+ok "$(q "$J" '[d["slotsInUse"], d["slotLimit"]]')" '[1,3]' "C17g: 3 GB running, revises of 4 GB each: two fit, so slotLimit is slotsInUse + 2"
+ok "$(claims '[[c["slug"], c.get("kind"), c.get("weight")] for c in d["claims"]]')" '[["v1","revise",{"cores":2.0,"mem_gb":4.0}],["v2","revise",{"cores":2.0,"mem_gb":4.0}]]' \
+  "C17g: … only the fitting prefix is claimed, kind revise, with its Weight"
+wscen c17g-always
+wro ro; wrev v1 ro huge; wrev v2 ro heavy; wt q1 ro huge
+J=$(nx ro)
+ok "$(q "$J" '[d["slotLimit"], '"$W"'["alwaysFits"], d["start"]]')" '[1,true,[]]' "C17g: on an empty Mac the first revise takes one task always fits (16 GB), and no start does"
+V2="trickle: 1 task on this Mac holds 16/12 GB and 2/16 cores: memory short for [[v2]] (4 GB, 2 cores)"
+ok "$(q "$J" "$W"'["why"]')|$(claims '[[w["want"], w.get("weight")] for w in d["waiting"]]')" "\"$V2\"|[[2,{\"cores\":2.0,\"mem_gb\":4.0}]]" \
+  "C17g: … the first held item in launch order is v2: weight.why and the waiting record name it"
+wscen c17g-revise-first
+python3 "$TMP/wpeaks.py" "$THREAD_EVENTS_DIR" "$D" big:8:2
+wro ro; wrev v1 ro big; wt q1 ro big
+J=$(nx ro)
+ok "$(q "$J" '[d["start"], d["slotsInUse"], d["slotLimit"]]')|$(q "$J" "$W"'["running"]')|$(q "$J" "$W"'["mine"]')" \
+  '[[],0,1]|{"cores":2.0,"mem_gb":8.0}|{"cores":2.0,"mem_gb":8.0}' \
+  "C17g: an 8 GB revise and an 8 GB start on 12 GB: the revise, first in launch order, goes alone; running and mine count it"
+ok "$(q "$J" "$holds")|$(claims '[c["slug"] for c in d["claims"]]')" \
+  '{"q1":"trickle: 1 task on this Mac holds 8/12 GB and 2/16 cores: memory short for [[q1]] (8 GB, 2 cores)"}|["v1"]' \
+  "C17g: … q1's line holds the revise's 8 GB, and only v1 is claimed"
+wscen c17g-always-light
+wro ro; wrev v1 ro huge; wt l1 ro light
+J=$(nx ro)
+ok "$(q "$J" '[d["start"], d["slotLimit"], '"$W"'["alwaysFits"]]')|$(q "$J" "$W"'["running"]')" \
+  '[[],1,true]|{"cores":2.0,"mem_gb":16.0}' \
+  "C17g: a 16 GB revise takes one task always fits on an empty Mac: a light start gets no room beside it"
+ok "$(q "$J" "$holds")" '{"l1":"trickle: 1 task on this Mac holds 16/12 GB and 2/16 cores: memory short for [[l1]] (1.5 GB, 1 core)"}' \
+  "C17g: … l1 waits on the revise's 16 GB"
+
+# C17h: a stale reading with a budget falls back to the Trickle 2 (Away, the Away cap)
+wscen c17h-stale
+wro ro; for i in 1 2 3 4; do wt "h$i" ro huge; done
+cap 4 2026-10-02T13:54:00Z "$BUDGET"
+J=$(nx ro --dry-run)
+ok "$(q "$J" '[d["start"], d["slotLimit"], "weight" in d["trickle"]["capacity"]]')|$(lines)" '[["h1","h2"],2,false]|1' "C17h: stale: the Trickle 2 by count, one WARN, no weight block"
+away_file "$D/home" "$HOUR_AGO" true 2026-10-02T22:05:00Z 2 09:00 3
+J=$(nx ro --dry-run)
+ok "$(q "$J" '[len(d["start"]), d["trickle"]["awayCap"]]')" '[3,3]' "C17h: … Away, the Away cap 3"
+
+# C17i: an ill-typed budget is no budget: byte-identical output, and claims of today's keys only
+wscen c17i-ill
+wro ro; for i in 1 2 3 4 5; do wt "h$i" ro huge; done
+cap 4 "$MIN_AGO" '"budget": {"mem_gb": 12, "cores": 0}'; A=$(nx ro --dry-run)
+cap 4 "$MIN_AGO"; B=$(nx ro --dry-run)
+ok "$([ "$A" = "$B" ] && echo same || echo differ)" same "C17i: next with an ill-typed budget is byte-identical to no budget"
+cap 4 "$MIN_AGO" '"budget": {"mem_gb": 12, "cores": 0}'; nx ro >/dev/null
+ok "$(claims 'sorted(set(k for c in d["claims"] for k in c))')|$(claims 'sorted(set(k for w in d["waiting"] for k in w))')" \
+  '["at","rollout","slug","tasksDir"]|["at","rollout","served","since","tasksDir","want"]' "C17i: … its claims and waiting record carry today's keys only"
+ok "$(idle ro)" '{"bound":null,"reason":"hold-trickle"}' "C17i: … and idle-slots no bound"
+
+# C17j: status reads the budget as next does
+wscen c17j-status
+wro ro; mkt d1 ro done 'owner: lead-ro' 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'
+for i in 1 2 3; do wt "q$i" ro heavy; done
+wro oth; for i in 1 2 3 4; do mkt "o$i" oth in_progress 'owner: lead-oth'; done
+J=$(st ro)
+ok "$(q "$J" '[d["timeline"]["etaWidth"], d["timeline"]["etaBy"]]')" '[1,"memory"]' "C17j: 12 GB held elsewhere: the ETA's width floors at 1, by memory"
+ok "$(q "$J" 'd["trickle"]["capacity"]["weight"]["running"]')|$(q "$J" '[d["trickle"]["limit"], d["trickle"]["awayCap"]]')" '{"cores":8.0,"mem_gb":12.0}|[8,8]' \
+  "C17j: status reports the Weight held and capacity_max in limit and awayCap"
+N=$(nx ro --dry-run)
+ok "$(q "$N" '[d["trickle"]["limit"], d["trickle"]["awayCap"]]')" '[8,8]' "C17j: … equal to next's"
+away_file "$D/home" "$HOUR_AGO" true 2026-10-02T22:05:00Z 2 09:00 3
+ok "$(q "$(st ro)" '[d["trickle"]["limit"], d["trickle"]["awayCap"]]')|$(q "$(nx ro --dry-run)" '[d["trickle"]["limit"], d["trickle"]["awayCap"]]')" '[8,8]|[8,8]' "C17j: … Away too"
+cap 4 "$MIN_AGO"
+ok "$(q "$(st ro)" '[d["trickle"]["limit"], d["trickle"]["awayCap"], "weight" in d["trickle"]["capacity"]]')" '[4,4,false]' "C17j: with no budget both read C, and no weight block"
+
+# C17k: _slot_weights reads each task's latest slot-taken, from the record's tail only
+wscen c17k-slot
+C17K=$(HOME="$D/home" python3 - "$SCRIPT" "$THREAD_EVENTS_DIR" <<'PY2'
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+ev = sys.argv[2]; os.makedirs(ev, exist_ok=True)
+def line(task, mem, kind="slot-taken"):
+    return json.dumps({"kind": kind, "task": task, "cap": {"weight": {"mem_gb": mem, "cores": 1}}}) + "\n"
+open(os.path.join(ev, "k1.jsonl"), "w").write(line("a", 2) + line("b", 7) + line("a", 5) + line("a", 9, "slot-freed")
+                                              + "not json\n")
+got = rr._slot_weights("k1")
+bad = []
+if got != {"b": {"mem_gb": 7.0, "cores": 1.0}, "a": {"mem_gb": 5.0, "cores": 1.0}}:
+    bad.append(["latest", got])
+early = line("early", 6)
+pad = "".join(json.dumps({"kind": "lead-entry", "n": i}) + "\n" for i in range(8))
+late = line("late", 4)
+open(os.path.join(ev, "k2.jsonl"), "w").write(early + pad + late)
+rr.SLOT_WEIGHTS_MAX_BYTES = 300
+got = rr._slot_weights("k2")
+if got != {"late": {"mem_gb": 4.0, "cores": 1.0}}:
+    bad.append(["tail", got])
+rr.SLOT_WEIGHTS_MAX_BYTES = len(late)       # the tail starts exactly at late's line: kept whole
+if rr._slot_weights("k2") != {"late": {"mem_gb": 4.0, "cores": 1.0}}:
+    bad.append(["boundary", rr._slot_weights("k2")])
+rr.SLOT_WEIGHTS_MAX_BYTES = len(late) - 1   # one byte short: late's line is torn, so skipped
+if rr._slot_weights("k2") != {}:
+    bad.append(["torn", rr._slot_weights("k2")])
+rr.SLOT_WEIGHTS_MAX_BYTES = 10 ** 6
+if rr._slot_weights("k2") != {"early": {"mem_gb": 6.0, "cores": 1.0}, "late": {"mem_gb": 4.0, "cores": 1.0}}:
+    bad.append(["control", rr._slot_weights("k2")])
+if rr._slot_weights("missing") != {}:
+    bad.append(["missing"])
+print(json.dumps(bad))
+PY2
+)
+ok "$C17K" "[]" "C17k: the last slot-taken wins; past the byte cap only the tail is read (a torn first line skipped)"
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-capacity: ALL PASS"; else echo "reconcile-rollout-capacity: FAILED"; fi
 exit "$fail"
