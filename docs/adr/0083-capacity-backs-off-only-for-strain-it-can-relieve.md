@@ -13,8 +13,8 @@ whether the number could scale with the nature of the tasks and the resources th
 
 The audit (three read-only readers, 2026-11-15 09:10) found the cap of 4 was not the limit:
 
-- **Capacity read 1 for 57.6 hours**, from 2026-11-13 04:14 to 11-15 13:50 (about 53 hours in at the audit). 59 of the three rollouts' 79 Slot starts ran
-  under a cap of 1, and since all three overlapped the Mac ran exactly one task at a time for 34.5 of 37.8 hours. The
+- **Capacity read 1 for 57.6 hours**, from 2026-11-13 04:14 to 11-15 13:50 (about 53 hours in at the audit). 59 of
+  the three rollouts' 79 Slot starts ran under a cap of 1, and since all three overlapped the Mac ran exactly one task at a time for 34.5 of 37.8 hours. The
   hold cost about 120 rollout-hours (`hold-away-cap` 92.7 h, `hold-trickle` 26.6 h); 4 tasks at once happened for 3.4
   hours, all on the first day.
 - **A memory warning froze it, and the rollouts did not cause the warning.** macOS's file-events daemon
