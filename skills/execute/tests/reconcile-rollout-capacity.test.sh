@@ -96,6 +96,7 @@ ok "$(q "$J" "$holds")" '{"r6":"trickle: 5/5 tasks running on this Mac"}' "C1: t
 ok "$(q "$J" '[d["slotLimit"], d["trickle"]["limit"], d["halt"]]')" '[5,5,null]' "C1: slotLimit 5, trickle.limit 5, no halt"
 ok "$(q "$J" "$capof")" '{"file":"fresh","limit":5,"max":6,"maxSource":"built-in"}' "C1: trickle.capacity reads fresh, C 5, max 6 built-in"
 ok "$(lines)" 0 "C1: a fresh reading prints no WARN"
+ok "$(q "$J" 'd["trickle"]["capacity"]["budget"]')" null "C1: a file with no budget reports none (p53-2)"
 
 # ── C2: no file reads the Trickle of 2, silently ─────────────────────────────────────────────────────────────────
 scen c2-missing
@@ -345,6 +346,129 @@ has "$(err)" "${WARN_CAP}stale: " "C14: … that line the stale WARN"
 cap 5 "$MIN_AGO" "$FAULT_SIGNALS"
 J=$(st ro)
 ok "$(q "$J" 'd["trickle"]["capacity"]["fault"]')|$(lines)" "$FAULT|0" "C14: status reports trickle.capacity.fault, silently"
+
+# ── C15: the budget is reported, fresh and well-typed only (p53-2, ADR 0083 d4) ──────────────────────────────────────
+scen c15-budget
+six
+cap 5 "$MIN_AGO" '"budget": {"mem_gb": 12.0, "cores": 8}'
+J=$(nx ro --dry-run)
+ok "$(q "$J" 'd["trickle"]["capacity"]["budget"]')" '{"cores":8,"mem_gb":12.0}' "C15: next reports trickle.capacity.budget"
+cap 5 "$MIN_AGO" '"budget": {"mem_gb": 12.0, "cores": 0}'
+J=$(nx ro --dry-run)
+ok "$(q "$J" '[d["trickle"]["capacity"]["budget"], d["trickle"]["capacity"]["limit"]]')|$(lines)" '[null,5]|0' \
+  "C15: an ill-typed budget (cores 0) reads none, silently, and the Capacity stays in force"
+
+# ── C16: capacity.py's peak() and read()'s budget, case by case, in one process (p53-2) ─────────────────────────────
+# peak(tree, since, ref, now) against a fixed Slot taken 13:00, its call ending 14:00 (ref), read at 14:05 (now): each
+# case rewrites slot-peaks.json, and the process prints every case whose result is not the one it expects.
+scen c16-peak
+mkdir -p "$D/tree" "$D/home/.config/thread"; ln -s "$D/tree" "$D/link"
+C16=$(cd "$D" && HOME="$D/home" python3 - "$HERE/../scripts/capacity.py" "$D" <<'PY2'
+import importlib.util, json, os, sys
+from datetime import datetime, timedelta, timezone
+spec = importlib.util.spec_from_file_location("capacity", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+D = sys.argv[2]
+TREE, LINK = D + "/tree", D + "/link"
+PEAKS = os.path.join(D, "home", m.SLOT_PEAKS_FILE_REL)
+CAP = os.path.join(D, "home", m.CAPACITY_FILE_REL)
+SINCE = datetime(2026, 10, 2, 13, 0, tzinfo=timezone.utc)
+REF = datetime(2026, 10, 2, 14, 0, tzinfo=timezone.utc)
+NOW = REF + timedelta(minutes=5)
+iso = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
+FRESH, LAST = iso(REF - timedelta(minutes=1)), iso(REF - timedelta(minutes=2))
+PEAK = {"mem_gb": 3.1, "cores": 2.4}
+
+def clear(p):
+    if os.path.isdir(p) and not os.path.islink(p):
+        os.rmdir(p)
+    elif os.path.lexists(p):
+        os.remove(p)
+
+def put(p, content):
+    clear(p)
+    if content is None:
+        return
+    if content == "DIR":
+        os.mkdir(p)
+        return
+    data = content if isinstance(content, bytes) else (content if isinstance(content, str) else json.dumps(content)).encode()
+    open(p, "wb").write(data)
+
+def doc(slots, written=FRESH, **extra):
+    return {"written_at": written, "by": "chorus-stage", "slots": slots, **extra}
+
+def entry(**over):
+    e = {"mem_gb": 3.1, "cores": 2.4, "since": iso(SINCE), "last": LAST}
+    e.update(over)
+    return {k: v for k, v in e.items() if v is not None}
+
+PEAK_CASES = [
+    ("missing", None, None),
+    ("a directory", "DIR", None),
+    ("over 256 KiB", doc({TREE: entry()}, pad="x" * (256 * 1024)), None),
+    ("not UTF-8", b"\xff\xfe{}", None),
+    ("not JSON", "not json", None),
+    ("a list", [doc({TREE: entry()})], None),
+    ("written_at naive", doc({TREE: entry()}, written="2026-10-02T13:59:00"), None),
+    ("written_at missing", {"slots": {TREE: entry()}}, None),
+    ("slots a list", doc([entry()]), None),
+    ("10:01 before the call's end: stale", doc({TREE: entry()}, written=iso(REF - timedelta(minutes=10, seconds=1))), None),
+    ("10:00 before the call's end: fresh", doc({TREE: entry()}, written=iso(REF - timedelta(minutes=10))), PEAK),
+    ("5:01 ahead of now: stale", doc({TREE: entry()}, written=iso(NOW + timedelta(minutes=5, seconds=1))), None),
+    ("5:00 ahead of now: fresh", doc({TREE: entry()}, written=iso(NOW + timedelta(minutes=5))), PEAK),
+    ("no entry for the tree", doc({D + "/other": entry()}), None),
+    ("mem_gb a bool", doc({TREE: entry(mem_gb=True)}), None),
+    ("cores negative", doc({TREE: entry(cores=-0.5)}), None),
+    ("mem_gb NaN", json.dumps(doc({TREE: entry(mem_gb=float("nan"))})), None),
+    ("last missing", doc({TREE: {"mem_gb": 3.1, "cores": 2.4}}), None),
+    ("last naive", doc({TREE: entry(last="2026-10-02T13:58:00")}), None),
+    ("last before the Slot was taken", doc({TREE: entry(last=iso(SINCE - timedelta(seconds=1)))}), None),
+    ("last at the Slot's take: carried", doc({TREE: entry(last=iso(SINCE))}), PEAK),
+    ("a relative key is skipped", doc({"tree": entry()}), None),
+    ("a symlinked key, int values and an extra key", doc({LINK: entry(mem_gb=3, cores=2, x=1)}), {"mem_gb": 3, "cores": 2}),
+    ("~ and a trailing slash", doc({"~/../tree/": entry()}), PEAK),
+    ("an exact key wins over a real-path match", doc({LINK: entry(mem_gb=9.0), TREE: entry()}), PEAK),
+    ("zeros carried", doc({TREE: entry(mem_gb=0, cores=0.0)}), {"mem_gb": 0, "cores": 0.0}),
+]
+bad = []
+for label, content, want in PEAK_CASES:
+    put(PEAKS, content)
+    got = m.peak(TREE, SINCE, REF, NOW)
+    if got != want or (got is not None and list(got) != ["mem_gb", "cores"]):
+        bad.append(["peak", label, got, want])
+clear(PEAKS)
+# read()'s budget: a fresh, well-typed one is its two keys; anything else is None and the file stays fresh
+B = {"mem_gb": 12.0, "cores": 8}
+BUDGET_CASES = [
+    ("well-typed", {"mem_gb": 12.0, "cores": 8}, B),
+    ("an extra key dropped", {"mem_gb": 12.0, "cores": 8, "x": 1}, B),
+    ("cores 0", {"mem_gb": 12.0, "cores": 0}, None),
+    ("a bool", {"mem_gb": True, "cores": 8}, None),
+    ("a string", {"mem_gb": "12", "cores": 8}, None),
+    ("a missing key", {"mem_gb": 12.0}, None),
+    ("NaN", "NaN", None),
+    ("absent", "ABSENT", None),
+]
+for label, budget, want in BUDGET_CASES:
+    body = {"capacity": 5, "written_at": iso(NOW - timedelta(minutes=1))}
+    text = json.dumps(body)
+    if budget == "NaN":
+        text = text[:-1] + ', "budget": {"mem_gb": NaN, "cores": 8}}'
+    elif budget != "ABSENT":
+        text = json.dumps({**body, "budget": budget})
+    put(CAP, text)
+    r = m.read(NOW)
+    if r["budget"] != want or r["file"] != "fresh":
+        bad.append(["budget", label, r["budget"], r["file"]])
+put(CAP, json.dumps({"capacity": 5, "written_at": iso(NOW - timedelta(minutes=11)), "budget": B}))
+r = m.read(NOW)
+if r["budget"] is not None or r["file"] != "stale":
+    bad.append(["budget", "a stale file", r["budget"], r["file"]])
+print(json.dumps(bad))
+PY2
+)
+ok "$C16" "[]" "C16: every peak() and budget case reads as expected"
 
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-capacity: ALL PASS"; else echo "reconcile-rollout-capacity: FAILED"; fi
 exit "$fail"

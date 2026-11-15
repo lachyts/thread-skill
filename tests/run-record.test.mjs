@@ -307,6 +307,44 @@ test('p36-7: idle-slots hold-quota and a slot-taken cap set by the Capacity (by:
   assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'the refused line was not written')
 })
 
+test('p53-2: slot-taken\'s cap carries the budget and the Weight, slot-freed a peak; each refused out of its shape', (t) => {
+  const home = tmpHome(t)
+  const capA = { away: false, n: 5, file: 'fresh', by: 'capacity', budget: { mem_gb: 12, cores: 8 }, weight: { mem_gb: 3, cores: 2 } }
+  const capB = { away: true, n: 4, file: 'fresh', weight: { mem_gb: 3, cores: 2 } }
+  const GOOD = [['ta', 'slot-taken', { settings: SETTINGS, start: 'start', cap: capA }],
+    ['tb', 'slot-taken', { settings: SETTINGS, start: 'start', cap: capB }],
+    ['ta', 'slot-freed', { outcome: 'ready', peak: { mem_gb: 3.1, cores: 2.4 } }],
+    ['tb', 'slot-freed', { outcome: 'set-aside', peak: { mem_gb: 0, cores: 0 } }]]
+  for (const [task, kind, fields] of GOOD) emitOk(home, ['--rollout', 'r', '--task', task, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+  const got = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(got.map((l) => l.cap ?? l.peak), [capA, capB, GOOD[2][2].peak, GOOD[3][2].peak], 'each line reads back as written')
+  const BAD = [
+    ['budget mem_gb 0', 'slot-taken', 'cap', { ...capA, budget: { mem_gb: 0, cores: 8 } }],
+    ['weight with no cores', 'slot-taken', 'cap', { ...capB, weight: { mem_gb: 3 } }],
+    ['budget with an extra key', 'slot-taken', 'cap', { ...capA, budget: { mem_gb: 12, cores: 8, x: 1 } }],
+    ['weight mem_gb a string', 'slot-taken', 'cap', { ...capB, weight: { mem_gb: '3', cores: 2 } }],
+    ['peak mem_gb -1', 'slot-freed', 'peak', { mem_gb: -1, cores: 1 }],
+    ['peak mem_gb true', 'slot-freed', 'peak', { mem_gb: true, cores: 1 }],
+    ['peak with an extra key', 'slot-freed', 'peak', { mem_gb: 1, cores: 1, since: 'x' }],
+    ['peak a list', 'slot-freed', 'peak', [1, 1]],
+  ]
+  for (const [label, kind, key, value] of BAD) {
+    const fields = kind === 'slot-taken' ? { settings: SETTINGS, cap: value } : { outcome: 'ready', peak: value }
+    const r = cli(home, ['emit', '--rollout', 'r', '--task', 't', '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
+    assert.match(r.stderr, new RegExp(`^run_record: refused: \\S.*${key}.*\\n$`), label)
+  }
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, GOOD.length, 'no refused line was written')
+  // A NaN, which the CLI's JSON never carries, through the API's check
+  const nan = api(home, `try:
+    m.check("r", "slot-freed", "t", {"outcome": "ready", "peak": {"mem_gb": float("nan"), "cores": 1}})
+    print(json.dumps("accepted"))
+except m.Refused as e:
+    print(json.dumps(str(e)))`)
+  assert.equal(nan.status, 0, nan.stderr)
+  assert.match(JSON.parse(nan.stdout), /^slot-freed: peak must be /)
+})
+
 test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })

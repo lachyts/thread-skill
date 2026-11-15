@@ -135,11 +135,15 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug);
                      cap? {away (bool), n (int >= 1: the Mac-wide cap in force, the Away cap while Away, else the
                      Trickle; the Capacity's C while it is in force), file (fresh | missing | stale | unreadable: the
-                     Away state file's reading), by? (capacity: p36-7, n is the Capacity's, never the Trickle's)}
-                     (exactly those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
+                     Away state file's reading), by? (capacity: p36-7, n is the Capacity's, never the Trickle's),
+                     budget? (mem_gb and cores, numbers above 0: the Capacity's budget while it is in force, p53-2),
+                     weight? (mem_gb and cores, numbers above 0: the task's Weight, p53-2)}
+                     (away, n and file, plus the optional by, budget and weight, and no other key; p29-8, ADR 0049: the
+                     cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
-                     reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
+                     reconciledAt? (a UTC Z stamp); peak? (mem_gb and cores, finite numbers of at least 0: the tree's
+                     peak from slot-peaks.json, p53-2). p29-12: reconcile's call-end stamp, under Reading the record
   ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed | ci-timeout |
@@ -512,6 +516,15 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   night record (`next`) reads the Slot as ended at the call's end. The lane's events stay at the reconcile's clock,
   unmarked: the lane is the lead's (ADR 0030). A line from before p29-12 carries no `stamp`: its ts is the
   reconcile's clock.
+- Weight and peak (p53-2, ADR 0083 d4). A slot-taken's `cap.weight` is the Weight the task started with (the built-in
+  3 GB and 2 cores until p53-3), and `cap.budget` the Capacity's budget while it was in force. A slot-freed's `peak` is
+  Chorus's slot-peaks.json entry for the task tree (execute away.md § Capacity), copied at the reconcile that ends the
+  Slot: the tree's highest sample since that entry began. One tree serves every Slot of its task (ADR 0030), and Chorus
+  keeps an entry 24 hours after its last sample, so a re-taken task's peak (a seeded revise, a restart) may cover its
+  earlier Slots and repeat on more than one slot-freed: a reader takes peaks per task (one figure per task, its
+  highest), never as independent samples, and p53-3 reads them that way. An entry with no sample since the Slot's first
+  slot-taken is never copied. None is carried by a line from before p53-2, by a Slot freed by any other verb (mark-done
+  or resume, a hard pause, a defer, a carry), or by a reconcile with no fresh file or no entry: never a guess.
 - Idle Slot time is a span. A Reflection derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
@@ -790,13 +803,34 @@ CAP_FILES = ("fresh", "missing", "stale", "unreadable")  # reconcile-rollout.py 
 CAP_BY = ("capacity",)  # p36-7: a cap the Capacity set (reconcile-rollout.py _cap_in_force), never the Trickle's
 
 
+def _room(positive):
+    """A check for a room of memory and cores (p53-2, ADR 0083 d4): an object of exactly `mem_gb` and `cores`, each a
+    finite number (never a bool), above 0 when `positive` (a budget, a Weight), else at least 0 (a peak)."""
+    floor = "above 0" if positive else "of at least 0"
+
+    def check(v):
+        ok = isinstance(v, dict) and set(v) == {"mem_gb", "cores"} and \
+            all(_number(v[k]) and (v[k] > 0 if positive else v[k] >= 0) for k in ("mem_gb", "cores"))
+        return None if ok else "an object of exactly mem_gb and cores, finite numbers %s" % floor
+    return check
+
+
+CAP_ROOM = _room(True)   # slot-taken cap's budget and weight (p53-2)
+CAP_KEYS = {"away", "n", "file", "by", "budget", "weight"}   # away, n and file required; the rest optional
+
+
 def _cap(v):
-    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else, plus
-    an optional `by` (p36-7: "capacity" when the Capacity's C set n, so a Reflection never reads it as the Trickle)."""
-    if not isinstance(v, dict) or not {"away", "n", "file"} <= set(v) <= {"away", "n", "file", "by"}:
-        return "an object of exactly away, n and file, and an optional by"
+    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file}, plus an optional `by`
+    (p36-7: "capacity" when the Capacity's C set n, so a Reflection never reads it as the Trickle) and, p53-2, an
+    optional `budget` (the Capacity's budget while it is in force) and `weight` (the task's Weight), each a room of
+    mem_gb and cores above 0 (_room), and no other key."""
+    if not isinstance(v, dict) or not {"away", "n", "file"} <= set(v) <= CAP_KEYS:
+        return "an object of exactly away, n and file, and an optional by, budget and weight"
     if "by" in v and v["by"] not in CAP_BY:
         return "an object with by one of %s" % ", ".join(CAP_BY)
+    for k in ("budget", "weight"):
+        if k in v and CAP_ROOM(v[k]):
+            return "an object with %s %s" % (k, CAP_ROOM(v[k]))
     if _bool(v["away"]):
         return "an object with away true or false"
     if _int(1)(v["n"]):
@@ -1599,7 +1633,7 @@ KINDS = {
     "run-bound": (True, {"runId": _str, "journalDir": _str},
                   {"call": _enum("task", "revise", "integrate", "resume"), "resumedFrom": _str}),
     "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")},
-                   {**CALL_END}),
+                   {**CALL_END, "peak": _room(False)}),
     "ready": (True, {}, {"pr": _pr, **CALL_END}),
     "set-aside": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate", "gate"),
                          "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate"), **CALL_END}),

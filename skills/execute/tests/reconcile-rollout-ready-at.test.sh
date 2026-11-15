@@ -142,6 +142,7 @@ ok "$(ev a ready pr stamp reconciledAt)" \
 ok "$(ev a slot-freed outcome stamp reconciledAt)" \
   '[["2026-10-19T09:12:30.000Z","ready","call-end","2026-10-19T22:12:30.000Z"]]' \
   "R1: slot-freed is at the call's end too (the Slot's call ended there)"
+ok "$(ev a slot-freed peak)" '[["2026-10-19T09:12:30.000Z",null]]' "R1: no slot-peaks.json: slot-freed carries no peak (p53-2)"
 n=$(count)
 cp "$D/a.md" "$D/a.before"
 rec a "$(REVIEW 1)" 2026-10-20T01:00:00Z
@@ -334,5 +335,47 @@ rec m "$(REVIEW 32)" 2026-10-20T09:00:00Z
 J7=$(HOME="$HOME" nx 2026-10-20T09:05:00Z)
 ok "$(ev n ran-past-morning)|$(ev m ran-past-morning)" '[]|[["2026-10-20T09:05:00.000Z"]]' \
   "R7: n's call ended before the Morning, so no ran-past-morning line; m (fallback) reads as before"
+
+# ── P: a Slot's peak (p53-2, ADR 0083 d4): reconcile copies the task tree's slot-peaks.json entry onto slot-freed ────
+# Each case is one task, taken at 08:00, its call ending 08:30. The file reads stale by capacity.json's bounds, measured
+# from the call's end (else now). This scenario alone has a slot-peaks.json: it pins its own HOME and restores it.
+scen p-peaks
+export HOME="$D/home"; mkdir -p "$HOME/.config/thread"
+# peaks <written_at> <key> <mem_gb> <cores> <last>: slot-peaks.json as Chorus writes it, one entry
+peaks() {
+  python3 -c 'import json, sys
+w, k, m, c, l = sys.argv[2:]
+json.dump({"written_at": w, "by": "chorus-stage", "slots": {k: {"mem_gb": float(m), "cores": float(c), "since": w, "last": l}}},
+          open(sys.argv[1], "w"))' "$HOME/.config/thread/slot-peaks.json" "$@"
+}
+# slot <slug> [journal]: start at 08:00 and bind; with `journal`, the call ends 08:30
+slot() {
+  mkt "$1" open; start "$1" 2026-10-19T08:00:00Z; bind "$1" "wf_$1" 2026-10-19T08:01:00Z
+  [ -z "${2:-}" ] || journal "wf_$1" 2026-10-19T08:01:00Z 29
+}
+REVIEWW() { printf '{"status":"review","scope":"cross-cutting","prUrl":"%s/%s","reviewRoundsUsed":1,"planRoundsUsed":0,"worktreePath":"%s"}' "$PR" "$1" "$2"; }
+END='"2026-10-19T08:30:00.000Z","call-end"'
+slot p1 journal; peaks 2026-10-19T08:35:00Z "$D/tree-p1" 3.1 2.4 2026-10-19T08:29:00Z
+rec p1 "$(REVIEWW 41 "$D/tree-p1")" 2026-10-19T08:40:00Z
+ok "$(ev p1 slot-freed stamp peak)" "[[$END,{\"mem_gb\":3.1,\"cores\":2.4}]]" "P1: the tree's entry is carried exactly, at the call's end"
+slot p1b journal; peaks 2026-10-19T08:35:00Z "$D/tree-p1b" 3.1 2.4 2026-10-19T08:29:00Z
+rec p1b "$(REVIEWW 42 "$D/tree-p1b")" 2026-10-19T11:00:00Z
+ok "$(ev p1b slot-freed stamp peak)" "[[$END,{\"mem_gb\":3.1,\"cores\":2.4}]]" \
+  "P1b: a late reconcile, hours after the call, still carries it: staleness runs from the call's end"
+slot p3 journal; peaks 2026-10-19T08:15:00Z "$D/tree-p3" 3.1 2.4 2026-10-19T08:14:00Z
+rec p3 "$(REVIEWW 43 "$D/tree-p3")" 2026-10-19T08:40:00Z
+ok "$(ev p3 slot-freed stamp peak)" "[[$END,null]]" "P3: a file written over 10 minutes before the call's end is stale: no peak"
+slot p4 journal; peaks 2026-10-19T08:35:00Z "$D/tree-other" 3.1 2.4 2026-10-19T08:29:00Z
+rec p4 "$(REVIEWW 44 "$D/tree-p4")" 2026-10-19T08:40:00Z
+ok "$(ev p4 slot-freed stamp peak)" "[[$END,null]]" "P4: a fresh file with no entry for the tree: no peak"
+slot p6 journal; peaks 2026-10-19T08:35:00Z "$TMP/no-repo/.claude/worktrees/p6" 1.5 0.5 2026-10-19T08:29:00Z
+rec p6 "$(REVIEW 46)" 2026-10-19T08:40:00Z
+ok "$(ev p6 slot-freed stamp peak)" "[[$END,{\"mem_gb\":1.5,\"cores\":0.5}]]" \
+  "P6: no worktreePath: the engine's tree under the rollout's Project root is read"
+slot p8; peaks 2026-10-19T08:25:00Z "$D/tree-p8" 3.1 2.4 2026-10-19T08:24:00Z
+rec p8 "$(REVIEWW 48 "$D/tree-p8")" 2026-10-19T08:40:00Z
+ok "$(ev p8 slot-freed stamp peak)" '[["2026-10-19T08:40:00.000Z","fallback",null]]' \
+  "P8: no journal, so staleness runs from now: written 15 minutes before it, no peak"
+export HOME="$TMP/home"
 
 exit $fail

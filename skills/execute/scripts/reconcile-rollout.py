@@ -1146,7 +1146,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     revise|restart|start; `started:` present -> restart; else start. carriedFrom: the
                     record's unconsumed `carried` line for the task. cap (p29-8, ADR 0049): the Mac-wide cap
                     in force, {away, n, file} (_cap_in_force: n the Away cap while Away, else the Trickle),
-                    the Away state file read once per run, silently (`next` prints its WARN). No resolvable
+                    the Away state file read once per run, silently (`next` prints its WARN); `by` and, p53-2,
+                    the Capacity's `budget` only while it is in force, and `weight` (p53-2, ADR 0083 d4: the
+                    task's Weight, WEIGHT_BUILT_IN until p53-3) on every slot-taken. No resolvable
                     ceiling (or no rollout note): one `run_record: warning: slot-taken for <slug> not
                     recorded: <why>` line.
   mark-integrating  lane-taken, on every successful call; on an origin-lane refusal (exit 4, ADR 0064) with this
@@ -1186,6 +1188,11 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     then (p21-3) review-verdict {round, verdict, findings, original, regression,
                     digest, head?} per reviewVerdicts entry of a row that was in_progress and carries no
                     integration (the row-field mapping's reviewVerdicts, below), written once per verdict_key.
+                    The slot-freed carries `peak` (p53-2, ADR 0083 d4), the Slot's peak {mem_gb, cores} from
+                    capacity.py peak() for the task tree (_slot_peak: the row's absolute worktreePath, else the
+                    engine's <Project root>/.claude/worktrees/<slug>), read once per Slot-ending row and never
+                    under --dry-run; with no fresh slot-peaks.json or no entry since the Slot was taken it carries
+                    none.
   hand-back         (p21-2) race-decided {mark, by=hand-back} when a `RACE decided:` line lifted the task's hold
                     (_record_decision: once per task per record); then handed-back {via, arm}: via, first match,
                     descope (a `descope_armed:` stamp standing, read before the transition), answer (--answer, a live
@@ -1476,9 +1483,10 @@ Capacity (p36-7, ADR 0067 d8; the spec is skills/execute/away.md § Capacity): c
 script) reads ~/.config/thread/capacity.json, which Chorus writes, and _capacity_state adds `capacity_max` (rollouts.toml's
 machine-wide [defaults] key, _machine_settings, resolved only for a fresh reading). While the reading is fresh and the
 maximum resolves the Capacity is in force: C = min(max(capacity, 1), capacity_max) takes the number of the Mac-wide cap
-in force, by day and Away alike (_cap_in_force: `n` is C and `by: "capacity"`, so slot-taken's `cap` names it), while
-the Trickle's machinery stays as it is: the trickle claim lock and the claims, the fair share, the wakes, the leases,
-the prefixes `trickle:` and `away cap:` and the last starts. A missing reading (silent), a stale or unreadable one, or
+in force, by day and Away alike (_cap_in_force: `n` is C and `by: "capacity"`, so slot-taken's `cap` names it, and
+p53-2's `budget`, the file's {mem_gb, cores} when it has a well-typed one, beside them), while the Trickle's machinery
+stays as it is: the trickle claim lock and the claims, the fair share, the wakes, the leases, the prefixes `trickle:`
+and `away cap:` and the last starts. A missing reading (silent), a stale or unreadable one, or
 a capacity_max that will not resolve (each one CAPACITY_WARN line from `next`) falls back to today's Trickle and Away
 cap exactly, never to open. While in force: the count elsewhere (and mac_running's, the Run record's suite `running`,
 p36-9) also counts each open serial rollout's Leg claims (_leg_tasks: its `status: in_progress` notes owned `leg-<n>`)
@@ -4243,6 +4251,7 @@ def cmd_reconcile(args) -> int:
     warnings = []
     top = None  # (name, source) of the ladder's top rung, read once, only for a pre-3.0.0 row
     walk = None
+    notes = {}  # the rollout notes _slot_peak reads, once per run (_rollout_note_read)
 
     def lazy_walk():  # one walk per call, taken only on a read-only fix's carried verdict (_land_outcome)
         nonlocal walk
@@ -4280,7 +4289,10 @@ def cmd_reconcile(args) -> int:
         # end (`ready:`, a read-only approval's `merged:`, and the row's Slot events) is read from the call itself
         # (_call_end), falling back to now, marked, only when no end is readable.
         ends_slot = prior == "in_progress" and not isinstance(task.get("integration"), dict)
-        ended = _call_end(rollout, slug, now) if ends_slot else None
+        slot = _open_slot(rollout, slug) if ends_slot else None
+        ended = _call_end(slot, now)
+        # p53-2: the Slot's peak for its slot-freed, read once, never under --dry-run (no event is written there)
+        peak = None if not ends_slot or args.dry_run else _slot_peak(args, rollout, slug, task, slot, ended, now, notes)
         at = ended or now
         stamped = []  # the call-end stamps this row writes, for its line
         # A read-only task lands when its review approves: nothing to merge, so it never enters
@@ -4459,7 +4471,7 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: cannot write {path}: {e} — nothing written for this row")
             continue
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
-                          ready_stamped, ended, now, landed_before=landed_before)
+                          ready_stamped, ended, now, landed_before=landed_before, peak=peak)
         _review_verdict_events(args, rollout, slug, task, prior, ended, now)
         flake_lines = _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
@@ -4545,6 +4557,9 @@ _HEAT_MOD = None
 # whose Login is inside its line starts nothing new).
 CAPACITY_PY = Path(__file__).resolve().parent / "capacity.py"
 QUOTA_PREFIX = "quota:"
+# A task's Weight (ADR 0083 d4, Decided for Lachy 8): the built-in middle value slot-taken's `cap.weight` records
+# (p53-2) until p53-3 replaces it with the repo's setting and the measured Weight.
+WEIGHT_BUILT_IN = {"mem_gb": 3.0, "cores": 2.0}
 _CAPACITY_MOD = None
 # The Leg lease (p36-7, ADR 0067 d8): a serial rollout's lease, `by: leg`, written by leg.py on its own open Leg. While
 # Capacity is in force a Leg's `leg-<n>` claims count behind it, LEG_LEASE_LAPSE after its last write, or LEG_WAIT_LAPSE
@@ -4585,10 +4600,12 @@ def _capacity_module():
 
 def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     """The Capacity a call reads (p36-7, ADR 0067 d8; execute away.md § Capacity): {file, why, suggested, max,
-    maxSource, maxWhy, limit, inForce, quota, fault}. `file` and `why` are capacity.py read()'s (fresh, missing, stale
-    or unreadable; why null only when fresh), `suggested` the file's `capacity` when fresh. `fault` (ADR 0083 d2, p53-1)
-    is capacity.py's fault(reading) for a fresh reading, in force or not, else null: {signals, holder} while the writer
-    names a Mac fault. It is said, never obeyed: no hold, slotLimit or waiting record reads it (_capacity_fault_line).
+    maxSource, maxWhy, limit, inForce, quota, fault, budget}. `file` and `why` are capacity.py read()'s (fresh, missing,
+    stale or unreadable; why null only when fresh), `suggested` the file's `capacity` when fresh, and `budget` (p53-2,
+    ADR 0083 d4) read()'s {mem_gb, cores} when fresh and well-typed, else null (an older capacity.py has none).
+    `fault` (ADR 0083 d2, p53-1) is capacity.py's fault(reading) for a fresh reading, in force or not, else null:
+    {signals, holder} while the writer names a Mac fault. It is said, never obeyed: no hold, slotLimit or waiting record
+    reads it (_capacity_fault_line).
     `capacity_max` (rollouts.toml's [defaults], machine-wide, through _machine_settings) is resolved only for a fresh
     reading: `max` and `maxSource` are its value and source, else null, and `maxWhy` why it would not resolve. In force
     only when fresh and resolved: then `limit` is C = min(max(suggested, 1), max), else null, and every caller reads
@@ -4598,7 +4615,8 @@ def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     the lead's Login off its lease, _lead_login; "" reads none). Never raises: a capacity.py that will not load reads
     unreadable."""
     out = {"file": "unreadable", "why": "capacity.py would not load", "suggested": None, "max": None,
-           "maxSource": None, "maxWhy": None, "limit": None, "inForce": False, "quota": None, "fault": None}
+           "maxSource": None, "maxWhy": None, "limit": None, "inForce": False, "quota": None, "fault": None,
+           "budget": None}
     mod = _capacity_module()
     if mod is None:
         return out
@@ -4615,6 +4633,7 @@ def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     except Exception:  # noqa: BLE001 — fault() never raises; one that does (or an older capacity.py) names none
         out["fault"] = None
     out["suggested"] = reading["capacity"]
+    out["budget"] = reading.get("budget")
     settings, err = _machine_settings()
     try:
         if settings is not None:
@@ -4798,11 +4817,13 @@ def _away_state(now) -> dict:
 def _cap_in_force(away, capacity=None) -> dict:
     """The Mac-wide cap an Away state puts in force (_away_state): {away, n, file}, n the Away cap while Away, else the
     Trickle; while a Capacity reading (_capacity_state) is in force, n is its C and `by: "capacity"` is added (p36-7), so
-    a Reflection never reads a Capacity's number as the Trickle's. slot-taken's `cap` (the Run record), so a Reflection
-    reads each Slot against it (ADR 0032, 0049)."""
+    a Reflection never reads a Capacity's number as the Trickle's, and so is the reading's `budget` (p53-2) when it has
+    one. slot-taken's `cap` (the Run record), so a Reflection reads each Slot against it (ADR 0032, 0049)."""
     out = {"away": away["away"], "n": away["awayCap"] if away["away"] else away["limit"], "file": away["file"]}
     if capacity is not None and capacity["inForce"]:
         out.update(n=capacity["limit"], by="capacity")
+        if capacity.get("budget") is not None:
+            out["budget"] = capacity["budget"]
     return out
 
 
@@ -9793,9 +9814,10 @@ def _rollout_note_read(args, rollout, cache):
 def _record_slot_taken(args, slug, note, rollout, start, cache, away_once):
     """mark-started's slot-taken. With no `rollout:`, no rollout note or no resolvable ceiling, one warning and
     nothing recorded (a Slot with no ceiling cannot be read against it). `cap` is the Mac-wide cap in force
-    (_cap_in_force, p29-8): `away_once` reads the Away state and the Capacity (p36-7: C, `by: capacity`, while it is in
-    force) at most once per verb run, silently (`next` prints their WARNs), and only here, so --dry-run and a warned
-    note never read them."""
+    (_cap_in_force, p29-8): `away_once` reads the Away state and the Capacity (p36-7: C, `by: capacity`, and p53-2 its
+    `budget`, while it is in force) at most once per verb run, silently (`next` prints their WARNs), and only here, so
+    --dry-run and a warned note never read them. `cap.weight` (p53-2, ADR 0083 d4) is the task's Weight, on every
+    slot-taken: WEIGHT_BUILT_IN until p53-3."""
     def warn(why):
         print(f"run_record: warning: slot-taken for {slug} not recorded: {why}", file=sys.stderr)
 
@@ -9809,7 +9831,8 @@ def _record_slot_taken(args, slug, note, rollout, start, cache, away_once):
     settings, err = _slot_settings(note, rollout_note)
     if err:
         return warn(err)
-    fields = {"settings": settings, "start": start, "cap": _cap_in_force(*away_once())}
+    cap = {**_cap_in_force(*away_once()), "weight": dict(WEIGHT_BUILT_IN)}
+    fields = {"settings": settings, "start": start, "cap": cap}
     state = _record_state(rollout)
     carried = state["carried"].get(slug.lower()) if state else None
     if carried:
@@ -9920,24 +9943,15 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
     return "blocked"
 
 
-def _call_end(rollout, slug, now):
-    """The end of the call whose row ends the task's Slot (p29-12), as the Workflow journal of that call records it (an
-    aware UTC datetime), or None when it cannot be read: the caller then falls back to now and marks it. The call is
-    read through the rollout's Run record by its reader rules: the task's open Slot is its first slot-taken since the
-    last slot-freed (or from-file `carried`), a re-take while it is open being the same Slot, and the call is the last
-    run-bound for the task inside it that is not an integrate call (a restart after a dead lead binds a newer one). Its
-    journal, <journalDir>/<runId>.json (fold-journals' path), must be an object naming that runId with a terminal
-    status. The end is startTime + durationMs (epoch ms, ints >= 0: score.py's reading), else the journal's
-    `timestamp`, and must lie at or after the Slot's latest slot-taken, a re-take included, and at or before now (a
-    later one is no end yet). An end before the latest slot-taken is not the end of the call the row reports: it is an
-    earlier attempt's, a restart re-took the Slot after it (a launch that failed binds nothing new, and a resume that
-    re-binds the same runId and errors leaves the old journal on disk), or another call's stale file. Stamped there,
-    the row's slot-freed would sit before that slot-taken and split the Slot in two for every reader that reads the
-    record by ts (score.py, the night record; run_record.py's call-end stamps): a second Slot that is never freed. A
-    record, journal or field that cannot be read is None: never an error, no extra reason or warning line is printed,
-    and the verb's exit is unchanged (p15-2). Whether the end is readable does decide the stamps: with none, the note's
-    `ready:` (or a read-only approval's `merged:`) and the line's `ready=`/`merged=` are now, the line marked
-    `(fallback)`, and the events `stamp: fallback`."""
+def _open_slot(rollout, slug):
+    """(taken, floor, bound) for the task's open Slot, read once from the rollout's Run record by its reader rules
+    (p29-12), or None when there is no rollout or the record cannot be resolved or read. The open Slot is the task's
+    first slot-taken since the last slot-freed (or from-file `carried`), a re-take while it is open being the same Slot:
+    `taken` is that first slot-taken (None with no open Slot), `floor` the latest slot-taken ts inside it, a re-take
+    included, and `bound` the last run-bound for the task inside it that is not an integrate call (a restart after a
+    dead lead binds a newer one), None with none. A record that cannot be read is None: never an error, and no reason
+    or warning line is printed (p15-2). cmd_reconcile reads it once per Slot-ending row and hands it to _call_end and
+    _slot_peak."""
     if not rollout:
         return None
     try:
@@ -9945,7 +9959,6 @@ def _call_end(rollout, slug, now):
         lines, _bad = _record_lines(rr.record_path(rollout))
     except Exception:
         return None  # no record yet, or one that cannot be resolved or read
-    # `taken` is the open Slot (its first slot-taken); `floor` the latest slot-taken ts inside it, a re-take included
     key, taken, floor, bound = slug.lower(), None, None, None
     for d in lines:
         if d.get("task") != key:
@@ -9961,7 +9974,33 @@ def _call_end(rollout, slug, now):
             taken, floor, bound = None, None, None
         elif kind == "run-bound" and taken is not None and d.get("call") != "integrate":
             bound = d
+    return taken, floor, bound
+
+
+def _call_end(slot, now):
+    """The end of the call whose row ends the task's Slot (p29-12), as the Workflow journal of that call records it (an
+    aware UTC datetime), or None when it cannot be read: the caller then falls back to now and marks it. `slot` is
+    _open_slot's (taken, floor, bound): the call is `bound`, so no Slot (None) or no call bound since it was taken is
+    None. Its journal, <journalDir>/<runId>.json (fold-journals' path), must be an object naming that runId with a
+    terminal status. The end is startTime + durationMs (epoch ms, ints >= 0: score.py's reading), else the journal's
+    `timestamp`, and must lie at or after the Slot's latest slot-taken (`floor`), a re-take included, and at or before
+    now (a later one is no end yet). An end before the latest slot-taken is not the end of the call the row reports: it
+    is an earlier attempt's, a restart re-took the Slot after it (a launch that failed binds nothing new, and a resume
+    that re-binds the same runId and errors leaves the old journal on disk), or another call's stale file. Stamped
+    there, the row's slot-freed would sit before that slot-taken and split the Slot in two for every reader that reads
+    the record by ts (score.py, the night record; run_record.py's call-end stamps): a second Slot that is never freed. A
+    journal or field that cannot be read is None: never an error, no extra reason or warning line is printed, and the
+    verb's exit is unchanged (p15-2). Whether the end is readable does decide the stamps: with none, the note's `ready:`
+    (or a read-only approval's `merged:`) and the line's `ready=`/`merged=` are now, the line marked `(fallback)`, and
+    the events `stamp: fallback`."""
+    if slot is None:
+        return None
+    _taken, floor, bound = slot
     if bound is None:  # no open Slot, or no call bound since it was taken
+        return None
+    try:
+        rr = _run_record()
+    except Exception:
         return None
     run_id, jdir = bound.get("runId"), bound.get("journalDir")
     if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id) or ".." in run_id or not isinstance(jdir, str):
@@ -9991,6 +10030,33 @@ def _call_end(rollout, slug, now):
     return end
 
 
+def _slot_peak(args, rollout, slug, task, slot, ended, now, notes):
+    """A Slot's peak (p53-2, ADR 0083 d4; execute away.md § Capacity, *A Slot's peak*): capacity.py's peak() for the
+    task tree, {mem_gb, cores}, or None, for the slot-freed of a row that ends a Slot. It reads no record of its own:
+    `slot` is _open_slot's, and `since` its first slot-taken's ts (no open Slot or an unreadable ts is None). The tree
+    is the row's `worktreePath` when it is a string, absolute after `~`, else the engine's worktreeDir,
+    <Project root>/.claude/worktrees/<slug>, the root read from the rollout note (_rollout_note_read, once per run
+    through `notes`; no note or no root is None). The file reads stale against the call's end (`ended`, else now).
+    Never raises: a capacity.py that will not load, or one with no peak (an older snapshot's), is None."""
+    try:
+        taken = slot[0] if slot else None
+        since = _parse_ts(taken.get("ts")) if isinstance(taken, dict) else None
+        if since is None:
+            return None
+        given = task.get("worktreePath")
+        tree = given if isinstance(given, str) and os.path.isabs(os.path.expanduser(given)) else None
+        if tree is None:
+            _path, rollout_note, _why, _unreadable = _rollout_note_read(args, rollout, notes)
+            root = _project_root(rollout_note) if rollout_note is not None else None
+            if root is None:
+                return None
+            tree = f"{root}/.claude/worktrees/{slug}"
+        mod = _capacity_module()
+        return mod.peak(tree, since, ended or now, now) if mod is not None else None
+    except Exception:  # noqa: BLE001 — a peak is never a guess and never an error: anything unforeseen is none
+        return None
+
+
 def _call_end_mark(ended, now):
     """(fields, ts) for an event that records a call's end (p29-12): at `ended` with `stamp: call-end` and the
     reconcile's own clock as `reconciledAt` (when the lead turned to the row), or, with no end read, `stamp: fallback`
@@ -10001,7 +10067,7 @@ def _call_end_mark(ended, now):
 
 
 def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped,
-                      ended, now, landed_before=False):
+                      ended, now, landed_before=False, peak=None):
     """One row's events, against the note's status (`prior`), _holds_lane (`held`) and the Integration log's lane
     fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes. A row that ends a
     Slot is its call's end (p29-12): its slot-freed, ready, merged, set-aside and quota-stall (and its review-verdict
@@ -10010,7 +10076,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     (_call_end_mark); a ready or merged on any other row is a fallback too. The lane's events are the lead's (ADR
     0030): at the reconcile's clock, unmarked. A read-only approval (`note_status` done) fires its landing's merged
     in every _land_outcome outcome, carried and owed included, as mark-done's does; `landed_before` (the note read done
-    or a carried fix before this row) fires none: a re-reconcile lands nothing twice."""
+    or a carried fix before this row) fires none: a re-reconcile lands nothing twice. `peak` (p53-2, _slot_peak) is
+    the Slot's peak, written on its slot-freed only when there is one."""
     if args.dry_run or not rollout:
         return
     integ = task.get("integration") if isinstance(task.get("integration"), dict) else None
@@ -10034,7 +10101,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
             outcome_s = "lost"
         else:
             outcome_s = "set-aside"
-        _event(rollout, "slot-freed", slug, {"outcome": outcome_s, **mark}, args, ts=end_ts)
+        _event(rollout, "slot-freed", slug, {"outcome": outcome_s, **mark, **({"peak": peak} if peak else {})}, args,
+               ts=end_ts)
     if ready_stamped:
         _event(rollout, "ready", slug, {**({"pr": pr} if pr else {}), **mark}, args, ts=end_ts)
     if note_status == "done" and prior != "done" and not landed_before:
