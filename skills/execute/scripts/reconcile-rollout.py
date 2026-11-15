@@ -1528,10 +1528,12 @@ lock). The fair share is weighted (_fair_share_w over _waiters_w): it keeps room
 it kept a place, reserves a reachable head that does not fit (no wake), passes over one that needs a serial chain to
 end, and keeps a waiting Leg's need beyond its session weight-only, held 0. One task always fits: the caller's first item
 in launch order is admitted whatever its Weight while nothing is counted in its view, nothing of its own runs and the
-share kept nothing for another (or gave it the empty grant). A row the weight holds stops the start loop as the count
-does and reads _budget_why's line under the same prefixes; `trickle.capacity.weight` reports the reading, the
-waiting record and the claims carry `weight`, idle-slots a `bound`, and the suite lines a record-only `runningWeight`
-(mac_running's room, _suite_weight). With no budget nothing new is read, written or reported.
+share kept nothing for another (or gave it the empty grant). The seeded revises step 1.2 launches take the room first,
+in launch order, and each start fits on top of them (none once a revise took one task always fits). A row the weight
+holds stops the start loop as the count does and reads _budget_why's line under the same prefixes;
+`trickle.capacity.weight` reports the reading, the waiting record and the claims carry `weight`, idle-slots a `bound`,
+and the suite lines a record-only `runningWeight` (mac_running's room, _suite_weight). With no budget nothing new is
+read, written or reported.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -6956,14 +6958,15 @@ def cmd_next(args) -> int:
     no waiting record, `surfaceWait` reports it, `halt` stays null while it holds a row and no pause stands, and
     idle-slots reads `hold-surface`. The budget (p53-4; the module docstring's "The budget admits"): while the reading
     in force carries one, the cap is capacity_max (_count_cap), every queued row and seeded revise carries its Weight
-    (`task_w`, read before the lock), the fair share is weighted (_fair_share_w), each start must also fit the budget
-    less the Weight elsewhere and the room kept (else it stops the loop, `slot_held` as the count's stop, the row named
-    by _budget_why's line), rev_go is the prefix of revises that fit both and the reported `slotLimit` is used + rev_go
-    while revises exist, one task always fits the first item in launch order on an empty Mac when nothing is kept for
-    another, the claims and the waiting record carry `weight` (the record the first held item's in step 1.2's launch
-    order), wakes go to the names granted (never the one reserved), idle-slots adds `bound`, and `trickle.capacity`
-    is a copy carrying `weight` {budget, count, running, elsewhere, mine, floors, kept, reserve, alwaysFits, short,
-    why}."""
+    (`task_w`, read before the lock), the fair share is weighted (_fair_share_w), rev_go is the prefix of revises that
+    fit both, taken first (step 1.2 launches them before step 1.3's starts), each start must also fit the budget less
+    the Weight elsewhere and the room kept on top of those revises (else it stops the loop, `slot_held` as the count's
+    stop, the row named by _budget_why's line), and the reported `slotLimit` is used + rev_go while revises exist, one
+    task always fits the first item in launch order on an empty Mac when nothing is kept for another (a revise that
+    takes it leaves no start room), the claims and the waiting record carry `weight` (the record the first held
+    item's in step 1.2's launch order), wakes go to the names granted (never the one reserved), idle-slots adds
+    `bound`, and `trickle.capacity` is a copy carrying `weight` {budget, count, running, elsewhere, mine, floors, kept,
+    reserve, alwaysFits, short, why}, `running` and `mine` counting the revises rev_go admits."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     quota_login = getattr(args, "quota_login", None)
     if quota_login is not None and not args.dry_run:
@@ -7273,7 +7276,11 @@ def cmd_next(args) -> int:
     started, solo_head = [], None
     # The start loop's stop (p53-4): (the row it broke on for want of a Slot, "count" or "weight"), else None; and the
     # one-task-always-fits state: whether it may admit the first item in launch order (`always_ok`) and whether it did.
+    # The seeded revises go first in launch order (step 1.2 before step 1.3's starts), so while the budget admits
+    # `rev_go_w` is the prefix of them admitted before any start, `rev_w` their Weight, `rev_bind` what held the first
+    # revise outside it ("count" or "weight"), and `rev_always` whether the first one took one task always fits.
     brk, always_ok, always_used = None, False, False
+    rev_go_w, rev_w, rev_bind, rev_always = 0, dict(WEIGHT_ZERO), None, False
     if paused or pause_requested:
         slot_limit, kept, share = fair_limit(0)  # nothing of this rollout starts: every free place is the waiters'
         # A soft pause drains (ADR 0030 decision 5): nothing new starts or restarts; once nothing runs,
@@ -7341,18 +7348,38 @@ def cmd_next(args) -> int:
                 first_w = first["task_w"]
         slot_limit, kept, share = fair_limit(min(startable + len(revises), max(0, ceiling - mine)), first_w)
         # The weight (p53-4): each pick must fit the budget less the Weight elsewhere and the room the share keeps, on
-        # this rollout's own Weight and this call's starts. One task always fits (DfL 11): the first item in launch
-        # order is admitted whatever its Weight while nothing is counted in this view, nothing of this rollout runs,
-        # and the share kept nothing for another (or gave this rollout the empty grant).
+        # this rollout's own Weight, the seeded revises admitted ahead of it and this call's starts. One task always
+        # fits (DfL 11): the first item in launch order is admitted whatever its Weight while nothing is counted in
+        # this view, nothing of this rollout runs, and the share kept nothing for another (or gave this rollout the
+        # empty grant).
         if budget is not None:
             room_starts = _room_sub(_room_sub(budget, elsewhere_wt), _room_sum(share["keptW"].values()))
             always_ok = empty and (not share["keptNamed"] or share["emptyTo"] == rollout_path.stem)
+            # The revises first (step 1.2 launches them before step 1.3's starts): the prefix each passing the count
+            # (slotsInUse plus the ones before it below slotLimit, step 1.2's rule) and the weight (this rollout's own
+            # Weight plus the ones before it and its own fitting room_starts; the first one by one task always fits).
+            for i, r in enumerate(revises):
+                if used + i >= slot_limit:
+                    rev_bind = "count"
+                    break
+                fit = _room_fits(_room_add(mine_w, rev_w), r["task_w"], room_starts)
+                if not fit and not (i == 0 and always_ok):
+                    rev_bind = "weight"
+                    break
+                rev_always = rev_always or not fit
+                rev_w = _room_add(rev_w, r["task_w"])
+                rev_go_w += 1
+            always_used = rev_always
 
         def fits_w(r):
-            """(fits, by one task always fits) for a pick under the budget; always (True, False) without one."""
+            """(fits, by one task always fits) for a pick under the budget; always (True, False) without one. A start
+            fits on top of the revises admitted ahead of it, and once a revise took one task always fits (the Mac
+            holds it alone) no start has room."""
             if budget is None:
                 return True, False
-            used_w = _room_add(mine_w, _room_sum(x["task_w"] for x in start))
+            if rev_always:
+                return False, False
+            used_w = _room_add(_room_add(mine_w, rev_w), _room_sum(x["task_w"] for x in start))
             if _room_fits(used_w, r["task_w"], room_starts):
                 return True, False
             return (True, True) if always_ok and not start and not revises else (False, False)
@@ -7415,9 +7442,11 @@ def cmd_next(args) -> int:
     # `trickle.kept`'s order. The prefix never changes, so every reader of `trickle:` and `away cap:` reads it as
     # before.
     # While the budget admits (p53-4) the row the weight held names it instead (_budget_why): what the Mac holds after
-    # this call's starts, which part is short and the row's own Weight, with the same `kept for` suffix (keptNamed).
+    # the seeded revises step 1.2 launches and this call's starts, which part is short and the row's own Weight, with
+    # the same `kept for` suffix (keptNamed). `start_base` is this rollout's Weight on the Mac after both.
     kept_for = _kept_for(share["keptNamed"] if budget is not None else kept)
-    start_w = _room_sum(r["task_w"] for r in start) if budget is not None else None
+    start_base = _room_add(_room_add(mine_w, rev_w), _room_sum(r["task_w"] for r in start)) if budget is not None \
+        else None
 
     def weight_line(r, base, n):
         """The weight's hold line for row (or revise) r on `base`, this rollout's Weight on the Mac before it."""
@@ -7429,7 +7458,7 @@ def cmd_next(args) -> int:
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
                 f"{HEAT_PREFIX} the Mac is hot ({heat['name']})" if heat["held"] else
                 _quota_why(capacity) if quota_on else
-                weight_line(brk[0], _room_add(mine_w, start_w), running_elsewhere + mine + len(start))
+                weight_line(brk[0], start_base, running_elsewhere + mine + rev_go_w + len(start))
                 if budget is not None and brk is not None and brk[1] == "weight" else
                 f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac{kept_for}")
     holds += [(r, slot_why) for r in slot_held]
@@ -7506,35 +7535,24 @@ def cmd_next(args) -> int:
     in_flight_or_owed = live or restart or awaiting or integrating or race_held_lane or start or revises
     want = sum(1 for r in waits if r is not solo_head) or int(solo_head in waits and not in_flight_or_owed)
     rev_go = min(len(revises), max(0, slot_limit - used))
-    # While the budget admits (p53-4) rev_go is the prefix of the revises each passing the count and the weight: this
-    # rollout's own Weight plus the revises before it and its own fitting the same room the starts fit (the first one by
-    # one task always fits, which then goes to it and not to a start). The first held item in step 1.2's launch order
-    # (the first revise outside rev_go, else the row the start loop broke on) is the one the waiting record weighs, and
-    # its weight line, when the weight held it, is `trickle.capacity.weight.why`.
-    held_item, held_line, rev_bind = None, None, None
+    # While the budget admits (p53-4) rev_go is rev_go_w, the prefix of the revises each passing the count and the
+    # weight, taken before any start (the start loop above fits each start on top of them; the first revise by one task
+    # always fits leaves no start room). The first held item in step 1.2's launch order (the first revise outside
+    # rev_go, else the row the start loop broke on) is the one the waiting record weighs, and its weight line, when the
+    # weight held it, is `trickle.capacity.weight.why`.
+    held_item, held_line = None, None
     if budget is not None:
-        rev_go, acc = 0, dict(WEIGHT_ZERO)
-        for i, r in enumerate(revises):
-            if used + i >= slot_limit:
-                rev_bind = "count"
-                break
-            if not _room_fits(_room_add(mine_w, acc), r["task_w"], room_starts) and not (i == 0 and always_ok):
-                rev_bind = "weight"
-                break
-            if not _room_fits(_room_add(mine_w, acc), r["task_w"], room_starts):
-                always_used = True
-            acc = _room_add(acc, r["task_w"])
-            rev_go += 1
+        rev_go = rev_go_w
         if sw_on or ro_held or main_red or whole:
             pass   # their holds replace every Slot reason: no item waits on the Mac's room
         elif rev_go < len(revises):
             held_item = revises[rev_go]
             if rev_bind == "weight":
-                held_line = weight_line(held_item, _room_add(mine_w, acc), running_elsewhere + mine + rev_go)
+                held_line = weight_line(held_item, _room_add(mine_w, rev_w), running_elsewhere + mine + rev_go)
         elif brk is not None:
             held_item = brk[0]
             if brk[1] == "weight":
-                held_line = weight_line(held_item, _room_add(mine_w, start_w), running_elsewhere + mine + len(start))
+                held_line = weight_line(held_item, start_base, running_elsewhere + mine + rev_go + len(start))
         if revises:
             slot_limit = min(slot_limit, used + rev_go)
     want = min(want + len(revises) - rev_go, max(0, ceiling - (mine + len(start) + rev_go)))
@@ -7689,12 +7707,13 @@ def cmd_next(args) -> int:
     # dependency on a folded member waits on its combined unit (_fold_unit), as its hold reason already says.
     waited = {_fold_unit(d, index)[0].lower() for r in queued for d in r["deps"]}
     # trickle.capacity.weight (p53-4), only while the budget admits: the budget, the hard count, what the Mac holds after
-    # this call's starts (elsewhere plus this rollout's own, `mine`), the chains' floors, the room the share keeps
-    # (keptW) and the one it reserves, whether one task always fits admitted an item past its Weight, and the first
-    # held item's weight line and its short parts (null when the count, or nothing, held it).
+    # the seeded revises step 1.2 launches and this call's starts (elsewhere plus this rollout's own, `mine`), the
+    # chains' floors, the room the share keeps (keptW) and the one it reserves, whether one task always fits admitted an
+    # item past its Weight, and the first held item's weight line and its short parts (null when the count, or nothing,
+    # held it).
     wblock = None
     if budget is not None:
-        own_now = _room_add(mine_w, _room_sum(r["task_w"] for r in start))
+        own_now = _room_add(_room_add(mine_w, rev_w), _room_sum(r["task_w"] for r in start))
         wblock = {"budget": budget, "count": cap, "running": _room_add(elsewhere_wt, own_now), "elsewhere": elsewhere_w,
                   "mine": own_now, "floors": dict(sorted(floors.items())), "kept": share["keptW"],
                   "reserve": share["reserve"], "alwaysFits": always_used,

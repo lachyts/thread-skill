@@ -612,6 +612,12 @@ wtoml 3; wro ro; for i in 1 2 3 4; do wt "l$i" ro light; done
 J=$(nx ro)
 ok "$(q "$J" "$holds")|$(q "$J" "$W"'["why"]')" '{"l4":"trickle: 3/3 tasks running on this Mac"}|null' "C17c: capacity_max 3 binds before the weight: the count's line, no weight why"
 ok "$(idle ro)" '{"bound":"count","reason":"hold-trickle"}' "C17c: … bound count"
+wscen c17c-nopack
+wro ro; wt h1 ro heavy; wt h2 ro heavy; wt x1 ro huge; wt l1 ro light
+J=$(nx ro --dry-run)
+X1="trickle: 2 tasks on this Mac hold 8/12 GB and 4/16 cores: memory short for [[x1]] (16 GB, 2 cores)"
+ok "$(q "$J" 'd["start"]')|$(q "$J" "$holds")" "[\"h1\",\"h2\"]|{\"l1\":\"$X1\",\"x1\":\"$X1\"}" \
+  "C17c: no packing: x1 (16 GB) stops the loop, so l1 (1.5 GB, it would fit) waits on x1's line"
 
 # C17d: another lead's live claim holds the Weight it carries (else the built-in); a consumed claim weighs it too
 wscen c17d-claims
@@ -702,6 +708,24 @@ ok "$(q "$J" '[d["slotLimit"], '"$W"'["alwaysFits"], d["start"]]')" '[1,true,[]]
 V2="trickle: 1 task on this Mac holds 16/12 GB and 2/16 cores: memory short for [[v2]] (4 GB, 2 cores)"
 ok "$(q "$J" "$W"'["why"]')|$(claims '[[w["want"], w.get("weight")] for w in d["waiting"]]')" "\"$V2\"|[[2,{\"cores\":2.0,\"mem_gb\":4.0}]]" \
   "C17g: … the first held item in launch order is v2: weight.why and the waiting record name it"
+wscen c17g-revise-first
+python3 "$TMP/wpeaks.py" "$THREAD_EVENTS_DIR" "$D" big:8:2
+wro ro; wrev v1 ro big; wt q1 ro big
+J=$(nx ro)
+ok "$(q "$J" '[d["start"], d["slotsInUse"], d["slotLimit"]]')|$(q "$J" "$W"'["running"]')|$(q "$J" "$W"'["mine"]')" \
+  '[[],0,1]|{"cores":2.0,"mem_gb":8.0}|{"cores":2.0,"mem_gb":8.0}' \
+  "C17g: an 8 GB revise and an 8 GB start on 12 GB: the revise, first in launch order, goes alone; running and mine count it"
+ok "$(q "$J" "$holds")|$(claims '[c["slug"] for c in d["claims"]]')" \
+  '{"q1":"trickle: 1 task on this Mac holds 8/12 GB and 2/16 cores: memory short for [[q1]] (8 GB, 2 cores)"}|["v1"]' \
+  "C17g: … q1's line holds the revise's 8 GB, and only v1 is claimed"
+wscen c17g-always-light
+wro ro; wrev v1 ro huge; wt l1 ro light
+J=$(nx ro)
+ok "$(q "$J" '[d["start"], d["slotLimit"], '"$W"'["alwaysFits"]]')|$(q "$J" "$W"'["running"]')" \
+  '[[],1,true]|{"cores":2.0,"mem_gb":16.0}' \
+  "C17g: a 16 GB revise takes one task always fits on an empty Mac: a light start gets no room beside it"
+ok "$(q "$J" "$holds")" '{"l1":"trickle: 1 task on this Mac holds 16/12 GB and 2/16 cores: memory short for [[l1]] (1.5 GB, 1 core)"}' \
+  "C17g: … l1 waits on the revise's 16 GB"
 
 # C17h: a stale reading with a budget falls back to the Trickle 2 (Away, the Away cap)
 wscen c17h-stale
