@@ -22,8 +22,10 @@
 //              says every added key is optional, gives the restart hold's Strain rule, and the fault line's tail
 //              ` — a Mac fault, never waited on`, which reconcile-rollout.py prints
 //   peaks      ADR 0083 d12 (p53-1): § Capacity holds the `budget` row (the older reader's `capacity` beside it) and its
-//              example, and the slot-peaks.json contract: its path, `"by": "chorus-stage"`, the 24-hour keep and "a
-//              missing, stale or unreadable file means no peak"
+//              example, and the slot-peaks.json contract: capacity.py's SLOT_PEAKS_FILE_REL as its path, `"by":
+//              "chorus-stage"`, the 24-hour keep and "a missing, stale or unreadable file means no peak"; and (p53-2) the
+//              writer's duty to rewrite it at least once every 2 minutes while it holds an entry, and that a reader
+//              takes peaks per task, never as independent samples
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read } from '../lib/contract-text.mjs'
@@ -68,6 +70,7 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
   const faultKey = grab(cap, /^CAPACITY_FAULT_KEY = "([^"]*)"/m)
   const freezeKey = grab(cap, /^CAPACITY_FREEZE_KEY = "([^"]*)"/m)
   const holderKey = grab(cap, /^CAPACITY_HOLDER_KEY = "([^"]*)"/m)
+  const peaksRel = grab(cap, /^SLOT_PEAKS_FILE_REL = "([^"]*)"/m)
   const keys = (grab(cap, /^CAPACITY_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((k) => k.slice(1, -1)) ?? []
   const legLapse = grab(code, /^LEG_LEASE_LAPSE = timedelta\(minutes=(\d+)\)/m)
   const waitLapse = grab(code, /^LEG_WAIT_LAPSE = timedelta\(minutes=(\d+)\)/m)
@@ -106,9 +109,11 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
     !s.includes(`fault: <signal>[ (held by <name>)][, <signal>…]${faultTail}\``) || !code.includes(`${faultTail}"`)) fails.push('strain')
   const budgetRow = collapse(away.split('\n').find((l) => l.startsWith('| `budget` |')) ?? '')
   if (!budgetRow.includes('`capacity` stays beside it, the count an older reader uses') ||
-    !s.includes('budget {"mem_gb": 12.0, "cores": 8.0}, both above 0') || !s.includes('~/.config/thread/slot-peaks.json') ||
+    !s.includes('budget {"mem_gb": 12.0, "cores": 8.0}, both above 0') || !peaksRel || !s.includes(`~/${peaksRel}`) ||
     !s.includes('"by": "chorus-stage"') || !s.includes('An entry is kept 24 hours after its last sample') ||
-    !s.includes('A missing, stale or unreadable file means no peak')) fails.push('peaks')
+    !s.includes('A missing, stale or unreadable file means no peak') ||
+    !s.includes('rewrites it at least once every 2 minutes while it holds an entry, a state that holds included') ||
+    !s.includes('never as independent samples')) fails.push('peaks')
   return fails
 }
 
@@ -161,6 +166,11 @@ test('controls: each mutation fails exactly its rule', () => {
   only('away', '"by": "chorus-stage"', '"by": "chorus"', 'peaks', 'another slot-peaks writer')
   only('away', 'A missing, stale or unreadable file means no peak', 'A missing file means no peak', 'peaks', 'a stale peaks file read')
   only('away', 'An entry is kept 24 hours after its last sample', 'An entry is kept 1 hour after its last sample', 'peaks', 'another keep')
+  only('cap', 'SLOT_PEAKS_FILE_REL = ".config/thread/slot-peaks.json"', 'SLOT_PEAKS_FILE_REL = ".config/thread/peaks.json"', 'peaks',
+    'another slot-peaks path in the code')
+  only('away', 'rewrites it at least once every 2 minutes while it holds an entry, a state that holds included', 'rewrites it when a peak rises',
+    'peaks', 'the writer rewrites only on a rise')
+  only('away', 'never as independent samples', 'as independent samples', 'peaks', 'peaks read as independent samples')
 })
 
 test('every rule has a control', () => {

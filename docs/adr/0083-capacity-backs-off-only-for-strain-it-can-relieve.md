@@ -3,7 +3,10 @@
 Date: 2026-11-15
 Status: proposed (d2's and d12's reader built by p53-1: the restart hold and the suite stop's label follow Strain, a
 fault is said and never obeyed; the `signals.fault`/`holder`/`shares`, `budget` and slot-peaks.json contract written in
-execute away.md § Capacity; the writer is Chorus's, chorus-p109-2). In grill with Lachy (`/grill-with-docs`,
+execute away.md § Capacity; the writer is Chorus's, chorus-p109-2. d4's Run record built by p53-2: slot-taken's `cap`
+carries the budget in force and the task's Weight (the built-in 3 GB and 2 cores, DfL 8, until p53-3), and slot-freed
+each Slot's peak from slot-peaks.json, read per task, and the contract's writer duty for slot-peaks.json (rewritten at
+least once every 2 minutes while it holds an entry)). In grill with Lachy (`/grill-with-docs`,
 2026-11-15); the decisions below are added as he rules them, and the open questions are listed at the end. Amends ADR
 0067 d8 (Capacity is the limit, set automatically) and, through it, Chorus ADR 0104. Nothing else here is built yet.
 

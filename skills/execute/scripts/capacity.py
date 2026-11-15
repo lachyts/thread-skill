@@ -6,10 +6,12 @@ holds its constants and its reading, and nothing else. Stdlib only. It never rai
 a fresh, well-formed file reads as no Capacity, and its callers then fall back to today's Trickle and Away cap
 (reconcile-rollout.py `_capacity_state`), never to open.
 
-    read(now)            {file, why, capacity, writtenAt, logins, signals}: file is fresh, missing, unreadable or
-                         stale; why null only when fresh; capacity (an int >= 1), writtenAt (the file's string), logins
-                         ({<name>: {inside_line, why}}) and signals (the file's object, as written) are the file's, and
-                         only when fresh (else null, null, {}, {}).
+    read(now)            {file, why, capacity, writtenAt, logins, signals, budget}: file is fresh, missing,
+                         unreadable or stale; why null only when fresh; capacity (an int >= 1), writtenAt (the file's
+                         string), logins ({<name>: {inside_line, why}}) and signals (the file's object, as written) are
+                         the file's, and only when fresh (else null, null, {}, {}). budget (p53-2, ADR 0083 d4) is
+                         {mem_gb, cores}, rebuilt from those two keys (any other dropped), only when fresh and both are
+                         finite numbers above 0 (never a bool); else null, and the file reads as it does without one.
     suite_stop(reading)  None, or the label of the Capacity stop (p36-10, ADR 0067 d8; verify-slot.py contract 7):
                          only for a fresh reading whose signals' CAPACITY_STOP_KEY is exactly JSON true; "memory:
                          critical" when signals' `memory` is an integer (never a bool) >= CAPACITY_MEMORY_CRITICAL and
@@ -45,9 +47,21 @@ a fresh, well-formed file reads as no Capacity, and its callers then fall back t
                          The same for a Login named outright (quota reads login(env)'s): None for a reading that is not
                          fresh or a name that is no non-empty string. `moving` reads the lead's Login this way, from the
                          `login` its lease names, never the reader's own (reconcile-rollout.py _lead_login).
+    peak(tree, since, ref, now)
+                         A Slot's peak (p53-2, ADR 0083 d4; away.md § Capacity, *A Slot's peak*): {mem_gb, cores},
+                         rebuilt from slot-peaks.json's entry for the task tree `tree`, or None. None for a file that
+                         cannot be read (missing, a directory, over SLOT_PEAKS_MAX_BYTES, not UTF-8, not JSON, not an
+                         object, a `written_at` missing or naive, `slots` not an object); for a stale one, by
+                         capacity.json's bounds, `written_at` more than CAPACITY_STALE_AFTER before `ref` (the call's
+                         end) or more than CAPACITY_FUTURE_SKEW after `now`; for no entry (an exact key equal to `tree`
+                         wins, else the first absolute key whose real path is `tree`'s, `~` expanded on both sides; a
+                         relative key is skipped); and for an entry whose `mem_gb` or `cores` is no finite number of at
+                         least 0 (a bool or NaN included) or whose `last` is no aware stamp at or after `since` (the
+                         Slot's first slot-taken: an earlier `last` holds no sample of this Slot). Never raises.
 
 The file is ~/.config/thread/capacity.json under the home dir at call time (Path.home(): a pinned HOME is the only
-override, as for away.json). Chorus writes it (chorus-p96-28); a person may write it by hand.
+override, as for away.json). Chorus writes it (chorus-p96-28); a person may write it by hand. slot-peaks.json
+(SLOT_PEAKS_FILE_REL) sits beside it, under the same home, and Chorus writes it too (chorus-p109-8).
 """
 import json
 import math
@@ -72,6 +86,8 @@ CAPACITY_FREEZE_KEY = "freeze"                       # signals' list of the sign
                                                      # while CAPACITY_FAULT_KEY is present
 CAPACITY_HOLDER_KEY = "holder"                       # signals' {name, mem_gb}: the process a memory fault is read from
 CAPACITY_MEMORY_SIGNAL = "memory"                    # the memory signal's name in the fault and freeze lists
+SLOT_PEAKS_FILE_REL = ".config/thread/slot-peaks.json"   # each task tree's peak (p53-2), under the home dir
+SLOT_PEAKS_MAX_BYTES = 256 * 1024                    # 24 h of entries; a larger file reads as no peak
 
 
 def _stamp(value):
@@ -150,10 +166,11 @@ def _load(path):
 
 
 def read(now) -> dict:
-    """The Capacity reading at `now` (an aware datetime): {file, why, capacity, writtenAt, logins, signals} (the
+    """The Capacity reading at `now` (an aware datetime): {file, why, capacity, writtenAt, logins, signals, budget} (the
     module docstring). Stale: `written_at` more than CAPACITY_STALE_AFTER before now, or more than CAPACITY_FUTURE_SKEW after
     it. Never raises."""
-    out = {"file": "missing", "why": "no file", "capacity": None, "writtenAt": None, "logins": {}, "signals": {}}
+    out = {"file": "missing", "why": "no file", "capacity": None, "writtenAt": None, "logins": {}, "signals": {},
+           "budget": None}
     try:
         file, why, data = _load(Path.home() / CAPACITY_FILE_REL)
     except Exception as e:  # noqa: BLE001 — a reading never raises: anything unforeseen fails closed
@@ -170,8 +187,71 @@ def read(now) -> dict:
         return out
     logins = {name: {"inside_line": e["inside_line"], "why": e.get("why")} for name, e in (data.get("logins") or {}).items()}
     out.update(file="fresh", why=None, capacity=data["capacity"], writtenAt=data["written_at"], logins=logins,
-               signals=dict(data.get("signals") or {}))
+               signals=dict(data.get("signals") or {}), budget=_room(data.get("budget"), positive=True))
     return out
+
+
+def _finite(value):
+    """Whether a JSON value is a finite number: an int or a float, never a bool, never NaN or an infinity."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return isinstance(value, int) or math.isfinite(value)
+
+
+def _room(value, positive):
+    """{mem_gb, cores} rebuilt from an object whose two keys are finite numbers, above 0 when `positive` (a budget),
+    else at least 0 (a peak); any other key is dropped. None for anything else."""
+    if not isinstance(value, dict):
+        return None
+    room = {k: value.get(k) for k in ("mem_gb", "cores")}
+    if not all(_finite(v) and (v > 0 if positive else v >= 0) for v in room.values()):
+        return None
+    return room
+
+
+def _tree_entry(slots, tree):
+    """The entry slots holds for the task tree `tree`: an exact key wins, else the first absolute key (after `~`) whose
+    real path is the tree's. None with none."""
+    if tree in slots:
+        return slots[tree]
+    want = os.path.realpath(os.path.expanduser(tree))
+    for key, entry in slots.items():
+        path = os.path.expanduser(key) if isinstance(key, str) else ""
+        if os.path.isabs(path) and os.path.realpath(path) == want:
+            return entry
+    return None
+
+
+def peak(tree, since, ref, now):
+    """The task tree's peak from slot-peaks.json, {mem_gb, cores}, or None (the module docstring). `since` is the
+    Slot's first slot-taken, `ref` the call's end (else now), `now` this reconcile's clock: aware datetimes. Never
+    raises."""
+    try:
+        path = Path.home() / SLOT_PEAKS_FILE_REL
+        with open(path, "rb") as f:
+            raw = f.read(SLOT_PEAKS_MAX_BYTES + 1)
+        if len(raw) > SLOT_PEAKS_MAX_BYTES:
+            return None
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            return None
+        written = _stamp(data.get("written_at"))[0]
+        slots = data.get("slots")
+        if written is None or not isinstance(slots, dict):
+            return None
+        if ref - written > CAPACITY_STALE_AFTER or written - now > CAPACITY_FUTURE_SKEW:
+            return None
+        if not isinstance(tree, str) or not os.path.isabs(os.path.expanduser(tree)):
+            return None
+        entry = _tree_entry(slots, tree)
+        if not isinstance(entry, dict):
+            return None
+        last = _stamp(entry.get("last"))[0]
+        if last is None or last < since:
+            return None
+        return _room(entry, positive=False)
+    except Exception:  # noqa: BLE001 — a reading never raises: any read error or unforeseen shape is no peak
+        return None
 
 
 def _level(memory):

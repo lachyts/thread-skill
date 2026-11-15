@@ -614,6 +614,34 @@ test('span: the grades block is byte-equal with or without ledger lines (p29-10)
   assert.equal(entryOf(s, 'ledger-only'), undefined, 'a record of ledger lines alone is never read')
 })
 
+// p53-2: slot-taken's cap gains budget and weight, slot-freed a peak. span drives score.py (and its night record, which
+// reads cap), ledger.py, attention.py, grades.py and arms.py, so one pair of runs shows no reader reads them: two
+// setups with identical notes and lives, the second's lines carrying the new fields.
+test('span: the slot fields p53-2 adds change no reader\'s reading', (t) => {
+  const lives = byTs([...life('a', W(4, '00:00'), W(4, '02:00'), { lane: [W(4, '02:10'), W(4, '02:30')] }),
+    ...life('b', W(5, '01:00'), W(5, '03:00'))])
+  const cap = { away: false, n: 2, file: 'fresh' }
+  const before = lives.map(([ts, kind, task, f]) => [ts, kind, task, kind === 'slot-taken' ? { ...f, cap } : f])
+  const after = lives.map(([ts, kind, task, f]) => [ts, kind, task,
+    kind === 'slot-taken' ? { ...f, cap: { ...cap, budget: { mem_gb: 12, cores: 8 }, weight: { mem_gb: 3, cores: 2 } } }
+      : kind === 'slot-freed' ? { ...f, peak: { mem_gb: 3.1, cores: 2.4 } } : f])
+  const read = (events) => {
+    const h = setup(t)
+    emitAll(h, 'demo', events)
+    rolloutNote(h, 'demo')
+    taskNote(h, 'a', { status: 'done' })
+    taskNote(h, 'b', { status: 'review' })
+    const s = span(h)
+    const keys = ['rollouts', 'ledger', 'attention', 'grades', 'nights', 'arms', 'flags']
+    // each setup's root and its Reflection's id (ids such as a ledger row's embed it) read as placeholders
+    const text = JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]])))
+    return JSON.parse(text.split(h.home).join('<root>').split(s.reflection.slice(2)).join('<rid>'))
+  }
+  const [plain, carried] = [read(before), read(after)]
+  assert.ok(carried.rollouts.length === 1 && carried.rollouts[0].rollout === 'demo', JSON.stringify(carried.rollouts))
+  for (const k of Object.keys(plain)) assert.deepEqual(carried[k], plain[k], `${k} reads the same`)
+})
+
 test('span: close lines: a completed rollout\'s is read, a running one\'s null passes, a dropped or archived one with none is flagged; tunings.jsonl untouched', (t) => {
   const h = setup(t)
   for (const s of ['done-r', 'run-r', 'drop-r', 'arch-r']) emitAll(h, s, byTs(life(`${s}-t`, W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))

@@ -730,9 +730,10 @@ ok "$(nh nh4 '{"status":"gate-pending","gatedInputs":["spend: one call — cap $
 ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the implementer asks"}')" \
   '"slot-freed" ["implement","needs-human","run"]' "an engine-blocked row on a question -> needs-human"
 
-echo "== 21c. slot-taken carries the cap in force (p29-8)"
+echo "== 21c. slot-taken carries the cap in force (p29-8) and the task's Weight (p53-2)"
 # mark-started records the Mac-wide cap a Slot starts under (ADR 0049), read from the Away state file of the call's
-# HOME: {away, n, file}, n the Away cap while Away, else the Trickle. Side rollout sc; each call pins its own HOME.
+# HOME: {away, n, file}, n the Away cap while Away, else the Trickle; and the task's Weight, the built-in 3 GB and 2
+# cores until p53-3, on every slot-taken. Side rollout sc; each call pins its own HOME.
 mkro sc "parallel_ceiling: 5"
 # capof <slug> <home> [mark-started flags...]: mark-started under that HOME; prints each new event's [start, cap]
 capof() {
@@ -747,17 +748,32 @@ away_file "$TMP/sc-away" "$NOW" true 2099-01-01T00:00:00Z 2 09:00 6
 away_file "$TMP/sc-nokey" "$NOW" true 2099-01-01T00:00:00Z 2 09:00 -
 away_file "$TMP/sc-stale" 2026-10-01T00:00:00Z true 2099-01-01T00:00:00Z 2 09:00 6
 for s in sc1 sc2 sc3 sc4 sc5; do mkt $s sc in_progress; done
-ok "$(capof sc1 "$TMP/sc-none")" '["start",{"away":false,"file":"missing","n":2}]' "no file: not Away, the Trickle 2"
-ok "$(capof sc2 "$TMP/sc-day")" '["start",{"away":false,"file":"fresh","n":3}]' "fresh, not Away: the Trickle 3, the Away cap unused"
-ok "$(capof sc3 "$TMP/sc-away")" '["start",{"away":true,"file":"fresh","n":6}]' "fresh, Away: the Away cap 6"
-ok "$(capof sc4 "$TMP/sc-nokey")" '["start",{"away":true,"file":"fresh","n":4}]' "fresh, Away, no away_cap: the built-in 4"
-ok "$(capof sc5 "$TMP/sc-stale")" '["start",{"away":false,"file":"stale","n":2}]' "stale, its away_cap ignored: not Away, the Trickle 2"
-ok "$(capof sc3 "$TMP/sc-away" --start restart)" '["restart",{"away":true,"file":"fresh","n":6}]' "--start restart carries it"
+ok "$(capof sc1 "$TMP/sc-none")" '["start",{"away":false,"file":"missing","n":2,"weight":{"cores":2.0,"mem_gb":3.0}}]' "no file: not Away, the Trickle 2"
+ok "$(capof sc2 "$TMP/sc-day")" '["start",{"away":false,"file":"fresh","n":3,"weight":{"cores":2.0,"mem_gb":3.0}}]' "fresh, not Away: the Trickle 3, the Away cap unused"
+ok "$(capof sc3 "$TMP/sc-away")" '["start",{"away":true,"file":"fresh","n":6,"weight":{"cores":2.0,"mem_gb":3.0}}]' "fresh, Away: the Away cap 6"
+ok "$(capof sc4 "$TMP/sc-nokey")" '["start",{"away":true,"file":"fresh","n":4,"weight":{"cores":2.0,"mem_gb":3.0}}]' "fresh, Away, no away_cap: the built-in 4"
+ok "$(capof sc5 "$TMP/sc-stale")" '["start",{"away":false,"file":"stale","n":2,"weight":{"cores":2.0,"mem_gb":3.0}}]' "stale, its away_cap ignored: not Away, the Trickle 2"
+ok "$(capof sc3 "$TMP/sc-away" --start restart)" '["restart",{"away":true,"file":"fresh","n":6,"weight":{"cores":2.0,"mem_gb":3.0}}]' "--start restart carries it"
 mkt sc6 sc blocked
 rrs hand-back --tasks sc6 --tasks-dir "$V" --now "$NOW" >/dev/null
-ok "$(capof sc6 "$TMP/sc-away")" '["hand-back",{"away":true,"file":"fresh","n":6}]' "a hand-back restart carries it"
+ok "$(capof sc6 "$TMP/sc-away")" '["hand-back",{"away":true,"file":"fresh","n":6,"weight":{"cores":2.0,"mem_gb":3.0}}]' "a hand-back restart carries it"
 ok "$(capof sc2 "$TMP/sc-away" --dry-run)" "" "--dry-run records nothing"
 ok "$(grep -c 'WARN: ~/.config/thread/away.json' "$TMP/sc-err")" 0 "mark-started prints no WARN line, a stale file included"
+# p53-2: while a Capacity is in force its well-typed budget joins the cap ({mem_gb, cores} only); an ill-typed one, or
+# a reading not in force, records none. Each HOME holds only a capacity.json, so away.json reads missing.
+capfile() { mkdir -p "$1/.config/thread"; printf '%s' "$2" > "$1/.config/thread/capacity.json"; }
+capfile "$TMP/sc-budget" '{"capacity": 5, "written_at": "'"$NOW"'", "budget": {"mem_gb": 12.0, "cores": 8, "x": 1}}'
+capfile "$TMP/sc-badbudget" '{"capacity": 5, "written_at": "'"$NOW"'", "budget": {"mem_gb": 12.0, "cores": 0}}'
+capfile "$TMP/sc-oldcap" '{"capacity": 5, "written_at": "2026-10-01T00:00:00Z", "budget": {"mem_gb": 12.0, "cores": 8}}'
+for s in sc7 sc8 sc9; do mkt $s sc in_progress; done
+ok "$(capof sc7 "$TMP/sc-budget")" \
+  '["start",{"away":false,"budget":{"cores":8,"mem_gb":12.0},"by":"capacity","file":"missing","n":5,"weight":{"cores":2.0,"mem_gb":3.0}}]' \
+  "a Capacity in force with a budget: C 5, by capacity, the budget's two keys (the extra one dropped), the Weight"
+ok "$(capof sc8 "$TMP/sc-badbudget")" \
+  '["start",{"away":false,"by":"capacity","file":"missing","n":5,"weight":{"cores":2.0,"mem_gb":3.0}}]' \
+  "an ill-typed budget (cores 0) records none; the Capacity stays in force"
+ok "$(capof sc9 "$TMP/sc-oldcap")" '["start",{"away":false,"file":"missing","n":2,"weight":{"cores":2.0,"mem_gb":3.0}}]' \
+  "a stale Capacity: no by and no budget, the Trickle 2"
 
 echo "== 25. human acts (p21-2): record-answer, approve-gates and hand-back record their own act (rollout ha)"
 # Each verb that carries a decision of Lachy's records it (the Hands-off rate's events); hand-back classifies its own
