@@ -55,7 +55,7 @@ Subcommands:
       The prepare record (p47-11): once its note is read and stamped, prepare removes <repo>/.claude/integration/
       <slug>.prepare.json (a failed removal is exit 2), and writes its printed JSON there (tmp + rename) on every
       exit 0, so a prepare that ends on exit 2 or 8 leaves no record; a failed write is one stderr WARN and never
-      changes the verdict (`call` then finds no record and refuses).
+      changes the verdict (`call` then finds no record: its exit 2).
 
   call --repo R --slug S --note N [--row FILE|-] [--after shared-green|red|push-refused]
       The integrate call's `integration`, whole (p47-11, execute § 4.5 step 3): the lead passes it verbatim and
@@ -67,10 +67,12 @@ Subcommands:
       plus "shared-file" when it had one) or `--after push-refused` ([]), the skip route's `--after push-refused`.
       prUrl, reviewHistory, reviewRoundsUsed and rung are `inputs --row`'s integrate record; readyAt the note's
       `ready:` (absent with none); startedAt a fresh stamp. Prints {integration, source, rungSource, rowRefused,
-      prUrlError}: a non-empty prUrlError launches nothing (the lead's set-aside, as with inputs). Exit 1
-      (`lead-integrate call: refused: …`, nothing launched): no record, an unreadable one or another slug's, a
-      route that launches no integrate call (merge, set-aside), an --after the route does not take, a record
-      sha that is not 40-hex, or a --note that is not the slug's.
+      prUrlError}: a non-empty prUrlError launches nothing (the lead's set-aside, as with inputs). Exit 2
+      (`lead-integrate call: …`, nothing launched; `call` runs on the task that holds the lane, so execute's
+      *lead-integrate's exit 2* routes it to the Lane hold, ADR 0048: the lane's own command stops merging, never
+      the whole rollout): no record, an unreadable one or another slug's, a route that launches no integrate call
+      (merge, set-aside), an --after the route does not take, a record sha that is not 40-hex, or a --note that is
+      not the slug's.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
          [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
@@ -330,7 +332,7 @@ Subcommands:
       Now, in reconcile's `_stamp` form (log-integration's --started; `call` stamps the integrate call's startedAt).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
-integrating:, revert's guard, call), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
+integrating:, revert's guard), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
 execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
 prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
@@ -792,7 +794,7 @@ def cmd_prepare(args):
         record.parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(record, json.dumps(out, ensure_ascii=False) + "\n")
     except OSError as e:
-        # Never fails the verdict: `call` finds no record and refuses, so no integrate call launches without one.
+        # Never fails the verdict: `call` finds no record and exits 2, so no integrate call launches without one.
         print(f"lead-integrate prepare: WARN: the prepare record {record} was not written: {e}", file=sys.stderr)
     return out
 
@@ -2291,12 +2293,12 @@ def _read_prepared(repo, slug):
     try:
         rec = json.loads(p.read_text())
     except FileNotFoundError:
-        raise Refused(f"no prepare record at {p}: run prepare first (execute § 4.5 step 3); nothing launched")
+        raise EnvError(f"no prepare record at {p}: run prepare first (execute § 4.5 step 3); nothing launched")
     except (OSError, ValueError) as e:
-        raise Refused(f"the prepare record {p} is unreadable: {_one_line(e)}; run prepare again; nothing launched")
+        raise EnvError(f"the prepare record {p} is unreadable: {_one_line(e)}; run prepare again; nothing launched")
     if not isinstance(rec, dict) or rec.get("slug") != slug:
         got = rec.get("slug") if isinstance(rec, dict) else None
-        raise Refused(f"the prepare record {p} is {json.dumps(got)}'s, not {slug}'s; run prepare again; nothing launched")
+        raise EnvError(f"the prepare record {p} is {json.dumps(got)}'s, not {slug}'s; run prepare again; nothing launched")
     return rec
 
 
@@ -2304,16 +2306,16 @@ def _call_trouble(rec, after):
     """(trouble, leadMerge or None) for the integrate call that follows prepare's route and the lead's --after."""
     route = rec.get("route")
     if route not in CALL_AFTER:
-        raise Refused(f"prepare routed {json.dumps(route)}, which launches no integrate call (execute § 4.5 step 3); "
-                      "nothing launched")
+        raise EnvError(f"prepare routed {json.dumps(route)}, which launches no integrate call (execute § 4.5 step 3); "
+                       "nothing launched")
     if after not in CALL_AFTER[route]:
         takes = " or ".join("no --after" if a is None else f"--after {a}" for a in CALL_AFTER[route])
         given = "no --after" if after is None else f"--after {after}"
-        raise Refused(f"prepare routed {route}, which takes {takes}, not {given}; nothing launched")
+        raise EnvError(f"prepare routed {route}, which takes {takes}, not {given}; nothing launched")
     for k in ("anchor", "taskBase", "mainSha"):
         if not re.fullmatch(r"[0-9a-f]{40}", rec.get(k) or ""):
-            raise Refused(f"the prepare record's {k} is {json.dumps(rec.get(k))}, not a 40-hex sha; run prepare again; "
-                          "nothing launched")
+            raise EnvError(f"the prepare record's {k} is {json.dumps(rec.get(k))}, not a 40-hex sha; run prepare "
+                           "again; nothing launched")
     shared = bool(rec.get("sharedFiles"))
     if after is None:
         return list(rec.get("trouble") or []), None
@@ -2323,8 +2325,8 @@ def _call_trouble(rec, after):
         return ["red"] + (["shared-file"] if shared else []), None
     m = rec.get("mergeCommit") or ""
     if not shared or not re.fullmatch(r"[0-9a-f]{40}", m):
-        raise Refused("--after shared-green needs prepare's verify route with a shared file and its merge commit; "
-                      "nothing launched")
+        raise EnvError("--after shared-green needs prepare's verify route with a shared file and its merge commit; "
+                       "nothing launched")
     return ["shared-file"], {"mergeCommit": m, "headSha": m, "baseSha": rec["mainSha"], "verified": True}
 
 
@@ -2334,7 +2336,7 @@ def cmd_call(args):
     trouble, lead_merge = _call_trouble(rec, args.after)
     path, note = _load_note(args.note)
     if path.stem != args.slug:
-        raise Refused(f"--note {path} is not {args.slug}'s task note; nothing launched")
+        raise EnvError(f"--note {path} is not {args.slug}'s task note; nothing launched")
     inp = task_inputs(path, note, None, args.repo, args.row)
     got = inp["integrate"]
     integration = {
@@ -3092,8 +3094,8 @@ def _sha(value):
 
 
 # The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row and
-# its RACE revert. inputs and plan are readers (status reads inputs); verify, push and undo follow a guarded prepare in
-# one flow.
+# its RACE revert. inputs and plan are readers (status reads inputs); verify, push, undo and call (a reader of prepare's
+# record) follow a guarded prepare in one flow.
 GUARDED = ("prepare", "set-aside", "revert")
 
 

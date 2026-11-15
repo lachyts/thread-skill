@@ -239,11 +239,13 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // is), a non-empty rowRefused printed, a non-empty prUrlError (a note pr: with no PR URL, e.g. a bare #N and no GitHub
   // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
   // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
-  // `unlisted`, `note` and `inert` only inform.
+  // `unlisted`, `note` and `inert` only inform. p47-11: the whole integration is `lead-integrate.py call`'s, passed
+  // unchanged, and its exit 2 is the Lane hold's (ADR 0048), never a halt.
   if (!st3.includes('`startedAt` the fresh stamp `call` takes at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
     !st3.includes('rung, readyAt, startedAt}` (`leadMerge` too on a green shared file): verbatim, the `integration` object of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --repo <repoPath> --slug <slug> --note <task note> [--row') ||
     !st3.includes('**The anchor is passed by the script, never by the lead:** pass that object whole, retype no sha in it and add no key to it.') ||
+    !st3.includes("`call`'s exit 2 (`lead-integrate call: …`: no record, an unreadable one or another slug's, a route that launches no integrate call, an `--after` its route does not take) launches nothing: `call` runs on the task that holds the lane, so *lead-integrate's exit 2* routes it to the *Lane hold* (`--cause integrate-env`, that line the evidence), never a halt") ||
     !st3.includes("Its `prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are the `integrate` record `lead-integrate.py inputs --row` gives") ||
     !st3.includes('the lead prints a non-empty `rowRefused`') || st3.includes('from the approving row when this session holds it') ||
     !st3.includes("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason") ||
@@ -1049,6 +1051,11 @@ test('control: startedAt taken at prepare fails integrate-args', () => {
 test('control: an integrate call whose sha the lead types fails integrate-args', () => {
   only(sk(' **The anchor is passed by the script, never by the lead:** pass that object whole, retype no sha in it and add no key to it.', ''),
     'integrate-args', 'no pass-through rule')
+})
+
+test("control: call's exit 2 halting the rollout fails integrate-args", () => {
+  only(sk("routes it to the *Lane hold* (`--cause integrate-env`, that line the evidence), never a halt", 'halts (§ 7)'),
+    'integrate-args', 'call refusal halts')
 })
 
 test("control: the exit-4 reason not passed verbatim fails set-aside", () => {

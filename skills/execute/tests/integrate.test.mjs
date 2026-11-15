@@ -50,8 +50,8 @@ const mkTask = (over = {}) => ({
 })
 // The task's own rung record, as its approving row carried it.
 const RUNG = { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }
-// prepared: prepare's anchor pair, as lead-integrate.py call prints it (p47-11), following any headSha or taskBase
-// override unless the case sets its own.
+// prepared: prepare's anchor pair, as the lead's `call` verb prints it from prepare's record (p47-11), following any
+// headSha or taskBase override unless the case sets its own.
 const withPrepared = (I) => ({ prepared: { anchor: I.headSha, taskBase: I.taskBase }, ...I })
 const mkI = (over = {}) => withPrepared({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: H0, taskBase: TB, mainSha: B1, trouble: [], landed: [],

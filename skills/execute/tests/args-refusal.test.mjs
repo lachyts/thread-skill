@@ -79,11 +79,12 @@ const CASES = [
   ['a bad integration', integrateArgs({}, { headSha: 'x' }), 'args.integration: headSha must be a 40-hex commit sha'],
   // p47-11: the anchor is passed by the script, never by the lead. An integration with no `prepared` pair (built by
   // hand) and one whose headSha or taskBase was retyped away from prepare's pair are refused, each naming both shas.
+  // Each head stops before the remedy, which names the script: tests/lead-integrate.test.sh C58 reads the whole line.
   ['an integration with no prepared pair', integrateArgs({}, { prepared: undefined }),
-    "args.integration: prepared must be { anchor, taskBase } (40-hex), as lead-integrate.py call prints it, got undefined"],
+    'args.integration: prepared must be { anchor, taskBase } (40-hex), as '],
   ['a prepared pair with a bad anchor', integrateArgs({}, { prepared: { anchor: 'x', taskBase: sha('b') } }), 'args.integration: prepared must be'],
   ['a headSha retyped from the prepared anchor', integrateArgs({}, { headSha: sha('d') }),
-    `args.integration: headSha ${sha('d')} is not prepare's anchor ${sha('a')} — pass lead-integrate.py call's integration whole`],
+    `args.integration: headSha ${sha('d')} is not prepare's anchor ${sha('a')} — pass `],
   ['a taskBase retyped from the prepared taskBase', integrateArgs({}, { taskBase: sha('e') }),
     `args.integration: taskBase ${sha('e')} is not prepare's taskBase ${sha('b')}`],
   // A long string round budget: roundBudgetDiagnosis shows it cut (cutEcho), as refusedEcho cuts, never whole.

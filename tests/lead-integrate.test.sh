@@ -48,8 +48,8 @@
 #   C58 (p47-11) the anchor is passed by the script, never by the lead: prepare writes its record, `call` prints the
 #   integrate call's integration whole from it (the trouble route's, and the verify route's --after shared-green, red
 #   and push-refused), the engine takes it unchanged and refuses a hand-altered headSha or taskBase before any dispatch
-#   with its line; `call` refuses a merge route, a wrong --after, no record and another slug's; an exit-8 prepare
-#   leaves no record behind.
+#   with its line; `call` exits 2 (execute's Lane hold) on a merge route, a wrong --after, no record and another
+#   slug's; an exit-8 prepare leaves no record behind.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -2533,17 +2533,17 @@ BAD=$(j "$CI" '{k: v for k, v in d.items() if k != "prepared"}')
 out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$BAD")")
 has "$out" "refused thread:args-refused: args.integration: prepared must be { anchor, taskBase }" "C58: an integration built by hand (no prepared pair) is refused"
 call --after red
-ok "$crc" 1 "C58: --after on the trouble route → exit 1"
-has "$(cat "$F/call.err")" "lead-integrate call: refused: prepare routed trouble, which takes no --after, not --after red; nothing launched" "C58: … with its line"
+ok "$crc" 2 "C58: --after on the trouble route → exit 2"
+has "$(cat "$F/call.err")" "lead-integrate call: prepare routed trouble, which takes no --after, not --after red; nothing launched" "C58: … with its line"
 python3 - "$REC" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1])); d["slug"] = "proj-other"; json.dump(d, open(sys.argv[1], "w"))
 PY
 call
-ok "$crc" 1 "C58: another slug's record → exit 1"; has "$(cat "$F/call.err")" "is \"proj-other\"'s, not $SLUG's" "C58: … named"
+ok "$crc" 2 "C58: another slug's record → exit 2"; has "$(cat "$F/call.err")" "is \"proj-other\"'s, not $SLUG's" "C58: … named"
 rm -f "$REC"
 call
-ok "$crc|$CJ" "1|" "C58: no record → exit 1, nothing printed"; has "$(cat "$F/call.err")" "no prepare record at $REC: run prepare first" "C58: … named"
+ok "$crc|$CJ" "2|" "C58: no record → exit 2, nothing printed"; has "$(cat "$F/call.err")" "no prepare record at $REC: run prepare first" "C58: … named"
 
 # the verify route: a shared file (C3's), green, red and a refused push
 fx c58v
@@ -2552,7 +2552,7 @@ prep
 M=$(j "$J" 'd["mergeCommit"]')
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["sharedFiles"]')" 'verify|["a.txt"]' "C58v: a shared file → route verify"
 call
-ok "$crc" 1 "C58v: the verify route with no --after → exit 1"
+ok "$crc" 2 "C58v: the verify route with no --after → exit 2"
 call --after shared-green
 ok "$crc|$(j "$CJ" '[d["integration"]["trouble"], d["integration"]["leadMerge"]]')" \
   "0|[[\"shared-file\"],{\"mergeCommit\":\"$M\",\"headSha\":\"$M\",\"baseSha\":\"$B\",\"verified\":true}]" "C58v: --after shared-green → trouble [shared-file], leadMerge (M, M, mainSha)"
@@ -2569,7 +2569,7 @@ fx c58m
 prep
 ok "$(j "$J" 'd["route"]')" merge "C58m: main unmoved → route merge"
 call
-ok "$crc" 1 "C58m: call on the merge route → exit 1"
+ok "$crc" 2 "C58m: call on the merge route → exit 2"
 has "$(cat "$F/call.err")" "prepare routed \"merge\", which launches no integrate call" "C58m: … named"
 git -C "$R" remote set-url origin "$F/nowhere.git"
 prep
