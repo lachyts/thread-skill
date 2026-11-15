@@ -26,6 +26,9 @@
 //              "chorus-stage"`, the 24-hour keep and "a missing, stale or unreadable file means no peak"; and (p53-2) the
 //              writer's duty to rewrite it at least once every 2 minutes while it holds an entry, and that a reader
 //              takes peaks per task, never as independent samples
+//   budget     ADR 0083 d4, DfL 11, 13, 14 (p53-4): § Capacity states that one task always fits, that capacity_max is the
+//              hard count behind the budget, that with no budget the count runs exactly as before and never open, and
+//              that the idle-slots names are unchanged; reconcile-rollout.py's _count_cap reads capacity_max (`max`)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read } from '../lib/contract-text.mjs'
@@ -114,6 +117,10 @@ function checkCapacity({ away, cap, code, settings, skill, legs, context }) {
     !s.includes('A missing, stale or unreadable file means no peak') ||
     !s.includes('rewrites it at least once every 2 minutes while it holds an entry, a state that holds included') ||
     !s.includes('never as independent samples')) fails.push('peaks')
+  if (!s.includes('**One task always fits**') || !s.includes('`capacity_max` is the hard count behind the budget') ||
+    !s.includes('the count runs exactly as before, the Capacity\'s C, else the Trickle and the Away cap, never open') ||
+    !s.includes('The idle-slots names are unchanged (`hold-trickle`, `hold-away-cap`)') ||
+    !code.includes('return cif.get("max", cif["n"])')) fails.push('budget')
   return fails
 }
 
@@ -123,7 +130,8 @@ test('away.md § Capacity, capacity.py, reconcile-rollout.py, the settings and l
 
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
-const RULES = ['path', 'staleness', 'login', 'warn', 'fallback', 'max', 'lease', 'glossary', 'legs', 'stop', 'strain', 'peaks']
+const RULES = ['path', 'staleness', 'login', 'warn', 'fallback', 'max', 'lease', 'glossary', 'legs', 'stop', 'strain', 'peaks',
+  'budget']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -171,6 +179,8 @@ test('controls: each mutation fails exactly its rule', () => {
   only('away', 'rewrites it at least once every 2 minutes while it holds an entry, a state that holds included', 'rewrites it when a peak rises',
     'peaks', 'the writer rewrites only on a rise')
   only('away', 'never as independent samples', 'as independent samples', 'peaks', 'peaks read as independent samples')
+  only('away', "the count runs exactly as before, the Capacity's C, else the Trickle and the Away cap, never open",
+    'the Mac runs open', 'budget', 'no budget opens the Mac')
 })
 
 test('every rule has a control', () => {

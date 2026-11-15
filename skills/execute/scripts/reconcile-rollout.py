@@ -1152,7 +1152,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     the Away state file read once per run, silently (`next` prints its WARN); `by` and, p53-2,
                     the Capacity's `budget` only while it is in force, and `weight` (p53-2, ADR 0083 d4: the
                     task's Weight, p53-3's _weight: measured, else the repo's setting, else the built-in) on
-                    every slot-taken. No resolvable
+                    every slot-taken; `max` (p53-4: capacity_max, the hard count) only while the budget admits,
+                    so its presence, never `budget`'s, marks a Slot the budget admitted. No resolvable
                     ceiling (or no rollout note): one `run_record: warning: slot-taken for <slug> not
                     recorded: <why>` line.
   mark-integrating  lane-taken, on every successful call; on an origin-lane refusal (exit 4, ADR 0064) with this
@@ -1289,7 +1290,8 @@ the rollout's own Surface re-check passes) -> hold-surface; any `heat:` hold (th
 hold-heat; any
 `quota:` hold (the quota hold, p36-7: the lead's Login is inside its line while Capacity is in force) -> hold-quota; any
 `trickle:` hold (only ever a queued row: a stalled row waits on the ceiling alone) -> hold-trickle, and any `away cap:`
-hold (the same, Away) -> hold-away-cap; any `last start:` hold (p28-2: a queued row or a head Solo the last starts hold
+hold (the same, Away) -> hold-away-cap (p53-4: while the budget admits, either carries `bound`, `count` when the first
+such row reads the count's line, else the parts its Weight did not fit: `memory`, `cores` or `memory and cores`); any `last start:` hold (p28-2: a queued row or a head Solo the last starts hold
 toward the Morning) -> hold-last-start (after hold-away-cap, with which it can co-occur Away); the rollout's own
 hold_until standing -> hold-pr; the first held queued row's reason: `hold until` (a task's own hold_until) -> hold-pr,
 `depends on` -> dependency,
@@ -1409,6 +1411,7 @@ notes only. Nothing here writes the file; mark-started reads it too, for slot-ta
 as `next` reads it, never through `next`; The last starts, below), and every progress line (_progress_for, `next`,
 `status`) for the ETA's width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count
 elsewhere)), the Heat hold and the places kept aside); all of them read it silently, and only `next` prints the WARN.
+While the budget admits (p53-4; Capacity, below) the cap is capacity_max and each start must fit by its Weight too.
 
 Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
 would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
@@ -1511,6 +1514,24 @@ takes before the lock. A Mac fault (ADR 0083 d2, p53-1: a fresh file's non-empty
 obeyed: _capacity_state reports it as `fault`, `next` prints one line for it (_capacity_fault_line) and status reports
 it, and no hold, slotLimit or waiting record reads it; the restart hold and the suite stop's label follow Strain in
 capacity.py itself.
+
+The budget admits (p53-4, ADR 0083 d4 and DfL 11, 13 and 14; away.md § Capacity, *The budget admits*). While a reading
+in force carries a well-typed `budget` (_budget_on) a start is admitted only when the count and the Weight both allow
+it: the hard count is capacity_max (_count_cap; `trickle.limit`, `trickle.awayCap`, `status`'s and capacity_gate's
+`limit` read it, and slot-taken's `cap` adds `max`), and the Weights running across the Mac plus the start's own fit
+the budget in memory and in cores, each compared rounded to 2 places (_room_fits). The Weights are file reads alone: a
+parallel task counted from its note at its rollout's latest slot-taken `cap.weight` (_slot_weights, the record's last
+SLOT_WEIGHTS_MAX_BYTES), else its consumed Trickle claim's `weight`, else WEIGHT_BUILT_IN; a live claim at its `weight`
+(written only under the budget), else the built-in; a Leg chain at its claims times its lease's `weight`, a session
+alone at the built-in (_weights_of). A candidate's own is _weight's (`task_w` on its row, read before the trickle claim
+lock). The fair share is weighted (_fair_share_w over _waiters_w): it keeps room for the head waiter's next item where
+it kept a place, reserves a reachable head that does not fit (no wake), passes over one that needs a serial chain to
+end, and keeps a waiting Leg's need beyond its session weight-only, held 0. One task always fits: the caller's first item
+in launch order is admitted whatever its Weight while nothing is counted in its view, nothing of its own runs and the
+share kept nothing for another (or gave it the empty grant). A row the weight holds stops the start loop as the count
+does and reads _budget_why's line under the same prefixes; `trickle.capacity.weight` reports the reading, the
+waiting record and the claims carry `weight`, idle-slots a `bound`, and the suite lines a record-only `runningWeight`
+(mac_running's room, _suite_weight). With no budget nothing new is read, written or reported.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -4647,7 +4668,8 @@ def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     `capacity_max` (rollouts.toml's [defaults], machine-wide, through _machine_settings) is resolved only for a fresh
     reading: `max` and `maxSource` are its value and source, else null, and `maxWhy` why it would not resolve. In force
     only when fresh and resolved: then `limit` is C = min(max(suggested, 1), max), else null, and every caller reads
-    today's Trickle and Away cap. `quota` (in force and `quota` true only) is capacity.py's quota(reading, env), `env`
+    today's Trickle and Away cap. `limit` stays C under a budget too (p53-4): a caller reads the count in force through
+    _count_cap (capacity_max while the budget admits, _budget_on), never this key. `quota` (in force and `quota` true only) is capacity.py's quota(reading, env), `env`
     os.environ by default: {login, inside, why}, or null for a caller that is no Claude Code session; with `login` (a
     string) it is quota_of(reading, login) instead, that Login's line in place of the caller's own (`moving`'s dry run:
     the lead's Login off its lease, _lead_login; "" reads none). Never raises: a capacity.py that will not load reads
@@ -5762,7 +5784,8 @@ def _waiters(waiting_live, held_by, bare) -> list:
     served, since, demand}: held its count elsewhere (`held_by`, keyed by lowercased stem), demand its record's `want`,
     less the one place a Leg counted for its session alone already holds (`bare`, lowercased stems: ADR 0076 d3, p44-2;
     _running_by_rollout's `unclaimed`). So a waiting Leg's place is counted once, through its session, never kept for
-    it a second time. cmd_next and capacity_gate read it, the one copy."""
+    it a second time. cmd_next and capacity_gate read it, the one copy, with no budget; while the budget admits (p53-4)
+    they read _waiters_w, its weighted copy, instead."""
     return [{"name": w["name"], "held": held_by.get(k, 0), "served": w["served"], "since": w["since"],
              "demand": max(0, w["want"] - (1 if k in bare else 0))} for k, w in waiting_live.items()]
 
@@ -6031,7 +6054,8 @@ def capacity_reads(now, quota_env=None) -> dict:
     `now` whose Mac evidence, machine_times' sysctl, is read here at once)}, the last three None while the Capacity is
     not in force. A caller that holds the trickle claim lock (leg.py claim and wait's record) takes them before the
     lock, as `next` reads its heat before it takes its own, and passes them in, so nothing under that lock runs git,
-    gh or a child process. Never raises."""
+    gh or a child process. A Leg's claim Weight (p53-4, leg.py's leg_weight) is read beside them, before the lock, and
+    only while _budget_on(state) holds. Never raises."""
     state = _capacity_state(now, env=quota_env if quota_env is not None else {}, quota=quota_env is not None)
     out = {"state": state, "away": None, "heat": None, "leases": None}
     if state["inForce"]:
@@ -6930,7 +6954,16 @@ def cmd_next(args) -> int:
     surface wait (P41-3; the module docstring's `next`): while the rollout's surface-wait marker stands, readable or
     not, nothing starts, restarts or begins Integration (`surface wait: <why>`), `slotLimit` is 0, no seeded revise and
     no waiting record, `surfaceWait` reports it, `halt` stays null while it holds a row and no pause stands, and
-    idle-slots reads `hold-surface`."""
+    idle-slots reads `hold-surface`. The budget (p53-4; the module docstring's "The budget admits"): while the reading
+    in force carries one, the cap is capacity_max (_count_cap), every queued row and seeded revise carries its Weight
+    (`task_w`, read before the lock), the fair share is weighted (_fair_share_w), each start must also fit the budget
+    less the Weight elsewhere and the room kept (else it stops the loop, `slot_held` as the count's stop, the row named
+    by _budget_why's line), rev_go is the prefix of revises that fit both and the reported `slotLimit` is used + rev_go
+    while revises exist, one task always fits the first item in launch order on an empty Mac when nothing is kept for
+    another, the claims and the waiting record carry `weight` (the record the first held item's in step 1.2's launch
+    order), wakes go to the names granted (never the one reserved), idle-slots adds `bound`, and `trickle.capacity`
+    is a copy carrying `weight` {budget, count, running, elsewhere, mine, floors, kept, reserve, alwaysFits, short,
+    why}."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     quota_login = getattr(args, "quota_login", None)
     if quota_login is not None and not args.dry_run:
@@ -7492,7 +7525,9 @@ def cmd_next(args) -> int:
                 always_used = True
             acc = _room_add(acc, r["task_w"])
             rev_go += 1
-        if rev_go < len(revises):
+        if sw_on or ro_held or main_red or whole:
+            pass   # their holds replace every Slot reason: no item waits on the Mac's room
+        elif rev_go < len(revises):
             held_item = revises[rev_go]
             if rev_bind == "weight":
                 held_line = weight_line(held_item, _room_add(mine_w, acc), running_elsewhere + mine + rev_go)
@@ -10635,7 +10670,9 @@ def _record_slot_taken(args, slug, note, rollout, start, cache, away_once, weigh
     --dry-run and a warned note never read them. `cap.weight` (p53-2, ADR 0083 d4) is the task's Weight, on every
     slot-taken: _weight's room {mem_gb, cores} for the task's kind (p53-3: measured, else the repo's setting, else the
     built-in), from `weights_once`, which reads the estimate and the past peaks at most once per verb run per rollout,
-    and likewise never under --dry-run."""
+    and likewise never under --dry-run. While the budget admits (p53-4) the cap also carries `max`, capacity_max
+    (_cap_in_force): the stamp records the budget, the Weight and the hard count, and which part is short is said where a
+    row is held (the hold line, status, idle-slots' `bound`), never recomputed here."""
     def warn(why):
         print(f"run_record: warning: slot-taken for {slug} not recorded: {why}", file=sys.stderr)
 

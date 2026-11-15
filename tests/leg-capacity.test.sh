@@ -529,14 +529,13 @@ ok "$(q 'd["why"]')" "trickle: 1/1 tasks running on this Mac" "L16b: … on the 
 
 # ════ L17: the budget admits a Leg's claim by its Weight (p53-4) ═══════════════════════════════════════════════════
 # Each scenario keeps its own Run record; Weights are measured from planted peaks (3 done tasks per kind under an
-# archived rollout of project Demo): kinds w3, w5, w8, w10, w15, each <n> GB and 2 cores. The budget is 12 GB and 16
+# archived rollout of project Demo, their slot-freed lines appended as the Run record writes them): kinds w3, w5, w8, w10, w15, each <n> GB and 2 cores. The budget is 12 GB and 16
 # cores; capacity_max is the built-in 6. lkind <slug> <kind> gives a Leg row its kind (`scope:`).
 BUDGET='"budget": {"mem_gb": 12, "cores": 16}'
-lpeaks() { python3 - "$root/skills/_shared/scripts/run_record.py" "$T" <<'PY2'
-import importlib.util, os, sys
-spec = importlib.util.spec_from_file_location("thread_run_record", sys.argv[1])
-rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
-T = sys.argv[2]
+lpeaks() { python3 - "$THREAD_EVENTS_DIR" "$T" <<'PY2'
+import json, os, sys
+ev, T = sys.argv[1], sys.argv[2]
+os.makedirs(ev, exist_ok=True)
 os.makedirs(os.path.join(T, "Archive", "Rollouts"), exist_ok=True)
 open(os.path.join(T, "Archive", "Rollouts", "old-ro.md"), "w").write(
     '---\ntags: [task, rollout]\nstatus: done\nprotocol_version: 5\nprojects: ["[[Demo]]"]\n---\n')
@@ -545,8 +544,9 @@ for gb in (3, 5, 8, 10, 15):
         slug = "w%d-past%d" % (gb, i)
         open(os.path.join(T, "Archive", slug + ".md"), "w").write(
             '---\ntags: [task]\nstatus: done\nscope: w%d\nrollout: "[[old-ro]]"\n---\n' % gb)
-        assert rr.emit("old-ro", "slot-freed", slug, {"outcome": "ready", "peak": {"mem_gb": gb, "cores": 2}},
-                       ts="2026-10-19T12:00:00Z", strict=True)
+        with open(os.path.join(ev, "old-ro.jsonl"), "a") as f:
+            f.write(json.dumps({"ts": "2026-10-19T12:00:00.000Z", "rollout": "old-ro", "task": slug, "kind": "slot-freed",
+                                "outcome": "ready", "peak": {"mem_gb": gb, "cores": 2}}) + "\n")
 PY2
 }
 lscen() { scen "$1"; export THREAD_EVENTS_DIR="$S/events"; lpeaks; }

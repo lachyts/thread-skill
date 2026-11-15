@@ -474,13 +474,12 @@ ok "$C16" "[]" "C16: every peak() and budget case reads as expected"
 # Each scenario keeps its own Run record (events) and a rollouts.toml with capacity_max 8 (the hard count behind the
 # budget); its Weights are measured from planted slot-freed peaks (3 done tasks per kind under an archived rollout of
 # project Demo), so no land.sh runs. Kinds (each its `scope:`): light 1.5 GB / 1 core, heavy 4 / 2, huge 16 / 2, cpu
-# 2 / 5, both 4 / 5, tenth 1.2 / 1. The budget is 12 GB and 16 cores over a Capacity of 4.
-RRPY="$HERE/../../_shared/scripts/run_record.py"
+# 2 / 5, both 4 / 5, tenth 1.2 / 1. The budget is 12 GB and 16 cores over a Capacity of 4. The peaks are slot-freed
+# lines appended to old-ro's record as the Run record writes them (the reader reads the lines, never the validator).
 cat > "$TMP/wpeaks.py" <<'PY2'
-import importlib.util, os, sys
-spec = importlib.util.spec_from_file_location("thread_run_record", sys.argv[1])
-rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
-D = sys.argv[2]
+import json, os, sys
+ev, D = sys.argv[1], sys.argv[2]
+os.makedirs(ev, exist_ok=True)
 os.makedirs(os.path.join(D, "Archive", "Rollouts"), exist_ok=True)
 rn = os.path.join(D, "Archive", "Rollouts", "old-ro.md")
 if not os.path.exists(rn):
@@ -491,14 +490,15 @@ for kspec in sys.argv[3:]:
         slug = "%s-past%d" % (kind, i)
         open(os.path.join(D, "Archive", slug + ".md"), "w").write(
             '---\ntags: [task]\nstatus: done\nscope: %s\nrollout: "[[old-ro]]"\n---\n' % kind)
-        assert rr.emit("old-ro", "slot-freed", slug, {"outcome": "ready", "peak": {"mem_gb": float(mem), "cores": float(cores)}},
-                       ts="2026-10-01T12:00:00Z", strict=True)
+        with open(os.path.join(ev, "old-ro.jsonl"), "a") as f:
+            f.write(json.dumps({"ts": "2026-10-01T12:00:00.000Z", "rollout": "old-ro", "task": slug, "kind": "slot-freed",
+                                "outcome": "ready", "peak": {"mem_gb": float(mem), "cores": float(cores)}}) + "\n")
 PY2
 BUDGET='"budget": {"mem_gb": 12, "cores": 16}'
 wtoml() { mkdir -p "$D/home/.config/thread"; printf 'schema = 4\n\n[defaults]\ncapacity_max = %s\n' "${1:-8}" > "$D/home/.config/thread/rollouts.toml"; }
 wscen() {
   scen "$1"; export THREAD_EVENTS_DIR="$D/events"; wtoml 8
-  python3 "$TMP/wpeaks.py" "$RRPY" "$D" light:1.5:1 heavy:4:2 huge:16:2 cpu:2:5 both:4:5 tenth:1.2:1
+  python3 "$TMP/wpeaks.py" "$THREAD_EVENTS_DIR" "$D" light:1.5:1 heavy:4:2 huge:16:2 cpu:2:5 both:4:5 tenth:1.2:1
   cap 4 "$MIN_AGO" "$BUDGET"
 }
 # wro <stem> [ceiling] [frontmatter…]: a parallel rollout of project Demo; wt <slug> <rollout> <kind> [status] [fm…]: a task.

@@ -401,7 +401,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      slot wait), seconds (>= 0: the run, after any slot wait); load?, rc? (an int 0-255, never on noslot
                      or heat), failing? (at most 50 names of at most 200 characters each, read from the run's output on
                      red or timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
-                     verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running? and
+                     verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running?,
                      runningWeight? (as suite-started).
   time-lost          id, source, since, until; month?, reflection?, hours?, recorded?, rank?, top?, byCause?, rollouts?,
                      other?, events?, streak?, audit?, ranges?, cites? (p29-11, ADR 0051: the Time-lost ledger, one line

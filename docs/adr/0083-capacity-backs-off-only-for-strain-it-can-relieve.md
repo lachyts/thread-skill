@@ -9,9 +9,29 @@ slot-freed each Slot's peak from slot-peaks.json, read per task, and the contrac
 (rewritten at least once every 2 minutes while it holds an entry). d4's Weight and DfL 8 and 9 built by p53-3: the
 repo's estimate as rollouts.toml's `weight_mem_gb` and `weight_cores` (schema 6, per repo, built-in 3 and 2); the
 measure, the upper quartile of the per-task peaks of the project and `scope:` over 30 days once 3 tasks have one,
-floored at 0.1; slot-taken's `cap.weight` records it, and status gives each queued row its Weight and its source). In grill with Lachy (`/grill-with-docs`,
+floored at 0.1; slot-taken's `cap.weight` records it, and status gives each queued row its Weight and its source). d4's
+admission and DfL 11, 13 and 14 built by p53-4: while a fresh reading in force carries `budget`, `next` and a Leg's
+claim admit a start only when the Weights running across the Mac plus its own fit the budget in memory and in cores
+(compared to 2 places), behind `capacity_max` as the hard count (`trickle.limit`, `trickle.awayCap`, status and the
+Leg gate read it); one task always fits on a Mac where nothing is counted and the fair share kept nothing for another
+rollout; the fair share keeps room for the waiting rollout's next item; claims, waiting records and the Leg lease carry
+the Weight they hold; hold lines name memory or cores short; and with no usable budget every count runs exactly as
+before. "A full suite counts its own Weight" is read as a record-only `runningWeight` on suite-started and suite-ended
+(an integration or race suite adds its task's latest slot-taken Weight, a completion suite the built-in), admission
+unchanged. DfL 13's evidence: slot-taken's `cap` adds `max` (capacity_max) on a Slot the budget admitted, and
+idle-slots a `bound` (`count`, `memory`, `cores` or `memory and cores`); `n` stays C, and since p53-2 and p53-3 wrote
+`budget` on every slot-taken while C admitted, `max`, never `budget`, marks budget admission. Technical calls made for
+Lachy, each his to overturn: a head waiter that would fit only once a serial chain ends is passed over (it can starve
+while chains keep cycling; one heavier than the whole budget is reachable once no other chain lives); a Leg claim whose
+need beyond what its chain holds is 0 in both parts is never held by the weight; Legs keep p44-2's turns in the
+weighted view (the Mac can run over the budget by a later chain's 3 GB session until its turn); a Leg counted for its
+session alone holds 0 in the weighted share; and an idle Leg session weighs the built-in, never its last claim
+(parallel throughput is kept, and a heavy chain's next claim waits for its reserved turn and a drain). The Waiting
+list's room (`unfinished-rollout.py`) still counts C until the filed follow-up
+`thread-skill-followup-the-waiting-lists-room-reads-the-budget`. In grill with Lachy (`/grill-with-docs`,
 2026-11-15); the decisions below are added as he rules them, and the open questions are listed at the end. Amends ADR
-0067 d8 (Capacity is the limit, set automatically) and, through it, Chorus ADR 0104. Nothing else here is built yet.
+0067 d8 (Capacity is the limit, set automatically) and, through it, Chorus ADR 0104. Nothing else here is built yet:
+d3's repair is Chorus's, and the Waiting list's room is that follow-up.
 
 ## Context
 

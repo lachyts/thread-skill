@@ -696,7 +696,14 @@ and a Capacity wait's start and renewals (`moving` reads an open Leg's waiting l
 the open Leg by begin (any begin that runs it), next (its own session only), claim, wait, smoke, done, security,
 set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its last write, or
 LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback nothing is gated
-and nothing counts; the lease is still written.
+and nothing counts; the lease is still written. While the reading also carries a budget (p53-4, ADR 0083 d4; rr's
+_budget_on) a fresh claim fits by its Weight too (leg_weight: the row's kind's measured Weight, else the repo's
+estimate, computed before any lock): rr.capacity_gate reads this chain's own room (its claims times the lease's
+`weight`, or the built-in for its session alone), its need beyond that, the weighted share (a waiting Leg is a
+weight-only contender, held 0) and one task always fits on a Mac its turn leaves empty; a claim whose need is 0 in
+both parts is never held by the weight. A claim that finds room writes its Weight as the lease's `weight`, every
+renewal carries it forward (leg_lease), and an idle session weighs the built-in in every view, whatever its last claim
+weighed; a waiting record carries the Weight too.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
