@@ -732,8 +732,9 @@ ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the 
 
 echo "== 21c. slot-taken carries the cap in force (p29-8) and the task's Weight (p53-2)"
 # mark-started records the Mac-wide cap a Slot starts under (ADR 0049), read from the Away state file of the call's
-# HOME: {away, n, file}, n the Away cap while Away, else the Trickle; and the task's Weight, the built-in 3 GB and 2
-# cores until p53-3, on every slot-taken. Side rollout sc; each call pins its own HOME.
+# HOME: {away, n, file}, n the Away cap while Away, else the Trickle; and the task's Weight (p53-3: measured, else the
+# repo's setting, else the built-in 3 GB and 2 cores, which an empty HOME and no peaks read here), on every slot-taken.
+# Side rollout sc; each call pins its own HOME.
 mkro sc "parallel_ceiling: 5"
 # capof <slug> <home> [mark-started flags...]: mark-started under that HOME; prints each new event's [start, cap]
 capof() {

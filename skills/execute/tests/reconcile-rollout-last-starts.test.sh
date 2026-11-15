@@ -509,4 +509,156 @@ J=$(st 2026-10-03T07:30:00Z)
 ok "$(q "$J" "$LS")" "{\"u1\":\"$(nohist unscoped 0)\"}" "S5: no history: the fallback, named for kind unscoped"
 ok "$(lines)" 0 "S5: nothing on stderr"
 
+# ── W1-W7 (p53-3, ADR 0083 d4): a task's Weight, estimated from its repo, then measured from the Run record's peaks ──
+# The measure is the upper quartile of the per-task peaks on the slot-freed lines of the rollout's project and the
+# task's kind (its `scope:`) over the last 30 days, once 3 tasks have one; fewer, and the estimate stands: the repo's
+# setting in rollouts.toml, else the built-in 3 GB and 2 cores. A peak is one figure per task, its per-part highest, and
+# each line is windowed by its own ts before any grouping. `status` shows it on queued rows; mark-started records it in
+# slot-taken's cap.weight.
+# A peak spec is JSON {stem, slug, scope, peak, ts, project, extra}: an archived task note <slug> (scope `-` writes no
+# scope:), an archived rollout note <stem> (projects [[<project>]]), and in <stem>.jsonl a slot-freed {outcome: ready,
+# peak} line at <ts>, through run_record.py's strict emit. extra: note false (no task note), rnote false (no rollout
+# note), raw true (the line appended as written, past the validator: an ill-typed peak).
+cat > "$TMP/peaks.py" <<'PY'
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("thread_run_record", sys.argv[1])
+rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+D = sys.argv[2]
+for raw in sys.argv[3:]:
+    s = json.loads(raw)
+    x, stem, slug = s["extra"], s["stem"], s["slug"]
+    tn = os.path.join(D, "Archive", slug + ".md")
+    if x.get("note", True) and not os.path.exists(tn):
+        scope = "" if s["scope"] == "-" else "scope: %s\n" % s["scope"]
+        with open(tn, "w") as f:
+            f.write('---\ntags: [task]\nstatus: done\n%srollout: "[[%s]]"\n---\n' % (scope, stem))
+    rn = os.path.join(D, "Archive", "Rollouts", stem + ".md")
+    if x.get("rnote", True) and not os.path.exists(rn):
+        with open(rn, "w") as f:
+            f.write('---\ntags: [task, rollout]\nstatus: done\nprotocol_version: 5\nprojects: ["[[%s]]"]\n---\n' % s["project"])
+    fields = {"outcome": "ready", "peak": s["peak"]}
+    if x.get("raw"):
+        path = rr.record_path(stem)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a") as f:
+            f.write(json.dumps(dict(fields, ts=s["ts"], rollout=stem, task=slug, kind="slot-freed")) + "\n")
+    else:
+        assert rr.emit(stem, "slot-freed", slug, fields, ts=s["ts"], strict=True)
+PY
+# pspec <stem> <slug> <scope> <peak-json> [ts] [project] [extra-json]; pk <mem> <cores> is a peak's JSON
+pspec() {
+  local x="${7:-}"; [ -n "$x" ] || x='{}'
+  printf '{"stem":"%s","slug":"%s","scope":"%s","peak":%s,"ts":"%s","project":"%s","extra":%s}' \
+    "$1" "$2" "$3" "$4" "${5:-2026-10-02T12:00:00Z}" "${6:-Demo}" "$x"
+}
+pk() { printf '{"mem_gb":%s,"cores":%s}' "$1" "$2"; }
+peaks() { python3 "$TMP/peaks.py" "$RR" "$D" "$@"; }
+# The default measured history: three cross-cutting tasks of mem 1/2/3 and cores 1/2/4 (upper quartiles 2.5 and 3.0).
+measured() { peaks "$(pspec old-ro p1 cross-cutting "$(pk 1 1)")" "$(pspec old-ro p2 cross-cutting "$(pk 2 2)")" \
+  "$(pspec old-ro p3 cross-cutting "$(pk 3 4)")"; }
+# rooted: the rollout's Project root is a git repo whose origin is github.com/o/r; tomlw <lines...>: HOME's rollouts.toml
+rooted() {
+  git -c init.defaultBranch=master init -q "$D/repo" && git -C "$D/repo" remote add origin https://github.com/o/r
+  python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("\nfixture\n", "\nProject root: `%s`\n" % sys.argv[2], 1))' "$D/ro.md" "$D/repo"
+}
+tomlw() { mkdir -p "$D/home/.config/thread"; printf '%s\n' "$@" > "$D/home/.config/thread/rollouts.toml"; }
+WT='{t["slug"]: t["weight"] for t in d["tasks"]}'
+W0='d["tasks"][0]["weight"]'
+BUILTIN='{"cores":2.0,"history":0,"mem_gb":3.0,"source":{"cores":"built-in","mem_gb":"built-in"}}'
+estimate() { printf '{"cores":2.0,"history":%s,"mem_gb":3.0,"source":{"cores":"built-in","mem_gb":"built-in"}}' "$1"; }
+MEASURED='{"cores":3.0,"history":3,"mem_gb":2.5,"source":{"cores":"measured","mem_gb":"measured"}}'
+NOW_W=2026-10-03T07:30:00Z
+
+scen w1-no-history
+ro; mkt w1 ro open 'scope: cross-cutting'; mkt w2 ro in_progress 'scope: cross-cutting' 'started: 2026-10-03T07:00+00:00'
+J=$(st "$NOW_W")
+ok "$(q "$J" "$WT")" "{\"w1\":$BUILTIN,\"w2\":null}" "W1: no history, no setting: the queued row reads the built-in, the running row null"
+ok "$(lines)" 0 "W1: nothing on stderr"
+
+scen w2-repo-setting
+ro; rooted; mkt w1 ro open 'scope: cross-cutting'
+tomlw 'schema = 6' '' '[repo."o/r"]' 'weight_mem_gb = 1' 'weight_cores = 1'
+ok "$(q "$(st "$NOW_W")" "$W0")" '{"cores":1.0,"history":0,"mem_gb":1.0,"source":{"cores":"file:repo","mem_gb":"file:repo"}}' \
+  "W2: no history: the repo's setting, as floats"
+tomlw 'schema = 6' '' '[repo."o/r"]' 'weight_cores = 1'
+ok "$(q "$(st "$NOW_W")" "$W0")" '{"cores":1.0,"history":0,"mem_gb":3.0,"source":{"cores":"file:repo","mem_gb":"built-in"}}' \
+  "W2: only weight_cores set: the sources are per part"
+tomlw 'schema = 6' '' '[repo."o/r"]' 'weight_cores = 0'
+ok "$(q "$(st "$NOW_W")" "$W0")" "$BUILTIN" "W2: a refused rollouts.toml: the built-in"
+
+scen w3-measured
+ro; mkt w1 ro open 'scope: cross-cutting'
+peaks "$(pspec old-ro p1 cross-cutting "$(pk 1 1)")" "$(pspec old-ro p2 cross-cutting "$(pk 2 2)")"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$(estimate 2)" "W3: two tasks' peaks: the estimate stands, history 2"
+peaks "$(pspec old-ro p3 cross-cutting "$(pk 3 4)")"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$MEASURED" "W3: three tasks' peaks: the upper quartile of each part, measured"
+ok "$(lines)" 0 "W3: nothing on stderr"
+
+scen w4-window
+ro; mkt w1 ro open 'scope: cross-cutting'
+peaks "$(pspec old-ro p1 cross-cutting "$(pk 1 1)")" "$(pspec old-ro p2 cross-cutting "$(pk 2 2)" 2026-09-02T07:30:00Z)" \
+  "$(pspec old-ro p3 cross-cutting "$(pk 3 4)" 2026-10-03T07:30:01Z)"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$(estimate 1)" "W4: a peak 31 days old and one after now add nothing: history 1"
+scen w4b-boundary
+ro; mkt w1 ro open 'scope: cross-cutting'
+peaks "$(pspec old-ro p1 cross-cutting "$(pk 1 1)")" "$(pspec old-ro p2 cross-cutting "$(pk 2 2)")" \
+  "$(pspec old-ro p3 cross-cutting "$(pk 3 4)" 2026-09-03T07:30:00Z)"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$MEASURED" "W4: control: a peak exactly 30 days old counts"
+scen w4c-windowed-before-grouped
+ro; mkt w1 ro open 'scope: cross-cutting'
+measured
+peaks "$(pspec older-ro p1 cross-cutting "$(pk 9 9)" 2026-09-01T12:00:00Z)" "$(pspec old-ro p2 cross-cutting "$(pk 9 9)" 2026-10-03T08:00:00Z)"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$MEASURED" "W4: a task's higher line outside the window is not its figure: only its in-window peak counts"
+
+scen w5-per-task
+ro; mkt w1 ro open 'scope: cross-cutting'
+peaks "$(pspec old-ro x1 cross-cutting "$(pk 1 4)")" "$(pspec old-ro2 x1 cross-cutting "$(pk 3 1)" 2026-10-01T12:00:00Z)" \
+  "$(pspec old-ro x2 cross-cutting "$(pk 2 2)")"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$(estimate 2)" "W5: a task with two in-window lines counts once: history 2"
+peaks "$(pspec old-ro x3 cross-cutting "$(pk 1 1)")"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$MEASURED" "W5: … at its per-part highest (mem 3, cores 4)"
+peaks "$(pspec other-ro y1 cross-cutting "$(pk 9 9)" "" Other)" "$(pspec old-ro y2 single-file "$(pk 9 9)")" \
+  "$(pspec old-ro y3 cross-cutting '{"mem_gb":true,"cores":9}' "" "" '{"raw":true}')" \
+  "$(pspec old-ro y4 cross-cutting '{"mem_gb":-1,"cores":9}' "" "" '{"raw":true}')" \
+  "$(pspec old-ro y5 cross-cutting '{"mem_gb":9,"cores":9,"x":1}' "" "" '{"raw":true}')" \
+  "$(pspec old-ro y6 cross-cutting "$(pk 9 9)" "" "" '{"note":false}')" \
+  "$(pspec ghost-ro y7 cross-cutting "$(pk 9 9)" "" "" '{"rnote":false}')"
+ok "$(q "$(st "$NOW_W")" "$W0")" "$MEASURED" \
+  "W5: another project's, another scope's, an ill-typed (bool, negative, extra key), a noteless task's and a rollout-noteless peak are skipped"
+scen w5b-unscoped-and-no-projects
+mkro ro 3; mkt w1 ro open 'scope: cross-cutting'
+measured
+ok "$(q "$(st "$NOW_W")" "$W0")" "$BUILTIN" "W5: a rollout with no projects: reads no peaks, the estimate stands"
+
+scen w6-slot-taken
+ro; mkt m1 ro open 'scope: cross-cutting'; mkt m2 ro open 'scope: cross-cutting'
+measured
+started m1 "$NOW_W"
+ok "$(recq '[r["cap"]["weight"] for r in rows if r["kind"] == "slot-taken"]')" '[{"cores":3.0,"mem_gb":2.5}]' \
+  "W6: mark-started records the measured Weight in slot-taken's cap.weight"
+restatus m2 in_progress
+HOME="$D/home" python3 "$SCRIPT" mark-started --tasks m2 --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW_W" --dry-run >/dev/null 2>>"$D/err-ms"
+ok "$(count slot-taken)" 1 "W6: --dry-run records nothing"
+ok "$(cat "$D/err-ms")" "" "W6: nothing on stderr"
+scen w6b-slot-taken-setting
+ro; rooted; mkt m1 ro open 'scope: cross-cutting'
+tomlw 'schema = 6' '' '[repo."o/r"]' 'weight_mem_gb = 1' 'weight_cores = 1'
+restatus m1 in_progress
+HOME="$D/home" python3 "$SCRIPT" mark-started --tasks m1 --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW_W" \
+  --arm-repo "$D/repo" --arm-default master >/dev/null 2>>"$D/err-ms"
+ok "$(recq '[r["cap"]["weight"] for r in rows if r["kind"] == "slot-taken"]')" '[{"cores":1.0,"mem_gb":1.0}]' \
+  "W6: with no history, the repo's setting is recorded"
+
+scen w7-floor
+ro; mkt m1 ro open 'scope: cross-cutting'
+peaks "$(pspec old-ro p1 cross-cutting "$(pk 1 0)")" "$(pspec old-ro p2 cross-cutting "$(pk 2 0)")" \
+  "$(pspec old-ro p3 cross-cutting "$(pk 3 0)")"
+ok "$(q "$(st "$NOW_W")" "$W0")" '{"cores":0.1,"history":3,"mem_gb":2.5,"source":{"cores":"measured","mem_gb":"measured"}}' \
+  "W7: a part that measures 0 is floored at 0.1"
+started m1 "$NOW_W"
+ok "$(recq '[r["cap"]["weight"] for r in rows if r["kind"] == "slot-taken"]')" '[{"cores":0.1,"mem_gb":2.5}]' \
+  "W7: … and slot-taken records it, through the strict validator"
+ok "$(grep -c 'refused' "$D/err-ms")" 0 "W7: … with no refusal"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

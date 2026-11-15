@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 5                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 6                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -40,6 +40,8 @@ of the file format:
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
     inert_paths = ["THREAD.md"]  # schema 2 (p29-3, ADR 0045): this repo's Inert paths; a repo table only
+    weight_mem_gb = 1            # schema 6 (p53-3, ADR 0083 DfL 8): a task's estimated Weight in this repo, memory in GB
+    weight_cores = 1             # ... and cores; numbers > 0, a repo table only (built-in 3 and 2)
 
     [repo."Animately/optimizer"]  # schema 3 (ADR 0063): the repo's test-credential class, ONE line in its repo table
     test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
@@ -47,9 +49,9 @@ of the file format:
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` (retired, below) and `repo`. A repo table
 holds every rollout key but `verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus
 `auto_retries`, `spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and
-`capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths` and
-`test_credentials` (REPO_ONLY: each refused under `[defaults]` with `<key> is per repo: set it under
-[repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
+`capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths`,
+`test_credentials`, `weight_mem_gb` and `weight_cores` (REPO_ONLY: each refused under `[defaults]` with `<key> is per
+repo: set it under [repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
 `[repo."o/r"]` label as MACHINE_ONLY's keys are, and kept out of `settings`). Dotted keys
 (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form, with two exceptions:
 `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table, and `test_logins` only from a key line
@@ -108,6 +110,18 @@ serial note (no Project root) signs one too. A schema-4 reader ignores it under 
 below), so that rollout asks every Login gate, as before; a pre-P29 reader refuses the `schema` line itself, so the
 operator installs the release that knows the key first and runs the reader check below.
 
+`weight_mem_gb` and `weight_cores` (p53-3, ADR 0083 d4 and DfL 8; schema 6, the first schema-6 keys) are the repo's
+estimated Weight: what one of its tasks is expected to use at its heaviest, in GB of memory and in cores (WEIGHT_KEYS).
+Each is an integer or float, never a boolean, finite and > 0 (a scripts repo's task is about 0.8 GB), refused otherwise
+at its line (`[repo."o/r"] <key> must be a number > 0, got <value described>`). They are per repo (a task note has no
+field that says what it runs, and a repo's tasks share its verifier), so `[defaults]` refuses them; with no repo table
+setting one, its part reads the built-in, WEIGHT_BUILT_IN (3 GB and 2 cores, DfL 8's middle value). They are not in
+`settings`: resolve() reports them as its own top-level `weight` (Output), each part with its own source, so a table
+setting only one gives mixed sources. execute's `reconcile-rollout.py` reads it as the estimate a task's Weight starts
+from until its project and `scope:` have measured runs (`_weight`; execute away.md § Capacity, *A task's Weight*). They
+are operator hand edits: no writer here adds them. A schema-5 reader ignores them under a schema-6 file (the schema rule
+below), so its slot-taken records the built-in Weight.
+
 `[notify]` is retired (ADR 0075 d2: no rollout code notifies Lachy, so nothing reads the ntfy topic it held, ADR 0038
 d3). A top-level `notify`, in any form (a table, a scalar, dotted or inline, valid or not), is skipped whole: never
 validated, never refused and never resolved, only recorded, so `_validate` returns `retired: ["notify"]`, load_tables
@@ -151,7 +165,8 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2, capacity_max 6; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2, capacity_max 6; weight_mem_gb 3 and
+weight_cores 2 (WEIGHT_BUILT_IN); guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
@@ -178,6 +193,7 @@ schema rule above):
 - a MACHINE_ONLY key (`verify_slots`, `capacity_max`) in a `[repo."o/r"]` table;
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
+- a `weight_mem_gb` or `weight_cores` under `[defaults]`, or one that is not a finite number > 0 (a boolean refused; p53-3);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a bad or case-duplicate repo key.
@@ -201,6 +217,8 @@ Output. Exit 0 and one JSON line on stdout:
                                     | {"name": "<NAME>", "supabase_project": "<ref>"}, ...]} | null,
                           "source": "file:repo"|"built-in"},                        # built-in null: no class
      "test_logins": {"value": ["<name>", ...], "source": "file:defaults"|"built-in"},  # built-in []: none
+     "weight": {"mem_gb": {"value": <num>, "source": "file:repo"|"built-in"},       # built-in 3
+                "cores": {"value": <num>, "source": "file:repo"|"built-in"}},       # built-in 2
      "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
      "ignored": ["<scope path of each ignored key>", ...],     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
      "retired": ["notify"] | []}                               # a retired table the file holds (ADR 0075 d2)
@@ -222,7 +240,7 @@ and this python has none. On failure stdout is empty and stderr carries one line
 Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
 `spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY,
-DEFAULTS_ONLY, MINIMUM,
+DEFAULTS_ONLY, MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
 GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
 credential_problem(value) (why a test_credentials value is refused, or None), logins_problem(value) (the same for
@@ -259,7 +277,11 @@ MACHINE_ONLY = ("verify_slots", "capacity_max")
 # Per-repo keys (p29-3): valid in a [repo."o/r"] table only, refused under [defaults], and kept out of `settings`
 # (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045);
 # `test_credentials` its test-credential class (ADR 0063), one line in its table.
-REPO_ONLY = ("inert_paths", "test_credentials")
+# `weight_mem_gb` and `weight_cores` (p53-3, ADR 0083 DfL 8) its estimated Weight, numbers > 0.
+REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores")
+# A task's estimated Weight (p53-3): the repo's two keys, and the built-in middle value of each (3 GB and 2 cores).
+WEIGHT_KEYS = ("weight_mem_gb", "weight_cores")
+WEIGHT_BUILT_IN = {"weight_mem_gb": 3, "weight_cores": 2}
 # Machine-wide keys kept out of `settings` (p37-4): valid under [defaults] only, refused in a repo table, and reported
 # by resolve() as their own top-level field. `test_logins` is the operator's declared test Logins, one line.
 DEFAULTS_ONLY = ("test_logins",)
@@ -292,7 +314,7 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 5
+SCHEMA = 6
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k != "capacity_max"})
@@ -302,6 +324,8 @@ KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schem
 KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0063: the first schema-3 key
 KEY_SCHEMA[("rollout", "capacity_max")] = 4   # p36-7 (ADR 0067 d8): the first schema-4 key
 KEY_SCHEMA[("rollout", "test_logins")] = 5   # p37-4 (ADR 0034's 2026-11-05 amendment): the first schema-5 key
+KEY_SCHEMA[("rollout", "weight_mem_gb")] = 6   # p53-3 (ADR 0083 DfL 8): the first schema-6 keys
+KEY_SCHEMA[("rollout", "weight_cores")] = 6
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -711,6 +735,13 @@ def _validate(text, doc, path):
                                  "keys": [{k: entry[k] for k in ("name", "prefix", "supabase_project") if k in entry}
                                           for entry in value["keys"]]}
                     continue
+                if key in WEIGHT_KEYS:
+                    # p53-3: the repo's estimated Weight, a finite number > 0 (a float: a scripts repo is ~0.8 GB).
+                    if (isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0
+                            or (isinstance(value, float) and not math.isfinite(value))):
+                        refuse("%s %s must be a number > 0, got %s" % (label, key, _describe(value)), at + (key,))
+                    kept[key] = value
+                    continue
                 if not isinstance(value, list):
                     refuse("%s %s must be a list of git pathspec globs, got %s" % (label, key, _describe(value)),
                            at + (key,))
@@ -912,8 +943,13 @@ def resolve(repo=None, path=None):
              if creds is not None else {"value": None, "source": "built-in"})
     logins = ({"value": list(tables["defaults"]["test_logins"]), "source": "file:defaults"}
               if "test_logins" in tables["defaults"] else {"value": [], "source": "built-in"})
+    weight = {}
+    for key in WEIGHT_KEYS:
+        part = key[len("weight_"):]
+        weight[part] = ({"value": overrides[key], "source": "file:repo"} if key in overrides
+                        else {"value": WEIGHT_BUILT_IN[key], "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "inert_paths": inert, "test_credentials": creds, "test_logins": logins,
+            "inert_paths": inert, "test_credentials": creds, "test_logins": logins, "weight": weight,
             "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"]),
             "retired": list(tables["retired"])}
 
