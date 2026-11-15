@@ -698,12 +698,13 @@ set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (9
 LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback nothing is gated
 and nothing counts; the lease is still written. While the reading also carries a budget (p53-4, ADR 0083 d4; rr's
 _budget_on) a fresh claim fits by its Weight too (leg_weight: the row's kind's measured Weight, else the repo's
-estimate, computed before any lock): rr.capacity_gate reads this chain's own room (its claims times the lease's
-`weight`, or the built-in for its session alone), its need beyond that, the weighted share (a waiting Leg is a
-weight-only contender, held 0) and one task always fits on a Mac its turn leaves empty; a claim whose need is 0 in
-both parts is never held by the weight. A claim that finds room writes its Weight as the lease's `weight`, every
-renewal carries it forward (leg_lease), and an idle session weighs the built-in in every view, whatever its last claim
-weighed; a waiting record carries the Weight too.
+estimate, computed before the trickle claim lock; claim computes it under the rollout's lock and the rank lock):
+rr.capacity_gate reads this chain's own room (its claims times the lease's `weight`, or the built-in for its session
+alone), its need beyond that, the weighted share (a waiting Leg is a weight-only contender, held 0) and one task always
+fits on a Mac its turn leaves empty; a claim whose need is 0 in both parts is never held by the weight. A claim that
+finds room writes its Weight as the lease's `weight`, every renewal carries it forward (leg_lease), a fresh claim with
+no Weight (no budget, or the fallback) writes the lease without one (LEASE_DROP_WEIGHT), and an idle session weighs the
+built-in in every view, whatever its last claim weighed; a waiting record carries the Weight too.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
@@ -1486,6 +1487,7 @@ def next_json(plan):
 # ---- the Capacity and the Leg lease (p36-7, ADR 0067 d8; execute away.md § Capacity) --------------------------
 
 CAPACITY_WAIT_REFRESH = 600   # a capacity wait re-records its waiting record and renews its lease this often (s)
+LEASE_DROP_WEIGHT = object()  # leg_lease's `weight` for a fresh claim with no Weight: the lease is written without one
 
 
 def leg_lease(ctx, leg, waiting=False, strict=False, weight=None):
@@ -1493,15 +1495,19 @@ def leg_lease(ctx, leg, waiting=False, strict=False, weight=None):
     `waiting: true` from `next --waiting`, off --dry-run, only for an open Leg (`leg`, my_leg's or the chain's). strict
     (`next`'s rule): only when this session is the Leg's own, both ids known and equal, so an `unknown` caller never
     renews a dead Leg. `weight` (p53-4): a fresh claim's Weight under the budget (claim_save), written as the lease's
-    `weight`; with None the lease's own valid `weight` is carried forward, so a claim in progress keeps its Weight across
-    every renewal, and a lease never weighted stays unweighted (a weight left from an ended claim is never read: an idle
-    session weighs the built-in, and the next claim overwrites it). Best-effort: a write that fails prints rr's one
+    `weight`; LEASE_DROP_WEIGHT, a fresh claim with none (no budget, or the fallback), writes the lease without one,
+    so no earlier claim's Weight outlives the claim it weighed; with None (a renewal, or an inherited claim) the lease's
+    own valid `weight` is carried forward, so a claim in progress keeps its Weight across every renewal, and a lease
+    never weighted stays unweighted (a weight left from an ended claim is never read: an idle session weighs the
+    built-in, and the next claim, weighted or not, replaces it). Best-effort: a write that fails prints rr's one
     `lease: warning:` line."""
     if ctx.dry or leg is None or leg.get("closed") is not None:
         return
     if strict and (ctx.session == "unknown" or leg.get("session") in (None, "unknown") or leg["session"] != ctx.session):
         return
-    if weight is None:
+    if weight is LEASE_DROP_WEIGHT:
+        weight = None
+    elif weight is None:
         weight = rr._lease_read(ctx.slug)[6]
     rr._lease_write(ctx.slug, ctx.now, "leg", waiting=waiting, weight=weight)
 
@@ -1510,7 +1516,8 @@ def leg_weight(ctx, row, chain=None):
     """A claim's Weight (p53-4, ADR 0083 d4): rr._weight over the past peaks of this rollout's project and the row's
     kind (its `scope:`, else unscoped) and the repo's estimate, as status and mark-started compute it, as a room
     {mem_gb, cores}. The estimate (whose resolve may run land.sh once per root) and the peaks (file reads) are read once
-    per ctx and cached on it, so a wait computes it once. Read only while the budget admits, and never under a lock."""
+    per ctx and cached on it, so a wait computes it once. Read only while the budget admits, and always before the
+    trickle claim lock (claim computes it under the rollout's lock and the rank lock, as it runs the bases' git)."""
     cache = getattr(ctx, "_leg_weights", None)
     if cache is None:
         chain = chain or Chain(ctx)
@@ -2518,21 +2525,24 @@ def capacity_stand(ctx, chain, n, row, why, capacity, quota=None):
 def claim_save(ctx, chain, leg, row, note, fresh):
     """claim's write of the task note (p36-7, ADR 0067 d8; the module docstring's claim). A fresh claim reads the
     Capacity, the Away state, the heat and the Mac's boot and wake first (rr.capacity_reads, every read that may run a
-    child process), before any lock. While Capacity is in force: the quota hold (the heat aside) stands at once, no lock
-    and nothing written; else under the trickle claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5,
-    nothing written: a Leg's stamp counts at once, so it never claims unlocked) the recount (rr.capacity_gate, from
-    those reads: under the lock only the notes, the leases and the claims file are read): no room writes this chain's
+    child process), before the trickle claim lock (cmd_claim already holds the rollout's lock and the rank lock).
+    While Capacity is in force: the quota hold (the heat aside) stands at once, no trickle claim lock and nothing
+    written; else under the trickle claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5, nothing
+    written: a Leg's stamp counts at once, so it never claims unlocked) the recount (rr.capacity_gate, from those
+    reads: under the lock only the notes, the leases and the claims file are read): no room writes this chain's
     waiting record and stands (exit 3); room writes the Leg lease, saves the note, then the claims write (its own
-    record and wake dropped, a wake for each rollout it keeps places for). --dry-run reads the gate and writes nothing.
-    Otherwise (the fallback, or an inherited claim, which is never gated) the lease best-effort, then the save, as
-    before. While the budget admits (p53-4) the claim's Weight (leg_weight) is computed before the lock, beside the
-    reads: the gate fits it, a waiting record carries it and a claim that finds room writes it as the lease's `weight`.
-    An inherited claim computes none (its lease carries the prior claim's valid `weight`, else none)."""
+    record and wake dropped, a wake for each rollout it keeps places for). --dry-run reads the gate and writes
+    nothing. Otherwise (the fallback, or an inherited claim, which is never gated) the lease best-effort, then the
+    save, as before. While the budget admits (p53-4) the claim's Weight (leg_weight) is computed before the trickle
+    claim lock, beside the reads: the gate fits it, a waiting record carries it and a claim that finds room writes it
+    as the lease's `weight`. A fresh claim with no Weight (no budget, or the fallback) writes the lease without one
+    (LEASE_DROP_WEIGHT), so a Weight an earlier claim left is never read as this claim's once a budget appears. An
+    inherited claim computes none (its lease carries the prior claim's valid `weight`, else none)."""
     n = leg["n"]
     reads = rr.capacity_reads(ctx.now, quota_env=os.environ) if fresh else None
     state = reads["state"] if reads else None
     if state is None or not state["inForce"]:
-        leg_lease(ctx, leg)
+        leg_lease(ctx, leg, weight=LEASE_DROP_WEIGHT if fresh else None)
         save(ctx, note)
         return
     if rr._quota_held(state) and not reads["heat"]["held"]:
@@ -2557,7 +2567,7 @@ def claim_save(ctx, chain, leg, row, note, fresh):
             if line:
                 print(line, file=sys.stderr)
             capacity_stand(ctx, chain, n, row, g["why"], g["capacity"], quota=state["quota"] if g["kind"] == "quota" else None)
-        leg_lease(ctx, leg, weight=w)
+        leg_lease(ctx, leg, weight=LEASE_DROP_WEIGHT if w is None else w)
         save(ctx, note)
         line = g["write"]("served")
         if line:

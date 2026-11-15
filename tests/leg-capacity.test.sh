@@ -612,11 +612,19 @@ ok "$rc|$(q 'd["capacity"]["weight"]["why"]')|$(sums)" "3|$L17B|$before" "L17b: 
 ok "$(RECW)" "[[\"$RO\",{\"cores\":2.0,\"mem_gb\":5.0}],[\"w\",{\"cores\":2.0,\"mem_gb\":8.0}]]" "L17b: … its waiting record carries its Weight"
 # L17c/d: a chain alone always fits, even above the budget; the claim writes its Weight on the lease
 lscen l17c
-mkro t1 t2; lkind t1 w15; mkpar 0 1; cap 4 "$NOW" "$BUDGET"
+mkro t1 t2 t3; lkind t1 w15; mkpar 0 1; cap 4 "$NOW" "$BUDGET"
 leg begin --cwd "$F"; leg next; ok "$(q 'd["action"]')" claim "L17c: the chain's own session alone: a 15 GB claim is admitted"
 leg claim --task t1; ok "$rc|$(LEASEW)" '0|{"cores":2.0,"mem_gb":15.0}' "L17d: the claim writes the lease's weight"
 LNOW=$T1 leg next; ok "$(LEASEW)" '{"cores":2.0,"mem_gb":15.0}' "L17d: leg.py next renews the lease and keeps it"
 par; ok "$(pq 'd["trickle"]["capacity"]["weight"]["elsewhere"]')" "{\"$RO\":{\"cores\":2.0,\"mem_gb\":15.0}}" "L17d: a parallel next counts the Leg at it"
+# A fresh claim with no Weight (Capacity with no budget, then the fallback) writes the lease without one: the 15 GB
+# an earlier claim left never weighs it once a budget appears.
+LNOW=$T1 leg done --task t1 --verify none 2>/dev/null; cap 4 "$T1"
+LNOW=$T1 leg claim --task t2; ok "$rc|$(fm t2 owner)|$(LEASEW)" '0|leg-1|null' "L17d: a claim under no budget after a weighted one: the lease has no weight"
+LNOW=$T1 leg done --task t2 --verify none 2>/dev/null; uncap
+python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["weight"] = {"mem_gb": 15, "cores": 2}; json.dump(d, open(p, "w"))' \
+  "$HOME/.config/thread/leases/$RO.json"
+LNOW=$T1 leg claim --task t3; ok "$rc|$(fm t3 owner)|$(LEASEW)" '0|leg-1|null' "L17d: … and under the fallback, a 15 GB weight on the lease dropped"
 # L17e: two idle chains take turns by their waiting records, at (a) 10 GB and (b) 15 GB claims
 lscen l17e
 mkro t1 t2; lkind t1 w10; mkpar 0 0; cap 4 "$NOW" "$BUDGET"
