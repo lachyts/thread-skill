@@ -863,6 +863,21 @@ through time, from attention to merged PRs. Terms only — no implementation.
   memory falls below warning. A Leg's wait for room is a `wait` of
   kind `capacity` (or `quota`), never a **Rank wait**. _Avoid_: governor (the
   mechanism), throttle.
+- **Strain** — what **Capacity** yields to: pressure on the Mac that running
+  fewer tasks would lift. By day it is strain from anything, Lachy's own apps
+  included, so the Mac stays his; while he is **Away** it is only the strain
+  the Rollouts themselves cause (ADR 0083 d1, d2, proposed and not yet built).
+  _Avoid_: load (one of its signals), pressure (macOS's reading).
+- **Weight** — what one Rollout task is expected to use at its heaviest, in
+  memory and in cores: estimated from its kind until that kind has past runs,
+  then measured. **Capacity** is the room the Rollouts may fill with it, so a
+  notes task and an Xcode build no longer count the same (ADR 0083 d4,
+  proposed and not yet built). _Avoid_: cost (a spend's), size, load.
+- **Mac fault** — pressure on the Mac that running fewer tasks cannot lift
+  (a system process holding most of the memory). Never **Strain**: it does not
+  lower or freeze **Capacity**, and it is repaired, by a reset of that process
+  or a restart of the Mac just before 7:00 (ADR 0083 d2, d3, proposed and not
+  yet built). _Avoid_: leak (one cause), incident.
 - **Waiting list** — the one estate-wide list of serial chains that are ready
   to run but have no Leg session yet, because **Capacity** has no room or
   another rollout holds their files. A chain on it has no session on the Stage;
