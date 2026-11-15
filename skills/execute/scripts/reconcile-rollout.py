@@ -401,7 +401,10 @@ Subcommands:
               a Slot frees (_LastStarts.hold: its kind's usual length, or the fallback, past M), else null; null on
               every row while the rollout is `paused` or carries `pause_requested`, while `mainRed` stands or a
               `gitEnvHold` of scope `rollout` stands (those hold every row themselves in `next`), and while the
-              last starts do not apply. A set-aside task whose note holds a `## Needs you`
+              last starts do not apply. Each task also carries `weight` (p53-3): on a queued row, _weight's
+              {mem_gb, cores, source: {mem_gb, cores}, history}, each source `measured`, `file:repo` or
+              `built-in`; null on every other row, and shown on a paused or held rollout too (information, never
+              a hold). A set-aside task whose note holds a `## Needs you`
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
@@ -1148,7 +1151,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     in force, {away, n, file} (_cap_in_force: n the Away cap while Away, else the Trickle),
                     the Away state file read once per run, silently (`next` prints its WARN); `by` and, p53-2,
                     the Capacity's `budget` only while it is in force, and `weight` (p53-2, ADR 0083 d4: the
-                    task's Weight, WEIGHT_BUILT_IN until p53-3) on every slot-taken. No resolvable
+                    task's Weight, p53-3's _weight: measured, else the repo's setting, else the built-in) on
+                    every slot-taken. No resolvable
                     ceiling (or no rollout note): one `run_record: warning: slot-taken for <slug> not
                     recorded: <why>` line.
   mark-integrating  lane-taken, on every successful call; on an origin-lane refusal (exit 4, ADR 0064) with this
@@ -3804,20 +3808,21 @@ def _machine_settings():
 def _resolved_settings(rollout_note) -> dict:
     """rollout-settings.py's resolve() for the rollout note's Project root (repo=None when it has no Project root line):
     rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, test_credentials, test_logins,
-    error, cause, where}: settings is resolve()'s `settings` object (each key {value, source}), or None when it cannot
+    weight, error, cause, where}: settings is resolve()'s `settings` object (each key {value, source}), or None when it cannot
     resolve, and then error is the resolver's own words and cause what the error needs: "resolver"
     (rollout-settings.py would not load, or failed), "root" (a `--repo` refusal: the Project root is gone or its origin
     unreadable) or "file" (rollouts.toml was refused; `where` names its path and line). test_credentials is resolve()'s
     field of that name ({value, source}: the repo's test-credential class, ADR 0063; value None with no class, as with
     no Project root), and test_logins resolve()'s ({value, source}: the machine's declared test Logins, p37-4; value []
-    with none; read from [defaults], so a note with no Project root resolves it too); each is None on an error. The
-    one loader _resolved_ceiling, _resolved_caps, _retry_budget and the standing approval share; it writes nothing and
-    never raises."""
+    with none; read from [defaults], so a note with no Project root resolves it too), and weight resolve()'s ({mem_gb,
+    cores}, each {value, source}: the repo's estimated Weight, p53-3); each is None on an error. The one loader
+    _resolved_ceiling and _resolved_caps (both through _root_resolved, as _weight_estimate), _retry_budget and the
+    standing approval share; it writes nothing and never raises."""
     root = _project_root(rollout_note)
 
     def failed(error, cause, where=""):
-        return {"settings": None, "test_credentials": None, "test_logins": None, "error": error, "cause": cause,
-                "where": where}
+        return {"settings": None, "test_credentials": None, "test_logins": None, "weight": None, "error": error,
+                "cause": cause, "where": where}
 
     try:
         mod = _settings_module()
@@ -3826,7 +3831,8 @@ def _resolved_settings(rollout_note) -> dict:
     try:
         out = mod.resolve(repo=None if root is None else str(root))
         return {"settings": out["settings"], "test_credentials": out.get("test_credentials"),
-                "test_logins": out.get("test_logins"), "error": None, "cause": None, "where": ""}
+                "test_logins": out.get("test_logins"), "weight": out.get("weight"), "error": None, "cause": None,
+                "where": ""}
     except mod.SettingsError as e:
         if (e.subject or "").startswith("--repo "):
             return failed(str(e), "root")
@@ -3840,10 +3846,11 @@ def _resolved_settings(rollout_note) -> dict:
 # (the note's own value is invalid: fix it), "file" (rollouts.toml was refused: fix the named line, or stamp the key),
 # "root" (the Project root is gone or its origin unreadable: stamp the key), "resolver" (it would not run: stamp it).
 def _resolved_ceiling(rollout_note):
-    """(ceiling, error, cause) for a note with no `parallel_ceiling`: _resolved_settings' parallel_ceiling. Any
-    failure is (None, error, cause), the error the resolver's own words plus the remedy that fits its cause, so
-    `next` exits 1 and status flags it; never a guessed ceiling."""
-    res = _resolved_settings(rollout_note)
+    """(ceiling, error, cause) for a note with no `parallel_ceiling`: _resolved_settings' parallel_ceiling, through
+    _root_resolved (once per process per root, the resolve the caps and the Weight share). Any failure is (None,
+    error, cause), the error the resolver's own words plus the remedy that fits its cause, so `next` exits 1 and
+    status flags it; never a guessed ceiling."""
+    res = _root_resolved(rollout_note)
     if res["settings"] is not None:
         try:
             return res["settings"]["parallel_ceiling"]["value"], None, None
@@ -4557,9 +4564,13 @@ _HEAT_MOD = None
 # whose Login is inside its line starts nothing new).
 CAPACITY_PY = Path(__file__).resolve().parent / "capacity.py"
 QUOTA_PREFIX = "quota:"
-# A task's Weight (ADR 0083 d4, Decided for Lachy 8): the built-in middle value slot-taken's `cap.weight` records
-# (p53-2) until p53-3 replaces it with the repo's setting and the measured Weight.
+# A task's Weight (ADR 0083 d4, Decided for Lachy 8; p53-3's _weight). WEIGHT_BUILT_IN is now only the fallback when
+# rollout-settings.py will not resolve (_weight_estimate), equal to its own built-in (3 GB and 2 cores). WEIGHT_PARTS
+# are a Weight's two parts; WEIGHT_FLOOR keeps a measured part above 0, as run_record.py's _room(True) requires of
+# slot-taken's `cap.weight`.
 WEIGHT_BUILT_IN = {"mem_gb": 3.0, "cores": 2.0}
+WEIGHT_PARTS = ("mem_gb", "cores")
+WEIGHT_FLOOR = 0.1
 _CAPACITY_MOD = None
 # The Leg lease (p36-7, ADR 0067 d8): a serial rollout's lease, `by: leg`, written by leg.py on its own open Leg. While
 # Capacity is in force a Leg's `leg-<n>` claims count behind it, LEG_LEASE_LAPSE after its last write, or LEG_WAIT_LAPSE
@@ -5876,10 +5887,95 @@ def _past_runs(project, rollout_path: Path, rollout_note, index, now) -> dict:
     return out
 
 
+def _peak_room(v):
+    """A slot-freed `peak` as {mem_gb, cores} floats, or None: exactly those two keys, each a finite number (never a
+    bool) of at least 0 (run_record.py's _room(False))."""
+    if not isinstance(v, dict) or set(v) != set(WEIGHT_PARTS):
+        return None
+    for part in WEIGHT_PARTS:
+        x = v[part]
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) or x < 0:
+            return None
+    return {part: float(v[part]) for part in WEIGHT_PARTS}
+
+
+def _past_peaks(project, rollout_path: Path, rollout_note, index, now) -> dict:
+    """{kind: {task: {"mem_gb": x, "cores": y}}}: the measured peaks a task's Weight reads (p53-3, ADR 0083 d4 and DfL
+    9; execute away.md § Capacity, *A task's Weight*), from the slot-freed lines in every per-rollout `<stem>.jsonl` of
+    the events dir, never a RESERVED file. A file counts only when its rollout note names `project` first in its
+    `projects:` (case ignored), as _past_runs reads it: this rollout's own note for its own record, else the note
+    `index` holds for the stem. A line counts when it reads `kind: slot-freed`, names a str task and carries a `peak`
+    of exactly mem_gb and cores, finite numbers (never a bool) of at least 0 (_peak_room). The window: a slot-freed line
+    by its own `ts`, which must lie in [now - LAST_START_HISTORY, now]; each line is windowed before any grouping, so a
+    line outside it adds nothing, not even to a task with lines inside it (CLAUDE.md, Review rule). Its kind is its
+    task note's (_kind, the note in `index`); a task with no note is skipped. Grouping: one figure per task (its slug
+    lowercased, across files), the per-part highest of its in-window peaks, since one tree serves every Slot of its
+    task and its peak may repeat (run_record.py's "a reader takes peaks per task"). No project, or an events dir, file
+    or line that cannot be read, reads fewer peaks, so the estimate stands more often, never an error."""
+    out = {}
+    if not project:
+        return out
+    want = project.lower()
+    try:
+        rr = _run_record()
+        base = rr.events_dir()
+        names = sorted(os.listdir(base))
+    except Exception:
+        return out
+    this = rollout_path.stem.lower()
+    hi = now.timestamp()
+    lo = hi - LAST_START_HISTORY.total_seconds()
+    for name in names:
+        stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else ""
+        if not stem or stem in rr.RESERVED:
+            continue
+        note = rollout_note if stem.lower() == this else (index.get(stem.lower()) or (None, None))[1]
+        if note is None or (_project(note) or "").lower() != want:
+            continue
+        try:
+            lines, _bad = _record_lines(os.path.join(base, name))
+        except OSError:
+            continue
+        for d in lines:
+            task = d.get("task")
+            if d.get("kind") != "slot-freed" or not isinstance(task, str):
+                continue
+            peak = _peak_room(d.get("peak"))
+            ts = _parse_ts(d["ts"]) if isinstance(d.get("ts"), str) else None
+            if peak is None or ts is None or not lo <= ts.timestamp() <= hi:
+                continue  # windowed first, by the line's own ts
+            entry = index.get(task.lower())
+            if entry is None:
+                continue
+            tasks = out.setdefault(_kind(entry[1]), {})
+            have = tasks.get(task.lower())
+            tasks[task.lower()] = peak if have is None else {p: max(have[p], peak[p]) for p in WEIGHT_PARTS}
+    return out
+
+
 def _usual(lengths):
     """(median, k) of one kind's past run lengths in ms: the median is None under LAST_START_MIN_RUNS (no history)."""
     k = len(lengths)
     return (statistics.median(lengths) if k >= LAST_START_MIN_RUNS else None), k
+
+
+def _weight(kind_peaks, estimate) -> dict:
+    """A task's Weight (p53-3, ADR 0083 d4, DfL 8 and 9): {mem_gb, cores, source: {mem_gb, cores}, history}, from its
+    kind's per-task peaks (_past_peaks' {task: room} for the kind) and the estimate (_weight_estimate's). With k (the
+    number of tasks, `history`) at least LAST_START_MIN_RUNS, each part is the upper quartile of its tasks' figures
+    (statistics.quantiles, n=4, method "inclusive", which stays inside the data's range: a Weight is a task at its
+    heaviest, so a median would overfill the Mac half the time), rounded to 2 places and floored at WEIGHT_FLOOR,
+    source "measured"; fewer, and each part is the estimate's value as a float, with its source ("file:repo" or
+    "built-in")."""
+    rooms = list((kind_peaks or {}).values())
+    k = len(rooms)
+    if k >= LAST_START_MIN_RUNS:
+        out = {part: max(WEIGHT_FLOOR, round(statistics.quantiles([r[part] for r in rooms], n=4,
+                                                                   method="inclusive")[2], 2))
+               for part in WEIGHT_PARTS}
+        return {**out, "source": {part: "measured" for part in WEIGHT_PARTS}, "history": k}
+    out = {part: float(estimate[part]["value"]) for part in WEIGHT_PARTS}
+    return {**out, "source": {part: estimate[part]["source"] for part in WEIGHT_PARTS}, "history": k}
 
 
 class _LastStarts:
@@ -7179,6 +7275,21 @@ def cmd_mark_started(args) -> int:
             away["state"] = (_away_state(now), _capacity_state(now, quota=False))
         return away["state"]
 
+    # slot-taken's Weight (p53-3): each rollout's estimate and past peaks, read once per run on first use, never on
+    # --dry-run (_record_slot_taken returns first); the index is one walk of --tasks-dir.
+    weights = {}
+
+    def weights_once(rollout, rollout_path, rollout_note):
+        key = rollout.lower()
+        if key not in weights:
+            try:
+                index = _walk_of(Path(os.path.expanduser(args.tasks_dir))).index
+            except Exception:
+                index = {}
+            weights[key] = (_weight_estimate(rollout_note),
+                            _past_peaks(_project(rollout_note), rollout_path, rollout_note, index, now))
+        return weights[key]
+
     worst = 0  # 3 an arm's trip or hold, 2 an arm failure or a flag refusal (D5)
     # The ladder for the arms (p46-2): read once per run, on first use; a refused one is one WARN and no arms drawn.
     ladder = {}
@@ -7240,7 +7351,7 @@ def cmd_mark_started(args) -> int:
             print(f"{slug}: descope restart (descoped {descoped}; {DESCOPE_ARMED_KEY}: cleared) — a block after this "
                   "restart asks Lachy")
         sys.stdout.flush()
-        _record_slot_taken(args, slug, note, rollout, start, rollouts, away_once)
+        _record_slot_taken(args, slug, note, rollout, start, rollouts, away_once, weights_once)
     return max(worst, _finish(args, now))  # 3 > 2 > 1 (a refused note) > 0
 
 
@@ -8146,6 +8257,16 @@ def cmd_status(args) -> int:
         if d.get("kind") in ("lane-taken", "lane-freed") and isinstance(d.get("task"), str):
             last_lane[d["task"].lower()] = d
 
+    # p53-3: each queued row's Weight (_weight), the estimate and the past peaks read lazily once per call. It is
+    # information, never a hold, so a paused or whole-held rollout still shows it.
+    weights = {}
+
+    def weight_of(r):
+        if "peaks" not in weights:
+            weights["estimate"] = _weight_estimate(rollout_note)
+            weights["peaks"] = _past_peaks(_project(rollout_note), rollout_path, rollout_note, index, now)
+        return _weight(weights["peaks"].get(_kind(r["note"]), {}), weights["estimate"])
+
     def rung_drift(r):
         stamp = _scalar(r["note"].get("rung"))
         if not stamp or ladder["error"] or r["state"] not in CARRIED_STATES or stamp in ladder["rungs"]:
@@ -8166,6 +8287,8 @@ def cmd_status(args) -> int:
             "integrating": r["integrating"],
             "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
             "lastStart": None,
+            # p53-3: a queued row's Weight, {mem_gb, cores, source, history}; null on every other row.
+            "weight": weight_of(r) if r["state"] == "queued" else None,
             "blockerSummary": _blocker_summary(r["note"]),
             "rung": _scalar(r["note"].get("rung")) or None,
             "rungDrift": rung_drift(r),
@@ -9731,14 +9854,46 @@ def _halt_lane(rollout, slug, args, state):
 
 
 _RESOLVED_CAPS = {}
+_ROOT_RESOLVED = {}
+
+
+def _root_resolved(rollout_note) -> dict:
+    """_resolved_settings for the rollout note's Project root, once per process per root (p53-3): the ceiling of a note
+    with no `parallel_ceiling` (_resolved_ceiling), the caps (_resolved_caps) and the Weight (_weight_estimate) share
+    one resolve, so mark-started and status each run land.sh at most once per root. _retry_budget, _resolved_cap and
+    the standing approval still resolve on their own."""
+    key = str(_project_root(rollout_note))
+    if key not in _ROOT_RESOLVED:
+        _ROOT_RESOLVED[key] = _resolved_settings(rollout_note)
+    return _ROOT_RESOLVED[key]
+
+
+def _weight_estimate(rollout_note) -> dict:
+    """A task's estimated Weight in this rollout's repo (p53-3, ADR 0083 DfL 8): {mem_gb, cores}, each {value, source},
+    from rollout-settings.py's `weight` for the Project root (_root_resolved: the repo table's weight_mem_gb and
+    weight_cores, source "file:repo", else its built-in 3 and 2, "built-in"). A part that will not resolve (a refused
+    file, a Project root that cannot be read, a resolver failure) reads WEIGHT_BUILT_IN, "built-in"; never raises."""
+    res = (_root_resolved(rollout_note) if rollout_note is not None else None) or {}
+    weight = res.get("weight") if isinstance(res.get("weight"), dict) else {}
+    out = {}
+    for part in WEIGHT_PARTS:
+        got = weight.get(part)
+        value = got.get("value") if isinstance(got, dict) else None
+        if (isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+                and got.get("source") in ("file:repo", "built-in")):
+            out[part] = {"value": float(value), "source": got["source"]}
+        else:
+            out[part] = {"value": WEIGHT_BUILT_IN[part], "source": "built-in"}
+    return out
 
 
 def _resolved_caps(rollout_note) -> dict:
     """The round caps rollout-settings.py resolves for the rollout's Project root (rollouts.toml, then the
-    built-in), once per process per root; {} when it cannot (the caps are then left out of the settings)."""
+    built-in), once per process per root (_root_resolved); {} when it cannot (the caps are then left out of the
+    settings)."""
     key = str(_project_root(rollout_note))
     if key not in _RESOLVED_CAPS:
-        res = _resolved_settings(rollout_note)["settings"] or {}
+        res = _root_resolved(rollout_note)["settings"] or {}
         try:
             _RESOLVED_CAPS[key] = {k: res[k]["value"] for k in CAP_KEYS if k in res}
         except Exception:
@@ -9811,13 +9966,15 @@ def _rollout_note_read(args, rollout, cache):
     return cache[key]
 
 
-def _record_slot_taken(args, slug, note, rollout, start, cache, away_once):
+def _record_slot_taken(args, slug, note, rollout, start, cache, away_once, weights_once):
     """mark-started's slot-taken. With no `rollout:`, no rollout note or no resolvable ceiling, one warning and
     nothing recorded (a Slot with no ceiling cannot be read against it). `cap` is the Mac-wide cap in force
     (_cap_in_force, p29-8): `away_once` reads the Away state and the Capacity (p36-7: C, `by: capacity`, and p53-2 its
     `budget`, while it is in force) at most once per verb run, silently (`next` prints their WARNs), and only here, so
     --dry-run and a warned note never read them. `cap.weight` (p53-2, ADR 0083 d4) is the task's Weight, on every
-    slot-taken: WEIGHT_BUILT_IN until p53-3."""
+    slot-taken: _weight's room {mem_gb, cores} for the task's kind (p53-3: measured, else the repo's setting, else the
+    built-in), from `weights_once`, which reads the estimate and the past peaks at most once per verb run per rollout,
+    and likewise never under --dry-run."""
     def warn(why):
         print(f"run_record: warning: slot-taken for {slug} not recorded: {why}", file=sys.stderr)
 
@@ -9831,7 +9988,9 @@ def _record_slot_taken(args, slug, note, rollout, start, cache, away_once):
     settings, err = _slot_settings(note, rollout_note)
     if err:
         return warn(err)
-    cap = {**_cap_in_force(*away_once()), "weight": dict(WEIGHT_BUILT_IN)}
+    estimate, peaks = weights_once(rollout, _path, rollout_note)
+    weight = _weight(peaks.get(_kind(note), {}), estimate)
+    cap = {**_cap_in_force(*away_once()), "weight": {part: weight[part] for part in WEIGHT_PARTS}}
     fields = {"settings": settings, "start": start, "cap": cap}
     state = _record_state(rollout)
     carried = state["carried"].get(slug.lower()) if state else None

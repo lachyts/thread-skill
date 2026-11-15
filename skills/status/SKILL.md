@@ -155,6 +155,12 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   apply. It reads the row once a Slot frees: a row whose ceiling or Away cap is also full, or one the Heat hold
   holds (a hot Mac's `slotLimit` is 0), still shows it, though `next` names `ceiling:`, `away cap:` or `heat:`
   first. An older engine's output has no `lastStart` or `lastStarts` key: the row then reads as a plain queued row.
+  Each also carries `weight` (p53-3): on a `queued` row, the task's Weight, `{mem_gb, cores, source, history}`, the
+  two numbers from its project and kind's measured peaks once 3 tasks have one, else the repo's `weight_mem_gb` and
+  `weight_cores` in rollouts.toml, else the built-in 3 GB and 2 cores; `source` names where each part came from
+  (`{mem_gb, cores}`, each `measured`, `file:repo` or `built-in`) and `history` how many tasks were measured
+  (`skills/execute/away.md` § Capacity, *A task's Weight*). It is null on every other row, and shown on a paused or
+  held rollout too: it is information, never a hold. An older engine's output has no `weight` key.
   A task set aside at Integration whose latest run opens a named marker also carries `integrationBlock`:
   `conflict` (an **Integration conflict**, `integration: conflict unresolved in …`, its resolution brief beneath)
   or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise. An
@@ -518,7 +524,7 @@ there these notes show on the Stage line (`carried-fixes.json`), in reflect § 1
 | `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3); with `originWait`: `waiting on the origin lane (<origin>) since <since>` in place of the time in the lane (another project's Integration holds the origin; ADR 0064) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
-| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else `lastStart` (`<reason>`: held toward the Morning; it starts once the Morning passes; a shorter row below may start meanwhile) when it is set, else "next free slot" |
+| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else `lastStart` (`<reason>`: held toward the Morning; it starts once the Morning passes; a shorter row below may start meanwhile) when it is set, else "next free slot"; then `· Weight <mem_gb> GB, <cores> cores (<source>)` from `weight` when the row has one, the source named once when both parts share it, else per part (`(memory measured, cores built-in)`) |
 | `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below); a task set aside at Integration names its `integrationBlock`: `Integration conflict → …` in place of `at Integration → …` for `conflict`, `at Integration, verifier red → …` for `red` |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
@@ -685,7 +691,7 @@ Awaiting Integration (1)
 Running (1)
   [[proj-running]]          owner execute-2026-10-02-ab12cd34
 Queued (1)
-  [[proj-queued]]           depends on [[proj-at-integration]] (blocked) · rung gone
+  [[proj-queued]]           depends on [[proj-at-integration]] (blocked) · Weight 3 GB, 2 cores (built-in) · rung gone
 Set aside (7)
   [[proj-at-integration]]   Integration conflict → the lead's automatic retry · integration: conflict unresolved in a.js · auto-retry 0/2
   [[proj-rejected]]         revise (automatic) → the lead launches it · revise: rejected at Integration re-review
