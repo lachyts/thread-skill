@@ -39,9 +39,9 @@
 # skills/ in a temp tree (tests/pushed-base.test.sh, tests/self-rollout-check.test.sh) has other paths, so it compiles
 # its own scripts as before. THREAD_TEST_WARM_STDLIB=0 leaves the stdlib and PyYAML half out of the warm, for a nested
 # run that launches only a handful of pythons: each warm compiles about 560 stdlib modules (about 0.75 s wall and 4
-# CPU-s on a 12-core Mac), and tests/fast-tier.test.sh's 30-odd fixture runs, which set it, took its 55-72 s to 103 s
-# without it. Empty, unset or 1 warms both halves; any other value exits 2 before any step. run.sh unsets it, so no
-# suite and no inner run inherits it.
+# CPU-s on a 12-core Mac), and tests/fast-tier.test.sh's 30-odd fixture runs, which set it, took that suite from
+# master's 54-77 s to 119-133 s without it (68-69 s with it, measured back to back on one Mac). Empty, unset or 1 warms
+# both halves; any other value exits 2 before any step. run.sh unsets it, so no suite and no inner run inherits it.
 #
 # Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files and plain
 # exit-code scripts both run through tests/lib/node-run.mjs, node:test's run() (the runner `node --test` uses, with its
@@ -313,16 +313,18 @@ step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-par
 # The bytecode cache's warm, after the stamp, so the tree check would see a .pyc it put in the checkout.
 # warm <dir>...: compile each dir's .py files into the prefix (none: none; a bare compileall walks sys.path), red when
 # one does not compile; then, best effort and silent, the interpreter's stdlib and PyYAML (the header says why), unless
-# THREAD_TEST_WARM_STDLIB=0.
+# THREAD_TEST_WARM_STDLIB=0. Only the stdlib's 560-odd modules take a worker pool (-j 0): for skills/ and hooks/ (about
+# 50 files) its start-up cost more than it saved (0.82 s against 0.53 s serially, and 0.35 against 0.12 s on a fixture's
+# two files), so they and PyYAML compile serially.
 warm() {
   local lib yaml
-  [ "$#" -eq 0 ] || python3 -m compileall -q -j 0 "$@" || return 1
+  [ "$#" -eq 0 ] || python3 -m compileall -q "$@" || return 1
   [ "$warm_stdlib" = 1 ] || { echo "bytecode cache: the stdlib and PyYAML left out (THREAD_TEST_WARM_STDLIB=0)"; return 0; }
   lib=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])') &&
     python3 -m compileall -qq -j 0 -x '[/\\](test|tests|idlelib|tkinter|turtledemo|lib2to3|ensurepip|site-packages|dist-packages)[/\\]' \
       "$lib" > /dev/null 2>&1
   yaml=$(python3 -c 'import os, yaml; print(os.path.dirname(yaml.__file__))' 2> /dev/null) &&
-    python3 -m compileall -qq -j 0 "$yaml" > /dev/null 2>&1
+    python3 -m compileall -qq "$yaml" > /dev/null 2>&1
   return 0
 }
 warm_dirs=(); for d in skills hooks; do [ -d "$d" ] && warm_dirs+=("$d"); done
