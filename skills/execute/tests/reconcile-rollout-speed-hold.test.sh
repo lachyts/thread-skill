@@ -292,7 +292,7 @@ scen s7
 base; mkro ro "max_review_rounds: 3" x-p9-1 x-p9-2 x-p9-3 a b c d f g
 sh_ apply
 blocked x-p9-2 "$MARK" 'auto_retries: 0'
-ok "$(hf x-p9-2)" '"hand back or defer"' "S7: the set-aside release's humanFix is non-null (its retries spent)"
+ok "$(hf x-p9-2)" '"raise max_iterations, hand back or defer"' "S7: the set-aside release's humanFix is non-null (its retries spent)"
 before=$(sums)
 nxt --dry-run
 has "$(starts)" '"a","b"' "S7e: next --dry-run starts a and b"
@@ -551,7 +551,9 @@ cmp -s "$D/ro.md" "$TMP/ro.s19b"; ok "$?" 0 "S19: the rollout note is byte-ident
 dfr --tasks b,h2 --rollout "$D/ro.md"
 ok "$(deps b)|$(deps h2)" "-|x-p9-2" "S19: a task held by two holds loses both; an unrecorded hand-written entry stays"
 jn --tasks a
-ok "$rc|$(deps a)|$(holdlines | grep -c .)" "0|z,x-p9-2|2" "S19: a later join re-stamps the recorded task with no new hold line"
+ok "$rc|$(deps a)|$(holdlines | grep -c 'hold \[\[x-p9-2\]\]')" "0|z,x-p8-1,x-p9-2|1" \
+  "S19: a later join re-stamps the recorded task with no new x-p9-2 hold line"
+ok "$(holdlines | tail -1)" "- $STAMP hold [[x-p8-1]] (p8, join): [[a]]" "S19: … and phase 8's standing hold extends to it"
 
 scen s19c
 mkro ro "" a; mkt a open ro 'depends-on: "[[z]]"'

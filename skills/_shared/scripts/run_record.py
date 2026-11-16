@@ -486,6 +486,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   setting-restored T id. ADR 0080: merge-settings.py `restore` wrote that change's before back, on his word.
   setting-dismissed T id. ADR 0080: merge-settings.py `dismiss`, his decision to keep that change; its
                      setting-changed line stays.
+  speed-hold         act (made | released), release (the hold's release, a task slug), phase (`p<N>`); by? (schedule
+                     | join: a made hold's writer), held? (an int >= 0: the tasks a made hold names), cause? (set-aside
+                     | left-queue | by-hand | superseded: why a hold was released), removed? (an int >= 0: the entries a
+                     release dropped), to? (the release a superseded hold moved to). p54-13 (ADR 0084 d4), the Speed fix
+                     hold (vault-grammar § Speed fix hold): one line per hold made (reconcile-rollout.py `speed-hold
+                     apply` or `join`) and per hold released (`next`'s let-go, `speed-hold release`, a move); a let-go's
+                     line names the task it let go for as its task.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -1791,6 +1798,10 @@ KINDS = {
                            "conclusion": _or_null(_short(40)), "timeoutMinutes": _or_null(_int(1)),
                            "limitSource": _enum(*CI_LIMIT_SOURCES)},
                     {"runId": _int(1), "workflow": _str, "shard": _short(CI_JOB_MAX)}),
+    # p54-13 (ADR 0084 d4), the Speed fix hold: reconcile-rollout.py `speed-hold`, `join` and `next`, through _event alone.
+    "speed-hold": (False, {"act": _enum("made", "released"), "release": _str, "phase": _str},
+                   {"by": _enum("schedule", "join"), "held": _int(0),
+                    "cause": _enum("set-aside", "left-queue", "by-hand", "superseded"), "removed": _int(0), "to": _str}),
 }
 
 
