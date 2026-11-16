@@ -280,18 +280,20 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/threa
 The first with Lachy's yes answers; the second when he picked nothing, said no, or ended the Reflection without
 answering. `--record-only` still matters: its line is the next Reflection's baseline. With a null repo, tune.py prints
 `tune: not recorded: ...` and exits 0: report that line as it is. Exit 1 (a write failed: nothing applied, or the
-line voided) and exit 2 (refused: a stale `from` because rollouts.toml changed since the score, an unknown or
-withheld id, a dotted or inline key, another repo) are reported verbatim; a stale `from` is fixed by a fresh
-Reflection. Never edit `rollouts.toml` to work around a refusal.
+line voided; or the reader check refused, nothing written: a capacity_max or Weight Tuning raises the file's `schema`,
+and a live rollout's engine cannot read it) and exit 2 (refused: a stale `from` because rollouts.toml changed since
+the score, an unknown or withheld id, a dotted or inline key, another repo) are reported verbatim; a stale `from` is
+fixed by a fresh Reflection. Never edit `rollouts.toml` to work around a refusal.
 
 A `--pick` run that wrote no line does not use up the one run: an exit-2 refusal writes nothing (no line, no key),
-and neither does an exit 1 that says `nothing applied: the Reflection's line could not be written` or `cannot write
-next to`. Report it, then either re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id; Owner
-*yours*, step 5's question, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), or,
-when he picks nothing more or the refusal cannot be fixed in this Reflection (a stale `from`, another repo), run
-`--record-only`, so the Reflection still leaves its line as the next one's baseline. A run that wrote its line (exit 0,
-or the exit-1 `rollouts.toml was not written` failure, which records the line and voids it) is the one run: never
-run tune.py again for this Reflection.
+and neither does an exit 1 that says `nothing applied: the Reflection's line could not be written`, `cannot write
+next to` or `nothing written: a live rollout's engine cannot read the raised `schema` line`. Report it, then either
+re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id; Owner *yours*, step 5's question,
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), or, when he picks nothing more or the refusal cannot be fixed in
+this Reflection (a stale `from`, another repo, the reader check: that rollout finishes, or its checkout is updated,
+first), run `--record-only`, so the Reflection still leaves its line as the next one's baseline. A run that wrote its
+line (exit 0, or the exit-1 `rollouts.toml was not written` failure, which records the line and voids it) is the one
+run: never run tune.py again for this Reflection.
 
 ### 8. Report, then tidy
 
@@ -726,7 +728,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span /tm
 `scores` file among `knobs.land[]` (with its items' `root`): one call lands every eligible proposal in that file as one
 line, and a repo's land items all come from its newest rollout's file. `knobs` runs once, after them. Report every exit
 verbatim: an `applied` line, a `held <key>: <reason>` line (`agreement 1 of 3`, say; a key this Reflection's revert
-moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a write failure (exit 1). Never `--pick`,
+moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a write failure or refused reader check
+(exit 1, nothing written: a live rollout's engine cannot read the `schema` line the landing raises). Never `--pick`,
 `--record-only` or `--close`, and never edit `rollouts.toml`. A `held <key>: a trade (...): Lachy decides` or
 `held <key>: a caution: Lachy decides` line is a held trade (ADR 0037 d1): the weekly reading never lands it, and
 step 15's `decide` puts it in the decision task. A `held parallel_ceiling: machine load tops the Time-lost ledger (<h> h

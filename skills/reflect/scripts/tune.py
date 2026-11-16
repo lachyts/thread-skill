@@ -12,7 +12,7 @@ each rollout's close (its completion ceremony, or its supersede); and SKILL.md s
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores <score.json|-> \\
         (--pick p1[,p2...] --repo <dir> | --record-only [--close completion|supersede] |
          --auto --repo <dir> --reflection <id> | --revert <tuning id> --repo <dir> --reflection <id>)
-        [--config <path>] [--dry-run]
+        [--config <path>] [--tasks-dir <dir>] [--dry-run]
 
 --scores is score.py's JSON. --pick, --record-only, --auto and --revert are mutually exclusive and one is required.
 --reflection (an r- id, the weekly reading's) is required with --auto and --revert and refused with the other two (exit
@@ -118,7 +118,20 @@ repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `d
 every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) and the resolved `[defaults]
 test_logins` (p37-4: the operator's declared test Logins, no automated writer) unchanged.
 
-Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
+The reader check (rollout-settings.py's header: a writer that raises the schema runs it), only when the edit raises the
+file's `schema`: a capacity_max Tuning raises it to 4 and a Weight Tuning to 6, an unattended --auto landing (and a
+--revert) included, since all three share _apply(). A pre-P29 reader refuses any top-level `schema` line, and a refused
+file halts every rollout on the machine at its next `verify-timeout`, so before anything is written each live rollout's
+engine root reads the temp file: inert-paths.py's reader_check() (its header has the rule: the live notes directly in
+--tasks-dir, default ~/repos/obsidian/Work/Tasks, each engine root's own rollout-settings.py under `python3 -I -B`,
+30 s), loaded lazily, its lines led `tune`. A refusal is exit 1, nothing written: one stderr line per note,
+`tune: [[<slug>]] runs on <root>, whose rollout-settings.py refuses the new file (<why>): update that checkout to a P29+
+release, or wait for the rollout to finish`, then `tune: nothing written: a live rollout's engine cannot read the raised
+`schema` line`. There is no --force (a hand edit is the operator's). A missing tasks dir, an unreadable note or an
+unusable snapshot is a `WARN: tune: ...` line on stderr, and the write goes on; a check that will not load is exit 1
+(fail closed). With the schema not raised, no check runs. --dry-run runs it too.
+
+Write order: (1) every check above, the reader check last; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
 or nothing; (3) os.replace(temp, realpath).
 - emit returns False (an unwritable events dir, a short write): the temp file goes, rollouts.toml was never
@@ -138,7 +151,8 @@ Weight key `takes effect at <repo>'s next `next` call or start, running rollouts
 
 Exit codes: 0 applied, recorded, already recorded (a --close run whose rollout has its close line), not recorded
 for a null repo, or nothing eligible under --auto (each `held` line printed); 1 a write failed (nothing applied, or the
-line voided), tunings.jsonl cannot be read for --close, --auto or --revert, or reflections.jsonl cannot be read; 2
+line voided), the reader check refuses (or will not load), tunings.jsonl cannot be read for --close, --auto or
+--revert, or reflections.jsonl cannot be read; 2
 refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config, a closed Reflection, a revert
 revert_check refuses); 3 no tomllib for a present config.
 """
@@ -511,6 +525,22 @@ def raise_schema(lines, need, current):
         raise Stop(str(e), 2)
 
 
+def reader_check(new_file, tasks_dir):
+    """The module docstring's reader check, run by _apply only when the edit raises the file's `schema`:
+    inert-paths.py's reader_check() (its one copy, loaded here and only here), led `tune`. Its WARN lines go to stderr;
+    a refusal prints its lines, then is a Stop(1), nothing written; a check that will not load is a Stop(1) too (fail
+    closed)."""
+    try:
+        ip = _load("thread_inert_paths", os.path.join(SHARED, "inert-paths.py"))
+        refusals, warns = ip.reader_check(new_file, tasks_dir or ip.ES.DEFAULT_TASKS_DIR, who="tune", force=False)
+    except Exception as e:
+        raise Stop("the reader check did not run (%s: %s): nothing written" % (type(e).__name__, e), 1)
+    for line in warns + refusals:
+        sys.stderr.write(line + "\n")
+    if refusals:
+        raise Stop("nothing written: a live rollout's engine cannot read the raised `schema` line", 1)
+
+
 def _edit_table(lines, target, label, picks, written):
     """`lines` with each pick's key set to its `to` in the table `target` (("defaults",), or ("repo", slug), the slug
     matched ignoring case): replaced in place keeping a trailing comment, else inserted after the table's last key, else
@@ -703,7 +733,7 @@ def _resolve(repo, config):
         raise Stop("rollout-settings: %s" % e, e.code)
 
 
-def pick(scores, picks_arg, repo, config, dry_run):
+def pick(scores, picks_arg, repo, config, dry_run, tasks_dir=None):
     ids = []
     for x in picks_arg.split(","):
         x = x.strip()
@@ -732,12 +762,13 @@ def pick(scores, picks_arg, repo, config, dry_run):
     applied = [{"key": p["key"], "from": p["from"], "to": p["to"], "ranAt": p["ranAt"],
                 "rule": str(p.get("rule"))[:64], "evidence": str(p.get("evidence"))[:300],
                 "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0} for p in picks]
-    return _apply(scores, applied, [p["id"] for p in picks], repo, config, before, dry_run)
+    return _apply(scores, applied, [p["id"] for p in picks], repo, config, before, dry_run, tasks_dir=tasks_dir)
 
 
-def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
+def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tasks_dir=None):
     """Land `applied` (tuning entries) in rollouts.toml and record them as ONE tuning line (pick, --auto and --revert
-    share it): each entry's `from` must be the key's value now, then the edit, its validation, the line, the replace."""
+    share it): each entry's `from` must be the key's value now, then the edit, its validation, the reader check when
+    the edit raises the file's `schema`, the line, the replace."""
     values = now_values(before)
     for e, name in zip(applied, names):
         now = values.get(e["key"])
@@ -787,6 +818,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
         # p37-4: the declared test Logins are the operator's alone (machine-wide, [defaults]): no Tuning moves them.
         if after.get("test_logins") != before.get("test_logins"):
             raise Stop("the edit changes test_logins: nothing written", 2)
+        if after["schema"]["file"] > before["schema"]["file"]:
+            reader_check(tmp, tasks_dir)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:
@@ -856,7 +889,7 @@ def _tunings():
         raise Stop("tunings.jsonl cannot be read: %s: nothing written" % e, 1)
 
 
-def auto(scores, repo, reflection, config, dry_run):
+def auto(scores, repo, reflection, config, dry_run, tasks_dir=None):
     """--auto: land every proposal that passes auto_check, as ONE auto line; print `held <key>: <reason>` for the rest."""
     reflections = _reflection_open(reflection)
     repo = _identity(scores, repo, "--auto")
@@ -882,10 +915,10 @@ def auto(scores, repo, reflection, config, dry_run):
                 "evidence": str(p.get("evidence"))[:300],
                 "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0, "agreed": n} for p, n in land]
     return _apply(scores, applied, [p["id"] for p, _n in land], repo, config, before, dry_run,
-                  auto={"auto": True, "reflection": reflection})
+                  auto={"auto": True, "reflection": reflection}, tasks_dir=tasks_dir)
 
 
-def revert(scores, tid, repo, reflection, config, dry_run):
+def revert(scores, tid, repo, reflection, config, dry_run, tasks_dir=None):
     """--revert <tid>: undo one key of an auto line that this run finds breaching a Guardrail its rule risks."""
     _reflection_open(reflection)
     repo = _identity(scores, repo, "--revert")
@@ -900,7 +933,7 @@ def revert(scores, tid, repo, reflection, config, dry_run):
              "evidence": ("revert %s: breaches %s, which %s risks" % (tid, ", ".join(e["breached"]), e.get("rule")))[:300],
              "agreeing": SCORE.agreeing(tunings, scores["repo"], e["key"], rule, -direction)}
     return _apply(scores, [entry], ["%s's %s" % (tid, e["key"])], repo, config, before, dry_run,
-                  auto={"auto": True, "reflection": reflection, "reverts": tid})
+                  auto={"auto": True, "reflection": reflection, "reverts": tid}, tasks_dir=tasks_dir)
 
 
 class Parser(argparse.ArgumentParser):
@@ -921,6 +954,7 @@ def main(argv):
     p.add_argument("--reflection")
     p.add_argument("--repo")
     p.add_argument("--config")
+    p.add_argument("--tasks-dir")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args(argv)
     if a.close and not a.record_only:
@@ -943,10 +977,10 @@ def main(argv):
         if a.record_only:
             return record_only(scores, a.dry_run, a.close)
         if a.auto:
-            return auto(scores, a.repo, a.reflection, a.config, a.dry_run)
+            return auto(scores, a.repo, a.reflection, a.config, a.dry_run, a.tasks_dir)
         if a.revert is not None:
-            return revert(scores, a.revert, a.repo, a.reflection, a.config, a.dry_run)
-        return pick(scores, a.pick, a.repo, a.config, a.dry_run)
+            return revert(scores, a.revert, a.repo, a.reflection, a.config, a.dry_run, a.tasks_dir)
+        return pick(scores, a.pick, a.repo, a.config, a.dry_run, a.tasks_dir)
     except Stop as e:
         say(str(e))
         return e.code

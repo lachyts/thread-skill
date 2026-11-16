@@ -1064,6 +1064,7 @@ test('KT5 (a) a Tuning raises capacity_max and the file\'s schema line together'
   const scores = writeScores(home, { binding: 'budget-bound', proposals: [CAPMAX()] })
   const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
   assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, 'WARN: tune: no tasks dir at ~/repos/obsidian/Work/Tasks: the reader check read no live rollout\n', 'the raise ran the reader check')
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 4\n\n[defaults]\nparallel_ceiling = 4\ncapacity_max = 7\n')
   const after = resolved(home, repo)
   assert.deepEqual([after.schema.file, after.settings.capacity_max], [4, { value: 7, source: 'file:defaults' }])
@@ -1185,4 +1186,51 @@ test('KT5 (h) --revert of a Weight auto line lands its reverse, rollouts.toml\'s
   const l = lines(tuningsPath(home))[1]
   assert.deepEqual([l.reverts, l.applied.map((e) => [e.key, e.from, e.to, e.ranAt, e.rule])], ['t-auto', [['weight_mem_gb', 2, 3, 2, 'revert:weight-measured-lower']]])
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), W2.replace('weight_mem_gb = 2', 'weight_mem_gb = 3'))
+})
+
+// ---- KT6: the reader check (rollout-settings.py's header; p53-5) ----------------------------------------------------
+// A capacity_max or Weight Tuning raises the file's schema, so before anything is written each live rollout's engine root
+// reads the new file (inert-paths.py's reader_check()). The fixture: one live rollout note stamped at a usable snapshot
+// whose rollout-settings.py is a pre-P29 stub that refuses any top-level `schema` line.
+function preP29Tasks(home) {
+  const snap = path.join(home, 'snap')
+  const scripts = path.join(snap, 'skills', '_shared', 'scripts')
+  fs.mkdirSync(scripts, { recursive: true })
+  fs.writeFileSync(path.join(scripts, 'rollout-settings.py'), 'def resolve(repo=None, path=None):\n    for line in open(path):\n' +
+    '        if line.startswith("schema"):\n            raise ValueError(\'unknown top-level key "schema"\')\n    return {}\n')
+  fs.writeFileSync(path.join(scripts, 'engine-snapshot.py'), '# the snapshot marker\n')
+  const genv = { PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: '1' }
+  const g = (...a) => execFileSync(REAL_GIT, ['-C', snap, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a],
+    { encoding: 'utf8', env: genv }).trim()
+  g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'pre-P29')
+  const sha = g('rev-parse', 'HEAD')
+  g('checkout', '-q', '--detach', sha)
+  const td = path.join(home, 'tasks')
+  fs.mkdirSync(td)
+  fs.writeFileSync(path.join(td, 'ro.md'), `---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nengine_snapshot: "${snap}"\nengine_sha: ${sha}\n---\n`)
+  return { snap, td }
+}
+
+test('KT6 a schema raise runs the reader check: a pre-P29 live engine refuses it (exit 1, nothing written, a dry run too); no raise, no check', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const { snap, td } = preP29Tasks(home)
+  const config = '[defaults]\nparallel_ceiling = 4\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { binding: 'budget-bound', proposals: [CAPMAX()] })
+  for (const extra of [[], ['--dry-run']]) {
+    const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo, '--tasks-dir', td, ...extra])
+    assert.equal(r.status, 1, r.stderr)
+    assert.equal(r.stderr, `tune: [[ro]] runs on ${snap}, whose rollout-settings.py refuses the new file (unknown top-level key "schema"): ` +
+      'update that checkout to a P29+ release, or wait for the rollout to finish\n' +
+      'tune: nothing written: a live rollout\'s engine cannot read the raised `schema` line\n', extra.join(' '))
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'byte-identical')
+    assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+  }
+  // the file already at schema 4: nothing is raised, so the pre-P29 engine is never asked
+  writeToml(home, `schema = 4\n\n${config}`)
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo, '--tasks-dir', td])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 4\n\n[defaults]\nparallel_ceiling = 4\ncapacity_max = 7\n')
 })

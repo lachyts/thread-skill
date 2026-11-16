@@ -152,8 +152,10 @@ adds it to a file whose `schema` is lower raises the file's `schema` line to tha
 does it (raise_schema(), pinned by tests/reflect-tune.test.mjs KT1), and so must a hand edit. Both writers share
 raise_schema_lines() below. A writer that raises the schema runs the reader check or names why it need not: a
 pre-P29 reader refuses any top-level `schema` line and a schema-N reader any known key above N, and a refused file halts
-every rollout on the machine at its next `verify-timeout`, so inert-paths.py `record` asks each live rollout's engine
-root to read the new file first (its header); tune.py writes only schema-1 keys, so it never raises the line today.
+every rollout on the machine at its next `verify-timeout`, so each writer asks every live rollout's engine root to read
+the new file first and refuses the write when one cannot: inert-paths.py `record` (its header, and reader_check(), the
+check's one copy) raising it to 2, and tune.py, which loads that reader_check(), raising it to 4 for capacity_max or
+to 6 for a Weight (p53-5; an unattended --auto landing included; its header).
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -271,7 +273,7 @@ LAND_SH = os.path.join(HERE, "land.sh")
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget,
 # the standing approval's limit in US dollars (ADR 0034), the machine's verify slots (p23-4) and the hard maximum of
-# the Mac-wide Capacity (p36-7, ADR 0067 d8); none of the four is Reflection-tunable.
+# the Mac-wide Capacity (p36-7, ADR 0067 d8); of the four only capacity_max is Reflection-tunable (p53-5, TUNING_KEYS).
 SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots", "capacity_max")
 # Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot, and the Capacity, are
 # shared by every rollout on the machine, whatever its repo).
