@@ -298,9 +298,9 @@ parallel with no note). For each:
   retired: one item {repo, job, date, line} per CI_RETIRED entry whose date passes date_in() (since's Melbourne date up
   to, not including, until's), so each retirement is said once, in the reading whose window holds its date.
   breaches: one line per breaching group, `<repo>: ...`. audit: {repo (THREAD_SKILL_REPO, the one repo whose breach
-  files Thread Skill's suite audit; another's is reported alone), key (watch_id(SUITE_RULE, SUITE_SHAPE): the audit's bug_key), due (a breach on that
-  repo), open ({slug, status} of the open task carrying that key, else null)}. Reported for the reading; suite-audit
-  files from it.
+  files Thread Skill's suite audit; another's is reported alone), key (watch_id(SUITE_RULE, SUITE_SHAPE): the audit's
+  bug_key), due (a breach on that repo), open ({slug, status} of the open task carrying that key, else null)}. Reported
+  for the reading; suite-audit files from it.
 - arms (p46-4, ADR 0079 d9): skills/reflect/scripts/arms.py's block (ARMS.reading(); its docstring holds every rule: the
   row units, the attributes read wider, the verdict, the proposal, the hold order, the Guardrails read, the plans and the
   Fable calls by kind), after the sweep and the escapes-only entries, over whole() (every record read whole, its fold's
@@ -327,9 +327,9 @@ knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: 
 ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
 overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
 warnings} | null} | null, suite{budget, local[], ci[], breaches[], retired[], audit} (above), gateMisses{count,
-items[{rollout, task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is non-empty, the count
-the Reflection reads; p51-3), arms (arms.py's block, above, or null), cannotShow[], flags[]}. stderr gets one summary
-line.
+items[{rollout, task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is
+non-empty, the count the Reflection reads; p51-3), arms (arms.py's block, above, or null), cannotShow[], flags[]}.
+stderr gets one summary line.
 
 The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
 blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
@@ -657,7 +657,7 @@ SUITE_BUDGET = {"integration": 300, "full": 1200}
 SUITE_TIERS = {"task": "integration", "integration": "integration", "race": "integration", "completion": "full"}
 SUITE_TIMED = ("green", "red", "timeout")
 CI_SHARE = 0.8
-# CI_RETIRED: the required CI jobs that left a repo's required checks, each (repo, job, the Melbourne date it left, why).
+# CI_RETIRED: the CI jobs that left a repo's required checks, each (repo, job, the Melbourne date it left, why).
 # suite() reads it as of until: a retired job's group never breaches from the reading whose until's date is past that
 # date, and the reading whose window holds the date says so once (suite.retired).
 CI_RETIRED = (("lachyts/thread-skill", "make test (macos-latest)", "2026-11-16", "ADR 0084 d3"),)
@@ -2547,8 +2547,8 @@ def window_flags(doc, scores):
     report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
     report("suite.local", spans(items(part(doc, "suite", "local"))), ss, us)
     report("suite.ci", spans(items(part(doc, "suite", "ci"))), ss, us)
-    report("suite.retired", [(_row_in(x.get("date"), S, U), x.get("date")) for x in items(part(doc, "suite", "retired"))],
-           ss, us)
+    retired = items(part(doc, "suite", "retired"))
+    report("suite.retired", [(_row_in(x.get("date"), S, U), x.get("date")) for x in retired], ss, us)
     misses = items(part(doc, "gateMisses", "items"))
     report("gateMisses.items", [(_row_in(x.get("at"), S, U), x.get("at")) for x in misses], ss, us)
     # the arms (arms.py's rows: each placed by its own time; an Escape needs inWindow too)
