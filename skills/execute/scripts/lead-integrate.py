@@ -358,8 +358,8 @@ Subcommands:
       Now, in reconcile's `_stamp` form (log-integration's --started; `call` stamps the integrate call's startedAt).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc; shards --jobs: an id reduced), 1 refused (push,
-undo, prepare without integrating:, revert's guard; shards --jobs: an unreadable FILE or a roll-up not proven), 3 shards
---jobs reduced no id, 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
+undo, prepare without integrating:, revert's guard; shards --jobs: an unreadable FILE or a roll-up not proven), 3 no id
+reduced (shards --jobs), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
 execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
 prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
