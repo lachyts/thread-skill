@@ -26,7 +26,14 @@ rows 2 and 5 built by p54-3: `tests/run.sh` warms a bytecode cache in its scratc
 `PYTHONPYCACHEPREFIX`, exported to every suite and node file), so the engine loads compiled; node's files start
 longest first, by measured seconds in `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs
 them in the shard split), run through `tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path.
-Phase 54 builds the rest.
+Decided for you 12's engine reading built by p54-11: a roll-up check, a required check whose workflow job has the
+aggregator shape (a non-empty `needs:` and a job-level `if:` holding `always()` or `!cancelled()`, read at the
+integrated head; a name that is only expressions matches nothing), is read through the jobs it needs by
+`lead-integrate.py shards`, at merge-task's three sites: the infra re-run classifies the run's jobs minus the
+roll-up's own, so a shard's setup failure is re-run; a shard cut alone takes ADR 0073 d4's cancelled path (skipped
+neutral, the cut-again rule per needed job); and a roll-up whose needed jobs all passed or were skipped falls back to
+itself, today's read. CI headroom records the slowest of its needed jobs and itself by seconds, against that job's own
+limit, and the line's `shard` field names the needed job. Phase 54 builds the rest.
 
 ## Context
 
