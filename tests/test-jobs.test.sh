@@ -166,11 +166,11 @@ has "$run" 'export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"' "run.sh: the
 has "$run" 'sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))' "run.sh: the shell suites spawn largest first"
 # `ls -S` is word-split into the array, so no suite path may hold whitespace.
 ok "$(ls skills/execute/tests/*.test.sh tests/*.test.sh | grep -c '[[:space:]]')" 0 "no shell suite path holds whitespace (run.sh word-splits ls -S)"
-# CI pins the cap and keeps its job names (ADR 0025).
+# CI pins the cap and keeps its job name (ADR 0025).
 ci=$(cat .github/workflows/test.yml)
 has "$ci" 'THREAD_TEST_JOBS: "4"' "CI pins THREAD_TEST_JOBS to 4"
 has "$ci" 'name: make test (${{ matrix.os }})' "CI keeps its job name (the required-check context)"
-has "$ci" 'os: [ubuntu-latest, macos-latest]' "CI keeps its matrix"
+has "$ci" 'os: [ubuntu-latest]' "CI's PR check runs on ubuntu alone (ADR 0084 d3)"
 # The Slow tier (p54-1, ADR 0084 d3): GitHub's PR check leaves it out, run.sh unsets the flag so no suite inherits it,
 # and master's full suite never sets it. tests/fast-tier.test.sh G1-G6 pins what the flag does.
 has "$ci" 'THREAD_SKIP_SLOW: "1"' "CI's PR check sets THREAD_SKIP_SLOW=1"
