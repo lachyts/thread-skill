@@ -10,7 +10,12 @@ held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15
 under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
 under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite
 fallbacks included, and names them in one line. Decided for you 2's return rule waits for p54-7's red-master record,
-in its own follow-up task (p54-18). Phase 54 builds the rest.
+in its own follow-up task (p54-18). d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
+header holds the rules): a file under `docs/` and an untracked file are no carriers, and the reach stops one carrier
+deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
+`tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line
+places, with a note. Measured on the tree: `skills/orient/SKILL.md` 120 test files (6 SLOW) to 88 (none); ADR 0083 87
+to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. Phase 54 builds the rest.
 
 ## Context
 

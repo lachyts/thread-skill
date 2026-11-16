@@ -453,9 +453,13 @@ make evals           # behaviour evals: real model calls, a human step, never pa
 **The fast tier** (ADR 0073 d1). `make test-fast` runs the always-run checks, then only the test files the diff
 from `THREAD_VERIFY_BASE` (ADR 0062's verify base; else `origin/HEAD`) reaches. The reach is declared in
 `tests/fast-tier.map`, and `tests/lib/fast-tier.py`'s header holds its rules: a script reaches the tests that name
-it and, transitively, the tests of every script that names it, and the walkers (tests that read the whole tree)
-run on every diff. A changed path the map cannot place, or one that reaches a path marked FULL, runs the full
-suite, so the fast tier is only ever slower than it could be. The five hubs (`reconcile-rollout.py`,
+it and, one carrier deep, the tests of every script that names it, and the walkers (tests that read the whole tree)
+run on every diff. Only tracked files outside `docs/` carry a name, so a scratch script or a docs spike reaches
+nothing. A skill's `SKILL.md` (a `READERS` name) selects the tests its map lines declare as its readers, never every
+test that names the word, and check (k) keeps those lines true. A changed path the map cannot place, or one that
+reaches a path marked FULL, runs the full suite, so on what CI checks the fast tier is only ever slower than it
+could be: the one path left out is an untracked one no map line places, named in a note (CI never sees it;
+`--paths` leaves none out; the header's Changed paths). The five hubs (`reconcile-rollout.py`,
 `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`), which most suites name, sit on HUB
 lines instead of FULL: a diff that reaches one runs the suites listed on its line and the reach ends there, and
 check (i) keeps each list holding every suite that names the hub (a tests/lib helper's included). So a suite that
