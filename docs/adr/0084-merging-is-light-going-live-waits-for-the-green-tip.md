@@ -9,12 +9,15 @@ until Phase 54's task 2). d3's Slow tier for GitHub's check built by p54-1: `SLO
 held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15), joining at 180 s and leaving only
 under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
 under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite
-fallbacks included, and names them in one line. d4's Speed fixes from the audit's rows 2 and 5 built by p54-3:
-`tests/run.sh` warms a bytecode cache in its scratch dir once (`compileall` into `PYTHONPYCACHEPREFIX`, exported to
-every suite and node file), so the engine loads compiled; node's files start longest first, by measured seconds in
+fallbacks included, and names them in one line. Decided for you 2's return rule waits for p54-7's red-master record,
+in its own follow-up task (p54-18). Decided for you 11's publisher and Decided for you 4 by p54-5: full-suite.yml's
+`green-tip` job, named `publish the Green tip`, fast-forwards `refs/thread/green` to a run's commit once every shard
+passed, and the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Readers
+not yet built (p54-6, p54-7). d4's Speed fixes from the audit's rows 2 and 5 built by p54-3: `tests/run.sh` warms a
+bytecode cache in its scratch dir once (`compileall` into `PYTHONPYCACHEPREFIX`, exported to every suite and node
+file), so the engine loads compiled; node's files start longest first, by measured seconds in
 `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs them in the shard split), run through
-`tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path. Decided for you 2's return rule waits for
-p54-7's red-master record, in its own follow-up task (p54-18). Phase 54 builds the rest.
+`tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path. Phase 54 builds the rest.
 
 ## Context
 
@@ -115,7 +118,8 @@ Calls made in his place, each overturnable:
    waits; a run in flight is never cancelled. Why: one run uses about 65 macOS runner-minutes and GitHub gives 5 macOS
    jobs at once, so about 4.6 runs an hour, fewer than a 10-minute lane can merge. A verdict per commit would let the
    queue grow and the Green tip trail by hours. A red then covers every merge since the last green commit, and its fix
-   task names them all.
+   task names them all. A re-run joins the same group, where it would cancel the newest commit's waiting run or be
+   cancelled by it, so only the newest commit's run is re-run (Decided for you 3's one re-run).
 5. **An Engine catch-up drains; it never cuts a task mid-step.** Why: one engine version writes a rollout's records
    between moves (ADR 0043). A serial chain catches up at its next Leg.
 6. **Only a Speed fix in the engine's own repo causes a catch-up, and a phase drains a rollout once.** The drain is
@@ -138,6 +142,13 @@ Calls made in his place, each overturnable:
 12. **The audit's other changes stand as technical work**: the remaining ubuntu check runs as shards behind a job
     that keeps the required name, a bytecode cache for the test run, `tests/leg.test.sh` split in four, a narrower
     reach, node's files longest-first.
+13. **A red whose only failed job is `publish the Green tip` files no suite fix, and one that comes back wants a fix to
+    that job or a credential gate, never another re-run.** Its failed job re-runs once (Decided for you 3), and a pass
+    then records a blip. A red that returns, on that re-run or on the next default-branch run's publisher, is a
+    structural refusal: GitHub refusing the push or the ref, such as a GITHUB_TOKEN without the `workflows` permission
+    across a merge that edited `.github/workflows/`. Why: every shard passed, so the red covers no merge and a suite fix
+    would name merges that broke nothing; and a refusal returns on every re-run, so another one only spends runner time
+    while the Green tip waits.
 
 ## Consequences
 
