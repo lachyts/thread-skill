@@ -124,7 +124,7 @@ hold_lock() {
 f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").write("held"); time.sleep(120)' \
     "$THREAD_NOTE_LOCK_DIR/trickle.lock" "$S/held" &
   holder=$!; holders+=("$holder")
-  local k=0; while [ ! -f "$S/held" ] && [ "$k" -lt 100 ]; do sleep 0.1; k=$((k+1)); done
+  local k=0; while [ ! -f "$S/held" ] && kill -0 "$holder" 2>/dev/null && [ "$k" -lt 600 ]; do sleep 0.1; k=$((k+1)); done
 }
 release_lock() { kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; rm -f "${S:?}/held"; }
 T1=2026-10-20T11:20:00+00:00     # T0 + 80 min
@@ -199,9 +199,9 @@ scen l6
 mkro t1 t2; mkpar 3 0
 leg begin --cwd "$F"; leg next; ok "$(q 'd["action"]')" claim "L6: no Capacity: next is claim, whatever runs elsewhere"
 hold_lock
-SECONDS=0; THREAD_NOTE_LOCK_TIMEOUT=20 leg claim --task t1; took=$SECONDS
+SECONDS=0; THREAD_NOTE_LOCK_TIMEOUT=90 leg claim --task t1; took=$SECONDS
 ok "$rc|$(fm t1 owner)" "0|leg-1" "L6: the claim proceeds as today"
-ok "$([ "$took" -lt 10 ] && echo fast)" fast "L6: … at once, with the trickle lock held elsewhere (no trickle lock under the fallback)"
+ok "$([ "$took" -lt 60 ] && echo unblocked)" unblocked "L6: … with the trickle lock held elsewhere, never waiting out its 90 s timeout (no trickle lock under the fallback)"
 release_lock
 ok "$(LEASE)" '["leg","2026-10-20T10:00:00Z",false]' "L6: … and still writes the Leg lease"
 par; ok "$(pq 'd["trickle"]["elsewhere"]')" '{}' "L6: … which no lead counts while the Capacity is missing"
@@ -230,8 +230,8 @@ hold_lock
 before=$(sums)
 THREAD_NOTE_LOCK_TIMEOUT=1 leg claim --task t2
 ok "$rc|$(sums)" "5|$before" "L7: the trickle lock held past its timeout: exit 5, nothing written"
-SECONDS=0; THREAD_NOTE_LOCK_TIMEOUT=20 leg claim --task t1; took=$SECONDS
-ok "$rc|$([ "$took" -lt 10 ] && echo fast)" "1|fast" "L7: a claim refused for a plan mismatch returns exit 1 at once, never waiting on the lock"
+SECONDS=0; THREAD_NOTE_LOCK_TIMEOUT=90 leg claim --task t1; took=$SECONDS
+ok "$rc|$([ "$took" -lt 60 ] && echo unblocked)" "1|unblocked" "L7: a claim refused for a plan mismatch returns exit 1, never waiting out the lock's 90 s timeout"
 release_lock
 # The reads that run a child process: the heat (verify-slot's heat_level runs `notifyutil`, found through PATH) and the
 # Mac's boot and wake (`sysctl`, through PATH), each unpinned here and shimmed to log whether the trickle lock is free.

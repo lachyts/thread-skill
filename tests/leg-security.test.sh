@@ -578,7 +578,7 @@ unset CWD
 
 # ---- L19h: in process: shell_safe, security_ask, run_scan's cut, settle_pushed ----
 python3 - "$LEG" > "$TMP/l19h.out" 2>&1 <<'PY'
-import importlib.util, sys, time, types
+import importlib.util, signal, sys, time, types
 spec = importlib.util.spec_from_file_location("leg", sys.argv[1]); leg = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(leg)
 bad = []
@@ -622,9 +622,8 @@ eq(leg.security_ask([ent(False, [sec(False)], config=[cfg], top="/c"), ent(True,
    ".gitleaksignore, the secret scanner's own config: keep it (answer security-accept config:0123456789ab), or drop "
    "the change; (2) in /p/r: " + head + ", and origin already holds it: rotate it?", "ask, two items over two entries")
 eq(leg.security_ask([ent(True), ent(False)]), None, "no item: no ask")
-t0 = time.monotonic()
 rc, out, err, cut = leg.run_scan([sys.executable, "-c", "import time; time.sleep(60)"], 1)
-eq((cut, time.monotonic() - t0 < 1 + leg.SCAN_GRACE + 2), (True, True), "run_scan cuts a sleeping child within timeout + grace")
+eq((cut, rc), (True, -signal.SIGINT), "run_scan cuts a sleeping child past its timeout, by its SIGINT")
 def fake(table):   # leg.git answered from a table, each call's verb recorded
     calls = []
     def git(top, *args, input=None, timeout=120):

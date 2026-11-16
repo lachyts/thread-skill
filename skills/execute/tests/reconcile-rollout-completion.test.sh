@@ -109,6 +109,9 @@ PY
 }
 # wait_for <file> <text> — up to 10 s for a line in a file
 wait_for() { for _ in $(seq 1 100); do grep -q "$2" "$1" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+# wait_held <pid> — a background lock holder is up: wait for its $D/held, touched once it holds, while it lives (a
+# 60 s liveness bound, never a guess at how long it takes to start)
+wait_held() { local i=0; while [ ! -e "$D/held" ] && kill -0 "$1" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done; }
 
 # ── C1 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c1
@@ -219,11 +222,12 @@ out=$(cat "$D/bg.out")
 ok "$brc|$(js result)|$(js streak)" "0|stopped|0" "C7: TERMed, --run records its own stopped, the streak unmoved"
 ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(window)" "1|checked" "C7: … the locked tree removed, the window checked"
 cv; ok "$(js state)|$(js attempt)" "run|1" "C7: … the same attempt runs again"
-python3 - "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock" <<'PY' &
+rm -f "$D/held"
+python3 - "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock" "$D/held" <<'PY' &
 import fcntl, sys, time
-fh = open(sys.argv[1], "a"); fcntl.flock(fh, fcntl.LOCK_SH); time.sleep(0.5)
+fh = open(sys.argv[1], "a"); fcntl.flock(fh, fcntl.LOCK_SH); open(sys.argv[2], "w").close(); time.sleep(0.5)
 PY
-sp=$!; sleep 0.1
+sp=$!; wait_held "$sp"
 python3 - "$RO" <<'PY'
 import sys
 t = open(sys.argv[1]).read(); open(sys.argv[1], "w").write(t.replace('completion_verifier: "sleep 30"', 'completion_verifier: "true"'))
@@ -418,14 +422,15 @@ scen c11y '"true"' 'env_bootstrap: >-'
 cv; ok "$rc" 2 "C11: an env_bootstrap the reader cannot represent → refused (2)"
 
 scen c11z '"true"'
-python3 - "$D/repo/.git/thread" "$RO" <<'PY' &
+rm -f "$D/held"
+python3 - "$D/repo/.git/thread" "$RO" "$D/held" <<'PY' &
 import fcntl, os, sys, time
-d, ro = sys.argv[1:]; os.makedirs(d, exist_ok=True)
+d, ro, held = sys.argv[1:]; os.makedirs(d, exist_ok=True)
 fh = open(os.path.join(d, "completion-ro-rollout-2026-10-24-1.lock"), "a"); fcntl.flock(fh, fcntl.LOCK_EX)
-time.sleep(0.5)
+open(held, "w").close(); time.sleep(0.5)
 t = open(ro).read(); open(ro, "w").write(t.replace('completion_verifier: "true"\n', ""))
 PY
-hp=$!; sleep 0.2
+hp=$!; wait_held "$hp"
 cv --run; wait "$hp"
 ok "$rc|$(window)" "2|none" "C11: the verifier removed before --run gets its lock → refused (2), nothing armed"
 
@@ -642,8 +647,7 @@ import fcntl, sys, time
 lock, ready, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
 fh = open(lock, "a"); fcntl.flock(fh, fcntl.LOCK_EX); open(ready, "w").close(); time.sleep(secs)
 PY
-  hp=$!
-  for _ in $(seq 1 100); do [ -e "$D/held" ] && break; sleep 0.1; done
+  hp=$!; wait_held "$hp"
 }
 before=$(cksum < "$RO")
 hold 3

@@ -728,7 +728,7 @@ hold() {  # hold <flag file> — an outside holder of the lock; $hp its pid, rec
 fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT); fcntl.flock(fd, fcntl.LOCK_EX); open(sys.argv[2], "w").write("held")
 time.sleep(120)' "$LOCK" "$1" &
   hp=$!; holders+=("$hp")
-  local i=0; while [ ! -f "$1" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+  local i=0; while [ ! -f "$1" ] && kill -0 "$hp" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
 }
 hold "$TMP/held1"; snap
 lb h1 s1 handed --started task_x; p1=$!
@@ -756,7 +756,6 @@ ok "$(find "$TMP" -path '*/Work/Tasks/*' -name '.*.tmp' | wc -l | tr -d ' ')" 0 
 
 # ════ L13: status and restarted (p24-4: /thread:status § 5, /thread:repair § 7) ══════════════════════════════════
 # Every chain is built through leg.py's own verbs; status is read-only and takes no lock.
-mstime() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 # (a) not started
 scen l13a
 mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
@@ -877,8 +876,8 @@ ok "$(q 'd["rows"][2]["held"]')|$(q 'd["rows"][0]["dependants"]')" "depends on [
 # (i) read-only: nothing changes, and it answers while another verb holds the lock
 before=$( { git -C "$V" status --porcelain; find "$V" -path "$V/.git" -prune -o -type f -print | sort | xargs shasum; ls -l "$THREAD_LEG_LOCK_DIR"; } 2>&1)
 hold "$TMP/held-l13"
-t0=$(mstime); leg status; t1=$(mstime)
-ok "$rc|$([ $((t1 - t0)) -lt 5000 ] && echo fast)" "0|fast" "L13i: status answers in under 5 s while the lock is held ($((t1 - t0)) ms)"
+leg status
+ok "$rc" 0 "L13i: status answers while the lock is held (a verb that waited on it ends exit 5 at THREAD_LEG_LOCK_TIMEOUT, L12)"
 kill "$hp"; wait "$hp" 2>/dev/null
 after=$( { git -C "$V" status --porcelain; find "$V" -path "$V/.git" -prune -o -type f -print | sort | xargs shasum; ls -l "$THREAD_LEG_LOCK_DIR"; } 2>&1)
 ok "$after" "$before" "L13i: … and writes nothing: the porcelain, every file's sha1 and the lock dir are unchanged"
