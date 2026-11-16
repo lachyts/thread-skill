@@ -207,5 +207,260 @@ li 5 "$plain"
 ok "$(jf '[J["written"], J["why"]]')" '[0,"no GitHub origin"]' "9. no GitHub origin: nothing written"
 ok "$(glog | wc -l | tr -d ' ')" 0 "9. … and no gh call"
 
+# 10-13 (p54-11): a required check that is a roll-up (a job that `needs:` others under `if: always()` or `!cancelled()`)
+# records the slowest of the jobs it needs, against that job's own limit, and `shard` names it. A plain `needs:` job and
+# a false-positive aggregator that is itself the slowest keep their own line, and a job named only by an expression no
+# longer lends its limit to every check after it (compression-engine's `${{ matrix.toolchain }}`).
+wftree() {  # wftree <file> <content> [<file> <content>…] — I := a head on B whose .github/workflows/ holds them; PR 5 on it, fetched
+  local entries='' blob t1 t2 t3
+  while [ "$#" -ge 2 ]; do
+    blob=$(printf '%s' "$2" | git --git-dir "$MT_SRV" hash-object -w --stdin)
+    entries="$entries$(printf '100644 blob %s\t%s' "$blob" "$1")"$'\n'
+    shift 2
+  done
+  t1=$(printf '%s' "$entries" | git --git-dir "$MT_SRV" mktree)
+  t2=$(printf '040000 tree %s\tworkflows\n' "$t1" | git --git-dir "$MT_SRV" mktree)
+  t3=$(printf '040000 tree %s\t.github\n' "$t2" | git --git-dir "$MT_SRV" mktree)
+  I=$(gt --git-dir "$MT_SRV" commit-tree "$t3" -p "$B" -m head)
+  mkpr 5 "$I"; git -C "$tmp/repo" fetch -q origin audit-fix/t5
+}
+runjobs() {  # runjobs <file> <workflowName> <id|name|conclusion[|seconds]>… — a `gh run view --json jobs,workflowName` object
+  python3 - "$@" <<'PY'
+import json, sys
+out, wf, specs = sys.argv[1], sys.argv[2], sys.argv[3:]
+jobs = []
+for s in specs:
+    jid, name, c, *secs = s.split("|")
+    j = {"databaseId": int(jid), "name": name, "status": "completed", "conclusion": c}
+    if secs:
+        j.update(startedAt="2026-11-08T01:00:00Z", completedAt="2026-11-08T%02d:%02d:%02dZ" % (
+            1 + int(secs[0]) // 3600, int(secs[0]) % 3600 // 60, int(secs[0]) % 60))
+    jobs.append(j)
+json.dump({"workflowName": wf, "jobs": jobs}, open(out, "w"))
+PY
+}
+reqrows() {  # reqrows <name|run|job>… — the required checks gh's table prints
+  python3 - "$MT_STATE/checks.cur" "$@" <<'PY'
+import json, sys
+rows = ["%s\tpass\t1m\thttps://github.com/o/r/actions/runs/%s/job/%s\t" % tuple(r.split("|")) for r in sys.argv[2:]]
+json.dump({"rc": 0, "out": "\n".join(rows) + "\n"}, open(sys.argv[1], "w"))
+PY
+}
+HWF='name: test
+on: [pull_request]
+jobs:
+  build:
+    name: ${{ matrix.toolchain }}
+    strategy:
+      matrix:
+        toolchain: [gcc-12]
+    timeout-minutes: ${{ matrix.minutes }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: make
+  linux-gcc-threads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: make
+  shard:
+    name: make test (ubuntu-latest, shard ${{ matrix.shard }}/3)
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: make test-fast
+  test:
+    name: make test (ubuntu-latest)
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every shard passed
+        run: true
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - run: true
+  ci:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - run: make test
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: true
+  fp:
+    needs: prep
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - run: make e2e
+'
+UB="make test (ubuntu-latest)"; S="make test (ubuntu-latest, shard"
+HROWS=("$UB|21|70" "ci|21|80" "fp|21|90" "linux-gcc-threads|21|95")
+HJOBS=("60|gcc-12|success|50" "95|linux-gcc-threads|success|100" "71|$S 1/3)|success|600" "72|$S 2/3)|success|1500"
+       "73|$S 3/3)|success|900" "70|$UB|success|10" "81|setup|success|60" "80|ci|success|300" "91|prep|success|30"
+       "90|fp|success|1200")
+LINE='[[d["job"], d["seconds"], d["timeoutMinutes"], d["limitSource"], d["conclusion"], d.get("shard")] for d in J["jobs"]]'
+
+# 10. the roll-up over three shards records shard 2/3's 1500 s against its 20; `ci` (needs, no if:) and `fp` (a
+#     `!cancelled()` false positive, itself the slowest) keep their own line with no shard; linux-gcc-threads reads its own 20.
+fresh; pair; wftree test.yml "$HWF"; reqrows "${HROWS[@]}"; runjobs "$MT_STATE/run.21.json" test "${HJOBS[@]}"
+rm -f "$THREAD_EVENTS_DIR/ro.jsonl"
+li 5 "$tmp/repo"
+ok "$(jf "$LINE")" \
+  "[[\"$UB\",1500,20,\"workflow\",\"success\",\"$S 2/3)\"],[\"ci\",300,30,\"workflow\",\"success\",null],[\"fp\",1200,45,\"workflow\",\"success\",null],[\"linux-gcc-threads\",100,20,\"workflow\",\"success\",null]]" \
+  "10. the roll-up records its slowest shard against the shard's limit; the rest their own line"
+ok "$(rec '[[d["job"], d["shard"]] for d in L if "shard" in d]')" "[[\"$UB\",\"$S 2/3)\"]]" \
+  "10. … the record takes the roll-up's line, the one that carries shard"
+
+# 11. a roll-up whose shard jobs the run does not hold proves nothing: seconds and limit null, unread, its own conclusion.
+fresh; pair; wftree test.yml "$HWF"; reqrows "$UB|22|70"; runjobs "$MT_STATE/run.22.json" test "70|$UB|failure|10"
+rm -f "$THREAD_EVENTS_DIR/ro.jsonl"
+li 5 "$tmp/repo"
+ok "$(jf "$LINE")" "[[\"$UB\",null,null,\"unread\",\"failure\",null]]" "11. shards the run lacks: null, unread"
+
+# 12. shards --check prints the roll-ups at the head: needs + always(), a flow list with a comment + !cancelled(), a block
+#     list at the same indent and one deeper (a quoted item); never needs alone, a name that is only an expression, a
+#     step's if:, a name two aggregators share, or a flow list that never closes.
+SHAPES='name: shapes
+on: [pull_request]
+jobs:
+  lint:
+    runs-on: x
+  shard:
+    runs-on: x
+  setup:
+    runs-on: x
+  a:
+    name: A
+    needs: shard
+    if: always()
+  b:
+    name: B
+    needs: [lint, shard]  # c
+    if: ${{ !cancelled() }}
+  c:
+    name: C
+    if: "always()"
+    needs:
+    - lint
+    - shard
+    runs-on: x
+  d:
+    name: D
+    needs:
+      - lint
+      - '"'"'shard'"'"'
+    if: always() && !failure()
+  e:
+    name: E
+    needs: setup
+  f:
+    name: ${{ matrix.any }}
+    needs: setup
+    if: always()
+  g:
+    name: G
+    needs: setup
+    steps:
+    - if: always()
+      run: true
+  h1:
+    name: H
+    needs: setup
+    if: always()
+  h2:
+    name: H
+    needs: lint
+    if: always()
+  i:
+    name: I
+    needs: [lint, shard
+    if: always()
+'
+fresh; pair; wftree shapes.yml "$SHAPES"
+ok "$(python3 "$LI" shards --repo "$tmp/repo" --head "$I" --check A B C D E "anything at all" G H I | tr '\n' ' ')" "A B C D " \
+  "12. --check prints the four aggregator shapes, and none of the five that are not"
+ok "$(python3 "$LI" shards --repo "$tmp/repo" --head 0000000000000000000000000000000000000000 --check A; echo "rc $?")" "rc 0" \
+  "12. … a head the repo lacks: nothing printed, exit 0"
+
+# 13. shards --jobs: what a run's required job ids stand for.
+WA='name: A
+on: [pull_request]
+jobs:
+  plan:
+    runs-on: x
+  shard:
+    name: shard ${{ matrix.n }}
+    needs: plan
+  roll:
+    name: R
+    needs: shard
+    if: always()
+  c1:
+    needs: c2
+  c2:
+    needs: c1
+  cyc:
+    name: C
+    needs: c1
+    if: always()
+  callee:
+    runs-on: x
+  gone:
+    name: G
+    needs: callee
+    if: always()
+  X:
+    needs: plan
+    if: always()
+'
+WB='name: B
+on: [pull_request]
+jobs:
+  plan:
+    runs-on: x
+  X:
+    needs: plan
+'
+shj() {  # shj <run json> <args…> — shards --jobs at I: "<rc> <the names it prints, ,-joined>"; its stderr in $tmp/sh.err
+  local f="$1" r
+  shift
+  sout=$(python3 "$LI" shards --repo "$tmp/repo" --head "$I" --jobs "$f" "$@" 2>"$tmp/sh.err"); r=$?
+  echo "$r $(printf '%s' "$sout" | python3 -c 'import json, sys; t = sys.stdin.read()
+print(",".join(j["name"] for j in json.loads(t)["jobs"]) if t.strip() else "-")')"
+}
+fresh; pair; wftree a.yml "$WA" b.yml "$WB"; R1="$tmp/r1.json"
+runjobs "$R1" A "1|plan|success" "2|shard 1|failure" "3|shard 2|success" "5|lint|success" "4|R|failure"
+ok "$(shj "$R1" --job-id 4)" "0 plan,shard 1,shard 2" "13. a roll-up stands for its two-level closure, never itself"
+has "$(cat "$tmp/sh.err")" "shards: R (job 4) stands for: plan (success), shard 1 (failure), shard 2 (success)" \
+  "13. … and one stderr line names them"
+ok "$(shj "$R1" --job-id 4 5)" "0 plan,shard 1,shard 2,lint" "13. a plain required id stands for itself, in run order"
+ok "$(shj "$R1" --whole --job-id 4)" "0 plan,shard 1,shard 2,lint" "13. --whole keeps every other job, drops only the roll-up"
+ok "$(shj "$R1" --job-id 5)" "3 lint" "13. only a plain id: exit 3"
+ok "$(python3 "$LI" shards --repo "$tmp/repo" --head 0000000000000000000000000000000000000000 --jobs "$R1" --job-id 4 \
+  >/dev/null 2>&1; echo $?)" 3 "13. a head the repo lacks: exit 3"
+runjobs "$tmp/r2.json" A "10|c1|cancelled" "11|c2|success" "12|C|failure"
+ok "$(shj "$tmp/r2.json" --job-id 12)" "0 c1,c2" "13. a needs: cycle ends, and holds both jobs"
+runjobs "$tmp/r3.json" A "20|G|failure"
+ok "$(shj "$tmp/r3.json" --job-id 20)" "1 -" "13. a needed job the run lacks: exit 1, not proven"
+echo nope > "$tmp/r0.json"
+ok "$(shj "$tmp/r0.json" --job-id 4)" "1 -" "13. unreadable JSON: exit 1"
+runjobs "$tmp/r4.json" A "1|plan|success" "2|shard 1|skipped" "3|shard 2|success" "4|R|failure"
+ok "$(shj "$tmp/r4.json" --job-id 4)" "3 R" "13. every needed job success or skipped: the roll-up stands for itself, exit 3"
+runjobs "$tmp/r5.json" A "1|plan|failure" "2|X|failure"; runjobs "$tmp/r6.json" B "1|plan|failure" "2|X|failure"
+ok "$(shj "$tmp/r5.json" --job-id 2)|$(shj "$tmp/r6.json" --job-id 2)" "0 plan|3 X" \
+  "13. workflowName picks the file: X a roll-up in A, a plain job in B"
+
 echo; [ "$fail" -eq 0 ] && echo "merge-task-ci-headroom: ALL PASS" || echo "merge-task-ci-headroom: SOME FAILED"
 exit "$fail"

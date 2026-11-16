@@ -18,7 +18,15 @@ header holds the rules): a file under `docs/` and an untracked file are no carri
 deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
 `tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line
 places, with a note. Measured on the tree: `skills/orient/SKILL.md` 120 test files (6 SLOW) to 88 (none); ADR 0083 87
-to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. Phase 54 builds the rest.
+to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. Decided for you 12's engine reading
+built by p54-11: a roll-up check, a required check whose workflow job has the aggregator shape (a non-empty `needs:` and
+a job-level `if:` holding `always()` or `!cancelled()`, read at the integrated head; a name that is only expressions
+matches nothing), is read through the jobs it needs by `lead-integrate.py shards`, at merge-task's three sites: the
+infra re-run classifies the run's jobs minus the roll-up's own, so a shard's setup failure is re-run; a shard cut alone
+takes ADR 0073 d4's cancelled path (skipped neutral, the cut-again rule per needed job); and a roll-up whose needed jobs
+all passed or were skipped falls back to itself, today's read. CI headroom records the slowest of its needed jobs and
+itself by seconds, against that job's own limit, and the line's `shard` field names the needed job. Phase 54 builds
+the rest.
 
 ## Context
 

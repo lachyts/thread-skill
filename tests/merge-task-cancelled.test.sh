@@ -194,5 +194,191 @@ ok "$rc" 1 "12. a failed-step read that errors beside a proven cut exits 1"; ok 
 lacks "$(glog)" "run rerun" "12. no re-run"; has "$out" "run 9's failed steps could not be read" "12. names run 9's read"
 lacks "$(glog)" "check-runs/10/annotations" "12. never reads the cut's proof"
 
+# 13-18 (p54-11): a required check that is a roll-up over three shards (`make test (ubuntu-latest)`: `needs: shard`,
+# `if: always()`) concludes `failure` whichever shard failed or was cut, and its own step (`every shard passed`) reads as
+# genuine. merge-task reads it through its shards: a shard's setup failure is re-run as infra, a shard cut alone takes
+# the cancelled path, a cut beside a setup failure the red path's timeout re-run, and a genuine shard failure stays red.
+# The head's tree holds the workflow, fetched into the clone as Integration's head is in production.
+SWF='name: test
+on: [pull_request]
+jobs:
+  shard:
+    name: make test (ubuntu-latest, shard ${{ matrix.shard }}/3)
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: make test-fast
+  test:
+    name: make test (ubuntu-latest)
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every shard passed
+        run: test "${{ needs.shard.result }}" = success
+'
+wfpr() {  # wfpr <workflow> [nofetch] — fresh state; I := a head whose tree holds test.yml; PR 5 on it (UNSTABLE), fetched
+  local blob t1 t2 t3
+  fresh; pair
+  blob=$(printf '%s' "$1" | git --git-dir "$MT_SRV" hash-object -w --stdin)
+  t1=$(printf '100644 blob %s\ttest.yml\n' "$blob" | git --git-dir "$MT_SRV" mktree)
+  t2=$(printf '040000 tree %s\tworkflows\n' "$t1" | git --git-dir "$MT_SRV" mktree)
+  t3=$(printf '040000 tree %s\t.github\n' "$t2" | git --git-dir "$MT_SRV" mktree)
+  I=$(gt --git-dir "$MT_SRV" commit-tree "$t3" -p "$B" -m head)
+  echo head > "$MT_STATE/squash.tree"
+  mkpr 5 "$I" UNSTABLE
+  [ "${2:-}" = nofetch ] || git -C "$tmp/repo" fetch -q origin audit-fix/t5
+}
+srun() {  # srun <shard 1> <shard 2> <shard 3> [<docs>] — run 7's jobs: each `<conclusion>[:<step>]`; the roll-up (70) failed
+  python3 - "$MT_STATE/run.7.json" "$@" <<'PY'
+import json, sys
+out, specs = sys.argv[1], sys.argv[2:]
+jobs = []
+for i, spec in enumerate(specs[:3], 1):
+    c, _, step = spec.partition(":")
+    jobs.append({"databaseId": 70 + i, "name": "make test (ubuntu-latest, shard %d/3)" % i, "status": "completed",
+                 "conclusion": c, "steps": [{"name": step or "Run make test-fast", "status": "completed", "conclusion": c}]})
+if len(specs) > 3:
+    jobs.append({"databaseId": 74, "name": "docs", "status": "completed", "conclusion": specs[3], "steps": []})
+jobs.append({"databaseId": 70, "name": "make test (ubuntu-latest)", "status": "completed", "conclusion": "failure",
+             "steps": [{"name": "every shard passed", "status": "completed", "conclusion": "failure"}]})
+json.dump({"workflowName": "test", "jobs": jobs}, open(out, "w"))
+PY
+}
+ROLL="$(row "make test (ubuntu-latest)" fail 7 70)"; ROLLOK="$(row "make test (ubuntu-latest)" pass 7 70)"
+WFR="jobs,workflowName"
+
+# 13. shard 2 fails on `Set up job`: re-run as infra, then merges. The roll-up's own `every shard passed` (in today's
+#     step read) never reaches the classifier.
+wfpr "$SWF"; srun success "failure:Set up job" success; printf 'Set up job\nevery shard passed\n' > "$MT_STATE/steps.7"
+chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc" 0 "13. a shard's setup failure behind the roll-up: re-run as infra, then merges"; ok "$(nmerge)" 1 "13. merged once"
+ok "$(reruns 7)" 1 "13. run 7 re-run once"; has "$out" "shard 2/3" "13. names the shard"; has "$out" "Set up job" "13. names its step"
+lacks "$out" "a genuine (non-infra) step failed" "13. never genuine"
+
+# 14. shard 2 cut alone: the roll-up's `failure` is the cut it stands for, the cancelled path's (gh 2.43.1's table).
+wfpr "$SWF"; srun success cancelled success; chk 1 "$ROLL"; chk 1 "$ROLL"
+run 5 "$I" "$B"
+ok "$rc" 1 "14a. a shard cut alone, cut again after its re-run: exits 1"; has "$out" "$CANCELLED" "14a. the cancelled cause"
+has "$out" "make test (ubuntu-latest) through make test (ubuntu-latest, shard 2/3) (run 7)" "14a. names the check through its cut shard"
+ok "$(reruns 7)" 1 "14a. one re-run"; lacks "$out" "a REQUIRED check FAILED" "14a. never a red required check"
+ok "$(reads "$out")" "True True" "14a. reconcile reads it as GitHub's stop, a CI timeout"
+wfpr "$SWF"; srun success cancelled success; chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc|$(reruns 7)|$(nmerge)" "0|1|1" "14b. a shard cut alone, then green: one re-run, merged"
+# 14c. a gh with `pr checks --json` (its `fail` bucket read through), and a needed job skipped by its path filter: neutral.
+wfpr "${SWF/needs: shard/needs: [shard, docs]}
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+"; touch "$MT_STATE/checks.json"; srun success cancelled success skipped; chk 1 "$ROLL"; chk 1 "$ROLL"
+run 5 "$I" "$B"
+ok "$rc" 1 "14c. --json gh, a skipped docs job beside the cut: exits 1"; has "$out" "$CANCELLED" "14c. the cancelled cause"
+has "$out" "through make test (ubuntu-latest, shard 2/3) (run 7)" "14c. the cut shard alone, never the skipped job"
+has "$(glog)" "pr checks 5 -R o/r --required --json name,bucket,link" "14c. reads the buckets"
+ok "$(reruns 7)" 1 "14c. one re-run"; ok "$(reads "$out")" "True True" "14c. GitHub's stop, a CI timeout"
+
+# 15. shard 2 cut at its time limit beside shard 3's setup failure: never a cancellation (a failure is in the set); the
+#     red path re-runs the cut once as infra (p47-10), and a second cut of the same shard is a genuine red.
+wfcut() { wfpr "$SWF"; srun success cancelled "failure:Set up job"; printf 'Set up job\nevery shard passed\n' > "$MT_STATE/steps.7"
+  printf '[{"message": "The job has exceeded the maximum execution time of 20m0s"}]\n' > "$MT_STATE/annotations.72"; }
+wfcut; chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc|$(reruns 7)|$(nmerge)" "0|1|1" "15a. a shard cut at its limit beside a setup failure: one re-run, merged"
+has "$out" "make test (ubuntu-latest, shard 2/3): Run make test-fast: $TL" "15a. names shard 2 cut at its time limit"
+lacks "$out" "$CANCELLED" "15a. never the cancelled cause"
+wfcut; chk 1 "$ROLL"; chk 1 "$ROLL"
+run 5 "$I" "$B"
+ok "$rc|$(reruns 7)" "1|1" "15b. cut again after its re-run: exits 1, one re-run only"; has "$out" "$AGAIN" "15b. the second timeout"
+ok "$(gate "$out")" "True False" "15b. a red required check (merge-gate), never ci-timeout"
+
+# 16. a genuine test failure in shard 1 stays red: no re-run.
+wfpr "$SWF"; srun "failure:Run make test-fast" success success
+printf 'Run make test-fast\nevery shard passed\n' > "$MT_STATE/steps.7"; chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc|$(nmerge)" "1|0" "16. a shard's genuine test failure: exits 1, nothing merged"; lacks "$(glog)" "run rerun" "16. no re-run"
+has "$out" "a genuine (non-infra) step failed" "16. the genuine verdict"; has "$out" "Run make test-fast" "16. names its step"
+
+# 17. fail-closed: (a) every shard passed, so the roll-up's red is its own (its step genuine); (b) the head is not in the
+#     clone, so no roll-up is read and nothing new is asked; (c) run 7 cannot be read.
+wfpr "$SWF"; srun success success success; echo "every shard passed" > "$MT_STATE/steps.7"; chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc" 1 "17a. every shard passed, the roll-up failed: exits 1"; lacks "$(glog)" "run rerun" "17a. no re-run"
+has "$out" "a genuine (non-infra) step failed" "17a. genuine"; lacks "$out" "$CANCELLED" "17a. never cancelled"
+wfpr "$SWF" nofetch; srun success "failure:Set up job" success; printf 'Set up job\nevery shard passed\n' > "$MT_STATE/steps.7"
+chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc" 1 "17b. the head not in the clone: exits 1, the reads as before"; lacks "$(glog)" "run rerun" "17b. no re-run"
+lacks "$(glog)" "$WFR" "17b. never reads a run whole for its shards"
+wfpr "$SWF"; srun success "failure:Set up job" success; echo "HTTP 502: Bad Gateway" > "$MT_STATE/run.7.err"
+chk 1 "$ROLL"; chk 0 "$ROLLOK"
+run 5 "$I" "$B"
+ok "$rc" 1 "17c. run 7 unreadable: exits 1"; lacks "$(glog)" "run rerun" "17c. no re-run"
+has "$out" "run 7's jobs could not be read" "17c. names run 7"
+
+# 18. no roll-up, a workflow file present: `ci` needs `setup` with no if: (a, b), or under a false-positive
+#     `${{ !cancelled() }}` with setup passed, which falls back to itself (c, d). A setup failure is still re-run and
+#     merged; a cut alone still takes the cancelled path; (a, b) never read a run whole for shards.
+NWF='name: test
+on: [pull_request]
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  ci:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - run: make test
+'
+cjobs() {  # cjobs <ci conclusion> [<its step>] — run 7: setup (6) success, ci (8)
+  printf '{"workflowName": "test", "jobs": [{"databaseId": 6, "name": "setup", "status": "completed", "conclusion": "success", "steps": []}, {"databaseId": 8, "name": "ci", "status": "completed", "conclusion": "%s", "steps": [{"name": "%s", "status": "completed", "conclusion": "%s"}]}]}\n' \
+    "$1" "${2:-Run make test}" "$1" > "$MT_STATE/run.7.json"
+}
+wfpr "$NWF"; cjobs failure "Set up job"; echo "Set up job" > "$MT_STATE/steps.7"
+chk 1 "$(row ci fail 7 8)"; chk 0 "$(row ci pass 7 8)"
+run 5 "$I" "$B"
+ok "$rc|$(reruns 7)|$(nmerge)" "0|1|1" "18a. needs, no if:, a setup failure: re-run once, merged"; lacks "$(glog)" "$WFR" "18a. no shards read"
+wfpr "$NWF"; jobs 7 8 cancelled; chk 0 "$(row ci fail 7 8)"; chk 0 "$(row ci fail 7 8)"
+run 5 "$I" "$B"
+ok "$rc|$(reruns 7)" "1|1" "18b. needs, no if:, cut alone: exits 1 after one re-run"; has "$out" "$CANCELLED" "18b. the cancelled cause"
+ok "$(reads "$out")" "True True" "18b. GitHub's stop, a CI timeout"; lacks "$(glog)" "$WFR" "18b. no shards read"
+FWF='name: test
+on: [pull_request]
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  ci:
+    needs: setup
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: make test
+'
+for c in setup cut; do
+  wfpr "$FWF"
+  if [ "$c" = setup ]; then
+    cjobs failure "Set up job"; echo "Set up job" > "$MT_STATE/steps.7"; chk 1 "$(row ci fail 7 8)"; chk 0 "$(row ci pass 7 8)"
+    run 5 "$I" "$B"
+    ok "$rc|$(reruns 7)|$(nmerge)" "0|1|1" "18c. a false-positive aggregator's own setup failure: re-run once, merged"
+    has "$(glog)" "run view 7 -R o/r --json $WFR" "18c. read as a roll-up, then as itself (setup passed)"
+  else
+    cjobs cancelled; chk 0 "$(row ci fail 7 8)"; chk 0 "$(row ci fail 7 8)"
+    run 5 "$I" "$B"
+    ok "$rc|$(reruns 7)" "1|1" "18d. a false-positive aggregator cut alone: exits 1 after one re-run"
+    has "$out" "$CANCELLED: a CI timeout" "18d. the cancelled cause"; has "$out" "ci (run 7)" "18d. names the check itself"
+    ok "$(reads "$out")" "True True" "18d. GitHub's stop, a CI timeout"
+  fi
+done
+
 echo; [ "$fail" -eq 0 ] && echo "merge-task cancelled: ALL PASS" || echo "merge-task cancelled: SOME FAILED"
 exit "$fail"
