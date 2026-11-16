@@ -15,8 +15,18 @@ under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the di
 fallbacks included, and names them in one line. Decided for you 2's return rule waits for p54-7's red-master record,
 in its own follow-up task (p54-18). Decided for you 11's publisher and Decided for you 4 by p54-5: full-suite.yml's
 `green-tip` job, named `publish the Green tip`, fast-forwards `refs/thread/green` to a run's commit once every shard
-passed, and the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Readers
-not yet built (p54-6, p54-7). d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
+passed, and the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Decided
+for you 3 by p54-7: `reconcile-rollout.py master-runs`, run by the lead at each loop entry, after each landing merge and
+at each heartbeat tick (never blocking a merge), reads master's last 100 `full suite` runs, re-runs the newest red run's
+failed jobs once, and files a red-master fix (`priority: high`, `master_red:`, joined first) for each suite its re-test
+confirms, naming every merge since the last green; a pass on the re-run is a `rerun-pass` line, never a Flake; its
+master-run lines (master-runs.jsonl) feed the weekly Reflection's `masterRuns` (how often master went red, how long the
+Green tip trailed). Decided for you 13 by p54-7, with "on the next default-branch run's publisher" read as a publisher
+red that returns on the next run after a run that got no re-run (a newer run was already waiting): that one is covered
+and files a publisher task with no re-run, while a publisher red straight after a blip is a first red with its own one
+re-run. Decided for you 11's lead check by p54-7: a `refs/thread/green` commit with no successful `full suite` run files
+its own task. Readers not yet built (p54-6).
+d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
 header holds the rules): a file under `docs/` and an untracked file are no carriers, and the reach stops one carrier
 deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
 `tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line
@@ -33,19 +43,31 @@ integrated head; a name that is only expressions matches nothing), is read throu
 roll-up's own, so a shard's setup failure is re-run; a shard cut alone takes ADR 0073 d4's cancelled path (skipped
 neutral, the cut-again rule per needed job); and a roll-up whose needed jobs all passed or were skipped falls back to
 itself, today's read. CI headroom records the slowest of its needed jobs and itself by seconds, against that job's own
-limit, and the line's `shard` field names the needed job. d4's Speed fix hold built by p54-13
-(`skills/_shared/vault-grammar.md` § Speed fix hold is the one copy of its forms): a task's `speed_fix:` cites its
-evidence (`docs/audits/<file>.md row <N>`, `docs/audits/<file>.md cause <words>` or `#<anchor>`, or `time-lost <id>
-[<class>]`), and one without it is refused and held like any other; `reconcile-rollout.py speed-hold apply` (schedule
-step 7) and `join` give every other queued task of the rollout a `depends-on:` on the phase's release (its last task,
-or the member, marked or not, the phase note's `speed_fix_release:` names), recorded on the rollout note's `## Speed
-fix holds` so `speed-hold release` and `lift` remove exactly what was added; the reach is one rule, so no marked task,
-no release, nothing upstream of either and no member of the hold's own phase is ever held, and two Speed fix phases
-never deadlock; `next` lets a hold go when its release, or a task it depends on, leaves the queue or is set aside with
-its automatic retries spent (a gate-pending task never lets it go), with a `speed-hold` Run record line; `defer` drops
-a deferred task's entries, `carry` copies the record, and `status` reports `speedHolds`. A red-master fix is exempt by
-`completion_red_of:` alone, the key the completion verifier's fix task writes (Decided for you 3); p54-7's writer
-stamps it. Phase 54 builds the rest.
+limit, and the line's `shard` field names the needed job.
+d4's Speed fix from the audit's row 1 begun by p54-10: `tests/run.sh --fast --shard K/N` selects as `--fast` does (its
+full-suite fallbacks and the Slow tier's filter included), then runs shard K of that selection by `tests/lib/shard.py`'s
+split, so the N shards together run it exactly once, the merge-task self-tests in shard 1 when it holds them; a shard
+left nothing passes on the always-run steps, and `--fast --shard-plan N` prints the split and runs nothing
+(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it are not yet built.
+d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
+`tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
+preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
+`tests/shard-weights.tsv` are leg.test.sh's apportioned by the parts' measured shares, so the Slow tier is thirteen;
+ok lines 758 + 307 + 195 + 294 = 1554, the old file's count.
+d4's Speed fix hold built by p54-13 (`skills/_shared/vault-grammar.md` § Speed fix hold is the one copy of its forms):
+a task's `speed_fix:` cites its evidence (`docs/audits/<file>.md row <N>`, `docs/audits/<file>.md cause <words>` or
+`#<anchor>`, or `time-lost <id> [<class>]`), and one without it is refused and held like any other;
+`reconcile-rollout.py speed-hold apply` (schedule step 7) and `join` give every other queued task of the rollout a
+`depends-on:` on the phase's release (its last task, or the member, marked or not, the phase note's
+`speed_fix_release:` names), recorded on the rollout note's `## Speed fix holds` so `speed-hold release` and `lift`
+remove exactly what was added; the reach is one rule, so no marked task, no release, nothing upstream of either and no
+member of the hold's own phase is ever held, and two Speed fix phases never deadlock; `next` lets a hold go when its
+release, or a task it depends on, leaves the queue or is set aside with its automatic retries spent (a gate-pending
+task never lets it go), with a `speed-hold` Run record line; `defer` drops a deferred task's entries, `carry` copies
+the record, and `status` reports `speedHolds`. A red-master fix (Decided for you 3) is exempt by its key alone:
+`master_red:`, the mark p54-7's `master-runs` stamps on its fix task, or `completion_red_of:`, the completion
+verifier's fix task's.
+Phase 54 builds the rest.
 
 ## Context
 

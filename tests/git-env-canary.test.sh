@@ -97,6 +97,17 @@ push2() { g -C "$C2" fetch -q origin; g -C "$C2" reset -q --hard origin/master; 
 ff() { g -C "$R" fetch -q origin; g -C "$R" merge -q --ff-only origin/master; }
 # await <pid> <cmd…> — poll <cmd> until it succeeds or <pid> has exited.
 await() { local p=$1; shift; while ! "$@" 2>/dev/null && kill -0 "$p" 2>/dev/null; do sleep 0.05; done; }
+# alive <pid file> — how many of the file's pids are still running, once none is or 30 s have passed (a liveness bound,
+# never a timing claim: a killed group's processes are gone well inside it, and a leaked one outlives it).
+alive() {
+  local n i=0
+  while :; do
+    n=0; while read -r pid; do kill -0 "$pid" 2>/dev/null && n=$((n + 1)); done < "$1"
+    [ "$n" -eq 0 ] || [ "$i" -ge 600 ] && break
+    sleep 0.05; i=$((i + 1))
+  done
+  echo "$n"
+}
 # holder — hold the lock in the background until `release` kills it (the kernel drops a flock with its process),
 # never for a fixed time a loaded host can outrun. A lock not taken within 60 s ends it by SIGALRM, and the `took
 # the lock` check fails by name; an unreleased hold ends after 300 s, so a canary that ignores its timeout fails
@@ -274,16 +285,18 @@ for b in slow slow2 cap; do
   scen "bm-$b"
   mkt A in_progress; mkt B in_progress; mkt C in_progress
   arm A; chk A; arm B; chk B
-  upwrap "$b" 'sleep 60 & echo $! >> "'"$S/$b"'.pids"; wait'
+  upwrap "$b" 'sleep 300 & echo $! >> "'"$S/$b"'.pids"; wait'
   case $b in
     slow) ST=2 LT=8 ;;
     slow2) ST=2 LT=6 ;;
-    cap) ST=30 LT=5 ;;
+    cap) ST=120 LT=5 ;;
   esac
   if [ "$b" = cap ]; then
+    # The trip line's budget is the cap's evidence; the 60 s bound only tells a capped miss from one that ran its own
+    # 120 s budget (or the wrapper's 300 s sleep), never how fast a capped one is.
     t0=$(date +%s); THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT chk A; t1=$(date +%s)
-    ok "$rc|$(( t1 - t0 <= 4 ))" "0|1" "bm-cap: STATE_TIMEOUT=30 under LOCK_TIMEOUT=5 → the miss ends within 4 s (0.4 x the lock timeout)"
-    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "ls-remote origin master timed out after 2s" "bm-cap: … its ls-remote timed out after 2 s"
+    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "ls-remote origin master timed out after 2s" "bm-cap: STATE_TIMEOUT=120 under LOCK_TIMEOUT=5 → its ls-remote timed out after 2 s (0.4 x the lock timeout)"
+    ok "$rc|$(( t1 - t0 < 60 ))" "0|1" "bm-cap: … the miss → 0, ended long before its own 120 s budget"
   else
     THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug A --kind task > "$S/a.out" 2> "$S/a.err" & pa=$!
     pb=""
@@ -291,18 +304,15 @@ for b in slow slow2 cap; do
       THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug B --kind task > "$S/b.out" 2> "$S/b.err" & pb=$!
     fi
     await "$pa" test -s "$S/$b.pids"
-    t0=$(date +%s); THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT arm C; t1=$(date +%s)
+    THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT arm C
     ok "$rc|$(recf C task state)" '0|"armed"' "bm-$b: a concurrent task arm C behind the slow miss(es) (LOCK_TIMEOUT=$LT) → 0, armed"
-    ok "$(( t1 - t0 <= 6 ))" 1 "bm-$b: … within 6 s"
-    lacks "$err" "waiting for the lock" "bm-$b: … with no lock-timeout line"
+    lacks "$err" "waiting for the lock" "bm-$b: … inside its lock timeout: no lock-timeout line (each miss held the lock for its 2 s budget, below)"
     wait "$pa"; ra=$?; rb=0; [ -z "$pb" ] || { wait "$pb"; rb=$?; }
     ok "$ra|$rb" "0|0" "bm-$b: the slow miss's own check(s) → 0 (task windows)"
     has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "record not armed, and the state check failed: ls-remote origin master timed out after 2s" "bm-$b: … A trips: its ls-remote timed out after 2 s"
     [ "$b" = slow2 ] && has "$(grep 'git-env trip \[\[B\]\]' "$RO")" "timed out after 2s" "bm-slow2: … and B the same"
   fi
-  sleep 0.2; alive=0
-  while read -r pid; do kill -0 "$pid" 2>/dev/null && alive=$((alive + 1)); done < "$S/$b.pids"
-  ok "$alive" 0 "bm-$b: … every wrapper process is gone (its group killed)"
+  ok "$(alive "$S/$b.pids")" 0 "bm-$b: … every wrapper process is gone (its group killed)"
   g -C "$R" config --unset remote.origin.uploadpack
   call; ok "$rc" 9 "bm-$b: check-all → 9 (the lane)"
 done

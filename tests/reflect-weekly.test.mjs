@@ -260,6 +260,77 @@ test('span: noteOverlaps.previous counts the last reflection line\'s window, so 
   assert.equal(o.warnings, 1)
 })
 
+// ---- master's full-suite runs (p54-7): master-runs.jsonl, written by the execute skill's master-runs verb alone ----
+
+const mastersFile = (h) => path.join(h.ev, 'master-runs.jsonl')
+// One master-run line: [ts, rollout, fields]; a line is placed by its `at`, never its ts
+const master = ([ts, r, f]) => [ts, 'master-run', null, { repo: 'o/r', sha: 'a'.repeat(40), ...f }, r]
+
+test('span: masterRuns counts each repo\'s reds, breaks (filed and healed apart) and the trail, by `at`, and reads no rollout', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [
+    master([W(4, '01:00'), 'ra', { outcome: 'unconfirmed', at: W(4, '00:30'), runId: 1, attempt: 1, suites: ['A'], redKind: 'suites', retest: 'next-run' }]),
+    master([W(4, '02:00'), 'ra', { outcome: 'red', at: W(4, '01:30'), runId: 2, attempt: 2, suites: ['A'], newSuites: ['A'], followup: 'master-red-r-a-2', since: 'g'.repeat(40), retest: 'rerun', redKind: 'suites', merges: 2, prs: [1, 2] }]),
+    // a second lead's copy of the same key: the first line is kept, so it adds nothing
+    master([W(4, '02:05'), 'rb', { outcome: 'red', at: W(4, '01:30'), runId: 2, attempt: 2, suites: ['A'], newSuites: ['A'], followup: 'master-red-r-a-2', since: 'g'.repeat(40), retest: 'rerun', redKind: 'suites', merges: 2, prs: [1, 2] }]),
+    master([W(5, '01:00'), 'ra', { outcome: 'red', at: W(5, '00:30'), runId: 3, attempt: 1, suites: ['A'], since: 'g'.repeat(40), retest: 'covered', redKind: 'suites', merges: null, prs: null }]),
+    master([W(5, '02:00'), 'ra', { outcome: 'red', at: W(5, '01:30'), runId: 4, attempt: 1, suites: ['A', 'B'], newSuites: ['B'], healed: true, since: 'g'.repeat(40), retest: 'next-run', redKind: 'suites', merges: 1, prs: [3] }]),
+    master([W(5, '03:00'), 'ra', { outcome: 'red', at: W(5, '02:30'), runId: 5, attempt: 2, suites: ['publish the Green tip'], newSuites: ['publish the Green tip'], followup: 'master-red-r-b-2', since: 'g'.repeat(40), retest: 'rerun', redKind: 'publisher', merges: null, prs: null }]),
+    master([W(6, '01:00'), 'ra', { outcome: 'green', at: W(6, '00:30'), runId: 6, attempt: 1, since: 'g'.repeat(40), trailMinutes: 300, redRuns: 5, followups: ['master-red-r-a-2', 'master-red-r-b-2'] }]),
+    master([W(7, '01:00'), 'ra', { outcome: 'rerun-pass', at: W(7, '00:30'), runId: 7, attempt: 2, publisherOnly: true }]),
+    master([W(7, '02:00'), 'ra', { outcome: 'rerun-pass', at: W(7, '01:30'), runId: 8, attempt: 2 }]),
+    master([W(8, '01:00'), 'ra', { outcome: 'green', at: W(8, '00:30'), runId: 9, attempt: 1, since: null, trailMinutes: 100, redRuns: 1, followups: [], trailFloor: true }]),
+    master([W(8, '02:00'), 'ra', { outcome: 'unproven', at: W(8, '02:00'), sha: 'c'.repeat(40), ref: 'refs/thread/green', followup: 'master-green-unproven-r-cccccccccccc' }]),
+    master([W(8, '03:00'), 'ra', { repo: 'o/other', outcome: 'green', at: W(8, '02:30'), runId: 1, attempt: 1, since: null, trailMinutes: 40, redRuns: 1, followups: [] }]),
+  ])
+  assert.deepEqual(fs.readdirSync(h.ev), ['master-runs.jsonl'], 'the lines sit in the reserved file alone')
+  const s = span(h)
+  assert.deepEqual(s.masterRuns.repos, [
+    { repo: 'o/other', redRuns: 0, breaks: 0, filed: 0, healed: 0, publisherReds: 0, unconfirmed: 0, rerunPasses: 0, blips: 0,
+      greens: 1, trailMinutes: { median: 40, max: 40 }, trailFloors: 0, unproven: 0, first: '2026-09-08T02:30:00.000Z', last: '2026-09-08T02:30:00.000Z' },
+    { repo: 'o/r', redRuns: 5, breaks: 3, filed: 2, healed: 1, publisherReds: 1, unconfirmed: 1, rerunPasses: 2, blips: 1,
+      greens: 2, trailMinutes: { median: 200, max: 300 }, trailFloors: 1, unproven: 1, first: '2026-09-04T00:30:00.000Z', last: '2026-09-08T02:00:00.000Z' },
+  ])
+  assert.deepEqual(s.rollouts, [], 'a record of only master-run lines reads no rollout')
+  assert.ok(!s.flags.some((f) => f.startsWith('masterRuns')), JSON.stringify(s.flags))
+})
+
+test('span: masterRuns holds only lines whose `at` is in the window: a line written inside it about an older run adds nothing', (t) => {
+  const h = setup(t)
+  let s = span(h)
+  assert.deepEqual(s.masterRuns, { repos: [] }, 'no file yet')
+  emitAll(h, null, [
+    // ts inside the window, at before it (a backfilled healed break, a late pass): no sum gains it
+    master([W(4, '01:00'), 'ra', { outcome: 'red', at: '2026-09-01T00:00:00Z', runId: 1, attempt: 1, suites: ['A'], newSuites: ['A'], healed: true, since: 'g'.repeat(40), retest: 'next-run', redKind: 'suites', merges: 1, prs: [1] }]),
+    master([W(4, '02:00'), 'ra', { outcome: 'green', at: '2026-09-01T01:00:00Z', runId: 2, attempt: 1, since: 'g'.repeat(40), trailMinutes: 9999, redRuns: 1, followups: [] }]),
+    master([W(5, '01:00'), 'ra', { outcome: 'rerun-pass', at: W(5, '00:30'), runId: 3, attempt: 2 }]),
+  ])
+  s = span(h)
+  assert.deepEqual(s.masterRuns.repos.map((r) => [r.repo, r.redRuns, r.breaks, r.healed, r.greens, r.trailMinutes, r.rerunPasses, r.first]),
+    [['o/r', 0, 0, 0, 0, null, 1, '2026-09-05T00:30:00.000Z']])
+})
+
+test('span: an unreadable master-runs.jsonl makes masterRuns a null block and a flag; a torn line is a flag; window_flags holds a repo as one row', (t) => {
+  const h = setup(t)
+  fs.mkdirSync(mastersFile(h))
+  let s = span(h)
+  assert.equal(s.masterRuns, null, 'unread, never none')
+  assert.ok(s.flags.some((f) => f.startsWith('masterRuns: master-runs.jsonl cannot be read (')), JSON.stringify(s.flags))
+  fs.rmdirSync(mastersFile(h))
+  emitAll(h, null, [master([W(4, '01:00'), 'ra', { outcome: 'rerun-pass', at: W(4, '00:30'), runId: 1, attempt: 2 }])])
+  fs.appendFileSync(mastersFile(h), '{"torn')
+  s = span(h)
+  assert.equal(s.masterRuns.repos[0].rerunPasses, 1)
+  assert.ok(s.flags.includes('masterRuns: master-runs.jsonl: 1 line(s) did not parse: skipped'), JSON.stringify(s.flags))
+  const S0 = '2026-09-02T14:00:00.000Z'
+  const U0 = '2026-09-09T14:00:00.000Z'
+  const doc = (repos) => ({ since: S0, until: U0, rollouts: [], masterRuns: repos === null ? null : { repos }, cannotShow: [], flags: [] })
+  const [bad, good, unread] = pyOut(h, 'print(json.dumps([m.window_flags(d, {}) for d in a]))', [REFLECT, [
+    doc([{ repo: 'o/r', first: '2026-09-01T00:00:00.000Z', last: '2026-09-05T00:00:00.000Z' }]), doc([{ repo: 'o/r', first: S0, last: U0 }]), doc(null)]])
+  assert.deepEqual(bad, [`window: masterRuns.repos holds 1 row(s) outside [${S0}, ${U0}], the first at 2026-09-01T00:00:00.000Z: a reader read past its window`])
+  assert.deepEqual([good, unread], [[], []])
+})
+
 test('span: every friction kind, a Human fix as movedBy unrecorded with its taskNote, and null while still set aside', (t) => {
   const h = setup(t)
   const ev = [

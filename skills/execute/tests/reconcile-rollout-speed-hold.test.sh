@@ -457,8 +457,11 @@ ok "$(starts)" '["x-p8-1","x-p8-3","x-p9-1","x-p9-3"]' "S8: no deadlock: each ph
 scen s9
 base; sh_ apply
 mkt rf open - 'completion_red_of: "[[ro-old]]"'; mkt mr open - 'master_red_since: 2026-11-10T10:00+00:00'
-jn --tasks rf,mr
-ok "$rc|$(deps rf)|$(deps mr)" "0|-|x-p9-2" "S9: completion_red_of: exempts it; master_red_since: does not"
+# p54-7's red-master fix, as master-runs files it (_master_task): `master_red:` beside its other master_red_* keys.
+mkt mm open - 'master_red: "o/r"' 'master_red_kind: suites' 'master_red_since: none'
+jn --tasks rf,mr,mm
+ok "$rc|$(deps rf)|$(deps mr)|$(deps mm)" "0|-|x-p9-2|-" \
+  "S9: completion_red_of: and master_red: each exempt it; master_red_since: alone does not"
 
 # ── S10: the phase's own tasks start under its hold ────────────────────────────────────────────────────────────────────────
 scen s10

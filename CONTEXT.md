@@ -1058,8 +1058,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   one follow-up per (repo, test); a test logged as a Flake twice is the repo's
   to fix. Never a known baseline failure (schedule § 2.6: a test already
   red on a clean `main`, which execute's green criterion already allows
-  for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
-  _Avoid_: flaky failure, quarantined test.
+  for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs, nor a
+  red default-branch `full suite` run that passes on its one re-run (a
+  `rerun-pass` master-run line, p54-7). _Avoid_: flaky failure, quarantined
+  test.
 - **Named re-run** — the Flake check's first step: only a red's failing tests,
   re-run alone by name on the same tree before the one confirming full run
   (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
@@ -1312,9 +1314,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   not live until its full suite has passed, and a red default branch leaves
   every rollout and session on the last commit that passed (ADR 0084 d1, d2,
   proposed; published as `refs/thread/green` by full-suite.yml's `green-tip`
-  job (p54-5); its readers not yet built: both still take origin's tip). Not
-  the branch's tip, which a light check lets move first. _Avoid_: proven
-  commit (**Proven** is a fix's), stable, release.
+  job (p54-5); its lead check is built (p54-7: `reconcile-rollout.py
+  master-runs` files a task when the ref's commit carries no successful run);
+  its readers not yet built: both still take origin's tip). Not the branch's
+  tip, which a light check lets move first. _Avoid_: proven commit
+  (**Proven** is a fix's), stable, release.
+- **Red-master fix** — the fix task `reconcile-rollout.py master-runs` files
+  when a default-branch `full suite` run is red on a suite its re-test
+  confirmed (or when the **Green tip**'s commit carries no successful run):
+  `priority: high`, marked `master_red: "<owner/repo>"`, joined at the top of
+  the running rollout's `## Queue`, and ranked ahead of every scheduled task by
+  `next`, so it starts first among its priority (p54-7; ADR 0084 Decided for
+  you 3). A Speed fix hold never holds it (p54-13 reads the mark): while master
+  is red no Speed fix goes live, so the fix comes first. Distinct from main red
+  (`next`'s `mainRed`, a RACE revert that did not land), which holds the whole
+  rollout: a red-master fix holds nothing, merges go on, and it is only
+  started first. _Avoid_: main red, revert task, CI fix.
 - **Speed fix** — a task filed against a measured cause of rollout time lost:
   a line of the Time-lost ledger, a suite audit's ranked change, a stall
   audit's cause. It names that evidence, and a task without it is never one.

@@ -27,10 +27,10 @@
 // to serial-chains.py's literal, and every outcome a Primary refresh pass returns (primary-refresh.py's refresh() and
 // the repair it hands off to) to RESET_PRIMARY_RECORDED or RESET_PRIMARY_RETRIED, each of their literals to one, so a
 // renamed or a new outcome fails here rather than quietly reading as not recorded. § Speed fix hold (p54-13) states the
-// mark (`speed_fix`), the phase note's release (`speed_fix_release`), the red-master key (`completion_red_of`) and the
-// record's section (`## Speed fix holds`); reconcile-rollout.py's SPEED_FIX_KEY, SPEED_FIX_RELEASE_KEY, RED_MASTER_KEY
-// and SPEED_HOLD_SECTION are pinned to it, its three evidence lines appear verbatim in task-writer § 4 and the
-// reshuffle's R5 too, and § Readers lists the constants.
+// mark (`speed_fix`), the phase note's release (`speed_fix_release`), the two red-master keys (`master_red`, p54-7's
+// fix, and `completion_red_of`) and the record's section (`## Speed fix holds`); reconcile-rollout.py's SPEED_FIX_KEY,
+// SPEED_FIX_RELEASE_KEY, MASTER_RED_KEY, RED_MASTER_KEY and SPEED_HOLD_SECTION are pinned to it, its three evidence
+// lines appear verbatim in task-writer § 4 and the reshuffle's R5 too, and § Readers lists the constants.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -86,7 +86,8 @@ print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHA
                   "ON_MERGE_KEY": rr.ON_MERGE_KEY, "ON_MERGE_REGENERATE": rr.ON_MERGE_REGENERATE,
                   "WHEN_KEY": rr.WHEN_KEY, "RESET_PRIMARY_RECORDED": list(rr.RESET_PRIMARY_RECORDED),
                   "SPEED_FIX_KEY": rr.SPEED_FIX_KEY, "SPEED_FIX_RELEASE_KEY": rr.SPEED_FIX_RELEASE_KEY,
-                  "RED_MASTER_KEY": rr.RED_MASTER_KEY, "SPEED_HOLD_SECTION": rr.SPEED_HOLD_SECTION,
+                  "RED_MASTER_KEY": rr.RED_MASTER_KEY, "MASTER_RED_KEY": rr.MASTER_RED_KEY,
+                  "SPEED_HOLD_SECTION": rr.SPEED_HOLD_SECTION,
                   "RESET_PRIMARY_RETRIED": list(rr.RESET_PRIMARY_RETRIED),
                   "PRIMARY_REFRESH_PY": str(rr.PRIMARY_REFRESH_PY),
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
@@ -269,7 +270,7 @@ function readersOf(text) {
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
   'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY', 'ON_MERGE_KEY',
-  'WHEN_KEY', 'SPEED_FIX_KEY', 'SPEED_FIX_RELEASE_KEY', 'RED_MASTER_KEY', 'SPEED_HOLD_SECTION']
+  'WHEN_KEY', 'SPEED_FIX_KEY', 'SPEED_FIX_RELEASE_KEY', 'MASTER_RED_KEY', 'RED_MASTER_KEY', 'SPEED_HOLD_SECTION']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -295,20 +296,21 @@ export const SPEED_FIX_EVIDENCE = [
 ]
 
 // The names of the failed § Speed fix hold checks; [] when the section states the mark's key, the phase note's release
-// key, the red-master key and the record's section, the script's four constants equal them, the three evidence lines
-// appear verbatim in vault-grammar's section, task-writer § 4 and the reshuffle's R5, and the section names its write
-// orders, its writers and the cross-version marker.
+// key, the two red-master keys and the record's section, the script's five constants equal them, the three evidence
+// lines appear verbatim in vault-grammar's section, task-writer § 4 and the reshuffle's R5, and the section names its
+// write orders, its writers and the cross-version marker.
 function speedFixChecks({ text, writer, resh }, s) {
   const sec = collapse(section(text, /^## Speed fix hold$/) ?? '')
   if (!sec) return ['states the hold']
   const out = []
   const mark = sec.match(/The mark is the task-note key `([a-z_]+)`/)
   const release = sec.match(/`([a-z_]+): "\[\[x\]\]"`/)
-  const red = sec.match(/\*\*Red-master\.\*\* The key `([a-z_]+):` alone exempts a task/)
+  const red = sec.match(/\*\*Red-master\.\*\* The key `([a-z_]+):` or `([a-z_]+):` alone exempts a task/)
   const record = sec.match(/The rollout note's `(## [A-Za-z ]+)` section, append-only/)
   if (!mark || s.SPEED_FIX_KEY !== mark[1]) out.push('mark constant')
   if (!release || s.SPEED_FIX_RELEASE_KEY !== release[1]) out.push('release constant')
-  if (!red || s.RED_MASTER_KEY !== red[1]) out.push('red-master constant')
+  if (!red || s.MASTER_RED_KEY !== red[1]) out.push('master-red constant')
+  if (!red || s.RED_MASTER_KEY !== red[2]) out.push('red-master constant')
   if (!record || s.SPEED_HOLD_SECTION !== record[1]) out.push('section constant')
   const where = [['vault-grammar', sec], ['task-writer § 4', collapse(section(writer, /^## 4\. /) ?? '')],
     ['reshuffle R5', collapse(section(resh, /^## R5\. /) ?? '')]]
@@ -671,6 +673,7 @@ test('control: a drifted key, a reworded evidence line or a dropped writer fails
   assert.deepEqual(speedFixChecks(base, { ...s, SPEED_FIX_KEY: 'speedfix' }), ['mark constant'])
   assert.deepEqual(speedFixChecks(base, { ...s, SPEED_FIX_RELEASE_KEY: 'release' }), ['release constant'])
   assert.deepEqual(speedFixChecks(base, { ...s, RED_MASTER_KEY: 'master_red_since' }), ['red-master constant'])
+  assert.deepEqual(speedFixChecks(base, { ...s, MASTER_RED_KEY: 'master_red_since' }), ['master-red constant'])
   assert.deepEqual(speedFixChecks(base, { ...s, SPEED_HOLD_SECTION: '## Holds' }), ['section constant'])
   assert.deepEqual(speedFixChecks({ ...base, writer: mutate(taskWriter, "a suite audit's ranked change", 'an audit row') }, s),
     ['task-writer § 4 evidence 1'])

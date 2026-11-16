@@ -420,19 +420,21 @@ reshuffle's R5.2 use the same words):
   its release or anything upstream of it, until R lands or `speed-hold release` ends it. A marked task outside any
   phase makes no hold, and is still never held.
 - **The reach.** One rule: a hold on R for phase P stamps a task only when (1) it is linked to the rollout (or being
-  joined) and queued, the fix's own project's queue only; (2) its unit carries no valid mark; (3) it carries no
-  non-empty `completion_red_of:`; (4) its unit is not a member of P (so P's unmarked members other than its release
-  are held by every other Speed fix phase's hold, never by P's); (5) it is neither a root nor upstream (`depends-on:` /
-  `blocked-by:`, transitively) of one, the roots being every unlanded marked unit linked to the rollout or being
-  joined, every standing hold's release, and the release of every phase with such a mark while it is unlanded and
-  linked; (6) R is not already among its `depends-on:` or `blocked-by:` by hand (an entry a recorded hold wrote is not
-  a hand-written one, and a hand-written entry is never recorded). **Out of reach**: a recorded task that carries R's
-  entry but now fails "linked" or (2) to (5) loses that entry at the next join, apply or `next`, why `left the
-  rollout`, `a Speed fix now`, `a red-master fix`, `a member of p<N>`, `a Speed fix release` or `upstream of [[M]]`. So
-  no hold ever holds a release, directly or transitively: two Speed fix phases never deadlock, and a held queue always
-  has its phase's own tasks startable.
-- **Red-master.** The key `completion_red_of:` alone exempts a task (the completion verifier's fix task carries it,
-  p54-7): never held, joined under a hold or not.
+  joined) and queued, the fix's own project's queue only; (2) its unit carries no valid mark; (3) it is no red-master
+  fix (below); (4) its unit is not a member of P (so P's unmarked members other than its release are held by every other
+  Speed fix phase's hold, never by P's); (5) it is neither a root nor upstream (`depends-on:` / `blocked-by:`,
+  transitively) of one, the roots being every unlanded marked unit linked to the rollout or being joined, every standing
+  hold's release, and the release of every phase with such a mark while it is unlanded and linked; (6) R is not already
+  among its `depends-on:` or `blocked-by:` by hand (an entry a recorded hold wrote is not a hand-written one, and a
+  hand-written entry is never recorded). **Out of reach**: a recorded task that carries R's entry but now fails "linked"
+  or (2) to (5) loses that entry at the next join, apply or `next`, why `left the rollout`, `a Speed fix now`, `a
+  red-master fix`, `a member of p<N>`, `a Speed fix release` or `upstream of [[M]]`. So no hold ever holds a release,
+  directly or transitively: two Speed fix phases never deadlock, and a held queue always has its phase's own tasks
+  startable.
+- **Red-master.** The key `master_red:` or `completion_red_of:` alone exempts a task, either one non-empty: never
+  held, joined under a hold or not. `master_red:` marks the red-master fix `reconcile-rollout.py master-runs` files and
+  joins first (p54-7, CONTEXT.md **Red-master fix**), and `completion_red_of:` the completion verifier's fix task; a
+  key beside them (`master_red_since:` alone) exempts nothing.
 - **The entry.** A held task's `depends-on:` gains `- "[[R]]"` (an inline list becomes a block list, its items kept;
   the key inserted after `status:` when absent), released by itself once R lands, as any dependency is.
 - **The record.** The rollout note's `## Speed fix holds` section, append-only, two line forms:
@@ -507,9 +509,9 @@ reshuffle's R5.2 use the same words):
   `_when`, the one reader of its forms and of `on` and `do`; a target's status through `FINISHED_STATUSES`; and
   `LOCAL_RE`, a literal copy of `skills/_shared/scripts/serial-chains.py`'s, pinned by this file's contract test.
 - `skills/execute/scripts/reconcile-rollout.py` `speed-hold`, `join`, `next`, `defer`, `status` and `carry`:
-  `SPEED_FIX_KEY`, `SPEED_FIX_RELEASE_KEY`, `RED_MASTER_KEY` and `SPEED_HOLD_SECTION` (§ Speed fix hold's keys and
-  section), read by `_speed_fix_mark`, `_speed_release`, `_red_master_fix` and `_speed_holds`, the one reader of the
-  record's line forms; the phase by `_speed_phase` on `PHASED_STEM_RE`.
+  `SPEED_FIX_KEY`, `SPEED_FIX_RELEASE_KEY`, `MASTER_RED_KEY`, `RED_MASTER_KEY` and `SPEED_HOLD_SECTION` (§ Speed fix
+  hold's keys and section), read by `_speed_fix_mark`, `_speed_release`, `_red_master_fix` and `_speed_holds`, the one
+  reader of the record's line forms; the phase by `_speed_phase` on `PHASED_STEM_RE`.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,
