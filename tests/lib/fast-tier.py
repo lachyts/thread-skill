@@ -12,7 +12,9 @@ Commands
       the selected entries, sorted, one per line (collected test paths and `@merge-task-self-tests`). With --paths
       the changed paths are those given, git is never asked for a diff, and the base and source fields are `-`.
       --ignore-full reads the reach as if no line were FULL (a FULL line then only places its paths); only the tests
-      and the follow-ups pass it, never run.sh.
+      and the follow-ups pass it, never run.sh. Without --paths, each untracked path Changed paths leaves out gets one
+      stderr line, `fast-tier: <p>: untracked and placed by no map line, left out (CI never sees it)`, and the FAST
+      header counts only the paths it read.
   check
       `fast-tier map: ok (...)`, exit 0, or one `fast-tier map: <problem>` line per problem, exit 1.
   slow [--base REV | --paths P...]
@@ -31,13 +33,24 @@ origin/master, else origin/main, each checked with `git rev-parse --verify -q <r
 `git merge-base <base> HEAD`. A base that does not resolve, or a failed merge-base (a shallow clone), is FULL.
 
 Changed paths: `git diff -z --name-only --no-renames <merge base>` (the working tree against it, so staged and
-unstaged edits count, and a rename counts both paths), plus `git ls-files -z --others --exclude-standard`, minus
-`.claude/**` (other sessions' worktrees and the harness's state). None left is FULL.
+unstaged edits count, and a rename counts both paths), plus the untracked paths, `git ls-files -z --others
+--exclude-standard` less any path the diff lists (one `git rm --cached` left in both counts as tracked), minus
+`.claude/**` (other sessions' worktrees and the harness's state). None left is FULL. Once the index is built, every
+untracked path that is no collected test and that no line places (a line that is not ALSO, rule (2)'s test) is left
+out, each with its stderr note: CI's checkout holds no untracked file, so such a path is local scratch (a
+`.scratch/x.py`), and rule (2)'s FULL for it would run the full suite for a file no merge carries. An untracked
+collected test, or an untracked path a line places (a new script under skills/**), still counts. None left then is
+FULL too (`no changed paths from <base> once <n> untracked paths no map line places are left out`). --paths never
+leaves a path out.
 
 The index, built once per run:
-  - Carriers: the files `git ls-files -z -co --exclude-standard` lists that exist on disk, lie outside `.claude/` and
-    end in .py, .sh, .js, .mjs or .json. Collected tests, tests/run.sh and this file are never carriers: this file
-    names merge-task.sh and run.sh names the harness, and a carrier that names a path is reached by it.
+  - Collected tests: the collected files `git ls-files -z -co --exclude-standard` lists that exist on disk and lie
+    outside `.claude/`, so an untracked new test counts.
+  - Carriers: the tracked files (`git ls-files -z`, the index) that exist on disk, lie outside `.claude/` and `docs/`,
+    and end in .py, .sh, .js, .mjs or .json. An untracked file is no carrier (a local scratch script would reach
+    whatever it names; staged, it is one), and nor is a file under docs/ (a spike there names scripts that nothing
+    runs it with). Collected tests, tests/run.sh and this file are never carriers: this file names merge-task.sh and
+    run.sh names the harness, and a carrier that names a path is reached by it.
   - A carrier's naming text: for .py its str and bytes constants, docstrings dropped (an unparseable file: its whole
     text); for .sh every line whose first non-blank character is not `#`; for anything else its whole text. A test's
     text is always its whole text.
@@ -61,17 +74,23 @@ this repo's SKILL.md files. `FOREIGN-ONLY <name> <test>... # <what it holds>` de
 name <name> only as another root's file (a fixture repo's THREAD.md, a temp vault's note, a string or a comment) and
 never read this repo's: such a test is no namer of <name> (rule 3), so a prose change to the real file does not select
 it; it still selects for every other name it holds. A test that reads the real file, or runs a script on this tree
-that does, never goes on the line. `OWN-LISTINGS <test>... # (i)|(ii) <what it lists>` excuses tests from check (f). `SLOW <test>...` declares the Slow
-tier (ADR 0084 d3): each entry one exact collected test path, no glob and no `@`. A SLOW line places nothing and selects
-nothing: select never reads it, only `slow` and check (j) do.
+that does, never goes on the line. `READERS <name>...` declares FOREIGN names whose readers are declared: each tracked
+file of that basename has plain lines (its readers lines, pattern ending in the name) listing the tests that read it,
+so a change to one selects only its lines' entries (rule 3), never every test that names the word, and check (k) keeps
+the lines true; a FOREIGN-ONLY line of a READERS name only exempts its tests from check (k). `OWN-LISTINGS <test>...
+# (i)|(ii) <what it lists>` excuses tests from check (f). `SLOW <test>...` declares the Slow tier (ADR 0084 d3): each
+entry one exact collected test path, no glob and no `@`. A SLOW line places nothing and selects nothing: select never
+reads it, only `slow` and check (j) do.
 
 Rules, for each changed path p, in sorted order; the first FULL is the result:
   (1) p is a collected test (present or deleted). It selects itself when it exists (a runner of a deleted test now
       fails, so the deleted one never runs), the plain and ALSO entries of every line matching it, and every
       collected test whose text names basename(p), one level, through the index: a runner's operand and a reader's
       path both hold that basename as a token. Rule (1) never gives FULL.
-  (2) No line places p: FULL (`<p>: not in the map`).
-  (3) Otherwise a worklist from p, breadth-first in sorted order. For each item q:
+  (2) No line places p: FULL (`<p>: not in the map`). An untracked path no line places never reaches this rule:
+      Changed paths leaves it out with a note (CI never sees it); `--paths` never leaves one out.
+  (3) Otherwise a worklist one carrier deep: p, then the carriers p pushes, each level in sorted order. For each item
+      q:
       - a FULL line places q: FULL (`<p>: marked FULL`, or `<p>: reaches <q>, marked FULL`);
       - no line places q, a reached carrier: FULL (`<p>: reaches <q>, not in the map`);
       - otherwise q adds the ALSO entries of its matching lines on top (never reach), and then
@@ -82,21 +101,29 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
           2026-11-11), and its line's check (i) keeps its declared suites whole instead. The reach ends there: a suite
           that drives the hub only through another carrier (a loader's own suite) does not run at merge, ADR 0073 d1's
           accepted risk, which the completion verifier and master's run hold;
-        - else q adds, as reach, the plain entries of its placing lines and every collected test that names
-          basename(q) (for a FOREIGN basename, minus its FOREIGN-ONLY tests); then every carrier that names
-          basename(q) is pushed (a FOREIGN basename pushes only tests/lib carriers). A carrier's own text changes
-          what it names, never who names it, so reach follows names from the changed path outward.
+        - else q adds, as reach, the plain entries of its placing lines, and then
+          - basename(q) is a READERS name: q adds nothing more and pushes nothing. Its readers lines are its reach;
+            the tests that name the word are not (a basename every skill's file shares would select them all), nor
+            are a tests/lib helper's users, and check (k) keeps the lines whole;
+          - else q adds every collected test that names basename(q) (for a FOREIGN basename, minus its FOREIGN-ONLY
+            tests), and when q is p every carrier that names basename(p) is pushed (a FOREIGN basename pushes only
+            tests/lib carriers). A carrier's own text changes what it names, never who names it, so reach follows
+            names from the changed path outward, one step: a pushed carrier pushes nothing. So a suite that drives
+            p only through two carriers (p named by a, a by b, b's suite) does not run at merge, ADR 0073 d1's
+            accepted risk as at a hub, which the completion verifier and master's full suite hold before anything
+            goes live (ADR 0084); check (d) still holds every script to a reach that is not empty.
   (4) p is placed, not only by NONE lines, and its reach is empty: FULL (`<p>: reaches no test`).
   (5) Once every path is read and the result is FAST, the selection is closed over runners: every collected test
       that runs a selected test (the runner map) is added, until nothing new is. `@merge-task-self-tests` is no file
       and has no runners. --ignore-full applies (5) too.
 
 check:
-  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, OWN-LISTINGS, SLOW, FULL, NONE, ALSO, HUB), FULL and
-      NONE stand alone, each SLOW line names at least one entry and each is one exact path (no glob, no `@`), HUB and ALSO list at least one entry, `@merge-task-self-tests` is the only `@` entry and sits
-      on plain lines only, each OWN-LISTINGS line names at least one test and carries a trailing `# (i) ...` or
-      `# (ii) ...` comment, and each FOREIGN-ONLY line names a FOREIGN name and at least one test and carries a
-      trailing `# ...` comment.
+  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, READERS, OWN-LISTINGS, SLOW, FULL, NONE, ALSO,
+      HUB), FULL and NONE stand alone, each SLOW line names at least one entry and each is one exact path (no glob, no
+      `@`), HUB and ALSO list at least one entry, `@merge-task-self-tests` is the only `@` entry and sits on plain
+      lines only, each OWN-LISTINGS line names at least one test and carries a trailing `# (i) ...` or `# (ii) ...`
+      comment, each FOREIGN-ONLY line names a FOREIGN name and at least one test and carries a trailing `# ...`
+      comment, and each READERS line names at least one name and each is a FOREIGN name.
   (b) Every exact pattern exists on disk, and every glob matches at least one tracked file.
   (c) Every entry resolves to collected tests, and an exact test entry (an OWN-LISTINGS or FOREIGN-ONLY one too) is
       collected.
@@ -153,6 +180,20 @@ check:
       is not SLOW (add it). A suite joins at SLOW_JOIN and leaves only under SLOW_LEAVE, one sixth lower, so a suite
       whose median drifts near the cutoff does not swap in and out: between the two either state passes, and every
       swap is an edit to this map, which is FULL. With no SLOW line and no CI_SECONDS, (j) is silent.
+  (k) Each READERS name N's readers are declared (p54-4), since rule (3) selects only them. A test on a FOREIGN-ONLY
+      N line or on the `** ALSO` walkers line is exempt. A line of an N file is a plain line whose pattern matches a
+      tracked file named N.
+      (k1) Every collected test that names N, and every one that names a tests/lib carrier whose naming text names N
+           (check (i)'s form), is an entry of a line of an N file (`<t> names N` or `<t> names <helper>, which names
+           N`, `but is on no line of a N file`).
+      (k2) A test whose text holds a read of a tracked N file f is an entry of a plain line matching f. A read is
+           READ_LITERAL, f's own path whose left edge is the text start or a character outside [A-Za-z0-9_.-];
+           READ_SEGMENTS, quoted path segments, `'<f's last dir segment>', 'N'` as path.join takes them (a segment
+           two N files share is read as either, and a line matching either clears it); or, in a test under
+           skills/<s>/tests/, READ_UP, `../N` (never a `../../N`) or `'..', 'N'`, which read skills/<s>/N. So
+           `orient-all/N` is never a read of `orient/N` or of an `all/N`.
+      (k3) A readers line, a plain line whose pattern's last segment is exactly N, holds only tests that name N or
+           a tests/lib carrier that does: one that no longer does is stale (drop it).
 """
 import ast
 import fnmatch
@@ -185,6 +226,10 @@ _LEAD = r"(?:^|(?<=[\s;&|(`'\"]))"   # a command word's left edge: line start, b
 RUN_FORM = re.compile(_LEAD + r"(?:bash|sh|node)(?:[ \t]+--test)?[ \t]+([^\s;&|)`]+)", re.M)
 FIXTURE_LITERAL = r"fixtures/{d}(?![A-Za-z0-9_.-])"
 FIXTURE_SEGMENTS = r"""['"](?:[^'"\n]*/)?fixtures['"]\s*,\s*['"]{d}['"/]"""
+READ_LITERAL = r"(?<![A-Za-z0-9_.-]){f}"                                      # check (k2): f's own path
+READ_SEGMENTS = r"""['"](?:[^'"\n]*/)?({segs})['"]\s*,\s*['"]{name}['"]"""   # … its last dir segment, then N
+READ_UP = r"""(?<![A-Za-z0-9_.-])(?<!\.\./)\.\./{name}|['"]\.\.['"]\s*,\s*['"]{name}['"]"""   # … skills/<s>/tests/'s
+NO_CARRIERS = ("docs/",)   # a file under docs/ is no carrier
 LISTING_ANY = re.compile(r"readdirSync\(|\breaddir\(|opendirSync\(|globSync\(|ls-files|os\.walk\(|os\.listdir\("
                          r"|os\.scandir\(|rglob\(")
 LISTING_LITERALS = ("readdirSync(", "readdir(", "opendirSync(", "globSync(", "ls-files", "os.walk(", "os.listdir(",
@@ -319,7 +364,9 @@ class Repo:
         self.tests = [p for p in self.files if collected(p)]
         test_set = set(self.tests)
         never = test_set | {RUNNER, SELF}
-        self.carriers = [p for p in self.files if p.endswith(CARRIER_SUFFIXES) and p not in never]
+        tracked = set(self.tracked)   # carriers are tracked files only: an untracked scratch script names nothing
+        self.carriers = [p for p in self.files if p in tracked and p.endswith(CARRIER_SUFFIXES) and p not in never
+                         and not p.startswith(NO_CARRIERS)]
         self.naming = {p: naming_text(p, read(p)) for p in self.carriers}   # a carrier's naming text
         self.text = {p: read(p) for p in self.tests}                        # a test's whole text
         self.carrier_index = {}
@@ -346,7 +393,8 @@ class Repo:
             self.runs[p] = got
             for t in got:
                 self.ran_by.setdefault(t, set()).add(p)
-        self.map_lines, self.foreign, self.own, self.foreign_only, self.slow, self.parse_problems = parse_map(self)
+        (self.map_lines, self.foreign, self.own, self.foreign_only, self.slow, self.readers,
+         self.parse_problems) = parse_map(self)
         self.foreign_only_tests = {}   # FOREIGN name -> its FOREIGN-ONLY tests
         for _no, name, t in self.foreign_only:
             self.foreign_only_tests.setdefault(name, set()).add(t)
@@ -370,7 +418,7 @@ class Repo:
 
     # ---- the rules ----
     def reach(self, p, ignore_full=False):
-        """Rule (3) from p: (full reason | None, reach, also, none_only)."""
+        """Rule (3) from p, one carrier deep: (full reason | None, reach, also, none_only)."""
         def kind(l):
             return "PLACE" if (ignore_full and l.kind == "FULL") else l.kind
         placing = [l for l in self.matching(p) if l.kind != "ALSO"]
@@ -402,12 +450,18 @@ class Repo:
                 base = os.path.basename(q)
                 for l in placing:
                     reach |= l.entries
+                if base in self.readers:
+                    # A READERS name: its readers lines are its reach (check (k) keeps them whole), never every test
+                    # that names the word, and it pushes no carrier, a tests/lib helper included.
+                    continue
                 named_by = self.namers(base, "tests")
                 pushed = self.namers(base, "carriers")
                 if base in self.foreign:
                     named_by -= self.foreign_only_tests.get(base, set())
                     pushed = {c for c in pushed if c.startswith(LIB)}
                 reach |= named_by
+                if q != p:
+                    continue   # one carrier deep: a pushed carrier pushes nothing
                 for c in pushed:
                     if c not in seen:
                         seen.add(c)
@@ -444,14 +498,15 @@ class Repo:
 
 def parse_map(repo):
     """(lines, FOREIGN names, OWN-LISTINGS (line, test) pairs, FOREIGN-ONLY (line, name, test) triples, SLOW (line, test)
-    pairs, problems) of tests/fast-tier.map, entries resolved."""
-    lines, foreign, own, foreign_only, slow, problems = [], set(), [], [], [], []
+    pairs, READERS names, problems) of tests/fast-tier.map, entries resolved."""
+    lines, foreign, own, foreign_only, slow, readers, problems = [], set(), [], [], [], set(), []
     try:
         with open(os.path.join(ROOT, MAP), encoding="utf-8") as f:
             raw = f.read().split("\n")
     except OSError:
-        return lines, foreign, own, foreign_only, slow, [f"{MAP} is missing"]
+        return lines, foreign, own, foreign_only, slow, readers, [f"{MAP} is missing"]
     fo_names = []   # (line, name) of each FOREIGN-ONLY line, checked once every FOREIGN line is read
+    rd_names = []   # (line, name) of each READERS name, checked the same way
     for no, text in enumerate(raw, 1):
         body, _, comment = text.partition("#")
         words = body.split()
@@ -481,6 +536,12 @@ def parse_map(repo):
             if rest:
                 fo_names.append((no, rest[0]))
                 foreign_only.extend((no, rest[0], t) for t in rest[1:])
+            continue
+        if head == "READERS":
+            if not rest:
+                problems.append(f"{where}: READERS names no name (check a)")
+            readers.update(rest)
+            rd_names.extend((no, n) for n in rest)
             continue
         if head == "SLOW":
             if not rest:
@@ -535,7 +596,10 @@ def parse_map(repo):
     for no, name in fo_names:
         if name not in foreign:
             problems.append(f"{MAP}:{no}: FOREIGN-ONLY {name}: {name} is not a FOREIGN name (check a)")
-    return lines, foreign, own, foreign_only, slow, problems
+    for no, name in rd_names:
+        if name not in foreign:
+            problems.append(f"{MAP}:{no}: READERS {name}: {name} is not a FOREIGN name (check a)")
+    return lines, foreign, own, foreign_only, slow, readers, problems
 
 
 # ---- check (f): directory listings ------------------------------------------------------------------------------
@@ -755,11 +819,67 @@ def check(repo):
             problems.append(f"{MAP}:{lines[0].no}: {t} {drivers[t]} but is missing from the HUB line of {pat} (check i)")
     # (j) the Slow tier follows measured seconds
     problems += check_slow(repo)
+    # (k) a READERS name's readers are declared
+    problems += check_readers(repo, walkers)
     if problems:
         return problems, ""
     summary = (f"{len(repo.map_lines)} lines, {len(sources)} sources placed, {len(dirs)} fixture dirs, "
                f"{len(walkers)} walkers, {len(own)} own-listings, {len(slow)} slow")
     return [], summary
+
+
+def reader_reads(t, text, name, files, segs):
+    """Check (k2): the reads of the READERS name `name` in test t's text, each a sorted tuple of the tracked files
+    named `name` it may read (several when a last dir segment is shared). `segs` maps each last dir segment to its
+    files."""
+    got = []
+    for f in files:
+        if f in text and re.search(READ_LITERAL.format(f=re.escape(f)), text):
+            got.append((f,))
+    if segs and ("'" + name in text or '"' + name in text):
+        rx = READ_SEGMENTS.format(segs="|".join(re.escape(s) for s in sorted(segs)), name=re.escape(name))
+        for seg in sorted({m.group(1) for m in re.finditer(rx, text)}):
+            got.append(tuple(sorted(segs[seg])))
+    m = re.match(r"skills/([^/]+)/tests/", t)
+    if m:
+        up = f"skills/{m.group(1)}/{name}"
+        if up in files and re.search(READ_UP.format(name=re.escape(name)), text):
+            got.append((up,))
+    return sorted(set(got))
+
+
+def check_readers(repo, walkers):
+    """Check (k)'s problems: each READERS name's readers lines against the tests that name it and read its files."""
+    problems = []
+    for name in sorted(repo.readers):
+        files = sorted(p for p in repo.tracked if os.path.basename(p) == name)
+        segs = {}
+        for f in files:
+            if os.path.dirname(f):
+                segs.setdefault(os.path.basename(os.path.dirname(f)), []).append(f)
+        on = {f: set().union(*(l.entries for l in repo.matching(f) if l.kind == "PLAIN")) for f in files}
+        declared = set().union(*on.values())
+        exempt = repo.foreign_only_tests.get(name, set()) | walkers
+        why = {t: f"names {name}" for t in repo.namers(name, "tests")}
+        for h in sorted(c for c in repo.namers(name, "carriers") if c.startswith(LIB)):
+            for t in repo.namers(os.path.basename(h), "tests"):
+                why.setdefault(t, f"names {h}, which names {name}")
+        # (k1) every namer is declared on some file's line
+        for t in sorted(set(why) - exempt - declared):
+            problems.append(f"{t} {why[t]} but is on no line of a {name} file (check k)")
+        # (k2) a read of one file is declared on that file's line (a read holds the name, so only namers are read)
+        for t in sorted(repo.namers(name, "tests") - exempt):
+            for group in reader_reads(t, repo.text[t], name, files, segs):
+                if not any(t in on[f] for f in group):
+                    g = " or ".join(group)
+                    problems.append(f"{t} reads {g} but is on no line of {g} (check k)")
+        # (k3) a readers line holds only tests that name the name, or a tests/lib helper that does
+        for l in repo.map_lines:
+            if l.kind == "PLAIN" and l.pattern.split("/")[-1] == name:
+                for t in sorted(l.entries - {SELF_TESTS}):
+                    if t not in why:
+                        problems.append(f"{MAP}:{l.no}: {t} does not name {name}; drop it from that readers line (check k)")
+    return problems
 
 
 def check_slow(repo):
@@ -814,7 +934,7 @@ def check_slow(repo):
 # ---- the CLI ----------------------------------------------------------------------------------------------------
 
 def changed_paths(base):
-    """(full reason | None, merge base, source, paths) from git."""
+    """(full reason | None, merge base, source, paths, untracked) from git: untracked is the paths no diff lists."""
     revs = [("--base", base)] if base is not None else [(r, r) for r in ("origin/HEAD", "origin/master", "origin/main")]
     sha = source = None
     for source_name, rev in revs:
@@ -824,18 +944,19 @@ def changed_paths(base):
             break
     if sha is None:
         if base is not None:
-            return f"base {base} does not resolve", None, None, []
-        return "no base: origin/HEAD, origin/master and origin/main do not resolve", None, None, []
+            return f"base {base} does not resolve", None, None, [], set()
+        return "no base: origin/HEAD, origin/master and origin/main do not resolve", None, None, [], set()
     rc, out = git("merge-base", sha, "HEAD")
     if rc != 0 or not out.strip():
-        return f"no merge base of {sha[:12]} and HEAD (a shallow clone?)", None, None, []
+        return f"no merge base of {sha[:12]} and HEAD (a shallow clone?)", None, None, [], set()
     mb = out.decode().strip()
     rc, diff = git("diff", "-z", "--name-only", "--no-renames", mb)
     if rc != 0:
-        return f"git diff from {mb[:12]} failed", None, None, []
+        return f"git diff from {mb[:12]} failed", None, None, [], set()
     _rc, others = git("ls-files", "-z", "--others", "--exclude-standard")
-    paths = {p for p in (diff + b"\0" + others).decode("utf-8", "replace").split("\0") if p}
-    return None, mb, source, paths
+    listed = {p for p in diff.decode("utf-8", "replace").split("\0") if p}
+    untracked = {p for p in others.decode("utf-8", "replace").split("\0") if p} - listed
+    return None, mb, source, listed | untracked, untracked
 
 
 def usage(msg=""):
@@ -856,7 +977,7 @@ def slow_cmd(rest):
     elif rest:
         return usage(f"slow takes --base REV or --paths P..., got {' '.join(rest)}")
     if paths is None:
-        full, _mb, _source, paths = changed_paths(base)
+        full, _mb, _source, paths, _untracked = changed_paths(base)
         if full:
             paths = []   # the diff cannot be read: nothing counts as changed, so every SLOW suite is OUT
     changed = set(paths)
@@ -895,12 +1016,13 @@ def main(argv):
             paths, i = rest[i + 1:], len(rest)
         else:
             return usage(f"unknown argument {a}")
+    untracked = set()   # --paths never leaves a path out
     if paths is not None:
         if base is not None:
             return usage("--paths takes no --base")
         mb = source = "-"
     else:
-        full, mb, source, paths = changed_paths(base)
+        full, mb, source, paths, untracked = changed_paths(base)
         if full:
             print(f"FULL\t{full}")
             return 0
@@ -909,6 +1031,17 @@ def main(argv):
         print(f"FULL\tno changed paths from {base if base is not None else (mb if mb != '-' else 'the given paths')}")
         return 0
     repo = Repo()
+    # Changed paths: an untracked path no line places is local scratch CI never sees, so it is left out with a note.
+    left = [p for p in paths if p in untracked and not collected(p)
+            and not any(l.kind != "ALSO" for l in repo.matching(p))]
+    for p in left:
+        print(f"fast-tier: {p}: untracked and placed by no map line, left out (CI never sees it)", file=sys.stderr)
+    if left:
+        paths = [p for p in paths if p not in set(left)]
+        if not paths:
+            print(f"FULL\tno changed paths from {base if base is not None else mb} once {len(left)} untracked paths "
+                  f"no map line places are left out")
+            return 0
     full, selected = repo.select(paths, ignore_full)
     if full:
         print(f"FULL\t{full}")

@@ -105,6 +105,8 @@ export function section(text, startRe) {
   return out.join('\n')
 }
 
-// How many skills the plugin ships: directories under skills/ holding a SKILL.md (`_shared` holds none).
-export const skillCount = () => fs.readdirSync(path.join(root, 'skills'), { withFileTypes: true })
-  .filter((e) => e.isDirectory() && fs.existsSync(path.join(root, 'skills', e.name, 'SKILL.md'))).length
+// How many skills the plugin ships: the directories under skills/ but `_shared` whose top holds a .md file, so a
+// deleted skill's leftovers (an ignored `__pycache__/`, a `.DS_Store`) count as none. `dir` is for a test's temp tree.
+export const skillCount = (dir = path.join(root, 'skills')) => fs.readdirSync(dir, { withFileTypes: true })
+  .filter((e) => e.isDirectory() && e.name !== '_shared' && fs.readdirSync(path.join(dir, e.name), { withFileTypes: true })
+    .some((f) => f.isFile() && f.name.endsWith('.md'))).length
