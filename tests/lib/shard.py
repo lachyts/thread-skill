@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""The full suite's shard split (ADR 0073 d3, p43-3; measured weights p43-6): which of N shards runs each test file.
+"""The suite's shard split (ADR 0073 d3, p43-3; measured weights p43-6): which of N shards runs each test file.
 
-`bash tests/run.sh --shard K/N` runs shard K of N (.github/workflows/full-suite.yml runs every shard on both OSes on
-each push to master); `bash tests/run.sh --shard-plan N` prints the whole split and runs nothing. Stdlib only: it
-writes nothing and imports no repo module. This docstring is the one copy of its rules.
+`bash tests/run.sh --shard K/N` runs shard K of N of the full suite (.github/workflows/full-suite.yml runs every shard
+on both OSes on each push to master); `bash tests/run.sh --shard-plan N` prints the whole split and runs nothing.
+`--fast --shard K/N` and `--fast --shard-plan N` (p54-10, ADR 0084 d4) do the same for the fast tier's selection: run.sh
+selects first and passes only the selection. Stdlib only: it writes nothing and imports no repo module. This docstring
+is the one copy of its rules.
 
     python3 tests/lib/shard.py <N>
     python3 tests/lib/shard.py --order
 
 Input, on stdin, one entry per line in run.sh's order: `@merge-task-self-tests` (run.sh's two merge-task.sh
-self-tests), then every collected test file, repo-relative. Output: one `<k>\t<entry>` line per entry, in input order,
+self-tests), then every collected test file, repo-relative; with --fast, only the entries the fast tier selected (the
+self-tests among them only when it selected them). No input entries is no output, exit 0. Output: one `<k>\t<entry>` line per entry, in input order,
 k in 1..N. `--order` (p54-3) prints the same entries instead, one per line, longest first: by load (below), ties by
 path, the self-tests by their weight. run.sh passes node's files through it, so the slowest node file starts first
 (tests/lib/node-run.mjs keeps the order it is given).

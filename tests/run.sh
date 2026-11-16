@@ -2,7 +2,8 @@
 # The one test entrypoint. `make test` is the full suite (the self-rollout's completion verifier); `make test-fast`
 # (`--fast`) is the fast tier (its verifier, ADR 0073 d1); `--only <test file>...` runs the named files; `--shard K/N`
 # runs shard K of the full suite split N ways (CI's full-suite.yml, ADR 0073 d3) and `--shard-plan N` prints that
-# split and runs nothing. bash 3.2-compatible (macOS).
+# split and runs nothing; `--fast --shard K/N` and `--fast --shard-plan N` do the same for the fast tier's selection
+# (p54-10, ADR 0084 d4), so a PR's check can run it as several jobs. bash 3.2-compatible (macOS).
 #
 # Modes. Every mode runs the always-run steps (bash and python syntax, the workflow parse, the fast-tier map check)
 # and ends with the check that the run wrote nothing into the checkout. Full mode then runs every suite. --fast runs
@@ -14,14 +15,23 @@
 # once; a shard.py failure is a red `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's
 # `<k><TAB><entry>` lines for the same entries and exits before any step, writing nothing.
 #
+# The fast tier's shards (p54-10, ADR 0084 d4). `--fast --shard K/N` selects first, exactly as --fast does (its
+# full-suite fallbacks and the Slow tier's filter included), then hands that selection, in run.sh's order, to shard.py
+# and runs shard K of it, so the N shards together run the selection exactly once. The merge-task self-tests run only
+# when the selection holds them, and then in shard 1. A selection smaller than N leaves some shards nothing but the
+# always-run steps, and such a shard passes. `--fast --shard-plan N` selects (its `== fast tier` and `== slow tier`
+# lines go to stderr), prints the split of the selection on stdout and exits before any step. --fast comes first:
+# `--shard K/N --fast` exits 2.
+#
 # The Slow tier (p54-1, ADR 0084 d3). THREAD_SKIP_SLOW=1 (GitHub's check sets it on its `make test-fast` step) leaves
-# the SLOW suites tests/fast-tier.map declares out of a --fast run, after the mode block, so the full-suite fallbacks (a
-# FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself edits still
-# runs (fast-tier.py's `slow` prints it KEPT). The run prints one `== slow tier: left out <N> suites (THREAD_SKIP_SLOW=1)`
+# the SLOW suites tests/fast-tier.map declares out of a --fast run, after the selection (fast_select), so the full-suite
+# fallbacks (a FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself
+# edits still runs (fast-tier.py's `slow` prints it KEPT). The run prints one `== slow tier: left out <N> suites (THREAD_SKIP_SLOW=1)`
 # line naming the ones it removed, then a `   kept, the diff edits it:` line when it kept one. A failed `slow` leaves
-# nothing out and says so. Empty or unset is off; any other value than 1 exits 2 before any step. Full mode, --only,
-# --shard and --shard-plan ignore it, so master's full suite and the completion verifier run the Slow tier, and so does
-# --fast without it (the Mac's verify, an agent's Checkpoint). run.sh unsets it, so no suite or inner run inherits it.
+# nothing out and says so. Empty or unset is off; any other value than 1 exits 2 before any step. --fast --shard and
+# --fast --shard-plan read it as --fast does, before the split. Full mode, --only, and --shard and --shard-plan without
+# --fast ignore it, so master's full suite and the completion verifier run the Slow tier, and so does --fast without it
+# (the Mac's verify, an agent's Checkpoint). run.sh unsets it, so no suite or inner run inherits it.
 #
 # Hermetic by construction: HOME and the global git config point into a temp dir, so any stray default
 # (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
@@ -86,23 +96,34 @@ cd "$(dirname "$0")/.."
 root=$(pwd)
 shopt -s nullglob
 
-usage() { echo "usage: bash tests/run.sh [--fast | --only <test file>... | --shard K/N | --shard-plan N]" >&2; exit 2; }
-mode=full; only=(); shard_k=; shard_n=
+usage() {
+  echo "usage: bash tests/run.sh [--fast [--shard K/N | --shard-plan N] | --only <test file>... | --shard K/N | --shard-plan N]" >&2
+  exit 2
+}
+# fast=1 when the run reads the fast tier's selection: --fast alone (mode fast), or with --shard or --shard-plan.
+mode=full; fast=0; only=(); shard_k=; shard_n=
+# shard_args <arg>...: --shard K/N or --shard-plan N, the last arguments, into mode, shard_k and shard_n; else usage.
+shard_args() {
+  case "${1:-}" in
+    --shard)
+      mode=shard; shift; [ "$#" -eq 1 ] || usage
+      case "$1" in */*) shard_k=${1%%/*}; shard_n=${1#*/} ;; *) usage ;; esac
+      case "$shard_k" in ''|*[!0-9]*) usage ;; esac
+      case "$shard_n" in ''|*[!0-9]*) usage ;; esac
+      shard_k=$((10#$shard_k)); shard_n=$((10#$shard_n))
+      [ "$shard_k" -ge 1 ] && [ "$shard_k" -le "$shard_n" ] || usage ;;
+    --shard-plan)
+      mode=plan; shift; [ "$#" -eq 1 ] || usage
+      case "$1" in ''|*[!0-9]*) usage ;; esac
+      shard_n=$((10#$1)); [ "$shard_n" -ge 1 ] || usage ;;
+    *) usage ;;
+  esac
+}
 case "${1:-}" in
   '') ;;
-  --fast) mode=fast; shift; [ "$#" -eq 0 ] || usage ;;
+  --fast) mode=fast; fast=1; shift; [ "$#" -eq 0 ] || shard_args "$@" ;;
   --only) mode=only; shift; [ "$#" -gt 0 ] || usage; only=("$@") ;;
-  --shard)
-    mode=shard; shift; [ "$#" -eq 1 ] || usage
-    case "$1" in */*) shard_k=${1%%/*}; shard_n=${1#*/} ;; *) usage ;; esac
-    case "$shard_k" in ''|*[!0-9]*) usage ;; esac
-    case "$shard_n" in ''|*[!0-9]*) usage ;; esac
-    shard_k=$((10#$shard_k)); shard_n=$((10#$shard_n))
-    [ "$shard_k" -ge 1 ] && [ "$shard_k" -le "$shard_n" ] || usage ;;
-  --shard-plan)
-    mode=plan; shift; [ "$#" -eq 1 ] || usage
-    case "$1" in ''|*[!0-9]*) usage ;; esac
-    shard_n=$((10#$1)); [ "$shard_n" -ge 1 ] || usage ;;
+  --shard|--shard-plan) shard_args "$@" ;;
   *) usage ;;
 esac
 # The Slow tier's flag (the header's "The Slow tier"): captured here, then unset below with THREAD_VERIFY_BASE.
@@ -285,14 +306,78 @@ if [ "$mode" = only ]; then
   done
 fi
 
-# shard_split <N>: tests/lib/shard.py's `<k><TAB><entry>` line for the merge-task self-tests and every collected test,
-# in run.sh's order (the self-tests, the shell suites largest first, the node files).
+# What this run runs: run_sh (largest first, as sh_tests), run_node, and the two merge-task self-tests when self_tests=1.
+# keep <list>: the entries of sh_tests and node_tests that the newline-separated <list> names, in their order.
+keep() {
+  local t
+  run_sh=(); run_node=()
+  for t in ${sh_tests[@]+"${sh_tests[@]}"}; do case "$nl$1$nl" in *"$nl$t$nl"*) run_sh+=("$t") ;; esac; done
+  for t in ${node_tests[@]+"${node_tests[@]}"}; do case "$nl$1$nl" in *"$nl$t$nl"*) run_node+=("$t") ;; esac; done
+}
+run_sh=(${sh_tests[@]+"${sh_tests[@]}"}); run_node=(${node_tests[@]+"${node_tests[@]}"}); self_tests=1
+
+# fast_select: the fast tier's selection (the header's "Modes") into run_sh, run_node and self_tests, the full suite on
+# each fallback, then the Slow tier's filter under THREAD_SKIP_SLOW=1 (the header's "The Slow tier"), which drops each
+# SLOW suite `slow` prints OUT from whatever the selection chose, the full-suite fallbacks included, and names the ones
+# it removed. It prints its `== fast tier` and `== slow tier` lines; --fast --shard-plan sends them to stderr.
+fast_select() {
+  sel=$(python3 tests/lib/fast-tier.py select ${verify_base:+--base "$verify_base"}); src=$?
+  head=${sel%%"$nl"*}; picked=""; case "$sel" in *"$nl"*) picked=${sel#*"$nl"} ;; esac
+  kind=${head%%"$tab"*}
+  if [ "$src" -ne 0 ]; then
+    echo "== fast tier: full suite (selector failed (rc $src))"
+  elif [ "$kind" = FULL ] && [ "$head" != FULL ]; then
+    echo "== fast tier: full suite (${head#FULL"$tab"})"
+  elif [ "$kind" = FAST ]; then
+    IFS=$tab read -r _ fbase fsource fcount <<< "$head"
+    keep "$picked"
+    case "$nl$picked$nl" in *"$nl@merge-task-self-tests$nl"*) self_tests=1 ;; *) self_tests=0 ;; esac
+    k=$(( ${#run_sh[@]} + ${#run_node[@]} ))
+    echo "== fast tier: base ${fbase:0:12} ($fsource), $fcount changed paths, $k test files"
+    [ "$self_tests" = 1 ] && echo "   the merge-task self-tests"
+    for t in ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"}; do echo "   $t"; done
+  else
+    echo "== fast tier: full suite (selector output unreadable: ${head:0:80})"
+  fi
+  [ "$skip_slow" = 1 ] || return 0
+  slow=$(python3 tests/lib/fast-tier.py slow ${verify_base:+--base "$verify_base"}); src=$?
+  if [ "$src" -ne 0 ]; then
+    echo "== slow tier: none left out (fast-tier.py slow failed (rc $src))"
+    return 0
+  fi
+  slow_out=""; slow_kept=""
+  while IFS=$tab read -r sk st; do
+    case "$sk" in OUT) slow_out="$slow_out$st$nl" ;; KEPT) slow_kept="$slow_kept$st$nl" ;; esac
+  done <<< "$slow"
+  left=(); kept=(); still_sh=(); still_node=()
+  for t in ${run_sh[@]+"${run_sh[@]}"}; do
+    case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
+    still_sh+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
+  done
+  for t in ${run_node[@]+"${run_node[@]}"}; do
+    case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
+    still_node+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
+  done
+  run_sh=(${still_sh[@]+"${still_sh[@]}"}); run_node=(${still_node[@]+"${still_node[@]}"})
+  names=""; [ "${#left[@]}" -eq 0 ] || names=": ${left[*]}"
+  echo "== slow tier: left out ${#left[@]} suites (THREAD_SKIP_SLOW=1)$names"
+  [ "${#kept[@]}" -eq 0 ] || echo "   kept, the diff edits it: ${kept[*]}"
+}
+
+# shard_split <N>: tests/lib/shard.py's `<k><TAB><entry>` line for each entry of what this run would run, in run.sh's
+# order (the self-tests, the shell suites largest first, the node files): every collected test and the merge-task
+# self-tests, or, with --fast, the selection fast_select left in run_sh, run_node and self_tests.
 shard_split() {
-  printf '%s\n' @merge-task-self-tests ${sh_tests[@]+"${sh_tests[@]}"} ${node_tests[@]+"${node_tests[@]}"} \
+  local self=(); [ "$self_tests" = 1 ] && self=(@merge-task-self-tests)
+  printf '%s\n' ${self[@]+"${self[@]}"} ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"} \
     | python3 tests/lib/shard.py "$1"
 }
-# --shard-plan: the dry run. It prints the split and exits before any step; the trap removes scratch.
-if [ "$mode" = plan ]; then shard_split "$shard_n"; exit $?; fi
+# --shard-plan: the dry run. It prints the split and exits before any step; the trap removes scratch. With --fast it
+# selects first, its lines on stderr, so stdout holds only the split.
+if [ "$mode" = plan ]; then
+  [ "$fast" = 0 ] || fast_select >&2
+  shard_split "$shard_n"; exit $?
+fi
 
 syntax_sh() { local f r=0; for f in "$@"; do bash -n "$f" || r=1; done; return $r; }
 # Warnings are errors: an invalid escape such as '\`' in a non-raw string is a silent DeprecationWarning on python
@@ -332,38 +417,15 @@ step "bytecode cache (${#warm_dirs[@]} dirs)"   warm ${warm_dirs[@]+"${warm_dirs
 # The map check runs in every mode, so a stale map line turns every run red, not only a run that selects its suite.
 step "fast-tier map check"                      python3 tests/lib/fast-tier.py check
 
-# What this run runs: run_sh (largest first, as sh_tests), run_node, and the two merge-task self-tests when self_tests=1.
-# keep <list>: the entries of sh_tests and node_tests that the newline-separated <list> names, in their order.
-keep() {
-  local t
-  run_sh=(); run_node=()
-  for t in ${sh_tests[@]+"${sh_tests[@]}"}; do case "$nl$1$nl" in *"$nl$t$nl"*) run_sh+=("$t") ;; esac; done
-  for t in ${node_tests[@]+"${node_tests[@]}"}; do case "$nl$1$nl" in *"$nl$t$nl"*) run_node+=("$t") ;; esac; done
-}
-run_sh=(${sh_tests[@]+"${sh_tests[@]}"}); run_node=(${node_tests[@]+"${node_tests[@]}"}); self_tests=1
 if [ "$mode" = fast ]; then
-  sel=$(python3 tests/lib/fast-tier.py select ${verify_base:+--base "$verify_base"}); src=$?
-  head=${sel%%"$nl"*}; picked=""; case "$sel" in *"$nl"*) picked=${sel#*"$nl"} ;; esac
-  kind=${head%%"$tab"*}
-  if [ "$src" -ne 0 ]; then
-    echo "== fast tier: full suite (selector failed (rc $src))"
-  elif [ "$kind" = FULL ] && [ "$head" != FULL ]; then
-    echo "== fast tier: full suite (${head#FULL"$tab"})"
-  elif [ "$kind" = FAST ]; then
-    IFS=$tab read -r _ fbase fsource fcount <<< "$head"
-    keep "$picked"
-    case "$nl$picked$nl" in *"$nl@merge-task-self-tests$nl"*) self_tests=1 ;; *) self_tests=0 ;; esac
-    k=$(( ${#run_sh[@]} + ${#run_node[@]} ))
-    echo "== fast tier: base ${fbase:0:12} ($fsource), $fcount changed paths, $k test files"
-    [ "$self_tests" = 1 ] && echo "   the merge-task self-tests"
-    for t in ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"}; do echo "   $t"; done
-  else
-    echo "== fast tier: full suite (selector output unreadable: ${head:0:80})"
-  fi
+  fast_select
 elif [ "$mode" = only ]; then
   keep "$(printf '%s\n' "${only[@]}")"; self_tests=0
 elif [ "$mode" = shard ]; then
-  # shard_pick: this shard's entries into $mine. A shard.py failure fails the step, and the run then runs no test.
+  # With --fast the shard splits the selection, Slow tier filter included, so the N shards run it exactly once.
+  [ "$fast" = 0 ] || fast_select
+  # shard_pick: this shard's entries into $mine, split from what run_sh, run_node and self_tests hold, which it then
+  # empties for keep below. A shard.py failure fails the step, and the run then runs no test.
   shard_pick() {
     local split sk se
     split=$(shard_split "$shard_n") || { echo "shard.py failed, so this shard runs no test"; return 1; }
@@ -371,8 +433,9 @@ elif [ "$mode" = shard ]; then
     while IFS=$tab read -r sk se; do [ "$sk" = "$shard_k" ] && mine="$mine$se$nl"; done <<< "$split"
     shard_ok=1
   }
-  run_sh=(); run_node=(); self_tests=0; shard_ok=0
+  shard_ok=0
   step "shard split" shard_pick
+  run_sh=(); run_node=(); self_tests=0
   if [ "$shard_ok" = 1 ]; then
     keep "$mine"
     case "$nl$mine" in *"$nl@merge-task-self-tests$nl"*) self_tests=1 ;; esac
@@ -380,33 +443,6 @@ elif [ "$mode" = shard ]; then
     echo "== shard $shard_k/$shard_n: $k test files"
     [ "$self_tests" = 1 ] && echo "   the merge-task self-tests"
     for t in ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"}; do echo "   $t"; done
-  fi
-fi
-
-# The Slow tier (the header's "The Slow tier"): under THREAD_SKIP_SLOW=1, --fast drops each SLOW suite `slow` prints OUT
-# from whatever the mode block chose, the full-suite fallbacks included, and names the ones it removed.
-if [ "$mode" = fast ] && [ "$skip_slow" = 1 ]; then
-  slow=$(python3 tests/lib/fast-tier.py slow ${verify_base:+--base "$verify_base"}); src=$?
-  if [ "$src" -ne 0 ]; then
-    echo "== slow tier: none left out (fast-tier.py slow failed (rc $src))"
-  else
-    slow_out=""; slow_kept=""
-    while IFS=$tab read -r sk st; do
-      case "$sk" in OUT) slow_out="$slow_out$st$nl" ;; KEPT) slow_kept="$slow_kept$st$nl" ;; esac
-    done <<< "$slow"
-    left=(); kept=(); still_sh=(); still_node=()
-    for t in ${run_sh[@]+"${run_sh[@]}"}; do
-      case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
-      still_sh+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
-    done
-    for t in ${run_node[@]+"${run_node[@]}"}; do
-      case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
-      still_node+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
-    done
-    run_sh=(${still_sh[@]+"${still_sh[@]}"}); run_node=(${still_node[@]+"${still_node[@]}"})
-    names=""; [ "${#left[@]}" -eq 0 ] || names=": ${left[*]}"
-    echo "== slow tier: left out ${#left[@]} suites (THREAD_SKIP_SLOW=1)$names"
-    [ "${#kept[@]}" -eq 0 ] || echo "   kept, the diff edits it: ${kept[*]}"
   fi
 fi
 

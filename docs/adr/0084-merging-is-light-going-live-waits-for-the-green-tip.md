@@ -4,8 +4,11 @@ Date: 2026-11-16
 Status: proposed. Grilled with Lachy on 2026-11-16, from the suite audit of the merge wait
 (`docs/audits/test-suite-audit-2026-11-16.md`). Amends ADR 0025 (the required checks), ADR 0073 d3 and its "macOS
 stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset (the
-`make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job still runs, unrequired,
-until Phase 54's task 2). d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
+`make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job ran on, unrequired,
+until Phase 54's task 2). p54-2 built the rest of d3's PR side: test.yml's PR job runs on ubuntu-latest alone, pinned by
+`tests/ci-workflows.test.mjs` W1 and W3 (no pull_request job on a macOS runner), and the Reflection's CI headroom reads
+the macOS job as retired from 2026-11-16 (`reflect.py`'s `CI_RETIRED`): said once, in the week whose window holds the
+date, and never a breach from that week on. d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
 held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15), joining at 180 s and leaving only
 under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
 under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite
@@ -23,6 +26,19 @@ rows 2 and 5 built by p54-3: `tests/run.sh` warms a bytecode cache in its scratc
 `PYTHONPYCACHEPREFIX`, exported to every suite and node file), so the engine loads compiled; node's files start
 longest first, by measured seconds in `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs
 them in the shard split), run through `tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path.
+Decided for you 12's engine reading built by p54-11: a roll-up check, a required check whose workflow job has the
+aggregator shape (a non-empty `needs:` and a job-level `if:` holding `always()` or `!cancelled()`, read at the
+integrated head; a name that is only expressions matches nothing), is read through the jobs it needs by
+`lead-integrate.py shards`, at merge-task's three sites: the infra re-run classifies the run's jobs minus the
+roll-up's own, so a shard's setup failure is re-run; a shard cut alone takes ADR 0073 d4's cancelled path (skipped
+neutral, the cut-again rule per needed job); and a roll-up whose needed jobs all passed or were skipped falls back to
+itself, today's read. CI headroom records the slowest of its needed jobs and itself by seconds, against that job's own
+limit, and the line's `shard` field names the needed job.
+d4's Speed fix from the audit's row 1 begun by p54-10: `tests/run.sh --fast --shard K/N` selects as `--fast` does (its
+full-suite fallbacks and the Slow tier's filter included), then runs shard K of that selection by `tests/lib/shard.py`'s
+split, so the N shards together run it exactly once, the merge-task self-tests in shard 1 when it holds them; a shard
+left nothing passes on the always-run steps, and `--fast --shard-plan N` prints the split and runs nothing
+(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it are not yet built.
 d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
 `tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
 preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and

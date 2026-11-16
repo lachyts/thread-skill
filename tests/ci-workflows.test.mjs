@@ -1,12 +1,15 @@
-// p43-3 (ADR 0073 d3, ADR 0025): the CI workflows. A PR's two required checks run the fast tier against the PR's base;
-// every push to master runs the full suite as a matrix of shards, split by tests/lib/shard.py.
-// - W1: test.yml's job `test` expands, over its matrix, to exactly the two required-check names, carries no job-level
-//   `if:` (a skipped required job reports success), and runs on pull_request only.
+// p43-3 (ADR 0073 d3, ADR 0025): the CI workflows. A PR's one required check runs the fast tier against the PR's base,
+// on ubuntu alone (macOS left the PR checks by ADR 0084 d3, p54-2, and runs only in master's shards); every push to
+// master runs the full suite as a matrix of shards on both OSes, split by tests/lib/shard.py.
+// - W1: test.yml's job `test` expands, over its one-value matrix, to exactly the one required-check name,
+//   `make test (ubuntu-latest)`, carries no job-level `if:` (a skipped required job reports success), and runs on
+//   pull_request only.
 // - W2: that job runs `make test-fast` with THREAD_VERIFY_BASE the PR's base sha and THREAD_SKIP_SLOW=1 (it leaves the
 //   Slow tier out, ADR 0084 d3), on a full-history checkout, under one plain timeout-minutes (merge-task's CI headroom
 //   record reads only a whole number; the value is p43-6's audit's).
-// - W3: no other job in any workflow takes a required-check name, by expansion or by merge-gate.py's rules 1-3; and
-//   full-suite.yml runs on push to master only.
+// - W3: no other job in any workflow takes the required-check name, by expansion or by merge-gate.py's rules 1-3; no
+//   job in a workflow triggered by pull_request runs on a macos-* runner (ADR 0084 d3); and full-suite.yml runs on push
+//   to master only.
 // - W4: full-suite.yml's shard matrix and its run line agree on N, and each OS has its own timeout-minutes (p43-6's
 //   audit: about twice that OS's slowest shard); its shards never set THREAD_SKIP_SLOW, so master runs the Slow tier.
 // - W5: every .github/workflows/*.yml parses (PyYAML) to a mapping with `jobs` (check-workflow-parse.sh covers only
@@ -37,8 +40,10 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const WF = '.github/workflows'
-const REQUIRED = ['make test (ubuntu-latest)', 'make test (macos-latest)']
-const OSES = ['ubuntu-latest', 'macos-latest']
+const REQUIRED = ['make test (ubuntu-latest)']
+// PR_OSES: test.yml's matrix (W1). FULL_OSES: full-suite.yml's shard matrix (W4, limits()), which keeps macOS.
+const PR_OSES = ['ubuntu-latest']
+const FULL_OSES = ['ubuntu-latest', 'macos-latest']
 const SELF_TESTS = '@merge-task-self-tests'
 
 const py = (code, args = []) => {
@@ -96,12 +101,12 @@ test('W5: every workflow file parses to a mapping that has jobs', () => {
   }
 })
 
-test('W1: test.yml\'s job `test` is the two required checks, unskippable, on pull_request only (ADR 0025)', () => {
+test('W1: test.yml\'s job `test` is the one required check, on ubuntu, unskippable, on pull_request only (ADR 0025, 0084 d3)', () => {
   const wf = parsed[TEST]
   const job = wf.jobs.test
   assert.ok(job, 'job id test')
   assert.equal(job.name, 'make test (${{ matrix.os }})')
-  assert.deepEqual(job.strategy.matrix.os, OSES)
+  assert.deepEqual(job.strategy.matrix.os, PR_OSES)
   assert.deepEqual(expand(job.name, job.strategy.matrix), REQUIRED)
   assert.equal(job.strategy['fail-fast'], false)
   assert.equal(job.if, undefined, 'no job-level if: a skipped required job reports success')
@@ -121,9 +126,17 @@ test('W2: the PR job runs the fast tier against the PR\'s base, on a full-histor
   assert.equal(job['timeout-minutes'], 55)
 })
 
-test('W3: no other job takes a required-check name; full-suite.yml runs on push to master only', () => {
+test('W3: no other job takes the required-check name, no PR job runs on macOS; full-suite.yml runs on push to master only', () => {
   for (const f of files) {
+    // on: is a mapping, a list or one event name.
+    const trig = on(parsed[f])
+    const onPr = Array.isArray(trig) ? trig.includes('pull_request')
+      : trig && typeof trig === 'object' ? 'pull_request' in trig : trig === 'pull_request'
     for (const [id, job] of Object.entries(parsed[f].jobs)) {
+      if (onPr) {
+        const runners = expand(String(job['runs-on'] ?? ''), job.strategy?.matrix)
+        assert.deepEqual(runners.filter((r) => r.startsWith('macos-')), [], `${f} job ${id} runs a PR check on macOS (ADR 0084 d3)`)
+      }
       if (f === TEST && id === 'test') continue
       const names = typeof job.name === 'string' ? expand(job.name, job.strategy?.matrix) : [id]
       for (const ctx of REQUIRED) {
@@ -149,17 +162,17 @@ const shardN = () => shardJob().strategy.matrix.shard.length
 const LIMIT_EXPR = /^\$\{\{\s*matrix\.os\s*==\s*'([^']+)'\s*&&\s*(\d+)\s*\|\|\s*(\d+)\s*\}\}$/
 const limits = (job) => {
   const v = job['timeout-minutes']
-  if (Number.isInteger(v)) return Object.fromEntries(OSES.map((os) => [os, v]))
+  if (Number.isInteger(v)) return Object.fromEntries(FULL_OSES.map((os) => [os, v]))
   const m = typeof v === 'string' ? LIMIT_EXPR.exec(v) : null
-  assert.ok(m && OSES.includes(m[1]), `timeout-minutes is a whole number or the matrix.os form: ${JSON.stringify(v)}`)
-  return Object.fromEntries(OSES.map((os) => [os, Number(os === m[1] ? m[2] : m[3])]))
+  assert.ok(m && FULL_OSES.includes(m[1]), `timeout-minutes is a whole number or the matrix.os form: ${JSON.stringify(v)}`)
+  return Object.fromEntries(FULL_OSES.map((os) => [os, Number(os === m[1] ? m[2] : m[3])]))
 }
 
 test('W4: the shard matrix covers both OSes and shards 1..N, and the run line names the same N', () => {
   const job = shardJob()
   const n = shardN()
   assert.ok(n >= 2, `N is at least 2, got ${n}`)
-  assert.deepEqual(job.strategy.matrix.os, OSES)
+  assert.deepEqual(job.strategy.matrix.os, FULL_OSES)
   assert.deepEqual(job.strategy.matrix.shard, Array.from({ length: n }, (_, i) => i + 1))
   assert.equal(job.strategy['fail-fast'], false)
   assert.deepEqual(limits(job), { 'ubuntu-latest': 30, 'macos-latest': 35 })
