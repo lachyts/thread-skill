@@ -68,15 +68,17 @@ never current or moved, and never leads to a merge.
      skills/_shared/scripts/green-tip.py (<why>)`, one that raises `broken: green-tip.py raised <Type>: <msg>`), run
      in process with this pass's child runner: resolve(<checkout>, <d>, checkout=True), gh asked and the record written
      with a 150 s budget on a real pass, under --dry-run neither, 30 s. Kind origin (a repo that publishes no Green
-     tip), or a Green tip at origin's tip, is the pass below with every word as it was. A Green tip behind origin's tip
-     reads every step against it (live-checkout.sh's optional target), in the Green-tip words below. A hold (the ref
-     absent, not an ancestor of origin's tip, unverified or unreadable) moves nothing and never reads origin's tip: the
-     read runs against origin with no target, and only its target-independent forms stand (ahead, busy, unreadable, a
-     helper that breaks, and diverged: the primary's repair, its reset waiting, `repair waits (no Green tip to reset
-     to: <why>)`); current, behind and an overlap read the hold's outcome, before the hold below is asked: `no move:
-     <why> (never origin's tip)` (kind green-held), or for the one transient cause, an unreachable ref, `fetch failed:
-     refs/thread/green: <why>` (kind fetch-failed). The tip is None on every hold, so a real pass makes no
-     self-update.
+     tip) is the pass below with every word as it was. Kind green reads every step against the resolver's commit
+     (live-checkout.sh's optional target: check, content, the reset's overlap and ff), at origin's tip included, so a
+     fetch that moves origin/<d> while the pass runs (merge-task's in-place refresh, land.sh S4, a snapshot cut, in
+     this very checkout) is never followed and its bundle never installed. At origin's tip every word is as it was; a
+     Green tip behind origin's tip reads in the Green-tip words below. A hold (the ref absent, not an ancestor of
+     origin's tip, unverified or unreadable) moves nothing and never reads origin's tip: the read runs against origin
+     with no target, and only its target-independent forms stand (ahead, busy, unreadable, a helper that breaks, and
+     diverged: the primary's repair, its reset waiting, `repair waits (no Green tip to reset to: <why>)`); current,
+     behind and an overlap read the hold's outcome, before the hold below is asked: `no move: <why> (never origin's
+     tip)` (kind green-held), or for the one transient cause, an unreachable ref, `fetch failed: refs/thread/green:
+     <why>` (kind fetch-failed). The tip is None on every hold, so a real pass makes no self-update.
   d. The read (`check`): `current` (HEAD at origin's tip, on any branch; `current at the Green tip <g12> (<n> behind
      origin/<d>: waits on the Green tip)` at a Green tip behind origin's tip); `past the Green tip <g12> by <m> (on
      origin/<d>): waits on the Green tip` (a Green tip only: HEAD on origin but past it, a hand pull say; never moved
@@ -103,8 +105,8 @@ never current or moved, and never leads to a merge.
 
 The repair, the primary only (ADR 0078 d4): a diverged primary returns to origin by itself; nothing is ever merged here.
 Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwise, kind `diverged`, in this order:
-  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block, against the Green tip too
-     when it is behind origin's tip): `busy` reads `repair waits (<why>)` (a half-applied operation, HEAD detached or on
+  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block, against the Green tip too,
+     at origin's tip included): `busy` reads `repair waits (<why>)` (a half-applied operation, HEAD detached or on
      another branch: a commit there is someone's work); a read that fails reads `unreadable: <why>`, kind unreadable.
      `pending` (on origin by content, not yet at the Green tip) reads, after the hold, `repair waits (its content is on
      origin/<d>, not yet at the Green tip <g12>)`, and on a hold `landed` reads `repair waits (no Green tip to reset to:
@@ -704,13 +706,17 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra, gree
     origin = r.get("origin")
     hold_why = r.get("why") if r.get("kind") == "hold" else None
     target = None if hold_why is not None else r.get("target")
-    lead = target if target and target != origin else None  # the Green tip, when it is not origin's tip
+    # pin: the commit every step below reads and moves to, the resolver's verified Green tip whenever its kind is
+    # green, at origin's tip included, so a fetch that moves origin/<d> mid-pass is never followed (c2). lead: the
+    # Green-tip words, only when that tip is not origin's.
+    pin = target if r.get("kind") == "green" and target else None
+    lead = pin if pin and pin != origin else None
     n = r.get("behind")
     green.update(fetched=True, kind="hold" if hold_why is not None else ("green" if lead else "origin"),
                  target=target, origin=origin, behind=n, cause=r.get("cause"), why=r.get("why"))
-    rc, out, _, timed_out = _lc(lc, "check", d, branch, *([lead] if lead else []))
+    rc, out, _, timed_out = _lc(lc, "check", d, branch, *([pin] if pin else []))
     form, m = _form(CHECK_FORMS, rc, out, timed_out)
-    ptip = None if hold_why is not None else (lead or _origin_tip(d, branch))
+    ptip = None if hold_why is not None else (pin or _origin_tip(d, branch))
     if form is None:
         return (f"broken: live-checkout.sh check: {_said(rc, out, timed_out)}", "broken", ptip,
                 branch)
@@ -732,7 +738,7 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra, gree
     if form == "diverged":
         if is_primary:
             return repair(d, lc, primary, branch, tip, (m.group(2), m.group(3)), dry_run, ff_timeout, now, entry, extra,
-                          lead=lead, hold_why=hold_why)
+                          lead=lead, hold_why=hold_why, pin=pin)
         return f"diverged (ahead {m.group(2)}, behind {m.group(3)}): never integrated here", "diverged", tip, branch
     if form == "busy":
         return f"busy: {m.group(2)}", "busy", tip, branch
@@ -752,7 +758,7 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra, gree
             return (f"would move {head[:12]}..{tip[:12]} ({behind} commits) to the Green tip ({n} behind "
                     f"origin/{branch})", "dry", tip, branch)
         return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", "dry", tip, branch
-    rc, out, _, timed_out = _lc(lc, "ff", d, branch, *([lead] if lead else []), timeout=ff_timeout)
+    rc, out, _, timed_out = _lc(lc, "ff", d, branch, *([pin] if pin else []), timeout=ff_timeout)
     if timed_out:
         return (f"timed out: git merge --ff-only ran past {ff_timeout} s and was stopped: the working tree may be "
                 f"partly updated (git -C {d} status)", "timed-out", tip, branch)
@@ -778,12 +784,14 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra, gree
 
 # ---- the repair of a diverged primary (ADR 0078 d4; the rules are the module docstring's) ---------------------------------
 
-def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra, lead=None, hold_why=None):
-    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple. lead is the Green tip the reset
-    goes to when it is not origin's tip (its content read against it too); hold_why a hold's why: no Green tip, so the
-    reset waits while the read, the hold and the carry run as ever."""
+def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra, lead=None, hold_why=None,
+           pin=None):
+    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple. pin is the Green tip the content is
+    read against and the reset goes to (refresh's pin: at origin's tip included), lead the same commit when it is not
+    origin's tip (the Green-tip words); hold_why a hold's why: no Green tip, so the reset waits while the read, the hold
+    and the carry run as ever."""
     base = f"diverged (ahead {counts[0]}, behind {counts[1]})"
-    rc, out, _, timed_out = _lc(lc, "content", d, branch, *([lead] if lead else []))
+    rc, out, _, timed_out = _lc(lc, "content", d, branch, *([pin] if pin else []))
     form, m = _form(CONTENT_FORMS, rc, out, timed_out)
     if form is None:
         return f"broken: live-checkout.sh content: {_said(rc, out, timed_out)}", "broken", tip, branch
@@ -798,7 +806,7 @@ def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry,
     if h:
         return f"{base}: repair held: {h}", "diverged", tip, branch
     if form == "pending":
-        return (f"{base}: repair waits (its content is on origin/{branch}, not yet at the Green tip {(lead or '')[:12]})",
+        return (f"{base}: repair waits (its content is on origin/{branch}, not yet at the Green tip {(pin or '')[:12]})",
                 "diverged", tip, branch)
     if form == "landed":
         if hold_why is not None:
@@ -809,13 +817,14 @@ def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry,
 
 def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra, green=False):
     """The reset of a primary whose ahead commits are all on origin by content: a backup ref, then `reset --keep` to
-    tip, the pass's target (the Green tip when green, else origin's tip)."""
+    tip, the pass's target as check read it (the Green tip, else origin's tip), the overlap read against that same
+    commit, never the ref as it stands later; green chooses the Green-tip words (a Green tip behind origin's tip)."""
     if green:
         where = f"reset {head[:12]} to the Green tip {tip[:12]} of origin/{branch}"
     else:
         where = f"reset {head[:12]} to origin/{branch} at {tip[:12]}"
     why = f"ahead {counts[0]}, behind {counts[1]}: their content is already on origin"
-    rc, out, _, timed_out = _lc(lc, "overlap", d, tip if green else f"refs/remotes/origin/{branch}")
+    rc, out, _, timed_out = _lc(lc, "overlap", d, tip)
     form, m = _form(OVERLAP_FORMS, rc, out, timed_out)
     if form is None:
         return f"broken: live-checkout.sh overlap: {_said(rc, out, timed_out)}", "broken", tip, branch

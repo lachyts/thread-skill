@@ -21,9 +21,10 @@
 #             transition), S8 S9, S10a-S10c (the candidate's table), I6 (the frozen contract)
 #   carrier   LC1-LC6 (the landing carrier, ADR 0078 d2: run last in an installed pass, its lines, its exit 3, the
 #             `carrier` spell of kind broken, the primary's copy as the fallback, never under --dry-run or from a checkout)
-#   green     GR0-GR7, GR-W, GR-T1-GR-T4, GR-B (ADR 0084 d1, p54-6: the fast-forward, the repair and the self-update stop
-#             at the Green tip; the waits file and its 2 h line; holds that move nothing, never to origin's tip; an
-#             untested ref never followed, gh once per 15 min; past; a kept THREAD.md; the transition across p54-6)
+#   green     GR0-GR7, GR-W, GR-T1-GR-T4, GR-B, GR-R (ADR 0084 d1, p54-6: the fast-forward, the repair and the
+#             self-update stop at the Green tip; the waits file and its 2 h line; holds that move nothing, never to
+#             origin's tip; an untested ref never followed, gh once per 15 min; past; a kept THREAD.md; the transition
+#             across p54-6; a fetch that moves origin/<d> mid-pass never followed)
 # Origins over ssh are git@github.com:o/origin.git, served by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`. Every pid
 # an arm records is checked gone (`gone`). Hermetic: HOME, XDG_STATE_HOME and every path live under mktemp; commits carry
 # an inline identity; global/system git config is ignored; no server runs.
@@ -1335,6 +1336,42 @@ out=$(job --state "$tmp/gr/st4.json")
 has "$out" "failed its smoke run (no move: a stub that always holds" "GR-T4: a candidate whose resolver always holds is refused (no move: is denied)"
 real; commit "real again (gr)"; green_at "$(tip)"; job >/dev/null
 ok "$(same "$pr" "$tmp/bin/primary-refresh.py")|$(same "$root/skills/_shared/scripts/green-tip.py" "$GB")" "same|same" "GR: (the copy and its resolver this tree's again)"
+
+# GR-R: the pass moves to the commit the resolver verified, never to origin/<d> as another fetch leaves it mid-pass
+# (merge-task's in-place refresh, land.sh S4, a cut: this Primary is a self-rollout's twin). The resolver reads
+# origin's tip O, moves refs/remotes/origin/master to N (that other fetch: a commit no full suite passed), then answers
+# green O. Both checkouts reach O, never N, in origin's words, and the self-update installs nothing from N.
+grace() {  # grace <file>: that resolver; the ref moves only while $GR_RACE names N
+  cat > "$1" <<'PY'
+import os, subprocess
+def resolve(repo, branch, **kw):
+    ref = "refs/remotes/origin/" + branch
+    o = subprocess.run(["git", "-C", str(repo), "rev-parse", ref], capture_output=True, text=True).stdout.strip()
+    if os.environ.get("GR_RACE"):
+        subprocess.run(["git", "-C", str(repo), "update-ref", ref, os.environ["GR_RACE"]], capture_output=True)
+    return {"kind": "green", "target": o, "green": o, "origin": o, "behind": 0, "publishes": True, "verified": True,
+            "stepped": False, "fallback": None, "cause": None, "why": "the Green tip %s, 0 behind origin/%s" % (o[:12], branch)}
+PY
+}
+P=$(tip); grace "$tmp/seed/skills/_shared/scripts/green-tip.py"; commit "gr-r resolver"; O=$(tip)
+cp -p "$tmp/seed/skills/_shared/scripts/green-tip.py" "$GB"
+echo "# gr-r mark" >> "$tmp/seed/$SELF"; g -C "$tmp/seed" commit -qam "gr-r untested"; N=$(tip)
+for c in primary agents; do g -C "$tmp/$c" fetch -q "$tmp/seed" master:refs/gr/n; done; g -C "$tmp/seed" reset -q --hard "$O"
+ok "$(head_of "$tmp/primary")|$(head_of "$tmp/agents")|$(git --git-dir "$OK" rev-parse master)" "$P|$P|$O" "GR-R: (both checkouts one behind origin's tip O; N on no origin branch)"
+out=$(GR_RACE="$N" job --state "$tmp/gr/sr.json")
+has "$out" "primary: moved $(c12 "$P")..$(c12 "$O") (1 commits)" "GR-R: the primary moves to O, the commit the resolver read"
+ok "$(head_of "$tmp/primary")|$(head_of "$tmp/agents")" "$O|$O" "GR-R: … both checkouts stand at O, never at N"
+lacks "$out" "$(c12 "$N")" "GR-R: … no line names N"
+lacks "$out" "Green tip" "GR-R: … in origin's words (the Green tip was origin's tip when read)"
+lacks "$out" "self-update" "GR-R: … and the self-update reads O's bundle, the installed one: nothing from N"
+ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "GR-R: … the bin's copy lacks N's mark"
+out=$(GR_RACE="$N" job --state "$tmp/gr/sr.json")
+has "$out" "primary: current" "GR-R: the next pass, raced again: current at O"
+ok "$(head_of "$tmp/primary")|$(head_of "$tmp/agents")" "$O|$O" "GR-R: … neither checkout moves to N"
+for c in primary agents; do g -C "$tmp/$c" update-ref -d refs/gr/n; done
+real; commit "real again (gr-r)"; green_at "$(tip)"; job >/dev/null
+ok "$(head_of "$tmp/primary")|$(same "$pr" "$tmp/bin/primary-refresh.py")|$(same "$root/skills/_shared/scripts/green-tip.py" "$GB")" "$(tip)|same|same" \
+   "GR-R: (healed: the primary at the Green tip, the copy and its resolver this tree's)"
 
 ok "$(ls -a "$tmp/bin" | grep -c '^\.stage-')" 0 "no stage is left beside the copy"
 exit $fail

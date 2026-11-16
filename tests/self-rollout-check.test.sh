@@ -750,6 +750,24 @@ g -C "$rg" reset -q --hard "$G"; echo mine2 > "$rg/mine2.txt"; g -C "$rg" add mi
 sr --refresh-in-place "$rg-rollout" $GENV
 has "$out" "in-place: $rg not moved: diverged: 1 local-only commit(s)" "SR-G: a hold, a diverged twin: its diverged line, with its remedy"
 lacks "$out" "no move" "SR-G: … never no move"
+# SR-G race: a Green tip read at origin's tip keeps origin's words, but the twin moves to that commit, never to
+# origin/<d> as another fetch in the twin leaves it before the move (merge-task, land.sh S4, another clone's lead). A
+# plugin copy's repo-state.sh, run in that window on the origin path, stands in for the fetch: it moves the twin's
+# refs/remotes/origin/master to N, a commit no full suite passed.
+rr="$home/repos/rr"; srv o/rr; cl o/rr "$rr"; cl o/rr "$rr-rollout"; old=$(git -C "$rr" rev-parse HEAD)
+push o/rr .github/workflows/full-suite.yml "$(printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green')"
+O=$(srvtip o/rr); git --git-dir "$SRV/o/rr.git" update-ref refs/thread/green "$O"
+printf '{"v": 1, "repos": {"o/rr": {"verified": [{"sha": "%s", "at": "2026-11-01T10:00:00+11:00", "by": "test"}], "unverified": []}}}\n' "$O" > "$tmp/gt-rr.json"
+w="$tmp/t/seed-o-rr"; echo n > "$w/n.txt"; g -C "$w" add -A; g -C "$w" commit -qm untested; N=$(git -C "$w" rev-parse HEAD)
+g -C "$rr" fetch -q "$w" master:refs/sr/n; g -C "$w" reset -q --hard "$O"
+race="$tmp/race"; plugin_copy "$race"; mkdir -p "$race/skills/close/scripts"
+printf '#!/usr/bin/env bash\n[ -n "${SR_RACE:-}" ] && git -C "$1" update-ref refs/remotes/origin/master "$SR_RACE"\necho "on master, a stub"\n' > "$race/skills/close/scripts/repo-state.sh"
+RENV="THREAD_GREEN_TIP_FILE=$tmp/gt-rr.json PATH=$tmp/ghbin:$PATH SR_RACE=$N"
+SC="$race/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rr-rollout" $RENV
+ok "$rc|$out" "0|in-place: $rr fast-forwarded to origin/master (${old:0:7}..${O:0:7})" "SR-G race: the Green tip read at origin's tip: moved there, in origin's words"
+ok "$(git -C "$rr" rev-parse HEAD)" "$O" "SR-G race: … never to N, the commit the other fetch brought"
+SC="$race/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rr-rollout" $RENV
+ok "$out|$(git -C "$rr" rev-parse HEAD)" "in-place: $rr already at origin/master|$O" "SR-G race: the next run: already at origin's tip as read, unmoved"
 
 echo; [ "$fail" -eq 0 ] && echo "self-rollout-check: ALL PASS" || echo "self-rollout-check: SOME FAILED"
 exit "$fail"

@@ -120,14 +120,16 @@
 # `git merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash, never during an operation.
 # The twin is a live checkout, so it stops at the Green tip (ADR 0084 d1, p54-6): after the fetch,
 # skills/_shared/scripts/green-tip.py reads the target (`--checkout --budget 60` under lc_bounded 70). A repo that
-# publishes none reads origin's tip and keeps every line below as it was. Else the twin moves to the Green tip
-# (`fast-forwarded to the Green tip (<old7>..<new7>)`), or stands `at the Green tip <g7>, <n> behind origin/<d> (waits
-# on the Green tip)`, `past the Green tip <g7> by <m>: waits on it` (never moved back), `not moved: local changes
-# overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>` (`green-tip.py exit
-# <rc>: <its first stderr line>` for a failure), and a `green-tip: WARN: …` line it prints passes through to stderr. A
-# twin ahead of origin, or diverged from it, reads as below whatever the target, a hold's included (only a move, at or
-# past the Green tip, or already at origin's tip needs one: primary-refresh.py's c2 rule). --ensure and --refresh never
-# read it: the Rollout clone keeps origin's tip, the code being built.
+# publishes none reads origin's tip and keeps every line below as it was. A Green tip at origin's tip keeps those lines
+# too, but the twin moves only to the commit the reading named (lc_ff's target), never to origin/<d> as it stands by
+# then: another fetch in the twin (merge-task, land.sh S4, another clone's lead) can move it. Else the twin moves to
+# the Green tip (`fast-forwarded to the Green tip (<old7>..<new7>)`), or stands `at the Green tip <g7>, <n> behind
+# origin/<d> (waits on the Green tip)`, `past the Green tip <g7> by <m>: waits on it` (never moved back), `not moved:
+# local changes overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>`
+# (`green-tip.py exit <rc>: <its first stderr line>` for a failure), and a `green-tip: WARN: …` line it prints passes
+# through to stderr. A twin ahead of origin, or diverged from it, reads as below whatever the target, a hold's included
+# (only a move, at or past the Green tip, or already at origin's tip needs one: primary-refresh.py's c2 rule). --ensure
+# and --refresh never read it: the Rollout clone keeps origin's tip, the code being built.
 # One stdout line, `in-place: <twin> …`, or nothing:
 #   held: <primary-hold line> (ADR 0031) · not moved: cannot load live-checkout.sh · not moved: fetch failed: <first
 #   line> · not moved: on '<b>', not <d> · not moved: an operation is in progress · fast-forwarded to origin/<d>
@@ -568,7 +570,10 @@ case "$mode" in
       0:hold) gk=hold; gw=${out#hold - } ;;
       *) gk=hold; gw="green-tip.py exit $grc${gline:+: $gline}" ;;
     esac
-    [ "$gk" = green ] && [ "$gs" = "$(git -C "$tw" rev-parse -q --verify "refs/remotes/origin/$d" 2>/dev/null)" ] && gk=origin
+    # gat: the Green tip was origin's tip when read. Its lines are origin's, but the move still goes to $gs, never to
+    # origin/<d> as it stands later: another fetch here (merge-task, land.sh S4, another clone's lead) can move it.
+    gat=''
+    [ "$gk" = green ] && [ "$gs" = "$(git -C "$tw" rev-parse -q --verify "refs/remotes/origin/$d" 2>/dev/null)" ] && gat=1
     cur=$(git -C "$tw" symbolic-ref -q --short HEAD 2>/dev/null)
     [ "$cur" = "$d" ] || { echo "in-place: $tw not moved: on '${cur:-a detached HEAD}', not $d"; exit 0; }
     lc_op "$tw" >/dev/null && { echo "in-place: $tw not moved: an operation is in progress"; exit 0; }
@@ -582,14 +587,18 @@ case "$mode" in
     if [ "$gk" = green ] && [ "$ahead" = 0 ]; then
       head=$(git -C "$tw" rev-parse -q --verify HEAD)
       gb=$(git -C "$tw" rev-list --count "$gs..$up" 2>/dev/null) || gb='?'
-      if [ "$head" = "$gs" ]; then
+      if [ "$head" = "$gs" ] && [ -n "$gat" ]; then
+        echo "in-place: $tw already at origin/$d"
+      elif [ "$head" = "$gs" ]; then
         echo "in-place: $tw at the Green tip ${gs:0:7}, $gb behind origin/$d (waits on the Green tip)"
       elif git -C "$tw" merge-base --is-ancestor HEAD "$gs" 2>/dev/null; then
         e=$(lc_ff "$tw" "$d" "$gs"); rc=$?
-        case $rc in
-          0) new=$(git -C "$tw" rev-parse -q --verify HEAD)
-             echo "in-place: $tw fast-forwarded to the Green tip (${head:0:7}..${new:0:7})" ;;
-          3) echo "in-place: $tw not moved: local changes overlap the Green tip ${gs:0:7}" ;;
+        case $rc:$gat in
+          0:*) new=$(git -C "$tw" rev-parse -q --verify HEAD)
+               if [ -n "$gat" ]; then echo "in-place: $tw fast-forwarded to origin/$d (${head:0:7}..${new:0:7})"
+               else echo "in-place: $tw fast-forwarded to the Green tip (${head:0:7}..${new:0:7})"; fi ;;
+          3:1) echo "in-place: $tw not moved: local changes overlap origin/$d" ;;
+          3:) echo "in-place: $tw not moved: local changes overlap the Green tip ${gs:0:7}" ;;
           *) echo "in-place: $tw not moved: git merge --ff-only refused: $e" ;;
         esac
       else
