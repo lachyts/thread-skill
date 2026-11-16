@@ -4,6 +4,9 @@ Date: 2026-11-07
 Status: proposed. Grilled with Lachy on 2026-11-07, from the close of `thread-skill-rollout-2026-11-06`, whose
 last two tasks (PRs #324 and #326) were set aside at merge by a macOS CI timeout. Adopts estate ADR 0009 d6
 (a declared fast tier at Integration) and estate ADR 0011 (a suite keeps its budget) for Thread Skill itself.
+*(Amended by ADR 0084 d3, 2026-11-16: "macOS stays in the merge gate" (Decided for you) no longer holds. The macOS
+context left the ruleset that day, so a PR waits on ubuntu alone; macOS runs in the default branch's full suite. d3's
+"on both OSes" reads as ubuntu for the PR checks.)*
 
 ## Context
 

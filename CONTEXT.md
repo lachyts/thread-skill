@@ -1177,12 +1177,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Fast tier** — the part of a project's suite its rollouts verify at each
   merge, declared as the rollout's `verifier:`: the tests a change reaches from
   its **Verify base**, plus a small set that always runs, and the full suite
-  whenever a change cannot be placed. The full suite then runs as the
+  whenever a change cannot be placed, less the **Slow tier** where a project
+  declares one. The full suite then runs as the
   **Completion verifier** and on the default branch's own runs, so a break only
   the slow tests catch, in code the change did not reach, is found there and
   filed, not at its merge (estate ADR 0009 d6, ADR 0073). Not **Touched
   tests**, which an agent runs between Checkpoints. _Avoid_: quick suite,
   smoke tests, partial verify.
+- **Slow tier** — the suites GitHub's check before a merge leaves out because
+  each runs long, whatever the change reaches, and the Mac's verify too once
+  the **Green tip** decides what goes live: they run in the default
+  branch's full suite after every merge, which sets the **Green tip**, and at
+  the **Completion verifier**. The set is declared, derived from each suite's
+  measured seconds; a suite the change itself edits still runs before the
+  merge, and a suite red on the default branch twice in four weeks returns to
+  the **Fast tier** (ADR 0084 d3, proposed; not yet built).
+  _Avoid_: nightly tests, excluded tests.
 - **Suite budget** — how long a project's suite may take, read on the week's
   median, never one run: an Integration verify within 5 minutes and a full
   suite within 20 unless the project sets its own (a looser one only with its
@@ -1290,6 +1300,33 @@ through time, from attention to merged PRs. Terms only — no implementation.
   version-cache install). `engine-snapshot.py resolve` prints it, and the
   guarded scripts refuse to write from any other (ADR 0043). _Avoid_: plugin
   root (the session's, which may differ), engine version.
+- **Green tip** — the newest commit on a repo's default branch whose full
+  suite passed there, on every OS it runs on. Thread Skill's own code goes
+  live only from it: an **Engine snapshot** is cut at it and the **Primary
+  refresh** moves the **Primary checkout** to it, never past it, so a merge is
+  not live until its full suite has passed, and a red default branch leaves
+  every rollout and session on the last commit that passed (ADR 0084 d1, d2,
+  proposed; not yet built: both still take origin's tip). Not the branch's
+  tip, which a light check lets move first. _Avoid_: proven commit (**Proven**
+  is a fix's), stable, release.
+- **Speed fix** — a task filed against a measured cause of rollout time lost:
+  a line of the Time-lost ledger, a suite audit's ranked change, a stall
+  audit's cause. It names that evidence, and a task without it is never one.
+  Speed fixes go first: their phase holds every other task of the project's
+  queue until its releasing task lands (its last, unless the phase names an
+  earlier one), and the hold releases by itself. Once one in the engine's own
+  repo is live at the **Green tip**, each running rollout takes it by an
+  **Engine catch-up** (ADR 0084 d4, d5, proposed; not yet built: Phase 54's hold is
+  made by hand). _Avoid_: perf task, optimisation, priority fix.
+- **Engine catch-up** — a running rollout moving itself onto a fresh **Engine
+  snapshot** at the **Green tip** because a **Speed fix** went live there: it
+  starts nothing new, lets what is running finish, moves, and carries on, with
+  no word from Lachy. Only a Speed fix in the engine's own repo causes one,
+  never an ordinary merge nor another project's Speed fix, and a phase drains
+  a rollout once, for its releasing task: any other is taken when nothing of
+  the rollout is running. A
+  **Reinstate** is the same move after a pause someone made (ADR 0084 d5,
+  proposed; not yet built). _Avoid_: auto-update, hot reload, restart.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
   its toplevel and never nested inside it: the Project root of every parallel
   rollout scheduled after P26 (ADR 0042); a second project's parallel rollout on
