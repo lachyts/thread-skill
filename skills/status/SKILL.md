@@ -523,7 +523,8 @@ there these notes show on the Stage line (`carried-fixes.json`), in reflect § 1
 
 **The Speed fix line** (p54-13, ADR 0084 d4), right under the Carried line, one per `speedHolds` entry (none when it
 is empty; `_shared/vault-grammar.md` § Speed fix hold): a standing one as `Speed fix hold: [[<release>]] (<phase>)
-holds <K> tasks; releases when [[<release>]] lands` (K the length of `held`), a released one as `Speed fix hold:
+standing, <K> recorded; releases when [[<release>]] lands` (K the length of `held`, every task a hold line named, some
+since started, landed, deferred or out of reach, as carry's preview counts them), a released one as `Speed fix hold:
 [[<release>]] (<phase>) released: <released.why>`, an ended one as `Speed fix hold: [[<release>]] (<phase>) ended:
 [[<release>]] landed`. Under a standing one, each that applies: `lets go at the lead's next call: <lettingGo.why>`,
 `the phase's release is now [[<moved>]]: the next join or apply moves the hold`, `<K> recorded tasks lack the entry:
