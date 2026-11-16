@@ -56,12 +56,18 @@ export const frame = (prompt) => `${PREAMBLE}\n${prompt.split('\n').map((l) => `
 function openerLinks(texts) {
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'note-overlap-opener-')))
   try {
+    // The texts reach python3 as a file, never as spawnSync's `input`: about 230 KB fed to the child's stdin left
+    // python3 waiting on a stdin EOF that never came, about once in 800 runs on a loaded Mac (a stress of 7,500 such
+    // calls hung 9 past 20 s; 16,500 through a file hung none), the likeliest cause of this file's run into node's
+    // 1200-s limit.
+    const src = path.join(tmp, 'openers.json')
+    fs.writeFileSync(src, JSON.stringify(texts))
     const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("hook", sys.argv[1])',
       'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
-      'print(json.dumps([m.opener_links(t) for t in json.load(sys.stdin)]))'].join('\n')
+      'print(json.dumps([m.opener_links(t) for t in json.load(open(sys.argv[2], encoding="utf-8"))]))'].join('\n')
     // A liveness bound, never a timing claim: one python3 start reads every opener in well under a second, and a hung
     // child fails here by name instead of running into node's per-file limit.
-    const r = spawnSync('python3', ['-B', '-c', body, HOOK], { encoding: 'utf8', cwd: tmp, input: JSON.stringify(texts),
+    const r = spawnSync('python3', ['-B', '-c', body, HOOK, src], { encoding: 'utf8', cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 120_000, killSignal: 'SIGKILL',
       env: { PATH: process.env.PATH, HOME: tmp, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(tmp, 'events'),
         THREAD_NOTE_OVERLAP_DIR: path.join(tmp, 'state') } })
