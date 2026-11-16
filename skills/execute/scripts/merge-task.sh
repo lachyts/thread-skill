@@ -241,6 +241,22 @@
 # `(queued, no runner)`, deduped and capped at 8 plus `+N more`, no minutes or ids (an unread jobs page adds nothing,
 # and none read leaves today's line). Each cut slice names the required checks still pending, once per change.
 #
+# A required check behind its shards (p54-11, ADR 0084 Decided for you 12). A roll-up check is a required check whose
+# workflow job has the aggregator shape: a non-empty `needs:` and a job-level `if:` holding `always()` or `!cancelled()`
+# (giflab's `Checks Complete`, the ubuntu check over its shards). Its own conclusion is `failure` whichever needed job
+# failed or was cut, and its own failed step (`every shard passed`) reads as genuine, so it is read through the jobs it
+# needs. ROLLUPS, the required checks that are roll-ups, is reset at every watch exit and recomputed only when a row is
+# red (lead-integrate.py shards --check over every check the watch's tables name: the workflow files at the integrated
+# head, through git, no gh call); a job name that is only `${{ }}` expressions matches nothing, and two such jobs of one
+# name are none. A red roll-up row is read whole (`gh run view --json jobs,workflowName`) and through `shards --jobs`.
+# The cancelled path proves a cancellation only when every needed job passed, was skipped (neutral, like success: a
+# path-filtered job) or was cut, and one was cut; with gh exiting 1 on the roll-up's `failure`, it runs before the red
+# path whenever ROLLUPS is set. The red path classifies the failed steps of the run's jobs minus the roll-up's own job.
+# A roll-up whose needed jobs all passed or were skipped falls back to the required job itself (its red is its own, read
+# as before); one with a needed job no run job matches proves nothing (genuine, never a cancellation). The cut-again
+# rule (p47-10) counts per needed job across both paths: a cut needed job's name is the unit, never the roll-up's.
+# ROLLUPS empty (no aggregator-shaped required check, a head this repo lacks) means today's gh calls.
+#
 # Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
 # delete (`gh pr merge --delete-branch` would `git branch -d` a branch checked out in the task's worktree,
@@ -1330,11 +1346,31 @@ PY
   )
 }
 
+failed_steps() {  # failed_steps <run view jobs json> — the `failure` steps of each job concluded `failure`, one per line; 1 unreadable
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    jobs = json.load(open(sys.argv[1])).get("jobs")
+except Exception:
+    sys.exit(1)
+if not isinstance(jobs, list):
+    sys.exit(1)
+for j in jobs:
+    if isinstance(j, dict) and str(j.get("conclusion") or "").lower() == "failure":
+        for s in j.get("steps") or []:
+            if isinstance(s, dict) and str(s.get("conclusion") or "").lower() == "failure":
+                print(s.get("name") or "")
+PY
+}
+
 infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wait), 1 to HALT
   # Finding #4: inspect the failed REQUIRED runs' failing STEP names, classify infra vs genuine
   # (fail-closed), and `gh run rerun --failed` only when EVERY failed step is provably setup/infra.
   # A step cut at its job's time limit (above) is infra once, and a second cut of its job is genuine.
-  local links runs run_id steps s verdict reran=0 cj jid job cut tl timeouts='' again=''
+  # A required check behind its shards (p54-11, the header) is read through them: with ROLLUPS set, a run holding a red
+  # required job is read whole and `lead-integrate.py shards --whole` drops each roll-up's own job, so its own step
+  # (`every shard passed`) never reaches the classifier while every other job of the run still does.
+  local links runs run_id steps s verdict reran=0 cj jid job cut tl timeouts='' again='' ids src src_json
   # Failed REQUIRED checks only (branch protection's definition) → their run ids via the details link. Either read
   # selects the same rows, gh's `fail` and `cancel` buckets: `fail` holds ERROR, FAILURE, TIMED_OUT and
   # ACTION_REQUIRED, `cancel` holds CANCELLED. A gh with `pr checks --json` reads them by bucket. gh 2.43.1 (this
@@ -1356,17 +1392,44 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
   [ -z "$runs" ] && { echo "  infra-classify: could not parse run ids — genuine (fail-closed)." >&2; return 1; }
   steps=""
   for run_id in $runs; do
+    # A roll-up check's run (p54-11): read whole once, then reduced by `shards --whole` (exit 0: its failed steps and
+    # cancelled jobs come from the reduced jobs); exit 3 (no red job of the run is a reduced roll-up) reads it as
+    # before; a read that fails or a roll-up not proven is genuine (fail-closed).
+    src_json=''
+    if [ -n "$ROLLUPS" ]; then
+      ids=$(printf '%s\n' "$links" | grep -oE "runs/$run_id/job/[0-9]+" | sed 's#.*/##' | sort -u | tr '\n' ' ')
+      if [ -n "${ids// /}" ]; then
+        if ! gh run view "$run_id" -R "$OWNER/$REPO" --json jobs,workflowName >"$tmp/flake.json" 2>/dev/null; then
+          echo "  infra-classify: run $run_id's jobs could not be read, so its required check's shards are not proven — genuine (fail-closed)." >&2
+          return 1
+        fi
+        python3 "$LI_PY" shards --repo "$REPO_PATH" --head "$IHEAD" --jobs "$tmp/flake.json" --whole --job-id $ids \
+          >"$tmp/flake.red.json" 2>"$tmp/flake.shards.err"; src=$?
+        case "$src" in
+          0) src_json="$tmp/flake.red.json"
+             sed "/^[[:space:]]*\$/d; s/^/  infra-classify: run $run_id: /" "$tmp/flake.shards.err" >&2 ;;
+          3) ;;
+          *) echo "  infra-classify: run $run_id: a required check's shards are not proven (lead-integrate.py shards exit $src) — genuine (fail-closed)." >&2
+             return 1 ;;
+        esac
+      fi
+    fi
     # The run's failed steps, then its cancelled jobs, each proven cut at its time limit or not. An unproven one beside
     # a proven failure is re-run with it as before (a fail-fast sibling); a read that fails proves no timeout. A run
     # whose failed-step read fails proves nothing and stops here, before its timeouts are read: a real red in a job
     # beside a proven cut would otherwise pass the per-run guard on the cut alone and be re-run.
-    if ! s="$(gh run view "$run_id" -R "$OWNER/$REPO" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | .name' 2>/dev/null)"; then
+    if [ -n "$src_json" ]; then
+      if ! s="$(failed_steps "$src_json")"; then
+        echo "  infra-classify: run $run_id's failed steps could not be read, so nothing in it is proven, a time limit included — genuine (fail-closed)." >&2
+        return 1
+      fi
+    elif ! s="$(gh run view "$run_id" -R "$OWNER/$REPO" --json jobs -q '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | .name' 2>/dev/null)"; then
       echo "  infra-classify: run $run_id's failed steps could not be read, so nothing in it is proven, a time limit included — genuine (fail-closed)." >&2
       return 1
     fi
     tl=''
-    if gh run view "$run_id" -R "$OWNER/$REPO" --json jobs >"$tmp/flake.json" 2>/dev/null \
-       && cj=$(cancelled_jobs "$tmp/flake.json"); then
+    if { [ -n "$src_json" ] || gh run view "$run_id" -R "$OWNER/$REPO" --json jobs >"$tmp/flake.json" 2>/dev/null; } \
+       && cj=$(cancelled_jobs "${src_json:-$tmp/flake.json}"); then
       while IFS=$'\t' read -r jid job cut; do
         [ -n "$jid" ] && at_time_limit "$jid" && tl="$(printf '%s\n%s\t%s\t%s' "$tl" "$job" "$cut" "$TL_MSG")"
       done <<EOF
@@ -1433,11 +1496,27 @@ EOF
 # there, so its table's red rows are read by their job: `gh run view <run> --json jobs`, the job its link names, its
 # conclusion `cancelled`. Fail-closed: a red row that is no proven cancellation (a `fail` bucket, a job concluded any
 # other way, a link that names no run and job, a read that failed) is the red path's, never a timeout's.
+# A roll-up check's `fail` row (ROLLUPS, p54-11) is read through the jobs it needs: its own conclusion is `failure`
+# whichever of them was cut (the header's "A required check behind its shards").
 CANCEL_RUNS=''; CANCEL_NAMES=''; CANCEL_JOBS=''; CANCEL_WHY=''
-red_rows() {  # red_rows <json|table> <file> — `<bucket>\t<run>\t<job>\t<name>` per red row, or NONE; exit 1 = not proven
-  python3 - "$1" "$2" <<'PY'
+ROLLUPS=''   # the required checks that are roll-ups at the integrated head (lead-integrate.py shards --check), one per line
+rollup_checks() {  # ROLLUPS from every check named in checks.out; any failure leaves it empty (the reads as before), no gh call
+  local names=() n
+  ROLLUPS=''
+  # Every distinct check of the watch's tables, so a check pending at its last refresh but red in a later read is covered.
+  while IFS= read -r n; do
+    [ -n "$n" ] && names+=("$n")
+  done <<EOF
+$(awk -F'\t' 'NF >= 2 && $1 != "" && !seen[$1]++ { print $1 }' "$tmp/checks.out" 2>/dev/null)
+EOF
+  [ "${#names[@]}" -gt 0 ] || return 0   # bash 3.2's set -u aborts on an empty "${names[@]}"
+  ROLLUPS=$(python3 "$LI_PY" shards --repo "$REPO_PATH" --head "$IHEAD" --check "${names[@]}" 2>/dev/null) || ROLLUPS=''
+}
+red_rows() {  # red_rows <json|table> <file> [<ROLLUPS>] — `<bucket>\t<run>\t<job>\t<name>` per red row, or NONE; exit 1 = not proven
+  python3 - "$1" "$2" "${3:-}" <<'PY'
 import json, re, sys
-mode, path = sys.argv[1:]
+mode, path, rolls = sys.argv[1:]
+rolls = {" ".join(x.split()) for x in rolls.split("\n") if x.strip()}
 try:
     text = open(path).read()
 except Exception:
@@ -1455,13 +1534,34 @@ out = []
 for bucket, link, name in rows:
     if bucket not in ("fail", "cancel"):
         continue
+    if bucket == "fail" and " ".join(name.split()) in rolls:
+        bucket = "rollup"  # a roll-up check: read through the jobs it needs, in either mode
     if mode == "json" and bucket == "fail":
         sys.exit(1)  # FAILURE, ERROR, TIMED_OUT or ACTION_REQUIRED: a red check, never a cancellation
     m = re.search(r"/runs/([0-9]+)(?:/job/([0-9]+))?", link)
-    if not m or (bucket == "fail" and not m.group(2)):
+    if not m or (bucket != "cancel" and not m.group(2)):
         sys.exit(1)  # no run to re-run, or no job whose conclusion would tell
     out.append("%s\t%s\t%s\t%s" % (bucket, m.group(1), m.group(2) or "-", " ".join(name.split()) or "-"))
 print("\n".join(out) if out else "NONE")
+PY
+}
+rollup_cut() {  # rollup_cut <shards --jobs json> — the needed jobs cut (cancelled or timed_out), one per line; 1 not proven
+  # Proven only when the set is non-empty, every job concluded success, skipped, cancelled or timed_out (skipped is
+  # neutral, like success: a path-filtered job), and at least one was cut.
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    jobs = json.load(open(sys.argv[1])).get("jobs")
+except Exception:
+    sys.exit(1)
+if not isinstance(jobs, list) or not jobs:
+    sys.exit(1)
+said = [(" ".join(str(j.get("name") or "").split()) or "-", str(j.get("conclusion") or "").lower())
+        for j in jobs if isinstance(j, dict)]
+cut = [n for n, c in said if c in ("cancelled", "timed_out")]
+if len(said) != len(jobs) or not cut or any(c not in ("success", "skipped", "cancelled", "timed_out") for _n, c in said):
+    sys.exit(1)
+print("\n".join(cut))
 PY
 }
 job_conclusion() {  # job_conclusion <run view jobs json> <job id> — that job's conclusion, lowercased ("" if absent)
@@ -1476,24 +1576,42 @@ print(next((str(j.get("conclusion") or "").lower() for j in jobs
 PY
 }
 cancelled_required() {  # 0 every red required check is CANCELLED (CANCEL_RUNS, CANCEL_NAMES, CANCEL_JOBS); 1 not proven; 2 none red
-  local rows b run jid name
+  local rows b run jid name mode src cut label cutjobs
   CANCEL_RUNS=''; CANCEL_NAMES=''; CANCEL_JOBS=''
   if gh pr checks "$PR" -R "$OWNER/$REPO" --required --json name,bucket,link >"$tmp/req.out" 2>/dev/null; then
-    rows=$(red_rows json "$tmp/req.out") || return 1
+    mode=json
   else
     gh pr checks "$PR" -R "$OWNER/$REPO" --required >"$tmp/req.out" 2>/dev/null   # gh 2.43.1: its exit says nothing
-    rows=$(red_rows table "$tmp/req.out") || return 1
+    mode=table
   fi
+  rows=$(red_rows "$mode" "$tmp/req.out" "$ROLLUPS") || return 1
   [ "$rows" = NONE ] && return 2
   while IFS=$'\t' read -r b run jid name; do
     [ -n "$run" ] || continue
-    if [ "$b" = fail ]; then
-      gh run view "$run" -R "$OWNER/$REPO" --json jobs >"$tmp/jobs.json" 2>/dev/null || return 1
-      [ "$(job_conclusion "$tmp/jobs.json" "$jid")" = cancelled ] || return 1
-    fi
+    label="$name (run $run)"; cutjobs="$name"   # its job's name (TIMEOUT_RERUN's unit)
+    case "$b" in
+      rollup)
+        # A roll-up check (p54-11): the run read whole, then the jobs it needs (shards --jobs). Exit 0 is a cancellation
+        # only when every needed job passed, was skipped or was cut, and one was cut: each cut job is the unit. Exit 3
+        # (it stands for itself) is its own row, read as before; anything else is not proven.
+        gh run view "$run" -R "$OWNER/$REPO" --json jobs,workflowName >"$tmp/jobs.json" 2>/dev/null || return 1
+        python3 "$LI_PY" shards --repo "$REPO_PATH" --head "$IHEAD" --jobs "$tmp/jobs.json" --job-id "$jid" \
+          >"$tmp/jobs.red.json" 2>/dev/null; src=$?
+        case "$src" in
+          0) cut=$(rollup_cut "$tmp/jobs.red.json") || return 1
+             cutjobs="$cut"
+             label="$name through $(printf '%s\n' "$cut" | awk 'NF { printf "%s%s", (n++ ? ", " : ""), $0 }') (run $run)" ;;
+          3) [ "$mode" = table ] || return 1   # json's `fail` bucket is never a cancellation
+             [ "$(job_conclusion "$tmp/jobs.json" "$jid")" = cancelled ] || return 1 ;;
+          *) return 1 ;;
+        esac ;;
+      fail)
+        gh run view "$run" -R "$OWNER/$REPO" --json jobs >"$tmp/jobs.json" 2>/dev/null || return 1
+        [ "$(job_conclusion "$tmp/jobs.json" "$jid")" = cancelled ] || return 1 ;;
+    esac
     case " $CANCEL_RUNS " in *" $run "*) ;; *) CANCEL_RUNS="${CANCEL_RUNS:+$CANCEL_RUNS }$run" ;; esac
-    CANCEL_NAMES="${CANCEL_NAMES:+$CANCEL_NAMES, }$name (run $run)"
-    CANCEL_JOBS="$(printf '%s\n%s' "$CANCEL_JOBS" "$name")"   # its job's name, one per line (TIMEOUT_RERUN's unit)
+    CANCEL_NAMES="${CANCEL_NAMES:+$CANCEL_NAMES, }$label"
+    CANCEL_JOBS="$(printf '%s\n%s' "$CANCEL_JOBS" "$cutjobs")"   # one job name per line (TIMEOUT_RERUN's unit)
   done <<EOF
 $rows
 EOF
@@ -1753,6 +1871,32 @@ pending_checks() {  # the required checks pending at the watch slice's last refr
 }
 
 WAIT_MSG=''
+cancelled_rerun_or_stop() {  # a proven cancellation (CANCEL_*): 0 re-ran its failed jobs (re-watch); 1 printed the GitHub-side ERROR
+  # Runs in wait_required_checks' dynamic scope: cancel_reruns, again and job are its locals.
+  echo "  PR #$PR — required check CANCELLED, a CI timeout or another stop on GitHub's side: $CANCEL_NAMES." >&2
+  # A job the red path already re-ran as cut at its time limit has had its one re-run (p47-10): cancelled again, it
+  # stops here. Any other cancelled job takes this path's own budget, whatever the red path re-ran.
+  again=''
+  while IFS= read -r job; do
+    rerun_took "$job" "$TIMEOUT_RERUN" && again="${again:+$again, }$job"
+  done <<EOF
+$CANCEL_JOBS
+EOF
+  if [ -n "$again" ]; then
+    CANCEL_WHY="cancelled again after its one re-run as a step cut at its job's time limit ($again)"
+  elif [ "$cancel_reruns" -lt "$CANCEL_RERUN_MAX" ]; then
+    if rerun_cancelled; then
+      cancel_reruns=$((cancel_reruns+1))
+      CANCEL_RERUN_JOBS="$(printf '%s\n%s' "$CANCEL_RERUN_JOBS" "$CANCEL_JOBS")"
+      echo "  cancelled-check rerun $cancel_reruns/$CANCEL_RERUN_MAX triggered — re-watching required checks…" >&2
+      return 0
+    fi
+  else
+    CANCEL_WHY="cancelled again after $CANCEL_RERUN_MAX re-run of its failed jobs"
+  fi
+  echo "ERROR: a REQUIRED check was CANCELLED on PR #$PR: a CI timeout or another stop on GitHub's side, no test failed; $CANCEL_WHY: $CANCEL_NAMES. Nothing was merged (ADR 0073 d4: GitHub-side, the automatic retry takes it)." >&2
+  return 1
+}
 wait_required_checks() {  # wait_required_checks <the state machine's mergeStateStatus> — 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed); a required job no runner took exits 4 here
   # The entry state is captured here, because each snapshot_once below overwrites S_MSS.
   local from="$1" absent=0 rc infra_reruns=0 cancel_reruns=0 mss crc held pending seen='' again job
@@ -1771,6 +1915,10 @@ wait_required_checks() {  # wait_required_checks <the state machine's mergeState
       fi
       continue
     fi
+    # Which required checks are roll-ups (p54-11), read afresh at every watch exit, and only when a row is red: a green
+    # exit costs nothing, and a reading from an earlier slice, or from before a re-run, never buckets a later read.
+    ROLLUPS=''
+    awk -F'\t' 'NF >= 2 && $2 == "fail" { f = 1 } END { exit !f }' "$tmp/checks.out" 2>/dev/null && rollup_checks
     if [ $rc -eq 0 ]; then
       # A 0 with no red cell is green. A 0 with one is a CANCELLED required check (above): one re-run of its failed
       # jobs, then the GitHub-side exit 1 the lead sets aside at Integration and the infra retry takes (ADR 0073 d4),
@@ -1779,29 +1927,7 @@ wait_required_checks() {  # wait_required_checks <the state machine's mergeState
       cancelled_required; crc=$?
       [ "$crc" -eq 2 ] && return 0   # no red row as they stand: the red cell was an earlier refresh of the watch
       if [ "$crc" -eq 0 ]; then
-        echo "  PR #$PR — required check CANCELLED, a CI timeout or another stop on GitHub's side: $CANCEL_NAMES." >&2
-        # A job the red path already re-ran as cut at its time limit has had its one re-run (p47-10): cancelled again,
-        # it stops here. Any other cancelled job takes this path's own budget, whatever the red path re-ran.
-        again=''
-        while IFS= read -r job; do
-          rerun_took "$job" "$TIMEOUT_RERUN" && again="${again:+$again, }$job"
-        done <<EOF
-$CANCEL_JOBS
-EOF
-        if [ -n "$again" ]; then
-          CANCEL_WHY="cancelled again after its one re-run as a step cut at its job's time limit ($again)"
-        elif [ "$cancel_reruns" -lt "$CANCEL_RERUN_MAX" ]; then
-          if rerun_cancelled; then
-            cancel_reruns=$((cancel_reruns+1))
-            CANCEL_RERUN_JOBS="$(printf '%s\n%s' "$CANCEL_RERUN_JOBS" "$CANCEL_JOBS")"
-            echo "  cancelled-check rerun $cancel_reruns/$CANCEL_RERUN_MAX triggered — re-watching required checks…" >&2
-            sleep "$CHECK_INTERVAL"
-            continue
-          fi
-        else
-          CANCEL_WHY="cancelled again after $CANCEL_RERUN_MAX re-run of its failed jobs"
-        fi
-        echo "ERROR: a REQUIRED check was CANCELLED on PR #$PR: a CI timeout or another stop on GitHub's side, no test failed; $CANCEL_WHY: $CANCEL_NAMES. Nothing was merged (ADR 0073 d4: GitHub-side, the automatic retry takes it)." >&2
+        if cancelled_rerun_or_stop; then sleep "$CHECK_INTERVAL"; continue; fi
         return 1
       fi
     fi
@@ -1890,6 +2016,15 @@ EOF
        && ! awk -F'\t' '{for(i=1;i<=NF;i++) if($i=="fail") f=1} END{exit !f}' "$tmp/checks.out"; then
       WAIT_MSG="retryable: gh pr checks failed ($(head -1 "$tmp/checks.err")); nothing merged"
       return 8
+    fi
+    # A roll-up check red because a job it needs was cut (p54-11): its own conclusion is `failure`, so gh exits 1, yet it
+    # is the cut it stands for, the cancelled path's. Not proven (crc 1) or no red row (crc 2): the red path below.
+    if [ "$rc" -ne 0 ] && [ -n "$ROLLUPS" ]; then
+      cancelled_required; crc=$?
+      if [ "$crc" -eq 0 ]; then
+        if cancelled_rerun_or_stop; then sleep "$CHECK_INTERVAL"; continue; fi
+        return 1
+      fi
     fi
     echo "ERROR: a REQUIRED check FAILED on PR #$PR (Ralph passed locally, but remote CI is red):" >&2
     cat "$tmp/checks.out" "$tmp/checks.err" 2>/dev/null | tail -6 >&2
