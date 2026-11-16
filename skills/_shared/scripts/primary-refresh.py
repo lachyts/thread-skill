@@ -351,6 +351,7 @@ CHECK_FORMS = {
     "current": re.compile(r"^current ([0-9a-f]{40})$"),
     "ahead": re.compile(r"^ahead ([0-9a-f]{40}) ([0-9]+)$"),
     "diverged": re.compile(r"^diverged ([0-9a-f]{40}) ([0-9]+) ([0-9]+)$"),
+    "past": re.compile(r"^past ([0-9a-f]{40}) ([0-9]+)$"),  # a target only: on origin, past the Green tip
     "busy": re.compile(r"^busy ([0-9a-f]{40}) (.+)$"),
     "overlap": re.compile(r"^overlap ([0-9a-f]{40}) ([0-9]+) (.+)$"),
     "behind": re.compile(r"^behind ([0-9a-f]{40}) ([0-9]+) ([0-9a-f]{40})$"),
@@ -361,6 +362,7 @@ CONTENT_FORMS = {  # live-checkout.sh content: a diverged checkout, read for its
     "unreadable": re.compile(r"^unreadable (.+)$"),
     "untouched": re.compile(r"^untouched$"),
     "landed": re.compile(r"^landed ([0-9]+)$"),
+    "pending": re.compile(r"^pending ([0-9]+)$"),  # a target only: on origin by content, not yet at the Green tip
     "unlanded": re.compile(r"^unlanded ([0-9]+) (.+)$"),
 }
 OVERLAP_FORMS = {
