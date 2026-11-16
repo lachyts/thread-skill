@@ -31,7 +31,8 @@
 #   M18 the master-runs lock busy: not read, nothing written.
 #   M20 GitHub refuses the re-run: recorded once, the line reads refused.
 #   M21 no GitHub origin; no full-suite workflow.
-#   M22 recovery: a task with no line; a line write that fails, then lands naming the same task.
+#   M22 recovery: a task with no line; a line write that fails, then lands naming the same task; a join that fails,
+#       then joins through R's own stem.
 #   M24 a red too big for one line: one fitted line, one task holding every suite and PR.
 # Temp dirs only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -766,6 +767,26 @@ ok "$rc|$(tasks)|$(qrows | head -1 | grep -c "$T22")|$(lines | wc -l | tr -d ' '
 has "$err" "ERROR: master-runs: line not written" "M22 (b): … ERROR: line not written"
 chmod 0644 "$THREAD_EVENTS_DIR/master-runs.jsonl"; mr
 ok "$rc|$(tasks)|$(lines)" "0|$T22.md|red 1002 2 rerun tests/a.test.sh $T22" "M22 (b): the next pass writes the line naming that stem, no second task"
+fresh m22c
+fx "{$RED2, \"ref\": 1}"
+python3 - "$RR" "$RO" "$F/tasks" "$TMP/bin/gh" "$NOW" > "$F/out" 2> "$F/err" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+def cmd_join(ns):
+    print("ERROR: join: cannot write: %s: Permission denied" % ns.rollout, file=sys.stderr)
+    return 1
+rr.cmd_join = cmd_join
+args = rr._parser().parse_args(["master-runs", "--rollout", sys.argv[2], "--tasks-dir", sys.argv[3], "--gh-bin",
+                                sys.argv[4], "--now", sys.argv[5]])
+sys.exit(args.func(args))
+PY
+rc=$?; out=$(cat "$F/out"); err=$(cat "$F/err")
+ok "$rc|$(tasks)|$(fmv "$T22" rollout)|$(qrows | grep -c master-red-)|$(lines | wc -l | tr -d ' ')" "1|$T22.md||0|0" "M22 (c): the join fails (exit 1): exit 1, the task filed, not joined, no line"
+has "$err" "ERROR: master-runs: [[$T22]] not joined (cannot write:" "M22 (c): … ERROR: not joined"
+mr
+ok "$rc|$(tasks)|$(fmv "$T22" rollout)|$(qrows | head -1 | grep -c "$T22")|$(lines)" "0|$T22.md|\"[[r-rollout-2026-11-16]]\"|1|red 1002 2 rerun tests/a.test.sh $T22" "M22 (c): the next pass joins it at Queue row 1, stamps rollout:, writes one line naming it, no second task"
 
 # ── M24 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 fresh m24

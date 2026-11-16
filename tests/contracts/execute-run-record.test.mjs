@@ -127,7 +127,12 @@ for (const [rule, mutate] of controls) {
 }
 
 // ---- p54-7 (ADR 0084 Decided for you 3, 11, 13): master's full suite, read at four sites, never routed on --------------
+// Each `mark-done` that lands a merge points at the pass (step 4's 0, a second 6, the RACE's green, both copies of the
+// hold route's 0), and every site names the Bash tool's 600 s timeout: a pass may run about 130 s, past its default.
 const MR = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <rollout-note> || true`'
+const MR_HB = '(2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note\'s path> || true` once'
+const TO = "with the Bash tool's `timeout: 600000`"
+const PASS = "*Master's full suite*'s `master-runs` pass"
 function checkMasterRuns(md) {
   const bad = []
   const need = (name, ok) => { if (!ok) bad.push(name) }
@@ -135,12 +140,19 @@ function checkMasterRuns(md) {
   need('master-paragraph', p.includes(MR) && p.includes('never blocks a merge and is never routed on, whatever its exit') &&
     p.includes('Merges go on while master is red, with no revert: a red-master fix holds nothing, it only starts first'))
   need('master-entry', p.includes("- once per loop entry, after the canary's `check-all` and the *Surface re-check*, before step 1.1's first `next`"))
+  const race = (section(md, /^### 4\.5\. /) ?? '').split('\n').find((l) => l.includes('**RACE procedure**')) ?? ''
   need('master-merge', p.includes("- once after each `mark-done` that lands a merge: step 4's exit 0, a second exit 6, the RACE procedure's green re-verify, and the merge-result rule's hold route's 0") &&
-    md.includes("The lane frees; *Master's full suite*'s `master-runs` pass, then step 1 |"))
-  need('master-heartbeat', p.includes('- at each heartbeat tick, its clause (2c) (§ 5);') &&
-    (md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? '').includes('(2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note\'s path> || true` once'))
+    md.includes(`The lane frees; ${PASS}, then step 1 |`) &&
+    md.includes(`| 6 | Re-run once. A second 6: \`mark-done\`, and report "merged and verified; local refresh failed: <message>"; then ${PASS}.`) &&
+    race.includes(`then green → \`mark-done\` (the RACE line stays), then ${PASS};`) &&
+    md.includes(`takes **the hold route**: 0 → \`mark-done\`, then ${PASS}; 5 →`) &&
+    md.includes(`takes the hold route (0 → \`mark-done\`, then ${PASS}; 5 →`))
+  const hb = md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  need('master-heartbeat', p.includes('- at each heartbeat tick, its clause (2c) (§ 5);') && hb.includes(MR_HB))
   need('master-ceremony', p.includes('- once in the completion ceremony (step 5)') &&
-    collapse(md).includes("**Read master's full suite once more (p54-7).** Run " + MR + " (*Master's full suite*), never routed on."))
+    collapse(md).includes("**Read master's full suite once more (p54-7).** Run " + MR))
+  need('master-timeout', p.includes(`${MR}, ${TO} at every site below`) && hb.includes(`${MR_HB}, ${TO} (`) &&
+    collapse(md).includes("**Read master's full suite once more (p54-7).** Run " + MR + ` ${TO} (*Master's full suite*), never routed on.`))
   need('master-donts', collapse(section(md, /^## Don'ts/) ?? '').includes("Never re-run, revert or file for master's full-suite runs by hand: `master-runs` makes the one re-run of the newest run and files the fix (§4.5 *Master's full suite*). merge-task's own `gh run rerun --failed` on a PR's required checks is unchanged."))
   return bad
 }
@@ -158,7 +170,14 @@ const masterControls = [
   ['master-entry', (t) => t.replace("- once per loop entry, after the canary's `check-all` and the *Surface re-check*, before step 1.1's first `next`", '- once per loop entry')],
   ['master-merge', (t) => t.replace(", the RACE procedure's green re-verify, and the merge-result rule's hold route's 0", '')],
   ['master-merge', (t) => t.replace("The lane frees; *Master's full suite*'s `master-runs` pass, then step 1 |", 'The lane frees; step 1 |')],
-  ['master-heartbeat', (t) => t.replace(/ \(2c\) Run `[^`]*master-runs[^`]*` once \([^)]*\), then go on to the next clause\./, '')],
+  ['master-merge', (t) => t.replace(`failed: <message>"; then ${PASS}. The re-run`, 'failed: <message>". The re-run')],
+  ['master-merge', (t) => t.replace(`(the RACE line stays), then ${PASS};`, '(the RACE line stays);')],
+  ['master-merge', (t) => t.replace(`**the hold route**: 0 → \`mark-done\`, then ${PASS};`, '**the hold route**: 0 → `mark-done`;')],
+  ['master-merge', (t) => t.replace(`the hold route (0 → \`mark-done\`, then ${PASS};`, 'the hold route (0 → `mark-done`;')],
+  ['master-heartbeat', (t) => t.replace(/ \(2c\) Run `[^`]*master-runs[^`]*` once, [^(]*\([^)]*\), then go on to the next clause\./, '')],
+  ['master-timeout', (t) => t.replace(`, ${TO} at every site below`, ' at every site below')],
+  ['master-timeout', (t) => t.replace(`<the rollout note's path> || true\` once, ${TO} (master`, "<the rollout note's path> || true` once (master")],
+  ['master-timeout', (t) => t.replace(`<rollout-note> || true\` ${TO} (*Master's full suite*), never routed on.`, "<rollout-note> || true` (*Master's full suite*), never routed on.")],
   ['master-ceremony', (t) => t.replace("**Read master's full suite once more (p54-7).**", '**Read master once more.**')],
   ['master-donts', (t) => t.replace("- Never re-run, revert or file for master's full-suite runs by hand", '- Never re-run master by hand')],
 ]
@@ -206,7 +225,7 @@ function checkLedger(md) {
   need('no-hand-writes', p.includes('The lead adds nothing for a halt or a room stop: the Stop hook records each halt (§ 8), and `step-boundary.py begin` each room stop'))
   const hb = md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
   // p54-7: clause (2c), master's full suite, sits between (2b) and (3)
-  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note's path> || true` once (master's full suite, execute § 4.5 *Master's full suite*: never routed on, never blocking), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
+  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note's path> || true` once, with the Bash tool's `timeout: 600000` (master's full suite, execute § 4.5 *Master's full suite*: never routed on, never blocking), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
   need('heartbeat-2b', hb.includes(B2))
   need('entry-order', md.includes("**Validate `verify_timeout` once per loop entry, before anything the entry writes.** (The Run record's `record-entry` aside: § 2's first write.)") &&
     labelled(md, 'Landing-register re-check.').includes('re-runs § 2.5 before anything else it does, `record-entry` aside (*Run record*)') &&

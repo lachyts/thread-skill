@@ -1147,8 +1147,11 @@ Subcommands:
               nothing is written to the vault or the Run record; the read cache is still saved: it holds only reads); 1 a
               write failed, `ERROR: master-runs: …` (a task file, a join that failed to write, a line _event returned
               False for, `line not written (<key>)`, or a line the fitter could not fit, `line refused (<why>)`, a bug):
-              the pass goes on with its other decisions, and the next recovers through R's own stem (below); 2 usage (no
-              rollout note, no `Project root:`). 1 outranks 8.
+              the pass goes on with its other decisions, and the failed one's line is never written, so its key stays
+              free and the next pass decides R (or the unproven C) again: it files a task that was not written, or finds
+              R's own stem (below; the Green tip's task by its own stem), joins it while its `rollout:` is empty and
+              writes the line naming it (a refused line, a bug, is refused again); 2 usage (no rollout note, no `Project
+              root:`). 1 outranks 8.
               The origin: remote.origin.url as configured, in one of merge-settings.py's three GitHub forms (its
               GITHUB_URL_RE, mirrored as MASTER_GITHUB_URL_RE), `.git` dropped, lower-cased; anything else is no GitHub
               origin. Each origin has its own read cache, re-run ledger and lock, in _note_lock_dir(), named
@@ -1300,7 +1303,10 @@ Subcommands:
               Every other gh call runs before the lock. The join is in process: cmd_join on a Namespace (tasks_dir,
               rollout, tasks, files None, now, dry_run False, top True), its stdout relayed as `join: …` lines and its
               WARN lines verbatim; its exit 2 prints `not joined: <its ERROR text>`, the task stays a loose `priority:
-              high` task (a complete, closed, paused, pausing or superseded rollout) and the next schedule takes it.
+              high` task (a complete, closed, paused, pausing or superseded rollout) and the next schedule takes it; its
+              exit 1 (a write that failed, or a row missing after it) is `ERROR: master-runs: [[<stem>]] not joined (…)`
+              and that decision's line is not written, so the next pass decides it again and joins it through its own
+              stem.
               --dry-run reads but writes no cache and no ledger, prints the re-run, tasks, joins and lines it would make,
               and never calls `run rerun` or cmd_join.
               One Mac leads: the cache, the ledger and master-runs.jsonl (the events dir is local state) are this Mac's;
@@ -18861,7 +18867,7 @@ def _master_green(sha, runs, head_runs, cache, keys, repo):
     return ("need", needs) if needs else ("unproven", at)
 
 
-def _master_unproven(repo, sha, runs, now, rollout_note):
+def _master_unproven(repo, sha, runs, now):
     """The unproven Green tip's decision: its line, keyed (repo, C, unproven), and its own task."""
     name = repo.split("/")[-1]
     stem = f"master-green-unproven-{name}-{sha[:12]}"
@@ -19315,8 +19321,8 @@ def _master_join(tasks_dir, rollout_path, stem, now):
     if rc == 2:
         print(f"master-runs: not joined: {errors[0] if errors else 'join refused'}")
     elif rc != 0:
-        print(f"ERROR: master-runs: [[{stem}]] not joined ({errors[0] if errors else f'join exit {rc}'}): the next pass "
-              "joins it again", file=sys.stderr)
+        print(f"ERROR: master-runs: [[{stem}]] not joined ({errors[0] if errors else f'join exit {rc}'}): its line is "
+              "not written, so the next pass decides it again and joins it through its own stem", file=sys.stderr)
     return rc
 
 
@@ -19419,7 +19425,7 @@ def cmd_master_runs(args) -> int:
         reader.halt("reads left")   # a read that kept no fact: never expected, never a loop
     finish(0, runs, green_sha)
     plan = list(d["decisions"])
-    unproven = _master_unproven(repo, green_sha, runs, now, rollout_note) if g[0] == "unproven" else None
+    unproven = _master_unproven(repo, green_sha, runs, now) if g[0] == "unproven" else None
     if unproven is not None:
         plan.append(unproven)
     failed = False
@@ -19505,7 +19511,7 @@ def _master_locked(args, reader, repo, ro, rollout_path, rollout_note, tasks_dir
             print(f"master-runs: no re-run of run {rid}: {why}")
     plan = list(d["decisions"])
     if g[0] == "unproven":
-        plan.append(_master_unproven(repo, green_sha, runs, now, rollout_note))
+        plan.append(_master_unproven(repo, green_sha, runs, now))
     for dec in plan:
         if dec["key"] in keys:
             continue
@@ -19532,7 +19538,8 @@ def _master_locked(args, reader, repo, ro, rollout_path, rollout_note, tasks_dir
                 except (OSError, ValueError):
                     joined = False
                 if not joined and _master_join(tasks_dir, rollout_path, stem, now) == 1:
-                    failed = True
+                    failed = True   # no line: the next pass decides R again and joins it through its own stem
+                    continue
         fields, why = _master_fit(dec["fields"], ro)
         if why:
             print(f"ERROR: master-runs: line refused ({why})", file=sys.stderr)
