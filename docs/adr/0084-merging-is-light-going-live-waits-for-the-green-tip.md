@@ -3,9 +3,14 @@
 Date: 2026-11-16
 Status: proposed. Grilled with Lachy on 2026-11-16, from the suite audit of the merge wait
 (`docs/audits/test-suite-audit-2026-11-16.md`). Amends ADR 0025 (the required checks), ADR 0073 d3 and its "macOS
-stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset alone (the
+stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset (the
 `make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job still runs, unrequired,
-until Phase 54's task 2). Phase 54 builds the rest.
+until Phase 54's task 2). d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
+held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15), joining at 180 s and leaving only
+under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
+under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite
+fallbacks included, and names them in one line. Decided for you 2's return rule waits for p54-7's red-master record,
+in its own follow-up task (p54-18). Phase 54 builds the rest.
 
 ## Context
 

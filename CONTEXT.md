@@ -1191,7 +1191,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the **Completion verifier**. The set is declared, derived from each suite's
   measured seconds; a suite the change itself edits still runs before the
   merge, and a suite red on the default branch twice in four weeks returns to
-  the **Fast tier** (ADR 0084 d3, proposed; not yet built).
+  the **Fast tier** (ADR 0084 d3, proposed; built for GitHub's check by p54-1;
+  the Mac's verify by p54-8).
   _Avoid_: nightly tests, excluded tests.
 - **Suite budget** — how long a project's suite may take, read on the week's
   median, never one run: an Integration verify within 5 minutes and a full

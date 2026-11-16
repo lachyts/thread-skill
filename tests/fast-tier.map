@@ -17,7 +17,8 @@
 # that hold the FOREIGN name <name> only as another root's file and never read this repo's, so a change to the real one
 # does not select them; each line's trailing comment says what they hold it as. `OWN-LISTINGS <test>...` excuses tests
 # from check (f) on one of the two kinds the selector's docstring defines; each line's trailing comment says which kind
-# applies and what it lists.
+# applies and what it lists. `SLOW <test>...` declares the Slow tier (ADR 0084 d3): exact collected test paths, which
+# place and select nothing; THREAD_SKIP_SLOW=1 (GitHub's check) leaves them out of --fast unless the diff edits them.
 
 FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
 
@@ -80,7 +81,14 @@ OWN-LISTINGS tests/pushed-base.test.sh  # (i) copies $root/skills as the primary
 OWN-LISTINGS skills/execute/tests/reconcile-rollout-prove.test.sh  # (i) ls-files copy of $root/skills as a seeded Primary checkout; a temp vault
 OWN-LISTINGS tests/self-rollout-check.test.sh  # (i) copies $root/skills into a seed repo
 OWN-LISTINGS tests/lead-integrate.test.sh  # (i) C35's fixture verifier string `find . ...`, read by the inert proof
-OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R8 read the real tree through the selector's index; C1 is every run's map check, and R1-R8 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)
+OWN-LISTINGS tests/fast-tier.test.sh  # (ii) C1 and R1-R10 read the real tree through the selector's index; C1 is every run's map check, and R1-R10 change only on a FULL change or a change to a file this test names (rule 1/3 selects it); its C2 fixture strings also trip (f)
+
+# ---- SLOW: the Slow tier (ADR 0084 d3; check (j) derives it from tests/ci-seconds.tsv's macOS CI medians) ----
+# A suite measured at 180 s or more joins; a SLOW suite leaves only under 150 s. Today's ten, 184 s to 1778 s.
+SLOW tests/leg.test.sh tests/lead-integrate.test.sh tests/unfinished-rollout.test.sh tests/git-env-canary.test.sh
+SLOW tests/primary-refresh.test.sh skills/execute/tests/reconcile-rollout-completion.test.sh
+SLOW skills/execute/tests/reconcile-rollout-auto-retry.test.sh tests/merge-task-integrated.test.sh
+SLOW tests/land.test.sh tests/merge-settings.test.sh
 
 # ---- FULL: the harness and the repo's config ----
 tests/run.sh FULL
@@ -190,6 +198,9 @@ tests/lib/**
 tests/*.test.*
 tests/contracts/*.test.mjs
 skills/execute/tests/*.test.*
+
+# ---- The Slow tier's measured seconds: only check (j) reads them, and the check runs in every mode ----
+tests/ci-seconds.tsv tests/fast-tier.test.sh
 
 # ---- Prose and records: the contract tests read them ----
 skills/**/*.md tests/contracts/*.test.mjs

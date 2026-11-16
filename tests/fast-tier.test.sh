@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3) on throwaway
-# repos, its results on the real tree (R1-R8), and tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
-# fixture checkout (F1-F22; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
-# temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
+# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3, the Slow tier's
+# check (j) and its check (d) case among C2's controls) on throwaway repos, its results on the real tree (R1-R8, and the
+# Slow tier's `slow` and --shard-plan in R9-R10), tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
+# fixture checkout (F1-F22; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree), and THREAD_SKIP_SLOW's
+# filter on a second one (G1-G6, p54-1, ADR 0084 d3). Each throwaway repo has a local bare origin and a copy of the
+# selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked file uses.
+# bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -22,6 +25,8 @@ export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 unset $(git rev-parse --local-env-vars)
 git config --global user.name "fast-tier-tests"; git config --global user.email "fast-tier-tests@example.invalid"
 git config --global init.defaultBranch main
+
+nl=$'\n'; tab=$'\t'
 
 # mkrepo <dir>: an empty repo whose origin is a local bare repo, holding a copy of the selector.
 mkrepo() {
@@ -381,6 +386,39 @@ ctl "(f) a runner of a walker on OWN-LISTINGS" "tests/zzrun.test.sh: runs the wa
 pass "(f) a runner of a walker on the walkers line" "$W_SETUP; ml '** ALSO tests/zzrun.test.sh'"
 ctl "(f) a contract-text importer on OWN-LISTINGS" "walks the tree through contract-text.mjs" \
   "put . tests/zzct.test.mjs \"import { walk } from './lib/$CT.mjs'\"; ml 'OWN-LISTINGS tests/zzct.test.mjs  # (i) x'"
+# (j): the Slow tier (ADR 0084 d3), SLOW lines held to tests/ci-seconds.tsv's measured seconds. SL adds a second suite,
+# zzs, that names nothing, so making it SLOW never leaves zza.py's only test SLOW. ts writes the seconds file.
+ts() { : > tests/ci-seconds.tsv; while [ "$#" -ge 2 ]; do printf '%s\t%s\n' "$1" "$2" >> tests/ci-seconds.tsv; shift 2; done; }
+SL='put . tests/zzs.test.sh "echo s"'
+pass "(j) a SLOW line and its suite measured at 200 s" "$SL; ml 'SLOW tests/zzs.test.sh'; ts 200 tests/zzs.test.sh"
+pass "(j) the band: a SLOW suite at 160 s and one not SLOW at 175 s" \
+  "$SL; put . tests/zzt.test.sh 'echo t'; ml 'SLOW tests/zzs.test.sh  # a comment'; ts 160 tests/zzs.test.sh 175 tests/zzt.test.sh"
+pass "(j) the edges: a SLOW suite at exactly 150 s stays, and a suite under 180 s needs no line" \
+  "$SL; put . tests/zzt.test.sh 'echo t'; ml 'SLOW tests/zzs.test.sh'; ts 150 tests/zzs.test.sh 179.5 tests/zzt.test.sh"
+ctl "(j) a SLOW line naming a missing file" "the SLOW entry tests/zzgone.test.sh is not a collected test (check j)" \
+  "ml 'SLOW tests/zzgone.test.sh'; ts 200 tests/zza.test.sh"
+ctl "(j) a suite measured at 200 s that is not SLOW" "tests/zzs.test.sh is measured at 200 s, at or over 180 s: add it to a SLOW line (check j)" \
+  "$SL; ts 200 tests/zzs.test.sh"
+ctl "(j) … and at exactly 180 s" "tests/zzs.test.sh is measured at 180 s, at or over 180 s" "$SL; ts 180 tests/zzs.test.sh"
+ctl "(j) a SLOW suite measured at 140 s" "the SLOW suite tests/zzs.test.sh is measured at 140 s, under 150 s: drop its SLOW line (check j)" \
+  "$SL; ml 'SLOW tests/zzs.test.sh'; ts 140 tests/zzs.test.sh"
+ctl "(j) a SLOW suite with no row" "the SLOW suite tests/zzs.test.sh has no row in tests/ci-seconds.tsv (check j)" \
+  "$SL; ml 'SLOW tests/zzs.test.sh'; ts 10 tests/zza.test.sh"
+ctl "(j) SLOW lines and no seconds file" "tests/ci-seconds.tsv is missing" "$SL; ml 'SLOW tests/zzs.test.sh'"
+ctl "(j) a stale row" "tests/ci-seconds.tsv:1: tests/zzgone.test.sh is not a collected test; drop its row (check j)" \
+  "ts 10 tests/zzgone.test.sh 5 tests/zza.test.sh"
+for bad in "x${tab}tests/zza.test.sh" "0${tab}tests/zza.test.sh" "10 tests/zza.test.sh" "5${tab}tests/zza.test.sh${nl}6${tab}tests/zza.test.sh"; do
+  ctl "(j) a malformed row ($(printf '%s' "$bad" | tr '\t\n' '>/'))" "tests/ci-seconds.tsv:" "printf '%s\n' $(printf '%q' "$bad") > tests/ci-seconds.tsv"
+done
+ctl "(j) … names its line and its rule" "tests/ci-seconds.tsv:2: not a <seconds><TAB><suite> row" \
+  "printf '# c\n10 tests/zza.test.sh\n' > tests/ci-seconds.tsv"
+ctl "(a) a SLOW glob" "SLOW tests/*.test.sh: a SLOW entry is one exact collected test path (check a)" "ml 'SLOW tests/*.test.sh'"
+ctl "(a) a SLOW @ entry" "SLOW @merge-task-self-tests: a SLOW entry is one exact collected test path (check a)" "ml 'SLOW @merge-task-self-tests'"
+ctl "(a) a SLOW line with no entry" "SLOW names no test (check a)" "ml 'SLOW  # nothing'"
+ctl "(d) a script whose only test is SLOW" "skills/x/scripts/zza.py: its only tests are SLOW; name it in a Fast-tier test or mark it FULL (check d)" \
+  "ml 'SLOW tests/zza.test.sh'; ts 200 tests/zza.test.sh"
+pass "(d) … while a second, non-SLOW test that names it clears it" \
+  "put . tests/zzb.test.sh 'python3 skills/x/scripts/zza.py'; ml 'SLOW tests/zza.test.sh'; ts 200 tests/zza.test.sh"
 
 # C3: the selector collects exactly what run.sh runs.
 globs=$(python3 - "$SEL" <<'PY'
@@ -431,6 +469,20 @@ ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE
   "R8: a THREAD.md change is FAST and skips the suites that write only fixture repos' THREAD.md (their FOREIGN-ONLY line)"
 has "$(python3 "$SEL" select --paths CONTEXT.md)" "tests/repo-threads.test.sh" "R8: … while CONTEXT.md still selects repo-threads.test.sh, which reads the real one"
 has "$(python3 "$SEL" select --paths CLAUDE.md)" "tests/fast-tier-wiring.test.mjs" "R8: … and CLAUDE.md still selects fast-tier-wiring.test.mjs (W3 reads it)"
+# R9-R10: the real Slow tier (ADR 0084 d3). The map's SLOW lines, read here as text, are what `slow` prints; no suite is
+# named here, so a change to one never selects this suite by its name (rule 1).
+slow_map=$(sed -n -e 's/#.*//' -e 's/^SLOW[[:space:]]//p' tests/fast-tier.map | tr -s ' \t' '\n\n' | grep . | LC_ALL=C sort -u)
+r9=$(python3 "$SEL" slow --paths docs/zz.md); r9rc=$?
+ok "$r9rc|$(printf '%s\n' "$r9" | cut -f1 | LC_ALL=C sort -u | tr '\n' ' ')|$(printf '%s\n' "$r9" | cut -f2)" "0|OUT |$slow_map" \
+  "R9: slow over a path that is no SLOW suite prints OUT for every SLOW suite the map declares, and nothing else"
+ok "$([ "$(printf '%s\n' "$slow_map" | grep -c .)" -ge 1 ] && echo y || echo none)" y "R9: … and the real map declares a Slow tier"
+s1=$(printf '%s\n' "$slow_map" | head -1)
+r9=$(python3 "$SEL" slow --paths "$s1" skills/zz.py)
+ok "$(printf '%s\n' "$r9" | grep -c "^KEPT$tab")|$(printf '%s\n' "$r9" | grep -cx "KEPT$tab$s1")|$(printf '%s\n' "$r9" | grep -c "^OUT$tab")" \
+  "1|1|$(( $(printf '%s\n' "$slow_map" | grep -c .) - 1 ))" "R9: a diff that edits one SLOW suite ($s1) keeps it, and leaves every other one OUT"
+r10=$(THREAD_SKIP_SLOW=1 bash tests/run.sh --shard-plan 4 2>&1); r10rc=$?
+missing=""; for t in $slow_map; do printf '%s\n' "$r10" | grep -qx "[1-4]$tab$t" || missing="$missing $t"; done
+ok "$r10rc|${missing:-none}" "0|none" "R10: THREAD_SKIP_SLOW=1 bash tests/run.sh --shard-plan 4 still lists every SLOW suite"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
@@ -524,7 +576,6 @@ ok "$rc|$(markers)" "0|zzmarker-self-test --self-test-base zzmarker-self-test --
 
 # --shard K/N and --shard-plan N (p43-3, ADR 0073 d3): tests/lib/shard.py's split, run one shard at a time.
 git -C "$F" reset -q --hard "$FB"
-nl=$'\n'; tab=$'\t'
 # allmarkers: every marker the run printed, one per run of a suite (not deduplicated), sorted.
 allmarkers() { printf '%s\n' "$1" | grep -oE 'zzmarker-[a-z-]+( --self-test-[a-z]+)?' | grep -v '^zzmarker-self-test$' | LC_ALL=C sort | tr '\n' ' '; }
 ZZ_C_OK=1 run bash --shard 1/2; rc1=$rc; out1=$out
@@ -674,6 +725,71 @@ for bad in "nottab tests/zza.test.sh" "0${tab}tests/zza.test.sh" "3${tab}tests/z
     "F19: a bad weights file ($(printf '%s' "$bad" | tr '\t\n' '>/')) exits 2 with one shard: tests/shard-weights.tsv:<n>: line and no stdout"
 done
 rm -f "$W"
+
+# G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
+# included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:
+# zzs.py is named by zzslow (SLOW, 200 s) and zzsfast; zzslow prints the THREAD_SKIP_SLOW it sees. A workflow script,
+# as in F, since run.sh's workflow parse step needs one under bash 3.2's set -u.
+G="$TMP/g"; mkrepo "$G"
+cp "$root/tests/run.sh" "$G/tests/run.sh"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$G/tests/lib/"
+put "$G" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
+put "$G" skills/x/scripts/zzs.py 'print("s")'
+put "$G" tests/zzslow.test.sh 'echo "zzmarker-slow zzs.py ${THREAD_SKIP_SLOW:-unset}"'
+put "$G" skills/x/zz.workflow.js 'export const meta = {}
+return 1'
+put "$G" tests/zzsfast.test.sh 'echo "zzmarker-sfast zzs.py zz.workflow.js"'
+printf '%s\t%s\n' 200 tests/zzslow.test.sh 1 tests/zzsfast.test.sh > "$G/tests/ci-seconds.tsv"
+map "$G" 'tests/run.sh FULL' 'tests/fast-tier.map FULL' 'tests/lib/** FULL' 'skills/execute/scripts/merge-task.sh @merge-task-self-tests' \
+  'SLOW tests/zzslow.test.sh' 'tests/ci-seconds.tsv tests/zzsfast.test.sh' 'skills/**' 'tests/*.test.*'
+push "$G" base
+GB=$(git -C "$G" rev-parse HEAD)
+rung() { local sh="$1"; shift; out=$(cd "$G" && "$sh" tests/run.sh "$@" 2>&1); rc=$?; }
+slowl() { printf '%s\n' "$out" | grep '^== slow tier' | tr '\n' '/'; }
+LEFT='== slow tier: left out 1 suites (THREAD_SKIP_SLOW=1): tests/zzslow.test.sh/'
+echo 'S = 1' >> "$G/skills/x/scripts/zzs.py"; git -C "$G" commit -qam "zzs only"
+for sh in "${shells[@]}"; do
+  v=$("$sh" -c 'echo ${BASH_VERSINFO[0]}')
+  THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung "$sh" --fast
+  ok "$rc|$(markers)|$(slowl)" "0|zzmarker-sfast |$LEFT" \
+    "G1 ($sh, bash $v): with the flag, a diff that reaches a SLOW suite runs the rest, leaves it out and names it in one line"
+done
+THREAD_VERIFY_BASE=$GB rung bash --fast
+ok "$rc|$(markers)|$(slowl)" "0|zzmarker-sfast zzmarker-slow |" "G2: without the flag the same diff runs both, and prints no slow-tier line"
+git -C "$G" reset -q --hard "$GB"
+echo 'echo edited' >> "$G/tests/zzslow.test.sh"; git -C "$G" commit -qam "zzslow itself"
+for sh in "${shells[@]}"; do
+  THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung "$sh" --fast
+  ok "$rc|$(markers)|$(slowl)|$(printf '%s\n' "$out" | grep -c '^   kept, the diff edits it: tests/zzslow\.test\.sh$')" \
+    "0|zzmarker-slow |== slow tier: left out 0 suites (THREAD_SKIP_SLOW=1)/|1" \
+    "G3 ($sh): with the flag, a diff that edits the SLOW suite's own file still runs it, and says so"
+done
+git -C "$G" reset -q --hard "$GB"
+put "$G" new.txt 'loose'
+THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung bash --fast
+ok "$rc|$(markers)|$(slowl)" \
+  "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |$LEFT" \
+  "G4: with the flag, a FULL fallback (an unmapped path) runs everything but the SLOW suite, and names it"
+has "$out" "== fast tier: full suite (new.txt: not in the map)" "G4: … the fallback says why"
+rm -f "$G/new.txt"
+THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=0000000000000000000000000000000000000bad rung bash --fast
+ok "$rc|$(markers)|$(slowl)" \
+  "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |$LEFT" \
+  "G4: … and so does a base that does not resolve: an unreadable diff leaves every SLOW suite out"
+THREAD_SKIP_SLOW=1 rung bash
+ok "$rc|$(markers)|$(slowl)|$(printf '%s\n' "$out" | grep -c 'zzmarker-slow zzs.py unset')" \
+  "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast zzmarker-slow ||1" \
+  "G5: with the flag, a bare run runs the SLOW suite, which never sees the flag (run.sh unsets it)"
+THREAD_SKIP_SLOW=1 rung bash --shard-plan 2
+ok "$rc|$(printf '%s\n' "$out" | grep -cE "^[12]${tab}tests/zzslow\.test\.sh$")" "0|1" "G5: … --shard-plan 2 lists it"
+THREAD_SKIP_SLOW=1 rung bash --only tests/zzslow.test.sh
+ok "$rc|$(markers)|$(slowl)" "0|zzmarker-slow |" "G5: … and --only runs it"
+for mode in --fast "" "--shard-plan 2"; do
+  # shellcheck disable=SC2086
+  THREAD_SKIP_SLOW=yes THREAD_VERIFY_BASE=$GB rung bash $mode
+  ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c -e '^== ' -e "^[12]$tab")|$(printf '%s\n' "$out" | grep -c "THREAD_SKIP_SLOW must be 1 or empty, got 'yes'")" \
+    "2||0|1" "G6: THREAD_SKIP_SLOW=yes (${mode:-bare}) exits 2 before any step and runs nothing"
+done
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"
