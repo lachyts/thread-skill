@@ -4,8 +4,11 @@ Date: 2026-11-16
 Status: proposed. Grilled with Lachy on 2026-11-16, from the suite audit of the merge wait
 (`docs/audits/test-suite-audit-2026-11-16.md`). Amends ADR 0025 (the required checks), ADR 0073 d3 and its "macOS
 stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset (the
-`make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job still runs, unrequired,
-until Phase 54's task 2). d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
+`make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job ran on, unrequired,
+until Phase 54's task 2). p54-2 built the rest of d3's PR side: test.yml's PR job runs on ubuntu-latest alone, pinned by
+`tests/ci-workflows.test.mjs` W1 and W3 (no pull_request job on a macOS runner), and the Reflection's CI headroom reads
+the macOS job as retired from 2026-11-16 (`reflect.py`'s `CI_RETIRED`): said once, in the week whose window holds the
+date, and never a breach from that week on. d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
 held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15), joining at 180 s and leaving only
 under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
 under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite
@@ -18,15 +21,19 @@ header holds the rules): a file under `docs/` and an untracked file are no carri
 deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
 `tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line
 places, with a note. Measured on the tree: `skills/orient/SKILL.md` 120 test files (6 SLOW) to 88 (none); ADR 0083 87
-to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. Decided for you 12's engine reading
-built by p54-11: a roll-up check, a required check whose workflow job has the aggregator shape (a non-empty `needs:` and
-a job-level `if:` holding `always()` or `!cancelled()`, read at the integrated head; a name that is only expressions
-matches nothing), is read through the jobs it needs by `lead-integrate.py shards`, at merge-task's three sites: the
-infra re-run classifies the run's jobs minus the roll-up's own, so a shard's setup failure is re-run; a shard cut alone
-takes ADR 0073 d4's cancelled path (skipped neutral, the cut-again rule per needed job); and a roll-up whose needed jobs
-all passed or were skipped falls back to itself, today's read. CI headroom records the slowest of its needed jobs and
-itself by seconds, against that job's own limit, and the line's `shard` field names the needed job. Phase 54 builds
-the rest.
+to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. d4's Speed fixes from the audit's
+rows 2 and 5 built by p54-3: `tests/run.sh` warms a bytecode cache in its scratch dir once (`compileall` into
+`PYTHONPYCACHEPREFIX`, exported to every suite and node file), so the engine loads compiled; node's files start
+longest first, by measured seconds in `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs
+them in the shard split), run through `tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path.
+Decided for you 12's engine reading built by p54-11: a roll-up check, a required check whose workflow job has the
+aggregator shape (a non-empty `needs:` and a job-level `if:` holding `always()` or `!cancelled()`, read at the
+integrated head; a name that is only expressions matches nothing), is read through the jobs it needs by
+`lead-integrate.py shards`, at merge-task's three sites: the infra re-run classifies the run's jobs minus the
+roll-up's own, so a shard's setup failure is re-run; a shard cut alone takes ADR 0073 d4's cancelled path (skipped
+neutral, the cut-again rule per needed job); and a roll-up whose needed jobs all passed or were skipped falls back to
+itself, today's read. CI headroom records the slowest of its needed jobs and itself by seconds, against that job's own
+limit, and the line's `shard` field names the needed job. Phase 54 builds the rest.
 
 ## Context
 

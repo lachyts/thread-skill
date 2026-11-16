@@ -265,7 +265,11 @@ measurably down.
   builds 33, so about 12 s of its 244. A `cp -R` template would break the linked worktree (its gitdir paths are
   absolute), and the saving is under 1 % of the shell seconds: below the bar, not filed. The engine's start-up was
   checked too: `lead-integrate.py` (which loads the 860 KB `reconcile-rollout.py` by path) starts in 0.14 s with or
-  without a bytecode cache (`PYTHONPYCACHEPREFIX`), so caching saves nothing.
+  without a bytecode cache (`PYTHONPYCACHEPREFIX`), so caching saves nothing. *(Corrected 2026-11-16, p54-3: this
+  reading was not valid. `lead-integrate.py` sets `sys.dont_write_bytecode` before it loads the engine, so the cache
+  arm never wrote a `.pyc` to read, and neither arm had a cache. Read from a warmed prefix, the engine's load drops
+  from 105 to 53 ms (`docs/audits/test-suite-audit-2026-11-16.md` § 1), and `tests/run.sh` now warms one for every
+  run.)*
 - **(c) A prompt-text pin a contract test covers: none removed.** The 74 contract files take about 73 s of test time
   (2 % of the total, about 18 s of wall time at concurrency 4). Removing every pin would save under 20 s; judging each
   against the code it pins is not worth that.
@@ -368,7 +372,8 @@ The review of #327 (`docs/reviews/2026-11-07-6e8773c-9102f4.md`, consumed in tha
 | 11 | `actions/setup-python@v6` | 0; avoids both required checks failing when GitHub drops Node 20 | **Applied in this PR** |
 
 Not recommended, with the reason in § 5: removing prompt-text pins (under 20 s), sharing lead-integrate's git fixture
-(about 3 s of wall time, unsafe with linked worktrees), a bytecode cache for the engine (no saving).
+(about 3 s of wall time, unsafe with linked worktrees), a bytecode cache for the engine (no saving: not valid, see
+§ 5 (b)'s correction; p54-3 built the cache).
 
 ## 10. What stands between the full suite and the 20-min budget
 

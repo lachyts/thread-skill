@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # p23-4, executed: tests/lib/test-jobs.sh, tests/run.sh's cap on its own background suites (suite_cap,
 # wait_for_room) and their liveness bound (flat_bound, suite_bounds, bound_or_unweighted, watch_group, end_groups), and
-# the run.sh lines that use them.
+# the run.sh lines that use them; and (p54-3, ADR 0084 d4) run.sh's bytecode cache and node's longest-first order.
 # Run under this bash and, when present, under /bin/bash (3.2 on macOS), the shell run.sh is written for. Structural:
 # the peak is counted by marker dirs, never timed; watch_group's bounds and end_groups's grace are 1 s, their checks
 # liveness-bounded at 10 s; watch_group's awake-seconds count reads an injected clock, never a real sleep.
@@ -132,8 +132,8 @@ has "$run" '. tests/lib/test-jobs.sh' "run.sh sources tests/lib/test-jobs.sh"
 has "$run" 'max_jobs=$(suite_cap) || {' "run.sh: the cap comes from suite_cap, and a bad THREAD_TEST_JOBS stops the run"
 has "$run" 'echo "== suites: at most $max_jobs at a time"' "run.sh prints the cap"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /wait_for_room "\$max_jobs"/{print "y"; exit} on && /^\}/{exit}' tests/run.sh)" y "run.sh: spawn() waits for room first"
-has "$run" 'node --test --test-concurrency="$max_jobs" --test-timeout=1200000' \
-  "run.sh: node runs at the same concurrency, each test file bounded at 20 minutes"
+has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"' \
+  "run.sh: node runs at the same concurrency, each test file bounded at 20 minutes, through node-run.mjs (it keeps the order)"
 # ---- the real bounds clear macOS CI: PR #373's first CI run (factor 3) killed tests/unfinished-rollout.test.sh at 336 s
 # and tests/leg.test.sh at 1581 s, both healthy. The slowest passing macos-latest times seen, 19 jobs (PR full runs and
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
@@ -166,17 +166,77 @@ has "$run" 'export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"' "run.sh: the
 has "$run" 'sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))' "run.sh: the shell suites spawn largest first"
 # `ls -S` is word-split into the array, so no suite path may hold whitespace.
 ok "$(ls skills/execute/tests/*.test.sh tests/*.test.sh | grep -c '[[:space:]]')" 0 "no shell suite path holds whitespace (run.sh word-splits ls -S)"
-# CI pins the cap and keeps its job names (ADR 0025).
+# CI pins the cap and keeps its job name (ADR 0025).
 ci=$(cat .github/workflows/test.yml)
 has "$ci" 'THREAD_TEST_JOBS: "4"' "CI pins THREAD_TEST_JOBS to 4"
 has "$ci" 'name: make test (${{ matrix.os }})' "CI keeps its job name (the required-check context)"
-has "$ci" 'os: [ubuntu-latest, macos-latest]' "CI keeps its matrix"
+has "$ci" 'os: [ubuntu-latest]' "CI's PR check runs on ubuntu alone (ADR 0084 d3)"
 # The Slow tier (p54-1, ADR 0084 d3): GitHub's PR check leaves it out, run.sh unsets the flag so no suite inherits it,
 # and master's full suite never sets it. tests/fast-tier.test.sh G1-G6 pins what the flag does.
 has "$ci" 'THREAD_SKIP_SLOW: "1"' "CI's PR check sets THREAD_SKIP_SLOW=1"
 has "$run" 'skip_slow=${THREAD_SKIP_SLOW:-}' "run.sh captures THREAD_SKIP_SLOW"
 ok "$(grep -c '^unset THREAD_SKIP_SLOW$' tests/run.sh)" 1 "run.sh unsets THREAD_SKIP_SLOW, so no suite inherits it"
 ok "$(grep -c THREAD_SKIP_SLOW .github/workflows/full-suite.yml)" 0 "master's full-suite.yml never sets THREAD_SKIP_SLOW"
+
+# ---- node's files longest first (p54-3): `node --test` sorts its arguments by path, so run.sh orders them with
+# shard.py --order from tests/shard-weights.tsv's measured seconds and passes them to node-run.mjs, which keeps the order
+# (tests/fast-tier.test.sh F23 runs it on a fixture). From the real weights, the slowest node file goes first.
+has "$run" 'ordered=$(printf '"'"'%s\n'"'"' "${node_tests[@]}" | python3 tests/lib/shard.py --order)' \
+  "run.sh: node's files are ordered by shard.py --order"
+first=$(printf '%s\n' skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs | python3 tests/lib/shard.py --order | head -1)
+ok "$first" tests/reflect-weekly.test.mjs "run.sh: from the real weights, node's first file is tests/reflect-weekly.test.mjs, the slowest"
+ok "$(ls skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs | grep -c '[[:space:]]')" 0 \
+  "no node test path holds whitespace (run.sh word-splits shard.py's order)"
+
+# ---- the bytecode cache (p54-3, ADR 0084 d4): run.sh warms a scratch prefix once and exports it to every suite ---------
+has "$run" 'export PYTHONPYCACHEPREFIX="$scratch/pyc"' "run.sh exports a scratch bytecode prefix to every suite and node file"
+has "$run" 'python3 -m compileall -q' "run.sh warms it with compileall"
+# leg.py loads reconcile-rollout.py by path after `sys.dont_write_bytecode = True`, which stops a write and never a read.
+# A marker .pyc for the engine, in a prefix of this suite's own (the run's shared prefix is never written): leg.py run
+# under it prints the marker, so a script a suite runs reads its bytecode from the prefix. PYTHONDONTWRITEBYTECODE is
+# unset for that run, so it would write if it could, and the tree still gets no bytecode.
+rr=$(cd skills/execute/scripts && pwd -P)/reconcile-rollout.py
+P="$tmp/pyc"; : > "$tmp/pyc.stamp"
+PYTHONPYCACHEPREFIX="$P" python3 - "$rr" <<'PY'
+import importlib.util, marshal, os, sys
+src = sys.argv[1]; st = os.stat(src)
+pyc = importlib.util.cache_from_source(src)
+os.makedirs(os.path.dirname(pyc), exist_ok=True)
+code = compile('print("zz-pyc-marker"); raise SystemExit(7)', src, "exec")
+with open(pyc, "wb") as f:  # PEP 552's timestamp header: magic, flags 0, the source's mtime and size
+    f.write(importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + (int(st.st_mtime) & 0xFFFFFFFF).to_bytes(4, "little")
+            + (st.st_size & 0xFFFFFFFF).to_bytes(4, "little") + marshal.dumps(code))
+PY
+# legs [<python flag>]: leg.py's status verb on a note that does not exist; it loads the engine before it reads the note.
+legs() { HOME="$tmp" python3 "$@" skills/execute/scripts/leg.py status --rollout "$tmp/zz-none.md" 2>&1; }
+got=$(PYTHONPYCACHEPREFIX="$P" PYTHONDONTWRITEBYTECODE='' legs); grc=$?
+ok "$grc|$got" "7|zz-pyc-marker" "bytecode cache: leg.py reads the engine's bytecode from the prefix, its dont_write_bytecode notwithstanding"
+got=$( (unset PYTHONPYCACHEPREFIX; legs) | grep -c zz-pyc-marker)
+ok "$got" 0 "bytecode cache: … control: with no prefix it compiles the source and never sees the marker"
+ok "$(find skills hooks -newer "$tmp/pyc.stamp" \( -name '*.pyc' -o -name __pycache__ \) -print | head -3)" "" \
+  "bytecode cache: … and neither run left bytecode or a __pycache__ in the tree"
+# run.sh's own prefix: exported to this suite, warmed with the engine's .pyc, and the one a real engine load reads.
+if [ -n "${PYTHONPYCACHEPREFIX:-}" ]; then
+  warm=$(python3 -c 'import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))' "$rr")
+  if [ "${warm#"$PYTHONPYCACHEPREFIX"/}" = "$warm" ]; then got="outside the prefix: $warm"
+  elif [ -f "$warm" ]; then got=y; else got="no $warm"; fi
+  ok "$got" y \
+    "bytecode cache: run.sh's prefix holds the engine's warmed .pyc"
+  ok "$(legs -v | grep -cF "code object from '$warm'")" 1 \
+    "bytecode cache: … and leg.py's engine load reads it"
+  # Under a prefix python never reads a __pycache__, so the stdlib (and PyYAML, where it is installed) is warmed too, or
+  # every launch of every suite would compile it.
+  got=$(python3 -c 'import argparse, importlib.util, os, sys
+mods = [argparse]
+try:
+    import yaml; mods.append(yaml)
+except ImportError:
+    pass
+print(" ".join(m.__name__ for m in mods if not os.path.isfile(importlib.util.cache_from_source(m.__file__))))')
+  ok "$got" "" "bytecode cache: … and holds the stdlib's and PyYAML's bytecode too (argparse, yaml)"
+else
+  ok "unset" "set" "bytecode cache: PYTHONPYCACHEPREFIX is set (run this suite through bash tests/run.sh)"
+fi
 
 echo; [ "$fail" -eq 0 ] && echo "test-jobs: ALL PASS" || echo "test-jobs: SOME FAILED"
 exit "$fail"
