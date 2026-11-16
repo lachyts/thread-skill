@@ -862,10 +862,13 @@ and this run writes no note of its own. In order:
    it adds each task's `## Queue` row ranked first (Mode `joined <date>`, or `joined <date>, solo` for a Solo task),
    its `## File-sets` line and its `rollout:` stamp, rows before stamps, and prints `join`, `fileset`, `lead` and
    `hold` lines for step 8. It applies the Speed fix hold itself (step 5's **Speed fix hold**): a joined unmarked task
-   under a standing hold is held in the save of its `rollout:` stamp, a joined Speed fix makes or moves its phase's
-   hold, and an entry that now sits upstream of a mark is dropped; its `speed-hold` lines and `WARN: speed-hold:` lines
-   go to step 8. A non-zero exit stops the run with its stderr: a refusal (exit 2) writes nothing, and an
-   exit 1 names what was written, which the next run's `join` completes.
+   under a standing hold is held in the save of its `rollout:` stamp, a joined Speed fix, or a joined task that is a
+   Speed fix phase's release (its last task or the one its phase note names, marked or not), makes or moves its
+   phase's hold, and an entry that now sits upstream of a mark is dropped. It reads the hold whenever a Speed fix is in
+   play (a recorded hold, or a marked task on the rollout or joining), so a task step 8 left out until its blocker
+   landed is held, or holds, once it joins. Its `speed-hold` lines and `WARN: speed-hold:` lines go to step 8. A
+   non-zero exit stops the run with its stderr: a refusal (exit 2) writes nothing, and an exit 1 names what was
+   written, which the next run's `join` completes.
 3. Then the Cross-project waits below (`waits-on.py write`).
 
 There is no `incomplete:` stamp to clear and no step 7.5: the running rollout's own lead starts the joined tasks at its

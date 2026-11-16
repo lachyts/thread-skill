@@ -450,15 +450,18 @@ reshuffle's R5.2 use the same words):
   unresolved tombstone leaves the queue. A `gate-pending` task never lets a hold go: a gate has no automatic retries,
   and the Standing approval may still sign it. The queue never waits on Lachy for a Speed fix that did not land.
 - **Write orders.** A new hold: its line, then its entries. A join of unmarked tasks under a hold: the extension line
-  in the rows' save, then each task's `rollout:` and its entry in one save. A join of marked tasks: the stamps, the
-  out-of-reach drops, then the hold line, then its entries. A let-go, a release or a move's old hold: the released line,
-  then the drops, then one Run record line (`speed-hold`). A lift: drops only, no line.
+  in the rows' save, then each task's `rollout:` and its entry in one save. A join that makes or moves a hold (a joined
+  Speed fix, or a joined task that is a Speed fix phase's release, marked or not): the stamps, the out-of-reach drops,
+  then the hold line, then its entries. A let-go, a release or a move's old hold: the released line, then the drops,
+  then one Run record line (`speed-hold`). A lift: drops only, no line.
 - **Writers**: `reconcile-rollout.py speed-hold apply` (schedule step 7; § 0's Put back), `speed-hold release` (by
   hand, any note, an archived one included; a hold whose R landed ended by itself, so it is only named `ended`, with no
-  line, no drop and no event), `speed-hold lift` (schedule step 1, on a supersede, from the prior's root), `join` (its
-  extension, new or moved hold, out-of-reach drops and re-stamps; a joined task's refused mark is named even on a
-  rollout with no hold), `next` (the let-go and the clean-up, never a stamp), `defer` (a deferred task's recorded
-  entries, in the save that clears `rollout:`) and `carry` (the section's lines, a union).
+  line, no drop and no event), `speed-hold lift` (schedule step 1, on a supersede, from the prior's root), `join` (read
+  whenever a Speed fix is in play: the note records a hold, or an unlanded marked unit is linked to the rollout or
+  being joined; its extension, new or moved hold, made or moved by a joined Speed fix or by a joined task that is a
+  Speed fix phase's release, marked or not, its out-of-reach drops and re-stamps; a joined task's refused mark is named
+  even on a rollout with no hold), `next` (the let-go and the clean-up, never a stamp), `defer` (a deferred task's
+  recorded entries, in the save that clears `rollout:`) and `carry` (the section's lines, a union).
 - **Readers**: `reconcile-rollout.py status` (`speedHolds`, rendered by status § 4), the carry preview's `speed_hold`
   lines (schedule step 1), repair § 5 step 1 (a hold entry is no dependency) and every dependency reader, through
   the entries themselves.
