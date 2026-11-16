@@ -4,9 +4,9 @@
 # release, recorded on the rollout note's `## Speed fix holds` section. reconcile-rollout.py's `speed-hold apply |
 # release | lift`, and the hold's writes in `join`, `next`, `defer` and `carry`, and its reading in `status`. The mark and
 # its refusals (S2, S2b), the release (the phase's last task, or the one its note names: S1, S1b, S1c, S20), the reach
-# (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S12b, S21), the release landing (S5,
-# S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer (S19), the moving release (S21) and
-# the cross-version gate (S16). Temp vaults only; no network.
+# (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S4c, S4d, S12b, S21, S21d), the
+# release landing (S5, S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer (S19), the
+# moving release (S21) and the cross-version gate (S16). Temp vaults only; no network.
 # Usage: bash reconcile-rollout-speed-hold.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -295,6 +295,8 @@ ok "$(holdlines)" "- $STAMP hold [[x-p9-2]] (p9, join): [[a]], [[b]]" "S4c: … 
 ok "$(deps a)|$(deps b)|$(deps x-p9-1)|$(deps x-p9-2)" "x-p9-2|x-p9-2|-|-" "S4c: a and b carry the entry; the phase's own carry none"
 nxt --dry-run
 ok "$(starts)" '["x-p9-1","x-p9-2"]' "S4c: next starts only the phase's own tasks"
+sh_ apply
+ok "$(printf '%s' "$out" | tail -1)" "[no-change]" "S4c: a following apply agrees with the join's hold"
 
 # S4c (control): a phased task whose phase has no mark joins as before: no section, no speed-hold line.
 scen s4c-control
@@ -685,6 +687,14 @@ ok "$(holdlines | tail -2)" "- $STAMP hold [[x-p9-4]] (p9, join): [[a]], [[b]]
 ok "$(deps a)|$(deps b)" "x-p9-4|x-p9-4" "S21: a and b carry the new release only"
 ok "$(ev '[[d["act"], d["release"], d.get("cause"), d.get("to")] for d in L][1:]')" '[["made","x-p9-4",null,null],["released","x-p9-2","superseded","x-p9-4"]]' \
   "S21: made for the new release, released superseded for the old"
+
+# S21d: the phase's new last task joins unmarked: it is the release now, so the join moves the hold to it.
+scen s21d
+base; sh_ apply; mkt x-p9-3 open -
+jn --tasks x-p9-3
+ok "$rc|$(deps a)|$(deps b)|$(deps x-p9-3)" "0|x-p9-3|x-p9-3|-" "S21d: an unmarked last task joining takes the hold, and is never held"
+ok "$(holdlines | tail -2)" "- $STAMP hold [[x-p9-3]] (p9, join): [[a]], [[b]]
+- $STAMP released [[x-p9-2]] (p9): superseded by [[x-p9-3]]" "S21d: … the new hold line, then the old one superseded"
 
 scen s21b
 base; sh_ apply

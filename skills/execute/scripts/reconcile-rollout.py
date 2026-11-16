@@ -694,16 +694,18 @@ Subcommands:
               they never change the exit), then `[written: <n notes saved>]`, `[no-change]` or `(dry-run)`. stderr's
               `WARN: join:` lines: a queued linked task a ranked line above the queue's table ranks above the joined
               ones, and a queued linked task whose `priority:` outweighs a joined one's (next orders by priority first).
-              The Speed fix hold (p54-13; Speed fix hold, below), read only when the note records a hold or a joining
-              task carries a mark, decided before any write with the joining tasks read as linked: the extension lines
-              of every standing hold a joining unmarked task falls under (a hold about to move included) go in the rows'
-              save; each joining task's hold entries in the save of its `rollout:` stamp; then the out-of-reach drops
-              (the joined marks counted); then, on the rows re-read, each new or moved-to hold's line and its entries,
-              a move's `superseded` released line and its drops, and the re-stamps of recorded tasks missing their
-              entry. It writes no let-go line (the lead's `next` does): a phase whose hold lets go is left alone, with a
-              `speed-hold skip … (lets go at the lead's next call)` line. A join that reads no hold but whose joining
-              task carries a refused `speed_fix:` prints that task's `speed-hold refuse` line and writes nothing more
-              for the hold. Its stdout lines, before the last line:
+              The Speed fix hold (p54-13; Speed fix hold, below), read whenever a Speed fix is in play (the note records
+              a hold, or an unlanded marked unit is linked to the rollout or being joined: _SpeedCtx.in_play), so a
+              joined task that is a Speed fix phase's release (its last task or the one its phase note names, marked or
+              not) makes that phase's hold, and decided before any write with the joining tasks read as linked: the
+              extension lines of every standing hold a joining unmarked task falls under (a hold about to move included)
+              go in the rows' save; each joining task's hold entries in the save of its `rollout:` stamp; then the
+              out-of-reach drops (the joined marks counted); then, on the rows re-read, each new or moved-to hold's line
+              and its entries, a move's `superseded` released line and its drops, and the re-stamps of recorded tasks
+              missing their entry. It writes no let-go line (the lead's `next` does): a phase whose hold lets go is left
+              alone, with a `speed-hold skip … (lets go at the lead's next call)` line. A join that reads no hold but
+              whose joining task carries a refused `speed_fix:` prints that task's `speed-hold refuse` line and writes
+              nothing more for the hold. Its stdout lines, before the last line:
               `speed-hold refuse|made|moved|drop|skip|restamp …` and `speed-hold [[<R>]] (p<N>) holds [[<t>]]`. Its
               writes wait on _engine_reads_speed_hold, read only when it would write: False is one stderr `WARN:
               speed-hold: [[<ro>]]: <why> (engine-snapshot.md § Cross-version state): no Speed fix hold made`, and the
@@ -1658,7 +1660,8 @@ the block comment above SPEED_FIX_KEY: no mark, no release and nothing upstream 
 itself once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]] (p<N>,
 schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold is
 never re-made for the same R. The hold follows its phase's release at every apply and join (a move: the new hold's line
-and entries, then the old one's `superseded by [[R']]` line and drops), never at `next`; a standing hold whose phase
+and entries, then the old one's `superseded by [[R']]` line and drops; join reads it whenever a Speed fix is in play,
+_SpeedCtx.in_play, so a joined release makes its phase's hold), never at `next`; a standing hold whose phase
 has no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R,
 read through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
 leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, read
@@ -14101,6 +14104,14 @@ class _SpeedCtx:
             self._marks = sorted(u for u in self.units["marked"] if u in self.linked and not self.landed(u))
         return self._marks
 
+    def in_play(self):
+        """Whether a Speed fix is in play on this rollout, so join reads its hold: the note records one (its `## Speed
+        fix holds` section), or a live mark stands (live_marks). Every hold a plan can make, extend, move or trim needs
+        one of the two, so a join reading neither is as before; a joined task that is a live mark's phase's release
+        (its last task, or the one its phase note names, marked or not) makes that phase's hold, as does a mark added
+        by hand since the last apply."""
+        return self.note.has_heading(SPEED_HOLD_SECTION) or bool(self.live_marks())
+
     def phases_of(self, unit):
         return [k for k, p in self.units["phases"].items() if unit.lower() in p["units"]]
 
@@ -15111,17 +15122,18 @@ def cmd_join(args) -> int:
     had = _queue_links(x_note)
     x_note.apply(_join_edit, rows, [(r[0], files[r[0].lower()]) for r in rows if files.get(r[0].lower())], day)
     # The Speed fix hold (p54-13; vault-grammar § Speed fix hold), decided before any write, with the joining tasks read
-    # as linked: read only when the note records a hold or a joining task carries a mark, so every other join is as before.
+    # as linked: read whenever a Speed fix is in play on the rollout (_SpeedCtx.in_play: the note records a hold, or an
+    # unlanded marked unit is linked to it or being joined), so the hold follows its phase's release at every join (a
+    # joined release, marked or not, makes its phase's hold) and a rollout with no Speed fix joins as before.
     joined_names = [r[0] for r in rows]
-    sh_marks = [_speed_fix_mark(n)[0] for _p, n, _m in tasks]
-    sh_on = x_note.has_heading(SPEED_HOLD_SECTION) or "marked" in sh_marks
+    sh_ctx = _SpeedCtx(x_path, x_note, [{"slug": p.stem} for p, _n in linked], index, tasks_dir, now,
+                       joined=joined_names)
+    sh_on = sh_ctx.in_play()
     sh_out, sh_entries, sh_plan, sh_w = [], {}, None, None
-    if not sh_on and "refused" in sh_marks:
-        # No hold to read, but a joining task carries a refused `speed_fix:`: its refusal still reaches step 8.
-        sh_out.extend(_speed_refusals(_SpeedCtx(x_path, x_note, [], index, tasks_dir, now, joined=joined_names),
-                                      joined_names))
+    if not sh_on:
+        # No hold to read, but a joining task may carry a refused `speed_fix:`: its refusal still reaches step 8.
+        sh_out.extend(_speed_refusals(sh_ctx, joined_names))
     if sh_on:
-        sh_ctx = _SpeedCtx(x_path, x_note, *_rows(x_path, x_note, tasks_dir), tasks_dir, now, joined=joined_names)
         sh_plan, _sh_skip = _speed_join_plan(sh_ctx)
         sh_out.extend(sh_plan["refuse"])
         for line in sh_ctx.warns + sh_plan["warns"]:
