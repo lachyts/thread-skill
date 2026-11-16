@@ -37,11 +37,16 @@
 # prefix and never from a __pycache__, so an unwarmed stdlib would be compiled at each launch (a script importing
 # argparse, json, re and subprocess measured 31 ms without a prefix, 94 ms with an empty one). A suite's own copy of
 # skills/ in a temp tree (tests/pushed-base.test.sh, tests/self-rollout-check.test.sh) has other paths, so it compiles
-# its own scripts as before.
+# its own scripts as before. THREAD_TEST_WARM_STDLIB=0 leaves the stdlib and PyYAML half out of the warm, for a nested
+# run that launches only a handful of pythons: each warm compiles about 560 stdlib modules (about 0.75 s wall and 4
+# CPU-s on a 12-core Mac), and tests/fast-tier.test.sh's 30-odd fixture runs, which set it, took its 55-72 s to 103 s
+# without it. Empty, unset or 1 warms both halves; any other value exits 2 before any step. run.sh unsets it, so no
+# suite and no inner run inherits it.
 #
-# Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
-# and plain exit-code scripts both run under `node --test`; shell suites and the merge-task self-tests
-# run concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
+# Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files and plain
+# exit-code scripts both run through tests/lib/node-run.mjs, node:test's run() (the runner `node --test` uses, with its
+# exit codes; the "Capped" paragraph says why it is not the CLI); shell suites and the merge-task self-tests run
+# concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
 #
 # Reporting (p43-6, #327 finding 2). Each suite and each step prints one `<label>: ok (<N>s)` or `<label>: FAILED
 # (<N>s)` line the moment it ends, N its own seconds, so a run cut part-way (a CI job at its timeout-minutes) still
@@ -103,6 +108,9 @@ esac
 # The Slow tier's flag (the header's "The Slow tier"): captured here, then unset below with THREAD_VERIFY_BASE.
 skip_slow=${THREAD_SKIP_SLOW:-}
 case "$skip_slow" in ''|1) ;; *) echo "make test: THREAD_SKIP_SLOW must be 1 or empty, got '$skip_slow'"; exit 2 ;; esac
+# The warm's stdlib half (the header's "The bytecode cache"): captured here, then unset below with THREAD_SKIP_SLOW.
+warm_stdlib=${THREAD_TEST_WARM_STDLIB:-1}
+case "$warm_stdlib" in 0|1) ;; *) echo "make test: THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got '$warm_stdlib'"; exit 2 ;; esac
 
 export PYTHONDONTWRITEBYTECODE=1
 scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
@@ -158,6 +166,8 @@ verify_base=${THREAD_VERIFY_BASE:-}
 unset THREAD_VERIFY_BASE
 # The Slow tier's flag, captured above: unset, so no suite and no inner `make test-fast` inherits GitHub's.
 unset THREAD_SKIP_SLOW
+# The warm's stdlib knob, captured above: unset, so no suite's inner run inherits a fixture run's 0.
+unset THREAD_TEST_WARM_STDLIB
 # The Mac's own evidence of a stop (reconcile-rollout.py machine_times: kern.boottime, kern.waketime, `pmset -g log`,
 # p29-10) is never read under test: `{}` is no boot and no sleep, so no suite infers a stop from this Mac's history.
 # Each suite that tests the stops sets its own.
@@ -302,10 +312,12 @@ step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
 step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
 # The bytecode cache's warm, after the stamp, so the tree check would see a .pyc it put in the checkout.
 # warm <dir>...: compile each dir's .py files into the prefix (none: none; a bare compileall walks sys.path), red when
-# one does not compile; then, best effort and silent, the interpreter's stdlib and PyYAML (the header says why).
+# one does not compile; then, best effort and silent, the interpreter's stdlib and PyYAML (the header says why), unless
+# THREAD_TEST_WARM_STDLIB=0.
 warm() {
   local lib yaml
   [ "$#" -eq 0 ] || python3 -m compileall -q -j 0 "$@" || return 1
+  [ "$warm_stdlib" = 1 ] || { echo "bytecode cache: the stdlib and PyYAML left out (THREAD_TEST_WARM_STDLIB=0)"; return 0; }
   lib=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])') &&
     python3 -m compileall -qq -j 0 -x '[/\\](test|tests|idlelib|tkinter|turtledemo|lib2to3|ensurepip|site-packages|dist-packages)[/\\]' \
       "$lib" > /dev/null 2>&1

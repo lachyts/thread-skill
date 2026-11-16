@@ -2,10 +2,11 @@
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3, the Slow tier's
 # check (j) and its check (d) case among C2's controls) on throwaway repos, its results on the real tree (R1-R8, and the
 # Slow tier's `slow` and --shard-plan in R9-R10), tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
-# fixture checkout (F1-F22, and node's longest-first order in F23; tests/ci-workflows.test.mjs S1 runs --shard-plan on
-# the real tree), and THREAD_SKIP_SLOW's filter on a second one (G1-G6, p54-1, ADR 0084 d3). Each throwaway repo has a
-# local bare origin and a copy of the selector; no network, nothing written outside temp. Fixture basenames all start
-# with zz, which no tracked file uses.
+# fixture checkout (F1-F22; p54-3's node order, warm knob and node-run.mjs signals in F23-F25;
+# tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree), and THREAD_SKIP_SLOW's filter on a second one
+# (G1-G6, p54-1, ADR 0084 d3). Each throwaway repo has a local bare origin and a copy of the selector; no network,
+# nothing written outside temp. Fixture basenames all start with zz, which no tracked file uses. The fixture runs leave
+# the warm's stdlib half out (THREAD_TEST_WARM_STDLIB=0, exported before F1), all but F24's.
 # bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
@@ -487,6 +488,9 @@ ok "$r10rc|${missing:-none}" "0|none" "R10: THREAD_SKIP_SLOW=1 bash tests/run.sh
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
+# Every fixture run below leaves the warm's stdlib half out (run.sh's header, "The bytecode cache"): each launches only a
+# few pythons, so warming about 560 stdlib modules per run cost this suite more than the warm saved. F24 runs it whole.
+export THREAD_TEST_WARM_STDLIB=0
 F="$TMP/f"; mkrepo "$F"
 cp "$root/tests/run.sh" "$F/tests/run.sh"
 cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
@@ -750,6 +754,42 @@ test('zze fails', () => { if (process.env.ZZ_E_FAIL) throw new Error('zze') })"
 erc() { (cd "$F" && env "$@" node tests/lib/node-run.mjs tests/zze.test.mjs > /dev/null 2>&1); echo $?; }
 ok "$(erc ZZ_E=)|$(erc ZZ_E_FAIL=1)" "0|1" "F23: … node-run.mjs passes a failing todo test, as the CLI does, and fails a failing test"
 rm -f "$W" "$F/tests/zzd.test.mjs" "$F/tests/zze.test.mjs"
+
+# F24 (p54-3): the warm's stdlib half. zzw prints whether its python finds argparse's bytecode in the run's prefix, and
+# the knob it sees. This suite's THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out; 1 warms it; the suite never sees the
+# knob (run.sh unsets it); any other value exits 2 before any step.
+put "$F" tests/zzw.test.sh "python3 -c 'import argparse, importlib.util, os
+warm = os.path.isfile(importlib.util.cache_from_source(argparse.__file__))
+print(\"zzwarm\", \"warm\" if warm else \"cold\", os.environ.get(\"THREAD_TEST_WARM_STDLIB\", \"unset\"))'"
+warmed() { printf '%s\n' "$out" | grep '^zzwarm ' | tr '\n' '/'; }
+run bash --only tests/zzw.test.sh; w0="$rc|$(warmed)"
+THREAD_TEST_WARM_STDLIB=1 run bash --only tests/zzw.test.sh; w1="$rc|$(warmed)"
+ok "$w0 $w1" "0|zzwarm cold unset/ 0|zzwarm warm unset/" \
+  "F24: THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out of the prefix, 1 warms it, and no suite inherits the knob"
+THREAD_TEST_WARM_STDLIB=x run bash --only tests/zzw.test.sh
+ok "$rc|$(warmed)|$(lines '^== ')|$(lines "THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got 'x'")" "2||0|1" \
+  "F24: … THREAD_TEST_WARM_STDLIB=x exits 2 before any step and runs nothing"
+rm -f "$F/tests/zzw.test.sh"
+
+# F25 (p54-3): a TERM to node-run.mjs alone (as when a verify slot's guard ends a run inside node's step) cancels the
+# run as the CLI does: the running file's child ends with it, never left to init, its test reads cancelled, and the run
+# exits 1. Both waits are bounded (20 s for the child's pid, 5 s for its end), and a node-run.mjs that ignored the TERM
+# still ends at zzt's own 60 s, so a regression never hangs the suite.
+tpid="$TMP/f25.pid"; rm -f "$tpid"
+put "$F" tests/zzt.test.mjs "import { writeFileSync } from 'node:fs'
+writeFileSync(process.env.ZZ_PID, String(process.pid))
+setTimeout(() => {}, 60000)"
+(cd "$F" && ZZ_PID="$tpid" exec node tests/lib/node-run.mjs tests/zzt.test.mjs > "$TMP/f25.out" 2>&1) & npid=$!
+n=0; while [ ! -s "$tpid" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+kill -TERM "$npid"; wait "$npid"; nrc=$?
+child=$(cat "$tpid" 2>/dev/null)
+n=0; while [ -n "$child" ] && kill -0 "$child" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n+1)); done
+if [ -z "$child" ]; then alive="no child pid"
+elif kill -0 "$child" 2>/dev/null; then alive="child alive, ppid $(ps -o ppid= -p "$child" | tr -d ' ')"; kill "$child"
+else alive=none; fi
+ok "$nrc|$alive|$(grep -c 'cancelled 1' "$TMP/f25.out")" "1|none|1" \
+  "F25: a TERM to node-run.mjs cancels the run: exit 1, the running file's child gone with it, its test cancelled"
+rm -f "$F/tests/zzt.test.mjs"
 
 # G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
 # included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:

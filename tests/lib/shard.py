@@ -16,9 +16,9 @@ path, the self-tests by their weight. run.sh passes node's files through it, so 
 
 Weights. The measured seconds live in `shard-weights.tsv` in this script's parent's parent (tests/shard-weights.tsv,
 beside run.sh), shell suites and node files alike; its own header says where they come from and how to regenerate
-them. An absent file means no weights. `#` lines and blank lines are ignored; every other line is `<seconds>\t<entry>`, seconds a positive number. The entry
-may be `@merge-task-self-tests`. A line whose entry is not in the input is ignored, so a deleted test never breaks the
-split.
+them. An absent file means no weights. `#` lines and blank lines are ignored; every other line is
+`<seconds>\t<entry>`, seconds a positive number. The entry may be `@merge-task-self-tests`. A line whose entry is not
+in the input is ignored, so a deleted test never breaks the split.
 
 Rules:
   - `@merge-task-self-tests` always goes to shard 1, and its weight (0 when it has none) seeds shard 1's `.sh` load,
@@ -36,8 +36,9 @@ Rules:
   - A shard may hold nothing (N above the entries of a kind); run.sh runs it as a passing shard with no tests.
   - Exit 2, with one `shard: <problem>` line on stderr and nothing on stdout, on: an argument that is neither a
     positive integer N nor `--order`, a duplicate entry, an entry that is not an existing file (other than
-    `@merge-task-self-tests`), or a suffix other than .sh and .mjs; and, as `shard: tests/shard-weights.tsv:<n>: <problem>`, on a weights line that is not
-    `<seconds>\t<entry>`, a weight that is not a positive number, or an entry listed twice.
+    `@merge-task-self-tests`), or a suffix other than .sh and .mjs; and, as
+    `shard: tests/shard-weights.tsv:<n>: <problem>`, on a weights line that is not `<seconds>\t<entry>`, a weight that
+    is not a positive number, or an entry listed twice.
 """
 import math
 import os
@@ -128,7 +129,7 @@ def split(entries, n, weights=None):
 
 
 def order(entries, weights=None):
-    """The entries longest first: by load, ties by path, the kinds merged (the self-tests by their weight, 0 without)."""
+    """The entries longest first: by load, ties by path, the kinds merged (the self-tests by their weight, else 0)."""
     weights = {} if weights is None else weights
     rows = [t for items in loads(entries, weights).values() for t in items]
     if SELF_TESTS in entries:

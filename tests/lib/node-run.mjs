@@ -11,6 +11,11 @@
 // neither, so it passes), and 1 when the run ends with no summary for the whole run, so a runner that stops short is
 // never a pass.
 //
+// Signals behave as the CLI's do: a SIGINT, SIGTERM or SIGHUP cancels the run (an AbortController's signal, handed to
+// run()), which ends each running file's child and reports its tests cancelled, so the run exits 1 and leaves no orphan
+// (without it a TERM ended this process at once and left the running file's child to init). A second of the same
+// signal takes its default action and ends the process at once.
+//
 // After the reporter's last line it prints `== node seconds per file`, then one `<seconds>\t<file>` line per file,
 // longest first: the seconds of the file's top-level tests (their duration_ms summed, the file's whole time when it
 // fails to load), the lines tests/shard-weights.tsv's node section is regenerated from (its header says how).
@@ -41,7 +46,7 @@ if (files.length === 0) {
 const major = Number(process.versions.node.split('.')[0])
 const reporter = major >= 23 || process.stdout.isTTY ? new spec() : tap
 const seconds = new Map(files.map((f) => [f, 0]))
-// A top-level test's event names its file by the path it was given or by its absolute path: resolved, either is its row.
+// A top-level test's event names its file by its given path or its absolute path: resolved, either finds its row.
 const rowOf = new Map(files.map((f) => [resolve(f), f]))
 const tally = (data) => {
   if (data.nesting !== 0 || !data.file) return
@@ -49,7 +54,9 @@ const tally = (data) => {
   if (f !== undefined) seconds.set(f, seconds.get(f) + (data.details?.duration_ms ?? 0) / 1000)
 }
 
-const stream = run({ files, concurrency, timeout })
+const ac = new AbortController()
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(sig, () => ac.abort())
+const stream = run({ files, concurrency, timeout, signal: ac.signal })
 stream.on('test:pass', tally)
 stream.on('test:fail', tally)
 // One summary per file, then one for the whole run, the one with no file.
