@@ -102,6 +102,7 @@ tests/lib/fast-tier.py FULL
 tests/lib/test-jobs.sh FULL
 tests/lib/check-workflow-parse.sh FULL
 tests/lib/shard.py FULL
+tests/lib/node-run.mjs FULL  # run.sh's node phase: every node file runs through it
 tests/shard-weights.tsv FULL  # shard.py's split, and run.sh's every suite bound (suite_bounds, check h)
 Makefile FULL
 .github/** FULL
@@ -130,7 +131,7 @@ skills/execute/scripts/reconcile-rollout.py HUB tests/integration-marker-roundtr
 skills/execute/scripts/reconcile-rollout.py HUB tests/merge-task-cancelled.test.sh tests/needs-human-roundtrip.test.mjs tests/parallel-rollouts-one-repo.test.sh tests/pickups.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/primary-refresh.test.sh tests/merge-settings.test.sh tests/merge-task-no-runner.test.sh
 skills/execute/scripts/reconcile-rollout.py HUB tests/reconcile-project.test.sh tests/reflect-score.test.mjs tests/run-record.test.mjs tests/schedule-queue.test.sh tests/serial-chains.test.sh
-skills/execute/scripts/reconcile-rollout.py HUB tests/unfinished-rollout.test.sh tests/vault-note-overlap.test.sh tests/verify-slot-wait.test.sh tests/verify-slot.test.sh
+skills/execute/scripts/reconcile-rollout.py HUB tests/unfinished-rollout.test.sh tests/vault-note-overlap.test.sh tests/verify-slot-wait.test.sh tests/verify-slot.test.sh tests/test-jobs.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/integration-inputs.test.sh skills/execute/tests/reconcile-rollout-auto-retry.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-completion.test.sh skills/execute/tests/reconcile-rollout-descope.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-flake.test.sh skills/execute/tests/reconcile-rollout-human-fix.test.sh

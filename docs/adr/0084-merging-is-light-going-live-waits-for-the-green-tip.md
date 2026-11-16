@@ -18,7 +18,12 @@ header holds the rules): a file under `docs/` and an untracked file are no carri
 deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
 `tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line
 places, with a note. Measured on the tree: `skills/orient/SKILL.md` 120 test files (6 SLOW) to 88 (none); ADR 0083 87
-to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. Phase 54 builds the rest.
+to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. d4's Speed fixes from the audit's
+rows 2 and 5 built by p54-3: `tests/run.sh` warms a bytecode cache in its scratch dir once (`compileall` into
+`PYTHONPYCACHEPREFIX`, exported to every suite and node file), so the engine loads compiled; node's files start
+longest first, by measured seconds in `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs
+them in the shard split), run through `tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path.
+Phase 54 builds the rest.
 
 ## Context
 

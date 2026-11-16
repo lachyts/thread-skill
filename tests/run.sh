@@ -27,9 +27,26 @@
 # (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
 # temp instead of the real vault or ~/.claude. PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the tree.
 #
-# Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
-# and plain exit-code scripts both run under `node --test`; shell suites and the merge-task self-tests
-# run concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
+# The bytecode cache (p54-3, ADR 0084 d4). PYTHONPYCACHEPREFIX points every suite and node file at scratch's pyc/, which
+# the run warms once (`python3 -m compileall`, which writes there under PYTHONDONTWRITEBYTECODE=1) before any suite
+# starts, so a script that loads the engine by path (leg.py's reconcile-rollout.py, about 1,500 launches in
+# tests/leg.test.sh) reads it compiled instead of compiling 1.1 MB each time: leg.py's launch measured 172 ms without
+# the cache and 87 ms with it. The scripts' `sys.dont_write_bytecode` stops only writes, never a read, so no script
+# changes, and the warm writes nothing into the checkout (the tree check below still holds). The warm compiles skills/
+# and hooks/, then the interpreter's stdlib and PyYAML: under a prefix python reads every module's bytecode from the
+# prefix and never from a __pycache__, so an unwarmed stdlib would be compiled at each launch (a script importing
+# argparse, json, re and subprocess measured 31 ms without a prefix, 94 ms with an empty one). A suite's own copy of
+# skills/ in a temp tree (tests/pushed-base.test.sh, tests/self-rollout-check.test.sh) has other paths, so it compiles
+# its own scripts as before. THREAD_TEST_WARM_STDLIB=0 leaves the stdlib and PyYAML half out of the warm, for a nested
+# run that launches only a handful of pythons: each warm compiles about 560 stdlib modules (about 0.75 s wall and 4
+# CPU-s on a 12-core Mac), and tests/fast-tier.test.sh's 30-odd fixture runs, which set it, took that suite from
+# master's 54-77 s to 119-133 s without it (68-69 s with it, measured back to back on one Mac). Empty, unset or 1 warms
+# both halves; any other value exits 2 before any step. run.sh unsets it, so no suite and no inner run inherits it.
+#
+# Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files and plain
+# exit-code scripts both run through tests/lib/node-run.mjs, node:test's run() (the runner `node --test` uses, with its
+# exit codes; the "Capped" paragraph says why it is not the CLI); shell suites and the merge-task self-tests run
+# concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
 #
 # Reporting (p43-6, #327 finding 2). Each suite and each step prints one `<label>: ok (<N>s)` or `<label>: FAILED
 # (<N>s)` line the moment it ends, N its own seconds, so a run cut part-way (a CI job at its timeout-minutes) still
@@ -40,7 +57,10 @@
 # Capped (p23-4): at most `suite_cap` background suites run at once (tests/lib/test-jobs.sh: THREAD_TEST_JOBS,
 # else max(2, ceil(cores / 3)), 4 on 12 cores), and node runs that many test files at once. The suites spawn
 # roughly longest-first: the two merge-task self-tests, then the shell suites by file size, largest first (`ls -S`;
-# no suite path holds a space, tests/test-jobs.test.sh pins it), so no static list can drift.
+# no suite path holds a space, tests/test-jobs.test.sh pins it), so no static list can drift. Node's files go longest
+# first by their measured seconds (p54-3): tests/lib/shard.py --order sorts them from tests/shard-weights.tsv (its node
+# section; a file it has no seconds for is weighed by its size), and tests/lib/node-run.mjs runs them in that order,
+# since `node --test` sorts its arguments by path. A failed --order keeps the glob's order and says so on stderr.
 # THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot (verify-slot.py) never waits on
 # the machine's pool, nor an inner `make test` on its outer wrapper's slot.
 #
@@ -59,7 +79,8 @@
 # TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 1200 s
 # (`--test-timeout`, which bounds a whole file as well as each test, from the file's own start: node 22 and 23.9 cancel
 # a file of three 1.5 s tests at a 2 s timeout), 2.3x the slowest file on macOS CI (tests/reflect-weekly.test.mjs,
-# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x).
+# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x). node-run.mjs takes the CLI's
+# --test-concurrency and --test-timeout and hands them to node:test's run(), the runner `node --test` uses.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -87,9 +108,14 @@ esac
 # The Slow tier's flag (the header's "The Slow tier"): captured here, then unset below with THREAD_VERIFY_BASE.
 skip_slow=${THREAD_SKIP_SLOW:-}
 case "$skip_slow" in ''|1) ;; *) echo "make test: THREAD_SKIP_SLOW must be 1 or empty, got '$skip_slow'"; exit 2 ;; esac
+# The warm's stdlib half (the header's "The bytecode cache"): captured here, then unset below with THREAD_SKIP_SLOW.
+warm_stdlib=${THREAD_TEST_WARM_STDLIB:-1}
+case "$warm_stdlib" in 0|1) ;; *) echo "make test: THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got '$warm_stdlib'"; exit 2 ;; esac
 
 export PYTHONDONTWRITEBYTECODE=1
 scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
+# The bytecode cache (the header's "The bytecode cache"): warmed by its step below, read by every suite and node file.
+export PYTHONPYCACHEPREFIX="$scratch/pyc"
 
 # Pin the real interpreters BEFORE swapping HOME: version-manager shims (asdf, mise, pyenv) resolve the
 # global version under $HOME and fail inside the temp one. Their resolved dirs go first on PATH.
@@ -140,6 +166,8 @@ verify_base=${THREAD_VERIFY_BASE:-}
 unset THREAD_VERIFY_BASE
 # The Slow tier's flag, captured above: unset, so no suite and no inner `make test-fast` inherits GitHub's.
 unset THREAD_SKIP_SLOW
+# The warm's stdlib knob, captured above: unset, so no suite's inner run inherits a fixture run's 0.
+unset THREAD_TEST_WARM_STDLIB
 # The Mac's own evidence of a stop (reconcile-rollout.py machine_times: kern.boottime, kern.waketime, `pmset -g log`,
 # p29-10) is never read under test: `{}` is no boot and no sleep, so no suite infers a stop from this Mac's history.
 # Each suite that tests the stops sets its own.
@@ -240,6 +268,11 @@ sh_files=(skills/*/scripts/*.sh hooks/*.sh tests/*.sh tests/lib/*.sh)
 py_files=(skills/*/scripts/*.py hooks/*.py tests/lib/*.py)
 wf_files=(skills/*/*.workflow.js skills/*/diagnostics/*.workflow.js)
 node_tests=(skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs)
+# Longest first by measured seconds (p54-3, the header's "Capped"); a failed order keeps the glob's.
+if [ "${#node_tests[@]}" -gt 0 ]; then
+  if ordered=$(printf '%s\n' "${node_tests[@]}" | python3 tests/lib/shard.py --order); then node_tests=($ordered)
+  else echo "run.sh: shard.py --order failed, so node takes its files in glob order" >&2; fi
+fi
 # Largest first: a cheap longest-first order (p23-4), so the long suites start before the cap fills.
 sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))
 nl=$'\n'; tab=$'\t'
@@ -277,6 +310,25 @@ sys.exit(r)' "$@"; }
 step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
 step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
 step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
+# The bytecode cache's warm, after the stamp, so the tree check would see a .pyc it put in the checkout.
+# warm <dir>...: compile each dir's .py files into the prefix (none: none; a bare compileall walks sys.path), red when
+# one does not compile; then, best effort and silent, the interpreter's stdlib and PyYAML (the header says why), unless
+# THREAD_TEST_WARM_STDLIB=0. Only the stdlib's 560-odd modules take a worker pool (-j 0): for skills/ and hooks/ (about
+# 50 files) its start-up cost more than it saved (0.82 s against 0.53 s serially, and 0.35 against 0.12 s on a fixture's
+# two files), so they and PyYAML compile serially.
+warm() {
+  local lib yaml
+  [ "$#" -eq 0 ] || python3 -m compileall -q "$@" || return 1
+  [ "$warm_stdlib" = 1 ] || { echo "bytecode cache: the stdlib and PyYAML left out (THREAD_TEST_WARM_STDLIB=0)"; return 0; }
+  lib=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])') &&
+    python3 -m compileall -qq -j 0 -x '[/\\](test|tests|idlelib|tkinter|turtledemo|lib2to3|ensurepip|site-packages|dist-packages)[/\\]' \
+      "$lib" > /dev/null 2>&1
+  yaml=$(python3 -c 'import os, yaml; print(os.path.dirname(yaml.__file__))' 2> /dev/null) &&
+    python3 -m compileall -qq "$yaml" > /dev/null 2>&1
+  return 0
+}
+warm_dirs=(); for d in skills hooks; do [ -d "$d" ] && warm_dirs+=("$d"); done
+step "bytecode cache (${#warm_dirs[@]} dirs)"   warm ${warm_dirs[@]+"${warm_dirs[@]}"}
 # The map check runs in every mode, so a stale map line turns every run red, not only a run that selects its suite.
 step "fast-tier map check"                      python3 tests/lib/fast-tier.py check
 
@@ -373,9 +425,9 @@ fi
 for t in ${run_sh[@]+"${run_sh[@]}"}; do spawn "$t" "$(bound_of "$t")" bash "$t"; done
 wait
 i=0; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
-# A bare `node --test` walks the whole tree, so node runs only when a file is selected.
+# A bare `node --test` walks the whole tree, and node-run.mjs refuses an empty list, so node runs only when a file is selected.
 if [ "${#run_node[@]}" -gt 0 ]; then
-  step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"
+  step "node tests (${#run_node[@]} files)"    node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"
 else
   echo "== node tests: none selected"
 fi

@@ -5,10 +5,12 @@
 # unstaged ones, which check an untracked helper or script as a worktree holds it before `git add`; C4 pins
 # contract-text's skillCount) on throwaway repos, its results on the real tree (R1-R8, the Slow tier's `slow` and
 # --shard-plan in R9-R10, and R11-R12's SKILL.md and docs reach through one index), tests/run.sh's --fast, --only,
-# --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note), and THREAD_SKIP_SLOW's
-# filter on a second one (G1-G6, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real
-# tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
-# temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
+# --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note; p54-3's node order, warm
+# knob and node-run.mjs signals in F23-F25), and THREAD_SKIP_SLOW's filter on a second one (G1-G6, p54-1, ADR 0084 d3;
+# tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a
+# copy of the selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked
+# file uses. The fixture runs leave the warm's stdlib half out (THREAD_TEST_WARM_STDLIB=0, exported before F1), all but
+# F24's. bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -682,9 +684,13 @@ ok "$n" 7 "R11-R12: the real-tree reading printed its seven verdicts"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
+# Every fixture run below leaves the warm's stdlib half out (run.sh's header, "The bytecode cache"): each launches only a
+# few pythons, so warming about 560 stdlib modules per run cost this suite more than the warm saved. F24 runs it whole.
+export THREAD_TEST_WARM_STDLIB=0
 F="$TMP/f"; mkrepo "$F"
 cp "$root/tests/run.sh" "$F/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$F/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$F/tests/lib/"
 put "$F" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$F" skills/x/scripts/zza.py 'print("a")'
 put "$F" skills/x/scripts/zzb.py 'print("b")'
@@ -811,6 +817,7 @@ put "$F" tests/lib/shard.py 'import sys; sys.exit(1)'
 ZZ_C_OK=1 run bash --shard 1/2
 ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no test"
 has "$out" "  - shard split" "F14: … through the shard split step"
+has "$out" "run.sh: shard.py --order failed, so node takes its files in glob order" "F14: … and node's order falls back to the glob's, and says so"
 git -C "$F" checkout -q -- tests/lib/shard.py
 
 # F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
@@ -927,13 +934,72 @@ for bad in "nottab tests/zza.test.sh" "0${tab}tests/zza.test.sh" "3${tab}tests/z
 done
 rm -f "$W"
 
+# F23 (p54-3): node takes its files longest first, by the measured seconds in tests/shard-weights.tsv: shard.py --order
+# sorts them and tests/lib/node-run.mjs keeps that order (`node --test` itself sorts its arguments by path). At
+# THREAD_TEST_JOBS=1 node runs one file at a time, so the markers' order is the files' start order.
+put "$F" tests/zzd.test.mjs "console.log('zzmarker-d')"
+nodeorder() { printf '%s\n' "$out" | grep -oE 'zzmarker-[cd]' | tr '\n' ' '; }
+printf '%s\t%s\n' 1 tests/contracts/zzc.test.mjs 100 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-d zzmarker-c " "F23: the heavier node file (zzd, 100 s) runs first, though zzc's path sorts first"
+has "$out" "== node seconds per file" "F23: … and node prints each file's seconds, the weights' source"
+printf '%s\t%s\n' 100 tests/contracts/zzc.test.mjs 1 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-c zzmarker-d " "F23: … and with the weights swapped, zzc runs first"
+ZZ_C_OK=0 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(lines '^node tests \(2 files\): FAILED \([0-9]+s\)$')" "1|1" "F23: … a failing node file still fails the node step and the run"
+# node-run.mjs exits as `node --test` does, by the run's summary: a failing `todo` test passes, a failing test does not.
+put "$F" tests/zze.test.mjs "import test from 'node:test'
+test('zze todo', { todo: true }, () => { throw new Error('zze') })
+test('zze fails', () => { if (process.env.ZZ_E_FAIL) throw new Error('zze') })"
+erc() { (cd "$F" && env "$@" node tests/lib/node-run.mjs tests/zze.test.mjs > /dev/null 2>&1); echo $?; }
+ok "$(erc ZZ_E=)|$(erc ZZ_E_FAIL=1)" "0|1" "F23: … node-run.mjs passes a failing todo test, as the CLI does, and fails a failing test"
+rm -f "$W" "$F/tests/zzd.test.mjs" "$F/tests/zze.test.mjs"
+
+# F24 (p54-3): the warm's stdlib half. zzw prints whether its python finds argparse's bytecode in the run's prefix, and
+# the knob it sees. This suite's THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out; 1 warms it; the suite never sees the
+# knob (run.sh unsets it); any other value exits 2 before any step.
+put "$F" tests/zzw.test.sh "python3 -c 'import argparse, importlib.util, os
+warm = os.path.isfile(importlib.util.cache_from_source(argparse.__file__))
+print(\"zzwarm\", \"warm\" if warm else \"cold\", os.environ.get(\"THREAD_TEST_WARM_STDLIB\", \"unset\"))'"
+warmed() { printf '%s\n' "$out" | grep '^zzwarm ' | tr '\n' '/'; }
+run bash --only tests/zzw.test.sh; w0="$rc|$(warmed)"
+THREAD_TEST_WARM_STDLIB=1 run bash --only tests/zzw.test.sh; w1="$rc|$(warmed)"
+ok "$w0 $w1" "0|zzwarm cold unset/ 0|zzwarm warm unset/" \
+  "F24: THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out of the prefix, 1 warms it, and no suite inherits the knob"
+THREAD_TEST_WARM_STDLIB=x run bash --only tests/zzw.test.sh
+ok "$rc|$(warmed)|$(lines '^== ')|$(lines "THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got 'x'")" "2||0|1" \
+  "F24: … THREAD_TEST_WARM_STDLIB=x exits 2 before any step and runs nothing"
+rm -f "$F/tests/zzw.test.sh"
+
+# F25 (p54-3): a TERM to node-run.mjs alone (as when a verify slot's guard ends a run inside node's step) cancels the
+# run as the CLI does: the running file's child ends with it, never left to init, its test reads cancelled, and the run
+# exits 1. Both waits are bounded (20 s for the child's pid, 5 s for its end), and a node-run.mjs that ignored the TERM
+# still ends at zzt's own 60 s, so a regression never hangs the suite.
+tpid="$TMP/f25.pid"; rm -f "$tpid"
+put "$F" tests/zzt.test.mjs "import { writeFileSync } from 'node:fs'
+writeFileSync(process.env.ZZ_PID, String(process.pid))
+setTimeout(() => {}, 60000)"
+(cd "$F" && ZZ_PID="$tpid" exec node tests/lib/node-run.mjs tests/zzt.test.mjs > "$TMP/f25.out" 2>&1) & npid=$!
+n=0; while [ ! -s "$tpid" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+kill -TERM "$npid"; wait "$npid"; nrc=$?
+child=$(cat "$tpid" 2>/dev/null)
+n=0; while [ -n "$child" ] && kill -0 "$child" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n+1)); done
+if [ -z "$child" ]; then alive="no child pid"
+elif kill -0 "$child" 2>/dev/null; then alive="child alive, ppid $(ps -o ppid= -p "$child" | tr -d ' ')"; kill "$child"
+else alive=none; fi
+ok "$nrc|$alive|$(grep -c 'cancelled 1' "$TMP/f25.out")" "1|none|1" \
+  "F25: a TERM to node-run.mjs cancels the run: exit 1, the running file's child gone with it, its test cancelled"
+rm -f "$F/tests/zzt.test.mjs"
+
 # G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
 # included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:
 # zzs.py is named by zzslow (SLOW, 200 s) and zzsfast; zzslow prints the THREAD_SKIP_SLOW it sees. A workflow script,
 # as in F, since run.sh's workflow parse step needs one under bash 3.2's set -u.
 G="$TMP/g"; mkrepo "$G"
 cp "$root/tests/run.sh" "$G/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$G/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$G/tests/lib/"
 put "$G" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$G" skills/x/scripts/zzs.py 'print("s")'
 put "$G" tests/zzslow.test.sh 'echo "zzmarker-slow zzs.py ${THREAD_SKIP_SLOW:-unset}"'

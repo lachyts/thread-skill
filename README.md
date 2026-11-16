@@ -641,7 +641,8 @@ it runs:
   `docs/evals/`.
 
 New suites join by filename: `tests/*.test.mjs`, `tests/contracts/*.test.mjs` and
-`skills/execute/tests/*.test.mjs` run under `node --test`; `tests/*.test.sh` and
+`skills/execute/tests/*.test.mjs` run under node's test runner (`tests/lib/node-run.mjs`, longest first by
+measured seconds); `tests/*.test.sh` and
 `skills/execute/tests/*.test.sh` run concurrently, output grouped per suite. `skills/execute/diagnostics/` holds paid live
 diagnostics (Workflow runtime + real agents) — parse-checked, never run by `make test`.
 
