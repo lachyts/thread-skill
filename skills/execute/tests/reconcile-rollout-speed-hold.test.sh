@@ -279,6 +279,44 @@ ok "$rc|$(deps a)|$(cksum < "$D/b.md")" "0|x-p9-2|$bb" "S4b: the same join stamp
 ok "$(holdlines | grep -c ' hold ')" 1 "S4b: the section keeps exactly one hold line"
 ok "$(deps c)|$(deps x-p9-1)|$(deps x-p9-2)" "-|-|-" "S4b: the running task and the phase's own tasks carry no entry"
 
+# ── S4c: the phase's release joins a rollout its marked task is already on: the join makes the phase's hold ─────────────
+# Schedule step 8 leaves a waiting task out and schedules it once its blocker lands; on a join, the join is the only
+# Speed fix step, so the hold is read whenever a Speed fix is in play, not only when the joining task is marked.
+scen s4c
+mkro ro "" x-p9-1 a b
+mkt x-p9-1 open ro "$MARK"; mkt a open ro; mkt b open ro; mkt x-p9-2 open -
+sh_ apply
+has "$out" "speed-hold skip [[x-p9-2]] (p9): not on [[ro]]" "S4c: apply skips the phase whose release is on no rollout"
+ok "$(holdlines)" "" "S4c: … and writes no section"
+jn --tasks x-p9-2
+ok "$rc" 0 "S4c: the release's join exits 0"
+has "$out" "speed-hold made [[x-p9-2]] (p9, join): [[a]], [[b]]" "S4c: joining the phase's unmarked release makes its hold"
+ok "$(holdlines)" "- $STAMP hold [[x-p9-2]] (p9, join): [[a]], [[b]]" "S4c: … its hold line"
+ok "$(deps a)|$(deps b)|$(deps x-p9-1)|$(deps x-p9-2)" "x-p9-2|x-p9-2|-|-" "S4c: a and b carry the entry; the phase's own carry none"
+nxt --dry-run
+ok "$(starts)" '["x-p9-1","x-p9-2"]' "S4c: next starts only the phase's own tasks"
+
+# S4c (control): a phased task whose phase has no mark joins as before: no section, no speed-hold line.
+scen s4c-control
+mkro ro "" x-p7-1 a
+mkt x-p7-1 open ro; mkt a open ro; mkt x-p7-2 open -
+jn --tasks x-p7-2
+ok "$rc|$(holdlines)|$(deps a)|$(deps x-p7-1)" "0||-|-" "S4c (control): an unmarked phase's join writes no hold"
+hasnt "$out$err" "speed-hold" "S4c (control): … and prints no speed-hold line"
+
+# S4d: a mark added by hand after the schedule (no section yet) is followed at the next join, of any task.
+scen s4d
+mkro ro "" x-p9-1 x-p9-2 a b
+mkt x-p9-1 open ro; mkt x-p9-2 open ro; mkt a open ro; mkt b open ro; mkt e open -
+sh_ apply
+ok "$(holdlines)|$(printf '%s' "$out" | tail -1)" "|[no-change]" "S4d: with no mark, apply writes nothing"
+setfm x-p9-1 speed_fix '"docs/audits/x.md row 4"'
+jn --tasks e
+ok "$rc" 0 "S4d: an unrelated task's join exits 0"
+has "$out" "speed-hold made [[x-p9-2]] (p9, join): [[a]], [[b]], [[e]]" "S4d: the join makes the hand-marked phase's hold"
+ok "$(deps a)|$(deps b)|$(deps e)|$(deps x-p9-1)|$(deps x-p9-2)" "x-p9-2|x-p9-2|x-p9-2|-|-" \
+  "S4d: the queue's other tasks, the joined one included, are held"
+
 # ── S5: the release lands: next starts the held rows, with no Speed fix write ──────────────────────────────────────────────
 scen s5
 base; sh_ apply
@@ -320,7 +358,7 @@ done
 
 # ── S7: a hold that cannot release lets go, with its Run record line ───────────────────────────────────────────────────────
 scen s7
-base; mkro ro "max_review_rounds: 3" x-p9-1 x-p9-2 x-p9-3 a b c d f g
+base; mkro ro "max_review_rounds: 3" x-p9-1 x-p9-2 a b c d f g
 sh_ apply
 blocked x-p9-2 "$MARK" 'auto_retries: 0'
 ok "$(hf x-p9-2)" '"raise max_iterations, hand back or defer"' "S7: the set-aside release's humanFix is non-null (its retries spent)"
