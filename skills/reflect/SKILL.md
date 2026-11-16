@@ -227,7 +227,14 @@ headlines first (ADR 0037 d1), then the Guardrails:
   time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
   moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. Nor does a last-start-bound
   one (p28-7: the same reading over `hold-last-start`, the last starts holding starts toward the Morning): say "the
-  last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below.
+  last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below. A
+  budget-bound one (p53-5: the trickle-bound share, held mostly while the budget admitted, its idle-slots markers
+  carrying a `bound`) is read from `budget`: say which part was short (`short`: the count, memory, cores, or memory and
+  cores, with each part's held hours in `heldHours`; `unboundHeldHours` is the time C or the Trickle held, no part of
+  the budget) and read Throughput as under the budget. Memory and cores are Chorus's budget (capacity.json), not a
+  rollout key: say "no rollout key moves this". A count-bound one proposes a capacity_max raise, always with a caution,
+  Lachy's call: the record cannot show the Mac green at a count hold, since `next` tests the count before the Weight
+  (ADR 0083 DfL 13).
 - **The nights** (`nights`, p28-7; `skills/execute/away.md` § The night record), for each Morning this rollout
   marked: the night (its rollouts, `marked`), the starts the last starts held (`held`, split `heldBy` fallback / history) and the
   tasks still running at the Morning (`ranPast`, split `ranPastBy`: a `fallback` overrun, fewer than 3 past runs and
@@ -239,6 +246,11 @@ headlines first (ADR 0037 d1), then the Guardrails:
   Its N is the Trickle's cap only, never a Capacity's (a slot-taken `cap` with `by: capacity`, ADR 0067 d8): a window
   whose by-day caps were all the Capacity's suggests no trickle-raise and says so in `nights.flags`.
   Show `nights.flags` beside them.
+- **The Weights** (`weights`, p53-5; `skills/execute/away.md` § Capacity, *A task's Weight*): the repo's estimate
+  (`estimate`, each part with its source) beside the measure (`measured`, the pooled upper quartile of the window's
+  per-task peaks once 3 tasks have one), then each kind's (`kinds`: its tasks, its own measure or none yet, and the
+  Weight its tasks started with), and the tasks with no note (`noNote`). A Weight proposal steps the estimate one whole
+  unit toward its measure; show `weights:` flags beside them.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
   3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
@@ -269,18 +281,20 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/threa
 The first with Lachy's yes answers; the second when he picked nothing, said no, or ended the Reflection without
 answering. `--record-only` still matters: its line is the next Reflection's baseline. With a null repo, tune.py prints
 `tune: not recorded: ...` and exits 0: report that line as it is. Exit 1 (a write failed: nothing applied, or the
-line voided) and exit 2 (refused: a stale `from` because rollouts.toml changed since the score, an unknown or
-withheld id, a dotted or inline key, another repo) are reported verbatim; a stale `from` is fixed by a fresh
-Reflection. Never edit `rollouts.toml` to work around a refusal.
+line voided; or the reader check refused, nothing written: a capacity_max or Weight Tuning raises the file's `schema`,
+and a live rollout's engine cannot read it) and exit 2 (refused: a stale `from` because rollouts.toml changed since
+the score, an unknown or withheld id, a dotted or inline key, another repo) are reported verbatim; a stale `from` is
+fixed by a fresh Reflection. Never edit `rollouts.toml` to work around a refusal.
 
 A `--pick` run that wrote no line does not use up the one run: an exit-2 refusal writes nothing (no line, no key),
-and neither does an exit 1 that says `nothing applied: the Reflection's line could not be written` or `cannot write
-next to`. Report it, then either re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id; Owner
-*yours*, step 5's question, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), or,
-when he picks nothing more or the refusal cannot be fixed in this Reflection (a stale `from`, another repo), run
-`--record-only`, so the Reflection still leaves its line as the next one's baseline. A run that wrote its line (exit 0,
-or the exit-1 `rollouts.toml was not written` failure, which records the line and voids it) is the one run: never
-run tune.py again for this Reflection.
+and neither does an exit 1 that says `nothing applied: the Reflection's line could not be written`, `cannot write
+next to` or `nothing written: a live rollout's engine cannot read the raised `schema` line`. Report it, then either
+re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id; Owner *yours*, step 5's question,
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), or, when he picks nothing more or the refusal cannot be fixed in
+this Reflection (a stale `from`, another repo, the reader check: that rollout finishes, or its checkout is updated,
+first), run `--record-only`, so the Reflection still leaves its line as the next one's baseline. A run that wrote its
+line (exit 0, or the exit-1 `rollouts.toml was not written` failure, which records the line and voids it) is the one
+run: never run tune.py again for this Reflection.
 
 ### 8. Report, then tidy
 
@@ -291,7 +305,9 @@ printed. Then `rm -rf /tmp/thread-reflect-<rollout-slug>`.
 `--regenerate`, which stamps freshly resolved values). A rollout note already stamped, running, paused or not yet
 started, keeps its own frontmatter values: execute reads task frontmatter, then rollout frontmatter, then
 rollouts.toml, and only a legacy note missing a key reads rollouts.toml, at its next loop entry (execute § 3). To
-change a live rollout, Lachy edits its note.
+change a live rollout, Lachy edits its note. Two keys take effect sooner, since nothing stamps them: a capacity_max
+Tuning at every rollout's next `next` call on this Mac, whatever its repo, and a Weight Tuning at its repo's next `next`
+call or start, running rollouts included (both read live; ADR 0083).
 
 ## The weekly reading (ADR 0037 d3–d5)
 
@@ -713,13 +729,16 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span /tm
 `scores` file among `knobs.land[]` (with its items' `root`): one call lands every eligible proposal in that file as one
 line, and a repo's land items all come from its newest rollout's file. `knobs` runs once, after them. Report every exit
 verbatim: an `applied` line, a `held <key>: <reason>` line (`agreement 1 of 3`, say; a key this Reflection's revert
-moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a write failure (exit 1). Never `--pick`,
+moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a write failure or refused reader check
+(exit 1, nothing written: a live rollout's engine cannot read the `schema` line the landing raises). Never `--pick`,
 `--record-only` or `--close`, and never edit `rollouts.toml`. A `held <key>: a trade (...): Lachy decides` or
 `held <key>: a caution: Lachy decides` line is a held trade (ADR 0037 d1): the weekly reading never lands it, and
 step 15's `decide` puts it in the decision task. A `held parallel_ceiling: machine load tops the Time-lost ledger (<h> h
 of <total> h): a Parallel ceiling raise waits (ADR 0051)` line is the load hold: a Parallel ceiling raise waits while
 machine load tops this reading's ledger (ADR 0051's "a load-topped ledger"; `span.json`'s `ledger.holds` lists it
-ahead). Lowers and round caps are never held by load, and an audit's hours never move it. `no Time-lost ledger line
+ahead). Lowers and round caps are never held by load, apart from a Weight lower, which admits more work as a raise
+does: `held capacity_max: … a capacity_max raise waits (ADR 0051, ADR 0083)` and `held weight_mem_gb: … a weight_mem_gb
+lower waits (ADR 0051, ADR 0083)` are the load hold too. A revert is never held, and an audit's hours never move it. `no Time-lost ledger line
 for Reflection <id>: run reflect.py ledger first` means step 13a was skipped: run it, then `--auto` again; `knobs`
 refuses (`run ledger`) for the same reason.
 

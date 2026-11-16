@@ -12,7 +12,7 @@ each rollout's close (its completion ceremony, or its supersede); and SKILL.md s
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores <score.json|-> \\
         (--pick p1[,p2...] --repo <dir> | --record-only [--close completion|supersede] |
          --auto --repo <dir> --reflection <id> | --revert <tuning id> --repo <dir> --reflection <id>)
-        [--config <path>] [--dry-run]
+        [--config <path>] [--tasks-dir <dir>] [--dry-run]
 
 --scores is score.py's JSON. --pick, --record-only, --auto and --revert are mutually exclusive and one is required.
 --reflection (an r- id, the weekly reading's) is required with --auto and --revert and refused with the other two (exit
@@ -26,20 +26,26 @@ cannot be read prints `tune: reflections.jsonl cannot be read: ...` and exits 1,
 unresolvable events directory, `tune: cannot resolve the events directory: ...`). Both modes refuse a --reflection that
 already has its `reflection` (close) line: exit 2, `Reflection <id> is closed`.
 
---auto --repo <dir> --reflection <id> (ADR 0037 d5) lands every proposal in scores.proposals that passes auto_check(),
+--auto --repo <dir> --reflection <id> (ADR 0037 d5) lands every proposal in scores.proposals whose key is one of
+rollout-settings.py's TUNING_KEYS (KEYS, then capacity_max and the two Weight keys, p53-5) and that passes auto_check(),
 as ONE tuning line stamped `auto: true` and `reflection`. auto_check's checks run in order, and the first that fails is
 the reason: (1) no trade and no caution (Lachy's call, ADR 0037 d1); (2) no Guardrail breached and the window not
-partial; (3) ranAt == from (a landing steps one past the value the run ran at, never a jump); (4) no auto line of this
-Reflection has already moved the key (a revert included); (5) the agreement is at least AGREE (3): run_record.py's
+partial; (3) ranAt == from (a landing steps one past the value the run ran at, never a jump; a Weight's ranAt is its
+estimate now, score.py's, so this check always passes for it, and score.py's one-unit step toward the measure keeps
+"never a jump"); (4) no auto line of this Reflection has already moved the key (a revert included); (5) the agreement is at least AGREE (3): run_record.py's
 Agreement rule, closed earlier Reflections' knob lines since the key's last move, each counted when it names a rollout
 not yet seen, plus this proposal when its rollout is new; lines from the Reflection whose auto line made the last move
-are that move's evidence and never count again; (6) last, the load hold (p29-11, ADR 0051): a `parallel_ceiling` raise
-waits while this Reflection's Time-lost ledger is load-topped, `machine load tops the Time-lost ledger (<h> h of <total>
-h): a Parallel ceiling raise waits (ADR 0051)`, and fails closed with no ledger line, `no Time-lost ledger line for
+are that move's evidence and never count again; (6) last, the load hold (p29-11, ADR 0051; p53-5, ADR 0083): a Tuning
+of a LOAD_KEYS key that admits more work (score.py's admits()) waits while this Reflection's Time-lost ledger is
+load-topped: a `parallel_ceiling` raise, `machine load tops the Time-lost ledger (<h> h of <total> h): a Parallel ceiling
+raise waits (ADR 0051)`; a capacity_max raise or a Weight lower, `machine load tops the Time-lost ledger (<h> h of <total>
+h): a <key> raise|lower waits (ADR 0051, ADR 0083)`; each fails closed with no ledger line, `no Time-lost ledger line for
 Reflection <id>: run reflect.py ledger first`. ADR 0051's "when the ledger puts load above it" is read as its Verify's
 "a load-topped ledger": load is the top of reflections.jsonl's `time-lost` line with `source: record` for this Reflection
-(load_hold(); an audit line is never read: its hours never move the hold). Lowers and round-cap raises are never held by
-load. Each entry records `agreeing` (the proposal's own, score.py's count)
+(load_hold(); an audit line is never read: its hours never move the hold). Lowers other than a Weight's, round-cap
+raises, a Weight raise (it admits less work) and every revert are never held by load. A capacity_max raise
+(budget-count-raise) always carries score.py's caution, so (1) holds it first: it reaches Lachy as a held trade, and
+the load hold covers it only should that caution lift. Each entry records `agreeing` (the proposal's own, score.py's count)
 and `agreed` (the agreement). A held proposal prints `held <key>: <reason>` (`agreement <n> of 3`, say); with nothing
 eligible it exits 0 and writes nothing. The write is --pick's, below, with the same checks.
 
@@ -50,7 +56,8 @@ in a window whose activeStart is after the auto line and that is not partial; an
 score.py's RULE_EFFECTS risks for its rule. It lands to = the entry's `from` as one auto line with `reverts: <id>`, rule
 `revert:<rule>` (so it never counts toward <rule>) and `agreeing` = score.py's agreeing() for that rule and the reverse
 direction; it carries no `agreed`. An auto line that moved several keys is reverted one key per call. A revert is never
-reverted. A refusal is exit 2, nothing written.
+reverted, and never load-held: it restores a value the Mac already ran at. rollouts.toml's value now is now_values() of
+resolve(), so a capacity_max or Weight landing is found as a round cap's is. A refusal is exit 2, nothing written.
 
 Void lines (a replace failure, below) in --auto or --revert carry the same `auto` and `reflection`, never `close`.
 
@@ -83,13 +90,19 @@ lock, so two closes racing on one rollout could both write (one lead closes a ro
   process group), never resolve()'s `repo`, which is null when no repo table applies yet: so the first Tuning
   on a repo passes. No GitHub origin, an unreadable origin, or a slug other than scores.repo (ignoring case)
   is refused;
-- each pick's `from` equals resolve(repo=--repo, path=--config)'s value for its key now (else a stale `from`);
+- each pick's key is one of rollout-settings.py's TUNING_KEYS (KEYS, capacity_max, weight_mem_gb, weight_cores) and its
+  from, to and ranAt are integers;
+- each pick's `from` equals resolve(repo=--repo, path=--config)'s value for its key now, now_values(): `settings` for
+  KEYS and capacity_max, `weight` for a Weight key (else a stale `from`);
 - the key is not set in dotted or inline-table form (edit those by hand);
 - a config rollout-settings refuses is refused (exit 3 when a present file needs tomllib and there is none).
-The edit works on the config's realpath (a symlink keeps its link), line by line: in the repo's
-`[repo."owner/name"]` table (matched ignoring case) it replaces the value and keeps a trailing comment, or
-inserts the key after the table's last key; with no table it appends `[repo."<scores.repo>"]` (a key set only
-under [defaults] still gets a repo entry: Tunings are per repo). The schema (raise_schema(), a thin wrapper over
+The edit works on the config's realpath (a symlink keeps its link), line by line, one table per key (_edit_table):
+a machine-wide key (rollout-settings.py's MACHINE_ONLY: capacity_max, p53-5) in `[defaults]`, every other key (KEYS and
+the Weights) in the repo's `[repo."owner/name"]` table (matched ignoring case). In it the edit replaces the value and
+keeps a trailing comment, or inserts the key after the table's last key; with no table it appends `[defaults]`, or
+`[repo."<scores.repo>"]`, at the end (a key set only under [defaults] still gets a repo entry: Tunings are per repo).
+A table whose keys are set in dotted or inline-table form, or a `defaults` key with no `[defaults]` header, is refused
+(edit it by hand). The schema (raise_schema(), a thin wrapper over
 rollout-settings.py's raise_schema_lines()): when a picked key's
 rollout-settings.py KEY_SCHEMA number is above the file's `schema` (its top-level line, else 1), the edit raises that
 line to it, never lowers it: an existing top-level `schema` line (before the first table header) is rewritten in
@@ -98,13 +111,27 @@ comment lines directly over it), or before the appended repo block; a `schema` l
 refused (edit it by hand). With no newer key the text is exactly as before. The post-edit validation below is the
 backstop: an edit that forgets the raise does not validate, and nothing is written. No file, or a comment-only one, is created
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
-result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
-`file:repo`, every other key and Guardrail unchanged, and every
+result goes to a temp file in the same directory and must resolve with each picked key at its `to` (a machine-wide
+key from `file:defaults`, a repo one from `file:repo`, a Weight key in `weight`), every other rollout key, Weight part
+and Guardrail unchanged, and every
 repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers),
 every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) and the resolved `[defaults]
 test_logins` (p37-4: the operator's declared test Logins, no automated writer) unchanged.
 
-Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
+The reader check (rollout-settings.py's header: a writer that raises the schema runs it), only when the edit raises the
+file's `schema`: a capacity_max Tuning raises it to 4 and a Weight Tuning to 6, an unattended --auto landing (and a
+--revert) included, since all three share _apply(). A pre-P29 reader refuses any top-level `schema` line, and a refused
+file halts every rollout on the machine at its next `verify-timeout`, so before anything is written each live rollout's
+engine root reads the temp file: inert-paths.py's reader_check() (its header has the rule: the live notes directly in
+--tasks-dir, default ~/repos/obsidian/Work/Tasks, each engine root's own rollout-settings.py under `python3 -I -B`,
+30 s), loaded lazily, its lines led `tune`. A refusal is exit 1, nothing written: one stderr line per note,
+`tune: [[<slug>]] runs on <root>, whose rollout-settings.py refuses the new file (<why>): update that checkout to a P29+
+release, or wait for the rollout to finish`, then `tune: nothing written: a live rollout's engine cannot read the raised
+`schema` line`. There is no --force (a hand edit is the operator's). A missing tasks dir, an unreadable note or an
+unusable snapshot is a `WARN: tune: ...` line on stderr, and the write goes on; a check that will not load is exit 1
+(fail closed). With the schema not raised, no check runs. --dry-run runs it too.
+
+Write order: (1) every check above, the reader check last; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
 or nothing; (3) os.replace(temp, realpath).
 - emit returns False (an unwritable events dir, a short write): the temp file goes, rollouts.toml was never
@@ -115,12 +142,17 @@ or nothing; (3) os.replace(temp, realpath).
 --dry-run prints the diff and the line it would write, and writes nothing.
 
 On success stdout names the line's id and file, then one line per Tuning: `applied <key> <from> → <to> for
-<repo>: takes effect at the next /thread:schedule (or --regenerate); a rollout note already stamped keeps its
-own values`.
+<repo>: <effect>`, the effect TAKES_EFFECT for the four keys a rollout note stamps (`takes effect at the next
+/thread:schedule (or --regenerate); a rollout note already stamped keeps its own values`) and TAKES_EFFECT_BY's for the
+three no note stamps, read live (p53-5): capacity_max `takes effect at every rollout's next `next` call on this Mac,
+whatever its repo (machine-wide, read live while a fresh Capacity reading is in force); no rollout note stamps it`, a
+Weight key `takes effect at <repo>'s next `next` call or start, running rollouts included, for a kind with fewer than
+3 measured tasks (read live); no rollout note stamps it`.
 
 Exit codes: 0 applied, recorded, already recorded (a --close run whose rollout has its close line), not recorded
 for a null repo, or nothing eligible under --auto (each `held` line printed); 1 a write failed (nothing applied, or the
-line voided), tunings.jsonl cannot be read for --close, --auto or --revert, or reflections.jsonl cannot be read; 2
+line voided), the reader check refuses (or will not load), tunings.jsonl cannot be read for --close, --auto or
+--revert, or reflections.jsonl cannot be read; 2
 refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config, a closed Reflection, a revert
 revert_check refuses); 3 no tomllib for a present config.
 """
@@ -141,6 +173,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SHARED = os.path.join(os.path.dirname(os.path.dirname(HERE)), "_shared", "scripts")
 TAKES_EFFECT = ("takes effect at the next /thread:schedule (or --regenerate); a rollout note already stamped "
                 "keeps its own values")
+# p53-5: the keys no rollout note stamps take effect sooner, as reconcile-rollout.py reads them live: capacity_max at every
+# `next` call (_capacity_state -> _machine_settings, per call), a Weight estimate per process (_weight_estimate through
+# _root_resolved, at a `next` call or a start, leg.py's claim included). `%s` is the repo.
+TAKES_EFFECT_BY = {
+    "capacity_max": ("takes effect at every rollout's next `next` call on this Mac, whatever its repo (machine-wide, "
+                     "read live while a fresh Capacity reading is in force); no rollout note stamps it"),
+    "weight_mem_gb": ("takes effect at %s's next `next` call or start, running rollouts included, for a kind with fewer "
+                      "than 3 measured tasks (read live); no rollout note stamps it"),
+    "weight_cores": ("takes effect at %s's next `next` call or start, running rollouts included, for a kind with fewer "
+                     "than 3 measured tasks (read live); no rollout note stamps it"),
+}
+# Check (6)'s keys (p29-11, ADR 0051; p53-5, ADR 0083): a Tuning of one that admits more work (score.py's admits()) waits
+# while load tops the Time-lost ledger.
+LOAD_KEYS = ("parallel_ceiling", "capacity_max", "weight_mem_gb", "weight_cores")
 
 
 def _load(name, path):
@@ -283,9 +329,10 @@ def _ms(stamp):
 
 
 def _moves(tunings, repo, key):
-    """The non-voided tuning lines for `repo` (case ignored) with an applied entry on `key`: picks, auto landings and
-    reverts alike (a close line's applied is [], so it never moves a key)."""
-    return [d for d in tunings if not d["_voided"] and d["repo"].lower() == repo.lower() and
+    """The non-voided tuning lines for `repo` (case ignored; any repo for a machine-wide key, score.py's same_repo(),
+    p53-5: capacity_max is one value for every rollout on the Mac) with an applied entry on `key`: picks, auto landings
+    and reverts alike (a close line's applied is [], so it never moves a key)."""
+    return [d for d in tunings if not d["_voided"] and SCORE.same_repo(key, d["repo"], repo) and
             any(isinstance(e, dict) and e.get("key") == key for e in d.get("applied") or [])]
 
 
@@ -317,14 +364,16 @@ def agreement(scores, proposal, reflection, tunings, reflections):
 
 
 def load_hold(proposal, reflection, reflections):
-    """Check (6)'s reason for a proposal, or None: a parallel_ceiling raise is held while this Reflection's `time-lost`
-    record line has `top: load` (ADR 0051's "a load-topped ledger"), and fails closed with no such line. Only `source:
-    record` lines are read, never an audit's."""
+    """Check (6)'s reason for a proposal, or None: a Tuning of a LOAD_KEYS key that admits more work (score.py's
+    admits(): a parallel_ceiling or capacity_max raise, a Weight lower; p53-5) is held while this Reflection's
+    `time-lost` record line has `top: load` (ADR 0051's "a load-topped ledger"), and fails closed with no such line. Only
+    `source: record` lines are read, never an audit's. A Weight raise, which admits less, is never held."""
     direction = proposal.get("direction")
     if not isinstance(direction, int) or isinstance(direction, bool):
         f, t = proposal.get("from"), proposal.get("to")
         direction = (t > f) - (t < f) if isinstance(f, int) and isinstance(t, int) else 0
-    if proposal.get("key") != "parallel_ceiling" or direction <= 0:
+    key = proposal.get("key")
+    if key not in LOAD_KEYS or SCORE.admits(key, direction) <= 0:
         return None
     line = next((d for d in reflections if d.get("kind") == "time-lost" and d.get("source") == "record"
                  and d.get("reflection") == reflection), None)
@@ -338,15 +387,18 @@ def load_hold(proposal, reflection, reflections):
 
     def fmt(x):  # up to 3 places, no trailing zeros
         return ("%.3f" % x).rstrip("0").rstrip(".")
-    return "%s (%s h of %s h): a Parallel ceiling raise waits (ADR 0051)" % (LOAD_HELD, fmt(load), fmt(sum(nums)))
+    if key == "parallel_ceiling":
+        return "%s (%s h of %s h): a Parallel ceiling raise waits (ADR 0051)" % (LOAD_HELD, fmt(load), fmt(sum(nums)))
+    return "%s (%s h of %s h): a %s %s waits (ADR 0051, ADR 0083)" % (
+        LOAD_HELD, fmt(load), fmt(sum(nums)), key, "raise" if direction > 0 else "lower")
 
 
 def auto_check(scores, proposal, reflection, tunings, reflections):
     """(ok, reason, agreed) for one of score.py's proposals under --auto: the first check that fails is the reason, in
     order (1) no trade and no caution, (2) no Guardrail breached and the window not partial, (3) ranAt == from, (4) no
     auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE, (6) the load hold
-    (load_hold(): a ceiling raise waits on a load-topped Time-lost ledger, or on none). `agreed` is the agreement once (5)
-    is reached, else None. Pure: reflect.py's span calls it with the same reads, its ledger's record line appended."""
+    (load_hold(): a Tuning that admits more work, a ceiling or capacity_max raise or a Weight lower, waits on a
+    load-topped Time-lost ledger, or on none). `agreed` is the agreement once (5) is reached, else None. Pure: reflect.py's span calls it with the same reads, its ledger's record line appended."""
     if proposal.get("trade"):
         t = proposal["trade"]
         return False, "a trade (gains %s, costs %s): Lachy decides" % (
@@ -384,13 +436,32 @@ def reverted(tunings):
     return out
 
 
+def now_values(resolved):
+    """rollouts.toml's values now for every Tuning key, from rollout-settings.py's resolve() object: {key: value} for
+    KEYS and capacity_max (its `settings`) and each Weight key (its `weight` part, p53-5). A part missing or ill-typed is
+    left out; it never raises. revert(), _apply()'s staleness check and reflect.py's Span.now_values read it."""
+    out = {}
+    if not isinstance(resolved, dict):
+        return out
+    s = resolved.get("settings") if isinstance(resolved.get("settings"), dict) else {}
+    for k in RS.KEYS + ("capacity_max",):
+        if isinstance(s.get(k), dict) and "value" in s[k]:
+            out[k] = s[k]["value"]
+    w = resolved.get("weight") if isinstance(resolved.get("weight"), dict) else {}
+    for k in RS.WEIGHT_KEYS:
+        part = w.get(k[len("weight_"):])
+        if isinstance(part, dict) and "value" in part:
+            out[k] = part["value"]
+    return out
+
+
 def revert_check(scores, tid, tunings, now_values):
     """(entry, None) for the first entry of auto line `tid` a revert may undo now, else (None, why). `now_values` is
-    rollouts.toml's resolved {key: value} for the repo (rollout-settings.py). It passes only when the id is a
-    non-voided auto line of this repo that is no revert, the entry is not reverted yet, rollouts.toml still holds its
-    `to`, this score ran at that `to` (ranAt) in a window that started after the auto line and is not partial, and a
-    breached Guardrail is among score.py's RULE_EFFECTS risks for its rule. An auto line that moved several keys is
-    reverted one key per call."""
+    rollouts.toml's resolved {key: value} for the repo (now_values() of rollout-settings.py's resolve()). It passes
+    only when the id is a non-voided auto line of this repo that is no revert, the entry is not reverted yet,
+    rollouts.toml still holds its `to`, this score ran at that `to` (ranAt) in a window that started after the auto line
+    and is not partial, and a breached Guardrail is among score.py's RULE_EFFECTS risks for its rule. An auto line that
+    moved several keys is reverted one key per call."""
     line = next((d for d in tunings if d.get("id") == tid), None)
     if line is None:
         return None, "%s is no tuning line" % tid
@@ -454,15 +525,32 @@ def raise_schema(lines, need, current):
         raise Stop(str(e), 2)
 
 
-def edit_text(text, slug, picks, doc):
-    """The config text with each pick's key set to its `to` in [repo."<slug>"] (a Stop(2) for a form it won't edit),
-    and the file's `schema` raised for a newer key (raise_schema)."""
-    lines = text.split("\n") if text else []
-    trailing = bool(lines) and lines[-1] == ""
-    if trailing:
-        lines = lines[:-1]
-    repos = (doc or {}).get("repo") or {}
-    written = next((k for k in repos if isinstance(k, str) and k.lower() == slug.lower()), None)
+def reader_check(new_file, tasks_dir):
+    """The module docstring's reader check, run by _apply only when the edit raises the file's `schema`:
+    inert-paths.py's reader_check() (its one copy, loaded here and only here), led `tune`. Its WARN lines go to stderr;
+    a refusal prints its lines, then is a Stop(1), nothing written; a check that will not load is a Stop(1) too (fail
+    closed)."""
+    try:
+        ip = _load("thread_inert_paths", os.path.join(SHARED, "inert-paths.py"))
+        refusals, warns = ip.reader_check(new_file, tasks_dir or ip.ES.DEFAULT_TASKS_DIR, who="tune", force=False)
+    except Exception as e:
+        raise Stop("the reader check did not run (%s: %s): nothing written" % (type(e).__name__, e), 1)
+    for line in warns + refusals:
+        sys.stderr.write(line + "\n")
+    if refusals:
+        raise Stop("nothing written: a live rollout's engine cannot read the raised `schema` line", 1)
+
+
+def _edit_table(lines, target, label, picks, written):
+    """`lines` with each pick's key set to its `to` in the table `target` (("defaults",), or ("repo", slug), the slug
+    matched ignoring case): replaced in place keeping a trailing comment, else inserted after the table's last key, else
+    the table appended at the end. `label` is its header text, `written` whether the parsed config holds the table. A
+    Stop(2) for a form it won't edit: the table's keys set in dotted or inline-table form, or held with no header."""
+    def same(table):
+        if len(table) != len(target) or table[0] != target[0]:
+            return False
+        return len(target) == 1 or table[1].lower() == target[1].lower()
+
     table, header, end, last_key = (), None, None, None
     keys_at = {}
     for i, line in enumerate(lines):
@@ -474,7 +562,7 @@ def edit_text(text, slug, picks, doc):
             table = RS._segments(m.group(1))
             if header is not None and end is None:
                 end = i
-            if len(table) == 2 and table[0] == "repo" and table[1].lower() == slug.lower():
+            if same(table):
                 header = i
             continue
         m = RS._KEY_RE.match(s)
@@ -482,17 +570,15 @@ def edit_text(text, slug, picks, doc):
             continue
         segs = RS._segments(m.group(1))
         path = table + segs
-        if path[0] != "repo":
+        if path[0] != target[0]:
             continue
         if header is not None and end is None and len(segs) == 1:
             last_key = i
             keys_at[segs[0]] = i
-        elif len(path) == 1 or path[1].lower() == slug.lower():
-            raise Stop("[repo.%s] is set in dotted or inline-table form in the config: edit it by hand"
-                       % json.dumps(written or slug), 2)
-    if written is not None and header is None:
-        raise Stop("[repo.%s] is set in dotted or inline-table form in the config: edit it by hand"
-                   % json.dumps(written), 2)
+        elif len(path) < len(target) or same(path[:len(target)]):
+            raise Stop("%s is set in dotted or inline-table form in the config: edit it by hand" % label, 2)
+    if written and header is None:
+        raise Stop("%s is set in dotted or inline-table form in the config: edit it by hand" % label, 2)
     if header is not None:
         inserts = []
         for p in picks:
@@ -502,8 +588,7 @@ def edit_text(text, slug, picks, doc):
                 continue
             m = _key_line_re(p["key"]).match(lines[i])
             if not m:
-                raise Stop("cannot read the %s line in [repo.%s] (line %d): edit it by hand"
-                           % (p["key"], json.dumps(written or slug), i + 1), 2)
+                raise Stop("cannot read the %s line in %s (line %d): edit it by hand" % (p["key"], label, i + 1), 2)
             lines[i] = m.group(1) + str(p["to"]) + m.group(3)
         if inserts:
             at = (last_key if last_key is not None else header) + 1
@@ -511,8 +596,28 @@ def edit_text(text, slug, picks, doc):
     else:
         if lines and lines[-1].strip():
             lines.append("")
-        lines.append("[repo.%s]" % json.dumps(slug))
+        lines.append(label)
         lines.extend("%s = %d" % (p["key"], p["to"]) for p in picks)
+    return lines
+
+
+def edit_text(text, slug, picks, doc):
+    """The config text with each pick's key set to its `to`: a machine-wide key (rollout-settings.py's MACHINE_ONLY,
+    capacity_max) in [defaults], every other in [repo."<slug>"] (_edit_table: a Stop(2) for a form it won't edit), and
+    the file's `schema` raised for a newer key (raise_schema)."""
+    lines = text.split("\n") if text else []
+    trailing = bool(lines) and lines[-1] == ""
+    if trailing:
+        lines = lines[:-1]
+    machine = [p for p in picks if p["key"] in RS.MACHINE_ONLY]
+    per_repo = [p for p in picks if p["key"] not in RS.MACHINE_ONLY]
+    if machine:
+        lines = _edit_table(lines, ("defaults",), "[defaults]", machine, "defaults" in (doc or {}))
+    if per_repo:
+        repos = (doc or {}).get("repo") or {}
+        written = next((k for k in repos if isinstance(k, str) and k.lower() == slug.lower()), None)
+        lines = _edit_table(lines, ("repo", slug), "[repo.%s]" % json.dumps(written or slug), per_repo,
+                            written is not None)
     need = max([RS.KEY_SCHEMA.get(("rollout", p["key"]), 1) for p in picks] or [1])
     lines = raise_schema(lines, need, RS.file_schema(doc or {}) or 1)
     return "\n".join(lines) + "\n"
@@ -628,7 +733,7 @@ def _resolve(repo, config):
         raise Stop("rollout-settings: %s" % e, e.code)
 
 
-def pick(scores, picks_arg, repo, config, dry_run):
+def pick(scores, picks_arg, repo, config, dry_run, tasks_dir=None):
     ids = []
     for x in picks_arg.split(","):
         x = x.strip()
@@ -650,23 +755,25 @@ def pick(scores, picks_arg, repo, config, dry_run):
     if dup:
         raise Stop("two picks on one key (%s): pick one" % ", ".join(dup), 2)
     for p in picks:
-        if p.get("key") not in RS.KEYS or not all(isinstance(p.get(k), int) for k in ("from", "to", "ranAt")):
+        if p.get("key") not in RS.TUNING_KEYS or not all(isinstance(p.get(k), int) for k in ("from", "to", "ranAt")):
             raise Stop("%s is not a well-formed proposal (key, from, to, ranAt)" % p.get("id"), 2)
     repo = _identity(scores, repo, "--pick")
     config, before = _resolve(repo, config)
     applied = [{"key": p["key"], "from": p["from"], "to": p["to"], "ranAt": p["ranAt"],
                 "rule": str(p.get("rule"))[:64], "evidence": str(p.get("evidence"))[:300],
                 "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0} for p in picks]
-    return _apply(scores, applied, [p["id"] for p in picks], repo, config, before, dry_run)
+    return _apply(scores, applied, [p["id"] for p in picks], repo, config, before, dry_run, tasks_dir=tasks_dir)
 
 
-def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
+def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tasks_dir=None):
     """Land `applied` (tuning entries) in rollouts.toml and record them as ONE tuning line (pick, --auto and --revert
-    share it): each entry's `from` must be the key's value now, then the edit, its validation, the line, the replace."""
+    share it): each entry's `from` must be the key's value now, then the edit, its validation, the reader check when
+    the edit raises the file's `schema`, the line, the replace."""
+    values = now_values(before)
     for e, name in zip(applied, names):
-        now = before["settings"][e["key"]]["value"]
+        now = values.get(e["key"])
         if now != e["from"]:
-            raise Stop("%s's from is stale: %s is %d now, not %d (re-run the Reflection's score)"
+            raise Stop("%s's from is stale: %s is %s now, not %s (re-run the Reflection's score)"
                        % (name, e["key"], now, e["from"]), 2)
     real = os.path.realpath(config)
     try:
@@ -690,10 +797,18 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
         except RS.SettingsError as e:
             raise Stop("the edit does not validate (%s): nothing written" % e, 2)
         picked = {p["key"]: p["to"] for p in picks}
-        for k in RS.KEYS:
-            want = {"value": picked[k], "source": "file:repo"} if k in picked else before["settings"][k]
+        # every rollout key: a picked machine-wide one at its `to` from [defaults], a picked repo one from its repo
+        # table, every other unchanged; and each Weight part the same way (p53-5)
+        for k in RS.SETTING_KEYS:
+            src = "file:defaults" if k in RS.MACHINE_ONLY else "file:repo"
+            want = {"value": picked[k], "source": src} if k in picked else before["settings"][k]
             if after["settings"][k] != want:
                 raise Stop("the edit resolves %s to %s, not %s: nothing written" % (k, after["settings"][k], want), 2)
+        for k in RS.WEIGHT_KEYS:
+            part = k[len("weight_"):]
+            want = {"value": picked[k], "source": "file:repo"} if k in picked else before["weight"][part]
+            if after["weight"][part] != want:
+                raise Stop("the edit resolves %s to %s, not %s: nothing written" % (k, after["weight"][part], want), 2)
         if after["guardrails"] != before["guardrails"]:
             raise Stop("the edit changes the Guardrails: nothing written", 2)
         # p29-3 (ADR 0045) and ADR 0063: a Tuning never touches any repo's Inert paths or test-credential class.
@@ -703,6 +818,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
         # p37-4: the declared test Logins are the operator's alone (machine-wide, [defaults]): no Tuning moves them.
         if after.get("test_logins") != before.get("test_logins"):
             raise Stop("the edit changes test_logins: nothing written", 2)
+        if after["schema"]["file"] > before["schema"]["file"]:
+            reader_check(tmp, tasks_dir)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:
@@ -744,7 +861,9 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
         raise Stop("cannot write next to %s: %s" % (real, e), 1)
     print("recorded %s in %s" % (tid, tunings_path()))
     for a in applied:
-        print("applied %s %d → %d for %s: %s" % (a["key"], a["from"], a["to"], scores["repo"], TAKES_EFFECT))
+        effect = TAKES_EFFECT_BY.get(a["key"], TAKES_EFFECT)
+        print("applied %s %d → %d for %s: %s" % (a["key"], a["from"], a["to"], scores["repo"],
+                                                 effect % scores["repo"] if "%s" in effect else effect))
     return 0
 
 
@@ -770,14 +889,14 @@ def _tunings():
         raise Stop("tunings.jsonl cannot be read: %s: nothing written" % e, 1)
 
 
-def auto(scores, repo, reflection, config, dry_run):
+def auto(scores, repo, reflection, config, dry_run, tasks_dir=None):
     """--auto: land every proposal that passes auto_check, as ONE auto line; print `held <key>: <reason>` for the rest."""
     reflections = _reflection_open(reflection)
     repo = _identity(scores, repo, "--auto")
     tunings = _tunings()
     land, keys = [], set()
     for p in scores["proposals"]:
-        if not isinstance(p, dict) or p.get("key") not in RS.KEYS or \
+        if not isinstance(p, dict) or p.get("key") not in RS.TUNING_KEYS or \
                 not all(isinstance(p.get(k), int) for k in ("from", "to", "ranAt", "direction")):
             print("held %s: not a well-formed proposal (key, from, to, ranAt, direction)" % (p.get("key") if isinstance(p, dict) else p))
             continue
@@ -796,17 +915,16 @@ def auto(scores, repo, reflection, config, dry_run):
                 "evidence": str(p.get("evidence"))[:300],
                 "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0, "agreed": n} for p, n in land]
     return _apply(scores, applied, [p["id"] for p, _n in land], repo, config, before, dry_run,
-                  auto={"auto": True, "reflection": reflection})
+                  auto={"auto": True, "reflection": reflection}, tasks_dir=tasks_dir)
 
 
-def revert(scores, tid, repo, reflection, config, dry_run):
+def revert(scores, tid, repo, reflection, config, dry_run, tasks_dir=None):
     """--revert <tid>: undo one key of an auto line that this run finds breaching a Guardrail its rule risks."""
     _reflection_open(reflection)
     repo = _identity(scores, repo, "--revert")
     tunings = _tunings()
     config, before = _resolve(repo, config)
-    now_values = {k: before["settings"][k]["value"] for k in RS.KEYS}
-    e, why = revert_check(scores, tid, tunings, now_values)
+    e, why = revert_check(scores, tid, tunings, now_values(before))
     if e is None:
         raise Stop("%s is not reverted: %s: nothing written" % (tid, why), 2)
     direction = 1 if e["to"] > e["from"] else -1
@@ -815,7 +933,7 @@ def revert(scores, tid, repo, reflection, config, dry_run):
              "evidence": ("revert %s: breaches %s, which %s risks" % (tid, ", ".join(e["breached"]), e.get("rule")))[:300],
              "agreeing": SCORE.agreeing(tunings, scores["repo"], e["key"], rule, -direction)}
     return _apply(scores, [entry], ["%s's %s" % (tid, e["key"])], repo, config, before, dry_run,
-                  auto={"auto": True, "reflection": reflection, "reverts": tid})
+                  auto={"auto": True, "reflection": reflection, "reverts": tid}, tasks_dir=tasks_dir)
 
 
 class Parser(argparse.ArgumentParser):
@@ -836,6 +954,7 @@ def main(argv):
     p.add_argument("--reflection")
     p.add_argument("--repo")
     p.add_argument("--config")
+    p.add_argument("--tasks-dir")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args(argv)
     if a.close and not a.record_only:
@@ -858,10 +977,10 @@ def main(argv):
         if a.record_only:
             return record_only(scores, a.dry_run, a.close)
         if a.auto:
-            return auto(scores, a.repo, a.reflection, a.config, a.dry_run)
+            return auto(scores, a.repo, a.reflection, a.config, a.dry_run, a.tasks_dir)
         if a.revert is not None:
-            return revert(scores, a.revert, a.repo, a.reflection, a.config, a.dry_run)
-        return pick(scores, a.pick, a.repo, a.config, a.dry_run)
+            return revert(scores, a.revert, a.repo, a.reflection, a.config, a.dry_run, a.tasks_dir)
+        return pick(scores, a.pick, a.repo, a.config, a.dry_run, a.tasks_dir)
     except Stop as e:
         say(str(e))
         return e.code

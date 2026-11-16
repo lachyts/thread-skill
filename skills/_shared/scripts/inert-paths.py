@@ -205,7 +205,8 @@ CLI. JSON on stdout for prove and propose (one line), human lines for record and
 - drop: the same edit removing globs (the line goes when the list empties); it raises no schema, so no reader check.
 
 Importable (lead-integrate.py prepare loads this file lazily, inside its fail-closed try): ProofError, changed(),
-path_test(), prove(), glob_match(), PROSE_EXT, CANDIDATES, PROOF_BUDGET_S, DROP_AFTER, ES, RS, RR.
+path_test(), prove(), glob_match(), PROSE_EXT, CANDIDATES, PROOF_BUDGET_S, DROP_AFTER, ES, RS, RR; and reader_check()
+(tune.py loads this file lazily for it, when a Tuning raises the schema: p53-5).
 """
 from __future__ import annotations
 
@@ -3688,22 +3689,23 @@ def live_notes(tasks_dir):
     return out
 
 
-def reader_check(new_file, tasks_dir):
-    """(refusals, warnings): each live rollout's engine root asked to read `new_file` (the header's reader check)."""
+def reader_check(new_file, tasks_dir, who="inert-paths", force=True):
+    """(refusals, warnings): each live rollout's engine root asked to read `new_file` (the header's reader check), each
+    line led by `who`. tune.py loads it too (who "tune", force False: it has no --force, so no line offers one)."""
     notes = live_notes(tasks_dir)
     warns, refusals = [], []
     if notes is None:
-        return [], ["WARN: inert-paths: no tasks dir at %s: the reader check read no live rollout" % tasks_dir]
+        return [], ["WARN: %s: no tasks dir at %s: the reader check read no live rollout" % (who, tasks_dir)]
     roots = {}
     for slug, path in notes:
         try:
             er = ES.engine_root(path)
         except Exception as e:  # an unreadable note: warn, never block
-            warns.append("WARN: inert-paths: [[%s]] cannot be read (%s): skipped" % (slug, e))
+            warns.append("WARN: %s: [[%s]] cannot be read (%s): skipped" % (who, slug, e))
             continue
         if er.get("root") is None:
-            warns.append("WARN: inert-paths: [[%s]] runs on an unusable snapshot (%s): skipped (its own guard refuses "
-                         "it)" % (slug, er.get("unusable")))
+            warns.append("WARN: %s: [[%s]] runs on an unusable snapshot (%s): skipped (its own guard refuses it)"
+                         % (who, slug, er.get("unusable")))
             continue
         roots.setdefault(er["root"], []).append(slug)
     for root, slugs in sorted(roots.items()):
@@ -3724,9 +3726,9 @@ def reader_check(new_file, tasks_dir):
                 why = "it will not start: %s" % e
         if why:
             for slug in slugs:
-                refusals.append("inert-paths: [[%s]] runs on %s, whose rollout-settings.py refuses the new file (%s): "
-                                "update that checkout to a P29+ release, or wait for the rollout to finish, or re-run "
-                                "with --force" % (slug, root, why))
+                refusals.append("%s: [[%s]] runs on %s, whose rollout-settings.py refuses the new file (%s): update "
+                                "that checkout to a P29+ release, or wait for the rollout to finish%s"
+                                % (who, slug, root, why, ", or re-run with --force" if force else ""))
     return refusals, warns
 
 

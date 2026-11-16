@@ -118,8 +118,9 @@ field that says what it runs, and a repo's tasks share its verifier), so `[defau
 setting one, its part reads the built-in, WEIGHT_BUILT_IN (3 GB and 2 cores, DfL 8's middle value). They are not in
 `settings`: resolve() reports them as its own top-level `weight` (Output), each part with its own source, so a table
 setting only one gives mixed sources. execute's `reconcile-rollout.py` reads it as the estimate a task's Weight starts
-from until its project and `scope:` have measured runs (`_weight`; execute away.md § Capacity, *A task's Weight*). They
-are operator hand edits: no writer here adds them. A schema-5 reader ignores them under a schema-6 file (the schema rule
+from until its project and `scope:` have measured runs (`_weight`; execute away.md § Capacity, *A task's Weight*). Each
+is an operator's hand edit, or a Reflection's Tuning through tune.py (p53-5: one whole unit toward its measure); no
+writer here adds them. A schema-5 reader ignores them under a schema-6 file (the schema rule
 below), so its slot-taken records the built-in Weight.
 
 `[notify]` is retired (ADR 0075 d2: no rollout code notifies Lachy, so nothing reads the ntfy topic it held, ADR 0038
@@ -151,8 +152,10 @@ adds it to a file whose `schema` is lower raises the file's `schema` line to tha
 does it (raise_schema(), pinned by tests/reflect-tune.test.mjs KT1), and so must a hand edit. Both writers share
 raise_schema_lines() below. A writer that raises the schema runs the reader check or names why it need not: a
 pre-P29 reader refuses any top-level `schema` line and a schema-N reader any known key above N, and a refused file halts
-every rollout on the machine at its next `verify-timeout`, so inert-paths.py `record` asks each live rollout's engine
-root to read the new file first (its header); tune.py writes only schema-1 keys, so it never raises the line today.
+every rollout on the machine at its next `verify-timeout`, so each writer asks every live rollout's engine root to read
+the new file first and refuses the write when one cannot: inert-paths.py `record` (its header, and reader_check(), the
+check's one copy) raising it to 2, and tune.py, which loads that reader_check(), raising it to 4 for capacity_max or
+to 6 for a Weight (p53-5; an unattended --auto landing included; its header).
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -237,8 +240,9 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: <path>:<line>: <reason>`, `rollout-settings: <path>: <reason>` when no line applies, or
 `rollout-settings: --repo <p>: <reason>`.
 
-Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
-run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
+Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys a rollout note
+stamps, which tune.py and score.py read), TUNING_KEYS (p53-5: KEYS, then `capacity_max` and WEIGHT_KEYS, every key a
+Tuning may move; run_record.py's TUNING_KEYS is pinned to it), SETTING_KEYS (KEYS plus `auto_retries`,
 `spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY,
 DEFAULTS_ONLY, MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
 GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
@@ -265,11 +269,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAND_SH = os.path.join(HERE, "land.sh")
 
-# The four Tuning keys (a Reflection proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
+# The four Tuning keys a rollout note stamps (a Reflection proposes them; TUNING_KEYS, below, adds the rest).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget,
 # the standing approval's limit in US dollars (ADR 0034), the machine's verify slots (p23-4) and the hard maximum of
-# the Mac-wide Capacity (p36-7, ADR 0067 d8); none of the four is Reflection-tunable.
+# the Mac-wide Capacity (p36-7, ADR 0067 d8); of the four only capacity_max is Reflection-tunable (p53-5, TUNING_KEYS).
 SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots", "capacity_max")
 # Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot, and the Capacity, are
 # shared by every rollout on the machine, whatever its repo).
@@ -282,6 +286,9 @@ REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores")
 # A task's estimated Weight (p53-3): the repo's two keys, and the built-in middle value of each (3 GB and 2 cores).
 WEIGHT_KEYS = ("weight_mem_gb", "weight_cores")
 WEIGHT_BUILT_IN = {"weight_mem_gb": 3, "weight_cores": 2}
+# Every key a Reflection's Tuning may move (p53-5; run_record.py's TUNING_KEYS is pinned to this tuple): the four a
+# rollout note stamps, then the machine-wide capacity_max and a repo's Weight estimates, which no note stamps.
+TUNING_KEYS = KEYS + ("capacity_max",) + WEIGHT_KEYS
 # Machine-wide keys kept out of `settings` (p37-4): valid under [defaults] only, refused in a repo table, and reported
 # by resolve() as their own top-level field. `test_logins` is the operator's declared test Logins, one line.
 DEFAULTS_ONLY = ("test_logins",)

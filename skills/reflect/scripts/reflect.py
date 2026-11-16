@@ -338,7 +338,8 @@ score.json carries a window whose since and until parse, its score held to that 
 is scored whole): `rollouts[<slug>].score.handsOff` (each act's at in [window.since, window.until]; on a serial chain
 [window.since, window.until + 60 s), serial-score.py's since <= act < done + 60 s, printed `[<since>, <until> + 60 s)`)
 and, on a serial chain, `rollouts[<slug>].score.merges` (each merge's at in [window.since, window.until]: a parallel
-score's merges.tasks carries task names alone); then `freshReview` (an entry is one row: its first and last both in
+score's merges.tasks carries task names alone), or on a parallel one `rollouts[<slug>].score.weights.tasks` (p53-5:
+each task's at, its latest in-window peak's ts, in [window.since, window.until]); then `freshReview` (an entry is one row: its first and last both in
 [since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
 until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
 `nights.nights` (each morning), `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
@@ -348,7 +349,8 @@ the same way), `gateMisses.items` (each item's at), and the arms' rows, each by 
 `arms.escapes` (at, with inWindow true, as a friction escape is). span calls score.py with no --since, so a score's
 window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
 ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
-read the run start instead. Not checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly
+read the run start instead. Not checked, each for its reason: a score's budget (p53-5: sums and a count, its window pinned by reflect-score's
+tests) and its weights' measured and kinds (sums over the tasks checked above), reviewChurn, freshReviewLevels and the ledger's weekly
 row (ledger.py's rows(): its hours, byCause, contributing rollouts' hours and events) report sums with no rows, so tests
 alone pin their windows (reflect-score's (l) and (e2), reflect-weekly's freshReviewLevels test, and reflect-ledger's L1
 for the ledger, whose header clips every interval to [since, until]); a score's escapes block reads its evidence up to
@@ -2026,6 +2028,13 @@ class Span:
     # -- knobs ------------------------------------------------------------------------------------------------------
 
     def knobs(self, entries, scores, rid, tunings, reflections):
+        """The weekly reading's knobs, {revert, land, held}: each standing auto line a read rollout of its repo finds
+        breaching (tune.py's revert_check), then each read rollout's proposals through tune.py's auto_check, one land per
+        repo from its newest rollout. Agreement and the knob table are per repo (knob_key), though capacity_max is one
+        machine-wide value (p53-5): a capacity_max proposal (budget-count-raise) always carries score.py's caution, so
+        auto_check's check (1) holds it, here and in tune.py --auto alike, and it never reaches `land`. Two repos' raises
+        are two held trades, and a yes to one leaves the other's `from` stale, answered as moot. Should that caution lift,
+        the land list must dedupe the machine-wide key across repos first."""
         out = {"revert": [], "land": [], "held": []}
         by_repo = {}  # the knob-capable read rollouts (a note, a root, an origin, settings and a score), per repo
         for e in entries:
@@ -2091,10 +2100,13 @@ class Span:
 
     @staticmethod
     def now_values(e):
+        """rollouts.toml's values now for the rollout's repo: tune.py's now_values() over its rollout-settings JSON (the
+        four note-stamped keys, capacity_max and each Weight part, p53-5; a missing part left out), {} when it cannot
+        be read. Never raises."""
         try:
             with open(e["settingsFile"], encoding="utf-8") as f:
                 doc = json.load(f)
-            return {k: doc["settings"][k]["value"] for k in RS.KEYS}
+            return TUNE.now_values(doc)
         except (OSError, ValueError, KeyError, TypeError):
             return {}
 
@@ -2497,6 +2509,10 @@ def window_flags(doc, scores):
                    w["since"], w["until"])
         else:
             report("rollouts[%s].score.handsOff" % slug, [(_row_in(a.get("at"), lo, hi), a.get("at")) for a in acts],
+                   w["since"], w["until"])
+            # p53-5: each task's measured peak, by its latest contributing slot-freed line's ts (score.py's weights)
+            weighed = items(part(sc, "weights", "tasks"))
+            report("rollouts[%s].score.weights.tasks" % slug, [(_row_in(x.get("at"), lo, hi), x.get("at")) for x in weighed],
                    w["since"], w["until"])
     report("freshReview", spans(items(doc.get("freshReview"))), ss, us)
     rows = []

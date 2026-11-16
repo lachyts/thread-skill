@@ -313,7 +313,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
                      agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | trickle-bound (p28-6) |
-                     last-start-bound (p28-7) | dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     budget-bound (p53-5) | last-start-bound (p28-7) | dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
@@ -327,8 +327,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      or no Escape source was read, p21-4; reviewChurn when no review round was recorded, p21-3). A
                      serial line has applied [] and a close, and no binding, voids, auto, reflection or reverts.
                      applied: key
-                     one of parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds; from, to
-                     and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
+                     one of TUNING_KEYS: parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, and
+                     (p53-5) capacity_max and a repo's weight_mem_gb and weight_cores, which tune.py moves in whole
+                     units; from, to and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
                      entry of a non-void auto landing and on no other line); no other key. Never auto and close on one
                      line.
@@ -345,8 +346,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      lands in reflections.jsonl.
   proposal           id, altitude (knob | rule | bug), reflection, rollouts; repo?, key?, rule?, shape?, direction?,
                      from?, to?, ranAt?, landed?, auto?, tuning?, reverts?, held?, vaultTask?, filed?, fixes? (per
-                     altitude: a knob needs repo, key, rule of at most 64, direction 1 or -1, from, to and ranAt
-                     integers >= 1 and landed, its id knob_key(repo, key, rule, direction); a rule needs rule, shape
+                     altitude: a knob needs repo, key (one of TUNING_KEYS, as a tuning's applied key), rule of at
+                     most 64, direction 1 or -1, from, to and ranAt integers >= 1 and landed, its id knob_key(repo,
+                     key, rule, direction); a rule needs rule, shape
                      and vaultTask, a bug rule, shape, vaultTask and filed, each id watch_id(rule, shape); auto is true
                      only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
@@ -859,8 +861,10 @@ def _cap(v):
 # ---- the tuning kind (skills/reflect/scripts/tune.py) -----------------------------------------------------
 
 UTC_Z_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z\Z", re.ASCII)
-# rollout-settings.py's KEYS (tests/run-record.test.mjs pins that the two agree).
-TUNING_KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
+# rollout-settings.py's TUNING_KEYS (tests/run-record.test.mjs pins that the two agree): its KEYS, the four a rollout
+# note stamps, then (p53-5) the machine-wide capacity_max and a repo's two Weight estimates, which no note stamps.
+TUNING_KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds", "capacity_max",
+               "weight_mem_gb", "weight_cores")
 # v2 (p21-2): the old seven, then the two headlines' and Review churn's slots. A v1 line carries the first seven.
 SCORE_KEYS = ("throughput", "runningHours", "merges", "tokensPerMerge", "setAsideRate", "conflictRate",
               "quotaStalls", "handsOffRate", "quality", "reviewChurn")
@@ -868,8 +872,8 @@ APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 # p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
 APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
-BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "last-start-bound", "dependency-bound",
-            "none-clear")
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "budget-bound", "last-start-bound",
+            "dependency-bound", "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
 CLOSES = ("completion", "supersede")
 

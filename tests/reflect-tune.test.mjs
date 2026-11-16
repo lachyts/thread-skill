@@ -1047,3 +1047,190 @@ test('KT4 (b) control: an edit that changes test_logins is refused, nothing writ
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
   assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
 })
+
+// ---- KT5: capacity_max and the Weights (p53-5, ADR 0083 d4 and DfL 13) ---------------------------------------------
+// capacity_max is machine-wide (MACHINE_ONLY, schema 4): a Tuning writes it into [defaults]. A repo's Weight estimate
+// (schema 6) goes into its repo table. Both raise the file's schema line in the same edit, and neither is stamped by a
+// rollout note, so each prints its own effect line.
+const CAP_EFFECT = 'takes effect at every rollout\'s next `next` call on this Mac, whatever its repo (machine-wide, read live while a fresh Capacity reading is in force); no rollout note stamps it'
+const W_EFFECT = (repo) => `takes effect at ${repo}'s next \`next\` call or start, running rollouts included, for a kind with fewer than 3 measured tasks (read live); no rollout note stamps it`
+const NO_GREEN_MAC = 'no green-Mac evidence: a count hold never tests the Weight against the budget (ADR 0083 DfL 13): Lachy decides'
+const CAPMAX = () => P('p1', 'capacity_max', 6, 7, { rule: 'budget-count-raise', direction: 1, caution: NO_GREEN_MAC })
+
+test('KT5 (a) a Tuning raises capacity_max and the file\'s schema line together', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, '[defaults]\nparallel_ceiling = 4\n')
+  const scores = writeScores(home, { binding: 'budget-bound', proposals: [CAPMAX()] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, 'WARN: tune: no tasks dir at ~/repos/obsidian/Work/Tasks: the reader check read no live rollout\n', 'the raise ran the reader check')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 4\n\n[defaults]\nparallel_ceiling = 4\ncapacity_max = 7\n')
+  const after = resolved(home, repo)
+  assert.deepEqual([after.schema.file, after.settings.capacity_max], [4, { value: 7, source: 'file:defaults' }])
+  const [l] = lines(tuningsPath(home))
+  assert.deepEqual([l.binding, l.applied.map((a) => [a.key, a.from, a.to, a.ranAt, a.rule])], ['budget-bound', [['capacity_max', 6, 7, 6, 'budget-count-raise']]])
+  assert.equal(r.stdout.split('\n').filter(Boolean).at(-1), `applied capacity_max 6 → 7 for o/r: ${CAP_EFFECT}`)
+})
+
+test('KT5 (b) a Weight lower lands in the repo table at schema 6; (c) no [defaults] table gets one appended; (d) both at once', (t) => {
+  {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    const scores = writeScores(home, { proposals: [P('p1', 'weight_mem_gb', 3, 2, { rule: 'weight-measured-lower', direction: -1 })] })
+    const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), `schema = 6\n\n${CONFIG.replace('max_review_rounds = 4\n', 'max_review_rounds = 4\nweight_mem_gb = 2\n')}`)
+    const after = resolved(home, repo)
+    assert.deepEqual(after.weight, { mem_gb: { value: 2, source: 'file:repo' }, cores: { value: 2, source: 'built-in' } })
+    assert.equal(r.stdout.split('\n').filter(Boolean).at(-1), `applied weight_mem_gb 3 → 2 for o/r: ${W_EFFECT('o/r')}`)
+  }
+  {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, '[repo."o/r"]\nparallel_ceiling = 3\n')
+    const r = tune(home, ['--scores', writeScores(home, { proposals: [CAPMAX()] }), '--pick', 'p1', '--repo', repo])
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 4\n\n[repo."o/r"]\nparallel_ceiling = 3\n\n[defaults]\ncapacity_max = 7\n')
+    assert.deepEqual(resolved(home, repo).settings.capacity_max, { value: 7, source: 'file:defaults' })
+  }
+  {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, '[defaults]\nparallel_ceiling = 4\n')
+    const scores = writeScores(home, { proposals: [CAPMAX(), P('p2', 'weight_cores', 2, 1, { rule: 'weight-measured-lower', direction: -1 })] })
+    const r = tune(home, ['--scores', scores, '--pick', 'p1,p2', '--repo', repo])
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 6\n\n[defaults]\nparallel_ceiling = 4\ncapacity_max = 7\n\n[repo."o/r"]\nweight_cores = 1\n')
+    assert.deepEqual(lines(tuningsPath(home))[0].applied.map((a) => a.key), ['capacity_max', 'weight_cores'])
+  }
+})
+
+test('KT5 (e) capacity_max set in dotted or inline form is refused, nothing written; a stale Weight from too', (t) => {
+  for (const [text, proposals, re] of [
+    // a top-level dotted defaults.capacity_max, then an inline defaults table
+    ['schema = 4\ndefaults.capacity_max = 6\n', [CAPMAX()], /^tune: \[defaults\] is set in dotted or inline-table form in the config: edit it by hand\n$/],
+    ['schema = 4\ndefaults = { capacity_max = 6 }\n', [CAPMAX()], /^tune: \[defaults\] is set in dotted or inline-table form/],
+    // a stale Weight from: rollouts.toml's weight part, not the proposal's
+    ['schema = 6\n\n[repo."o/r"]\nweight_mem_gb = 4\n', [P('p1', 'weight_mem_gb', 3, 2, { rule: 'weight-measured-lower', direction: -1 })],
+      /^tune: p1's from is stale: weight_mem_gb is 4 now, not 3/],
+  ]) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, text)
+    refusedNothingWritten(home, ['--scores', writeScores(home, { proposals }), '--pick', 'p1', '--repo', repo], 2, re, text)
+  }
+})
+
+const WKID = knobKey('o/r', 'weight_mem_gb', 'weight-measured-lower', -1)
+const LOWER = () => P('p1', 'weight_mem_gb', 3, 2, { rule: 'weight-measured-lower', direction: -1 })
+const W_AGREE = TWO_AGREE.map((l) => {
+  const d = JSON.parse(l)
+  return d.kind === 'proposal' ? JSON.stringify({ ...d, id: WKID, key: 'weight_mem_gb', rule: 'weight-measured-lower', direction: -1, from: 3, to: 2, ranAt: 3 }) : l
+})
+
+test('KT5 (f) --auto holds a cautioned capacity_max raise; lands an agreed Weight lower, and holds it on a load-topped ledger', (t) => {
+  {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...TWO_AGREE, TL_NOW])
+    held(home, autoArgs(writeScores(home, { proposals: [CAPMAX()], guardrails: OK_GUARDS }), repo), /^held capacity_max: a caution: Lachy decides$/m, CONFIG)
+  }
+  {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...W_AGREE, tlLine('load', { load: 12.5, stalls: 7.5 })])
+    held(home, autoArgs(writeScores(home, { proposals: [LOWER()], guardrails: OK_GUARDS }), repo),
+      /^held weight_mem_gb: machine load tops the Time-lost ledger \(12\.5 h of 20 h\): a weight_mem_gb lower waits \(ADR 0051, ADR 0083\)$/m, CONFIG)
+  }
+  {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...W_AGREE, TL_NOW])
+    const r = tune(home, autoArgs(writeScores(home, { proposals: [LOWER()], guardrails: OK_GUARDS }), repo))
+    assert.equal(r.status, 0, r.stderr)
+    assert.deepEqual(lines(tuningsPath(home))[0].applied.map((a) => [a.key, a.from, a.to, a.agreed]), [['weight_mem_gb', 3, 2, 3]])
+    assert.match(fs.readFileSync(tomlPath(home), 'utf8'), /^schema = 6\n[\s\S]*\[repo\."o\/r"\]\n[^[]*weight_mem_gb = 2\n/)
+    assert.match(r.stdout, /^applied weight_mem_gb 3 → 2 for o\/r: takes effect at o\/r's next `next` call/m)
+  }
+})
+
+test('KT5 (g) the load hold: a Weight lower and a capacity_max raise wait on a load-topped ledger, a Weight raise passes check (6)', (t) => {
+  const home = tmpHome(t)
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'a = json.load(sys.stdin)',
+    'print(json.dumps([m.load_hold(p, a["rid"], a["lines"]) for p in a["props"]]))'].join('\n')
+  const ledger = [JSON.parse(tlLine('load', { load: 12.5, stalls: 7.5 }))]
+  const props = [LOWER(), P('p2', 'weight_cores', 1, 2, { rule: 'weight-measured-raise', direction: 1 }), CAPMAX(), RAISE()]
+  const r = spawnSync('python3', ['-B', '-c', body, TUNE], { encoding: 'utf8', env: env(home), input: JSON.stringify({ rid: RNOW, lines: ledger, props }) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [
+    'machine load tops the Time-lost ledger (12.5 h of 20 h): a weight_mem_gb lower waits (ADR 0051, ADR 0083)',
+    null,
+    'machine load tops the Time-lost ledger (12.5 h of 20 h): a capacity_max raise waits (ADR 0051, ADR 0083)',
+    'machine load tops the Time-lost ledger (12.5 h of 20 h): a Parallel ceiling raise waits (ADR 0051)',
+  ])
+})
+
+test('KT5 (h) --revert of a Weight auto line lands its reverse, rollouts.toml\'s value read from `weight`', (t) => {
+  const W2 = `schema = 6\n\n${CONFIG.replace('max_review_rounds = 4\n', 'max_review_rounds = 4\nweight_mem_gb = 2\n')}`
+  const { home, args } = revertCase(t, {
+    tunings: [AUTO_LINE({ applied: [{ key: 'weight_mem_gb', from: 3, to: 2, ranAt: 3, rule: 'weight-measured-lower', evidence: 'e', agreeing: 0, agreed: 3 }] })],
+    toml: W2, scores: { ranAt: { ...RAN4, capacity_max: null, weight_mem_gb: 2, weight_cores: 2 } } })
+  const r = tune(home, args)
+  assert.equal(r.status, 0, r.stderr)
+  const l = lines(tuningsPath(home))[1]
+  assert.deepEqual([l.reverts, l.applied.map((e) => [e.key, e.from, e.to, e.ranAt, e.rule])], ['t-auto', [['weight_mem_gb', 2, 3, 2, 'revert:weight-measured-lower']]])
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), W2.replace('weight_mem_gb = 2', 'weight_mem_gb = 3'))
+})
+
+// ---- KT6: the reader check (rollout-settings.py's header; p53-5) ----------------------------------------------------
+// A capacity_max or Weight Tuning raises the file's schema, so before anything is written each live rollout's engine root
+// reads the new file (inert-paths.py's reader_check()). The fixture: one live rollout note stamped at a usable snapshot
+// whose rollout-settings.py is a pre-P29 stub that refuses any top-level `schema` line.
+function preP29Tasks(home) {
+  const snap = path.join(home, 'snap')
+  const scripts = path.join(snap, 'skills', '_shared', 'scripts')
+  fs.mkdirSync(scripts, { recursive: true })
+  fs.writeFileSync(path.join(scripts, 'rollout-settings.py'), 'def resolve(repo=None, path=None):\n    for line in open(path):\n' +
+    '        if line.startswith("schema"):\n            raise ValueError(\'unknown top-level key "schema"\')\n    return {}\n')
+  fs.writeFileSync(path.join(scripts, 'engine-snapshot.py'), '# the snapshot marker\n')
+  const genv = { PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: '1' }
+  const g = (...a) => execFileSync(REAL_GIT, ['-C', snap, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a],
+    { encoding: 'utf8', env: genv }).trim()
+  g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'pre-P29')
+  const sha = g('rev-parse', 'HEAD')
+  g('checkout', '-q', '--detach', sha)
+  const td = path.join(home, 'tasks')
+  fs.mkdirSync(td)
+  fs.writeFileSync(path.join(td, 'ro.md'), `---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nengine_snapshot: "${snap}"\nengine_sha: ${sha}\n---\n`)
+  return { snap, td }
+}
+
+test('KT6 a schema raise runs the reader check: a pre-P29 live engine refuses it (exit 1, nothing written, a dry run too); no raise, no check', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const { snap, td } = preP29Tasks(home)
+  const config = '[defaults]\nparallel_ceiling = 4\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { binding: 'budget-bound', proposals: [CAPMAX()] })
+  for (const extra of [[], ['--dry-run']]) {
+    const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo, '--tasks-dir', td, ...extra])
+    assert.equal(r.status, 1, r.stderr)
+    assert.equal(r.stderr, `tune: [[ro]] runs on ${snap}, whose rollout-settings.py refuses the new file (unknown top-level key "schema"): ` +
+      'update that checkout to a P29+ release, or wait for the rollout to finish\n' +
+      'tune: nothing written: a live rollout\'s engine cannot read the raised `schema` line\n', extra.join(' '))
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'byte-identical')
+    assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+  }
+  // the file already at schema 4: nothing is raised, so the pre-P29 engine is never asked
+  writeToml(home, `schema = 4\n\n${config}`)
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo, '--tasks-dir', td])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 4\n\n[defaults]\nparallel_ceiling = 4\ncapacity_max = 7\n')
+})

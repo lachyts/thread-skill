@@ -56,15 +56,16 @@ function emitAll(home, rollout, events) {
 // One task's life: a Slot from..to (ready at its end), then a lane holding, then its merge. A terminal call journal
 // ends a minute before the Slot frees, unless journal is false (or an object to merge into the journal line). The
 // journal line is stamped at the Slot's end, or at `fold` (fold-journals stamps the fold time, not the call's).
-function life(slug, { from, to, c, lane, settings, journal = true, merged = true, tokens = 100000, outcome = 'ready', fold = to }) {
+// `cap` goes on the slot-taken (p29-8, p53-2, p53-4) and `peak` on the slot-freed (p53-2), when given.
+function life(slug, { from, to, c, lane, settings, journal = true, merged = true, tokens = 100000, outcome = 'ready', fold = to, cap, peak, run = slug }) {
   const out = [
-    [from, 'slot-taken', slug, { settings: settings || S(c), start: 'start' }],
-    [from, 'run-bound', slug, { runId: `wf_${slug}`, journalDir: '/nonexistent/workflows', call: 'task' }],
-    [to, 'slot-freed', slug, { outcome }],
+    [from, 'slot-taken', slug, { settings: settings || S(c), start: 'start', ...(cap ? { cap } : {}) }],
+    [from, 'run-bound', slug, { runId: `wf_${run}`, journalDir: '/nonexistent/workflows', call: 'task' }],
+    [to, 'slot-freed', slug, { outcome, ...(peak ? { peak } : {}) }],
   ]
   if (outcome === 'ready') out.push([to, 'ready', slug, { pr: 7 }])
   if (journal) {
-    const j = { runId: `wf_${slug}`, status: 'completed', mode: 'task', startTime: ms(from), durationMs: ms(to) - ms(from) - 60000, tokens }
+    const j = { runId: `wf_${run}`, status: 'completed', mode: 'task', startTime: ms(from), durationMs: ms(to) - ms(from) - 60000, tokens }
     out.push([fold, 'call-journal', null, typeof journal === 'object' ? { ...j, ...journal } : j])
   }
   if (lane) {
@@ -89,15 +90,18 @@ function saturated(c, { settings, prefix = 't', start = 0 } = {}) {
   return ev
 }
 
-function writeSettings(home, values, { file = null, repo = 'o/r', guardrails = {} } = {}) {
+// `capacity_max` adds that key to `settings` (p36-7); `weight` is resolve()'s top-level `weight` (p53-3), e.g. W(3, 2).
+function writeSettings(home, values, { file = null, repo = 'o/r', guardrails = {}, capacity_max = null, weight = null } = {}) {
   const settings = {}
   for (const k of ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']) {
     settings[k] = { value: values[k] ?? { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3 }[k], source: file ? 'file:repo' : 'built-in' }
   }
+  if (capacity_max !== null) settings.capacity_max = { value: capacity_max, source: file ? 'file:defaults' : 'built-in' }
   const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, review_churn_pct: 40, hours_per_task: 1.5, ...guardrails }
   const doc = {
     path: file || path.join(home, '.config', 'thread', 'rollouts.toml'), file: !!file, repo,
     settings, guardrails: Object.fromEntries(Object.entries(g).map(([k, v]) => [k, { value: v, source: 'built-in' }])),
+    ...(weight ? { weight } : {}),
   }
   const p = path.join(home, 'settings.json')
   fs.writeFileSync(p, JSON.stringify(doc))
@@ -140,7 +144,7 @@ function signsHold(out) {
   }
   for (const w of out.withheld) {
     assert.equal(w.to, w.ranAt + w.direction, `${w.id}: to = ranAt + direction`)
-    assert.ok(Math.sign(w.to - w.from) !== w.direction || /Guardrail|lane \d+% busy/.test(w.reason), `${w.id}: withheld for a reason`)
+    assert.ok(Math.sign(w.to - w.from) !== w.direction || /Guardrail|lane \d+% busy|whole GB/.test(w.reason), `${w.id}: withheld for a reason`)
   }
 }
 
@@ -362,6 +366,259 @@ test('trickle-bound controls: a marker labels 40 min at most; dependency markers
     assert.equal(out.throughput, null)
     assert.equal(out.binding.constraint, 'trickle-bound')
   }
+})
+
+// ---- 1b'. a run the budget held (p53-5, ADR 0083 d4 and DfL 13) ---------------------------------------------------
+// While the budget admits, `next` stamps idle-slots' `bound` on a hold-trickle or hold-away-cap marker (p53-4) and
+// slot-taken's cap.max. trickleHeld()'s shape with every marker carrying `bound` (or none, per tick).
+
+const CAP = (max = 6) => ({ away: false, n: 4, file: 'fresh', by: 'capacity', budget: { mem_gb: 12, cores: 8 }, weight: { mem_gb: 3, cores: 2 }, max })
+const W = (mem, cores, source = 'built-in') => ({ mem_gb: { value: mem, source }, cores: { value: cores, source } })
+const NO_GREEN_MAC = 'no green-Mac evidence: a count hold never tests the Weight against the budget (ADR 0083 DfL 13): Lachy decides'
+// bounds: the bound of each marker at 00:00, 02:00, 02:20, 02:40 and 03:00 (null: none)
+function budgetHeld(bounds, { max = 6 } = {}) {
+  const at5 = ['00:00', '02:00', '02:20', '02:40', '03:00']
+  const free = [3, 4, 4, 4, 3]
+  return byTs([
+    ...life('a', { from: at('00:00'), to: at('02:00'), c: 4, cap: CAP(max) }),
+    ...life('b', { from: at('03:00'), to: at('05:00'), c: 4, cap: CAP(max) }),
+    ...at5.map((hm, i) => [at(hm), 'idle-slots', null, { reason: 'hold-trickle', free: free[i], settings: S(4), ...(bounds[i] ? { bound: bounds[i] } : {}) }]),
+  ])
+}
+
+test('budget-bound: a budget-held week reads budget-bound with the short part named', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', budgetHeld(Array(5).fill('memory')))
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 }, { capacity_max: 6 })])
+  assert.equal(out.binding.constraint, 'budget-bound')
+  assert.equal(out.binding.short, 'memory')
+  assert.equal(out.binding.why, 'the budget kept Slots free 100% of the time (running time plus 1 h with no Slot open; held: the count 0 h, memory 5 h, cores 0 h, memory and cores 0 h)')
+  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 5, cores: 0, 'memory and cores': 0 }, unboundHeldHours: 0, short: 'memory' })
+  assert.ok(has(out.flags, /^budget-bound: memory and cores are the budget's \(Chorus's capacity\.json\): no rollout key moves them$/), JSON.stringify(out.flags))
+  assert.ok(has(out.flags, /^throughput: read under the budget \(budget-bound\): .* not at the ceiling 4$/))
+  assert.ok(!has(out.flags, /^trickle-bound/), 'never also trickle-bound')
+  assert.deepEqual(out.runningTime.excludedHours, { 'hold-trickle': 1 }, 'the excluded kind keeps its name')
+  assert.deepEqual([out.proposals, out.withheld], [[], []], 'the budget is Chorus\'s: no rollout key moves memory')
+  assert.equal(out.ranAt.capacity_max, 6, 'cap.max on the window\'s slot-taken lines')
+})
+
+test('budget-bound on the count: a capacity_max raise one past the value it ran at, always with a caution; withheld once rollouts.toml is there', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', budgetHeld(['count', 'count', 'count', 'count', 'memory']))
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 }, { capacity_max: 6 })])
+  assert.equal(out.binding.constraint, 'budget-bound')
+  assert.deepEqual(out.budget.heldHours, { count: 3, memory: 2, cores: 0, 'memory and cores': 0 })
+  assert.equal(out.binding.short, 'count')
+  assert.ok(has(out.flags, /^budget-bound: capacity_max, the hard count, held it; the record shows no green Mac at a count hold \(the count is tested before the Weight\): a raise is Lachy's$/), JSON.stringify(out.flags))
+  assert.equal(out.proposals.length, 1, JSON.stringify(out.withheld))
+  const [p] = out.proposals
+  assert.deepEqual([p.key, p.from, p.to, p.ranAt, p.rule, p.direction, p.ranAtCause, p.agreeing], ['capacity_max', 6, 7, 6, 'budget-count-raise', 1, null, 0])
+  assert.equal(p.caution, NO_GREEN_MAC)
+  assert.ok(p.caution.length < 200, 'the decision task keeps 200 characters')
+  assert.deepEqual([p.serves, p.trade], [['throughput'], null])
+  assert.match(p.evidence, /^Budget-bound: capacity_max held Slots free 3 h .*\(ran at 6\)$/)
+  signsHold(out)
+  // rollouts.toml already at 7: withheld on the sign, as every rule is
+  const home2 = tmpHome(t)
+  emitAll(home2, 'demo', budgetHeld(['count', 'count', 'count', 'count', 'memory']))
+  const out2 = scored(home2, ['--until', at('05:00'), '--settings', writeSettings(home2, { parallel_ceiling: 4 }, { capacity_max: 7 })])
+  assert.deepEqual(out2.proposals, [])
+  assert.equal(out2.withheld.length, 1)
+  assert.match(out2.withheld[0].reason, /^rollouts\.toml already at 7, at or past this run's evidence \(ran at 6 → 7\)/)
+  signsHold(out2)
+})
+
+test('budget-bound control: C or the Trickle holding longer than the budget keeps trickle-bound, its why byte-equal', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', budgetHeld([null, null, null, null, 'memory']))
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+  assert.equal(out.binding.constraint, 'trickle-bound')
+  assert.equal(out.binding.why, 'the Mac-wide cap kept Slots free 100% of the time (running time plus 1 h with no Slot open; Slot time it held: the Trickle 16 h, the Away cap 0 h)')
+  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 2, cores: 0, 'memory and cores': 0 }, unboundHeldHours: 3, short: 'memory' })
+  assert.ok(!has(out.flags, /^budget-bound/))
+  // a pre-p53-4 record (budget with no max, no bound) reads as C held it, and capacity_max ran at nothing
+  const home2 = tmpHome(t)
+  const old = { away: false, n: 4, file: 'fresh', by: 'capacity', budget: { mem_gb: 12, cores: 8 }, weight: { mem_gb: 3, cores: 2 } }
+  emitAll(home2, 'demo', byTs([...life('a', { from: at('00:00'), to: at('02:00'), c: 4, cap: old }), ...life('b', { from: at('03:00'), to: at('05:00'), c: 4, cap: old }),
+    ...['00:00', '02:00', '02:20', '02:40', '03:00'].map((hm) => [at(hm), 'idle-slots', null, { reason: 'hold-trickle', free: 3, settings: S(4) }])]))
+  const out2 = scored(home2, ['--until', at('05:00'), '--settings', writeSettings(home2, { parallel_ceiling: 4 })])
+  assert.equal(out2.binding.constraint, 'trickle-bound')
+  assert.deepEqual([out2.budget.admitted, out2.budget.unboundHeldHours, out2.budget.short, out2.ranAt.capacity_max], [0, 5, null, null])
+})
+
+// capacity_max is machine-wide ([defaults] only): another repo's Tuning of it is this one's cause and
+// agreement, named with its repo; a parallel_ceiling Tuning there is neither (same_repo(), which cause() and agreeing()
+// read, pinned on the same line below).
+test('budget-count-raise reads capacity_max machine-wide: another repo\'s Tuning causes and agrees, named with its repo', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', budgetHeld(['count', 'count', 'count', 'count', 'memory']))
+  const w = { since: D(4, '00:00'), until: D(4, '10:00'), activeStart: D(4, '00:00'), activeEnd: D(4, '09:00'), partial: false }
+  emitAll(home, 'older-run', [[at('02:30'), 'tuning', null, { id: 't-other', repo: 'o/other', window: w, scores: SC(),
+    applied: [{ key: 'capacity_max', from: 6, to: 7, ranAt: 6, rule: 'budget-count-raise', evidence: 'Budget-bound', agreeing: 0 },
+      { key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'Slot-bound', agreeing: 0 }] }]])
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 }, { capacity_max: 7 })])
+  const [x] = out.withheld
+  assert.deepEqual([x.key, x.from, x.to, x.ranAt, x.agreeing], ['capacity_max', 7, 7, 6, 1])
+  assert.equal(x.ranAtCause, `Tuning t-other moved it on ${Z(at('02:30'))} (for o/other)`)
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("score", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'ts = m.load_tunings(sys.argv[2])',
+    'print(json.dumps([m.agreeing(ts, "o/r", "capacity_max", "budget-count-raise", 1), m.agreeing(ts, "o/r", "parallel_ceiling", "slot-bound-raise", 1),',
+    '                  m.agreeing(ts, "o/other", "parallel_ceiling", "slot-bound-raise", 1),',
+    '                  m.same_repo("capacity_max", "o/other", "o/r"), m.same_repo("parallel_ceiling", "o/other", "o/r")]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE, evDir(home)], { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [1, 0, 1, true, false], 'o/other\'s parallel_ceiling entry speaks for o/other alone')
+})
+
+// CLAUDE.md, Review rule: one row planted outside each new reading's window adds nothing.
+test('the budget holds only its window: ticks ending past the marker span before --since add nothing; cap.max before it never sets ranAt', (t) => {
+  const early = (hm, bound) => [D(4, hm), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4), bound }]
+  const ev = () => byTs([...budgetHeld([null, null, null, null, null]),
+    early('20:00', 'memory'), early('20:20', 'memory'), early('20:40', 'memory'), // its last span ends 21:20, hours before --since
+    ...['x', 'y', 'z'].flatMap((s, i) => life(s, { from: D(4, `1${i}:00`), to: D(4, `1${i}:30`), c: 4, cap: CAP(9) }))])
+  const home = tmpHome(t)
+  emitAll(home, 'demo', ev())
+  const out = scored(home, ['--since', at('00:00'), '--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 }, { capacity_max: 6 })])
+  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 0, cores: 0, 'memory and cores': 0 }, unboundHeldHours: 5, short: null })
+  assert.equal(out.binding.constraint, 'trickle-bound', 'never budget-bound')
+  assert.equal(out.ranAt.capacity_max, 6, 'three slot-taken lines at cap.max 9 before --since are no evidence')
+  // the control: the same record read from the day before counts both
+  const home2 = tmpHome(t)
+  emitAll(home2, 'demo', ev())
+  const out2 = scored(home2, ['--since', D(4, '00:00'), '--until', at('05:00'), '--settings', writeSettings(home2, { parallel_ceiling: 4 }, { capacity_max: 6 })])
+  assert.ok(out2.budget.heldHours.memory > 0, JSON.stringify(out2.budget))
+  assert.equal(out2.ranAt.capacity_max, 9)
+})
+
+// ---- 1b''. each kind's measured Weight beside its estimate (p53-5, ADR 0083 DfL 8 and 9) -----------------------------
+
+// Four tasks one after another at ceiling 4 (none-clear), each with a slot-freed peak; t1 and t2 single-file, t3 and t4
+// cross-cutting. `early` plants t1's own earlier Slot before --since, with a 40 GB peak; `late` its own later Slot
+// after an --until of 06:00, started at another Weight (cap.weight 40 GB, 3 cores).
+function weighed(home, mems, { early = false, late = false, notes = true } = {}) {
+  const ev = mems.flatMap((mem, i) => life(`t${i + 1}`, { from: at(`0${i}:00`), to: at(`0${i}:50`), c: 4, cap: CAP(), peak: { mem_gb: mem, cores: 1 } }))
+  if (early) ev.push(...life('t1', { from: D(4, '20:00'), to: D(4, '21:00'), c: 4, run: 't1-early', cap: CAP(), peak: { mem_gb: 40, cores: 3 } }))
+  if (late) {
+    ev.push(...life('t1', { from: at('07:00'), to: at('07:50'), c: 4, run: 't1-late', cap: { ...CAP(), weight: { mem_gb: 40, cores: 3 } },
+      peak: { mem_gb: 40, cores: 3 } }))
+  }
+  emitAll(home, 'demo', byTs(ev))
+  const tasks = path.join(home, 'vault', 'Work', 'Tasks')
+  fs.mkdirSync(path.join(tasks, 'Archive'), { recursive: true })
+  if (notes) {
+    for (const [i, scope] of ['single-file', 'single-file', 'cross-cutting', 'cross-cutting'].entries()) {
+      fs.writeFileSync(path.join(tasks, i === 3 ? 'Archive' : '', `t${i + 1}.md`), ['---', 'tags: [task]', 'status: done', `scope: ${scope}`, '---', '', `# t${i + 1}`, ''].join('\n'))
+    }
+  }
+  return tasks
+}
+
+test('weights: each kind\'s measured Weight beside the estimate, and one whole step toward it per part', (t) => {
+  const home = tmpHome(t)
+  const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9])
+  const out = scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 2) })])
+  assert.deepEqual(out.weights.estimate, W(3, 2))
+  assert.deepEqual(out.weights.measured, { mem_gb: 0.83, cores: 1, tasks: 4 })
+  assert.deepEqual(out.weights.tasks.map((x) => [x.task, x.kind, x.mem_gb, x.cores, x.at]), [
+    ['t1', 'single-file', 0.5, 1, Z(at('00:50'))], ['t2', 'single-file', 0.6, 1, Z(at('01:50'))],
+    ['t3', 'cross-cutting', 0.8, 1, Z(at('02:50'))], ['t4', 'cross-cutting', 0.9, 1, Z(at('03:50'))]], 'an Archive note is read too')
+  assert.deepEqual(out.weights.kinds, [
+    { kind: 'cross-cutting', tasks: 2, measured: null, started: { mem_gb: 3, cores: 2 } },
+    { kind: 'single-file', tasks: 2, measured: null, started: { mem_gb: 3, cores: 2 } }])
+  assert.equal(out.weights.noNote, 0)
+  assert.deepEqual([out.ranAt.weight_mem_gb, out.ranAt.weight_cores], [3, 2])
+  assert.equal(out.binding.constraint, 'none-clear')
+  assert.deepEqual(out.proposals.map((p) => [p.key, p.from, p.to, p.ranAt, p.rule, p.direction]), [
+    ['weight_mem_gb', 3, 2, 3, 'weight-measured-lower', -1], ['weight_cores', 2, 1, 2, 'weight-measured-lower', -1]], 'one step, never 3 → 1')
+  assert.match(out.proposals[0].evidence, /^measured upper quartile 0\.83 over 4 tasks \(target 1\); the estimate 3 \(built-in\)/)
+  assert.ok(!has(out.flags, /^weights: /), JSON.stringify(out.flags))
+  signsHold(out)
+})
+
+test('weights: a measure above the estimate raises it one step; a fractional estimate is withheld; no settings weight proposes nothing', (t) => {
+  {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [4, 5, 6, 7])
+    const out = scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 1, 'file:repo') })])
+    assert.deepEqual(out.weights.measured, { mem_gb: 6.25, cores: 1, tasks: 4 })
+    assert.deepEqual(out.proposals.map((p) => [p.key, p.from, p.to, p.rule, p.direction, p.serves, p.risks]), [
+      ['weight_mem_gb', 3, 4, 'weight-measured-raise', 1, [], ['throughput']]], 'cores already at its target 1: no rule')
+    signsHold(out)
+  }
+  {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9])
+    const out = scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(0.8, 1.0, 'file:repo') })])
+    assert.deepEqual([out.ranAt.weight_mem_gb, out.ranAt.weight_cores], [0.8, 1], '1.0 reads 1')
+    assert.deepEqual(out.proposals, [])
+    assert.equal(out.withheld.length, 1)
+    assert.deepEqual([out.withheld[0].key, out.withheld[0].reason], ['weight_mem_gb', 'a Tuning moves a Weight in whole GB and cores: weight_mem_gb is 0.8, edit it by hand'])
+    signsHold(out)
+  }
+  {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], { notes: false })
+    fs.writeFileSync(path.join(tasks, 't2.md'), ['---', 'tags: [task]', 'scope: single-file', '---', ''].join('\n'))
+    const out = scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+    assert.equal(out.weights.estimate, null)
+    assert.deepEqual(out.weights.measured, { mem_gb: 0.83, cores: 1, tasks: 4 }, 'a task with no note stays in the pooled measure')
+    assert.equal(out.weights.noNote, 3)
+    assert.deepEqual(out.weights.kinds.map((k) => [k.kind, k.tasks]), [['single-file', 1]])
+    assert.deepEqual([out.ranAt.weight_mem_gb, out.ranAt.weight_cores, out.proposals], [null, null, []])
+    assert.ok(has(out.flags, /^weights: --settings carries no `weight`/), JSON.stringify(out.flags))
+    assert.ok(has(out.flags, /^weights: 3 task\(s\) with a peak have no readable note \(\[\[t1\]\], \[\[t3\]\], \[\[t4\]\]\): pooled, in no kind$/))
+  }
+})
+
+test('weights: rollouts.toml changed after the run began is flagged only beside a Weight rule', (t) => {
+  const CHANGED = /^weights: rollouts\.toml changed after the run began: the Weights' ranAt is its value now$/
+  const newer = (home) => { // a settings file written now, after every fixture's activeStart
+    const f = path.join(home, 'rollouts.toml')
+    fs.writeFileSync(f, 'schema = 6\n')
+    return writeSettings(home, { parallel_ceiling: 4 }, { file: f, weight: W(3, 2, 'file:repo') })
+  }
+  {
+    // no peak: no measure, no Weight rule, no flag
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(life('a', { from: at('00:00'), to: at('02:00'), c: 4, cap: CAP() })))
+    const out = scored(home, ['--until', at('03:00'), '--settings', newer(home)])
+    assert.deepEqual([out.weights.measured, out.proposals.concat(out.withheld).filter((p) => p.key.startsWith('weight_'))], [null, []])
+    assert.ok(!has(out.flags, CHANGED), JSON.stringify(out.flags))
+  }
+  {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9])
+    const out = scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', newer(home)])
+    assert.deepEqual(out.proposals.map((p) => p.key), ['weight_mem_gb', 'weight_cores'])
+    assert.ok(has(out.flags, CHANGED), JSON.stringify(out.flags))
+  }
+})
+
+test('weights hold only their window: a 40 GB peak before --since for a task with an in-window peak changes neither its row nor the measure; a start after --until no kind\'s `started`', (t) => {
+  const run = (opts) => {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], opts)
+    return scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 2) })])
+  }
+  const [plain, planted, late] = [run({}), run({ early: true }), run({ late: true })]
+  assert.deepEqual(planted.weights, plain.weights)
+  assert.deepEqual(planted.weights.tasks[0], { task: 't1', kind: 'single-file', mem_gb: 0.5, cores: 1, at: Z(at('00:50')) })
+  assert.deepEqual(planted.proposals.map((p) => [p.key, p.to]), plain.proposals.map((p) => [p.key, p.to]))
+  assert.deepEqual(late.weights, plain.weights)
+  assert.deepEqual(late.weights.kinds.map((k) => [k.kind, k.started]), [['cross-cutting', { mem_gb: 3, cores: 2 }], ['single-file', { mem_gb: 3, cores: 2 }]],
+    'the latest slot-taken in the window, never t1\'s start after --until')
+  {
+    // the control: read past it, t1's later start is its kind's latest
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], { late: true })
+    const out = scored(home, ['--since', at('00:00'), '--until', at('08:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 2) })])
+    assert.deepEqual(out.weights.kinds.map((k) => [k.kind, k.started]), [['cross-cutting', { mem_gb: 3, cores: 2 }], ['single-file', { mem_gb: 40, cores: 3 }]])
+  }
+  // the control: read from the day before, the early peak is t1's highest
+  const home = tmpHome(t)
+  const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], { early: true })
+  const out = scored(home, ['--since', D(4, '00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 2) })])
+  assert.deepEqual([out.weights.tasks[0].mem_gb, out.weights.tasks[0].at], [40, Z(at('00:50'))], 'one figure per task, its highest; at its latest line')
 })
 
 // ---- 1c. a run the last starts held (p28-7) ------------------------------------------------------------------
@@ -1332,7 +1589,8 @@ test('the rules propose() emits are exactly RULE_EFFECTS\' keys', () => {
   const r = spawnSync('python3', ['-B', '-c', body, SCORE], { encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
   assert.equal(r.status, 0, r.stderr)
   const [emitted, declared] = JSON.parse(r.stdout)
-  assert.deepEqual(emitted, ['plan-rejected-raise', 'quota-bound-lower', 'review-rounds-raise', 'slot-bound-raise'], 'the scan found the four rules')
+  assert.deepEqual(emitted, ['budget-count-raise', 'plan-rejected-raise', 'quota-bound-lower', 'review-rounds-raise', 'slot-bound-raise',
+    'weight-measured-lower', 'weight-measured-raise'], 'the scan found the seven rules')
   assert.deepEqual(emitted, declared)
 })
 
@@ -1928,7 +2186,8 @@ test('ranAt holds the ceiling and each cap, a spread included; a spread on an un
   const caps = [4, 4, 6]
   emitAll(home, 'demo', byTs(saturated(3, { settings: (i) => S(3, { max_review_rounds: caps[i], max_iterations: 2 }) })))
   const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
-  assert.deepEqual(out.ranAt, { parallel_ceiling: 3, max_review_rounds: 4, max_iterations: 2, max_plan_rounds: 3 })
+  assert.deepEqual(out.ranAt, { parallel_ceiling: 3, max_review_rounds: 4, max_iterations: 2, max_plan_rounds: 3,
+    capacity_max: null, weight_mem_gb: null, weight_cores: null }, 'no budget-admitted Slot and no settings weight: null (p53-5)')
   assert.ok(!out.proposals.concat(out.withheld).some((p) => p.key === 'max_review_rounds'), 'no review-rounds proposal')
   assert.ok(!has(out.flags, /task override/), `no spread flag for an unproposed key: ${JSON.stringify(out.flags)}`)
 })
