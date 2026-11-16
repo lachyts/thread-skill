@@ -7,12 +7,12 @@
 # Modes. Every mode runs the always-run steps (bash and python syntax, the workflow parse, the fast-tier map check)
 # and ends with the check that the run wrote nothing into the checkout. Full mode then runs every suite. --fast runs
 # only the test files tests/lib/fast-tier.py selects for the diff from THREAD_VERIFY_BASE (ADR 0062), read through
-# tests/fast-tier.map, and the full suite when the selector cannot place a changed path (its FULL line). --only runs
-# the named collected files, and never the merge-task self-tests. --shard K/N runs shard K of the split
-# tests/lib/shard.py makes of the merge-task self-tests and every collected test (its docstring holds the rules; the
-# self-tests run in shard 1), so the N shards together run the full suite exactly once; a shard.py failure is a red
-# `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's `<k><TAB><entry>` lines for the
-# same entries and exits before any step, writing nothing.
+# tests/fast-tier.map, and the full suite when the selector prints FULL (its header says when: an untracked path no map
+# line places is left out instead). --only runs the named collected files, and never the merge-task self-tests.
+# --shard K/N runs shard K of the split tests/lib/shard.py makes of the merge-task self-tests and every collected test
+# (its docstring holds the rules; the self-tests run in shard 1), so the N shards together run the full suite exactly
+# once; a shard.py failure is a red `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's
+# `<k><TAB><entry>` lines for the same entries and exits before any step, writing nothing.
 #
 # The Slow tier (p54-1, ADR 0084 d3). THREAD_SKIP_SLOW=1 (GitHub's check sets it on its `make test-fast` step) leaves
 # the SLOW suites tests/fast-tier.map declares out of a --fast run, after the mode block, so the full-suite fallbacks (a
