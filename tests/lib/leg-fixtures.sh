@@ -130,6 +130,8 @@ lscen() {
 mkcopies() { RO=$RO2; CWD="$R" leg copies; RO=$RO1; CWD="$R" leg copies; }
 # lands — the last land's `lands` as `state|why|waits` per copy, `;`-joined
 lands() { q '";".join("%s|%s|%s" % (e["state"], e["why"], e["waits"]) for e in d["lands"])'; }
+# master — $R's master (lscen's repo), as gscen and L17 read it
+master() { git -C "$R" rev-parse master; }
 
 # gscen <name> [B] — A's a1 (cell a1.txt) and B's b1 (cell b1.txt) both commit f.txt; A begins first (B with `B`)
 gscen() {

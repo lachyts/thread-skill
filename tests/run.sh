@@ -30,7 +30,7 @@
 # The bytecode cache (p54-3, ADR 0084 d4). PYTHONPYCACHEPREFIX points every suite and node file at scratch's pyc/, which
 # the run warms once (`python3 -m compileall`, which writes there under PYTHONDONTWRITEBYTECODE=1) before any suite
 # starts, so a script that loads the engine by path (leg.py's reconcile-rollout.py, about 1,500 launches in
-# tests/leg.test.sh) reads it compiled instead of compiling 1.1 MB each time: leg.py's launch measured 172 ms without
+# tests/leg*.test.sh) reads it compiled instead of compiling 1.1 MB each time: leg.py's launch measured 172 ms without
 # the cache and 87 ms with it. The scripts' `sys.dont_write_bytecode` stops only writes, never a read, so no script
 # changes, and the warm writes nothing into the checkout (the tree check below still holds). The warm compiles skills/
 # and hooks/, then the interpreter's stdlib and PyYAML: under a prefix python reads every module's bytecode from the
@@ -151,7 +151,7 @@ mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcr
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
 # A serial chain's Chain copies (leg.py copies, ADR 0067 d2) stay in temp too: each suite that makes one exports its own
-# (tests/leg.test.sh), so this is the backstop that keeps a missed site out of ~/.local/state/thread/chains.
+# (the tests/leg*.test.sh suites), so this is the backstop that keeps a missed site out of ~/.local/state/thread/chains.
 export THREAD_CHAIN_COPY_DIR="$scratch/chains"
 # The Security check (security-check.py, execute § 3 `security_checks`) never reaches the real OSV under test: a closed port, so
 # a case that forgets its own stub reads `advisories not checked`, never the network; an inherited THREAD_GITLEAKS is unset, so

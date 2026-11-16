@@ -48,11 +48,9 @@ git config --global user.name t; git config --global user.email t@t.invalid
 git config --global init.defaultBranch master; git config --global advice.detachedHead false
 export LANDING_REGISTER="$TMP/register.md"; : > "$LANDING_REGISTER"
 export THREAD_LEG_LOCK_DIR="$TMP/locks" THREAD_EVENTS_DIR="$TMP/events" TMPDIR="$TMP/t"
-export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
-# L1cv's completion-verify --run: the machine's verify slots and the detached verify trees stay in temp (ADR 0055)
-export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots" THREAD_COMPLETION_TREE_DIR="$TMP/trees"
-# L16's Chain copies stay in temp (each L16 scenario points it at its own dir), and so does the launch-alias file a copy's
-# manual launch line reads (absent unless a case writes it)
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading (a fresh claim's), pinned: a hot Mac never flips an assertion
+# L19c's and L21d's Chain copies stay in temp (cscen points it at each scenario's own dir), and so does the launch-alias
+# file a copy's manual launch line reads (absent: cscen removes it). No case here runs a completion verify.
 export THREAD_CHAIN_COPY_DIR="$TMP/chains" THREAD_LAUNCH_ALIASES="$TMP/aliases.zsh"
 mkdir -p "$TMPDIR" "$TMP/bin"
 # A fake gh and ssh: any call is logged and fails, so a test can assert no network was touched.
@@ -62,7 +60,6 @@ chmod +x "$TMP/bin/gh" "$TMP/bin/fake-ssh"
 export PATH="$TMP/bin:$PATH" GIT_SSH_COMMAND="$TMP/bin/fake-ssh"
 : > "$TMP/net.log"
 NOW=2026-10-20T10:00+00:00
-REFL="close-score: demo-rollout-2026-10-20: recorded t-20261020T100000Z-abc123 (completion)"   # legs.md § Complete step 3's line
 
 . tests/lib/leg-fixtures.sh   # the shared helpers (scen, mkro, mkt, leg, q, the repo helpers, cscen, lscen, ...)
 
