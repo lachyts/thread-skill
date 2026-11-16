@@ -14972,7 +14972,8 @@ def _speed_join_rest(w, plan0, entries, out, x_path, x_note, tasks_dir, now, joi
     """join's hold writes after the rows' save and the joining tasks' stamps (cmd_join wrote steps 1 and 2): the extension
     and re-stamp entries of a task already on the queue (its own save), the out-of-reach drops with the joined marks
     counted, then, on the rows re-read, each new or moved-to hold's line and entries, a move's `superseded` release and
-    its drops, and the re-stamps of recorded tasks still missing their entry. 0, or 1 when a write failed (w.failed)."""
+    its drops, and the re-stamps of recorded tasks still missing their entry. 0, or 1 when a task note's write failed
+    (w.failed); a hold line's save of the rollout note raises OSError, which cmd_join turns into its ERROR line."""
     for t, rs in sorted(entries.items()):
         for r in rs:
             w.add(w.ctx.name(t), r)
@@ -15404,7 +15405,16 @@ def cmd_join(args) -> int:
                   "after the write: a re-run of the same join finishes it", file=sys.stderr)
             return 1
     if sh_plan is not None:
-        rc = _speed_join_rest(sh_w, sh_plan, sh_entries, sh_out, x_path, x_note, tasks_dir, now, joined_names, args)
+        try:
+            rc = _speed_join_rest(sh_w, sh_plan, sh_entries, sh_out, x_path, x_note, tasks_dir, now, joined_names, args)
+        except OSError as e:
+            # A hold line saves the rollout note (_SpeedWriter.line), which raises (a lock timeout, an edit it cannot
+            # replay, a read-only note) after the rows and stamps above are written: name them, and the re-run.
+            for line in sh_out:
+                print(line)
+            print(f"ERROR: join: cannot write: {e} (written so far: {', '.join(done + sh_w.done) or 'nothing'}; a re-run "
+                  "of the same join finishes it)", file=sys.stderr)
+            return 1
         if rc:
             for line in sh_out:
                 print(line)

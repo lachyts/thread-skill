@@ -4,7 +4,7 @@
 # release, recorded on the rollout note's `## Speed fix holds` section. reconcile-rollout.py's `speed-hold apply |
 # release | lift`, and the hold's writes in `join`, `next`, `defer` and `carry`, and its reading in `status`. The mark and
 # its refusals (S2, S2b), the release (the phase's last task, or the one its note names: S1, S1b, S1c, S1d, S20), the reach
-# (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S4c, S4d, S12b, S21, S21d), the
+# (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S4c, S4d, S4e, S12b, S21, S21d), the
 # release landing (S5, S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer (S19), the
 # moving release (S21) and the cross-version gate (S16). Temp vaults only; no network.
 # Usage: bash reconcile-rollout-speed-hold.test.sh   (exit 0 = pass)
@@ -133,6 +133,24 @@ run() { HOME="$EH" python3 "$SCRIPT" "$@" > "$TMP/out" 2> "$TMP/err"; rc=$?; out
 sh_() { local verb="$1"; shift; run speed-hold "$verb" --rollout "$D/${RO:-ro}.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 jn() { run join --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 nxt() { run next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
+# jn_late <join args...>: join in process, the rollout note made read-only once the rows' save and the stamps are
+# written (as _speed_join_rest, the hold's writes, begins), so the hold line's save fails as a lock timeout would.
+jn_late() {
+  HOME="$EH" python3 - "$SCRIPT" "$D/ro.md" join --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@" \
+    > "$TMP/out" 2> "$TMP/err" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("rr_under_test", sys.argv[1]); m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+ro, rest = sys.argv[2], m._speed_join_rest
+def late(*a, **k):
+    os.chmod(ro, 0o444)
+    return rest(*a, **k)
+m._speed_join_rest = late
+sys.argv = [sys.argv[1]] + sys.argv[3:]
+sys.exit(m.main())
+PY
+  rc=$?; out=$(cat "$TMP/out"); err=$(cat "$TMP/err")
+}
 st() { run status --rollout "$D/${RO:-ro}.md" --tasks-dir "$D" --now "$NOW"; }
 dfr() { run defer --tasks-dir "$D" "$@"; }
 starts() { q "$out" 'sorted(d["start"])'; }
@@ -339,6 +357,23 @@ ok "$rc" 0 "S4d: an unrelated task's join exits 0"
 has "$out" "speed-hold made [[x-p9-2]] (p9, join): [[a]], [[b]], [[e]]" "S4d: the join makes the hand-marked phase's hold"
 ok "$(deps a)|$(deps b)|$(deps e)|$(deps x-p9-1)|$(deps x-p9-2)" "x-p9-2|x-p9-2|x-p9-2|-|-" \
   "S4d: the queue's other tasks, the joined one included, are held"
+
+# S4e: the rollout note turns read-only after the rows' save and the stamps, so the hold line's save fails: join exits 1
+# with its ERROR line naming what it wrote, never a traceback, and the same join, re-run, makes the hold.
+scen s4e
+mkro ro "" x-p9-1 a b
+mkt x-p9-1 open ro "$MARK"; mkt a open ro; mkt b open ro; mkt x-p9-2 open -
+jn_late --tasks x-p9-2
+ok "$rc" 1 "S4e: a hold line whose save fails exits 1"
+has "$err" "ERROR: join: cannot write: " "S4e: … with join's ERROR line"
+has "$err" "(written so far: [[ro]]'s rows, [[x-p9-2]]'s rollout: stamp; a re-run of the same join finishes it)" \
+  "S4e: … naming the rows and the stamp already written, and the re-run"
+hasnt "$err" "Traceback" "S4e: … and no traceback"
+ok "$(holdlines)|$(deps a)|$(deps b)" "|-|-" "S4e: no hold line and no entry was written"
+chmod 644 "$D/ro.md"
+jn --tasks x-p9-2
+ok "$rc|$(holdlines)" "0|- $STAMP hold [[x-p9-2]] (p9, join): [[a]], [[b]]" "S4e: the same join, re-run, makes the hold"
+ok "$(deps a)|$(deps b)" "x-p9-2|x-p9-2" "S4e: … and its entries"
 
 # ── S5: the release lands: next starts the held rows, with no Speed fix write ──────────────────────────────────────────────
 scen s5
