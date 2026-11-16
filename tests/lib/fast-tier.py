@@ -15,6 +15,13 @@ Commands
       and the follow-ups pass it, never run.sh.
   check
       `fast-tier map: ok (...)`, exit 0, or one `fast-tier map: <problem>` line per problem, exit 1.
+  slow [--base REV | --paths P...]
+      The Slow tier against the diff (ADR 0084 d3): one line per SLOW suite, sorted by its path, `OUT<TAB><test>` for
+      one a `THREAD_SKIP_SLOW=1` run leaves out and `KEPT<TAB><test>` for one the diff itself changes (a changed path
+      that is the SLOW test, rule (1)'s paths). The changed paths are read as select reads them (Base, Changed paths;
+      --paths gives them instead); when they cannot be read (a base that does not resolve, no merge base, a failed
+      diff) none counts as changed, so every SLOW suite is OUT, as select's FULL fallback then runs none of them.
+      tests/run.sh runs it only in --fast mode under THREAD_SKIP_SLOW=1 (its header holds the filter).
   Exit 0 on FAST or FULL, 1 on a check problem, 2 on usage.
 
 Collected tests: the files run.sh runs (COLLECTED, its globs; tests/fast-tier.test.sh C3 pins them to run.sh).
@@ -54,7 +61,9 @@ this repo's SKILL.md files. `FOREIGN-ONLY <name> <test>... # <what it holds>` de
 name <name> only as another root's file (a fixture repo's THREAD.md, a temp vault's note, a string or a comment) and
 never read this repo's: such a test is no namer of <name> (rule 3), so a prose change to the real file does not select
 it; it still selects for every other name it holds. A test that reads the real file, or runs a script on this tree
-that does, never goes on the line. `OWN-LISTINGS <test>... # (i)|(ii) <what it lists>` excuses tests from check (f).
+that does, never goes on the line. `OWN-LISTINGS <test>... # (i)|(ii) <what it lists>` excuses tests from check (f). `SLOW <test>...` declares the Slow
+tier (ADR 0084 d3): each entry one exact collected test path, no glob and no `@`. A SLOW line places nothing and selects
+nothing: select never reads it, only `slow` and check (j) do.
 
 Rules, for each changed path p, in sorted order; the first FULL is the result:
   (1) p is a collected test (present or deleted). It selects itself when it exists (a runner of a deleted test now
@@ -83,8 +92,8 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
       and has no runners. --ignore-full applies (5) too.
 
 check:
-  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, OWN-LISTINGS, FULL, NONE, ALSO, HUB), FULL and
-      NONE stand alone, HUB and ALSO list at least one entry, `@merge-task-self-tests` is the only `@` entry and sits
+  (a) The map parses: known keywords only (FOREIGN, FOREIGN-ONLY, OWN-LISTINGS, SLOW, FULL, NONE, ALSO, HUB), FULL and
+      NONE stand alone, each SLOW line names at least one entry and each is one exact path (no glob, no `@`), HUB and ALSO list at least one entry, `@merge-task-self-tests` is the only `@` entry and sits
       on plain lines only, each OWN-LISTINGS line names at least one test and carries a trailing `# (i) ...` or
       `# (ii) ...` comment, and each FOREIGN-ONLY line names a FOREIGN name and at least one test and carries a
       trailing `# ...` comment.
@@ -93,7 +102,9 @@ check:
       collected.
   (d) Every source (SOURCES: skills/*/scripts/*, hooks/*, skills/*/*.workflow.js, skills/*/diagnostics/*.workflow.js)
       is placed, and its rule-(3) result is FULL or has a non-empty reach: every script maps to a test or to the
-      full-suite list.
+      full-suite list. A reach made only of SLOW suites is a problem too (`its only tests are SLOW`): GitHub's check
+      leaves them out, so such a script would merge with no test run; it reads the reach only, never ALSO, so the
+      walkers never count as a script's tests.
   (e) Every tests/fixtures/<d>/ has a `tests/fixtures/<d>/**` line whose plain entries hold every consumer of <d>: a
       collected test whose text holds <d> in either FIXTURE form, or one that names a tests/lib helper whose text
       does. FIXTURE_LITERAL is `fixtures/<d>` followed by a character outside [A-Za-z0-9_.-] or by the end of the
@@ -133,6 +144,15 @@ check:
       hub's basename and every one that names a tests/lib helper naming it: a suite that drives a hub is on its list,
       or the map says which is missing. A list may hold more (a suite a hub's loader runs, say); an entry is never
       required to name the hub.
+  (j) The Slow tier follows measured seconds (ADR 0084 d3). CI_SECONDS (tests/ci-seconds.tsv) holds one row per
+      suite, `<seconds><TAB><suite>`, a positive number and a path, `#` comment and blank lines skipped; its header
+      names the source (GitHub's macOS jobs, each suite's median), the window and how to regenerate it. Problems: a
+      SLOW entry that is not a collected test on disk; SLOW lines and no CI_SECONDS; a row that does not parse, or a
+      second row for one suite; a row whose suite is not a collected test (stale: drop it); a SLOW suite with no row,
+      or whose row is under SLOW_LEAVE (150 s: drop its SLOW line); and a row at or over SLOW_JOIN (180 s) whose suite
+      is not SLOW (add it). A suite joins at SLOW_JOIN and leaves only under SLOW_LEAVE, one sixth lower, so a suite
+      whose median drifts near the cutoff does not swap in and out: between the two either state passes, and every
+      swap is an edit to this map, which is FULL. With no SLOW line and no CI_SECONDS, (j) is silent.
 """
 import ast
 import fnmatch
@@ -152,6 +172,9 @@ COLLECTED = ("skills/execute/tests/*.test.mjs", "tests/*.test.mjs", "tests/contr
 SOURCES = ("skills/*/scripts/*", "hooks/*", "skills/*/*.workflow.js", "skills/*/diagnostics/*.workflow.js")
 CARRIER_SUFFIXES = (".py", ".sh", ".js", ".mjs", ".json")
 FIXTURES = "tests/fixtures"
+CI_SECONDS = "tests/ci-seconds.tsv"
+SLOW_JOIN = 180    # check (j): a suite measured at or over this is SLOW
+SLOW_LEAVE = 150   # … and a SLOW suite leaves only under this
 LIB = "tests/lib/"
 WALKERS = "**"
 KEYWORD = re.compile(r"[A-Z][A-Z-]*\Z")
@@ -323,7 +346,7 @@ class Repo:
             self.runs[p] = got
             for t in got:
                 self.ran_by.setdefault(t, set()).add(p)
-        self.map_lines, self.foreign, self.own, self.foreign_only, self.parse_problems = parse_map(self)
+        self.map_lines, self.foreign, self.own, self.foreign_only, self.slow, self.parse_problems = parse_map(self)
         self.foreign_only_tests = {}   # FOREIGN name -> its FOREIGN-ONLY tests
         for _no, name, t in self.foreign_only:
             self.foreign_only_tests.setdefault(name, set()).add(t)
@@ -420,14 +443,14 @@ class Repo:
 
 
 def parse_map(repo):
-    """(lines, FOREIGN names, OWN-LISTINGS (line, test) pairs, FOREIGN-ONLY (line, name, test) triples, problems) of
-    tests/fast-tier.map, entries resolved."""
-    lines, foreign, own, foreign_only, problems = [], set(), [], [], []
+    """(lines, FOREIGN names, OWN-LISTINGS (line, test) pairs, FOREIGN-ONLY (line, name, test) triples, SLOW (line, test)
+    pairs, problems) of tests/fast-tier.map, entries resolved."""
+    lines, foreign, own, foreign_only, slow, problems = [], set(), [], [], [], []
     try:
         with open(os.path.join(ROOT, MAP), encoding="utf-8") as f:
             raw = f.read().split("\n")
     except OSError:
-        return lines, foreign, own, foreign_only, [f"{MAP} is missing"]
+        return lines, foreign, own, foreign_only, slow, [f"{MAP} is missing"]
     fo_names = []   # (line, name) of each FOREIGN-ONLY line, checked once every FOREIGN line is read
     for no, text in enumerate(raw, 1):
         body, _, comment = text.partition("#")
@@ -458,6 +481,15 @@ def parse_map(repo):
             if rest:
                 fo_names.append((no, rest[0]))
                 foreign_only.extend((no, rest[0], t) for t in rest[1:])
+            continue
+        if head == "SLOW":
+            if not rest:
+                problems.append(f"{where}: SLOW names no test (check a)")
+            for t in rest:
+                if t.startswith("@") or GLOB_CHARS.search(t):
+                    problems.append(f"{where}: SLOW {t}: a SLOW entry is one exact collected test path (check a)")
+                else:
+                    slow.append((no, t))
             continue
         if KEYWORD.match(head):
             problems.append(f"{where}: unknown keyword {head} (check a)")
@@ -503,7 +535,7 @@ def parse_map(repo):
     for no, name in fo_names:
         if name not in foreign:
             problems.append(f"{MAP}:{no}: FOREIGN-ONLY {name}: {name} is not a FOREIGN name (check a)")
-    return lines, foreign, own, foreign_only, problems
+    return lines, foreign, own, foreign_only, slow, problems
 
 
 # ---- check (f): directory listings ------------------------------------------------------------------------------
@@ -614,12 +646,15 @@ def check(repo):
             problems.append(f"{MAP}:{no}: the FOREIGN-ONLY entry {t} is not a collected test (check c)")
     # (d) sources
     sources = [p for p in repo.files if any(match(g, p) for g in SOURCES)]
+    slow = {t for _no, t in repo.slow}
     for s in sources:
         full, reach, _also, none_only = repo.reach(s)
         if full == f"{s}: not in the map":
             problems.append(f"{s}: not placed by any map line; give it a line (check d)")
         elif not full and not reach:
             problems.append(f"{s}: reaches no test; name it in a test, give its line entries, or mark it FULL (check d)")
+        elif not full and reach <= slow:
+            problems.append(f"{s}: its only tests are SLOW; name it in a Fast-tier test or mark it FULL (check d)")
     # (e) fixture dirs
     dirs = sorted({p.split("/")[2] for p in repo.tracked if p.startswith(FIXTURES + "/") and p.count("/") >= 3})
     helpers = [p for p in repo.files if p.startswith(LIB)]
@@ -718,11 +753,62 @@ def check(repo):
                 drivers.setdefault(t, f"names {h}, which names it")
         for t in sorted(set(drivers) - listed):
             problems.append(f"{MAP}:{lines[0].no}: {t} {drivers[t]} but is missing from the HUB line of {pat} (check i)")
+    # (j) the Slow tier follows measured seconds
+    problems += check_slow(repo)
     if problems:
         return problems, ""
     summary = (f"{len(repo.map_lines)} lines, {len(sources)} sources placed, {len(dirs)} fixture dirs, "
-               f"{len(walkers)} walkers, {len(own)} own-listings")
+               f"{len(walkers)} walkers, {len(own)} own-listings, {len(slow)} slow")
     return [], summary
+
+
+def check_slow(repo):
+    """Check (j)'s problems: the SLOW lines against CI_SECONDS."""
+    problems, first = [], {}   # first: SLOW test -> its first line
+    for no, t in repo.slow:
+        first.setdefault(t, no)
+        if t not in repo.tests:
+            problems.append(f"{MAP}:{no}: the SLOW entry {t} is not a collected test (check j)")
+    try:
+        with open(os.path.join(ROOT, CI_SECONDS), encoding="utf-8") as f:
+            raw = f.read().split("\n")
+    except OSError:
+        if first:
+            problems.append(f"{CI_SECONDS} is missing: the SLOW lines are held to its measured seconds (check j)")
+        return problems
+    rows = {}   # suite -> (row number, seconds)
+    for no, text in enumerate(raw, 1):
+        if not text.strip() or text.lstrip().startswith("#"):
+            continue
+        where = f"{CI_SECONDS}:{no}"
+        parts, secs = text.split("\t"), None
+        if len(parts) == 2 and parts[1] and parts[1] == parts[1].strip():
+            try:
+                secs = float(parts[0])
+            except ValueError:
+                pass
+        if secs is None or not 0 < secs < float("inf"):   # NaN fails the comparison too
+            problems.append(f"{where}: not a <seconds><TAB><suite> row with positive seconds (check j)")
+            continue
+        t = parts[1]
+        if t in rows:
+            problems.append(f"{where}: {t} has a second row (the first is line {rows[t][0]}) (check j)")
+            continue
+        rows[t] = (no, secs)
+        if t not in repo.tests:
+            problems.append(f"{where}: {t} is not a collected test; drop its row (check j)")
+        elif secs >= SLOW_JOIN and t not in first:
+            problems.append(f"{where}: {t} is measured at {secs:g} s, at or over {SLOW_JOIN} s: add it to a SLOW line "
+                            f"(check j)")
+    for t, no in sorted(first.items()):
+        if t not in repo.tests:
+            continue
+        if t not in rows:
+            problems.append(f"{MAP}:{no}: the SLOW suite {t} has no row in {CI_SECONDS} (check j)")
+        elif rows[t][1] < SLOW_LEAVE:
+            problems.append(f"{MAP}:{no}: the SLOW suite {t} is measured at {rows[t][1]:g} s, under {SLOW_LEAVE} s: drop "
+                            f"its SLOW line (check j)")
+    return problems
 
 
 # ---- the CLI ----------------------------------------------------------------------------------------------------
@@ -755,8 +841,28 @@ def changed_paths(base):
 def usage(msg=""):
     if msg:
         print(f"fast-tier: {msg}", file=sys.stderr)
-    print("usage: fast-tier.py select [--base REV] [--paths P...] [--ignore-full] | check", file=sys.stderr)
+    print("usage: fast-tier.py select [--base REV] [--paths P...] [--ignore-full] | check"
+          " | slow [--base REV | --paths P...]", file=sys.stderr)
     return 2
+
+
+def slow_cmd(rest):
+    """`slow`: each SLOW suite, KEPT when the diff changes it, else OUT."""
+    base = paths = None
+    if rest[:1] == ["--paths"]:
+        paths = rest[1:]
+    elif len(rest) == 2 and rest[0] == "--base":
+        base = rest[1]
+    elif rest:
+        return usage(f"slow takes --base REV or --paths P..., got {' '.join(rest)}")
+    if paths is None:
+        full, _mb, _source, paths = changed_paths(base)
+        if full:
+            paths = []   # the diff cannot be read: nothing counts as changed, so every SLOW suite is OUT
+    changed = set(paths)
+    for t in sorted({t for _no, t in Repo().slow}):
+        print(f"{'KEPT' if t in changed else 'OUT'}\t{t}")
+    return 0
 
 
 def main(argv):
@@ -773,6 +879,8 @@ def main(argv):
             return 1
         print(f"fast-tier map: ok ({summary})")
         return 0
+    if cmd == "slow":
+        return slow_cmd(rest)
     if cmd != "select":
         return usage(f"unknown command {cmd}")
     base, paths, ignore_full = None, None, False

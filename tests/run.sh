@@ -14,6 +14,15 @@
 # `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's `<k><TAB><entry>` lines for the
 # same entries and exits before any step, writing nothing.
 #
+# The Slow tier (p54-1, ADR 0084 d3). THREAD_SKIP_SLOW=1 (GitHub's check sets it on its `make test-fast` step) leaves
+# the SLOW suites tests/fast-tier.map declares out of a --fast run, after the mode block, so the full-suite fallbacks (a
+# FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself edits still
+# runs (fast-tier.py's `slow` prints it KEPT). The run prints one `== slow tier: left out <N> suites (THREAD_SKIP_SLOW=1)`
+# line naming the ones it removed, then a `   kept, the diff edits it:` line when it kept one. A failed `slow` leaves
+# nothing out and says so. Empty or unset is off; any other value than 1 exits 2 before any step. Full mode, --only,
+# --shard and --shard-plan ignore it, so master's full suite and the completion verifier run the Slow tier, and so does
+# --fast without it (the Mac's verify, an agent's Checkpoint). run.sh unsets it, so no suite or inner run inherits it.
+#
 # Hermetic by construction: HOME and the global git config point into a temp dir, so any stray default
 # (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
 # temp instead of the real vault or ~/.claude. PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the tree.
@@ -75,6 +84,9 @@ case "${1:-}" in
     shard_n=$((10#$1)); [ "$shard_n" -ge 1 ] || usage ;;
   *) usage ;;
 esac
+# The Slow tier's flag (the header's "The Slow tier"): captured here, then unset below with THREAD_VERIFY_BASE.
+skip_slow=${THREAD_SKIP_SLOW:-}
+case "$skip_slow" in ''|1) ;; *) echo "make test: THREAD_SKIP_SLOW must be 1 or empty, got '$skip_slow'"; exit 2 ;; esac
 
 export PYTHONDONTWRITEBYTECODE=1
 scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
@@ -126,6 +138,8 @@ unset VERIFY_SLOT_HELD
 verify_base=${THREAD_VERIFY_BASE:-}
 # The lead's verify exports its diff base to the suite it runs (ADR 0062): unset, so no inner verify inherits the outer one's.
 unset THREAD_VERIFY_BASE
+# The Slow tier's flag, captured above: unset, so no suite and no inner `make test-fast` inherits GitHub's.
+unset THREAD_SKIP_SLOW
 # The Mac's own evidence of a stop (reconcile-rollout.py machine_times: kern.boottime, kern.waketime, `pmset -g log`,
 # p29-10) is never read under test: `{}` is no boot and no sleep, so no suite infers a stop from this Mac's history.
 # Each suite that tests the stops sets its own.
@@ -314,6 +328,33 @@ elif [ "$mode" = shard ]; then
     echo "== shard $shard_k/$shard_n: $k test files"
     [ "$self_tests" = 1 ] && echo "   the merge-task self-tests"
     for t in ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"}; do echo "   $t"; done
+  fi
+fi
+
+# The Slow tier (the header's "The Slow tier"): under THREAD_SKIP_SLOW=1, --fast drops each SLOW suite `slow` prints OUT
+# from whatever the mode block chose, the full-suite fallbacks included, and names the ones it removed.
+if [ "$mode" = fast ] && [ "$skip_slow" = 1 ]; then
+  slow=$(python3 tests/lib/fast-tier.py slow ${verify_base:+--base "$verify_base"}); src=$?
+  if [ "$src" -ne 0 ]; then
+    echo "== slow tier: none left out (fast-tier.py slow failed (rc $src))"
+  else
+    slow_out=""; slow_kept=""
+    while IFS=$tab read -r sk st; do
+      case "$sk" in OUT) slow_out="$slow_out$st$nl" ;; KEPT) slow_kept="$slow_kept$st$nl" ;; esac
+    done <<< "$slow"
+    left=(); kept=(); still_sh=(); still_node=()
+    for t in ${run_sh[@]+"${run_sh[@]}"}; do
+      case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
+      still_sh+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
+    done
+    for t in ${run_node[@]+"${run_node[@]}"}; do
+      case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
+      still_node+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
+    done
+    run_sh=(${still_sh[@]+"${still_sh[@]}"}); run_node=(${still_node[@]+"${still_node[@]}"})
+    names=""; [ "${#left[@]}" -eq 0 ] || names=": ${left[*]}"
+    echo "== slow tier: left out ${#left[@]} suites (THREAD_SKIP_SLOW=1)$names"
+    [ "${#kept[@]}" -eq 0 ] || echo "   kept, the diff edits it: ${kept[*]}"
   fi
 fi
 

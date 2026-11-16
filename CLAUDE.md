@@ -16,6 +16,10 @@ place runs the full suite (ADR 0073 d1). Every run, `make test` included, checks
 - A new test that lists a directory joins the walkers' `** ALSO` line or an OWN-LISTINGS line (check f).
 - A new test that names a hub (a `HUB` line's path) or a tests/lib helper that does joins that hub's HUB line
   (check i).
+- A suite whose tests/ci-seconds.tsv macOS CI median reaches 180 s joins the Slow tier with a `SLOW` line, and a SLOW
+  suite measured under 150 s leaves it (check j); a script whose only tests are SLOW needs a non-SLOW test (check d).
+  GitHub's PR check sets `THREAD_SKIP_SLOW=1` and leaves them out unless the diff edits one; `make test-fast` without
+  the flag, and `make test`, still run them (ADR 0084 d3).
 
 tests/fast-tier.map is itself FULL, so a diff that edits it runs the full suite at both Checkpoints and at
 Integration: edit it only when a check names a missing line.

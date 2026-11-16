@@ -2,12 +2,13 @@
 // every push to master runs the full suite as a matrix of shards, split by tests/lib/shard.py.
 // - W1: test.yml's job `test` expands, over its matrix, to exactly the two required-check names, carries no job-level
 //   `if:` (a skipped required job reports success), and runs on pull_request only.
-// - W2: that job runs `make test-fast` with THREAD_VERIFY_BASE the PR's base sha, on a full-history checkout, under one
-//   plain timeout-minutes (merge-task's CI headroom record reads only a whole number; the value is p43-6's audit's).
+// - W2: that job runs `make test-fast` with THREAD_VERIFY_BASE the PR's base sha and THREAD_SKIP_SLOW=1 (it leaves the
+//   Slow tier out, ADR 0084 d3), on a full-history checkout, under one plain timeout-minutes (merge-task's CI headroom
+//   record reads only a whole number; the value is p43-6's audit's).
 // - W3: no other job in any workflow takes a required-check name, by expansion or by merge-gate.py's rules 1-3; and
 //   full-suite.yml runs on push to master only.
 // - W4: full-suite.yml's shard matrix and its run line agree on N, and each OS has its own timeout-minutes (p43-6's
-//   audit: about twice that OS's slowest shard).
+//   audit: about twice that OS's slowest shard); its shards never set THREAD_SKIP_SLOW, so master runs the Slow tier.
 // - W5: every .github/workflows/*.yml parses (PyYAML) to a mapping with `jobs` (check-workflow-parse.sh covers only
 //   the *.workflow.js scripts).
 // - W6 (p54-5, ADR 0084 Decided for you 11): full-suite.yml's job `green-tip`, named `publish the Green tip` (p54-7's
@@ -115,6 +116,7 @@ test('W2: the PR job runs the fast tier against the PR\'s base, on a full-histor
   assert.equal(last.run.trim(), 'make test-fast')
   assert.equal(last.env.THREAD_VERIFY_BASE, '${{ github.event.pull_request.base.sha }}')
   assert.equal(last.env.THREAD_TEST_JOBS, '4')
+  assert.equal(last.env.THREAD_SKIP_SLOW, '1', 'the PR check leaves the Slow tier out (ADR 0084 d3)')
   assert.equal(checkout(job)?.with?.['fetch-depth'], 0, 'fetch-depth: 0, so the base sha and merge-base resolve')
   assert.equal(job['timeout-minutes'], 55)
 })
@@ -165,6 +167,9 @@ test('W4: the shard matrix covers both OSes and shards 1..N, and the run line na
   const last = runSteps(job).at(-1)
   assert.equal(last.run.trim(), `bash tests/run.sh --shard \${{ matrix.shard }}/${n}`)
   assert.equal(last.env.THREAD_TEST_JOBS, '4')
+  assert.equal(last.env.THREAD_SKIP_SLOW, undefined, 'master\'s shards run the Slow tier')
+  assert.equal(job.env?.THREAD_SKIP_SLOW, undefined, 'nor at the job level')
+  assert.equal(parsed[FULL].env?.THREAD_SKIP_SLOW, undefined, 'nor at the workflow level')
   assert.equal(checkout(job)?.with?.['persist-credentials'], false)
 })
 

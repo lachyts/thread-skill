@@ -474,7 +474,12 @@ in exactly one shard; `--shard-plan N` is the dry run). Those runs coalesce in o
 fast-forwards `refs/thread/green` (the Green tip, ADR 0084) to the run's commit once every shard has passed. A test
 that holds a FOREIGN name (`THREAD.md`, `CONTEXT.md` and the other root prose) only as a fixture repo's file sits on
 a `FOREIGN-ONLY` line, so a change to the real file does not select it; the over-selection still left (message
-strings, broad walkers, rule (1)'s namers) is measured in `thread-skill-followup-fast-tier-over-selection`.
+strings, broad walkers, rule (1)'s namers) is measured in `thread-skill-followup-fast-tier-over-selection`. The
+**Slow tier** (ADR 0084 d3), the suites on the map's `SLOW` lines, is left out of the PR checks: their
+`make test-fast` step sets `THREAD_SKIP_SLOW=1`, which drops every SLOW suite the diff does not edit itself, a
+full-suite fallback included, while the Mac's verify, `make test` and master's shards still run them. Check (j) holds
+the SLOW lines to `tests/ci-seconds.tsv`, each suite's macOS CI median: a suite joins at 180 s and leaves only under
+150 s.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
