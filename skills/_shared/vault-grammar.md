@@ -406,19 +406,20 @@ reshuffle's R5.2 use the same words):
   citation (an ADR decision or prose is no evidence)`. A refused mark makes an ordinary task: held like any other,
   never stopped, never asked about, its note never edited. A combined note is read per unit: a unit is marked when its
   own key cites or a task folded into it (`merged_into:`) carries one that does.
-- **The release.** A phase's members are its tasks named with its literal prefix `<slug>-p<N>-` and a task number, at
-  any status but `dropped` (a unit a member folds into is a member too). A phase is a Speed fix phase while any member
-  is marked. Its release is its last task, unless the phase names another (ADR 0084 d4): the phase note in
-  `Work/Phases/` may name it, `speed_fix_release: "[[x]]"`, where x is any member of the phase, marked or not, else a
-  `WARN` and no hold for the phase, with no fallback. Otherwise the release is the phase's highest-numbered member,
-  marked or not, landed ones included. The release R is that task's unit; a release that is no Speed fix itself is
-  still never held (the reach's arm 5). A hold is made only while R has not landed, is linked to the rollout (or is
-  being joined), has no let-go cause and has no `released` line. The hold follows its phase's release at every apply
-  and every join, never at `next`: when R moves to R' and R' can hold, the new hold's line and entries come first, then
-  `released [[R]] (p<N>): superseded by [[R']]` and R's entries dropped; when R' cannot hold, the hold on R is kept with
-  a `speed-hold skip` line. A standing hold whose phase has no marked member left keeps standing, still never holding
-  its release or anything upstream of it, until R lands or `speed-hold release` ends it. A marked task outside any
-  phase makes no hold, and is still never held.
+- **The release.** A phase's members are its tasks named with its literal prefix `<slug>-p<N>-` and a task number that
+  starts with digits (`2`, and `2b` too), at any status but `dropped` (a unit a member folds into is a member too). A
+  phase is a Speed fix phase while any member is marked. Its release is its last task, unless the phase names another
+  (ADR 0084 d4): the phase note in `Work/Phases/` may name it, `speed_fix_release: "[[x]]"`, where x is any member of
+  the phase, marked or not, else a `WARN` and no hold for the phase, with no fallback. Otherwise the release is the
+  phase's last member, marked or not, landed ones included: the highest number by the task number's leading digits, the
+  whole task number breaking a tie (`1` before `1b` before `2`). The release R is that task's unit; a release that is no
+  Speed fix itself is still never held (the reach's arm 5). A hold is made only while R has not landed, is linked to the
+  rollout (or is being joined), has no let-go cause and has no `released` line. The hold follows its phase's release at
+  every apply and every join, never at `next`: when R moves to R' and R' can hold, the new hold's line and entries come
+  first, then `released [[R]] (p<N>): superseded by [[R']]` and R's entries dropped; when R' cannot hold, the hold on R
+  is kept with a `speed-hold skip` line. A standing hold whose phase has no marked member left keeps standing, still
+  never holding its release or anything upstream of it, until R lands or `speed-hold release` ends it. A marked task
+  outside any phase makes no hold, and is still never held.
 - **The reach.** One rule: a hold on R for phase P stamps a task only when (1) it is linked to the rollout (or being
   joined) and queued, the fix's own project's queue only; (2) its unit carries no valid mark; (3) it is no red-master
   fix (below); (4) its unit is not a member of P (so P's unmarked members other than its release are held by every other

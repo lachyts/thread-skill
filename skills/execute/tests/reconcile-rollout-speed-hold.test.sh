@@ -3,7 +3,7 @@
 # a cited `speed_fix:` holds every other queued task of its rollout through plain `depends-on:` entries on the phase's
 # release, recorded on the rollout note's `## Speed fix holds` section. reconcile-rollout.py's `speed-hold apply |
 # release | lift`, and the hold's writes in `join`, `next`, `defer` and `carry`, and its reading in `status`. The mark and
-# its refusals (S2, S2b), the release (the phase's last task, or the one its note names: S1, S1b, S1c, S20), the reach
+# its refusals (S2, S2b), the release (the phase's last task, or the one its note names: S1, S1b, S1c, S1d, S20), the reach
 # (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S4c, S4d, S12b, S21, S21d), the
 # release landing (S5, S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer (S19), the
 # moving release (S21) and the cross-version gate (S16). Temp vaults only; no network.
@@ -198,6 +198,27 @@ ok "$(deps a)|$(deps x-p9-1)|$(deps x-p9-2)" "x-p9-2|-|-" "S1c: an unmarked last
 setfm x-p9-1 status done
 nxt --dry-run
 ok "$(starts)" '["x-p9-2"]' "S1c: the marked task landed: next starts the release only, a waits on it"
+
+# S1d: a task number that starts with digits (`1b`, as the vault's chorus-p105-2b-… is named) is a phase member, its
+# leading digits ordering it and the whole number breaking a tie: 1 < 1b < 2.
+scen s1d
+mkro ro "" x-p9-1 x-p9-1b x-p9-2 a
+mkt x-p9-1 open ro "$MARK"; mkt x-p9-1b open ro; mkt x-p9-2 open ro; mkt a open ro
+sh_ apply
+ok "$(holdlines)" "- $STAMP hold [[x-p9-2]] (p9, schedule): [[a]]" "S1d: x-p9-1b is p9's own: never held by p9's hold"
+ok "$(deps a)|$(deps x-p9-1)|$(deps x-p9-1b)|$(deps x-p9-2)" "x-p9-2|-|-|-" "S1d: … only a carries the entry"
+scen s1d-tie
+mkro ro "" x-p9-1 x-p9-1b a
+mkt x-p9-1 open ro "$MARK"; mkt x-p9-1b open ro; mkt a open ro
+sh_ apply
+ok "$(holdlines)" "- $STAMP hold [[x-p9-1b]] (p9, schedule): [[a]]" "S1d: 1b comes after 1, so it is the phase's release"
+scen s1d-alone
+mkro ro "" y-p3-1b a
+mkt y-p3-1b open ro "$MARK"; mkt a open ro
+sh_ apply
+ok "$(holdlines)|$(deps a)|$(deps y-p3-1b)" "- $STAMP hold [[y-p3-1b]] (p3, schedule): [[a]]|y-p3-1b|-" \
+  "S1d: a marked y-p3-1b is its phase's release and holds the queue"
+hasnt "$out" "outside a phase" "S1d: … it is no Speed fix outside a phase"
 
 # ── S2: a mark without its evidence is refused, and the task is held like any other ──────────────────────────────────────
 scen s2

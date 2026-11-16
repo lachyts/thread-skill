@@ -1836,27 +1836,28 @@ dropped note) clears the hold and its `on_merge:` lines in one compare-and-swap 
 added by hand later is a plain hold. `carry` never copies `on_merge`.
 
 Speed fix hold (p54-13, ADR 0084 d4; _SpeedCtx, read by `speed-hold`, `join`, `next`, `defer`, `carry` and `status`; the
-grammar is skills/_shared/vault-grammar.md § Speed fix hold): a task marked `speed_fix: <citation>` (a suite audit's row,
-a stall audit's cause, or a Time-lost ledger line by its tl- id; _speed_fix_mark, else refused: an ordinary task) makes its
-phase (PHASED_STEM_RE's prefix and a digit task number, _speed_phase) hold every other queued task of its rollout. The
-phase's release R (its last task, unless the phase names another: ADR 0084 d4) is the unit of the phase note's
-`speed_fix_release:` (any member of the phase, marked or not, else a WARN and no hold), else of its highest-M member,
-marked or not, landed ones included; a phase with no marked member has none. A hold is made only while R is unlanded,
-linked, not letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its reach (the one rule,
-the block comment above SPEED_FIX_KEY: no mark, no release and nothing upstream of either is ever held), released by
-itself once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]] (p<N>,
-schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold is
-never re-made for the same R. The hold follows its phase's release at every apply and join (a move: the new hold's line
-and entries, then the old one's `superseded by [[R']]` line and drops; join reads it whenever a Speed fix is in play,
-_SpeedCtx.in_play, so a joined release makes its phase's hold), never at `next`; a standing hold whose phase
-has no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R,
-read through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
+grammar is skills/_shared/vault-grammar.md § Speed fix hold): a task marked `speed_fix: <citation>` (a suite audit's
+row, a stall audit's cause, or a Time-lost ledger line by its tl- id; _speed_fix_mark, else refused: an ordinary task)
+makes its phase (PHASED_STEM_RE's prefix and a task number that starts with digits, `2b` as `2`, _speed_phase) hold
+every other queued task of its rollout. The phase's release R (its last task, unless the phase names another: ADR 0084
+d4) is the unit of the phase note's `speed_fix_release:` (any member of the phase, marked or not, else a WARN and no
+hold), else of its last member (the highest M, the task number's leading digits, the whole task number breaking a tie:
+`1` < `1b` < `2`), marked or not, landed ones included; a phase with no marked member has none. A hold is made only
+while R is unlanded, linked, not letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its
+reach (the one rule, the block comment above SPEED_FIX_KEY: no mark, no release and nothing upstream of either is ever
+held), released by itself once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]]
+(p<N>, schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold
+is never re-made for the same R. The hold follows its phase's release at every apply and join (a move: the new hold's
+line and entries, then the old one's `superseded by [[R']]` line and drops; join reads it whenever a Speed fix is in
+play, _SpeedCtx.in_play, so a joined release makes its phase's hold), never at `next`; a standing hold whose phase has
+no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R, read
+through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
 leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, read
 as `moving` reads it; a gate-pending task never lets it go): `next` writes the released line, drops the entries and
-records one Run record line, reported as `speedHoldReleased`, and on --dry-run reads its rows as if it had.
-Out-of-reach and leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next` computes
-its starts. The section's lines change only by migration (engine-snapshot.md § Cross-version state), and join and apply
-write a line or an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
+records one Run record line, reported as `speedHoldReleased`, and on --dry-run reads its rows as if it had. Out-of-reach
+and leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next` computes its starts.
+The section's lines change only by migration (engine-snapshot.md § Cross-version state), and join and apply write a line
+or an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
 
 Durable triggers (p45-7, ADR 0078 d5; the grammar is skills/_shared/vault-grammar.md § When): a "when X, then Y" step
 written on a rollout or task note as a `when:` entry, so it survives any session. _when reads every form; _trigger_eval
@@ -13975,15 +13976,18 @@ def _red_master_fix(note) -> bool:
 
 
 def _speed_phase(stem):
-    """((slug lowercased, phase key), M) for a phased task's stem, by PHASED_STEM_RE and its task number (leg.py's idiom:
-    the text after the match up to its next `-`, kept only when it is digits), else None: a loose task, or a phase note."""
+    """((slug lowercased, phase key), (M, number)) for a phased task's stem, by PHASED_STEM_RE and its task number (the
+    text after the match up to its next `-`), kept when it starts with digits, so `2b` is a member as `2` is (the vault
+    names `chorus-p105-2b-…`): M is its leading digits as a number, and number the whole task number lowercased, the
+    release order's tiebreak (`1` < `1b` < `2`). Else None: a loose task, or a phase note."""
     m = PHASED_STEM_RE.match(stem)
     if not m:
         return None
     n = stem[m.end():].partition("-")[0]
-    if not re.fullmatch(r"[0-9]+", n):
+    lead = re.match(r"[0-9]+", n)
+    if not lead:
         return None
-    return (m.group("slug").lower(), _phase_key(m.group("n"))), int(n)
+    return (m.group("slug").lower(), _phase_key(m.group("n"))), (int(lead.group()), n.lower())
 
 
 def _speed_label(pkey) -> str:
@@ -13996,10 +14000,11 @@ def _speed_pkey_sort(pkey):
 
 def _speed_units(index):
     """The phases and the marks, read over the whole index (Archive included; a note tagged rollout, decisions or phase,
-    or at `status: dropped`, counts for neither): {phases: {pkey: {tasks: [(M, slug)], marked: [(M, slug)], units: {unit
-    lowercased}}}, marked: {unit lowercased}, refused: {slug lowercased: why}}. A phase's members are its prefixed tasks;
-    a unit is a member when its own stem has the prefix or a member folds into it (_fold_unit). A unit is marked when its
-    own `speed_fix:` cites, or a task folded into it does."""
+    or at `status: dropped`, counts for neither): {phases: {pkey: {tasks: [(order, slug)], marked: [(order, slug)], units:
+    {unit lowercased}}}, marked: {unit lowercased}, refused: {slug lowercased: why}}, order _speed_phase's (M, number). A
+    phase's members are its prefixed tasks whose task number starts with digits (_speed_phase); a unit is a member when
+    its own stem has the prefix or a member folds into it (_fold_unit). A unit is marked when its own `speed_fix:` cites,
+    or a task folded into it does."""
     phases, marked, refused = {}, set(), {}
     for key, (path, note) in index.items():
         if _tags(note) & {"rollout", "decisions", "phase"} or _status(note) == "dropped":
@@ -14044,9 +14049,10 @@ def _speed_release_named(pkey, tasks_dir):
 def _speed_release(pkey, units, index, tasks_dir):
     """(R, warn): phase P's release (ADR 0084 d4: its last task, unless the phase names another), the unit (_fold_unit)
     of the phase note's `speed_fix_release:` when it names one (any member of P, marked or not, a unit a member folds
-    into included: else no release and a WARN, with no fallback), else of P's highest-M member, marked or not, landed
-    ones included; (None, None) when P has no marked member, so is no Speed fix phase. A release that is no Speed fix
-    itself is still never held (_SpeedCtx.roots)."""
+    into included: else no release and a WARN, with no fallback), else of P's last member by _speed_phase's order (the
+    highest M, the whole task number breaking a tie, then the stem), marked or not, landed ones included; (None, None)
+    when P has no marked member, so is no Speed fix phase. A release that is no Speed fix itself is still never held
+    (_SpeedCtx.roots)."""
     p = units["phases"].get(pkey) or {"tasks": [], "marked": [], "units": set()}
     if not p["marked"]:
         return None, None
