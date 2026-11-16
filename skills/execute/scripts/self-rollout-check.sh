@@ -123,8 +123,11 @@
 # publishes none reads origin's tip and keeps every line below as it was. Else the twin moves to the Green tip
 # (`fast-forwarded to the Green tip (<old7>..<new7>)`), or stands `at the Green tip <g7>, <n> behind origin/<d> (waits
 # on the Green tip)`, `past the Green tip <g7> by <m>: waits on it` (never moved back), `not moved: local changes
-# overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>`. A twin ahead of origin
-# reads as below. --ensure and --refresh never read it: the Rollout clone keeps origin's tip, the code being built.
+# overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>` (`green-tip.py exit <rc>:
+# <its first stderr line>` for a failure), and a `green-tip: WARN: …` line it prints passes through to stderr. A twin
+# ahead of origin, or diverged from it, reads as below whatever the target, a hold's included (only a move, at or past
+# the Green tip, or already at origin's tip needs one: primary-refresh.py's c2 rule). --ensure and --refresh never read
+# it: the Rollout clone keeps origin's tip, the code being built.
 # One stdout line, `in-place: <twin> …`, or nothing:
 #   held: <primary-hold line> (ADR 0031) · not moved: cannot load live-checkout.sh · not moved: fetch failed: <first
 #   line> · not moved: on '<b>', not <d> · not moved: an operation is in progress · fast-forwarded to origin/<d>
@@ -549,13 +552,21 @@ case "$mode" in
       echo "in-place: $tw not moved: fetch failed: $(first "$e")"; exit 0
     fi
     # The twin is a live checkout: in a repo that publishes a Green tip it moves to it, never past (ADR 0084 d1).
+    # Its stderr goes to a file, and its `green-tip: WARN:` lines pass through to stderr, as land.sh's green_read does.
     gk=origin gs='' gw=''
-    out=$(lc_bounded 70 python3 "$here/../../_shared/scripts/green-tip.py" target --repo "$tw" --branch "$d" --checkout --budget 60 2>/dev/null); grc=$?
+    gerr=$(mktemp "${TMPDIR:-/tmp}/self-rollout-green.XXXXXX" 2>/dev/null) || gerr=/dev/null
+    out=$(lc_bounded 70 python3 "$here/../../_shared/scripts/green-tip.py" target --repo "$tw" --branch "$d" --checkout --budget 60 2>"$gerr"); grc=$?
+    gline=''
+    if [ "$gerr" != /dev/null ]; then
+      grep '^green-tip: WARN: ' "$gerr" >&2
+      gline=$(grep -v '^green-tip: WARN: ' "$gerr" | awk 'NF { print; exit }' | cut -c1-200)
+      rm -f "$gerr"
+    fi
     case "$grc:${out%% *}" in
       0:origin) ;;
       0:green) gk=green; gs=$(printf '%s' "$out" | cut -d' ' -f2) ;;
       0:hold) gk=hold; gw=${out#hold - } ;;
-      *) gk=hold; gw="green-tip.py exit $grc" ;;
+      *) gk=hold; gw="green-tip.py exit $grc${gline:+: $gline}" ;;
     esac
     [ "$gk" = green ] && [ "$gs" = "$(git -C "$tw" rev-parse -q --verify "refs/remotes/origin/$d" 2>/dev/null)" ] && gk=origin
     cur=$(git -C "$tw" symbolic-ref -q --short HEAD 2>/dev/null)
@@ -565,7 +576,9 @@ case "$mode" in
     ahead=$(git -C "$tw" rev-list --count "$up..HEAD" 2>/dev/null) || ahead=''
     behind=$(git -C "$tw" rev-list --count "HEAD..$up" 2>/dev/null) || behind=''
     case "$ahead$behind" in ''|*[!0-9]*) echo "in-place: $tw not moved: cannot compare HEAD with origin/$d"; exit 0 ;; esac
-    if [ "$gk" = hold ]; then echo "in-place: $tw not moved: no move: $gw"; exit 0; fi
+    # A hold stops only the paths that need a target (the move, at or past it, already at origin's tip); a twin ahead of
+    # origin, or diverged from it, reads as below whatever the target (primary-refresh.py's c2 rule).
+    if [ "$gk" = hold ] && [ "$ahead" = 0 ]; then echo "in-place: $tw not moved: no move: $gw"; exit 0; fi
     if [ "$gk" = green ] && [ "$ahead" = 0 ]; then
       head=$(git -C "$tw" rev-parse -q --verify HEAD)
       gb=$(git -C "$tw" rev-list --count "$gs..$up" 2>/dev/null) || gb='?'

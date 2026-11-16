@@ -739,6 +739,17 @@ ok "$(git -C "$rg" rev-parse HEAD)" "$G" "SR-G: … HEAD unmoved, never origin's
 sr --refresh "$rg-rollout" $GENV
 ok "$rc|$(git -C "$rg-rollout" rev-parse HEAD)" "0|$O" "SR-G: --refresh moves the Rollout clone to origin's tip (the code being built)"
 ok "$(grep -c . "$tmp/gh-sr.log")" 0 "SR-G: … and gh is never called (the Green tip recorded)"
+# On a hold only the move, at and past need a target: a twin ahead of origin keeps its ahead line, a diverged one its
+# remedy (primary-refresh.py's c2 rule), and a WARN green-tip.py prints passes through to stderr.
+g -C "$rg" merge -q --ff-only origin/master; echo mine > "$rg/mine.txt"; g -C "$rg" add mine.txt; g -C "$rg" commit -qm mine
+printf '{not json' > "$tmp/gt-bad.json"
+sr --refresh-in-place "$rg-rollout" "THREAD_GREEN_TIP_FILE=$tmp/gt-bad.json" "PATH=$tmp/ghbin:$PATH"
+ok "$rc|${out#"in-place: $rg ahead: "}" "0|on master, 1 commit(s) not on origin/master — stranded" "SR-G: a hold, a twin ahead of origin: its ahead line, never no move"
+has "$err" "green-tip: WARN: the record $tmp/gt-bad.json is corrupt" "SR-G: … and green-tip.py's WARN passes through to stderr"
+g -C "$rg" reset -q --hard "$G"; echo mine2 > "$rg/mine2.txt"; g -C "$rg" add mine2.txt; g -C "$rg" commit -qm mine2
+sr --refresh-in-place "$rg-rollout" $GENV
+has "$out" "in-place: $rg not moved: diverged: 1 local-only commit(s)" "SR-G: a hold, a diverged twin: its diverged line, with its remedy"
+lacks "$out" "no move" "SR-G: … never no move"
 
 echo; [ "$fail" -eq 0 ] && echo "self-rollout-check: ALL PASS" || echo "self-rollout-check: SOME FAILED"
 exit "$fail"
