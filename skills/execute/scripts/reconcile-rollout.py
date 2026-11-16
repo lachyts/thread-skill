@@ -13718,7 +13718,6 @@ SPEED_FIX_FLAGS = RUNG_YAML_WORDS | {"0", "1"}
 # `- <stamp> released [[R]] (p<N>): <why>`.
 SPEED_HOLD_LINE_RE = re.compile(r"^-\s+(?P<at>\S+)\s+(?P<verb>hold|released)\s+\[\[(?P<r>[^\]|#^\\]+)[^\]]*\]\]\s+"
                                 r"\((?P<phase>p\d+(?:\.\d+)?)(?:,\s*(?P<by>schedule|join))?\):\s*(?P<rest>.*?)\s*$")
-SPEED_HOLD_BYS = ("schedule", "join")
 
 
 def _speed_fix_cites(item):
