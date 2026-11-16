@@ -53,7 +53,11 @@ jobs:
       # THREAD_VERIFY_BASE is the PR's base sha. The checkout is the PR's merge ref, so its merge base with the base sha
       # is that sha and the diff is exactly what the PR lands; a base that moved after the event only grows the diff
       # (slower, never wrong). A FULL diff runs the full suite here, inside the same 55 minutes.
+      # THREAD_SKIP_SLOW=1 leaves the Slow tier (tests/fast-tier.map's SLOW lines, ADR 0084 d3) out of this check, a FULL
+      # diff's full suite included, unless the PR edits a SLOW suite itself. The Mac's own verify (`make test-fast`
+      # without it) and master's full-suite.yml still run the Slow tier.
       - run: make test-fast
         env:
           THREAD_TEST_JOBS: "4"
           THREAD_VERIFY_BASE: ${{ github.event.pull_request.base.sha }}
+          THREAD_SKIP_SLOW: "1"

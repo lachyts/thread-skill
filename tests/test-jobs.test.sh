@@ -171,6 +171,12 @@ ci=$(cat .github/workflows/test.yml)
 has "$ci" 'THREAD_TEST_JOBS: "4"' "CI pins THREAD_TEST_JOBS to 4"
 has "$ci" 'name: make test (${{ matrix.os }})' "CI keeps its job name (the required-check context)"
 has "$ci" 'os: [ubuntu-latest, macos-latest]' "CI keeps its matrix"
+# The Slow tier (p54-1, ADR 0084 d3): GitHub's PR check leaves it out, run.sh unsets the flag so no suite inherits it,
+# and master's full suite never sets it. tests/fast-tier.test.sh G1-G6 pins what the flag does.
+has "$ci" 'THREAD_SKIP_SLOW: "1"' "CI's PR check sets THREAD_SKIP_SLOW=1"
+has "$run" 'skip_slow=${THREAD_SKIP_SLOW:-}' "run.sh captures THREAD_SKIP_SLOW"
+ok "$(grep -c '^unset THREAD_SKIP_SLOW$' tests/run.sh)" 1 "run.sh unsets THREAD_SKIP_SLOW, so no suite inherits it"
+ok "$(grep -c THREAD_SKIP_SLOW .github/workflows/full-suite.yml)" 0 "master's full-suite.yml never sets THREAD_SKIP_SLOW"
 
 echo; [ "$fail" -eq 0 ] && echo "test-jobs: ALL PASS" || echo "test-jobs: SOME FAILED"
 exit "$fail"

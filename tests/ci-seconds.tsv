@@ -1,0 +1,93 @@
+# CI's seconds per shell suite, read by tests/lib/fast-tier.py's check (j), which holds the Slow tier (ADR 0084 d3) to
+# them: a suite at or over SLOW_JOIN (180 s) must be on a `SLOW` line of tests/fast-tier.map, and a SLOW suite under
+# SLOW_LEAVE (150 s) must leave it; between the two either is fine, so a suite near the cutoff does not flap as the
+# medians drift. Its docstring holds the format and the rules. Nothing else reads it: the selection reads the SLOW
+# lines, never this file.
+# Source: the per-suite `<label>: ok (<N>s)` and `<label>: FAILED (<N>s)` lines of GitHub's macos-latest jobs from
+# 2026-11-08 to 2026-11-15 (322 jobs on both runners, 161 on macOS: the 2026-11-16 suite audit's jobs-parsed.json,
+# docs/audits/test-suite-audit-2026-11-16.md), every macOS job that printed the line, whatever its conclusion. Each
+# value is that suite's median. macOS because it is the slowest runner, so the medians spread most at the cutoff, and
+# master's full-suite.yml keeps running macOS shards that print the same lines. The merge-task self-tests and node
+# files have no row (node prints no per-file time), so they are never SLOW by this file.
+# Regenerate: from a week's macOS job logs (master's full-suite.yml shards, or PR checks), take each shell suite's
+# median of those lines, and rewrite this file whole, one `<seconds><TAB><suite>` row per collected shell suite. A
+# refresh that moves a suite across the cutoff fails check (j) until the same PR edits its SLOW line.
+2	skills/execute/tests/integration-inputs.test.sh
+11	skills/execute/tests/note-save.test.sh
+50	skills/execute/tests/reconcile-rollout-approved-queue.test.sh
+11	skills/execute/tests/reconcile-rollout-arms.test.sh
+229	skills/execute/tests/reconcile-rollout-auto-retry.test.sh
+27	skills/execute/tests/reconcile-rollout-capacity.test.sh
+17	skills/execute/tests/reconcile-rollout-churn.test.sh
+234.5	skills/execute/tests/reconcile-rollout-completion.test.sh
+69	skills/execute/tests/reconcile-rollout-descope.test.sh
+13	skills/execute/tests/reconcile-rollout-flake.test.sh
+11	skills/execute/tests/reconcile-rollout-fold.test.sh
+10	skills/execute/tests/reconcile-rollout-heat.test.sh
+37	skills/execute/tests/reconcile-rollout-hold.test.sh
+174	skills/execute/tests/reconcile-rollout-human-fix.test.sh
+37	skills/execute/tests/reconcile-rollout-last-starts.test.sh
+32	skills/execute/tests/reconcile-rollout-lead.test.sh
+128	skills/execute/tests/reconcile-rollout-moving.test.sh
+66	skills/execute/tests/reconcile-rollout-origin-lane.test.sh
+56.5	skills/execute/tests/reconcile-rollout-prove.test.sh
+93	skills/execute/tests/reconcile-rollout-queue.test.sh
+39	skills/execute/tests/reconcile-rollout-ready-at.test.sh
+139	skills/execute/tests/reconcile-rollout-record.test.sh
+50	skills/execute/tests/reconcile-rollout-runs.test.sh
+50	skills/execute/tests/reconcile-rollout-standing.test.sh
+24	skills/execute/tests/reconcile-rollout-stops.test.sh
+78	skills/execute/tests/reconcile-rollout-trickle-claim.test.sh
+54	skills/execute/tests/reconcile-rollout-trickle-share.test.sh
+38.5	skills/execute/tests/reconcile-rollout-trickle-wake.test.sh
+63	skills/execute/tests/reconcile-rollout-trickle.test.sh
+38.5	skills/execute/tests/reconcile-rollout-triggers.test.sh
+46.5	skills/execute/tests/reconcile-rollout.test.sh
+7	skills/execute/tests/rollout-stop-driver.test.sh
+3	tests/default-branch.test.sh
+87.5	tests/engine-snapshot.test.sh
+8	tests/execution-fit-remote.test.sh
+88	tests/fast-tier.test.sh
+393	tests/git-env-canary.test.sh
+5	tests/git-env-scrub.test.sh
+4	tests/handoff-home.test.sh
+10	tests/handoff-scan.test.sh
+73	tests/integration-tree.test.sh
+85.5	tests/land-carrier.test.sh
+197	tests/land.test.sh
+643.5	tests/lead-integrate.test.sh
+91	tests/leg-capacity.test.sh
+1778	tests/leg.test.sh
+53	tests/live-checkout.test.sh
+184	tests/merge-settings.test.sh
+6	tests/merge-task-bare-blocked.test.sh
+12	tests/merge-task-base-moved.test.sh
+62	tests/merge-task-base.test.sh
+18	tests/merge-task-cancelled.test.sh
+37	tests/merge-task-ci-headroom.test.sh
+213	tests/merge-task-integrated.test.sh
+115.5	tests/merge-task-no-runner.test.sh
+66	tests/parallel-rollouts-one-repo.test.sh
+3	tests/peer-guard.test.sh
+35.5	tests/pickups.test.sh
+28	tests/pinned-tree.test.sh
+20	tests/primary-commit-guard.test.sh
+364	tests/primary-refresh.test.sh
+123.5	tests/pushed-base.test.sh
+53	tests/reconcile-project.test.sh
+12	tests/release-check-missing-tree-dir.test.sh
+22	tests/release-check-quoting-diff.test.sh
+13	tests/release-check-symlinked-dir.test.sh
+26	tests/release-check.test.sh
+13	tests/repo-state.test.sh
+14	tests/repo-threads.test.sh
+10	tests/schedule-queue.test.sh
+88	tests/self-rollout-check.test.sh
+145	tests/serial-chains.test.sh
+9	tests/test-jobs.test.sh
+546.5	tests/unfinished-rollout.test.sh
+21	tests/vault-note-overlap.test.sh
+113	tests/verify-slot-heat.test.sh
+51	tests/verify-slot-own.test.sh
+16	tests/verify-slot-wait.test.sh
+75	tests/verify-slot.test.sh
