@@ -59,9 +59,13 @@ function openerLinks(texts) {
     const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("hook", sys.argv[1])',
       'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
       'print(json.dumps([m.opener_links(t) for t in json.load(sys.stdin)]))'].join('\n')
+    // A liveness bound, never a timing claim: one python3 start reads every opener in well under a second, and a hung
+    // child fails here by name instead of running into node's per-file limit.
     const r = spawnSync('python3', ['-B', '-c', body, HOOK], { encoding: 'utf8', cwd: tmp, input: JSON.stringify(texts),
+      timeout: 120_000, killSignal: 'SIGKILL',
       env: { PATH: process.env.PATH, HOME: tmp, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(tmp, 'events'),
         THREAD_NOTE_OVERLAP_DIR: path.join(tmp, 'state') } })
+    assert.equal(r.error, undefined, `opener_links did not finish: ${r.error?.message} (signal ${r.signal})`)
     assert.equal(r.status, 0, r.stderr)
     assert.ok(!fs.existsSync(path.join(tmp, 'events')) && !fs.existsSync(path.join(tmp, 'state')), 'reading an opener writes nothing')
     return JSON.parse(r.stdout)
