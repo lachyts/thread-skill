@@ -23,6 +23,11 @@ rows 2 and 5 built by p54-3: `tests/run.sh` warms a bytecode cache in its scratc
 `PYTHONPYCACHEPREFIX`, exported to every suite and node file), so the engine loads compiled; node's files start
 longest first, by measured seconds in `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs
 them in the shard split), run through `tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path.
+d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
+`tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
+preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
+`tests/shard-weights.tsv` are leg.test.sh's apportioned by the parts' measured shares, so the Slow tier is thirteen;
+ok lines 758 + 307 + 195 + 294 = 1554, the old file's count.
 Phase 54 builds the rest.
 
 ## Context

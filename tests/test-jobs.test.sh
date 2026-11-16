@@ -138,8 +138,12 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # and tests/leg.test.sh at 1581 s, both healthy. The slowest passing macos-latest times seen, 19 jobs (PR full runs and
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
+# leg.test.sh's 1581 s and 1891 s are now split across its four files (p54-9), 1891 by the parts' measured shares.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
-ci_max="tests/leg.test.sh 1891
+ci_max="tests/leg.test.sh 550
+tests/leg-land.test.sh 565
+tests/leg-rank.test.sh 355
+tests/leg-security.test.sh 421
 tests/lead-integrate.test.sh 735
 tests/unfinished-rollout.test.sh 613
 tests/primary-refresh.test.sh 543
