@@ -73,6 +73,9 @@ of those also carry real sleeps or deadlines (54 %). Node's 63 prose-pin contrac
 `leg.py` loads `reconcile-rollout.py` (1.1 MB) and `serial-chains.py` by path, and `_load` sets
 `sys.dont_write_bytecode = True` (`skills/execute/scripts/leg.py:835`). Every launch therefore recompiles them.
 Measured on this Mac: the load takes 105 ms with no cache and 53 ms with a cache from `PYTHONPYCACHEPREFIX`.
+The 2026-11-09 audit's "caching saves nothing" (its § 5 (b)) was not valid: `lead-integrate.py` sets
+`sys.dont_write_bytecode` before it loads the engine, so its cache arm never wrote one, and neither arm had a cache
+(corrected there by p54-3).
 
 The heaviest engine-loading suites run 3 to 4.5x slower on macOS than locally. Lighter suites run about 1.4x.
 `THREAD_TEST_JOBS=4` on a 3-vCPU macOS runner gives each suite at most 0.75 of a core, and compiling is

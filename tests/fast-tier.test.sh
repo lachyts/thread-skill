@@ -2,9 +2,10 @@
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3, the Slow tier's
 # check (j) and its check (d) case among C2's controls) on throwaway repos, its results on the real tree (R1-R8, and the
 # Slow tier's `slow` and --shard-plan in R9-R10), tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
-# fixture checkout (F1-F22; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree), and THREAD_SKIP_SLOW's
-# filter on a second one (G1-G6, p54-1, ADR 0084 d3). Each throwaway repo has a local bare origin and a copy of the
-# selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked file uses.
+# fixture checkout (F1-F22, and node's longest-first order in F23; tests/ci-workflows.test.mjs S1 runs --shard-plan on
+# the real tree), and THREAD_SKIP_SLOW's filter on a second one (G1-G6, p54-1, ADR 0084 d3). Each throwaway repo has a
+# local bare origin and a copy of the selector; no network, nothing written outside temp. Fixture basenames all start
+# with zz, which no tracked file uses.
 # bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
@@ -488,7 +489,8 @@ ok "$r10rc|${missing:-none}" "0|none" "R10: THREAD_SKIP_SLOW=1 bash tests/run.sh
 echo "== run.sh"
 F="$TMP/f"; mkrepo "$F"
 cp "$root/tests/run.sh" "$F/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$F/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$F/tests/lib/"
 put "$F" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$F" skills/x/scripts/zza.py 'print("a")'
 put "$F" skills/x/scripts/zzb.py 'print("b")'
@@ -610,6 +612,7 @@ put "$F" tests/lib/shard.py 'import sys; sys.exit(1)'
 ZZ_C_OK=1 run bash --shard 1/2
 ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no test"
 has "$out" "  - shard split" "F14: … through the shard split step"
+has "$out" "run.sh: shard.py --order failed, so node takes its files in glob order" "F14: … and node's order falls back to the glob's, and says so"
 git -C "$F" checkout -q -- tests/lib/shard.py
 
 # F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
@@ -726,13 +729,30 @@ for bad in "nottab tests/zza.test.sh" "0${tab}tests/zza.test.sh" "3${tab}tests/z
 done
 rm -f "$W"
 
+# F23 (p54-3): node takes its files longest first, by the measured seconds in tests/shard-weights.tsv: shard.py --order
+# sorts them and tests/lib/node-run.mjs keeps that order (`node --test` itself sorts its arguments by path). At
+# THREAD_TEST_JOBS=1 node runs one file at a time, so the markers' order is the files' start order.
+put "$F" tests/zzd.test.mjs "console.log('zzmarker-d')"
+nodeorder() { printf '%s\n' "$out" | grep -oE 'zzmarker-[cd]' | tr '\n' ' '; }
+printf '%s\t%s\n' 1 tests/contracts/zzc.test.mjs 100 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-d zzmarker-c " "F23: the heavier node file (zzd, 100 s) runs first, though zzc's path sorts first"
+has "$out" "== node seconds per file" "F23: … and node prints each file's seconds, the weights' source"
+printf '%s\t%s\n' 100 tests/contracts/zzc.test.mjs 1 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-c zzmarker-d " "F23: … and with the weights swapped, zzc runs first"
+ZZ_C_OK=0 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(lines '^node tests \(2 files\): FAILED \([0-9]+s\)$')" "1|1" "F23: … a failing node file still fails the node step and the run"
+rm -f "$W" "$F/tests/zzd.test.mjs"
+
 # G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
 # included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:
 # zzs.py is named by zzslow (SLOW, 200 s) and zzsfast; zzslow prints the THREAD_SKIP_SLOW it sees. A workflow script,
 # as in F, since run.sh's workflow parse step needs one under bash 3.2's set -u.
 G="$TMP/g"; mkrepo "$G"
 cp "$root/tests/run.sh" "$G/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$G/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$G/tests/lib/"
 put "$G" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$G" skills/x/scripts/zzs.py 'print("s")'
 put "$G" tests/zzslow.test.sh 'echo "zzmarker-slow zzs.py ${THREAD_SKIP_SLOW:-unset}"'

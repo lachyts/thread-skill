@@ -9,8 +9,12 @@ until Phase 54's task 2). d3's Slow tier for GitHub's check built by p54-1: `SLO
 held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15), joining at 180 s and leaving only
 under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
 under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite
-fallbacks included, and names them in one line. Decided for you 2's return rule waits for p54-7's red-master record,
-in its own follow-up task (p54-18). Phase 54 builds the rest.
+fallbacks included, and names them in one line. d4's Speed fixes from the audit's rows 2 and 5 built by p54-3:
+`tests/run.sh` warms a bytecode cache in its scratch dir once (`compileall` into `PYTHONPYCACHEPREFIX`, exported to
+every suite and node file), so the engine loads compiled; node's files start longest first, by measured seconds in
+`tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs them in the shard split), run through
+`tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path. Decided for you 2's return rule waits for
+p54-7's red-master record, in its own follow-up task (p54-18). Phase 54 builds the rest.
 
 ## Context
 
