@@ -9,7 +9,9 @@ imports fcntl), so the hook lets everything through there (docs/windows-setup.md
 What it does. It prints {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": ...}} when the Bash command would make a commit on the default branch of the Primary, the
 reason naming the command, the branch, the checkout and the remedy (a branch or a worktree, or land.sh; for a pull or
-a merge also `git pull --ff-only`, which is all a Primary that is only behind needs). Otherwise it prints nothing. It
+a merge also how a Primary that is only behind catches up: in a repo that publishes a Green tip it waits on it, and the
+Primary refresh moves it there (ADR 0084 d1: live code never runs past the Green tip), so work that needs origin's tip
+goes in a worktree; `git pull --ff-only` is still allowed, and goes past the Green tip). Otherwise it prints nothing. It
 always exits 0, nothing reaches stderr, and any exception lets the command through: it refuses only on positive
 evidence, so a command it cannot read runs.
 
@@ -48,7 +50,8 @@ What makes a commit. git commit, merge, cherry-pick, am, rebase, revert and pull
 form in SPARED makes none and is let through, read only from the flags before a `--`: an abort, a quit, a dry run,
 help, --no-commit or --squash (the later commit is the one refused), and --ff-only (the Primary only ever
 fast-forwards, ADR 0078 d3), so `git pull --ff-only` always passes while a bare `git pull` is refused even under
-pull.ff=only.
+pull.ff=only. A pull --ff-only takes the Primary past the Green tip in a repo that publishes one (ADR 0084 d1): the
+permission stands, and the refusal's advice says the Primary waits on the Green tip instead.
 
 Accepted misses. A script that runs git inside itself is never seen by a Bash hook (land.sh and primary-refresh.py
 under primary-hold.sh, by design, and any other). Codex Legs have no Claude Code hooks (p45-3's repair is their
@@ -480,8 +483,10 @@ def refusal(ops, eng):
         if branch is None:
             branch = eng.git_out(primary, "symbolic-ref", "--short", "-q", "HEAD", timeout=GIT_TIMEOUT) or ""
         if branch == default:
-            behind = (" If the Primary is only behind, `git pull --ff-only` brings it up to date, and the guard allows "
-                      "that." if verb in ("pull", "merge") else "")
+            behind = (" If the Primary is only behind: in a repo that publishes a Green tip it waits on the Green tip "
+                      "(ADR 0084 d1), and the Primary refresh moves it there, so work that needs origin's tip goes in a "
+                      "worktree; `git pull --ff-only` brings it to origin's tip, and the guard allows that, but it goes "
+                      "past the Green tip." if verb in ("pull", "merge") else "")
             return ("Refused (ADR 0078 d3, hooks/primary-commit-guard.py): `git %s` would make a commit on `%s` in the "
                     "Primary checkout %s, the copy every session loads the plugin from. Nothing commits there: it only "
                     "fast-forwards. Do this on a branch or in a worktree (`git switch -c <name>`, `git worktree add`) "

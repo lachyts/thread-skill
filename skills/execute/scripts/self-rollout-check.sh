@@ -118,6 +118,13 @@
 # (primary-hold.sh, ADR 0031; run from a snapshot, the hold reads the snapshot's Primary, ADR 0043).
 # Otherwise it fetches origin/<default> in the twin (lc_fetch, under the ssh and prompt rule) and runs only lc_ff's
 # `git merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash, never during an operation.
+# The twin is a live checkout, so it stops at the Green tip (ADR 0084 d1, p54-6): after the fetch,
+# skills/_shared/scripts/green-tip.py reads the target (`--checkout --budget 60` under lc_bounded 70). A repo that
+# publishes none reads origin's tip and keeps every line below as it was. Else the twin moves to the Green tip
+# (`fast-forwarded to the Green tip (<old7>..<new7>)`), or stands `at the Green tip <g7>, <n> behind origin/<d> (waits
+# on the Green tip)`, `past the Green tip <g7> by <m>: waits on it` (never moved back), `not moved: local changes
+# overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>`. A twin ahead of origin
+# reads as below. --ensure and --refresh never read it: the Rollout clone keeps origin's tip, the code being built.
 # One stdout line, `in-place: <twin> …`, or nothing:
 #   held: <primary-hold line> (ADR 0031) · not moved: cannot load live-checkout.sh · not moved: fetch failed: <first
 #   line> · not moved: on '<b>', not <d> · not moved: an operation is in progress · fast-forwarded to origin/<d>
@@ -541,6 +548,16 @@ case "$mode" in
     if ! e=$(lc_fetch "$tw" "$d" 2>&1); then
       echo "in-place: $tw not moved: fetch failed: $(first "$e")"; exit 0
     fi
+    # The twin is a live checkout: in a repo that publishes a Green tip it moves to it, never past (ADR 0084 d1).
+    gk=origin gs='' gw=''
+    out=$(lc_bounded 70 python3 "$here/../../_shared/scripts/green-tip.py" target --repo "$tw" --branch "$d" --checkout --budget 60 2>/dev/null); grc=$?
+    case "$grc:${out%% *}" in
+      0:origin) ;;
+      0:green) gk=green; gs=$(printf '%s' "$out" | cut -d' ' -f2) ;;
+      0:hold) gk=hold; gw=${out#hold - } ;;
+      *) gk=hold; gw="green-tip.py exit $grc" ;;
+    esac
+    [ "$gk" = green ] && [ "$gs" = "$(git -C "$tw" rev-parse -q --verify "refs/remotes/origin/$d" 2>/dev/null)" ] && gk=origin
     cur=$(git -C "$tw" symbolic-ref -q --short HEAD 2>/dev/null)
     [ "$cur" = "$d" ] || { echo "in-place: $tw not moved: on '${cur:-a detached HEAD}', not $d"; exit 0; }
     lc_op "$tw" >/dev/null && { echo "in-place: $tw not moved: an operation is in progress"; exit 0; }
@@ -548,6 +565,25 @@ case "$mode" in
     ahead=$(git -C "$tw" rev-list --count "$up..HEAD" 2>/dev/null) || ahead=''
     behind=$(git -C "$tw" rev-list --count "HEAD..$up" 2>/dev/null) || behind=''
     case "$ahead$behind" in ''|*[!0-9]*) echo "in-place: $tw not moved: cannot compare HEAD with origin/$d"; exit 0 ;; esac
+    if [ "$gk" = hold ]; then echo "in-place: $tw not moved: no move: $gw"; exit 0; fi
+    if [ "$gk" = green ] && [ "$ahead" = 0 ]; then
+      head=$(git -C "$tw" rev-parse -q --verify HEAD)
+      gb=$(git -C "$tw" rev-list --count "$gs..$up" 2>/dev/null) || gb='?'
+      if [ "$head" = "$gs" ]; then
+        echo "in-place: $tw at the Green tip ${gs:0:7}, $gb behind origin/$d (waits on the Green tip)"
+      elif git -C "$tw" merge-base --is-ancestor HEAD "$gs" 2>/dev/null; then
+        e=$(lc_ff "$tw" "$d" "$gs"); rc=$?
+        case $rc in
+          0) new=$(git -C "$tw" rev-parse -q --verify HEAD)
+             echo "in-place: $tw fast-forwarded to the Green tip (${head:0:7}..${new:0:7})" ;;
+          3) echo "in-place: $tw not moved: local changes overlap the Green tip ${gs:0:7}" ;;
+          *) echo "in-place: $tw not moved: git merge --ff-only refused: $e" ;;
+        esac
+      else
+        echo "in-place: $tw past the Green tip ${gs:0:7} by $(git -C "$tw" rev-list --count "$gs..HEAD" 2>/dev/null): waits on it"
+      fi
+      exit 0
+    fi
     if [ "$ahead" = 0 ] && [ "$behind" = 0 ]; then echo "in-place: $tw already at origin/$d"; exit 0; fi
     rs=$(bash "$REPO_STATE" "$tw" 2>/dev/null) || rs=''
     [ -n "$rs" ] || rs="on $d, $ahead commit(s) not on origin/$d"

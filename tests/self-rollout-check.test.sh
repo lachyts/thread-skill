@@ -48,7 +48,7 @@ ln -s "$home/repos/plug" "$tmp/link"
 plugin_copy() {
   mkdir -p "$1/skills/execute/scripts" "$1/skills/_shared/scripts"
   cp "$root/skills/execute/scripts/self-rollout-check.sh" "$root/skills/execute/scripts/default-branch.sh" "$1/skills/execute/scripts/"
-  cp "$root/skills/_shared/scripts/land.sh" "$root/skills/_shared/scripts/live-checkout.sh" "$1/skills/_shared/scripts/"
+  cp "$root/skills/_shared/scripts/land.sh" "$root/skills/_shared/scripts/live-checkout.sh" "$root/skills/_shared/scripts/green-tip.py" "$1/skills/_shared/scripts/"
 }
 pd="$home/repos/pd"; plugin_copy "$pd/plugin"; mkdir -p "$pd-x"; ln -s "$pd" "$tmp/pdlink"
 reg="$cfg/plugins/known_marketplaces.json"
@@ -718,6 +718,27 @@ ok "$([ -n "$srl" ] && [ -n "$gol" ] && [ "$srl" -lt "$gol" ] && echo y)" y "Sel
 s26f=$(printf '%s\n' "$s26" | tr '\n' ' ')
 has "$s26f" "execution-fit.md\` § Dispatch blockers (point at it; never copy the snippet here), with \`<mode>\` empty" "execute § 2.6 points at execution-fit.md § Dispatch blockers, plain mode"
 has "$s26f" "Execute never swaps a root itself" "execute § 2.6 never swaps a root"
+
+# SR-G: --refresh-in-place stops the twin at the Green tip (ADR 0084 d1, p54-6); --refresh keeps the Rollout clone on
+# origin's tip (the code being built). The record is seeded, and a gh stub logs every call: there are none.
+rg="$home/repos/rg"; srv o/rg; cl o/rg "$rg"; cl o/rg "$rg-rollout"; old=$(git -C "$rg" rev-parse HEAD)
+push o/rg .github/workflows/full-suite.yml "$(printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green')"
+G=$(srvtip o/rg); push o/rg b.txt 1; O=$(srvtip o/rg); git --git-dir "$SRV/o/rg.git" update-ref refs/thread/green "$G"
+GT="$tmp/gt.json"; printf '{"v": 1, "repos": {"o/rg": {"verified": [{"sha": "%s", "at": "2026-11-01T10:00:00+11:00", "by": "test"}], "unverified": []}}}\n' "$G" > "$GT"
+mkdir -p "$tmp/ghbin"; printf '#!/bin/sh\necho "gh $*" >> "%s/gh-sr.log"\nexit 1\n' "$tmp" > "$tmp/ghbin/gh"; chmod +x "$tmp/ghbin/gh"; : > "$tmp/gh-sr.log"
+GENV="THREAD_GREEN_TIP_FILE=$GT PATH=$tmp/ghbin:$PATH"
+sr --refresh-in-place "$rg-rollout" $GENV
+ok "$rc|$out" "0|in-place: $rg fast-forwarded to the Green tip (${old:0:7}..${G:0:7})" "SR-G: the twin is fast-forwarded to the Green tip"
+ok "$(git -C "$rg" rev-parse HEAD)" "$G" "SR-G: … not to origin's tip"
+sr --refresh-in-place "$rg-rollout" $GENV
+ok "$out" "in-place: $rg at the Green tip ${G:0:7}, 1 behind origin/master (waits on the Green tip)" "SR-G: the next run: at the Green tip, waiting on it"
+git --git-dir "$SRV/o/rg.git" update-ref -d refs/thread/green
+sr --refresh-in-place "$rg-rollout" $GENV
+has "$out" "in-place: $rg not moved: no move: refs/thread/green is gone from origin after it was seen" "SR-G: a vanished ref: not moved, no move"
+ok "$(git -C "$rg" rev-parse HEAD)" "$G" "SR-G: … HEAD unmoved, never origin's tip"
+sr --refresh "$rg-rollout" $GENV
+ok "$rc|$(git -C "$rg-rollout" rev-parse HEAD)" "0|$O" "SR-G: --refresh moves the Rollout clone to origin's tip (the code being built)"
+ok "$(grep -c . "$tmp/gh-sr.log")" 0 "SR-G: … and gh is never called (the Green tip recorded)"
 
 echo; [ "$fail" -eq 0 ] && echo "self-rollout-check: ALL PASS" || echo "self-rollout-check: SOME FAILED"
 exit "$fail"

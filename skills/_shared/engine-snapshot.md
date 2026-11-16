@@ -105,8 +105,12 @@ reason and the remedy.
 ## Schedule's cut
 
 `/thread:schedule`'s first step runs `cut`: a fresh `git fetch` of origin's default branch and a detached, locked
-worktree at `<primary>-snapshots/<sha12>`, shared by every rollout cut at that tip. Never the Primary's HEAD or
-working tree: a branch, an unpushed commit or a stale `origin/<default>` there reaches no rollout. Schedule then
+worktree at `<primary>-snapshots/<sha12>`, shared by every rollout cut at that commit. The commit is the Green tip
+(ADR 0084 d1: `green-tip.py`'s reading, the newest commit whose full suite passed, origin's tip in a repo that
+publishes none): an unverified Green tip steps back to the newest verified commit before it, and with none the cut
+cuts nothing (exit 3), never origin's tip. `cut --at <sha>` cuts at a named commit by hand, on Lachy's word only (ADR
+0084 Decided for you 8: the one case the Green tip cannot serve is a break in the code that reads it). Never the
+Primary's HEAD or working tree: a branch, an unpushed commit or a stale `origin/<default>` there reaches no rollout. Schedule then
 writes the note, its queue and its task stamps with the snapshot's own scripts, and `adopt`, run from the snapshot,
 stamps the note. A cut exit 4 (no git Primary) stamps nothing.
 

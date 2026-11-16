@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """primary-refresh.py — the Primary refresh (ADR 0066, amended 2026-11-05 by p37-7): keep the live-loaded checkouts
-current with origin.
+current with origin: at its Green tip in a repo that publishes one (ADR 0084 d1, p54-6), never past it.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py run [--primary DIR] [--also DIR]...
         [--state F] [--log F] [--now ISO] [--dry-run] [--job-shape N] [--ff-timeout N] [--smoke-timeout N]
@@ -16,7 +16,10 @@ merge-task's in-place refresh (`self-rollout-check.sh --refresh-in-place`) also 
 when they run and ADR 0031's hold is clear: on 2026-11-02 it sat 97 commits behind because the hold never cleared. The
 Primary refresh is the background job that keeps trying: every pass it fast-forwards the primary to origin while the
 hold is clear, and each `--also` checkout (`~/.agents`, which holds /fresh-review and the shared skills) whenever it is
-behind.
+behind. "Origin" is the pass's target: skills/_shared/scripts/green-tip.py's reading (its docstring holds the rules),
+the Green tip of a repo that publishes one (Thread Skill's full-suite.yml moves refs/thread/green once every shard
+passed), origin's tip for every other repo. Nothing live runs from a commit the full suite has not passed ("Everything
+waits", ADR 0084 d2), so a primary may stand behind origin while master is red: that is a wait, never a stuck spell.
 
 run, one pass, in this order:
   1. --log F: a log over 1 MiB moves to F.1 first, one generation kept (a pass whose stdout or stderr is that file
@@ -61,7 +64,23 @@ never current or moved, and never leads to a merge.
      land.sh's ssh rule (BatchMode unless the operator set an ssh command; never a prompt), so an unrelated ref
      conflict never fails it. A failure is `fetch failed: <git's last fatal: or error: line, else its last line>`,
      and nothing later reads the stale refs.
-  d. The read (`check`): `current` (HEAD at origin's tip, on any branch); `ahead <n>: left to its landing route`;
+  c2. The target: green-tip.py (the bundle's copy, else the primary's; one that will not load is `broken: cannot load
+     skills/_shared/scripts/green-tip.py (<why>)`, one that raises `broken: green-tip.py raised <Type>: <msg>`), run
+     in process with this pass's child runner: resolve(<checkout>, <d>, checkout=True), gh asked and the record written
+     with a 150 s budget on a real pass, under --dry-run neither, 30 s. Kind origin (a repo that publishes no Green
+     tip), or a Green tip at origin's tip, is the pass below with every word as it was. A Green tip behind origin's tip
+     reads every step against it (live-checkout.sh's optional target), in the Green-tip words below. A hold (the ref
+     absent, not an ancestor of origin's tip, unverified or unreadable) moves nothing and never reads origin's tip: the
+     read runs against origin with no target, and only its target-independent forms stand (ahead, busy, unreadable, a
+     helper that breaks, and diverged: the primary's repair, its reset waiting, `repair waits (no Green tip to reset
+     to: <why>)`); current, behind and an overlap read the hold's outcome, before the hold below is asked: `no move:
+     <why> (never origin's tip)` (kind green-held), or for the one transient cause, an unreachable ref, `fetch failed:
+     refs/thread/green: <why>` (kind fetch-failed). The tip is None on every hold, so a real pass makes no
+     self-update.
+  d. The read (`check`): `current` (HEAD at origin's tip, on any branch; `current at the Green tip <g12> (<n> behind
+     origin/<d>: waits on the Green tip)` at a Green tip behind origin's tip); `past the Green tip <g12> by <m> (on
+     origin/<d>): waits on the Green tip` (a Green tip only: HEAD on origin but past it, a hand pull say; never moved
+     back, kind None); `ahead <n>: left to its landing route`;
      `diverged (ahead <a>, behind <b>)`: an --also checkout reads `never integrated here` (ADR 0042's rule), the primary
      goes to the repair below (read before the hold, since a divergence never clears by itself); behind and `busy:
      <why>` (an index.lock, a rebase, merge, cherry-pick, revert, bisect or sequencer in progress, a detached HEAD,
@@ -72,18 +91,24 @@ never current or moved, and never leads to a merge.
      sessions commit there in place, so a fast-forward is no different from a peer's commit. Asked only here, so
      `refused` below always means the hold is clear and git still would not move.
   f. An uncommitted edit origin's commits would overwrite (live-checkout.sh's overlap: dirty or staged tracked files,
-     and untracked ones where origin adds a path): `refused: local changes overlap origin/<d> (<paths>)`. No merge
-     runs, so ORIG_HEAD is never rewritten.
+     and untracked ones where origin adds a path): `refused: local changes overlap origin/<d> (<paths>)` (`… overlap
+     the Green tip <g12> (<paths>)`). No merge runs, so ORIG_HEAD is never rewritten. A landed close-out's THREAD.md
+     (live-checkout.sh's lc_landed: land.sh leaves one on disk in a checkout that waits on the Green tip) is no overlap.
   g. Behind and free: `would move <old12>..<new12> (<n> commits)` under --dry-run; else `ff`, `git merge -q --ff-only
      --no-autostash`, bounded by --ff-timeout (600 s): `moved <old12>..<new12> (<n> commits)` (HEAD re-read and checked
      against what the helper said), `refused: <git's reason>`, or `timed out: git merge --ff-only ran past <N> s and was
-     stopped: the working tree may be partly updated (git -C <d> status)`.
+     stopped: the working tree may be partly updated (git -C <d> status)`. To a Green tip behind origin's tip the two
+     read `would move <a12>..<b12> (<k> commits) to the Green tip (<n> behind origin/<d>)` and `moved <a12>..<b12> (<k>
+     commits) to the Green tip (<n> behind origin/<d>)`.
 
 The repair, the primary only (ADR 0078 d4): a diverged primary returns to origin by itself; nothing is ever merged here.
 Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwise, kind `diverged`, in this order:
-  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block): `busy` reads `repair waits
-     (<why>)` (a half-applied operation, HEAD detached or on another branch: a commit there is someone's work); a read
-     that fails reads `unreadable: <why>`, kind unreadable.
+  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block, against the Green tip too
+     when it is behind origin's tip): `busy` reads `repair waits (<why>)` (a half-applied operation, HEAD detached or on
+     another branch: a commit there is someone's work); a read that fails reads `unreadable: <why>`, kind unreadable.
+     `pending` (on origin by content, not yet at the Green tip) reads, after the hold, `repair waits (its content is on
+     origin/<d>, not yet at the Green tip <g12>)`, and on a hold `landed` reads `repair waits (no Green tip to reset to:
+     <why>)`: nothing resets, while the carry below runs as ever.
   2. The hold, as for a behind checkout (`held` above; the same primary-hold.sh): `repair held: <it>`, for a reset and a
      carry alike.
   3. `landed` (no file the ahead commits touch differs from origin/<d>, THREAD.md included): the reset. An uncommitted
@@ -93,8 +118,11 @@ Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwis
      the hold, which can run 120 s, so a HEAD that has moved reads `repair waits (HEAD moved during the pass)`, with no
      backup ref and no reset, and the next pass re-reads the content. Else the backup ref
      refs/thread/primary-backup/<YYYYMMDDTHHMMSS> (the pass's stamp) is written, must-not-exist, at the old HEAD, and
-     `git reset --keep <tip>` runs, bounded by --ff-timeout: the line `repaired: reset <head12> to origin/<d> at <tip12>
-     (…; backup <ref>)` (HEAD re-read and checked; kind None, which ends the spell), `repair refused: git reset --keep:
+     `git reset --keep <tip>` runs (tip the pass's target: the Green tip, never past it), bounded by --ff-timeout: the
+     line `repaired: reset <head12> to origin/<d> at <tip12> (…; backup <ref>)` (to a Green tip behind origin's tip
+     `repaired: reset <head12> to the Green tip <g12> of origin/<d> (…; backup <ref>)`, its dry form `would reset
+     <head12> to the Green tip <g12> of origin/<d> (…)`; HEAD re-read and checked; kind None, which ends the spell),
+     `repair refused: git reset --keep:
      <why>` with the backup ref removed, or `timed out: git reset --keep ran past <N> s …` (kind timed-out, as for a
      merge). The state entry `repaired:<checkout path>` (kind repaired; its since, outcome, backup, head and tip)
      records the last repair; it is no spell: the stuck read skips it and only an install's prune may drop it (never one
@@ -117,8 +145,8 @@ by a merge (the landing PR's, as queued) leaves the primary only behind: the ord
 
 The spells. A pass sends no notice (ADR 0075 d2: no rollout code notifies Lachy); a stuck checkout is read at a sitting,
 on /thread:status's Primary refresh line (`stuck`, below). A stuck spell runs from the first pass whose kind is stuck
-(not-primary, busy, fetch-failed, broken, unreadable, diverged, stuck, held, refused, timed-out) to the next that reads
-current, moved or ahead (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
+(not-primary, busy, fetch-failed, broken, unreadable, diverged, stuck, held, refused, timed-out, green-held) to the
+next that reads current, moved, ahead or past (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
 moves within the spell, a change of kind restarts only `kindSince`, `outcome` is the latest pass's. The installed copy's
 own `self-update` and `job` spells, and the landing carrier's `carrier` spell, are entries of the same shape. The spells live in the state file
 ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json (or --state), {"v": 1, "stuck": {<checkout path, or
@@ -134,24 +162,38 @@ A pass never prunes: it drops only the key of a checkout it read as current, mov
 either copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
 checkout the job does not watch stands until a pass on that checkout clears it or the next install drops it (below).
 
+The waits file (ADR 0084 d1 and Decided for you 9), beside the state file: primary-green.json, {"v": 1, "green":
+{<checkout path>: {since, green, origin, behind, branch, outcome}}}, through background_job.py's read_state and
+write_state, written only when it changes, never under --dry-run; a corrupt file is one WARN. An entry is opened or kept
+after a pass that leaves the checkout at a Green tip behind origin's tip (current at it, moved to it, repaired to it),
+`since` reset whenever the Green tip moves; dropped once the repo reads origin's tip (no Green tip, or the Green tip at
+origin's tip) or the checkout stands past it; left as it is on a hold, a failed fetch or any other stuck outcome. A wait
+is no spell: it never enters primary-refresh.json, so `_due` and every older copy's `stuck` never see it, and Chorus
+reads only its FILES (carried-fixes.json, primary-live.json, primary-refresh.json) and `stuck` rows.
+
 stuck, a read that writes nothing (no rotation, no prune, no fetch, no temp file): the spells due now, for
 /thread:status's Primary refresh line. It prints one JSON line, {"state": <path>, "stuck": [{key, name, kind, since,
-outcome}], "line": <str or null>}. A spell is due once it is 24 h old from `since` (STUCK_AFTER, ADR 0066's first
+outcome}], "waits": [{key, name, since, green, origin, behind, branch, outcome}], "line": <str or null>}: waits holds
+every entry of the waits file beside the state file, sorted by key. A spell is due once it is 24 h old from `since` (STUCK_AFTER, ADR 0066's first
 notice), or at once when its kind is timed-out (a merge stopped mid-checkout may have left the live-loaded tree half
 updated); a `since` in the future is never due. Due spells are ordered oldest first. A path key is named by its
 directory's name, with the tail `; git -C <key> status`; `self-update` reads `primary-refresh self-update`, `job`
 `primary-refresh job`, `prove` `primary-refresh prove` and `carrier` `landing carrier`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
 joined with ` · `, each `<name>: <outcome> (stuck since <since16>[; git -C <key> status])`, never cut; null when none is
 due (no file included). An entry with no kind (before p37-7) reads the outcome `stuck (kind not yet read)`. It is a
-point-in-time read with no window, only --now, and no freshness check: a spell stands as the job's last pass wrote it
+point-in-time read with no window, only --now, and no freshness check. `line` also joins, after the spells, every wait
+at least GREEN_WAIT_SHOW (2 h) old from its since and not in the future, `<name>: waits on the Green tip <g12>, <n>
+behind origin/<d> (since <since16>)` (a Green tip trailing origin for 2 hours, never the minutes of a normal full-suite
+run; a merge burst moves the Green tip, so its since resets and the wait never shows). It is a
+point-in-time read: a spell stands as the job's last pass wrote it
 until a pass clears it, so with the job unloaded or dead it can be old, and a pass writes the file only when the map
 changes, so its mtime says nothing about the job's health. A corrupt file is one WARN and a null line. Exit 0 for any
 read; 1 when background_job.py cannot be loaded; 2 on usage (a bad --now).
 
-The bundle: install writes BUNDLE's nine files beside each other in --bin-dir, with the marker
+The bundle: install writes BUNDLE's ten files beside each other in --bin-dir, with the marker
 primary-refresh.installed: this copy (its install-rel primary-refresh.py, the plist's path), and live-checkout.sh,
-default-branch.sh, background_job.py, rollout-settings.py, land-carrier.py, landing-register.py, merge-task.sh and
-ladder.py each at its repo path below the copy's directory (a mirrored mini plugin root, so live-checkout.sh's and
+default-branch.sh, background_job.py, rollout-settings.py, land-carrier.py, landing-register.py, merge-task.sh,
+ladder.py and green-tip.py (the pass's target, p54-6) each at its repo path below the copy's directory (a mirrored mini plugin root, so live-checkout.sh's and
 land-carrier.py's own sibling lookups work unchanged: the carrier's register check and rerun classifier). `bundle` prints the
 table, one `<mode> <repo-rel> <install-rel>` line per file. The ntfy-push.py row an earlier table carried is dropped
 (ADR 0075 d2), so a self-update's step 5 removes an installed ntfy-push.py as a file the candidate's table drops.
@@ -164,13 +206,19 @@ verb prints one line, `ERROR: primary-refresh <verb>: cannot load skills/_shared
 beside the copy or in <primary> | <the path> raised <Type>: <msg>): run primary-refresh.py install from a checkout that
 holds the whole bundle`, and runs no further (no log rotation, no state).
 
-The self-update, on the installed copy (the marker beside it) only, on every pass whose primary fetch succeeded,
-whatever the primary read, at the tip that fetch read (`git cat-file blob <tip>:<rel>`: one sha, never a short name,
-never the working tree). Its exceptions are caught (`self-update: failed (<Type>: <msg>)`, kind failed), so it never
-skips the job check or the state.
-  1. origin's primary-refresh.py at the tip equal to this copy: compare every row of this copy's own table (bytes and
-     mode) with the copy's directory. Nothing differs: current, which clears the self-update spell (printed only under
-     --dry-run, which otherwise prints `would install …` and stops there).
+The self-update, on the installed copy (the marker beside it) only, on every pass whose primary fetch succeeded and
+whose target was read, whatever the primary read, at that target (`git cat-file blob <tip>:<rel>`: one sha, never a
+short name, never the working tree): the bundle follows the Green tip, backwards included (a hand install past it goes
+back once the Green tip's candidate smokes current). A real pass on a hold or a `fetch failed:` makes none. Its
+exceptions are caught (`self-update: failed (<Type>: <msg>)`, kind failed), so it never skips the job check or the
+state.
+  1. The tip's primary-refresh.py equal to this copy: compare every row of this copy's own table (bytes and mode) with
+     the copy's directory. Nothing differs: current, which clears the self-update spell (printed only under --dry-run,
+     which otherwise prints `would install …` and stops there). Under --dry-run only, a stage that matches origin's
+     freshly fetched tip reads current too: an older installed copy (origin's tip, its frozen rule) stages and smokes
+     this candidate at origin's tip, so the candidate's own dry pass, which reads a Green tip behind it, still accepts
+     it. A dry run on a hold has no target: current when the stage matches origin's tip, else `self-update: waits: no
+     Green tip to install from (<why>)`.
   2. A tip already refused within the last 24 h (SMOKE_RETRY) is skipped, so each tip is smoked once; a tip whose
      install failed partway is restaged and installed with no second smoke.
   3. Stage, in a `.stage-*` directory beside the copy (leftovers removed first): the candidate script (compiled first),
@@ -182,15 +230,19 @@ skips the job check or the state.
      replaced in place where present (<stage>/smoke-state.json, <stage>/smoke.log, this pass's stamp), --state added if
      absent, and --dry-run added: so it fetches for real through its own staged live-checkout.sh, reads the hold, and
      runs its compare-only self-update against the stage it was built from. Accepted only at exit 0 with no Traceback,
-     its primary's outcome line neither `fetch failed:`, `not a primary checkout:`, `broken:` nor `unreadable`, and a
-     `self-update: current` line; bounded by --smoke-timeout (300 s). A refusal: `self-update: origin's bundle at
-     <tip12> failed its smoke run (<why>): the installed copy is kept`.
+     its primary's outcome line neither `fetch failed:`, `not a primary checkout:`, `broken:`, `unreadable` nor `no
+     move:` (a candidate whose resolver holds), and a `self-update: current` line; bounded by --smoke-timeout (300 s).
+     A candidate that cannot read its own stage as current is refused, so the bundle never steps back to a Green tip
+     whose copy reads origin's tip (one older than p54-6), nor onto one whose resolver holds. A refusal:
+     `self-update: origin's bundle at <tip12> failed its smoke run (<why>): the installed copy is kept` (`the Green
+     tip's bundle at <tip12> …` when the target is a Green tip behind origin's tip).
   5. Install, by the candidate's table: the helpers that differ, then every file of this copy's own table that the
      candidate's drops (removed, so a stale helper never shadows the primary's), then this copy, last, so a failure
      partway leaves the old copy running with its own table (and, once background_job.py is installed, calling the new
      module in process: the frozen interface below keeps it running): `installed <k> of <n> files, then <rel> failed
      (<e>): the next fetched pass finishes it` (kind install-failed). Success: `the installed bundle now matches
-     origin/<d> at <tip12> (installed …; removed …)`.
+     origin/<d> at <tip12> (installed …; removed …)`, or `the installed bundle now matches the Green tip <tip12> of
+     origin/<d> (…)`.
   A refusal opens or continues the `self-update` spell (kind refused, install-failed or failed, with the tip and tipAt),
   read by `stuck` like any spell. A helper an older copy cannot parse reads `broken:`, never moved, and the next
   fetched pass heals it.
@@ -199,7 +251,10 @@ The self-update contract is frozen: an installed copy sends every candidate `run
 --dry-run, the `bundle` subcommand, and reads its `<mode> <repo-rel> <install-rel>` lines and the `primary-refresh
 <P>: <outcome>` and `self-update: current` lines back. Change any of them and every installed copy refuses every
 candidate: the self-update spell shows on /thread:status's Primary refresh line after 24 h, and a hand-run install
-recovers (tests/primary-refresh.test.sh I6 pins the literal tokens). `run` takes no abbreviated flag, so the smoke's
+recovers (tests/primary-refresh.test.sh I6 pins the literal tokens). p54-6 changed none of them: the green-tip.py row
+is additive, live-checkout.sh with no target reads as an older copy expects, `no move:` is a new outcome an older copy
+does not deny (GR-T3 pins that an older copy's smoke of this candidate reads `self-update: current`), and an installed
+copy older than p54-6 installs p54-6's merge at origin's tip once, by its frozen rule. `run` takes no abbreviated flag, so the smoke's
 rewrite names every flag one way. background_job.py's interface is in the contract too, additive only. Step 5 installs
 it as a helper before this copy, so an install that fails partway leaves the OLD copy calling the NEW module in
 process, and "the next fetched pass finishes it" holds only while every old call still binds. One that no longer binds

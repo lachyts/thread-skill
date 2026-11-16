@@ -310,6 +310,12 @@ R~0~@ held: a rollout runs
 R~0~@ refused: local changes overlap origin/main (x)
 R~0~@ repaired: reset aaaaaaaaaaaa to origin/main at bbbbbbbbbbbb (ahead 1, behind 2: their content is already on origin; backup refs/thread/primary-backup/20261002T140500)
 R~0~@ diverged (ahead 1, behind 2): carried: queued https://github.com/o/r/pull/9
+R~0~@ current at the Green tip aaaaaaaaaaaa (1 behind origin/main: waits on the Green tip)
+R~0~@ moved aaaaaaaaaaaa..bbbbbbbbbbbb (3 commits) to the Green tip (1 behind origin/main)
+R~0~@ past the Green tip aaaaaaaaaaaa by 1 (on origin/main): waits on the Green tip
+R~0~@ no move: refs/thread/green is gone from origin after it was seen (never origin's tip)
+R~0~@ repaired: reset aaaaaaaaaaaa to the Green tip bbbbbbbbbbbb of origin/main (ahead 1, behind 2: their content is already on origin; backup refs/thread/primary-backup/20261002T140500)
+R~0~@ diverged (ahead 1, behind 2): repair waits (no Green tip to reset to: refs/thread/green is gone from origin after it was seen)
 R~0~@ self-update: would install it\n@ current
 N~0~@ busy: a rebase is in progress
 N~0~@ not a primary checkout: a linked worktree
@@ -318,6 +324,8 @@ N~0~@ broken: live-checkout.sh default: exit 1
 N~0~@ unreadable: an unborn HEAD
 N~0~@ timed out: git merge --ff-only ran past 600 s and was stopped
 N~0~@ would move aaaaaaaaaaaa..bbbbbbbbbbbb (3 commits)
+N~0~@ fetch failed: refs/thread/green: origin did not answer
+N~0~@ would move aaaaaaaaaaaa..bbbbbbbbbbbb (3 commits) to the Green tip (1 behind origin/main)
 N~0~
 U~0~@ a new outcome
 N~0~@ self-update: current

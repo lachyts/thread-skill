@@ -13,6 +13,11 @@ copy.)*
 installed pass and paced by its own 15-minute limit, shipped as three new bundle rows (land-carrier.py,
 landing-register.py and merge-task.sh), with no plist change. Its failures are the `carrier` spell on the Primary
 refresh line, and primary-refresh.py's docstring holds the wiring.)*
+*(Amended by ADR 0084 d1, 2026-11-16, p54-6: "current with origin" now means its Green tip in a repo that publishes one:
+the fast-forward, the repair's reset and the self-update all take `green-tip.py`'s target and never pass it (the bundle
+follows the Green tip, backwards included), a missing or untested ref moves nothing (`no move:`, never origin's tip),
+a checkout pulled past it reads `past`, and a checkout waiting on it is kept in a separate waits file, shown after 2 h.
+The tenth bundle row is green-tip.py; the self-update contract's tokens are unchanged.)*
 
 ## Context
 

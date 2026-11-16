@@ -614,6 +614,11 @@ test('control: a drifted key, verb or LOCAL_RE, or a renamed, new or unclassifie
     ['classifies a return it cannot read', 'refresh() returns repaired: '])
   const recorded = s.RESET_PRIMARY_RECORDED.filter((lit) => lit !== 'repaired: ')
   assert.deepEqual(whenChecks(doc, { ...s, RESET_PRIMARY_RECORDED: recorded }), ['classifies repaired: '])
+  // The Green tip's two recorded outcomes (ADR 0084 d1, p54-6), each classified by its own literal alone.
+  const noPast = s.RESET_PRIMARY_RECORDED.filter((lit) => lit !== 'past ')
+  assert.deepEqual(whenChecks(doc, { ...s, RESET_PRIMARY_RECORDED: noPast }), ['classifies past the Green tip '])
+  const noMove = s.RESET_PRIMARY_RECORDED.filter((lit) => lit !== 'no move: ')
+  assert.deepEqual(whenChecks(doc, { ...s, RESET_PRIMARY_RECORDED: noMove }), ['classifies no move: '])
   assert.deepEqual(whenChecks(mutate(doc, '## When', '## Whence'), s), ['states the key'])
 })
 
