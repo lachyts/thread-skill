@@ -9,8 +9,15 @@
 # The target (ADR 0084 d1, p54-6): a live checkout of a repo that publishes a Green tip moves to it and never past it
 # (skills/_shared/scripts/green-tip.py decides which commit). So lc_overlap, lc_ff, lc_check and the check, ff and
 # content modes take an optional <target>, a commit (a run mode's is 40 or 64 hex), against which they read and move.
-# With none it is refs/remotes/origin/<d>, so every call without one is byte-identical to before (an older caller's
-# included). <target> is always origin/<d> or an ancestor of it.
+# With none it is refs/remotes/origin/<d>, as before. <target> is always origin/<d> or an ancestor of it.
+#
+# One rule came with it and holds for every caller, with a target or none (land.sh S4 and O9, merge-task.sh's
+# refresh_local_base, self-rollout-check.sh's --ensure, --refresh and --refresh-in-place, primary-refresh.py):
+# lc_landed. A dirty or staged THREAD.md whose copy is a blob a commit of HEAD..origin/<d> holds at that path (a landed
+# close-out's copy) is no overlap, and lc_ff writes the target's copy over it when the target holds that commit (with
+# no target, always). Before it, such a copy held the move back unless it was origin's own. The widening loses
+# nothing: the copy replaced is one origin's history holds, and, once moved, HEAD's; a copy no such commit holds is an
+# overlap as before. LC13 pins it, (h) with no target.
 #
 # Sourced, it sets one variable, _lc_dir (this file's directory, physical), and defines the lc_* functions below. It
 # never runs set or shopt, never scrubs the environment and never unsets anything; every function variable is local and
@@ -70,7 +77,7 @@
 #                              -- <path>` holding that blob at <path> (newest first). The default branch already holds
 #                              that copy, so a move that replaces it loses nothing. It is how a checkout that waits on the
 #                              Green tip keeps the close-out's THREAD.md land.sh leaves on disk (its settle_handed)
-#                              without that copy ever holding a move back. Any other path, or a copy no such commit
+#                              without that copy ever holding a move back; it holds with no target too (the header). Any other path, or a copy no such commit
 #                              holds, or a staged entry of some third blob, is rc 1 (an overlap as before).
 #   lc_overlap <repo> <d> [<target>]
 #                              the fast-forward's overlap: lc_overlap_ref's paths against <target> (refs/remotes/origin/
