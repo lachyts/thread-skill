@@ -204,7 +204,8 @@ running time (ties to the later), a round cap's most common value on the window'
 most common int cap.max on them (ties to the later; null with no budget-admitted Slot), and a Weight part's estimate
 now (--settings' `weight`, an int when integral: slot-taken's cap.weight carries no source, so this reads wider, as an
 attribute, and is flagged `weights: rollouts.toml changed after the run began: the Weights' ranAt is its value now`
-when the settings file's mtime is after activeStart). to = ranAt + direction; from = rollouts.toml's resolved value now
+when a Weight rule fires and the settings file's mtime is after activeStart, never otherwise: an edit during a long run
+flags no score that proposes no Weight). to = ranAt + direction; from = rollouts.toml's resolved value now
 (--settings: `settings`, a Weight's from `weight`). A proposal is
 `from -> to` when sign(to - from) is the rule's direction; otherwise rollouts.toml is already at or past this
 run's evidence and the entry is withheld. to < 1 is dropped and flagged. With no repo identity nothing is
@@ -296,11 +297,11 @@ The budget (p53-5, ADR 0083 d4 and DfL 13; budget_score, the one copy of its rul
 stamps idle-slots' `bound` (count, memory, cores or memory and cores) on a hold-trickle or hold-away-cap marker, and
 slot-taken's cap.max. `budget` re-reads the markers with each such reason refined by its bound, an exact refinement of
 the coarse run, and splits trickle-bound's held time (its running time with a Slot free, plus its no-Slot time inside
-the coarse excluded spans, so a pause or a hold still wins) by bound: heldHours{count, memory, cores, memory and cores},
-countHeldHours (no bound: C or the Trickle), which sum to that rule's numerator; short, the bound held longest (ties:
-count, memory and cores, memory, cores), else null; admitted, the window's slot-taken lines with an int cap.max. Its
-window: time in [since, until] (a marker's span clipped to it) and slot-taken by ts in [since, until]. A line from
-before p53-4 (budget with no max, no bound) reads as C held it.
+the coarse excluded spans, so a pause or a hold still wins) by bound: heldHours{count (capacity_max, the hard count),
+memory, cores, memory and cores}, unboundHeldHours (no bound: C or the Trickle held it), which sum to that rule's
+numerator; short, the bound held longest (ties: count, memory and cores, memory, cores), else null; admitted, the
+window's slot-taken lines with an int cap.max. Its window: time in [since, until] (a marker's span clipped to it) and
+slot-taken by ts in [since, until]. A line from before p53-4 (budget with no max, no bound) reads as C held it.
 
 The Weights (p53-5, ADR 0083 DfL 8 and 9; weights_score, the one copy of its rules): each task's measured peak beside
 the repo's estimate. A slot-freed `peak` counts when reconcile-rollout.py's _peak_room accepts it, each line windowed
@@ -330,7 +331,7 @@ setAsideRate, conflictRate, quotaStalls, reviewChurn{value | "unknown", bound "<
 roundsPerLandedTask}}, load, nights (The nights, above), binding{constraint, why, short (budget-bound only)},
 headline (the ten numbers tune.py records, its name kept for tune.py: throughput, runningHours, merges, tokensPerMerge,
 setAsideRate, conflictRate, quotaStalls, handsOffRate, quality (escapes.quality), reviewChurn (reviewChurn.value)),
-budget{admitted, heldHours{count, memory, cores, memory and cores}, countHeldHours, short} (The budget, above),
+budget{admitted, heldHours{count, memory, cores, memory and cores}, unboundHeldHours, short} (The budget, above),
 weights{estimate{mem_gb, cores: {value, source}} | null, tasks[{task, kind, mem_gb, cores, at}], measured{mem_gb, cores,
 tasks} | null, kinds[{kind, tasks, measured, started}], noNote} (The Weights, above), ranAt{parallel_ceiling,
 max_review_rounds, max_iterations, max_plan_rounds, capacity_max, weight_mem_gb, weight_cores} (each key's ran-at
@@ -1471,12 +1472,13 @@ class Score:
         refinement is exact: the same cuts and labels, each reason refined. heldHours[b] is the running time a CAP_HOLDS
         reason with bound b was in force with a Slot free, plus the no-Slot time it labelled inside the coarse run's
         excluded CAP_HOLDS spans (so a pause or a hold still wins), each refined label taking what of them is left in
-        start order; countHeldHours is the same with no bound. Their sum is trickle-bound's numerator exactly
-        (_mac_bound). short is the bound held longest (ties in SHORT_ORDER), null when none held. admitted counts the
-        window's slot-taken lines whose cap carries an int `max` (p53-4: the budget admitted the Slot)."""
+        start order; unboundHeldHours is the same with no bound (C or the Trickle held it; heldHours["count"] is
+        capacity_max's, the hard count). Their sum is trickle-bound's numerator exactly (_mac_bound). short is the bound
+        held longest (ties in SHORT_ORDER), null when none held. admitted counts the window's slot-taken lines whose cap
+        carries an int `max` (p53-4: the budget admitted the Slot)."""
         refined = [(t, "%s/%s" % (r, b) if r in CAP_HOLDS and b else r) for t, r, b in self.marker_bounds]
         segs = self.idle_segments(since, until, refined)
-        held, count = {b: 0 for b in BUDGET_BOUNDS}, 0
+        held, unbound = {b: 0 for b in BUDGET_BOUNDS}, 0
         for _a, _b, running, _n, c, reason in segs:
             if c is None or _base(reason) not in CAP_HOLDS:
                 continue
@@ -1484,7 +1486,7 @@ class Score:
             if b:
                 held[b] += running
             else:
-                count += running
+                unbound += running
         left = union((a, b) for kind, a, b in self._excluded_ms if kind in CAP_HOLDS)
         rest = subtract([(since, until)], self.run_iv)
         for kind, _why, iv in sorted(self._mac_hold_labels(rest, until, refined, segs), key=lambda x: x[2]):
@@ -1495,15 +1497,15 @@ class Score:
             if _bound_of(kind):
                 held[_bound_of(kind)] += piece
             else:
-                count += piece
-        count += total(left)  # none, the refinement being exact; kept so the parts always sum to the numerator
-        self.budget_ms, self.budget_count_ms = held, count
+                unbound += piece
+        unbound += total(left)  # none, the refinement being exact; kept so the parts always sum to the numerator
+        self.budget_ms, self.budget_unbound_ms = held, unbound
         short = None
         if any(held.values()):
             short = max(SHORT_ORDER, key=lambda b: (held[b], -SHORT_ORDER.index(b)))
         admitted = sum(1 for t, _task, cap in self.caps if since <= t <= until and _int_ge(cap.get("max"), 1))
         self.budget = {"admitted": admitted, "heldHours": {b: hours(held[b]) for b in BUDGET_BOUNDS},
-                       "countHeldHours": hours(count), "short": short}
+                       "unboundHeldHours": hours(unbound), "short": short}
 
     # ---- the Weights (p53-5, ADR 0083 d4, DfL 8 and 9) ---------------------------------------------------------------
 
@@ -1520,7 +1522,8 @@ class Score:
         quartile, inclusive, rounded to 2 places, floored at WEIGHT_FLOOR) once WEIGHT_MIN_TASKS tasks have one, else
         null; each kind (_kind of its note: its `scope:`, else unscoped) the same over its own tasks. A task with no
         readable note stays in the pooled measure and in no kind (noNote). reconcile-rollout.py loads only when a peak
-        exists, and the flags rise only then."""
+        exists, and the flags rise only then; the settings file's mtime is read here, but flagged by propose() only
+        when a Weight rule fires."""
         est = (settings or {}).get("weight") if isinstance((settings or {}).get("weight"), dict) else None
         estimate = None
         if est and all(isinstance(est.get(p), dict) and _int_if_whole(est[p].get("value")) is not None
@@ -1530,14 +1533,16 @@ class Score:
         self.weight_estimate = estimate
         for key in WEIGHT_KEYS:
             self.ran_at[key] = ((estimate or {}).get(WEIGHT_PART[key], {}).get("value"), None)
+        # read now, flagged by propose() only when a Weight rule fires (its ranAt is this estimate): any edit of the
+        # file during a long run would otherwise flag every score
+        self.weight_file_newer = False
         if estimate is not None and settings.get("file") and isinstance(settings.get("path"), str) and \
                 act_start is not None:
             try:
                 mtime = int(os.stat(os.path.expanduser(settings["path"])).st_mtime * 1000)
             except OSError:
                 mtime = None
-            if mtime is not None and mtime > act_start:
-                self.flag("weights: rollouts.toml changed after the run began: the Weights' ranAt is its value now")
+            self.weight_file_newer = mtime is not None and mtime > act_start
         out = {"estimate": estimate, "tasks": [], "measured": None, "kinds": [], "noNote": 0}
         self.weight_measured = None
         inside = [(t, task, peak) for t, task, peak in self.peaks if since <= t <= until]
@@ -2251,7 +2256,7 @@ class Score:
             return None
         share, held, no_slot = hit
         by_budget = sum(self.budget_ms.values())
-        if by_budget > 0 and by_budget >= self.budget_count_ms:
+        if by_budget > 0 and by_budget >= self.budget_unbound_ms:
             return self._budget_bound(share, no_slot)
         self.flag("trickle-bound: no rollout key moves this (the Trickle is the Mac-wide cap in "
                   "~/.config/thread/away.json)")
@@ -2417,6 +2422,8 @@ class Score:
                     measured_w[part], measured_w["tasks"], target, frm, est[part].get("source"))
                 rules.append((key, direction, "weight-measured-raise" if direction > 0 else "weight-measured-lower",
                               evidence, None, None))
+            if getattr(self, "weight_file_newer", False) and any(r[0] in WEIGHT_KEYS for r in rules):
+                self.flag("weights: rollouts.toml changed after the run began: the Weights' ranAt is its value now")
         proposals, withheld = [], []
         breached = [k for k, v in guard.items() if v["breached"]]
         measured = {h: headline.get(h) for h in HEADLINES}

@@ -393,7 +393,7 @@ test('budget-bound: a budget-held week reads budget-bound with the short part na
   assert.equal(out.binding.constraint, 'budget-bound')
   assert.equal(out.binding.short, 'memory')
   assert.equal(out.binding.why, 'the budget kept Slots free 100% of the time (running time plus 1 h with no Slot open; held: the count 0 h, memory 5 h, cores 0 h, memory and cores 0 h)')
-  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 5, cores: 0, 'memory and cores': 0 }, countHeldHours: 0, short: 'memory' })
+  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 5, cores: 0, 'memory and cores': 0 }, unboundHeldHours: 0, short: 'memory' })
   assert.ok(has(out.flags, /^budget-bound: memory and cores are the budget's \(Chorus's capacity\.json\): no rollout key moves them$/), JSON.stringify(out.flags))
   assert.ok(has(out.flags, /^throughput: read under the budget \(budget-bound\): .* not at the ceiling 4$/))
   assert.ok(!has(out.flags, /^trickle-bound/), 'never also trickle-bound')
@@ -434,7 +434,7 @@ test('budget-bound control: C or the Trickle holding longer than the budget keep
   const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
   assert.equal(out.binding.constraint, 'trickle-bound')
   assert.equal(out.binding.why, 'the Mac-wide cap kept Slots free 100% of the time (running time plus 1 h with no Slot open; Slot time it held: the Trickle 16 h, the Away cap 0 h)')
-  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 2, cores: 0, 'memory and cores': 0 }, countHeldHours: 3, short: 'memory' })
+  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 2, cores: 0, 'memory and cores': 0 }, unboundHeldHours: 3, short: 'memory' })
   assert.ok(!has(out.flags, /^budget-bound/))
   // a pre-p53-4 record (budget with no max, no bound) reads as C held it, and capacity_max ran at nothing
   const home2 = tmpHome(t)
@@ -443,11 +443,12 @@ test('budget-bound control: C or the Trickle holding longer than the budget keep
     ...['00:00', '02:00', '02:20', '02:40', '03:00'].map((hm) => [at(hm), 'idle-slots', null, { reason: 'hold-trickle', free: 3, settings: S(4) }])]))
   const out2 = scored(home2, ['--until', at('05:00'), '--settings', writeSettings(home2, { parallel_ceiling: 4 })])
   assert.equal(out2.binding.constraint, 'trickle-bound')
-  assert.deepEqual([out2.budget.admitted, out2.budget.countHeldHours, out2.budget.short, out2.ranAt.capacity_max], [0, 5, null, null])
+  assert.deepEqual([out2.budget.admitted, out2.budget.unboundHeldHours, out2.budget.short, out2.ranAt.capacity_max], [0, 5, null, null])
 })
 
 // capacity_max is machine-wide ([defaults] only): another repo's Tuning of it is this one's cause and
-// agreement, named with its repo; a parallel_ceiling Tuning there is neither.
+// agreement, named with its repo; a parallel_ceiling Tuning there is neither (same_repo(), which cause() and agreeing()
+// read, pinned on the same line below).
 test('budget-count-raise reads capacity_max machine-wide: another repo\'s Tuning causes and agrees, named with its repo', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', budgetHeld(['count', 'count', 'count', 'count', 'memory']))
@@ -459,6 +460,14 @@ test('budget-count-raise reads capacity_max machine-wide: another repo\'s Tuning
   const [x] = out.withheld
   assert.deepEqual([x.key, x.from, x.to, x.ranAt, x.agreeing], ['capacity_max', 7, 7, 6, 1])
   assert.equal(x.ranAtCause, `Tuning t-other moved it on ${Z(at('02:30'))} (for o/other)`)
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("score", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'ts = m.load_tunings(sys.argv[2])',
+    'print(json.dumps([m.agreeing(ts, "o/r", "capacity_max", "budget-count-raise", 1), m.agreeing(ts, "o/r", "parallel_ceiling", "slot-bound-raise", 1),',
+    '                  m.agreeing(ts, "o/other", "parallel_ceiling", "slot-bound-raise", 1),',
+    '                  m.same_repo("capacity_max", "o/other", "o/r"), m.same_repo("parallel_ceiling", "o/other", "o/r")]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE, evDir(home)], { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [1, 0, 1, true, false], 'o/other\'s parallel_ceiling entry speaks for o/other alone')
 })
 
 // CLAUDE.md, Review rule: one row planted outside each new reading's window adds nothing.
@@ -470,7 +479,7 @@ test('the budget holds only its window: ticks ending past the marker span before
   const home = tmpHome(t)
   emitAll(home, 'demo', ev())
   const out = scored(home, ['--since', at('00:00'), '--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 }, { capacity_max: 6 })])
-  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 0, cores: 0, 'memory and cores': 0 }, countHeldHours: 5, short: null })
+  assert.deepEqual(out.budget, { admitted: 2, heldHours: { count: 0, memory: 0, cores: 0, 'memory and cores': 0 }, unboundHeldHours: 5, short: null })
   assert.equal(out.binding.constraint, 'trickle-bound', 'never budget-bound')
   assert.equal(out.ranAt.capacity_max, 6, 'three slot-taken lines at cap.max 9 before --since are no evidence')
   // the control: the same record read from the day before counts both
@@ -484,10 +493,15 @@ test('the budget holds only its window: ticks ending past the marker span before
 // ---- 1b''. each kind's measured Weight beside its estimate (p53-5, ADR 0083 DfL 8 and 9) -----------------------------
 
 // Four tasks one after another at ceiling 4 (none-clear), each with a slot-freed peak; t1 and t2 single-file, t3 and t4
-// cross-cutting. `early` plants t1's own earlier Slot before --since, with a 40 GB peak.
-function weighed(home, mems, { early = false, notes = true } = {}) {
+// cross-cutting. `early` plants t1's own earlier Slot before --since, with a 40 GB peak; `late` its own later Slot
+// after an --until of 06:00, started at another Weight (cap.weight 40 GB, 3 cores).
+function weighed(home, mems, { early = false, late = false, notes = true } = {}) {
   const ev = mems.flatMap((mem, i) => life(`t${i + 1}`, { from: at(`0${i}:00`), to: at(`0${i}:50`), c: 4, cap: CAP(), peak: { mem_gb: mem, cores: 1 } }))
   if (early) ev.push(...life('t1', { from: D(4, '20:00'), to: D(4, '21:00'), c: 4, run: 't1-early', cap: CAP(), peak: { mem_gb: 40, cores: 3 } }))
+  if (late) {
+    ev.push(...life('t1', { from: at('07:00'), to: at('07:50'), c: 4, run: 't1-late', cap: { ...CAP(), weight: { mem_gb: 40, cores: 3 } },
+      peak: { mem_gb: 40, cores: 3 } }))
+  }
   emitAll(home, 'demo', byTs(ev))
   const tasks = path.join(home, 'vault', 'Work', 'Tasks')
   fs.mkdirSync(path.join(tasks, 'Archive'), { recursive: true })
@@ -556,16 +570,50 @@ test('weights: a measure above the estimate raises it one step; a fractional est
   }
 })
 
-test('weights hold only their window: a 40 GB peak before --since for a task with an in-window peak changes neither its row nor the measure', (t) => {
-  const run = (early) => {
+test('weights: rollouts.toml changed after the run began is flagged only beside a Weight rule', (t) => {
+  const CHANGED = /^weights: rollouts\.toml changed after the run began: the Weights' ranAt is its value now$/
+  const newer = (home) => { // a settings file written now, after every fixture's activeStart
+    const f = path.join(home, 'rollouts.toml')
+    fs.writeFileSync(f, 'schema = 6\n')
+    return writeSettings(home, { parallel_ceiling: 4 }, { file: f, weight: W(3, 2, 'file:repo') })
+  }
+  {
+    // no peak: no measure, no Weight rule, no flag
     const home = tmpHome(t)
-    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], { early })
+    emitAll(home, 'demo', byTs(life('a', { from: at('00:00'), to: at('02:00'), c: 4, cap: CAP() })))
+    const out = scored(home, ['--until', at('03:00'), '--settings', newer(home)])
+    assert.deepEqual([out.weights.measured, out.proposals.concat(out.withheld).filter((p) => p.key.startsWith('weight_'))], [null, []])
+    assert.ok(!has(out.flags, CHANGED), JSON.stringify(out.flags))
+  }
+  {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9])
+    const out = scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', newer(home)])
+    assert.deepEqual(out.proposals.map((p) => p.key), ['weight_mem_gb', 'weight_cores'])
+    assert.ok(has(out.flags, CHANGED), JSON.stringify(out.flags))
+  }
+})
+
+test('weights hold only their window: a 40 GB peak before --since for a task with an in-window peak changes neither its row nor the measure; a start after --until no kind\'s `started`', (t) => {
+  const run = (opts) => {
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], opts)
     return scored(home, ['--since', at('00:00'), '--until', at('06:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 2) })])
   }
-  const [plain, planted] = [run(false), run(true)]
+  const [plain, planted, late] = [run({}), run({ early: true }), run({ late: true })]
   assert.deepEqual(planted.weights, plain.weights)
   assert.deepEqual(planted.weights.tasks[0], { task: 't1', kind: 'single-file', mem_gb: 0.5, cores: 1, at: Z(at('00:50')) })
   assert.deepEqual(planted.proposals.map((p) => [p.key, p.to]), plain.proposals.map((p) => [p.key, p.to]))
+  assert.deepEqual(late.weights, plain.weights)
+  assert.deepEqual(late.weights.kinds.map((k) => [k.kind, k.started]), [['cross-cutting', { mem_gb: 3, cores: 2 }], ['single-file', { mem_gb: 3, cores: 2 }]],
+    'the latest slot-taken in the window, never t1\'s start after --until')
+  {
+    // the control: read past it, t1's later start is its kind's latest
+    const home = tmpHome(t)
+    const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], { late: true })
+    const out = scored(home, ['--since', at('00:00'), '--until', at('08:00'), '--tasks-dir', tasks, '--settings', writeSettings(home, { parallel_ceiling: 4 }, { weight: W(3, 2) })])
+    assert.deepEqual(out.weights.kinds.map((k) => [k.kind, k.started]), [['cross-cutting', { mem_gb: 3, cores: 2 }], ['single-file', { mem_gb: 40, cores: 3 }]])
+  }
   // the control: read from the day before, the early peak is t1's highest
   const home = tmpHome(t)
   const tasks = weighed(home, [0.5, 0.6, 0.8, 0.9], { early: true })
