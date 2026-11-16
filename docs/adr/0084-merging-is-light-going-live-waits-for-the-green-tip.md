@@ -60,8 +60,9 @@ task's `speed_fix:` cites its evidence (`docs/audits/<file>.md row <N>`, `docs/a
 `reconcile-rollout.py speed-hold apply` (schedule step 7) and `join` give every other queued task of the rollout a
 `depends-on:` on the phase's release (its last task, or the member, marked or not, the phase note's `speed_fix_release:`
 names), recorded on the rollout note's `## Speed fix holds` so `speed-hold release` and `lift` remove exactly what was
-added; the reach is one rule, so no marked task, no release, nothing upstream of either and no member of the hold's own
-phase is ever held, and two Speed fix phases never deadlock; `next` lets a hold go when its release, or a task it
+added; the reach is one rule, so no marked task, no release, nothing upstream of either and no member of any Speed fix
+phase in play (one with a live mark or a standing hold) is ever held, and two Speed fix phases hold no task of each
+other's and never deadlock; `next` lets a hold go when its release, or a task it
 depends on, leaves the queue or is set aside with its automatic retries spent (a gate-pending one never lets it go, so a
 gate-pending release, or a task it depends on, is the one wait on Lachy the hold keeps, until he or the Standing
 approval signs its gate or he defers it), with a `speed-hold` Run record line; `defer` drops a deferred task's entries,

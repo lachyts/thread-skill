@@ -494,7 +494,7 @@ s7d u-deferred 'setfm u rollout -' '[[u]] left the queue (deferred)'
 s7d u-elsewhere 'setfm u rollout "\"[[ro2]]\""' ''
 s7d u-here 'true' ''
 
-# ── S8: two Speed fix phases never hold each other's marks or releases ─────────────────────────────────────────────────────
+# ── S8: two Speed fix phases joined to one queue hold no task of each other's ──────────────────────────────────────────────
 # Each phase: a marked x-pN-1, an unmarked x-pN-2 and its unmarked last task x-pN-3, the release.
 scen s8
 mkro ro "" x-p8-1 x-p8-2 x-p8-3 x-p9-1 x-p9-2 x-p9-3 u
@@ -502,12 +502,25 @@ for t in x-p8-1 x-p9-1; do mkt "$t" open ro "$MARK"; done
 for t in x-p8-2 x-p8-3 x-p9-2 x-p9-3; do mkt "$t" open ro; done
 mkt u open ro
 sh_ apply
-ok "$(deps x-p8-1),$(deps x-p9-1)" "-,-" "S8: no marked task gets any entry"
-ok "$(deps x-p8-3),$(deps x-p9-3)" "-,-" "S8: an unmarked release is held by no hold, the other phase's included"
-ok "$(deps x-p9-2)|$(deps x-p8-2)|$(deps u)" "x-p8-3|x-p9-3|x-p8-3,x-p9-3" \
-  "S8: each phase's other unmarked member is held only by the other phase; an unmarked task by both"
+ok "$(deps x-p8-1)|$(deps x-p8-2)|$(deps x-p8-3)|$(deps x-p9-1)|$(deps x-p9-2)|$(deps x-p9-3)" "-|-|-|-|-|-" \
+  "S8: no member of p8 carries a p9 entry, and no member of p9 a p8 one"
+ok "$(deps u)" "x-p8-3,x-p9-3" "S8: the unmarked task outside both is held by both"
 nxt --dry-run
-ok "$(starts)" '["x-p8-1","x-p8-3","x-p9-1","x-p9-3"]' "S8: no deadlock: each phase's marks and release start"
+ok "$(starts)" '["x-p8-1","x-p8-2","x-p8-3","x-p9-1","x-p9-2","x-p9-3"]' "S8: no deadlock: every member of both phases starts"
+
+# S8b: the second phase joins a queue whose first phase's hold already stamped one of its members: the join drops it.
+scen s8b
+mkro ro "" x-p8-1 x-p8-2 x-p8-3 x-p9-2 u
+mkt x-p8-1 open ro "$MARK"; mkt x-p8-2 open ro; mkt x-p8-3 open ro; mkt x-p9-2 open ro; mkt u open ro
+mkt x-p9-1 open - "$MARK"; mkt x-p9-3 open -
+sh_ apply
+ok "$(deps x-p9-2)|$(deps u)" "x-p8-3|x-p8-3" "S8b: with p9 unmarked, p8's hold stamps x-p9-2"
+jn --tasks x-p9-1,x-p9-3
+ok "$rc" 0 "S8b: the join exits 0"
+has "$out" "speed-hold drop [[x-p8-3]] from [[x-p9-2]]: a member of p9" "S8b: p8's entry on x-p9-2 is dropped as out of reach"
+ok "$(deps x-p9-1)|$(deps x-p9-2)|$(deps x-p9-3)|$(deps x-p8-2)|$(deps u)" "-|-|-|-|x-p8-3,x-p9-3" \
+  "S8b: no member of either phase carries the other's entry; u is held by both"
+ok "$(holdlines | tail -1)" "- $STAMP hold [[x-p9-3]] (p9, join): [[u]]" "S8b: p9's hold holds u alone"
 
 # ── S9: a red-master fix joined under a hold is not held ───────────────────────────────────────────────────────────────────
 scen s9
@@ -669,8 +682,8 @@ mkt x-p9-2 merged ro "$MARK" 'merged_into: "[[cmb]]"'; mkt cmb open ro
 mkt x-p9-1 merged ro 'merged_into: "[[cm2]]"'; mkt xx merged ro 'merged_into: "[[cm2]]"'; mkt cm2 open ro
 mkt a open ro
 sh_ apply
-ok "$(deps cmb)|$(deps a)|$(deps cm2)" "-|x-p8-1,cmb|x-p8-1" \
-  "S17: x-p9-2 folded into cmb: cmb is the release and never held; cm2, folding x-p9-1, is exempt from p9 and held by p8"
+ok "$(deps cmb)|$(deps a)|$(deps cm2)" "-|x-p8-1,cmb|-" \
+  "S17: x-p9-2 folded into cmb: cmb is the release and never held; cm2, folding x-p9-1, is p9's: held by neither phase"
 
 # S17b: the release is folded into a live combined unit after the hold is made: the hold stands, and apply moves it.
 scen s17b

@@ -1844,10 +1844,11 @@ d4) is the unit of the phase note's `speed_fix_release:` (any member of the phas
 hold), else of its last member (the highest M, the task number's leading digits, the whole task number breaking a tie:
 `1` < `1b` < `2`), marked or not, landed ones included; a phase with no marked member has none. A hold is made only
 while R is unlanded, linked, not letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its
-reach (the one rule, the block comment above SPEED_FIX_KEY: no mark, no release and nothing upstream of either is ever
-held), released by itself once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]]
-(p<N>, schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold
-is never re-made for the same R. The hold follows its phase's release at every apply and join (a move: the new hold's
+reach (the one rule, the block comment above SPEED_FIX_KEY: no mark, no member of a Speed fix phase in play, no release
+and nothing upstream of either is ever held, so two Speed fix phases hold no task of each other's), released by itself
+once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]] (p<N>, schedule|join):
+[[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold is never re-made for
+the same R. The hold follows its phase's release at every apply and join (a move: the new hold's
 line and entries, then the old one's `superseded by [[R']]` line and drops; join reads it whenever a Speed fix is in
 play, _SpeedCtx.in_play, so a joined release makes its phase's hold), never at `next`; a standing hold whose phase has
 no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R, read
@@ -13904,15 +13905,18 @@ def cmd_carry(args) -> int:
 #
 # The reach is one rule (_SpeedCtx.reach): a hold H(P, R) stamps task t only when (1) t is linked to this rollout (or
 # being joined) and queued; (2) t's unit carries no valid mark; (3) t carries no `master_red:` or `completion_red_of:`
-# (a red-master fix, _red_master_fix); (4) t's unit is not a member of P; (5) t is neither a root nor upstream of one
-# (_SpeedCtx.roots: every unlanded marked unit linked to this rollout or being joined, every standing hold's release,
-# and the release of every phase with such a mark while it is unlanded and linked); (6) R's unit is not already among
-# t's `depends-on:` / `blocked-by:` by hand (a recorded hold's entry is not, and a hand-written entry is never
-# recorded). A recorded task that carries R's entry but now fails "linked" or arms 2-5 is out of reach: join, apply and
-# `next` drop that entry. So no entry is ever stamped on a marked unit, on a release or on anything upstream of either,
-# and no hold holds a release, directly or transitively, even one that is no Speed fix itself (the phase's last task) or
-# one whose phase lost its marks: two Speed fix phases never deadlock, and a held queue always has its phase's own tasks
-# startable.
+# (a red-master fix, _red_master_fix); (4) t's unit is a member of no Speed fix phase in play (_SpeedCtx.play_phases:
+# P, every phase with an unlanded marked unit linked to this rollout or being joined, and every standing hold's phase),
+# so two Speed fix phases hold no task of each other's and order among themselves by priority and row; (5) t is
+# neither a root nor upstream of one (_SpeedCtx.roots: every unlanded marked unit linked to this rollout or being
+# joined, every standing hold's release, and the release of every phase with such a mark while it is unlanded and
+# linked); (6) R's unit is not already among t's `depends-on:` / `blocked-by:` by hand (a recorded hold's entry is not,
+# and a hand-written entry is never recorded). A recorded task that carries R's entry but now fails "linked" or arms
+# 2-5 is out of reach: join, apply and `next` drop that entry (a member of a phase that came into play since, why `a
+# member of p<N>`). So no entry is ever stamped on a marked unit, on a Speed fix phase's member, on a release or on
+# anything upstream of either, and no hold holds a release, directly or transitively, even one that is no Speed fix
+# itself (the phase's last task) or one whose phase lost its marks: two Speed fix phases never deadlock, and a held
+# queue always has its phase's own tasks startable.
 
 SPEED_FIX_KEY = "speed_fix"                    # a task's mark: its measured cause, cited
 SPEED_FIX_RELEASE_KEY = "speed_fix_release"    # a phase note's own choice of release, any member of the phase
@@ -14285,7 +14289,8 @@ class _SpeedCtx:
         self.units = _speed_units(index)
         self.holds = _speed_holds(rollout_note, index)
         self.warns = []
-        self._fix, self._up, self._lg, self._rel, self._marks, self._roots = {}, {}, {}, {}, None, None
+        self._fix, self._up, self._lg, self._rel = {}, {}, {}, {}
+        self._marks, self._roots, self._play = None, None, None
 
     def name(self, slug):
         e = self.index.get(slug.lower())
@@ -14351,6 +14356,15 @@ class _SpeedCtx:
             return hit[0]
         return same[0] if len(same) == 1 else None
 
+    def play_phases(self):
+        """The Speed fix phases in play, in phase order (the reach's arm 4): every phase with a live mark (live_marks,
+        phases_of) and every standing hold's phase (phase_of_hold). Read once per context."""
+        if self._play is None:
+            keys = {k for u in self.live_marks() for k in self.phases_of(u)}
+            keys.update(self.phase_of_hold(h) for h in self.holds.values() if h["standing"])
+            self._play = sorted((k for k in keys if k is not None), key=_speed_pkey_sort)
+        return self._play
+
     def has_entry(self, slug, r):
         e = self.index.get(slug.lower())
         return e is not None and r.lower() in _speed_entries(e[1])
@@ -14372,9 +14386,11 @@ class _SpeedCtx:
             return "a Speed fix now"
         if _red_master_fix(note):
             return "a red-master fix"
-        p = self.units["phases"].get(pkey) if pkey is not None else None
-        if p is not None and u in p["units"]:
-            return f"a member of {_speed_label(pkey)}"
+        # Arm 4: a member of the hold's own phase, or of any other Speed fix phase in play (the own one named first).
+        for k in dict.fromkeys([pkey, *self.play_phases()]):
+            p = self.units["phases"].get(k)
+            if p is not None and u in p["units"]:
+                return f"a member of {_speed_label(k)}"
         for m in self.roots():
             if u == m or slug.lower() == m:
                 return "a Speed fix release"
