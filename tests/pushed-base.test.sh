@@ -323,6 +323,28 @@ GIT_TRACE=1 pb "$C" master
 ok "$rc|$out" "0|pushed" "13i. in sync under GIT_TRACE=1 → 0"
 has "$err" "trace:" "13i. … with git's trace on stderr (precondition)"
 
+# 13j. a member on master that waits on the Green tip (a main checkout of a repo whose origin/master full-suite.yml
+# holds the green-tip job, ADR 0084 d1): its remedy names the Primary refresh's repair, never a reset to origin/master
+fresh
+mkdir -p "$S/.github/workflows"
+printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green\n' > "$S/.github/workflows/full-suite.yml"
+g -C "$S" add -A; g -C "$S" commit -q -m "publish the Green tip"; g -C "$S" push -q origin master; g -C "$C" pull -q
+commit "$C" "add adr 0031" docs/adr/0031-x.md
+mkdir -p "$S/docs/adr"; cp "$C/docs/adr/0031-x.md" "$S/docs/adr/0031-x.md"
+g -C "$S" add -A; g -C "$S" commit -q -m "add adr 0031 (#99)"; g -C "$S" push -q origin master
+pb "$C" master
+ok "$rc|$out" "0|pushed" "13j. landed by squash, in a checkout that waits on the Green tip → 0"
+has "$err" "not a blocker; the Primary refresh's repair drops the local copies, resetting $C to the Green tip once the tip holds them (ADR 0084 d1" "13j. … the note names the Primary refresh's repair"
+lacks "$err" "reset --keep" "13j. … and no reset to origin/master"
+commit "$C" "stranded adr" docs/adr/0032-z.md
+pb "$C" master
+ok "$rc" 3 "13j. plus a stranded ADR → 3"
+has "$err" "(a squash merge included), the Primary refresh's repair drops the local copies, resetting $C to the Green tip" "13j. … the remedy names the repair too"
+lacks "$err" "reset --keep" "13j. … never a reset to origin/master"
+g -C "$C" checkout -q -b side
+pb "$C" master
+has "$err" "git -C $C branch -f master origin/master" "13j. … master not checked out: branch -f, as ever (no live code moves)"
+
 # ======== the clone set ==================================================================================
 # 14. rollout clone in sync, primary (same origin) ahead with an ADR, given via --also
 fresh; P="$tmp/p$k"; mkclone "$O" "$P"
