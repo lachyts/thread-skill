@@ -451,7 +451,9 @@ reshuffle's R5.2 use the same words):
   and its retries spent (a non-null humanFix, read as needs-you reads it). R is read through its tombstone first: a
   release folded into a live combined unit keeps its hold, which the next apply or join moves to the unit; only an
   unresolved tombstone leaves the queue. A `gate-pending` task never lets a hold go: a gate has no automatic retries,
-  and the Standing approval may still sign it. The queue never waits on Lachy for a Speed fix that did not land.
+  and the Standing approval may still sign it. So a gate-pending release, or a unit upstream of it, is the one wait on
+  Lachy the hold keeps: the queue waits until he or the Standing approval signs the gate, or he defers the task (which
+  leaves the queue and lets the hold go).
 - **Write orders.** A new hold: its line, then its entries. A join of unmarked tasks under a hold: the extension line
   in the rows' save, then each task's `rollout:` and its entry in one save. A join that makes or moves a hold (a joined
   Speed fix, or a joined task that is a Speed fix phase's release, marked or not): the stamps, the out-of-reach drops,
@@ -510,7 +512,7 @@ reshuffle's R5.2 use the same words):
   `_when`, the one reader of its forms and of `on` and `do`; a target's status through `FINISHED_STATUSES`; and
   `LOCAL_RE`, a literal copy of `skills/_shared/scripts/serial-chains.py`'s, pinned by this file's contract test.
 - `skills/execute/scripts/reconcile-rollout.py` `speed-hold`, `join`, `next`, `defer`, `status` and `carry`:
-  `SPEED_FIX_KEY`, `SPEED_FIX_RELEASE_KEY`, `MASTER_RED_KEY`, `RED_MASTER_KEY` and `SPEED_HOLD_SECTION` (§ Speed fix
+  `SPEED_FIX_KEY`, `SPEED_FIX_RELEASE_KEY`, `MASTER_RED_KEY`, `COMPLETION_RED_KEY` and `SPEED_HOLD_SECTION` (§ Speed fix
   hold's keys and section), read by `_speed_fix_mark`, `_speed_release`, `_red_master_fix` and `_speed_holds`, the one
   reader of the record's line forms; the phase by `_speed_phase` on `PHASED_STEM_RE`.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the

@@ -1853,11 +1853,13 @@ play, _SpeedCtx.in_play, so a joined release makes its phase's hold), never at `
 no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R, read
 through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
 leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, read
-as `moving` reads it; a gate-pending task never lets it go): `next` writes the released line, drops the entries and
-records one Run record line, reported as `speedHoldReleased`, and on --dry-run reads its rows as if it had. Out-of-reach
-and leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next` computes its starts.
-The section's lines change only by migration (engine-snapshot.md § Cross-version state), and join and apply write a line
-or an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
+as `moving` reads it): `next` writes the released line, drops the entries and records one Run record line, reported as
+`speedHoldReleased`, and on --dry-run reads its rows as if it had. A gate-pending one never lets it go (a gate has no
+automatic retries, and the Standing approval may still sign it), so a gate-pending release, or a unit upstream of it, is
+the one wait on Lachy the hold keeps, until he or the Standing approval signs its gate or he defers it. Out-of-reach and
+leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next` computes its starts. The
+section's lines change only by migration (engine-snapshot.md § Cross-version state), and join and apply write a line or
+an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
 
 Durable triggers (p45-7, ADR 0078 d5; the grammar is skills/_shared/vault-grammar.md § When): a "when X, then Y" step
 written on a rollout or task note as a `when:` entry, so it survives any session. _when reads every form; _trigger_eval
@@ -13914,7 +13916,7 @@ def cmd_carry(args) -> int:
 
 SPEED_FIX_KEY = "speed_fix"                    # a task's mark: its measured cause, cited
 SPEED_FIX_RELEASE_KEY = "speed_fix_release"    # a phase note's own choice of release, any member of the phase
-RED_MASTER_KEY = "completion_red_of"           # the completion verifier's fix task (written by _file_red_fix): never held
+COMPLETION_RED_KEY = "completion_red_of"       # the completion verifier's fix task (_write_completion_red): never held
 MASTER_RED_KEY = "master_red"                  # master-runs' red-master fix (written by _write_master_red): never held
 SPEED_HOLD_SECTION = "## Speed fix holds"
 # The queue states (_queue_state) a set-aside task's retries can be spent in, as `moving` reads them: set aside at `run`
@@ -13972,7 +13974,7 @@ def _red_master_fix(note) -> bool:
     """A red-master fix (ADR 0084 Decided for you 3): a non-empty `master_red:`, the mark master-runs' fix task carries
     (p54-7, CONTEXT.md **Red-master fix**), or a non-empty `completion_red_of:`, the completion verifier's fix task's.
     Those two keys alone exempt a task from every Speed fix hold (a `master_red_since:` alone exempts nothing)."""
-    return _valued(note.get(MASTER_RED_KEY)) or _valued(note.get(RED_MASTER_KEY))
+    return _valued(note.get(MASTER_RED_KEY)) or _valued(note.get(COMPLETION_RED_KEY))
 
 
 def _speed_phase(stem):

@@ -294,7 +294,8 @@ prior's unlanded tasks are on their way to it, and a stop before step 7.5's clos
 step 7.5's. Report the clear in step 8 as `cleared [[<prior>]]'s start when ready: superseded here`.
 A run that stops before step 6 writes its note after step 1 lifted the prior's Speed fix hold (step 1) puts it back
 too, from the prior's root: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py speed-hold apply --rollout ~/repos/obsidian/Work/Tasks/<prior>.md`,
-which re-stamps each recorded task still queued and in reach, and prints `restored [[<prior>]]'s Speed fix hold`.
+which re-stamps each recorded task still queued and in reach (its `speed-hold restamp [[<R>]] on [[<t>]]` lines,
+then `[written: N]` or `[no-change]`). Once it exits 0, the run reports `restored [[<prior>]]'s Speed fix hold`.
 
 There is no minimum size: shape decides, not count. A parallel-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,

@@ -54,18 +54,19 @@ d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits
 preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
 `tests/shard-weights.tsv` are leg.test.sh's apportioned by the parts' measured shares, so the Slow tier is thirteen;
 ok lines 758 + 307 + 195 + 294 = 1554, the old file's count.
-d4's Speed fix hold built by p54-13 (`skills/_shared/vault-grammar.md` § Speed fix hold is the one copy of its forms):
-a task's `speed_fix:` cites its evidence (`docs/audits/<file>.md row <N>`, `docs/audits/<file>.md cause <words>` or
+d4's Speed fix hold built by p54-13 (`skills/_shared/vault-grammar.md` § Speed fix hold is the one copy of its forms): a
+task's `speed_fix:` cites its evidence (`docs/audits/<file>.md row <N>`, `docs/audits/<file>.md cause <words>` or
 `#<anchor>`, or `time-lost <id> [<class>]`), and one without it is refused and held like any other;
 `reconcile-rollout.py speed-hold apply` (schedule step 7) and `join` give every other queued task of the rollout a
-`depends-on:` on the phase's release (its last task, or the member, marked or not, the phase note's
-`speed_fix_release:` names), recorded on the rollout note's `## Speed fix holds` so `speed-hold release` and `lift`
-remove exactly what was added; the reach is one rule, so no marked task, no release, nothing upstream of either and no
-member of the hold's own phase is ever held, and two Speed fix phases never deadlock; `next` lets a hold go when its
-release, or a task it depends on, leaves the queue or is set aside with its automatic retries spent (a gate-pending
-task never lets it go), with a `speed-hold` Run record line; `defer` drops a deferred task's entries, `carry` copies
-the record, and `status` reports `speedHolds`. A red-master fix (Decided for you 3) is exempt by its key alone:
-`master_red:`, the mark p54-7's `master-runs` stamps on its fix task, or `completion_red_of:`, the completion
+`depends-on:` on the phase's release (its last task, or the member, marked or not, the phase note's `speed_fix_release:`
+names), recorded on the rollout note's `## Speed fix holds` so `speed-hold release` and `lift` remove exactly what was
+added; the reach is one rule, so no marked task, no release, nothing upstream of either and no member of the hold's own
+phase is ever held, and two Speed fix phases never deadlock; `next` lets a hold go when its release, or a task it
+depends on, leaves the queue or is set aside with its automatic retries spent (a gate-pending one never lets it go, so a
+gate-pending release, or a task it depends on, is the one wait on Lachy the hold keeps, until he or the Standing
+approval signs its gate or he defers it), with a `speed-hold` Run record line; `defer` drops a deferred task's entries,
+`carry` copies the record, and `status` reports `speedHolds`. A red-master fix (Decided for you 3) is exempt by its key
+alone: `master_red:`, the mark p54-7's `master-runs` stamps on its fix task, or `completion_red_of:`, the completion
 verifier's fix task's.
 Phase 54 builds the rest.
 
