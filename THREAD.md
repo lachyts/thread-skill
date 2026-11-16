@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-12
+last_touched: 2026-11-16
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,15 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-11-16: the merge wait was audited and grilled into ADR 0084 (proposed, PR #413), and Phase 54 (17 Speed fixes) joined [[thread-skill-rollout-2026-11-12]] ahead of everything; the Mac restarts at 13:45 today (Chorus's Lunch restart).**
+- **Before it.** The Capacity fix (ADR 0083) is built: Chorus P109 landed whole (#793 to #800), P53 tasks 1 to 4 landed, p53-5 is in review as #414.
+- **The audit** (`docs/audits/test-suite-audit-2026-11-16.md`, from 150 CI runs, no local run). A merge held the Integration lane a median 65 minutes: about 21 for the Mac's verify, then about 43 for GitHub's check. Runner queue was nil. The fast tier selected a median 191 of 199 test files, `tests/leg.test.sh` ran 28 minutes on macOS, and every `leg.py` launch recompiles `reconcile-rollout.py` (105 ms against 53 with a bytecode cache, measured).
+- **His rulings** (ADR 0084). Code goes live only from the **Green tip**, the newest master commit whose full suite passed ("only goes live on rollouts once it has passed all the tests"; "Everything waits", his sessions too). macOS left the PR checks ("Drop it from PRs") and the **Slow tier** (ten suites) leaves them ("Move them off PRs now"). **Speed fixes** go first and hold the queue ("Stop the rest by default"), and a running rollout takes one by an **Engine catch-up**.
+- **Done by hand.** `master-green-pr-only` requires `make test (ubuntu-latest)` alone since today (the old payload is in `~/.local/share/suite-audit/thread-skill-2026-11-16/ruleset-24028790.before.json`); the macOS job still runs, unrequired, until p54-2. The 33 tasks held on p53-5 are now also held on [[thread-skill-p54-8-the-macs-check-before-a-merge-goes-light]] (`.scratch/p54/hold.py`, its own `held.json`), which itself waits on p54-1 to p54-7.
+- **Phase 54** ([[thread-skill-p54-merging-is-light-going-live-waits-for-the-green-tip]]): all 17 graded Ready. Tasks 1 to 8 are the core. Three `/fresh-review code xhigh` rounds on #413 returned 15 findings each: one blocking (ADR 0025's amendment moved a line a contract test pins, fixed), the rest filed. Rounds 1 and 2's are in the ADR, the glossary, the audit and the task notes; round 3's are in the task notes and in [[thread-skill-followup-adr-0084-settles-its-third-review-round]] for the docs. The vault task notes are the newer copy wherever they differ from the ADR.
+- **Not safe yet, said to him.** Until p54-6 and p54-7 are live, a PR outside the Integration lane merges on ubuntu alone and is live within minutes. He can have macOS required again by one ruleset write.
+- **Filed beside it.** [[chorus-the-quiet-line-shows-a-green-tip-that-trails-master]]; the priority line "Speed fixes go first" on the project note's Priorities card and in `~/.agents/knowledge/how-lachy-decides.md` (uncommitted there).
 
 **2026-11-12: orient grilled Fable 5.2's place and five standing grills, reshuffled Thread Skill into P46 to P52, landed ADRs 0079 to 0081 (#380), and handed [[thread-skill-rollout-2026-11-12]] (57 tasks) to a fresh lead (Stage task_7b48a245; launch doc landed by #381).**
 - **Fable.** Lachy rejected a first "last-resort rung" draft ("I want it to be part of the many tools that we use … earn the right of using it more, log it") and picked "everything, now". ADR 0079 carries that and Chorus ADR 0119's two rulings of the same morning (Fable shapes every plan, tops the ladder): four further roles run in measured Opus and Fable arms, and the Fable share is paced per Login with no reserve. The lock in `~/.agents/AGENTS.md` was replaced the same day on his word (workspaces ADR 0014). Nothing in a rollout runs on Fable until Phase 46 lands and [[thread-skill-p46-7-switch-fables-arms-on-once-the-lock-is-edited]] writes the ladder file.
@@ -1227,7 +1236,20 @@ scheduled 2026-07-15.
 - **`tests/contracts/refs.test.mjs` reads a bare `ADR NNNN` as this repo's** (2026-11-12). Another repo's ADR needs its qualifier ("Chorus ADR 0119", "workspaces ADR 0014"); "`_shared` ADR 0014" is no qualifier and would resolve to this repo's own ADR 0014 without failing. #380's CI was red on a bare "ADR 0119".
 - **A one-file task has no plan, so no Fable plan** (2026-11-12). `plan_approval: scope-gated` gives a plan gate to `scope: cross-cutting` tasks only; ADR 0079's "Fable shapes every plan" changes no default.
 
+- **ADR 0025's by-hand ruleset PUT is pinned at line 42** (`tests/contracts/merge-settings-guard.test.mjs`, the one allowlisted write window in prose). An amendment above it shifts the line and turns the contract red: add amendments below the PUT, and never name a ruleset write call in prose anywhere else. (2026-11-16, #413 round 1.)
+- **GitHub refuses the Actions app as a ruleset bypass actor on this user-owned repo** (`422: Actor GitHub Actions integration must be part of the ruleset source or owner organization`), so no ruleset can make a workflow the only writer of a ref. ADR 0084's Green tip ref is guarded by its readers for that reason. (2026-11-16.)
+- **`make test-fast` reads FULL in the Primary checkout while `.scratch/` holds scripts**: the selector counts untracked files as carriers and as changed paths (`reaches .scratch/p53-p109/gen.py, not in the map`). CI never sees it. Probe the selector in a clean clone; p54-4 fixes it. (2026-11-16.)
+- **A docs-only PR's review rounds block only on the named test**: the checker files every prose finding (clause `none`), so three rounds on #413 gave 45 findings and one blocking. Apply the filed doc findings before the chain's last round, so that round reads the corrected text (as #382 did for ADRs 0079 to 0081); a body edit to a task note on a live rollout goes through the engine's `Note` (`.scratch/p54/patch-notes.py`), never a plain write. (2026-11-16.)
+- **A join makes its tasks startable at once**, before a docs PR they cite has merged: point each task note at the docs branch (`git show origin/<branch>:<path>`) before the join. (2026-11-16.)
+
 ## Resume instructions
+
+**From 2026-11-16 (the merge wait, Phase 54 joined):** [[thread-skill-rollout-2026-11-12]] builds Phase 54 under its own lead; `/thread:status [[thread-skill-rollout-2026-11-12]]` reads where it is. In order:
+1. **After today's Mac restart (13:45, Chorus's Lunch restart; this session checks it at Lunch).** Read: `sysctl -n kern.boottime` is after 13:45 today; the Stage is up (`launchctl print gui/$(id -u)/com.lachy.chorus-stage`), so Chorus #796 to #800 are live; `~/.config/thread/capacity.json` is fresh, above 1 and carries `budget`; `~/.config/thread/slot-peaks.json` exists; the Stage's quiet line shows a fault when one stands; each rollout's lead resumed. If it was held, the `lunch_restart` lines of `~/.local/state/chorus/stage/companion.jsonl` say which check held it, and it moves to the next Lunch.
+2. **When p53-5 lands (#414):** nothing releases, since the 33 are also held on p54-8. On ADR 0083, record its Decided for Lachy 15's reading: five hours after the reset, the new `fseventsd` held 3.5 MB under busy rollouts.
+3. **Once [[thread-skill-p54-8-the-macs-check-before-a-merge-goes-light]] lands** and the Green tip holds it: the first Engine catch-up, by hand. Pause [[thread-skill-rollout-2026-11-12]] and reinstate it (`/thread:execute`), so its lead runs the new engine and its `verifier:` is restamped from CLAUDE.md (p54-14 builds the move). Then confirm the 33 held tasks start with no hand in it (`reconcile-rollout.py next --dry-run` from the rollout's engine root shows no `depends on [[thread-skill-p54-8…]]` rows).
+4. **Docs:** [[thread-skill-followup-adr-0084-settles-its-third-review-round]] (round 3's 15 findings, docs only).
+5. **Read by the weekly Reflection:** the lane's median hold (`lane-taken` to `lane-freed`; 65 minutes before) and the `ci-headroom` lines, before and after p54-8.
 
 **From 2026-11-12 (orient, P46 to P52 scheduled):** handed [[thread-skill-rollout-2026-11-12]] to a fresh lead (Stage task_7b48a245); `/thread:status [[thread-skill-rollout-2026-11-12]]` reads where it is. Next for this thread: once p46-1 to p46-6 have merged and are live, work [[thread-skill-p46-7-switch-fables-arms-on-once-the-lock-is-edited]] (write `~/.config/thread/ladder.toml`; it waits on nothing of Lachy's). Then a `/thread:orient Thread Skill --steer` schedules what the rollout left out (p30-2, p50-3, p39-13, p46-9 and the workspaces tasks p36-8 and p36-11). His own: the Thursday decisions task and the three hand steps listed in the 2026-11-11 entry below.
 
@@ -1282,6 +1304,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-16 (close, the merge wait): suite audit from CI's own runs (65 min of lane per merge; the fast tier ran 191 of 199 files); grilled into ADR 0084 (Green tip, Slow tier, Speed fix, Engine catch-up; PR #413, three review rounds); macOS dropped from the ruleset by hand; Phase 54 (17 tasks) joined [[thread-skill-rollout-2026-11-12]] and the hold moved to p54-8; carried today's Lunch restart.
 - 2026-11-12 (close, orient): six grills (Fable's place, merge settings, unreachable surfaces, ADR 0070's questions, the Inert proof, plus four decided for him); ADRs 0079 to 0081 landed (#380); reshuffled into P46 to P52; handed [[thread-skill-rollout-2026-11-12]] (57 tasks) to a fresh lead; the model lock was replaced the same day (workspaces ADR 0014) and P46 adjusted to it.
 - 2026-11-11 (close, rollout lead): ran [[thread-skill-rollout-2026-11-10]] to completion: 13/13 merged, Phase 45 closed, completion verify green at 52a5eab, archived; filed the P45 proofs and the Chorus scheduling follow-ons; noted merge-task's 401 misread.
 - 2026-11-11 (close, Stage audit): 15 finished Leg and lead sessions found and archived by him; website-re-design's two publish gates signed (Leg 3 listed); grilled the Clean-up archive: Chorus ADR 0117 (#734), Chorus build task and a thread-skill follow-up filed; p102-2's unmet Proven line noted.
