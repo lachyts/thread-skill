@@ -303,6 +303,7 @@ LC_REL = "skills/_shared/scripts/live-checkout.sh"
 BJ_REL = "skills/_shared/scripts/background_job.py"
 SELF_REL = "skills/_shared/scripts/primary-refresh.py"
 CARRIER_REL = "skills/_shared/scripts/land-carrier.py"  # the landing carrier (ADR 0078 d2), run at the end of a pass
+GREEN_REL = "skills/_shared/scripts/green-tip.py"  # the live target, the Green tip (ADR 0084 d1, p54-6)
 COPY = "primary-refresh.py"  # the copy's install-rel: the plist's path, part of the self-update contract
 # (mode, repo-rel, install-rel): what install writes, what the self-update stages and installs, what `bundle` prints.
 BUNDLE = (
@@ -315,6 +316,7 @@ BUNDLE = (
     ("0755", "skills/_shared/scripts/landing-register.py", "skills/_shared/scripts/landing-register.py"),
     ("0755", "skills/execute/scripts/merge-task.sh", "skills/execute/scripts/merge-task.sh"),
     ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
+    ("0755", GREEN_REL, GREEN_REL),
 )
 # Bump whenever install's ProgramArguments or EnvironmentVariables change: the self-update never rewrites the plist,
 # so only this tells a job left on the old one (tests/primary-refresh.test.sh I4 pins both beside it).
@@ -332,6 +334,10 @@ REPAIRED = "repaired:"                 # a state key's prefix: the last repair's
 LAND_REL = "skills/_shared/scripts/land.sh"  # the primary's own copy: not in the bundle, like the hold
 PROVE_REL = "skills/execute/scripts/reconcile-rollout.py"  # the prove step runs the primary's own copy (ADR 0078 d1)
 LIVE_NAME = "primary-live.json"        # the live file, beside the state file
+GREEN_NAME = "primary-green.json"      # the waits file (a checkout waiting on the Green tip), beside the state file
+GREEN_WAIT_SHOW = timedelta(hours=2)   # a wait joins the stuck line this long from its since (ADR 0084 Decided 9)
+GREEN_BUDGET = 150                     # green-tip.py's budget on a real pass (gh asked, the record written)
+GREEN_DRY_BUDGET = 30                  # … under --dry-run, the smoke's (no gh, nothing written)
 PROVE_TIMEOUT = 120
 GIT_TIMEOUT = 60
 HOLD_TIMEOUT = 120
@@ -376,7 +382,7 @@ FF_FORMS = {
 }
 _SEG = r"[A-Za-z0-9._-]+"
 ROW_RE = re.compile(rf"^(0[0-7]{{3}}) ({_SEG}(?:/{_SEG})*) ({_SEG}(?:/{_SEG})*)$")
-SMOKE_DENIED = ("fetch failed:", "not a primary checkout:", "broken:", "unreadable")
+SMOKE_DENIED = ("fetch failed:", "not a primary checkout:", "broken:", "unreadable", "no move:")
 _STAMP = ""  # the pass's time, for the lines it prints
 _ARGV = []   # the argv main parsed: the smoke runs the job's own
 BJ = None    # background_job.py, loaded by main for run, install and stuck (_load_bj); importing this loads nothing
@@ -578,13 +584,38 @@ def _origin_tip(d, branch):
     return t if rc == 0 and HEX40.match(t) else None
 
 
-def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
-    """One checkout's pass: (outcome, kind, tip, branch). kind None clears a stuck spell (current, moved, ahead,
-    repaired), `dry` changes nothing (would move), any other is stuck. tip is origin's tip as this pass fetched it (ff's
-    verified new sha after a move), None when the fetch did not succeed: the self-update runs on it whatever the
-    checkout read. `entry` is this checkout's spell as last written (its repair field read by the carry), `now` the
-    pass's time, and `extra` a dict a repair fills: "repair" (the spell's repair field) or "record" (the repaired:
-    entry)."""
+def _load_green(primary):
+    """green-tip.py, the bundle's copy else the primary's: (module, None), or (None, why it cannot be loaded)."""
+    f = _helper(GREEN_REL, primary)
+    if f is None:
+        return None, f"no file beside the copy or in {primary}"
+    try:
+        spec = importlib.util.spec_from_file_location("thread_green_tip", str(f))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:  # noqa: BLE001 — a resolver that will not load holds, never origin's tip
+        return None, f"{type(e).__name__}: {_flat(e)[:160]}"
+    return mod, None
+
+
+def _no_move(r, branch):
+    """A hold's outcome (the module docstring's d): nothing moves, and never to origin's tip."""
+    if r.get("cause") == "unreachable":
+        return f"fetch failed: {r.get('why')}", "fetch-failed", None, branch
+    return f"no move: {r.get('why')} (never origin's tip)", "green-held", None, branch
+
+
+def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra, green=None):
+    """One checkout's pass: (outcome, kind, tip, branch). kind None clears a stuck spell (current, moved, ahead, past,
+    repaired), `dry` changes nothing (would move), any other is stuck. tip is the pass's target as this pass read it:
+    the Green tip (green-tip.py's), or origin's tip for a repo that publishes none (ff's verified new sha after a move),
+    None when the fetch did not succeed or on a hold: the self-update runs on it whatever the checkout read. `entry` is
+    this checkout's spell as last written (its repair field read by the carry), `now` the pass's time, `extra` a dict a
+    repair fills: "repair" (the spell's repair field) or "record" (the repaired: entry), and `green` a dict the pass
+    fills once the default branch's fetch succeeded: {fetched, kind (green, origin or hold), target, origin, behind,
+    cause, why}."""
+    if green is None:
+        green = {}
     why = checkout_problem(d)
     if why:
         return f"not a primary checkout: {why}", "not-primary", None, None
@@ -606,34 +637,67 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
         return f"fetch failed: git fetch ran past {GIT_TIMEOUT} s and was stopped", "fetch-failed", None, branch
     if frc != 0:
         return f"fetch failed: {_why_line(ferr) or f'exit {frc}'}", "fetch-failed", None, branch
-    rc, out, _, timed_out = _lc(lc, "check", d, branch)
+    gt, gwhy = _load_green(primary)
+    if gt is None:
+        return f"broken: cannot load {GREEN_REL} ({gwhy})", "broken", None, branch
+    try:
+        r = gt.resolve(d, branch, checkout=True, gh=not dry_run, write=not dry_run,
+                       budget=GREEN_DRY_BUDGET if dry_run else GREEN_BUDGET, now=now, run=_run,
+                       nogh_why="gh is not asked under --dry-run")
+    except Exception as e:  # noqa: BLE001 — a resolver that raises holds, never origin's tip
+        return f"broken: green-tip.py raised {type(e).__name__}: {_flat(e)[:160]}", "broken", None, branch
+    origin = r.get("origin")
+    hold_why = r.get("why") if r.get("kind") == "hold" else None
+    target = None if hold_why is not None else r.get("target")
+    lead = target if target and target != origin else None  # the Green tip, when it is not origin's tip
+    n = r.get("behind")
+    green.update(fetched=True, kind="hold" if hold_why is not None else ("green" if lead else "origin"),
+                 target=target, origin=origin, behind=n, cause=r.get("cause"), why=r.get("why"))
+    rc, out, _, timed_out = _lc(lc, "check", d, branch, *([lead] if lead else []))
     form, m = _form(CHECK_FORMS, rc, out, timed_out)
+    ptip = None if hold_why is not None else (lead or _origin_tip(d, branch))
     if form is None:
-        return (f"broken: live-checkout.sh check: {_said(rc, out, timed_out)}", "broken", _origin_tip(d, branch),
+        return (f"broken: live-checkout.sh check: {_said(rc, out, timed_out)}", "broken", ptip,
                 branch)
     if form == "unreadable":
-        return f"unreadable: {m.group(1)}", "unreadable", _origin_tip(d, branch), branch
-    tip = m.group(1)
+        return f"unreadable: {m.group(1)}", "unreadable", ptip, branch
+    tip = None if hold_why is not None else m.group(1)
     if form == "current":
+        if hold_why is not None:
+            return _no_move(r, branch)
+        if lead:
+            return (f"current at the Green tip {lead[:12]} ({n} behind origin/{branch}: waits on the Green tip)", None,
+                    tip, branch)
         return "current", None, tip, branch
+    if form == "past":
+        return (f"past the Green tip {tip[:12]} by {m.group(2)} (on origin/{branch}): waits on the Green tip", None,
+                tip, branch)
     if form == "ahead":
         return f"ahead {m.group(2)}: left to its landing route", None, tip, branch
     if form == "diverged":
         if is_primary:
-            return repair(d, lc, primary, branch, tip, (m.group(2), m.group(3)), dry_run, ff_timeout, now, entry, extra)
+            return repair(d, lc, primary, branch, tip, (m.group(2), m.group(3)), dry_run, ff_timeout, now, entry, extra,
+                          lead=lead, hold_why=hold_why)
         return f"diverged (ahead {m.group(2)}, behind {m.group(3)}): never integrated here", "diverged", tip, branch
     if form == "busy":
         return f"busy: {m.group(2)}", "busy", tip, branch
+    if hold_why is not None:  # behind, or an overlap, with no Green tip to move to: nothing moves
+        return _no_move(r, branch)
     if is_primary:
         h = hold(d)
         if h:
             return f"held: {h}", "held", tip, branch
     if form == "overlap":
+        if lead:
+            return f"refused: local changes overlap the Green tip {lead[:12]} ({m.group(3)})", "refused", tip, branch
         return f"refused: local changes overlap origin/{branch} ({m.group(3)})", "refused", tip, branch
     behind, head = m.group(2), m.group(3)
     if dry_run:
+        if lead:
+            return (f"would move {head[:12]}..{tip[:12]} ({behind} commits) to the Green tip ({n} behind "
+                    f"origin/{branch})", "dry", tip, branch)
         return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", "dry", tip, branch
-    rc, out, _, timed_out = _lc(lc, "ff", d, branch, timeout=ff_timeout)
+    rc, out, _, timed_out = _lc(lc, "ff", d, branch, *([lead] if lead else []), timeout=ff_timeout)
     if timed_out:
         return (f"timed out: git merge --ff-only ran past {ff_timeout} s and was stopped: the working tree may be "
                 f"partly updated (git -C {d} status)", "timed-out", tip, branch)
@@ -644,8 +708,13 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
         if now_head != new:
             return (f"broken: live-checkout.sh ff: said moved to {new[:12]}, HEAD is {now_head[:12] or 'unreadable'}",
                     "broken", tip, branch)
+        if lead:
+            return (f"moved {m.group(1)[:12]}..{new[:12]} ({behind} commits) to the Green tip ({n} behind "
+                    f"origin/{branch})", None, new, branch)
         return f"moved {m.group(1)[:12]}..{new[:12]} ({behind} commits)", None, new, branch
     if form == "overlap":
+        if lead:
+            return f"refused: local changes overlap the Green tip {lead[:12]} ({m.group(1)})", "refused", tip, branch
         return f"refused: local changes overlap origin/{branch} ({m.group(1)})", "refused", tip, branch
     if form == "refused":
         return f"refused: {m.group(1)}", "refused", tip, branch
@@ -654,10 +723,12 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
 
 # ---- the repair of a diverged primary (ADR 0078 d4; the rules are the module docstring's) ---------------------------------
 
-def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra):
-    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple."""
+def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra, lead=None, hold_why=None):
+    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple. lead is the Green tip the reset
+    goes to when it is not origin's tip (its content read against it too); hold_why a hold's why: no Green tip, so the
+    reset waits while the read, the hold and the carry run as ever."""
     base = f"diverged (ahead {counts[0]}, behind {counts[1]})"
-    rc, out, _, timed_out = _lc(lc, "content", d, branch)
+    rc, out, _, timed_out = _lc(lc, "content", d, branch, *([lead] if lead else []))
     form, m = _form(CONTENT_FORMS, rc, out, timed_out)
     if form is None:
         return f"broken: live-checkout.sh content: {_said(rc, out, timed_out)}", "broken", tip, branch
@@ -671,20 +742,32 @@ def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry,
     h = hold(d)
     if h:
         return f"{base}: repair held: {h}", "diverged", tip, branch
+    if form == "pending":
+        return (f"{base}: repair waits (its content is on origin/{branch}, not yet at the Green tip {(lead or '')[:12]})",
+                "diverged", tip, branch)
     if form == "landed":
-        return _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra)
+        if hold_why is not None:
+            return f"{base}: repair waits (no Green tip to reset to: {hold_why})", "diverged", tip, branch
+        return _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra, green=bool(lead))
     return _carry(d, primary, branch, tip, head, base, dry_run, now, entry, extra)
 
 
-def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra):
-    """The reset of a primary whose ahead commits are all on origin by content: a backup ref, then `reset --keep`."""
-    where = f"reset {head[:12]} to origin/{branch} at {tip[:12]}"
+def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra, green=False):
+    """The reset of a primary whose ahead commits are all on origin by content: a backup ref, then `reset --keep` to
+    tip, the pass's target (the Green tip when green, else origin's tip)."""
+    if green:
+        where = f"reset {head[:12]} to the Green tip {tip[:12]} of origin/{branch}"
+    else:
+        where = f"reset {head[:12]} to origin/{branch} at {tip[:12]}"
     why = f"ahead {counts[0]}, behind {counts[1]}: their content is already on origin"
-    rc, out, _, timed_out = _lc(lc, "overlap", d, f"refs/remotes/origin/{branch}")
+    rc, out, _, timed_out = _lc(lc, "overlap", d, tip if green else f"refs/remotes/origin/{branch}")
     form, m = _form(OVERLAP_FORMS, rc, out, timed_out)
     if form is None:
         return f"broken: live-checkout.sh overlap: {_said(rc, out, timed_out)}", "broken", tip, branch
     if form == "overlap":
+        if green:
+            return (f"{base}: repair refused: local changes overlap the Green tip {tip[:12]} ({m.group(1)})",
+                    "diverged", tip, branch)
         return f"{base}: repair refused: local changes overlap origin/{branch} ({m.group(1)})", "diverged", tip, branch
     if dry_run:
         return f"would {where} ({why})", "dry", tip, branch
@@ -972,7 +1055,7 @@ def _smoke(stage, primary, stamp, smoke_timeout):
     return _flat(why)[:80]
 
 
-def _install(stage, table, me, branch, t12):
+def _install(stage, table, me, branch, t12, green=False):
     """The helpers that differ, then the files this copy's table has and the candidate's drops, then the copy."""
     cdir = me.parent
     irels = {irel for _, _, irel in table}
@@ -1001,29 +1084,60 @@ def _install(stage, table, me, branch, t12):
     parts = [f"installed {', '.join(done['install'])}"] if done["install"] else []
     if done["remove"]:
         parts.append(f"removed {', '.join(done['remove'])}")
+    if green:
+        return (f"self-update: the installed bundle now matches the Green tip {t12} of origin/{branch} "
+                f"({'; '.join(parts)})"), None
     return f"self-update: the installed bundle now matches origin/{branch} at {t12} ({'; '.join(parts)})", None
 
 
-def self_update(primary, branch, tip, args, stuck, now, stamp):
-    """The installed copy's self-update at `tip` (the module docstring's steps): (line or None, kind). kind None clears
-    the self-update spell, `keep` leaves it as it is, any other opens or continues it."""
+def _bundle_diff(primary, t, src, me):
+    """(same, diff): whether t's primary-refresh.py (its bytes in src, read here when None) is this copy's, and then the
+    install-rels of every other row of this copy's table whose blob or mode at t differs from the copy's directory."""
+    if src is None:
+        rc, src, _ = git(primary, "cat-file", "blob", f"{t}:{SELF_REL}", raw=True)
+        if rc != 0 or not src:
+            return False, []
+    if src != me.read_bytes():
+        return False, []
+    diff = []
+    for mode, rel, irel in BUNDLE:
+        if irel == COPY:
+            continue
+        rc, data, _ = git(primary, "cat-file", "blob", f"{t}:{rel}", raw=True)
+        if rc != 0 or _differs(data, me.parent / irel, mode):
+            diff.append(irel)
+    return True, diff
+
+
+def _matches(primary, t, me):
+    """Whether the installed bundle is t's (step 1's compare): t's primary-refresh.py equals this copy's bytes and every
+    other row matches t's blob and mode."""
+    same, diff = _bundle_diff(primary, t, None, me)
+    return same and not diff
+
+
+def self_update(primary, branch, tip, args, stuck, now, stamp, origin=None, green=False, why=None):
+    """The installed copy's self-update at `tip`, the pass's target (the module docstring's steps): (line or None,
+    kind). kind None clears the self-update spell, `keep` leaves it as it is, any other opens or continues it. origin is
+    origin's freshly fetched tip (read only under --dry-run, step 1's origin arm), green whether tip is a Green tip
+    that is not origin's tip (the wording), and why a hold's why when tip is None (a dry run on a hold)."""
+    if tip is None:  # a dry run on a hold (cmd_run's gate): nothing to install from
+        if origin and _matches(primary, origin, Path(__file__).resolve()):
+            return "self-update: current", None
+        return f"self-update: waits: no Green tip to install from ({why})", "keep"
     me = Path(__file__).resolve()
     t12 = tip[:12]
     rc, src, _ = git(primary, "cat-file", "blob", f"{tip}:{SELF_REL}", raw=True)
     if rc != 0 or not src:
+        if green:
+            return f"self-update: the Green tip {t12} lacks {SELF_REL}: the installed bundle is kept", "refused"
         return f"self-update: origin's tip {t12} lacks {SELF_REL}: the installed bundle is kept", "refused"
-    same = src == me.read_bytes()
-    if same:
-        diff = []
-        for mode, rel, irel in BUNDLE:
-            if irel == COPY:
-                continue
-            rc, data, _ = git(primary, "cat-file", "blob", f"{tip}:{rel}", raw=True)
-            if rc != 0 or _differs(data, me.parent / irel, mode):
-                diff.append(irel)
-        if not diff:
-            return ("self-update: current" if args.dry_run else None), None
+    same, diff = _bundle_diff(primary, tip, src, me)
+    if same and not diff:
+        return ("self-update: current" if args.dry_run else None), None
     if args.dry_run:
+        if origin and origin != tip and _matches(primary, origin, me):
+            return "self-update: current", None  # an older copy's smoke: its stage was built at origin's tip
         if same:
             return f"self-update: would install {', '.join(diff)}", "keep"
         return f"self-update: would install origin's bundle at {t12} (its primary-refresh.py differs)", "keep"
@@ -1045,12 +1159,13 @@ def self_update(primary, branch, tip, args, stuck, now, stamp):
                 pass
     stage = Path(tempfile.mkdtemp(prefix=".stage-", dir=str(me.parent)))
     try:
-        return _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, args.smoke_timeout)
+        return _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, args.smoke_timeout,
+                                  green=green)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, smoke_timeout):
+def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, smoke_timeout, green=False):
     t12 = tip[:12]
 
     def refused(why):
@@ -1101,8 +1216,10 @@ def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp,
     if smoke:
         why = _smoke(stage, primary, stamp, smoke_timeout)
         if why:
+            if green:
+                return refused(f"the Green tip's bundle at {t12} failed its smoke run ({why})")
             return refused(f"origin's bundle at {t12} failed its smoke run ({why})")
-    return _install(stage, table, me, branch, t12)
+    return _install(stage, table, me, branch, t12, green=green)
 
 
 def live_entry(d, is_primary, prev, stamp):
@@ -1178,6 +1295,56 @@ def _carrier(args, primary, stuck, stamp):
     return json.dumps(stuck.get("carrier"), sort_keys=True) != before
 
 
+def _wait(waits, d, gr, kind, outcome, branch, stamp):
+    """The waits file's entry for one checkout (the module docstring's stuck): opened or kept after a pass that left it
+    at a Green tip behind origin (since reset when the Green tip moves), dropped once the repo reads origin's tip (no
+    Green tip, or the Green tip at origin's tip) or the checkout stands past it, left as it is on a hold, a failed
+    fetch or any other stuck outcome."""
+    key = str(d)
+    if not gr.get("fetched") or gr.get("kind") == "hold":
+        return
+    if gr.get("kind") == "origin":
+        waits.pop(key, None)
+        return
+    if kind is not None:
+        return
+    behind, target = gr.get("behind"), gr.get("target")
+    head = git(d, "rev-parse", "-q", "--verify", "HEAD^{commit}")[1]
+    if head != target or not isinstance(behind, int) or behind < 1:
+        waits.pop(key, None)
+        return
+    prev = waits.get(key)
+    since = prev["since"] if isinstance(prev, dict) and prev.get("green") == target and \
+        isinstance(prev.get("since"), str) else stamp
+    waits[key] = {"since": since, "green": target, "origin": gr.get("origin"), "behind": behind, "branch": branch,
+                  "outcome": outcome}
+
+
+def _wait_rows(waits):
+    """The waits file's entries as the `stuck` verb's rows, sorted by key."""
+    rows = []
+    for k in sorted(waits):
+        e = waits[k]
+        if not isinstance(e, dict):
+            continue
+        rows.append({"key": k, "name": _stuck_name(k)[0], "since": e.get("since"), "green": e.get("green"),
+                     "origin": e.get("origin"), "behind": e.get("behind"), "branch": e.get("branch"),
+                     "outcome": e.get("outcome")})
+    return rows
+
+
+def _wait_text(w):
+    """`<name>: waits on the Green tip <g12>, <n> behind origin/<d> (since <since16>)`."""
+    return (f"{w['name']}: waits on the Green tip {str(w.get('green') or '')[:12]}, {w.get('behind')} behind "
+            f"origin/{w.get('branch')} (since {str(w.get('since') or '')[:16]})")
+
+
+def _wait_due(w, now):
+    """A wait on the stuck line: GREEN_WAIT_SHOW (2 h) from its since, never a since in the future."""
+    since = _parse_iso(w.get("since"))
+    return since is not None and since <= now and now - since >= GREEN_WAIT_SHOW
+
+
 # ---- the verbs ------------------------------------------------------------------------------------------------------
 
 def cmd_run(args):
@@ -1199,20 +1366,24 @@ def cmd_run(args):
     state_path = _state_file(args.state)
     stuck, dirty = _read_state(state_path, stamp)
     before = json.dumps(stuck, sort_keys=True)
-    tip, branch = None, None
+    tip, branch, gp = None, None, {}
     live_path = Path(state_path).parent / LIVE_NAME
     live, live_dirty = BJ.read_state(live_path, "primary-refresh", "live", STATE_VERSION)
     live_before = json.dumps(live, sort_keys=True)
+    waits_path = Path(state_path).parent / GREEN_NAME
+    waits, waits_dirty = BJ.read_state(waits_path, "primary-refresh", "green", STATE_VERSION)
+    waits_before = json.dumps(waits, sort_keys=True)
     for d, is_primary in targets:
-        entry, extra = stuck.get(str(d)), {}
-        outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout, now, entry, extra)
+        entry, extra, gr = stuck.get(str(d)), {}, {}
+        outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout, now, entry, extra, gr)
         _line(d, outcome)
         if kind != "not-primary":
             le = live_entry(d, is_primary, live.get(str(d)), stamp)
             if le is not None:
                 live[str(d)] = le
+            _wait(waits, d, gr, kind, outcome, b, stamp)
         if is_primary:
-            tip, branch = t, b
+            tip, branch, gp = t, b, gr
         if "record" in extra:
             stuck[REPAIRED + str(d)] = extra.pop("record")
         if kind == "diverged" and is_primary and entry is not None:  # d4: a repair blocked a day is recorded stuck
@@ -1228,6 +1399,11 @@ def cmd_run(args):
             BJ.write_state(live_path, "live", live, STATE_VERSION)
         except OSError as e:
             print(f"WARN: primary-refresh: cannot write the live file {live_path}: {e}", file=sys.stderr)
+    if not args.dry_run and (waits_dirty or json.dumps(waits, sort_keys=True) != waits_before):
+        try:
+            BJ.write_state(waits_path, "green", waits, STATE_VERSION)
+        except OSError as e:
+            print(f"WARN: primary-refresh: cannot write the waits file {waits_path}: {e}", file=sys.stderr)
     if (INSTALLED or args.prove) and not args.dry_run:
         line, verdict = prove_step(primary, live_path, args.prove_timeout)
         _line("prove", line)
@@ -1235,16 +1411,17 @@ def cmd_run(args):
             stuck.pop("prove", None)
         elif verdict is False:
             _spell(stuck, "prove", "prove-failed", line, stamp)
-    if INSTALLED and tip is not None:
+    if INSTALLED and (tip is not None or (args.dry_run and gp.get("fetched") and gp.get("origin"))):
         try:
-            line, kind = self_update(primary, branch, tip, args, stuck, now, stamp)
+            line, kind = self_update(primary, branch, tip, args, stuck, now, stamp, origin=gp.get("origin"),
+                                     green=gp.get("kind") == "green", why=gp.get("why"))
         except Exception as e:  # noqa: BLE001 — the self-update never skips the job check or the state
             line, kind = f"self-update: failed ({type(e).__name__}: {_flat(e)[:160]})", "failed"
         if line:
             _line(primary, line)
         if kind is None:
             stuck.pop("self-update", None)
-        elif kind != "keep" and not args.dry_run:
+        elif kind != "keep" and not args.dry_run and tip is not None:
             _spell(stuck, "self-update", kind, line[len("self-update: "):], stamp, tip=tip, tipAt=stamp)
     if INSTALLED:
         job_check(args, stuck, stamp, primary)
@@ -1272,8 +1449,11 @@ def cmd_stuck(args):
     due = sorted(((_parse_iso(e["since"]), k, e) for k, e in stuck.items() if _due(e, now)), key=lambda x: (x[0], x[1]))
     spells = [{"key": k, "name": _stuck_name(k)[0], "kind": e.get("kind") if isinstance(e.get("kind"), str) else None,
                "since": e.get("since"), "outcome": _stuck_outcome(e)} for _, k, e in due]
-    line = ("Primary refresh: " + " · ".join(_stuck_text(k, e) for _, k, e in due)) if due else None
-    print(json.dumps({"state": str(path), "stuck": spells, "line": line}, ensure_ascii=False))
+    waits, _ = BJ.read_state(Path(path).parent / GREEN_NAME, "primary-refresh", "green", STATE_VERSION)
+    rows = _wait_rows(waits)
+    texts = [_stuck_text(k, e) for _, k, e in due] + [_wait_text(w) for w in rows if _wait_due(w, now)]
+    line = ("Primary refresh: " + " · ".join(texts)) if texts else None
+    print(json.dumps({"state": str(path), "stuck": spells, "waits": rows, "line": line}, ensure_ascii=False))
     return 0
 
 
@@ -1285,7 +1465,8 @@ def _prune(primary, also):
     for p, key, watched, noun in ((path, "stuck",
                                    {"self-update", "job", "prove", "carrier", REPAIRED + str(primary)} | checkouts,
                                    "spell"),
-                                  (path.parent / LIVE_NAME, "live", checkouts, "live entry")):
+                                  (path.parent / LIVE_NAME, "live", checkouts, "live entry"),
+                                  (path.parent / GREEN_NAME, "green", checkouts, "waits entry")):
         entries, corrupt = BJ.read_state(p, "primary-refresh", key, STATE_VERSION)
         dropped = [] if corrupt else [k for k in entries if k not in watched]
         if not dropped:

@@ -22,7 +22,10 @@
 # Exit 0 for all but stuck (1). A usage error exits 2 with stdout empty.
 # stderr carries `land: …` lines: `land: commit <sha40>` (this run's commit, final SHA after any rebase)
 # or `land: nothing committed`, `land: carried <N> earlier close-out commit(s)`, `land: nothing to land`,
-# `land: dropped <rel> (…)`, `land: ff refused: …`, `land: 3-way conflict …`, `land: kept <rel> …`,
+# `land: dropped <rel> (…)`, `land: ff refused: …`, `land: 3-way conflict …`, `land: kept <rel> …` (`land: kept <rel> as
+# the close-out's copy (the checkout waits on the Green tip)` among them), `land: skipped the Green tip read: deadline`,
+# `land: not fast-forwarded: no move: <why> (never origin's tip)`, `land: not moved to <N12>: the checkout waits on the
+# Green tip`, a `green-tip: WARN: …` line,
 # `land: label failed: …`, `land: update-branch failed: …`, the own branch's `land: queue marker …` and `land: queue
 # withdrawn (…)`,
 # `land: skipped <step>: deadline`, `land: held the primary checkout at <sha>, …: <why>`, and git's or gh's
@@ -34,6 +37,11 @@
 #   (a non-default checkout may need one ls-remote to learn the default when origin/HEAD is unset).
 #   Unprotected default branch → push it (a diverged origin: one rebase in a scratch worktree, then the
 #   branch moves by a two-tree read-tree, which keeps non-overlapping local changes exactly).
+#   The Green tip (ADR 0084 d1, p54-6): a live checkout (a main checkout not named `*-rollout`) of a repo that publishes
+#   one runs from it and never past it. S4's green_read asks skills/_shared/scripts/green-tip.py for the target: S4
+#   fast-forwards to the Green tip (origin's tip for every other repo or checkout, as ever), and on a hold not at all
+#   (`land: not fast-forwarded: no move: …`); S11 never follows its own push there (`land: not moved to <N12>: the
+#   checkout waits on the Green tip`); O9 refuses to take origin/<d> commits past the Green tip into such a checkout.
 #   The primary checkout (the checkout this plugin runs from, live) never moves while a rollout with no
 #   Engine snapshot runs on it (ADR 0031, narrowed by ADR 0043: a snapshotted rollout never runs on it): S4
 #   skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed without moving the
@@ -52,7 +60,10 @@
 #   commits nothing at all. Once the commit is on origin, settle_handed leaves the checkout free to
 #   fast-forward: a THREAD.md whose copy has not changed since goes back to HEAD's (a staged copy of it unstaged,
 #   the one write to the index, since a staged THREAD.md would refuse the fast-forward), because many sessions land in
-#   that file and origin's copy will rarely equal this one; a consumed review doc is removed from disk; every other
+#   that file and origin's copy will rarely equal this one; in a checkout that waits on the Green tip it instead holds
+#   the close-out commit's copy (origin/<d>'s when origin already held the edit), since that checkout does not follow
+#   the close-out, and live-checkout.sh's lc_landed lets a later fast-forward replace it once origin's default branch
+#   holds it; a consumed review doc is removed from disk; every other
 #   handed path stays as handed, a doc for its reader and a deletion gone, and the fast-forward lets it through once
 #   origin's copy equals it, or at any time for a handoff doc origin holds (live-checkout.sh's lc_same and lc_doc). A
 #   handoff doc HEAD lacks that origin's default branch or a close/ tip already holds is kept out of the commit (`land:
@@ -62,16 +73,21 @@
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
 #   runs S2) and the own branch never drift.
 #
-# The live checkout is skills/_shared/scripts/live-checkout.sh, the one primitive self-rollout-check.sh and
-# primary-refresh.py share, sourced just before S1 and O1 (a source that fails or stops partway is `stuck: cannot load
+# The live target is skills/_shared/scripts/green-tip.py's (green_read, its CLI under bounded). The live checkout is
+# skills/_shared/scripts/live-checkout.sh, the one primitive self-rollout-check.sh and primary-refresh.py share, sourced just before S1 and O1 (a source that fails or stops partway is `stuck: cannot load
 # <path>`, never an undefined check read as clear; --origin-slug never loads it). S1 and O1 refuse a half-applied
 # operation, `stuck: half-applied operation (<m>)`, <m> one of rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD,
 # REVERT_HEAD, BISECT_LOG or sequencer (a multi-pick whose stopped pick was committed by hand), and set its ssh rule
 # (BatchMode unless the operator set an ssh command, read from <repo>'s own config; never a prompt). S4 and O4 fetch one
-# branch each with it, under `bounded`. S4's and O9's fast-forwards (lc_ff, each run only when HEAD is strictly behind)
-# check the overlap first: a dirty or untracked path origin's commits would overwrite is `land: ff refused: local
-# changes overlap origin/<d> (<paths>)` at S4 and `stuck: ff refused: local changes overlap origin/<B> (<paths>)` at O9,
-# with no merge run and ORIG_HEAD untouched; any other refusal is `… ff refused: <git's reason, on one line>`.
+# branch each with it, under `bounded`. S4's and O9's fast-forwards (lc_ff, each run only when HEAD is strictly behind
+# its target) check the overlap first: a dirty or untracked path the target's commits would overwrite is `land: ff
+# refused: local changes overlap origin/<d> (<paths>)` (`… overlap the Green tip <g12> (<paths>)` when S4's target is
+# one) at S4 and `stuck: ff refused: local changes overlap origin/<B> (<paths>)` at O9, with no merge run and ORIG_HEAD
+# untouched; any other refusal is `… ff refused: <git's reason, on one line>`. O9 first refuses, in a live checkout of a
+# repo that publishes a Green tip, an origin/<B> whose origin/<d> merge-bases HEAD lacks reach past it: `stuck:
+# origin/<B> carries origin/<d> commits past the Green tip (<m12>, not at <g12>): the checkout runs live; land <B> from
+# a worktree (ADR 0084)`, or on a hold `stuck: no move: <why>: the checkout runs live; land <B> from a worktree (ADR
+# 0084)`.
 #
 # Route mode (`--route`, read-only; leg.py's Complete, execute legs.md; self-rollout-check.sh --refresh-in-place,
 # whose diverged-twin remedy follows the twin's route, ADR 0042) runs S1 with no paths through S3 exactly as
@@ -151,7 +167,8 @@
 # Exit 0 but stuck (1) and usage (2).
 #
 # Every network call runs under `bounded` (LAND_TIMEOUT seconds each, default 30; LAND_DEADLINE seconds
-# overall, default 450). The review-round recorder runs after them, under LAND_RECORD_TIMEOUT alone: 450 + 60
+# overall, default 450). The Green tip read (green_read) runs under it too, inside LAND_DEADLINE: its own budget gb =
+# min(60, what is left - 10), skipped under 1 s, under an outer bound of gb + 5, so it costs at most 65 s of the 450. The review-round recorder runs after them, under LAND_RECORD_TIMEOUT alone: 450 + 60
 # leaves close's 600 s Bash timeout 90 s for the local work. The body runs in a subshell whose fd 1 is
 # stderr, so no child — a hook that daemonizes, git's own maintenance — can ever hold the caller's stdout;
 # git's auto-gc and auto-maintenance are switched off for every git call here. bash 3.2-compatible (macOS);
@@ -362,6 +379,7 @@ main() {
   if [ "${1:-}" = --own-branch ]; then shift; own_main "$@"; exit 1; fi
 
   local slug_arg= msgfile= commit_only= route_only= repo made= built= tip=HEAD tree= already= pending= class= reason= b= bref= d= top slug
+  local GREEN_KIND=hold GREEN_SHA= GREEN_WHY=
   local -a paths=() rels=() list=()
 
   if [ "${1:-}" = --origin-slug ]; then
@@ -481,17 +499,34 @@ main() {
     elif ! git rev-parse -q --verify HEAD >/dev/null; then
       git rev-parse -q --verify "refs/remotes/origin/$d" >/dev/null \
         && stuck_early "local branch has no common history with origin/$d"
-    elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "refs/remotes/origin/$d")" ] \
-         && git merge-base --is-ancestor HEAD "refs/remotes/origin/$d"; then
-      if primary_hold; then
-        echo "land: held the primary checkout at $(git rev-parse --short HEAD), not fast-forwarded: $HOLD"
-      else
-        out=$(lc_ff "$top" "$d"); rc=$?
-        case $rc in
-          0) ;;
-          3) echo "land: ff refused: local changes overlap origin/$d ($out)" ;;
-          *) echo "land: ff refused: $out" ;;
-        esac
+    else
+      # The live target (ADR 0084 d1): origin's tip, the Green tip, or nothing on a hold (green_read).
+      green_read
+      local ff=
+      case $GREEN_KIND in
+        origin) ff=$(git rev-parse "refs/remotes/origin/$d") ;;
+        green) ff=$GREEN_SHA ;;
+      esac
+      if [ -z "$ff" ]; then
+        if [ "$(git rev-parse HEAD)" != "$(git rev-parse "refs/remotes/origin/$d")" ] \
+           && git merge-base --is-ancestor HEAD "refs/remotes/origin/$d"; then
+          echo "land: not fast-forwarded: no move: $GREEN_WHY (never origin's tip)"
+        fi
+      elif [ "$(git rev-parse HEAD)" != "$ff" ] && git merge-base --is-ancestor HEAD "$ff"; then
+        if primary_hold; then
+          echo "land: held the primary checkout at $(git rev-parse --short HEAD), not fast-forwarded: $HOLD"
+        else
+          out=$(lc_ff "$top" "$d" ${GREEN_SHA:+"$GREEN_SHA"}); rc=$?
+          case $rc in
+            0) ;;
+            3) if [ "$GREEN_KIND" = green ]; then
+                 echo "land: ff refused: local changes overlap the Green tip $(printf '%s' "$GREEN_SHA" | cut -c1-12) ($out)"
+               else
+                 echo "land: ff refused: local changes overlap origin/$d ($out)"
+               fi ;;
+            *) echo "land: ff refused: $out" ;;
+          esac
+        fi
       fi
     fi
   fi
@@ -662,13 +697,19 @@ land_unprotected() {
 }
 
 # primary_follow <old> <new> <reflog msg> <held wording>: after a push to the default branch, move the checkout from
-# <old> to <new>. It is held while a rollout runs on the primary checkout, and a move git refuses over local changes is
+# <old> to <new>. A checkout that waits on the Green tip (GREEN_KIND not origin: a live checkout of a repo that publishes
+# one, or a hold) never follows: <new> is no Green tip yet, and the Primary refresh moves it once it is (ADR 0084 d1).
+# It is held while a rollout runs on the primary checkout, and a move git refuses over local changes is
 # a note: the commit is on origin either way, and the checkout catches up at its next fast-forward. A handed file
 # settle_handed left on disk with <new>'s blob is staged first (so the move keeps it) and unstaged again if the move is
 # refused.
 primary_follow() {
   local rc r added=()
   [ "$1" = "$2" ] && return 0
+  if [ "$GREEN_KIND" != origin ]; then
+    echo "land: not moved to $(printf '%s' "$2" | cut -c1-12): the checkout waits on the Green tip"
+    return 0
+  fi
   if primary_hold; then
     echo "land: held the primary checkout at $(git rev-parse --short HEAD), $4: $HOLD"
     return 0
@@ -792,10 +833,14 @@ delivered() { if [ -n "$built$already" ]; then settle_handed; fi; }
 # settle_handed: once the close-out is on origin, leave the checkout free to fast-forward (the header's scratch commit).
 # THREAD.md goes back to HEAD's copy, only if it is still exactly as committed: one edited since keeps its edit, and
 # a copy the caller staged (close's 7.1) is unstaged first, since a staged copy that differs from origin's would
-# refuse the fast-forward. A consumed review doc still on disk is removed, the removal the pathspec route does up front.
-# Every other handed path stays as handed: a new or refreshed doc for its reader, a deletion gone.
+# refuse the fast-forward. A checkout that waits on the Green tip (GREEN_KIND not origin) instead holds the copy origin
+# will hold, the close-out commit's ($made, else origin/<d>'s when origin already held the edit): it does not follow
+# the close-out (primary_follow), so HEAD's copy would read stale for the whole Green-tip lag, and live-checkout.sh's
+# lc_landed lets the fast-forward replace it once origin's default branch holds it. A consumed review doc still on disk
+# is removed, the removal the pathspec route does up front. Every other handed path stays as handed: a new or refreshed
+# doc for its reader, a deletion gone.
 settle_handed() {
-  local r
+  local r src
   for r in ${list[@]+"${list[@]}"}; do
     if git cat-file -e "$tree:$r" 2>/dev/null; then
       case $r in THREAD.md|*/THREAD.md) ;; *) continue ;; esac
@@ -805,6 +850,16 @@ settle_handed() {
         || { echo "land: kept $r (changed since it was committed)"; continue; }
       git diff --quiet --cached HEAD -- "$r" || git reset -q HEAD -- "$r" 2>/dev/null \
         || { echo "land: kept $r (could not unstage it)"; continue; }
+      if [ "$GREEN_KIND" != origin ]; then
+        src=${made:-refs/remotes/origin/$d}
+        git cat-file -e "$src:$r" 2>/dev/null || src=refs/remotes/origin/$d
+        if git restore --worktree --source="$src" -- "$r" 2>/dev/null; then
+          echo "land: kept $r as the close-out's copy (the checkout waits on the Green tip)"
+        else
+          echo "land: kept $r (could not restore it)"
+        fi
+        continue
+      fi
       git restore --worktree --source=HEAD -- "$r" 2>/dev/null || echo "land: kept $r (could not restore it)"
     elif review_doc "$r" && consumed_review "$r"; then
       rm -f -- "$r" 2>/dev/null || echo "land: kept $r (could not remove it)"
@@ -955,6 +1010,39 @@ EOF
   fi
   delivered
   finish "$res" 0
+}
+
+# green_read: the checkout's live target, skills/_shared/scripts/green-tip.py's reading (ADR 0084 d1 and Decided for you
+# 11; its docstring holds the rules), into GREEN_KIND: origin (a repo that publishes no Green tip, or no live checkout:
+# origin's tip as ever), green (GREEN_SHA, the Green tip or a recorded verified commit before it) or hold (GREEN_WHY:
+# nothing moves, never to origin's tip). The read's own budget is gb = min(60, LAND_DEADLINE - SECONDS - 10) under an
+# outer bound of gb + 5, which bounded caps at what is left (at least gb + 10), so the resolver's own bound fires first
+# and its children, kept in its group, die with that group; under 1 s of gb it is skipped (`land: skipped the Green tip
+# read: deadline`). Every failure (a timeout, exit 1, a line it does not promise) is a hold.
+green_read() {
+  local gb out rc k s w
+  GREEN_KIND=hold GREEN_SHA= GREEN_WHY=
+  gb=$((LAND_DEADLINE - SECONDS - 10))
+  [ "$gb" -gt 60 ] && gb=60
+  if [ "$gb" -lt 1 ]; then
+    echo "land: skipped the Green tip read: deadline"; GREEN_WHY="the Green tip read was skipped (deadline)"; return 0
+  fi
+  out=$(LAND_TIMEOUT=$((gb + 5)) bounded python3 "$here/green-tip.py" target --repo "$top" --branch "$d" --checkout \
+        --budget "$gb" 2>"$tmpd/green.err"); rc=$?
+  [ -s "$tmpd/green.err" ] && grep '^green-tip: WARN: ' "$tmpd/green.err"
+  if [ "$rc" = 124 ]; then
+    echo "land: skipped the Green tip read: deadline"; GREEN_WHY="the Green tip read was skipped (deadline)"; return 0
+  fi
+  if [ "$rc" = 142 ]; then GREEN_WHY="green-tip.py ran past $((gb + 5)) s"; return 0; fi
+  k=${out%% *}; s=${out#* }; s=${s%% *}; w=${out#* * }
+  case "$rc:$k:$s" in
+    0:origin:*) GREEN_KIND=origin ;;
+    0:green:*[!0-9a-f]*|0:green:) GREEN_WHY="green-tip.py exit 0: an unreadable line: $(printf '%s' "$out" | cut -c1-120)" ;;
+    0:green:*) GREEN_KIND=green GREEN_SHA=$s ;;
+    0:hold:*) GREEN_WHY=$w ;;
+    0:*) GREEN_WHY="green-tip.py exit 0: an unreadable line: $(printf '%s' "$out" | cut -c1-120)" ;;
+    *) GREEN_WHY="green-tip.py exit $rc: $(first_line "$tmpd/green.err")" ;;
+  esac
 }
 
 # ==== own-branch mode (ADR 0028 §§ 1–3: close lands the session's own branch) ==============================
@@ -1268,6 +1356,7 @@ subjects() {
 
 own_main() {
   local B= act= rev= note= fixed= repo top b bref d= slug tmpd out rc m od ob own_restore= own_ref=
+  local GREEN_KIND=hold GREEN_SHA= GREEN_WHY=
   local state n= url= login auto me R H st infra res prot wf fixedn=0
   while [ $# -gt 0 ]; do
     case $1 in
@@ -1420,6 +1509,23 @@ EOF
 
   # ---- O9. Reconcile with origin/<B>: fast-forward, or merge update-branch's commits; never force ----------
   if git rev-parse -q --verify "$ob" >/dev/null && ! git merge-base --is-ancestor "$ob" HEAD; then
+    # origin/<B> carries origin/<d> commits HEAD lacks (update-branch's merges): a live checkout of a repo that
+    # publishes a Green tip takes them only up to it (ADR 0084 d1; green_read).
+    local mb mbs=
+    for mb in $(git merge-base -a "$ob" "$od" 2>/dev/null); do   # -a: every merge base (a read)
+      git merge-base --is-ancestor "$mb" HEAD || mbs="$mbs $mb"
+    done
+    if [ -n "$mbs" ]; then
+      green_read
+      case $GREEN_KIND in
+        green)
+          for mb in $mbs; do
+            git merge-base --is-ancestor "$mb" "$GREEN_SHA" \
+              || own_finish "stuck: origin/$B carries origin/$d commits past the Green tip ($(printf '%s' "$mb" | cut -c1-12), not at $(printf '%s' "$GREEN_SHA" | cut -c1-12)): the checkout runs live; land $B from a worktree (ADR 0084)" 1
+          done ;;
+        hold) own_finish "stuck: no move: $GREEN_WHY: the checkout runs live; land $B from a worktree (ADR 0084)" 1 ;;
+      esac
+    fi
     if git merge-base --is-ancestor HEAD "$ob"; then
       # Strictly behind (the guard above): live-checkout.sh's lc_ff, the overlap first, so a refusal over a local
       # change runs no merge and leaves ORIG_HEAD alone.

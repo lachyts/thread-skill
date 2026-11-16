@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """engine-snapshot.py — a rollout runs on its Engine snapshot (ADR 0043; skills/_shared/engine-snapshot.md says when).
 
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py cut [--verb V] [--prose-id H]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py cut [--at SHA] [--verb V] [--prose-id H]
         [--tasks-dir D] [--now T]
     python3 <snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout <note> [--tasks-dir D] [--now T]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <note> [--verb V]
@@ -35,9 +35,11 @@ the realpath of a plugin root (this script's, three levels up, by default). Each
   (c) The Primary is `dirname(common)`: the root itself for a main checkout, the main checkout for a snapshot or any
       other linked worktree.
 
-A snapshot is a detached, `git worktree lock`ed linked worktree of the Primary's repo at `refs/remotes/origin/<d>`
-read right after a fresh `git fetch origin <d>` (<d> from default-branch.sh), at
-`<dirname(primary)>/<basename(primary)>-snapshots/<sha12>`: one per origin tip, shared by every rollout cut there.
+A snapshot is a detached, `git worktree lock`ed linked worktree of the Primary's repo at the Green tip of <d> (ADR
+0084 d1, p54-6; <d> from default-branch.sh), read right after a fresh `git fetch origin <d>` by
+skills/_shared/scripts/green-tip.py (its docstring holds the rules), at
+`<dirname(primary)>/<basename(primary)>-snapshots/<sha12>`: one per commit, shared by every rollout cut there. In a
+repo that publishes no Green tip that commit is `refs/remotes/origin/<d>`, origin's tip, as before.
 It is never the Primary's HEAD or working tree. The lock reason is "thread Engine snapshot (ADR 0043)".
 A snapshot is usable at sha S when its directory exists, is its own work tree's toplevel, sits detached at S, has no
 tracked change (`git status --untracked-files=no`: __pycache__ and an `ident` expansion read clean) and holds this
@@ -91,13 +93,22 @@ prune`. A directory that is no worktree of the Primary is never removed (`kept <
 Verbs.
   cut     No git Primary: exit 4, stdout empty, one stderr line with the reason; no git call reaches any origin.
           Otherwise default-branch.sh <primary>, then `git -C <primary> fetch -q origin +refs/heads/<d>:refs/remotes/
-          origin/<d>` (retried once; a failure is exit 2, never a stale-ref fallback); a tip without this script is
+          origin/<d>` (retried once; a failure is exit 2, never a stale-ref fallback). The sha is green-tip.py's
+          (resolve(), gh asked, the record written, run through run_group; loaded from this root, lazily, and one that
+          will not load or raises is exit 2): the Green tip (from green); a recorded verified commit before an
+          unverified Green tip (from verified); origin's tip in a repo that publishes none (from origin); on a hold the
+          newest recorded verified ancestor of origin/<d> (from verified), and with none exit 3, `no Green tip to cut
+          at (<why>)`, naming `cut --at`, nothing cut and never origin's tip. `cut --at <sha>`, by hand on his word only
+          (ADR 0084 Decided for you 8, the one case the Green tip cannot serve: a break in the code that reads it),
+          skips the resolver and cuts at that commit (from at), which must be origin/<d> or an ancestor of it, else exit
+          3, nothing cut. A sha without this script is
           exit 3; a home whose parent is inside a work tree that does not ignore it is exit 3, nothing created; the
           home lock (exit 2 after 60 s). It reuses `<home>/<sha12>` only when that is a usable snapshot of the same
           repo at that sha (else exit 3: move it aside), or runs `worktree add --detach` then `worktree lock`. It
           touches `<home>/.cut/<sha12>`, runs the retire sweep sparing the snapshot just cut (its `retired` lines
           go to stderr), and prints one JSON line: {snapshot, sha, sha12, reused, primary, default,
-          prose: {verb, rootId, identical} | null}.
+          prose: {verb, rootId, identical} | null, from, green, origin, why} (from green | verified | origin | at; green
+          refs/thread/green's commit when it was read, origin origin/<d>'s tip, why the reading in words).
   adopt   Run from a snapshot of git_primary() (a linked worktree, detached, tracked-clean, its directory named
           HEAD[:12] inside `<basename(primary)>-snapshots` beside the Primary), else exit 2. An archived note, or one
           not found, is exit 2. Under the note lock, through reconcile-rollout.py's Note save (loaded from this
@@ -143,6 +154,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.realpath(os.path.join(HERE, "..", "..", ".."))
 SELF_REL = "skills/_shared/scripts/engine-snapshot.py"
 DEFAULT_BRANCH_REL = "skills/execute/scripts/default-branch.sh"
+GREEN_REL = "skills/_shared/scripts/green-tip.py"   # the cut's sha: the Green tip (ADR 0084 d1, p54-6)
 RR_REL = "skills/execute/scripts/reconcile-rollout.py"
 DEFAULT_TASKS_DIR = "~/repos/obsidian/Work/Tasks"
 LOCK_REASON = "thread Engine snapshot (ADR 0043)"
@@ -392,7 +404,7 @@ def remedy(snap, sha, problem):
     primary = git_primary(ROOT)[0] or "<the Primary checkout>"
     if problem == "gone":
         return ("restore it at its sha: git -C %s worktree add --detach %s %s, then git -C %s worktree lock --reason "
-                "\"%s\" %s (a Reinstate re-cuts it onto origin's tip instead)" % (primary, snap, sha or "<engine_sha>",
+                "\"%s\" %s (a Reinstate re-cuts it at the Green tip instead)" % (primary, snap, sha or "<engine_sha>",
                                                                                   primary, LOCK_REASON, snap))
     if problem.startswith("moved"):
         return "put it back: git -C %s checkout -q --detach %s" % (snap, sha or "<engine_sha>")
@@ -737,9 +749,10 @@ def cmd_cut(a):
     if rc != 0:
         raise Fail(2, "engine-snapshot cut: git fetch origin %s failed in %s (%s): nothing cut, never a stale ref"
                       % (default, primary, first_line(err) or "exit %d" % rc))
-    sha = git_out(primary, "rev-parse", "--verify", "-q", ref + "^{commit}")
-    if not sha:
+    origin = git_out(primary, "rev-parse", "--verify", "-q", ref + "^{commit}")
+    if not origin:
         raise Fail(2, "engine-snapshot cut: %s does not resolve in %s after the fetch: nothing cut" % (ref, primary))
+    sha, frm, green, why = _cut_target(a, primary, default, origin, env)
     sha12 = sha[:12]
     if git(primary, "cat-file", "-e", "%s:%s" % (sha, SELF_REL)).returncode != 0:
         raise Fail(3, "engine-snapshot cut: origin/%s at %s has no %s (it predates Engine snapshots): nothing cut"
@@ -795,8 +808,48 @@ def cmd_cut(a):
             sys.stderr.write("engine-snapshot cut: swept: %s\n" % line)
     snap = real(snap)
     print(json.dumps({"snapshot": snap, "sha": sha, "sha12": sha12, "reused": reused, "primary": primary,
-                      "default": default, "prose": prose(a.verb, a.prose_id, snap)}))
+                      "default": default, "prose": prose(a.verb, a.prose_id, snap), "from": frm, "green": green,
+                      "origin": origin, "why": why}))
     return 0
+
+
+def _cut_target(a, primary, default, origin, env):
+    """(sha, from, green, why): the commit the cut is at (the header's cut). `cut --at <sha>` by hand (ADR 0084 Decided
+    for you 8): that commit, which must be origin/<d> or an ancestor of it. Otherwise green-tip.py's reading (loaded from
+    this root, gh asked, the record written, through run_group): the Green tip (from green), a verified commit before an
+    unverified one (from verified), origin's tip in a repo that publishes none (from origin), or on a hold the newest
+    recorded verified ancestor of origin/<d> (from verified), else exit 3: never origin's tip."""
+    if a.at:
+        if not re.match(r"^[0-9a-f]{7,64}$", a.at):
+            raise Fail(2, "engine-snapshot usage: cut --at takes a commit id, got %r" % a.at)
+        sha = git_out(primary, "rev-parse", "--verify", "-q", a.at + "^{commit}")
+        if not sha or git(primary, "merge-base", "--is-ancestor", sha, origin).returncode != 0:
+            raise Fail(3, "engine-snapshot cut: --at %s is %s: nothing cut" % (
+                a.at, "not a commit here" if not sha else "not origin/%s or an ancestor of it" % default))
+        return sha, "at", None, "cut at %s by hand (cut --at)" % sha[:12]
+    try:
+        spec = importlib.util.spec_from_file_location("thread_green_tip_es", os.path.join(ROOT, GREEN_REL))
+        gt = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gt)
+    except Exception as e:  # noqa: BLE001 — a resolver that will not load cuts nothing
+        raise Fail(2, "engine-snapshot cut: cannot load %s (%s: %s): nothing cut" % (GREEN_REL, type(e).__name__, e))
+
+    def run(argv, timeout):
+        rc, out, err = run_group(argv, env, timeout)
+        return rc, out, err, rc == 124
+
+    try:
+        r = gt.resolve(primary, default, gh=True, write=True, run=run)
+    except Exception as e:  # noqa: BLE001
+        raise Fail(2, "engine-snapshot cut: green-tip.py raised %s: %s: nothing cut" % (type(e).__name__, e))
+    if r.get("kind") == "green":
+        return r["target"], ("verified" if r.get("stepped") else "green"), r.get("green"), r.get("why")
+    if r.get("kind") == "origin":
+        return r["target"], "origin", None, r.get("why")
+    if r.get("fallback"):
+        return r["fallback"], "verified", r.get("green"), "%s: cut at the newest verified commit before it" % r.get("why")
+    raise Fail(3, "engine-snapshot cut: no Green tip to cut at (%s): nothing cut, never origin's tip; on his word only, "
+                  "cut --at <sha> (ADR 0084 Decided for you 8)" % r.get("why"))
 
 
 def _snapshot_root_problem(primary):
@@ -946,7 +999,8 @@ class Parser(argparse.ArgumentParser):
 def parser():
     p = Parser(prog="engine-snapshot.py", description="A rollout runs on its Engine snapshot (ADR 0043).")
     sub = p.add_subparsers(dest="cmd", parser_class=Parser)
-    c = sub.add_parser("cut", help="cut a snapshot at origin's fresh tip of the default branch")
+    c = sub.add_parser("cut", help="cut a snapshot at the Green tip of the default branch (or --at a commit, by hand)")
+    c.add_argument("--at", help="cut at this commit, origin/<d> or an ancestor of it, by hand (ADR 0084 Decided 8)")
     c.add_argument("--verb")
     c.add_argument("--prose-id", dest="prose_id")
     c.add_argument("--tasks-dir", dest="tasks_dir")
