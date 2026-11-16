@@ -26,15 +26,14 @@
 # - diverged, or the run's commit no longer on master: a warning, and a pass;
 # - behind, or missing: a fast-forward push, never forced. After a failed push it reads again, up to 3 pushes, and only
 #   a ref still behind after the third is red, with the push's own stderr above the `::error::` line.
-# A run whose only failed job is `publish the Green tip` passed every shard: that red is the publisher's own, covers no
-# merge, and never files a suite fix naming the merges since the last green commit (p54-7). Its failed job is re-run
-# once (ADR 0084 d3's one re-run); if the re-run passes, the red was a blip, a network or GitHub hiccup. A publisher red
-# that comes back, on that re-run or on the next master run's publisher, is a structural refusal: GitHub refuses the
-# push or the ref. The likely cause is a GITHUB_TOKEN without the `workflows` permission, which a fast-forward across a
-# merge that edited .github/workflows/ may need; its log line is `refusing to allow a GitHub App to create or update
-# workflow ...`. A structural refusal wants a fix to this job or a credential gate, never another re-run and never a
-# suite fix. No ruleset can guard the ref on a user-owned repo (422, tried 2026-11-16), so its readers are the guard.
-# Never push to the ref from the Mac.
+# A run whose only failed job is `publish the Green tip` passed every shard: ADR 0084 Decided for you 13 reads that red,
+# and p54-7 builds the reading. It files no suite fix. Its failed job is re-run once (Decided for you 3's one re-run),
+# and a pass then was a blip, a network or GitHub hiccup. A publisher red that comes back, on that re-run or on the next
+# master run's publisher, is a structural refusal: GitHub refuses the push or the ref. The likely cause is a
+# GITHUB_TOKEN without the `workflows` permission, which a fast-forward across a merge that edited .github/workflows/
+# may need; its log line is `refusing to allow a GitHub App to create or update workflow ...`. It wants a fix to this
+# job or a credential gate, never another re-run. No ruleset can guard the ref on a user-owned repo (422, tried
+# 2026-11-16), so its readers are the guard. Never push to the ref from the Mac.
 name: full suite
 
 on:

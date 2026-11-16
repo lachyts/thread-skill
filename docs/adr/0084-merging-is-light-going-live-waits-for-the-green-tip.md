@@ -6,13 +6,9 @@ Status: proposed. Grilled with Lachy on 2026-11-16, from the suite audit of the 
 stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset (the
 `make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job still runs, unrequired,
 until Phase 54's task 2). Decided for you 11's publisher and Decided for you 4 by p54-5: full-suite.yml's `green-tip`
-job fast-forwards `refs/thread/green` to a run's commit once every shard passed. The runs coalesce in one concurrency
-group, so a red covers every merge since the last green commit, and only the newest commit's run is re-run (p54-7). A
-red whose only failed job is `publish the Green tip` is the publisher's own: every shard passed, so it covers no merge
-and never files a suite fix. If its one re-run (d3) passes, the red was a blip. One that comes back, on that re-run or
-on the next master run, is a structural refusal (GitHub refusing the push or the ref, such as a GITHUB_TOKEN without
-the `workflows` permission across a workflow edit). It wants a fix or a credential gate, never another re-run. Readers
-not yet built (p54-6, p54-7). Phase 54 builds the rest.
+job, named `publish the Green tip`, fast-forwards `refs/thread/green` to a run's commit once every shard passed, and
+the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Readers not yet
+built (p54-6, p54-7). Phase 54 builds the rest.
 
 ## Context
 
@@ -113,7 +109,8 @@ Calls made in his place, each overturnable:
    waits; a run in flight is never cancelled. Why: one run uses about 65 macOS runner-minutes and GitHub gives 5 macOS
    jobs at once, so about 4.6 runs an hour, fewer than a 10-minute lane can merge. A verdict per commit would let the
    queue grow and the Green tip trail by hours. A red then covers every merge since the last green commit, and its fix
-   task names them all.
+   task names them all. A re-run joins the same group, where it would cancel the newest commit's waiting run or be
+   cancelled by it, so only the newest commit's run is re-run (Decided for you 3's one re-run).
 5. **An Engine catch-up drains; it never cuts a task mid-step.** Why: one engine version writes a rollout's records
    between moves (ADR 0043). A serial chain catches up at its next Leg.
 6. **Only a Speed fix in the engine's own repo causes a catch-up, and a phase drains a rollout once.** The drain is
@@ -136,6 +133,13 @@ Calls made in his place, each overturnable:
 12. **The audit's other changes stand as technical work**: the remaining ubuntu check runs as shards behind a job
     that keeps the required name, a bytecode cache for the test run, `tests/leg.test.sh` split in four, a narrower
     reach, node's files longest-first.
+13. **A red whose only failed job is `publish the Green tip` files no suite fix, and one that comes back wants a fix to
+    that job or a credential gate, never another re-run.** Its failed job re-runs once (Decided for you 3), and a pass
+    then records a blip. A red that returns, on that re-run or on the next default-branch run's publisher, is a
+    structural refusal: GitHub refusing the push or the ref, such as a GITHUB_TOKEN without the `workflows` permission
+    across a merge that edited `.github/workflows/`. Why: every shard passed, so the red covers no merge and a suite fix
+    would name merges that broke nothing; and a refusal returns on every re-run, so another one only spends runner time
+    while the Green tip waits.
 
 ## Consequences
 
