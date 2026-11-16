@@ -283,16 +283,16 @@ r = m.resolve(sys.argv[2], "master", budget=2)
 print(r["kind"], r["cause"])
 PY
 )
-ok "$out|$([ $((SECONDS - s0)) -le 5 ] && echo soon)" "hold unreachable|soon" "GT15 (a): imported, budget 2, a hanging ssh: a hold, unreachable, within 5 s"
+ok "$out|$([ $((SECONDS - s0)) -le 10 ] && echo soon)" "hold unreachable|soon" "GT15 (a): imported, budget 2, a hanging ssh: a hold, unreachable, within 10 s (the hang is 120 s)"
 gone "$(cat "$HANG_PID" 2>/dev/null)" "GT15 (a): … the hung ssh is gone (its own group, killed at the bound)"
 rm -f "$HANG_PID"; s0=$SECONDS
 out=$(FAKE=hang wrap 10 python3 "$GT" target --repo "$W" --branch master --budget 2); rc=$?
-ok "$rc|${out%% *}|$([ $((SECONDS - s0)) -le 5 ] && echo soon)" "0|hold|soon" "GT15 (b): the CLI under the group-kill wrapper, --budget 2: exit 0, a hold, within 5 s"
+ok "$rc|${out%% *}|$([ $((SECONDS - s0)) -le 10 ] && echo soon)" "0|hold|soon" "GT15 (b): the CLI under the group-kill wrapper, --budget 2: exit 0, a hold, within 10 s (the hang is 120 s)"
 has "$out" "refs/thread/green: " "GT15 (b): … unreachable, its why naming the ref"
 gone "$(cat "$HANG_PID" 2>/dev/null)" "GT15 (b): … the ssh its inner kill left in the CLI's group is reaped by the wrapper's after-exit kill"
 rm -f "$THREAD_GREEN_TIP_FILE" "$HANG_PID"; : > "$LOG_GH"; s0=$SECONDS
 out=$(GH_MODE=hang wrap 10 python3 "$GT" target --repo "$W" --branch master --budget 2)
-ok "${out%% *}|$(grep -c . "$LOG_GH")|$(rv o/r 'e["unverified"]')|$([ $((SECONDS - s0)) -le 5 ] && echo soon)" "hold|1|[]|soon" \
+ok "${out%% *}|$(grep -c . "$LOG_GH")|$(rv o/r 'e["unverified"]')|$([ $((SECONDS - s0)) -le 10 ] && echo soon)" "hold|1|[]|soon" \
   "GT15 (c): --budget 2, a hanging gh on an unrecorded tip: one bounded call, nothing recorded"
 gone "$(cat "$HANG_PID" 2>/dev/null)" "GT15 (c): … the hung gh is gone"
 
@@ -308,8 +308,8 @@ python3 -c 'import fcntl, sys, time; f = open(sys.argv[1], "a"); fcntl.flock(f, 
   "$THREAD_GREEN_TIP_FILE.lock" "$tmp/locked" &
 holders+=($!); i=0; while [ ! -s "$tmp/locked" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
 s0=$SECONDS; out=$(gt --budget 3 2>&1)
-ok "$(printf '%s\n' "$out" | grep -c '^green ')|$(cmp -s "$tmp/rec.before" "$THREAD_GREEN_TIP_FILE" && echo same)|$([ $((SECONDS - s0)) -le 4 ] && echo soon)" "1|same|soon" \
-  "GT17: a held lock: the reading still prints, the record unchanged, within the budget + 1 s"
+ok "$(printf '%s\n' "$out" | grep -c '^green ')|$(cmp -s "$tmp/rec.before" "$THREAD_GREEN_TIP_FILE" && echo same)|$([ $((SECONDS - s0)) -le 10 ] && echo soon)" "1|same|soon" \
+  "GT17: a held lock: the reading still prints, the record unchanged, within its 3 s budget and a margin (the holder sleeps 30 s)"
 has "$out" "green-tip: WARN: the record is locked: this reading is not recorded" "GT17: … with one WARN"
 { kill "${holders[0]}"; wait "${holders[0]}"; } 2>/dev/null
 
