@@ -5,10 +5,12 @@
 # unstaged ones, which check an untracked helper or script as a worktree holds it before `git add`; C4 pins
 # contract-text's skillCount) on throwaway repos, its results on the real tree (R1-R8, the Slow tier's `slow` and
 # --shard-plan in R9-R10, and R11-R12's SKILL.md and docs reach through one index), tests/run.sh's --fast, --only,
-# --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note), and THREAD_SKIP_SLOW's
-# filter on a second one (G1-G6, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real
-# tree). Each throwaway repo has a local bare origin and a copy of the selector; no network, nothing written outside
-# temp. Fixture basenames all start with zz, which no tracked file uses. bash 3.2-compatible (macOS).
+# --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note; p54-3's node order, warm
+# knob and node-run.mjs signals in F23-F25; p54-10's --fast --shard in F26), and THREAD_SKIP_SLOW's filter on a second
+# one (G1-G7, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway
+# repo has a local bare origin and a copy of the selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked
+# file uses. The fixture runs leave the warm's stdlib half out (THREAD_TEST_WARM_STDLIB=0, exported before F1), all but
+# F24's. bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -612,7 +614,7 @@ for h in skills/execute/scripts/reconcile-rollout.py skills/execute/scripts/lead
     "R7: the hub $h is FAST: its declared suites and the walkers (FULL means its HUB line went)"
 done
 r8=$(python3 "$SEL" select --paths THREAD.md)
-ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
+ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg(-land|-security)?.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
   "R8: a THREAD.md change is FAST and skips the suites that write only fixture repos' THREAD.md (their FOREIGN-ONLY line)"
 has "$(python3 "$SEL" select --paths CONTEXT.md)" "tests/repo-threads.test.sh" "R8: … while CONTEXT.md still selects repo-threads.test.sh, which reads the real one"
 has "$(python3 "$SEL" select --paths CLAUDE.md)" "tests/fast-tier-wiring.test.mjs" "R8: … and CLAUDE.md still selects fast-tier-wiring.test.mjs (W3 reads it)"
@@ -682,9 +684,13 @@ ok "$n" 7 "R11-R12: the real-tree reading printed its seven verdicts"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
+# Every fixture run below leaves the warm's stdlib half out (run.sh's header, "The bytecode cache"): each launches only a
+# few pythons, so warming about 560 stdlib modules per run cost this suite more than the warm saved. F24 runs it whole.
+export THREAD_TEST_WARM_STDLIB=0
 F="$TMP/f"; mkrepo "$F"
 cp "$root/tests/run.sh" "$F/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$F/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$F/tests/lib/"
 put "$F" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$F" skills/x/scripts/zza.py 'print("a")'
 put "$F" skills/x/scripts/zzb.py 'print("b")'
@@ -796,7 +802,9 @@ ok "$(printf '%s\n' "$out" | grep -cE '^[12]'"$tab"'')|$(printf '%s\n' "$out" | 
   "F11: … and prints <k><TAB><entry> for each entry once"
 
 for args in "--shard 0/2" "--shard 3/2" "--shard x" "--shard 1/2 extra" "--shard" "--shard 1/2/3" "--shard /2" \
-  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--fast --shard 1/2" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2"; do
+  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2" \
+  "--fast --shard 0/2" "--fast --shard 3/2" "--fast --shard 1/2 extra" "--fast --shard-plan 0" "--fast --fast" \
+  "--fast --only tests/zza.test.sh" "--shard-plan 2 --fast"; do
   # shellcheck disable=SC2086
   run bash $args
   ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== ')" "2||0" "F12: run.sh $args exits 2 and runs nothing"
@@ -811,7 +819,40 @@ put "$F" tests/lib/shard.py 'import sys; sys.exit(1)'
 ZZ_C_OK=1 run bash --shard 1/2
 ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no test"
 has "$out" "  - shard split" "F14: … through the shard split step"
+has "$out" "run.sh: shard.py --order failed, so node takes its files in glob order" "F14: … and node's order falls back to the glob's, and says so"
 git -C "$F" checkout -q -- tests/lib/shard.py
+
+# F26 (p54-10, ADR 0084 d4): --fast --shard K/N runs shard K of the fast tier's selection, so the shards together run it
+# exactly once: over a small diff (F1's: zza alone, so shards 2 and 3 hold nothing) and a FULL one (F2's tracked
+# unmapped path), the union of --fast --shard k/3's suite runs (allmarkers, not deduplicated) is --fast's selection,
+# which F1 and F2 pin. G7 runs the same under the Slow tier's flag.
+# fshards <base>: shard k's output in fo[k], the three joined in $fsh, their exit codes in $frc.
+fshards() {
+  local k; fsh=""; frc=""; fo=()
+  for k in 1 2 3; do ZZ_C_OK=1 THREAD_VERIFY_BASE=$1 run bash --fast --shard "$k/3"; fo[$k]=$out; fsh="$fsh$nl$out"; frc="$frc$rc"; done
+}
+echo 'B = 1' >> "$F/skills/x/scripts/zza.py"; git -C "$F" commit -qam "a only"
+fshards "$FB"
+ok "$frc|$(allmarkers "$fsh")" "000|zzmarker-a " "F26: a small diff's three --fast shards run its one suite exactly once, and all pass"
+ok "$(holds "${fo[1]}" "== shard 1/3: 1 test files" y n)$(holds "${fo[1]}" "== fast tier: base ${FB:0:12} (--base), 1 changed paths, 1 test files" y n)" yy \
+  "F26: … shard 1 holds it, after the fast tier's own line"
+for k in 2 3; do
+  o=${fo[$k]}
+  ok "$(holds "$o" "== fast-tier map check" y n)$(holds "$o" "== shard $k/3: 0 test files" y n)$(holds "$o" "== node tests: none selected" y n)$(holds "$o" "make test: ALL PASS" y n)" yyyy \
+    "F26: … shard $k holds no entry: it runs the always-run steps, no suite and no node, and passes"
+done
+fpo=$(cd "$F" && THREAD_VERIFY_BASE=$FB bash tests/run.sh --fast --shard-plan 3 2>"$TMP/fplan.err"); fprc=$?
+ok "$fprc|$(printf '%s' "$fpo" | tr '\t\n' ':/')|$(grep -c '^== fast tier: base ' "$TMP/fplan.err")|$(grep -c '^== fast-tier map check' "$TMP/fplan.err")" \
+  "0|1:tests/zza.test.sh|1|0" "F26: --fast --shard-plan 3 prints only the selection's split on stdout, its fast tier line on stderr, and runs no step"
+git -C "$F" reset -q --hard "$FB"
+put "$F" new.txt 'loose'; git -C "$F" add new.txt
+fshards "$FB"
+ok "$frc|$(allmarkers "$fsh")" \
+  "000|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F26: a FULL diff's three --fast shards run every suite and both self-tests exactly once, and all pass"
+ok "$(printf '%s\n' "${fo[1]}" | grep -c 'zzmarker-self-test --self-test-')|$(printf '%s\n' "${fo[2]}$nl${fo[3]}" | grep -c 'zzmarker-self-test')|$(printf '%s\n' "$fsh" | grep -c '^== fast tier: full suite (new.txt: not in the map)$')" \
+  "2|0|3" "F26: … the self-tests in shard 1 only, and each shard says why it fell to the full suite"
+git -C "$F" rm -qf new.txt
 
 # F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
 # mid-run still shows every suite that finished (F15's sentinel case: one suite's line while another still runs); the
@@ -927,13 +968,72 @@ for bad in "nottab tests/zza.test.sh" "0${tab}tests/zza.test.sh" "3${tab}tests/z
 done
 rm -f "$W"
 
+# F23 (p54-3): node takes its files longest first, by the measured seconds in tests/shard-weights.tsv: shard.py --order
+# sorts them and tests/lib/node-run.mjs keeps that order (`node --test` itself sorts its arguments by path). At
+# THREAD_TEST_JOBS=1 node runs one file at a time, so the markers' order is the files' start order.
+put "$F" tests/zzd.test.mjs "console.log('zzmarker-d')"
+nodeorder() { printf '%s\n' "$out" | grep -oE 'zzmarker-[cd]' | tr '\n' ' '; }
+printf '%s\t%s\n' 1 tests/contracts/zzc.test.mjs 100 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-d zzmarker-c " "F23: the heavier node file (zzd, 100 s) runs first, though zzc's path sorts first"
+has "$out" "== node seconds per file" "F23: … and node prints each file's seconds, the weights' source"
+printf '%s\t%s\n' 100 tests/contracts/zzc.test.mjs 1 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-c zzmarker-d " "F23: … and with the weights swapped, zzc runs first"
+ZZ_C_OK=0 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(lines '^node tests \(2 files\): FAILED \([0-9]+s\)$')" "1|1" "F23: … a failing node file still fails the node step and the run"
+# node-run.mjs exits as `node --test` does, by the run's summary: a failing `todo` test passes, a failing test does not.
+put "$F" tests/zze.test.mjs "import test from 'node:test'
+test('zze todo', { todo: true }, () => { throw new Error('zze') })
+test('zze fails', () => { if (process.env.ZZ_E_FAIL) throw new Error('zze') })"
+erc() { (cd "$F" && env "$@" node tests/lib/node-run.mjs tests/zze.test.mjs > /dev/null 2>&1); echo $?; }
+ok "$(erc ZZ_E=)|$(erc ZZ_E_FAIL=1)" "0|1" "F23: … node-run.mjs passes a failing todo test, as the CLI does, and fails a failing test"
+rm -f "$W" "$F/tests/zzd.test.mjs" "$F/tests/zze.test.mjs"
+
+# F24 (p54-3): the warm's stdlib half. zzw prints whether its python finds argparse's bytecode in the run's prefix, and
+# the knob it sees. This suite's THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out; 1 warms it; the suite never sees the
+# knob (run.sh unsets it); any other value exits 2 before any step.
+put "$F" tests/zzw.test.sh "python3 -c 'import argparse, importlib.util, os
+warm = os.path.isfile(importlib.util.cache_from_source(argparse.__file__))
+print(\"zzwarm\", \"warm\" if warm else \"cold\", os.environ.get(\"THREAD_TEST_WARM_STDLIB\", \"unset\"))'"
+warmed() { printf '%s\n' "$out" | grep '^zzwarm ' | tr '\n' '/'; }
+run bash --only tests/zzw.test.sh; w0="$rc|$(warmed)"
+THREAD_TEST_WARM_STDLIB=1 run bash --only tests/zzw.test.sh; w1="$rc|$(warmed)"
+ok "$w0 $w1" "0|zzwarm cold unset/ 0|zzwarm warm unset/" \
+  "F24: THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out of the prefix, 1 warms it, and no suite inherits the knob"
+THREAD_TEST_WARM_STDLIB=x run bash --only tests/zzw.test.sh
+ok "$rc|$(warmed)|$(lines '^== ')|$(lines "THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got 'x'")" "2||0|1" \
+  "F24: … THREAD_TEST_WARM_STDLIB=x exits 2 before any step and runs nothing"
+rm -f "$F/tests/zzw.test.sh"
+
+# F25 (p54-3): a TERM to node-run.mjs alone (as when a verify slot's guard ends a run inside node's step) cancels the
+# run as the CLI does: the running file's child ends with it, never left to init, its test reads cancelled, and the run
+# exits 1. Both waits are bounded (20 s for the child's pid, 5 s for its end), and a node-run.mjs that ignored the TERM
+# still ends at zzt's own 60 s, so a regression never hangs the suite.
+tpid="$TMP/f25.pid"; rm -f "$tpid"
+put "$F" tests/zzt.test.mjs "import { writeFileSync } from 'node:fs'
+writeFileSync(process.env.ZZ_PID, String(process.pid))
+setTimeout(() => {}, 60000)"
+(cd "$F" && ZZ_PID="$tpid" exec node tests/lib/node-run.mjs tests/zzt.test.mjs > "$TMP/f25.out" 2>&1) & npid=$!
+n=0; while [ ! -s "$tpid" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+kill -TERM "$npid"; wait "$npid"; nrc=$?
+child=$(cat "$tpid" 2>/dev/null)
+n=0; while [ -n "$child" ] && kill -0 "$child" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n+1)); done
+if [ -z "$child" ]; then alive="no child pid"
+elif kill -0 "$child" 2>/dev/null; then alive="child alive, ppid $(ps -o ppid= -p "$child" | tr -d ' ')"; kill "$child"
+else alive=none; fi
+ok "$nrc|$alive|$(grep -c 'cancelled 1' "$TMP/f25.out")" "1|none|1" \
+  "F25: a TERM to node-run.mjs cancels the run: exit 1, the running file's child gone with it, its test cancelled"
+rm -f "$F/tests/zzt.test.mjs"
+
 # G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
 # included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:
 # zzs.py is named by zzslow (SLOW, 200 s) and zzsfast; zzslow prints the THREAD_SKIP_SLOW it sees. A workflow script,
 # as in F, since run.sh's workflow parse step needs one under bash 3.2's set -u.
 G="$TMP/g"; mkrepo "$G"
 cp "$root/tests/run.sh" "$G/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$G/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$G/tests/lib/"
 put "$G" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$G" skills/x/scripts/zzs.py 'print("s")'
 put "$G" tests/zzslow.test.sh 'echo "zzmarker-slow zzs.py ${THREAD_SKIP_SLOW:-unset}"'
@@ -991,6 +1091,20 @@ for mode in --fast "" "--shard-plan 2"; do
   ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c -e '^== ' -e "^[12]$tab")|$(printf '%s\n' "$out" | grep -c "THREAD_SKIP_SLOW must be 1 or empty, got 'yes'")" \
     "2||0|1" "G6: THREAD_SKIP_SLOW=yes (${mode:-bare}) exits 2 before any step and runs nothing"
 done
+
+# G7 (p54-10): F26 under the Slow tier's flag. A diff reaching zzslow (SLOW), zzsfast and the self-tests: with the flag,
+# the union of --fast --shard k/3 is --fast's selection with zzslow left out (G1's rule), each entry once, and each shard
+# names what it left out; --fast --shard-plan 3 leaves it out of the split too.
+echo 'S = 2' >> "$G/skills/x/scripts/zzs.py"; echo '# touched' >> "$G/skills/execute/scripts/merge-task.sh"
+git -C "$G" commit -qam "zzs and merge-task"
+gsh=""; grc=""
+for k in 1 2 3; do THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung bash --fast --shard "$k/3"; gsh="$gsh$nl$out"; grc="$grc$rc"; done
+ok "$grc|$(allmarkers "$gsh")|$(printf '%s\n' "$gsh" | grep -cxF "${LEFT%/}")" \
+  "000|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |3" \
+  "G7: with the flag, the three --fast shards run the selection less the SLOW suite exactly once, and each names it"
+gpo=$(cd "$G" && THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB bash tests/run.sh --fast --shard-plan 3 2>/dev/null); gprc=$?
+ok "$gprc|$(printf '%s\n' "$gpo" | cut -f2 | LC_ALL=C sort | tr '\n' ' ')" "0|@merge-task-self-tests tests/zzsfast.test.sh " \
+  "G7: … and --fast --shard-plan 3 splits only that selection"
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"

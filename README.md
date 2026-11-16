@@ -447,6 +447,8 @@ make test            # = bash tests/run.sh — the full suite, and the self-roll
 make test-fast       # = bash tests/run.sh --fast — the fast tier, and the self-rollout's verifier
 bash tests/run.sh --shard K/N    # shard K of the full suite split N ways (CI's full-suite.yml on master)
 bash tests/run.sh --shard-plan N # the dry run: prints every test file's shard, runs nothing
+bash tests/run.sh --fast --shard K/N    # shard K of the fast tier's selection split N ways
+bash tests/run.sh --fast --shard-plan N # its dry run: prints the selection's split, runs nothing
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 
@@ -472,8 +474,8 @@ line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` w
 consumers line, or a test that lists a directory but sits on neither the walkers' `** ALSO` line nor OWN-LISTINGS.
 The map is itself FULL, so a diff that edits it runs the full suite: edit it only when the check names a missing
 line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. In CI (ADR 0073
-d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-latest)`, ADR 0025) run
-`make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
+d3), a PR's one required check (`make test (ubuntu-latest)`, ADR 0025; macOS left it by ADR 0084 d3 and runs in
+master's shards) runs `make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
 in exactly one shard; `--shard-plan N` is the dry run). Those runs coalesce in one concurrency group, and the last job
 fast-forwards `refs/thread/green` (the Green tip, ADR 0084) to the run's commit once every shard has passed. A test
@@ -641,7 +643,8 @@ it runs:
   `docs/evals/`.
 
 New suites join by filename: `tests/*.test.mjs`, `tests/contracts/*.test.mjs` and
-`skills/execute/tests/*.test.mjs` run under `node --test`; `tests/*.test.sh` and
+`skills/execute/tests/*.test.mjs` run under node's test runner (`tests/lib/node-run.mjs`, longest first by
+measured seconds); `tests/*.test.sh` and
 `skills/execute/tests/*.test.sh` run concurrently, output grouped per suite. `skills/execute/diagnostics/` holds paid live
 diagnostics (Workflow runtime + real agents) — parse-checked, never run by `make test`.
 

@@ -1,13 +1,14 @@
-# The fast tier on every PR (ADR 0073 d3): `make test-fast` against the PR's base, on both OSes (macOS stays in the
-# gate for BSD vs GNU tools). ADR 0025 makes both jobs required status checks on master (strict), so a PR re-tests
-# against the updated base before it can merge. The full suite runs on every push to master, split into shards, in
-# full-suite.yml; master's red is that run's, never a PR's.
+# The fast tier on every PR (ADR 0073 d3): `make test-fast` against the PR's base, on ubuntu alone. macOS left the PR
+# checks by ADR 0084 d3 (p54-2) and runs only in full-suite.yml's shards, which still catch BSD vs GNU tool drift on
+# master. ADR 0025 makes this job a required status check on master (strict), so a PR re-tests against the updated base
+# before it can merge. The full suite runs on every push to master, split into shards on both OSes, in full-suite.yml;
+# master's red is that run's, never a PR's.
 #
-# The job names ARE the required-check contexts: "make test (ubuntu-latest)" and
-# "make test (macos-latest)". Renaming the job, or changing a matrix value, leaves the old contexts
-# unreported and every PR waiting forever. Change the protection in the same breath (ADR 0025 records
-# the payload and the command). No job-level `if:` either: a skipped required job reports success.
-# tests/ci-workflows.test.mjs pins all of this.
+# The job name IS the required-check context: "make test (ubuntu-latest)". The one-value matrix keeps that string
+# byte-identical to what the ruleset and merge-gate.py's matrix expansion read. Renaming the job, or changing the
+# matrix value, leaves the old context unreported and every PR waiting forever. Change the protection in the same
+# breath (ADR 0025 records the payload and the command). No job-level `if:` either: a skipped required job reports
+# success. tests/ci-workflows.test.mjs pins all of this.
 name: test
 
 on:
@@ -22,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 55
     steps:
@@ -40,14 +41,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m pip install pyyaml
-      # THREAD_TEST_JOBS is 4: tests/run.sh's own cap (p23-4) would give these 3- and 4-vCPU runners 2, and on
-      # 2026-10-28 8 made the 3-vCPU macOS runner slower (shell suites 16.5 min against 8 at 4), so it stays 4.
+      # THREAD_TEST_JOBS is 4: tests/run.sh's own cap (p23-4) would give these 4-vCPU runners 2, and on 2026-10-28 8
+      # made the 3-vCPU macOS runner (then in this job) slower (shell suites 16.5 min against 8 at 4), so it stays 4.
       # timeout-minutes sits where it does because a diff that touches a FULL path runs the whole suite, unsharded, in
-      # this one job. Passing jobs from 2026-11-06 to 08 (all full runs, none cancelled) took 19 to 51 min on macOS
-      # and 19 to 34 on ubuntu. The rule (docs/audits/2026-11-09-test-suite.md § 4): 1.15 times the slowest passing
-      # FULL job (50.9 min) is 58.5, rounded up to a multiple of 5 that is 60, then capped at 55 to stay below the 60
-      # it was raised to on 2026-11-07. It is one number for both OSes because merge-task's CI headroom record reads
-      # only a plain whole number from this file (p43-5). The job names and the matrix stay as they are (ADR 0025).
+      # this one job. It was set while macOS and ubuntu shared this job: the rule (docs/audits/2026-11-09-test-suite.md
+      # § 4) took 1.15 times the slowest passing FULL job, macOS's 50.9 min, which is 58.5, rounded up to a multiple of
+      # 5 that is 60, then capped at 55 to stay below the 60 it was raised to on 2026-11-07. Ubuntu's passing FULL jobs
+      # from 2026-11-06 to 08 took 19 to 34 min, so 55 is generous for ubuntu alone; it stays until a suite audit works
+      # the rule out again for ubuntu's own runs. It is a plain whole number because merge-task's CI headroom record
+      # reads only that from this file (p43-5).
       # A job whose week's median runs past 80 % of it (44 min) is a finding (CONTEXT.md's CI headroom, ADR 0073 d5);
       # a job cut at it is re-run once, then set aside as infra (ADR 0073 d4).
       # THREAD_VERIFY_BASE is the PR's base sha. The checkout is the PR's merge ref, so its merge base with the base sha

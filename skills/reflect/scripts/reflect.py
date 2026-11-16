@@ -292,11 +292,15 @@ parallel with no note). For each:
   the timed rows; null with none), timeoutMinutes and limitSource (the group's latest row's), share (the median over the
   limit, 2 places; null when either is unknown), breach (the median past CI_SHARE, 80 %, of the limit; never with no
   limit), cancelled (the rows GitHub cancelled: at the limit, a CI timeout, whose set-aside is merge-task's reasonClass
-  ci-timeout, ADR 0073 d4, read with the set-aside friction), first, last and rollouts. breaches: one line per breaching
-  group, `<repo>: ...`. audit: {repo (THREAD_SKILL_REPO, the one repo whose breach files Thread Skill's suite audit;
-  another's is reported alone), key (watch_id(SUITE_RULE, SUITE_SHAPE): the audit's bug_key), due (a breach on that
-  repo), open ({slug, status} of the open task carrying that key, else null)}. Reported for the reading; suite-audit
-  files from it.
+  ci-timeout, ADR 0073 d4, read with the set-aside friction), first, last, rollouts and retired (CI_RETIRED's date
+  when the (repo, job) left the required checks on a Melbourne date before until's, else null: a retired group's
+  breach is always false; CI_RETIRED is read as of until, an attribute, and the group's rows are windowed as above).
+  retired: one item {repo, job, date, line} per CI_RETIRED entry whose date passes date_in() (since's Melbourne date up
+  to, not including, until's), so each retirement is said once, in the reading whose window holds its date.
+  breaches: one line per breaching group, `<repo>: ...`. audit: {repo (THREAD_SKILL_REPO, the one repo whose breach
+  files Thread Skill's suite audit; another's is reported alone), key (watch_id(SUITE_RULE, SUITE_SHAPE): the audit's
+  bug_key), due (a breach on that repo), open ({slug, status} of the open task carrying that key, else null)}. Reported
+  for the reading; suite-audit files from it.
 - arms (p46-4, ADR 0079 d9): skills/reflect/scripts/arms.py's block (ARMS.reading(); its docstring holds every rule: the
   row units, the attributes read wider, the verdict, the proposal, the hold order, the Guardrails read, the plans and the
   Fable calls by kind), after the sweep and the escapes-only entries, over whole() (every record read whole, its fold's
@@ -322,10 +326,10 @@ rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring,
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
 ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
 overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
-warnings} | null} | null, suite{budget, local[], ci[], breaches[], audit} (above), gateMisses{count, items[{rollout,
-task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is non-empty, the count
-the Reflection reads; p51-3), arms (arms.py's block, above, or null), cannotShow[], flags[]}. stderr gets one summary
-line.
+warnings} | null} | null, suite{budget, local[], ci[], breaches[], retired[], audit} (above), gateMisses{count,
+items[{rollout, task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is
+non-empty, the count the Reflection reads; p51-3), arms (arms.py's block, above, or null), cannotShow[], flags[]}.
+stderr gets one summary line.
 
 The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
 blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
@@ -344,9 +348,10 @@ each task's at, its latest in-window peak's ts, in [window.since, window.until])
 until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
 `nights.nights` (each morning), `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
 first and last both in [since, until], the one outside printed), `suite.local` and `suite.ci` (a group is one row,
-the same way), `gateMisses.items` (each item's at), and the arms' rows, each by its own unit (arms.py's docstring):
-`arms.tasks` (landedAt), `arms.calls` (startTime), `arms.reviews`, `arms.planTasks` and `arms.rejections` (at), and
-`arms.escapes` (at, with inWindow true, as a friction escape is). span calls score.py with no --since, so a score's
+the same way), `suite.retired` (each item's date by date_in()), `gateMisses.items` (each item's at), and the arms'
+rows, each by its own unit (arms.py's docstring): `arms.tasks` (landedAt), `arms.calls` (startTime), `arms.reviews`,
+`arms.planTasks` and `arms.rejections` (at), and `arms.escapes` (at, with inWindow true, as a friction escape is).
+span calls score.py with no --since, so a score's
 window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
 ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
 read the run start instead. Not checked, each for its reason: a score's budget (p53-5: sums and a count, its window pinned by reflect-score's
@@ -652,6 +657,10 @@ SUITE_BUDGET = {"integration": 300, "full": 1200}
 SUITE_TIERS = {"task": "integration", "integration": "integration", "race": "integration", "completion": "full"}
 SUITE_TIMED = ("green", "red", "timeout")
 CI_SHARE = 0.8
+# CI_RETIRED: the CI jobs that left a repo's required checks, each (repo, job, the Melbourne date it left, why).
+# suite() reads it as of until: a retired job's group never breaches from the reading whose until's date is past that
+# date, and the reading whose window holds the date says so once (suite.retired).
+CI_RETIRED = (("lachyts/thread-skill", "make test (macos-latest)", "2026-11-16", "ADR 0084 d3"),)
 THREAD_SKILL_REPO = "lachyts/thread-skill"   # the repo whose breach files Thread Skill's suite audit
 SUITE_RULE = "a suite's week's median within its Suite budget, a CI job's within 80 % of its limit (ADR 0073 d5)"
 SUITE_SHAPE = "Thread Skill's suite or CI ran past its budget on the week's median"
@@ -2261,7 +2270,9 @@ class Span:
 
     def suite(self, records, since, until):
         """The Suite budget and CI headroom readings (ADR 0073 d5; the module docstring's suite), over the window's rows
-        alone: each suite-ended (self.ledger_lines) and each ci-headroom line by its ts in [since, until]."""
+        alone: each suite-ended (self.ledger_lines) and each ci-headroom line by its ts in [since, until]. CI_RETIRED is
+        read as of until, an attribute of a (repo, job) group; its retired line is said only when date_in() holds its
+        date."""
         repos = {}
 
         def repo_of(slug):
@@ -2293,6 +2304,8 @@ class Span:
                 repo = str(d.get("repo")).lower() if isinstance(d.get("repo"), str) else None
                 ci.setdefault((repo, d["job"]), []).append((t, d, slug))
         out_local, out_ci, breaches = [], [], []
+        until_day = mdate(until)
+        retired_on = {(repo, job): day for repo, job, day, _why in CI_RETIRED if day < until_day}
         for (repo, tier), rows in sorted(local.items(), key=lambda kv: (kv[0][0] or "", kv[0][1])):
             m, budget = median([r[1] for r in rows]), SUITE_BUDGET[tier]
             g = {"repo": repo, "tier": tier, "runs": len(rows), "medianSeconds": round(m, 1), "budgetSeconds": budget,
@@ -2310,24 +2323,30 @@ class Span:
             limit = last.get("timeoutMinutes") if isinstance(last.get("timeoutMinutes"), int) else None
             m = median(timed) if timed else None
             share = round(m / (limit * 60.0), 2) if m is not None and limit else None
+            retired = retired_on.get((repo, job))
             g = {"repo": repo, "job": job, "runs": len(rows), "timed": len(timed),
                  "medianSeconds": round(m, 1) if m is not None else None, "timeoutMinutes": limit,
                  "limitSource": last.get("limitSource"), "share": share,
-                 "breach": m is not None and bool(limit) and m > CI_SHARE * limit * 60,
+                 "breach": retired is None and m is not None and bool(limit) and m > CI_SHARE * limit * 60,
                  "cancelled": sum(1 for r in rows if r[1].get("conclusion") == "cancelled"),
-                 "first": fmt(rows[0][0]), "last": fmt(rows[-1][0]), "rollouts": sorted({r[2] for r in rows})}
+                 "first": fmt(rows[0][0]), "last": fmt(rows[-1][0]), "rollouts": sorted({r[2] for r in rows}),
+                 "retired": retired}
             out_ci.append(g)
             if g["breach"]:
                 breaches.append("%s: %s's week's median %s s is %d %% of its %d min limit, past %d %% (%d run(s))"
                                 % (repo or "no repo", job, hfmt(g["medianSeconds"]), round(100 * m / (limit * 60.0)),
                                    limit, round(100 * CI_SHARE), len(timed)))
+        retired_lines = [{"repo": repo, "job": job, "date": day,
+                          "line": "%s: %s left the required checks on %s (%s): CI headroom has no series for it from "
+                                  "that day, and its rows never breach" % (repo, job, day, why)}
+                         for repo, job, day, why in CI_RETIRED if date_in(day, since, until)]
         due = any(g["breach"] and g["repo"] == THREAD_SKILL_REPO for g in out_local + out_ci)
         key = RR.watch_id(SUITE_RULE, SUITE_SHAPE)
         open_task = next(({"slug": p.stem, "status": rec.status} for p, rec in self.vault.open_root_notes(self.flag)
                           if rec.scalar("bug_key") == key), None)
         return {"budget": {"integrationSeconds": SUITE_BUDGET["integration"], "fullSeconds": SUITE_BUDGET["full"],
                            "ciShare": CI_SHARE},
-                "local": out_local, "ci": out_ci, "breaches": breaches,
+                "local": out_local, "ci": out_ci, "breaches": breaches, "retired": retired_lines,
                 "audit": {"repo": THREAD_SKILL_REPO, "key": key, "due": due, "open": open_task}}
 
     def run(self):
@@ -2528,6 +2547,8 @@ def window_flags(doc, scores):
     report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
     report("suite.local", spans(items(part(doc, "suite", "local"))), ss, us)
     report("suite.ci", spans(items(part(doc, "suite", "ci"))), ss, us)
+    retired = items(part(doc, "suite", "retired"))
+    report("suite.retired", [(_row_in(x.get("date"), S, U), x.get("date")) for x in retired], ss, us)
     misses = items(part(doc, "gateMisses", "items"))
     report("gateMisses.items", [(_row_in(x.get("at"), S, U), x.get("at")) for x in misses], ss, us)
     # the arms (arms.py's rows: each placed by its own time; an Escape needs inWindow too)

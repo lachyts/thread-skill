@@ -1215,7 +1215,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (ADR 0073), and never a red check but in one case: beside another red
   required check, merge-task re-runs its first cut as infra, and a second cut
   of the same job after that one re-run halts as a red check, merge-gate, which
-  the lead retries as an agent's (p47-10). Each merge records one `ci-headroom`
+  the lead retries as an agent's (p47-10). A roll-up required check (a job
+  that `needs:` others under `if: always()` or `!cancelled()`) records its
+  slowest needed job by seconds against that job's own limit, which is not
+  always the job nearest its limit; and a needed job cut at its limit is that
+  check's CI timeout (p54-11). Each merge records one `ci-headroom`
   Run-record line per required job (merge-task, through lead-integrate.py
   ci-headroom); the weekly Reflection reads them in span's `suite` block, and a
   breach on Thread Skill's repo files its suite audit (`reflect.py
