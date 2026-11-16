@@ -447,6 +447,8 @@ make test            # = bash tests/run.sh — the full suite, and the self-roll
 make test-fast       # = bash tests/run.sh --fast — the fast tier, and the self-rollout's verifier
 bash tests/run.sh --shard K/N    # shard K of the full suite split N ways (CI's full-suite.yml on master)
 bash tests/run.sh --shard-plan N # the dry run: prints every test file's shard, runs nothing
+bash tests/run.sh --fast --shard K/N    # shard K of the fast tier's selection split N ways
+bash tests/run.sh --fast --shard-plan N # its dry run: prints the selection's split, runs nothing
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 

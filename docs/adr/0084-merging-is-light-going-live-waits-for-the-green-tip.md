@@ -26,7 +26,11 @@ rows 2 and 5 built by p54-3: `tests/run.sh` warms a bytecode cache in its scratc
 `PYTHONPYCACHEPREFIX`, exported to every suite and node file), so the engine loads compiled; node's files start
 longest first, by measured seconds in `tests/shard-weights.tsv`'s node section (`shard.py --order`, which also weighs
 them in the shard split), run through `tests/lib/node-run.mjs`, since `node --test` sorts its arguments by path.
-Phase 54 builds the rest.
+d4's Speed fix from the audit's row 1 begun by p54-10: `tests/run.sh --fast --shard K/N` selects as `--fast` does (its
+full-suite fallbacks and the Slow tier's filter included), then runs shard K of that selection by `tests/lib/shard.py`'s
+split, so the N shards together run it exactly once, the merge-task self-tests in shard 1 when it holds them; a shard
+left nothing passes on the always-run steps, and `--fast --shard-plan N` prints the split and runs nothing
+(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it are not yet built. Phase 54 builds the rest.
 
 ## Context
 
