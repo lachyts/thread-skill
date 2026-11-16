@@ -4,9 +4,10 @@
 # GT4 the step-back; GT5 GT6 an absent ref; GT7 an unreachable one (a stale fetched copy ignored); GT8 not an ancestor;
 # GT9 the live-checkout rule; GT10 --no-write; GT11 a corrupt record; GT12 usage, an unreadable origin and an internal
 # failure; GT13 the 15-minute negative answer; GT14 the GitHub URL forms (landing-register.py's); GT15 the inner bounds;
-# GT16 an outer kill reaps every child; GT17 a locked record; GT18 waits. Origins are git@github.com:o/<r>.git,
-# served from $SRV/o/<r>.git by an inline ssh stub on PATH (GIT_SSH_COMMAND unset, so the resolver's BatchMode rule
-# reaches it); an inline gh stub answers from a file and logs its argv. Hermetic: HOME, XDG_STATE_HOME and the record
+# GT16 an outer kill reaps every child; GT17 a locked record; GT18 waits; GT19 a failing git call in steps 0 and 1
+# holds. Origins are git@github.com:o/<r>.git, served from $SRV/o/<r>.git by an inline ssh stub on PATH
+# (GIT_SSH_COMMAND unset, so the resolver's BatchMode rule reaches it); an inline gh stub answers from a file and logs
+# its argv. Hermetic: HOME, XDG_STATE_HOME and the record
 # live under mktemp; global/system git config is ignored, and git never guesses an identity (user.useConfigOnly), so a
 # commit made without g fails on every OS, as on a CI runner whose user has no name;
 # never the network, never the real gh.
@@ -330,5 +331,34 @@ ok "$(wt "$tmp/w/n")" waits "GT18: no job, but the record has seen the ref: wait
 printf '{not json' > "$THREAD_GREEN_TIP_FILE"
 ok "$(wt "$tmp/w/n" 2>&1)" "origin this repo publishes no Green tip" "GT18: a corrupt record reads as empty, with no WARN"
 python3 "$GT" waits --repo "$W" >/dev/null 2>&1; ok "$?" 2 "GT18: no --branch: exit 2"
+
+# ---- GT19: a git call that fails in steps 0 and 1 read no answer: a hold (unreadable), never origin's tip -------------
+# A git shim on PATH fails the one call whose argv holds $GIT_FAIL, and passes every other to the real git.
+REALGIT=$(command -v git); mkdir -p "$tmp/gitbin"
+cat > "$tmp/gitbin/git" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "\${GIT_FAIL:-}" ] && { echo "fatal: shim refused \$a" >&2; exit 128; }; done
+exec "$REALGIT" "\$@"
+EOF
+chmod +x "$tmp/gitbin/git"
+W="$tmp/w/r9"; rec o/r9 "$C9"
+fails() { local f="$1"; shift; env PATH="$tmp/gitbin:$PATH" GIT_FAIL="$f" python3 "$GT" "$@" --repo "$W" --branch master; }
+ok "$(gt --checkout --no-write | cut -d' ' -f1-2)" "green $C9" "GT19: (unshimmed, the main checkout reads the Green tip)"
+: > "$LOG_SSH"; ok "$(rv o/r9 'e.get("seen")')" None "GT19: (the record has not seen the ref: step 1 reads full-suite.yml)"
+ok "$(fails --show-toplevel target --checkout)" \
+  "hold - cannot tell whether it is a live checkout: git rev-parse --show-toplevel failed (fatal: shim refused --show-toplevel)" \
+  "GT19: step 0's toplevel read fails: a hold, never 'not a live checkout' and origin's tip"
+ok "$(fails --show-toplevel target --checkout --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["kind"], d["cause"], d["target"])')" \
+  "hold unreadable None" "GT19: … cause unreadable, no target"
+ok "$(fails --git-common-dir target --checkout)" \
+  "hold - cannot tell whether it is a live checkout: git rev-parse --git-common-dir failed (fatal: shim refused --git-common-dir)" \
+  "GT19: its common-dir read fails: a hold too"
+ok "$(fails refs/remotes/origin/master:.github/workflows/full-suite.yml target --checkout)" \
+  "hold - cannot tell whether this repo publishes a Green tip: git rev-parse refs/remotes/origin/master:.github/workflows/full-suite.yml failed (fatal: shim refused refs/remotes/origin/master:.github/workflows/full-suite.yml)" \
+  "GT19: step 1's read of full-suite.yml fails (no seen recorded): a hold, never 'publishes no Green tip'"
+ok "$(grep -c . "$LOG_SSH")" 0 "GT19: … every hold before the network"
+ok "$(fails --show-toplevel waits)" \
+  "origin cannot tell whether it is a live checkout: git rev-parse --show-toplevel failed (fatal: shim refused --show-toplevel)" \
+  "GT19: waits only advises: cannot tell, never a hold"
 
 exit $fail

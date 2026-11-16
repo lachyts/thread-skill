@@ -22,21 +22,26 @@ caller has fetched <branch> already: nothing here fetches it.
 
 waits(repo, branch, *, run=None) returns (True, None) when <repo> waits on the Green tip, else (False, why): steps 0 and
 1 alone, local, with no network call, no gh and no write (the record is read, never written, and its WARNs are
-silent). It is how a reader that only advises tells a checkout whose movers stop at the Green tip from one that
-follows origin's tip: thread-placement.py's `behind` finding (read-only, it never fetches) and pushed-base.sh's reset
-hint (the CLI's `waits`). The Green tip itself is never read: a checkout that waits may stand at it, behind it or on a
-hold.
+silent). A git call there that fails is (False, `cannot tell whether …: <why>`), never a hold: waits only advises. It
+is how a reader that only advises tells a checkout whose movers stop at the Green tip from one that follows origin's
+tip: thread-placement.py's `behind` finding (read-only, it never fetches) and pushed-base.sh's reset hint (the CLI's
+`waits`). The Green tip itself is never read: a checkout that waits may stand at it, behind it or on a hold.
 
 The reading, in order, stopping at the first that decides:
   0. The live-checkout rule (checkout=True only, local). Only a main checkout takes the Green tip: its git dir is its
      common dir, it is its own toplevel, and its name does not end `-rollout` (a Rollout clone is the code being built).
      Any other checkout (a linked worktree, an Engine snapshot, a Rollout clone) reads kind origin, why `not a live
      checkout`, with no network call. The cut never passes it: a snapshot is cut at the Green tip from any checkout.
-     An origin/<branch> that names no commit is a hold, cause unreadable, before anything else.
-  1. Whether the repo publishes one, decided by facts a failed fetch cannot fake: the blob
-     refs/remotes/origin/<branch>:.github/workflows/full-suite.yml holds a line `^  green-tip:` and the text
-     refs/thread/green, or the record (below) has `seen` for this origin. Neither: kind origin, target origin's tip, no
-     network call and no gh. Every repo but one that publishes reads this way.
+     An origin/<branch> that names no commit is a hold, cause unreadable, before anything else. A git call here that
+     fails (a non-zero exit, or the LOCAL_TIMEOUT kill) read no answer, so it is never `not a live checkout`: it is a
+     hold, cause unreadable, why `cannot tell whether it is a live checkout: git <call> failed (<why>)` (it must not
+     fail open to origin's tip).
+  1. Whether the repo publishes one, decided by facts a failed fetch cannot fake: the record (below) has `seen` for
+     this origin, or the blob refs/remotes/origin/<branch>:.github/workflows/full-suite.yml holds a line `^  green-tip:`
+     and the text refs/thread/green. Neither: kind origin, target origin's tip, no network call and no gh. Every repo
+     but one that publishes reads this way. Only a file origin/<branch> lacks (`rev-parse -q --verify`'s quiet exit 1)
+     is that clean no; a git call that fails reading it is a hold, cause unreadable, why `cannot tell whether this repo
+     publishes a Green tip: git <call> failed (<why>)`.
   2. The fetch, by name: `git -C <repo> [-c core.sshCommand='ssh -o BatchMode=yes'] fetch --quiet --no-tags
      --no-write-fetch-head origin +refs/thread/green:refs/thread/fetched/green`, into a private namespace a `fetch
      --prune` never touches. The -c only when GIT_SSH_COMMAND, GIT_SSH and the repo's core.sshCommand are all unset
@@ -371,17 +376,31 @@ class _Reader:
         return int(out) if rc == 0 and out.isdigit() else None
 
 
+def _failed(what, rc, err):
+    """A git call that failed, in words: its exit (124: stopped at LOCAL_TIMEOUT) and its last fatal: line."""
+    said = f"ran past {LOCAL_TIMEOUT} s" if rc == 124 else (_why_line(err) or f"exit {rc}")
+    return f"git {what} failed ({said})"
+
+
 def _not_live(r):
-    rc, top, _ = r.git("rev-parse", "--show-toplevel")
-    if rc != 0 or os.path.realpath(top) != os.path.realpath(r.repo):
-        return "not its own toplevel"
-    rc1, gd, _ = r.git("rev-parse", "--path-format=absolute", "--git-dir")
-    rc2, gc, _ = r.git("rev-parse", "--path-format=absolute", "--git-common-dir")
-    if rc1 or rc2 or os.path.realpath(gd) != os.path.realpath(gc):
-        return "a linked worktree"
+    """Step 0: (why, failed). why None for a live checkout, else why not; failed when a git call failed (a non-zero
+    exit, or the LOCAL_TIMEOUT kill), so no answer was read: resolve() holds on it, never reads it as not live."""
+    rc, top, err = r.git("rev-parse", "--show-toplevel")
+    if rc != 0:
+        return _failed("rev-parse --show-toplevel", rc, err), True
+    if os.path.realpath(top) != os.path.realpath(r.repo):
+        return "not its own toplevel", False
+    dirs = []
+    for flag in ("--git-dir", "--git-common-dir"):
+        rc, out, err = r.git("rev-parse", "--path-format=absolute", flag)
+        if rc != 0:
+            return _failed(f"rev-parse {flag}", rc, err), True
+        dirs.append(os.path.realpath(out))
+    if dirs[0] != dirs[1]:
+        return "a linked worktree", False
     if os.path.basename(os.path.realpath(r.repo)).endswith("-rollout"):
-        return "a Rollout clone"
-    return None
+        return "a Rollout clone", False
+    return None, False
 
 
 def _record_key(r):
@@ -392,22 +411,38 @@ def _record_key(r):
 
 
 def _publishes(r, branch, entry):
-    """Step 1: origin/<branch>'s full-suite.yml, as last fetched, holds the green-tip job and the ref, or the record's
-    entry has seen the ref."""
-    rc, yml, _ = r.git("cat-file", "blob", f"refs/remotes/origin/{branch}:{WORKFLOW}")
-    return (rc == 0 and bool(JOB_RE.search(yml)) and GREEN_REF in yml) or bool(entry.get("seen"))
+    """Step 1: (publishes, failed). publishes when the record's entry has seen the ref, or origin/<branch>'s
+    full-suite.yml, as last fetched, holds the green-tip job and the ref; failed (a why) when a git call failed, so no
+    answer was read: only a file origin/<branch> lacks (rev-parse's quiet exit 1) is a clean no."""
+    if entry.get("seen"):
+        return True, None
+    spec = f"refs/remotes/origin/{branch}:{WORKFLOW}"
+    rc, blob, err = r.git("rev-parse", "-q", "--verify", spec)
+    if rc == 1 and not blob:
+        return False, None
+    if rc != 0 or not HEX_RE.match(blob):
+        return False, _failed(f"rev-parse {spec}", rc, err)
+    rc, yml, err = r.git("cat-file", "blob", blob)
+    if rc != 0:
+        return False, _failed(f"cat-file blob {spec}", rc, err)
+    return bool(JOB_RE.search(yml)) and GREEN_REF in yml, None
 
 
 def waits(repo, branch, *, run=None):
     """(True, None) when <repo> is a live checkout of a repo that publishes a Green tip, else (False, why): steps 0
     and 1 only (the module docstring's waits)."""
     r = _Reader(repo, run or make_runner(own_group=True), LOCAL_TIMEOUT * 6)
-    why = _not_live(r)
+    why, failed = _not_live(r)
+    if failed:
+        return False, f"cannot tell whether it is a live checkout: {why}"
     if why:
         return False, f"not a live checkout ({why})"
     _, key = _record_key(r)
     entry = read_record(record_path(), warn=False)[0]["repos"].get(key, {}) if key is not None else {}
-    if not _publishes(r, branch, entry):
+    publishes, failed = _publishes(r, branch, entry)
+    if failed:
+        return False, f"cannot tell whether this repo publishes a Green tip: {failed}"
+    if not publishes:
         return False, "this repo publishes no Green tip"
     return True, None
 
@@ -476,7 +511,9 @@ def resolve(repo, branch, *, checkout=False, gh=True, write=True, budget=DEFAULT
         return hold("unreadable", f"{od} names no commit")
     out["origin"] = origin
     if checkout:
-        why = _not_live(r)
+        why, failed = _not_live(r)
+        if failed:
+            return hold("unreadable", f"cannot tell whether it is a live checkout: {why}")
         if why:
             return take("origin", origin, f"origin/{branch}: not a live checkout ({why})")
     slug, key = _record_key(r)
@@ -484,8 +521,10 @@ def resolve(repo, branch, *, checkout=False, gh=True, write=True, budget=DEFAULT
     rec, state["dirty"] = read_record(state["path"])
     entry = rec["repos"].get(key, {}) if key is not None else {}
     state["verified"] = [v["sha"] for v in entry.get("verified", [])]
-    publishes = _publishes(r, branch, entry)
+    publishes, failed = _publishes(r, branch, entry)
     out["publishes"] = publishes
+    if failed:
+        return hold("unreadable", f"cannot tell whether this repo publishes a Green tip: {failed}")
     if not publishes:
         return take("origin", origin, f"origin/{branch}: this repo publishes no Green tip")
 
