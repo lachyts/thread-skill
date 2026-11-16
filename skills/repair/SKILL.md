@@ -800,7 +800,10 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
 
 1. **Compute the dependent closure.** From the status task list, every task whose `depends-on:` or
    `blocked-by:` names this task, transitive (a dependant's dependants too), followed through `merged_into:`
-   tombstones (a task folded into this one counts as this one).
+   tombstones (a task folded into this one counts as this one). A Speed fix hold's entry is not a dependency: a
+   task that names this task only through a hold (status's `speedHolds` lists this task as a `release` and that
+   task in its `held`) is no dependant. The hold lets go by itself once this task is set aside with its retries
+   spent or leaves the queue, and `defer` drops a deferred task's own hold entries (vault-grammar § Speed fix hold).
 2. **No dependants** → **clean defer**. The retire block:
    ```
    git -C <repoPath> worktree remove -f -f <repoPath>/.claude/worktrees/<slug>   # if it exists; -f -f: execute locks task trees against the reaper

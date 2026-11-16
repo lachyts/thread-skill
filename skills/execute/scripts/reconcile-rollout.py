@@ -150,6 +150,12 @@ Subcommands:
               holds a row and no pause stands, `halt` stays null; a soft pause drains past the held rows (it reads no
               awaiting row) and stamps, so a pause still reads `paused`. Only the calls in flight and an Integration
               already begun (`integrating:`) go on.
+              The Speed fix hold (p54-13; Speed fix hold, below): right after the lease write, when the note has a `##
+              Speed fix holds` section, each standing hold that cannot release lets go (its released line, its entries
+              dropped, one Run record line) and the clean-up drops a released hold's leftover entries and a standing
+              one's out-of-reach entries, before any dependency is read; --dry-run writes nothing and reads those rows
+              without those entries instead. It never stamps or moves a hold. `speedHoldReleased` ([{release, phase,
+              cause, task, label, removed}]) follows `surfaceWait`: the holds this call let go (on --dry-run, would).
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -417,7 +423,12 @@ Subcommands:
               below): the note's on_merge as read, {value, error}, on a parallel note carrying a rollout hold_until,
               else null; `chainStart`: {prior, pr} when the note is a chain's N never started, unstamped and not
               started by the Stage, whose `supersedes:` prior carries `on_merge: regenerate` (_chain_start), else
-              null. Pure read; no network.
+              null. `speedHolds` (p54-13; Speed fix hold, below), always present ([] with no `## Speed fix holds`): one
+              {release, phase, by, held, standing, ended, released: {why, at} | null, missing, outOfReach: [{task,
+              why}], lettingGo: {cause, task, why} | null, moved} per recorded hold; missing (recorded tasks in reach
+              that lack the entry: apply restores them), outOfReach (recorded tasks carrying the entry out of reach: the
+              lead's next call drops them), lettingGo and moved (the phase's release now, when it is another) are read
+              for a standing hold only. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -534,6 +545,11 @@ Subcommands:
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill. A carried fix is
               refused (exit 1, `merged:` and `rollout:` kept): deferring it would take back a landed fix (ADR 0078).
+              The Speed fix hold (p54-13; Speed fix hold, below): every hold entry the task's rollout note records for
+              it (standing, released or ended) that its `depends-on:` still carries is removed in the same save that
+              clears `rollout:` (_speed_hold_strip; an inline list keeps its other items), one `speed-hold dropped
+              [[<R>]] from <slug> (deferred)` line each after its own line (` (dry-run)` on a dry run); no rollout-note
+              write and no event. A rollout note that is missing or unreadable, or records no hold, drops nothing.
 
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
@@ -639,6 +655,10 @@ Subcommands:
               dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
+              The Speed fix hold (p54-13; Speed fix hold, below): in both modes, after the `security_checks` line, one
+              `speed_hold [[<R>]] (p<N>) standing, <K> recorded` (or `released`, or `ended (landed)`) line per hold the
+              prior records; --to appends each line of the prior's `## Speed fix holds` it lacks, in the prior's order,
+              in the same save as the hold and `security_checks:`, before any task write (a re-run writes nothing).
 
   join        `--rollout <note> --tasks <slug,...> [--files <slug>=<a,b>]... [--tasks-dir <dir>] [--dry-run] [--now
               <iso>]` (ADR 0078 d6; /thread:schedule step 7's **Join**, after unfinished-rollout.py check printed `join
@@ -674,6 +694,35 @@ Subcommands:
               they never change the exit), then `[written: <n notes saved>]`, `[no-change]` or `(dry-run)`. stderr's
               `WARN: join:` lines: a queued linked task a ranked line above the queue's table ranks above the joined
               ones, and a queued linked task whose `priority:` outweighs a joined one's (next orders by priority first).
+              The Speed fix hold (p54-13; Speed fix hold, below), read only when the note records a hold or a joining
+              task carries a mark, decided before any write with the joining tasks read as linked: the extension lines
+              of every standing hold a joining unmarked task falls under (a hold about to move included) go in the rows'
+              save; each joining task's hold entries in the save of its `rollout:` stamp; then the out-of-reach drops
+              (the joined marks counted); then, on the rows re-read, each new or moved-to hold's line and its entries,
+              a move's `superseded` released line and its drops, and the re-stamps of recorded tasks missing their
+              entry. It writes no let-go line (the lead's `next` does): a phase whose hold lets go is left alone, with a
+              `speed-hold skip … (lets go at the lead's next call)` line. Its stdout lines, before the last line:
+              `speed-hold refuse|made|moved|drop|skip|restamp …` and `speed-hold [[<R>]] (p<N>) holds [[<t>]]`. Its
+              writes wait on _engine_reads_speed_hold, read only when it would write: False is one stderr `WARN:
+              speed-hold: [[<ro>]]: <why> (engine-snapshot.md § Cross-version state): no Speed fix hold made`, and the
+              join goes on. A hold write that fails is exit 1 with an `ERROR: join:` line naming what was not written;
+              a re-run of the same join finishes it.
+
+  speed-hold  `apply | release (--release <R> | --all) | lift --rollout <note> [--tasks-dir <dir>] [--dry-run] [--now
+              <iso>]` (p54-13, ADR 0084 d4; Speed fix hold, below; vault-grammar § Speed fix hold). Guarded. Refuses
+              (exit 2): a missing or untagged note, a serial note, a protocol other than 5, an unknown --release, and
+              apply on a done, dropped or superseded note. `apply` (schedule step 7, and § 0's Put back from the
+              prior's root) runs on an incomplete or paused note too: in order, the let-go of each standing hold that
+              cannot release (its released line, its entries dropped, one Run record line), each move to the phase's
+              current release, the out-of-reach drops, each standing hold's extension line and entries and its
+              re-stamps, then each new hold's line and entries; its writes wait on _engine_reads_speed_hold (False: one
+              WARN, exit 0, nothing written). `release` (by hand) writes `released [[<R>]] (p<N>): by hand` for each
+              named hold not yet released, then drops its recorded entries (a released hold's leftovers too), then
+              its event; it works on any note, an archived one included. `lift` (schedule step 1 on a supersede)
+              drops every standing hold's recorded entries, whatever each task's state, and writes no line and no
+              event (`speed-hold lifted [[<R>]] (p<N>): <K> entries`). stdout: `speed-hold …` lines, then `[written:
+              <n notes saved>]`, `[no-change]` or `(dry-run)`; exit 1 when a save fails, naming what it wrote: a re-run
+              finishes it.
 
   approve-queue  `--rollout <note> --pr <owner/repo#N | PR URL>` (p30-4; Approved queue below): run on Lachy's words
               naming a queue and its gating PR (execute § Invocation forms, orient § 9, schedule step 8). Writes, in one
@@ -1221,6 +1270,11 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     (the Standing approval's, never counted as his act); then the Integration arm records ready pr=.
   defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
                     holder a merge-hold close and lane-freed release=halt; an open race hold closes.
+  speed-hold        (p54-13) speed-hold {act: made, release, phase, by, held} per hold apply makes or moves to;
+                    speed-hold {act: released, release, phase, cause, removed[, to]} per hold it lets go (cause
+                    set-aside | left-queue, the task it let go for as the line's task), releases by hand (by-hand) or
+                    moves from (superseded, to the new release). join writes the made and superseded lines too; next
+                    the let-go lines; lift none.
   carry             to the --from rollout, after each carried note saves: slot-freed stopped for a running
                     note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
                     (the writer appends it to both files).
@@ -1587,6 +1641,24 @@ the note's first project (_norm_project). While it holds nothing starts, restart
 (`awaitingIntegration` is []), and the hold is never cleared. A plain release (the verdict's `released`, or a done or
 dropped note) clears the hold and its `on_merge:` lines in one compare-and-swap (Note.remove_block's `also`), so a hold
 added by hand later is a plain hold. `carry` never copies `on_merge`.
+
+Speed fix hold (p54-13, ADR 0084 d4; _SpeedCtx, read by `speed-hold`, `join`, `next`, `defer`, `carry` and `status`; the
+grammar is skills/_shared/vault-grammar.md § Speed fix hold): a task marked `speed_fix: <citation>` (a suite audit's row,
+a stall audit's cause, or a Time-lost ledger line by its tl- id; _speed_fix_mark, else refused: an ordinary task) makes its
+phase (PHASED_STEM_RE's prefix and a digit task number, _speed_phase) hold every other queued task of its rollout. The
+phase's release R is the unit of the phase note's `speed_fix_release:` (a marked member of the phase, else a WARN and no
+hold), else of its highest-M marked member, landed ones included; a hold is made only while R is unlanded, linked, not
+letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its reach (the one rule, the block
+comment above SPEED_FIX_KEY), released by itself once R lands, and recorded on the rollout note's `## Speed fix holds`
+(`- <stamp> hold [[R]] (p<N>, schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`),
+append-only, so a released hold is never re-made for the same R. The hold follows its phase's release at every apply and
+join (a move: the new hold's line and entries, then the old one's `superseded by [[R']]` line and drops), never at
+`next`. It lets go (_SpeedCtx.let_go) when R, or an unlanded unit upstream of it, leaves the queue (_speed_gone) or is set
+aside with its retries spent (a non-null humanFix, read as `moving` reads it): `next` writes the released line, drops
+the entries and records one Run record line, reported as `speedHoldReleased`, and on --dry-run reads its rows as if it
+had. Out-of-reach and leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next`
+computes its starts. The section's lines change only by migration (engine-snapshot.md § Cross-version state), and join
+and apply write a line or an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
 
 Durable triggers (p45-7, ADR 0078 d5; the grammar is skills/_shared/vault-grammar.md § When): a "when X, then Y" step
 written on a rollout or task note as a `when:` entry, so it survives any session. _when reads every form; _trigger_eval
@@ -19632,8 +19704,11 @@ GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
 # reads the kind); join (ADR 0078 d6) is run by a newer schedule on a running
 # rollout whose snapshot predates the verb, and writes only forms every protocol-5 engine reads, under the same note
 # lock: a `## Queue` row (a wikilink on a ranked line, its Mode `joined <date>` or `joined <date>, solo`), a
-# `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp. Those forms and the note lock's path are a
-# cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration. And prove writes
+# `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp; and, only on a rollout whose engine has the
+# SPEED_HOLD_ENGINE line (_engine_reads_speed_hold, p54-13), a `## Speed fix holds` line and a task's `depends-on:`
+# entry naming a Speed fix hold's release, which every protocol-5 engine reads as a dependency. Those forms and the note
+# lock's path are a cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration.
+# speed-hold itself is guarded: every caller runs it from the rollout's own root. And prove writes
 # only proof stamps every engine reads as landed, gating each write a queue reads per note on _carry_readers (ADR 0078
 # d1).
 GUARD_EXEMPT = ("status", "fold-journals", "moving", "join", "prove")

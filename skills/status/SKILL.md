@@ -137,7 +137,9 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
   hold or none: `_shared/vault-grammar.md` § Approved queue; § 3's Hold until flag), `chainStart` (`{prior, pr}`
   when this note is a chain's new note whose start was never stamped, else null; § 3's **Approved queue,
-  unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `lastStarts` (the last starts as `next`
+  unstamped:** flag), `speedHolds` (the Speed fix holds the note records, `[]` when none: one `{release, phase, by,
+  held, standing, ended, released, missing, outOfReach, lettingGo, moved}` per hold, `_shared/vault-grammar.md`
+  § Speed fix hold; § 4's Speed fix line), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `lastStarts` (the last starts as `next`
   reads them, `{morning, kinds}`: `morning` the Morning they look toward, ISO 8601 at the local offset, or null when
   they do not apply, and `kinds` each kind the rows' checks read, `{usualMinutes, history}`;
   `skills/execute/away.md` § The last starts; § 4's Trickle line and the Queued row), `ceilingError` (why `ceiling` is null: an invalid
@@ -518,6 +520,16 @@ three are empty. A non-zero exit prints `Carried: not read (<its last stderr lin
 exits 2). An entry is never called done. The line appears only in status prose at this text's prose id or later:
 status on an older-snapshot rollout hands over to that snapshot's own status text (§ 1), which has no Carried line, so
 there these notes show on the Stage line (`carried-fixes.json`), in reflect § 17 and in close's rows.
+
+**The Speed fix line** (p54-13, ADR 0084 d4), right under the Carried line, one per `speedHolds` entry (none when it
+is empty; `_shared/vault-grammar.md` § Speed fix hold): a standing one as `Speed fix hold: [[<release>]] (<phase>)
+holds <K> tasks; releases when [[<release>]] lands` (K the length of `held`), a released one as `Speed fix hold:
+[[<release>]] (<phase>) released: <released.why>`, an ended one as `Speed fix hold: [[<release>]] (<phase>) ended:
+[[<release>]] landed`. Under a standing one, each that applies: `lets go at the lead's next call: <lettingGo.why>`,
+`the phase's release is now [[<moved>]]: the next join or apply moves the hold`, `<K> recorded tasks lack the entry:
+speed-hold apply restores them` (K the length of `missing`) and `<K> entries out of reach: the lead's next call drops
+them` (K the length of `outOfReach`). A hold is never drift and never routed to repair: it releases by itself. To end
+one early, Lachy runs `reconcile-rollout.py speed-hold release --rollout <note> --release <R>` from the rollout's root.
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 

@@ -1322,8 +1322,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   queue until its releasing task lands (its last, unless the phase names an
   earlier one), and the hold releases by itself. Once one in the engine's own
   repo is live at the **Green tip**, each running rollout takes it by an
-  **Engine catch-up** (ADR 0084 d4, d5, proposed; not yet built: Phase 54's hold is
-  made by hand). _Avoid_: perf task, optimisation, priority fix.
+  **Engine catch-up** (ADR 0084 d4, d5, proposed; the hold built by p54-13
+  (`speed_fix:`, `reconcile-rollout.py speed-hold`); the Engine catch-up not yet
+  built). _Avoid_: perf task, optimisation, priority fix.
 - **Engine catch-up** — a running rollout moving itself onto a fresh **Engine
   snapshot** at the **Green tip** because a **Speed fix** went live there: it
   starts nothing new, lets what is running finish, moves, and carries on, with
