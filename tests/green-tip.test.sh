@@ -7,13 +7,15 @@
 # GT16 an outer kill reaps every child; GT17 a locked record; GT18 waits. Origins are git@github.com:o/<r>.git,
 # served from $SRV/o/<r>.git by an inline ssh stub on PATH (GIT_SSH_COMMAND unset, so the resolver's BatchMode rule
 # reaches it); an inline gh stub answers from a file and logs its argv. Hermetic: HOME, XDG_STATE_HOME and the record
-# live under mktemp; global/system git config is ignored; never the network, never the real gh.
+# live under mktemp; global/system git config is ignored, and git never guesses an identity (user.useConfigOnly), so a
+# commit made without g fails on every OS, as on a CI runner whose user has no name;
+# never the network, never the real gh.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)
 unset GIT_SSH_COMMAND GIT_SSH CDPATH
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.useConfigOnly GIT_CONFIG_VALUE_0=true
 root=$(pwd -P)
 GT="$root/skills/_shared/scripts/green-tip.py"
 LR="$root/skills/_shared/scripts/landing-register.py"
@@ -171,9 +173,9 @@ ok "${out%% *} ${out#* }" "hold - refs/thread/green: origin did not answer (fata
 ok "$(FAKE=fail JQ='d["cause"], d["target"]' js)" "('unreachable', None)" "GT7: … cause unreachable"
 
 # ---- GT8: not an ancestor -----------------------------------------------------------------------------------------------
-side=$(git --git-dir "$SRV/o/r.git" commit-tree -p "$C1" -m side "$C1^{tree}"); green r "$side"
+side=$(g --git-dir "$SRV/o/r.git" commit-tree -p "$C1" -m side "$C1^{tree}"); green r "$side"
 out=$(gt)
-ok "${out%% *}|$(JQ='d["cause"]' js)" "hold|not-ancestor" "GT8: a ref off origin's history: a hold, cause not-ancestor"
+ok "${out%% *}|$(JQ='d["cause"], d["green"]' js)" "hold|('not-ancestor', '$side')" "GT8: a ref off origin's history: a hold, cause not-ancestor, green the side commit"
 green r "$C2"
 
 # ---- GT9: the live-checkout rule ----------------------------------------------------------------------------------------
