@@ -38,7 +38,13 @@ d4's Speed fix from the audit's row 1 begun by p54-10: `tests/run.sh --fast --sh
 full-suite fallbacks and the Slow tier's filter included), then runs shard K of that selection by `tests/lib/shard.py`'s
 split, so the N shards together run it exactly once, the merge-task self-tests in shard 1 when it holds them; a shard
 left nothing passes on the always-run steps, and `--fast --shard-plan N` prints the split and runs nothing
-(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it are not yet built. Phase 54 builds the rest.
+(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it are not yet built.
+d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
+`tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
+preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
+`tests/shard-weights.tsv` are leg.test.sh's apportioned by the parts' measured shares, so the Slow tier is thirteen;
+ok lines 758 + 307 + 195 + 294 = 1554, the old file's count.
+Phase 54 builds the rest.
 
 ## Context
 

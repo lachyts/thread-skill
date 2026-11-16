@@ -1,5 +1,5 @@
 // execute runs a serial rollout's Legs (ADR 0040, p24-3): the prose around skills/execute/legs.md and leg.py (their
-// behaviour is pinned by tests/leg.test.sh, and land.sh --route by tests/land.test.sh case 74). Ten rules, one pure
+// behaviour is pinned by tests/leg*.test.sh, and land.sh --route by tests/land.test.sh case 74). Ten rules, one pure
 // function, check(files), over { key: text }:
 //   e1  routing: execute § 2's shape line sends a serial note to legs.md; § 1 and § Pausing say a serial note is never
 //       paused; no product file still says Legs are not built yet;

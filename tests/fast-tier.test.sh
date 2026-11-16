@@ -614,7 +614,7 @@ for h in skills/execute/scripts/reconcile-rollout.py skills/execute/scripts/lead
     "R7: the hub $h is FAST: its declared suites and the walkers (FULL means its HUB line went)"
 done
 r8=$(python3 "$SEL" select --paths THREAD.md)
-ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
+ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg(-land|-security)?.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
   "R8: a THREAD.md change is FAST and skips the suites that write only fixture repos' THREAD.md (their FOREIGN-ONLY line)"
 has "$(python3 "$SEL" select --paths CONTEXT.md)" "tests/repo-threads.test.sh" "R8: … while CONTEXT.md still selects repo-threads.test.sh, which reads the real one"
 has "$(python3 "$SEL" select --paths CLAUDE.md)" "tests/fast-tier-wiring.test.mjs" "R8: … and CLAUDE.md still selects fast-tier-wiring.test.mjs (W3 reads it)"
