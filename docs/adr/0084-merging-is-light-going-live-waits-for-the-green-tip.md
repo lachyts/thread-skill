@@ -51,7 +51,8 @@ waits": one rule, nothing runs from a commit the full suite has not passed.
   made for him (Decided for you 1). The suites that each run long (ten today: leg, lead-integrate, unfinished-rollout,
   git-env-canary, primary-refresh, reconcile-rollout-completion, reconcile-rollout-auto-retry, merge-task-integrated,
   land, merge-settings) run in the default branch's full suite and at the **Completion verifier**. A break only they catch turns the default branch red, the Green tip stays where it is, and
-  a fix is filed. It never reaches a rollout.
+  a fix is filed. It never reaches a running engine. A task's own tree is still cut from the default branch's tip, so
+  later tasks build on the break until its fix lands, which is why that fix goes first.
 
 **d4. Speed fixes go first, and the rest of Thread's queue waits for them.** A **Speed fix** is a task filed against a
 measured cause of rollout time lost (a Time-lost ledger line, a suite audit's ranked change, a stall audit's cause).
@@ -62,7 +63,8 @@ He picked "Stop the rest by default", and said what the stop is for:
 > quickly as possible."
 
 A Speed fix phase holds every other task of the project's queue until its releasing task lands: its last task, unless
-the phase names an earlier one. The hold is made at schedule, releases by itself, and never asks him.
+the phase names an earlier one. The hold is made at schedule, releases by itself, and never asks him. A red default
+branch's fix is never held by it, and a hold whose releasing task is set aside shows on his needs-you list.
 
 - Rejected: first in line with no stop (the fix shares the lane and lands later); a stop only when a week's reading
   shows rollouts slow (he wants it whenever a measured fix exists).
@@ -85,17 +87,19 @@ Calls made in his place, each overturnable:
 1. **The Mac's verify before a merge goes light too, once the Green tip is live, and then runs at the same time as
    GitHub's check.** Until the Green tip decides what goes live, the Mac's verify keeps the Slow tier, which was his
    first pick ("Move them off PRs now", with the Mac still running them). After that nothing merges until both checks
-   pass, and the lane costs the slower of the two (about 10 minutes, estimated), not their sum. Why: d1 makes the
+   pass, and the lane costs the slower of the two (about 10 minutes once the GitHub check is sharded, estimated), not
+   their sum. Why: d1 makes the
    full suite on the default branch the safety, so the Mac's check need not repeat it, but only from the day d1 is
    built.
 2. **The Slow tier is declared and derived, never a hand list.** A suite joins it on its measured seconds (today the
    ten whose macOS median on CI is 180 s or more; `tests/shard-weights.tsv` holds one local number per suite, so the
    cutoff and its source are the building task's to fix). The map check fails for a script whose only tests are
-   slow. A suite that lets two Escapes through in four weeks returns to the Fast tier. Why: the set must not grow
-   silently.
+   slow. A suite the change itself edits still runs before the merge. A suite red on the default branch twice in four
+   weeks, for breaks the checks before a merge left out, returns to the Fast tier (the red's own record names the
+   suite; an Escape does not). Why: the set must not grow silently, and a diff that points at a suite should run it.
 3. **A red default branch files its fix; it does not revert.** The failed jobs re-run once (a pass then is recorded and
    files nothing; it is no **Flake**, which is a named test in a rollout's own verifier run), then a fix task is filed
-   and goes first, by ADR 0055's path. Merges continue. Why: nothing live is broken while the
+   and goes first, ahead of a Speed fix phase's hold too, through the writer the completion verifier's fix task uses. Merges continue. Why: nothing live is broken while the
    Green tip holds, and a revert is new machinery. If a week's reading shows the Green tip trailing for hours, the
    Reflection proposes revert-first.
 4. **The default branch's full-suite runs coalesce when they queue.** One run goes on and only the newest commit
@@ -117,8 +121,9 @@ Calls made in his place, each overturnable:
    may want to check is one click away and never a notification (ADR 0075; Chorus builds the line).
 10. **Phase 54's own hold and its catch-up are made by hand**, since it builds the machinery that will make them.
 11. **The Green tip is a ref the default branch's own run moves, guarded by its readers.** It lives outside
-    `refs/heads/`, a reader takes it only when it is an ancestor of the default branch's tip, and the lead checks that
-    its commit carries a passing run. Why: the job that refreshes his sessions has no GitHub CLI, so the tip must be
+    `refs/heads/`, a reader fetches it by name and takes it only when it is an ancestor of the default branch's tip, a missing or
+    unfetched ref in a repo that publishes one moves nothing (never the branch's tip), and the lead checks that its
+    commit carries a passing run. Why: the job that refreshes his sessions has no GitHub CLI, so the tip must be
     readable by a plain fetch; and a ruleset cannot guard it, since GitHub refuses the Actions app as a bypass actor
     on a user-owned repo (tried 2026-11-16).
 12. **The audit's other changes stand as technical work**: the remaining ubuntu check runs as shards behind a job
@@ -127,7 +132,10 @@ Calls made in his place, each overturnable:
 
 ## Consequences
 
-- A merge should hold the lane about 10 minutes, from a median 65 (estimated; the Reflection reads it).
+- A merge should hold the lane about 30 minutes when Phase 54's hold releases (the light Mac verify, then GitHub's
+  light check), and about 10 once the two run together and the GitHub check is sharded, from a median 65 (both
+  estimated; the Reflection reads it).
+- CI headroom loses its macOS series from 2026-11-16: it reads the required checks.
 - Live code trails the default branch by one full-suite run, two in a burst. A fix he is waiting on reaches his
   sessions about 20 to 45 minutes after it merges.
 - Until d1 is built, a PR that does not merge through the Integration lane (a session's own PR, a landing PR that

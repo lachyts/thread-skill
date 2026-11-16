@@ -237,7 +237,8 @@ rest of Thread's queue is held until it lands (ADR 0084 d4). Tasks 16 and 17 run
 1. **The Slow tier is declared, and GitHub's check leaves it out** (rows B, 4; § 1). `SLOW` lines in
    `tests/fast-tier.map`, checked by `tests/lib/fast-tier.py check` against measured seconds (CI's medians, checked in:
    `tests/shard-weights.tsv`'s local seconds cannot reproduce the set). `tests/run.sh --fast`
-   drops them only under a flag `test.yml` sets, after a FULL fallback too. Full mode and `--shard` keep them.
+   drops them only under a flag `test.yml` sets, after a FULL fallback too, and never a SLOW suite the diff itself
+   edits. Full mode and `--shard` keep them.
    **Verify:** `--fast` with the flag runs no SLOW suite and without it runs them; `bash tests/run.sh --shard-plan 4`
    still lists every suite; `python3 tests/lib/fast-tier.py check` passes.
 2. **macOS leaves the PR checks** (row A). `test.yml`'s matrix is ubuntu alone; `tests/ci-workflows.test.mjs` and the
@@ -249,7 +250,8 @@ rest of Thread's queue is held until it lands (ADR 0084 d4). Tasks 16 and 17 run
    **Verify:** a test proves a suite's scripts read bytecode from the prefix and the tree stays unchanged; a test pins
    the heaviest node file first; the PR records leg's seconds before and after.
 4. **The fast tier stops fanning out** (row 4, § 4). Docs carriers are NONE, `contract-text.mjs`'s `SKILL.md` literal
-   goes, `SKILL.md` readers are declared, the carrier push stops at depth 1, and untracked files are no carriers.
+   goes, `SKILL.md` readers are declared, the carrier push stops at depth 1, untracked files are no carriers, and an
+   untracked path no map line places is skipped, never FULL.
    **Verify:** `select --paths skills/orient/SKILL.md` selects none of the Slow tier; `select --paths` on an ADR
    selects under 50; `tests/fast-tier.test.sh` passes.
 5. **Master's full-suite run publishes the Green tip** (ADR 0084 d1). A last job in `full-suite.yml` fast-forwards a
@@ -263,11 +265,14 @@ rest of Thread's queue is held until it lands (ADR 0084 d4). Tasks 16 and 17 run
 6. **Live code follows the Green tip** (ADR 0084 d1, d2). The snapshot cut, the Primary refresh (its fast-forward,
    repair and self-update), merge-task's in-place refresh and land.sh S4 stop at the Green tip. The Rollout clone
    stays on origin's tip, as do `refresh_local_base` on a rollout rooted in place and `leg.py land`, which Thread Skill
-   has none of; the task says what each does for a repo that publishes a Green tip. With no ref yet, origin's tip. A cut at a named commit, by hand.
+   has none of; the task says what each does for a repo that publishes a Green tip. A repo that publishes none keeps
+   origin's tip; one that does never falls back to it (the ref is fetched by name, and a missing one moves nothing). A
+   cut at a named commit, by hand.
    **Verify:** fixtures where origin's tip is ahead of the Green tip: `tests/engine-snapshot.test.sh`,
    `tests/primary-refresh.test.sh` and `tests/live-checkout.test.sh` gain cases where each stops at it.
 7. **A red master files its fix** (ADR 0084 Decided for you 3). The failed jobs re-run once; red again files a fix
-   task first in the queue, with a Run record line.
+   task first in the queue, ahead of a Speed fix hold, with a Run record line. The same reader cross-checks the Green
+   tip's ref against a passing run.
    **Verify:** fixtures of a red, a red that passes its re-run and a green master run produce a fix task naming the
    merges since the last green, a re-run-pass line (never a Flake line) and nothing.
 8. **The Mac's check before a merge goes light** (ADR 0084 Decided for you 1). The rollout's verify takes task 1's
@@ -286,7 +291,8 @@ rest of Thread's queue is held until it lands (ADR 0084 d4). Tasks 16 and 17 run
 12. **The ubuntu check runs as shards behind a job that keeps its name** (row 1).
     **Verify:** `node --test tests/ci-workflows.test.mjs` passes; a PR shows the one required context reported by
     the aggregator.
-13. **Schedule holds the queue for a Speed fix phase** (ADR 0084 d4).
+13. **Schedule holds the queue for a Speed fix phase** (ADR 0084 d4). A hold whose releasing task is set aside shows
+    on the needs-you list.
     **Verify:** a join of a Speed fix phase stamps the hold on every other queued task, and its releasing task's
     merge leaves none held.
 14. **Engine catch-up** (ADR 0084 d5). A running rollout drains, moves onto a snapshot at the Green tip and carries
@@ -305,7 +311,8 @@ rest of Thread's queue is held until it lands (ADR 0084 d4). Tasks 16 and 17 run
 
 **Order and what must not run together.** 3 and 4 follow 1 (`tests/run.sh`, the map). 6 and 7 follow 5. 8 follows 1,
 6 and 7. 9 follows 4; 10 follows 3; 12 follows 2, 10 and 11 and runs Solo (it changes how the
-required check is reported). 14 follows 6; 15 follows 8; 16 follows 9. Tasks that edit `tests/fast-tier.map`,
+required check is reported). 14 follows 6 and 13; 15 follows 8; 16 follows 9. Tasks that edit one file with no order
+between them (1 and 2, 2 and 5, 6 and 11) are left to Integration. Tasks that edit `tests/fast-tier.map`,
 `tests/run.sh` or `.github/**` fall back to the whole selection in their own PR: on GitHub that leaves the Slow tier
 out once task 1 lands, and the Mac's verify still runs it until task 8. Every task's Verify line ends on a full
 `make test`, which is where a task that could break a slow suite (3, 4, 9, 10, 12) runs them.
