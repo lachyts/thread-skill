@@ -529,7 +529,8 @@ holds <K> tasks; releases when [[<release>]] lands` (K the length of `held`), a 
 `the phase's release is now [[<moved>]]: the next join or apply moves the hold`, `<K> recorded tasks lack the entry:
 speed-hold apply restores them` (K the length of `missing`) and `<K> entries out of reach: the lead's next call drops
 them` (K the length of `outOfReach`). A hold is never drift and never routed to repair: it releases by itself. To end
-one early, Lachy runs `reconcile-rollout.py speed-hold release --rollout <note> --release <R>` from the rollout's root.
+one early, Lachy runs the engine's `speed-hold release` verb, naming the note and its release, from the rollout's root
+(`_shared/vault-grammar.md` § Speed fix hold's Writers); status runs no write.
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 

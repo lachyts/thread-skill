@@ -557,9 +557,10 @@ ok "$(holdlines | tail -1)" "- $STAMP hold [[x-p8-1]] (p8, join): [[a]]" "S19: �
 
 scen s19c
 mkro ro "" a; mkt a open ro 'depends-on: "[[z]]"'
+before=$(cksum < "$D/ro.md")
 dfr --tasks a --rollout "$D/ro.md"
-ok "$out|$(deps a)" "a: deferred->open (rollout/owner and started/merged/integrating/ready/gates_signed/descope_armed/handed_back/auto_retries_used/quota_retries_used/auto_retry_sha/auto_retry_at cleared, a legacy \`wave:\` included) [written]|z" \
-  "S19 (control): with no section, defer prints and writes as before"
+ok "$rc|$(printf '%s\n' "$out" | grep -c .)|$(printf '%s' "$out" | grep -c '^a: deferred->open (.*) \[written\]$')|$(deps a)|$(cksum < "$D/ro.md")" \
+  "0|1|1|z|$before" "S19 (control): with no section, defer prints its one line and writes as before"
 
 # ── S20: a phase note naming a release that is no marked task of the phase makes no hold ───────────────────────────────────
 scen s20
