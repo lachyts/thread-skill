@@ -10,14 +10,26 @@
 //   audit: about twice that OS's slowest shard).
 // - W5: every .github/workflows/*.yml parses (PyYAML) to a mapping with `jobs` (check-workflow-parse.sh covers only
 //   the *.workflow.js scripts).
+// - W6 (p54-5, ADR 0084 Decided for you 11): full-suite.yml's job `green-tip`, named `publish the Green tip` (p54-7's
+//   marker), needs every other job, runs only on success(), on ubuntu under 5 minutes, and alone holds
+//   `contents: write`; its checkout keeps its credentials on full history, and its script reads only GITHUB_SHA,
+//   GITHUB_REF and GREEN_REF (refs/thread/green), with no `${{ }}`, so G1 runs exactly the deployed text.
+// - W7: both workflows read only at the workflow level, no other job holds a write permission, and full-suite.yml's
+//   runs coalesce in one workflow-level concurrency group that never cancels a run in flight (Decided for you 4).
+// - G1: that script, run as GitHub's `shell: bash` runs it, against a fixture origin (a bare repo, the run's checkout
+//   and a second clone for other merges): it creates the ref, fetches before it checks, never moves it back or off
+//   master, never forces, rereads after a rejected push, and goes red only when the ref is still behind after its
+//   third failed push, with the push's own stderr in the log.
 // - S1: `bash tests/run.sh --shard-plan N` on the real tree puts every collected test (fast-tier.py's COLLECTED, which
 //   tests/fast-tier.test.sh C3 pins to run.sh's globs) and the merge-task self-tests in exactly one shard.
-// tests/fast-tier.test.sh pins run.sh's --shard and --shard-plan modes on a fixture. Reads the tree; writes nothing.
+// tests/fast-tier.test.sh pins run.sh's --shard and --shard-plan modes on a fixture. Reads the tree; writes only under
+// an os.tmpdir() mkdtemp dir, removed after G1.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -123,9 +135,9 @@ test('W3: no other job takes a required-check name; full-suite.yml runs on push 
 
 // The shard count N: full-suite.yml's matrix, which the run line must repeat.
 const shardJob = () => {
-  const jobs = Object.values(parsed[FULL].jobs)
-  assert.equal(jobs.length, 1, 'full-suite.yml has one job, the shard matrix')
-  return jobs[0]
+  const job = parsed[FULL].jobs.shard
+  assert.ok(job, 'full-suite.yml has the job shard, the shard matrix')
+  return job
 }
 const shardN = () => shardJob().strategy.matrix.shard.length
 // limits(job): each OS's timeout-minutes. A whole number holds for both OSes; the one other form is
@@ -152,6 +164,186 @@ test('W4: the shard matrix covers both OSes and shards 1..N, and the run line na
   assert.equal(last.run.trim(), `bash tests/run.sh --shard \${{ matrix.shard }}/${n}`)
   assert.equal(last.env.THREAD_TEST_JOBS, '4')
   assert.equal(checkout(job)?.with?.['persist-credentials'], false)
+})
+
+const GREEN = 'green-tip'
+
+test('W6: full-suite.yml\'s job green-tip publishes the Green tip once every shard has passed', () => {
+  const jobs = parsed[FULL].jobs
+  const job = jobs[GREEN]
+  assert.ok(job, 'full-suite.yml has the job green-tip')
+  assert.equal(job.name, 'publish the Green tip', 'p54-7 reads a red whose only failed job has this name')
+  const needs = [job.needs ?? []].flat()
+  assert.deepEqual([...needs].sort(), Object.keys(jobs).filter((id) => id !== GREEN).sort(), 'it needs every other job')
+  assert.equal(String(job.if ?? '').replace(/\$\{\{|\}\}|\s/g, ''), 'success()', 'it runs only once every shard passed')
+  assert.equal(job['runs-on'], 'ubuntu-latest')
+  assert.equal(job['timeout-minutes'], 5)
+  assert.deepEqual(job.permissions, { contents: 'write' })
+  const co = checkout(job)
+  assert.equal(co?.with?.['fetch-depth'], 0, 'full history, so its ancestor checks are exact')
+  assert.notEqual(co?.with?.['persist-credentials'], false, 'its fetch and push authenticate with GITHUB_TOKEN')
+  const last = runSteps(job).at(-1)
+  assert.equal(last?.shell, 'bash')
+  assert.equal(last.env?.GREEN_REF, 'refs/thread/green')
+  assert.ok(!last.run.includes('${{'), 'no ${{ }} in the script, so G1 runs the deployed text')
+})
+
+test('W7: only green-tip writes, and full-suite.yml\'s runs coalesce without cancelling a run in flight', () => {
+  for (const f of files) {
+    assert.deepEqual(parsed[f].permissions, { contents: 'read' }, `${f}'s workflow-level permissions`)
+    for (const [id, job] of Object.entries(parsed[f].jobs)) {
+      const perms = job.permissions
+      assert.notEqual(perms, 'write-all', `${f} job ${id} holds write-all`)
+      if (f === FULL && id === GREEN) continue
+      const writes = perms && typeof perms === 'object' ? Object.keys(perms).filter((k) => perms[k] === 'write') : []
+      assert.deepEqual(writes, [], `${f} job ${id} holds no write permission`)
+    }
+  }
+  const c = parsed[FULL].concurrency
+  assert.equal(typeof c?.group, 'string', 'full-suite.yml has a workflow-level concurrency group')
+  assert.equal(c['cancel-in-progress'], false, 'a run in flight is never cancelled')
+  for (const [id, job] of Object.entries(parsed[FULL].jobs)) {
+    assert.equal(job.concurrency, undefined, `full-suite.yml job ${id} has no concurrency of its own`)
+  }
+})
+
+// G1's fixture: a bare origin, the run's checkout W (the script's cwd) and a second clone X standing for other merges.
+// Every commit is commit-tree on the empty tree, and every spawn's env is built from scratch, so no inherited GIT_*
+// variable reaches it. The cases are successive states of one origin, in order.
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+const ID = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
+
+test('G1: the green-tip script moves refs/thread/green only forward, on master, unforced, on a fixture origin', (t) => {
+  const job = parsed[FULL].jobs[GREEN]
+  assert.ok(job, 'full-suite.yml has the job green-tip')
+  const step = runSteps(job).at(-1)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-green-tip-'))
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }))
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
+  const basePath = process.env.PATH
+  const home = path.join(tmp, 'home')
+  fs.mkdirSync(home)
+  const env = (extra = {}) => ({
+    PATH: basePath, HOME: home, TMPDIR: tmp, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', ...ID, ...extra,
+  })
+  const git = (cwd, ...args) =>
+    execFileSync(realGit, ['-C', cwd, ...args], { encoding: 'utf8', env: env(), stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const ok = (cwd, ...args) => spawnSync(realGit, ['-C', cwd, ...args], { encoding: 'utf8', env: env() })
+  const bare = path.join(tmp, 'origin.git')
+  const w = path.join(tmp, 'w')
+  const x = path.join(tmp, 'x')
+  const commit = (cwd, msg, parent) => git(cwd, 'commit-tree', EMPTY_TREE, '-p', parent, '-m', msg)
+  const green = () => ok(bare, 'rev-parse', '-q', '--verify', 'refs/thread/green').stdout.trim()
+  const lacks = (sha) => ok(w, 'cat-file', '-e', `${sha}^{commit}`).status !== 0
+  const script = path.join(tmp, 'green-tip.sh')
+  fs.writeFileSync(script, step.run)
+  const log = path.join(tmp, 'run.log')
+  // runGreen(sha): the script as GitHub's `shell: bash` runs it, stdout and stderr in one log as the job's.
+  const runGreen = (sha, opts = {}) => {
+    const fd = fs.openSync(log, 'w')
+    let r
+    try {
+      r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], {
+        cwd: w, stdio: ['ignore', fd, fd],
+        env: env({ PATH: opts.path || basePath, GITHUB_SHA: sha, GITHUB_REF: 'refs/heads/master', GREEN_REF: step.env.GREEN_REF }),
+      })
+    } finally {
+      fs.closeSync(fd)
+    }
+    return { status: r.status, out: fs.readFileSync(log, 'utf8') }
+  }
+
+  git(tmp, 'init', '-q', '--bare', '-b', 'master', bare)
+  git(tmp, 'init', '-q', '-b', 'master', w)
+  git(w, 'remote', 'add', 'origin', bare)
+  const c1 = git(w, 'commit-tree', EMPTY_TREE, '-m', 'c1')
+  const c2 = commit(w, 'c2', c1)
+  git(w, 'push', '-q', 'origin', `${c2}:refs/heads/master`)
+  git(tmp, 'clone', '-q', bare, x)
+
+  // (1) No ref yet: ls-remote's exit 2 is told apart from a read error, and the push creates the ref.
+  let r = runGreen(c1)
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c1, r.out)
+
+  // (2) Origin's master moved on to c3, which the checkout lacks: the script fetches it before any check.
+  const c3 = commit(x, 'c3', c2)
+  git(x, 'push', '-q', 'origin', `${c3}:refs/heads/master`)
+  assert.ok(lacks(c3), 'precondition: the checkout lacks c3')
+  r = runGreen(c2)
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c2, r.out)
+
+  // (3) Out of order: an older run finishes after a newer one moved the ref.
+  r = runGreen(c1)
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c2, r.out)
+  assert.match(r.out, /nothing to move/)
+
+  // (4) A re-run of the published commit.
+  r = runGreen(c2)
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c2, r.out)
+
+  // (5) A commit no longer on master that fast-forwards from the ref: only the off-branch check stops its push.
+  const s = commit(w, 's', c2)
+  r = runGreen(s)
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c2, r.out)
+  assert.match(r.out, /::warning::.*no longer on/)
+
+  // (5b) Diverged: the ref sits off master, at s, and the run's commit c3 is on master.
+  git(w, 'push', '-q', 'origin', `${s}:refs/thread/green`)
+  r = runGreen(c3)
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), s, r.out)
+  assert.match(r.out, /::warning::.*diverged/)
+  git(bare, 'update-ref', 'refs/thread/green', c2)
+
+  // (6) The race: at the push, master and the ref move to c4, which the checkout lacks. The rejected push is reread,
+  // never forced, and never turns the green run red.
+  const c4 = commit(x, 'c4', c3)
+  git(x, 'push', '-q', 'origin', `${c4}:refs/heads/next`)
+  assert.ok(lacks(c4), 'precondition: the checkout lacks c4')
+  const wrap = path.join(tmp, 'wrap')
+  fs.mkdirSync(wrap)
+  fs.writeFileSync(path.join(wrap, 'git'), [
+    '#!/bin/sh',
+    'if [ "$1" = push ]; then',
+    `  '${realGit}' -C '${bare}' update-ref refs/heads/master ${c4} || exit 1`,
+    `  '${realGit}' -C '${bare}' update-ref refs/thread/green ${c4} || exit 1`,
+    'fi',
+    `exec '${realGit}' "$@"`,
+    '',
+  ].join('\n'), { mode: 0o755 })
+  r = runGreen(c3, { path: `${wrap}:${basePath}` })
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c4, r.out)
+  assert.match(r.out, /push 1 of [\s\S]*nothing to move/)
+
+  // (7) The push itself fails while the ref stays behind (GitHub's workflows refusal, as a pre-receive hook): red only
+  // after the third failed push, with the refusal's own words in the log. The base PATH: case 6's wrapper never runs.
+  const c5 = commit(w, 'c5', c4)
+  git(w, 'push', '-q', 'origin', `${c5}:refs/heads/master`)
+  fs.writeFileSync(path.join(bare, 'hooks', 'pre-receive'), [
+    '#!/bin/sh',
+    'echo "refusing to allow a GitHub App to create or update workflow without workflows permission" >&2',
+    'exit 1',
+    '',
+  ].join('\n'), { mode: 0o755 })
+  r = runGreen(c5)
+  assert.equal(r.status, 1, r.out)
+  assert.match(r.out.trimEnd().split('\n').at(-1), /^::error::/, r.out)
+  assert.equal(r.out.match(/push \d of /g)?.length, 3, r.out)
+  assert.match(r.out, /refusing to allow/)
+  assert.equal(green(), c4, r.out)
+
+  // (8) An unreadable origin: red, and nothing moves.
+  git(w, 'remote', 'set-url', 'origin', path.join(tmp, 'missing.git'))
+  r = runGreen(c5)
+  assert.notEqual(r.status, 0, r.out)
+  assert.match(r.out, /::error::/)
+  assert.equal(green(), c4, r.out)
 })
 
 const COLLECT = `import glob, importlib.util, sys
