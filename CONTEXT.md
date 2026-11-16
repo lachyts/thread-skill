@@ -888,15 +888,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lower or freeze **Capacity**, and it is repaired, by a reset of that process
   or a restart of the Mac just before 7:00 (ADR 0083 d2, d3, accepted; d2's
   reader built by p53-1, which says a fault and never waits on it, Chorus's
-  writer chorus-p109-2; d3 built by Chorus: chorus-p109-5 resets the faulted
-  process, `fseventsd` alone on its list, with `sudo -n killall fseventsd`
-  under the narrow admin rule, at most once in six hours, never closing an
-  app, and marks a fault still standing 30 minutes later as outliving it;
-  chorus-p109-6 then restarts the Mac at 06:30 by the Lunch restart's own
-  polite path, at most once a night, held by an app that will not quit or by
-  his input; each repair shows on the Stage's quiet line, chorus-p109-4; the
-  weekly Reflection reads the budget, p53-5). _Avoid_: leak (one cause),
-  incident.
+  writer chorus-p109-2; d3 built by Chorus, chorus-p109-5 and -6, its repairs
+  shown on the Stage's quiet line by chorus-p109-4; ADR 0083's Status holds
+  how). _Avoid_: leak (one cause), incident.
 - **Waiting list** — the one estate-wide list of serial chains that are ready
   to run but have no Leg session yet, because **Capacity** has no room or
   another rollout holds their files. A chain on it has no session on the Stage;

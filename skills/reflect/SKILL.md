@@ -225,15 +225,16 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
   trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
   time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
-  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. A budget-bound one (p53-5: the
-  same share, held mostly while the budget admitted, its idle-slots markers carrying a `bound`) is read from `budget`:
-  say which part was short (`short`: the count, memory, cores, or memory and cores, with each part's held hours) and read
-  Throughput as under the budget. Memory and cores are Chorus's budget (capacity.json), not a rollout key: say "no
-  rollout key moves this". A count-bound one proposes a capacity_max raise, always with a caution, Lachy's call: the
-  record cannot show the Mac green at a count hold, since `next` tests the count before the Weight (ADR 0083 DfL 13).
-  Nor does a last-start-bound
+  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. Nor does a last-start-bound
   one (p28-7: the same reading over `hold-last-start`, the last starts holding starts toward the Morning): say "the
-  last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below.
+  last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below. A
+  budget-bound one (p53-5: the trickle-bound share, held mostly while the budget admitted, its idle-slots markers
+  carrying a `bound`) is read from `budget`: say which part was short (`short`: the count, memory, cores, or memory and
+  cores, with each part's held hours in `heldHours`; `unboundHeldHours` is the time C or the Trickle held, no part of
+  the budget) and read Throughput as under the budget. Memory and cores are Chorus's budget (capacity.json), not a
+  rollout key: say "no rollout key moves this". A count-bound one proposes a capacity_max raise, always with a caution,
+  Lachy's call: the record cannot show the Mac green at a count hold, since `next` tests the count before the Weight
+  (ADR 0083 DfL 13).
 - **The nights** (`nights`, p28-7; `skills/execute/away.md` § The night record), for each Morning this rollout
   marked: the night (its rollouts, `marked`), the starts the last starts held (`held`, split `heldBy` fallback / history) and the
   tasks still running at the Morning (`ranPast`, split `ranPastBy`: a `fallback` overrun, fewer than 3 past runs and
