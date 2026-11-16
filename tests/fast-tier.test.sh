@@ -630,7 +630,9 @@ r9=$(python3 "$SEL" slow --paths "$s1" skills/zz.py)
 ok "$(printf '%s\n' "$r9" | grep -c "^KEPT$tab")|$(printf '%s\n' "$r9" | grep -cx "KEPT$tab$s1")|$(printf '%s\n' "$r9" | grep -c "^OUT$tab")" \
   "1|1|$(( $(printf '%s\n' "$slow_map" | grep -c .) - 1 ))" "R9: a diff that edits one SLOW suite ($s1) keeps it, and leaves every other one OUT"
 r10=$(THREAD_SKIP_SLOW=1 bash tests/run.sh --shard-plan 4 2>&1); r10rc=$?
-missing=""; for t in $slow_map; do printf '%s\n' "$r10" | grep -qx "[1-4]$tab$t" || missing="$missing $t"; done
+# A here-string, never `printf | grep -q`: under pipefail grep's exit on its first match broke printf's pipe once the
+# plan spanned more than one write, and a listed suite read as missing (PR #429's ubuntu run 43930195186).
+missing=""; for t in $slow_map; do grep -qx "[1-4]$tab$t" <<<"$r10" || missing="$missing $t"; done
 ok "$r10rc|${missing:-none}" "0|none" "R10: THREAD_SKIP_SLOW=1 bash tests/run.sh --shard-plan 4 still lists every SLOW suite"
 # R11-R12 (p54-4): the real tree through one index. core(p) is the entries of every map line matching p, ALSO included;
 # closure(s) adds the runners of s until nothing is new (rule 5). R11: a SKILL.md (a READERS name) selects exactly the
