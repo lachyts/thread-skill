@@ -280,6 +280,19 @@ parallel with no note). For each:
   rollout's entry reads it. cannotShow always names what the hook cannot see: a script's or shell write, or a Codex
   Leg's; and two tasks of one rollout in one note (another run is another rollout), or an edit by a session that is no
   run's task.
+- masterRuns (p54-7, ADR 0084 Decided for you 3 and 11): master's `full suite` runs as reconcile-rollout.py
+  master-runs decided them, read from run_record's reserved master-runs.jsonl as noteOverlaps reads overlaps.jsonl:
+  its master-run lines deduped on run_record's master_key (the first line kept), each held by its `at` (the decided
+  attempt's completion, or an unproven line's read time) in [since, until], never by its ts, so a line written in this
+  window about an older run adds nothing. Per repo (sorted): redRuns (the distinct runs with a red or unconfirmed line:
+  how often master went red), breaks (red lines with newSuites), filed (red lines with a followup), healed,
+  publisherReds (redKind publisher), unconfirmed, rerunPasses, blips (publisherOnly rerun-passes), greens,
+  trailMinutes {median, max} over the green lines (null with none: how long the Green tip trailed), trailFloors (green
+  lines with trailFloor), unproven, first and last (their `at`). A green line's trailMinutes was computed at its write
+  and reaches back to its streak's first push, before since by design (CLAUDE.md's review rule names it). No file is
+  repos []; an unreadable one is the flag `masterRuns: master-runs.jsonl cannot be read (...)` and a null block, read
+  as unread, never as none; a torn line is a flag and is skipped. Reported, never traced (SKILL.md): it reads no
+  rollout's record, and no rollout's score or ledger reads the file.
 - suite (ADR 0073 d5): the Suite budget and CI headroom, each on the week's median, over the window's rows alone (a row
   by its ts in [since, until], and only those: CLAUDE.md's review rule). local: each suite-ended line of every record
   (the ledger's kept lines) whose outcome has a verdict (green, red or timeout: a timeout's seconds are its deadline, a
@@ -322,7 +335,9 @@ rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring,
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
 ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
 overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
-warnings} | null} | null, suite{budget, local[], ci[], breaches[], audit} (above), gateMisses{count, items[{rollout,
+warnings} | null} | null, masterRuns{repos[{repo, redRuns, breaks, filed, healed, publisherReds, unconfirmed,
+rerunPasses, blips, greens, trailMinutes{median, max} | null, trailFloors, unproven, first, last}]} | null (above),
+suite{budget, local[], ci[], breaches[], audit} (above), gateMisses{count, items[{rollout,
 task, at, kinds}]} (gate_misses(): one item per in-window ask friction item whose sweepMiss is non-empty, the count
 the Reflection reads; p51-3), arms (arms.py's block, above, or null), cannotShow[], flags[]}. stderr gets one summary
 line.
@@ -343,8 +358,8 @@ each task's at, its latest in-window peak's ts, in [window.since, window.until])
 [since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
 until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
 `nights.nights` (each morning), `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
-first and last both in [since, until], the one outside printed), `suite.local` and `suite.ci` (a group is one row,
-the same way), `gateMisses.items` (each item's at), and the arms' rows, each by its own unit (arms.py's docstring):
+first and last both in [since, until], the one outside printed), `masterRuns.repos` (a repo's group is one row, the
+same way, its first and last the lines' `at`), `suite.local` and `suite.ci` (a group is one row, the same way), `gateMisses.items` (each item's at), and the arms' rows, each by its own unit (arms.py's docstring):
 `arms.tasks` (landedAt), `arms.calls` (startTime), `arms.reviews`, `arms.planTasks` and `arms.rejections` (at), and
 `arms.escapes` (at, with inWindow true, as a friction escape is). span calls score.py with no --since, so a score's
 window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
@@ -355,7 +370,8 @@ row (ledger.py's rows(): its hours, byCause, contributing rollouts' hours and ev
 alone pin their windows (reflect-score's (l) and (e2), reflect-weekly's freshReviewLevels test, and reflect-ledger's L1
 for the ledger, whose header clips every interval to [since, until]); a score's escapes block reads its evidence up to
 now by design (score.py's header); grades' window and all are sums; noteOverlaps' warnings, notes and rollouts are its
-overlaps' sum and sets, and its previous reads the last Reflection's window by design; attention's trails, waits and
+overlaps' sum and sets, and its previous reads the last Reflection's window by design; masterRuns' counts are sums over
+its held lines, and a green's trailMinutes reaches back to its streak's first push by design; attention's trails, waits and
 circling and the ledger's Monthly audit declare wider units in their own docstrings, and so does each arms attribute
 (a landed task's Hands-off and tokens, a task's arm and exclusion, the plans' sides and toDate: arms.py's
 docstring), whose per-arm sums and plans are sums over the rows checked above; knobs, watches, bugsOpen and
@@ -581,6 +597,7 @@ import os
 import re
 import secrets
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -1165,6 +1182,63 @@ def note_overlaps(ev, since, until, reflections):
              "rollouts": sorted({r["rollout"] for g in overlaps for r in g["runs"] if r["rollout"]}),
              "none": warnings == 0, "previous": previous}
     return block, flags
+
+
+def master_runs(ev, since, until):
+    """(block, flags): the week's master-run lines from master-runs.jsonl (the docstring's masterRuns rule). The block
+    is None when the file cannot be read, {repos: []} when there is none."""
+    path = os.path.join(ev, RR.MASTER_RUNS + ".jsonl")
+    try:
+        lines, skipped = SCORE.read_lines(path, kinds=("master-run",))
+    except FileNotFoundError:
+        return {"repos": []}, []
+    except OSError as e:
+        return None, ["masterRuns: %s.jsonl cannot be read (%s): no master run read" % (RR.MASTER_RUNS, e)]
+    flags = ["masterRuns: %s.jsonl: %d line(s) did not parse: skipped" % (RR.MASTER_RUNS, skipped)] if skipped else []
+    seen, repos = set(), {}
+    for _t, _n, d in lines:
+        key = RR.master_key(d)
+        if key in seen:
+            continue   # run_record's rule: the first line per key
+        seen.add(key)
+        at = _ts({"ts": d.get("at")})
+        if at is None or not since <= at <= until or not isinstance(d.get("repo"), str):
+            continue   # a line is placed by its `at`, never its ts
+        g = repos.setdefault(d["repo"], {"repo": d["repo"], "red": set(), "breaks": 0, "filed": 0, "healed": 0,
+                                         "publisherReds": 0, "unconfirmed": 0, "rerunPasses": 0, "blips": 0,
+                                         "greens": 0, "trails": [], "trailFloors": 0, "unproven": 0,
+                                         "first": at, "last": at})
+        g["first"], g["last"] = min(g["first"], at), max(g["last"], at)
+        out = d.get("outcome")
+        if out in ("red", "unconfirmed"):
+            g["red"].add(d.get("runId"))
+        if out == "red":
+            g["breaks"] += bool(d.get("newSuites"))
+            g["filed"] += bool(d.get("followup"))
+            g["healed"] += d.get("healed") is True
+            g["publisherReds"] += d.get("redKind") == "publisher"
+        elif out == "unconfirmed":
+            g["unconfirmed"] += 1
+        elif out == "rerun-pass":
+            g["rerunPasses"] += 1
+            g["blips"] += d.get("publisherOnly") is True
+        elif out == "green":
+            g["greens"] += 1
+            g["trailFloors"] += d.get("trailFloor") is True
+            if isinstance(d.get("trailMinutes"), int) and not isinstance(d.get("trailMinutes"), bool):
+                g["trails"].append(d["trailMinutes"])
+        elif out == "unproven":
+            g["unproven"] += 1
+    block = []
+    for repo in sorted(repos):
+        g, trails = repos[repo], repos[repo]["trails"]
+        row = {"repo": repo, "redRuns": len(g["red"])}
+        row.update({k: g[k] for k in ("breaks", "filed", "healed", "publisherReds", "unconfirmed", "rerunPasses",
+                                      "blips", "greens")})
+        row["trailMinutes"] = {"median": statistics.median(trails), "max": max(trails)} if trails else None
+        row.update(trailFloors=g["trailFloors"], unproven=g["unproven"], first=fmt(g["first"]), last=fmt(g["last"]))
+        block.append(row)
+    return {"repos": block}, flags
 
 
 # ---- span ------------------------------------------------------------------------------------------------------
@@ -2411,13 +2485,17 @@ class Span:
         overlaps, overlap_flags = note_overlaps(ev, since, until, reflections)
         for f in overlap_flags:
             self.flag(f)
+        masters, master_flags = master_runs(ev, since, until)
+        for f in master_flags:
+            self.flag(f)
         for c in OVERLAP_CANNOT:
             self.cannot_show(c)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
                "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
-               "attention": attention, "nights": nights, "noteOverlaps": overlaps, "suite": suite,
+               "attention": attention, "nights": nights, "noteOverlaps": overlaps, "masterRuns": masters,
+               "suite": suite,
                "gateMisses": gate_misses(entries), "arms": arms, "cannotShow": self.cannot,
                "flags": self.flags}
         for f in window_flags(doc, scores):  # the window check: doc["flags"] is self.flags, so each lands in span.json
@@ -2526,6 +2604,7 @@ def window_flags(doc, scores):
     nights = items(part(doc, "nights", "nights"))
     report("nights.nights", [(_row_in(n.get("morning"), S, U), n.get("morning")) for n in nights], ss, us)
     report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
+    report("masterRuns.repos", spans(items(part(doc, "masterRuns", "repos"))), ss, us)
     report("suite.local", spans(items(part(doc, "suite", "local"))), ss, us)
     report("suite.ci", spans(items(part(doc, "suite", "ci"))), ss, us)
     misses = items(part(doc, "gateMisses", "items"))

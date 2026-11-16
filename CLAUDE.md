@@ -52,6 +52,8 @@ check, is another thing).
      window; a wait to start is a row per rollout that started in the window or is open at until; circling reads
      its own [until - `TOUCH_DAYS`, until];
    - the Monthly audit (ledger.py) reads its month;
+   - the master-runs reading (reflect.py's masterRuns) places each line by its `at`, never its ts; a green line's
+     trailMinutes is computed at its write and reaches back to its streak's first push, before since;
    - the arms reading (arms.py) places each row by its own unit: a call by its segment's startTime, a review by its
      ts, a task's first verdict by its earliest round-1 line up to until, a landed task by its first merge, an Escape
      by the sweep's evidence date (credited, for the lead, to the task's landing rollout), a plan task by its first

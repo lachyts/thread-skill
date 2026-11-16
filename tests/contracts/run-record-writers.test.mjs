@@ -76,6 +76,18 @@ test('role-call is emitted by reconcile-rollout.py alone, inside cmd_fold_journa
   assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*role-call/.test(text)).map(({ file }) => file), [])
 })
 
+// p54-7 (ADR 0084 Decided for you 3): master-run has one writer, master-runs' locked write (_master_locked), on one line.
+test('master-run is emitted by reconcile-rollout.py alone, inside _master_locked, never by prose', () => {
+  const by = scripts().filter(({ text }) => emits(text, 'master-run')).map(({ file }) => file)
+  assert.deepEqual(by, ['skills/execute/scripts/reconcile-rollout.py'])
+  const rr = read('skills/execute/scripts/reconcile-rollout.py')
+  const locked = defBody(rr, '_master_locked')
+  assert.ok(/_event\(ro, "master-run", None, fields, args\)/.test(locked), 'the emit sits inside _master_locked, on one line')
+  assert.ok(!emits(rr.replace(locked, ''), 'master-run'), 'and nowhere else in the file')
+  const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
+  assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*master-run/.test(text)).map(({ file }) => file), [])
+})
+
 // p46-4 (ADR 0079 d9): the arms line is the Reflection's own, written once by reflect.py close before its reflection line.
 export const armsWriters = (rx) => {
   const close = defBody(rx, 'cmd_close')

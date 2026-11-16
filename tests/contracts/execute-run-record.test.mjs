@@ -126,6 +126,50 @@ for (const [rule, mutate] of controls) {
   })
 }
 
+// ---- p54-7 (ADR 0084 Decided for you 3, 11, 13): master's full suite, read at four sites, never routed on --------------
+const MR = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <rollout-note> || true`'
+function checkMasterRuns(md) {
+  const bad = []
+  const need = (name, ok) => { if (!ok) bad.push(name) }
+  const p = labelled(md, "Master's full suite")
+  need('master-paragraph', p.includes(MR) && p.includes('never blocks a merge and is never routed on, whatever its exit') &&
+    p.includes('Merges go on while master is red, with no revert: a red-master fix holds nothing, it only starts first'))
+  need('master-entry', p.includes("- once per loop entry, after the canary's `check-all` and the *Surface re-check*, before step 1.1's first `next`"))
+  need('master-merge', p.includes("- once after each `mark-done` that lands a merge: step 4's exit 0, a second exit 6, the RACE procedure's green re-verify, and the merge-result rule's hold route's 0") &&
+    md.includes("The lane frees; *Master's full suite*'s `master-runs` pass, then step 1 |"))
+  need('master-heartbeat', p.includes('- at each heartbeat tick, its clause (2c) (§ 5);') &&
+    (md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? '').includes('(2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note\'s path> || true` once'))
+  need('master-ceremony', p.includes('- once in the completion ceremony (step 5)') &&
+    collapse(md).includes("**Read master's full suite once more (p54-7).** Run " + MR + " (*Master's full suite*), never routed on."))
+  need('master-donts', collapse(section(md, /^## Don'ts/) ?? '').includes("Never re-run, revert or file for master's full-suite runs by hand: `master-runs` makes the one re-run of the newest run and files the fix (§4.5 *Master's full suite*). merge-task's own `gh run rerun --failed` on a PR's required checks is unchanged."))
+  return bad
+}
+
+test('execute (p54-7): master-runs at each loop entry, after each landing mark-done, each heartbeat tick and the ceremony; a Don\'ts line', () => {
+  assert.deepEqual(checkMasterRuns(skill), [])
+  const doc = rrs.slice(0, rrs.indexOf('\nimport argparse'))
+  assert.ok(/^ {2}master-runs\s/m.test(doc), 'documented in the module docstring')
+  assert.ok(rrs.includes('sub.add_parser("master-runs"'), 'wired')
+  assert.ok(!/GUARD_EXEMPT = \([^)]*master-runs/.test(rrs), 'never exempt from the Engine snapshot guard')
+})
+
+const masterControls = [
+  ['master-paragraph', (t) => t.replace('never blocks a merge and is never routed on, whatever its exit', 'blocks a merge while master is red')],
+  ['master-entry', (t) => t.replace("- once per loop entry, after the canary's `check-all` and the *Surface re-check*, before step 1.1's first `next`", '- once per loop entry')],
+  ['master-merge', (t) => t.replace(", the RACE procedure's green re-verify, and the merge-result rule's hold route's 0", '')],
+  ['master-merge', (t) => t.replace("The lane frees; *Master's full suite*'s `master-runs` pass, then step 1 |", 'The lane frees; step 1 |')],
+  ['master-heartbeat', (t) => t.replace(/ \(2c\) Run `[^`]*master-runs[^`]*` once \([^)]*\), then go on to the next clause\./, '')],
+  ['master-ceremony', (t) => t.replace("**Read master's full suite once more (p54-7).**", '**Read master once more.**')],
+  ['master-donts', (t) => t.replace("- Never re-run, revert or file for master's full-suite runs by hand", '- Never re-run master by hand')],
+]
+for (const [rule, mutate] of masterControls) {
+  test(`control (p54-7): ${rule}`, () => {
+    const mutated = mutate(skill)
+    assert.notEqual(mutated, skill, 'the mutation applied')
+    assert.ok(checkMasterRuns(mutated).includes(rule), JSON.stringify(checkMasterRuns(mutated)))
+  })
+}
+
 // ---- p29-10 (ADR 0051): the lead's loop entry, the heartbeat's liveness line, and the suites' flags ----------------
 // record-entry is every loop entry's first write: at a § 1 entry right after § 2's lineage, version and shape lines,
 // before § 2.5 (so a write-nothing halt in a gate is a stop the Stop hook records and the next entry closes); its
@@ -161,7 +205,8 @@ function checkLedger(md) {
     ['the Watchdog stopped the lead', 'watchdog']].every(([what, c]) => p.includes(`| ${what} | \`${c}\` |`)))
   need('no-hand-writes', p.includes('The lead adds nothing for a halt or a room stop: the Stop hook records each halt (§ 8), and `step-boundary.py begin` each room stop'))
   const hb = md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
-  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
+  // p54-7: clause (2c), master's full suite, sits between (2b) and (3)
+  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note's path> || true` once (master's full suite, execute § 4.5 *Master's full suite*: never routed on, never blocking), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
   need('heartbeat-2b', hb.includes(B2))
   need('entry-order', md.includes("**Validate `verify_timeout` once per loop entry, before anything the entry writes.** (The Run record's `record-entry` aside: § 2's first write.)") &&
     labelled(md, 'Landing-register re-check.').includes('re-runs § 2.5 before anything else it does, `record-entry` aside (*Run record*)') &&

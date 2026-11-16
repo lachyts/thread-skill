@@ -14,11 +14,14 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            refuse, and writes nothing: reflect.py checks a whole pass first)
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
     normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG,
-                                           NOTE_OVERLAPS, RESERVED
+                                           NOTE_OVERLAPS, MASTER_RUNS, RESERVED, MAX_LINE, MAX_FAILING,
+                                           FAILING_NAME, MAX_MASTER_PRS, MAX_MASTER_FOLLOWUPS
     title_key(name) -> str                 (a titled note's Grade-log key, p34-6: estate-dispatch.py `log` keys by it,
                                            and a grade line's `note` is checked against it)
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
+    master_key(line) -> tuple              (a master-run line's identity, p54-7: reconcile-rollout.py master-runs
+                                           writes by it, reflect.py's masterRuns reads by it)
     watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
                                            identities, p21-7: reflect.py writes them, tune.py reads them back)
     arms_key(role, signal) -> str          (a Fable ceiling's identity, p46-4: arms.py computes it, reflect.py's
@@ -44,8 +47,25 @@ the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
 weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention, arms) to reflections.jsonl, the
-Grade log's kind (grade) to grades.jsonl, and the Note overlap's kind (note-overlap) to overlaps.jsonl. All five names
-are RESERVED: refused as a rollout slug and as a carried `from`.
+Grade log's kind (grade) to grades.jsonl, the Note overlap's kind (note-overlap) to overlaps.jsonl, and the master-run
+kind to master-runs.jsonl. All six names are RESERVED: refused as a rollout slug and as a carried `from`.
+
+master-runs.jsonl holds one `master-run` line per decided run of a repo's default-branch `full suite` workflow and per
+unproven Green tip commit (p54-7, ADR 0084 Decided for you 3, 11 and 13; CONTEXT.md **Red-master fix**).
+skills/execute/scripts/reconcile-rollout.py `master-runs` is its one writer (its docstring holds the rules) and
+skills/reflect/scripts/reflect.py `span` its first reader (masterRuns); p54-18 reads its breaks. A line's rollout is
+the lead's that wrote it, a provenance stamp: the file is one per Mac, never a rollout's record, so it dedupes exactly
+under one lock and no rollout's score or ledger reads it.
+- The dedupe key: (repo, runId, attempt, outcome), and (repo, sha, unproven) for an unproven line. The writer skips a key
+  the file already holds, and a reader keeps the first line per key.
+- `at` is the row's time, never ts: the decided attempt's completion (GitHub's updated_at), or the read time for an
+  unproven line. A windowed reader places a line by its `at`.
+- A break is a `red` line with `newSuites`: a suite first confirmed red since the last green run. Its followup is the fix
+  task it filed or found; `healed: true` says a newer green came first, so none was filed. A `red` line with no
+  newSuites is a red run every one of whose suites was already filed.
+- A `<list>Total` field (suitesTotal, newSuitesTotal, prsTotal, followupsTotal) means its list holds only its first
+  entries in its sort order (names by name, prs ascending, followups in run order), cut to fit the line; the full
+  suite list lives in the followup's `master_red_suites:`.
 
 overlaps.jsonl holds one `note-overlap` line per warned Note overlap (ADR 0067 d6; CONTEXT.md **Note overlap**): a vault
 note one run's task edited while another rollout's live task had written it. hooks/vault-note-overlap.py, the plugin's
@@ -485,6 +505,18 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   setting-restored T id. ADR 0080: merge-settings.py `restore` wrote that change's before back, on his word.
   setting-dismissed T id. ADR 0080: merge-settings.py `dismiss`, his decision to keep that change; its
                      setting-changed line stays.
+  master-run         repo (owner/name, lowercased), outcome (red | unconfirmed | rerun-pass | green | unproven), sha
+                     (the run's head, or the Green tip commit for unproven), at (a UTC Z stamp: the row's time, above);
+                     runId?, attempt? (ints >= 1: the run and the decided attempt), suites?, newSuites? (at most
+                     MAX_FAILING names of at most FAILING_NAME characters), suitesTotal?, newSuitesTotal?, prsTotal?,
+                     followupsTotal? (ints >= 0, each only when its list was cut), since? (the last green run's head sha,
+                     or null with none listed), merges? (an int >= 0, or null), prs? (at most MAX_MASTER_PRS PR numbers,
+                     ints >= 1, or null: merges and prs set only on a break with a since), retest? (rerun | next-run |
+                     covered | refused | none: what re-tested the red read), redKind? (suites | publisher), followup?
+                     (a slug: the fix task), healed?, publisherOnly?, trailFloor? (bools), trailMinutes? (an int >= 0),
+                     redRuns? (an int >= 1), followups? (at most MAX_MASTER_FOLLOWUPS slugs: a streak's fix tasks), ref?
+                     (the Green tip's ref name). p54-7: reconcile-rollout.py master-runs, one line per key (above), in
+                     master-runs.jsonl; a rollout is required (provenance) and there is no task.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -682,6 +714,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   recorded for that task and PR never twice), its time against its job's time limit. A required check that is no
   Actions job (an external status) writes none, and nor does a job whose run gh could not read (a re-run on the
   already-merged path fills it). reflect.py's span reads them on the week's median (its suite block).
+- master-run (p54-7): see master-runs.jsonl under Files. Keep the first line per key, (repo, runId, attempt, outcome),
+  or (repo, sha, unproven); place a line by its `at`, never its ts; a break is a `red` line with `newSuites`; a
+  `<list>Total` says its list was cut, and the followup's `master_red_suites:` holds the whole suite list.
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -741,8 +776,9 @@ TUNINGS = "tunings"
 REFLECTIONS = "reflections"
 GRADE_LOG = "grades"
 NOTE_OVERLAPS = "overlaps"
+MASTER_RUNS = "master-runs"
 # record files that are no rollout's: refused as a rollout slug or a carried `from`
-RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG, NOTE_OVERLAPS)
+RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG, NOTE_OVERLAPS, MASTER_RUNS)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 # title_key's one separator: every run of characters outside a slug's letters, digits, dots and underscores (p34-6)
 TITLE_SEP_RE = re.compile(r"[^a-z0-9._]+")
@@ -1536,6 +1572,8 @@ MOVER_SOURCES = ("record", "note")
 MAX_CALLS = 64
 MAX_FAILING = 50
 FAILING_NAME = 200
+MAX_MASTER_PRS = 100          # master-run's prs (p54-7)
+MAX_MASTER_FOLLOWUPS = 50     # master-run's followups (p54-7)
 MAX_MOVERS = 20
 MAX_NON_INERT = 20
 REASON_MAX = 200
@@ -1599,6 +1637,19 @@ def _movers(v):
         if "source" in m and m["source"] not in MOVER_SOURCES:
             return "a list whose source is one of %s" % ", ".join(MOVER_SOURCES)
     return None
+
+
+def _pr_list(n):
+    """master-run's prs: at most n PR numbers, each an int >= 1."""
+    def check(v):
+        ok = isinstance(v, list) and len(v) <= n and \
+            all(isinstance(x, int) and not isinstance(x, bool) and x >= 1 for x in v)
+        return None if ok else "a list of at most %d integers >= 1" % n
+    return check
+
+
+MASTER_OUTCOMES = ("red", "unconfirmed", "rerun-pass", "green", "unproven")
+MASTER_RETESTS = ("rerun", "next-run", "covered", "refused", "none")
 
 
 def _bool_or_null(v):
@@ -1787,6 +1838,15 @@ KINDS = {
                            "conclusion": _or_null(_short(40)), "timeoutMinutes": _or_null(_int(1)),
                            "limitSource": _enum(*CI_LIMIT_SOURCES)},
                     {"runId": _int(1), "workflow": _str}),
+    # p54-7 (ADR 0084 Decided for you 3, 11, 13): reconcile-rollout.py master-runs, in master-runs.jsonl.
+    "master-run": (False, {"repo": _str, "outcome": _enum(*MASTER_OUTCOMES), "sha": _str, "at": _stampz},
+                   {"runId": _int(1), "attempt": _int(1),
+                    "suites": _names(MAX_FAILING, FAILING_NAME), "newSuites": _names(MAX_FAILING, FAILING_NAME),
+                    "suitesTotal": _int(0), "newSuitesTotal": _int(0), "prsTotal": _int(0), "followupsTotal": _int(0),
+                    "since": _or_null(_str), "merges": _or_null(_int(0)), "prs": _or_null(_pr_list(MAX_MASTER_PRS)),
+                    "retest": _enum(*MASTER_RETESTS), "redKind": _enum("suites", "publisher"), "followup": _slug,
+                    "healed": _bool, "publisherOnly": _bool, "trailFloor": _bool, "trailMinutes": _int(0),
+                    "redRuns": _int(1), "followups": _names(MAX_MASTER_FOLLOWUPS, FAILING_NAME), "ref": _str}),
 }
 
 
@@ -2060,6 +2120,15 @@ def verdict_key(line):
     return (line.get("task"), line.get("round"), "digest", line.get("digest"))
 
 
+def master_key(line):
+    """A master-run line's dedupe key (p54-7; Files, master-runs.jsonl): (repo, runId, attempt, outcome), or (repo, sha,
+    "unproven") for an unproven line. The writer (reconcile-rollout.py master-runs) skips a key the file holds, and a
+    reader (reflect.py's masterRuns) keeps the first line per key."""
+    if line.get("outcome") == "unproven":
+        return (line.get("repo"), line.get("sha"), "unproven")
+    return (line.get("repo"), line.get("runId"), line.get("attempt"), line.get("outcome"))
+
+
 def _encode(ts, host, rollout, task, kind, fields):
     obj = {"v": KIND_VERSIONS.get(kind, VERSION), "ts": ts, "host": host, "rollout": rollout, "task": task, "kind": kind}
     obj.update(fields)
@@ -2204,6 +2273,8 @@ def _prepare(rollout, kind, task, fields, ts):
             raise Refused("rollout %r is reserved (%s.jsonl is no rollout's record)" % (rollout, rollout))
     if kind == "tuning" and task is not None:
         raise Refused("tuning has no task (it lands in %s.jsonl)" % TUNINGS)
+    if kind == "master-run" and task is not None:
+        raise Refused("master-run has no task (it lands in %s.jsonl)" % MASTER_RUNS)
     if task is not None:
         task = normalise_slug(task, "task")
     elif task_required:
@@ -2230,7 +2301,8 @@ def _prepare(rollout, kind, task, fields, ts):
     out = []
     for r in targets:
         name = REFLECTIONS if kind in REFLECTION_KINDS else GRADE_LOG if kind == "grade" else REVIEWS if r is None \
-            else TUNINGS if kind == "tuning" else NOTE_OVERLAPS if kind == "note-overlap" else r
+            else TUNINGS if kind == "tuning" else NOTE_OVERLAPS if kind == "note-overlap" \
+            else MASTER_RUNS if kind == "master-run" else r
         out.append((name, _line(stamp, host, r, task, kind, fields)))
     return out
 
