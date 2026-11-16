@@ -701,7 +701,9 @@ Subcommands:
               (the joined marks counted); then, on the rows re-read, each new or moved-to hold's line and its entries,
               a move's `superseded` released line and its drops, and the re-stamps of recorded tasks missing their
               entry. It writes no let-go line (the lead's `next` does): a phase whose hold lets go is left alone, with a
-              `speed-hold skip … (lets go at the lead's next call)` line. Its stdout lines, before the last line:
+              `speed-hold skip … (lets go at the lead's next call)` line. A join that reads no hold but whose joining
+              task carries a refused `speed_fix:` prints that task's `speed-hold refuse` line and writes nothing more
+              for the hold. Its stdout lines, before the last line:
               `speed-hold refuse|made|moved|drop|skip|restamp …` and `speed-hold [[<R>]] (p<N>) holds [[<t>]]`. Its
               writes wait on _engine_reads_speed_hold, read only when it would write: False is one stderr `WARN:
               speed-hold: [[<ro>]]: <why> (engine-snapshot.md § Cross-version state): no Speed fix hold made`, and the
@@ -718,7 +720,9 @@ Subcommands:
               re-stamps, then each new hold's line and entries; its writes wait on _engine_reads_speed_hold (False: one
               WARN, exit 0, nothing written). `release` (by hand) writes `released [[<R>]] (p<N>): by hand` for each
               named hold not yet released, then drops its recorded entries (a released hold's leftovers too), then
-              its event; it works on any note, an archived one included. `lift` (schedule step 1 on a supersede)
+              its event; a hold whose release landed (ended) is only named, `speed-hold ended [[<R>]] (p<N>): its
+              release landed; nothing released`, with no line, no drop and no event; it works on any note, an archived
+              one included. `lift` (schedule step 1 on a supersede)
               drops every standing hold's recorded entries, whatever each task's state, and writes no line and no
               event (`speed-hold lifted [[<R>]] (p<N>): <K> entries`). stdout: `speed-hold …` lines, then `[written:
               <n notes saved>]`, `[no-change]` or `(dry-run)`; exit 1 when a save fails, naming what it wrote: a re-run
@@ -1646,19 +1650,23 @@ Speed fix hold (p54-13, ADR 0084 d4; _SpeedCtx, read by `speed-hold`, `join`, `n
 grammar is skills/_shared/vault-grammar.md § Speed fix hold): a task marked `speed_fix: <citation>` (a suite audit's row,
 a stall audit's cause, or a Time-lost ledger line by its tl- id; _speed_fix_mark, else refused: an ordinary task) makes its
 phase (PHASED_STEM_RE's prefix and a digit task number, _speed_phase) hold every other queued task of its rollout. The
-phase's release R is the unit of the phase note's `speed_fix_release:` (a marked member of the phase, else a WARN and no
-hold), else of its highest-M marked member, landed ones included; a hold is made only while R is unlanded, linked, not
-letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its reach (the one rule, the block
-comment above SPEED_FIX_KEY), released by itself once R lands, and recorded on the rollout note's `## Speed fix holds`
-(`- <stamp> hold [[R]] (p<N>, schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`),
-append-only, so a released hold is never re-made for the same R. The hold follows its phase's release at every apply and
-join (a move: the new hold's line and entries, then the old one's `superseded by [[R']]` line and drops), never at
-`next`. It lets go (_SpeedCtx.let_go) when R, or an unlanded unit upstream of it, leaves the queue (_speed_gone) or is set
-aside with its retries spent (a non-null humanFix, read as `moving` reads it): `next` writes the released line, drops
-the entries and records one Run record line, reported as `speedHoldReleased`, and on --dry-run reads its rows as if it
-had. Out-of-reach and leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next`
-computes its starts. The section's lines change only by migration (engine-snapshot.md § Cross-version state), and join
-and apply write a line or an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
+phase's release R (its last task, unless the phase names another: ADR 0084 d4) is the unit of the phase note's
+`speed_fix_release:` (any member of the phase, marked or not, else a WARN and no hold), else of its highest-M member,
+marked or not, landed ones included; a phase with no marked member has none. A hold is made only while R is unlanded,
+linked, not letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its reach (the one rule,
+the block comment above SPEED_FIX_KEY: no mark, no release and nothing upstream of either is ever held), released by
+itself once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]] (p<N>,
+schedule|join): [[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold is
+never re-made for the same R. The hold follows its phase's release at every apply and join (a move: the new hold's line
+and entries, then the old one's `superseded by [[R']]` line and drops), never at `next`; a standing hold whose phase
+has no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R,
+read through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
+leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, read
+as `moving` reads it; a gate-pending task never lets it go): `next` writes the released line, drops the entries and
+records one Run record line, reported as `speedHoldReleased`, and on --dry-run reads its rows as if it had.
+Out-of-reach and leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next` computes
+its starts. The section's lines change only by migration (engine-snapshot.md § Cross-version state), and join and apply
+write a line or an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
 
 Durable triggers (p45-7, ADR 0078 d5; the grammar is skills/_shared/vault-grammar.md § When): a "when X, then Y" step
 written on a rollout or task note as a `when:` entry, so it survives any session. _when reads every form; _trigger_eval
@@ -13696,17 +13704,22 @@ def cmd_carry(args) -> int:
 #
 # The reach is one rule (_SpeedCtx.reach): a hold H(P, R) stamps task t only when (1) t is linked to this rollout (or
 # being joined) and queued; (2) t's unit carries no valid mark; (3) t carries no `completion_red_of:`; (4) t's unit is not
-# a member of P; (5) t is upstream of no unlanded marked unit linked to this rollout (or being joined); (6) R's unit is
-# not already among t's `depends-on:` / `blocked-by:` (a hand-written entry is never recorded). A recorded task that
-# carries R's entry but now fails "linked" or arms 2-5 is out of reach: join, apply and `next` drop that entry. So every
-# release is a marked unit, no entry is ever stamped on a marked unit or on anything upstream of one, and no hold holds a
-# release, directly or transitively: two Speed fix phases never deadlock, and a held queue always has its phase's own
-# tasks startable.
+# a member of P; (5) t is neither a root nor upstream of one (_SpeedCtx.roots: every unlanded marked unit linked to this
+# rollout or being joined, every standing hold's release, and the release of every phase with such a mark while it is
+# unlanded and linked); (6) R's unit is not already among t's `depends-on:` / `blocked-by:` by hand (a recorded hold's
+# entry is not, and a hand-written entry is never recorded). A recorded task that carries R's entry but now fails
+# "linked" or arms 2-5 is out of reach: join, apply and `next` drop that entry. So no entry is ever stamped on a marked
+# unit, on a release or on anything upstream of either, and no hold holds a release, directly or transitively, even one
+# that is no Speed fix itself (the phase's last task) or one whose phase lost its marks: two Speed fix phases never
+# deadlock, and a held queue always has its phase's own tasks startable.
 
 SPEED_FIX_KEY = "speed_fix"                    # a task's mark: its measured cause, cited
-SPEED_FIX_RELEASE_KEY = "speed_fix_release"    # a phase note's own choice of release, a marked task of the phase
+SPEED_FIX_RELEASE_KEY = "speed_fix_release"    # a phase note's own choice of release, any member of the phase
 RED_MASTER_KEY = "completion_red_of"           # the completion verifier's fix task (written by _file_red_fix): never held
 SPEED_HOLD_SECTION = "## Speed fix holds"
+# The queue states (_queue_state) a set-aside task's retries can be spent in, as `moving` reads them: set aside at `run`
+# or `integration`. A gate-pending task (`gate`) has no automatic retries, so a Speed fix hold never lets go for it.
+SPEED_SPENT_STATES = (("set-aside", "run"), ("set-aside", "integration"))
 # The evidence forms (vault-grammar § Speed fix hold; task-writer § 4 and reshuffle R5.2 use the same words): a suite
 # audit's ranked change (`docs/audits/<file>.md row <N>`), a stall audit's cause (`docs/audits/<file>.md cause <words>` or
 # `docs/audits/<file>.md#<anchor>`), and a Time-lost ledger line by its id (`time-lost <id> [<class>]`, the id checked by
@@ -13829,21 +13842,25 @@ def _speed_release_named(pkey, tasks_dir):
 
 
 def _speed_release(pkey, units, index, tasks_dir):
-    """(R, warn): phase P's release, the unit (_fold_unit) of the phase note's `speed_fix_release:` when it names one (it
-    must be a marked member of P: else no release and a WARN, with no fallback), else of P's highest-M marked member,
-    landed ones included; (None, None) when P has no marked member."""
-    p = units["phases"].get(pkey) or {"marked": []}
+    """(R, warn): phase P's release (ADR 0084 d4: its last task, unless the phase names another), the unit (_fold_unit)
+    of the phase note's `speed_fix_release:` when it names one (any member of P, marked or not, a unit a member folds
+    into included: else no release and a WARN, with no fallback), else of P's highest-M member, marked or not, landed
+    ones included; (None, None) when P has no marked member, so is no Speed fix phase. A release that is no Speed fix
+    itself is still never held (_SpeedCtx.roots)."""
+    p = units["phases"].get(pkey) or {"tasks": [], "marked": [], "units": set()}
+    if not p["marked"]:
+        return None, None
     label = _speed_label(pkey)
     named = _speed_release_named(pkey, tasks_dir)
     if named is not None:
-        hit = next((s for _m, s in p["marked"] if s.lower() == named.lower()), None)
+        hit = next((s for _m, s in p["tasks"] if s.lower() == named.lower()), None)
+        if hit is None and named.lower() in p["units"]:
+            hit = index[named.lower()][0].stem if named.lower() in index else named
         if hit is None:
-            return None, (f"WARN: speed-hold: {label}'s {SPEED_FIX_RELEASE_KEY}: [[{named}]] is not a marked task of the "
+            return None, (f"WARN: speed-hold: {label}'s {SPEED_FIX_RELEASE_KEY}: [[{named}]] is not a member of the "
                           f"phase: no hold for {label}")
         return _fold_unit(hit, index)[0], None
-    if not p["marked"]:
-        return None, None
-    return _fold_unit(max(p["marked"], key=lambda ms: (ms[0], ms[1].lower()))[1], index)[0], None
+    return _fold_unit(max(p["tasks"], key=lambda ms: (ms[0], ms[1].lower()))[1], index)[0], None
 
 
 def _speed_holds(note, index=None):
@@ -14060,7 +14077,7 @@ class _SpeedCtx:
         self.units = _speed_units(index)
         self.holds = _speed_holds(rollout_note, index)
         self.warns = []
-        self._fix, self._up, self._lg, self._marks = {}, {}, {}, None
+        self._fix, self._up, self._lg, self._rel, self._marks, self._roots = {}, {}, {}, {}, None, None
 
     def name(self, slug):
         e = self.index.get(slug.lower())
@@ -14086,6 +14103,28 @@ class _SpeedCtx:
 
     def phases_of(self, unit):
         return [k for k, p in self.units["phases"].items() if unit.lower() in p["units"]]
+
+    def release(self, pkey):
+        """(R, warn): phase pkey's release now (_speed_release), memoised, so its WARN is read once per context."""
+        if pkey not in self._rel:
+            self._rel[pkey] = _speed_release(pkey, self.units, self.index, self.tasks_dir)
+        return self._rel[pkey]
+
+    def roots(self):
+        """The units no hold stamps, nor anything upstream of them (the reach's arm 5), lowercased and sorted: every
+        live mark, every standing hold's release (through _fold_unit), and the release of every phase with a live mark
+        while it is unlanded and linked. A release that is no Speed fix itself (the phase's last task), and the release
+        of a standing hold whose phase has lost its marks, are protected as a mark is, so no hold ever holds a
+        release."""
+        if self._roots is None:
+            out = set(self.live_marks())
+            out.update(self.unit(h["release"]).lower() for h in self.holds.values() if h["standing"])
+            for pkey in {k for u in self.live_marks() for k in self.phases_of(u)}:
+                r = self.release(pkey)[0]
+                if r is not None and r.lower() in self.linked and not self.landed(r):
+                    out.add(r.lower())
+            self._roots = sorted(out)
+        return self._roots
 
     def phase_of_hold(self, h):
         """The phase key a recorded hold belongs to: the phase labelled as its line says whose units hold its release, else
@@ -14120,23 +14159,35 @@ class _SpeedCtx:
         p = self.units["phases"].get(pkey) if pkey is not None else None
         if p is not None and u in p["units"]:
             return f"a member of {_speed_label(pkey)}"
-        for m in self.live_marks():
+        for m in self.roots():
+            if u == m or slug.lower() == m:
+                return "a Speed fix release"
             up = self.upstream(m)
             if slug.lower() in up or u in up:
                 return f"upstream of [[{self.name(m)}]]"
-        if hand and r.lower() in {self.unit(d).lower() for d in _dep_entries(note)}:
+        # Arm 6 reads only an entry no recorded hold wrote: a recorded entry on a release now folded into r (a move to
+        # the combined unit) is the old hold's, which the move drops once r's entry is stamped.
+        if hand and r.lower() in {self.unit(d).lower() for d in _dep_entries(note) if not self.recorded(slug, d)}:
             return "holds it by hand"
         return None
 
+    def recorded(self, slug, r):
+        """Whether a recorded hold on release r (by its own name) names `slug`: that entry is the engine's, not by
+        hand."""
+        h = self.holds.get(r.lower())
+        return h is not None and slug.lower() in h["held"]
+
     def spent(self, x):
-        """humanFix's label when x is linked to this rollout, set aside and its retries spent (moving's read: _retry_budget,
-        task_inputs, auto_retry_verdict), else None; memoised. A read that raises keeps the hold, with one WARN."""
+        """humanFix's label when x is linked to this rollout, set aside at `run` or `integration` and its retries spent
+        (moving's read: only those two setAsideAt, then _retry_budget, task_inputs, auto_retry_verdict), else None;
+        memoised. A gate-pending task (setAsideAt `gate`) is never spent: a gate has no automatic retries, and step
+        1.2's Standing approval may still sign it. A read that raises keeps the hold, with one WARN."""
         key = x.lower()
         if key in self._fix:
             return self._fix[key]
         out = None
         e = self.index.get(key)
-        if e is not None and key in self.linked and _queue_state(e[1])[0] == "set-aside":
+        if e is not None and key in self.linked and _queue_state(e[1]) in SPEED_SPENT_STATES:
             try:
                 note = Note(e[0])
                 budget = _retry_budget(note, self.note)
@@ -14154,14 +14205,18 @@ class _SpeedCtx:
         return out
 
     def let_go(self, r):
-        """(cause, task, why, label) when a hold on release r lets go now, else None. Its closure is r, then every unlanded
-        unit upstream of it (_upstream, each through _fold_unit), sorted by slug; for each in order, the first that applies:
-        left-queue (_speed_gone), then set-aside (linked, set aside, its humanFix non-null)."""
-        key = r.lower()
-        if key in self._lg:
-            return self._lg[key]
-        closure, seen = [r], {key}
-        for s in sorted(self.upstream(r)):
+        """(cause, task, why, label) when a hold on release r lets go now, else None. r is read through _fold_unit
+        first, so a release folded into a live combined unit keeps its hold (the next apply or join moves it to the
+        unit) and only an unresolved tombstone leaves the queue. Its closure is that unit, then every unlanded unit
+        upstream of it (_upstream, each through _fold_unit), sorted by slug; for each in order, the first that
+        applies: left-queue (_speed_gone), then set-aside (linked, set aside at run or integration, its humanFix
+        non-null: spent)."""
+        if r.lower() in self._lg:
+            return self._lg[r.lower()]
+        ru = self.unit(r)
+        key = ru.lower()
+        closure, seen = [ru], {key}
+        for s in sorted(self.upstream(ru)):
             u, e, _f = _fold_unit(s, self.index)
             if u.lower() in seen or (e is not None and _landed(e[1])):
                 continue
@@ -14178,7 +14233,7 @@ class _SpeedCtx:
                 inner = label[1:-1] if label.startswith("(") and label.endswith(")") else label
                 out = ("set-aside", self.name(x), f"[[{self.name(x)}]] set aside, its retries spent ({inner})", label)
                 break
-        self._lg[key] = out
+        self._lg[r.lower()] = out
         return out
 
     def cannot_hold(self, r):
@@ -14214,6 +14269,17 @@ class _SpeedCtx:
                 if not self.has_entry(s, h["release"]) and self.reach(pkey, h["release"], s, hand=False) is None]
 
 
+def _speed_refusals(ctx, slugs):
+    """`speed-hold refuse [[x]]: <why>` for each of `slugs` whose `speed_fix:` is refused (_speed_fix_mark) and whose
+    unit no valid mark makes a Speed fix, sorted by slug."""
+    out = []
+    for s in sorted(x.lower() for x in slugs):
+        why = ctx.units["refused"].get(s)
+        if why and ctx.unit(s).lower() not in ctx.units["marked"]:
+            out.append(f"speed-hold refuse [[{ctx.name(s)}]]: {why}")
+    return out
+
+
 def _speed_hold_plan(ctx, by):
     """What the hold does now, read-only, in write order: {letgo: [(hold, (cause, task, why, label))], moves: [{phase,
     old: [holds], to, held, standing}], oor: [(hold, task, why)], extend: [(hold, phase, [tasks])], restamp: [(hold,
@@ -14221,12 +14287,8 @@ def _speed_hold_plan(ctx, by):
     in letgo and takes no other step; each phase's release R' is computed afresh (_speed_release), and the hold follows
     it: a new hold when none stands and R' can hold; a move when one stands on another release and R' can hold (or
     already holds: an interrupted move); else the standing hold is kept, with a skip line."""
-    plan = {"letgo": [], "moves": [], "oor": [], "extend": [], "restamp": [], "new": [], "refuse": [], "skips": [],
-            "warns": []}
-    for s in sorted(ctx.linked):
-        why = ctx.units["refused"].get(s)
-        if why and ctx.unit(s).lower() not in ctx.units["marked"]:
-            plan["refuse"].append(f"speed-hold refuse [[{ctx.name(s)}]]: {why}")
+    plan = {"letgo": [], "moves": [], "oor": [], "extend": [], "restamp": [], "new": [], "refuse": _speed_refusals(ctx,
+            ctx.linked), "skips": [], "warns": []}
     standing = {}
     for rl, h in sorted(ctx.holds.items()):
         if not h["standing"]:
@@ -14246,7 +14308,7 @@ def _speed_hold_plan(ctx, by):
     for pkey in sorted(live_phases | {k for k in standing if k is not None}, key=_speed_pkey_sort):
         label = _speed_label(pkey)
         mine = standing.get(pkey, [])
-        target, warn = _speed_release(pkey, ctx.units, ctx.index, ctx.tasks_dir)
+        target, warn = ctx.release(pkey)
         if warn:
             plan["warns"].append(warn)
         if not mine:
@@ -14522,7 +14584,7 @@ def _speed_hold_status(rollout_path, rollout_note, rows, index, tasks_dir, now):
             entry["outOfReach"] = [{"task": t, "why": why} for t, why in ctx.out_of_reach(pkey, h)]
             lg = ctx.let_go(h["release"])
             entry["lettingGo"] = {"cause": lg[0], "task": lg[1], "why": lg[2]} if lg else None
-            target = _speed_release(pkey, ctx.units, ctx.index, ctx.tasks_dir)[0] if pkey is not None else None
+            target = ctx.release(pkey)[0] if pkey is not None else None
             entry["moved"] = target if target is not None and target.lower() != rl else None
         out.append(entry)
     return out
@@ -14646,7 +14708,12 @@ def cmd_speed_hold(args) -> int:
             return refuse("usage: release needs --release <R> or --all")
         try:
             for h in names:
-                if h["released"] is None:
+                if h["ended"]:
+                    # Its release landed: the hold ended by itself, so it is no hand release, and its entries are
+                    # satisfied dependencies, left as they are.
+                    out.append(f"speed-hold ended [[{h['release']}]] ({h['phase']}): its release landed; nothing "
+                               "released")
+                elif h["released"] is None:
                     n = w.release(h, "by hand", "by-hand")
                     out.append(f"speed-hold released [[{h['release']}]] ({h['phase']}): by hand, {n} entries")
                 else:
@@ -15046,8 +15113,13 @@ def cmd_join(args) -> int:
     # The Speed fix hold (p54-13; vault-grammar § Speed fix hold), decided before any write, with the joining tasks read
     # as linked: read only when the note records a hold or a joining task carries a mark, so every other join is as before.
     joined_names = [r[0] for r in rows]
-    sh_on = x_note.has_heading(SPEED_HOLD_SECTION) or any(_speed_fix_mark(n)[0] == "marked" for _p, n, _m in tasks)
+    sh_marks = [_speed_fix_mark(n)[0] for _p, n, _m in tasks]
+    sh_on = x_note.has_heading(SPEED_HOLD_SECTION) or "marked" in sh_marks
     sh_out, sh_entries, sh_plan, sh_w = [], {}, None, None
+    if not sh_on and "refused" in sh_marks:
+        # No hold to read, but a joining task carries a refused `speed_fix:`: its refusal still reaches step 8.
+        sh_out.extend(_speed_refusals(_SpeedCtx(x_path, x_note, [], index, tasks_dir, now, joined=joined_names),
+                                      joined_names))
     if sh_on:
         sh_ctx = _SpeedCtx(x_path, x_note, *_rows(x_path, x_note, tasks_dir), tasks_dir, now, joined=joined_names)
         sh_plan, _sh_skip = _speed_join_plan(sh_ctx)

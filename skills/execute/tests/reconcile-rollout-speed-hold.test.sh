@@ -3,9 +3,10 @@
 # a cited `speed_fix:` holds every other queued task of its rollout through plain `depends-on:` entries on the phase's
 # release, recorded on the rollout note's `## Speed fix holds` section. reconcile-rollout.py's `speed-hold apply |
 # release | lift`, and the hold's writes in `join`, `next`, `defer` and `carry`, and its reading in `status`. The mark and
-# its refusals (S2), the reach (one rule: S1, S8, S9, S12, S17), the record (S3, S6, S13), join (S4, S4b, S12b, S21),
-# the release landing (S5), the let-go (S7), supersede and Put back (S11, S18), clean-up and defer (S19), the moving
-# release (S21) and the cross-version gate (S16). Temp vaults only; no network.
+# its refusals (S2, S2b), the release (the phase's last task, or the one its note names: S1, S1b, S1c, S20), the reach
+# (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S12b, S21), the release landing (S5,
+# S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer (S19), the moving release (S21) and
+# the cross-version gate (S16). Temp vaults only; no network.
 # Usage: bash reconcile-rollout-speed-hold.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -153,23 +154,23 @@ print(json.dumps(fix and fix["act"]))
 PY
 }
 
-# The standard queue: phase 9's marked x-p9-1 and x-p9-2 and unmarked x-p9-3; a and b open; c running; d awaiting
-# Integration; f set aside; g done; h open on no rollout.
+# The standard queue: phase 9's unmarked x-p9-1 and marked x-p9-2, its last task and so its release; a and b open; c
+# running; d awaiting Integration; f set aside; g done; h open on no rollout.
 base() {
-  mkro ro "" x-p9-1 x-p9-2 x-p9-3 a b c d f g
-  mkt x-p9-1 open ro "$MARK"; mkt x-p9-2 open ro "$MARK"; mkt x-p9-3 open ro
+  mkro ro "" x-p9-1 x-p9-2 a b c d f g
+  mkt x-p9-1 open ro; mkt x-p9-2 open ro "$MARK"
   mkt a open ro; mkt b open ro; mkt c in_progress ro "owner: lead"
   mkt d review ro "pr: https://github.com/o/r/pull/4"; mkt f blocked ro; mkt g done ro; mkt h open -
 }
 
-# ── S1: before the verb exists, apply is an invalid choice (the red step); then a fresh apply holds a and b ──────────────
+# ── S1: a fresh apply holds a and b ────────────────────────────────────────────────────────────────────────────────────────
 scen s1
 base
-before=$(cd "$D" && cksum x-p9-1.md x-p9-2.md x-p9-3.md c.md d.md f.md g.md h.md)
+before=$(cd "$D" && cksum x-p9-1.md x-p9-2.md c.md d.md f.md g.md h.md)
 sh_ apply
 ok "$rc" 0 "S1: speed-hold apply exits 0"
-ok "$(deps a)|$(deps b)" "x-p9-2|x-p9-2" "S1: a and b gain depends-on [[x-p9-2]], the phase's highest marked task"
-ok "$(cd "$D" && cksum x-p9-1.md x-p9-2.md x-p9-3.md c.md d.md f.md g.md h.md)" "$before" \
+ok "$(deps a)|$(deps b)" "x-p9-2|x-p9-2" "S1: a and b gain depends-on [[x-p9-2]], the phase's last task"
+ok "$(cd "$D" && cksum x-p9-1.md x-p9-2.md c.md d.md f.md g.md h.md)" "$before" \
   "S1: the phase's own tasks, running, awaiting, set-aside, landed and unlinked tasks are byte-identical"
 ok "$(holdlines)" "- $STAMP hold [[x-p9-2]] (p9, schedule): [[a]], [[b]]" "S1: the section's one hold line names a and b"
 ok "$(ev '[[d["act"], d["release"], d["phase"], d.get("by"), d.get("held")] for d in L]')" '[["made","x-p9-2","p9","schedule",2]]' \
@@ -184,8 +185,19 @@ scen s1b
 base
 printf -- '---\ntags: [phase]\nstatus: open\nspeed_fix_release: "[[x-p9-1]]"\n---\n\n# Phase 9\n' > "$P/x-p9-speed.md"
 sh_ apply
-ok "$(deps a)|$(deps b)|$(deps x-p9-2)" "x-p9-1|x-p9-1|-" "S1b: the phase note's speed_fix_release moves the release to x-p9-1"
+ok "$(deps a)|$(deps b)|$(deps x-p9-2)" "x-p9-1|x-p9-1|-" \
+  "S1b: the phase note's speed_fix_release names an earlier member, unmarked x-p9-1: the release"
 ok "$(holdlines)" "- $STAMP hold [[x-p9-1]] (p9, schedule): [[a]], [[b]]" "S1b: … its hold line"
+
+# S1c: the phase's last task is unmarked: it is the release, so the hold stands once the marked task lands.
+scen s1c
+mkro ro "" x-p9-1 x-p9-2 a
+mkt x-p9-1 open ro "$MARK"; mkt x-p9-2 open ro; mkt a open ro
+sh_ apply
+ok "$(deps a)|$(deps x-p9-1)|$(deps x-p9-2)" "x-p9-2|-|-" "S1c: an unmarked last task is the release, and is never held"
+setfm x-p9-1 status done
+nxt --dry-run
+ok "$(starts)" '["x-p9-2"]' "S1c: the marked task landed: next starts the release only, a waits on it"
 
 # ── S2: a mark without its evidence is refused, and the task is held like any other ──────────────────────────────────────
 scen s2
@@ -210,6 +222,13 @@ ok "$(deps r1),$(deps r2),$(deps r3),$(deps r4),$(deps r5),$(deps r6)" "x-p9-2,x
 ok "$(deps k1),$(deps k2),$(deps k3),$(deps k4),$(deps k5)" "-,-,-,-,-" "S2: each cited form marks its task: never held"
 has "$out" "speed-hold skip [[k1]]: a Speed fix outside a phase makes no hold" "S2: a marked task outside a phase makes no hold"
 hasnt "$out" "refuse [[k" "S2: no accepted form is refused"
+
+# S2b: a join of a task whose mark is refused, on a rollout with no hold, still names the refusal and makes nothing.
+scen s2b
+mkro ro "" a; mkt a open ro; mkt r1 open - 'speed_fix: true'
+jn --tasks r1
+ok "$rc|$(deps r1)|$(holdlines)" "0|-|" "S2b: the join goes on, with no hold"
+has "$out" "speed-hold refuse [[r1]]: a flag (true), not a citation" "S2b: … and prints the joined task's refusal"
 
 # ── S3: two holds on one task are both recorded; each release removes only its own; a hand-written entry stays ─────────
 scen s3
@@ -287,6 +306,18 @@ ok "$rc|$(printf '%s' "$out" | tail -1)|$(sums)" "0|[no-change]|$before" "S6: a 
 sh_ release --release nosuch
 ok "$rc" 2 "S6: an unknown --release exits 2"
 
+# S6b: a hold whose release landed ended by itself: a hand release names it and writes nothing.
+scen s6b
+base; sh_ apply
+setfm x-p9-2 status done
+hl=$(holdlines); n=$(ev 'len(L)'); before=$(sums)
+for how in "--release x-p9-2" "--all"; do
+  sh_ release $how
+  ok "$rc|$(printf '%s' "$out" | tail -1)|$(sums)|$(holdlines)|$(ev 'len(L)')" "0|[no-change]|$before|$hl|$n" \
+    "S6b: release $how on an ended hold writes no line, no drop and no event"
+  has "$out" "speed-hold ended [[x-p9-2]] (p9): its release landed; nothing released" "S6b: … and names it ended"
+done
+
 # ── S7: a hold that cannot release lets go, with its Run record line ───────────────────────────────────────────────────────
 scen s7
 base; mkro ro "max_review_rounds: 3" x-p9-1 x-p9-2 x-p9-3 a b c d f g
@@ -331,6 +362,18 @@ ok "$(hf x-p9-2)" 'null' "S7c: a set-aside release with retries left reads a nul
 nxt
 ok "$(holdlines | grep -c released)|$(deps a)" "0|x-p9-2" "S7c (control): the hold stands"
 
+# S7f: a gate-pending release waits on a sign-off, not on spent retries (a gate has none): the hold stands through next.
+scen s7f
+mkro ro "max_review_rounds: 3" x-p9-2 a b
+mkt x-p9-2 open ro "$MARK"; mkt a open ro; mkt b open ro
+sh_ apply
+setfm x-p9-2 status gate-pending
+printf '\n## Gated inputs\n\n- spend: a paid run — cap USD 5\n' >> "$D/x-p9-2.md"
+ok "$(hf x-p9-2)" '"sign off gated input"' "S7f: the gate-pending release's humanFix is non-null"
+nxt
+ok "$(holdlines | grep -c released)|$(deps a)|$(deps b)" "0|x-p9-2|x-p9-2" "S7f: next keeps the hold: no released line, no drop"
+ok "$(q "$out" 'd["speedHoldReleased"]')|$(starts)" "[]|[]" "S7f: … nothing released and nothing started"
+
 # S7d: the release, or a unit upstream of it, leaves the queue while linked or not: the hold lets go.
 s7d() {  # s7d <label> <mutation> <expected why> — one fresh fixture per row
   scen "s7d-$1"
@@ -355,15 +398,20 @@ s7d u-deferred 'setfm u rollout -' '[[u]] left the queue (deferred)'
 s7d u-elsewhere 'setfm u rollout "\"[[ro2]]\""' ''
 s7d u-here 'true' ''
 
-# ── S8: two Speed fix phases never hold each other's tasks ─────────────────────────────────────────────────────────────────
+# ── S8: two Speed fix phases never hold each other's marks or releases ─────────────────────────────────────────────────────
+# Each phase: a marked x-pN-1, an unmarked x-pN-2 and its unmarked last task x-pN-3, the release.
 scen s8
 mkro ro "" x-p8-1 x-p8-2 x-p8-3 x-p9-1 x-p9-2 x-p9-3 u
-for t in x-p8-1 x-p8-2 x-p9-1 x-p9-2; do mkt "$t" open ro "$MARK"; done
-mkt x-p8-3 open ro; mkt x-p9-3 open ro; mkt u open ro
+for t in x-p8-1 x-p9-1; do mkt "$t" open ro "$MARK"; done
+for t in x-p8-2 x-p8-3 x-p9-2 x-p9-3; do mkt "$t" open ro; done
+mkt u open ro
 sh_ apply
-ok "$(deps x-p8-1),$(deps x-p8-2),$(deps x-p9-1),$(deps x-p9-2)" "-,-,-,-" "S8: no marked task gets any entry"
-ok "$(deps x-p9-3)|$(deps x-p8-3)|$(deps u)" "x-p8-2|x-p9-2|x-p8-2,x-p9-2" \
-  "S8: each phase's unmarked member is held only by the other phase; an unmarked task by both"
+ok "$(deps x-p8-1),$(deps x-p9-1)" "-,-" "S8: no marked task gets any entry"
+ok "$(deps x-p8-3),$(deps x-p9-3)" "-,-" "S8: an unmarked release is held by no hold, the other phase's included"
+ok "$(deps x-p9-2)|$(deps x-p8-2)|$(deps u)" "x-p8-3|x-p9-3|x-p8-3,x-p9-3" \
+  "S8: each phase's other unmarked member is held only by the other phase; an unmarked task by both"
+nxt --dry-run
+ok "$(starts)" '["x-p8-1","x-p8-3","x-p9-1","x-p9-3"]' "S8: no deadlock: each phase's marks and release start"
 
 # ── S9: a red-master fix joined under a hold is not held ───────────────────────────────────────────────────────────────────
 scen s9
@@ -376,7 +424,7 @@ ok "$rc|$(deps rf)|$(deps mr)" "0|-|x-p9-2" "S9: completion_red_of: exempts it; 
 scen s10
 base; sh_ apply
 nxt --dry-run
-ok "$(starts)" '["x-p9-1","x-p9-2","x-p9-3"]' "S10: next --dry-run starts the phase's own tasks, and only them"
+ok "$(starts)" '["x-p9-1","x-p9-2"]' "S10: next --dry-run starts the phase's own tasks, and only them"
 
 # ── S11: a supersede lifts the hold, carry copies the record, apply on the new note puts it back ───────────────────────────
 scen s11
@@ -387,7 +435,7 @@ ok "$rc|$(deps a)|$(deps b)" "0|-|-" "S11: lift takes every recorded entry off"
 has "$out" "speed-hold lifted [[x-p9-2]] (p9): 2 entries" "S11: … and says so"
 run carry --from "$D/ro.md" --tasks-dir "$D" --dry-run
 has "$out" "speed_hold [[x-p9-2]] (p9) standing, 2 recorded" "S11: the carry preview names the standing hold"
-mkro ro2 'supersedes: "[[ro]]"' x-p9-1 x-p9-2 x-p9-3 a b c d f
+mkro ro2 'supersedes: "[[ro]]"' x-p9-1 x-p9-2 a b c d f
 run carry --from "$D/ro.md" --to "$D/ro2.md" --tasks-dir "$D"
 ok "$rc|$(holdlines ro2)" "0|- $STAMP hold [[x-p9-2]] (p9, schedule): [[a]], [[b]]" "S11: carry --to appends the section's lines"
 before=$(cksum < "$D/ro2.md")
@@ -402,7 +450,7 @@ base; sh_ apply
 setfm ro paused 2026-11-11T11:30+00:00
 sh_ lift
 dfr --tasks x-p9-2 --rollout "$D/ro.md"
-mkro ro2 'supersedes: "[[ro]]"' x-p9-1 x-p9-3 a b c d f
+mkro ro2 'supersedes: "[[ro]]"' x-p9-1 a b c d f
 run carry --from "$D/ro.md" --to "$D/ro2.md" --tasks-dir "$D"
 RO=ro2 sh_ apply
 ok "$(holdlines ro2 | grep released)" "- $STAMP released [[x-p9-2]] (p9): [[x-p9-2]] left the queue (deferred)" \
@@ -516,14 +564,28 @@ ok "$(grep -c '^SPEED_HOLD_ENGINE = 1$' "$SCRIPT")" 1 "S16: this tree carries th
 
 # ── S17: folds: the release is the combined unit; a combined note is read per unit ─────────────────────────────────────────
 scen s17
-mkro ro "" x-p8-1 x-p9-1 cmb cm2 a
-mkt x-p8-1 open ro "$MARK"; mkt x-p9-1 open ro "$MARK"
+mkro ro "" x-p8-1 cmb cm2 a
+mkt x-p8-1 open ro "$MARK"
 mkt x-p9-2 merged ro "$MARK" 'merged_into: "[[cmb]]"'; mkt cmb open ro
-mkt x-p9-3 merged ro 'merged_into: "[[cm2]]"'; mkt xx merged ro 'merged_into: "[[cm2]]"'; mkt cm2 open ro
+mkt x-p9-1 merged ro 'merged_into: "[[cm2]]"'; mkt xx merged ro 'merged_into: "[[cm2]]"'; mkt cm2 open ro
 mkt a open ro
 sh_ apply
 ok "$(deps cmb)|$(deps a)|$(deps cm2)" "-|x-p8-1,cmb|x-p8-1" \
-  "S17: x-p9-2 folded into cmb: cmb is the release and never held; cm2, folding x-p9-3, is exempt from p9 and held by p8"
+  "S17: x-p9-2 folded into cmb: cmb is the release and never held; cm2, folding x-p9-1, is exempt from p9 and held by p8"
+
+# S17b: the release is folded into a live combined unit after the hold is made: the hold stands, and apply moves it.
+scen s17b
+mkro ro "" x-p9-2 a cmb
+mkt x-p9-2 open ro "$MARK"; mkt a open ro
+sh_ apply
+setfm x-p9-2 status merged; setfm x-p9-2 merged_into '"[[cmb]]"'; mkt cmb open ro
+nxt
+ok "$(holdlines | grep -c released)|$(deps a)|$(q "$out" 'd["speedHoldReleased"]')" "0|x-p9-2|[]" \
+  "S17b: next keeps the hold on the folded release: its unit is still queued"
+ok "$(starts)" '["cmb"]' "S17b: … and starts the combined unit only"
+sh_ apply
+ok "$(deps a)|$(holdlines | tail -1)" "cmb|- $STAMP released [[x-p9-2]] (p9): superseded by [[cmb]]" \
+  "S17b: the next apply moves the hold to the combined unit"
 
 # ── S19: clean-up: next drops a released hold's leftover entry; defer drops a deferred task's recorded entries ─────────────
 scen s19
@@ -562,17 +624,13 @@ dfr --tasks a --rollout "$D/ro.md"
 ok "$rc|$(printf '%s\n' "$out" | grep -c .)|$(printf '%s' "$out" | grep -c '^a: deferred->open (.*) \[written\]$')|$(deps a)|$(cksum < "$D/ro.md")" \
   "0|1|1|z|$before" "S19 (control): with no section, defer prints its one line and writes as before"
 
-# ── S20: a phase note naming a release that is no marked task of the phase makes no hold ───────────────────────────────────
+# ── S20: a phase note naming a release that is no member of the phase makes no hold ────────────────────────────────────────
 scen s20
 base
-printf -- '---\ntags: [phase]\nstatus: open\nspeed_fix_release: "[[x-p9-3]]"\n---\n' > "$P/x-p9-speed.md"
-sh_ apply
-ok "$rc|$(deps a)|$(holdlines)" "0|-|" "S20: an unmarked member named as the release: no hold"
-has "$err" "WARN: speed-hold: p9's speed_fix_release: [[x-p9-3]] is not a marked task of the phase: no hold for p9" "S20: … with its WARN"
 printf -- '---\ntags: [phase]\nstatus: open\nspeed_fix_release: "[[h]]"\n---\n' > "$P/x-p9-speed.md"
 sh_ apply
-ok "$(deps a)|$(holdlines)" "-|" "S20: a task outside the phase named as the release: no hold"
-has "$err" "speed_fix_release: [[h]] is not a marked task of the phase" "S20: … with its WARN"
+ok "$rc|$(deps a)|$(holdlines)" "0|-|" "S20: a task outside the phase named as the release: no hold"
+has "$err" "WARN: speed-hold: p9's speed_fix_release: [[h]] is not a member of the phase: no hold for p9" "S20: … with its WARN"
 
 # ── S21: the hold follows the phase's release at every join and apply, never at next ───────────────────────────────────────
 scen s21
@@ -609,6 +667,24 @@ printf -- '---\ntags: [phase]\nstatus: open\nspeed_fix_release: "[[x-p9-1]]"\n--
 sh_ apply
 ok "$(deps a)|$(holdlines | grep -c released)" "x-p9-2|0" "S21c (control): a move to a landed release keeps the hold"
 has "$out" "speed-hold skip [[x-p9-1]] (p9): landed; [[x-p9-2]] kept" "S21c: … with its skip line"
+
+# ── S22: a standing hold whose release lost its mark still never holds what its release depends on ─────────────────────────
+scen s22
+mkro ro "" x-p9-2 u a
+mkt x-p9-2 open ro "$MARK" 'depends-on: "[[u]]"'; mkt u open ro; mkt a open ro
+sh_ apply
+setfm x-p9-2 speed_fix -
+sh_ apply
+ok "$rc|$(deps u)|$(deps a)" "0|-|x-p9-2" "S22: with the phase's mark gone, apply stamps nothing upstream of the standing release"
+nxt --dry-run
+ok "$(starts)|$(q "$out" 'd["halt"]')" '["u"]|null' "S22: next starts u, no halt"
+setfm u depends-on '"[[x-p9-2]]"'
+printf -- '- 2026-11-10T10:00+00:00 hold [[x-p9-2]] (p9, schedule): [[u]]\n' >> "$D/ro.md"
+st
+ok "$(q "$out" '[h["outOfReach"] for h in d["speedHolds"]]')" '[[{"task":"u","why":"upstream of [[x-p9-2]]"}]]' \
+  "S22: an entry already on u is out of reach"
+nxt
+ok "$(deps u)|$(starts)" '-|["u"]' "S22: next drops it and starts u"
 
 # ── usage: a serial note and another protocol exit 2 ───────────────────────────────────────────────────────────────────────
 scen usage
