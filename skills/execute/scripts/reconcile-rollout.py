@@ -707,9 +707,10 @@ Subcommands:
               out-of-reach drops (the joined marks counted); then, on the rows re-read, each new or moved-to hold's line
               and its entries, a move's `superseded` released line and its drops, and the re-stamps of recorded tasks
               missing their entry. It writes no let-go line (the lead's `next` does): a phase whose hold lets go is left
-              alone, with a `speed-hold skip … (lets go at the lead's next call)` line. A join that reads no hold but
-              whose joining task carries a refused `speed_fix:` prints that task's `speed-hold refuse` line and writes
-              nothing more for the hold. Its stdout lines, before the last line:
+              alone, with a `speed-hold skip … (lets go at the lead's next call)` line. A joining task that carries a
+              refused `speed_fix:` gets its `speed-hold refuse` line whether or not a hold is read (a task already on
+              the queue is never named again), and a join that reads no hold writes nothing more for the hold. Its
+              stdout lines, before the last line:
               `speed-hold refuse|made|moved|drop|skip|restamp …` and `speed-hold [[<R>]] (p<N>) holds [[<t>]]`. Its
               writes wait on _engine_reads_speed_hold, read only when it would write: False is one stderr `WARN:
               speed-hold: [[<ro>]]: <why> (engine-snapshot.md § Cross-version state): no Speed fix hold made`, and the
@@ -14512,15 +14513,15 @@ def _speed_refusals(ctx, slugs):
     return out
 
 
-def _speed_hold_plan(ctx, by):
+def _speed_hold_plan(ctx):
     """What the hold does now, read-only, in write order: {letgo: [(hold, (cause, task, why, label))], moves: [{phase,
     old: [holds], to, held, standing}], oor: [(hold, task, why)], extend: [(hold, phase, [tasks])], restamp: [(hold,
-    task)], new: [{phase, release, held}], refuse, skips, warns: [lines]}. A standing hold whose let-go cause stands is
-    in letgo and takes no other step; each phase's release R' is computed afresh (_speed_release), and the hold follows
-    it: a new hold when none stands and R' can hold; a move when one stands on another release and R' can hold (or
-    already holds: an interrupted move); else the standing hold is kept, with a skip line."""
-    plan = {"letgo": [], "moves": [], "oor": [], "extend": [], "restamp": [], "new": [], "refuse": _speed_refusals(ctx,
-            ctx.linked), "skips": [], "warns": []}
+    task)], new: [{phase, release, held}], skips, warns: [lines]}. A standing hold whose let-go cause stands is in letgo
+    and takes no other step; each phase's release R' is computed afresh (_speed_release), and the hold follows it: a new
+    hold when none stands and R' can hold; a move when one stands on another release and R' can hold (or already holds:
+    an interrupted move); else the standing hold is kept, with a skip line. Its refusals are the caller's
+    (_speed_refusals: apply's over the whole rollout, join's over the joined tasks)."""
+    plan = {"letgo": [], "moves": [], "oor": [], "extend": [], "restamp": [], "new": [], "skips": [], "warns": []}
     standing = {}
     for rl, h in sorted(ctx.holds.items()):
         if not h["standing"]:
@@ -14714,13 +14715,14 @@ def _speed_oor_write(w, plan, out):
         out.append(f"speed-hold drop [[{h['release']}]] from [[{task}]]: {why}")
 
 
-def _speed_extend_write(w, plan, out, skip_entries=()):
-    """The extensions' lines, then their entries (a task in skip_entries takes its entry elsewhere: join's same save)."""
+def _speed_extend_write(w, plan, out):
+    """The extensions' lines, then their entries, each task note in its own save. (join writes the extensions it read
+    before its rows' save itself, a joining task's entry in the save of its `rollout:` stamp; this writes the ones it
+    reads on the rows re-read, and apply's.)"""
     for h, pkey, new in plan["extend"]:
         w.line(f"hold [[{h['release']}]] ({h['phase']}, {w.by}): " + ", ".join(f"[[{t}]]" for t in new))
         for t in new:
-            if t.lower() not in skip_entries:
-                w.add(t, h["release"])
+            w.add(t, h["release"])
             out.append(f"speed-hold [[{h['release']}]] ({h['phase']}) holds [[{t}]]")
 
 
@@ -14883,10 +14885,10 @@ def cmd_speed_hold(args) -> int:
             return refuse(f"--rollout {path.stem} is {_status(note)}: a closed rollout holds nothing")
         if _valued(note.get("superseded_by")):
             return refuse(f"--rollout {path.stem} is superseded by [[{_link_slug(note, 'superseded_by')}]]: apply it there")
-        plan = _speed_hold_plan(ctx, "schedule")
+        plan = _speed_hold_plan(ctx)
         for line in ctx.warns + plan["warns"]:
             print(line, file=sys.stderr)
-        for line in plan["refuse"]:
+        for line in _speed_refusals(ctx, ctx.linked):
             print(line)
         if plan["letgo"] or _speed_plan_writes(plan):
             gate, gate_why = _engine_reads_speed_hold(path, note, tasks_dir)
@@ -14907,8 +14909,7 @@ def cmd_speed_hold(args) -> int:
                         ctx.holds[h["release"].lower()]["standing"] = False
                         ctx.holds[h["release"].lower()]["released"] = ("let go", w.stamp)
                 w.ctx = ctx
-                rest = _speed_hold_plan(ctx, "schedule")
-                plan = {**rest, "letgo": [], "refuse": []}
+                plan = {**_speed_hold_plan(ctx), "letgo": []}
             _speed_moves_write(w, plan, out)
             _speed_oor_write(w, plan, out)
             _speed_extend_write(w, plan, out)
@@ -14971,10 +14972,10 @@ def cmd_speed_hold(args) -> int:
 
 
 def _speed_join_plan(ctx):
-    """join's plan (_speed_hold_plan, by join), every phase whose standing hold lets go left alone: join reads the let-go
-    only to decide (the lead's `next` writes it), so it never extends, makes or moves such a hold, and says so in a skip
-    line. Returns (plan, the phases left alone); the plan's letgo is empty."""
-    plan = _speed_hold_plan(ctx, "join")
+    """join's plan (_speed_hold_plan), every phase whose standing hold lets go left alone: join reads the let-go only to
+    decide (the lead's `next` writes it), so it never extends, makes or moves such a hold, and says so in a skip line.
+    Returns (plan, the phases left alone); the plan's letgo is empty."""
+    plan = _speed_hold_plan(ctx)
     skip = set()
     for h, lg in plan["letgo"]:
         skip.add(ctx.phase_of_hold(h))
@@ -15357,12 +15358,11 @@ def cmd_join(args) -> int:
                        joined=joined_names)
     sh_on = sh_ctx.in_play()
     sh_out, sh_entries, sh_plan, sh_w = [], {}, None, None
-    if not sh_on:
-        # No hold to read, but a joining task may carry a refused `speed_fix:`: its refusal still reaches step 8.
-        sh_out.extend(_speed_refusals(sh_ctx, joined_names))
+    # A joining task's refused `speed_fix:` reaches step 8, held or not; a task already on the queue was named at its
+    # own schedule or join, so it is never named again.
+    sh_out.extend(_speed_refusals(sh_ctx, joined_names))
     if sh_on:
         sh_plan, _sh_skip = _speed_join_plan(sh_ctx)
-        sh_out.extend(sh_plan["refuse"])
         for line in sh_ctx.warns + sh_plan["warns"]:
             print(line, file=sys.stderr)
         if not _speed_plan_writes(sh_plan):

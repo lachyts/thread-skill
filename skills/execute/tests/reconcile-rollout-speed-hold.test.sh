@@ -4,9 +4,9 @@
 # release, recorded on the rollout note's `## Speed fix holds` section. reconcile-rollout.py's `speed-hold apply |
 # release | lift`, and the hold's writes in `join`, `next`, `defer` and `carry`, and its reading in `status`. The mark and
 # its refusals (S2, S2b), the release (the phase's last task, or the one its note names: S1, S1b, S1c, S1d, S20), the reach
-# (one rule: S1, S8, S9, S12, S17, S22), the record (S3, S6, S13), join (S4, S4b, S4c, S4d, S4e, S12b, S21, S21d), the
-# release landing (S5, S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer (S19), the
-# moving release (S21) and the cross-version gate (S16). Temp vaults only; no network.
+# (one rule: S1, S8, S8b, S9, S12, S17, S22), the record (S3, S6, S13), join (S2, S4, S4b, S4c, S4d, S4e, S8b, S12b, S21,
+# S21d), the release landing (S5, S6b), the let-go (S7, S17b), supersede and Put back (S11, S18), clean-up and defer
+# (S19), the moving release (S21) and the cross-version gate (S16). Temp vaults only; no network.
 # Usage: bash reconcile-rollout-speed-hold.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -261,6 +261,12 @@ ok "$(deps r1),$(deps r2),$(deps r3),$(deps r4),$(deps r5),$(deps r6)" "x-p9-2,x
 ok "$(deps k1),$(deps k2),$(deps k3),$(deps k4),$(deps k5)" "-,-,-,-,-" "S2: each cited form marks its task: never held"
 has "$out" "speed-hold skip [[k1]]: a Speed fix outside a phase makes no hold" "S2: a marked task outside a phase makes no hold"
 hasnt "$out" "refuse [[k" "S2: no accepted form is refused"
+# A join under the hold names its own refused task's mark, never again those of the tasks already on the queue.
+mkt e open -; mkt r7 open - 'speed_fix: true'
+jn --tasks e,r7
+ok "$rc|$(deps e)|$(deps r7)" "0|x-p9-2|x-p9-2" "S2: a join under the hold holds the joined tasks"
+has "$out" "speed-hold refuse [[r7]]: a flag (true), not a citation" "S2: … names the joined task's refused mark"
+hasnt "$out" "speed-hold refuse [[r1]]" "S2: … and not the refusal of a task already on the queue"
 
 # S2b: a join of a task whose mark is refused, on a rollout with no hold, still names the refusal and makes nothing.
 scen s2b

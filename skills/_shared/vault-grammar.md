@@ -467,8 +467,9 @@ reshuffle's R5.2 use the same words):
   whenever a Speed fix is in play: the note records a hold, or an unlanded marked unit is linked to the rollout or
   being joined; its extension, new or moved hold, made or moved by a joined Speed fix or by a joined task that is a
   Speed fix phase's release, marked or not, its out-of-reach drops and re-stamps; a joined task's refused mark is named
-  even on a rollout with no hold), `next` (the let-go and the clean-up, never a stamp), `defer` (a deferred task's
-  recorded entries, in the save that clears `rollout:`) and `carry` (the section's lines, a union).
+  whether or not a hold is read, and a task already on the queue is never named again), `next` (the let-go and the
+  clean-up, never a stamp), `defer` (a deferred task's recorded entries, in the save that clears `rollout:`) and
+  `carry` (the section's lines, a union).
 - **Readers**: `reconcile-rollout.py status` (`speedHolds`, rendered by status § 4), the carry preview's `speed_hold`
   lines (schedule step 1), repair § 5 step 1 (a hold entry is no dependency) and every dependency reader, through
   the entries themselves.
