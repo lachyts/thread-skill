@@ -191,12 +191,38 @@ Subcommands:
       compares), its seconds (completedAt - startedAt; null when either is missing), its conclusion, and its time
       limit, read from the workflow file the run ran (the run's workflowName, or a file path, matched under
       .github/workflows/ at --head, else --merge, through git, no network): the job whose `name:` (a `${{ }}`
-      expression matches any text, and a name with none may carry GitHub's ` (<matrix values>)` suffix) or, with no
-      name, whose key matches the check's name; its `timeout-minutes` (limitSource workflow), GitHub's 360 when it
-      declares none (default), or null when no file, job or plain number matched (unread). A check that is no Actions
+      expression matches any text, a name that is only expressions matches nothing, and a name with none may carry
+      GitHub's ` (<matrix values>)` suffix) or, with no name, whose key matches the check's name; its
+      `timeout-minutes` (limitSource workflow), GitHub's 360 when it declares none (default), or null when no file, job
+      or plain number matched (unread). A roll-up check (shards, below, in that same file) stands for the jobs it needs
+      (p54-11): when one of them maps to no job of the run, its seconds and limit are null (unread) and its conclusion
+      its own; else the slowest by seconds of those jobs and the required job itself (an untimed one counts below any
+      timed one, the first wins a tie): the required job itself keeps the line above, and a needed job gives its own
+      seconds, conclusion and limit (its own workflow job's) and `shard`, its name cut to CI_JOB_MAX. The slowest by
+      seconds is not always the job nearest its limit. `job` stays the check's name. A check that is no Actions
       job (no `/actions/runs/<run>/job/<job>` link) writes none. A job already recorded for this task and PR (a re-run
       taking the already-merged path) is never written twice. Prints one JSON line ({written, why, rollout, task,
       jobs}); exit 0 always (2 on usage). Recording never changes merge-task's exit.
+
+  shards --repo R --head SHA (--check NAME... | --jobs FILE --job-id ID... [--whole])
+      A required check read through the jobs it stands for (p54-11, ADR 0084 Decided for you 12; merge-task.sh's
+      reader). A roll-up check is a required check whose workflow job, in a file under .github/workflows/ at --head
+      (through git, no network; _workflows), has the aggregator shape: a readable, non-empty `needs:` and a job-level
+      `if:` holding `always()` or `!cancelled()` (_rollup; a name that is only expressions matches nothing, and two
+      such jobs of one name are ambiguous, so neither is one). It stands for its needs closure in that file (transitive,
+      cycle-guarded, never itself), each closure job mapped to the run's jobs whose names it matches, never the
+      roll-up's own job; a closure job no run job matches, or a `needs:` that cannot be read, proves nothing.
+      --check prints, one per line, each NAME that is a roll-up check in some file at --head; exit 0 always, even when
+      it prints nothing (an unreadable head, a failed read). --jobs reads FILE, a `gh run view --json
+      jobs,workflowName` object (the file picked by its workflowName, the file's `name:` or path; any file without
+      one), and per --job-id: its job not a roll-up check (or absent) stands for itself; a roll-up whose closure is not
+      proven stops it (exit 1); one whose mapped jobs all concluded success or skipped stands for itself (the red is its
+      own); otherwise it stands for its mapped jobs, is reduced, and one stderr line names them (`shards: <check> (job
+      <id>) stands for: <job> (<conclusion>), …`, capped at 8 plus `+N more`). Prints {"jobs": [...]}: the union, in
+      run order, of what each id stands for; with --whole the run's jobs minus each reduced roll-up's own job (every
+      other job stays, so the red path classifies as much as before). Exit 0 when an id was reduced; 3 when none was
+      (no roll-up, each falling back to itself, or --head unreadable: the caller reads as before); 1 when FILE is
+      unreadable or no jobs object, or a roll-up is not proven (fail-closed); 2 on usage.
 
   revert --repo R --slug S --default B --merge M --note N --rollout RN [--verifier CMD] [--bootstrap CMD]
          [--tasks-dir T] [--gh-bin GH]
@@ -331,14 +357,15 @@ Subcommands:
   stamp
       Now, in reconcile's `_stamp` form (log-integration's --started; `call` stamps the integrate call's startedAt).
 
-Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
-integrating:, revert's guard), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
+Exit codes: 0 a verdict (or verify finished; its own exit is the rc; shards --jobs: an id reduced), 1 refused (push,
+undo, prepare without integrating:, revert's guard; shards --jobs: an unreadable FILE or a roll-up not proven), 3 no id
+reduced (shards --jobs), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
 execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
 prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, call, plan, verify,
-push, undo, base-moved, ci-headroom and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
+push, undo, base-moved, ci-headroom, shards and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
 or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
 76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
@@ -1631,7 +1658,11 @@ CI_MAX_RUNS = 4         # workflow runs read per merge: the worst case is 5 call
 GH_DEFAULT_TIMEOUT_MINUTES = 360   # GitHub's own limit for a job that declares no timeout-minutes
 JOB_LINK_RE = re.compile(r"/actions/runs/([0-9]+)/job/([0-9]+)")
 WORKFLOW_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?:#.*)?$")
-WORKFLOW_FIELD_RE = re.compile(r"(name|timeout-minutes)\s*:\s*(.*)$")
+WORKFLOW_FIELD_RE = re.compile(r"(name|timeout-minutes|if|needs)\s*:\s*(.*)$")
+WORKFLOW_FIELDS = {"name": "name", "timeout-minutes": "timeout", "if": "if", "needs": "needs"}
+EXPR_RE = re.compile(r"\$\{\{.*?\}\}")
+# A roll-up check's job-level `if:` (p54-11): it runs whatever its needed jobs concluded, so its own result is theirs.
+AGG_IF_RE = re.compile(r"\balways\s*\(\s*\)|!\s*cancelled\s*\(\s*\)")
 
 
 def _yaml_scalar(text):
@@ -1643,18 +1674,34 @@ def _yaml_scalar(text):
     return re.split(r"\s+#", v, 1)[0].strip()
 
 
+def _yaml_keys(text):
+    """A job's one-line `needs:` value as its list of keys: a bare or quoted string, or a flow list (`[a, 'b']`, a
+    trailing comment cut); [] for an empty value (a block list may follow); None when a flow list never closes."""
+    v = text.strip()
+    if v.startswith("["):
+        end = v.find("]")
+        if end < 0:
+            return None
+        return [k for k in (_yaml_scalar(x) for x in v[1:end].split(",")) if k]
+    k = _yaml_scalar(v)
+    return [k] if k else []
+
+
 def _workflow_jobs(text):
-    """(the workflow's top-level name or None, [{key, name, timeout}]) of one workflow file, read line by line (stdlib
-    only, no YAML parser): the keys one level under a top-level `jobs:`, and each job's own `name:` and
-    `timeout-minutes:` (the first level under its key; a step's are deeper, so never read)."""
-    name, jobs, in_jobs, job_indent, child_indent, cur = None, [], False, None, None, None
+    """(the workflow's top-level name or None, [{key, name, timeout, if, needs}]) of one workflow file, read line by line
+    (stdlib only, no YAML parser): the keys one level under a top-level `jobs:`, and each job's own `name:`,
+    `timeout-minutes:`, `if:` and `needs:` (the first level under its key; a step's are deeper, so never read). `needs`
+    is a list of keys ([] when the job declares none): a bare or quoted string, a flow list, or a block list of `- a`
+    lines under an empty `needs:`, at its indent or deeper, ended by the next line at that indent that is no `- ` item;
+    None when it cannot be read (a flow list that never closes, a deeper line in a block list that is no item)."""
+    name, jobs, in_jobs, job_indent, child_indent, cur, block = None, [], False, None, None, None, False
     for raw in text.splitlines():
         s = raw.strip()
         if not s or s.startswith("#"):
             continue
         indent = len(raw) - len(raw.lstrip(" "))
         if indent == 0:
-            in_jobs, job_indent, cur = bool(re.match(r"jobs\s*:\s*(?:#.*)?$", s)), None, None
+            in_jobs, job_indent, cur, block = bool(re.match(r"jobs\s*:\s*(?:#.*)?$", s)), None, None, False
             m = re.match(r"name\s*:\s*(.*)$", s)
             if m:
                 name = _yaml_scalar(m.group(1)) or None
@@ -1665,28 +1712,97 @@ def _workflow_jobs(text):
             job_indent = indent
         if indent == job_indent:
             m = WORKFLOW_KEY_RE.match(s)
-            cur = {"key": m.group(1), "name": None, "timeout": None} if m else None
+            cur = {"key": m.group(1), "name": None, "timeout": None, "if": None, "needs": []} if m else None
             if cur is not None:
                 jobs.append(cur)
-            child_indent = None
+            child_indent, block = None, False
             continue
         if cur is None or indent < job_indent:
             continue
         if child_indent is None:
             child_indent = indent
+        if block:   # the `- a` items of a block-list `needs:`, at its indent or deeper
+            if s.startswith("- ") and indent >= child_indent:
+                k = _yaml_scalar(s[2:])
+                if k and cur["needs"] is not None:
+                    cur["needs"].append(k)
+                continue
+            if indent > child_indent:
+                cur["needs"] = None   # a deeper line that is no item: not a list this reader can read
+                continue
+            block = False
         if indent == child_indent:
             m = WORKFLOW_FIELD_RE.match(s)
             if m:
-                cur["name" if m.group(1) == "name" else "timeout"] = _yaml_scalar(m.group(2))
+                field = WORKFLOW_FIELDS[m.group(1)]
+                if field == "needs":
+                    cur["needs"] = _yaml_keys(m.group(2))
+                    block = cur["needs"] == []
+                else:
+                    cur[field] = _yaml_scalar(m.group(2))
     return name, jobs
 
 
 def _job_matches(job, check):
     """Whether a workflow job is the one a check names: its `name:` with each `${{ }}` expression matching any text,
-    else its key; a name holding no expression may carry GitHub's ` (<matrix values>)` suffix."""
-    parts = re.split(r"\$\{\{.*?\}\}", job["name"] or job["key"])
+    else its key; a name holding no expression may carry GitHub's ` (<matrix values>)` suffix. A name that is only
+    expressions matches nothing (merge-gate.py's rule: a wildcard needs some literal text), so it never lends its limit,
+    or its shape, to every check after it."""
+    parts = EXPR_RE.split(job["name"] or job["key"])
+    if len(parts) > 1 and not "".join(parts).strip():
+        return False
     body = ".+?".join(re.escape(x) for x in parts)
     return re.fullmatch(body + ("" if len(parts) > 1 else r"(?: \(.*\))?"), check) is not None
+
+
+def _rollup(wjobs, check):
+    """The roll-up job a required check names in one workflow file (p54-11, ADR 0084 Decided for you 12): the one job
+    that matches the check and has the aggregator shape, a readable non-empty `needs:` and a job-level `if:` holding
+    `always()` or `!cancelled()`, so it runs whatever its needed jobs concluded and its own result is theirs. None when
+    no job has that shape, or when more than one does (ambiguous: the check is read as itself, today's path)."""
+    hits = [j for j in wjobs if j.get("needs") and AGG_IF_RE.search(j.get("if") or "") and _job_matches(j, check)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _needs_closure(wjobs, job):
+    """(the workflow jobs a job's `needs:` reaches, transitively, in the same file, readable): breadth first in `needs:`
+    order, a cycle guarded by a seen set, never the job itself, and a key the file lacks ignored. readable is False when
+    the job's or a reached job's `needs:` could not be read."""
+    by_key = {j["key"]: j for j in wjobs}
+    seen, out, readable = {job["key"]}, [], job.get("needs") is not None
+    todo = list(job.get("needs") or [])
+    while todo:
+        k = todo.pop(0)
+        if k in seen:
+            continue
+        seen.add(k)
+        j = by_key.get(k)
+        if j is None:
+            continue
+        out.append(j)
+        if j.get("needs") is None:
+            readable = False
+            continue
+        todo.extend(j["needs"])
+    return out, readable
+
+
+def _stands_for(wjobs, roll, run_jobs, own_id):
+    """([(run job, workflow job)], complete): the run's jobs a roll-up stands for, each mapped to the first job of the
+    roll-up's needs closure whose `_job_matches` its name, never the roll-up's own run job (by databaseId). complete is
+    False when the closure is unreadable or a closure job maps to no run job (a reusable workflow's `a / b` callee, a
+    name that is only expressions, a renamed job): then nothing is proven of it."""
+    closure, readable = _needs_closure(wjobs, roll)
+    pairs, mapped = [], set()
+    for rj in run_jobs:
+        name = rj.get("name")
+        if rj.get("databaseId") == own_id or not isinstance(name, str):
+            continue
+        hits = [i for i, wj in enumerate(closure) if _job_matches(wj, name)]
+        if hits:
+            pairs.append((rj, closure[hits[0]]))
+            mapped.update(hits)
+    return pairs, readable and len(mapped) == len(closure)
 
 
 def _job_limit(job):
@@ -1743,7 +1859,8 @@ def _job_seconds(job):
 
 def cmd_ci_headroom(args):
     """merge-task.sh's CI headroom record (ADR 0073 d5): one ci-headroom line per required Actions job of a merged PR in
-    its task's rollout record (the module docstring's ci-headroom). Prints one JSON line; exit 0 always (2 on usage)."""
+    its task's rollout record (the module docstring's ci-headroom), a roll-up check's read from the slowest of the jobs
+    it needs and itself (p54-11). Prints one JSON line; exit 0 always (2 on usage)."""
     repo = Path(os.path.expanduser(args.repo))
     out = {"written": 0, "why": "", "jobs": []}
     try:
@@ -1814,20 +1931,40 @@ def cmd_ci_headroom(args):
             job = next((j for j in jobs if j.get("databaseId") == job_id), None) or \
                 next((j for j in jobs if j.get("name") == check), None) or {}
             wf_name = run.get("workflowName")
-            limit, source = None, "unread"
+            limit, source, roll = None, "unread", None
             for name, wpath, wjobs in workflows or []:
                 if wf_name and wf_name not in (name, wpath):
                     continue
                 hit = next((j for j in wjobs if _job_matches(j, check)), None)
                 if hit is not None:
                     limit, source = _job_limit(hit)
+                    rj = _rollup(wjobs, check)
+                    roll = (rj, wjobs) if rj is not None else None
                     break
-            conclusion = job.get("conclusion")
+            seconds, conclusion, shard = _job_seconds(job), job.get("conclusion"), None
+            if roll is not None:
+                # A roll-up check stands for the jobs it needs (p54-11): its line is the slowest of those jobs and itself,
+                # against that job's own limit; nothing proven of them (one maps to no run job) reads unread.
+                pairs, complete = _stands_for(roll[1], roll[0], jobs, job_id)
+                if not complete:
+                    seconds, limit, source = None, None, "unread"
+                else:
+                    best, best_s = None, -2
+                    for rj, wj in pairs + [(job, None)]:
+                        s = _job_seconds(rj)
+                        if (-1 if s is None else s) > best_s:
+                            best, best_s = (rj, wj), (-1 if s is None else s)
+                    if best[1] is not None:   # a needed job is the slowest; the required job itself keeps today's line
+                        seconds, conclusion = _job_seconds(best[0]), best[0].get("conclusion")
+                        limit, source = _job_limit(best[1])
+                        shard = str(best[0].get("name"))[:run_record.CI_JOB_MAX]
             fields = {"repo": owner_repo, "pr": args.pr, "job": key,
-                      "seconds": _job_seconds(job), "timeoutMinutes": limit, "limitSource": source,
+                      "seconds": seconds, "timeoutMinutes": limit, "limitSource": source,
                       "conclusion": str(conclusion).lower()[:40] if conclusion else None, "runId": run_id}
             if isinstance(wf_name, str) and wf_name:
                 fields["workflow"] = wf_name
+            if shard is not None:
+                fields["shard"] = shard
             if rr._event(rollout, "ci-headroom", task, fields):
                 out["written"] += 1
             seen.add(key)
@@ -1839,6 +1976,70 @@ def cmd_ci_headroom(args):
         out["why"] = f"{type(e).__name__}: {e}"
     print(json.dumps(out))
     return 0
+
+
+# ---- shards: a required check read through the jobs it stands for (p54-11, ADR 0084 Decided for you 12) ------------
+
+SHARDS_NAMED = 8          # needed jobs one `shards:` line names before `+N more`
+SHARDS_NEUTRAL = ("success", "skipped")   # a needed job concluded so says nothing against the roll-up
+
+
+def cmd_shards(args):
+    """merge-task.sh's reader of a roll-up check (the module docstring's shards). --check prints the names that are
+    roll-ups at the head (exit 0 always); --jobs prints {"jobs": [...]} and exits 0 (an id reduced), 3 (none), 1."""
+    repo = Path(os.path.expanduser(args.repo))
+    if args.check is not None:
+        try:
+            files = _workflows(repo, [args.head]) or []
+            for c in dict.fromkeys(args.check):
+                if any(_rollup(wjobs, c) is not None for _n, _p, wjobs in files):
+                    print(c)
+        except Exception as e:  # noqa: BLE001 — a reader that fails names no roll-up: the caller reads as today
+            print(f"lead-integrate shards: {type(e).__name__}: {e}", file=sys.stderr)
+        return 0
+    try:
+        run = json.loads(Path(args.jobs).read_text())
+    except (OSError, ValueError) as e:
+        print(f"lead-integrate shards: {args.jobs} unreadable: {e}", file=sys.stderr)
+        return 1
+    if not isinstance(run, dict) or not isinstance(run.get("jobs"), list):
+        print(f"lead-integrate shards: {args.jobs} is not a run's jobs object", file=sys.stderr)
+        return 1
+    jobs = [j for j in run["jobs"] if isinstance(j, dict)]
+    files = _workflows(repo, [args.head])
+    wf_name = run.get("workflowName")
+    if files is not None and isinstance(wf_name, str) and wf_name:
+        files = [f for f in files if wf_name in (f[0], f[1])]
+    keep, drop, reduced = set(), set(), False   # indices into jobs: what the ids stand for; reduced roll-ups' own jobs
+    for jid in args.job_id:
+        i = next((n for n, j in enumerate(jobs) if j.get("databaseId") == jid), None)
+        if i is None:
+            continue
+        check = jobs[i].get("name")
+        roll = next(((r, wjobs) for _n, _p, wjobs in files or []
+                     for r in [_rollup(wjobs, check)] if r is not None), None) if isinstance(check, str) else None
+        if roll is None:
+            keep.add(i)
+            continue
+        pairs, complete = _stands_for(roll[1], roll[0], jobs, jid)
+        if not complete:
+            print(f"lead-integrate shards: {check} (job {jid}): a job it needs maps to no job of the run, or its "
+                  "needs cannot be read: not proven", file=sys.stderr)
+            return 1
+        said = [(rj, str(rj.get("conclusion") or rj.get("status") or "-").lower()) for rj, _wj in pairs]
+        if all(c in SHARDS_NEUTRAL for _rj, c in said):
+            keep.add(i)   # every job it needs passed or was skipped: the red is its own (the fallback)
+            continue
+        reduced = True
+        drop.add(i)
+        keep.update(n for n, j in enumerate(jobs) if any(j is rj for rj, _c in said))
+        named = ", ".join(f"{rj.get('name')} ({c})" for rj, c in said[:SHARDS_NAMED])
+        more = f", +{len(said) - SHARDS_NAMED} more" if len(said) > SHARDS_NAMED else ""
+        print(f"shards: {check} (job {jid}) stands for: {named}{more}", file=sys.stderr)
+    picked = [j for n, j in enumerate(jobs) if n not in drop] if args.whole else \
+        [j for n, j in enumerate(jobs) if n in keep]
+    print(json.dumps({"jobs": picked}))
+    return 0 if reduced else 3
 
 
 # ---- push / undo ---------------------------------------------------------------------------------------
@@ -3167,6 +3368,16 @@ def main(argv=None):
     ch.add_argument("--tasks-dir", default=None, help="the vault's task notes (default: reconcile's DEFAULT_TASKS_DIR)")
     ch.add_argument("--gh-bin", default="gh")
 
+    sh = sub.add_parser("shards", help="a required check read through the jobs it stands for (p54-11): which checks "
+                        "are roll-ups at the head (--check), or what a run's required job ids stand for (--jobs)")
+    sh.add_argument("--repo", required=True)
+    sh.add_argument("--head", required=True, help="the integrated head: its workflow files say which jobs are roll-ups")
+    shm = sh.add_mutually_exclusive_group(required=True)
+    shm.add_argument("--check", nargs="+", default=None, metavar="NAME", help="print each NAME that is a roll-up check")
+    shm.add_argument("--jobs", default=None, metavar="FILE", help="a `gh run view --json jobs,workflowName` object")
+    sh.add_argument("--job-id", nargs="+", type=int, default=None, metavar="ID", help="with --jobs: the required jobs")
+    sh.add_argument("--whole", action="store_true", help="with --jobs: the run's jobs minus each reduced roll-up's own")
+
     pu = sub.add_parser("push", help="a plain push of the tree's merge commit; the read-back must equal it")
     pu.add_argument("--repo", required=True)
     pu.add_argument("--slug", required=True)
@@ -3216,6 +3427,8 @@ def main(argv=None):
     sub.add_parser("stamp", help="now, in reconcile's _stamp form")
 
     args = p.parse_args(argv)
+    if args.cmd == "shards" and (bool(args.jobs) != bool(args.job_id) or (args.whole and not args.jobs)):
+        sh.error("--job-id and --whole go with --jobs, and --jobs needs at least one --job-id")
     if args.cmd in GUARDED:
         refusal = _engine_guard(args.note, getattr(args, "tasks_dir", None))
         if refusal:   # ADR 0043: before any git call; nothing fetched, merged or printed
@@ -3231,6 +3444,8 @@ def main(argv=None):
             return cmd_base_moved(args)
         if args.cmd == "ci-headroom":
             return cmd_ci_headroom(args)
+        if args.cmd == "shards":
+            return cmd_shards(args)
         handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs, "call": cmd_call,
                    "plan": cmd_plan, "set-aside": cmd_set_aside, "revert": cmd_revert}[args.cmd]
         emit(handler(args))

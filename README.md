@@ -447,28 +447,35 @@ make test            # = bash tests/run.sh — the full suite, and the self-roll
 make test-fast       # = bash tests/run.sh --fast — the fast tier, and the self-rollout's verifier
 bash tests/run.sh --shard K/N    # shard K of the full suite split N ways (CI's full-suite.yml on master)
 bash tests/run.sh --shard-plan N # the dry run: prints every test file's shard, runs nothing
+bash tests/run.sh --fast --shard K/N    # shard K of the fast tier's selection split N ways
+bash tests/run.sh --fast --shard-plan N # its dry run: prints the selection's split, runs nothing
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 
 **The fast tier** (ADR 0073 d1). `make test-fast` runs the always-run checks, then only the test files the diff
 from `THREAD_VERIFY_BASE` (ADR 0062's verify base; else `origin/HEAD`) reaches. The reach is declared in
 `tests/fast-tier.map`, and `tests/lib/fast-tier.py`'s header holds its rules: a script reaches the tests that name
-it and, transitively, the tests of every script that names it, and the walkers (tests that read the whole tree)
-run on every diff. A changed path the map cannot place, or one that reaches a path marked FULL, runs the full
-suite, so the fast tier is only ever slower than it could be. The five hubs (`reconcile-rollout.py`,
+it and, one carrier deep, the tests of every script that names it, and the walkers (tests that read the whole tree)
+run on every diff. Only tracked files outside `docs/` carry a name, so a scratch script or a docs spike reaches
+nothing. A skill's `SKILL.md` (a `READERS` name) selects the tests its map lines declare as its readers, never every
+test that names the word, and check (k) keeps those lines true. A changed path the map cannot place, or one that
+reaches a path marked FULL, runs the full suite. An untracked path no map line places is left out, named in a note
+(CI never sees it; `--paths` leaves none out; the header's Changed paths). The five hubs (`reconcile-rollout.py`,
 `lead-integrate.py`, `run_record.py`, `verify-slot.py`, `rollout-settings.py`), which most suites name, sit on HUB
 lines instead of FULL: a diff that reaches one runs the suites listed on its line and the reach ends there, and
-check (i) keeps each list holding every suite that names the hub (a tests/lib helper's included). So a suite that
-drives a hub only through another script runs at completion and on master rather than at the merge, ADR 0073 d1's
-accepted risk. Every run, `make test` included, checks
+check (i) keeps each list holding every suite that names the hub (a tests/lib helper's included). The reach also
+ends one carrier deep: a suite, or a path marked FULL, two scripts away from the changed one neither runs nor turns
+the result FULL. So a suite that drives a hub only through another script, or a script only through two others,
+runs at completion and on master rather than at the merge, ADR 0073 d1's accepted risk (the selector header's rule
+(3)). Every run, `make test` included, checks
 the map first (`fast-tier.py check`) and names what is missing: a script under `skills/*/scripts/` or `hooks/`
 that no test names (`skills/**` and `hooks/**` already place it, so a test that names it is all it needs; a map
 line only when it should be FULL or no test names it), a `tests/fixtures/<d>/` without its `tests/fixtures/<d>/**`
 consumers line, or a test that lists a directory but sits on neither the walkers' `** ALSO` line nor OWN-LISTINGS.
 The map is itself FULL, so a diff that edits it runs the full suite: edit it only when the check names a missing
 line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. In CI (ADR 0073
-d3), a PR's two required checks (`make test (ubuntu-latest)`, `make test (macos-latest)`, ADR 0025) run
-`make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
+d3), a PR's one required check (`make test (ubuntu-latest)`, ADR 0025; macOS left it by ADR 0084 d3 and runs in
+master's shards) runs `make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
 in exactly one shard; `--shard-plan N` is the dry run). Those runs coalesce in one concurrency group, and the last job
 fast-forwards `refs/thread/green` (the Green tip, ADR 0084) to the run's commit once every shard has passed. A test
@@ -636,7 +643,8 @@ it runs:
   `docs/evals/`.
 
 New suites join by filename: `tests/*.test.mjs`, `tests/contracts/*.test.mjs` and
-`skills/execute/tests/*.test.mjs` run under `node --test`; `tests/*.test.sh` and
+`skills/execute/tests/*.test.mjs` run under node's test runner (`tests/lib/node-run.mjs`, longest first by
+measured seconds); `tests/*.test.sh` and
 `skills/execute/tests/*.test.sh` run concurrently, output grouped per suite. `skills/execute/diagnostics/` holds paid live
 diagnostics (Workflow runtime + real agents) — parse-checked, never run by `make test`.
 

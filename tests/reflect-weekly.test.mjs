@@ -1202,6 +1202,8 @@ test('window_flags: one flag per block holding a row outside its window; a score
     // an overlap is one row: its first in the window, its last a second past until, printed as the one outside
     noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: '2026-09-05T00:00:00.000Z', last: '2026-09-09T14:00:01.000Z' }] },
     gateMisses: { count: 1, items: [{ rollout: 'r', task: 'a', at: '2026-09-01T00:00:00.000Z', kinds: ['credential'] }] },
+    // until's own Melbourne date is outside under date_in() (the next reading says it)
+    suite: { local: [], ci: [], retired: [{ repo: 'o/r', job: 'j', date: '2026-09-10', line: 'x' }] },
   })
   const CS = '2026-09-04T00:00:00.000Z' // chain c's Leg 1 began
   const badScores = {
@@ -1220,6 +1222,7 @@ test('window_flags: one flag per block holding a row outside its window; a score
     nights: { nights: [{ morning: U0 }] },
     noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: S0, last: U0 }] },
     gateMisses: { count: 2, items: [{ rollout: 'r', task: 'a', at: S0, kinds: ['credential'] }, { rollout: 'r', task: 'b', at: U0, kinds: ['irreversible'] }] },
+    suite: { local: [], ci: [], retired: [{ repo: 'o/r', job: 'j', date: '2026-09-03', line: 'x' }] },
   })
   const goodScores = {
     // scored whole: an act weeks before span's since, inside the score's own window, is no flag
@@ -1244,6 +1247,7 @@ test('window_flags: one flag per block holding a row outside its window; a score
     F('attention.questions', 1, SPAN, '2026-09-01T00:00:00.000Z'),
     F('nights.nights', 1, SPAN, '2026-09-02T00:00:00.000Z'),
     F('noteOverlaps.overlaps', 1, SPAN, '2026-09-09T14:00:01.000Z'),
+    F('suite.retired', 1, SPAN, '2026-09-10'),
     F('gateMisses.items', 1, SPAN, '2026-09-01T00:00:00.000Z'),
   ])
   assert.deepEqual(none, [], 'rows on the boundaries, a stamp in another form and a score read by its own window flag nothing')
@@ -1498,6 +1502,39 @@ test('suite-audit: a week whose median crosses 80 % files one audit task; the ne
   assert.equal(fs.readFileSync(p, 'utf8'), text, 'the open audit is untouched')
   const lines = rlines(h).filter((l) => l.kind === 'proposal' && l.id === s1.suite.audit.key)
   assert.deepEqual(lines.map((l) => [l.reflection, l.filed, l.vaultTask]), [[s1.reflection, true, slug], [s2.reflection, false, slug]])
+})
+
+// p54-2 (ADR 0084 d3): make test (macos-latest) left Thread Skill's required checks on 2026-11-16 (reflect.py's
+// CI_RETIRED). The 2026-09 tests above are the control: a reading before that date still breaches on it and files.
+test('span: CI headroom says once that make test (macos-latest) left the required checks, and never flags it from that week on', (t) => {
+  const h = setup(t, { origin: TS_ORIGIN })
+  const N = (d, hm) => `2026-11-${d}T${hm}:00+11:00`
+  const NOW = ['--now', '2026-12-01T00:00+11:00']   // both readings are past: neither until is clamped
+  emitAll(h, 'suite-r', byTs([
+    ...life('t1', N(11, '09:00'), N(11, '10:00')),
+    ciRow(N(11, '10:08'), MAC, 2950), ciRow(N(12, '10:00'), MAC, 2950), ciRow(N(13, '10:00'), MAC, 2950), // 82 %: breached before
+    ciRow(N(11, '10:08'), UBU, 1850),
+    ciRow(N(12, '11:00'), MAC, 3000, { repo: 'o/r' }),                       // another repo's job: never retired
+    ciRow(N('01', '10:00'), MAC, 10),                                        // outside: the median would be 2950 still, runs 4
+  ]))
+  rolloutNote(h, 'suite-r')
+  const a = span(h, NOW, { since: N(10, '00:00'), until: N(17, '00:00') })
+  assert.deepEqual(a.suite.ci.map((g) => [g.repo, g.job, g.runs, g.breach, g.retired]), [
+    ['lachyts/thread-skill', MAC, 3, false, '2026-11-16'],
+    ['lachyts/thread-skill', UBU, 1, false, null],
+    ['o/r', MAC, 1, true, null],
+  ], JSON.stringify(a.suite.ci))
+  assert.deepEqual(a.suite.breaches, [`o/r: ${MAC}'s week's median 3000 s is 83 % of its 60 min limit, past 80 % (1 run(s))`])
+  assert.equal(a.suite.audit.due, false, 'a retired job files no audit')
+  assert.deepEqual(a.suite.retired, [{ repo: 'lachyts/thread-skill', job: MAC, date: '2026-11-16',
+    line: `lachyts/thread-skill: ${MAC} left the required checks on 2026-11-16 (ADR 0084 d3): CI headroom has no series for it from that day, and its rows never breach` }])
+  assert.equal(ok(h, ['suite-audit', '--span', path.join(h.out, 'span.json'), '--tasks-dir', h.tasks]).stdout,
+    'no suite budget breach on lachyts/thread-skill: no audit task\n')
+  // the next week: a stray macOS row (a PR still on the old workflow) is retired and never breaches; nothing is said again
+  emitAll(h, 'suite-r', byTs([...life('t2', N(18, '09:00'), N(18, '10:00')), ciRow(N(18, '10:08'), MAC, 3500)]))
+  const b = span(h, NOW, { since: N(17, '00:00'), until: N(24, '00:00') })
+  assert.deepEqual(b.suite.ci.map((g) => [g.repo, g.job, g.runs, g.breach, g.retired]), [['lachyts/thread-skill', MAC, 1, false, '2026-11-16']])
+  assert.deepEqual([b.suite.breaches, b.suite.retired, b.suite.audit.due], [[], [], false])
 })
 
 // ---- bug ---------------------------------------------------------------------------------------------------------------

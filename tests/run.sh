@@ -2,34 +2,61 @@
 # The one test entrypoint. `make test` is the full suite (the self-rollout's completion verifier); `make test-fast`
 # (`--fast`) is the fast tier (its verifier, ADR 0073 d1); `--only <test file>...` runs the named files; `--shard K/N`
 # runs shard K of the full suite split N ways (CI's full-suite.yml, ADR 0073 d3) and `--shard-plan N` prints that
-# split and runs nothing. bash 3.2-compatible (macOS).
+# split and runs nothing; `--fast --shard K/N` and `--fast --shard-plan N` do the same for the fast tier's selection
+# (p54-10, ADR 0084 d4), so a PR's check can run it as several jobs. bash 3.2-compatible (macOS).
 #
 # Modes. Every mode runs the always-run steps (bash and python syntax, the workflow parse, the fast-tier map check)
 # and ends with the check that the run wrote nothing into the checkout. Full mode then runs every suite. --fast runs
 # only the test files tests/lib/fast-tier.py selects for the diff from THREAD_VERIFY_BASE (ADR 0062), read through
-# tests/fast-tier.map, and the full suite when the selector cannot place a changed path (its FULL line). --only runs
-# the named collected files, and never the merge-task self-tests. --shard K/N runs shard K of the split
-# tests/lib/shard.py makes of the merge-task self-tests and every collected test (its docstring holds the rules; the
-# self-tests run in shard 1), so the N shards together run the full suite exactly once; a shard.py failure is a red
-# `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's `<k><TAB><entry>` lines for the
-# same entries and exits before any step, writing nothing.
+# tests/fast-tier.map, and the full suite when the selector prints FULL (its header says when: an untracked path no map
+# line places is left out instead). --only runs the named collected files, and never the merge-task self-tests.
+# --shard K/N runs shard K of the split tests/lib/shard.py makes of the merge-task self-tests and every collected test
+# (its docstring holds the rules; the self-tests run in shard 1), so the N shards together run the full suite exactly
+# once; a shard.py failure is a red `shard split` step, never a green run of nothing. --shard-plan N prints shard.py's
+# `<k><TAB><entry>` lines for the same entries and exits before any step, writing nothing.
+#
+# The fast tier's shards (p54-10, ADR 0084 d4). `--fast --shard K/N` selects first, exactly as --fast does (its
+# full-suite fallbacks and the Slow tier's filter included), then hands that selection, in run.sh's order, to shard.py
+# and runs shard K of it, so the N shards together run the selection exactly once. The merge-task self-tests run only
+# when the selection holds them, and then in shard 1. A selection smaller than N leaves some shards nothing but the
+# always-run steps, and such a shard passes. `--fast --shard-plan N` selects (its `== fast tier` and `== slow tier`
+# lines go to stderr), prints the split of the selection on stdout and exits before any step. --fast comes first:
+# `--shard K/N --fast` exits 2.
 #
 # The Slow tier (p54-1, ADR 0084 d3). THREAD_SKIP_SLOW=1 (GitHub's check sets it on its `make test-fast` step) leaves
-# the SLOW suites tests/fast-tier.map declares out of a --fast run, after the mode block, so the full-suite fallbacks (a
-# FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself edits still
-# runs (fast-tier.py's `slow` prints it KEPT). The run prints one `== slow tier: left out <N> suites (THREAD_SKIP_SLOW=1)`
+# the SLOW suites tests/fast-tier.map declares out of a --fast run, after the selection (fast_select), so the full-suite
+# fallbacks (a FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself
+# edits still runs (fast-tier.py's `slow` prints it KEPT). The run prints one `== slow tier: left out <N> suites (THREAD_SKIP_SLOW=1)`
 # line naming the ones it removed, then a `   kept, the diff edits it:` line when it kept one. A failed `slow` leaves
-# nothing out and says so. Empty or unset is off; any other value than 1 exits 2 before any step. Full mode, --only,
-# --shard and --shard-plan ignore it, so master's full suite and the completion verifier run the Slow tier, and so does
-# --fast without it (the Mac's verify, an agent's Checkpoint). run.sh unsets it, so no suite or inner run inherits it.
+# nothing out and says so. Empty or unset is off; any other value than 1 exits 2 before any step. --fast --shard and
+# --fast --shard-plan read it as --fast does, before the split. Full mode, --only, and --shard and --shard-plan without
+# --fast ignore it, so master's full suite and the completion verifier run the Slow tier, and so does --fast without it
+# (the Mac's verify, an agent's Checkpoint). run.sh unsets it, so no suite or inner run inherits it.
 #
 # Hermetic by construction: HOME and the global git config point into a temp dir, so any stray default
 # (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
 # temp instead of the real vault or ~/.claude. PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the tree.
 #
-# Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
-# and plain exit-code scripts both run under `node --test`; shell suites and the merge-task self-tests
-# run concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
+# The bytecode cache (p54-3, ADR 0084 d4). PYTHONPYCACHEPREFIX points every suite and node file at scratch's pyc/, which
+# the run warms once (`python3 -m compileall`, which writes there under PYTHONDONTWRITEBYTECODE=1) before any suite
+# starts, so a script that loads the engine by path (leg.py's reconcile-rollout.py, about 1,500 launches in
+# tests/leg*.test.sh) reads it compiled instead of compiling 1.1 MB each time: leg.py's launch measured 172 ms without
+# the cache and 87 ms with it. The scripts' `sys.dont_write_bytecode` stops only writes, never a read, so no script
+# changes, and the warm writes nothing into the checkout (the tree check below still holds). The warm compiles skills/
+# and hooks/, then the interpreter's stdlib and PyYAML: under a prefix python reads every module's bytecode from the
+# prefix and never from a __pycache__, so an unwarmed stdlib would be compiled at each launch (a script importing
+# argparse, json, re and subprocess measured 31 ms without a prefix, 94 ms with an empty one). A suite's own copy of
+# skills/ in a temp tree (tests/pushed-base.test.sh, tests/self-rollout-check.test.sh) has other paths, so it compiles
+# its own scripts as before. THREAD_TEST_WARM_STDLIB=0 leaves the stdlib and PyYAML half out of the warm, for a nested
+# run that launches only a handful of pythons: each warm compiles about 560 stdlib modules (about 0.75 s wall and 4
+# CPU-s on a 12-core Mac), and tests/fast-tier.test.sh's 30-odd fixture runs, which set it, took that suite from
+# master's 54-77 s to 119-133 s without it (68-69 s with it, measured back to back on one Mac). Empty, unset or 1 warms
+# both halves; any other value exits 2 before any step. run.sh unsets it, so no suite and no inner run inherits it.
+#
+# Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files and plain
+# exit-code scripts both run through tests/lib/node-run.mjs, node:test's run() (the runner `node --test` uses, with its
+# exit codes; the "Capped" paragraph says why it is not the CLI); shell suites and the merge-task self-tests run
+# concurrently. New suites join by filename — including the protocol 4 branch's, unchanged.
 #
 # Reporting (p43-6, #327 finding 2). Each suite and each step prints one `<label>: ok (<N>s)` or `<label>: FAILED
 # (<N>s)` line the moment it ends, N its own seconds, so a run cut part-way (a CI job at its timeout-minutes) still
@@ -40,7 +67,10 @@
 # Capped (p23-4): at most `suite_cap` background suites run at once (tests/lib/test-jobs.sh: THREAD_TEST_JOBS,
 # else max(2, ceil(cores / 3)), 4 on 12 cores), and node runs that many test files at once. The suites spawn
 # roughly longest-first: the two merge-task self-tests, then the shell suites by file size, largest first (`ls -S`;
-# no suite path holds a space, tests/test-jobs.test.sh pins it), so no static list can drift.
+# no suite path holds a space, tests/test-jobs.test.sh pins it), so no static list can drift. Node's files go longest
+# first by their measured seconds (p54-3): tests/lib/shard.py --order sorts them from tests/shard-weights.tsv (its node
+# section; a file it has no seconds for is weighed by its size), and tests/lib/node-run.mjs runs them in that order,
+# since `node --test` sorts its arguments by path. A failed --order keeps the glob's order and says so on stderr.
 # THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot (verify-slot.py) never waits on
 # the machine's pool, nor an inner `make test` on its outer wrapper's slot.
 #
@@ -59,37 +89,54 @@
 # TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 1200 s
 # (`--test-timeout`, which bounds a whole file as well as each test, from the file's own start: node 22 and 23.9 cancel
 # a file of three 1.5 s tests at a 2 s timeout), 2.3x the slowest file on macOS CI (tests/reflect-weekly.test.mjs,
-# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x).
+# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x). node-run.mjs takes the CLI's
+# --test-concurrency and --test-timeout and hands them to node:test's run(), the runner `node --test` uses.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
 shopt -s nullglob
 
-usage() { echo "usage: bash tests/run.sh [--fast | --only <test file>... | --shard K/N | --shard-plan N]" >&2; exit 2; }
-mode=full; only=(); shard_k=; shard_n=
+usage() {
+  echo "usage: bash tests/run.sh [--fast [--shard K/N | --shard-plan N] | --only <test file>... | --shard K/N | --shard-plan N]" >&2
+  exit 2
+}
+# fast=1 when the run reads the fast tier's selection: --fast alone (mode fast), or with --shard or --shard-plan.
+mode=full; fast=0; only=(); shard_k=; shard_n=
+# shard_args <arg>...: --shard K/N or --shard-plan N, the last arguments, into mode, shard_k and shard_n; else usage.
+shard_args() {
+  case "${1:-}" in
+    --shard)
+      mode=shard; shift; [ "$#" -eq 1 ] || usage
+      case "$1" in */*) shard_k=${1%%/*}; shard_n=${1#*/} ;; *) usage ;; esac
+      case "$shard_k" in ''|*[!0-9]*) usage ;; esac
+      case "$shard_n" in ''|*[!0-9]*) usage ;; esac
+      shard_k=$((10#$shard_k)); shard_n=$((10#$shard_n))
+      [ "$shard_k" -ge 1 ] && [ "$shard_k" -le "$shard_n" ] || usage ;;
+    --shard-plan)
+      mode=plan; shift; [ "$#" -eq 1 ] || usage
+      case "$1" in ''|*[!0-9]*) usage ;; esac
+      shard_n=$((10#$1)); [ "$shard_n" -ge 1 ] || usage ;;
+    *) usage ;;
+  esac
+}
 case "${1:-}" in
   '') ;;
-  --fast) mode=fast; shift; [ "$#" -eq 0 ] || usage ;;
+  --fast) mode=fast; fast=1; shift; [ "$#" -eq 0 ] || shard_args "$@" ;;
   --only) mode=only; shift; [ "$#" -gt 0 ] || usage; only=("$@") ;;
-  --shard)
-    mode=shard; shift; [ "$#" -eq 1 ] || usage
-    case "$1" in */*) shard_k=${1%%/*}; shard_n=${1#*/} ;; *) usage ;; esac
-    case "$shard_k" in ''|*[!0-9]*) usage ;; esac
-    case "$shard_n" in ''|*[!0-9]*) usage ;; esac
-    shard_k=$((10#$shard_k)); shard_n=$((10#$shard_n))
-    [ "$shard_k" -ge 1 ] && [ "$shard_k" -le "$shard_n" ] || usage ;;
-  --shard-plan)
-    mode=plan; shift; [ "$#" -eq 1 ] || usage
-    case "$1" in ''|*[!0-9]*) usage ;; esac
-    shard_n=$((10#$1)); [ "$shard_n" -ge 1 ] || usage ;;
+  --shard|--shard-plan) shard_args "$@" ;;
   *) usage ;;
 esac
 # The Slow tier's flag (the header's "The Slow tier"): captured here, then unset below with THREAD_VERIFY_BASE.
 skip_slow=${THREAD_SKIP_SLOW:-}
 case "$skip_slow" in ''|1) ;; *) echo "make test: THREAD_SKIP_SLOW must be 1 or empty, got '$skip_slow'"; exit 2 ;; esac
+# The warm's stdlib half (the header's "The bytecode cache"): captured here, then unset below with THREAD_SKIP_SLOW.
+warm_stdlib=${THREAD_TEST_WARM_STDLIB:-1}
+case "$warm_stdlib" in 0|1) ;; *) echo "make test: THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got '$warm_stdlib'"; exit 2 ;; esac
 
 export PYTHONDONTWRITEBYTECODE=1
 scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
+# The bytecode cache (the header's "The bytecode cache"): warmed by its step below, read by every suite and node file.
+export PYTHONPYCACHEPREFIX="$scratch/pyc"
 
 # Pin the real interpreters BEFORE swapping HOME: version-manager shims (asdf, mise, pyenv) resolve the
 # global version under $HOME and fail inside the temp one. Their resolved dirs go first on PATH.
@@ -125,7 +172,7 @@ mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcr
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
 # A serial chain's Chain copies (leg.py copies, ADR 0067 d2) stay in temp too: each suite that makes one exports its own
-# (tests/leg.test.sh), so this is the backstop that keeps a missed site out of ~/.local/state/thread/chains.
+# (the tests/leg*.test.sh suites), so this is the backstop that keeps a missed site out of ~/.local/state/thread/chains.
 export THREAD_CHAIN_COPY_DIR="$scratch/chains"
 # The Security check (security-check.py, execute § 3 `security_checks`) never reaches the real OSV under test: a closed port, so
 # a case that forgets its own stub reads `advisories not checked`, never the network; an inherited THREAD_GITLEAKS is unset, so
@@ -140,6 +187,8 @@ verify_base=${THREAD_VERIFY_BASE:-}
 unset THREAD_VERIFY_BASE
 # The Slow tier's flag, captured above: unset, so no suite and no inner `make test-fast` inherits GitHub's.
 unset THREAD_SKIP_SLOW
+# The warm's stdlib knob, captured above: unset, so no suite's inner run inherits a fixture run's 0.
+unset THREAD_TEST_WARM_STDLIB
 # The Mac's own evidence of a stop (reconcile-rollout.py machine_times: kern.boottime, kern.waketime, `pmset -g log`,
 # p29-10) is never read under test: `{}` is no boot and no sleep, so no suite infers a stop from this Mac's history.
 # Each suite that tests the stops sets its own.
@@ -240,6 +289,11 @@ sh_files=(skills/*/scripts/*.sh hooks/*.sh tests/*.sh tests/lib/*.sh)
 py_files=(skills/*/scripts/*.py hooks/*.py tests/lib/*.py)
 wf_files=(skills/*/*.workflow.js skills/*/diagnostics/*.workflow.js)
 node_tests=(skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs)
+# Longest first by measured seconds (p54-3, the header's "Capped"); a failed order keeps the glob's.
+if [ "${#node_tests[@]}" -gt 0 ]; then
+  if ordered=$(printf '%s\n' "${node_tests[@]}" | python3 tests/lib/shard.py --order); then node_tests=($ordered)
+  else echo "run.sh: shard.py --order failed, so node takes its files in glob order" >&2; fi
+fi
 # Largest first: a cheap longest-first order (p23-4), so the long suites start before the cap fills.
 sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))
 nl=$'\n'; tab=$'\t'
@@ -252,34 +306,6 @@ if [ "$mode" = only ]; then
   done
 fi
 
-# shard_split <N>: tests/lib/shard.py's `<k><TAB><entry>` line for the merge-task self-tests and every collected test,
-# in run.sh's order (the self-tests, the shell suites largest first, the node files).
-shard_split() {
-  printf '%s\n' @merge-task-self-tests ${sh_tests[@]+"${sh_tests[@]}"} ${node_tests[@]+"${node_tests[@]}"} \
-    | python3 tests/lib/shard.py "$1"
-}
-# --shard-plan: the dry run. It prints the split and exits before any step; the trap removes scratch.
-if [ "$mode" = plan ]; then shard_split "$shard_n"; exit $?; fi
-
-syntax_sh() { local f r=0; for f in "$@"; do bash -n "$f" || r=1; done; return $r; }
-# Warnings are errors: an invalid escape such as '\`' in a non-raw string is a silent DeprecationWarning on python
-# 3.11 but a SyntaxWarning on stderr on every run from 3.12 (CI's), which breaks each suite that pins an empty
-# stderr. Each file is parsed on its own, so one bad file names itself and the rest still get checked.
-syntax_py() { python3 -W error::DeprecationWarning -W error::SyntaxWarning -c 'import ast, sys
-r = 0
-for p in sys.argv[1:]:
-    try:
-        ast.parse(open(p).read(), p)
-    except SyntaxError as e:
-        print(f"{p}:{e.lineno}: {e.msg}"); r = 1
-sys.exit(r)' "$@"; }
-
-step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
-step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
-step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
-# The map check runs in every mode, so a stale map line turns every run red, not only a run that selects its suite.
-step "fast-tier map check"                      python3 tests/lib/fast-tier.py check
-
 # What this run runs: run_sh (largest first, as sh_tests), run_node, and the two merge-task self-tests when self_tests=1.
 # keep <list>: the entries of sh_tests and node_tests that the newline-separated <list> names, in their order.
 keep() {
@@ -289,7 +315,12 @@ keep() {
   for t in ${node_tests[@]+"${node_tests[@]}"}; do case "$nl$1$nl" in *"$nl$t$nl"*) run_node+=("$t") ;; esac; done
 }
 run_sh=(${sh_tests[@]+"${sh_tests[@]}"}); run_node=(${node_tests[@]+"${node_tests[@]}"}); self_tests=1
-if [ "$mode" = fast ]; then
+
+# fast_select: the fast tier's selection (the header's "Modes") into run_sh, run_node and self_tests, the full suite on
+# each fallback, then the Slow tier's filter under THREAD_SKIP_SLOW=1 (the header's "The Slow tier"), which drops each
+# SLOW suite `slow` prints OUT from whatever the selection chose, the full-suite fallbacks included, and names the ones
+# it removed. It prints its `== fast tier` and `== slow tier` lines; --fast --shard-plan sends them to stderr.
+fast_select() {
   sel=$(python3 tests/lib/fast-tier.py select ${verify_base:+--base "$verify_base"}); src=$?
   head=${sel%%"$nl"*}; picked=""; case "$sel" in *"$nl"*) picked=${sel#*"$nl"} ;; esac
   kind=${head%%"$tab"*}
@@ -308,10 +339,93 @@ if [ "$mode" = fast ]; then
   else
     echo "== fast tier: full suite (selector output unreadable: ${head:0:80})"
   fi
+  [ "$skip_slow" = 1 ] || return 0
+  slow=$(python3 tests/lib/fast-tier.py slow ${verify_base:+--base "$verify_base"}); src=$?
+  if [ "$src" -ne 0 ]; then
+    echo "== slow tier: none left out (fast-tier.py slow failed (rc $src))"
+    return 0
+  fi
+  slow_out=""; slow_kept=""
+  while IFS=$tab read -r sk st; do
+    case "$sk" in OUT) slow_out="$slow_out$st$nl" ;; KEPT) slow_kept="$slow_kept$st$nl" ;; esac
+  done <<< "$slow"
+  left=(); kept=(); still_sh=(); still_node=()
+  for t in ${run_sh[@]+"${run_sh[@]}"}; do
+    case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
+    still_sh+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
+  done
+  for t in ${run_node[@]+"${run_node[@]}"}; do
+    case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
+    still_node+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
+  done
+  run_sh=(${still_sh[@]+"${still_sh[@]}"}); run_node=(${still_node[@]+"${still_node[@]}"})
+  names=""; [ "${#left[@]}" -eq 0 ] || names=": ${left[*]}"
+  echo "== slow tier: left out ${#left[@]} suites (THREAD_SKIP_SLOW=1)$names"
+  [ "${#kept[@]}" -eq 0 ] || echo "   kept, the diff edits it: ${kept[*]}"
+}
+
+# shard_split <N>: tests/lib/shard.py's `<k><TAB><entry>` line for each entry of what this run would run, in run.sh's
+# order (the self-tests, the shell suites largest first, the node files): every collected test and the merge-task
+# self-tests, or, with --fast, the selection fast_select left in run_sh, run_node and self_tests.
+shard_split() {
+  local self=(); [ "$self_tests" = 1 ] && self=(@merge-task-self-tests)
+  printf '%s\n' ${self[@]+"${self[@]}"} ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"} \
+    | python3 tests/lib/shard.py "$1"
+}
+# --shard-plan: the dry run. It prints the split and exits before any step; the trap removes scratch. With --fast it
+# selects first, its lines on stderr, so stdout holds only the split.
+if [ "$mode" = plan ]; then
+  [ "$fast" = 0 ] || fast_select >&2
+  shard_split "$shard_n"; exit $?
+fi
+
+syntax_sh() { local f r=0; for f in "$@"; do bash -n "$f" || r=1; done; return $r; }
+# Warnings are errors: an invalid escape such as '\`' in a non-raw string is a silent DeprecationWarning on python
+# 3.11 but a SyntaxWarning on stderr on every run from 3.12 (CI's), which breaks each suite that pins an empty
+# stderr. Each file is parsed on its own, so one bad file names itself and the rest still get checked.
+syntax_py() { python3 -W error::DeprecationWarning -W error::SyntaxWarning -c 'import ast, sys
+r = 0
+for p in sys.argv[1:]:
+    try:
+        ast.parse(open(p).read(), p)
+    except SyntaxError as e:
+        print(f"{p}:{e.lineno}: {e.msg}"); r = 1
+sys.exit(r)' "$@"; }
+
+step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
+step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
+step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
+# The bytecode cache's warm, after the stamp, so the tree check would see a .pyc it put in the checkout.
+# warm <dir>...: compile each dir's .py files into the prefix (none: none; a bare compileall walks sys.path), red when
+# one does not compile; then, best effort and silent, the interpreter's stdlib and PyYAML (the header says why), unless
+# THREAD_TEST_WARM_STDLIB=0. Only the stdlib's 560-odd modules take a worker pool (-j 0): for skills/ and hooks/ (about
+# 50 files) its start-up cost more than it saved (0.82 s against 0.53 s serially, and 0.35 against 0.12 s on a fixture's
+# two files), so they and PyYAML compile serially.
+warm() {
+  local lib yaml
+  [ "$#" -eq 0 ] || python3 -m compileall -q "$@" || return 1
+  [ "$warm_stdlib" = 1 ] || { echo "bytecode cache: the stdlib and PyYAML left out (THREAD_TEST_WARM_STDLIB=0)"; return 0; }
+  lib=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])') &&
+    python3 -m compileall -qq -j 0 -x '[/\\](test|tests|idlelib|tkinter|turtledemo|lib2to3|ensurepip|site-packages|dist-packages)[/\\]' \
+      "$lib" > /dev/null 2>&1
+  yaml=$(python3 -c 'import os, yaml; print(os.path.dirname(yaml.__file__))' 2> /dev/null) &&
+    python3 -m compileall -qq "$yaml" > /dev/null 2>&1
+  return 0
+}
+warm_dirs=(); for d in skills hooks; do [ -d "$d" ] && warm_dirs+=("$d"); done
+step "bytecode cache (${#warm_dirs[@]} dirs)"   warm ${warm_dirs[@]+"${warm_dirs[@]}"}
+# The map check runs in every mode, so a stale map line turns every run red, not only a run that selects its suite.
+step "fast-tier map check"                      python3 tests/lib/fast-tier.py check
+
+if [ "$mode" = fast ]; then
+  fast_select
 elif [ "$mode" = only ]; then
   keep "$(printf '%s\n' "${only[@]}")"; self_tests=0
 elif [ "$mode" = shard ]; then
-  # shard_pick: this shard's entries into $mine. A shard.py failure fails the step, and the run then runs no test.
+  # With --fast the shard splits the selection, Slow tier filter included, so the N shards run it exactly once.
+  [ "$fast" = 0 ] || fast_select
+  # shard_pick: this shard's entries into $mine, split from what run_sh, run_node and self_tests hold, which it then
+  # empties for keep below. A shard.py failure fails the step, and the run then runs no test.
   shard_pick() {
     local split sk se
     split=$(shard_split "$shard_n") || { echo "shard.py failed, so this shard runs no test"; return 1; }
@@ -319,8 +433,9 @@ elif [ "$mode" = shard ]; then
     while IFS=$tab read -r sk se; do [ "$sk" = "$shard_k" ] && mine="$mine$se$nl"; done <<< "$split"
     shard_ok=1
   }
-  run_sh=(); run_node=(); self_tests=0; shard_ok=0
+  shard_ok=0
   step "shard split" shard_pick
+  run_sh=(); run_node=(); self_tests=0
   if [ "$shard_ok" = 1 ]; then
     keep "$mine"
     case "$nl$mine" in *"$nl@merge-task-self-tests$nl"*) self_tests=1 ;; esac
@@ -328,33 +443,6 @@ elif [ "$mode" = shard ]; then
     echo "== shard $shard_k/$shard_n: $k test files"
     [ "$self_tests" = 1 ] && echo "   the merge-task self-tests"
     for t in ${run_sh[@]+"${run_sh[@]}"} ${run_node[@]+"${run_node[@]}"}; do echo "   $t"; done
-  fi
-fi
-
-# The Slow tier (the header's "The Slow tier"): under THREAD_SKIP_SLOW=1, --fast drops each SLOW suite `slow` prints OUT
-# from whatever the mode block chose, the full-suite fallbacks included, and names the ones it removed.
-if [ "$mode" = fast ] && [ "$skip_slow" = 1 ]; then
-  slow=$(python3 tests/lib/fast-tier.py slow ${verify_base:+--base "$verify_base"}); src=$?
-  if [ "$src" -ne 0 ]; then
-    echo "== slow tier: none left out (fast-tier.py slow failed (rc $src))"
-  else
-    slow_out=""; slow_kept=""
-    while IFS=$tab read -r sk st; do
-      case "$sk" in OUT) slow_out="$slow_out$st$nl" ;; KEPT) slow_kept="$slow_kept$st$nl" ;; esac
-    done <<< "$slow"
-    left=(); kept=(); still_sh=(); still_node=()
-    for t in ${run_sh[@]+"${run_sh[@]}"}; do
-      case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
-      still_sh+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
-    done
-    for t in ${run_node[@]+"${run_node[@]}"}; do
-      case "$nl$slow_out" in *"$nl$t$nl"*) left+=("$t"); continue ;; esac
-      still_node+=("$t"); case "$nl$slow_kept" in *"$nl$t$nl"*) kept+=("$t") ;; esac
-    done
-    run_sh=(${still_sh[@]+"${still_sh[@]}"}); run_node=(${still_node[@]+"${still_node[@]}"})
-    names=""; [ "${#left[@]}" -eq 0 ] || names=": ${left[*]}"
-    echo "== slow tier: left out ${#left[@]} suites (THREAD_SKIP_SLOW=1)$names"
-    [ "${#kept[@]}" -eq 0 ] || echo "   kept, the diff edits it: ${kept[*]}"
   fi
 fi
 
@@ -373,9 +461,9 @@ fi
 for t in ${run_sh[@]+"${run_sh[@]}"}; do spawn "$t" "$(bound_of "$t")" bash "$t"; done
 wait
 i=0; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
-# A bare `node --test` walks the whole tree, so node runs only when a file is selected.
+# A bare `node --test` walks the whole tree, and node-run.mjs refuses an empty list, so node runs only when a file is selected.
 if [ "${#run_node[@]}" -gt 0 ]; then
-  step "node tests (${#run_node[@]} files)"    node --test --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"
+  step "node tests (${#run_node[@]} files)"    node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-timeout=1200000 "${run_node[@]}"
 else
   echo "== node tests: none selected"
 fi

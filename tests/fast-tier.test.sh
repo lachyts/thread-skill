@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S14) and `check` (C1-C3, the Slow tier's
-# check (j) and its check (d) case among C2's controls) on throwaway repos, its results on the real tree (R1-R8, and the
-# Slow tier's `slow` and --shard-plan in R9-R10), tests/run.sh's --fast, --only, --shard and --shard-plan modes on a
-# fixture checkout (F1-F22; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree), and THREAD_SKIP_SLOW's
-# filter on a second one (G1-G6, p54-1, ADR 0084 d3). Each throwaway repo has a local bare origin and a copy of the
-# selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked file uses.
-# bash 3.2-compatible (macOS).
+# p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S16: p54-4's docs carriers in S15, the
+# reach one carrier deep in S2 and S6, READERS in S16) and the untracked paths it leaves out (U1-U4), and `check`
+# (C1-C3, the Slow tier's check (j), check (k)'s READERS controls and its check (d) case among C2's controls, and the
+# unstaged ones, which check an untracked helper or script as a worktree holds it before `git add`; C4 pins
+# contract-text's skillCount) on throwaway repos, its results on the real tree (R1-R8, the Slow tier's `slow` and
+# --shard-plan in R9-R10, and R11-R12's SKILL.md and docs reach through one index), tests/run.sh's --fast, --only,
+# --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note; p54-3's node order, warm
+# knob and node-run.mjs signals in F23-F25; p54-10's --fast --shard in F26), and THREAD_SKIP_SLOW's filter on a second
+# one (G1-G7, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway
+# repo has a local bare origin and a copy of the selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked
+# file uses. The fixture runs leave the warm's stdlib half out (THREAD_TEST_WARM_STDLIB=0, exported before F1), all but
+# F24's. bash 3.2-compatible (macOS).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -40,10 +45,14 @@ holds() { case "$1" in *"$2"*) printf '%s' "$3" ;; *) printf '%s' "$4" ;; esac; 
 put() { mkdir -p "$(dirname "$1/$2")"; printf '%s\n' "$3" > "$1/$2"; }
 # map <dir> <line>...: the repo's tests/fast-tier.map.
 map() { local d="$1"; shift; printf '%s\n' "$@" > "$d/tests/fast-tier.map"; }
-# sel <dir> <arg>...: the select output on one line, tabs as |, lines joined by a space.
-sel() { local d="$1"; shift; python3 "$d/tests/lib/fast-tier.py" select "$@" 2>&1 | tr '\t\n' '| ' | sed 's/ $//'; }
-# chk <dir>: index the repo's files, then check (its output; $? is check's).
-chk() { git -C "$1" add -A >/dev/null 2>&1; python3 "$1/tests/lib/fast-tier.py" check 2>&1; }
+# sel <dir> <arg>...: the select output on one line, tabs as |, lines joined by a space. It stages the fixture first, so
+# its files are tracked, as carriers must be (an index read only; `git diff <merge base>` reads the working tree).
+sel() { local d="$1"; shift; git -C "$d" add -A >/dev/null 2>&1; python3 "$d/tests/lib/fast-tier.py" select "$@" 2>&1 | tr '\t\n' '| ' | sed 's/ $//'; }
+# selr <dir> <arg>...: the same with no staging, stdout only; stderr goes to $TMP/selr.err (S12, U1-U4).
+selr() { local d="$1"; shift; python3 "$d/tests/lib/fast-tier.py" select "$@" 2>"$TMP/selr.err" | tr '\t\n' '| ' | sed 's/ $//'; }
+# chk <dir>: index the repo's files, then check (its output; $? is check's). chku: check with nothing staged.
+chku() { python3 "$1/tests/lib/fast-tier.py" check 2>&1; }
+chk() { git -C "$1" add -A >/dev/null 2>&1; chku "$1"; }
 # push <dir> <msg>: commit everything and push it to origin's main, which origin/HEAD then names.
 push() {
   git -C "$1" add -A && git -C "$1" commit -qm "$2" && git -C "$1" push -q origin HEAD:main 2>/dev/null &&
@@ -74,8 +83,12 @@ put "$D" tests/zztop.test.sh 'bash skills/x/scripts/zztop.sh'
 map "$D" 'skills/**' 'tests/*.test.*'
 ok "$(sel "$D" --paths skills/x/scripts/zzleaf.py)" "FAST|-|-|1 tests/zzsuite-loader.test.mjs" \
   "S2: a script loaded by path reaches its loader's suite, which never names it"
-ok "$(sel "$D" --paths skills/x/scripts/zzleaf2.py)" "FAST|-|-|1 tests/zztop.test.sh" \
-  "S2: a chain of three (zzleaf2 <- zzmid <- zztop) selects the top's suite"
+# p54-4: the reach stops one carrier deep, so a chain of three (zzleaf2 <- zzmid <- zztop) never reaches the top's suite.
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf2.py)" "FULL|skills/x/scripts/zzleaf2.py: reaches no test" \
+  "S2: a chain of three (zzleaf2 <- zzmid <- zztop) stops at zzmid, which no suite names: FULL"
+put "$D" tests/zzmid.test.sh 'python3 skills/x/scripts/zzmid.py'
+ok "$(sel "$D" --paths skills/x/scripts/zzleaf2.py)" "FAST|-|-|1 tests/zzmid.test.sh" \
+  "S2: … and once zzmid has a suite, it selects that one, never the top's"
 
 D="$TMP/s3"; mkrepo "$D"
 put "$D" skills/x/scripts/zzleaf3.py 'Z = 3'
@@ -140,6 +153,18 @@ ok "$(sel "$D" --paths zznone/a.md)" "FAST|-|-|1 tests/zzw.test.mjs" \
   "S6: a path placed only by NONE still selects the walkers (its ALSO entries), and only them"
 ok "$(sel "$D" --paths skills/x/scripts/zzleaf6b.py)" "FAST|-|-|1 tests/zzleaf6b.test.sh tests/zzv.test.mjs tests/zzw.test.mjs" \
   "S6: a reached carrier placed only by NONE adds its lines' ALSO entries, never the tests that name it"
+# p54-4: one carrier deep. zzd2 names zzd1, and zzorph2 (no line places it) and zzd3 (FULL) name zzd2.
+D="$TMP/s6d"; mkrepo "$D"
+put "$D" skills/x/scripts/zzd1.py 'A = 1'
+put "$D" skills/x/scripts/zzd2.py 'B = "zzd1.py"'
+put "$D" tests/zzd2.test.sh 'python3 skills/x/scripts/zzd2.py'
+put "$D" zzorph2.py 'C = "zzd2.py"'
+put "$D" skills/x/scripts/zzd3.py 'D = "zzd2.py"'
+map "$D" 'skills/x/scripts/zzd3.py FULL' 'skills/**' 'tests/*.test.*'
+ok "$(sel "$D" --paths skills/x/scripts/zzd1.py)" "FAST|-|-|1 tests/zzd2.test.sh" \
+  "S6: a carrier two deep that no line places (zzorph2.py), or that is marked FULL (zzd3.py), no longer makes the result FULL"
+ok "$(sel "$D" --paths skills/x/scripts/zzd2.py)" "FULL|skills/x/scripts/zzd2.py: reaches skills/x/scripts/zzd3.py, marked FULL" \
+  "S6: … while either one carrier deep still does"
 
 D="$TMP/s7"; mkrepo "$D"
 put "$D" skills/x/scripts/zznobody.py 'T = 7'
@@ -244,7 +269,42 @@ ok "$(sel "$D" --paths skills/x/scripts/zzhub.py)" "FAST|-|-|1 tests/zzhub.test.
 ok "$(sel "$D" --paths skills/x/scripts/zzleaf14.py)" "FAST|-|-|1 tests/zzhub.test.sh tests/zzhub2.test.sh tests/zzleaf14.test.sh tests/zzw.test.mjs" \
   "S14: a leaf that reaches a hub adds the hub's suites, and the reach stops there"
 
-# S12: the changed paths from git.
+# S15 (p54-4): a file under docs/ is no carrier, so a docs spike that names a script never adds the docs line's tests.
+D="$TMP/s15"; mkrepo "$D"
+put "$D" skills/x/scripts/zzd.py 'D = 1'
+put "$D" tests/zzd.test.sh 'python3 skills/x/scripts/zzd.py'
+put "$D" docs/spikes/zzspike.py 'D = "zzd.py"'
+put "$D" tests/zzdocs.test.mjs '// reads docs'
+map "$D" 'skills/**' 'tests/*.test.*' 'docs/** tests/zzdocs.test.mjs'
+ok "$(sel "$D" --paths skills/x/scripts/zzd.py)" "FAST|-|-|1 tests/zzd.test.sh" \
+  "S15: a script a docs/ file names selects its own suite, never the docs line's tests (a docs file is no carrier)"
+ok "$(sel "$D" --paths docs/spikes/zzspike.py)" "FAST|-|-|1 tests/zzdocs.test.mjs" "S15: … while a change to the docs file itself still selects them"
+
+# S16 (p54-4): a READERS name selects only the readers its files' lines declare, never every test that names the word,
+# and pushes no carrier, a tests/lib helper included. zzra reads skills/a's copy literally, zzrel skills/execute's through
+# $HERE/../, zzskuser through a helper that names skills/a's; zzfx only writes a fixture copy (FOREIGN-ONLY).
+D="$TMP/s16"; mkrepo "$D"
+put "$D" skills/a/ZZSK.md 'a'
+put "$D" skills/execute/ZZSK.md 'e'
+put "$D" tests/zzra.test.sh 'grep -c x skills/a/ZZSK.md'
+put "$D" skills/execute/tests/zzrel.test.sh 'HERE=$(cd "$(dirname "$0")" && pwd); grep -c x "$HERE/../ZZSK.md"'
+put "$D" tests/lib/zzskh.sh 'zzsk() { cat skills/a/ZZSK.md; }'
+put "$D" tests/zzskuser.test.sh '. tests/lib/zzskh.sh; zzsk'
+put "$D" tests/zzfx.test.sh 'printf x > "$tmp/repo/ZZSK.md"'
+RD=('FOREIGN ZZSK.md' 'FOREIGN-ONLY ZZSK.md tests/zzfx.test.sh  # a fixture copy' 'skills/**' 'tests/lib/**' 'tests/*.test.*'
+  'skills/a/ZZSK.md tests/zzra.test.sh tests/zzskuser.test.sh' 'skills/execute/ZZSK.md skills/execute/tests/zzrel.test.sh')
+map "$D" 'READERS ZZSK.md' "${RD[@]}"
+ok "$(sel "$D" --paths skills/a/ZZSK.md)" "FAST|-|-|1 tests/zzra.test.sh tests/zzskuser.test.sh" \
+  "S16: a READERS file selects its line's readers, the helper's user included, never the other file's reader or zzfx"
+ok "$(sel "$D" --paths skills/execute/ZZSK.md)" "FAST|-|-|1 skills/execute/tests/zzrel.test.sh" \
+  "S16: … the other file selects only its relative reader (the helper that names the word is pushed no more)"
+out=$(chk "$D"); rc=$?
+ok "$rc|$(holds "$out" "fast-tier map: ok (" ok "$out")" "0|ok" "S16: … and check passes on the fixture (check k holds its lines)"
+map "$D" "${RD[@]}"
+ok "$(sel "$D" --paths skills/a/ZZSK.md)" "FAST|-|-|1 skills/execute/tests/zzrel.test.sh tests/zzra.test.sh tests/zzskuser.test.sh" \
+  "S16: without the READERS line the name fans out to every test that names it (zzfx still left out by FOREIGN-ONLY)"
+
+# S12: the changed paths from git (selr: the fixture's own index, never staged).
 D="$TMP/s12"; mkrepo "$D"
 for x in zza zzb zzc; do put "$D" "skills/x/scripts/$x.py" "N = '$x'"; put "$D" "tests/$x.test.sh" "python3 skills/x/scripts/$x.py"; done
 put "$D" tests/zzdocs.test.mjs '// reads docs'
@@ -253,28 +313,58 @@ put "$D" tests/zzr.test.sh 'python3 skills/x/scripts/zzr.py'
 map "$D" 'skills/**' 'tests/*.test.*' 'docs/** tests/zzdocs.test.mjs'
 push "$D" base
 B=$(git -C "$D" rev-parse HEAD)
-ok "$(sel "$D")" "FULL|no changed paths from $B" "S12: an empty diff from origin/HEAD is FULL"
-ok "$(sel "$D" --base nope)" "FULL|base nope does not resolve" "S12: an unresolvable base is FULL"
+ok "$(selr "$D")" "FULL|no changed paths from $B" "S12: an empty diff from origin/HEAD is FULL"
+ok "$(selr "$D" --base nope)" "FULL|base nope does not resolve" "S12: an unresolvable base is FULL"
 mkdir -p "$D/.claude"; : > "$D/.claude/settings.json"; : > "$D/.claude/merge-task.status"
-ok "$(sel "$D" --base HEAD)" "FULL|no changed paths from HEAD" "S12: untracked .claude/ files add nothing"
+ok "$(selr "$D" --base HEAD)" "FULL|no changed paths from HEAD" "S12: untracked .claude/ files add nothing"
 echo "M = 1" >> "$D/skills/x/scripts/zza.py"; git -C "$D" commit -qam one; C1=$(git -C "$D" rev-parse HEAD)
 echo "M = 2" >> "$D/skills/x/scripts/zzb.py"; git -C "$D" commit -qam two
-ok "$(sel "$D")" "FAST|$B|origin/HEAD|2 tests/zza.test.sh tests/zzb.test.sh" "S12: no --base reads origin/HEAD's merge base"
-ok "$(sel "$D" --base "$C1")" "FAST|$C1|--base|1 tests/zzb.test.sh" "S12: --base wins when given"
+ok "$(selr "$D")" "FAST|$B|origin/HEAD|2 tests/zza.test.sh tests/zzb.test.sh" "S12: no --base reads origin/HEAD's merge base"
+ok "$(selr "$D" --base "$C1")" "FAST|$C1|--base|1 tests/zzb.test.sh" "S12: --base wins when given"
 git -C "$D" push -q origin "$B:refs/heads/master" 2>/dev/null; git -C "$D" remote set-head origin -d >/dev/null 2>&1
-ok "$(sel "$D" | cut -d' ' -f1)" "FAST|$B|origin/master|2" "S12: no origin/HEAD falls back to origin/master"
+ok "$(selr "$D" | cut -d' ' -f1)" "FAST|$B|origin/master|2" "S12: no origin/HEAD falls back to origin/master"
 H=$(git -C "$D" rev-parse HEAD)
 echo "M = 3" >> "$D/skills/x/scripts/zza.py"; git -C "$D" add skills/x/scripts/zza.py
 echo "M = 4" >> "$D/skills/x/scripts/zzb.py"
 put "$D" tests/zznew.test.sh 'echo new'
-ok "$(sel "$D" --base HEAD)" "FAST|$H|--base|3 tests/zza.test.sh tests/zzb.test.sh tests/zznew.test.sh" \
+ok "$(selr "$D" --base HEAD)" "FAST|$H|--base|3 tests/zza.test.sh tests/zzb.test.sh tests/zznew.test.sh" \
   "S12: staged, unstaged and untracked edits all count (.claude/ still ignored)"
 git -C "$D" reset -q --hard && rm -f "$D/tests/zznew.test.sh"
 git -C "$D" mv skills/x/scripts/zza.py skills/x/scripts/zzr.py; git -C "$D" commit -qm rename
-ok "$(sel "$D" --base HEAD~1)" "FAST|$H|--base|2 tests/zza.test.sh tests/zzr.test.sh" "S12: a rename counts both paths"
+ok "$(selr "$D" --base HEAD~1)" "FAST|$H|--base|2 tests/zza.test.sh tests/zzr.test.sh" "S12: a rename counts both paths"
 put "$D" "docs/a b.md" 'spaced'
-ok "$(sel "$D" --base HEAD)" "FAST|$(git -C "$D" rev-parse HEAD)|--base|1 tests/zzdocs.test.mjs tests/zzspace.test.mjs" \
+ok "$(selr "$D" --base HEAD)" "FAST|$(git -C "$D" rev-parse HEAD)|--base|1 tests/zzdocs.test.mjs tests/zzspace.test.mjs" \
   "S12: docs/a b.md survives the -z parse, and a basename that is no token matches as a substring"
+
+# U1-U4 (p54-4): an untracked file is no carrier, and an untracked path no map line places is left out with a stderr
+# note (CI never sees it), never FULL; one a line does place, a new test say, still counts. --paths never leaves one out.
+D="$TMP/u"; mkrepo "$D"
+put "$D" skills/x/scripts/zzu.py 'U = 1'
+put "$D" tests/zzu.test.sh 'python3 skills/x/scripts/zzu.py'
+map "$D" 'skills/**' 'tests/*.test.*'
+push "$D" base
+B=$(git -C "$D" rev-parse HEAD)
+put "$D" .scratch/zzx.py 'L = "zzu.py"'
+LEFT_NOTE='fast-tier: .scratch/zzx.py: untracked and placed by no map line, left out (CI never sees it)'
+ok "$(selr "$D" --paths skills/x/scripts/zzu.py)" "FAST|-|-|1 tests/zzu.test.sh" \
+  "U1: an untracked scratch file that names the script is no carrier: FAST, never \`reaches .scratch/zzx.py\`"
+git -C "$D" add .scratch/zzx.py
+ok "$(selr "$D" --paths skills/x/scripts/zzu.py)" "FULL|skills/x/scripts/zzu.py: reaches .scratch/zzx.py, not in the map" \
+  "U1: … and once staged it is a carrier again, one no line places, so FULL"
+git -C "$D" rm -q --cached .scratch/zzx.py
+echo 'U = 2' >> "$D/skills/x/scripts/zzu.py"; git -C "$D" commit -qam u2
+ok "$(selr "$D")" "FAST|$B|origin/HEAD|1 tests/zzu.test.sh" \
+  "U2: a plain select beside the untracked file leaves it out and counts only the path it read"
+ok "$(cat "$TMP/selr.err")" "$LEFT_NOTE" "U2: … and names it in one stderr line"
+put "$D" tests/zzu2.test.sh 'echo new'
+ok "$(selr "$D")" "FAST|$B|origin/HEAD|2 tests/zzu.test.sh tests/zzu2.test.sh" "U3: an untracked new test still counts (a line places it)"
+rm -f "$D/tests/zzu2.test.sh"
+git -C "$D" reset -q --hard "$B"
+ok "$(selr "$D")" "FULL|no changed paths from $B once 1 untracked paths no map line places are left out" \
+  "U4: when the only changed paths are untracked ones no line places, none is left: FULL, as an empty diff is"
+ok "$(cat "$TMP/selr.err")" "$LEFT_NOTE" "U4: … the note still names it"
+ok "$(selr "$D" --paths .scratch/zzx.py)|$(cat "$TMP/selr.err")" "FULL|.scratch/zzx.py: not in the map|" \
+  "U4: --paths never leaves a path out, and writes no note"
 
 # ════ check ═════════════════════════════════════════════════════════════════════════════════════════════════════
 echo "== check"
@@ -292,12 +382,16 @@ map "$CB" 'skills/**' 'tests/*.test.*'
 out=$(chk "$CB"); rc=$?
 ok "$rc|$(holds "$out" "fast-tier map: ok (" ok "$out")" "0|ok" "C2: the base fixture passes check"
 # ctl <label> <expected text> <setup...>: a copy of the base fixture, the setup run in it, check exits 1 naming it.
-ctl() {
-  local label="$1" want="$2" out rc; shift 2
+# ctlu: the same with nothing staged, so the setup's new files stay untracked, as in a worktree before `git add`.
+ctl() { _ctl chk "$@"; }
+ctlu() { _ctl chku "$@"; }
+_ctl() {
+  local how="$1" label="$2" want="$3" out rc tag=C2; shift 3
+  [ "$how" = chku ] && tag="C2 unstaged"
   D="$TMP/ctl"; rm -rf "$D"; cp -R "$CB" "$D"
   ( cd "$D" && eval "$@" )
-  out=$(chk "$D"); rc=$?
-  ok "$rc|$(holds "$out" "$want" named "$(echo "$out" | head -3)")" "1|named" "C2: $label"
+  out=$($how "$D"); rc=$?
+  ok "$rc|$(holds "$out" "$want" named "$(echo "$out" | head -3)")" "1|named" "$tag: $label"
 }
 # pass <label> <setup...>: the same, and check passes.
 pass() {
@@ -351,6 +445,9 @@ pass "(i) a HUB line holding every suite that names it" "ml '$HUB'"
 ctl "(i) a suite that names the hub, missing from its HUB line" "tests/zzb.test.sh names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
   "put . tests/zzb.test.sh 'python3 skills/x/scripts/zza.py'; ml '$HUB'"
 ctl "(i) a suite that names a tests/lib helper naming the hub, missing" \
+  "tests/zzu.test.sh names tests/lib/zzh.sh, which names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
+  "put . tests/lib/zzh.sh 'python3 skills/x/scripts/zza.py'; put . tests/zzu.test.sh '. tests/lib/zzh.sh'; ml 'tests/lib/**' '$HUB'"
+ctlu "(i) … with the helper and its suite untracked (CI's checkout tracks them)" \
   "tests/zzu.test.sh names tests/lib/zzh.sh, which names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
   "put . tests/lib/zzh.sh 'python3 skills/x/scripts/zza.py'; put . tests/zzu.test.sh '. tests/lib/zzh.sh'; ml 'tests/lib/**' '$HUB'"
 ctl "(i) a HUB line naming no exact path" "skills/x/scripts/*.py: a HUB line names one exact path (check i)" 'ml "skills/x/scripts/*.py HUB tests/zza.test.sh"'
@@ -419,6 +516,48 @@ ctl "(d) a script whose only test is SLOW" "skills/x/scripts/zza.py: its only te
   "ml 'SLOW tests/zza.test.sh'; ts 200 tests/zza.test.sh"
 pass "(d) … while a second, non-SLOW test that names it clears it" \
   "put . tests/zzb.test.sh 'python3 skills/x/scripts/zza.py'; ml 'SLOW tests/zza.test.sh'; ts 200 tests/zza.test.sh"
+# DN: a new script whose only suite runs it through a second new script. Unstaged, the second is no carrier yet.
+DN='put . skills/x/scripts/zznew.py "N = 1"; put . skills/x/scripts/zzrun.sh "python3 skills/x/scripts/zznew.py"
+  put . tests/zzrun.test.sh "bash skills/x/scripts/zzrun.sh"'
+DN_WANT="skills/x/scripts/zznew.py: reaches no test; name it in a test, give its line entries, or mark it FULL"
+DN_WANT="$DN_WANT (skills/x/scripts/zzrun.sh names it but is untracked, and a file carries a name only once staged)"
+ctlu "(d) a new script reached only through an unstaged one names the unstaged file" "$DN_WANT (check d)" "$DN"
+pass "(d) … and once staged it carries it" "$DN"
+# (k) (p54-4): a READERS name's readers are declared on its files' lines. RK: two ZZSK.md files, skills/a's and skills/b's.
+RK='put . skills/a/ZZSK.md a; put . skills/b/ZZSK.md b; ml "FOREIGN ZZSK.md" "READERS ZZSK.md"'
+pass "(k) a declared literal reader, a FOREIGN-ONLY test and a walker that name ZZSK.md" \
+  "$RK; put . tests/zzra.test.sh 'cat skills/a/ZZSK.md'; put . tests/zzfx.test.sh 'echo x > \"\$tmp/ZZSK.md\"'
+   put . tests/zzw.test.mjs '// reads every ZZSK.md'
+   ml 'skills/a/ZZSK.md tests/zzra.test.sh' 'FOREIGN-ONLY ZZSK.md tests/zzfx.test.sh  # a temp copy' '** ALSO tests/zzw.test.mjs'"
+pass "(k) a reader of skills/b-a/ZZSK.md, through path.join segments, never reads skills/a's" \
+  "$RK; put . skills/b-a/ZZSK.md c; put . tests/zzba.test.mjs \"const f = path.join(root, 'skills', 'b-a', 'ZZSK.md')\"
+   ml 'skills/b-a/ZZSK.md tests/zzba.test.mjs'"
+ctl "(k1) an undeclared namer" "tests/zzrn.test.sh names ZZSK.md but is on no line of a ZZSK.md file (check k)" \
+  "$RK; put . tests/zzrn.test.sh 'echo ZZSK.md'"
+ctl "(k1) an undeclared user of a tests/lib helper that names it" \
+  "tests/zzru.test.sh names tests/lib/zzrh.sh, which names ZZSK.md but is on no line of a ZZSK.md file (check k)" \
+  "$RK; put . tests/lib/zzrh.sh 'cat skills/a/ZZSK.md'; put . tests/zzru.test.sh '. tests/lib/zzrh.sh'; ml 'tests/lib/**'"
+ctlu "(k1) … with the helper and its user untracked (the ZZSK.md files staged)" \
+  "tests/zzru.test.sh names tests/lib/zzrh.sh, which names ZZSK.md but is on no line of a ZZSK.md file (check k)" \
+  "$RK; git add -A; put . tests/lib/zzrh.sh 'cat skills/a/ZZSK.md'; put . tests/zzru.test.sh '. tests/lib/zzrh.sh'; ml 'tests/lib/**'"
+ctl "(k2) a literal read declared on another file's line" \
+  "tests/zzrb.test.sh reads skills/b/ZZSK.md but is on no line of skills/b/ZZSK.md (check k)" \
+  "$RK; put . tests/zzrb.test.sh 'cat skills/b/ZZSK.md'; ml 'skills/a/ZZSK.md tests/zzrb.test.sh'"
+ctl "(k2) a path.join segment read declared on another file's line" \
+  "tests/zzrs.test.mjs reads skills/b/ZZSK.md but is on no line of skills/b/ZZSK.md (check k)" \
+  "$RK; put . tests/zzrs.test.mjs \"const f = path.join(root, 'skills', 'b', 'ZZSK.md')\"; ml 'skills/a/ZZSK.md tests/zzrs.test.mjs'"
+ctl "(k2) a \$HERE/../ read under skills/execute/tests declared on the wrong line" \
+  "skills/execute/tests/zzrel.test.sh reads skills/execute/ZZSK.md but is on no line of skills/execute/ZZSK.md (check k)" \
+  "$RK; put . skills/execute/ZZSK.md e; put . skills/execute/tests/zzrel.test.sh 'cat \"\$HERE/../ZZSK.md\"'
+   ml 'skills/a/ZZSK.md skills/execute/tests/zzrel.test.sh'"
+ctl "(k2) a '..', 'ZZSK.md' read under skills/execute/tests declared on the wrong line" \
+  "skills/execute/tests/zzrelj.test.mjs reads skills/execute/ZZSK.md but is on no line of skills/execute/ZZSK.md (check k)" \
+  "$RK; put . skills/execute/ZZSK.md e; put . skills/execute/tests/zzrelj.test.mjs \"const f = path.join(here, '..', 'ZZSK.md')\"
+   ml 'skills/a/ZZSK.md skills/execute/tests/zzrelj.test.mjs'"
+ctl "(k3) a stale readers entry" "tests/zza.test.sh does not name ZZSK.md; drop it from that readers line (check k)" \
+  "$RK; ml 'skills/a/ZZSK.md tests/zza.test.sh'"
+ctl "(a) READERS of a name that is not FOREIGN" "READERS ZZNOT.md: ZZNOT.md is not a FOREIGN name (check a)" "ml 'READERS ZZNOT.md'"
+ctl "(a) READERS with no name" "READERS names no name (check a)" "ml 'READERS  # nothing'"
 
 # C3: the selector collects exactly what run.sh runs.
 globs=$(python3 - "$SEL" <<'PY'
@@ -431,6 +570,15 @@ PY
 run_globs=$(sed -n -e 's/^node_tests=(\(.*\))$/\1/p' -e 's/^sh_tests=(\$(ls -S \(.*\)))$/\1/p' tests/run.sh | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 ok "$globs" "$run_globs" "C3: the selector's COLLECTED globs equal run.sh's node_tests and sh_tests globs"
 
+# C4 (p54-4): contract-text's skillCount counts the directories under skills/ but _shared whose top holds a .md file, so
+# a deleted skill's leftovers (an ignored __pycache__/, a .DS_Store) count as none; it names no SKILL.md (check k).
+d="$TMP/c4"; rm -rf "$d"; mkdir -p "$d/skills/zza" "$d/skills/_shared" "$d/skills/zzgone/scripts/__pycache__"
+: > "$d/skills/zza/SKILL.md"; : > "$d/skills/_shared/x.md"; : > "$d/skills/zzgone/scripts/__pycache__/x.cpython-312.pyc"
+: > "$d/skills/zzgone/.DS_Store"
+c4=$(node --input-type=module -e 'const { skillCount } = await import(process.argv[1]); console.log(skillCount(process.argv[2]))' \
+  "$root/tests/lib/$CT.mjs" "$d/skills" 2>&1)
+ok "$c4" 1 "C4: skillCount over a temp skills tree counts zza only, never _shared or zzgone's leftovers"
+
 # ════ the real tree ═════════════════════════════════════════════════════════════════════════════════════════════
 echo "== the real tree"
 r1=$(python3 "$SEL" select --paths skills/reflect/scripts/attention.py)
@@ -438,12 +586,13 @@ ok "$(holds "${r1:0:4}" FULL y "$(holds "$r1" tests/reflect-weekly.test.mjs y "$
   "R1: attention.py is FULL or reaches tests/reflect-weekly.test.mjs (reflect.py loads it by path)"
 r2=$(python3 "$SEL" select --ignore-full --paths skills/reflect/scripts/attention.py)
 has "$r2" "tests/reflect-weekly.test.mjs" "R2: with --ignore-full, attention.py reaches tests/reflect-weekly.test.mjs through reflect.py"
-# R3, re-judged in p45-4 (ADR 0078 d2): land-carrier.py runs merge-task.sh's classifier (--classify-steps), land.sh runs
-# land-carrier.py's marker verb, and rollout-settings.py runs land.sh, so a merge-task.sh change reaches rollout-settings.py,
-# a HUB line (#372) whose reach ends at its declared suites: FAST, with the carrier's suite as well as the self-tests.
+# R3, re-judged in p45-4 (ADR 0078 d2) and p54-4: land-carrier.py runs merge-task.sh's classifier (--classify-steps), so
+# a merge-task.sh change reaches land-carrier.py, and the reach stops there, one carrier deep (land.sh, which runs
+# land-carrier.py's marker verb, and rollout-settings.py, which runs land.sh, are no longer reached): FAST, with the
+# carrier's suite as well as the self-tests.
 r3=$(python3 "$SEL" select --paths skills/execute/scripts/merge-task.sh)
 ok "$(echo "$r3" | head -1 | cut -f1)|$(printf '%s\n' "$r3" | grep -cx '@merge-task-self-tests')|$(printf '%s\n' "$r3" | grep -cx 'tests/land-carrier.test.sh')|$(printf '%s\n' "$r3" | grep -c 'fast-tier.py')" \
-  "FAST|1|1|0" "R3: merge-task.sh is FAST with @merge-task-self-tests and the carrier's suite, through land-carrier.py and land.sh (if this turns FULL, re-judge the FULL list: what does it reach?)"
+  "FAST|1|1|0" "R3: merge-task.sh is FAST with @merge-task-self-tests and the suite of land-carrier.py, the carrier that runs it (if this turns FULL, re-judge the FULL list: what does it reach?)"
 r4=$(python3 "$SEL" select --paths docs/adr/0073-thread-skill-verifies-a-fast-tier-at-merge.md)
 ok "$(printf '%s\n' "$r4" | head -1 | cut -f1)|$(printf '%s\n' "$r4" | grep -cxE 'tests/(verify-slot|release-check-quoting-diff)\.test\.sh')" "FAST|2" \
   "R4: a docs-only change is FAST and runs the walkers (verify-slot, release-check-quoting-diff)"
@@ -465,7 +614,7 @@ for h in skills/execute/scripts/reconcile-rollout.py skills/execute/scripts/lead
     "R7: the hub $h is FAST: its declared suites and the walkers (FULL means its HUB line went)"
 done
 r8=$(python3 "$SEL" select --paths THREAD.md)
-ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
+ok "$(printf '%s\n' "$r8" | head -1 | cut -f1)|$(printf '%s\n' "$r8" | grep -cxE 'tests/leg(-land|-security)?.test.sh|tests/lead-integrate.test.sh|tests/land.test.sh')" "FAST|0" \
   "R8: a THREAD.md change is FAST and skips the suites that write only fixture repos' THREAD.md (their FOREIGN-ONLY line)"
 has "$(python3 "$SEL" select --paths CONTEXT.md)" "tests/repo-threads.test.sh" "R8: … while CONTEXT.md still selects repo-threads.test.sh, which reads the real one"
 has "$(python3 "$SEL" select --paths CLAUDE.md)" "tests/fast-tier-wiring.test.mjs" "R8: … and CLAUDE.md still selects fast-tier-wiring.test.mjs (W3 reads it)"
@@ -483,12 +632,65 @@ ok "$(printf '%s\n' "$r9" | grep -c "^KEPT$tab")|$(printf '%s\n' "$r9" | grep -c
 r10=$(THREAD_SKIP_SLOW=1 bash tests/run.sh --shard-plan 4 2>&1); r10rc=$?
 missing=""; for t in $slow_map; do printf '%s\n' "$r10" | grep -qx "[1-4]$tab$t" || missing="$missing $t"; done
 ok "$r10rc|${missing:-none}" "0|none" "R10: THREAD_SKIP_SLOW=1 bash tests/run.sh --shard-plan 4 still lists every SLOW suite"
+# R11-R12 (p54-4): the real tree through one index. core(p) is the entries of every map line matching p, ALSO included;
+# closure(s) adds the runners of s until nothing is new (rule 5). R11: a SKILL.md (a READERS name) selects exactly the
+# closure of its lines' entries, so no test that only names the word is reach, and orient's holds no SLOW suite. R12: an
+# ADR selects between the closure of its lines' entries and its namers, and that plus what its carriers add one deep;
+# the asserted counts are of lines' entries only, so only a FULL change moves them.
+rr=$(python3 - "$SEL" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("ft", sys.argv[1]); ft = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ft)
+R = ft.Repo()
+slow = {t for _no, t in R.slow}
+def core(p):
+    return set().union(*(l.entries for l in R.matching(p)))
+def closure(s):
+    s = set(s); todo = [t for t in s if t != ft.SELF_TESTS]
+    while todo:
+        for r in R.ran_by.get(todo.pop(), ()):
+            if r not in s:
+                s.add(r); todo.append(r)
+    return s
+def say(cond, msg):
+    print(f"{'ok' if cond else 'FAIL'}\t{msg}")
+for p in ("skills/orient/SKILL.md", "skills/execute/SKILL.md"):
+    full, sel = R.select([p])
+    say(not full and sel == closure(core(p)),
+        f"R11: {p} is FAST and selects exactly the closure of its lines' entries ({full or len(sel)})")
+full, sel = R.select(["skills/orient/SKILL.md"])
+say(not full and not (sel & slow), f"R11: … and orient's selection holds no SLOW suite ({sorted(sel & slow)})")
+say("skills/execute/tests/prompt-invariants.test.mjs" in core("skills/execute/SKILL.md"),
+    "R11: … while execute's lines hold prompt-invariants, its declared relative reader")
+p = "docs/adr/0083-capacity-backs-off-only-for-strain-it-can-relieve.md"
+b = os.path.basename(p)
+full, sel = R.select([p])
+lower = closure(core(p) | R.namers(b, "tests"))
+carriers = R.namers(b, "carriers")
+upper = set(lower)
+for c in carriers:
+    upper |= core(c) | R.namers(os.path.basename(c), "tests")
+upper = closure(upper)
+say((not full and lower <= sel <= upper) or (full and any(c in full for c in carriers)),
+    f"R12: ADR 0083 selects between its lines' entries and namers, and what its carriers add one deep ({full or len(sel)})")
+say(len(core(p)) < 50, f"R12: … its lines' entries number under 50 ({len(core(p))}; it selects {full or len(sel)})")
+say(not any(c.startswith("docs/") for c in R.carriers) and set(R.carriers) <= set(R.tracked),
+    "R12: no carrier lies under docs/, and every carrier is tracked")
+PY
+)
+n=0
+while IFS=$tab read -r v msg; do ok "$v" ok "$msg"; n=$((n + 1)); done <<< "$rr"
+ok "$n" 7 "R11-R12: the real-tree reading printed its seven verdicts"
 
 # ════ tests/run.sh on a fixture checkout ════════════════════════════════════════════════════════════════════════
 echo "== run.sh"
+# Every fixture run below leaves the warm's stdlib half out (run.sh's header, "The bytecode cache"): each launches only a
+# few pythons, so warming about 560 stdlib modules per run cost this suite more than the warm saved. F24 runs it whole.
+export THREAD_TEST_WARM_STDLIB=0
 F="$TMP/f"; mkrepo "$F"
 cp "$root/tests/run.sh" "$F/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$F/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$F/tests/lib/"
 put "$F" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$F" skills/x/scripts/zza.py 'print("a")'
 put "$F" skills/x/scripts/zzb.py 'print("b")'
@@ -519,8 +721,13 @@ ok "$(porc)" "$p0" "F8: the fast run left the fixture's git status unchanged"
 
 put "$F" new.txt 'loose'
 ZZ_C_OK=1 THREAD_VERIFY_BASE=$FB run bash --fast
+ok "$rc|$(markers)" "0|zzmarker-a " "F2b: an untracked path no map line places is left out: the zza.py commit runs only zza's suite"
+has "$out" "== fast tier: base ${FB:0:12} (--base), 1 changed paths, 1 test files" "F2b: … counting only the path it read"
+has "$out" "fast-tier: new.txt: untracked and placed by no map line, left out (CI never sees it)" "F2b: … and the note reaches the run log"
+git -C "$F" add new.txt
+ZZ_C_OK=1 THREAD_VERIFY_BASE=$FB run bash --fast
 ok "$rc|$(markers)" "0|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
-  "F2: an unmapped path runs everything"
+  "F2: a tracked unmapped path runs everything"
 has "$out" "== fast tier: full suite (new.txt: not in the map)" "F2: … and says why"
 rm -f "$F/new.txt"
 
@@ -595,7 +802,9 @@ ok "$(printf '%s\n' "$out" | grep -cE '^[12]'"$tab"'')|$(printf '%s\n' "$out" | 
   "F11: … and prints <k><TAB><entry> for each entry once"
 
 for args in "--shard 0/2" "--shard 3/2" "--shard x" "--shard 1/2 extra" "--shard" "--shard 1/2/3" "--shard /2" \
-  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--fast --shard 1/2" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2"; do
+  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2" \
+  "--fast --shard 0/2" "--fast --shard 3/2" "--fast --shard 1/2 extra" "--fast --shard-plan 0" "--fast --fast" \
+  "--fast --only tests/zza.test.sh" "--shard-plan 2 --fast"; do
   # shellcheck disable=SC2086
   run bash $args
   ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== ')" "2||0" "F12: run.sh $args exits 2 and runs nothing"
@@ -610,7 +819,40 @@ put "$F" tests/lib/shard.py 'import sys; sys.exit(1)'
 ZZ_C_OK=1 run bash --shard 1/2
 ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no test"
 has "$out" "  - shard split" "F14: … through the shard split step"
+has "$out" "run.sh: shard.py --order failed, so node takes its files in glob order" "F14: … and node's order falls back to the glob's, and says so"
 git -C "$F" checkout -q -- tests/lib/shard.py
+
+# F26 (p54-10, ADR 0084 d4): --fast --shard K/N runs shard K of the fast tier's selection, so the shards together run it
+# exactly once: over a small diff (F1's: zza alone, so shards 2 and 3 hold nothing) and a FULL one (F2's tracked
+# unmapped path), the union of --fast --shard k/3's suite runs (allmarkers, not deduplicated) is --fast's selection,
+# which F1 and F2 pin. G7 runs the same under the Slow tier's flag.
+# fshards <base>: shard k's output in fo[k], the three joined in $fsh, their exit codes in $frc.
+fshards() {
+  local k; fsh=""; frc=""; fo=()
+  for k in 1 2 3; do ZZ_C_OK=1 THREAD_VERIFY_BASE=$1 run bash --fast --shard "$k/3"; fo[$k]=$out; fsh="$fsh$nl$out"; frc="$frc$rc"; done
+}
+echo 'B = 1' >> "$F/skills/x/scripts/zza.py"; git -C "$F" commit -qam "a only"
+fshards "$FB"
+ok "$frc|$(allmarkers "$fsh")" "000|zzmarker-a " "F26: a small diff's three --fast shards run its one suite exactly once, and all pass"
+ok "$(holds "${fo[1]}" "== shard 1/3: 1 test files" y n)$(holds "${fo[1]}" "== fast tier: base ${FB:0:12} (--base), 1 changed paths, 1 test files" y n)" yy \
+  "F26: … shard 1 holds it, after the fast tier's own line"
+for k in 2 3; do
+  o=${fo[$k]}
+  ok "$(holds "$o" "== fast-tier map check" y n)$(holds "$o" "== shard $k/3: 0 test files" y n)$(holds "$o" "== node tests: none selected" y n)$(holds "$o" "make test: ALL PASS" y n)" yyyy \
+    "F26: … shard $k holds no entry: it runs the always-run steps, no suite and no node, and passes"
+done
+fpo=$(cd "$F" && THREAD_VERIFY_BASE=$FB bash tests/run.sh --fast --shard-plan 3 2>"$TMP/fplan.err"); fprc=$?
+ok "$fprc|$(printf '%s' "$fpo" | tr '\t\n' ':/')|$(grep -c '^== fast tier: base ' "$TMP/fplan.err")|$(grep -c '^== fast-tier map check' "$TMP/fplan.err")" \
+  "0|1:tests/zza.test.sh|1|0" "F26: --fast --shard-plan 3 prints only the selection's split on stdout, its fast tier line on stderr, and runs no step"
+git -C "$F" reset -q --hard "$FB"
+put "$F" new.txt 'loose'; git -C "$F" add new.txt
+fshards "$FB"
+ok "$frc|$(allmarkers "$fsh")" \
+  "000|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F26: a FULL diff's three --fast shards run every suite and both self-tests exactly once, and all pass"
+ok "$(printf '%s\n' "${fo[1]}" | grep -c 'zzmarker-self-test --self-test-')|$(printf '%s\n' "${fo[2]}$nl${fo[3]}" | grep -c 'zzmarker-self-test')|$(printf '%s\n' "$fsh" | grep -c '^== fast tier: full suite (new.txt: not in the map)$')" \
+  "2|0|3" "F26: … the self-tests in shard 1 only, and each shard says why it fell to the full suite"
+git -C "$F" rm -qf new.txt
 
 # F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
 # mid-run still shows every suite that finished (F15's sentinel case: one suite's line while another still runs); the
@@ -726,13 +968,72 @@ for bad in "nottab tests/zza.test.sh" "0${tab}tests/zza.test.sh" "3${tab}tests/z
 done
 rm -f "$W"
 
+# F23 (p54-3): node takes its files longest first, by the measured seconds in tests/shard-weights.tsv: shard.py --order
+# sorts them and tests/lib/node-run.mjs keeps that order (`node --test` itself sorts its arguments by path). At
+# THREAD_TEST_JOBS=1 node runs one file at a time, so the markers' order is the files' start order.
+put "$F" tests/zzd.test.mjs "console.log('zzmarker-d')"
+nodeorder() { printf '%s\n' "$out" | grep -oE 'zzmarker-[cd]' | tr '\n' ' '; }
+printf '%s\t%s\n' 1 tests/contracts/zzc.test.mjs 100 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-d zzmarker-c " "F23: the heavier node file (zzd, 100 s) runs first, though zzc's path sorts first"
+has "$out" "== node seconds per file" "F23: … and node prints each file's seconds, the weights' source"
+printf '%s\t%s\n' 100 tests/contracts/zzc.test.mjs 1 tests/zzd.test.mjs > "$W"
+ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(nodeorder)" "0|zzmarker-c zzmarker-d " "F23: … and with the weights swapped, zzc runs first"
+ZZ_C_OK=0 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
+ok "$rc|$(lines '^node tests \(2 files\): FAILED \([0-9]+s\)$')" "1|1" "F23: … a failing node file still fails the node step and the run"
+# node-run.mjs exits as `node --test` does, by the run's summary: a failing `todo` test passes, a failing test does not.
+put "$F" tests/zze.test.mjs "import test from 'node:test'
+test('zze todo', { todo: true }, () => { throw new Error('zze') })
+test('zze fails', () => { if (process.env.ZZ_E_FAIL) throw new Error('zze') })"
+erc() { (cd "$F" && env "$@" node tests/lib/node-run.mjs tests/zze.test.mjs > /dev/null 2>&1); echo $?; }
+ok "$(erc ZZ_E=)|$(erc ZZ_E_FAIL=1)" "0|1" "F23: … node-run.mjs passes a failing todo test, as the CLI does, and fails a failing test"
+rm -f "$W" "$F/tests/zzd.test.mjs" "$F/tests/zze.test.mjs"
+
+# F24 (p54-3): the warm's stdlib half. zzw prints whether its python finds argparse's bytecode in the run's prefix, and
+# the knob it sees. This suite's THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out; 1 warms it; the suite never sees the
+# knob (run.sh unsets it); any other value exits 2 before any step.
+put "$F" tests/zzw.test.sh "python3 -c 'import argparse, importlib.util, os
+warm = os.path.isfile(importlib.util.cache_from_source(argparse.__file__))
+print(\"zzwarm\", \"warm\" if warm else \"cold\", os.environ.get(\"THREAD_TEST_WARM_STDLIB\", \"unset\"))'"
+warmed() { printf '%s\n' "$out" | grep '^zzwarm ' | tr '\n' '/'; }
+run bash --only tests/zzw.test.sh; w0="$rc|$(warmed)"
+THREAD_TEST_WARM_STDLIB=1 run bash --only tests/zzw.test.sh; w1="$rc|$(warmed)"
+ok "$w0 $w1" "0|zzwarm cold unset/ 0|zzwarm warm unset/" \
+  "F24: THREAD_TEST_WARM_STDLIB=0 leaves the stdlib out of the prefix, 1 warms it, and no suite inherits the knob"
+THREAD_TEST_WARM_STDLIB=x run bash --only tests/zzw.test.sh
+ok "$rc|$(warmed)|$(lines '^== ')|$(lines "THREAD_TEST_WARM_STDLIB must be 0, 1 or empty, got 'x'")" "2||0|1" \
+  "F24: … THREAD_TEST_WARM_STDLIB=x exits 2 before any step and runs nothing"
+rm -f "$F/tests/zzw.test.sh"
+
+# F25 (p54-3): a TERM to node-run.mjs alone (as when a verify slot's guard ends a run inside node's step) cancels the
+# run as the CLI does: the running file's child ends with it, never left to init, its test reads cancelled, and the run
+# exits 1. Both waits are bounded (20 s for the child's pid, 5 s for its end), and a node-run.mjs that ignored the TERM
+# still ends at zzt's own 60 s, so a regression never hangs the suite.
+tpid="$TMP/f25.pid"; rm -f "$tpid"
+put "$F" tests/zzt.test.mjs "import { writeFileSync } from 'node:fs'
+writeFileSync(process.env.ZZ_PID, String(process.pid))
+setTimeout(() => {}, 60000)"
+(cd "$F" && ZZ_PID="$tpid" exec node tests/lib/node-run.mjs tests/zzt.test.mjs > "$TMP/f25.out" 2>&1) & npid=$!
+n=0; while [ ! -s "$tpid" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+kill -TERM "$npid"; wait "$npid"; nrc=$?
+child=$(cat "$tpid" 2>/dev/null)
+n=0; while [ -n "$child" ] && kill -0 "$child" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n+1)); done
+if [ -z "$child" ]; then alive="no child pid"
+elif kill -0 "$child" 2>/dev/null; then alive="child alive, ppid $(ps -o ppid= -p "$child" | tr -d ' ')"; kill "$child"
+else alive=none; fi
+ok "$nrc|$alive|$(grep -c 'cancelled 1' "$TMP/f25.out")" "1|none|1" \
+  "F25: a TERM to node-run.mjs cancels the run: exit 1, the running file's child gone with it, its test cancelled"
+rm -f "$F/tests/zzt.test.mjs"
+
 # G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
 # included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:
 # zzs.py is named by zzslow (SLOW, 200 s) and zzsfast; zzslow prints the THREAD_SKIP_SLOW it sees. A workflow script,
 # as in F, since run.sh's workflow parse step needs one under bash 3.2's set -u.
 G="$TMP/g"; mkrepo "$G"
 cp "$root/tests/run.sh" "$G/tests/run.sh"
-cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$G/tests/lib/"
+cp "$root/tests/lib/test-jobs.sh" "$root/tests/lib/check-workflow-parse.sh" "$root/tests/lib/shard.py" "$root/tests/lib/node-run.mjs" \
+  "$G/tests/lib/"
 put "$G" skills/execute/scripts/merge-task.sh 'echo "zzmarker-self-test $1"'
 put "$G" skills/x/scripts/zzs.py 'print("s")'
 put "$G" tests/zzslow.test.sh 'echo "zzmarker-slow zzs.py ${THREAD_SKIP_SLOW:-unset}"'
@@ -765,13 +1066,13 @@ for sh in "${shells[@]}"; do
     "G3 ($sh): with the flag, a diff that edits the SLOW suite's own file still runs it, and says so"
 done
 git -C "$G" reset -q --hard "$GB"
-put "$G" new.txt 'loose'
+put "$G" new.txt 'loose'; git -C "$G" add new.txt
 THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung bash --fast
 ok "$rc|$(markers)|$(slowl)" \
   "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |$LEFT" \
-  "G4: with the flag, a FULL fallback (an unmapped path) runs everything but the SLOW suite, and names it"
+  "G4: with the flag, a FULL fallback (a tracked unmapped path) runs everything but the SLOW suite, and names it"
 has "$out" "== fast tier: full suite (new.txt: not in the map)" "G4: … the fallback says why"
-rm -f "$G/new.txt"
+git -C "$G" rm -qf new.txt
 THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=0000000000000000000000000000000000000bad rung bash --fast
 ok "$rc|$(markers)|$(slowl)" \
   "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |$LEFT" \
@@ -790,6 +1091,20 @@ for mode in --fast "" "--shard-plan 2"; do
   ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c -e '^== ' -e "^[12]$tab")|$(printf '%s\n' "$out" | grep -c "THREAD_SKIP_SLOW must be 1 or empty, got 'yes'")" \
     "2||0|1" "G6: THREAD_SKIP_SLOW=yes (${mode:-bare}) exits 2 before any step and runs nothing"
 done
+
+# G7 (p54-10): F26 under the Slow tier's flag. A diff reaching zzslow (SLOW), zzsfast and the self-tests: with the flag,
+# the union of --fast --shard k/3 is --fast's selection with zzslow left out (G1's rule), each entry once, and each shard
+# names what it left out; --fast --shard-plan 3 leaves it out of the split too.
+echo 'S = 2' >> "$G/skills/x/scripts/zzs.py"; echo '# touched' >> "$G/skills/execute/scripts/merge-task.sh"
+git -C "$G" commit -qam "zzs and merge-task"
+gsh=""; grc=""
+for k in 1 2 3; do THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung bash --fast --shard "$k/3"; gsh="$gsh$nl$out"; grc="$grc$rc"; done
+ok "$grc|$(allmarkers "$gsh")|$(printf '%s\n' "$gsh" | grep -cxF "${LEFT%/}")" \
+  "000|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |3" \
+  "G7: with the flag, the three --fast shards run the selection less the SLOW suite exactly once, and each names it"
+gpo=$(cd "$G" && THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB bash tests/run.sh --fast --shard-plan 3 2>/dev/null); gprc=$?
+ok "$gprc|$(printf '%s\n' "$gpo" | cut -f2 | LC_ALL=C sort | tr '\n' ' ')" "0|@merge-task-self-tests tests/zzsfast.test.sh " \
+  "G7: … and --fast --shard-plan 3 splits only that selection"
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"

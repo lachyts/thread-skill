@@ -8,7 +8,9 @@ Tests: one test file, hermetic: `bash tests/run.sh --only <test file>...`
 
 `make test-fast` is the fast tier: the always-run checks, then only the test files the diff reaches. That reach is
 declared in tests/fast-tier.map, and tests/lib/fast-tier.py's header holds its rules. A changed path the map cannot
-place runs the full suite (ADR 0073 d1). Every run, `make test` included, checks the map and names what is missing:
+place runs the full suite (ADR 0073 d1); an untracked one is left out with a note instead, since CI never sees it, and
+`--paths` never leaves one out (the header's Changed paths). Every run, `make test` included, checks the map and names
+what is missing:
 
 - A new script under skills/*/scripts/ or hooks/ is already placed by `skills/**` or `hooks/**`; it needs only a
   test that names it (check d). It needs a map line only when it should be FULL or no test names it.
@@ -16,6 +18,8 @@ place runs the full suite (ADR 0073 d1). Every run, `make test` included, checks
 - A new test that lists a directory joins the walkers' `** ALSO` line or an OWN-LISTINGS line (check f).
 - A new test that names a hub (a `HUB` line's path) or a tests/lib helper that does joins that hub's HUB line
   (check i).
+- A new test that names `SKILL.md`, or sources a tests/lib helper that does, joins the tests/fast-tier.map line of each
+  SKILL.md it reads, or `FOREIGN-ONLY SKILL.md` when it reads none (check k).
 - A suite whose tests/ci-seconds.tsv macOS CI median reaches 180 s joins the Slow tier with a `SLOW` line, and a SLOW
   suite measured under 150 s leaves it (check j); a script whose only tests are SLOW needs a non-SLOW test (check d).
   GitHub's PR check sets `THREAD_SKIP_SLOW=1` and leaves them out unless the diff edits one; `make test-fast` without
