@@ -610,6 +610,13 @@ above 0, name it as ADR 0067 d6's trigger for vault copies (overlaps in two week
 readings running), and name any overlap whose note the week shows was left wrong, the other trigger, which the record
 cannot show. A null `noteOverlaps` is unread (its flag says why), never `none`.
 
+**Master's full suite.** Read `span.json`'s `masterRuns` (p54-7, ADR 0084 Decided for you 3 and 11) as reported, never
+traced: `reconcile-rollout.py master-runs` decided each line, not a run of this week's, so it is no friction and no
+sighting. Per repo, name `redRuns` (how often master went red), its `breaks` with `filed` and `healed` apart,
+`publisherReds`, `unconfirmed`, `rerunPasses` and `blips`, `greens`, `unproven`, and `trailMinutes` (median and max: how
+long the Green tip trailed a red). A trail of hours is Decided for you 3's cue to propose revert-first, as a rule item
+for Lachy, never a knob. A null `masterRuns` is unread (its flag says why), never quiet.
+
 **The attention ledger** (`span.json`'s `attention`). Label each question's Owner by
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1 (with `~/.agents/knowledge/how-lachy-decides.md` when it is there)
 into `/tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json`, `{"<id>": "<owner>"}`, the owner one of `yours`, `priorities`,

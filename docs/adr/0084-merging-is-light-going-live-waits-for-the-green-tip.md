@@ -15,8 +15,18 @@ under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the di
 fallbacks included, and names them in one line. Decided for you 2's return rule waits for p54-7's red-master record,
 in its own follow-up task (p54-18). Decided for you 11's publisher and Decided for you 4 by p54-5: full-suite.yml's
 `green-tip` job, named `publish the Green tip`, fast-forwards `refs/thread/green` to a run's commit once every shard
-passed, and the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Readers
-not yet built (p54-6, p54-7). d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
+passed, and the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Decided
+for you 3 by p54-7: `reconcile-rollout.py master-runs`, run by the lead at each loop entry, after each landing merge and
+at each heartbeat tick (never blocking a merge), reads master's last 100 `full suite` runs, re-runs the newest red run's
+failed jobs once, and files a red-master fix (`priority: high`, `master_red:`, joined first) for each suite its re-test
+confirms, naming every merge since the last green; a pass on the re-run is a `rerun-pass` line, never a Flake; its
+master-run lines (master-runs.jsonl) feed the weekly Reflection's `masterRuns` (how often master went red, how long the
+Green tip trailed). Decided for you 13 by p54-7, with "on the next default-branch run's publisher" read as a publisher
+red that returns on the next run after a run that got no re-run (a newer run was already waiting): that one is covered
+and files a publisher task with no re-run, while a publisher red straight after a blip is a first red with its own one
+re-run. Decided for you 11's lead check by p54-7: a `refs/thread/green` commit with no successful `full suite` run files
+its own task. Readers not yet built (p54-6).
+d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
 header holds the rules): a file under `docs/` and an untracked file are no carriers, and the reach stops one carrier
 deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
 `tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line

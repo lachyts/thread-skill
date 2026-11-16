@@ -40,7 +40,9 @@ Subcommands:
               whose dependencies are met, `priority:` orders; that task holds every task ranked below it, whatever
               their `priority:` (p17-2), so a `## Queue` row move, never a `priority:` edit, takes a task past it.
               Schedule order is each task's first wikilink on a list-item or table-row line of the rollout body;
-              prose and fenced code never rank. Honours a soft pause: once nothing runs, awaits or integrates (a held
+              prose and fenced code never rank. A red-master fix (a valued `master_red:`, master-runs below) ranks ahead
+              of every scheduled task, a ranked line above the `## Queue` table and a queued Solo head included, so it
+              starts first among its priority (`high`, the top weight). Honours a soft pause: once nothing runs, awaits or integrates (a held
               RACE whose `integrating:` stands included, Race holds below), it stamps `paused:` and removes
               `pause_requested` (the drain, ADR 0030 decision 5). `startUnattended` reports the rollout start stamp
               (`start: unattended`, vault grammar § Rollout start stamp) and every call off --dry-run that gets past
@@ -659,7 +661,8 @@ Subcommands:
               save replays it once): each task its `## Queue` does not link gets a row ranked first, `| <n> |
               [[<slug>\\|<alias>]] | <its scope: or —> | joined <YYYY-MM-DD> |` (`joined <YYYY-MM-DD>, solo` for a
               `solo: true` task; columns mapped by header name, any other `—`), right below the rows already joined (so
-              joined tasks keep their join order, above the original queue; at the top of a table with no Mode column),
+              joined tasks keep their join order, above the original queue; at the top of a table with no Mode column;
+              at the very top, above the joined rows, for master-runs' in-process join, which alone sets `top`),
               its `#` the integer of the row it displaces and every integer `#` below shifted; a list-form queue gets `-
               [[<slug>|<alias>]] — joined <YYYY-MM-DD>` items below its joined ones. The alias drops the rollout's
               project-slug prefix (its slug before `-rollout-`) and is cut to 40 characters; the date is --now's, in its
@@ -673,7 +676,8 @@ Subcommands:
               <remedy>` lines (git-env, lane, room-stop, hold_until, surface-wait, halt: read with no git and no gh;
               they never change the exit), then `[written: <n notes saved>]`, `[no-change]` or `(dry-run)`. stderr's
               `WARN: join:` lines: a queued linked task a ranked line above the queue's table ranks above the joined
-              ones, and a queued linked task whose `priority:` outweighs a joined one's (next orders by priority first).
+              ones (never for a top join: its red-master fix ranks first anyway), and a queued linked task whose
+              `priority:` outweighs a joined one's (next orders by priority first).
 
   approve-queue  `--rollout <note> --pr <owner/repo#N | PR URL>` (p30-4; Approved queue below): run on Lachy's words
               naming a queue and its gating PR (execute § Invocation forms, orient § 9, schedule step 8). Writes, in one
@@ -1129,6 +1133,187 @@ Subcommands:
               own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
               changes only `waiting`'s cause, never moving or stalled.
 
+  master-runs  `--rollout <note> [--tasks-dir D] [--gh-bin gh] [--now ISO] [--dry-run]` (p54-7; ADR 0084 Decided for you
+              3, 11 and 13; execute § 4.5 *Master's full suite*): read master's `full suite` runs, make the newest red run's
+              one re-run, file a red-master fix task first in the queue (CONTEXT.md **Red-master fix**), check the Green
+              tip, and write master-run lines to the Run record's reserved master-runs.jsonl. The lead runs it at each
+              loop entry, after each `mark-done` that lands a merge and at each heartbeat tick, `|| true`: it never blocks
+              a merge, and the lead never routes on its exit. Guarded (not GUARD_EXEMPT). This entry is its rules' one
+              copy.
+              Exits: 0 everything read, or nothing to read (no GitHub origin, a 404 on the workflow: one line each); 8 not
+              read, whole or in part, one line `master-runs: not read (<why>)`: gh missing, a transient read failure (a
+              timeout, a 5xx, no HTTP code), the read budget, the pass deadline, master-runs.jsonl unreadable, or the
+              master-runs lock busy (decisions whose reads were complete are still written, but under the last two
+              nothing is written to the vault or the Run record; the read cache is still saved: it holds only reads); 1 a
+              write failed, `ERROR: master-runs: …` (a task file, a join that failed to write, a line _event returned
+              False for, `line not written (<key>)`, or a line the fitter could not fit, `line refused (<why>)`, a bug):
+              the pass goes on with its other decisions, and the failed one's line is never written, so its key stays
+              free and the next pass decides R (or the unproven C) again: it files a task that was not written, or finds
+              R's own stem (below; the Green tip's task by its own stem), joins it while its `rollout:` is empty and
+              writes the line naming it (a refused line, a bug, is refused again); 2 usage (no rollout note, no `Project
+              root:`). 1 outranks 8.
+              The origin: remote.origin.url as configured, in one of merge-settings.py's three GitHub forms (its
+              GITHUB_URL_RE, mirrored as MASTER_GITHUB_URL_RE), `.git` dropped, lower-cased; anything else is no GitHub
+              origin. Each origin has its own read cache, re-run ledger and lock, in _note_lock_dir(), named
+              `master-runs-<owner>.<name>{.json,.reruns.json,.lock}` (a GitHub owner holds no dot).
+              Reads (merge-settings.py's _gh/_get): `gh api` in its own process group, GH_PROMPT_DISABLED and
+              GH_NO_UPDATE_NOTIFIER set, GIT_* scrubbed, the HTTP code from `(HTTP nnn)`; a timeout, a 5xx or no code is
+              transient, a 4xx definitive; a JSON read is one bounded page, read whole. A log is written to an anonymous
+              temp file (memory stays flat, nothing left behind) and kept by _log_tail: whole at or under
+              MASTER_LOG_MAX_BYTES (16 MiB), else its last 16 MiB from the first whole line, and the task says "parsed
+              from the log's last 16 MiB". There is no "too large": run.sh's verdict and its `  - <label>` lines end a log.
+              The calls. Fixed, never counted, each still bounded by its timeout: `repos/<o>/<r>` for default_branch only
+              when the cache holds none read within MASTER_BRANCH_TTL (24 h); the list,
+              `actions/workflows/full-suite.yml/runs?branch=<b>&event=push&per_page=100`, every pass, never cached (a 404
+              is no workflow, exit 0; its one page, MASTER_LIST runs, is the act scope, whichever rollout merged the
+              commits); `git/ref/thread/green` every pass; `…runs?head_sha=<C>&event=push` only when no listed run is at
+              C, the cache holds no proof of C and (repo, C, unproven) is not keyed; and under the lock, only for a
+              planned re-run, the head peek (`…&per_page=5`) and `gh run rerun <id> --failed -R <o/r>`. Counted, at most
+              MASTER_READS (10) a pass, each cached once its object is complete so none is read twice:
+              `actions/runs/<id>/attempts/<n>` (conclusion, updated_at) for each attempt below a run's run_attempt (the
+              latest attempt's state is the list's); `actions/runs/<id>/attempts/<n>/jobs?per_page=100` for each attempt
+              concluding failure, cancelled or timed_out (attempt 1's shards always through `attempts/1`, never
+              `jobs?filter=latest`); `actions/jobs/<job>/logs` per failed or timed-out job; `check-runs/<job>/annotations`
+              per cancelled job; and `compare/<G>...<X>` once per break (below), cached by (G, X).
+              The pass: the fixed reads first, then a decide-and-read loop: _master_decide over what is read so far returns
+              the decisions it can make, at most one planned re-run and the reads its first gap needs, the pass makes them
+              and decides again, until nothing is needed or a bound ends it. Bounds: MASTER_READS counted reads (the next
+              one needed ends the pass, `read budget`); no call starts once MASTER_PASS_SECONDS (60) have passed since the
+              pass began, a read's timeout min(MASTER_GH_TIMEOUT 20 s, the time left), and a read cut that way is the
+              deadline, never a transient failure; four calls are exempt from the deadline (the default-branch read, the
+              list, the pass's first counted read and the two calls under the lock, MASTER_LOCK_GH_TIMEOUT 9 s each), so a
+              pass that reads caches at least one new read and a backlog drains however slow GitHub is; the first
+              transient failure ends the reading. Worst case about 130 s a pass (80 s of reads, NOTE_LOCK_TIMEOUT's 30 s
+              lock wait, 18 s under the lock); a pass with nothing new makes two calls. THREAD_MASTER_RUNS_READS,
+              THREAD_MASTER_RUNS_SECONDS and THREAD_MASTER_LOG_MAX_BYTES (tests only) can each only lower their constant.
+              The read cache holds immutable facts only: default_branch with its read time, each completed attempt's
+              conclusion and updated_at, each attempt's jobs and verdict, each job's parsed suites and annotation
+              verdict, each compare and each proven Green tip commit (by sha, with the run that proved it). It is saved
+              with no lock at the end of every pass but a dry run, a read-merge-write (the union with the file as it
+              reads then; runs off the list and proven commits other than C or a listed head dropped; a temp file and
+              os.replace), so two saves at once cost a re-read at most; an unreadable cache is read as empty, one WARN.
+              The re-run ledger holds each re-run this Mac made and each GitHub refusal (its 4xx), keyed (run, attempt):
+              read at the pass's start, read again and written only under the lock, before it is released, its runs off
+              the list dropped at each write; missing is empty, malformed is renamed `<file>.bad` with one WARN and read
+              as empty (a dry run renames nothing).
+              The verdict of one attempt (_master_verdict): `success` green, with no job read; `startup_failure` red as
+              `full-suite.yml (startup failure)`; `failure`, `cancelled` or `timed_out` reads its jobs: a job other than
+              the publisher concluding failure or timed_out is red on its log's suites; a job cancelled with a time-limit
+              annotation (merge-task.sh's at_time_limit, `exceeded the maximum execution time`) is red as `<job> (cut at
+              its time limit)`; a cancel without it, a `skipped` job (the publisher behind a cancelled shard) and a
+              `neutral` one are neutral; `publish the Green tip` concluding failure is red as that pseudo-suite (every
+              shard passed: its job needs them all), its `##[error]` line kept as its detail. Anything else, or no red
+              job, is no verdict: that attempt is no read. A 4xx on the jobs is no verdict, on annotations no time limit,
+              each with a WARN.
+              The suites of a failed job (_job_suites, on the kept log, GitHub's timestamp prefix and a BOM dropped): the
+              `  - <label>` lines under run.sh's last `make test: FAILED (<N>s)` line, else (a cut shard) every `<label>:
+              FAILED (<N>s)` line but `make test`; ` (timed out after <B>s)` and ` (<N> files)` dropped; `node tests`
+              expanded to the files of each top-level TAP `not ok` block's `location:` (spec's `test at` the fallback),
+              made repo-relative from the first `tests/`, `skills/` or `hooks/` part, the bare label kept when none
+              parses; with no label, the job named by its failed step, `<job>: step "<name>" failed`, or `<job>:
+              tests/run.sh failed with no suite named`. A 4xx on the log (a 410 past retention) is `<job> (log unreadable:
+              HTTP <code>)`, definitive, so it never stalls a run.
+              Reads, finality and confirmation (_master_decide, pure: the listed runs, their reads and compares, the
+              ledger, the master-red notes, master-runs.jsonl's keys and now in; decisions, at most one re-run and the
+              reads still needed out). A read is one attempt with a verdict, in (run_number, attempt) order; F(X) its
+              failing set (∅ for green); W(X) the read just before X, skipping attempts and runs with no verdict. The
+              newest run is the listed run with the highest run_number, of any status (the lock's guard uses the same).
+              Runs are decided oldest first and stop at the first gap, so every W a decision uses is final and two leads
+              decide alike. A gap: a pending run (queued, waiting, requested, in_progress: a re-run attempt still going
+              included, so a run that completes while an older run's re-run is queued waits for that read); a run whose
+              reads, compare or retest-label read are not all in; the newest run, completed at run_attempt 1, while the
+              ledger holds its re-run of (R, 1) made under MASTER_RERUN_GRACE (10 min) ago, not listed yet. A run whose
+              latest read is green is final. A run R whose latest read is red is final when (f1) run_attempt >= 2 (its
+              one re-run was made, whatever came of it; one that ended with no verdict leaves R's latest read at attempt
+              1); (f2) a newer run is listed, so R is decided on its one read and its suites are confirmed by the next
+              read; (f3) R is newest at run_attempt 1, W is red and F(R's read) ⊆ F(W): every suite is already confirmed,
+              so a re-run could add nothing (a repeated red files a run sooner, and a publisher red that returns on the
+              next run is never re-run, Decided for you 13); (f4) the ledger holds GitHub's refusal of R's re-run; (f5)
+              the ledger holds R's re-run made MASTER_RERUN_GRACE ago or more and the list still shows R completed at
+              attempt 1 (never seen: R is decided on its one read). Otherwise R, newest, completed, red, at attempt 1,
+              not covered and in no ledger entry, gets its one re-run and nothing is filed for it meanwhile; no re-run is
+              ever planned for a (run, attempt) the ledger holds. retest names what re-tested R's verdict read, apart
+              from finality, the first that holds: `rerun` (R's own re-run attempt has a verdict), `refused` (f4),
+              `covered` (f3), `next-run` (a newer run is pending or has a read: a re-run a newer push cancelled
+              included), `none` (every newer run completed with no verdict, R's re-run ended with no verdict and no
+              newer run, or f5). A suite is confirmed at read X when it is in F(X) and F(W(X)); confirmed(R) is the union
+              over R's reads, so (F(attempt 1) ∩ F(attempt 2)) ∪ (F(R's first read) ∩ F(W of it)), and a suite red on
+              attempt 2 alone waits for the next read. Decided for you 13's publisher red as run sequences: newest after
+              a green, one re-run, and a pass is a blip (`rerun-pass`, publisherOnly, no task); red with a newer run
+              already pending, final and `unconfirmed`, and the next run's publisher red is covered: a publisher task, no
+              re-run ("on the next default-branch run's publisher" read so); red straight after a blip, a first red with
+              its own one re-run (a publisher-only `--failed` re-run re-runs just that job). G is the newest run older
+              than R whose last read is green, from the listed history, never a rollout's merges, so every lead derives
+              the same G, trail, keys and stems; with none listed, since is null, trailFloor true, and the trail runs
+              from the oldest listed run.
+              Decisions: each final R's lines, keyed (repo, runId, attempt, outcome) in master-runs.jsonl, a held key
+              skipped. Latest read green after a red read of R itself: `rerun-pass` (publisherOnly when every red read
+              of R was the publisher alone), no task, never a Flake. Latest read green and W(R's first read) red:
+              `green`, a streak's end: trailMinutes (R's green attempt's updated_at less the created_at of the first run
+              after G, whatever its conclusion: the first push past the tip), redRuns (the runs between with a red last
+              read), followups (the streak's master-red stems, in run order); both lines when both hold. Latest read red
+              and confirmed(R) not empty: `red`, suites (all confirmed), redKind (`publisher` when confirmed is exactly
+              the publisher, else `suites`), since (G's sha or null), retest; with new = confirmed less filed(repo, G,
+              R): new not empty, R's own stem absent and no green read newer than R's verdict read, one fix task filed,
+              the line carrying newSuites and followup; new not empty and a newer green, `healed: true` and newSuites,
+              no task (a first pass after deploy, a gap in the lead's passes); new empty, neither. A break is a
+              suites-kind red line with newSuites and a non-null since: only it reads compare(G, R's head) and carries
+              merges (the commits naming a PR, `Merge pull request #N` or `(#N)`, else every commit) and prs (their PR
+              numbers, which p54-18 reads); everywhere else both are null. Latest read red and confirmed empty:
+              `unconfirmed`, suites F of its verdict read, redKind, retest. A task filed, or a break recorded healed,
+              earlier counts as filed for the runs after it (a healed line's newSuites with its since), so a healed streak
+              is one break.
+              Fitting a line (_master_fit, attention.py's ledger_line, the run_record caps the one copy): each list
+              sorted (suites and newSuites by name, prs ascending, followups in run order), each name cut to FAILING_NAME,
+              each list cut to its cap (MAX_FAILING, MAX_MASTER_PRS, MAX_MASTER_FOLLOWUPS), then while line_bytes is over
+              MAX_LINE the list with the most bytes halved (ties newSuites, suites, prs, followups), a `<list>Total` with
+              its true length for each list cut, then run_record.check. So a line is never refused for its size; the task
+              keeps every suite (`master_red_suites:`) and its body every suite and merge.
+              filed(repo, G, R): the union of `master_red_suites:` over `master-red-*.md` in --tasks-dir and under its
+              Archive/ (a glob on that stem, _find_note's root-then-Archive rule) carrying `master_red: <o/r>`, only
+              those with `master_red_since: <G>` when G is set (that filter dropped when G is null, nothing else
+              changes); a note whose `merged:` is before R's created_at does not count (R holds that fix and is still
+              red, so its suites refile), one merged after it or dropped still does, and R's own stem never counts.
+              R's own stem (crash and write-failure recovery): `master-red-<name>-<sha12 of R's head>-<verdict attempt>`
+              existing when R is decided names the followup, its `master_red_suites:` the newSuites, no second file, and
+              it is joined again when its `rollout:` is empty.
+              The fix task (_write_master_red, the completion red's writer path): _new_task_fm at `priority: high`,
+              exclusive; `master_red: "<o/r>"`, `master_red_kind: suites|publisher`, `master_red_since: <G sha40|none>`,
+              `master_red_run`, `master_red_attempt` (the verdict attempt, the stem's and the line's attempt) and
+              `master_red_suites:` (every new suite, JSON-quoted, never cut). Its body names the run and its re-test, every
+              new suite with the jobs it failed in, every merge since G (the first k of N when the compare was cut), why it
+              goes first (Decided for you 3) and a **Verify:** line; with since null, the floor run and no merge; a
+              publisher task says every shard passed, quotes the error line and wants a fix to that job or a credential
+              gate, never another re-run.
+              The Green tip check, C the ref's commit: a C cached as proven needs nothing; a keyed unproven C is never
+              looked up again; otherwise its listed runs, then `runs?head_sha=C` when none is listed. Proven: any run at C
+              with an attempt that concluded success (the latest from the run, earlier ones from `attempts/<n>`); cached
+              by sha. Wait, no line: a run at C queued, waiting or in progress (the publisher pushes the ref before its
+              own run ends). Unproven: every run at C completed with no success, or none exists: an `unproven` line keyed
+              (repo, C, unproven) and its own task, `master-green-unproven-<name>-<sha12 C>` (`master_red_kind:
+              green-tip`, `master_red_ref_sha: C`, found by that stem through _find_note), naming the last green run. No
+              ref (a 404): nothing.
+              Under the master-runs lock (_note_lock, `master-runs lock`; a timeout is exit 8 with nothing written), in
+              order: re-read master-runs.jsonl's keys (unreadable: exit 8, nothing written), the notes and the ledger, and
+              decide again; for a planned re-run of (R, 1), skip it when the ledger now holds it (another pass made it:
+              no call, nothing stored), else peek at the list head and re-run only while R has the highest run_number of
+              any status, completed, at attempt 1 (_master_rerun_guard): rc 0, a timeout or a 5xx records a re-run (a
+              timeout may have gone through: never repeated), a 4xx a refusal, a newer run at the head nothing (R is
+              decided next pass, f2), the ledger written before anything else; then each task file, its join, its line.
+              Every other gh call runs before the lock. The join is in process: cmd_join on a Namespace (tasks_dir,
+              rollout, tasks, files None, now, dry_run False, top True), its stdout relayed as `join: …` lines and its
+              WARN lines verbatim; its exit 2 prints `not joined: <its ERROR text>`, the task stays a loose `priority:
+              high` task (a complete, closed, paused, pausing or superseded rollout) and the next schedule takes it; its
+              exit 1 (a write that failed, or a row missing after it) is `ERROR: master-runs: [[<stem>]] not joined (…)`
+              and that decision's line is not written, so the next pass decides it again and joins it through its own
+              stem.
+              --dry-run reads but writes no cache and no ledger, prints the re-run, tasks, joins and lines it would make,
+              and never calls `run rerun` or cmd_join.
+              One Mac leads: the cache, the ledger and master-runs.jsonl (the events dir is local state) are this Mac's;
+              a second Mac leading a rollout on the repo could make its own re-run of R, which GitHub refuses as already
+              running, and decide R early (retest refused). While no rollout runs on the repo nothing reads master; the
+              Green tip still holds, so nothing live breaks.
+
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions, and (p21-2) the human acts it
 carries out (a Recorded answer, a sign-off, a hand-back, a consumed RACE decision), through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
@@ -1243,6 +1428,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
+  master-runs       (p54-7) master-run {repo, outcome, sha, at, …} per decided key, in the reserved master-runs.jsonl
+                    (task null; the rollout a provenance stamp), after its task and its join; nothing on --dry-run.
   prove             none: its writes are proof stamps and landings the next queue read sees; mark-done's landing events
                     are the queue's.
   record-verify     (p29-9) flake {test, repo, sha, site, followup, count} per new Flake log line (_record_flakes);
@@ -1814,11 +2001,13 @@ import stat
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import types
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import quote
 
 try:
     import fcntl
@@ -2857,6 +3046,9 @@ class _note_lock:
     taken only by `triggers fire`, around its record, with the note's lock inside it and never across a child process.
     The merge-settings lock (merge-settings.py, one per origin, ADR 0080) is taken outermost: note locks (Note.save) and
     the Run record's flock go inside it, and its gh and git calls run under it; nothing takes it inside a note lock.
+    The master-runs lock (p54-7, one per origin: _master_paths) is taken only by master-runs, outermost: note locks
+    (Note.save, cmd_join's in-process saves among them), the Run record's appends, the re-run ledger's write and its two
+    bounded gh calls (the head peek and `gh run rerun`) go inside it; nothing takes it inside a note lock.
     No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
@@ -3488,8 +3680,10 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
         slug = path.stem
         state, set_aside_at = _queue_state(note)
         pos = positions.get(slug.lower())
-        # Schedule rank: listed tasks by position, then unlisted ones by slug.
-        rank = (0, pos, "") if pos is not None else (1, 0, slug.lower())
+        # Schedule rank: a red-master fix (a valued `master_red:`, master-runs) first, then listed tasks by position, then
+        # unlisted ones by slug.
+        rank = (-1, 0, slug.lower()) if _valued(note.get("master_red")) else \
+            (0, pos, "") if pos is not None else (1, 0, slug.lower())
         priority = _priority(note)
         rows.append({
             "slug": slug, "path": path, "note": note, "state": state, "setAsideAt": set_aside_at,
@@ -13644,11 +13838,13 @@ def _join_queue(note):
     return None
 
 
-def _join_rows(note, new, day):
+def _join_rows(note, new, day, top=False):
     """Insert `new` [(slug, alias, scope, solo)] into the note's `## Queue`, ranked first: a table takes each as a row
     right below the leading rows whose Mode starts JOINED_MODE (at the top in a table with no Mode column), its `#` the
     integer of the row it displaces (else one past the row above, else 1), and every integer `#` below shifted by the rows
-    inserted; a list takes each as an item below its leading joined items. Computed from the note alone (_join_edit)."""
+    inserted; a list takes each as an item below its leading joined items. With `top` (master-runs' in-process join of a
+    red-master fix) the row goes at the table's first data row, or the list's first item, above the joined ones; the `#`
+    shift is the same. Computed from the note alone (_join_edit)."""
     q = _join_queue(note)
     if q is None:
         return
@@ -13660,7 +13856,7 @@ def _join_rows(note, new, day):
             if "]]" not in line or not line[line.index("]]") + 2:].strip().startswith(JOINED_LIST_MARK):
                 break
             joined.append(i)
-        p = joined[-1] + 1 if joined else at[0]
+        p = at[0] if top else joined[-1] + 1 if joined else at[0]
         add = [f"- [[{slug}|{alias}]] {JOINED_LIST_MARK}{day}{', solo' if solo else ''}" for slug, alias, _s, solo in new]
         note._set_body_lines(lines[:p] + add + lines[p:])
         return
@@ -13676,7 +13872,7 @@ def _join_rows(note, new, day):
         return cells[k] if k is not None and k < len(cells) else ""
 
     p = first
-    if mi is not None:
+    if mi is not None and not top:
         while p < stop and cell(p, mi).lower().startswith(JOINED_MODE):
             p += 1
     n0 = 1
@@ -13703,20 +13899,21 @@ def _join_rows(note, new, day):
     note._set_body_lines(lines[:p] + add + below + lines[stop:])
 
 
-def _join_edit(note, rows, filesets, day):
+def _join_edit(note, rows, filesets, day, top=False):
     """The rollout-note half of `join`, applied once through Note.apply (journaled), so save()'s replay over a concurrent
     writer's fresh read (a second join, a `next`, a reconcile) inserts each row once and shifts the numbers once: rows
     [(slug, alias, scope, solo)], filesets [(slug, [files])] and day YYYY-MM-DD are its only inputs, and everything else is
     read from the note it is given. A slug the `## Queue` already links (_queue_links) gets no row; a slug `## File-sets`
     already lists (_file_sets) gets no line, and any other gets `- <slug>: a, b` after the section's last line (the
-    section appended at the note's end when absent). An application that changes nothing journals nothing."""
+    section appended at the note's end when absent). An application that changes nothing journals nothing. `top` (last,
+    so the four-argument calls stand) places the rows first (_join_rows)."""
     have, new = _queue_links(note), []
     for slug, alias, scope, solo in rows:
         if slug.lower() not in have:
             have.add(slug.lower())
             new.append((slug, alias, scope, solo))
     if new:
-        _join_rows(note, new, day)
+        _join_rows(note, new, day, top)
     listed, add = set(_file_sets(note)), []
     for slug, files in filesets:
         if files and slug.lower() not in listed:
@@ -13897,7 +14094,9 @@ def cmd_join(args) -> int:
     now = _now(args)
     day = now.strftime("%Y-%m-%d")
     had = _queue_links(x_note)
-    x_note.apply(_join_edit, rows, [(r[0], files[r[0].lower()]) for r in rows if files.get(r[0].lower())], day)
+    # `top` only from master-runs' in-process Namespace (Note.apply takes no kwargs, so it goes fifth, positional)
+    x_note.apply(_join_edit, rows, [(r[0], files[r[0].lower()]) for r in rows if files.get(r[0].lower())], day,
+                 getattr(args, "top", False))
     written, done = 0, []
     if not args.dry_run:
         try:
@@ -13940,7 +14139,8 @@ def cmd_join(args) -> int:
     joined = {r[0].lower() for r in rows}
     others = [(p, n) for p, n in _scan(x_path, tasks_dir)[0]
               if p.stem.lower() not in joined and _queue_state(n)[0] == "queued"]
-    above = _join_above(x_note)
+    # a top join is master-runs' red-master fix, which next ranks first whatever a line above the table links (_rows)
+    above = set() if getattr(args, "top", False) else _join_above(x_note)
     for p, _n in sorted(others, key=lambda pn: pn[0].stem.lower()):
         if p.stem.lower() in above:
             print(f"WARN: join: [[{p.stem}]] is ranked above the joined tasks by a list or table line above "
@@ -18038,6 +18238,1331 @@ def cmd_moving(args) -> int:
     return 0
 
 
+# ---- master-runs (p54-7; ADR 0084 Decided for you 3, 11 and 13) -----------------------------------------------------
+# The module docstring's `master-runs` holds every rule (the one copy): the calls and which count, the pass bounds, the
+# verdict, the decide rules (gaps, finality, retest, confirmation), the fitting, the fix task, the Green tip check, the
+# lock and the exits. This section is its code: a pure core (_log_tail, _job_suites, _master_verdict, _master_decide,
+# _master_green, _master_fit, _master_filed, _master_rerun_guard) and the I/O around it (_MasterReader, cmd_master_runs).
+
+MASTER_GH_TIMEOUT = 20.0                 # seconds, each read
+MASTER_LOCK_GH_TIMEOUT = 9.0             # seconds, each of the two calls under the master-runs lock
+MASTER_READS = 10                        # counted reads per pass
+MASTER_PASS_SECONDS = 60.0               # no call starts once these have passed since the pass began (four exempt)
+MASTER_LOG_MAX_BYTES = 16 * 1024 * 1024  # a longer log is parsed from its last this many bytes
+MASTER_BRANCH_TTL = 24 * 3600            # seconds a cached default_branch stands
+MASTER_RERUN_GRACE = 10 * 60             # seconds a re-run this Mac made may go unseen in the list
+MASTER_LIST = 100                        # the runs one list read holds: the act scope
+# The three test-only knobs, each of which can only lower its constant: (env, constant, floor).
+MASTER_KNOBS = {"reads": ("THREAD_MASTER_RUNS_READS", MASTER_READS, 1),
+                "seconds": ("THREAD_MASTER_RUNS_SECONDS", MASTER_PASS_SECONDS, 0),
+                "log": ("THREAD_MASTER_LOG_MAX_BYTES", MASTER_LOG_MAX_BYTES, 1)}
+MASTER_WORKFLOW = "full-suite.yml"
+MASTER_PUBLISHER = "publish the Green tip"           # full-suite.yml's green-tip job, by name
+MASTER_STARTUP = "full-suite.yml (startup failure)"  # the pseudo-suite of a run GitHub could not start
+MASTER_GREEN_REF = "refs/thread/green"               # full-suite.yml's GREEN_REF
+MASTER_CUT_MARK = "exceeded the maximum execution time"   # merge-task.sh's at_time_limit annotation
+MASTER_RED_CONCLUSIONS = ("failure", "cancelled", "timed_out")
+MASTER_CACHE_MAPS = ("attempts", "jobs", "suites", "annotations", "verdicts", "compares", "proven")
+MASTER_LISTS = (("newSuites", "MAX_FAILING"), ("suites", "MAX_FAILING"), ("prs", "MAX_MASTER_PRS"),
+                ("followups", "MAX_MASTER_FOLLOWUPS"))   # _master_fit's list fields, in its tie order
+# merge-settings.py's GITHUB_URL_RE and HTTP_RE, mirrored: merge-settings imports this module, so the import cannot go
+# the other way. merge-settings.py is their source; change them there first.
+MASTER_GITHUB_URL_RE = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                                  r"([^/\s]+)/([^/\s]+?)(?:\.git)?/*$")
+MASTER_HTTP_RE = re.compile(r"\(HTTP (\d{3})\)|\bHTTP (\d{3})\b")
+MASTER_TS_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?")
+MASTER_VERDICT_RE = re.compile(r"^make test: FAILED \(\d+s\)")
+MASTER_ITEM_RE = re.compile(r"^  - (.+)$")
+MASTER_ENDED_RE = re.compile(r"^(.+): FAILED \(\d+s\)$")
+MASTER_LABEL_TAIL_RE = re.compile(r" \((?:timed out after \d+s|\d+ files?)\)$")
+MASTER_TAP_TOP_RE = re.compile(r"^not ok \d+ - ")
+MASTER_TAP_LOC_RE = re.compile(r"^  location: (.*)$")
+MASTER_SPEC_AT_RE = re.compile(r"^test at (\S+)$")
+MASTER_PR_RE = re.compile(r"Merge pull request #(\d+)|\(#(\d+)\)")
+MASTER_ERROR_RE = re.compile(r"(?:##\[error\]|::error::)(.*)$")
+
+
+def _master_knob(which):
+    """A pass bound: its constant, or the test knob's value when that is lower (never higher, never under the floor)."""
+    env, const, floor = MASTER_KNOBS[which]
+    raw = os.environ.get(env)
+    if raw is None or not raw.strip():
+        return const
+    try:
+        v = float(raw)
+    except ValueError:
+        return const
+    v = max(floor, min(const, v))
+    return int(v) if isinstance(const, int) else v
+
+
+def _master_origin(root):
+    """(<owner>/<name> lowercased | None, the configured url): remote.origin.url as configured, in one of merge-settings'
+    three GitHub forms (MASTER_GITHUB_URL_RE), `.git` dropped, GIT_* scrubbed. Anything else is no GitHub origin."""
+    try:
+        p = subprocess.run(["git", "-C", str(root), "config", "--get", "remote.origin.url"], capture_output=True,
+                           text=True, timeout=20, stdin=subprocess.DEVNULL,
+                           env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    url = p.stdout.strip() if p.returncode == 0 else ""
+    m = MASTER_GITHUB_URL_RE.match(url)
+    return (f"{m.group(1)}/{m.group(2)}".lower() if m else None), url
+
+
+def _master_gh(gh_bin, argv, timeout, out=None):
+    """(rc, http code | None, stdout text, stderr text) of one gh call in its own process group, GIT_* scrubbed, with
+    GH_PROMPT_DISABLED and GH_NO_UPDATE_NOTIFIER (merge-settings.py's _gh). rc "start": gh would not start; rc
+    "timeout": it ran past `timeout` and its group was killed. `out`: a file for stdout (a log), else a pipe."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GH_PROMPT_DISABLED"], env["GH_NO_UPDATE_NOTIFIER"] = "1", "1"
+    try:
+        p = subprocess.Popen([gh_bin, *argv], stdin=subprocess.DEVNULL,
+                             stdout=out if out is not None else subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                             start_new_session=True)
+    except OSError as e:
+        return "start", None, "", f"gh will not start: {e.strerror or e}"
+    try:
+        so, se = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        for f in (p.stdout, p.stderr):
+            try:
+                if f is not None:
+                    f.close()
+            except OSError:
+                pass
+        p.wait()
+        return "timeout", None, "", f"gh timed out after {timeout:g}s"
+    err = (se or b"").decode("utf-8", "replace")
+    m = MASTER_HTTP_RE.search(err)
+    code = int(m.group(1) or m.group(2)) if m else (200 if p.returncode == 0 else None)
+    return p.returncode, code, (so or b"").decode("utf-8", "replace"), err
+
+
+def _log_tail(fh, cap):
+    """(text, cut) of a seekable binary file: read whole at or under `cap` bytes; past it, its last `cap` bytes (a seek
+    from the end) with the first, partial line dropped, and cut True. Pure over any seekable file (io.BytesIO too)."""
+    fh.seek(0, os.SEEK_END)
+    size = fh.tell()
+    if size <= cap:
+        fh.seek(0)
+        return fh.read().decode("utf-8", "replace"), False
+    fh.seek(size - cap)
+    data = fh.read(cap)
+    nl = data.find(b"\n")
+    return (data[nl + 1:] if nl >= 0 else b"").decode("utf-8", "replace"), True
+
+
+def _master_line(raw):
+    """A log line with a BOM, GitHub's timestamp prefix and a trailing CR dropped."""
+    s = raw.lstrip("\ufeff").rstrip("\r")
+    m = MASTER_TS_RE.match(s)
+    return s[m.end():] if m else s
+
+
+def _master_rel(loc):
+    """A test location made repo-relative from its first `tests/`, `skills/` or `hooks/` part (`:line:col` dropped), or
+    None."""
+    loc = loc.strip().strip("'\"")
+    if loc.startswith("file://"):
+        loc = loc[len("file://"):]
+    loc = re.sub(r":\d+(?::\d+)?$", "", loc)
+    parts = loc.split("/")
+    for i, part in enumerate(parts):
+        if part in ("tests", "skills", "hooks") and i < len(parts) - 1:
+            return "/".join(parts[i:])
+    return None
+
+
+def _master_tap_files(lines):
+    """The files of the top-level TAP `not ok` blocks (their `location:`), else spec's `test at` lines."""
+    files, top = [], False
+    for line in lines:
+        if MASTER_TAP_TOP_RE.match(line):
+            top = True
+            continue
+        if top and line and not line.startswith(" "):
+            top = False
+        if top:
+            m = MASTER_TAP_LOC_RE.match(line)
+            if m:
+                f = _master_rel(m.group(1))
+                if f:
+                    files.append(f)
+                top = False
+    if not files:
+        for line in lines:
+            m = MASTER_SPEC_AT_RE.match(line.strip())
+            f = _master_rel(m.group(1)) if m else None
+            if f:
+                files.append(f)
+    return sorted(set(files))
+
+
+def _job_suites(text, job, step=None):
+    """The suites one failed shard's kept log text names, sorted (the docstring's rule): the `  - <label>` lines under
+    run.sh's last `make test: FAILED` line, else every `<label>: FAILED (<N>s)` line but `make test`; each label's
+    timeout and file-count tails dropped; `node tests` expanded to its failing files; with no label, the job named by
+    its failed step (`step`, the jobs API's)."""
+    lines = [_master_line(raw) for raw in text.split("\n")]
+    last = max((i for i, line in enumerate(lines) if MASTER_VERDICT_RE.match(line)), default=None)
+    labels = []
+    if last is not None:
+        for line in lines[last + 1:]:
+            m = MASTER_ITEM_RE.match(line)
+            if not m:
+                break
+            labels.append(m.group(1))
+    else:
+        labels = [m.group(1) for m in map(MASTER_ENDED_RE.match, lines) if m and m.group(1) != "make test"]
+    out = []
+    for label in labels:
+        clean = label.strip()
+        while True:
+            shorter = MASTER_LABEL_TAIL_RE.sub("", clean)
+            if shorter == clean:
+                break
+            clean = shorter
+        if clean == "node tests":
+            out += _master_tap_files(lines) or ["node tests"]
+        elif clean:
+            out.append(clean)
+    if not out:
+        if step and "tests/run.sh" not in step:
+            out = [f'{job}: step "{step}" failed']
+        else:
+            out = [f"{job}: tests/run.sh failed with no suite named"]
+    return sorted(set(out))
+
+
+def _master_detail(text):
+    """The publisher's last `##[error]`/`::error::` line, GitHub's own `Process completed` line aside, or None."""
+    for raw in reversed(text.split("\n")):
+        m = MASTER_ERROR_RE.search(_master_line(raw))
+        if m and m.group(1).strip() and not m.group(1).startswith("Process completed with exit code"):
+            return m.group(1).strip()[:300]
+    return None
+
+
+def _master_jobs(data):
+    """The jobs API's page, compact: [{id, name, conclusion, url, step}] (step: its first failed step's name)."""
+    out = []
+    for j in (data or {}).get("jobs") or [] if isinstance(data, dict) else []:
+        if not isinstance(j, dict) or not isinstance(j.get("id"), int) or isinstance(j.get("id"), bool):
+            continue
+        step = next((s.get("name") for s in j.get("steps") or []
+                     if isinstance(s, dict) and s.get("conclusion") == "failure"), None)
+        out.append({"id": j["id"], "name": str(j.get("name") or ""), "conclusion": j.get("conclusion"),
+                    "url": str(j.get("html_url") or ""), "step": step if isinstance(step, str) else None})
+    return out
+
+
+def _master_verdict(conclusion, jobs, suites, annotations):
+    """The verdict of one completed attempt (the docstring's rule), pure: {v: green | red | none, suites, where, detail}
+    or ("need", [needs]) while a job's log or annotations are unread. `jobs` is _master_jobs' list (None: unread);
+    `suites` and `annotations` the cache's maps, keyed by str(job id)."""
+    if conclusion == "success":
+        return {"v": "green", "suites": [], "where": {}, "detail": None}
+    if conclusion == "startup_failure":
+        return {"v": "red", "suites": [MASTER_STARTUP], "where": {}, "detail": None}
+    if conclusion not in MASTER_RED_CONCLUSIONS:
+        return {"v": "none", "suites": [], "where": {}, "detail": None}
+    if jobs is None:
+        return "need", [("jobs",)]
+    needs, red, where, detail = [], set(), {}, None
+    for j in jobs:
+        c, jid = j.get("conclusion"), str(j["id"])
+        if c in ("failure", "timed_out"):
+            got = suites.get(jid)
+            if got is None:
+                needs.append(("log", j["id"]))
+                continue
+            names = [MASTER_PUBLISHER] if j["name"] == MASTER_PUBLISHER else list(got.get("suites") or [])
+            if j["name"] == MASTER_PUBLISHER:
+                detail = got.get("detail") or detail
+            for s in names:
+                red.add(s)
+                where.setdefault(s, []).append([j["name"], j.get("url") or "", bool(got.get("cut"))])
+        elif c == "cancelled" and j["name"] != MASTER_PUBLISHER:
+            got = annotations.get(jid)
+            if got is None:
+                needs.append(("annotations", j["id"]))
+                continue
+            if got.get("cut"):
+                s = f"{j['name']} (cut at its time limit)"
+                red.add(s)
+                where.setdefault(s, []).append([j["name"], j.get("url") or "", False])
+        # success, skipped (the publisher behind a cancelled shard), neutral and a cancel with no time-limit
+        # annotation are neutral: neither failed nor a verdict
+    if needs:
+        return "need", needs
+    if not red:
+        return {"v": "none", "suites": [], "where": {}, "detail": None}
+    return {"v": "red", "suites": sorted(red), "where": where, "detail": detail}
+
+
+def _master_runs(data):
+    """The list read's runs, compact and oldest first: [{id, number, attempt, status, conclusion, sha, created,
+    updated, url}]."""
+    out = []
+    for r in (data or {}).get("workflow_runs") or [] if isinstance(data, dict) else []:
+        if not isinstance(r, dict) or not isinstance(r.get("id"), int) or not isinstance(r.get("run_number"), int):
+            continue
+        att = r.get("run_attempt")
+        out.append({"id": r["id"], "number": r["run_number"],
+                    "attempt": att if isinstance(att, int) and not isinstance(att, bool) and att >= 1 else 1,
+                    "status": r.get("status"), "conclusion": r.get("conclusion"), "sha": str(r.get("head_sha") or ""),
+                    "created": r.get("created_at"), "updated": r.get("updated_at"), "url": str(r.get("html_url") or "")})
+    return sorted(out, key=lambda r: (r["number"], r["id"]))
+
+
+def _master_z(value):
+    """A stamp (GitHub's, an ISO one or an aware datetime) as a UTC Z stamp to the second, else None."""
+    ts = value if isinstance(value, datetime) else _parse_ts(value)
+    if ts is None:
+        return None
+    return ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _master_key(line):
+    """A master-run line's dedupe key: run_record.py's master_key, the one copy ((repo, runId, attempt, outcome), or
+    (repo, sha, "unproven")); _master_decide builds the same tuples."""
+    return _run_record().master_key(line)
+
+
+def _master_filed(notes, repo, since, run, own):
+    """filed(repo, G, R) (the docstring's rule): the union of `master_red_suites:` over the repo's master-red notes, only
+    those with `master_red_since: <G>` when G (`since`) is not None, less a note whose `merged:` is before R's
+    created_at and R's own stem (`own`)."""
+    created = _parse_ts(run.get("created"))
+    out = set()
+    for n in notes:
+        if n["repo"] != repo or (n["stem"] and n["stem"] == own) or n["kind"] == "green-tip":
+            continue
+        if since is not None and n["since"] != since:
+            continue
+        if n["merged"] is not None and created is not None and n["merged"] < created:
+            continue
+        out |= set(n["suites"])
+    return out
+
+
+def _master_retest_text(retest, run, w_run, next_run, refusal):
+    """The fix task's words for what re-tested R's verdict read."""
+    if retest == "rerun":
+        return f"its one re-run ({run['url']}/attempts/{run['attempt']})"
+    if retest == "covered":
+        return (f"the read before it, run #{w_run['number']} ({w_run['url']}), red on every one of these suites"
+                if w_run else "the read before it")
+    if retest == "next-run":
+        return f"the next run, #{next_run['number']} ({next_run['url']})" if next_run else "the next run"
+    if retest == "refused":
+        return f"no re-run: GitHub refused it (HTTP {refusal})"
+    return "no re-test with a verdict"
+
+
+def _master_task(repo, run, vn, kind, suites, where, detail, retest_text, g_run, floor, cmp_, since):
+    """(frontmatter extra lines, body lines) of one red-master fix task (the docstring's *The fix task*)."""
+    extra = [f'master_red: "{repo}"', f"master_red_kind: {kind}", f"master_red_since: {since or 'none'}",
+             f"master_red_run: {run['id']}", f"master_red_attempt: {vn}", "master_red_suites:",
+             *[f"  - {json.dumps(s)}" for s in suites]]
+    sha12 = run["sha"][:12]
+    body = [f"# Master's full suite is red at {sha12} ({repo})", "", "## Notes", "",
+            f"Master's `full suite` run #{run['number']} ({run['url']}) on `{repo}` at `{run['sha']}` was red, re-tested "
+            f"by {retest_text}. Filed by `reconcile-rollout.py master-runs` (p54-7, ADR 0084 Decided for you 3).", ""]
+    if kind == "publisher":
+        body += ["Every shard passed, so no merge is blamed: only `publish the Green tip` failed, and it failed again on "
+                 "its re-test (ADR 0084 Decided for you 13). GitHub refuses the push or the ref: the likely cause is a "
+                 "GITHUB_TOKEN without the `workflows` permission.", ""]
+        if detail:
+            body += [f"- Its error: `{detail}`", ""]
+        body += ["It wants a fix to that job or a credential gate, never another re-run."]
+    else:
+        body.append("**Failing suites** (each confirmed red on two reads in a row):")
+        for s in suites:
+            jobs = where.get(s) or []
+            said = "; ".join(f"{j} ({u})" + (f", parsed from the log's last {_fmt_bytes(MASTER_LOG_MAX_BYTES)}"
+                                              if cut else "") for j, u, cut in jobs)
+            body.append(f"- `{s}`" + (f": failed in {said}" if said else ""))
+        body.append("")
+        if since is None:
+            body += [f"No green run sits among the last {MASTER_LIST} `full suite` runs: the oldest listed run, "
+                     f"`{floor['sha']}` (#{floor['number']}, {floor['url']}), is the floor, so no merge is listed."]
+        else:
+            commits, total = _master_merges(cmp_)
+            head = (f"**Merges since the last green** (`{since[:12]}`, run #{g_run['number']}, {g_run['url']})")
+            shown = len((cmp_ or {}).get("commits") or [])
+            if total > shown:
+                head += f", from the first {shown} of {total} commits"
+            body.append(head + ":")
+            for sha, msg, prs in commits:
+                body.append(f"- `{sha[:12]}` {msg}" + (f" (PR {', '.join('#%d' % p for p in prs)})" if prs else ""))
+            if not commits:
+                body.append("- none read from the compare")
+        body += ["", "**Why it goes first.** Until this fix lands every task's worktree is cut from the red tip (the "
+                 "Rollout clone follows origin's tip) while the Green tip holds, so it runs before the rest of the queue "
+                 "(ADR 0084 Decided for you 3). Merges go on meanwhile."]
+    if kind == "publisher":
+        body += ["", "**Verify:** master's next `full suite` run after the fix lands passes its `publish the Green tip` "
+                 "job."]
+    else:
+        body += ["", "**Verify:** every suite above passes, and master's next `full suite` run after the fix lands is "
+                 "green."]
+    return extra, body
+
+
+def _fmt_bytes(n):
+    return f"{n // (1024 * 1024)} MiB" if n >= 1024 * 1024 and n % (1024 * 1024) == 0 else f"{n} bytes"
+
+
+def _master_merges(cmp_):
+    """(commits [(sha, first line, [prs])], total) of a cached compare: the commits naming a PR (the merges), or every
+    commit when none does."""
+    rows = [(c[0], c[1], sorted({int(a or b) for a, b in MASTER_PR_RE.findall(c[1])}))
+            for c in (cmp_ or {}).get("commits") or [] if isinstance(c, list) and len(c) == 2]
+    merges = [r for r in rows if r[2]]
+    return (merges or rows), int((cmp_ or {}).get("total") or len(rows))
+
+
+def _master_decide(runs, cache, ledger, notes, keys, now, repo):
+    """The pure core of a pass (the docstring's *Reads, finality and confirmation*): {decisions, rerun, needs, gap}.
+    Runs are decided oldest first up to the first gap; `needs` are the reads that gap waits on (attempt, jobs, log,
+    annotations, compare), `rerun` the one planned re-run ({run, attempt: 1, number}) or None. Each decision is {key,
+    fields, task (None or {stem, extra, body}), join (a stem to join again, or None), order}: a key `keys` holds is no
+    decision. Reads nothing and writes nothing."""
+    runs = sorted(runs, key=lambda r: (r["number"], r["id"]))
+    out = {"decisions": [], "rerun": None, "needs": [], "gap": None}
+    if not runs:
+        return out
+    newest, name = runs[-1], repo.split("/")[-1]
+    notes = list(notes)   # a task this pass files, or a break it records healed, joins them for the runs after it
+    stems = {n["stem"]: n for n in notes}
+    reads, latest, g_run = [], {}, None
+
+    def attempt_of(r, n):
+        if n == r["attempt"]:
+            return (r["conclusion"], r["updated"]) if r["status"] == "completed" else "pending"
+        a = cache["attempts"].get(f"{r['id']}/{n}")
+        return None if a is None else (a.get("conclusion"), a.get("updated_at"))
+
+    def run_reads(r):
+        got, needs = [], []
+        for n in range(1, r["attempt"] + 1):
+            st = attempt_of(r, n)
+            if st == "pending":
+                continue
+            if st is None:
+                needs.append(("attempt", r["id"], n))
+                continue
+            key = f"{r['id']}/{n}"
+            v = cache["verdicts"].get(key)
+            if v is None:
+                v = _master_verdict(st[0], cache["jobs"].get(key), cache["suites"], cache["annotations"])
+                if isinstance(v, tuple):
+                    needs += [("jobs", r["id"], n) if x[0] == "jobs" else (x[0], r["id"], x[1]) for x in v[1]]
+                    continue
+            if v["v"] in ("green", "red"):
+                got.append((n, v, st[1]))
+        return got, needs
+
+    def since_secs(stamp):
+        t = _parse_ts(stamp)
+        return None if t is None else (now - t).total_seconds()
+
+    def green_newer(i):
+        for x in runs[i + 1:]:
+            if x["status"] == "completed" and x["conclusion"] == "success":
+                return True
+            if any((cache["attempts"].get(f"{x['id']}/{n}") or {}).get("conclusion") == "success"
+                   for n in range(1, x["attempt"])):
+                return True
+        return False
+
+    def gap(why, needs=()):
+        out["gap"], out["needs"] = why, list(needs)
+
+    for i, r in enumerate(runs):
+        if r["status"] != "completed":
+            gap(f"run #{r['number']} is {r['status']}")
+            break
+        made = ledger["reruns"].get(f"{r['id']}/1")
+        if r is newest and r["attempt"] == 1 and made is not None:
+            age = since_secs(made)
+            if age is None or age < MASTER_RERUN_GRACE:
+                gap(f"run #{r['number']}'s re-run is not listed yet")
+                break
+        rr, needs = run_reads(r)
+        if needs:
+            gap(f"run #{r['number']}'s reads", needs)
+            break
+        if not rr:
+            continue   # no verdict on any attempt: not a read, no decision
+        newer = runs[i + 1:]
+        w0 = reads[-1] if reads else None
+        top = rr[-1]
+        vn, at = top[0], _master_z(top[2])
+        decided, stop = [], False
+        g = g_run
+        since = g["sha"] if g else None
+        if top[1]["v"] == "green":
+            reds = [v for _n, v, _a in rr if v["v"] == "red"]
+            if reds and (repo, r["id"], vn, "rerun-pass") not in keys:
+                f = {"repo": repo, "outcome": "rerun-pass", "sha": r["sha"], "at": at, "runId": r["id"], "attempt": vn}
+                if all(set(v["suites"]) == {MASTER_PUBLISHER} for v in reds):
+                    f["publisherOnly"] = True
+                decided.append({"key": (repo, r["id"], vn, "rerun-pass"), "fields": f, "task": None, "join": None,
+                                "order": r["number"]})
+            if w0 is not None and w0[2]["v"] == "red" and (repo, r["id"], vn, "green") not in keys:
+                gi = runs.index(g) if g else -1
+                start = runs[gi + 1]
+                between = runs[gi + 1:i]
+                minutes = _whole_minutes(_master_z(start["created"]), at) if at else None
+                ids = {x["id"]: x["number"] for x in between}
+                follow = sorted((n for n in notes if n["repo"] == repo and n["kind"] not in ("green-tip", "healed")
+                                 and n["since"] == since and n["run"] in ids),
+                                key=lambda n: (ids[n["run"]], n["stem"]))
+                f = {"repo": repo, "outcome": "green", "sha": r["sha"], "at": at, "runId": r["id"], "attempt": vn,
+                     "since": since, "trailMinutes": max(0, minutes or 0),
+                     "redRuns": max(1, sum(1 for x in between if latest.get(x["id"]) == "red")),
+                     "followups": [n["stem"] for n in follow]}
+                if g is None:
+                    f["trailFloor"] = True
+                decided.append({"key": (repo, r["id"], vn, "green"), "fields": f, "task": None, "join": None,
+                                "order": r["number"]})
+        else:
+            F = set(top[1]["suites"])
+            refusal = ledger["refusals"].get(f"{r['id']}/1")
+            age = since_secs(made) if made is not None else None
+            f1, f2 = r["attempt"] >= 2, bool(newer)
+            f3 = (not f1 and not f2 and w0 is not None and w0[2]["v"] == "red" and F <= set(w0[2]["suites"]))
+            f4 = refusal is not None
+            f5 = made is not None and r["attempt"] == 1 and age is not None and age >= MASTER_RERUN_GRACE
+            if not (f1 or f2 or f3 or f4 or f5):
+                if made is None and refusal is None:
+                    out["rerun"] = {"run": r["id"], "attempt": 1, "number": r["number"]}
+                gap(f"run #{r['number']} waits on its one re-run")
+                break
+            conf, prev = set(), (w0[2] if w0 else None)
+            for _n, v, _a in rr:
+                if v["v"] == "red" and prev is not None and prev["v"] == "red":
+                    conf |= set(v["suites"]) & set(prev["suites"])
+                prev = v
+            outcome = "red" if conf else "unconfirmed"
+            key = (repo, r["id"], vn, outcome)
+            if key not in keys:
+                next_run, retest = None, None
+                if any(n >= 2 for n, _v, _a in rr):
+                    retest = "rerun"
+                elif f4:
+                    retest = "refused"
+                elif f3:
+                    retest = "covered"
+                else:
+                    retest = "none"
+                    for x in newer:
+                        if x["status"] != "completed":
+                            retest, next_run = "next-run", x
+                            break
+                        xr, xn = run_reads(x)
+                        if xn:
+                            gap(f"run #{r['number']}'s retest reads run #{x['number']}", xn)
+                            stop = True
+                            break
+                        if xr:
+                            retest, next_run = "next-run", x
+                            break
+                if stop:
+                    break
+                suites = conf if conf else F
+                kind = "publisher" if suites == {MASTER_PUBLISHER} else "suites"
+                f = {"repo": repo, "outcome": outcome, "sha": r["sha"], "at": at, "runId": r["id"], "attempt": vn,
+                     "suites": sorted(suites), "redKind": kind}
+                task, join = None, None
+                if conf:
+                    stem = f"master-red-{name}-{r['sha'][:12]}-{vn}"
+                    own = stems.get(stem)
+                    new = conf - _master_filed(notes, repo, since, r, stem)
+                    f["since"], f["retest"] = since, retest
+                    new_suites, healed = None, False
+                    if own is not None:
+                        new_suites = list(own["suites"])
+                        f["followup"] = stem
+                        join = None if own["rollout"] else stem
+                    elif new and not green_newer(i):
+                        new_suites = sorted(new)
+                        f["followup"] = stem
+                    elif new:
+                        new_suites, healed = sorted(new), True
+                    if new_suites:
+                        f["newSuites"] = new_suites
+                    if healed:
+                        f["healed"] = True
+                    f["merges"], f["prs"] = None, None
+                    cmp_ = None
+                    if kind == "suites" and new_suites and since is not None:
+                        cmp_ = cache["compares"].get(f"{since}...{r['sha']}")
+                        if cmp_ is None:
+                            gap(f"run #{r['number']}'s merges", [("compare", since, r["sha"])])
+                            break
+                        commits, _total = _master_merges(cmp_)
+                        f["merges"] = len(commits)
+                        f["prs"] = sorted({p for _s, _m, ps in commits for p in ps})
+                    if own is None and "followup" in f:
+                        where = {}
+                        for _n, v, _a in rr:
+                            for s, js in (v.get("where") or {}).items():
+                                where.setdefault(s, []).extend(js)
+                        w_run = w0[0] if w0 else None
+                        text = _master_retest_text(retest, r, w_run, next_run, refusal)
+                        extra, body = _master_task(repo, r, vn, kind, new_suites, where, top[1].get("detail"), text, g,
+                                                   runs[0], cmp_, since)
+                        task = {"stem": stem, "extra": extra, "body": body}
+                    if own is None and new_suites:
+                        notes.append({"stem": stem if task else "", "repo": repo, "since": since, "run": r["id"],
+                                      "kind": kind if task else "healed", "attempt": vn, "suites": list(new_suites),
+                                      "merged": None, "rollout": ""})
+                else:
+                    f["retest"] = retest
+                decided.append({"key": key, "fields": f, "task": task, "join": join, "order": r["number"]})
+        out["decisions"] += decided
+        reads += [(r, n, v, a) for n, v, a in rr]
+        latest[r["id"]] = top[1]["v"]
+        if top[1]["v"] == "green":
+            g_run = r
+    return out
+
+
+def _master_green(sha, runs, head_runs, cache, keys, repo):
+    """The Green tip check (the docstring's rule), pure: (state, payload). state none (no ref), cached (a proven C),
+    keyed (an unproven C already recorded), proven (payload: the run), wait (a run at C still going), need (payload:
+    the reads: ("head", C) or ("attempt", run, n)) or unproven (payload: the runs at C, [] for none)."""
+    if not sha:
+        return "none", None
+    if sha in cache["proven"]:
+        return "cached", None
+    if (repo, sha, "unproven") in keys:
+        return "keyed", None
+    at = [r for r in runs if r["sha"] == sha]
+    if not at:
+        if head_runs is None:
+            return "need", [("head", sha)]
+        at = head_runs
+    for r in at:
+        if r["status"] == "completed" and r["conclusion"] == "success":
+            return "proven", r
+    if any(r["status"] != "completed" for r in at):
+        return "wait", None
+    needs = []
+    for r in at:
+        for n in range(1, r["attempt"]):
+            a = cache["attempts"].get(f"{r['id']}/{n}")
+            if a is None:
+                needs.append(("attempt", r["id"], n))
+            elif a.get("conclusion") == "success":
+                return "proven", r
+    return ("need", needs) if needs else ("unproven", at)
+
+
+def _master_unproven(repo, sha, runs, now):
+    """The unproven Green tip's decision: its line, keyed (repo, C, unproven), and its own task."""
+    name = repo.split("/")[-1]
+    stem = f"master-green-unproven-{name}-{sha[:12]}"
+    last = next((r for r in reversed(runs) if r["status"] == "completed" and r["conclusion"] == "success"), None)
+    extra = [f'master_red: "{repo}"', "master_red_kind: green-tip", f"master_red_ref_sha: {sha}"]
+    body = [f"# The Green tip of {repo} sits at a commit no full suite proved", "", "## Notes", "",
+            f"`{MASTER_GREEN_REF}` on `{repo}` points at `{sha}`, and no `full suite` run at that commit has a "
+            "successful attempt. Only master's own run, through its `publish the Green tip` job, should move it, and "
+            "no ruleset guards the ref, so something else moved it (ADR 0084 Decided for you 11).", "",
+            (f"- The last green run: #{last['number']} at `{last['sha']}` ({last['url']})" if last else
+             f"- No green run sits among the last {MASTER_LIST} `full suite` runs"), "",
+            "**Verify:** the ref points at a commit with a successful `full suite` run, and the cause that moved it is "
+            "named and closed."]
+    f = {"repo": repo, "outcome": "unproven", "sha": sha, "at": _master_z(now), "ref": MASTER_GREEN_REF,
+         "followup": stem}
+    return {"key": (repo, sha, "unproven"), "fields": f, "task": {"stem": stem, "extra": extra, "body": body},
+            "join": None, "order": math.inf}
+
+
+def _master_fit(fields, rollout):
+    """(fields, None) | (None, why): a master-run line fitted before its write (the docstring's *Fitting a line*): each
+    list sorted (followups kept in run order), each name cut to FAILING_NAME, each list cut to its cap, then the list
+    with the most bytes halved until the line fits MAX_LINE, a `<list>Total` for each cut list, then run_record.check.
+    Pure but for run_record's line_bytes (this host's name)."""
+    rr = _run_record()
+    f, total = dict(fields), {}
+    for k, cap_name in MASTER_LISTS:
+        v = f.get(k)
+        if not isinstance(v, list):
+            continue
+        if k == "prs":
+            v = sorted(v)
+        else:
+            v = [str(x)[:rr.FAILING_NAME] for x in (v if k == "followups" else sorted(v))]
+        cap = getattr(rr, cap_name)
+        if len(v) > cap:
+            total[k] = len(fields[k])
+            v = v[:cap]
+        f[k] = v
+
+    def whole():
+        return {**f, **{f"{k}Total": n for k, n in total.items()}}
+
+    while rr.line_bytes("master-run", whole(), rollout) > rr.MAX_LINE:
+        cands = [(len(json.dumps(f[k])), -i, k) for i, (k, _c) in enumerate(MASTER_LISTS)
+                 if isinstance(f.get(k), list) and f[k]]
+        if not cands:
+            break
+        k = max(cands)[2]
+        total.setdefault(k, len(fields[k]))
+        f[k] = f[k][:len(f[k]) // 2]
+    f = whole()
+    try:
+        rr.check(rollout, "master-run", None, f)
+    except rr.Refused as e:
+        return None, str(e)
+    return f, None
+
+
+def _master_rerun_guard(ledger, head, run_id):
+    """The lock's guard on a planned re-run of (run_id, 1), pure: None to go, else why not. Refuses a (run, attempt)
+    the ledger holds (a re-run or a refusal: another pass made it), and a run that no longer has the highest
+    run_number of any status in the head peek (`head`: _master_runs of it), is not completed or is past attempt 1."""
+    k = f"{run_id}/1"
+    if k in ledger["reruns"]:
+        return "the ledger holds its re-run"
+    if k in ledger["refusals"]:
+        return "the ledger holds GitHub's refusal"
+    top = max(head, key=lambda r: (r["number"], r["id"]), default=None)
+    if top is None or top["id"] != run_id:
+        return "a newer run heads the list" if top is not None else "the head peek listed no run"
+    if top["status"] != "completed":
+        return f"it is {top['status']}"
+    if top["attempt"] != 1:
+        return f"it is at attempt {top['attempt']}"
+    return None
+
+
+def _master_paths(repo):
+    """(the read cache, the re-run ledger, the master-runs lock) of one origin, in _note_lock_dir(): named by
+    `<owner>.<name>` (a GitHub owner holds no dot)."""
+    base, tag = _note_lock_dir(), repo.replace("/", ".")
+    return (base / f"master-runs-{tag}.json", base / f"master-runs-{tag}.reruns.json",
+            base / f"master-runs-{tag}.lock")
+
+
+def _master_cache_read(path):
+    """(cache, why): the read cache, or an empty one with why it could not be read (None when missing or fine)."""
+    empty = {"branch": None, **{k: {} for k in MASTER_CACHE_MAPS}}
+    try:
+        d = json.loads(path.read_text())
+    except FileNotFoundError:
+        return empty, None
+    except (OSError, ValueError) as e:
+        return empty, str(e)
+    if not isinstance(d, dict) or any(not isinstance(d.get(k, {}), dict) for k in MASTER_CACHE_MAPS):
+        return empty, "not a read cache"
+    out = {"branch": d.get("branch") if isinstance(d.get("branch"), dict) else None}
+    for k in MASTER_CACHE_MAPS:
+        out[k] = dict(d.get(k) or {})
+    return out, None
+
+
+def _master_cache_save(path, cache, runs, green_sha):
+    """Save the read cache with no lock: a read-merge-write (the union with the file as it reads now, each entry the same
+    fact whichever pass read it), runs off the list and proven commits other than C or a listed head dropped (only when
+    the list was read: `runs` not None), then a temp file and os.replace. A failure is one warn line."""
+    old, _why = _master_cache_read(path)
+    new = {"v": 1, "branch": cache["branch"] or old["branch"]}
+    for k in MASTER_CACHE_MAPS:
+        m = dict(old[k])
+        m.update(cache[k])
+        new[k] = m
+    if runs is not None:
+        listed = {str(r["id"]) for r in runs}
+        heads = {r["sha"] for r in runs} | ({green_sha} if green_sha else set())
+        for k in ("attempts", "jobs", "verdicts"):
+            new[k] = {key: v for key, v in new[k].items() if key.split("/", 1)[0] in listed}
+        for k in ("suites", "annotations"):
+            new[k] = {key: v for key, v in new[k].items() if isinstance(v, dict) and str(v.get("run")) in listed}
+        new["compares"] = {key: v for key, v in new["compares"].items() if key.split("...", 1)[-1] in heads}
+        new["proven"] = {key: v for key, v in new["proven"].items() if key in heads}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(new, separators=(",", ":"), sort_keys=True))
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"WARN: master-runs: cannot save the read cache {path}: {e}", file=sys.stderr)
+
+
+def _master_ledger_read(path, quarantine=True):
+    """The re-run ledger ({reruns: {"<run>/<n>": stamp}, refusals: {"<run>/<n>": code}}). Missing: empty. Malformed:
+    renamed `<file>.bad` with one warn line (never by a --dry-run: quarantine False), and read as empty."""
+    empty = {"reruns": {}, "refusals": {}}
+    try:
+        d = json.loads(path.read_text())
+        if not (isinstance(d, dict) and isinstance(d.get("reruns", {}), dict)
+                and isinstance(d.get("refusals", {}), dict)):
+            raise ValueError("not a re-run ledger")
+    except FileNotFoundError:
+        return empty
+    except (OSError, ValueError) as e:
+        if quarantine:
+            try:
+                os.replace(path, path.with_name(path.name + ".bad"))
+            except OSError:
+                pass
+        print(f"WARN: master-runs: the re-run ledger {path} is unreadable ({e}): "
+              f"{'set aside as .bad, ' if quarantine else ''}read as empty", file=sys.stderr)
+        return empty
+    return {"reruns": dict(d.get("reruns") or {}), "refusals": dict(d.get("refusals") or {})}
+
+
+def _master_ledger_write(path, ledger, runs):
+    """Write the re-run ledger (under the master-runs lock only), entries for runs off the list dropped. Raises
+    OSError."""
+    listed = {str(r["id"]) for r in runs}
+    d = {"v": 1, **{k: {key: v for key, v in ledger[k].items() if key.split("/", 1)[0] in listed}
+                    for k in ("reruns", "refusals")}}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(d, sort_keys=True))
+    os.replace(tmp, path)
+
+
+def _master_keys(repo, healed=None):
+    """The dedupe keys master-runs.jsonl holds for `repo`, or None when it cannot be read. `healed`, a list, gains one
+    note-shaped entry per `red` line recorded healed (its since, run and newSuites, kind "healed"): such a break counts
+    as filed for the runs after it, as a filed task does, so a healed streak is one break."""
+    try:
+        rr = _run_record()
+        path = os.path.join(rr.events_dir(), rr.MASTER_RUNS + ".jsonl")
+    except Exception:  # noqa: BLE001 — no events dir is an unreadable file
+        return None
+    keys = set()
+    try:
+        with open(path, "rb") as f:
+            for raw in f:
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("kind") == "master-run" and d.get("repo") == repo:
+                    keys.add(_master_key(d))
+                    if healed is not None and d.get("healed") is True and isinstance(d.get("newSuites"), list):
+                        healed.append({"stem": "", "repo": repo, "kind": "healed", "since": d.get("since"),
+                                       "run": d.get("runId"), "attempt": d.get("attempt"),
+                                       "suites": [s for s in d["newSuites"] if isinstance(s, str)], "merged": None,
+                                       "rollout": ""})
+    except FileNotFoundError:
+        return keys
+    except OSError:
+        return None
+    return keys
+
+
+def _master_note_suites(note):
+    """A note's `master_red_suites:` block list, each item JSON-quoted (an unquoted one read as it stands)."""
+    for i, line in enumerate(note._fm):
+        if not line.startswith("master_red_suites:"):
+            continue
+        out = []
+        for item in note._fm[i + 1:]:
+            m = re.match(r"^\s+-\s+(.*)$", item)
+            if not m:
+                break
+            v = m.group(1).strip()
+            if v.startswith('"'):
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    v = v.strip('"')
+            if isinstance(v, str) and v:
+                out.append(v)
+        return out
+    return []
+
+
+def _master_notes(tasks_dir, repo):
+    """The repo's master-red notes: `master-red-*.md` in tasks_dir's root, then under its Archive/ (_find_note's rule:
+    the root's copy wins), each carrying `master_red: <repo>`: [{stem, repo, kind, since, run, attempt, suites, merged,
+    rollout}]. A glob on that stem, never a read of every note."""
+    found = {}
+    paths = sorted(tasks_dir.glob("master-red-*.md"))
+    archive = tasks_dir / "Archive"
+    if archive.is_dir():
+        paths += sorted(archive.rglob("master-red-*.md"))
+    out = []
+    for p in paths:
+        if p.stem in found:
+            continue
+        try:
+            note = Note(p)
+        except (OSError, ValueError):
+            continue
+        found[p.stem] = True
+        if _scalar(note.get("master_red")).lower() != repo:
+            continue
+        since = _scalar(note.get("master_red_since"))
+        out.append({"stem": p.stem, "repo": repo, "kind": _scalar(note.get("master_red_kind")) or "suites",
+                    "since": None if since in ("", "none") else since,
+                    "run": _int_field(note.get("master_red_run"), None),
+                    "attempt": _int_field(note.get("master_red_attempt"), None),
+                    "suites": _master_note_suites(note), "merged": _parse_ts(note.get("merged")),
+                    "rollout": _scalar(note.get("rollout"))})
+    return out
+
+
+class _MasterReader:
+    """One pass's gh reads, bounded (the docstring's *The calls, and which count* and the pass bounds): at most `reads`
+    counted reads; no call starts once `seconds` have passed since the pass began, the exempt calls aside (the
+    default-branch read, the list, the pass's first counted read and the two calls under the lock); the first transient
+    failure (a timeout, a 5xx, no HTTP code, no JSON) or gh missing ends the reading. `stop` says why a pass is not read
+    whole; `dead` that no further call starts."""
+
+    def __init__(self, gh_bin, repo, reads, seconds, log_max):
+        self.gh_bin, self.repo, self.budget, self.seconds, self.log_max = gh_bin, repo, reads, seconds, log_max
+        self.t0, self.counted, self.stop, self.dead = time.monotonic(), 0, None, False
+
+    def _halt(self, why, dead=False):
+        if self.stop is None:
+            self.stop = why
+        self.dead = self.dead or dead
+
+    def _admit(self, counted, exempt):
+        """(timeout, cut) for a call that may start now, else None with the reason kept."""
+        if self.dead:
+            return None
+        if counted and self.counted >= self.budget:
+            self._halt("read budget")
+            return None
+        if exempt or (counted and self.counted == 0):
+            return MASTER_GH_TIMEOUT, False
+        left = self.seconds - (time.monotonic() - self.t0)
+        if left <= 0:
+            self._halt("pass deadline")
+            return None
+        return min(MASTER_GH_TIMEOUT, left), left < MASTER_GH_TIMEOUT
+
+    def _result(self, what, rc, code, out, err, cut, parse):
+        if rc == "start":
+            self._halt("gh missing", dead=True)
+            return None
+        if rc == "timeout":
+            self._halt("pass deadline" if cut else f"{what}: {err}", dead=True)
+            return None
+        if rc == 0:
+            if not parse:
+                return "ok", out
+            try:
+                return "ok", json.loads(out)
+            except ValueError:
+                self._halt(f"{what}: gh exited 0 with no JSON", dead=True)
+                return None
+        text = next((s.strip() for s in err.splitlines() if s.strip()), f"gh exited {rc}")
+        if code is None or code >= 500:
+            self._halt(f"{what}: {text}", dead=True)
+            return None
+        return "http", code, text
+
+    def get(self, endpoint, counted=False, exempt=False):
+        """("ok", data) | ("http", code, text) | None: not read (`stop` says why)."""
+        adm = self._admit(counted, exempt)
+        if adm is None:
+            return None
+        if counted:
+            self.counted += 1
+        path = f"repos/{self.repo}" + (f"/{endpoint}" if endpoint else "")
+        rc, code, out, err = _master_gh(self.gh_bin, ["api", path], adm[0])
+        return self._result(endpoint or path, rc, code, out, err, adm[1], True)
+
+    def halt(self, why):
+        """Add a reason the pass is not read whole (the lock's, the ledger's), keeping any earlier one."""
+        self.stop = why if not self.stop else (self.stop if why in self.stop else f"{self.stop}; {why}")
+
+    def log(self, job_id):
+        """("ok", text, cut) | ("http", code, text) | None: one job's log, counted, written to an anonymous temp file
+        (memory stays flat, nothing is left behind) and kept through _log_tail."""
+        adm = self._admit(True, False)
+        if adm is None:
+            return None
+        self.counted += 1
+        endpoint = f"actions/jobs/{job_id}/logs"
+        with tempfile.TemporaryFile() as fh:
+            rc, code, _out, err = _master_gh(self.gh_bin, ["api", f"repos/{self.repo}/{endpoint}"], adm[0], out=fh)
+            got = self._result(endpoint, rc, code, "", err, adm[1], False)
+            if got is None or got[0] != "ok":
+                return got
+            fh.flush()
+            text, cut = _log_tail(fh, self.log_max)
+        return "ok", text, cut
+
+    def lock_call(self, argv):
+        """(rc, code, out, err) of one call under the master-runs lock: bounded at MASTER_LOCK_GH_TIMEOUT, exempt from
+        the deadline; None once the reading is dead."""
+        if self.dead:
+            return None
+        return _master_gh(self.gh_bin, argv, MASTER_LOCK_GH_TIMEOUT)
+
+
+def _master_job(cache, run_id, job_id):
+    for key, jobs in cache["jobs"].items():
+        if key.split("/", 1)[0] == str(run_id):
+            for j in jobs:
+                if j["id"] == job_id:
+                    return j
+    return None
+
+
+def _master_read(reader, cache, need):
+    """Make one read a decide asked for and keep its immutable fact in the cache. False when it was not made (a bound or
+    a transient failure: reader.stop says why)."""
+    kind = need[0]
+    if kind == "attempt":
+        _k, rid, n = need
+        got = reader.get(f"actions/runs/{rid}/attempts/{n}", counted=True)
+        if got is None:
+            return False
+        d = got[1] if got[0] == "ok" and isinstance(got[1], dict) else {}
+        if got[0] != "ok":
+            print(f"WARN: master-runs: attempt {n} of run {rid}: HTTP {got[1]}: read as no verdict", file=sys.stderr)
+        cache["attempts"][f"{rid}/{n}"] = {"conclusion": d.get("conclusion"), "updated_at": d.get("updated_at")}
+    elif kind == "jobs":
+        _k, rid, n = need
+        got = reader.get(f"actions/runs/{rid}/attempts/{n}/jobs?per_page=100", counted=True)
+        if got is None:
+            return False
+        if got[0] != "ok":
+            print(f"WARN: master-runs: the jobs of run {rid} attempt {n}: HTTP {got[1]}: read as no verdict",
+                  file=sys.stderr)
+        cache["jobs"][f"{rid}/{n}"] = _master_jobs(got[1]) if got[0] == "ok" else []
+    elif kind == "log":
+        _k, rid, jid = need
+        job = _master_job(cache, rid, jid) or {"name": f"job {jid}", "step": None}
+        got = reader.log(jid)
+        if got is None:
+            return False
+        if got[0] == "ok":
+            if job["name"] == MASTER_PUBLISHER:
+                entry = {"suites": [MASTER_PUBLISHER], "cut": got[2], "detail": _master_detail(got[1])}
+            else:
+                entry = {"suites": _job_suites(got[1], job["name"], job.get("step")), "cut": got[2], "detail": None}
+        else:
+            entry = {"suites": [f"{job['name']} (log unreadable: HTTP {got[1]})"], "cut": False, "detail": None}
+        cache["suites"][str(jid)] = dict(entry, run=rid)
+    elif kind == "annotations":
+        _k, rid, jid = need
+        got = reader.get(f"check-runs/{jid}/annotations?per_page=100", counted=True)
+        if got is None:
+            return False
+        rows = got[1] if got[0] == "ok" and isinstance(got[1], list) else []
+        if got[0] != "ok":
+            print(f"WARN: master-runs: the annotations of job {jid}: HTTP {got[1]}: read as no time limit",
+                  file=sys.stderr)
+        cache["annotations"][str(jid)] = {"run": rid, "cut": any(
+            MASTER_CUT_MARK in str((a or {}).get("message") or "") for a in rows if isinstance(a, dict))}
+    elif kind == "compare":
+        _k, g, x = need
+        got = reader.get(f"compare/{g}...{x}", counted=True)
+        if got is None:
+            return False
+        d = got[1] if got[0] == "ok" and isinstance(got[1], dict) else {}
+        commits = [[str(c.get("sha") or ""), str(((c.get("commit") or {}).get("message") or "")).split("\n", 1)[0]]
+                   for c in d.get("commits") or [] if isinstance(c, dict)]
+        total = d.get("total_commits") if isinstance(d.get("total_commits"), int) else len(commits)
+        cache["compares"][f"{g}...{x}"] = {"total": total, "commits": commits}
+    return True
+
+
+def _master_fill(runs, cache):
+    """Keep each complete attempt's verdict in the cache (an immutable fact once its attempt completed)."""
+    for r in runs:
+        for n in range(1, r["attempt"] + 1):
+            key = f"{r['id']}/{n}"
+            if key in cache["verdicts"]:
+                continue
+            if n == r["attempt"]:
+                if r["status"] != "completed":
+                    continue
+                conc = r["conclusion"]
+            elif key in cache["attempts"]:
+                conc = cache["attempts"][key].get("conclusion")
+            else:
+                continue
+            v = _master_verdict(conc, cache["jobs"].get(key), cache["suites"], cache["annotations"])
+            if not isinstance(v, tuple):
+                cache["verdicts"][key] = v
+
+
+def _master_join(tasks_dir, rollout_path, stem, now):
+    """Join one fix task to the rollout in process, ranked first (cmd_join with top): its stdout relayed as `join: …`
+    lines, its WARN lines verbatim; exit 2 prints `not joined: <its ERROR text>`. Returns cmd_join's exit."""
+    ns = argparse.Namespace(tasks_dir=str(tasks_dir), rollout=str(rollout_path), tasks=stem, files=None, now=now,
+                            dry_run=False, top=True)
+    so, se = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
+        try:
+            rc = cmd_join(ns)
+        except Exception as e:  # noqa: BLE001 — a join that raises is a write failure, never a crash of the pass
+            print(f"ERROR: join: {type(e).__name__}: {e}", file=sys.stderr)
+            rc = 1
+    for line in so.getvalue().splitlines():
+        print(f"master-runs: join: {line}")
+    errors = []
+    for line in se.getvalue().splitlines():
+        if line.startswith("ERROR: join: "):
+            errors.append(line[len("ERROR: join: "):])
+        else:
+            print(line, file=sys.stderr)
+    if rc == 2:
+        print(f"master-runs: not joined: {errors[0] if errors else 'join refused'}")
+    elif rc != 0:
+        print(f"ERROR: master-runs: [[{stem}]] not joined ({errors[0] if errors else f'join exit {rc}'}): its line is "
+              "not written, so the next pass decides it again and joins it through its own stem", file=sys.stderr)
+    return rc
+
+
+def cmd_master_runs(args) -> int:
+    """`master-runs` (the module docstring's Subcommands): read master's `full suite` runs, make their one re-run, file
+    the fix tasks, check the Green tip and write their Run record lines."""
+    now = _now(args)
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: master-runs: --rollout {rollout_path}: {e}", file=sys.stderr)
+        return 2
+    root = _project_root(rollout_note)
+    if root is None:
+        print(f"ERROR: master-runs: [[{rollout_path.stem}]] names no `Project root:`", file=sys.stderr)
+        return 2
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    ro = rollout_path.stem
+    repo, url = _master_origin(root)
+    if repo is None:
+        print(f"master-runs: no GitHub origin ({url or 'none'}): nothing to read")
+        return 0
+    cache_path, ledger_path, lock_path = _master_paths(repo)
+    reader = _MasterReader(args.gh_bin, repo, _master_knob("reads"), _master_knob("seconds"), _master_knob("log"))
+    cache, why = _master_cache_read(cache_path)
+    if why:
+        print(f"WARN: master-runs: the read cache {cache_path} is unreadable ({why}): read as empty", file=sys.stderr)
+    ledger = _master_ledger_read(ledger_path, quarantine=not args.dry_run)
+    healed = []
+    keys = _master_keys(repo, healed)
+    unreadable = keys is None
+    notes = _master_notes(tasks_dir, repo) + healed
+
+    def finish(code, runs=None, green_sha=None):
+        if not args.dry_run:
+            _master_cache_save(cache_path, cache, runs, green_sha)
+        return code
+
+    # the fixed reads: the default branch (cached within MASTER_BRANCH_TTL), the list, the Green tip's ref
+    br = cache["branch"] if isinstance(cache["branch"], dict) else None
+    br_at = _parse_ts(br.get("at")) if br else None
+    branch = br.get("name") if br and br_at and (now - br_at).total_seconds() < MASTER_BRANCH_TTL else None
+    if not branch:
+        got = reader.get("", exempt=True)
+        if got is None or got[0] != "ok" or not isinstance(got[1], dict) or not got[1].get("default_branch"):
+            if got is not None:
+                reader.halt(f"repos/{repo}: HTTP {got[1]}" if got[0] != "ok" else f"repos/{repo}: no default_branch")
+            print(f"master-runs: not read ({reader.stop})")
+            return finish(8)
+        branch = str(got[1]["default_branch"])
+        cache["branch"] = {"name": branch, "at": _master_z(now)}
+    lst = reader.get(f"actions/workflows/{MASTER_WORKFLOW}/runs?branch={quote(branch, safe='')}&event=push"
+                     f"&per_page={MASTER_LIST}", exempt=True)
+    if lst is None:
+        print(f"master-runs: not read ({reader.stop})")
+        return finish(8)
+    if lst[0] != "ok":
+        if lst[1] == 404:
+            print(f"master-runs: no {MASTER_WORKFLOW} workflow on {repo}: nothing to read")
+            return finish(0)
+        print(f"master-runs: not read (the {MASTER_WORKFLOW} runs: HTTP {lst[1]})")
+        return finish(8)
+    runs = _master_runs(lst[1])
+    green_sha, head_runs, ref_read = None, None, False
+    got = reader.get(f"git/ref/{MASTER_GREEN_REF[len('refs/'):]}")
+    if got is not None:
+        ref_read = True
+        if got[0] == "ok" and isinstance(got[1], dict):
+            green_sha = str((got[1].get("object") or {}).get("sha") or "") or None
+        elif got[0] != "ok" and got[1] != 404:
+            print(f"WARN: master-runs: {MASTER_GREEN_REF}: HTTP {got[1]}: the Green tip is not checked",
+                  file=sys.stderr)
+    if green_sha and _master_green(green_sha, runs, None, cache, keys or set(), repo) == ("need", [("head", green_sha)]):
+        got = reader.get(f"actions/workflows/{MASTER_WORKFLOW}/runs?head_sha={green_sha}&event=push")
+        if got is not None:
+            head_runs = _master_runs(got[1]) if got[0] == "ok" else []
+    # the decide-and-read loop
+    done = set()
+    while True:
+        d = _master_decide(runs, cache, ledger, notes, keys or set(), now, repo)
+        g = _master_green(green_sha, runs, head_runs, cache, keys or set(), repo) if ref_read else ("none", None)
+        needs = [n for n in d["needs"] + (g[1] if g[0] == "need" else []) if n[0] != "head" and n not in done]
+        if not needs:
+            break
+        stopped = False
+        for need in needs:
+            done.add(need)
+            if not _master_read(reader, cache, need):
+                stopped = True
+                break
+        if stopped:
+            break
+    d = _master_decide(runs, cache, ledger, notes, keys or set(), now, repo)
+    g = _master_green(green_sha, runs, head_runs, cache, keys or set(), repo) if ref_read else ("none", None)
+    _master_fill(runs, cache)
+    if g[0] == "proven":
+        cache["proven"][green_sha] = g[1]["id"]
+    if (d["needs"] or g[0] == "need") and reader.stop is None:
+        reader.halt("reads left")   # a read that kept no fact: never expected, never a loop
+    finish(0, runs, green_sha)
+    plan = list(d["decisions"])
+    unproven = _master_unproven(repo, green_sha, runs, now) if g[0] == "unproven" else None
+    if unproven is not None:
+        plan.append(unproven)
+    failed = False
+    if args.dry_run:
+        if d["rerun"]:
+            print(f"master-runs: would re-run run {d['rerun']['run']} (#{d['rerun']['number']}): its failed jobs")
+        for dec in plan:
+            if dec["task"]:
+                print(f"master-runs: would file {dec['task']['stem']}")
+                print(f"master-runs: would join {dec['task']['stem']} into [[{ro}]]")
+            elif dec["join"]:
+                print(f"master-runs: would join {dec['join']} into [[{ro}]]")
+            f = dec["fields"]
+            print(f"master-runs: would write {f['outcome']} " +
+                  (f"run {f.get('runId')} attempt {f.get('attempt')}" if f["outcome"] != "unproven" else f["sha"]))
+    elif unreadable:
+        reader.halt("master-runs.jsonl unreadable")
+    elif plan or d["rerun"]:
+        lock = _note_lock(lock_path=lock_path, label="master-runs lock")
+        try:
+            lock.__enter__()
+        except OSError:
+            reader.halt("master-runs lock busy")
+        else:
+            try:
+                failed = _master_locked(args, reader, repo, ro, rollout_path, rollout_note, tasks_dir, runs, cache,
+                                        ledger_path, green_sha, head_runs, ref_read, branch, now)
+            finally:
+                lock.__exit__(None, None, None)
+    if reader.stop:
+        print(f"master-runs: not read ({reader.stop})")
+    return 1 if failed else 8 if reader.stop else 0
+
+
+def _master_locked(args, reader, repo, ro, rollout_path, rollout_note, tasks_dir, runs, cache, ledger_path, green_sha,
+                   head_runs, ref_read, branch, now):
+    """Under the master-runs lock (the docstring's *Under the master-runs lock*): re-read the keys, the notes and the
+    ledger and decide again; make the one re-run (the guard, the head peek, the call, the ledger write); then each
+    task file, its join and its line. True when a write failed."""
+    healed = []
+    keys = _master_keys(repo, healed)
+    if keys is None:
+        reader.halt("master-runs.jsonl unreadable")
+        return False
+    notes = _master_notes(tasks_dir, repo) + healed
+    ledger = _master_ledger_read(ledger_path)
+    d = _master_decide(runs, cache, ledger, notes, keys, now, repo)
+    g = _master_green(green_sha, runs, head_runs, cache, keys, repo) if ref_read else ("none", None)
+    failed = False
+    if d["rerun"]:
+        rid = d["rerun"]["run"]
+        peek = reader.lock_call(["api", f"repos/{repo}/actions/workflows/{MASTER_WORKFLOW}/runs?branch="
+                                        f"{quote(branch, safe='')}&event=push&per_page=5"])
+        head = None
+        if peek is not None and peek[0] == 0:
+            try:
+                head = _master_runs(json.loads(peek[2]))
+            except ValueError:
+                head = None
+        why = _master_rerun_guard(ledger, head, rid) if head is not None else "the head peek was not read"
+        if head is None:
+            reader.halt("the head peek")
+        if why is None:
+            rc, code, _out, err = reader.lock_call(["run", "rerun", str(rid), "--failed", "-R", repo])
+            k = f"{rid}/1"
+            if rc == "start":
+                reader._halt("gh missing", dead=True)
+            elif rc == 0 or rc == "timeout" or code is None or code >= 500:
+                ledger["reruns"][k] = _master_z(now)
+                print(f"master-runs: re-ran run {rid} (#{d['rerun']['number']}): its failed jobs"
+                      + ("" if rc == 0 else f" (the call ended {'timed out' if rc == 'timeout' else err.strip()[:120]}: "
+                                            "recorded as made, never repeated)"))
+            else:
+                ledger["refusals"][k] = code
+                print(f"master-runs: GitHub refused the re-run of run {rid} (HTTP {code})")
+            if k in ledger["reruns"] or k in ledger["refusals"]:
+                try:
+                    _master_ledger_write(ledger_path, ledger, runs)
+                except OSError as e:
+                    print(f"ERROR: master-runs: the re-run ledger {ledger_path} not written ({e})", file=sys.stderr)
+                    failed = True
+        else:
+            print(f"master-runs: no re-run of run {rid}: {why}")
+    plan = list(d["decisions"])
+    if g[0] == "unproven":
+        plan.append(_master_unproven(repo, green_sha, runs, now))
+    for dec in plan:
+        if dec["key"] in keys:
+            continue
+        stem = dec["task"]["stem"] if dec["task"] else dec["join"]
+        if dec["task"]:
+            path = tasks_dir / f"{stem}.md"
+            existing = _find_note(tasks_dir, stem)
+            if existing is None:
+                try:
+                    _write_master_red(path, rollout_note, now, dec["task"]["extra"], dec["task"]["body"])
+                    print(f"master-runs: filed {stem}")
+                except FileExistsError:
+                    pass
+                except OSError as e:
+                    print(f"ERROR: master-runs: {stem} not written ({e})", file=sys.stderr)
+                    failed = True
+                    continue
+        if stem:
+            note_path = _find_note(tasks_dir, stem)
+            joined = False
+            if note_path is not None and note_path.parent.resolve() == tasks_dir.resolve():
+                try:
+                    joined = bool(_scalar(Note(note_path).get("rollout")))
+                except (OSError, ValueError):
+                    joined = False
+                if not joined and _master_join(tasks_dir, rollout_path, stem, now) == 1:
+                    failed = True   # no line: the next pass decides R again and joins it through its own stem
+                    continue
+        fields, why = _master_fit(dec["fields"], ro)
+        if why:
+            print(f"ERROR: master-runs: line refused ({why})", file=sys.stderr)
+            failed = True
+            continue
+        if _event(ro, "master-run", None, fields, args):
+            print(f"master-runs: wrote {fields['outcome']} " + (f"run {fields.get('runId')} attempt {fields.get('attempt')}"
+                                                                 if fields["outcome"] != "unproven" else fields["sha"]))
+        else:
+            print(f"ERROR: master-runs: line not written ({dec['key']})", file=sys.stderr)
+            failed = True
+    return failed
+
+
+def _write_master_red(path: Path, note, now, extra, body):
+    """File one red-master fix task through the completion red's writer path: _new_task_fm's shape at `priority: high`,
+    exclusive (an existing file is never overwritten: FileExistsError)."""
+    lines = [*_new_task_fm(note, now, "high", extra), "", *body]
+    with open(path, "x") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+
 def _parser():
     """The CLI's argparse parser (p29-7: moved out of main() unchanged, so `moving` builds `next`'s Namespace through
     it and every default `next` gains reaches that dry run too)."""
@@ -18476,6 +20001,16 @@ def _parser():
                     help=f"minutes of silence before work reads stalled, 1 to {STALL_AFTER_MAX} (default {STALL_AFTER_MIN})")
     mv.add_argument("--gh-bin", default="gh", help="the gh executable `next`'s dry run reads PR holds through")
     mv.set_defaults(func=cmd_moving)
+
+    mr = sub.add_parser("master-runs", help="p54-7 (ADR 0084): read master's full-suite runs, make their one re-run, "
+                                            "file the fix tasks, check the Green tip; the lead never routes on its exit")
+    mr.add_argument("--rollout", required=True, help="path to the rollout note (its Project root names the repo)")
+    mr.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    mr.add_argument("--gh-bin", default="gh", help="the gh executable (tests pass a stub)")
+    mr.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    mr.add_argument("--dry-run", action="store_true",
+                    help="read, but write no cache, ledger, task, join or line, and make no re-run")
+    mr.set_defaults(func=cmd_master_runs)
     return p
 
 
