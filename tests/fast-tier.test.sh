@@ -743,7 +743,13 @@ ZZ_C_OK=1 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/
 ok "$rc|$(nodeorder)" "0|zzmarker-c zzmarker-d " "F23: … and with the weights swapped, zzc runs first"
 ZZ_C_OK=0 THREAD_TEST_JOBS=1 run bash --only tests/contracts/zzc.test.mjs tests/zzd.test.mjs
 ok "$rc|$(lines '^node tests \(2 files\): FAILED \([0-9]+s\)$')" "1|1" "F23: … a failing node file still fails the node step and the run"
-rm -f "$W" "$F/tests/zzd.test.mjs"
+# node-run.mjs exits as `node --test` does, by the run's summary: a failing `todo` test passes, a failing test does not.
+put "$F" tests/zze.test.mjs "import test from 'node:test'
+test('zze todo', { todo: true }, () => { throw new Error('zze') })
+test('zze fails', () => { if (process.env.ZZ_E_FAIL) throw new Error('zze') })"
+erc() { (cd "$F" && env "$@" node tests/lib/node-run.mjs tests/zze.test.mjs > /dev/null 2>&1); echo $?; }
+ok "$(erc ZZ_E=)|$(erc ZZ_E_FAIL=1)" "0|1" "F23: … node-run.mjs passes a failing todo test, as the CLI does, and fails a failing test"
+rm -f "$W" "$F/tests/zzd.test.mjs" "$F/tests/zze.test.mjs"
 
 # G1-G6 (p54-1, ADR 0084 d3): THREAD_SKIP_SLOW=1, GitHub's check, leaves the Slow tier out of --fast, the FULL fallbacks
 # included, and keeps a SLOW suite the diff itself edits. A fixture of its own, so F1-F22's marker sets stay as they are:

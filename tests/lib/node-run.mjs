@@ -6,7 +6,10 @@
 // a file list passed longest-first still starts in path order, and tests/reflect-weekly.test.mjs, the slowest file,
 // started near the end. This runs the same runner through node:test's `run()`, whose `files` keep their order, with
 // the CLI's own two flags and its default reporter (spec on node 23 and later, and on a terminal; tap otherwise, as
-// node 22 on CI), so the run's output reads as the CLI's did. Exit 1 when any test fails, as the CLI's.
+// node 22 on CI), so the run's output reads as the CLI's did. The exit is the CLI's too: 1 when a `test:summary` is
+// not a success (a failed or cancelled test, a file that fails to load or exits non-zero; a failing `todo` test is
+// neither, so it passes), and 1 when the run ends with no summary for the whole run, so a runner that stops short is
+// never a pass.
 //
 // After the reporter's last line it prints `== node seconds per file`, then one `<seconds>\t<file>` line per file,
 // longest first: the seconds of the file's top-level tests (their duration_ms summed, the file's whole time when it
@@ -48,13 +51,20 @@ const tally = (data) => {
 
 const stream = run({ files, concurrency, timeout })
 stream.on('test:pass', tally)
-stream.on('test:fail', (data) => {
-  process.exitCode = 1
-  tally(data)
+stream.on('test:fail', tally)
+// One summary per file, then one for the whole run, the one with no file.
+let whole = false
+stream.on('test:summary', (data) => {
+  if (!data.success) process.exitCode = 1
+  if (data.file === undefined) whole = true
 })
 const out = stream.compose(reporter)
 out.pipe(process.stdout, { end: false })
 out.on('end', () => {
   const rows = [...seconds].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
   process.stdout.write(`== node seconds per file\n${rows.map(([f, s]) => `${s.toFixed(1)}\t${f}`).join('\n')}\n`)
+  if (!whole) {
+    process.stdout.write('node-run: the runner ended with no summary of the whole run, so the run fails\n')
+    process.exitCode = 1
+  }
 })

@@ -97,6 +97,7 @@ tests/lib/fast-tier.py FULL
 tests/lib/test-jobs.sh FULL
 tests/lib/check-workflow-parse.sh FULL
 tests/lib/shard.py FULL
+tests/lib/node-run.mjs FULL  # run.sh's node phase: every node file runs through it
 tests/shard-weights.tsv FULL  # shard.py's split, and run.sh's every suite bound (suite_bounds, check h)
 Makefile FULL
 .github/** FULL
