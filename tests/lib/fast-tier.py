@@ -48,9 +48,12 @@ The index, built once per run:
     outside `.claude/`, so an untracked new test counts.
   - Carriers: the tracked files (`git ls-files -z`, the index) that exist on disk, lie outside `.claude/` and `docs/`,
     and end in .py, .sh, .js, .mjs or .json. An untracked file is no carrier (a local scratch script would reach
-    whatever it names; staged, it is one), and nor is a file under docs/ (a spike there names scripts that nothing
-    runs it with). Collected tests, tests/run.sh and this file are never carriers: this file names merge-task.sh and
-    run.sh names the harness, and a carrier that names a path is reached by it.
+    whatever it names; staged, it is one), and nor is a file under docs/ (a test that runs a docs file names what it
+    drives itself: serial-chains' P8 runs a docs/spikes replay and names serial-chains.py). Collected tests,
+    tests/run.sh and this file are never carriers: this file names merge-task.sh and run.sh names the harness, and a
+    carrier that names a path is reached by it. Only select holds to the tracked ones: checks (i) and (k1) read every
+    tests/lib helper on disk, an untracked one too, since CI's checkout tracks it by then (a check that skipped it
+    would pass here and fail there), and check (d) names an untracked file that names a script it fails.
   - A carrier's naming text: for .py its str and bytes constants, docstrings dropped (an unparseable file: its whole
     text); for .sh every line whose first non-blank character is not `#`; for anything else its whole text. A test's
     text is always its whole text.
@@ -112,7 +115,9 @@ Rules, for each changed path p, in sorted order; the first FULL is the result:
             p only through two carriers (p named by a, a by b, b's suite) does not run at merge, ADR 0073 d1's
             accepted risk as at a hub, which the completion verifier and master's full suite hold before anything
             goes live (ADR 0084); check (d) still holds every script to a reach that is not empty.
-  (4) p is placed, not only by NONE lines, and its reach is empty: FULL (`<p>: reaches no test`).
+  (4) p is placed, not only by NONE lines, and its reach is empty: FULL (`<p>: reaches no test`). An untracked
+      carrier counts only once staged, so a new script whose only suite runs it through a second new script that is
+      not yet staged reaches no test here, while CI, where both are tracked, reaches that suite.
   (5) Once every path is read and the result is FAST, the selection is closed over runners: every collected test
       that runs a selected test (the runner map) is added, until nothing new is. `@merge-task-self-tests` is no file
       and has no runners. --ignore-full applies (5) too.
@@ -131,7 +136,10 @@ check:
       is placed, and its rule-(3) result is FULL or has a non-empty reach: every script maps to a test or to the
       full-suite list. A reach made only of SLOW suites is a problem too (`its only tests are SLOW`): GitHub's check
       leaves them out, so such a script would merge with no test run; it reads the reach only, never ALSO, so the
-      walkers never count as a script's tests.
+      walkers never count as a script's tests. The reach is select's, through tracked carriers only, so an untracked
+      file that names the script carries it only once staged: a `reaches no test` problem names each such file
+      (`<f> names it but is untracked, and a file carries a name only once staged`), so a new script whose suite
+      runs it through a second new script reads as the missing `git add` it is.
   (e) Every tests/fixtures/<d>/ has a `tests/fixtures/<d>/**` line whose plain entries hold every consumer of <d>: a
       collected test whose text holds <d> in either FIXTURE form, or one that names a tests/lib helper whose text
       does. FIXTURE_LITERAL is `fixtures/<d>` followed by a character outside [A-Za-z0-9_.-] or by the end of the
@@ -169,8 +177,10 @@ check:
       or carries `@merge-task-self-tests` on a line: run.sh's own inputs run in every mode.
   (i) Every HUB line names one exact path, and its pattern's lines together list every collected test that names the
       hub's basename and every one that names a tests/lib helper naming it: a suite that drives a hub is on its list,
-      or the map says which is missing. A list may hold more (a suite a hub's loader runs, say); an entry is never
-      required to name the hub.
+      or the map says which is missing. A helper is any file on disk under tests/lib/ the carrier rule would take but
+      for tracking, an untracked one too, read by its naming text: CI's checkout tracks a new helper, so the local
+      check holds it now. A list may hold more (a suite a hub's loader runs, say); an entry is never required to name
+      the hub.
   (j) The Slow tier follows measured seconds (ADR 0084 d3). CI_SECONDS (tests/ci-seconds.tsv) holds one row per
       suite, `<seconds><TAB><suite>`, a positive number and a path, `#` comment and blank lines skipped; its header
       names the source (GitHub's macOS jobs, each suite's median), the window and how to regenerate it. Problems: a
@@ -183,9 +193,9 @@ check:
   (k) Each READERS name N's readers are declared (p54-4), since rule (3) selects only them. A test on a FOREIGN-ONLY
       N line or on the `** ALSO` walkers line is exempt. A line of an N file is a plain line whose pattern matches a
       tracked file named N.
-      (k1) Every collected test that names N, and every one that names a tests/lib carrier whose naming text names N
-           (check (i)'s form), is an entry of a line of an N file (`<t> names N` or `<t> names <helper>, which names
-           N`, `but is on no line of a N file`).
+      (k1) Every collected test that names N, and every one that names a tests/lib helper whose naming text names N
+           (check (i)'s form and helpers, an untracked one included), is an entry of a line of an N file (`<t> names
+           N` or `<t> names <helper>, which names N`, `but is on no line of a N file`).
       (k2) A test whose text holds a read of a tracked N file f is an entry of a plain line matching f. A read is
            READ_LITERAL, f's own path whose left edge is the text start or a character outside [A-Za-z0-9_.-];
            READ_SEGMENTS, quoted path segments, `'<f's last dir segment>', 'N'` as path.join takes them (a segment
@@ -365,8 +375,10 @@ class Repo:
         test_set = set(self.tests)
         never = test_set | {RUNNER, SELF}
         tracked = set(self.tracked)   # carriers are tracked files only: an untracked scratch script names nothing
-        self.carriers = [p for p in self.files if p in tracked and p.endswith(CARRIER_SUFFIXES) and p not in never
-                         and not p.startswith(NO_CARRIERS)]
+        shaped = [p for p in self.files if p.endswith(CARRIER_SUFFIXES) and p not in never
+                  and not p.startswith(NO_CARRIERS)]
+        self.carriers = [p for p in shaped if p in tracked]
+        self.unstaged = [p for p in shaped if p not in tracked]   # carriers once staged: only checks read them
         self.naming = {p: naming_text(p, read(p)) for p in self.carriers}   # a carrier's naming text
         self.text = {p: read(p) for p in self.tests}                        # a test's whole text
         self.carrier_index = {}
@@ -408,6 +420,22 @@ class Repo:
             return set(index.get(base.rstrip("."), ()))
         items = self.carriers if pool == "carriers" else self.tests
         return {p for p in items if base in texts[p]}
+
+    def unstaged_namers(self, base, under=""):
+        """The untracked files under `under` that would be carriers once staged and whose naming text names `base`, by
+        namers' rule. Select never reads them; checks (d), (i) and (k1) do."""
+        got = set()
+        for p in self.unstaged:
+            if p.startswith(under):
+                text = naming_text(p, read(p))
+                if (base.rstrip(".") in tokens(text)) if TOKEN_NAME.match(base) else (base in text):
+                    got.add(p)
+        return got
+
+    def lib_namers(self, base):
+        """Checks (i) and (k1): the tests/lib helpers on disk, tracked or not, whose naming text names `base`. CI's
+        checkout tracks a new helper, so a check that read only the tracked ones would pass here and fail there."""
+        return {c for c in self.namers(base, "carriers") if c.startswith(LIB)} | self.unstaged_namers(base, LIB)
 
     def matching(self, path):
         got = self._matching.get(path)
@@ -716,7 +744,11 @@ def check(repo):
         if full == f"{s}: not in the map":
             problems.append(f"{s}: not placed by any map line; give it a line (check d)")
         elif not full and not reach:
-            problems.append(f"{s}: reaches no test; name it in a test, give its line entries, or mark it FULL (check d)")
+            unstaged = ", ".join(sorted(repo.unstaged_namers(os.path.basename(s))))
+            hint = (f" ({unstaged} names it but is untracked, and a file carries a name only once staged)"
+                    if unstaged else "")
+            problems.append(f"{s}: reaches no test; name it in a test, give its line entries, or mark it FULL{hint} "
+                            f"(check d)")
         elif not full and reach <= slow:
             problems.append(f"{s}: its only tests are SLOW; name it in a Fast-tier test or mark it FULL (check d)")
     # (e) fixture dirs
@@ -812,7 +844,7 @@ def check(repo):
         base = os.path.basename(pat)
         listed = set().union(*(l.entries for l in lines))
         drivers = {t: "names it" for t in repo.namers(base, "tests")}
-        for h in sorted(c for c in repo.namers(base, "carriers") if c.startswith(LIB)):
+        for h in sorted(repo.lib_namers(base)):
             for t in repo.namers(os.path.basename(h), "tests"):
                 drivers.setdefault(t, f"names {h}, which names it")
         for t in sorted(set(drivers) - listed):
@@ -861,7 +893,7 @@ def check_readers(repo, walkers):
         declared = set().union(*on.values())
         exempt = repo.foreign_only_tests.get(name, set()) | walkers
         why = {t: f"names {name}" for t in repo.namers(name, "tests")}
-        for h in sorted(c for c in repo.namers(name, "carriers") if c.startswith(LIB)):
+        for h in sorted(repo.lib_namers(name)):
             for t in repo.namers(os.path.basename(h), "tests"):
                 why.setdefault(t, f"names {h}, which names {name}")
         # (k1) every namer is declared on some file's line

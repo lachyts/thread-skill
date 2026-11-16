@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # p43-2 (ADR 0073 d1): the Fast tier. tests/lib/fast-tier.py's `select` (S1-S16: p54-4's docs carriers in S15, the
 # reach one carrier deep in S2 and S6, READERS in S16) and the untracked paths it leaves out (U1-U4), and `check`
-# (C1-C3, the Slow tier's check (j), check (k)'s READERS controls and its check (d) case among C2's controls; C4 pins
+# (C1-C3, the Slow tier's check (j), check (k)'s READERS controls and its check (d) case among C2's controls, and the
+# unstaged ones, which check an untracked helper or script as a worktree holds it before `git add`; C4 pins
 # contract-text's skillCount) on throwaway repos, its results on the real tree (R1-R8, the Slow tier's `slow` and
 # --shard-plan in R9-R10, and R11-R12's SKILL.md and docs reach through one index), tests/run.sh's --fast, --only,
 # --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note), and THREAD_SKIP_SLOW's
@@ -47,8 +48,9 @@ map() { local d="$1"; shift; printf '%s\n' "$@" > "$d/tests/fast-tier.map"; }
 sel() { local d="$1"; shift; git -C "$d" add -A >/dev/null 2>&1; python3 "$d/tests/lib/fast-tier.py" select "$@" 2>&1 | tr '\t\n' '| ' | sed 's/ $//'; }
 # selr <dir> <arg>...: the same with no staging, stdout only; stderr goes to $TMP/selr.err (S12, U1-U4).
 selr() { local d="$1"; shift; python3 "$d/tests/lib/fast-tier.py" select "$@" 2>"$TMP/selr.err" | tr '\t\n' '| ' | sed 's/ $//'; }
-# chk <dir>: index the repo's files, then check (its output; $? is check's).
-chk() { git -C "$1" add -A >/dev/null 2>&1; python3 "$1/tests/lib/fast-tier.py" check 2>&1; }
+# chk <dir>: index the repo's files, then check (its output; $? is check's). chku: check with nothing staged.
+chku() { python3 "$1/tests/lib/fast-tier.py" check 2>&1; }
+chk() { git -C "$1" add -A >/dev/null 2>&1; chku "$1"; }
 # push <dir> <msg>: commit everything and push it to origin's main, which origin/HEAD then names.
 push() {
   git -C "$1" add -A && git -C "$1" commit -qm "$2" && git -C "$1" push -q origin HEAD:main 2>/dev/null &&
@@ -378,12 +380,16 @@ map "$CB" 'skills/**' 'tests/*.test.*'
 out=$(chk "$CB"); rc=$?
 ok "$rc|$(holds "$out" "fast-tier map: ok (" ok "$out")" "0|ok" "C2: the base fixture passes check"
 # ctl <label> <expected text> <setup...>: a copy of the base fixture, the setup run in it, check exits 1 naming it.
-ctl() {
-  local label="$1" want="$2" out rc; shift 2
+# ctlu: the same with nothing staged, so the setup's new files stay untracked, as in a worktree before `git add`.
+ctl() { _ctl chk "$@"; }
+ctlu() { _ctl chku "$@"; }
+_ctl() {
+  local how="$1" label="$2" want="$3" out rc tag=C2; shift 3
+  [ "$how" = chku ] && tag="C2 unstaged"
   D="$TMP/ctl"; rm -rf "$D"; cp -R "$CB" "$D"
   ( cd "$D" && eval "$@" )
-  out=$(chk "$D"); rc=$?
-  ok "$rc|$(holds "$out" "$want" named "$(echo "$out" | head -3)")" "1|named" "C2: $label"
+  out=$($how "$D"); rc=$?
+  ok "$rc|$(holds "$out" "$want" named "$(echo "$out" | head -3)")" "1|named" "$tag: $label"
 }
 # pass <label> <setup...>: the same, and check passes.
 pass() {
@@ -437,6 +443,9 @@ pass "(i) a HUB line holding every suite that names it" "ml '$HUB'"
 ctl "(i) a suite that names the hub, missing from its HUB line" "tests/zzb.test.sh names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
   "put . tests/zzb.test.sh 'python3 skills/x/scripts/zza.py'; ml '$HUB'"
 ctl "(i) a suite that names a tests/lib helper naming the hub, missing" \
+  "tests/zzu.test.sh names tests/lib/zzh.sh, which names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
+  "put . tests/lib/zzh.sh 'python3 skills/x/scripts/zza.py'; put . tests/zzu.test.sh '. tests/lib/zzh.sh'; ml 'tests/lib/**' '$HUB'"
+ctlu "(i) … with the helper and its suite untracked (CI's checkout tracks them)" \
   "tests/zzu.test.sh names tests/lib/zzh.sh, which names it but is missing from the HUB line of skills/x/scripts/zza.py (check i)" \
   "put . tests/lib/zzh.sh 'python3 skills/x/scripts/zza.py'; put . tests/zzu.test.sh '. tests/lib/zzh.sh'; ml 'tests/lib/**' '$HUB'"
 ctl "(i) a HUB line naming no exact path" "skills/x/scripts/*.py: a HUB line names one exact path (check i)" 'ml "skills/x/scripts/*.py HUB tests/zza.test.sh"'
@@ -505,6 +514,13 @@ ctl "(d) a script whose only test is SLOW" "skills/x/scripts/zza.py: its only te
   "ml 'SLOW tests/zza.test.sh'; ts 200 tests/zza.test.sh"
 pass "(d) … while a second, non-SLOW test that names it clears it" \
   "put . tests/zzb.test.sh 'python3 skills/x/scripts/zza.py'; ml 'SLOW tests/zza.test.sh'; ts 200 tests/zza.test.sh"
+# DN: a new script whose only suite runs it through a second new script. Unstaged, the second is no carrier yet.
+DN='put . skills/x/scripts/zznew.py "N = 1"; put . skills/x/scripts/zzrun.sh "python3 skills/x/scripts/zznew.py"
+  put . tests/zzrun.test.sh "bash skills/x/scripts/zzrun.sh"'
+DN_WANT="skills/x/scripts/zznew.py: reaches no test; name it in a test, give its line entries, or mark it FULL"
+DN_WANT="$DN_WANT (skills/x/scripts/zzrun.sh names it but is untracked, and a file carries a name only once staged)"
+ctlu "(d) a new script reached only through an unstaged one names the unstaged file" "$DN_WANT (check d)" "$DN"
+pass "(d) … and once staged it carries it" "$DN"
 # (k) (p54-4): a READERS name's readers are declared on its files' lines. RK: two ZZSK.md files, skills/a's and skills/b's.
 RK='put . skills/a/ZZSK.md a; put . skills/b/ZZSK.md b; ml "FOREIGN ZZSK.md" "READERS ZZSK.md"'
 pass "(k) a declared literal reader, a FOREIGN-ONLY test and a walker that name ZZSK.md" \
@@ -519,6 +535,9 @@ ctl "(k1) an undeclared namer" "tests/zzrn.test.sh names ZZSK.md but is on no li
 ctl "(k1) an undeclared user of a tests/lib helper that names it" \
   "tests/zzru.test.sh names tests/lib/zzrh.sh, which names ZZSK.md but is on no line of a ZZSK.md file (check k)" \
   "$RK; put . tests/lib/zzrh.sh 'cat skills/a/ZZSK.md'; put . tests/zzru.test.sh '. tests/lib/zzrh.sh'; ml 'tests/lib/**'"
+ctlu "(k1) … with the helper and its user untracked (the ZZSK.md files staged)" \
+  "tests/zzru.test.sh names tests/lib/zzrh.sh, which names ZZSK.md but is on no line of a ZZSK.md file (check k)" \
+  "$RK; git add -A; put . tests/lib/zzrh.sh 'cat skills/a/ZZSK.md'; put . tests/zzru.test.sh '. tests/lib/zzrh.sh'; ml 'tests/lib/**'"
 ctl "(k2) a literal read declared on another file's line" \
   "tests/zzrb.test.sh reads skills/b/ZZSK.md but is on no line of skills/b/ZZSK.md (check k)" \
   "$RK; put . tests/zzrb.test.sh 'cat skills/b/ZZSK.md'; ml 'skills/a/ZZSK.md tests/zzrb.test.sh'"
