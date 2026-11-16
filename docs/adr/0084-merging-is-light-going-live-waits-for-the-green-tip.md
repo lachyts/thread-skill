@@ -3,9 +3,16 @@
 Date: 2026-11-16
 Status: proposed. Grilled with Lachy on 2026-11-16, from the suite audit of the merge wait
 (`docs/audits/test-suite-audit-2026-11-16.md`). Amends ADR 0025 (the required checks), ADR 0073 d3 and its "macOS
-stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset alone (the
+stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset (the
 `make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job still runs, unrequired,
-until Phase 54's task 2). Phase 54 builds the rest.
+until Phase 54's task 2). Decided for you 11's publisher and Decided for you 4 by p54-5: full-suite.yml's `green-tip`
+job fast-forwards `refs/thread/green` to a run's commit once every shard passed. The runs coalesce in one concurrency
+group, so a red covers every merge since the last green commit, and only the newest commit's run is re-run (p54-7). A
+red whose only failed job is `publish the Green tip` is the publisher's own: every shard passed, so it covers no merge
+and never files a suite fix. If its one re-run (d3) passes, the red was a blip. One that comes back, on that re-run or
+on the next master run, is a structural refusal (GitHub refusing the push or the ref, such as a GITHUB_TOKEN without
+the `workflows` permission across a workflow edit). It wants a fix or a credential gate, never another re-run. Readers
+not yet built (p54-6, p54-7). Phase 54 builds the rest.
 
 ## Context
 
