@@ -13,7 +13,12 @@ fallbacks included, and names them in one line. Decided for you 2's return rule 
 in its own follow-up task (p54-18). Decided for you 11's publisher and Decided for you 4 by p54-5: full-suite.yml's
 `green-tip` job, named `publish the Green tip`, fast-forwards `refs/thread/green` to a run's commit once every shard
 passed, and the runs coalesce in one concurrency group. A red of that job alone is read by Decided for you 13. Readers
-not yet built (p54-6, p54-7). Phase 54 builds the rest.
+not yet built (p54-6, p54-7). d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
+header holds the rules): a file under `docs/` and an untracked file are no carriers, and the reach stops one carrier
+deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);
+`tests/lib/contract-text.mjs` no longer names `SKILL.md`; and a plain select leaves out an untracked path no map line
+places, with a note. Measured on the tree: `skills/orient/SKILL.md` 120 test files (6 SLOW) to 88 (none); ADR 0083 87
+to 41; `leg.py` 194 to 138; `merge-task.sh` 194 to 83; `attention.py` 194 to 51. Phase 54 builds the rest.
 
 ## Context
 
