@@ -123,11 +123,11 @@
 # publishes none reads origin's tip and keeps every line below as it was. Else the twin moves to the Green tip
 # (`fast-forwarded to the Green tip (<old7>..<new7>)`), or stands `at the Green tip <g7>, <n> behind origin/<d> (waits
 # on the Green tip)`, `past the Green tip <g7> by <m>: waits on it` (never moved back), `not moved: local changes
-# overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>` (`green-tip.py exit <rc>:
-# <its first stderr line>` for a failure), and a `green-tip: WARN: …` line it prints passes through to stderr. A twin
-# ahead of origin, or diverged from it, reads as below whatever the target, a hold's included (only a move, at or past
-# the Green tip, or already at origin's tip needs one: primary-refresh.py's c2 rule). --ensure and --refresh never read
-# it: the Rollout clone keeps origin's tip, the code being built.
+# overlap the Green tip <g7>`, or on a hold, a timeout or a failure `not moved: no move: <why>` (`green-tip.py exit
+# <rc>: <its first stderr line>` for a failure), and a `green-tip: WARN: …` line it prints passes through to stderr. A
+# twin ahead of origin, or diverged from it, reads as below whatever the target, a hold's included (only a move, at or
+# past the Green tip, or already at origin's tip needs one: primary-refresh.py's c2 rule). --ensure and --refresh never
+# read it: the Rollout clone keeps origin's tip, the code being built.
 # One stdout line, `in-place: <twin> …`, or nothing:
 #   held: <primary-hold line> (ADR 0031) · not moved: cannot load live-checkout.sh · not moved: fetch failed: <first
 #   line> · not moved: on '<b>', not <d> · not moved: an operation is in progress · fast-forwarded to origin/<d>

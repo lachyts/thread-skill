@@ -92,8 +92,9 @@ Primary refresh's real pass 150 with gh and writes, its --dry-run 30, no gh, no 
 LAND_DEADLINE - 10) under an outer gb + 5; self-rollout-check.sh --refresh-in-place 60 under lc_bounded 70.
 
 CLI: `target` prints one line, `<kind> <sha|-> <why>`, or with --json the dict. `waits --repo R --branch D` prints
-`waits` or `origin <why>` (waits()). Exit 0 for any reading, 2 on usage, 1 on an internal failure. Every caller reads exit 1, a timeout or a bounded rc 124 as a hold (fail closed). --now pins the
-clock (tests). Stdlib only, python >= 3.9, POSIX (fcntl).
+`waits` or `origin <why>` (waits()). Exit 0 for any reading, 2 on usage, 1 on an internal failure. Every caller
+reads exit 1, a timeout or a bounded rc 124 as a hold (fail closed). --now pins the clock (tests). Stdlib only,
+python >= 3.9, POSIX (fcntl).
 """
 import argparse
 import fcntl

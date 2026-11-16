@@ -643,7 +643,7 @@ class Audit:
                 n = int(out.strip()) if rc == 0 and out.strip().isdigit() else 0
                 waits = bool(n) and self.waits_on_green(M, default)
                 if n and waits and self.holds_origin_copy(M, defref):
-                    pass  # the landed close-out's copy is on disk: the checkout waits on the Green tip, nothing reads stale
+                    pass  # the landed close-out's copy on disk, waiting on the Green tip: nothing reads stale
                 elif n and waits:
                     on = est.branch(M)
                     self.findings.append(finding(

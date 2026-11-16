@@ -77,8 +77,9 @@
 #                              -- <path>` holding that blob at <path> (newest first). The default branch already holds
 #                              that copy, so a move that replaces it loses nothing. It is how a checkout that waits on the
 #                              Green tip keeps the close-out's THREAD.md land.sh leaves on disk (its settle_handed)
-#                              without that copy ever holding a move back; it holds with no target too (the header). Any other path, or a copy no such commit
-#                              holds, or a staged entry of some third blob, is rc 1 (an overlap as before).
+#                              without that copy ever holding a move back; it holds with no target too (the header).
+#                              Any other path, or a copy no such commit holds, or a staged entry of some third blob, is
+#                              rc 1 (an overlap as before).
 #   lc_overlap <repo> <d> [<target>]
 #                              the fast-forward's overlap: lc_overlap_ref's paths against <target> (refs/remotes/origin/
 #                              <d> by default), less every lc_same or lc_doc path against <target>, and every lc_landed
