@@ -4,7 +4,7 @@ Date: 2026-09-26
 Status: accepted
 *(Amended by ADR 0073 d3, 2026-11-09 (p43-3): the two required jobs run the fast tier (`make test-fast` against the
 PR's base) on pull requests only, and the full suite runs on every push to master in `full-suite.yml`, split into
-shards. The ruleset and its two contexts are unchanged.)*
+shards. The ruleset and its two contexts were unchanged until ADR 0084, below.)*
 
 ## Context
 
@@ -46,6 +46,11 @@ prints the full payload.
 *(Amended 2026-11-12 by ADR 0080, p47-9: a rule that cannot be met, a required check no runner will take or a
 required context no job reports, is changed by `skills/execute/scripts/merge-settings.py` alone, logged with its undo;
 the by-hand lift above stays his for every other rule.)*
+
+*(Amended 2026-11-16 by ADR 0084 d3: `make test (macos-latest)` left the required contexts of `master-green-pr-only`,
+by hand: the ruleset's full payload, read as above, was written back without that context. The ruleset requires
+`make test (ubuntu-latest)` alone, still strict. macOS runs in the default branch's full suite, which decides
+what goes live once ADR 0084 d1 is built.)*
 
 **Local commits on master are stranded.** `thread:close` and `thread:handoff` commit to
 whatever branch is checked out. On `master` those commits can no longer be pushed: they wait
