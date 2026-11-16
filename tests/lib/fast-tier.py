@@ -878,7 +878,8 @@ def check_readers(repo, walkers):
             if l.kind == "PLAIN" and l.pattern.split("/")[-1] == name:
                 for t in sorted(l.entries - {SELF_TESTS}):
                     if t not in why:
-                        problems.append(f"{MAP}:{l.no}: {t} does not name {name}; drop it from that readers line (check k)")
+                        problems.append(f"{MAP}:{l.no}: {t} does not name {name}; drop it from that readers line "
+                                        f"(check k)")
     return problems
 
 
