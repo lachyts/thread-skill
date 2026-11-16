@@ -33,7 +33,12 @@ integrated head; a name that is only expressions matches nothing), is read throu
 roll-up's own, so a shard's setup failure is re-run; a shard cut alone takes ADR 0073 d4's cancelled path (skipped
 neutral, the cut-again rule per needed job); and a roll-up whose needed jobs all passed or were skipped falls back to
 itself, today's read. CI headroom records the slowest of its needed jobs and itself by seconds, against that job's own
-limit, and the line's `shard` field names the needed job. Phase 54 builds the rest.
+limit, and the line's `shard` field names the needed job.
+d4's Speed fix from the audit's row 1 begun by p54-10: `tests/run.sh --fast --shard K/N` selects as `--fast` does (its
+full-suite fallbacks and the Slow tier's filter included), then runs shard K of that selection by `tests/lib/shard.py`'s
+split, so the N shards together run it exactly once, the merge-task self-tests in shard 1 when it holds them; a shard
+left nothing passes on the always-run steps, and `--fast --shard-plan N` prints the split and runs nothing
+(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it are not yet built. Phase 54 builds the rest.
 
 ## Context
 

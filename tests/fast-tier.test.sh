@@ -6,9 +6,9 @@
 # contract-text's skillCount) on throwaway repos, its results on the real tree (R1-R8, the Slow tier's `slow` and
 # --shard-plan in R9-R10, and R11-R12's SKILL.md and docs reach through one index), tests/run.sh's --fast, --only,
 # --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note; p54-3's node order, warm
-# knob and node-run.mjs signals in F23-F25), and THREAD_SKIP_SLOW's filter on a second one (G1-G6, p54-1, ADR 0084 d3;
-# tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway repo has a local bare origin and a
-# copy of the selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked
+# knob and node-run.mjs signals in F23-F25; p54-10's --fast --shard in F26), and THREAD_SKIP_SLOW's filter on a second
+# one (G1-G7, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway
+# repo has a local bare origin and a copy of the selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked
 # file uses. The fixture runs leave the warm's stdlib half out (THREAD_TEST_WARM_STDLIB=0, exported before F1), all but
 # F24's. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -802,7 +802,9 @@ ok "$(printf '%s\n' "$out" | grep -cE '^[12]'"$tab"'')|$(printf '%s\n' "$out" | 
   "F11: … and prints <k><TAB><entry> for each entry once"
 
 for args in "--shard 0/2" "--shard 3/2" "--shard x" "--shard 1/2 extra" "--shard" "--shard 1/2/3" "--shard /2" \
-  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--fast --shard 1/2" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2"; do
+  "--shard-plan 0" "--shard-plan" "--shard-plan x" "--shard 1/2 --fast" "--only tests/zza.test.sh --shard 1/2" \
+  "--fast --shard 0/2" "--fast --shard 3/2" "--fast --shard 1/2 extra" "--fast --shard-plan 0" "--fast --fast" \
+  "--fast --only tests/zza.test.sh" "--shard-plan 2 --fast"; do
   # shellcheck disable=SC2086
   run bash $args
   ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c '^== ')" "2||0" "F12: run.sh $args exits 2 and runs nothing"
@@ -819,6 +821,38 @@ ok "$rc|$(markers)" "1|" "F14: a failing shard.py fails the run, which runs no t
 has "$out" "  - shard split" "F14: … through the shard split step"
 has "$out" "run.sh: shard.py --order failed, so node takes its files in glob order" "F14: … and node's order falls back to the glob's, and says so"
 git -C "$F" checkout -q -- tests/lib/shard.py
+
+# F26 (p54-10, ADR 0084 d4): --fast --shard K/N runs shard K of the fast tier's selection, so the shards together run it
+# exactly once: over a small diff (F1's: zza alone, so shards 2 and 3 hold nothing) and a FULL one (F2's tracked
+# unmapped path), the union of --fast --shard k/3's suite runs (allmarkers, not deduplicated) is --fast's selection,
+# which F1 and F2 pin. G7 runs the same under the Slow tier's flag.
+# fshards <base>: shard k's output in fo[k], the three joined in $fsh, their exit codes in $frc.
+fshards() {
+  local k; fsh=""; frc=""; fo=()
+  for k in 1 2 3; do ZZ_C_OK=1 THREAD_VERIFY_BASE=$1 run bash --fast --shard "$k/3"; fo[$k]=$out; fsh="$fsh$nl$out"; frc="$frc$rc"; done
+}
+echo 'B = 1' >> "$F/skills/x/scripts/zza.py"; git -C "$F" commit -qam "a only"
+fshards "$FB"
+ok "$frc|$(allmarkers "$fsh")" "000|zzmarker-a " "F26: a small diff's three --fast shards run its one suite exactly once, and all pass"
+ok "$(holds "${fo[1]}" "== shard 1/3: 1 test files" y n)$(holds "${fo[1]}" "== fast tier: base ${FB:0:12} (--base), 1 changed paths, 1 test files" y n)" yy \
+  "F26: … shard 1 holds it, after the fast tier's own line"
+for k in 2 3; do
+  o=${fo[$k]}
+  ok "$(holds "$o" "== fast-tier map check" y n)$(holds "$o" "== shard $k/3: 0 test files" y n)$(holds "$o" "== node tests: none selected" y n)$(holds "$o" "make test: ALL PASS" y n)" yyyy \
+    "F26: … shard $k holds no entry: it runs the always-run steps, no suite and no node, and passes"
+done
+fpo=$(cd "$F" && THREAD_VERIFY_BASE=$FB bash tests/run.sh --fast --shard-plan 3 2>"$TMP/fplan.err"); fprc=$?
+ok "$fprc|$(printf '%s' "$fpo" | tr '\t\n' ':/')|$(grep -c '^== fast tier: base ' "$TMP/fplan.err")|$(grep -c '^== fast-tier map check' "$TMP/fplan.err")" \
+  "0|1:tests/zza.test.sh|1|0" "F26: --fast --shard-plan 3 prints only the selection's split on stdout, its fast tier line on stderr, and runs no step"
+git -C "$F" reset -q --hard "$FB"
+put "$F" new.txt 'loose'; git -C "$F" add new.txt
+fshards "$FB"
+ok "$frc|$(allmarkers "$fsh")" \
+  "000|zzmarker-a zzmarker-b zzmarker-c zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify " \
+  "F26: a FULL diff's three --fast shards run every suite and both self-tests exactly once, and all pass"
+ok "$(printf '%s\n' "${fo[1]}" | grep -c 'zzmarker-self-test --self-test-')|$(printf '%s\n' "${fo[2]}$nl${fo[3]}" | grep -c 'zzmarker-self-test')|$(printf '%s\n' "$fsh" | grep -c '^== fast tier: full suite (new.txt: not in the map)$')" \
+  "2|0|3" "F26: … the self-tests in shard 1 only, and each shard says why it fell to the full suite"
+git -C "$F" rm -qf new.txt
 
 # F15-F17 (p43-6, #327 finding 2): each suite and each step prints `<label>: ok|FAILED (<N>s)` as it ends, so a job cut
 # mid-run still shows every suite that finished (F15's sentinel case: one suite's line while another still runs); the
@@ -1057,6 +1091,20 @@ for mode in --fast "" "--shard-plan 2"; do
   ok "$rc|$(markers)|$(printf '%s\n' "$out" | grep -c -e '^== ' -e "^[12]$tab")|$(printf '%s\n' "$out" | grep -c "THREAD_SKIP_SLOW must be 1 or empty, got 'yes'")" \
     "2||0|1" "G6: THREAD_SKIP_SLOW=yes (${mode:-bare}) exits 2 before any step and runs nothing"
 done
+
+# G7 (p54-10): F26 under the Slow tier's flag. A diff reaching zzslow (SLOW), zzsfast and the self-tests: with the flag,
+# the union of --fast --shard k/3 is --fast's selection with zzslow left out (G1's rule), each entry once, and each shard
+# names what it left out; --fast --shard-plan 3 leaves it out of the split too.
+echo 'S = 2' >> "$G/skills/x/scripts/zzs.py"; echo '# touched' >> "$G/skills/execute/scripts/merge-task.sh"
+git -C "$G" commit -qam "zzs and merge-task"
+gsh=""; grc=""
+for k in 1 2 3; do THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB rung bash --fast --shard "$k/3"; gsh="$gsh$nl$out"; grc="$grc$rc"; done
+ok "$grc|$(allmarkers "$gsh")|$(printf '%s\n' "$gsh" | grep -cxF "${LEFT%/}")" \
+  "000|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |3" \
+  "G7: with the flag, the three --fast shards run the selection less the SLOW suite exactly once, and each names it"
+gpo=$(cd "$G" && THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB bash tests/run.sh --fast --shard-plan 3 2>/dev/null); gprc=$?
+ok "$gprc|$(printf '%s\n' "$gpo" | cut -f2 | LC_ALL=C sort | tr '\n' ' ')" "0|@merge-task-self-tests tests/zzsfast.test.sh " \
+  "G7: … and --fast --shard-plan 3 splits only that selection"
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"
