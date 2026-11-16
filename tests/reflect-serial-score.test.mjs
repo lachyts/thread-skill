@@ -5,7 +5,7 @@
 //
 // Hermetic: each case gets its own mkdtemp HOME (its own THREAD_EVENTS_DIR under it), an env built from scratch with
 // TZ=Australia/Melbourne (so a stamp written with +11:00 must still print as UTC Z), the serial note and its task notes
-// at <HOME>/repos/obsidian/Work/Tasks/, and its Leg log written in leg.py's line forms (tests/leg.test.sh builds such
+// at <HOME>/repos/obsidian/Work/Tasks/, and its Leg log written in leg.py's line forms (tests/leg*.test.sh build such
 // logs through the verbs; here the stamps must be exact). Acts go through run_record.py's own emit.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

@@ -15,7 +15,9 @@
 // - tests/run.sh, tests/lib/rollout-fixtures.sh and tests/lib/merge-task-env.sh each export it, one top-level line;
 // - a shell suite that names verify-slot.py, `--slots` or `thread:integration-verify`, or reconcile-rollout with a
 //   `next --`, lead-integrate with a `verify --` or completion-verify with a `--run`, on a non-comment line, exports it
-//   itself or sources one of the two libraries;
+//   itself or sources one of the two libraries; the lines read are its own and those of each tests/lib/*.sh helper it
+//   sources, since a helper can hold the verb while the suite holds the flag (p54-9: tests/leg-land.test.sh's
+//   `rcv --run` is a completion-verify --run, and rcv is tests/lib/leg-fixtures.sh's). The pin is still the suite's own;
 // - a node test that binds reconcile-rollout.py (with a 'next' or 'completion-verify' literal), lead-integrate.py
 //   (with 'verify') or verify-slot.py with path.join and spawns python3, bash or sh passes THREAD_HEAT_LEVEL as an env
 //   key, whether or not its env spreads process.env (the backstop is missing when it runs alone).
@@ -30,7 +32,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { read, walk } from '../lib/contract-text.mjs'
+import { read, readIf, walk } from '../lib/contract-text.mjs'
 
 const SELF = `tests/contracts/${path.basename(fileURLToPath(import.meta.url))}`
 
@@ -54,6 +56,11 @@ export const shellHeat = (text) => {
     (/lead-integrate/.test(c) && /\bverify\s+--/.test(c)) || (/completion-verify/.test(c) && /--run\b/.test(c))
 }
 export const shellHeatPinned = (text) => HEAT_PIN.test(text) || SH_SOURCES_PIN.test(text)
+// A suite's text with each tests/lib/*.sh helper it sources on a non-comment line appended, for shellHeat (p54-9). One
+// level: no helper sources another. A missing helper adds nothing; readLib is injectable so the controls run it too.
+const SH_SOURCES_LIB = /^\s*(?:\.|source)\s+["']?\S*?(tests\/lib\/[A-Za-z0-9_.-]+\.sh)\b/gm
+export const sourcedLibs = (text) => [...code(text).matchAll(SH_SOURCES_LIB)].map((m) => m[1])
+export const withSourced = (text, readLib = readIf) => [text, ...sourcedLibs(text).map((p) => readLib(p) ?? '')].join('\n')
 
 // The slot marker's unset: one top-level line (never indented, so never inside a function), other names allowed before it.
 const HELD_UNSET = /^unset (?:\S+ )*VERIFY_SLOT_HELD(?:\s|$)/m
@@ -115,13 +122,14 @@ test('the Heat hold (p31-4): run.sh and both test libraries export THREAD_HEAT_L
 })
 
 test('the Heat hold (p31-4): every shell suite that reaches the heat reading pins it', () => {
-  const reaching = shellFiles().filter((f) => shellHeat(read(f)))
-  // Not vacuous: the suites that read the heat through next, verify, run or completion-verify --run are all seen.
+  const reaching = shellFiles().filter((f) => shellHeat(withSourced(read(f))))
+  // Not vacuous: the suites that read the heat through next, verify, run or completion-verify --run are all seen
+  // (tests/leg-land.test.sh's through the rcv helper it sources).
   for (const f of ['skills/execute/tests/reconcile-rollout-auto-retry.test.sh', 'skills/execute/tests/reconcile-rollout-completion.test.sh',
     'skills/execute/tests/reconcile-rollout-runs.test.sh', 'skills/execute/tests/reconcile-rollout-standing.test.sh',
     'skills/execute/tests/reconcile-rollout.test.sh', 'skills/execute/tests/reconcile-rollout-trickle.test.sh',
     'skills/execute/tests/reconcile-rollout-heat.test.sh', 'tests/verify-slot.test.sh', 'tests/verify-slot-heat.test.sh',
-    'tests/lead-integrate.test.sh', 'tests/leg.test.sh', 'tests/engine-snapshot.test.sh']) {
+    'tests/lead-integrate.test.sh', 'tests/leg.test.sh', 'tests/leg-land.test.sh', 'tests/engine-snapshot.test.sh']) {
     assert.ok(reaching.includes(f), `${f} is seen as reaching the heat reading`)
   }
   const bad = reaching.filter((f) => !shellHeatPinned(read(f)))
@@ -197,6 +205,22 @@ test('control: the heat matchers', () => {
   assert.ok(nodeHeatPinned("{ ...process.env, THREAD_HEAT_LEVEL: '0' }"))
   assert.ok(!nodeHeatPinned('{ ...process.env, THREAD_EVENTS_DIR: d }'), 'a node env missing the key')
   assert.ok(!nodeHeatPinned('// THREAD_HEAT_LEVEL is set by run.sh'), 'a comment')
+})
+
+test('control: a sourced helper is part of the heat reach (p54-9)', () => {
+  const libs = { 'tests/lib/fx.sh': '# rcv [args]: completion-verify on the note\nrcv() { python3 "$RR" completion-verify --rollout "$RO" "$@"; }\n' }
+  const readLib = (p) => libs[p] ?? null
+  const suite = '. tests/lib/fx.sh   # the helpers\nrcv --run\n'
+  assert.deepEqual(sourcedLibs(suite), ['tests/lib/fx.sh'])
+  assert.ok(!shellHeat(suite), 'the call site alone names no heat verb')
+  assert.ok(!shellHeat(libs['tests/lib/fx.sh']), 'nor does the helper alone: no --run')
+  assert.ok(shellHeat(withSourced(suite, readLib)), 'a suite that sources a helper holding completion-verify and runs --run is seen')
+  assert.ok(!shellHeat(withSourced(suite.replace('rcv --run', 'rcv'), readLib)), 'the helper called without --run')
+  assert.ok(!shellHeat(withSourced('# . tests/lib/fx.sh\nrcv --run\n', readLib)), 'a commented source line sources nothing')
+  assert.ok(!shellHeat(withSourced(suite, () => '# completion-verify, in prose\n')), "a helper's comment is not a use")
+  assert.ok(!shellHeat(withSourced(suite, () => null)), 'a missing helper adds nothing')
+  assert.deepEqual(sourcedLibs('. "$HERE/../../../tests/lib/rollout-fixtures.sh"\nsource "$root/tests/lib/merge-task-env.sh"\n'),
+    ['tests/lib/rollout-fixtures.sh', 'tests/lib/merge-task-env.sh'], 'a quoted, prefixed path, by . or source')
 })
 
 test('control: the slot marker matchers (p34-1)', () => {

@@ -15,6 +15,8 @@
 # Regenerate: run `make test` twice, take each suite's median from those lines and each node file's from that block,
 # sum the two self-tests, and rewrite this file whole. A suite or node file added since falls back to its size times
 # the median seconds per byte of its kind (shard.py).
+# The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
+# leg.test.sh's 527 s split by the parts' measured shares of two local runs, until the next regenerate.
 9	@merge-task-self-tests
 0.5	skills/execute/tests/integration-inputs.test.sh
 3.5	skills/execute/tests/note-save.test.sh
@@ -57,7 +59,10 @@
 62	tests/land.test.sh
 244	tests/lead-integrate.test.sh
 34	tests/leg-capacity.test.sh
-527	tests/leg.test.sh
+158	tests/leg-land.test.sh
+99	tests/leg-rank.test.sh
+117	tests/leg-security.test.sh
+153	tests/leg.test.sh
 20.5	tests/live-checkout.test.sh
 2.5	tests/merge-task-bare-blocked.test.sh
 5	tests/merge-task-base-moved.test.sh

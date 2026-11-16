@@ -13,6 +13,9 @@
 # since 2026-11-16, ADR 0084 d3), take each shell suite's median of those lines, and rewrite this file whole, one
 # `<seconds><TAB><suite>` row per collected shell suite. A refresh that moves a suite across the cutoff fails check (j)
 # until the same PR edits its SLOW line.
+# The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
+# leg.test.sh's 2026-11-08..15 median, 1778 s, split by the parts' measured shares of two local runs, until the next
+# regenerate measures them.
 2	skills/execute/tests/integration-inputs.test.sh
 11	skills/execute/tests/note-save.test.sh
 50	skills/execute/tests/reconcile-rollout-approved-queue.test.sh
@@ -58,7 +61,10 @@
 197	tests/land.test.sh
 643.5	tests/lead-integrate.test.sh
 91	tests/leg-capacity.test.sh
-1778	tests/leg.test.sh
+532	tests/leg-land.test.sh
+334	tests/leg-rank.test.sh
+395	tests/leg-security.test.sh
+517	tests/leg.test.sh
 53	tests/live-checkout.test.sh
 184	tests/merge-settings.test.sh
 6	tests/merge-task-bare-blocked.test.sh
