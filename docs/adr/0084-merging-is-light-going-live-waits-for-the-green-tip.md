@@ -4,8 +4,11 @@ Date: 2026-11-16
 Status: proposed. Grilled with Lachy on 2026-11-16, from the suite audit of the merge wait
 (`docs/audits/test-suite-audit-2026-11-16.md`). Amends ADR 0025 (the required checks), ADR 0073 d3 and its "macOS
 stays in the merge gate", and ADR 0043 ("a rollout moves only at its Reinstate"). Built so far: d3's ruleset (the
-`make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job still runs, unrequired,
-until Phase 54's task 2). d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
+`make test (macos-latest)` context left `master-green-pr-only` by hand on 2026-11-16; the job ran on, unrequired,
+until Phase 54's task 2). p54-2 built the rest of d3's PR side: test.yml's PR job runs on ubuntu-latest alone, pinned by
+`tests/ci-workflows.test.mjs` W1 and W3 (no pull_request job on a macOS runner), and the Reflection's CI headroom reads
+the macOS job as retired from 2026-11-16 (`reflect.py`'s `CI_RETIRED`): said once, in the week whose window holds the
+date, and never a breach from that week on. d3's Slow tier for GitHub's check built by p54-1: `SLOW` lines in `tests/fast-tier.map`,
 held by check (j) to `tests/ci-seconds.tsv`'s macOS CI medians (2026-11-08 to 15), joining at 180 s and leaving only
 under 150 s, so today's ten are the set; check (d) fails a script whose only tests are SLOW; `tests/run.sh --fast`
 under `THREAD_SKIP_SLOW=1`, which `test.yml` sets, drops every SLOW suite the diff does not edit itself, its full-suite

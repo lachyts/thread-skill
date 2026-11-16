@@ -50,7 +50,7 @@ the by-hand lift above stays his for every other rule.)*
 *(Amended 2026-11-16 by ADR 0084 d3: `make test (macos-latest)` left the required contexts of `master-green-pr-only`,
 by hand: the ruleset's full payload, read as above, was written back without that context. The ruleset requires
 `make test (ubuntu-latest)` alone, still strict. macOS runs in the default branch's full suite, which decides
-what goes live once ADR 0084 d1 is built.)*
+what goes live once ADR 0084 d1 is built; the job itself left test.yml's matrix by Phase 54's task 2.)*
 
 **Local commits on master are stranded.** `thread:close` and `thread:handoff` commit to
 whatever branch is checked out. On `master` those commits can no longer be pushed: they wait

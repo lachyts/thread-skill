@@ -404,8 +404,11 @@ Its `suite` block is the **Suite budget** and **CI headroom** (ADR 0073 d5; `ref
 each on the week's median over the window's rows: `local`, each repo's suites by tier (`integration`, a rollout's
 verifier, against 5 minutes; `full`, the completion verifier, against 20) from the `suite-ended` lines; `ci`, each
 required GitHub job's time against its `timeout-minutes` from the `ci-headroom` lines merge-task writes at each merge
-(`share`, its median over its limit; `cancelled`, the runs GitHub cut at the limit); `breaches`; and `audit`, whether a
-breach on Thread Skill's repo makes step 13's suite audit due, and the open audit if one is.
+(`share`, its median over its limit; `cancelled`, the runs GitHub cut at the limit; `retired`, the date a job left the
+required checks, from `reflect.py`'s `CI_RETIRED`, after which its group never breaches); `breaches`; `retired`, one
+line per job that left the required checks inside this window, said once (`make test (macos-latest)` on 2026-11-16,
+ADR 0084 d3); and `audit`, whether a breach on Thread Skill's repo makes step 13's suite audit due, and the open audit
+if one is.
 
 A flag starting `window: ` is the reading checking itself (`reflect.py`'s header, *The window check*): a reported
 block holds a row outside its window, so a reader read past it. It is a Thread Skill bug, never friction: read that
@@ -821,7 +824,8 @@ confirm-rate risk included), the precision per level (`freshReviewLevels`), the 
 Note overlaps (`noteOverlaps`: the warnings, notes and runs, or `none`, ADR 0067 d6's trigger when step 11 named it, and
 unread when the block is null), the gate misses (`gateMisses`: the count and each item's rollout, task and kinds, with
 the rule step 11 traced it to, or none), the Watches written (and any `extended` line), the bugs filed or found, the
-suite block's breaches (each repo's, with the suite audit filed, cited or not due), the Time-lost
+suite block's breaches (each repo's, with the suite audit filed, cited or not due) and its retired line when one is,
+the Time-lost
 ledger (its top class and hours, each class against last week, the trend, any Watch it opened, any ceiling raise it
 held), the Monthly audit's row when one ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
