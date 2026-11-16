@@ -15,11 +15,13 @@
 //   `contents: write`; its checkout keeps its credentials on full history, and its script reads only GITHUB_SHA,
 //   GITHUB_REF and GREEN_REF (refs/thread/green), with no `${{ }}`, so G1 runs exactly the deployed text.
 // - W7: both workflows read only at the workflow level, no other job holds a write permission, and full-suite.yml's
-//   runs coalesce in one workflow-level concurrency group that never cancels a run in flight (Decided for you 4).
+//   runs coalesce in one workflow-level concurrency group, keyed by the branch alone (a group per commit or per run
+//   never coalesces), that never cancels a run in flight (Decided for you 4).
 // - G1: that script, run as GitHub's `shell: bash` runs it, against a fixture origin (a bare repo, the run's checkout
-//   and a second clone for other merges): it creates the ref, fetches before it checks, never moves it back or off
-//   master, never forces, rereads after a rejected push, and goes red only when the ref is still behind after its
-//   third failed push, with the push's own stderr in the log.
+//   and a second clone for other merges): it creates the ref, fetches master and the ref before every check (so a
+//   force-push that took the run's commit off master during a failed push stops the next one), never moves the ref
+//   back or off master, never forces, rereads after a rejected push, and goes red only when the ref is still behind
+//   after its third failed push, with the push's own stderr in the log.
 // - S1: `bash tests/run.sh --shard-plan N` on the real tree puts every collected test (fast-tier.py's COLLECTED, which
 //   tests/fast-tier.test.sh C3 pins to run.sh's globs) and the merge-task self-tests in exactly one shard.
 // tests/fast-tier.test.sh pins run.sh's --shard and --shard-plan modes on a fixture. Reads the tree; writes only under
@@ -200,7 +202,7 @@ test('W7: only green-tip writes, and full-suite.yml\'s runs coalesce without can
     }
   }
   const c = parsed[FULL].concurrency
-  assert.equal(typeof c?.group, 'string', 'full-suite.yml has a workflow-level concurrency group')
+  assert.equal(c?.group, 'full-suite-${{ github.ref }}', 'one workflow-level group per branch, never per commit or run')
   assert.equal(c['cancel-in-progress'], false, 'a run in flight is never cancelled')
   for (const [id, job] of Object.entries(parsed[FULL].jobs)) {
     assert.equal(job.concurrency, undefined, `full-suite.yml job ${id} has no concurrency of its own`)
@@ -300,29 +302,50 @@ test('G1: the green-tip script moves refs/thread/green only forward, on master, 
   assert.match(r.out, /::warning::.*diverged/)
   git(bare, 'update-ref', 'refs/thread/green', c2)
 
-  // (6) The race: at the push, master and the ref move to c4, which the checkout lacks. The rejected push is reread,
+  // wrapGit(name, onPush): a PATH dir whose git runs the sh lines onPush before a `git push`, then the real git.
+  const wrapGit = (name, onPush) => {
+    const dir = path.join(tmp, name)
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, 'git'), [
+      '#!/bin/sh', 'if [ "$1" = push ]; then', ...onPush.map((l) => `  ${l}`), 'fi', `exec '${realGit}' "$@"`, '',
+    ].join('\n'), { mode: 0o755 })
+    return `${dir}:${basePath}`
+  }
+
+  // (6) The race off master: at the first push a force-push takes master off c3, and the push fails with the ref still
+  // behind. Only a fresh read of master stops the second push, which would otherwise fast-forward the ref to c3.
+  const off = commit(x, 'off', c2)
+  git(x, 'push', '-q', 'origin', `${off}:refs/heads/forced`)
+  const pushed = path.join(tmp, 'pushed')
+  r = runGreen(c3, { path: wrapGit('wrap-forced', [
+    `if [ ! -e '${pushed}' ]; then`,
+    `  : > '${pushed}'`,
+    `  '${realGit}' -C '${bare}' update-ref refs/heads/master ${off} || exit 1`,
+    "  echo 'fatal: the remote end hung up unexpectedly' >&2",
+    '  exit 1',
+    'fi',
+  ]) })
+  assert.equal(r.status, 0, r.out)
+  assert.equal(green(), c2, r.out)
+  assert.equal(r.out.match(/push \d of /g)?.length, 1, r.out)
+  assert.match(r.out, /push 1 of [\s\S]*::warning::.*no longer on/)
+  git(bare, 'update-ref', 'refs/heads/master', c3)
+
+  // (7) The race: at the push, master and the ref move to c4, which the checkout lacks. The rejected push is reread,
   // never forced, and never turns the green run red.
   const c4 = commit(x, 'c4', c3)
   git(x, 'push', '-q', 'origin', `${c4}:refs/heads/next`)
   assert.ok(lacks(c4), 'precondition: the checkout lacks c4')
-  const wrap = path.join(tmp, 'wrap')
-  fs.mkdirSync(wrap)
-  fs.writeFileSync(path.join(wrap, 'git'), [
-    '#!/bin/sh',
-    'if [ "$1" = push ]; then',
-    `  '${realGit}' -C '${bare}' update-ref refs/heads/master ${c4} || exit 1`,
-    `  '${realGit}' -C '${bare}' update-ref refs/thread/green ${c4} || exit 1`,
-    'fi',
-    `exec '${realGit}' "$@"`,
-    '',
-  ].join('\n'), { mode: 0o755 })
-  r = runGreen(c3, { path: `${wrap}:${basePath}` })
+  r = runGreen(c3, { path: wrapGit('wrap', [
+    `'${realGit}' -C '${bare}' update-ref refs/heads/master ${c4} || exit 1`,
+    `'${realGit}' -C '${bare}' update-ref refs/thread/green ${c4} || exit 1`,
+  ]) })
   assert.equal(r.status, 0, r.out)
   assert.equal(green(), c4, r.out)
   assert.match(r.out, /push 1 of [\s\S]*nothing to move/)
 
-  // (7) The push itself fails while the ref stays behind (GitHub's workflows refusal, as a pre-receive hook): red only
-  // after the third failed push, with the refusal's own words in the log. The base PATH: case 6's wrapper never runs.
+  // (8) The push itself fails while the ref stays behind (GitHub's workflows refusal, as a pre-receive hook): red only
+  // after the third failed push, with the refusal's own words in the log. The base PATH: no race wrapper runs.
   const c5 = commit(w, 'c5', c4)
   git(w, 'push', '-q', 'origin', `${c5}:refs/heads/master`)
   fs.writeFileSync(path.join(bare, 'hooks', 'pre-receive'), [
@@ -338,7 +361,7 @@ test('G1: the green-tip script moves refs/thread/green only forward, on master, 
   assert.match(r.out, /refusing to allow/)
   assert.equal(green(), c4, r.out)
 
-  // (8) An unreadable origin: red, and nothing moves.
+  // (9) An unreadable origin: red, and nothing moves.
   git(w, 'remote', 'set-url', 'origin', path.join(tmp, 'missing.git'))
   r = runGreen(c5)
   assert.notEqual(r.status, 0, r.out)
