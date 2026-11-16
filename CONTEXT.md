@@ -1307,9 +1307,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   refresh** moves the **Primary checkout** to it, never past it, so a merge is
   not live until its full suite has passed, and a red default branch leaves
   every rollout and session on the last commit that passed (ADR 0084 d1, d2,
-  proposed; not yet built: both still take origin's tip). Not the branch's
-  tip, which a light check lets move first. _Avoid_: proven commit (**Proven**
-  is a fix's), stable, release.
+  proposed; published as `refs/thread/green` by full-suite.yml's `green-tip`
+  job (p54-5); its readers not yet built: both still take origin's tip). Not
+  the branch's tip, which a light check lets move first. _Avoid_: proven
+  commit (**Proven** is a fix's), stable, release.
 - **Speed fix** — a task filed against a measured cause of rollout time lost:
   a line of the Time-lost ledger, a suite audit's ranked change, a stall
   audit's cause. It names that evidence, and a task without it is never one.

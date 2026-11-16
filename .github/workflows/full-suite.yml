@@ -1,18 +1,39 @@
 # The full suite on every push to master (ADR 0073 d3), split into shards so no one job runs it end to end. A PR's
 # required checks run only the fast tier (test.yml), so this run is where a break only the slow tests catch shows:
-# master's red is that run's, read by the Reflection, never a PR's. No concurrency cancel, so each master commit keeps
-# its own verdict.
+# master's red is that run's, read by the Reflection, never a PR's. The runs coalesce in one concurrency group (ADR 0084
+# Decided for you 4): one run goes on, only the newest commit waits, and a run in flight is never cancelled, so a red
+# covers every merge since the last green commit. A re-run joins the same group, where it would cancel the newest
+# commit's waiting run or be cancelled by it, so only the newest commit's run is re-run (p54-7).
 #
-# Each job runs one shard: `bash tests/run.sh --shard K/N` runs the part of the suite tests/lib/shard.py gives shard K
-# (its docstring holds the rules: each entry's load is its measured seconds, from tests/shard-weights.tsv). The split
-# is by test file and never trims: the N shards together run every test file exactly once. N in the run line must
+# Each `shard` job runs one shard: `bash tests/run.sh --shard K/N` runs the part of the suite tests/lib/shard.py gives
+# shard K (its docstring holds the rules: each entry's load is its measured seconds, from tests/shard-weights.tsv). The
+# split is by test file and never trims: the N shards together run every test file exactly once. N in the run line must
 # equal the length of the shard matrix; tests/ci-workflows.test.mjs pins both, and that no job here takes a
 # required-check name (`make test (...)`, ADR 0025).
 #
-# timeout-minutes is per OS, about twice that OS's slowest shard (docs/audits/2026-11-09-test-suite.md § 4 holds the
-# numbers and the rule), so a hang reports red in minutes, not an hour. Nothing but GitHub reads it: no required check
-# runs in this file, so merge-task never waits on it. A shard cut at its limit shows every suite that ended (run.sh's
-# `<label>: ok|FAILED (<N>s)` lines); a suite with no line was still running.
+# A shard's timeout-minutes is per OS, about twice that OS's slowest shard (docs/audits/2026-11-09-test-suite.md § 4
+# holds the numbers and the rule), so a hang reports red in minutes, not an hour. Nothing but GitHub reads it: no
+# required check runs in this file, so merge-task never waits on it. A shard cut at its limit shows every suite that
+# ended (run.sh's `<label>: ok|FAILED (<N>s)` lines); a suite with no line was still running.
+#
+# The last job, `green-tip` (`publish the Green tip`), fast-forwards refs/thread/green, the Green tip (ADR 0084 d1 and
+# Decided for you 11), to the run's commit once every shard has passed. GREEN_REF is the canonical name every reader
+# fetches, and the job id `green-tip` in origin's full-suite.yml is how p54-6's resolver knows a repo publishes a Green
+# tip. A ref and not a `gh` read: the Primary refresh has no `gh` and no token, and a snapshot cut works offline from
+# the last fetch. Before every check the job fetches master and the ref by name (its checkout holds only the heads as
+# they stood when it ran), and it decides from the ref's state, never from a push's wording:
+# - at or past the run's commit (an out-of-order finish, a re-run): nothing moves, and the job passes;
+# - diverged, or the run's commit no longer on master: a warning, and a pass;
+# - behind, or missing: a fast-forward push, never forced. After a failed push it reads again, up to 3 pushes, and only
+#   a ref still behind after the third is red, with the push's own stderr above the `::error::` line.
+# A run whose only failed job is `publish the Green tip` passed every shard: ADR 0084 Decided for you 13 reads that red,
+# and p54-7 builds the reading. It files no suite fix. Its failed job is re-run once (Decided for you 3's one re-run),
+# and a pass then was a blip, a network or GitHub hiccup. A publisher red that comes back, on that re-run or on the next
+# master run's publisher, is a structural refusal: GitHub refuses the push or the ref. The likely cause is a
+# GITHUB_TOKEN without the `workflows` permission, which a fast-forward across a merge that edited .github/workflows/
+# may need; its log line is `refusing to allow a GitHub App to create or update workflow ...`. It wants a fix to this
+# job or a credential gate, never another re-run. No ruleset can guard the ref on a user-owned repo (422, tried
+# 2026-11-16), so its readers are the guard. Never push to the ref from the Mac.
 name: full suite
 
 on:
@@ -21,6 +42,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: full-suite-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   shard:
@@ -49,3 +74,49 @@ jobs:
       - run: bash tests/run.sh --shard ${{ matrix.shard }}/4
         env:
           THREAD_TEST_JOBS: "4"
+
+  green-tip:
+    name: publish the Green tip
+    needs: shard
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # Full history, so the ancestor checks are exact, and the default persisted credentials, so the script's fetches
+      # and its push authenticate with GITHUB_TOKEN.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Reads only GITHUB_SHA, GITHUB_REF and GREEN_REF, with no expression in it: tests/ci-workflows.test.mjs G1 runs
+      # this exact text against a fixture origin.
+      - shell: bash
+        env:
+          GREEN_REF: refs/thread/green
+        run: |
+          set -u
+          sha="${GITHUB_SHA}" branch="${GITHUB_REF}" ref="${GREEN_REF}"
+          fail() { echo "::error::Green tip: $*"; exit 1; }
+          warn() { echo "::warning::Green tip: $*"; }
+          # fetched NAME DEST: fetch NAME from origin by name into the private DEST; print its commit (objects now local)
+          fetched() { git fetch --quiet --no-tags --no-write-fetch-head origin "+$1:$2" && git rev-parse --verify --quiet "$2^{commit}"; }
+          # green_now: the ref's commit on origin, fetched; empty when origin has none yet (ls-remote's exit 2)
+          green_now() { local rc=0; git ls-remote --exit-code origin "${ref}" >/dev/null || rc=$?
+            case "${rc}" in 0) fetched "${ref}" refs/green-tip/green ;; 2) ;; *) return 1 ;; esac; }
+          # is_ancestor A B: 0 yes, 1 no; any other exit is a read failure (red)
+          is_ancestor() { local rc=0; git merge-base --is-ancestor "$1" "$2" || rc=$?
+            [ "${rc}" -le 1 ] || fail "cannot compare $1 with $2 (git merge-base exit ${rc})"; return "${rc}"; }
+          git cat-file -e "${sha}^{commit}" || fail "the run's commit ${sha} is not in the checkout"
+          for try in 1 2 3 4; do
+            tip=$(fetched "${branch}" refs/green-tip/branch) || fail "cannot fetch ${branch} from origin"
+            green=$(green_now) || fail "cannot read ${ref} on origin"
+            is_ancestor "${sha}" "${tip}" || { warn "${sha} is no longer on ${branch} (${tip}): ${ref} stays at ${green:-nothing}"; exit 0; }
+            if [ -n "${green}" ]; then
+              if is_ancestor "${sha}" "${green}"; then echo "Green tip: ${ref} is at ${green}, at or past ${sha}: nothing to move"; exit 0; fi
+              is_ancestor "${green}" "${sha}" || { warn "${ref} (${green}) and ${sha} have diverged: nothing moved"; exit 0; }
+            fi
+            [ "${try}" -le 3 ] || fail "${ref} (${green:-absent}) still sits behind ${sha} after 3 failed pushes: the push itself fails (auth, network or a GitHub refusal): its stderr is above"
+            if git push --quiet origin "${sha}:${ref}"; then echo "Green tip: ${ref} moved to ${sha}"; exit 0; fi
+            echo "Green tip: push ${try} of ${sha} to ${ref} failed; reading ${ref} again"
+          done
