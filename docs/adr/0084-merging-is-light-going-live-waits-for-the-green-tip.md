@@ -37,14 +37,15 @@ limit, and the line's `shard` field names the needed job. d4's Speed fix hold bu
 (`skills/_shared/vault-grammar.md` § Speed fix hold is the one copy of its forms): a task's `speed_fix:` cites its
 evidence (`docs/audits/<file>.md row <N>`, `docs/audits/<file>.md cause <words>` or `#<anchor>`, or `time-lost <id>
 [<class>]`), and one without it is refused and held like any other; `reconcile-rollout.py speed-hold apply` (schedule
-step 7) and `join` give every other queued task of the rollout a `depends-on:` on the phase's release (the phase
-note's `speed_fix_release:`, else its highest-numbered marked task), recorded on the rollout note's `## Speed fix
-holds` so `speed-hold release` and `lift` remove exactly what was added; the reach is one rule, so no marked task,
-nothing upstream of one and no member of the hold's own phase is ever held, and two Speed fix phases never deadlock;
-`next` lets a hold go when its release, or a task it depends on, leaves the queue or is set aside with its retries
-spent, with a `speed-hold` Run record line; `defer` drops a deferred task's entries, `carry` copies the record, and
-`status` reports `speedHolds`. A red-master fix is exempt by `completion_red_of:` alone, the key the completion
-verifier's fix task writes (Decided for you 3); p54-7's writer stamps it. Phase 54 builds the rest.
+step 7) and `join` give every other queued task of the rollout a `depends-on:` on the phase's release (its last task,
+or the member, marked or not, the phase note's `speed_fix_release:` names), recorded on the rollout note's `## Speed
+fix holds` so `speed-hold release` and `lift` remove exactly what was added; the reach is one rule, so no marked task,
+no release, nothing upstream of either and no member of the hold's own phase is ever held, and two Speed fix phases
+never deadlock; `next` lets a hold go when its release, or a task it depends on, leaves the queue or is set aside with
+its automatic retries spent (a gate-pending task never lets it go), with a `speed-hold` Run record line; `defer` drops
+a deferred task's entries, `carry` copies the record, and `status` reports `speedHolds`. A red-master fix is exempt by
+`completion_red_of:` alone, the key the completion verifier's fix task writes (Decided for you 3); p54-7's writer
+stamps it. Phase 54 builds the rest.
 
 ## Context
 

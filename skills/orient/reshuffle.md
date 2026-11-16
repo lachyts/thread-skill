@@ -307,8 +307,8 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      - `docs/audits/<file>.md cause <words>` or `docs/audits/<file>.md#<anchor>`: a stall audit's cause.
      - `time-lost <id> [<class>]`: a Time-lost ledger line by its `id`.
      With no such evidence the task carries no mark (schedule refuses one without it). Its phase note may name
-     the phase's release, `speed_fix_release: "[[<task>]]"`, a marked task of the phase; otherwise the phase's
-     highest-numbered marked task releases the hold.
+     the phase's release, `speed_fix_release: "[[<task>]]"`, any task of the phase, marked or not; otherwise the
+     phase's last (highest-numbered) task releases the hold.
    - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
    - **Records from R3 (c)** are written exactly as schedule step 7 does: for a spend smell, the
      `## Decisions (recorded <date>)` section holding the Planner line alone; for a limit Lachy
