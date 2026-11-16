@@ -48,7 +48,14 @@ Kinds (each finding's owners are the notes a --project run shows it under):
     misnamed     a THREAD*.md other than THREAD.md (never for a seat file)
     undeclared   a repo THREAD.md identity no live note declares (no owner: estate and --thread only)
     no-slug      a ~/Projects THREAD.md with no front-matter slug:
-    behind       HEAD lacks THREAD.md commits on origin's default branch, as last fetched
+    behind       HEAD lacks THREAD.md commits on origin's default branch, as last fetched. A checkout that waits on
+                 the Green tip (green-tip.py's waits: a live checkout of a repo that publishes one, read locally)
+                 stands behind origin for a full-suite run after every close-out, and for as long as master is red,
+                 and its movers stop at the Green tip (ADR 0084 d1): there the finding reads as a wait, with no
+                 fast-forward advice (one to origin/<d> takes live code past the Green tip), and there is none when
+                 its THREAD.md on disk already holds origin/<d>'s copy (a landed close-out's copy, which land.sh
+                 leaves on disk in such a checkout), since nothing reads stale. green-tip.py that will not load
+                 reads as no wait.
     side-branch  origin's default and the local default lack THREAD.md while another local branch has it
     workspace    a THREAD*.md in a workspace seat subfolder (ADR 0039 d3)
 An `unchecked` entry (never a finding) is a main checkout holding a thread (on disk, in a linked worktree or on a
@@ -83,6 +90,7 @@ import sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESOLVE_TARGET_PY = os.path.join(HERE, "resolve-target.py")
+GREEN_TIP_PY = os.path.join(HERE, "green-tip.py")
 SELF_ROLLOUT_SH = os.path.join(HERE, "..", "..", "execute", "scripts", "self-rollout-check.sh")
 KINDS = ("split-home", "misnamed", "undeclared", "no-slug", "behind", "side-branch", "workspace")
 GIT_TIMEOUT = 30
@@ -118,6 +126,17 @@ except Exception as e:  # a broken install: report it as the check, never as a t
 
 NA = RT.NA
 real, within = RT.real, RT.within
+_GT = []
+
+
+def green_tip():
+    """green-tip.py, loaded by path on first use (only a behind checkout asks it); None when it will not load."""
+    if not _GT:
+        try:
+            _GT.append(_load("thread_green_tip", GREEN_TIP_PY))
+        except Exception:  # noqa: BLE001 — a missing or broken resolver reads as no wait (the advice as before)
+            _GT.append(None)
+    return _GT[0]
 
 
 def strictly_below(p, r):
@@ -622,7 +641,21 @@ class Audit:
             if has.get(defref):
                 rc, out = g.run(M, "rev-list", "--count", "HEAD..%s" % defref, "--", "THREAD.md")
                 n = int(out.strip()) if rc == 0 and out.strip().isdigit() else 0
-                if n:
+                waits = bool(n) and self.waits_on_green(M, default)
+                if n and waits and self.holds_origin_copy(M, defref):
+                    pass  # the landed close-out's copy is on disk: the checkout waits on the Green tip, nothing reads stale
+                elif n and waits:
+                    on = est.branch(M)
+                    self.findings.append(finding(
+                        "behind", path, "HEAD (%s) lacks %d THREAD.md commit%s on origin/%s, as last fetched: the checkout "
+                        "runs live in a repo that publishes a Green tip, so it waits on it (ADR 0084 d1)"
+                        % (on, n, "" if n == 1 else "s", default),
+                        ("wait: the Primary refresh moves it to the Green tip once origin/%s's full suite has passed there; "
+                         "never fast-forward it to origin/%s, which takes live code past the Green tip" % (default, default))
+                        if on == default else
+                        ("switch it back to %s, and the Primary refresh moves it to the Green tip once origin/%s's full "
+                         "suite has passed there (never past it, ADR 0084 d1)" % (default, default)), owners, copies=[]))
+                elif n:
                     self.findings.append(finding(
                         "behind", path, "HEAD (%s) lacks %d THREAD.md commit%s on origin/%s, as last fetched"
                         % (est.branch(M), n, "" if n == 1 else "s", default),
@@ -636,6 +669,26 @@ class Audit:
                         % (", ".join(others), default, default),
                         "merge %s into %s and push it, or delete the branch once its thread has moved" % (others[0], default),
                         owners, copies=[]))
+
+    @staticmethod
+    def waits_on_green(M, default):
+        """M waits on the Green tip (green-tip.py's waits: local, no network, no write); False when it cannot tell."""
+        gt = green_tip()
+        try:
+            return bool(gt) and gt.waits(M, default)[0] is True
+        except Exception:  # noqa: BLE001 — a resolver that raises reads as no wait
+            return False
+
+    def holds_origin_copy(self, M, defref):
+        """M's THREAD.md on disk is a regular file holding <defref>'s blob (`hash-object --path`, so filters apply, as
+        live-checkout.sh's lc_same reads it)."""
+        f = os.path.join(M, "THREAD.md")
+        if os.path.islink(f) or not os.path.isfile(f):
+            return False
+        g = self.est.git
+        rc, want = g.run(M, "rev-parse", "-q", "--verify", "%s:THREAD.md" % defref)
+        rc2, have = g.run(M, "hash-object", "--path=THREAD.md", "--", "THREAD.md")
+        return rc == 0 and rc2 == 0 and bool(want.strip()) and want.strip() == have.strip()
 
     # -- running it --
 

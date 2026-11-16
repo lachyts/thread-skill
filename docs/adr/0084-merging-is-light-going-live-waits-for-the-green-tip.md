@@ -21,8 +21,9 @@ a verified commit: one recorded in `green-tip.json`, or one gh shows a passing `
 Primary refresh asks gh too, best effort in its launchd pass, where Decided for you 11 assumed it had none
 (full-suite.yml's header still says so): a negative answer is cached 15 minutes, a pending one never. An unverified
 Green tip steps back to the newest verified commit before it, and a hold never yields origin's tip. The reset-primary
-trigger records two new outcomes, `past` and `no move:`. The installed bundle follows the Green tip, backwards
-included. A checkout that waits on the Green tip keeps the close-out commit's THREAD.md, which a later fast-forward
+trigger records two new outcomes, `past` and `no move:`. The readers that only advise, thread-placement.py's `behind`
+finding and pushed-base.sh's reset hint, ask its local `waits` (a live checkout of a repo that publishes one) and name
+the wait, never a move past the Green tip. The installed bundle follows the Green tip, backwards included. A checkout that waits on the Green tip keeps the close-out commit's THREAD.md, which a later fast-forward
 replaces once origin holds it (live-checkout.sh's lc_landed). Decided for you 9's reading on the Mac is the Primary
 refresh line's 2-hour waits line. p54-7's red-master record is still to build. d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
 header holds the rules): a file under `docs/` and an untracked file are no carriers, and the reach stops one carrier

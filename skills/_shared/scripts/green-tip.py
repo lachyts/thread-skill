@@ -20,6 +20,13 @@ Green tip, fallback (a hold only, read only by the cut) the newest recorded veri
 None, cause (a hold only) absent | unreachable | not-ancestor | unverified | unreadable, and why one line in words. The
 caller has fetched <branch> already: nothing here fetches it.
 
+waits(repo, branch, *, run=None) returns (True, None) when <repo> waits on the Green tip, else (False, why): steps 0 and
+1 alone, local, with no network call, no gh and no write (the record is read, never written, and its WARNs are
+silent). It is how a reader that only advises tells a checkout whose movers stop at the Green tip from one that
+follows origin's tip: thread-placement.py's `behind` finding (read-only, it never fetches) and pushed-base.sh's reset
+hint (the CLI's `waits`). The Green tip itself is never read: a checkout that waits may stand at it, behind it or on a
+hold.
+
 The reading, in order, stopping at the first that decides:
   0. The live-checkout rule (checkout=True only, local). Only a main checkout takes the Green tip: its git dir is its
      common dir, it is its own toplevel, and its name does not end `-rollout` (a Rollout clone is the code being built).
@@ -84,8 +91,8 @@ A step with under 1 s left is skipped: the fetch reads cause unreachable (`no ti
 Primary refresh's real pass 150 with gh and writes, its --dry-run 30, no gh, no write; land.sh min(60, what is left of
 LAND_DEADLINE - 10) under an outer gb + 5; self-rollout-check.sh --refresh-in-place 60 under lc_bounded 70.
 
-CLI: `target` prints one line, `<kind> <sha|-> <why>`, or with --json the dict. Exit 0 for any reading, 2 on usage, 1 on
-an internal failure. Every caller reads exit 1, a timeout or a bounded rc 124 as a hold (fail closed). --now pins the
+CLI: `target` prints one line, `<kind> <sha|-> <why>`, or with --json the dict. `waits --repo R --branch D` prints
+`waits` or `origin <why>` (waits()). Exit 0 for any reading, 2 on usage, 1 on an internal failure. Every caller reads exit 1, a timeout or a bounded rc 124 as a hold (fail closed). --now pins the
 clock (tests). Stdlib only, python >= 3.9, POSIX (fcntl).
 """
 import argparse
@@ -376,6 +383,34 @@ def _not_live(r):
     return None
 
 
+def _record_key(r):
+    """(slug, key): the origin's GitHub slug, and its record key (the slug lowercased, else the raw URL, else None)."""
+    url = r.git("remote", "get-url", "origin")[1]
+    slug = parse_slug(url)
+    return slug, (slug.lower() if slug else (url or None))
+
+
+def _publishes(r, branch, entry):
+    """Step 1: origin/<branch>'s full-suite.yml, as last fetched, holds the green-tip job and the ref, or the record's
+    entry has seen the ref."""
+    rc, yml, _ = r.git("cat-file", "blob", f"refs/remotes/origin/{branch}:{WORKFLOW}")
+    return (rc == 0 and bool(JOB_RE.search(yml)) and GREEN_REF in yml) or bool(entry.get("seen"))
+
+
+def waits(repo, branch, *, run=None):
+    """(True, None) when <repo> is a live checkout of a repo that publishes a Green tip, else (False, why): steps 0
+    and 1 only (the module docstring's waits)."""
+    r = _Reader(repo, run or make_runner(own_group=True), LOCAL_TIMEOUT * 6)
+    why = _not_live(r)
+    if why:
+        return False, f"not a live checkout ({why})"
+    _, key = _record_key(r)
+    entry = read_record(record_path(), warn=False)[0]["repos"].get(key, {}) if key is not None else {}
+    if not _publishes(r, branch, entry):
+        return False, "this repo publishes no Green tip"
+    return True, None
+
+
 def _newest(r, shas, below):
     """The newest of the recorded shas that is `below` or an ancestor of it (one no other candidate descends from)."""
     best = None
@@ -443,14 +478,12 @@ def resolve(repo, branch, *, checkout=False, gh=True, write=True, budget=DEFAULT
         why = _not_live(r)
         if why:
             return take("origin", origin, f"origin/{branch}: not a live checkout ({why})")
-    url = r.git("remote", "get-url", "origin")[1]
-    slug = parse_slug(url)
-    key = state["key"] = (slug.lower() if slug else (url or None))
+    slug, key = _record_key(r)
+    state["key"] = key
     rec, state["dirty"] = read_record(state["path"])
     entry = rec["repos"].get(key, {}) if key is not None else {}
     state["verified"] = [v["sha"] for v in entry.get("verified", [])]
-    rc, yml, _ = r.git("cat-file", "blob", f"{od}:{WORKFLOW}")
-    publishes = (rc == 0 and bool(JOB_RE.search(yml)) and GREEN_REF in yml) or bool(entry.get("seen"))
+    publishes = _publishes(r, branch, entry)
     out["publishes"] = publishes
     if not publishes:
         return take("origin", origin, f"origin/{branch}: this repo publishes no Green tip")
@@ -569,10 +602,21 @@ def main(argv=None):
     t.add_argument("--budget", type=float, default=DEFAULT_BUDGET, help="seconds for the whole reading (default 150)")
     t.add_argument("--now", default=None, help="the time to read against, ISO (tests)")
     t.add_argument("--json", action="store_true", help="print the reading as JSON")
+    w = sub.add_parser("waits", help="print waits, or origin <why>: local, no network (steps 0 and 1)")
+    w.add_argument("--repo", required=True)
+    w.add_argument("--branch", required=True)
     a = p.parse_args(argv)
+    if a.cmd == "waits":
+        try:
+            ok, why = waits(a.repo, a.branch, run=make_runner(own_group=False))
+        except Exception as e:  # noqa: BLE001
+            print(f"green-tip: internal failure: {type(e).__name__}: {' '.join(str(e).split())[:200]}", file=sys.stderr)
+            return 1
+        print("waits" if ok else f"origin {why}")
+        return 0
     if a.cmd != "target":
         print("green-tip: usage: green-tip.py target --repo R --branch D [--checkout] [--no-gh] [--no-write] "
-              "[--budget S] [--now ISO] [--json]", file=sys.stderr)
+              "[--budget S] [--now ISO] [--json] | waits --repo R --branch D", file=sys.stderr)
         return 2
     if a.budget <= 0:
         print("green-tip: usage: --budget must be > 0", file=sys.stderr)

@@ -4,10 +4,10 @@
 # GT4 the step-back; GT5 GT6 an absent ref; GT7 an unreachable one (a stale fetched copy ignored); GT8 not an ancestor;
 # GT9 the live-checkout rule; GT10 --no-write; GT11 a corrupt record; GT12 usage, an unreadable origin and an internal
 # failure; GT13 the 15-minute negative answer; GT14 the GitHub URL forms (landing-register.py's); GT15 the inner bounds;
-# GT16 an outer kill reaps every child; GT17 a locked record. Origins are git@github.com:o/<r>.git, served from
-# $SRV/o/<r>.git by an inline ssh stub on PATH (GIT_SSH_COMMAND unset, so the resolver's BatchMode rule reaches it); an
-# inline gh stub answers from a file and logs its argv. Hermetic: HOME, XDG_STATE_HOME and the record live under
-# mktemp; global/system git config is ignored; never the network, never the real gh.
+# GT16 an outer kill reaps every child; GT17 a locked record; GT18 waits. Origins are git@github.com:o/<r>.git,
+# served from $SRV/o/<r>.git by an inline ssh stub on PATH (GIT_SSH_COMMAND unset, so the resolver's BatchMode rule
+# reaches it); an inline gh stub answers from a file and logs its argv. Hermetic: HOME, XDG_STATE_HOME and the record
+# live under mktemp; global/system git config is ignored; never the network, never the real gh.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -312,5 +312,21 @@ ok "$(printf '%s\n' "$out" | grep -c '^green ')|$(cmp -s "$tmp/rec.before" "$THR
   "GT17: a held lock: the reading still prints, the record unchanged, within its 3 s budget and a margin (the holder sleeps 30 s)"
 has "$out" "green-tip: WARN: the record is locked: this reading is not recorded" "GT17: … with one WARN"
 { kill "${holders[0]}"; wait "${holders[0]}"; } 2>/dev/null
+
+# ---- GT18: waits, steps 0 and 1 alone: local, no network, no gh, no write -------------------------------------------------
+wt() { python3 "$GT" waits --repo "$1" --branch master; }
+: > "$LOG_SSH"; : > "$LOG_GH"; cp "$THREAD_GREEN_TIP_FILE" "$tmp/rec.before"
+ok "$(wt "$tmp/w/r9")" waits "GT18: a main checkout whose origin/<d> full-suite.yml holds the job: waits"
+ok "$(wt "$tmp/w/r9-wt")|$(wt "$tmp/w/r9-rollout")" "origin not a live checkout (a linked worktree)|origin not a live checkout (a Rollout clone)" \
+  "GT18: … a linked worktree and a Rollout clone do not (step 0)"
+ok "$(wt "$tmp/w/n")" "origin this repo publishes no Green tip" "GT18: no job: origin"
+ok "$(grep -c . "$LOG_SSH")|$(grep -c . "$LOG_GH")|$(cmp -s "$tmp/rec.before" "$THREAD_GREEN_TIP_FILE" && echo same)" "0|0|same" \
+  "GT18: … no network call, no gh, the record unchanged"
+rec o/n; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["repos"]["o/n"]["seen"]=sys.argv[2]; json.dump(d, open(sys.argv[1], "w"))' \
+  "$THREAD_GREEN_TIP_FILE" "$(git -C "$tmp/w/n" rev-parse HEAD)"
+ok "$(wt "$tmp/w/n")" waits "GT18: no job, but the record has seen the ref: waits"
+printf '{not json' > "$THREAD_GREEN_TIP_FILE"
+ok "$(wt "$tmp/w/n" 2>&1)" "origin this repo publishes no Green tip" "GT18: a corrupt record reads as empty, with no WARN"
+python3 "$GT" waits --repo "$W" >/dev/null 2>&1; ok "$?" 2 "GT18: no --branch: exit 2"
 
 exit $fail
