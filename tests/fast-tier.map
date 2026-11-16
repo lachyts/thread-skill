@@ -213,6 +213,8 @@ CONTEXT.md tests/contracts/*.test.mjs
 README.md tests/contracts/*.test.mjs
 CLAUDE.md tests/contracts/*.test.mjs
 THREAD.md tests/contracts/*.test.mjs
+# docs/**'s plain entries only keep its reach non-empty (rule (4)): they and every other walker that reads docs/ run
+# through `** ALSO` anyway
 docs/** tests/contracts/merge-settings-guard.test.mjs tests/contracts/refs.test.mjs tests/contracts/run-record-writers.test.mjs
 evals/** tests/contracts/*.test.mjs
 
