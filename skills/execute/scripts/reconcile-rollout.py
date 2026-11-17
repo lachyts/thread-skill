@@ -44,7 +44,12 @@ Subcommands:
               of every scheduled task, a ranked line above the `## Queue` table and a queued Solo head included, so it
               starts first among its priority (`high`, the top weight). Honours a soft pause: once nothing runs, awaits or integrates (a held
               RACE whose `integrating:` stands included, Race holds below), it stamps `paused:` and removes
-              `pause_requested` (the drain, ADR 0030 decision 5). `startUnattended` reports the rollout start stamp
+              `pause_requested` (the drain, ADR 0030 decision 5). An Engine catch-up's drain (`paused_for: catch-up`,
+              p54-14; `catch-up` below) is the same drain, its hold reasons `catch-up: draining (an Engine catch-up)`
+              and, once drained, `catch-up: moving`: drained, it keeps `paused_for`, records `paused` mode catch-up
+              and halts "catch-up"; past CATCH_UP_DRAIN_MINUTES since its open line with work still running, it first
+              removes both stamps, appends the `bound` line, records `catch-up` outcome bound and goes on unpaused in
+              the same call (in memory only on --dry-run). `startUnattended` reports the rollout start stamp
               (`start: unattended`, vault grammar § Rollout start stamp) and every call off --dry-run that gets past
               its refusals removes it (`startCleared`), so a running rollout clears it and the Chorus Stage never
               starts a second lead; a refusal leaves it. Refuses an incomplete rollout (below): exit 1, no
@@ -72,7 +77,8 @@ Subcommands:
               null while anything starts, restarts or runs, or while the lane moves (`laneHold` empty and something
               awaits Integration, integrates or holds the lane for a RACE re-verify; or a `race` entry reads `revert:
               true` and no `git-env` or `lane` entry stands); otherwise the first of "git-env" (a lane `git-env`
-              entry), "race" (a `race` entry with `revert: false`), "lane" (a `lane` entry), "paused", "empty",
+              entry), "race" (a `race` entry with `revert: false`), "lane" (a `lane` entry), "paused" ("catch-up" in
+              its place under `paused_for: catch-up`: an Engine catch-up drained, p54-14), "empty",
               "complete" (or "done"), "held",
               "awaiting-sign-off" and "stuck". Two halts sit outside that list (p30-4, Approved queue below):
               "superseded", returned at once for a note with a valued `superseded_by:`, before its ceiling is read,
@@ -516,14 +522,17 @@ Subcommands:
               mode=hard` (at the stamp), `slot-freed outcome=stopped` for each linked in_progress note and, for
               each lane holder, a merge-hold close and `lane-freed release=halt`. Nothing in the vault changes.
 
-  record-entry  `--rollout <note> --by lachy|stage|watchdog|heartbeat|repair [--cause usage-limit|dead-lead|watchdog]
+  record-entry  `--rollout <note> --by lachy|stage|watchdog|heartbeat|repair|catch-up
+              [--cause usage-limit|dead-lead|watchdog]
               [--session ID] [--now T] [--dry-run]` (p29-10, ADR 0051; execute § 4.5 *Run record*): the lead's loop
               entry in the Run record, run at every loop entry (right after § 2's lineage, version and shape lines) and
               by every heartbeat tick that finds no pause or room stop (its clause 2b). It writes only the Run record,
               the lead's lease (p28-4, renewed before the record is read; Trickle and Away, below) and the lead's arm
               stamp on the rollout note (below): the stops the
               record does not hold yet, as inferred `stopped` lines, then exactly one `lead-entry` {by,
-              session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause, the open
+              session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause (`stop:
+              catch-up` when it is an Engine catch-up's, by the note's `paused_for` or the open `paused` line's mode;
+              `--by catch-up` is the lead's own self-Reinstate at one, p54-14), the open
               stop, --cause, a boot after the latest live line, a session change but on --by heartbeat, --by
               watchdog; every boot or sleep before it written first). --session defaults to CLAUDE_CODE_SESSION_ID.
               The Mac's evidence is machine_times: kern.boottime, kern.waketime, and `pmset -g log` at most once per
@@ -642,7 +651,9 @@ Subcommands:
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
-              nor never started (or an approved queue whose only marks are ended room stops: approved_unrun); a
+              nor never started (or an approved queue whose only marks are ended room stops: approved_unrun), or one
+              that has run and is catching up (`paused_for: catch-up`, an Engine catch-up, p54-14: `--from <x> is
+              catching up (an Engine catch-up): it resumes by itself; nothing carried`); a
               --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
               included; the line names each held slug and `/thread:repair [[<from>]]`); a --from with an
               unacked git-env trip (Git-env hold, below; --dry-run included; `ERROR: carry: --from <stem> holds
@@ -670,7 +681,9 @@ Subcommands:
               note lock (engine-snapshot.md § Cross-version state). Refuses (exit 2, one `ERROR: join:` line, every
               check before any write): the rollout note missing, unparseable or not tagged `rollout` (_carry_note), not
               directly in --tasks-dir, done or dropped, superseded (`superseded_by:` valued), serial, not at
-              protocol_version 5, incomplete (reconcile's incomplete), paused or pause-requested, complete (at least one
+              protocol_version 5, incomplete (reconcile's incomplete), paused or pause-requested (never under an Engine
+              catch-up's `paused_for: catch-up`, p54-14: joined rows wait behind its drain and start after its move),
+              complete (at least one
               linked task and every one merged), or with a `## Queue` holding neither a table nor a list item; a task not
               directly in --tasks-dir, not tagged `task`, or tagged `rollout` or `decisions`; and, for a task whose
               `rollout:` does not already link the note, one whose `projects:` share none of the note's (_norm_project),
@@ -918,7 +931,8 @@ Subcommands:
               sign-off`, when the queue with the pause ignored would still be awaiting sign-off (_awaits_sign_off),
               it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` for each pending gate and exits 3, so
               a reinstate with a gate still unsigned never re-runs the sign-off form. Every other pause clears as
-              before.
+              before. First, the backstop (p54-14): an open `## Catch-up log` line is closed `not moved at <g12>:
+              cleared at a Reinstate`, so no later adopt takes the catch-up branch.
 
   await-sign-off  `--rollout <note>` (ADR 0034; execute § 4.5 step 5's sign-off form): the rollout finished
               everything else and only gates wait on Lachy, so it stays open, paused. Read-only check first: the
@@ -1128,7 +1142,10 @@ Subcommands:
               2. The Run record (_record_read, _record_state): either unreadable is a MovingError.
               3. Pauses: waiting `sign-off` when `paused_for: sign-off` (checked first: await-sign-off stamps `paused:`
                  with it); then waiting `paused` when _pause_stands (a stamped pause, his whole-rollout act, read as
-                 `paused` even beside an unacked Lane hold: status's LANE HOLD headline carries that ack).
+                 `paused` even beside an unacked Lane hold: status's LANE HOLD headline carries that ack). Read before
+                 both, an Engine catch-up's `paused:` (`paused_for: catch-up`, p54-14: the lead's own turn makes its
+                 move) is judged by silence at stall-after, else waiting `catch-up` (`an Engine catch-up: moving onto
+                 the Green tip since <stamp>`).
               4. A room stop under its bound (_room_stop_stands): waiting `room-stop`, `until` its stamp + 6 h.
               5. Never started (never_started) and no `lead-entry`: waiting `not-started`.
               6. `next --dry-run` in-process through _parser() (no --running: every in_progress note is live), its
@@ -1171,7 +1188,9 @@ Subcommands:
                   120), else the silence test at 120: regenerate is judged before the stall-after test and in its
                   place, whatever else is in W (a running task included), because the Approved-queue route runs as one
                   foreground turn with no life sign; then the silence test at stall-after; otherwise moving.
-              12. With no W: (a) an open ("merge", task) hold on an integrating task, released only by the lead's own
+              12. With no W: (a) `next`'s `halt: catch-up` (an Engine catch-up drained, p54-14: the lead's next turn
+                  moves it) is judged by silence at stall-after, else waiting `catch-up`; an open ("merge", task) hold
+                  on an integrating task, released only by the lead's own
                   tick, is judged by silence at stall-after, else waiting `merge-hold`; (a′) a `surfaceWait` whose `held`
                   is non-empty with `halt` null (P41-3: the lead's heartbeat re-runs the Surface re-check at each tick,
                   so a dead lead's surface wait is a stall) is judged by silence at stall-after, else waiting
@@ -1184,10 +1203,30 @@ Subcommands:
                   with H's reason, else `next`'s verdict worded as execute § 7 words it.
               Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test; moving_verdict
               returns each through by_silence, which refuses a cause the list leaves out): `merge-hold`,
-              `regenerating`, `surface-wait` and `leg-wait` (the Leg lease's silence, 1a), and every reading with
-              work; `room-stop` by its 6 h bound; the waits of 12(b) by their
+              `regenerating`, `surface-wait`, `leg-wait` (the Leg lease's silence, 1a) and `catch-up` (3 and 12a), and
+              every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
               own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
               changes only `waiting`'s cause, never moving or stalled.
+
+  catch-up    `--rollout <note> [--abort --why W] [--tasks-dir D] [--now ISO] [--dry-run]` (p54-14; ADR 0084 d5 and
+              Decided for you 5, 6 and 7; execute § 4.5 *Engine catch-up*): an Engine catch-up. It compares the
+              rollout's engine_sha (S) with the Green tip (G), read by engine-snapshot.py's `lacking` in the git Primary
+              of the rollout's own snapshot (so it reaches every project's rollout on the Mac), maps the marked Speed
+              fix units onto S..G's commits and tests each matched commit for engine code (`engine_fix`), then decides a
+              drain, a take or none by the drain rule (cmd_catch_up's docstring, its one copy) and writes the stamps and
+              the `## Catch-up log` line (engine-snapshot.py's header: the log's grammar, its open, live and stale rules
+              and its closers, cited here, never copied). The lead runs it, `|| true` and never routed on, wherever it
+              runs master-runs: each loop entry, after each landing merge and each heartbeat tick (its clause (2d));
+              execute § 1.5 runs it for a serial chain with no Leg open. `--abort --why W` closes an open line and
+              removes the stamps under `paused_for: catch-up`, with no open line too once adopt wrote `moved` (§ 1.5's
+              failed move, § Pausing when his pause takes over). Guarded (not GUARD_EXEMPT). Exits: 0 a reading, 1 an
+              unreadable note or an engine-snapshot.py that will not load, 2 usage and the guard.
+              The readings of a catch-up's stamps elsewhere (_catching_up: `paused_for: catch-up` with `pause_requested`
+              or `paused:`; with neither it is dangling and no catch-up): `next` drains it (above) and halts
+              "catch-up"; `moving` judges it by silence (`catch-up`); record-entry's gap stop is `catch-up`; join never
+              refuses it; carry refuses it as --from; the `regenerate` trigger gate reads its `paused:` as running and
+              the `when: paused` gate as not paused; clear-pause closes its open line; the status JSON's `pausedFor`
+              reads `catch-up`.
 
   master-runs  `--rollout <note> [--tasks-dir D] [--gh-bin gh] [--now ISO] [--dry-run]` (p54-7; ADR 0084 Decided for you
               3, 11 and 13; execute § 4.5 *Master's full suite*): read master's `full suite` runs, make the newest red run's
@@ -1470,7 +1509,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   carry             to the --from rollout, after each carried note saves: slot-freed stopped for a running
                     note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
                     (the writer appends it to both files).
-  next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
+  next              (not --dry-run) paused mode=soft when it stamps `paused:` (mode=catch-up under an Engine catch-up,
+                    and catch-up {from, fixes, release?, drainMinutes, shape, outcome: bound} at its bound);
+                    idle-slots {reason, free,
                     settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
                     done or empty (free stays the ceiling's, never the Trickle's, the Away cap's or the Heat
                     hold's); then the night record (p28-2, _night_record): away-night {morning} once per
@@ -1489,6 +1530,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
+  catch-up          (p54-14) --abort: resumed when it removes the stamps and the record's open paused line is the
+                    catch-up's, then, with an open line, catch-up {from, fixes, release?, shape, outcome: not-moved,
+                    why}; engine-snapshot.py adopt writes the moved line.
   master-runs       (p54-7) master-run {repo, outcome, sha, at, …} per decided key, in the reserved master-runs.jsonl
                     (task null; the rollout a provenance stamp), after its task and its join; nothing on --dry-run.
   prove             none: its writes are proof stamps and landings the next queue read sees; mark-done's landing events
@@ -1533,7 +1577,8 @@ Integration conflict, `integration: conflict unresolved in …`), integration-re
 else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): a whole-rollout gitEnvHold entry (a
 bare checkout; a lane trip holds no Slot) -> hold-git-env; mainRed (a RACE revert that did not land) -> hold-race;
-paused or pauseRequested -> pause-drain; any `surface wait:` hold (a surface wait, P41-3: `next` launches nothing until
+paused or pauseRequested under `paused_for: catch-up` (an Engine catch-up's drain, p54-14) -> catch-up-drain; paused or
+pauseRequested -> pause-drain; any `surface wait:` hold (a surface wait, P41-3: `next` launches nothing until
 the rollout's own Surface re-check passes) -> hold-surface; any `heat:` hold (the Heat hold; only ever a queued row) ->
 hold-heat; any
 `quota:` hold (the quota hold, p36-7: the lead's Login is inside its line while Capacity is in force) -> hold-quota; any
@@ -2070,6 +2115,9 @@ _carry_readers (the note's own rollout and the rollouts of its unstarted dependa
 versions by design, like fold-journals (status's Carried line, reflect § 17 and close run it from the session's own
 root). `triggers` names no note (no --rollout, no --tasks), so `_guarded_notes` finds nothing to ask about and it runs
 from any root, unguarded. `due` writes nothing; `fire` writes only the `fired:` of the one `when:` entry it ran.
+`catch-up` (p54-14) is guarded: it runs from the rollout's own snapshot, and its `paused_for: catch-up` and
+`## Catch-up log` (the log's grammar is engine-snapshot.py's header) are cross-version state that only an engine
+carrying the Engine catch-up writes and reads (engine-snapshot.md § Cross-version state).
 """
 
 import argparse
@@ -2158,6 +2206,15 @@ ROLLOUT_NOTE_NAME_RE = re.compile(r"-rollout-\d{4}-\d\d-\d\d(?:-\d+)?\.md\Z")
 STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
 SIGN_OFF = "sign-off"
+# An Engine catch-up (ADR 0084 d5, p54-14; the module docstring's `catch-up`): the soft pause's drain marked
+# `paused_for: catch-up`, so nothing reads it as a pause someone made. Its log's grammar is engine-snapshot.py's header.
+CATCH_UP = "catch-up"
+CATCH_UP_SECTION = "## Catch-up log"
+# The drain's bound: the Slot p90 on the Run record (1012 Slots since 2026-10-17: p50 60, p75 104, p90 159, p95 221
+# min), since a drain starts with its running Slots already part done. An approved task waiting on the Integration lane
+# (lane p90 60 min over 925 holdings) can push a drain past it: it then lands on the old snapshot through the bound
+# path, and its catch-up is taken at the next moment with nothing running.
+CATCH_UP_DRAIN_MINUTES = 160
 PAUSE_LOG_SECTION = "## Pause log"
 # The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute handoff's
 # Start when ready writes a top-level `start: unattended`, the Chorus Stage reads it (the first `start:` line, scalar
@@ -7399,6 +7456,30 @@ def cmd_next(args) -> int:
             stalled = [r for r in in_progress if r["slug"].lower() not in sw_live]
         sw_awaiting, awaiting = awaiting, []
 
+    # An Engine catch-up's drain (p54-14; the module docstring's `catch-up`): past CATCH_UP_DRAIN_MINUTES since its
+    # open line with work still running, its stamps go and a `bound` line closes it, before the pause read below, so
+    # the rollout goes on unpaused in this same call on its old snapshot (in memory only on --dry-run).
+    catching = _catching_up(rollout_note)
+    if catching and not _valued(rollout_note.get("paused")) and _truthy_flag(rollout_note.get("pause_requested")) \
+            and (live or awaiting or integrating or race_held_lane):
+        es_ = _engine_snapshot_mod()
+        op_ = es_.catch_up_open(rollout_note.render()) if es_ is not None and hasattr(es_, "catch_up_open") else None
+        t0_ = _parse_ts(op_["ts"]) if op_ is not None else None
+        if t0_ is not None and now - t0_ > timedelta(minutes=CATCH_UP_DRAIN_MINUTES):
+            mins = int((now - t0_).total_seconds() // 60)
+            rels = ", ".join(f"[[{r}]]" for r, _p in op_["releases"]) or "take"
+            rollout_note.remove("pause_requested")
+            rollout_note.remove(PAUSED_FOR_KEY)
+            rollout_note.append_line(CATCH_UP_SECTION, f"- {_stamp(now)} bound {rels} after {mins} min: on "
+                                                       f"{op_['from12']}")
+            rollout_note.save(dry_run=args.dry_run)
+            ev = {"from": _scalar(rollout_note.get("engine_sha")) or op_["from12"], "fixes": op_["fixes"],
+                  "drainMinutes": mins, "shape": SHAPES[0], "outcome": "bound"}
+            if op_["releases"]:
+                ev["release"] = ", ".join(r for r, _p in op_["releases"])
+            _event(rollout_path.stem, CATCH_UP, None, ev, args)
+            catching = False
+
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
     paused_now = False
@@ -7594,8 +7675,12 @@ def cmd_next(args) -> int:
             rollout_note.remove("pause_requested")
             rollout_note.save(dry_run=args.dry_run)
             paused_now = True
-            _event(rollout_path.stem, "paused", None, {"mode": "soft"}, args)
-        reason = "paused" if paused else "pause requested: draining"
+            # An Engine catch-up keeps its `paused_for: catch-up` (the lead's own move reads it, § 1.5).
+            _event(rollout_path.stem, "paused", None, {"mode": CATCH_UP if catching else "soft"}, args)
+        if catching:
+            reason = "catch-up: moving" if paused else "catch-up: draining (an Engine catch-up)"
+        else:
+            reason = "paused" if paused else "pause requested: draining"
         holds += [(r, reason) for r in stalled + queued]
     else:
         # A restart takes back a task every other lead already counts (its note stays in_progress), so only the
@@ -7962,7 +8047,7 @@ def cmd_next(args) -> int:
         elif any(e["hold"] == "lane" for e in lane_hold):
             halt = "lane"   # a Lane hold (ADR 0048): only Lachy's ack, through /thread:repair § 3g, releases it
         elif paused:
-            halt = "paused"
+            halt = CATCH_UP if catching else "paused"   # an Engine catch-up drained: the lead moves it (§ 4.5 step 5)
         elif not in_n:
             halt = "empty"
         elif counts["merged"] == counts["total"]:
@@ -7986,7 +8071,7 @@ def cmd_next(args) -> int:
         reason = _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold,
                               by_state.get("set-aside", []), cap_held, last_start_held, ro_held, bool(task_held),
                               heat_held=heat_held, main_red=main_red, quota_held=quota_held,
-                              surface_held=bool(sw_held))
+                              surface_held=bool(sw_held), catching_up=catching)
         idle = {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}
         # p53-4: which bound held a cap-held row while the budget admits (ADR 0083 DfL 13's evidence): `count` when the
         # first such row reads the count's line, else the parts the weight found short. The reasons keep their names.
@@ -9323,7 +9408,9 @@ def cmd_status(args) -> int:
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
         # What the pause waits for: "sign-off" under await-sign-off's pause (ADR 0034: only gates wait on Lachy, and the
         # repo keeps this as its project's one unfinished parallel rollout there, ADR 0064, until they are signed or
-        # deferred, though it holds no Project root against serial chains meanwhile, ADR 0060), else null.
+        # deferred, though it holds no Project root against serial chains meanwhile, ADR 0060); "catch-up" under an
+        # Engine catch-up's drain (`pause_requested`) or move (`paused:`), the engine's own pause (p54-14: status
+        # renders CATCHING UP, never PAUSED); else null.
         "pausedFor": _scalar(rollout_note.get(PAUSED_FOR_KEY)) or None,
         # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
         "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
@@ -9947,7 +10034,7 @@ def _record_state(rollout):
 # ---- the time-lost ledger (p29-10, ADR 0051): stops, resumes, suites and the load around them ---------------------
 # run_record.py's docstring holds the kinds and the stop model (its one copy); these are the writers' shared pieces.
 
-ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")       # record-entry --by
+ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair", "catch-up")   # record-entry --by
 ENTRY_CAUSES = ("usage-limit", "dead-lead", "watchdog")                 # record-entry --cause
 OPEN_STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog")  # a stop an entry resumes from
 CALL_KINDS = ("task", "revise", "integrate", "resume")                  # run-bound's `call`
@@ -10466,7 +10553,9 @@ def cmd_record_entry(args) -> int:
     gap = None   # {stop, start, fields (a new stopped line) or None}
     pause, pause_start = _pause_stands(note, lines)
     if pause:
-        gap = {"stop": "pause", "start": pause_start, "fields": None}
+        # An Engine catch-up's pause (p54-14) is the engine's own move, never his: its gap stop is `catch-up`.
+        own = _catching_up(note) or _open_pause_mode(lines) == CATCH_UP
+        gap = {"stop": CATCH_UP if own else "pause", "start": pause_start, "fields": None}
     elif st["open"]:
         o = st["open"][-1]
         gap = {"stop": o["cause"], "start": _away_stamp(o.get("at"))[0] or _rec_ts(o), "fields": None}
@@ -11636,7 +11725,7 @@ def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
 
 def _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
                  last_start_held, pr_held=False, task_pr_held=False, heat_held=False, main_red=(),
-                 quota_held=False, surface_held=False) -> str:
+                 quota_held=False, surface_held=False, catching_up=False) -> str:
     """The idle-slots reason (the module docstring's table, first match). `whole`: the whole-rollout git-env trips (a bare
     checkout; a lane trip holds no Slot); `main_red`: `next`'s mainRed (a RACE revert that did not land). `cap_held`:
     this call holds a queued row on the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a
@@ -11645,11 +11734,14 @@ def _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold
     run or a gate) row. `heat_held`: one on `heat:` (the Heat hold, estate ADR 0009 d5), ahead of the Mac-wide cap.
     `quota_held`: one on `quota:` (the quota hold, p36-7), after the heat and ahead of the Mac-wide cap.
     `surface_held`: a row a surface wait holds (`surface wait:`, P41-3), after the pause's drain and ahead of the heat:
-    `next` launches nothing while it stands."""
+    `next` launches nothing while it stands. `catching_up`: the pause is an Engine catch-up's (`paused_for: catch-up`,
+    p54-14): catch-up-drain, ahead of pause-drain."""
     if whole:
         return "hold-git-env"
     if main_red:
         return "hold-race"
+    if (paused or pause_requested) and catching_up:
+        return "catch-up-drain"
     if paused or pause_requested:
         return "pause-drain"
     if surface_held:
@@ -13744,6 +13836,8 @@ def cmd_carry(args) -> int:
     if not fresh and not _valued(src_note.get("paused")):
         return refuse(f"--from {src.stem} has run and is not paused ({why}): only a paused or never-started "
                       "rollout is superseded")
+    if not fresh and _catching_up(src_note):
+        return refuse(f"--from {src.stem} is catching up (an Engine catch-up): it resumes by itself; nothing carried")
     held = _race_holds(src_note, linked)
     if held:
         names = ", ".join(f"[[{slug}]] ({kind})" for slug, kind in sorted(held.values(), key=lambda h: h[0].lower()))
@@ -15299,10 +15393,12 @@ def cmd_join(args) -> int:
     inc = incomplete(x_path, x_note, linked, index)
     if inc:
         return refuse(f"--rollout {stem} is incomplete ({inc}): /thread:schedule --regenerate supersedes it")
-    if _valued(x_note.get("paused")):
+    # An Engine catch-up's stamps (p54-14) are no pause someone made: joined rows wait behind its drain and start
+    # after its move.
+    if _valued(x_note.get("paused")) and not _catching_up(x_note):
         return refuse(f"--rollout {stem} is paused ({_scalar(x_note.get('paused'))}): /thread:schedule --regenerate "
                       "supersedes it, carrying its unlanded tasks")
-    if _truthy_flag(x_note.get("pause_requested")):
+    if _truthy_flag(x_note.get("pause_requested")) and not _catching_up(x_note):
         return refuse(f"--rollout {stem} is pausing (pause_requested): once its `paused:` stamp lands, "
                       "/thread:schedule --regenerate supersedes it")
     counts = _counts([dict(zip(("state", "setAsideAt"), _queue_state(n))) for _p, n in linked])
@@ -15957,7 +16053,8 @@ def _regenerate_gate(walk, anchor, trigger_path):
     acts on whatever is unfinished for the project now, so it is held to the rollout it was written against. In order: a
     serial anchor is unreadable; no anchor, a superseded one, a successor read from a task note (carry moves a task's
     `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from one written since), a
-    closed one and one neither paused nor approved_unrun wait (unfinished-rollout.py's `eligible`, its two facts, so a
+    closed one and one neither paused (an Engine catch-up's `paused:` reads running, p54-14) nor approved_unrun wait
+    (unfinished-rollout.py's `eligible`, its two facts, so a
     merge during a run never spends `fired:` on schedule's join, which regenerates nothing: ADR 0078 d6)."""
     if anchor is not None and _shape(anchor[1]) == SHAPES[1]:
         return "unreadable", "a serial rollout supersedes nothing"
@@ -15972,7 +16069,8 @@ def _regenerate_gate(walk, anchor, trigger_path):
     if _status(note) in CLOSED_ROLLOUT_STATUSES:
         return "waiting", "closed: nothing to regenerate"
     linked = [(p, n) for p, n in walk.by_rollout.get(path.stem.lower(), ()) if p != path]
-    if not (_valued(note.get("paused")) or approved_unrun(note, linked)[0]):
+    # An Engine catch-up's `paused:` (p54-14) is the engine's own move, read as running.
+    if not ((_valued(note.get("paused")) and not _catching_up(note)) or approved_unrun(note, linked)[0]):
         return "waiting", "running: schedule joins a running rollout, regenerating nothing, until it is paused or finished"
     return None, None
 
@@ -16057,7 +16155,7 @@ def _trigger_eval(scan, path, note, e):
         read_on = (anchor or (path, note))[1]
         if _status(read_on) in CLOSED_ROLLOUT_STATUSES or _valued(read_on.get("superseded_by")):
             return "waiting", "closed: it never pauses"
-        if not _valued(read_on.get("paused")):
+        if not _valued(read_on.get("paused")) or _catching_up(read_on):   # a catch-up's is no pause (p54-14)
             return "waiting", "not paused"
     return "due", {"id": e["id"], "note": path.stem, "path": str(path), "scope": scope, "on": e["on"], "do": e["do"],
                    "kind": do["kind"], "command": command, "project": project,
@@ -16790,6 +16888,13 @@ def cmd_clear_pause(args) -> int:
                     if gate:
                         print(f"STILL-AWAITING: [[{w['slug']}]]: {gate}")
             return 3
+    # The backstop (p54-14; engine-snapshot.py's header, the Catch-up log's closers): an open catch-up line is closed
+    # before the stamps go, so no later adopt takes the catch-up branch on a Reinstate.
+    es = _engine_snapshot_mod()
+    op = es.catch_up_open(note.render()) if es is not None and hasattr(es, "catch_up_open") else None
+    if op is not None:
+        note.append_line(CATCH_UP_SECTION, f"- {_stamp(_now(args))} not moved at {op['green12']}: cleared at a "
+                                           "Reinstate")
     note.remove("paused")
     note.remove("pause_requested")
     note.remove(PAUSED_FOR_KEY)
@@ -19105,6 +19210,385 @@ def _write_carried_file(path, carried, owed, carry_back):
         tmp.unlink(missing_ok=True)
 
 
+# ---- catch-up: the Engine catch-up (ADR 0084 d5, p54-14; the module docstring's `catch-up`) ------------------------
+# The Catch-up log's grammar, its open, live and stale rules and its closers are engine-snapshot.py's header (the one
+# copy); the drain rule is cmd_catch_up's docstring (the one copy).
+
+# schedule § 2.5 step 1's "a line starting `Verifier:`" (optionally after a list marker): anchored, so a `Completion
+# verifier:` line, a `Named re-run:` line and prose naming "the `Verifier:` line" never match. estate-scan.py's
+# VERIFIER_LINE is unanchored on purpose (it only advises).
+CLAUDE_MD_VERIFIER_RE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?Verifier:[ \t]*`([^`\n]+)`", re.M)
+CLAUDE_MD_FENCE_RE = re.compile(r"^[ \t]*(```|~~~)")   # estate-scan.py's FENCE_LINE form
+
+
+def _catching_up(note) -> bool:
+    """An Engine catch-up stands on the rollout note: `paused_for: catch-up` with one of its stamps (its drain's
+    `pause_requested`, or its drained `paused:`): the engine's own pause, never one someone made. A `paused_for:
+    catch-up` with neither stamp (his soft-pause cancel removed `pause_requested:`, or the Stage's quiet-drain undo
+    removed its own flag after the verb's save replayed onto it) is dangling: no catch-up stands, and the verb's stale
+    close removes it (cmd_catch_up)."""
+    return note is not None and _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP and \
+        (_valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")))
+
+
+def _open_pause_mode(lines):
+    """The mode of the Run record's open `paused` line (the first after the last `resumed`, as _pause_stands reads
+    it), or None when none is open."""
+    mode = None
+    for d in lines or ():
+        if d.get("kind") == "paused" and mode is None:
+            mode = str(d.get("mode") or "")
+        elif d.get("kind") == "resumed":
+            mode = None
+    return mode
+
+
+def _claude_md_text(root):
+    """(text, source) of the Project root's CLAUDE.md: `git show refs/remotes/origin/<d>:CLAUDE.md`, <d> read from
+    refs/remotes/origin/HEAD (no fetch: as fresh as the root's last fetch), else the working tree's; (None, why)."""
+    env = _git_env()
+    try:
+        p = subprocess.run(["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"],
+                           capture_output=True, text=True, timeout=30, env=env, stdin=subprocess.DEVNULL)
+        ref = p.stdout.strip() if p.returncode == 0 else ""
+        if ref.startswith("refs/remotes/origin/"):
+            s = subprocess.run(["git", "-C", str(root), "show", f"{ref}:CLAUDE.md"], capture_output=True, text=True,
+                               timeout=30, env=env, stdin=subprocess.DEVNULL)
+            if s.returncode == 0:
+                return s.stdout, f"{ref[len('refs/remotes/'):]}:CLAUDE.md"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        return (Path(root) / "CLAUDE.md").read_text(), str(Path(root) / "CLAUDE.md")
+    except (OSError, ValueError):
+        return None, f"no CLAUDE.md in {root}"
+
+
+def _claude_md_verifier(project_root):
+    """(cmd, why): the command of the Project root's one `Verifier:` line (CLAUDE_MD_VERIFIER_RE, outside fenced
+    blocks), read from origin's default branch, else the working tree (_claude_md_text). cmd None, with why, when there
+    is no Project root, no CLAUDE.md, no such line or several."""
+    if project_root is None or not Path(project_root).is_dir():
+        return None, "no Project root"
+    text, src = _claude_md_text(project_root)
+    if text is None:
+        return None, src
+    found, fence = [], False
+    for line in text.split("\n"):
+        if CLAUDE_MD_FENCE_RE.match(line):
+            fence = not fence
+            continue
+        m = None if fence else CLAUDE_MD_VERIFIER_RE.match(line)
+        if m:
+            found.append(m.group(1).strip())
+    if len(found) != 1:
+        return None, f"{src} has {len(found) or 'no'} `Verifier:` line{'' if len(found) == 1 else 's'}"
+    return found[0], src
+
+
+def _restamp_verifier(note, now):
+    """At every move of the Engine snapshot (engine-snapshot.py adopt: a Reinstate's or an Engine catch-up's), the
+    note's `verifier:` from the Project root's CLAUDE.md (_claude_md_verifier), in memory (the caller saves): written
+    bare, as schedule's template writes it, only when _command_value reads the bare value back as the same command,
+    and only on a change, with a `## Notes` line `verifier restamped: <old> → <new>`. Returns the WARN lines (the stamp
+    is kept): no or several `Verifier:` lines, or a command that cannot be stamped bare. A serial note, or one with
+    neither a `Project root:` line nor a `verifier:`, has no stamp to restamp: nothing, and no WARN (a serial note
+    carries neither)."""
+    root = _project_root(note)
+    if _shape(note) == SHAPES[1] or (root is None and not _valued(note.get("verifier"))):
+        return []
+    cmd, why = _claude_md_verifier(root)
+    if cmd is None:
+        return [f"WARN: verifier not restamped: {why}: the stamp is kept"]
+    try:
+        bare = _command_value(Note(note.path, text=f"---\nverifier: {cmd}\n---\n"), "verifier")
+    except CompletionValueError:
+        bare = None
+    if bare != cmd:
+        return [f"WARN: verifier not restamped: {cmd} cannot be stamped bare"]
+    try:
+        old = _command_value(note, "verifier")
+    except CompletionValueError:
+        old = _scalar(note.get("verifier"))
+    if old == cmd:
+        return []
+    note.set("verifier", cmd, after=("parallel_ceiling", "protocol_version", "status"))
+    note.append_line("## Notes", f"- {_stamp(now)} verifier restamped: {old or '(none)'} → {cmd}")
+    return []
+
+
+def _catch_up_reading(**kw):
+    out = {"due": False, "kind": "none", "release": [], "fixes": [], "green12": None, "from12": None, "why": "",
+           "skipped": []}
+    out.update(kw)
+    return out
+
+
+def _catch_up_commit(unit, index, tasks_dir, commits, key):
+    """(sha, skip): the drain rule's commit of one unit among S..G's `commits` (cmd_catch_up's docstring), and why it
+    was skipped, or None. Another repo's unit is no commit with no skip (the ordinary case, never an anomaly)."""
+    entry = index.get(unit.lower())
+    if entry is None:
+        return None, None
+    note = entry[1]
+    mc = _scalar(note.get("merge_commit")).lower()
+    if _valued(mc):
+        repo, _rwhy = _note_repo(note, tasks_dir)
+        if repo is not None and key is not None and repo != key:
+            return None, None   # another repo's Speed fix (ADR 0084 Decided for you 6)
+        if not re.fullmatch(r"[0-9a-f]{7,64}", mc):
+            return None, f"merge_commit: {mc} is no commit id"
+        return next((c["sha"] for c in commits if c["sha"].startswith(mc)), None), None
+    repo, rwhy = _note_repo(note, tasks_dir)
+    if repo is None:
+        return None, (f"its repo is unread ({rwhy})" if rwhy else None)
+    pr = _pr(note)
+    m = PR_URL_RE.match(pr) if pr else None
+    n = m.group(2) if m else (PR_NUM_RE.match(pr).group(1) if pr and PR_NUM_RE.match(pr) else None)
+    if n is None:
+        return None, None
+    if key is None:
+        return None, f"pr: lands on {repo}, and the engine's origin is unread"
+    if repo != key:
+        return None, None   # another repo's Speed fix (ADR 0084 Decided for you 6)
+    for c in commits:
+        if c["subject"].endswith(f"(#{n})") or c["subject"].startswith(f"Merge pull request #{n} "):
+            return c["sha"], None
+    return None, None
+
+
+def _catch_up_decide(path, tasks_dir, index, la, es, log, serial):
+    """The drain rule (cmd_catch_up's docstring) over `la` (engine-snapshot.py lacking): {kind, release, fixes,
+    skipped}, kind drain | take | none."""
+    commits, primary, key = la["commits"], la["primary"], _repo_key(la["origin"])
+    su = _speed_units(index)
+    skipped, commit_memo, engine_memo = [], {}, {}
+
+    def name(unit):
+        entry = index.get(unit.lower())
+        return entry[0].stem if entry is not None else unit
+
+    def commit_of(unit):
+        k = unit.lower()
+        if k not in commit_memo:
+            sha, why = _catch_up_commit(unit, index, tasks_dir, commits, key)
+            if why:
+                skipped.append({"unit": name(unit), "why": why})
+            commit_memo[k] = sha
+        return commit_memo[k]
+
+    def engine_of(unit):
+        sha = commit_of(unit)
+        if sha is None:
+            return False
+        k = unit.lower()
+        if k not in engine_memo:
+            ok, why = es.engine_fix(primary, sha)
+            if not ok and why.startswith("git diff-tree"):
+                skipped.append({"unit": name(unit), "why": why})
+            engine_memo[k] = ok
+        return engine_memo[k]
+
+    fixes = sorted((name(u) for u in su["marked"] if engine_of(u)), key=str.lower)
+    if not fixes:
+        return {"kind": "none", "release": [], "fixes": [], "skipped": skipped}
+    if serial:
+        return {"kind": "take", "release": [], "fixes": fixes, "skipped": skipped}
+    drained = {r.lower() for e in log if e["verb"] == "drain" for r, _p in e["releases"]}
+    drains = []
+    for pkey in sorted(su["phases"], key=_speed_pkey_sort):
+        p = su["phases"][pkey]
+        if not p["marked"]:
+            continue
+        rel, warn = _speed_release(pkey, su, index, tasks_dir)
+        if rel is None:
+            if warn:
+                skipped.append({"unit": _speed_label(pkey), "why": warn})
+            continue
+        if rel.lower() in drained or commit_of(rel) is None:
+            continue
+        if any(engine_of(u) for u in {_fold_unit(s, index)[0] for _o, s in p["marked"]}):
+            drains.append({"release": name(rel), "phase": _speed_label(pkey)})
+    return {"kind": "drain" if drains else "take", "release": drains, "fixes": fixes, "skipped": skipped}
+
+
+def cmd_catch_up(args) -> int:
+    """`catch-up` (ADR 0084 d5, p54-14; the module docstring's `catch-up`). The drain rule's one copy.
+
+    Which units are read: every marked unit (_speed_units' `marked`, over the whole index, Archive included, through
+    _fold_unit), and each Speed fix phase P's release R (_speed_release), marked or not. A unit's commit, first match:
+    (1) a valued `merge_commit:`, found by prefix among S..G's commits (engine-snapshot.py lacking), no commit when
+    _note_repo reads a repo whose key differs from the engine origin's _repo_key ((None, None) and (None, why) still
+    match by membership, as _prove_judge's strict check does); (2) the `pr:` number, only when _note_repo's key equals
+    the engine's (PR_URL_RE's number, or PR_NUM_RE's for a bare `#N`, whose key is the rollout's Project root origin):
+    an S..G subject ending `(#N)` (a squash) or starting `Merge pull request #N ` (a true merge); a key that differs is
+    no commit; (3) else no commit, and the unit is not lacking. Another repo's unit is the ordinary case (Decided for
+    you 6), skipped silently; `skipped` holds only what could not be read: a unit whose repo or the engine's origin is
+    unread, a failed git call and a _speed_release WARN. A unit is lacking when its commit is in S..G, and an engine
+    fix when engine-snapshot.py engine_fix prints a path for that one commit (never one call per S..G commit; a failed
+    call is no engine fix, its why in `skipped`).
+    Parallel: drain P when R is lacking, at least one marked unit of P is a lacking engine fix (R counts only when it is
+    itself marked) and no `drain [[R]]` line exists (a phase drains once, whatever closed it); it drains even with work
+    running, and two phases due in one read share one drain line. So (a) R unmarked, or R's own merge docs- or
+    tests-only, with marked engine fixes of P in S..G, drains; (b) R in S..G with every engine fix of P already in S
+    does not; (c) R in S..G with no marked member of P touching engine paths does not. A _speed_release WARN (a named
+    release that is not a member) is no drain for P. Otherwise any lacking engine fix (a drained phase's second fix, or
+    a fix of a phase whose R has not landed) is a take, only when no row is in_progress, integrating or awaiting
+    Integration. Anything else is none: an ordinary merge, another repo's Speed fix (ADR 0084 Decided for you 6).
+    Serial: any lacking engine fix is a take, only with no Leg open.
+
+    It writes nothing, with a why, when the note is done, superseded, archived or unstamped; a live open parallel
+    catch-up stands (_catching_up: `paused_for: catch-up` with `pause_requested` or `paused:`; `next` drains it, the
+    lead moves it); a pause stands (`paused:` of any kind, or `pause_requested` without `paused_for: catch-up`; a
+    sign-off pause included); a room stop stands; nothing is queued to start; the churn wait holds (after a `not moved
+    at <g12>` line, until the Green tip is a strict descendant of g12); or a parallel take finds work running. A stale
+    parallel open line (both stamps gone, `paused_for: catch-up` with them or left dangling) is closed first, `not moved
+    at <g12>: its stamps were removed`, and a dangling `paused_for: catch-up` removed with it, when no pause of any kind
+    stands, then it decides afresh. A parallel drain or take stamps `pause_requested: true` and `paused_for: catch-up`
+    and appends its line; a serial take appends its line only. An open serial take prints due true and writes nothing
+    new (a lost turn's move is redone); with a Leg open, due is false. `--abort --why W`: under `paused_for: catch-up`
+    it removes `paused`, `pause_requested` and `paused_for` and emits `resumed` when the Run record's open `paused` line
+    is the catch-up's; an open line it closes `not moved at <g12>: W` and emits `catch-up` with outcome not-moved. So
+    once adopt has written `moved` (no open line, the stamps left until clear-pause, a lost turn's state) it removes the
+    stamps and writes no log line, and his pause that follows is his own; with neither an open line nor `paused_for:
+    catch-up` it writes nothing (`[no-change]`).
+    Prints one JSON line {due, kind, release: [{release, phase}], fixes, green12, from12, why, skipped: [{unit, why}]}
+    (the abort one plain line). Exit 0 a reading, 1 an unreadable note or an engine-snapshot.py that will not load, 2
+    usage and the guard."""
+    path = Path(os.path.expanduser(args.rollout))
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if args.abort and not (args.why or "").strip():
+        print("ERROR: catch-up: usage: --abort needs --why W", file=sys.stderr)
+        return 2
+    if not path.is_file():
+        print(f"ERROR: catch-up: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    try:
+        note = Note(path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: catch-up: cannot read {path}: {e}", file=sys.stderr)
+        return 1
+    es = _engine_snapshot_mod()
+    if es is None or not hasattr(es, "lacking"):
+        print(f"ERROR: catch-up: {ENGINE_SNAPSHOT_PY} will not load (or predates the Engine catch-up)", file=sys.stderr)
+        return 1
+    now = _now(args)
+    ro = path.stem
+    body = note.render()
+    op = es.catch_up_open(body)
+    if args.abort:
+        # `paused_for: catch-up` read alone (never _catching_up): a dangling one goes with the stamps.
+        cleared = _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP
+        if op is None and not cleared:
+            print(f"{ro}: no open Engine catch-up [no-change]")
+            return 0
+        why = " ".join(args.why.split())
+        if op is not None:
+            note.append_line(CATCH_UP_SECTION, f"- {_stamp(now)} not moved at {op['green12']}: {why}")
+        if cleared:
+            for key in ("paused", "pause_requested", PAUSED_FOR_KEY):
+                note.remove(key)
+        note.save(dry_run=args.dry_run)
+        if not args.dry_run:
+            if cleared and _open_pause_mode(_record_read(ro)) == CATCH_UP:
+                _event(ro, "resumed", None, None, args)
+            if op is not None:
+                ev = {"from": _scalar(note.get("engine_sha")) or op["from12"], "fixes": op["fixes"],
+                      "shape": _shape(note), "outcome": "not-moved", "why": why[:200]}
+                if op["releases"]:
+                    ev["release"] = ", ".join(r for r, _p in op["releases"])
+                _event(ro, CATCH_UP, None, ev, args)
+        head = (f"Engine catch-up closed: not moved at {op['green12']}: {why}" if op is not None
+                else f"no open Engine catch-up (its move made): {why}")
+        print(f"{ro}: {head}" + ("; its stamps removed" if cleared else "")
+              + (" (dry-run)" if args.dry_run else " [written]"))
+        return 0
+
+    def say(**kw):
+        print(json.dumps(_catch_up_reading(**kw)))
+        return 0
+
+    serial = _shape(note) == SHAPES[1]
+    open_kw = {} if op is None else {"kind": op["verb"], "green12": op["green12"], "from12": op["from12"],
+                                     "fixes": op["fixes"],
+                                     "release": [{"release": r, "phase": p} for r, p in op["releases"]]}
+    if es.is_archived(path):
+        return say(why="archived: the rollout is finished")
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return say(why=f"status {_status(note)}: nothing runs it")
+    if _valued(note.get("superseded_by")):
+        return say(why="superseded: nothing runs it")
+    if not _valued(note.get("engine_snapshot")):
+        return say(why="unstamped: its Reinstate stamps it, never a catch-up")
+    catching = _catching_up(note)
+    if not serial:
+        if op is not None and catching:
+            return say(**open_kw, why=f"an Engine catch-up is open since {op['ts']}: `next` drains it and the lead "
+                                      "moves it")
+        if _valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")):
+            pf = _scalar(note.get(PAUSED_FOR_KEY)).lower()
+            return say(why="an Engine catch-up's move is made: clear-pause resumes it" if catching
+                       else "a sign-off pause stands (ADR 0034)" if pf == SIGN_OFF
+                       else "a pause stands (his act): no catch-up while it stands")
+    elif op is not None:
+        if es._leg_open(body):
+            return say(**open_kw, why="an Engine catch-up's take is open, and a Leg is open: the next Leg begin "
+                                      "moves the chain")
+        return say(due=True, **open_kw, why="an Engine catch-up's take is open: this Leg begin moves the chain")
+    elif es._leg_open(body):
+        return say(why="a Leg is open: a serial chain catches up only at a Leg begin")
+    if _room_stop_stands(note, now):
+        return say(why="a room stop stands")
+    if op is not None:   # parallel and stale: its stamps were removed, and no pause stands
+        note.append_line(CATCH_UP_SECTION, f"- {_stamp(now)} not moved at {op['green12']}: its stamps were removed")
+        if _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP:
+            note.remove(PAUSED_FOR_KEY)   # dangling: neither stamp stands (_catching_up)
+        note.save(dry_run=args.dry_run)
+        body = note.render()
+    log = es.catch_up_log(body)
+    linked, index = _scan(path, tasks_dir)
+    states = [_queue_state(n)[0] for _p, n in linked]
+    if not any(s in (("queued", "running", "set-aside") if serial else ("queued",)) for s in states):
+        return say(why="nothing is queued to start: a move gains nothing")
+    la = es.lacking(path, PLUGIN_ROOT)
+    g12 = (la["green"] or "")[:12] or None
+    s12 = (la["engineSha"] or "")[:12] or None
+    if not la["commits"]:
+        return say(green12=g12, from12=s12, why=la["why"] or "nothing is lacking")
+    last = log[-1] if log else None
+    if last is not None and last["verb"] == "not moved":
+        past = g12 != last["green12"] and \
+            es.git(la["primary"], "merge-base", "--is-ancestor", last["green12"], la["green"]).returncode == 0
+        if not past:
+            return say(green12=g12, from12=s12, why=f"a catch-up at {last['green12']} did not move ({last['why']}): "
+                                                     "it waits for a newer Green tip")
+    d = _catch_up_decide(path, tasks_dir, index, la, es, log, serial)
+    out = {"kind": d["kind"], "release": d["release"], "fixes": d["fixes"], "green12": g12, "from12": s12,
+           "skipped": d["skipped"]}
+    if d["kind"] == "none":
+        return say(**out, why="no lacking Speed fix changes engine code")
+    if not serial and d["kind"] == "take" and any(s in ("running", "integrating", "awaiting-integration")
+                                                    for s in states):
+        return say(**out, why="a take waits for a moment with nothing running")
+    links = ", ".join(f"[[{f}]]" for f in d["fixes"])
+    if d["kind"] == "drain":
+        rels = ", ".join(f"[[{r['release']}]] ({r['phase']})" for r in d["release"])
+        line = f"- {_stamp(now)} drain {rels} at {g12} from {s12}: {links}"
+    else:
+        line = f"- {_stamp(now)} take at {g12} from {s12}: {links}"
+    if not serial:
+        note.set("pause_requested", "true", after=("parallel_ceiling", "status"))
+        note.set(PAUSED_FOR_KEY, CATCH_UP, after=("pause_requested",))
+    note.append_line(CATCH_UP_SECTION, line)
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        print(f"ERROR: catch-up: {e}: nothing written", file=sys.stderr)
+        return 1
+    return say(due=True, **out, why=("an Engine catch-up: " + ("drain" if d["kind"] == "drain" else "take")
+                                    + (" (dry-run)" if args.dry_run else "")))
+
+
 # ---- CLI --------------------------------------------------------------------
 
 # ---- moving: the Watchdog's reading (ADR 0048, p29-7; the module docstring's "moving") ---------------------------
@@ -19116,7 +19600,7 @@ REGENERATE_STALL_MIN = 120    # the Approved-queue route's one foreground turn: 
 # (status § The Watchdog's reading, *Which waits silence judges*, binds this list by a contract test). moving_verdict
 # returns each through its by_silence, which refuses a cause not listed here, so the code cannot judge a wait by silence
 # that the list (and status) leaves out.
-SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait")
+SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait", "catch-up")
 LEG_WAIT = "leg-wait"         # a serial note's open Leg at a waiting turn end (ADR 0075 d5, P41-4), its lease's silence
 LEG_PY = Path(__file__).resolve().parent / "leg.py"
 _LEG_MOD = None
@@ -19384,7 +19868,11 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             return done("stalled", cause, f"no life sign for {out['ageMinutes']}m")
         return None
 
-    # 3. Pauses: a sign-off pause first (await-sign-off stamps paused: with it), then a stamped pause (his act).
+    # 3. Pauses: an Engine catch-up's `paused:` first (p54-14: the lead's own turn makes its move, so a dead lead's is a
+    # stall), then a sign-off pause (await-sign-off stamps paused: with it), then a stamped pause (his act).
+    if _valued(note.get("paused")) and _catching_up(note):
+        return by_silence(stall_after, CATCH_UP, f"an Engine catch-up: moving onto the Green tip since "
+                                                 f"{_scalar(note.get('paused'))}")
     if _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
         return done("waiting", "sign-off", f"paused for sign-off since {_scalar(note.get('paused')) or '?'}")
     if _pause_stands(note, lines)[0]:
@@ -19493,7 +19981,10 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             until = _stamp(base + timedelta(minutes=REGENERATE_STALL_MIN)) if base is not None else None
             return by_silence(REGENERATE_STALL_MIN, "regenerating", "approved queue: regenerating", until)
         return silent(stall_after) or done("moving", None, "work moves")
-    # 12a. A wait only the lead's own tick ends: a merge hold, judged by silence.
+    # 12a. A wait only the lead's own tick ends: an Engine catch-up `next` reads drained (p54-14: its next turn moves
+    # it), then a merge hold, each judged by silence.
+    if nx.get("halt") == CATCH_UP:
+        return by_silence(stall_after, CATCH_UP, "an Engine catch-up drained: the lead's next turn moves it")
     if merge_held:
         return by_silence(stall_after, "merge-hold", f"merge hold on [[{merge_held[0]}]]")
     # 12a'. A surface wait holding a row (P41-3; execute § 4.5 *Surface re-check*): the lead's heartbeat re-runs the
@@ -21342,6 +21833,16 @@ def _parser():
     mr.add_argument("--dry-run", action="store_true",
                     help="read, but write no cache, ledger, task, join or line, and make no re-run")
     mr.set_defaults(func=cmd_master_runs)
+
+    cu = sub.add_parser("catch-up", help="p54-14 (ADR 0084 d5): an Engine catch-up: compare the rollout's engine_sha "
+                                         "with the Green tip and start a drain or a take, or --abort an open one")
+    cu.add_argument("--rollout", required=True, help="path to the rollout note")
+    cu.add_argument("--abort", action="store_true", help="close an open catch-up, not moved, and remove its stamps")
+    cu.add_argument("--why", default=None, help="--abort: why it did not move (its `not moved` line's words)")
+    cu.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    cu.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    cu.add_argument("--dry-run", action="store_true", help="print the reading; write nothing")
+    cu.set_defaults(func=cmd_catch_up)
     return p
 
 

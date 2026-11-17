@@ -12,7 +12,8 @@
 #   M1     the move rule: a hard pause moves, a sign-off pause never does (and cuts nothing), a serial chain moves only
 #          after a `stopped` close, until its next Leg begins; an unstamped note is stamped at the same parallel moment
 #          and at a serial chain's first Leg or first after any close, never mid-Leg (a take-over) nor with no git
-#          Primary
+#          Primary; an Engine catch-up's open line (paused_for: catch-up, a serial take with no Leg open) moves, its
+#          made or closed one never
 #   G1-G3b the guards: every wrong-root CLI refuses with `engine-snapshot:` and writes nothing (a task-keyed
 #          reconcile-rollout verb with --rollout left off, and reconcile's stdin rows, included); the exemptions
 #          (`join` and prove among them, ADR 0078 d6 and d1);
@@ -388,6 +389,22 @@ ok "$(due m1c)" false "M1: … halt cleared → still not due"
 BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: handoff to Leg 2 in cc-demo from $T/launch
 " sro m1o "$STAMP" "$SHA"
 ok "$(due m1o)" false "M1: serial: a handoff close → not due"
+# an Engine catch-up (p54-14; engine-snapshot.py's header, the Catch-up log): its open line makes the move due
+CUL=$'## Catch-up log\n\n- 2026-10-26T08:50+00:00 drain [[x-p9-2]] (p9) at 0123456789ab from 0123456789ab: [[x-p9-1]]\n'
+CUW="an Engine catch-up drained: the lead's own move (ADR 0084 d5)"
+BODY="$CUL" ro m1cu "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00" "paused_for: catch-up"
+ok "$(dw m1cu)" "0|true|$CUW" "M1: paused_for: catch-up with an open drain line → due"
+BODY="$CUL- 2026-10-26T09:05+00:00 moved 0123456789ab → 0123456789ab (drain 15 min)
+" ro m1cm "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00" "paused_for: catch-up"
+ok "$(dw m1cm)" "0|false|an Engine catch-up whose move is made or closed: clear-pause resumes it" "M1: … the log ending moved → not due"
+ro m1cn "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00" "paused_for: catch-up"
+ok "$(dw m1cn)" "0|false|an Engine catch-up whose move is made or closed: clear-pause resumes it" "M1: … no log → not due"
+TAKE=$'\n## Catch-up log\n\n- 2026-10-26T08:50+00:00 take at 0123456789ab from 0123456789ab: [[x-p9-1]]\n'
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: handoff to Leg 2 in cc-demo from $T/launch
+$TAKE" sro m1ct "$STAMP" "$SHA"
+ok "$(dw m1ct)" "0|true|an Engine catch-up's take: this Leg begin moves the chain" "M1: serial, an open take, no Leg open → due"
+BODY="$LOG$TAKE" sro m1cb "$STAMP" "$SHA"
+ok "$(dw m1cb)" "0|false|serial: no Leg has closed stopped" "M1: … a Leg open (began last) → not due"
 # ── an unstamped note is stamped at the same moments (ADR 0043, as amended by p36-1). The tip is V7, MS its snapshot.
 NOPRI="unstamped, and no git Primary (a version-cache install): nothing to cut, so it runs from the plugin root"
 PSTAMP="a hard pause: this /thread:execute is its Reinstate, which stamps the unstamped note (ADR 0043)"

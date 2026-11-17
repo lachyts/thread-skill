@@ -119,6 +119,7 @@ ro p7 "$PAUSED\npaused_for: sign-off\n$(wh paused reset-primary)"
 ro p8 "$PAUSED\nsuperseded_by: \"[[p1]]\"\n$(wh paused reset-primary)"
 RO_STATUS=done ro p9 "$PAUSED\n$(wh paused reset-primary)"
 tk p10 - done "$PAUSED\n$(wh paused reset-primary)"
+ro p11 "$PAUSED\npaused_for: catch-up\n$(wh paused reset-primary)"   # p54-14: an Engine catch-up's paused: is no pause
 tk d1 - done ""; tk o1 - open ""; tk unit - done ""
 tk mem - merged 'merged_into: "[[unit]]"'
 printf -- '---\ntags: [task]\nstatus: done\n---\n' > "$T/Archive/arch.md"
@@ -144,6 +145,7 @@ p7|due|script
 p8|waiting|closed
 p9|waiting|closed
 p10|waiting|closed
+p11|waiting|not paused
 l1|due|script
 l2|waiting|open
 l3|due|script
@@ -178,6 +180,7 @@ two() { printf 'when:\n  - {on: "%s", do: regenerate}\n  - {on: "%s", do: "sched
 ro g-paused "$PAUSED\n$(two)"
 ro g-unrun "$(two)"
 ro g-run "$(two)"; tk g-run-t g-run open "owner: lead-1"
+ro g-catch "$PAUSED\npaused_for: catch-up\n$(two)"; tk g-catch-t g-catch open "owner: lead-1"   # p54-14: read as running
 RO_STATUS=done ro g-done "$(two)"
 ro g-new "supersedes: \"[[g-sup]]\"\n$(two)"; ro g-sup "superseded_by: \"[[g-new]]\"\n$(two)"
 RO_STATUS=done ro g-arch "superseded_by: \"[[g-new]]\"\n$(two)"; mv "$T/g-arch.md" "$T/Archive/Rollouts/g-arch.md"
@@ -192,6 +195,7 @@ table <<EOF
 g-paused|due|/thread:schedule [[X]] --regenerate|regenerate
 g-unrun|due|/thread:schedule [[X]] --regenerate|regenerate
 g-run|waiting|running: schedule joins a running rollout|regenerate
+g-catch|waiting|running: schedule joins a running rollout|regenerate
 g-done|waiting|closed: nothing to regenerate|regenerate
 g-done|due|/thread:schedule --tasks u|schedule [[u]]
 g-sup|waiting|superseded by [[g-new]]|regenerate

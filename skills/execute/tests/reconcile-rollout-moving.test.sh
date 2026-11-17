@@ -4,7 +4,7 @@
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
 #   S1 stop_spans' reason and index   M1-M23 the verdicts (M23 a surface wait, P41-3; M20w a revise the budget's weight
-#   holds, p53-4)   N1-N9b the narrowings, each
+#   holds, p53-4; M3c-M3d an Engine catch-up, p54-14)   N1-N9b the narrowings, each
 #   through the real verbs   W1-W2 a due settings block (ADR 0080): reentry, or a cool-down until a try's retry
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
@@ -159,6 +159,20 @@ printf '\n## Gated inputs (awaiting sign-off)\n\n- spend: one run — cap 5 USD\
 python3 "$SCRIPT" await-sign-off --rollout "$D/$RO.md" --tasks-dir "$D" --now 2026-10-26T09:00:00Z >/dev/null 2>&1
 ok "$(grep -c '^paused_for: sign-off' "$D/$RO.md")" 1 "M3b: await-sign-off stamped paused_for: sign-off"
 ok "$(vc)" '["waiting","sign-off"]' "M3b: sign-off, read before the paused: it stamps beside it"
+# M3c (p54-14): an Engine catch-up's paused: (its move) and its drained dry run are judged by silence; his is paused
+CUL=$'\n## Catch-up log\n\n- 2026-10-26T09:00+00:00 drain [[r]] (p9) at 0123456789ab from 0123456789ab: [[f]]\n'
+scen m3c
+mkro "paused: 2026-10-26T11:30+00:00" "paused_for: catch-up"; running a; printf '%s' "$CUL" >> "$D/$RO.md"
+entry 2026-10-26T11:40:00Z
+ok "$(vcr)" '["waiting","catch-up","an Engine catch-up: moving onto the Green tip since 2026-10-26T11:30+00:00"]' \
+  "M3c: a catch-up's paused: with life signs → waiting catch-up"
+ok "$(MNOW=2026-10-26T12:40:00Z vc)" '["stalled","silent"]' "M3c: … past stall-after → stalled"
+scen m3d
+mkro "pause_requested: true" "paused_for: catch-up"; mkt a open "owner: lead"; printf '%s' "$CUL" >> "$D/$RO.md"
+entry 2026-10-26T11:40:00Z
+ok "$(j "$(nx)" 'd["halt"]')|$(vcr)" '"catch-up"|["waiting","catch-up","an Engine catch-up drained: the lead'"'"'s next turn moves it"]' \
+  "M3d: a drained catch-up (next's dry run halts catch-up) → waiting catch-up"
+ok "$(MNOW=2026-10-26T12:40:00Z vc)" '["stalled","silent"]' "M3d: … past stall-after → stalled"
 
 # ── M4 / M5: held only by the Trickle → trickle; only by the Away cap → away-cap ────────────────────────────────
 scen m4

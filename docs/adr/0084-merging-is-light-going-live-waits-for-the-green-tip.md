@@ -100,6 +100,23 @@ approval signs its gate or he defers it), with a `speed-hold` Run record line; `
 `carry` copies the record, and `status` reports `speedHolds`. A red-master fix (Decided for you 3) is exempt by its key
 alone: `master_red:`, the mark p54-7's `master-runs` stamps on its fix task, or `completion_red_of:`, the completion
 verifier's fix task's.
+d5 and Decided for you 5, 6 and 7 built by p54-14, the Engine catch-up: `reconcile-rollout.py catch-up` (its docstring
+holds the drain rule; engine-snapshot.py's header the `## Catch-up log`) compares a rollout's `engine_sha` with the Green
+tip read in its own snapshot's Primary checkout, maps the marked Speed fix units onto those commits (`merge_commit:`,
+else the `pr:` number on a `(#N)` or `Merge pull request #N` subject, only on the engine's own repo key) and tests each
+matched commit's first-parent diff for engine code (`skills/` or `hooks/`, their tests and fixtures excluded). A phase
+drains a rollout once, when its release lands with one of its engine fixes lacking: `pause_requested` with `paused_for:
+catch-up` (Decided for you 5: the soft pause's drain, never a cut mid-step); any other lacking engine fix is a take, only
+with nothing running; an ordinary merge and another repo's Speed fix cause none (Decided for you 6); the read reaches
+every project's rollout on the Mac (Decided for you 7). The drain's bound is 160 minutes, the Slot p90 on the Run
+record: past it the rollout goes on on its old snapshot and takes the catch-up later. Drained, the lead moves itself (a
+self-Reinstate: cut, adopt, `record-entry --by catch-up`, `clear-pause`); a serial chain moves at its next Leg begin.
+Each move restamps `verifier:` from the project's CLAUDE.md, and each catch-up is a Run record `catch-up` line. Accepted
+gap: Chorus reads the pause stamps directly, so during a catch-up its own pause, a battery pause or a quiet's drain can
+read "already asked" and be lost when the catch-up clears its stamps; follow-up
+`chorus-the-stage-reads-an-engine-catch-up`. The Speed fix hold lets go at the release's merge, before the Green tip
+holds it, so held tasks may start on the old snapshot first; follow-up
+`thread-skill-an-engine-speed-fix-hold-lets-go-at-the-catch-up`.
 Phase 54 builds the rest.
 
 ## Context

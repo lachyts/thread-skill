@@ -8,7 +8,8 @@
 #   E3c a line stamped at its call's end (p29-12) is the lead's sign of life at its reconciledAt   E4 a session change: dead-lead
 #   E4b (p46-2) a role-call is no sign of life   E5 a boot after the last live line: mac-restart   E5b a sleep with lines after it
 #   E5c a sleep before the first live line   E5d two sleeps, in at order   E6 --cause owns a later boot   E7 a pause
-#   owns a later boot   E7b a boot before the pause is written first   E8 an open halt, then a plain entry   E8b the
+#   owns a later boot   E7c an Engine catch-up's pause reads stop: catch-up (p54-14)   E7b a boot before the pause is
+#   written first   E8 an open halt, then a plain entry   E8b the
 #   hook's halt after a boot: both stops   E8c a sleep inside a halt   E9 next's sleep, once   E9b next writes no sleep
 #   with an open stop, a pause or no entry yet   E10 --dry-run   E10b an unwritable record   E11 the guard   E12 the
 #   skips   E13 --by watchdog   E13b (p37-5) an open halt, then --by repair or --by watchdog: the halt owns the gap
@@ -189,6 +190,18 @@ em e7 lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
 em e7 paused - '{"mode":"hard"}' 2026-10-26T10:30:00Z
 THREAD_MACHINE_TIMES='{"boot":"2026-10-26T11:00:00Z"}' ent e7 --by lachy --session B --now 2026-10-26T12:00:00Z >/dev/null
 ok "$(seq e7)" '["lead-entry:-","paused:-","lead-entry:pause"]' "E7: lead-entry stop: pause, no stopped line, no dead-lead"
+
+echo "== E7c. an Engine catch-up's pause (p54-14): its gap stop is catch-up, by the note's paused_for or the record's mode"
+mkro e7c "paused: 2026-10-26T10:30+00:00" "paused_for: catch-up"
+em e7c lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
+em e7c paused - '{"mode":"catch-up"}' 2026-10-26T10:30:00Z
+ent e7c --by catch-up --session A --now 2026-10-26T10:40:00Z >/dev/null
+ok "$(q e7c '[[d.get("by"), d.get("stop")] for d in L[2:]]')" '[["catch-up","catch-up"]]' "E7c: --by catch-up under paused_for: catch-up → stop: catch-up"
+mkro e7d
+em e7d lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
+em e7d paused - '{"mode":"catch-up"}' 2026-10-26T10:30:00Z
+ent e7d --by lachy --session A --now 2026-10-26T10:40:00Z >/dev/null
+ok "$(q e7d '[[d.get("by"), d.get("stop")] for d in L[2:]]')" '[["lachy","catch-up"]]' "E7c: … the record's open paused line of mode catch-up alone → stop: catch-up (E7 his: pause)"
 
 echo "== E7b. a boot after the last entry and before the pause's start is written first"
 mkro e7b "paused: 2026-10-26T10:30+00:00"

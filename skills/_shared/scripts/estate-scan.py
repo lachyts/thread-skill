@@ -225,6 +225,9 @@ ATX_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]|$)")
 BODY_CLAUSE = re.compile(r"\[\[[^\]\n]*\]\]|;(?=\s|$)|(?<!\.[A-Za-z])\.(?=\s|$)")
 BODY_NONE = re.compile(r"^[\s*_:]*(?:nothing|none)\b", re.I)
 FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)")
+# Unanchored on purpose: it only advises (a project's first verifier-ish line, read anywhere). The Engine catch-up's
+# restamp writes `verifier:` from CLAUDE.md, so it reads with reconcile-rollout.py's anchored CLAUDE_MD_VERIFIER_RE
+# instead (a line starting `Verifier:`, outside fenced blocks, exactly one), which prose naming the line never matches.
 VERIFIER_LINE = re.compile(r"Verifier:\s*`([^`\n]+)`")
 # schedule § 2.5 step 1's section, which a model reads: a heading, a `Tests:`-style line, or a test command in code.
 VERIFIER_HEADING = re.compile(r"^#{1,6}[ \t]+[^\n]*?\b(?:Verifier|Verification|Tests?|Testing)\b", re.M | re.I)

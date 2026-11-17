@@ -136,6 +136,34 @@ first stamp (adopt's `changed: true`), the lead drops its runIds and signed-gate
 cold resume, Stage re-send or repair hand-off, and never the lead's own judgement; the Leg a launch or hand-off starts
 resolves at its own § 1 entry, so the stamp is that Leg's.
 
+## The Engine catch-up's move
+
+The one move mid-run (ADR 0084 d5, p54-14; CONTEXT.md **Engine catch-up**): a running rollout whose snapshot lacks a
+Speed fix that changes engine code, live at the Green tip, moves onto it by itself. `reconcile-rollout.py catch-up`
+reads it (its docstring holds the drain rule) and writes the `## Catch-up log` (engine-snapshot.py's header holds its
+grammar, its open, live and stale rules and its closers):
+
+- **parallel:** a drain (`pause_requested: true`, `paused_for: catch-up`), once per Speed fix phase, when the phase's
+  release lands; a take, only with nothing of the rollout running, for any other lacking engine fix. `next` drains it,
+  bounded at 160 minutes (past it, a `bound` line and the rollout goes on on its old snapshot), stamps `paused:` once
+  drained (keeping `paused_for: catch-up`) and reports `halt: catch-up`; the lead's self-Reinstate then moves it.
+  `move.due` is true under `paused_for: catch-up` only while the log's last line is an open drain or take: once adopt
+  writes `moved`, a re-entry is a plain `clear-pause`, never a second cut;
+- **serial:** a take line only (no pause stamp), moved at the next Leg begin with no Leg open.
+
+Its move is read from `<root>`: under `paused_for: catch-up` execute § 1.5 runs `resolve` again from the root the
+first resolve printed (the rollout's snapshot, which holds this code), so a session rendered from an older root never
+reads the stamp as the engine's own pause and resumes on the old snapshot. adopt's catch-up branch moves only forward
+(exit 5, nothing written, when the cut landed at or behind the old sha) and writes `moved at catch-up`; with no open
+line it is the Reinstate's adopt, unchanged. A failed move is no halt: § 1.5 runs `catch-up --abort --why "<stderr
+line>"`, which closes the line `not moved` and removes the stamps, and goes on from the old root; after a `not moved`
+line no new catch-up starts until the Green tip is a strict descendant of the one it failed at. His pause takes over a
+catch-up: § Pausing's `--abort` first (which removes the stamps even once adopt has written `moved`, a turn lost before
+`clear-pause`, so his own pause never sits beside `paused_for: catch-up`), else the verb closes the stale line, or his
+Reinstate's `clear-pause` does. A `paused_for: catch-up` with neither stamp (his soft-pause cancel, say) is no catch-up:
+the verb closes its line and removes it. Every move, a Reinstate's included, restamps a parallel note's `verifier:`
+from the Project root's CLAUDE.md.
+
 ## Retirement
 
 `retire` runs after the completion ceremony's vault commit (execute § 4.5 step 5, `skills/execute/legs.md` § Complete
@@ -222,3 +250,10 @@ the `SPEED_HOLD_ENGINE` line reads: its `next` lets a hold go, its `defer` drops
 rollout (the `SPEED_HOLD_ENGINE` line in its `engine_snapshot:` root's `reconcile-rollout.py`, or in the root an
 unstamped note runs on, by `_engine_reads_carried`'s clauses); False is one `WARN: speed-hold:` line and no hold, and
 join goes on. The line forms change only by migration.
+
+The Engine catch-up (p54-14) adds `paused_for: catch-up` and the `## Catch-up log`, written and read only by engines
+carrying that code (its own rollout's, which reads them at each check site). An older cross-rollout reader (a
+schedule session's unfinished-rollout.py, the Trickle's count, an origin-lane read) reads the stamps as a pause: it
+counts and holds nothing of a drained rollout, and for the move window (minutes) its join may refuse or its regenerate
+read the rollout as superseded-eligible. `carry` never copies the log. An older reader skips the Run record's `catch-up` kind, as every reader skips a kind
+it does not know, and reads a `paused` line of mode `catch-up` as a pause.

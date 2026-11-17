@@ -1312,7 +1312,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
   runs them, so the Primary checkout can move under a **Running rollout**. A
-  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043); a
+  rollout moves to a newer snapshot only at its **Reinstate** or an **Engine
+  catch-up** (ADR 0043, ADR 0084 d5); a
   note that names none is stamped at its next Reinstate or Leg begin. A
   session's rendered prose is followed only when its git `ident` prose id is
   the snapshot's own; otherwise the snapshot's SKILL.md is read as a file
@@ -1360,17 +1361,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
   earlier one), and the hold releases by itself. Once one in the engine's own
   repo is live at the **Green tip**, each running rollout takes it by an
   **Engine catch-up** (ADR 0084 d4, d5, proposed; the hold built by p54-13
-  (`speed_fix:`, `reconcile-rollout.py speed-hold`); the Engine catch-up not yet
-  built). _Avoid_: perf task, optimisation, priority fix.
+  (`speed_fix:`, `reconcile-rollout.py speed-hold`); the Engine catch-up by
+  p54-14). _Avoid_: perf task, optimisation, priority fix.
 - **Engine catch-up** — a running rollout moving itself onto a fresh **Engine
   snapshot** at the **Green tip** because a **Speed fix** went live there: it
   starts nothing new, lets what is running finish, moves, and carries on, with
-  no word from Lachy. Only a Speed fix in the engine's own repo causes one,
-  never an ordinary merge nor another project's Speed fix, and a phase drains
-  a rollout once, for its releasing task: any other is taken when nothing of
-  the rollout is running. A
-  **Reinstate** is the same move after a pause someone made (ADR 0084 d5,
-  proposed; not yet built). _Avoid_: auto-update, hot reload, restart.
+  no word from Lachy. Only a Speed fix that changes engine code (a path under
+  `skills/` or `hooks/`, its tests and fixtures excluded) causes one, never an
+  ordinary merge nor another project's Speed fix, and a phase drains a rollout
+  once, when its releasing task lands: any other is taken when nothing of the
+  rollout is running. The drain is the soft pause's, stamped `pause_requested`
+  with `paused_for: catch-up`, so nothing reads it as a pause someone made,
+  and bounded at 160 minutes (past it the rollout goes on on its old snapshot
+  and takes the catch-up later); drained, `next` stamps `paused:` and halts
+  `catch-up`, and the lead moves it itself (a self-**Reinstate**: cut, adopt,
+  `clear-pause`). A serial chain takes it at its next Leg begin, with no pause
+  stamp. Each step is a line of the rollout note's `## Catch-up log` and one
+  Run record `catch-up` line (ADR 0084 d5 and Decided for you 5, 6 and 7, built
+  by p54-14: `reconcile-rollout.py catch-up`). _Avoid_: auto-update, hot
+  reload, restart.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
   its toplevel and never nested inside it: the Project root of every parallel
   rollout scheduled after P26 (ADR 0042); a second project's parallel rollout on
@@ -1732,7 +1741,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   never paused, it is the first Leg begun after a Leg closed `stopped`; never
   a **Sign-off pause**'s reinstate. An unstamped note is stamped at it, and an
   unstamped chain also at its first Leg or the first Leg begun after any close
-  (ADR 0043, as amended). _Avoid_: restart, relaunch, unpause.
+  (ADR 0043, as amended). An **Engine catch-up**'s self-Reinstate is the same
+  path, run by the lead itself once its drain is done (ADR 0084 d5).
+  _Avoid_: restart, relaunch, unpause.
 - **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
   nothing, stops each Workflow call at a step boundary (just after its running
   agent's result line), and resumes every stopped call by `resumeFromRunId` on

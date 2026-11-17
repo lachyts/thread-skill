@@ -64,6 +64,11 @@ Rules.
 - Never started: reconcile-rollout.py's never_started (only execute's own marks), widened for an approved queue whose
   only marks are the Stage's ended room stops (reconcile-rollout.py's approved_unrun; vault-grammar § Approved queue).
 - Eligible: this project's, and paused (`paused:`) or never started.
+- Catching up (p54-14, ADR 0084 d5): `paused_for: catch-up` on the note with one of its stamps (`pause_requested` or
+  `paused:`), an Engine catch-up's drain or move, the engine's own pause (rr._catching_up; a dangling one is none). It
+  is never paused or pausing here: never eligible, never refused as pausing, its state `catching up since <its stamp,
+  else its open Catch-up log line's ts>`, so schedule joins it; and it is not paused for parallel_hold, so an idle one
+  keeps its Project root against serial chains (it resumes by itself).
 - What a serial note holds (ADR 0060 d1, d2; leg.py's header, *The hold*): its whole `surfaces:`, but while leg.py
   reads its chain state as `stuck` only its unlanded rows' Queue `Surfaces` cells (set-aside rows, rows held behind
   them, a missing note's row) plus any `surfaces:` token no row's cell names; the rest, done rows on the next Leg's
@@ -921,11 +926,20 @@ def shape_of(rr, slug, note, warns, warned):
 
 def note_state(rr, path, note, tasks_dir, mine):
     """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete, pausing
-    (pause_requested) and its protocol_version."""
+    (pause_requested), its protocol_version and catchUp. An Engine catch-up (rr._catching_up, p54-14) is the
+    engine's own move, never a pause someone made: under it `paused` reads "" and `pauseRequested` false, so a catch-up
+    is never superseded, never refused as pausing, and joined (its `catchUp` the stamp, else its open line's ts)."""
     linked, index = rr._scan(path, tasks_dir)
     fresh, why = rr.approved_unrun(note, linked)
     counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
-    paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) else ""
+    catch_up = ""
+    if rr._catching_up(note):
+        catch_up = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) else ""
+        if not catch_up:
+            es = rr._engine_snapshot_mod()
+            op = es.catch_up_open(note.render()) if es is not None and hasattr(es, "catch_up_open") else None
+            catch_up = op["ts"] if op is not None else "its drain"
+    paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) and not catch_up else ""
     sign_off = bool(paused) and rr._scalar(note.get("paused_for")).lower() == "sign-off"
     waiting = sorted(p.stem for p, t in linked if rr._queue_state(t) == ("set-aside", "gate")) if sign_off else []
     return {
@@ -934,13 +948,15 @@ def note_state(rr, path, note, tasks_dir, mine):
         "signOff": sign_off, "waiting": waiting,
         "complete": counts["total"] >= 1 and counts["merged"] == counts["total"],
         "supersedes": link_slug(rr, note, "supersedes"), "incomplete": rr.incomplete(path, note, linked, index),
-        "pauseRequested": rr._truthy_flag(note.get("pause_requested")),
+        "pauseRequested": rr._truthy_flag(note.get("pause_requested")) and not catch_up,
         "protocol": rr._scalar(note.get("protocol_version")),
+        "catchUp": catch_up,
     }
 
 
 def state_line(c) -> str:
     return (f"awaiting sign-off since {c['paused']}: {links(c['waiting'])}" if c["signOff"]
+            else f"catching up since {c['catchUp']}" if c.get("catchUp")
             else f"paused {c['paused']}" if c["paused"] else "never started" if c["fresh"]
             else f"has run: {c['why']}")
 
@@ -1174,7 +1190,8 @@ def parallel_hold(rr, path, note, linked, marker=True):
       or `unreadable: <why>`."""
     states = [rr._queue_state(t)[0] for _, t in linked]
     stamped = rr._valued(note.get("paused"))
-    paused = stamped or rr._truthy_flag(note.get("pause_requested"))
+    # An Engine catch-up (p54-14) resumes by itself: an idle one keeps its Project root against serial chains.
+    paused = (stamped or rr._truthy_flag(note.get("pause_requested"))) and not rr._catching_up(note)
     sign_off = stamped and rr._scalar(note.get("paused_for")).lower() == "sign-off"
     lines = rr._record_read(path.stem)
     halt = None
