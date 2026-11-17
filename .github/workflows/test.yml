@@ -33,10 +33,12 @@ jobs:
         shard: [1, 2, 3]
     runs-on: ubuntu-latest
     # The rule: about twice the slowest shard of a FULL diff (the worst case: the whole fast tier minus the Slow tier),
-    # rounded up to a multiple of 5. 30 is full-suite.yml's ubuntu shard limit, held until this PR's shards are
-    # measured. A shard whose week's median runs past 80 % of it is a finding (CONTEXT.md's CI headroom, ADR 0073 d5);
-    # a shard cut at it is re-run once, then set aside as infra (ADR 0073 d4).
-    timeout-minutes: 30
+    # rounded up to a multiple of 5. p54-12's own PR (FULL, 2026-11-17) measured the jobs at 15.7, 5.0 and 10.0
+    # minutes: 2 x 15.7 = 31.4, so 35. Shard 1 is the long pole because it holds tests/reflect-weekly.test.mjs, about
+    # 10.3 minutes of CI alone against its 256 s weight in tests/shard-weights.tsv. A shard whose week's median runs past
+    # 80 % of the limit (28 minutes) is a finding (CONTEXT.md's CI headroom, ADR 0073 d5); a shard cut at it is re-run
+    # once, then set aside as infra (ADR 0073 d4).
+    timeout-minutes: 35
     steps:
       # Full history, so the PR's base sha and `git merge-base` resolve: at depth 1 the selector reads FULL.
       - uses: actions/checkout@v5

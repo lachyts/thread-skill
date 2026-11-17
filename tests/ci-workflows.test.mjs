@@ -46,10 +46,11 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const WF = '.github/workflows'
 const REQUIRED = ['make test (ubuntu-latest)']
-// PR_SHARDS: test.yml's shard count (W2, W3, W8) and PR_SHARD_LIMIT its shards' timeout-minutes (test.yml's header
-// holds the rule). FULL_OSES: full-suite.yml's shard matrix (W4, limits()), which keeps macOS.
+// PR_SHARDS: test.yml's shard count (W2, W3, W8) and PR_SHARD_LIMIT its shards' timeout-minutes (the comment above
+// it in test.yml holds the rule and the measured minutes). FULL_OSES: full-suite.yml's shard matrix (W4, limits()),
+// which keeps macOS.
 const PR_SHARDS = 3
-const PR_SHARD_LIMIT = 30
+const PR_SHARD_LIMIT = 35
 const FULL_OSES = ['ubuntu-latest', 'macos-latest']
 const SELF_TESTS = '@merge-task-self-tests'
 

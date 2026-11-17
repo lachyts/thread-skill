@@ -48,12 +48,15 @@ d4's Speed fix from the audit's row 1 begun by p54-10: `tests/run.sh --fast --sh
 full-suite fallbacks and the Slow tier's filter included), then runs shard K of that selection by `tests/lib/shard.py`'s
 split, so the N shards together run it exactly once, the merge-task self-tests in shard 1 when it holds them; a shard
 left nothing passes on the always-run steps, and `--fast --shard-plan N` prints the split and runs nothing
-(`tests/fast-tier.test.sh` F26 and G7). The PR check's jobs that run it built by p54-12: test.yml's required
+(`tests/fast-tier.test.sh` F26 and G7).
+d4's Speed fix from the audit's row 1 finished by p54-12, the PR check's jobs that run it: test.yml's required
 `make test (ubuntu-latest)` is reported by the roll-up job `test` (a literal name, so ADR 0025's ruleset is unchanged),
 which needs the three `fast tier (shard K/3)` jobs (`bash tests/run.sh --fast --shard K/3`, fail-fast off) under
-`if: ${{ always() }}` and fails unless every shard succeeded; each shard's limit is 30 minutes (full-suite.yml's ubuntu shard limit) until its own run is measured; pinned by
-`tests/ci-workflows.test.mjs` W1-W3 and W8 (W8 runs the roll-up's script and reads the file with lead-integrate.py's
-own line reader).
+`if: ${{ always() }}` and fails unless every shard succeeded. p54-12's own PR (FULL) measured the shards at 15.7, 5.0
+and 10.0 minutes and the roll-up at 3 seconds, so the check took 15.8 minutes; each shard's limit is 35 minutes, about
+twice the slowest rounded up to a multiple of 5. Shard 1 is the long pole: it holds `tests/reflect-weekly.test.mjs`,
+about 10.3 minutes of CI alone. Pinned by `tests/ci-workflows.test.mjs` W1-W3 and W8 (W8 runs the roll-up's script and
+reads the file with lead-integrate.py's own line reader).
 d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
 `tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
 preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
