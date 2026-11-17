@@ -88,7 +88,9 @@ keyed by the record's own values where one fits:
   set-aside: the Slot hours of a plan thrown away. needs-human is no class of its own: a question throws no work away,
   and it holds rollout hours only when nothing else can run, which is exactly when its halt or wait is stalls/question.
 - other (unranked, never a Watch): pause, pause-drain, dependency, solo, queue-tail, hold-last-start, hold-pr, revise,
-  hold-surface (a surface wait, P41-3).
+  hold-surface (a surface wait, P41-3), catch-up and catch-up-drain (an Engine catch-up's pause and its drain's idle
+  Slots, p54-14: the engine's own move, never his pause; the catch-up pause is subtracted wherever his is, as one `own`,
+  and only its add is split out of `pause`).
 
 A suite runs from its suite-started to its suite-ended (or its seconds before a suite-ended with no start); one with no
 end is priced 0 and counted (`suite-unfinished`). Completion suites belong to no class. Which records are read: every
@@ -529,8 +531,12 @@ def measure(slug, lines, since, until, is_live):
 
     own = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] != "sign-off"])
     signoff = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] == "sign-off"])
-    m.add("other", "pause", own)
-    m.lead("pause", own)
+    # p54-14: an Engine catch-up's pause stays in `own` for every subtraction below; only its add is its own cause.
+    catchup = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] == "catch-up"])
+    his = subtract(own, catchup)
+    m.add("other", "pause", his)
+    m.lead("pause", his)
+    m.add("other", "catch-up", catchup)
 
     def clean(iv):
         return subtract(win(iv), own)

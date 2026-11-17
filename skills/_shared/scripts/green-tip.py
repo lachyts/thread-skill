@@ -92,9 +92,10 @@ exits. primary-refresh.py passes its signal-aware _run; engine-snapshot.py an ad
 
 The budget (--budget S, default 150) clips each step's cap (the fetch 60 s, ls-remote 60 s, gh 30 s) to what is left.
 A step with under 1 s left is skipped: the fetch reads cause unreachable (`no time left to fetch it`), the ls-remote
-`not fetched`, and gh not verified with nothing recorded. The callers' budgets: the cut 150 with gh and writes; the
-Primary refresh's real pass 150 with gh and writes, its --dry-run 30, no gh, no write; land.sh min(60, what is left of
-LAND_DEADLINE - 10) under an outer gb + 5; self-rollout-check.sh --refresh-in-place 60 under lc_bounded 70.
+`not fetched`, and gh not verified with nothing recorded. The callers' budgets: the cut 150 with gh and writes;
+engine-snapshot.py `lacking` (the Engine catch-up's read, p54-14) 60 with gh and writes; the Primary refresh's real
+pass 150 with gh and writes, its --dry-run 30, no gh, no write; land.sh min(60, what is left of LAND_DEADLINE - 10)
+under an outer gb + 5; self-rollout-check.sh --refresh-in-place 60 under lc_bounded 70.
 
 CLI: `target` prints one line, `<kind> <sha|-> <why>`, or with --json the dict. `waits --repo R --branch D` prints
 `waits` or `origin <why>` (waits()). Exit 0 for any reading, 2 on usage, 1 on an internal failure. Every caller

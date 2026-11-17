@@ -204,7 +204,9 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   is big), shape, projectRoot, pausedFor, pendingSignOffs[] (its summary's), owners? (the `owner:` tags of its open
   tasks), holds[], canExecute, canRepair, reinstate}. holds, in this order: superseded (supersededBy), lineage
   (another live rollout's supersedes names it), version (protocol_version not 5), incomplete, serial (status § 5
-  reads a chain by its own S rules, which STATUS_ACTIONS never maps), paused, draining (pause_requested), live queue
+  reads a chain by its own S rules, which STATUS_ACTIONS never maps), paused, draining (pause_requested), catching up
+  (pausedFor catch-up under either stamp, p54-14: an Engine catch-up, the live lead's own move, in place of paused or
+  draining, so no reinstate item starts), live queue
   (running + integrating > 0), start stamp (RR._start_unattended: the Stage starts it), status unread (a null
   summary). reinstate: awaitingSignOff with every pending sign-off in --signed. canExecute: no hold, or reinstate
   with paused the only hold. canRepair: none of superseded, lineage, version, serial and status unread.
@@ -511,8 +513,8 @@ STATUS_ACTIONS = {
     12: (None, "Awaiting Integration"),
     13: ("execute", "Nothing started"),
 }
-HOLDS = ("superseded", "lineage", "version", "incomplete", "serial", "paused", "draining", "live queue", "start stamp",
-         "status unread")
+HOLDS = ("superseded", "lineage", "version", "incomplete", "serial", "paused", "draining", "catching up", "live queue",
+         "start stamp", "status unread")
 NO_REPAIR = frozenset({"superseded", "lineage", "version", "serial", "status unread"})
 # plan's own dependency holds (blockedBy whys), and the why kinds of a run they empty.
 DEP_UNSCHEDULED = "dependency not scheduled"
@@ -739,6 +741,8 @@ def live_item(r, n):
             words, ", ".join(h for h in r.get("holds") or [] if h != "paused") or "nothing")
     elif kind == "reinstate" and r.get("pausedFor") == "sign-off":
         why = "status action 8 (%s): a gate is still unsigned, so the sign-off pause holds" % words
+    elif kind == "reinstate" and "catching up" in (r.get("holds") or []):
+        why = "status action 8 (%s): an Engine catch-up: the live lead moves it, nothing to reinstate" % words
     elif kind == "reinstate" and "paused" in (r.get("holds") or []):
         why = "status action 8 (%s): paused by you: the reinstate is yours" % words
     elif kind == "reinstate":
@@ -749,11 +753,12 @@ def live_item(r, n):
 
 
 def sign_off_repair(r):
-    """True when a repair can ask the plan row r's pending sign-offs: it has some, canRepair, and no drain or pause
-    but the sign-off pause holds it (repair runs approve-gates under no other pause; rounds' sign-off rule)."""
+    """True when a repair can ask the plan row r's pending sign-offs: it has some, canRepair, and no drain, Engine
+    catch-up or pause but the sign-off pause holds it (repair runs approve-gates under no other pause; rounds' sign-off
+    rule)."""
     holds = r.get("holds") or []
     return bool(r.get("pendingSignOffs")) and bool(r.get("canRepair")) and "draining" not in holds \
-        and ("paused" not in holds or r.get("pausedFor") == "sign-off")
+        and "catching up" not in holds and ("paused" not in holds or r.get("pausedFor") == "sign-off")
 
 
 def own_item(r, n):
@@ -1052,6 +1057,8 @@ class Rounds:
                     pass
                 if not isinstance(s, dict):
                     why = "status unread"
+                elif s.get("pausedFor") == "catch-up" and (s.get("paused") or s.get("pause_requested")):
+                    why = "catching up"   # an Engine catch-up (p54-14, either stamp): the lead's own move, never his
                 elif s.get("paused") and s.get("pausedFor") != "sign-off":
                     why = "paused"
                 elif s.get("pause_requested"):
@@ -1709,9 +1716,12 @@ class Plan:
                 holds.add("incomplete")
             if shape == "serial":
                 holds.add("serial")
-            if s and s.get("paused"):
+            catching = bool(s and s.get("pausedFor") == "catch-up" and (s.get("paused") or s.get("pause_requested")))
+            if catching:
+                holds.add("catching up")   # an Engine catch-up (p54-14): the live lead's own move, no reinstate
+            if s and s.get("paused") and not catching:
                 holds.add("paused")
-            if s and s.get("pause_requested"):
+            if s and s.get("pause_requested") and not catching:
                 holds.add("draining")
             if (counts.get("running") or 0) + (counts.get("integrating") or 0) > 0:
                 holds.add("live queue")

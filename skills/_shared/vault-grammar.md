@@ -296,8 +296,8 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
 - **`on`** is one of `merged <owner/repo#N | PR URL>` (read as § Hold until reads a PR: MERGED is due; OPEN, CLOSED or a
   gh error or timeout waits; a bare number is unreadable, since a trigger fires with no lead and a bare number needs a
   repo to be read in), `paused` (a valued `paused:` on the note, or on the rollout a task note's `rollout:` links, and
-  only while that note is not closed or superseded; `pause_requested` and a room stop do not count, a sign-off pause
-  does) and `landed [[task]]` (as a dependency lands, `_dep_status`, so a merged tombstone and Archive resolve).
+  only while that note is not closed or superseded; `pause_requested`, a room stop and an Engine catch-up's `paused:`
+  (`paused_for: catch-up`, the engine's own move, p54-14) do not count, a sign-off pause does) and `landed [[task]]` (as a dependency lands, `_dep_status`, so a merged tombstone and Archive resolve).
 - **`do`** is one of `regenerate`, `regenerate --tasks a,b` (slugs or wikilinks), `schedule [[task]]`, `reset-primary`.
   A `do` target that is not found keeps the trigger waiting, and so does a list whose every target is closed (done,
   dropped or a merged tombstone); a partly landed `--tasks` list still fires, since schedule's skip rule drops the
@@ -327,8 +327,9 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   own status does not count. In order: a `shape: serial` anchor is unreadable (a serial rollout supersedes nothing); no
   anchor waits; a valued `superseded_by:` waits; on a task note, an anchor with a valued `supersedes:` waits, because
   `carry` moves a task's `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from
-  one written since; a done or dropped anchor waits; one neither paused nor never started (`approved_unrun`) waits, since
-  schedule regenerates no running rollout: it joins its queue, `--regenerate` not applied (ADR 0078 d6). So a successor
+  one written since; a done or dropped anchor waits; one neither paused (an Engine catch-up's `paused:` reads running)
+  nor never started (`approved_unrun`) waits, since schedule regenerates no running rollout: it joins its queue,
+  `--regenerate` not applied (ADR 0078 d6). So a successor
   is never touched by the prior's merge, whether the entry sits on the prior or on a carried task, and one written on a
   successor's own rollout note fires as any other. A `regenerate` written against a rollout that runs to its end lapses
   at its close, listed under `waiting`. `fire` runs the same reading.

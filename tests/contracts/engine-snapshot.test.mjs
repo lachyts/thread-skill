@@ -2,7 +2,10 @@
 // verbs hand over to the rollout's engine root by a git `ident` prose id (never a disk hash), schedule cuts first
 // and runs a prior's commands from the prior's own root, execute § 1.5 moves a rollout only by `move.due` (an unstamped
 // note's first stamp included; a sign-off pause never moves), the completion ceremonies retire snapshots after the commit, a Leg's close re-resolves when its
-// snapshot was retired, and the glossary and ADR say the same. The mechanics are pinned by tests/engine-snapshot.test.sh.
+// snapshot was retired, and the glossary and ADR say the same. The Engine catch-up (ADR 0084 d5, p54-14): § 1.5's due
+// rows, its resolve from `<root>`, the self-Reinstate as a § 1 entry of its own, a parallel failed move that aborts and
+// goes on while a Reinstate's still halts, the serial bullet, § 4.5 step 5's arm, the heartbeat's exception and (2d), and
+// § Pausing's abort before his stamp; tests/engine-catch-up.test.sh pins the mechanics. The mechanics are pinned by tests/engine-snapshot.test.sh.
 //
 // Same shape as tests/contracts/execute-signed-gate.test.mjs: every rule lives in one function, check(texts), which
 // returns named failures, so the real tree and the controls run through identical logic; each control swaps one
@@ -184,6 +187,27 @@ function check(t) {
     !entry(t.context, 'Primary checkout').includes("The plugin root counts only as its own work tree's toplevel")) fail('context')
 
   // adr: the serial, sign-off and grace consequences, the prose id as the only evidence, and § Decision's unstamped stamp.
+  // catch-up (p54-14): § 1.5 names it due and reads its move from <root>; a parallel failed move aborts and goes on, while
+  // a Reinstate's failed cut still halts; the serial bullet; nothing else cuts but its own move; step 5's arm; the
+  // heartbeat's clause (2) exception and (2d); § Pausing aborts first; CONTEXT's entry is built; ADR 0043 is amended.
+  const hb = collapse(ex.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? '')
+  const ce = entry(t.context, 'Engine catch-up')
+  if (!s15.includes("and an Engine catch-up's own move (ADR 0084 d5): a parallel note under `paused_for: catch-up` with an open drain or take line in its `## Catch-up log`, or a serial chain's open take with no Leg open") ||
+    !s15.includes("**An Engine catch-up's move is read from `<root>`.** When the note carries `paused_for: catch-up` and the resolve above printed `same: false`, run resolve once more from the root it printed, `python3 <root>/skills/_shared/scripts/engine-snapshot.py resolve` with the same flags") ||
+    !s15.includes("The lead's self-Reinstate (§ 4.5 step 5's `catch-up` arm) is a § 1 entry of its own, so its once-per-invocation move is its own.") ||
+    !s15.includes("is no halt: run `python3 <root>/skills/execute/scripts/reconcile-rollout.py catch-up --rollout <rollout-note> --abort --why \"<its first stderr line>\"` (Bash tool `timeout: 600000`), then carry on from the old `<root>`") ||
+    !s15.includes('Any other cut exit, or a failed adopt, is a write-nothing halt') ||
+    !s15.includes('**An Engine catch-up (serial).** With `move.due` false and no Leg open') ||
+    !s15.includes('only `move.due` moves a rollout, an Engine catch-up\'s own move, its `move.due`, included.') ||
+    !s45.includes("`catch-up` → an Engine catch-up drained (*Engine catch-up*): `CronDelete` this rollout's heartbeat if one is registered") ||
+    !s45.includes("re-enter § 1 in this same turn as a self-Reinstate, no ROLLOUT-STATUS halted line: § 1.5's resolve, cut and adopt from `<root>` (its catch-up paragraph), then § 2's `record-entry --by catch-up`, then the Reinstate's `clear-pause`") ||
+    !hb.includes('when it also carries `paused_for: catch-up` (an Engine catch-up\'s move, the lead\'s own, execute § 4.5 *Engine catch-up*), CronDelete this cron and re-enter /thread:execute [[<rollout-slug>]] at § 1') ||
+    !hb.includes('(2d) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py catch-up --rollout <the rollout note\'s path> || true`') ||
+    !before(pausing, '**His pause over an Engine catch-up.**', '**Soft pause (default).**') ||
+    !pausing.includes('before the soft pause\'s stamp, and before hard-pause step 1, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py catch-up --rollout <rollout-note> --abort --why "his pause"`') ||
+    !ce.includes('built by p54-14') || ce.includes('not yet built') ||
+    !collapse(t.adr.split('\n').find((l) => l.startsWith('Status:')) ?? '').includes('*(Amended by ADR 0084 d5, 2026-11-18, p54-14: the one mid-run move, an Engine catch-up')) fail('catch-up')
+
   const adr = collapse(t.adr)
   if (!collapse(section(t.adr, /^## Decision/) ?? '').includes('an unstamped note is stamped at its next Reinstate or Leg begin')) fail('adr')
   if (!adr.includes('its Reinstate is the first Leg begun after a Leg closed `stopped`') ||
@@ -193,7 +217,7 @@ function check(t) {
 }
 
 const RULES = ['ident', 'prose-id', 'schedule', 'execute', 'execute-pointers', 'sign-off', 'doc', 'legs', 'close', 'status', 'repair',
-  'plugin-root', 'context', 'adr']
+  'plugin-root', 'context', 'adr', 'catch-up']
 const CONTROLLED = new Set()
 
 // edit(key, from, to): the real texts with one swap in one file; asserts the swap applies.
@@ -309,7 +333,20 @@ test('control: the handle drop keyed on `from` alone fails execute', () => {
     'a first stamp (from null) drops no handle')
 })
 
-test('the rules are all named (14) and each has a control', () => {
-  assert.equal(RULES.length, 14)
+test('control: a catch-up whose failed move halts, a Reinstate that aborts, a cut the catch-up is not named in, or a resolve from the rendered root, fails catch-up', () => {
+  const ex = real.execute
+  const i = ex.indexOf("- **An Engine catch-up's failed move (parallel).**")
+  only(edit('execute', ex.slice(i, ex.indexOf('\n', i) + 1), ''), 'catch-up', '(i) the abort branch dropped')
+  only(edit('execute', 'Any other cut exit, or a failed adopt, is a write-nothing halt',
+    'Any other cut exit, or a failed adopt, runs `catch-up --abort` and carries on'), 'catch-up', '(ii) a Reinstate\'s failed cut no longer halts')
+  only(edit('execute', 'only `move.due` moves a rollout, an Engine catch-up\'s own move, its `move.due`, included.', 'only `move.due` moves a rollout.'),
+    'catch-up', '(iii) nothing else cuts, with no catch-up')
+  only(edit('execute', '`python3 <root>/skills/_shared/scripts/engine-snapshot.py resolve` with the same flags',
+    '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve` with the same flags'), 'catch-up',
+  '(iv) the self-Reinstate\'s resolve from the rendered root')
+})
+
+test('the rules are all named (15) and each has a control', () => {
+  assert.equal(RULES.length, 15)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

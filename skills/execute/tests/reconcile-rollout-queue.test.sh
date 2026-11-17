@@ -445,6 +445,22 @@ J=$(nxt)
 ok "$(q "$J" '[d["pausedNow"], d["halt"], d["start"]]')" '[false,"paused",[]]' "next: a paused rollout stays paused"
 ok "$(q "$J" "$holds")" '{"y":"paused"}' "next: … holding y as paused"
 
+# ── an Engine catch-up's drain (p54-14): the soft pause's, marked paused_for: catch-up ────────────────────────────────
+scen catch-up
+mkro $'- [[x]]\n- [[y]]\n\n## Catch-up log\n\n- 2026-10-02T14:00+00:00 drain [[r]] (p9) at 0123456789ab from 0123456789ab: [[f]]' \
+  'pause_requested: true' 'paused_for: catch-up'
+mkt x in_progress; mkt y open
+J=$(nxt)
+ok "$(q "$J" '[d["start"], d["halt"]]')|$(q "$J" "$holds")" '[[],null]|{"y":"catch-up: draining (an Engine catch-up)"}' \
+   "next: a catch-up drain starts nothing while x runs, holding y as catch-up: draining"
+ok "$(tail -1 "$THREAD_EVENTS_DIR/ro.jsonl" | q "$(cat)" '[d["kind"], d["reason"]]')" '["idle-slots","catch-up-drain"]' "next: … its idle Slots read catch-up-drain"
+setkey x status done
+J=$(nxt)
+ok "$(q "$J" '[d["pausedNow"], d["halt"]]')|$(fm ro paused_for)|$(fm ro pause_requested)" '[true,"catch-up"]|paused_for: catch-up|<none>' \
+   "next: drained, it stamps paused:, keeps paused_for and halts catch-up"
+ok "$(grep '"kind":"paused"' "$THREAD_EVENTS_DIR/ro.jsonl" | tail -1 | q "$(cat)" 'd["mode"]')" '"catch-up"' "next: … the paused line's mode catch-up"
+ok "$(q "$(nxt)" "$holds")" '{"y":"catch-up: moving"}' "next: … holding y as catch-up: moving"
+
 # ── halt ─────────────────────────────────────────────────────────────────────────────────────────
 scen halt-complete
 mkro $'- [[a]]'

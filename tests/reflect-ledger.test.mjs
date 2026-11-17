@@ -380,6 +380,19 @@ test('L1 controls: a sign-off pause re-moded hard moves its 2 h to other; a quot
     [0.5, { 'usage-limit': 0.5 }, 0.75, 30.75])
 })
 
+test('L1 (p54-14): the soft pause re-moded catch-up moves its 0.5 h to other.catch-up, every class unchanged; one before since adds nothing', (t) => {
+  const h = setup(t)
+  fixture(h, { 'l-holds': FIXTURE['l-holds'].map((e) => (e[1] === 'paused' ? [e[0], 'paused', null, { mode: 'catch-up' }] : e)) })
+  const b = ledgerCli(h, LSINCE, LUNTIL)
+  assert.deepEqual(b.row.other, { 'catch-up': 0.5, revise: 0.5 }, 'an Engine catch-up is the engine\'s own pause, never his')
+  assert.deepEqual(b.row.rollouts['lane-bound'], [['l-lane', 2], ['l-holds', 1.5]], 'still subtracted from the lane, as his pause is')
+  assert.deepEqual(b.row.hours, { stalls: 30.25, 'quota-bound': 1, load: 2.25, 'lane-bound': 3.5, rework: 1.5, 'plan-rejected': 1 })
+  const h2 = setup(t)
+  emitAll(h2, 'l-early', [[T('04', '00:00'), 'paused', null, { mode: 'catch-up' }], [T('04', '02:00'), 'resumed', null, {}]])
+  done(h2, 'l-early')
+  assert.equal(ledgerCli(h2, LSINCE, LUNTIL).row.other['catch-up'] ?? 0, 0, 'a catch-up pause before since adds nothing')
+})
+
 test('L1 controls (p36-7): the hold-heat stretch re-marked hold-quota (the quota hold) moves its 1 h from load to quota-bound', (t) => {
   const h = setup(t)
   fixture(h, { 'l-caps': FIXTURE['l-caps'].map((e) => (e[1] === 'idle-slots' && e[3].reason === 'hold-heat' ? [e[0], e[1], e[2], idle('hold-quota')] : e)) })
