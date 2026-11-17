@@ -2681,6 +2681,17 @@ mac green "$M"
 ok "$mrc|$(macf '[d["head"], d["state"]]')" "1|[\"$M2\",\"pending\"]" "C61: a late green for M exits 1 and lands nowhere"
 has "$(cat "$F/mac.err")" "mac: refused: the verdict for $M reads pending for $M2" "C61: … with its line"
 
+# C61e: case (iii) judges shared files from TB, never its verdict's base: a shared-file verify stopped before its green,
+# then main moves in another file only, keeps trouble ["shared-file"] (main's TB..base was never judged).
+fx c61e
+main a.txt "$(printf 'a1\na2\na3\na4\nA5 theirs')" "theirs: a5 (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; mac stopped "$M" base-moved
+main z.txt "later" "later: z (#8)"
+prep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["trouble"]')" \
+  '0|iii|verify|["a.txt"]|["shared-file"]' "C61e: main moved in z.txt only → case (iii) still names a.txt, trouble [shared-file]"
+
 # C61b: a crash with the verdict pending and main unmoved: case (iii) re-verifies the pushed M, nothing merged.
 fx c61b
 main m.txt "theirs" "theirs: m (#7)"

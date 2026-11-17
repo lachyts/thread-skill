@@ -28,17 +28,16 @@ Subcommands:
       discarded). When B = origin/<default> equals TB (case i) or record.base (case ii) the route is
       `merge` (no merge commit, no verifier, no tree needed: merge H onto that base), whatever the tree's
       state; case (iii) never routes `merge` or `skip`. Otherwise a missing tree, a tree off its branch or one ahead of
-      origin routes `trouble []` (case (iii) too, and its tree must then read H: else `trouble`, `the task tree is at X,
-      not origin's H`); in case (iii) with B equal to its verdict's base the route is `verify` with `mergeCommit` H and
-      nothing merged (a re-verify of the pushed M; sharedFiles the task files over base...H that main changed over
-      TB..base; inert off: `case (iii): the lead merge was never verified green, so no green run stands`);
-      else it fast-forwards the tree only, then merges B into the
-      branch (`git merge --no-ff --no-edit -m "Merge origin/<default> into <branch> (Integration)"`, the
+      origin routes `trouble []` (case (iii) too), else it fast-forwards the tree only, to origin's H. In case (iii)
+      with B equal to its verdict's base nothing is merged: M is H (a re-verify of the pushed M). Else it merges B into
+      the branch (`git merge --no-ff --no-edit -m "Merge origin/<default> into <branch> (Integration)"`, the
       engine's message): a conflict records `conflictFiles`, aborts and routes `trouble ["conflict"]`; any
-      other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed, except case
-      (iii) with B its base: already on origin), `sharedFiles` (task files over B...H that main changed over TB..B, or
-      record.base..B in case ii, or the verdict's base..B in case iii; case iii's Inert check is off, as above)
-      and `trouble` ["shared-file"] when there is one, else []. The Inert-path skip (ADR 0045, p29-3): with
+      other failure aborts and routes `trouble []`. Success routes `verify` with `mergeCommit` M (unpushed, except case
+      (iii) with B its base: H, already on origin), `sharedFiles` (task files over B...H that main changed over TB..B,
+      or record.base..B in case ii; case iii reads TB..B too, never its verdict's base..B: that merge never read green,
+      so main's TB..base was never judged) and `trouble` ["shared-file"] when there is one, else []. Case (iii)'s Inert
+      check is off (`inert.why` `case (iii): the lead merge was never verified green, so no green run stands`). The
+      Inert-path skip (ADR 0045, p29-3): with
       --verifier given and no shared file, one inert check runs there, all of it inside one `try/except
       Exception`: the lazy load of skills/_shared/scripts/inert-paths.py (never at module top, so a broken
       inert-paths.py cannot break push, undo or verify), the repo's `inert_paths` (rollout-settings.py resolve()),
@@ -1017,40 +1016,36 @@ def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
     if bad:
         out.update(route="trouble", reason=bad)
         return out
-    if out["case"] == "iii":
-        at = rev(tree, "HEAD")
-        if at != h:
-            out.update(route="trouble", reason=f"the task tree is at {at or 'nothing'}, not origin's {h}")
+    if out["case"] == "iii" and b == base:
+        # A re-verify of the pushed M, nothing merged: origin/<default> has not moved since its verdict's base, and
+        # _tree_trouble has fast-forwarded the tree to origin's H.
+        m = h
+        reason = (f"case (iii): the lead merge {h[:12]} on origin/{br} was never verified green and "
+                  f"origin/{args.default} has not moved since its base {base[:12]}: run the verifier on it again")
+    else:
+        p = git(tree, "merge", "--no-ff", "--no-edit", "-m", merge_message(args.default, br), b)
+        if p.returncode != 0:
+            if rev(tree, "MERGE_HEAD"):
+                out["conflictFiles"] = [f for f in out_of(git(tree, "diff", "--name-only", "--diff-filter=U")).split("\n") if f]
+                git(tree, "merge", "--abort")
+                out.update(route="trouble", trouble=["conflict"], reason="merging origin/%s conflicts" % args.default)
+            else:
+                out.update(route="trouble", reason=f"git merge failed with no conflict: {why(p)}")
             return out
-        if b == base:
-            # A re-verify of the pushed M, nothing merged: origin/<default> has not moved since its verdict's base.
-            task_files = set(f for f in out_of(git(tree, "diff", "--name-only", f"{base}...{h}")).split("\n") if f)
-            main_files = set(f for f in out_of(git(tree, "diff", "--name-only", tb, base)).split("\n") if f)
-            shared = sorted(task_files & main_files)
-            out.update(route="verify", mergeCommit=h, sharedFiles=shared, trouble=["shared-file"] if shared else [],
-                       inert=_inert_off(CASE_III_WHY),
-                       reason=f"case (iii): the lead merge {h[:12]} on origin/{br} was never verified green and "
-                              f"origin/{args.default} has not moved since its base {base[:12]}: run the verifier on it again")
-            return out
-    p = git(tree, "merge", "--no-ff", "--no-edit", "-m", merge_message(args.default, br), b)
-    if p.returncode != 0:
-        if rev(tree, "MERGE_HEAD"):
-            out["conflictFiles"] = [f for f in out_of(git(tree, "diff", "--name-only", "--diff-filter=U")).split("\n") if f]
-            git(tree, "merge", "--abort")
-            out.update(route="trouble", trouble=["conflict"], reason="merging origin/%s conflicts" % args.default)
-        else:
-            out.update(route="trouble", reason=f"git merge failed with no conflict: {why(p)}")
-        return out
-    m = rev(tree, "HEAD")
+        m = rev(tree, "HEAD")
+        reason = f"merged origin/{args.default} ({b[:12]}) into {br}: run the verifier on {m[:12]}"
+    # The shared-file judge reads main's files since the base a green run last stood on: TB, or record.base in case (ii).
+    # Case (iii) reads from TB too, never its verdict's base: that merge never read green, so main's TB..base was never judged.
+    since = tb if out["case"] == "iii" else base
     task_files = set(f for f in out_of(git(tree, "diff", "--name-only", f"{b}...{h}")).split("\n") if f)
-    main_files = set(f for f in out_of(git(tree, "diff", "--name-only", base, b)).split("\n") if f)
+    main_files = set(f for f in out_of(git(tree, "diff", "--name-only", since, b)).split("\n") if f)
     shared = sorted(task_files & main_files)
-    if not getattr(args, "verifier", None):
+    if out["case"] == "iii":
+        inert = _inert_off(CASE_III_WHY)
+    elif not getattr(args, "verifier", None):
         inert = _inert_off("no --verifier given: the verifier runs")
     elif shared:
         inert = _inert_off(f"{len(shared)} shared file(s) ({', '.join(shared[:3])}): the verifier runs")
-    elif out["case"] == "iii":
-        inert = _inert_off(CASE_III_WHY)
     else:
         inert = _inert(args, repo, tree, base, b, m, note)
     if inert["skip"]:
@@ -1059,7 +1054,7 @@ def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
                    "and the Inert proof held: the green run stands (ADR 0045): push it and merge, no verifier")
         return out
     out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [], inert=inert,
-               reason=f"merged origin/{args.default} ({b[:12]}) into {br}: run the verifier on {m[:12]}")
+               reason=reason)
     return out
 
 
