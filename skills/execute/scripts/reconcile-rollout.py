@@ -1217,10 +1217,12 @@ Subcommands:
               the `## Catch-up log` line (engine-snapshot.py's header: the log's grammar, its open, live and stale rules
               and its closers, cited here, never copied). The lead runs it, `|| true` and never routed on, wherever it
               runs master-runs: each loop entry, after each landing merge and each heartbeat tick (its clause (2d));
-              execute § 1.5 runs it for a serial chain with no Leg open. `--abort --why W` closes an open line (§ 1.5's
+              execute § 1.5 runs it for a serial chain with no Leg open. `--abort --why W` closes an open line and
+              removes the stamps under `paused_for: catch-up`, with no open line too once adopt wrote `moved` (§ 1.5's
               failed move, § Pausing when his pause takes over). Guarded (not GUARD_EXEMPT). Exits: 0 a reading, 1 an
               unreadable note or an engine-snapshot.py that will not load, 2 usage and the guard.
-              The readings of a catch-up's stamps elsewhere (_catching_up): `next` drains it (above) and halts
+              The readings of a catch-up's stamps elsewhere (_catching_up: `paused_for: catch-up` with `pause_requested`
+              or `paused:`; with neither it is dangling and no catch-up): `next` drains it (above) and halts
               "catch-up"; `moving` judges it by silence (`catch-up`); record-entry's gap stop is `catch-up`; join never
               refuses it; carry refuses it as --from; the `regenerate` trigger gate reads its `paused:` as running and
               the `when: paused` gate as not paused; clear-pause closes its open line; the status JSON's `pausedFor`
@@ -1528,8 +1530,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
-  catch-up          (p54-14) --abort: resumed when the record's open paused line is the catch-up's, then catch-up {from,
-                    fixes, release?, shape, outcome: not-moved, why}; engine-snapshot.py adopt writes the moved line.
+  catch-up          (p54-14) --abort: resumed when it removes the stamps and the record's open paused line is the
+                    catch-up's, then, with an open line, catch-up {from, fixes, release?, shape, outcome: not-moved,
+                    why}; engine-snapshot.py adopt writes the moved line.
   master-runs       (p54-7) master-run {repo, outcome, sha, at, …} per decided key, in the reserved master-runs.jsonl
                     (task null; the rollout a provenance stamp), after its task and its join; nothing on --dry-run.
   prove             none: its writes are proof stamps and landings the next queue read sees; mark-done's landing events
@@ -19219,9 +19222,13 @@ CLAUDE_MD_FENCE_RE = re.compile(r"^[ \t]*(```|~~~)")   # estate-scan.py's FENCE_
 
 
 def _catching_up(note) -> bool:
-    """An Engine catch-up stands on the rollout note: `paused_for: catch-up` (its drain's `pause_requested`, or its
-    drained `paused:`): the engine's own pause, never one someone made."""
-    return note is not None and _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP
+    """An Engine catch-up stands on the rollout note: `paused_for: catch-up` with one of its stamps (its drain's
+    `pause_requested`, or its drained `paused:`): the engine's own pause, never one someone made. A `paused_for:
+    catch-up` with neither stamp (his soft-pause cancel removed `pause_requested:`, or the Stage's quiet-drain undo
+    removed its own flag after the verb's save replayed onto it) is dangling: no catch-up stands, and the verb's stale
+    close removes it (cmd_catch_up)."""
+    return note is not None and _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP and \
+        (_valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")))
 
 
 def _open_pause_mode(lines):
@@ -19284,8 +19291,13 @@ def _restamp_verifier(note, now):
     note's `verifier:` from the Project root's CLAUDE.md (_claude_md_verifier), in memory (the caller saves): written
     bare, as schedule's template writes it, only when _command_value reads the bare value back as the same command,
     and only on a change, with a `## Notes` line `verifier restamped: <old> → <new>`. Returns the WARN lines (the stamp
-    is kept): no or several `Verifier:` lines, or a command that cannot be stamped bare."""
-    cmd, why = _claude_md_verifier(_project_root(note))
+    is kept): no or several `Verifier:` lines, or a command that cannot be stamped bare. A serial note, or one with
+    neither a `Project root:` line nor a `verifier:`, has no stamp to restamp: nothing, and no WARN (a serial note
+    carries neither)."""
+    root = _project_root(note)
+    if _shape(note) == SHAPES[1] or (root is None and not _valued(note.get("verifier"))):
+        return []
+    cmd, why = _claude_md_verifier(root)
     if cmd is None:
         return [f"WARN: verifier not restamped: {why}: the stamp is kept"]
     try:
@@ -19314,7 +19326,7 @@ def _catch_up_reading(**kw):
 
 def _catch_up_commit(unit, index, tasks_dir, commits, key):
     """(sha, skip): the drain rule's commit of one unit among S..G's `commits` (cmd_catch_up's docstring), and why it
-    was skipped, or None."""
+    was skipped, or None. Another repo's unit is no commit with no skip (the ordinary case, never an anomaly)."""
     entry = index.get(unit.lower())
     if entry is None:
         return None, None
@@ -19323,7 +19335,7 @@ def _catch_up_commit(unit, index, tasks_dir, commits, key):
     if _valued(mc):
         repo, _rwhy = _note_repo(note, tasks_dir)
         if repo is not None and key is not None and repo != key:
-            return None, f"merge_commit: lands on {repo}, not the engine's {key}"
+            return None, None   # another repo's Speed fix (ADR 0084 Decided for you 6)
         if not re.fullmatch(r"[0-9a-f]{7,64}", mc):
             return None, f"merge_commit: {mc} is no commit id"
         return next((c["sha"] for c in commits if c["sha"].startswith(mc)), None), None
@@ -19335,8 +19347,10 @@ def _catch_up_commit(unit, index, tasks_dir, commits, key):
     n = m.group(2) if m else (PR_NUM_RE.match(pr).group(1) if pr and PR_NUM_RE.match(pr) else None)
     if n is None:
         return None, None
-    if key is None or repo != key:
-        return None, f"pr: lands on {repo}, not the engine's {key or '(origin unread)'}"
+    if key is None:
+        return None, f"pr: lands on {repo}, and the engine's origin is unread"
+    if repo != key:
+        return None, None   # another repo's Speed fix (ADR 0084 Decided for you 6)
     for c in commits:
         if c["subject"].endswith(f"(#{n})") or c["subject"].startswith(f"Merge pull request #{n} "):
             return c["sha"], None
@@ -19403,14 +19417,16 @@ def cmd_catch_up(args) -> int:
 
     Which units are read: every marked unit (_speed_units' `marked`, over the whole index, Archive included, through
     _fold_unit), and each Speed fix phase P's release R (_speed_release), marked or not. A unit's commit, first match:
-    (1) a valued `merge_commit:`, found by prefix among S..G's commits (engine-snapshot.py lacking), skipped with its
-    why when _note_repo reads a repo whose key differs from the engine origin's _repo_key ((None, None) and (None, why)
-    still match by membership, as _prove_judge's strict check does); (2) the `pr:` number, only when _note_repo's key
-    equals the engine's (PR_URL_RE's number, or PR_NUM_RE's for a bare `#N`, whose key is the rollout's Project root
-    origin): an S..G subject ending `(#N)` (a squash) or starting `Merge pull request #N ` (a true merge); a key that
-    differs or cannot be read is skipped, with its why; (3) else no commit, and the unit is not lacking. A unit is
-    lacking when its commit is in S..G, and an engine fix when engine-snapshot.py engine_fix prints a path for that one
-    commit (never one call per S..G commit; a failed call is no engine fix, its why in `skipped`).
+    (1) a valued `merge_commit:`, found by prefix among S..G's commits (engine-snapshot.py lacking), no commit when
+    _note_repo reads a repo whose key differs from the engine origin's _repo_key ((None, None) and (None, why) still
+    match by membership, as _prove_judge's strict check does); (2) the `pr:` number, only when _note_repo's key equals
+    the engine's (PR_URL_RE's number, or PR_NUM_RE's for a bare `#N`, whose key is the rollout's Project root origin):
+    an S..G subject ending `(#N)` (a squash) or starting `Merge pull request #N ` (a true merge); a key that differs is
+    no commit; (3) else no commit, and the unit is not lacking. Another repo's unit is the ordinary case (Decided for
+    you 6), skipped silently; `skipped` holds only what could not be read: a unit whose repo or the engine's origin is
+    unread, a failed git call and a _speed_release WARN. A unit is lacking when its commit is in S..G, and an engine
+    fix when engine-snapshot.py engine_fix prints a path for that one commit (never one call per S..G commit; a failed
+    call is no engine fix, its why in `skipped`).
     Parallel: drain P when R is lacking, at least one marked unit of P is a lacking engine fix (R counts only when it is
     itself marked) and no `drain [[R]]` line exists (a phase drains once, whatever closed it); it drains even with work
     running, and two phases due in one read share one drain line. So (a) R unmarked, or R's own merge docs- or
@@ -19422,16 +19438,20 @@ def cmd_catch_up(args) -> int:
     Serial: any lacking engine fix is a take, only with no Leg open.
 
     It writes nothing, with a why, when the note is done, superseded, archived or unstamped; a live open parallel
-    catch-up stands (`next` drains it, the lead moves it); a pause stands (`paused:` of any kind, or `pause_requested`
-    without `paused_for: catch-up`; a sign-off pause included); a room stop stands; nothing is queued to start; the
-    churn wait holds (after a `not moved at <g12>` line, until the Green tip is a strict descendant of g12); or a
-    parallel take finds work running. A stale parallel open line (its stamps removed) is closed first, `not moved at
-    <g12>: its stamps were removed`, when no pause of any kind stands, then it decides afresh. A parallel drain or take
-    stamps `pause_requested: true` and `paused_for: catch-up` and appends its line; a serial take appends its line only.
-    An open serial take prints due true and writes nothing new (a lost turn's move is redone); with a Leg open, due is
-    false. `--abort --why W` closes an open line `not moved at <g12>: W`, removes `paused`, `pause_requested` and
-    `paused_for` only under `paused_for: catch-up`, emits `resumed` when the Run record's open `paused` line is the
-    catch-up's, and emits `catch-up` with outcome not-moved; with no open line it writes nothing (`[no-change]`).
+    catch-up stands (_catching_up: `paused_for: catch-up` with `pause_requested` or `paused:`; `next` drains it, the
+    lead moves it); a pause stands (`paused:` of any kind, or `pause_requested` without `paused_for: catch-up`; a
+    sign-off pause included); a room stop stands; nothing is queued to start; the churn wait holds (after a `not moved
+    at <g12>` line, until the Green tip is a strict descendant of g12); or a parallel take finds work running. A stale
+    parallel open line (both stamps gone, `paused_for: catch-up` with them or left dangling) is closed first, `not moved
+    at <g12>: its stamps were removed`, and a dangling `paused_for: catch-up` removed with it, when no pause of any kind
+    stands, then it decides afresh. A parallel drain or take stamps `pause_requested: true` and `paused_for: catch-up`
+    and appends its line; a serial take appends its line only. An open serial take prints due true and writes nothing
+    new (a lost turn's move is redone); with a Leg open, due is false. `--abort --why W`: under `paused_for: catch-up`
+    it removes `paused`, `pause_requested` and `paused_for` and emits `resumed` when the Run record's open `paused` line
+    is the catch-up's; an open line it closes `not moved at <g12>: W` and emits `catch-up` with outcome not-moved. So
+    once adopt has written `moved` (no open line, the stamps left until clear-pause, a lost turn's state) it removes the
+    stamps and writes no log line, and his pause that follows is his own; with neither an open line nor `paused_for:
+    catch-up` it writes nothing (`[no-change]`).
     Prints one JSON line {due, kind, release: [{release, phase}], fixes, green12, from12, why, skipped: [{unit, why}]}
     (the abort one plain line). Exit 0 a reading, 1 an unreadable note or an engine-snapshot.py that will not load, 2
     usage and the guard."""
@@ -19457,26 +19477,31 @@ def cmd_catch_up(args) -> int:
     body = note.render()
     op = es.catch_up_open(body)
     if args.abort:
-        if op is None:
+        # `paused_for: catch-up` read alone (never _catching_up): a dangling one goes with the stamps.
+        cleared = _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP
+        if op is None and not cleared:
             print(f"{ro}: no open Engine catch-up [no-change]")
             return 0
         why = " ".join(args.why.split())
-        note.append_line(CATCH_UP_SECTION, f"- {_stamp(now)} not moved at {op['green12']}: {why}")
-        cleared = _catching_up(note)
+        if op is not None:
+            note.append_line(CATCH_UP_SECTION, f"- {_stamp(now)} not moved at {op['green12']}: {why}")
         if cleared:
             for key in ("paused", "pause_requested", PAUSED_FOR_KEY):
                 note.remove(key)
         note.save(dry_run=args.dry_run)
         if not args.dry_run:
-            if _open_pause_mode(_record_read(ro)) == CATCH_UP:
+            if cleared and _open_pause_mode(_record_read(ro)) == CATCH_UP:
                 _event(ro, "resumed", None, None, args)
-            ev = {"from": _scalar(note.get("engine_sha")) or op["from12"], "fixes": op["fixes"],
-                  "shape": _shape(note), "outcome": "not-moved", "why": why[:200]}
-            if op["releases"]:
-                ev["release"] = ", ".join(r for r, _p in op["releases"])
-            _event(ro, CATCH_UP, None, ev, args)
-        print(f"{ro}: Engine catch-up closed: not moved at {op['green12']}: {why}"
-              + ("; its stamps removed" if cleared else "") + (" (dry-run)" if args.dry_run else " [written]"))
+            if op is not None:
+                ev = {"from": _scalar(note.get("engine_sha")) or op["from12"], "fixes": op["fixes"],
+                      "shape": _shape(note), "outcome": "not-moved", "why": why[:200]}
+                if op["releases"]:
+                    ev["release"] = ", ".join(r for r, _p in op["releases"])
+                _event(ro, CATCH_UP, None, ev, args)
+        head = (f"Engine catch-up closed: not moved at {op['green12']}: {why}" if op is not None
+                else f"no open Engine catch-up (its move made): {why}")
+        print(f"{ro}: {head}" + ("; its stamps removed" if cleared else "")
+              + (" (dry-run)" if args.dry_run else " [written]"))
         return 0
 
     def say(**kw):
@@ -19516,6 +19541,8 @@ def cmd_catch_up(args) -> int:
         return say(why="a room stop stands")
     if op is not None:   # parallel and stale: its stamps were removed, and no pause stands
         note.append_line(CATCH_UP_SECTION, f"- {_stamp(now)} not moved at {op['green12']}: its stamps were removed")
+        if _scalar(note.get(PAUSED_FOR_KEY)).lower() == CATCH_UP:
+            note.remove(PAUSED_FOR_KEY)   # dangling: neither stamp stands (_catching_up)
         note.save(dry_run=args.dry_run)
         body = note.render()
     log = es.catch_up_log(body)

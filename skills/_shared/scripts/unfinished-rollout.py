@@ -64,10 +64,11 @@ Rules.
 - Never started: reconcile-rollout.py's never_started (only execute's own marks), widened for an approved queue whose
   only marks are the Stage's ended room stops (reconcile-rollout.py's approved_unrun; vault-grammar § Approved queue).
 - Eligible: this project's, and paused (`paused:`) or never started.
-- Catching up (p54-14, ADR 0084 d5): `paused_for: catch-up` on the note, an Engine catch-up's drain or move, the
-  engine's own pause (rr._catching_up). It is never paused or pausing here: never eligible, never refused as pausing,
-  its state `catching up since <its stamp, else its open Catch-up log line's ts>`, so schedule joins it; and it is not
-  paused for parallel_hold, so an idle one keeps its Project root against serial chains (it resumes by itself).
+- Catching up (p54-14, ADR 0084 d5): `paused_for: catch-up` on the note with one of its stamps (`pause_requested` or
+  `paused:`), an Engine catch-up's drain or move, the engine's own pause (rr._catching_up; a dangling one is none). It
+  is never paused or pausing here: never eligible, never refused as pausing, its state `catching up since <its stamp,
+  else its open Catch-up log line's ts>`, so schedule joins it; and it is not paused for parallel_hold, so an idle one
+  keeps its Project root against serial chains (it resumes by itself).
 - What a serial note holds (ADR 0060 d1, d2; leg.py's header, *The hold*): its whole `surfaces:`, but while leg.py
   reads its chain state as `stuck` only its unlanded rows' Queue `Surfaces` cells (set-aside rows, rows held behind
   them, a missing note's row) plus any `surfaces:` token no row's cell names; the rest, done rows on the next Leg's
@@ -925,7 +926,7 @@ def shape_of(rr, slug, note, warns, warned):
 
 def note_state(rr, path, note, tasks_dir, mine):
     """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete, pausing
-    (pause_requested), its protocol_version and catchUp. An Engine catch-up (`paused_for: catch-up`, p54-14) is the
+    (pause_requested), its protocol_version and catchUp. An Engine catch-up (rr._catching_up, p54-14) is the
     engine's own move, never a pause someone made: under it `paused` reads "" and `pauseRequested` false, so a catch-up
     is never superseded, never refused as pausing, and joined (its `catchUp` the stamp, else its open line's ts)."""
     linked, index = rr._scan(path, tasks_dir)

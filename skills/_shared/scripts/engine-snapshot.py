@@ -65,10 +65,13 @@ reconcile-rollout.py `catch-up` (drain, take, and `not moved` at --abort or at a
     - <ts> bound [[R]][, [[R2]]] after <M> min: on <old12>
 catch_up_log(body) parses them (any other line is skipped); catch_up_open(body) is the open catch-up: the last of them
 when it is a drain or take line ({ts, verb, releases, green12, from12, fixes}), else None. Live or stale: a parallel
-open line is live only while `paused_for: catch-up` stands on the note, else stale (its stamps were removed: the verb
-closes it when no pause of any kind stands, his clear-pause when his does); a serial open line is always live (the take
-line is the chain's only mark, and it moves only with no Leg open). One closer per path: adopt writes `moved`;
-`catch-up --abort` writes `not moved at <g12>: <why>` (§ 1.5's failed move, § Pausing when his pause takes over);
+open line is live only while `paused_for: catch-up` and one of its stamps (`pause_requested`, `paused:`) stand on the
+note, else stale (its stamps were removed, a dangling `paused_for` left or not: the verb closes it, removing that
+`paused_for`, when no pause of any kind stands, his clear-pause when his does); a serial open line is always live (the
+take line is the chain's only mark, and it moves only with no Leg open). One closer per path: adopt writes `moved`;
+`catch-up --abort` writes `not moved at <g12>: <why>` (§ 1.5's failed move, § Pausing when his pause takes over), and
+under `paused_for: catch-up` removes the stamps, with no open line too (adopt's `moved` written, its turn lost before
+clear-pause: no log line then);
 `next` past the drain bound writes `bound`; clear-pause writes `not moved at <g12>: cleared at a Reinstate`; the verb
 itself closes a stale line with `not moved at <g12>: its stamps were removed`. No churn: after a `not moved at <g12>`
 line no new drain or take starts until the Green tip is a strict descendant of g12 (a `bound` line is no `not moved`
@@ -163,8 +166,9 @@ Verbs.
           open drain line to the `paused:` stamp) and emits the Run record's `catch-up` line {from, to, fixes,
           release, drainMinutes, shape, outcome: moved}. With no open line it takes the Reinstate branch, unchanged,
           even under a standing `paused_for: catch-up`. On every move (a non-null from, a Reinstate included) it
-          restamps `verifier:` from the Project root's CLAUDE.md (reconcile-rollout.py's _claude_md_verifier, the same
-          save; a WARN on stderr keeps the stamp).
+          restamps `verifier:` from the Project root's CLAUDE.md (reconcile-rollout.py's _restamp_verifier, the same
+          save; a WARN on stderr keeps the stamp; a serial note, or one with neither a Project root nor a `verifier:`,
+          has none to restamp).
           Idempotent. Prints {snapshot, sha, from (the old engine_sha on a move, else null), changed}: changed is
           true on a move and on an unstamped note's first stamp (from null).
   resolve Read-only. Reads only engine_snapshot, engine_sha, shape, status, paused, paused_for, superseded_by, the
@@ -874,22 +878,10 @@ def cmd_cut(a):
         raise Fail(4, "engine-snapshot cut: no git Primary (%s): no snapshot cut; the rollout runs unstamped from the "
                       "session's plugin root %s" % (why, ROOT))
     env = remote_env(primary)
-    rc, out, err = run_group(["bash", os.path.join(ROOT, DEFAULT_BRANCH_REL), primary], env, 60)
-    default = out.strip()
-    if rc != 0 or not default:
-        raise Fail(2, "engine-snapshot cut: cannot resolve origin's default branch for %s (%s): nothing cut"
-                      % (primary, first_line(err) or "exit %d" % rc))
+    default, why = _fetch_default(primary, env)
+    if default is None:
+        raise Fail(2, "engine-snapshot cut: %s: nothing cut" % why)
     ref = "refs/remotes/origin/%s" % default
-    for attempt in (1, 2):
-        rc, _o, err = run_group(["git", "-C", primary, "fetch", "-q", "origin", "+refs/heads/%s:%s" % (default, ref)],
-                                env, FETCH_TIMEOUT)
-        if rc == 0:
-            break
-        if attempt == 1:
-            time.sleep(2)   # a concurrent fetch holding the ref lock
-    if rc != 0:
-        raise Fail(2, "engine-snapshot cut: git fetch origin %s failed in %s (%s): nothing cut, never a stale ref"
-                      % (default, primary, first_line(err) or "exit %d" % rc))
     origin = git_out(primary, "rev-parse", "--verify", "-q", ref + "^{commit}")
     if not origin:
         raise Fail(2, "engine-snapshot cut: %s does not resolve in %s after the fetch: nothing cut" % (ref, primary))
@@ -1003,7 +995,9 @@ def _green_run(env):
 
 
 def _fetch_default(primary, env):
-    """(default, None) after the cut's own fetch of origin's default branch (retried once), else (None, why)."""
+    """(default, None) after default-branch.sh and one fetch of origin's default branch into its remote-tracking ref
+    (retried once), else (None, why): the cut's fetch (cmd_cut) and the Engine catch-up's (lacking), one copy. A failure
+    is never a stale-ref fallback."""
     rc, out, err = run_group(["bash", os.path.join(ROOT, DEFAULT_BRANCH_REL), primary], env, 60)
     default = out.strip()
     if rc != 0 or not default:
@@ -1016,7 +1010,8 @@ def _fetch_default(primary, env):
             return default, None
         if attempt == 1:
             time.sleep(2)   # a concurrent fetch holding the ref lock
-    return None, "git fetch origin %s failed in %s (%s)" % (default, primary, first_line(err) or "exit %d" % rc)
+    return None, ("git fetch origin %s failed in %s (%s), never a stale ref"
+                  % (default, primary, first_line(err) or "exit %d" % rc))
 
 
 def lacking(note_path, root=None):

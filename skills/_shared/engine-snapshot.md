@@ -158,8 +158,11 @@ reads the stamp as the engine's own pause and resumes on the old snapshot. adopt
 line it is the Reinstate's adopt, unchanged. A failed move is no halt: § 1.5 runs `catch-up --abort --why "<stderr
 line>"`, which closes the line `not moved` and removes the stamps, and goes on from the old root; after a `not moved`
 line no new catch-up starts until the Green tip is a strict descendant of the one it failed at. His pause takes over a
-catch-up: § Pausing's `--abort` first, else the verb closes the stale line, or his Reinstate's `clear-pause` does.
-Every move, a Reinstate's included, restamps `verifier:` from the Project root's CLAUDE.md.
+catch-up: § Pausing's `--abort` first (which removes the stamps even once adopt has written `moved`, a turn lost before
+`clear-pause`, so his own pause never sits beside `paused_for: catch-up`), else the verb closes the stale line, or his
+Reinstate's `clear-pause` does. A `paused_for: catch-up` with neither stamp (his soft-pause cancel, say) is no catch-up:
+the verb closes its line and removes it. Every move, a Reinstate's included, restamps a parallel note's `verifier:`
+from the Project root's CLAUDE.md.
 
 ## Retirement
 

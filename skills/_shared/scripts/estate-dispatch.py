@@ -1057,8 +1057,8 @@ class Rounds:
                     pass
                 if not isinstance(s, dict):
                     why = "status unread"
-                elif s.get("pausedFor") == "catch-up":
-                    why = "catching up"   # an Engine catch-up (p54-14): the lead's own move, never his pause
+                elif s.get("pausedFor") == "catch-up" and (s.get("paused") or s.get("pause_requested")):
+                    why = "catching up"   # an Engine catch-up (p54-14, either stamp): the lead's own move, never his
                 elif s.get("paused") and s.get("pausedFor") != "sign-off":
                     why = "paused"
                 elif s.get("pause_requested"):

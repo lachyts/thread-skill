@@ -2,21 +2,24 @@
 # The Engine catch-up (ADR 0084 d5, p54-14): reconcile-rollout.py `catch-up` (the drain rule, its docstring), `next`'s
 # drain and bound, engine-snapshot.py's move rule rows and adopt's catch-up branch (its header: the Catch-up log),
 # clear-pause's backstop, record-entry --by catch-up and the verifier restamp.
-#   CU2-CU5  the drain rule, read dry from the snapshot: an ordinary merge, another repo's Speed fix (a pr: URL, a
-#            merge_commit: outside S..G, a bare #N through its rollout's Project root), a tests-only one (tests/, and
-#            skills/*/tests/), a true merge matched by its subject, a phase's drain with an unmarked docs-only release
-#            (a), none once the phase's engine fixes are in S (b) or none of them touches engine paths (c), and a
-#            drained phase's second fix (a take with nothing running, none with a row running)
+#   CU2-CU5  the drain rule, read dry from the snapshot: an ordinary merge, another repo's Speed fix skipped silently
+#            (a pr: URL, a bare #N through its rollout's Project root), a merge_commit: outside S..G, a tests-only one
+#            (tests/, and skills/*/tests/), a true merge matched by its subject, a phase's drain with an unmarked
+#            docs-only release (a), none once the phase's engine fixes are in S (b) or none of them touches engine
+#            paths (c), and a drained phase's second fix (a take with nothing running, none with a row running)
 #   CU1      the drain end to end: the stamps and the line, next starts nothing and halts catch-up once drained, resolve
-#            due, cut and adopt (moved, the Notes line, verifier restamped), resolve not due, record-entry --by
-#            catch-up, clear-pause, then next starts the queued row on the new snapshot
-#   CU12     a turn lost between adopt and clear-pause: not due; another cut's adopt takes the Reinstate branch
+#            due, cut and adopt (moved, the Notes line, verifier restamped), record-entry --by catch-up, clear-pause,
+#            then next starts the queued row on the new snapshot (resolve's not due once moved is M1's, engine-snapshot)
+#   CU12     a turn lost between adopt and clear-pause: another cut's adopt takes the Reinstate branch, no second moved
 #   CU6      the bound: past 160 min with a row running, the stamps go, a bound line, rows start on the old snapshot;
 #            then a take with nothing running
 #   CU7      a serial chain: a take line only, due with no Leg open (resolve too), redone after a lost turn, never
-#            with a Leg open; cut and adopt move it and the next Leg begins there
+#            with a Leg open; cut and adopt move it (no verifier WARN: a serial note has no stamp) and the next Leg
+#            begins there
 #   CU8      the Run record's catch-up lines; CU9 --abort, and adopt's exit 5 at S; CU9b no churn; CU10 the verifier
-#            reader (prose and a fence ignored, two lines or an unsafe command kept); CU11 his pause wins
+#            reader (prose and a fence ignored, two lines or an unsafe command kept); CU11 his pause wins: over an open
+#            catch-up, a stale one (both stamps gone, or only pause_requested: paused_for dangling), and a move made
+#            (adopt's moved, its turn lost: --abort still removes the stamps, so moving and status read his pause)
 # Hermetic: HOME, the global git config, the vault, the events dir and the locks are temp; the engine origin is a local
 # bare repo at $T/srv/fx/engine.git (its key fx/engine) seeded from this tree's files (tracked and new, never ignored),
 # so nothing reaches the network. bash 3.2-compatible (macOS).
@@ -177,13 +180,13 @@ units; unit fx-p9-1-a "$PRU/106" -
 dec "CU2: an ordinary merge (an unmarked unit's commit under skills/) → none" "none|false"
 units; unit fx-p9-1-a https://github.com/other/proj/pull/105 marked
 dec "CU3: a marked unit whose pr: is another repo's → none" "none|false"
-has "$(j 'd["skipped"]')" "pr: lands on other/proj, not the engine's fx/engine" "CU3: … skipped, with its why"
+ok "$(j 'd["skipped"]')" "[]" "CU3: … skipped silently: no skipped row (another repo's Speed fix is the ordinary case)"
 units; unit fx-p9-1-a "$PRU/105" marked "merge_commit: $V1"
 dec "CU3: a marked unit whose merge_commit: is outside S..G → none (its pr: never read)" "none|false"
 printf -- '---\ntags: [task, rollout]\nstatus: done\nprotocol_version: 5\n---\n\n## Notes\n\nProject root: `%s`\n' "$T/oproj" > "$TASKS/fx-oth.md"
 units; UROLL=fx-oth unit fx-p9-1-a '"#105"' marked
 dec "CU3b: a bare pr: #105 whose rollout's Project root origin is other/proj → none" "none|false"
-has "$(j 'd["skipped"]')" "lands on other/proj" "CU3b: … skipped, with its why"
+ok "$(j 'd["skipped"]')" "[]" "CU3b: … skipped silently: no skipped row"
 units; unit fx-p9-1-a "$PRU/102" marked
 dec "CU4: a marked unit whose commit is tests/ only → none" "none|false"
 units; unit fx-p9-1-a "$PRU/107" marked
@@ -241,9 +244,6 @@ has "$(cat "$TASKS/cu1.md")" "- 2026-11-18T10:25+00:00 engine snapshot moved at 
 ok "$(log cu1 | tail -1)" "- 2026-11-18T10:25+00:00 moved $S12 → $G12 (drain 20 min)" "CU1: … the log ends moved, the drain's minutes"
 ok "$(fmv cu1 verifier)|$(grep -c 'verifier restamped: make old → make test-new' "$TASKS/cu1.md")|$err" "make test-new|1|" \
    "CU10: … verifier: restamped from origin's CLAUDE.md (prose and a fenced line ignored), a Notes line, no WARN"
-es "$N" resolve --rollout "$TASKS/cu1.md"
-ok "$rc|$(j 'd["move"]["due"]')|$(j 'd["move"]["why"]')" \
-   "0|false|an Engine catch-up whose move is made or closed: clear-pause resumes it" "CU1: resolve from N: not due"
 cp "$TASKS/cu1.md" "$T/cu1.lost"   # CU12's lost turn: here, before record-entry and clear-pause
 rr "$N" record-entry --rollout "$TASKS/cu1.md" --by catch-up --session s1 --now 2026-11-18T10:26:00Z
 ok "$rc|$(rec cu1 | tail -1 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["kind"], d["by"], d.get("stop"))')" \
@@ -280,8 +280,6 @@ ok "$rc|$(log cu9 | wc -l | tr -d ' ')" "0|2" "CU9: a second --abort: no open li
 # ════ CU12: a turn lost between adopt and clear-pause ═══════════════════════════════════════════════════════════
 echo "== CU12"
 sed 's/cu1-t/cu12-t/g' "$T/cu1.lost" > "$TASKS/cu12.md"; rows cu12 done
-es "$N" resolve --rollout "$TASKS/cu12.md"
-ok "$rc|$(j 'd["move"]["due"]')" "0|false" "CU12: paused_for: catch-up with the log ending moved → not due"
 es "$P" cut --at "$C6" --tasks-dir "$TASKS"; N2=$(j 'd["snapshot"]')
 es "$N2" adopt --rollout "$TASKS/cu12.md" --now 2026-11-18T11:00:00Z
 ok "$rc|$(j 'd["from"]')|$(grep -c 'moved at reinstate' "$TASKS/cu12.md")|$(log cu12 | grep -c '^- [^ ]* moved ')" "0|$G|1|1" \
@@ -335,7 +333,8 @@ ok "$rc|$(j 'd["due"]')|$(log cu7 | wc -l | tr -d ' ')" "0|true|1" "CU7: a repea
 es "$P" resolve --rollout "$TASKS/cu7.md"
 ok "$(j 'd["move"]["due"]')|$(j 'd["move"]["why"]')" "true|an Engine catch-up's take: this Leg begin moves the chain" "CU7: resolve: due"
 es "$N" adopt --rollout "$TASKS/cu7.md" --now 2026-11-18T10:15:00Z
-ok "$rc|$(j 'd["from"]')|$(log cu7 | tail -1)" "0|$V1|- 2026-11-18T10:15+00:00 moved $S12 → $G12 (take)" "CU7: cut and adopt move the chain: moved (take)"
+ok "$rc|$(j 'd["from"]')|$(log cu7 | tail -1)|$err" "0|$V1|- 2026-11-18T10:15+00:00 moved $S12 → $G12 (take)|" \
+   "CU7: cut and adopt move the chain: moved (take), and no verifier WARN (a serial note has no stamp to restamp)"
 (cd "$T/launch" && python3 "$N/skills/execute/scripts/leg.py" begin --rollout "$TASKS/cu7.md" --tasks-dir "$TASKS" --session s2 \
    --now 2026-11-18T10:16:00+00:00 > "$T/out" 2> "$T/err"); rc=$?
 ok "$rc" 0 "CU7: leg.py begin from N passes the guard"; hasnt "$(cat "$T/err")" "engine-snapshot:" "CU7: … no engine-snapshot: line"
@@ -371,12 +370,17 @@ ok "$rc|$(grep -c 'moved at reinstate' "$TASKS/cu11.md")|$(log cu11 | grep -c '^
 pro cu11c "$S" "$V1" "paused: 2026-11-18T09:00+00:00" "verifier: make test-new"; rows cu11c done
 es "$N" adopt --rollout "$TASKS/cu11c.md"
 ok "$rc|$(grep -c 'verifier restamped' "$TASKS/cu11c.md")|$err" "0|0|" "CU11a': the same Reinstate, CLAUDE.md naming the stamp: no change"
-pro cu11b "$S" "$V1"; rows cu11b open
-cu "$S" cu11b; setfm cu11b paused_for -; setfm cu11b pause_requested -
-cu "$S" cu11b --now 2026-11-18T10:30:00Z
-ok "$rc|$(j 'd["due"]')|$(log cu11b | tail -1 | cut -c26-)" "0|false|not moved at $G12: its stamps were removed" \
-   "CU11b: paused_for removed by hand: catch-up closes the stale line, then decides afresh"
-has "$(j 'd["why"]')" "waits for a newer Green tip" "CU11b: … afresh: the churn wait"
+# CU11b: a stale catch-up, by what is removed: both stamps by hand, or only pause_requested (his soft-pause cancel, a
+# quiet drain's undo), paused_for: catch-up left dangling, which is no catch-up
+for v in "cu11b paused_for pause_requested" "cu11f pause_requested"; do
+  set -- $v; n=$1; shift
+  pro "$n" "$S" "$V1"; rows "$n" open
+  cu "$S" "$n"; for k; do setfm "$n" "$k" -; done
+  cu "$S" "$n" --now 2026-11-18T10:30:00Z
+  ok "$rc|$(j 'd["due"]')|$(fmv "$n" paused_for)|$(log "$n" | tail -1 | cut -c26-)" "0|false|<none>|not moved at $G12: its stamps were removed" \
+     "CU11b: $* removed: catch-up closes the stale line (and a dangling paused_for), then decides afresh"
+  has "$(j 'd["why"]')" "waits for a newer Green tip" "CU11b: … ($*) afresh: the churn wait"
+done
 pro cu11d "$S" "$V1"; rows cu11d open
 cu "$S" cu11d; setfm cu11d paused_for -; setfm cu11d pause_requested -; setfm cu11d paused 2026-11-18T10:40+00:00
 cp "$TASKS/cu11d.md" "$T/cu11d.before"
@@ -385,6 +389,19 @@ cmp -s "$TASKS/cu11d.md" "$T/cu11d.before"; ok "$rc|$?|$(j 'd["due"]')" "0|0|fal
 rr "$S" clear-pause --rollout "$TASKS/cu11d.md" --tasks-dir "$TASKS"
 ok "$rc|$(fmv cu11d paused)|$(log cu11d | tail -1 | cut -c26-)" "0|<none>|not moved at $G12: cleared at a Reinstate" \
    "CU11c: … his clear-pause closes the line (the backstop)"
+# CU11d: his hard pause once adopt has written moved (its turn lost before clear-pause): § Pausing's --abort still
+# removes the stamps, so his paused: never sits beside paused_for: catch-up
+pro cu11m "$S" "$V1"; rows cu11m done
+cu "$S" cu11m; rr "$S" next --rollout "$TASKS/cu11m.md" --tasks-dir "$TASKS" --now 2026-11-18T10:05:00Z
+es "$N" adopt --rollout "$TASKS/cu11m.md" --now 2026-11-18T10:10:00Z
+cu "$N" cu11m --abort --why "his pause" --now 2026-11-18T10:15:00Z
+ok "$rc|$(fmv cu11m paused)|$(fmv cu11m pause_requested)|$(fmv cu11m paused_for)|$(log cu11m | tail -1 | cut -c26-30)|$(rec cu11m | tail -1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["kind"])')" \
+   "0|<none>|<none>|<none>|moved|resumed" "CU11d: adopt moved, then --abort: the stamps go, no log line, the record's resumed"
+setfm cu11m paused 2026-11-18T10:20+00:00; rr "$N" record-pause --rollout "$TASKS/cu11m.md" --tasks-dir "$TASKS"
+rr "$N" moving --rollout "$TASKS/cu11m.md" --tasks-dir "$TASKS" --now 2026-11-18T10:25:00Z
+ok "$rc|$(j 'd["verdict"]')|$(j 'd["cause"]')" "0|waiting|paused" "CU11d: … his hard pause: moving reads paused, not catch-up"
+rr "$N" status --rollout "$TASKS/cu11m.md" --tasks-dir "$TASKS" --now 2026-11-18T10:25:00Z
+ok "$rc|$(j 'd["paused"]')|$(j 'd["pausedFor"]')" "0|2026-11-18T10:20+00:00|null" "CU11d: … and the status JSON: paused, pausedFor null"
 
 # ════ CU9b (last: it moves the Green tip) ═══════════════════════════════════════════════════════════════════════
 echo "== CU9b"
