@@ -2798,24 +2798,33 @@ prep; ok "$(j "$J" 'd["route"]')" merge "C64: main unmoved → route merge"
 mac pending "$H0"
 ok "$mrc|$([ -e "$(MACF)" ] && echo written || echo none)" "2|none" "C64: pending on a route other than verify → 2, nothing written"
 
-# C65: holders: a live merge-task (or verify) of the task makes prepare wait; a dead pid or another command is no holder.
+# C65: holders: a live merge-task (or verify, C61) of this task makes prepare wait; a dead pid, or a live one whose
+# command line is not this task's own run (a reused pid), is no holder. Each holder is a sleeper carrying the arguments.
 fx c65
 main m.txt "theirs" "theirs: m (#7)"
 prep; rec0=$(shasum < "$R/.claude/integration/$SLUG.prepare.json")
-python3 -c 'import time; time.sleep(60)' merge-task.sh & hp=$!
+SLEEPER='import time; time.sleep(60)'
+python3 -c "$SLEEPER" merge-task.sh --mac "$(MACF)" & hp=$!
 echo "$hp" > "$R/.claude/integration/$SLUG.merge-task.pid"
-within 30 sh -c "ps -o command= -p $hp | grep -q merge-task.sh"
+within 30 sh -c "ps -o command= -p $hp | grep -q time.sleep"
 prep
-ok "$prc|$(j "$J" 'd["route"]')|$(shasum < "$R/.claude/integration/$SLUG.prepare.json")" "0|wait|$rec0" "C65: a live merge-task pid → wait, the record untouched"
+ok "$prc|$(j "$J" 'd["route"]')|$(shasum < "$R/.claude/integration/$SLUG.prepare.json")" "0|wait|$rec0" "C65: a live merge-task of this task → wait, the record untouched"
 has "$(j "$J" 'd["reason"]')" "an earlier merge-task (pid $hp) of [[$SLUG]] still runs" "C65: … naming it"
 kill "$hp"; wait "$hp" 2>/dev/null; git -C "$WT" reset -q --hard "$H0"
 prep
 ok "$(j "$J" 'd["route"]')" verify "C65: its pid dead → prepare routes as before"
-sleep 61 & sp=$!
-echo "$sp" > "$R/.claude/integration/$SLUG.pid"; git -C "$WT" reset -q --hard "$H0"
-prep
-ok "$(j "$J" 'd["route"]')" verify "C65: a live pid whose command names neither script → no holder"
-kill "$sp"; wait "$sp" 2>/dev/null
+nohold() {  # nohold <pid-file suffix> <what> [args…]: a live sleeper with those args, its pid in that file, holds nothing
+  local sfx=$1 what=$2 np; shift 2
+  python3 -c "$SLEEPER" "$@" & np=$!
+  echo "$np" > "$R/.claude/integration/$SLUG$sfx"
+  within 30 sh -c "ps -o command= -p $np | grep -q time.sleep"
+  git -C "$WT" reset -q --hard "$H0"; prep
+  ok "$(j "$J" 'd["route"]')" verify "C65: $what → no holder"
+  kill "$np"; wait "$np" 2>/dev/null; rm -f "$R/.claude/integration/$SLUG$sfx"
+}
+nohold .pid "a live pid whose command names neither script"
+nohold .merge-task.pid "another task's merge-task" merge-task.sh --mac "$R/.claude/integration/other.mac.json"
+nohold .pid "a verify of another task whose path starts with this one's" lead-integrate.py verify --out "$R/.claude/integration/$SLUG-b"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

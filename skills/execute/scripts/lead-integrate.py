@@ -12,9 +12,11 @@ Subcommands:
       Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
       `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
       stops here (p26-1). Then the holder check (p54-15): while an earlier verify or merge-task --mac of the slug still
-      runs (_live_holders: <repo>/.claude/integration/<slug>.pid or <slug>.merge-task.pid names a live pid whose
-      `ps -o command=` holds lead-integrate.py or merge-task.sh; a dead pid, a reused one, a missing or unparsable file is
-      no holder), route `wait` with `an earlier verify (pid P) / merge-task (pid Q) of [[S]] still runs: wait for its
+      runs (_live_holders: with <stem> = <repo>/.claude/integration/<slug>, <stem>.pid names a live pid whose
+      `ps -ww -o command=` runs lead-integrate.py with `--out <stem>`, or <stem>.merge-task.pid one that runs
+      merge-task.sh with `--mac <stem>.mac.json`, each a whole argument; a dead pid, one reused by any other command
+      (another task's or another repo's verify or merge-task included), a missing or unparsable file is no holder),
+      route `wait` with `an earlier verify (pid P) / merge-task (pid Q) of [[S]] still runs: wait for its
       notification`: nothing fetched, merged or written, the prepare record kept. In order: fetch origin with --prune (retried once; failing
       twice is exit 8); H = origin/<branch> (absent: route `set-aside`, reason `origin/<branch> does not
       exist — the PR branch is gone`); the anchor A = the engine's ANCHOR_RECIPE (pinned copy) with
@@ -814,7 +816,10 @@ def _tree_trouble(tree, br):
 MAC_SUFFIX = ".mac.json"
 MAC_STATES = ("pending", "green", "red", "stopped")
 CASE_III_WHY = "case (iii): the lead merge was never verified green, so no green run stands"
-HOLDER_FILES = (("verify", ".pid", "lead-integrate.py"), ("merge-task", ".merge-task.pid", "merge-task.sh"))
+# A holder (prepare's holder check): its pid file beside this task's integration stem <repo>/.claude/integration/<slug>,
+# its script, and the argument that names that stem on its command line, so only this task's own run holds.
+HOLDER_FILES = (("verify", ".pid", "lead-integrate.py", "--out {stem}"),
+                ("merge-task", ".merge-task.pid", "merge-task.sh", "--mac {stem}" + MAC_SUFFIX))
 
 
 def mac_path(repo, slug):
@@ -843,9 +848,10 @@ def _mac_case(repo, slug, h, b):
     return {"head": h, "base": base, "state": d["state"]}
 
 
-def _holder(path, script):
-    """The pid in `path` when that process is alive and its command names `script`; else None (no file, an unparsable
-    one, a dead pid, a pid reused by another command, or this process)."""
+def _holder(path, script, arg):
+    """The pid in `path` when that process is alive and its command line runs `script` with `arg` (this task's own path)
+    as a whole argument; else None (no file, an unparsable one, a dead pid, a pid reused by any other command, another
+    task's or another repo's verify or merge-task included, or this process)."""
     try:
         pid = int(Path(path).read_text().strip())
     except (OSError, ValueError):
@@ -858,15 +864,16 @@ def _holder(path, script):
         pass
     except OSError:
         return None
-    p = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, env=ENV)
-    return pid if p.returncode == 0 and script in p.stdout else None
+    p = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, env=ENV)
+    cmd = f" {p.stdout.strip()} "
+    return pid if p.returncode == 0 and script in cmd and f" {arg} " in cmd else None
 
 
 def _live_holders(repo, slug):
-    """[(kind, pid)] for an earlier verify (<slug>.pid, `verify --out <slug>`) or merge-task --mac (<slug>.merge-task.pid)
-    of this task that still runs."""
-    d = Path(os.path.expanduser(str(repo))) / ".claude" / "integration"
-    found = [(kind, _holder(d / f"{slug}{suffix}", script)) for kind, suffix, script in HOLDER_FILES]
+    """[(kind, pid)] for an earlier verify (<slug>.pid, `verify --out <stem>`) or merge-task --mac (<slug>.merge-task.pid,
+    `--mac <stem>.mac.json`) of this task that still runs, <stem> being <repo>/.claude/integration/<slug>."""
+    stem = Path(os.path.expanduser(str(repo))) / ".claude" / "integration" / slug
+    found = [(kind, _holder(f"{stem}{suffix}", script, arg.format(stem=stem))) for kind, suffix, script, arg in HOLDER_FILES]
     return [(kind, pid) for kind, pid in found if pid]
 
 
