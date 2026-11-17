@@ -10,10 +10,19 @@ Why. A rollout whose main is already red blocked its tasks at the verifier on re
 the machine's verify slots, and hands schedule the `## Known baseline failures` block execute threads into every agent
 as knownBaselineFailures (execute SKILL § 4: "only these fail" is green, never a --deselect).
 
-Stdlib only, python >= 3.8. It loads engine-snapshot.py (git_env()) from its own directory and reconcile-rollout.py
-(_failing_ids, DEFAULT_VERIFY_TIMEOUT, _slot_wait, FAILING_IDS_MAX) from skills/execute/scripts by path (importlib), and
-runs lead-integrate.py's `verify` as its child for the run itself. This header is the one copy of its rules; schedule
-step 2.6 reads its output.
+Stdlib only, python >= 3.8. It loads engine-snapshot.py (git_env()) from its own directory, and reconcile-rollout.py
+(_failing_ids, DEFAULT_VERIFY_TIMEOUT, _slot_wait, FAILING_IDS_MAX) and verify-slot.py (its run's frame) from
+skills/execute/scripts by path (importlib), and runs lead-integrate.py's `verify` as its child for the run itself. This
+header is the one copy of its rules; schedule step 2.6 reads its output.
+
+The frame (the in-turn wait). The run outlives a foreground Bash call, so schedule launches it in the background, and a
+fork (orient-all § 6, the Backlog orient) ends its background runs when its turn ends. So it frames its run as
+verify-slot.py's `run` does (that script's contract item 9): first, on stderr, `verify-slot: run <pid> started; wait
+for its verdict with: python3 '<verify-slot.py>' wait --log '<its output file>' --pid <pid>`, and last, on every
+return (a usage error and an unexpected exception included), `verify-slot: exit <rc> (run <pid>)`, after its JSON line
+is flushed. That wait command reports the end inside the caller's turn, 540 s a call, again on its exit 75.
+A stop. A TERM, INT or HUP is passed on to the verify, whose own stop path ends the suite through its guard and
+removes the tree; the capture then prints a `noverdict` line (`why`: stopped by signal <n>) and exits 128+n.
 
 The run, in order:
   1. Fetch. `git fetch --quiet origin B` in R under git_env(), bounded by FETCH_TIMEOUT; a failure is no stop: the
@@ -34,18 +43,22 @@ The run, in order:
      - another integer naming no test: unnamed. Block `none` (a baseline is test ids; a red the engine cannot match
        by name is no baseline), and the line says main is red.
      - 124 (the deadline), `noslot`, `heat` (the Heat hold or the Capacity stop), the log's `env_bootstrap failed`,
-       or no rc at all: no verdict. Block `none`, `why` the cause.
+       a stop (the log's `verify: stopped by signal`, or one this script passed on), or no rc at all: no verdict.
+       Block `none`, `why` the cause.
 Output: one JSON line on stdout, {status: green | red | unnamed | noverdict, sha, default, fetched, rc, failing,
 truncated, why, block, line, log}: `block` the text for schedule's {{KNOWN_BASELINE_FAILURES}}, `line` step 8's
-`Baseline:` line. Exit 0 for every verdict above (a capture is a fact, never a stop); 2 for a usage error, a --repo
-that is no git work tree, no origin/B, or lead-integrate's own exit 2, with one `baseline-capture: …` line on stderr.
+`Baseline:` line. Exit 0 for every verdict above (a capture is a fact, never a stop) but a stop's 128+n; 2 for a usage
+error, a --repo that is no git work tree, no origin/B, or lead-integrate's own exit 2, with one `baseline-capture: …`
+line on stderr.
 """
 import argparse
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
+import traceback
 from datetime import date
 from pathlib import Path
 
@@ -54,6 +67,8 @@ HERE = Path(__file__).resolve().parent
 EXEC_SCRIPTS = HERE.parent.parent / "execute" / "scripts"
 FETCH_TIMEOUT = 120
 GIT_TIMEOUT = 60
+STOPS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+STOPPED_LINE = "verify: stopped by signal"   # lead-integrate verify's log line for a stop
 
 
 def _load(name, path):
@@ -65,6 +80,7 @@ def _load(name, path):
 
 ES = _load("thread_engine_snapshot_bc", HERE / "engine-snapshot.py")
 rr = _load("thread_reconcile_rollout_bc", EXEC_SCRIPTS / "reconcile-rollout.py")
+VS = _load("thread_verify_slot_bc", EXEC_SCRIPTS / "verify-slot.py")
 LEAD_INTEGRATE = EXEC_SCRIPTS / "lead-integrate.py"
 
 
@@ -108,14 +124,17 @@ def _read(path):
         return None
 
 
-def verdict(rc_text, log_text, branch, sha, day):
-    """The capture's verdict from the verify's rc file text (None: no rc) and its log text: {status, rc, failing,
-    truncated, why, block, line}. Pure: the header's step 4."""
+def verdict(rc_text, log_text, branch, sha, day, stopped=None):
+    """The capture's verdict from the verify's rc file text (None: no rc), its log text and the stop signal this script
+    passed on (None: none): {status, rc, failing, truncated, why, block, line}. Pure: the header's step 4."""
     short = sha[:7]
     out = {"rc": None, "failing": [], "truncated": False, "why": ""}
     rc = (rc_text or "").strip()
     log = log_text or ""
-    if rc_text is None or not rc:
+    if stopped is not None or STOPPED_LINE in log:
+        why = f"stopped by signal {stopped}" if stopped is not None else "stopped by a signal"
+        out.update(status="noverdict", why=why, rc=int(rc) if rc.isdigit() else (rc or None))
+    elif rc_text is None or not rc:
         out.update(status="noverdict", why="no rc: the verify did not finish")
     elif rc == "noslot":
         out.update(status="noverdict", why="no verify slot came in time", rc=rc)
@@ -164,15 +183,62 @@ def capture(args):
         cmd += ["--slots", str(args.slots)]
     if args.bootstrap:
         cmd += ["--bootstrap", args.bootstrap]
-    p = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
-                       env=ES.git_env())
-    if p.returncode == 2 and not Path(f"{out}.rc").exists():
-        raise CaptureError(f"lead-integrate verify: {(p.stderr or '').strip() or 'exit 2'}")
-    res = verdict(_read(Path(f"{out}.rc")), _read(Path(f"{out}.log")), args.default, sha, args.date)
-    return dict(status=res.pop("status"), sha=sha, default=args.default, fetched=fetched, **res, log=f"{out}.log")
+    code, err, stopped = _verify(cmd)
+    if code == 2 and stopped is None and not Path(f"{out}.rc").exists():
+        raise CaptureError(f"lead-integrate verify: {(err or '').strip() or 'exit 2'}")
+    res = verdict(_read(Path(f"{out}.rc")), _read(Path(f"{out}.log")), args.default, sha, args.date, stopped)
+    res = dict(status=res.pop("status"), sha=sha, default=args.default, fetched=fetched, **res, log=f"{out}.log")
+    return res, stopped
+
+
+def _verify(cmd):
+    """lead-integrate verify as this script's child: (its exit, its stderr, the first stop signal or None). A TERM, INT
+    or HUP is passed on to it (its stop path ends the suite and removes the tree) and waited out; one before the spawn
+    spawns nothing."""
+    st = {"proc": None, "sig": None}
+
+    def on_stop(signum, _frame):
+        st["sig"] = st["sig"] or signum
+        if st["proc"] is not None:
+            try:
+                st["proc"].send_signal(signum)
+            except OSError:
+                pass
+
+    old = {s: signal.signal(s, on_stop) for s in STOPS}
+    try:
+        if st["sig"] is not None:
+            return None, "", st["sig"]
+        st["proc"] = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                      text=True, env=ES.git_env())
+        if st["sig"] is not None:   # a stop between the spawn and the handle
+            on_stop(st["sig"], None)
+        _, err = st["proc"].communicate()
+        return st["proc"].returncode, err, st["sig"]
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
 
 
 def main(argv=None):
+    """The framed run (the header's frame): the start line, the capture, then the exit line on every return."""
+    pid = os.getpid()
+    VS._frame(f"run {pid} started; wait for its verdict with: python3 {VS._shq(VS.SCRIPT)} wait --log "
+              f"{VS._shq(VS._stderr_path() or VS.NO_PATH)} --pid {pid}")
+    rc = 1
+    try:
+        rc = _main(argv)
+    except SystemExit as e:   # argparse: a usage error (2) or --help (0)
+        rc = e.code if isinstance(e.code, int) else (0 if e.code is None else 2)
+    except Exception:
+        traceback.print_exc()
+        rc = 1
+    finally:
+        VS._frame(f"exit {rc} (run {pid})")
+    return rc
+
+
+def _main(argv):
     ap = argparse.ArgumentParser(prog="baseline-capture.py", description=__doc__.split("\n")[0])
     ap.add_argument("--repo", required=True)
     ap.add_argument("--default", required=True, help="the default branch: the capture runs on origin/<default>")
@@ -188,11 +254,12 @@ def main(argv=None):
     if args.timeout is not None and args.timeout <= 0:
         ap.error("--timeout must be a positive number of seconds")
     try:
-        print(json.dumps(capture(args), ensure_ascii=False))
+        res, stopped = capture(args)
     except CaptureError as e:
-        print(f"baseline-capture: {e}", file=sys.stderr)
+        print(f"baseline-capture: {e}", file=sys.stderr, flush=True)
         return 2
-    return 0
+    print(json.dumps(res, ensure_ascii=False), flush=True)
+    return 128 + stopped if stopped is not None else 0
 
 
 if __name__ == "__main__":

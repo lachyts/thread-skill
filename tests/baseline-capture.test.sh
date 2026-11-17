@@ -5,6 +5,8 @@
 #       the block as execute reads it (its knownBaselineFailures), the run held in a verify slot, the tree removed
 #   B2  a green main records none
 #   B3  a red main naming no test, a failed bootstrap and a missing origin/<default>
+#   B4  the frame: the wait command its first line names reports its end inside the caller's turn (a fork's)
+#   B5  a stop is passed on to the verify: no verdict, none recorded, the tree removed
 # Hermetic: temp repos, ssh disabled, the verify slots in a temp pool, the heat reading pinned.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -71,5 +73,33 @@ ok "$rc|$(j fetched)" "0|null" "B3: --no-fetch runs on the origin/master the rep
 out=$(python3 "$BC" --repo "$tmp/repo" --default nope --verifier true --timeout 60 2>"$tmp/err"); rc=$?
 ok "$rc|$out" "2|" "B3: no origin/<default> is exit 2, nothing printed"
 has "$(cat "$tmp/err")" "baseline-capture: no origin/nope" "B3: … with its one stderr line"
+
+# ---- B4: the frame, so a fork waits for the capture inside its turn ----
+main 'echo "not ok 1 - tests/a.test.sh"; exit 1'
+python3 "$BC" --repo "$tmp/repo" --default master --verifier 'bash check.sh' --timeout 60 --slots 1 --slot-wait 30 \
+  --date 2026-11-18 >"$tmp/bg.out" 2>&1 &
+bg=$!
+for _ in $(seq 200); do [ -s "$tmp/bg.out" ] && break; sleep 0.1; done
+first=$(head -1 "$tmp/bg.out")
+has "$first" "verify-slot: run $bg started; wait for its verdict with: python3 " "B4: its first line names the wait"
+eval "${first#*wait for its verdict with: } --for 60" >/dev/null 2>"$tmp/wait.err"; wrc=$?
+wait "$bg"
+ok "$wrc|$(tail -1 "$tmp/wait.err")" "0|verify-slot: exit 0 (run $bg)" "B4: … which reports the capture's end"
+out=$(grep '^{' "$tmp/bg.out")
+ok "$(j status)|$(j failing)" 'red|["tests/a.test.sh"]' "B4: … its JSON line written before the exit line"
+
+# ---- B5: a stop is passed on to the verify ----
+main 'echo started; sleep 30; exit 0'
+python3 "$BC" --repo "$tmp/repo" --default master --verifier 'bash check.sh' --timeout 60 --slots 1 --slot-wait 30 \
+  --date 2026-11-18 >"$tmp/stop.out" 2>&1 &
+bg=$!
+for _ in $(seq 200); do grep -qs '^== verifier:' "$tmp/repo/.claude/baseline/main-$bg.log" && break; sleep 0.1; done
+kill "$bg"; wait "$bg"; src=$?
+out=$(grep '^{' "$tmp/stop.out")
+ok "$src|$(j status)|$(j block)" "143|noverdict|none" "B5: a stopped capture is no verdict, none recorded, exit 128+n"
+has "$(j line)" "not captured: stopped by signal 15" "B5: … its line names the stop"
+has "$(cat "$(j log)")" "verify: stopped by signal 15" "B5: … passed on to the verify, which stopped its suite"
+ok "$(ls "$tmp/repo/.claude/baseline" | grep -c '^tree-')" 0 "B5: … and the verify it passed the stop to removed its tree"
+ok "$(tail -1 "$tmp/stop.out")" "verify-slot: exit 143 (run $bg)" "B5: … its exit line last"
 
 exit $fail
