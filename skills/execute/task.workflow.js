@@ -364,12 +364,20 @@ const PLAN_VERDICT = {
   required: ['ready', 'blocked', 'blockerCause', 'plan'],
 }
 
+// An acceptance review can never close (p47-13; Watch 2eeb9875 of chorus-rollout-2026-10-26, where the gate approved
+// a write guard meant to parse every shell form, review blocked twice on new shell-form holes and the brief was
+// rewritten mid-run): a plan whose acceptance asks to cover every form of an open set is a plan-judge `changes`, its
+// bullet led by UNBOUNDED_ACCEPTANCE and asking for a bounded acceptance. The criterion rides in planJudgePrompt's
+// checklist and its Decide line, and in PLAN_JUDGE's feedback description, so the reason reaches the plan reviser
+// and a plan-blocked row's diagnosis word for word.
+const UNBOUNDED_ACCEPTANCE = 'Unbounded acceptance:'
+
 const PLAN_JUDGE = {
   type: 'object',
   additionalProperties: false,
   properties: {
     verdict: { type: 'string', enum: ['approve', 'changes'] },
-    feedback: { type: 'array', items: { type: 'string' }, description: '3–8 specific bullets when verdict is changes; empty when approve' },
+    feedback: { type: 'array', items: { type: 'string' }, description: `3–8 specific bullets when verdict is changes; empty when approve. An acceptance that asks to cover every form of an open set gets a bullet that starts "${UNBOUNDED_ACCEPTANCE}", names the open set and asks for a bounded acceptance (an allowlist, a named set)` },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
   },
   required: ['verdict', 'feedback'],
@@ -1665,6 +1673,12 @@ Check, against the task brief:
 - Caller-wiring check done (dead-code prevention — is the new surface actually called in production)?
 - Are the edge cases the right ones?
 - Are the stated risks/unknowns the real ones?
+- Can its acceptance ever close? An acceptance (in the brief or the plan) that asks to cover EVERY form of
+  an open set (every shell form that could write a file, every spelling of a path, every phrasing of a
+  request) can never be shown done: each review round finds one more form, and review blocks without end.
+  That is an automatic "changes" whose bullet starts "${UNBOUNDED_ACCEPTANCE}", names the open set, and
+  asks for a bounded acceptance: an allowlist (the forms accepted, everything else refused) or a named,
+  finite set of forms the tests list.
 - Does the plan carry the required "### Gated inputs" section — either exactly "None" or concrete gate
   BULLETS at column 0 ("- spend: <what> — cap N USD", one line WITH a hard cap / "- credential: …" /
   "- irreversible: …")? A missing section, a spend gate without a cap, or non-bullet prose in the section
@@ -1683,7 +1697,8 @@ ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Tests: you need not run any. To check a claim, ${observeTests('the files the plan names', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
-specific, actionable feedback bullets.${NEEDS_HUMAN_RULE}`
+specific, actionable feedback bullets. An unbounded acceptance is never a nitpick: it is always "changes",
+with its "${UNBOUNDED_ACCEPTANCE}" bullet.${NEEDS_HUMAN_RULE}`
 }
 
 function planReviserPrompt(task, priorPlan, priorFeedback, round, a) {
