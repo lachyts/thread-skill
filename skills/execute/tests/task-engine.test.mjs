@@ -725,14 +725,17 @@ test('p31-2: a fixture PR: each judge reads its latest code-writer\'s delta line
 
 // ---- p47-13: the plan gate rejects a plan whose acceptance review can never close -------------------------------
 // A fixture plan whose acceptance covers every form of an open set (Watch 2eeb9875: a write guard that parses every
-// shell form). The scripted judge applies the criterion only when its rendered prompt carries it, so a prompt that
-// lost the criterion lets the plan through and fails here. Kept unbounded through the revise, the plan is
-// plan-blocked before any code, with the reason in its diagnosis; revised to an allowlist, it is approved and built.
+// shell form). The scripted judge applies the criterion only when its rendered prompt carries it, and only to the plan
+// it is shown (planOf: the text between the prompt's `---` lines, since the criterion's own example names a shell form
+// too), so a prompt that lost the criterion lets the plan through and fails here. Kept unbounded through the revise,
+// the plan is plan-blocked before any code, with the reason in its diagnosis; revised to an allowlist, it is approved
+// and built.
 const UNBOUNDED = 'Unbounded acceptance:'
+const planOf = (prompt) => (prompt.split('The plan to review:\n---\n')[1] || '').split('\n---\n')[0]
 const PLAN_UNBOUNDED = 'Planned on: abc\n### Files to modify\n- guard.py\n### Test strategy\n- acceptance: the guard refuses every shell form that writes the file\n### Gated inputs\nNone'
 const PLAN_BOUNDED = 'Planned on: abc\n### Files to modify\n- guard.py\n### Test strategy\n- acceptance: only the allowlisted commands (cp, mv, tee) may write the file; every other command is refused\n### Gated inputs\nNone'
 const judgeOpenSets = {
-  planJudge: (l, prompt) => (prompt.includes(`bullet starts "${UNBOUNDED}"`) && prompt.includes('every shell form') ? 'changes' : 'approve'),
+  planJudge: (l, prompt) => (prompt.includes(`bullet starts "${UNBOUNDED}"`) && planOf(prompt).includes('every shell form') ? 'changes' : 'approve'),
   planFeedback: () => [`${UNBOUNDED} "every shell form that writes the file" is an open set; bound it with an allowlist of the commands allowed to write`],
 }
 

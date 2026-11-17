@@ -2173,14 +2173,16 @@ await (async () => {
 const P312X = loadEngine(['BUG_PREFLIGHTS', 'TEST_RULES', 'TEST_DELTA_TASK', 'TEST_DELTA_REVIEW', 'testDeltaLine'])
 // p31-2's [new, old] pairs for the whole-call pins (the pins block below): the code-writers' fragments after
 // BUG_PREFLIGHTS, and the review judge's after its depth paragraph (the pinned calls' judges see no delta, so the none
-// line). preP312 is the innermost swap: a call through it is its pre-p31-2 bytes, so every older pin and chain holds.
+// line). preP312 is the innermost swap after p47-13's preP4713 (the pins block below): a call through it is its pre-p31-2
+// bytes, so every older pin and chain holds.
 const P31_2 = [
   [P312X.BUG_PREFLIGHTS + '\n\n' + P312X.TEST_RULES + '\n\n' + P312X.TEST_DELTA_TASK, P312X.BUG_PREFLIGHTS],
   ['\n\n' + P312X.TEST_RULES + '\n\n' + P312X.testDeltaLine(null) + '\n' + P312X.TEST_DELTA_REVIEW, ''],
 ]
 const preP312 = (p) => P31_2.reduce((x, [nw, od]) => x.split(nw).join(od), p)
 // The p31-2 pins, recorded from the green build's own renders: the revisers and the three calls as rendered, slotted
-// and unslotted. Through preP312 they hash to P29_PINS (r2, r3, calls, slotted), which did not move.
+// and unslotted (the calls through preP4713 since p47-13, whose own pins are P47_13_PINS). Through preP312 they hash to
+// P29_PINS (r2, r3, calls, slotted), which did not move.
 const P31_2_PINS = {
   r2: 'b3dde19a14a4fe7cd2001a5aaa7e29d92e672e4020bfe604afa88778d2c24cf6', // the unseeded round-2 reviser
   r3: '3c0367e90385dba1130499fa4d1cafe53d14a28020d95a6f6828c0b9856745b9', // the unseeded round-3 reviser with the plan
@@ -2356,6 +2358,25 @@ const P23_1 = [ // [new, old]
 ]
 // A prompt with every p23-1 fragment swapped back for its old text.
 const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// p47-13 (an acceptance review can never close is a plan-judge "changes") moved no pin: the plan judge's checklist gains
+// the "Can its acceptance ever close?" bullet and its Decide line the never-a-nitpick sentence. P47_13 holds each
+// [new, old] fragment, anchored on its neighbours, and preP4713 swaps them back first, before every push below (the
+// innermost swap, inside preP312), so the calls through it are their pre-p47-13 bytes and every older pin and chain,
+// P31_2_PINS included, holds. P47_13_PINS holds the three calls as rendered. Only a plan judge renders the fragments
+// (proj-fix-p's and proj-audit-x's plan gates), so the reviser pins and the rows did not move. A deliberate
+// resume-cache break, like p23-1's: the plan judge's prompt and PLAN_JUDGE's feedback description (its opts) changed;
+// a resume re-passes its run's own `scriptPath` (ADR 0043).
+const P47_13 = [ // [new, old]
+  ['the real ones?\n- Can its acceptance ever close? An acceptance (in the brief or the plan) that asks to cover EVERY form of\n  an open set (every shell form that could write a file, every spelling of a path, every phrasing of a\n  request) can never be shown done: each review round finds one more form, and review blocks without end.\n  That is an automatic "changes" whose bullet starts "Unbounded acceptance:", names the open set, and\n  asks for a bounded acceptance: an allowlist (the forms accepted, everything else refused) or a named,\n  finite set of forms the tests list.\n- Does the plan carry',
+    'the real ones?\n- Does the plan carry'], // the checklist bullet
+  ['actionable feedback bullets. An unbounded acceptance is never a nitpick: it is always "changes",\nwith its "Unbounded acceptance:" bullet.',
+    'actionable feedback bullets.'], // the Decide line
+]
+const preP4713 = (p) => P47_13.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+const P47_13_PINS = {
+  calls: '1a94f0bc1be99cf9fee64956b69a72c87a5dc76a36e53d430ae24f196ec69e54', // three whole task-mode calls, unslotted
+  slotted: '1cfc799b2225fcc00b4c1fb70ff50726713980cf8c03b141f4b3d0927b1077d8', // the same calls as run, slotted
+}
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -2459,6 +2480,8 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const baseRows = []
   const p312Calls = []
   const p312Slotted = []
+  const p4713Calls = []
+  const p4713Slotted = []
   const treeCalls = []
   for (const args of [
     mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
@@ -2466,8 +2489,13 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
   ]) {
     const r = await runTask(args, scripted)
-    // p31-2: the calls as rendered, then through preP312 (the innermost swap) before every push below, so each older
-    // pin and chain reads its pre-p31-2 bytes.
+    // p47-13: the calls as rendered, then through preP4713 (the innermost swap) before every push below, so each older
+    // pin and chain, p31-2's included, reads its pre-p47-13 bytes.
+    p4713Slotted.push(JSON.stringify(r.calls))
+    p4713Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))))
+    r.calls = r.calls.map((c) => ({ ...c, prompt: preP4713(c.prompt) }))
+    // p31-2: the calls through preP4713, then through preP312 before every push below, so each older pin and chain
+    // reads its pre-p31-2 bytes.
     p312Slotted.push(JSON.stringify(r.calls))
     p312Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))))
     treeCalls.push(...r.calls.filter((c) => /^(plan|plan-judge|plan-revise|investigate):/.test(c.label)))
@@ -2564,6 +2592,13 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     'byte pin (p31-2): three whole task-mode calls, unslotted — the p29-9 calls pin above plus the test rules and the test delta')
   ok(sha(p312Slotted.join('\n')) === P31_2_PINS.slotted,
     'byte pin (p31-2): the same three calls as run, slotted — the p29-9 slotted pin above plus the test rules and the test delta')
+  // p47-13: each fragment renders in these calls (no no-op swap), and the calls as rendered hold their own pins; the pins
+  // above, through preP4713, are the pre-p47-13 ones, none moved.
+  for (const [i, [nw]] of P47_13.entries()) ok(p4713Slotted.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p47-13: fragment ${i + 1} renders in these calls, so its swap is no no-op`)
+  ok(sha(p4713Calls.join('\n')) === P47_13_PINS.calls,
+    'byte pin (p47-13): three whole task-mode calls, unslotted — the p31-2 calls pin above plus the plan judge\'s Unbounded acceptance bullet and Decide sentence')
+  ok(sha(p4713Slotted.join('\n')) === P47_13_PINS.slotted,
+    'byte pin (p47-13): the same three calls as run, slotted — the p31-2 slotted pin above plus the same two fragments')
 }
 
 console.log()
