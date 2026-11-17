@@ -853,6 +853,24 @@ test('D10. plan: each live rollout carries its holds; execute, repair and reinst
     'live-rollout-2026-10-19').reinstate, false, 'a live, unpaused rollout never reinstates')
 })
 
+// p54-14: an Engine catch-up (pausedFor: catch-up, its drain or its move) holds `catching up` in place of paused or
+// draining, and no reinstate item starts: the live lead moves it. D10's paused rollout is the control ("paused by you").
+test('D10b. plan: an Engine catch-up holds catching up, never paused or draining, and status action 8 starts nothing', () => {
+  const scan = scanned()
+  const cu = (slug, o) => { scan.rollouts.find((r) => r.slug === slug).summary = SUM({ ...SUMMARIES[slug], pausedFor: 'catch-up', ...o }) }
+  cu('paused-rollout-2026-10-19', {})
+  cu('drain-rollout-2026-10-19', {})
+  const scanPath = keep('scan-catch-up.json', JSON.stringify(scan))
+  ranked()
+  const run = py(['plan', '--rank', RANK_FILE, '--scan', scanPath])
+  const j = ok(run)
+  for (const slug of ['paused-rollout-2026-10-19', 'drain-rollout-2026-10-19']) assert.deepEqual(rolloutOf(j, slug).holds, ['catching up'], slug)
+  const planPath = keep('plan-catch-up.json', run.stdout)
+  const s8 = ok(sessions(planPath, ['--status', 'paused-rollout-2026-10-19=8']))
+  assert.equal(s8.items.find((x) => x.rollout === 'paused-rollout-2026-10-19'), undefined)
+  assert.match(s8.left.find((x) => x.rollout === 'paused-rollout-2026-10-19').why, /an Engine catch-up: the live lead moves it/)
+})
+
 // ---- D11. --assume-answered ----------------------------------------------------------------------------------------------
 test('D11. plan: --assume-answered --rounds F equals passing F\'s slugs as --decided, byte for byte', () => {
   const r = ok(R30())

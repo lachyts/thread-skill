@@ -53,13 +53,41 @@ The engine root of a note (resolve's `root`, and the root guard() wants):
 - stamped, archived (any path under an `Archive/` directory): the snapshot when it is usable; when it is not
   (`gone: true`), the unstamped root.
 
+The Catch-up log (an Engine catch-up, ADR 0084 d5, p54-14; this is its one copy, and reconcile-rollout.py's `catch-up`
+and engine-snapshot.md cite it). `## Catch-up log` on the rollout note, append-only, written only by
+reconcile-rollout.py `catch-up` (drain, take, and `not moved` at --abort or at a stale close), its `next` (bound), adopt
+(moved) and its clear-pause (`not moved` as the backstop); never by hand. Its lines, `<ts>` a stamp,
+`<g12>`/`<old12>`/`<new12>` twelve hex:
+    - <ts> drain [[R]] (p<N>)[, [[R2]] (p<M>)] at <g12> from <old12>: [[f]], …
+    - <ts> take at <g12> from <old12>: [[f]], …
+    - <ts> moved <old12> → <new12> (drain <M> min | take)
+    - <ts> not moved at <g12>: <why>
+    - <ts> bound [[R]][, [[R2]]] after <M> min: on <old12>
+catch_up_log(body) parses them (any other line is skipped); catch_up_open(body) is the open catch-up: the last of them
+when it is a drain or take line ({ts, verb, releases, green12, from12, fixes}), else None. Live or stale: a parallel
+open line is live only while `paused_for: catch-up` stands on the note, else stale (its stamps were removed: the verb
+closes it when no pause of any kind stands, his clear-pause when his does); a serial open line is always live (the take
+line is the chain's only mark, and it moves only with no Leg open). One closer per path: adopt writes `moved`;
+`catch-up --abort` writes `not moved at <g12>: <why>` (§ 1.5's failed move, § Pausing when his pause takes over);
+`next` past the drain bound writes `bound`; clear-pause writes `not moved at <g12>: cleared at a Reinstate`; the verb
+itself closes a stale line with `not moved at <g12>: its stamps were removed`. No churn: after a `not moved at <g12>`
+line no new drain or take starts until the Green tip is a strict descendant of g12 (a `bound` line is no `not moved`
+line: a take at the same Green tip is allowed once nothing runs). A phase drains once: any `drain [[R]]` line, however
+it closed, spends R's drain.
+
 The move rule (resolve's `move: {due, why}`, its one copy; execute § 1.5 acts on it). due is true only for a note
 that is not archived, whose `status` is neither done nor dropped, with no `superseded_by:`, and:
 - parallel (no `shape:` or anything but serial), stamped or not: `paused:` is set and `paused_for:` is empty: a hard
   pause, so this /thread:execute is its Reinstate. A sign-off pause (`paused_for: sign-off`, ADR 0034) is false, why
   "sign-off pause (ADR 0034): the engine's own pause, never a move": its reinstate runs on the note's snapshot and the
-  session's signed-gate handles keep their cache replay. Any other `paused_for:` is the engine's pause too, and false;
-- serial, stamped: the `## Leg log`'s last `Leg <N> closed:` line is `closed: stopped: …` and no `Leg <M> began:`
+  session's signed-gate handles keep their cache replay. `paused_for: catch-up` with an open drain or take line
+  (catch_up_open) is due, why "an Engine catch-up drained: the lead's own move (ADR 0084 d5)"; with none (its move made
+  or closed: a turn lost between adopt and clear-pause) it is false, why "an Engine catch-up whose move is made or
+  closed: clear-pause resumes it", so no second cut follows. Any other `paused_for:` is the engine's pause too, and
+  false;
+- serial, stamped: an open take (catch_up_open's verb `take`) with no Leg open (the Leg log's last event is no
+  `began:`) is due, why "an Engine catch-up's take: this Leg begin moves the chain", read before the stopped-close rule.
+  Otherwise the `## Leg log`'s last `Leg <N> closed:` line is `closed: stopped: …` and no `Leg <M> began:`
   line with M > N follows it. A halted, stuck, lost or handoff close moves nothing for a stamped note;
 - serial, unstamped: no Leg is open, so this Leg begin is its first stamp: the Leg log has no `began:` or `closed:`
   line (its first Leg), or its last such line is a `closed:` of any kind. A `began:` last is false (this session's own
@@ -68,7 +96,20 @@ An unstamped note (no `engine_snapshot:`) is stamped at these moments by § 1.5'
 same as a stamped note's (ADR 0043, as amended by p36-1), and is never due with no git Primary (a version-cache
 install: nothing to cut, so it runs from the plugin root; resolve passes `primary` to move_rule()).
 A launch, a heartbeat, a cold resume, a Stage re-send or a repair hand-off is none of these, so it cuts nothing; a Leg
-that one of them starts resolves at its own § 1 entry.
+that one of them starts resolves at its own § 1 entry. Nothing else cuts but an Engine catch-up's own move (its rows
+above): the lead's self-Reinstate after `next` reports `halt: catch-up`, or a serial chain's Leg begin under an open
+take.
+
+The Engine catch-up's read (lacking(note, root), importable; reconcile-rollout.py `catch-up` maps the units onto it).
+For a stamped note S = its engine_sha; in the git Primary of `root` (the rollout's own snapshot): default-branch.sh,
+the cut's own fetch of <d>, green-tip.py's resolve (gh asked, the record written, budget 60 s), so G is the Green tip
+the cut would take (origin's tip in a repo that publishes none); then `git remote get-url origin` and `git log
+--format=%H%x00%P%x00%s S..G` (a full rev-list, never path-limited). No commits, with a why: a Green-tip hold, an
+unstamped note, no git Primary, G equal to S or no strict descendant of it. A git or fetch failure reads `unread`.
+engine_fix(primary, sha) is a commit's own first-parent diff, `git diff-tree -r --no-commit-id --name-only <c>^1 <c> --
+skills hooks ':(exclude,glob)**/tests/**' ':(exclude,glob)**/fixtures/**'` (ENGINE_PATHS less NOT_ENGINE): an engine
+fix when it prints a path. A true merge is read by its first-parent diff (a path-limited rev-list would drop it); a root
+commit, or a failed call, is no engine fix, with a why.
 
 The prose-id rule. skills/{schedule,execute,status,repair}/SKILL.md carry git's `ident` attribute (.gitattributes),
 so each checkout expands the one `$Id$` marker in its hand-over block to `$Id: <blob id> $`, the id of that file as
@@ -114,10 +155,21 @@ Verbs.
           not found, is exit 2. Under the note lock, through reconcile-rollout.py's Note save (loaded from this
           root), it writes the two stamps just below `protocol_version:`, runs MIGRATIONS (none yet) on a move, and
           on a move appends `- <now> engine snapshot moved at reinstate: <old12> → <new12> (ADR 0043)` to `## Notes`.
+          Its catch-up branch (ADR 0084 d5) applies only when catch_up_open is a drain or take line and either
+          `paused_for: catch-up` stands (parallel) or the note is serial: HEAD not a strict descendant of the old
+          engine_sha (equal included: the cut landed at S) is exit 5, nothing written; a move writes `- <now> engine
+          snapshot moved at catch-up: <old12> → <new12> (ADR 0084 d5)` under `## Notes` in place of the reinstate
+          line, appends `moved <old12> → <new12> (drain <M> min | take)` to the Catch-up log (M the minutes from the
+          open drain line to the `paused:` stamp) and emits the Run record's `catch-up` line {from, to, fixes,
+          release, drainMinutes, shape, outcome: moved}. With no open line it takes the Reinstate branch, unchanged,
+          even under a standing `paused_for: catch-up`. On every move (a non-null from, a Reinstate included) it
+          restamps `verifier:` from the Project root's CLAUDE.md (reconcile-rollout.py's _claude_md_verifier, the same
+          save; a WARN on stderr keeps the stamp).
           Idempotent. Prints {snapshot, sha, from (the old engine_sha on a move, else null), changed}: changed is
           true on a move and on an unstamped note's first stamp (from null).
-  resolve Read-only. Reads only engine_snapshot, engine_sha, shape, status, paused, paused_for, superseded_by and the
-          Leg log's `closed:` and `began:` lines; never protocol_version. Exit 0 prints {rollout, note, snapshot, sha,
+  resolve Read-only. Reads only engine_snapshot, engine_sha, shape, status, paused, paused_for, superseded_by, the
+          Leg log's `closed:` and `began:` lines and the `## Catch-up log`; never protocol_version. Exit 0 prints
+          {rollout, note, snapshot, sha,
           root, same, gone, goneWhy, archived, prose, move: {due, why}, primary, primaryHead, ahead, behind}
           (`primary` and the three after it null with no git Primary; ahead and behind count engine_sha against the
           Primary's HEAD, null for an unstamped note). Exit 3 (a live note whose snapshot is unusable): stdout
@@ -132,7 +184,8 @@ Importable (each guarded script loads this file from its own tree with importlib
 and guard_task(task_note, root, script_rel, tasks_dir=None) return None to pass or the refusal line, which always
 starts `engine-snapshot: ` and names the root to re-run from; they never raise and refuse only on positive evidence
 (a stamp naming another usable snapshot, or a live note's unusable one). The guarded CLIs print it on stderr, exit
-2 and write nothing. prose_id(path), git_primary(root), engine_root(note), move_rule(), read_head().
+2 and write nothing. prose_id(path), git_primary(root), engine_root(note), move_rule(), read_head(),
+catch_up_log(body), catch_up_open(body), lacking(note, root), engine_fix(primary, sha).
 """
 import argparse
 import fcntl
@@ -172,6 +225,22 @@ EMBED_RE = re.compile(rb"\$Id: ([0-9a-f]{40}|[0-9a-f]{64}) \$")
 KEY_RE = re.compile(r"([A-Za-z0-9_-]+):(.*)$")
 LEG_RE = re.compile(r"^- (\S+) Leg (\d+) (began|closed):(.*)$")
 PR_URL_RE = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/([1-9][0-9]*)(?:[/?#]\S*)?", re.I)
+# The Engine catch-up (ADR 0084 d5, p54-14): the header's Catch-up log and engine-fix rule.
+CATCH_UP = "catch-up"
+CATCH_UP_SECTION = "## Catch-up log"
+CATCH_UP_WHY = "an Engine catch-up drained: the lead's own move (ADR 0084 d5)"
+CATCH_UP_DONE_WHY = "an Engine catch-up whose move is made or closed: clear-pause resumes it"
+CATCH_UP_TAKE_WHY = "an Engine catch-up's take: this Leg begin moves the chain"
+CATCH_UP_LINE_RE = re.compile(r"^- (\S+) (drain|take|moved|not moved|bound) (.*)$")
+CATCH_UP_DRAIN_RE = re.compile(r"^(?P<rel>.+?) at (?P<g>[0-9a-f]{12}) from (?P<f>[0-9a-f]{12}): ?(?P<fixes>.*)$")
+CATCH_UP_TAKE_RE = re.compile(r"^at (?P<g>[0-9a-f]{12}) from (?P<f>[0-9a-f]{12}): ?(?P<fixes>.*)$")
+CATCH_UP_MOVED_RE = re.compile(r"^(?P<f>[0-9a-f]{12}) → (?P<t>[0-9a-f]{12}) \((?P<how>[^)]*)\)$")
+CATCH_UP_NOT_RE = re.compile(r"^at (?P<g>[0-9a-f]{12}): (?P<why>.*)$")
+CATCH_UP_BOUND_RE = re.compile(r"^(?P<rel>.+?) after (?P<m>\d+) min: on (?P<f>[0-9a-f]{12})$")
+CATCH_UP_REL_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\](?: \((p[^)\s]+)\))?")
+ENGINE_PATHS = ("skills", "hooks")
+NOT_ENGINE = (":(exclude,glob)**/tests/**", ":(exclude,glob)**/fixtures/**")
+CATCH_UP_GREEN_BUDGET = 60
 # A note-format migration applied at a move, in order: fn(note, old_sha, new_sha). None yet: the stamps are the only
 # per-rollout format a Reinstate crosses so far (ADR 0043 Consequences, cross-version state).
 MIGRATIONS = []
@@ -347,6 +416,70 @@ def leg_events(text):
     return out
 
 
+def _links(text):
+    return [m.group(1).strip() for m in CATCH_UP_REL_RE.finditer(text or "") if m.group(1).strip()]
+
+
+def catch_up_log(body):
+    """The `## Catch-up log`'s lines (the header's grammar), in order: [{ts, verb, releases: [(R, phase|None)],
+    green12, from12, to12, fixes: [slug], why, minutes, how}], the fields a verb lacks None or empty. A line of any
+    other shape is skipped."""
+    out, inlog = [], False
+    for line in (body or "").split("\n"):
+        if line.startswith("## "):
+            inlog = line.strip() == CATCH_UP_SECTION
+            continue
+        if not inlog:
+            continue
+        m = CATCH_UP_LINE_RE.match(line.rstrip())
+        if not m:
+            continue
+        ts, verb, rest = m.group(1), m.group(2), m.group(3).strip()
+        e = {"ts": ts, "verb": verb, "releases": [], "green12": None, "from12": None, "to12": None, "fixes": [],
+             "why": None, "minutes": None, "how": None}
+        if verb == "drain":
+            mm = CATCH_UP_DRAIN_RE.match(rest)
+            if not mm:
+                continue
+            e.update(releases=[(r.group(1).strip(), r.group(2)) for r in CATCH_UP_REL_RE.finditer(mm.group("rel"))],
+                     green12=mm.group("g"), from12=mm.group("f"), fixes=_links(mm.group("fixes")))
+        elif verb == "take":
+            mm = CATCH_UP_TAKE_RE.match(rest)
+            if not mm:
+                continue
+            e.update(green12=mm.group("g"), from12=mm.group("f"), fixes=_links(mm.group("fixes")))
+        elif verb == "moved":
+            mm = CATCH_UP_MOVED_RE.match(rest)
+            if not mm:
+                continue
+            e.update(from12=mm.group("f"), to12=mm.group("t"), how=mm.group("how"))
+        elif verb == "not moved":
+            mm = CATCH_UP_NOT_RE.match(rest)
+            if not mm:
+                continue
+            e.update(green12=mm.group("g"), why=mm.group("why"))
+        else:
+            mm = CATCH_UP_BOUND_RE.match(rest)
+            if not mm:
+                continue
+            e.update(releases=[(r, None) for r in _links(mm.group("rel"))], minutes=int(mm.group("m")),
+                     from12=mm.group("f"))
+        out.append(e)
+    return out
+
+
+def catch_up_open(body):
+    """The open catch-up: the Catch-up log's last line when it is a drain or take line (catch_up_log's dict), else
+    None. Live or stale is the caller's reading (the header's)."""
+    log = catch_up_log(body)
+    return log[-1] if log and log[-1]["verb"] in ("drain", "take") else None
+
+
+def _leg_open(body):
+    ev = leg_events(body)
+    return bool(ev) and ev[-1][1] == "began"
+
+
 # ---- the Primary and snapshots ------------------------------------------------------------------------------------
 
 def git_primary(root=None):
@@ -460,6 +593,9 @@ def move_rule(fm, body, stamped, archived, primary=False):
                 due, why = True, ("serial, unstamped: the first Leg begun after Leg %d's close stamps it (ADR 0043)"
                                   % last[0])
         else:
+            op = catch_up_open(body)
+            if op is not None and op["verb"] == "take" and not _leg_open(body):
+                return True, CATCH_UP_TAKE_WHY
             closed = [(i, n, rest) for i, (n, kind, rest) in enumerate(ev) if kind == "closed"]
             if not closed:
                 return False, "serial: no Leg has closed stopped"
@@ -474,14 +610,19 @@ def move_rule(fm, body, stamped, archived, primary=False):
         if not scalar(fm.get("paused")):
             return False, "not paused: only a Reinstate (a hard pause, then /thread:execute) moves a rollout"
         pf = scalar(fm.get("paused_for"))
-        if pf:
+        if pf.lower() == CATCH_UP:
+            if catch_up_open(body) is None:
+                return False, CATCH_UP_DONE_WHY
+            due, why = True, CATCH_UP_WHY
+        elif pf:
             if pf.lower() == "sign-off":
                 return False, SIGN_OFF_WHY
             return False, "the engine's own pause (paused_for: %s), never a move" % pf
-        if stamped:
+        elif stamped:
             return True, "a hard pause: this /thread:execute is its Reinstate"
-        due, why = True, ("a hard pause: this /thread:execute is its Reinstate, which stamps the unstamped note "
-                          "(ADR 0043)")
+        else:
+            due, why = True, ("a hard pause: this /thread:execute is its Reinstate, which stamps the unstamped note "
+                              "(ADR 0043)")
     if due and not stamped and not primary:
         return False, NO_PRIMARY_WHY
     return due, why
@@ -828,18 +969,11 @@ def _cut_target(a, primary, default, origin, env):
                 a.at, "not a commit here" if not sha else "not origin/%s or an ancestor of it" % default))
         return sha, "at", None, "cut at %s by hand (cut --at)" % sha[:12]
     try:
-        spec = importlib.util.spec_from_file_location("thread_green_tip_es", os.path.join(ROOT, GREEN_REL))
-        gt = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gt)
+        gt = _green_mod()
     except Exception as e:  # noqa: BLE001 — a resolver that will not load cuts nothing
         raise Fail(2, "engine-snapshot cut: cannot load %s (%s: %s): nothing cut" % (GREEN_REL, type(e).__name__, e))
-
-    def run(argv, timeout):
-        rc, out, err = run_group(argv, env, timeout)
-        return rc, out, err, rc == 124
-
     try:
-        r = gt.resolve(primary, default, gh=True, write=True, run=run)
+        r = gt.resolve(primary, default, gh=True, write=True, run=_green_run(env))
     except Exception as e:  # noqa: BLE001
         raise Fail(2, "engine-snapshot cut: green-tip.py raised %s: %s: nothing cut" % (type(e).__name__, e))
     if r.get("kind") == "green":
@@ -850,6 +984,113 @@ def _cut_target(a, primary, default, origin, env):
         return r["fallback"], "verified", r.get("green"), "%s: cut at the newest verified commit before it" % r.get("why")
     raise Fail(3, "engine-snapshot cut: no Green tip to cut at (%s): nothing cut, never origin's tip; on his word only, "
                   "cut --at <sha> (ADR 0084 Decided for you 8)" % r.get("why"))
+
+
+def _green_mod():
+    """green-tip.py from this root, loaded fresh (it raises when it will not load)."""
+    spec = importlib.util.spec_from_file_location("thread_green_tip_es", os.path.join(ROOT, GREEN_REL))
+    gt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gt)
+    return gt
+
+
+def _green_run(env):
+    """green-tip.py's runner over run_group: (rc, out, err, timed_out)."""
+    def run(argv, timeout):
+        rc, out, err = run_group(argv, env, timeout)
+        return rc, out, err, rc == 124
+    return run
+
+
+def _fetch_default(primary, env):
+    """(default, None) after the cut's own fetch of origin's default branch (retried once), else (None, why)."""
+    rc, out, err = run_group(["bash", os.path.join(ROOT, DEFAULT_BRANCH_REL), primary], env, 60)
+    default = out.strip()
+    if rc != 0 or not default:
+        return None, "cannot resolve origin's default branch for %s (%s)" % (primary, first_line(err) or "exit %d" % rc)
+    ref = "refs/remotes/origin/%s" % default
+    for attempt in (1, 2):
+        rc, _o, err = run_group(["git", "-C", primary, "fetch", "-q", "origin", "+refs/heads/%s:%s" % (default, ref)],
+                                env, FETCH_TIMEOUT)
+        if rc == 0:
+            return default, None
+        if attempt == 1:
+            time.sleep(2)   # a concurrent fetch holding the ref lock
+    return None, "git fetch origin %s failed in %s (%s)" % (default, primary, first_line(err) or "exit %d" % rc)
+
+
+def lacking(note_path, root=None):
+    """The Engine catch-up's read (the header's): {primary, default, green, engineSha, origin, commits: [{sha, parents,
+    subject}], why, unread}. commits are S..G's, S the note's engine_sha and G the Green tip the cut would take, newest
+    first; none, with a why, on a Green-tip hold, an unstamped note, no git Primary, or G equal to S or no strict
+    descendant of it. A git or fetch failure is `unread` (true), never a reading. Never raises."""
+    out = {"primary": None, "default": None, "green": None, "engineSha": None, "origin": None, "commits": [],
+           "why": None, "unread": False}
+
+    def unread(why):
+        out.update(why=why, unread=True)
+        return out
+    try:
+        fm = read_head(os.path.expanduser(str(note_path)))
+    except OSError as e:
+        return unread("the note cannot be read (%s)" % (e.strerror or e))
+    sha = scalar(fm.get("engine_sha")).lower()
+    if not scalar(fm.get("engine_snapshot")) or not SHA_RE.match(sha):
+        out["why"] = "unstamped: its Reinstate stamps it, never a catch-up"
+        return out
+    out["engineSha"] = sha
+    primary, why = git_primary(root)
+    if primary is None:
+        out["why"] = "no git Primary (%s): nothing to catch up from" % why
+        return out
+    out["primary"] = primary
+    env = remote_env(primary)
+    default, why = _fetch_default(primary, env)
+    if default is None:
+        return unread(why)
+    out["default"] = default
+    try:
+        r = _green_mod().resolve(primary, default, gh=True, write=True, budget=CATCH_UP_GREEN_BUDGET,
+                                 run=_green_run(env))
+    except Exception as e:  # noqa: BLE001 — a resolver that will not load or raises reads nothing
+        return unread("green-tip.py: %s: %s" % (type(e).__name__, e))
+    if r.get("kind") not in ("green", "origin") or not r.get("target"):
+        out["why"] = "the Green tip holds (%s): no catch-up" % r.get("why")
+        return out
+    green = r["target"]
+    out["green"] = green
+    out["origin"] = git_out(primary, "remote", "get-url", "origin")
+    if green == sha:
+        out["why"] = "the snapshot is at the Green tip %s" % green[:12]
+        return out
+    anc = git(primary, "merge-base", "--is-ancestor", sha, green)
+    if anc.returncode == 1:
+        out["why"] = "the Green tip %s is no descendant of the snapshot %s" % (green[:12], sha[:12])
+        return out
+    if anc.returncode != 0:
+        return unread("git merge-base %s %s failed (%s)" % (sha[:12], green[:12], first_line(anc.stderr)))
+    log = git(primary, "log", "--format=%H%x00%P%x00%s", "%s..%s" % (sha, green))
+    if log.returncode != 0:
+        return unread("git log %s..%s failed (%s)" % (sha[:12], green[:12], first_line(log.stderr)))
+    for line in log.stdout.split("\n"):
+        parts = line.split("\x00")
+        if len(parts) == 3 and parts[0]:
+            out["commits"].append({"sha": parts[0], "parents": parts[1].split(), "subject": parts[2]})
+    return out
+
+
+def engine_fix(primary, sha):
+    """(engine, why): whether commit `sha` changes engine code (the header's rule: its own first-parent diff under
+    ENGINE_PATHS, NOT_ENGINE excluded). why names its first engine path, or why it is none; a failed call (a root
+    commit included) is no engine fix, with the failure's why."""
+    r = git(primary, "diff-tree", "-r", "--no-commit-id", "--name-only", sha + "^1", sha, "--",
+            *(ENGINE_PATHS + NOT_ENGINE))
+    if r.returncode != 0:
+        return False, "git diff-tree %s failed (%s): not read as an engine fix" % (sha[:12], first_line(r.stderr))
+    paths = [p for p in r.stdout.split("\n") if p.strip()]
+    if not paths:
+        return False, "no engine path (skills/ or hooks/, tests and fixtures excluded)"
+    return True, paths[0]
 
 
 def _snapshot_root_problem(primary):
@@ -895,18 +1136,50 @@ def cmd_adopt(a):
     want = tilde(ROOT)
     changed = old_stamp != want or old_sha != sha
     moved_from = old_sha if old_sha and old_sha != sha else None
+    now = datetime.fromtimestamp(_now(a.now)).astimezone()
+    stamp = rr._stamp(now)
+    # The catch-up branch (the header's adopt): an open drain or take line, under `paused_for: catch-up` or serial.
+    op = catch_up_open(note.render())
+    serial = scalar(note.get("shape")).lower() == "serial"
+    catching = op is not None and bool(old_sha) and (serial or scalar(note.get("paused_for")).lower() == CATCH_UP)
+    if catching and (old_sha == sha or git(ROOT, "merge-base", "--is-ancestor", old_sha, sha).returncode != 0):
+        raise Fail(5, "engine-snapshot adopt: this snapshot %s is not past the rollout's %s (the cut landed at or "
+                      "behind it): an Engine catch-up moves only forward; nothing written" % (sha[:12], old_sha[:12]))
+    warns, event = [], None
     if changed:
         note.set("engine_snapshot", '"%s"' % want, after=("protocol_version", "status"))
         note.set("engine_sha", sha, after=("engine_snapshot",))
         if moved_from:
             for migrate in MIGRATIONS:
                 note.apply(migrate, moved_from, sha)
-            note.append_line("## Notes", "- %s engine snapshot moved at reinstate: %s → %s (ADR 0043)"
-                             % (rr._stamp(datetime.fromtimestamp(_now(a.now))), moved_from[:12], sha[:12]))
+            if catching:
+                note.append_line("## Notes", "- %s engine snapshot moved at catch-up: %s → %s (ADR 0084 d5)"
+                                 % (stamp, moved_from[:12], sha[:12]))
+                minutes = None
+                if op["verb"] == "drain":
+                    t0, t1 = rr._parse_ts(op["ts"]), rr._parse_ts(scalar(note.get("paused")))
+                    minutes = max(0, int((t1 - t0).total_seconds() // 60)) if t0 and t1 else 0
+                note.append_line(CATCH_UP_SECTION, "- %s moved %s → %s (%s)" % (
+                    stamp, moved_from[:12], sha[:12], "drain %d min" % minutes if minutes is not None else "take"))
+                event = {"from": moved_from, "to": sha, "fixes": op["fixes"],
+                         "shape": "serial" if serial else "parallel", "outcome": "moved"}
+                if op["releases"]:
+                    event["release"] = ", ".join(r for r, _p in op["releases"])
+                if minutes is not None:
+                    event["drainMinutes"] = minutes
+            else:
+                note.append_line("## Notes", "- %s engine snapshot moved at reinstate: %s → %s (ADR 0043)"
+                                 % (stamp, moved_from[:12], sha[:12]))
+            warns = rr._restamp_verifier(note, now)
         try:
             note.save()
         except OSError as e:
             raise Fail(1, "engine-snapshot adopt: %s: nothing written" % e)
+    for w in warns:
+        sys.stderr.write(w + "\n")
+    if event is not None:
+        rr._event(os.path.splitext(os.path.basename(path))[0], "catch-up", None, event, None,
+                  ts=now.isoformat() if a.now else None)
     print(json.dumps({"snapshot": ROOT, "sha": sha, "from": moved_from, "changed": changed}))
     return 0
 

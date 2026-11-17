@@ -48,6 +48,7 @@
 18	skills/execute/tests/reconcile-rollout.test.sh
 2	skills/execute/tests/rollout-stop-driver.test.sh
 2	tests/default-branch.test.sh
+27	tests/engine-catch-up.test.sh
 37	tests/engine-snapshot.test.sh
 4	tests/execution-fit-remote.test.sh
 24	tests/fast-tier.test.sh
