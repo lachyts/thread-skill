@@ -4,17 +4,21 @@
 # answer (`inputs`' answerRecorded, reconcile-rollout.py _answer_recorded). reconcile-rollout.py record-answer is the only
 # writer of an answer, hand-back spends every live answer and takes `--answer <stamp>` as a compare-and-swap, and an
 # answered block is never retried.
-#   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H1-H13,
+#   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H2-H13,
 #      H12 under an answer and a question; H10-same-infra, the same held stop twice running at Integration, a settings
 #      block (ADR 0080) due for merge-settings.py free and its deadline, anchor, left, restored, spent change and spent
-#      clear, and no H10 for a budget spent at its first sighting; the null cases)
+#      clear; the null cases). Some rows are read in reconcile-rollout-auto-retry.test.sh, on the A4 scenario that
+#      builds the same block: H1, H3 (RACE and UNVERIFIED), H5 after a descope, H6, H7 at Integration, H8, H10's
+#      merge-task text and declined merge, H11 and the autoRevise null case; no H10 for a budget spent at its first
+#      sighting is A18 spent's
 #   K  --max-review-rounds is an overlay humanFix ignores; the keys today's callers read are unchanged
 #   L  the label forms, and `ask 2` after a spent answer
 #   N  answerRecorded: the live forms, the dead keys, each re-entry stamp, ties and unparseable stamps
 #   W  record-answer: the save, its refusals (a decision beside an open question included), --raise for all three
 #      fields, --pr, the stamp bump, supersede
 #   B  hand-back: --answer's compare-and-swap, the spend, a refused hand-back spends nothing
-#   X  the races between the lead's Recorded answer, repair and the other verbs
+#   X  the races between the lead's Recorded answer, repair and the other verbs (auto-retry on an answered block is
+#      reconcile-rollout-auto-retry.test.sh's A16)
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each scenario's
 # Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the canary's records
@@ -233,34 +237,11 @@ ok "$(j "$I" 'd["autoRetry"]')|$(hf "$I")|$(ans "$I")" "false|[\"hand back or de
 ok "$(fix "$I" detail)" "left on your answer of $S_NOW: nothing else holds it" "H0f: its detail"
 
 # ── H1-H12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-scen h1
-mkro; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test"
-rec "$(row "$A" gate-pending "" '{"gatedInputs":["spend: Replicate — cap USD 5","credential: a token"]}')"
-I=$(inp "$A")
-ok "$(hf "$I")" '["sign off gated input",false,null]' "H1: a gate"
-ok "$(fix "$I" detail)|$(fix "$I" label)" "spend: Replicate — cap USD 5; credential: a token|(gate-pending)" "H1: the pending gates, label (gate-pending)"
-
 scen h2
 mkro; mkt "$B" open
 mkt "$A" open; planblock "$A" "$FA"; setfm "$A" rollout '"[[proj-rollout-missing]]"'
 I=$(inp "$A")
 ok "$(hf "$I")" "[\"fix its rollout: or defer\",false,null]" "H2: no rollout note"
-
-scen h3-race
-mkro; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
-printf '\n## Race log\n\n- 2026-10-03T08:30+00:00 [[%s]] RACE: PR #5 merged as x\n' "$A" >> "$D/$RO.md"
-I=$(inp "$A")
-ok "$(hf "$I")" '["decide RACE",false,null]' "H3: an undecided RACE"
-ok "$(fix "$I" detail)" "- 2026-10-03T08:30+00:00 [[$A]] RACE: PR #5 merged as x" "H3 RACE: the Race log line"
-scen h3-unverified
-mkro; mkt "$B" open
-mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
-lead "$A" integration "UNVERIFIED: PR #5 merged as abc; not verifiable yet; re-run to verify"
-I=$(inp "$A")
-ok "$(hf "$I")" '["decide UNVERIFIED",false,null]' "H3: an undecided UNVERIFIED"
-has "$(fix "$I" detail)" "UNVERIFIED: PR #5 merged as abc" "H3 UNVERIFIED: its line"
 
 scen h4-own
 mkro; mkt "$B" open
@@ -273,13 +254,6 @@ plain_rejection; setfm "$A" pr '"#5"'; needs "$A" "$Q"
 I=$(inp "$A" --repo "$D/root" --max-review-rounds 4)
 ok "$(hf "$I")" '["answer the question",false,null]' "H4: a prUrlError revise's question, handBack false (through H7)"
 
-scen h5-descoped
-mkro; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
-printf '\n## Scope decision (automatic)\n\n- descoped (automatic) 2026-10-03T07:00+00:00, Plan-blocked feedback run 1: "x" is optional in the brief\n<!-- descope run=1 part=%s mode=optional -->\n' "$(sha12 x)" >> "$D/$A.md"
-I=$(inp "$A")
-ok "$(hf "$I")" '["decide scope or defer",true,null]' "H5: plan-blocked after a descope"
-ok "$(fix "$I" detail)" "plan-blocked again after an automatic descope (Plan-blocked feedback run 1)" "H5: its detail"
 scen h5-refused
 mkro; mkt "$B" open
 mkt "$A" open; planblock "$A" "$FA"
@@ -289,20 +263,6 @@ I=$(inp "$A")
 ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" 'descope refused at Plan-blocked feedback run 1: Lachy decides the scope|["decide scope or defer",true,null]' "H5: a refused descope"
 has "$(fix "$I" detail)" "descope refused (automatic) run=1 sha=$SHA_A, Plan-blocked feedback run 1: \"add the migration\" (optional)" "H5 refused: the record is its detail"
 
-scen h6
-mkro; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test"
-rec "$(row "$A" blocked 'integration: base moved before the merge 4 times in a row')"
-I=$(inp "$A")
-ok "$(hf "$I")" '["restore, recut or defer",false,null]' "H6: at Integration with no pr:, never hand-back"
-ok "$(fix "$I" detail)" "base moved before the merge 4 times in a row; restore finds its branch's PR (repair § 4), and a MERGED one is § 3c's PR-less merge" "H6: the block's first line, then § 4 and § 3c"
-
-scen h7
-mkro; mkt "$B" open
-int_retryable; setfm "$A" pr '"#5"'
-I=$(inp "$A" --repo "$D/root")
-ok "$(hf "$I")" "[\"fix the note's pr: or defer\",false,null]" "H7: at Integration, handBack false"
-ok "$(fix "$I" detail)" "$(j "$I" 'd["prUrlError"]')" "H7: its detail is prUrlError"
 scen h7-revise
 mkro; mkt "$B" open
 plain_rejection; setfm "$A" pr '"#5"'
@@ -334,13 +294,6 @@ has "$(fix "$I" detail)" "reverted on main: " "H7r: … its detail the reverted 
 setfm "$A" pr https://github.com/o/r/pull/7
 hasnt "$(j "$(inp "$A")" 'd["autoRetryWhy"]')" "reverted on main" "H7r: a new pr: (a re-land) is no longer refused for the revert"
 
-scen h8
-mkro; mkt "$B" open
-mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
-lead "$A" integration "origin/audit-fix/p1-1-a does not exist — the PR branch is gone"
-I=$(inp "$A")
-ok "$(hf "$I")|$(fix "$I" detail)" '["restore, recut or defer",false,null]|origin/audit-fix/p1-1-a does not exist — the PR branch is gone' "H8: the branch is gone"
-
 # H9: each budget, named by what the source run is (auto_retries: 0 refuses it at the budget)
 scen h9-plan
 mkro "auto_retries: 0"; mkt "$B" open
@@ -365,7 +318,8 @@ mkt "$A" in_progress "owner: execute-test"
 rec "$(row "$A" blocked 'the verifier stayed red after 3 iterations: test_migration fails')"
 ok "$(hf "$(inp "$A")")" '["raise max_iterations, hand back or defer",true,"max_iterations"]' "H9: max_iterations (the implementer's own paragraph)"
 
-# H10: each fixed opening, a decline, auto_retries: 0 and a same-fingerprint block at Integration: no raise
+# H10: each fixed opening, auto_retries: 0 and a same-fingerprint block at Integration: no raise (merge-task's human
+# text and a declined merge are read on auto-retry's A4 scenarios)
 for opening in "workflow call failed: no result row" "transient infrastructure failure — x" "plan-divergence: the plan names a missing file" \
                "agent returned neither verified nor blocked" "workflow stage threw — see /workflows"; do
   scen "h10-$(sha12 "$opening")"
@@ -374,16 +328,6 @@ for opening in "workflow call failed: no result row" "transient infrastructure f
   if [ "${opening%%:*}" = "workflow call failed" ]; then lead "$A" own "$opening"; else rec "$(row "$A" blocked "$opening")"; fi
   ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H10: the opening \"${opening:0:30}\" spends no budget"
 done
-scen h10-merge-task
-mkro; mkt "$B" open
-mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
-lead "$A" own "merge-task: ERROR: PR #5 is 'CLOSED' (not OPEN/MERGED) — nothing was merged. Resolve manually."
-ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H10: merge-task's human text"
-scen h10-declined
-mkro; mkt "$B" open
-mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
-lead "$A" integration "merge declined at the --gated hold"
-ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H10: a declined merge"
 scen h10-zero
 mkro "auto_retries: 0"; mkt "$B" open
 mkt "$A" open; planblock "$A" "$FA"
@@ -462,32 +406,12 @@ ok "$(hf "$I")|$(sb "$I")" '["hand back or defer",true,null]|["changed",true,fal
 has "$(fix "$I" detail)" "; merge-settings.py cleared it on 2026-10-03T08:40:01+00:00 with no setting changed, and that did not free it: another task's change freed it" \
   "H10 cleared: … its detail says nothing changed"
 hasnt "$(fix "$I" detail)" "changed for you" "H10 cleared: … never \"changed for you\""
-# H10 is no longer a spent budget's at a settings block's first sighting (ADR 0080 d2): with auto_retries_used equal to
-# auto_retries, a no-runner or an unreported-context block reads no humanFix and is not due (its free cool-down retry,
-# 15 minutes); the identical stop after that retry is due (A18 spent).
-UR='unreported-context: required check "build" is reported by no check run or status on the PR'"'"'s head, and no run on it is in flight'
-for r in "$NR" "$UR"; do
-  scen "h-spent-${r%%:*}"
-  mkro; mkt "$B" open
-  mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00" "auto_retries_used: 2"
-  lead "$A" integration "$r"
-  I=$(INOW=2026-10-03T08:05:00Z inp "$A")
-  ok "$(hf "$I")|$(sb "$I")|$(j "$I" '[d["autoRetry"], d["autoRetryAfter"]]')" 'null|["unfreed",false,false]|[false,"2026-10-03T08:15+00:00"]' \
-    "H spent (${r%%:*}): the first sighting with 2/2 used → no humanFix, not due, the 15-minute cool-down"
-  hasnt "$(j "$I" 'd["autoRetryWhy"]')" "budget:" "H spent (${r%%:*}): … never the budget's H10"
-done
 # A red required check (reasonClass merge-gate, the Verify line's real red) is no settings block.
 scen sb-red
 mkro; mkt "$B" open
 mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
 lead "$A" own "merge-task: ERROR: a REQUIRED check FAILED on PR #5 (Ralph passed locally, but remote CI is red):"
 ok "$(j "$(inp "$A")" 'd["settingsBlock"]')" null "a red required check (reasonClass merge-gate): settingsBlock null"
-
-scen h11
-mkro; mkt "$B" open
-mkt "$A" review "review_rounds_used: 1"
-I=$(inp "$A")
-ok "$(hf "$I")|$(fix "$I" label)" '["hand back or defer",true,null]|(review, no PR)' "H11: a code-writing review with no PR"
 
 scen h12
 mkro; mkt "$B" open
@@ -546,10 +470,6 @@ mkro; mkt "$B" open
 mkt "$A" open; planblock "$A" "$TRANSIENT"
 I=$(INOW=2026-10-03T08:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetryAfter"] is not None, d["humanFix"]]')" '[true,null]' "null: cooling"
-scen null-autorevise
-mkro; mkt "$B" open
-plain_rejection
-ok "$(j "$(inp "$A" --max-review-rounds 4)" '[d["autoRevise"], d["humanFix"]]')" '[true,null]' "null: autoRevise"
 scen null-answered
 mkro "auto_retries: 0"; mkt "$B" open
 mkt "$A" open; planblock "$A" "$FA"
@@ -876,12 +796,6 @@ mkt "$A" open; planblock "$A" "$FA"
 entry "$A" "- 2026-10-03T08:00+00:00 decision (block $SHA_A): \"x\" → y"
 I=$(inp "$A")
 ok "$(ans "$I")|$(hf "$I")" 'null|["hand back or defer",true,null]' "X: a hand-written tie reads no answer, and the task is listed"
-scen x-auto-retry
-mkro; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
-ra "$A" --kind decision --ask x --answer y --fingerprint "$SHA_A" --form left
-before=$(snap); ar "$A"
-ok "$rc|$(snap)" "1|$before" "X: auto-retry on an answered block exits 1"
 scen x-bare
 mkro "auto_retries: 0"; mkt "$B" open
 mkt "$A" open; planblock "$A" "$FA"

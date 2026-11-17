@@ -214,9 +214,7 @@ sscen l19b
 leg begin --cwd "$R"; leg claim --task a1; base=$(git -C "$R" rev-parse HEAD)
 subst "$T/$RO.md" "security_checks: true" "security_checks: false"; leg security --task a1
 ok "$rc" 1 "L19b1: security with the key off is exit 1"; has "$err" "security_checks is not true on [[$RO]]: nothing to scan" "L19b1: … saying so"
-subst "$T/$RO.md" "security_checks: false" "security_checks: yes"; leg security --task a1
-ok "$rc" 1 "L19b1: … and with yes"; has "$err" "security_checks: must be true or false, got 'yes': fix the note" "L19b1: … naming it"
-subst "$T/$RO.md" "security_checks: yes" "security_checks: true"
+subst "$T/$RO.md" "security_checks: false" "security_checks: true"   # a value other than true or false: L19d7
 leg security --task a2; ok "$rc" 1 "L19b2: a queued task is refused"; has "$err" "[[a2]] is not Leg 1's in_progress claim" "L19b2: … as not this Leg's claim"
 leg security --task a1
 ok "$rc|$(q 'd["tops"]')|$(q 'd["clean"]')|$(fm a1 leg_scan)" "0|[]|True|<none>" "L19b2: no commit yet: tops [], clean, nothing written"
@@ -578,7 +576,7 @@ unset CWD
 
 # ---- L19h: in process: shell_safe, security_ask, run_scan's cut, settle_pushed ----
 python3 - "$LEG" > "$TMP/l19h.out" 2>&1 <<'PY'
-import importlib.util, sys, time, types
+import importlib.util, signal, sys, time, types
 spec = importlib.util.spec_from_file_location("leg", sys.argv[1]); leg = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(leg)
 bad = []
@@ -622,9 +620,8 @@ eq(leg.security_ask([ent(False, [sec(False)], config=[cfg], top="/c"), ent(True,
    ".gitleaksignore, the secret scanner's own config: keep it (answer security-accept config:0123456789ab), or drop "
    "the change; (2) in /p/r: " + head + ", and origin already holds it: rotate it?", "ask, two items over two entries")
 eq(leg.security_ask([ent(True), ent(False)]), None, "no item: no ask")
-t0 = time.monotonic()
 rc, out, err, cut = leg.run_scan([sys.executable, "-c", "import time; time.sleep(60)"], 1)
-eq((cut, time.monotonic() - t0 < 1 + leg.SCAN_GRACE + 2), (True, True), "run_scan cuts a sleeping child within timeout + grace")
+eq((cut, rc), (True, -signal.SIGINT), "run_scan cuts a sleeping child past its timeout, by its SIGINT")
 def fake(table):   # leg.git answered from a table, each call's verb recorded
     calls = []
     def git(top, *args, input=None, timeout=120):

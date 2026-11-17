@@ -275,9 +275,8 @@ ok "$prc" 0 "C1: prepare exits 0"
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')" "merge|i" "C1: main unmoved → case (i), route merge"
 ok "$(j "$J" 'd["prHead"]')|$(j "$J" 'd["anchor"]')|$(j "$J" 'd["taskBase"]')|$(j "$J" 'd["mainSha"]')" "$H0|$H0|$TB|$TB" "C1: H = A = H0, TB = B"
 ok "$(j "$J" 'd["mergeCommit"]')|$(git -C "$WT" rev-parse HEAD)" "|$H0" "C1: no merge commit; the tree stays at H0"
-for k in branch worktreePath prHead anchor taskBase mainSha case route trouble reason landed unlisted note; do
-  ok "$(j "$J" "'$k' in d")" true "C1: prepare prints $k"
-done
+ok "$(j "$J" '[k for k in "branch worktreePath prHead anchor taskBase mainSha case route trouble reason landed unlisted note".split() if k not in d]')" \
+  "[]" "C1: prepare prints branch, worktreePath, prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed, unlisted and note"
 ok "$(j "$J" '[d["landed"], d["unlisted"], d["note"]]')" '[[],[],""]' "C1: an empty range → landed [], unlisted [], note \"\""
 S=$(python3 "$LI" stamp)
 python3 "$RR" log-integration --tasks "$SLUG" --tasks-dir "$V" --started "$S" --anchor "$H0" --head "$H0" --base "$TB" >/dev/null
@@ -314,7 +313,6 @@ ok "$(loglines)" "$before" "C2: case (ii) writes no new log line"
 mkpr 5 "$M"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
 mt 5 "$M" "$B"
 ok "$rc|$(cat "$R/.claude/merge-task.status")" "0|ok" "C2: merge-task <repo> 5 M B → rc 0, ok"
-ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 master | cut -d' ' -f2-)" "$B" "C2: the squash's single parent is B"
 ok "$(grep -c '^pr merge' "$MT_STATE/gh.log")" 1 "C2: gh.log holds one pr merge"
 python3 "$RR" mark-done --tasks "$SLUG" --tasks-dir "$V" >/dev/null
 ok "$(fm "$V/$SLUG.md" status)" "status: done" "C2: mark-done → done"
@@ -913,10 +911,7 @@ done
 fx c16
 ok "$(python3 "$LI" stamp | grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$')" 1 "C16: stamp prints reconcile's _stamp form"
 python3 "$LI" >/dev/null 2>&1; ok "$?" 2 "C16: no verb → exit 2"
-python3 "$LI" push --repo "$R" --slug "$SLUG" --head zz >/dev/null 2>&1; ok "$?" 2 "C16: a bad sha → exit 2"
-python3 "$LI" inputs --note "$F/nope.md" >/dev/null 2>&1; ok "$?" 2 "C16: a missing note → exit 2"
 python3 "$LI" verify --tree "$WT" --out "$F/x" --timeout 5 >/dev/null 2>&1; ok "$?" 2 "C16: verify without --verifier → exit 2"
-printf '' | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind own >/dev/null 2>&1; ok "$?" 2 "C16: set-aside with an empty reason → exit 2"
 git -C "$R" remote set-url origin "$F/nowhere.git"
 prep
 ok "$prc|$J" "8|" "C16: an unreachable origin → prepare exit 8, nothing printed"

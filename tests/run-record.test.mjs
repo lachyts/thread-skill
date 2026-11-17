@@ -1254,7 +1254,7 @@ print(json.dumps(out))`, { env: EV(home), args: [JSON.stringify([
   assert.ok(!fs.existsSync(ev(path.join(home, 'other'))), 'check never creates the events dir')
 })
 
-test('the tuning keys are rollout-settings.py\'s TUNING_KEYS, and RESERVED holds all five record files', (t) => {
+test('the tuning keys are rollout-settings.py\'s TUNING_KEYS, and RESERVED holds all six record files', (t) => {
   const home = tmpHome(t)
   const rs = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
   const r = api(home, `
@@ -1264,7 +1264,7 @@ print(json.dumps([list(m.TUNING_KEYS), list(rs.TUNING_KEYS), list(rs.KEYS), list
   const [mine, theirs, four, reserved, gradeLog] = JSON.parse(r.stdout)
   assert.deepEqual(mine, theirs)
   assert.deepEqual(mine, [...four, 'capacity_max', 'weight_mem_gb', 'weight_cores'], 'p53-5: the four a note stamps, then capacity_max and the Weights')
-  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades', 'overlaps'])
+  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades', 'overlaps', 'master-runs'])
   assert.equal(gradeLog, 'grades')
 })
 
@@ -1311,6 +1311,66 @@ test('note-overlap refusals: exit 2, one line and nothing written; `overlaps` is
   for (const args of [['--rollout', 'overlaps', '--kind', 'resumed'], ['--rollout', '[[Overlaps]]', '--task', 't', '--kind', 'ready'],
     ['--rollout', 'overlaps', '--task', 'b1', '--kind', 'note-overlap', '--json', JSON.stringify(OVERLAP)],
     ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[overlaps]]"}']]) {
+    const r = cli(home, ['emit', ...args], { env: EV(home) })
+    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`)
+    assert.match(r.stderr, /reserved/)
+    assert.deepEqual(listing(ev(home)), [])
+  }
+})
+
+// ---- master's full-suite runs (p54-7; reconcile-rollout.py master-runs) --------------------------------------------
+
+const MASTER = { repo: 'o/r', outcome: 'red', sha: 'a'.repeat(40), at: '2026-11-16T10:00:00Z', runId: 1002, attempt: 2,
+  suites: ['tests/a.test.sh'], newSuites: ['tests/a.test.sh'], redKind: 'suites', since: 'g'.repeat(40), retest: 'rerun',
+  followup: 'master-red-r-aaaaaaaaaaaa-2', merges: 2, prs: [101, 102] }
+
+test('master-run (p54-7) lands in master-runs.jsonl alone, its rollout a provenance stamp and no task', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', '[[ro-a]]', '--kind', 'master-run', '--json', JSON.stringify(MASTER)], { env: EV(home) })
+  emitOk(home, ['--rollout', 'ro-b', '--kind', 'master-run', '--json', JSON.stringify({ repo: 'o/r', outcome: 'unproven',
+    sha: 'c'.repeat(40), at: '2026-11-16T10:00:00Z', ref: 'refs/thread/green', followup: 'master-green-unproven-r-cccccccccccc' })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'ro-a', '--kind', 'master-run', '--json', JSON.stringify({ repo: 'o/r', outcome: 'red', sha: 'b'.repeat(40),
+    at: '2026-11-16T11:00:00Z', runId: 1003, attempt: 1, suites: ['A'], since: null, merges: null, prs: null, retest: 'covered',
+    suitesTotal: 60 })], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['master-runs.jsonl'], 'never ro-a.jsonl: no rollout\'s record grows a line')
+  const [a, b, c] = lines(path.join(ev(home), 'master-runs.jsonl'))
+  assert.deepEqual([a.v, a.rollout, a.task, a.kind, a.repo, a.outcome, a.prs, a.retest], [1, 'ro-a', null, 'master-run', 'o/r', 'red', [101, 102], 'rerun'])
+  assert.deepEqual([b.rollout, b.outcome, b.ref], ['ro-b', 'unproven', 'refs/thread/green'])
+  assert.deepEqual([c.since, c.merges, c.prs, c.suitesTotal], [null, null, null, 60])
+  const k = api(home, 'print(json.dumps([m.master_key(json.loads(l)) for l in open(sys.argv[2])]))', { args: [path.join(ev(home), 'master-runs.jsonl')] })
+  assert.deepEqual(JSON.parse(k.stdout), [['o/r', 1002, 2, 'red'], ['o/r', 'c'.repeat(40), 'unproven'], ['o/r', 1003, 1, 'red']], k.stderr)
+})
+
+test('master-run refusals: exit 2, one line and nothing written; `master-runs` is no rollout', (t) => {
+  const home = tmpHome(t)
+  const names = (n) => Array.from({ length: n }, (_v, i) => `s${i}`)
+  const cases = [
+    ['no rollout', MASTER, []],
+    ['a task', MASTER, ['--rollout', 'ro', '--task', 't']],
+    ['a retest outside its five', { ...MASTER, retest: 'later' }],
+    ['a redKind outside suites and publisher', { ...MASTER, redKind: 'shards' }],
+    ['an outcome outside its five', { ...MASTER, outcome: 'flake' }],
+    ['prs that are no integers', { ...MASTER, prs: ['#101'] }],
+    ['a pr below 1', { ...MASTER, prs: [0] }],
+    ['prs over MAX_MASTER_PRS', { ...MASTER, prs: Array.from({ length: 101 }, (_v, i) => i + 1) }],
+    ['a since that is no string or null', { ...MASTER, since: 7 }],
+    ['an empty since', { ...MASTER, since: '' }],
+    ['suites over MAX_FAILING', { ...MASTER, suites: names(51) }],
+    ['a suite over FAILING_NAME', { ...MASTER, suites: ['x'.repeat(201)] }],
+    ['followups over MAX_MASTER_FOLLOWUPS', { ...MASTER, followups: names(51) }],
+    ['an at that is no UTC Z stamp', { ...MASTER, at: '2026-11-16T10:00+11:00' }],
+    ['a followup that is no slug', { ...MASTER, followup: 'Master Red' }],
+    ['no sha', (({ sha, ...rest }) => rest)(MASTER)],
+  ]
+  for (const [name, fields, extra = ['--rollout', 'ro']] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', 'master-run', '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, name)
+    assert.deepEqual(listing(ev(home)), [], name)
+  }
+  for (const args of [['--rollout', 'master-runs', '--kind', 'resumed'], ['--rollout', '[[Master-Runs]]', '--task', 't', '--kind', 'ready'],
+    ['--rollout', 'master-runs', '--kind', 'master-run', '--json', JSON.stringify(MASTER)],
+    ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[master-runs]]"}']]) {
     const r = cli(home, ['emit', ...args], { env: EV(home) })
     assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`)
     assert.match(r.stderr, /reserved/)

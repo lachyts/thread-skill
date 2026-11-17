@@ -212,3 +212,13 @@ contract:
 - and the note lock it takes (`_note_lock_path`).
 
 They change only by migration.
+
+The Speed fix hold (p54-13; vault-grammar § Speed fix hold) adds two forms join and `speed-hold apply` write: a
+queued task's `depends-on:` entry `- "[[<release>]]"`, which every protocol-5 engine reads as a dependency (it holds
+the task until the release lands, and releases by itself), and the rollout note's `## Speed fix holds` lines (`- <stamp>
+hold [[<R>]] (p<N>, schedule|join): …` and `- <stamp> released [[<R>]] (p<N>): <why>`), which only an engine carrying
+the `SPEED_HOLD_ENGINE` line reads: its `next` lets a hold go, its `defer` drops a deferred task's entries and its
+`carry` copies the lines. So join and apply write either form only when `_engine_reads_speed_hold` reads True for the
+rollout (the `SPEED_HOLD_ENGINE` line in its `engine_snapshot:` root's `reconcile-rollout.py`, or in the root an
+unstamped note runs on, by `_engine_reads_carried`'s clauses); False is one `WARN: speed-hold:` line and no hold, and
+join goes on. The line forms change only by migration.

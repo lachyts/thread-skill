@@ -36,8 +36,9 @@
 //       § 0's **Put back**.
 //   p12 cross-version (ADR 0043; ADR 0047 § Build rulings): every span that runs a prior-root verb in schedule uses
 //       only the flags every snapshot a live prior can name has (carry --from/--to/--dry-run, defer --tasks/--rollout,
-//       resume --rollout, the canary's check-all and retire --rollout, close-score --rollout/--close), each verb seen
-//       with flags at least once; § 0's *The prior's root* says "ten commands" and names `defer`; step 6's defer runs
+//       resume --rollout, the canary's check-all and retire --rollout, close-score --rollout/--close, speed-hold
+//       --rollout, p54-13), each verb seen with flags at least once; § 0's *The prior's root* says "twelve commands" and
+//       names `defer`; step 6's defer runs
 //       from "the same prior's root" "before the carry".
 //   p13 § 1.5 step 3 mends a task whose note does not parse through `next-action.py mend <slug>`, the one writer of the
 //       quoting rule, and holds no `as one Edit` (a hand copy of it).
@@ -64,6 +65,7 @@ const PRIOR_VERBS = [
   { name: 'check-all', re: /git-env-canary\.py check-all\b/, flags: ['--rollout'] },
   { name: 'retire', re: /git-env-canary\.py retire\b/, flags: ['--rollout'] },
   { name: 'close-score', re: /close-score\.py\b/, flags: ['--rollout', '--close'] },
+  { name: 'speed-hold', re: /reconcile-rollout\.py speed-hold\b/, flags: ['--rollout'] },
 ]
 
 const C = (s) => (s == null ? '' : collapse(s))
@@ -226,7 +228,7 @@ function check(files) {
   }
   for (const v of PRIOR_VERBS) if (!seen[v.name]) flag('p12', `no span runs ${v.name} with its flags`)
   const root = C(sch.split(/\n\s*\n/).find((p) => p.startsWith("**The prior's root (ADR 0043).**")) ?? '')
-  need('p12', "§ 0's *The prior's root*", root, ['the ten commands that name it', "step 6's `check-all`, `defer`",
+  need('p12', "§ 0's *The prior's root*", root, ['the twelve commands that name it', "step 6's `check-all`, `defer`",
     'ADR 0047 § Build rulings'])
   const deferAt = s6.indexOf('reconcile-rollout.py defer --tasks')
   const deferSentence = deferAt < 0 ? '' : s6.slice(s6.lastIndexOf('. ', deferAt), s6.indexOf('`', s6.indexOf('`', deferAt) + 1))
@@ -336,9 +338,9 @@ test('control p11: an empty queue that drops the Grade log lines fails p11 alone
   only(swap(FILES, SCHEDULE, 'the Grade log lines `log` wrote', 'nothing else', PF), ['p11'], 'grade log')
 })
 
-test('control p12: a new flag on the prior\'s carry, nine commands, or the defer after the carry fails p12 alone', () => {
+test('control p12: a new flag on the prior\'s carry, eleven commands, or the defer after the carry fails p12 alone', () => {
   only(swap(FILES, SCHEDULE, '--to ~/repos/obsidian/Work/Tasks/<this-slug>.md', '--to ~/repos/obsidian/Work/Tasks/<this-slug>.md --leave <slug>', S6),
     ['p12'], 'new flag')
-  only(swap(FILES, SCHEDULE, 'the ten commands that name it', 'the nine commands that name it'), ['p12'], 'nine')
+  only(swap(FILES, SCHEDULE, 'the twelve commands that name it', 'the eleven commands that name it'), ['p12'], 'eleven')
   only(swap(FILES, SCHEDULE, 'before the carry, `python3', 'after the carry, `python3', S6), ['p12'], 'after the carry')
 })

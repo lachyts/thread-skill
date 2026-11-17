@@ -1058,8 +1058,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   one follow-up per (repo, test); a test logged as a Flake twice is the repo's
   to fix. Never a known baseline failure (schedule § 2.6: a test already
   red on a clean `main`, which execute's green criterion already allows
-  for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
-  _Avoid_: flaky failure, quarantined test.
+  for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs, nor a
+  red default-branch `full suite` run that passes on its one re-run (a
+  `rerun-pass` master-run line, p54-7). _Avoid_: flaky failure, quarantined
+  test.
 - **Named re-run** — the Flake check's first step: only a red's failing tests,
   re-run alone by name on the same tree before the one confirming full run
   (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
@@ -1329,12 +1331,24 @@ through time, from attention to merged PRs. Terms only — no implementation.
   not live until its full suite has passed, and a red default branch leaves
   every rollout and session on the last commit that passed (ADR 0084 d1, d2,
   proposed; published as `refs/thread/green` by full-suite.yml's `green-tip`
-  job (p54-5); its readers built by p54-6: `green-tip.py`, read by the cut,
-  the Primary refresh, land.sh and the in-place refresh, takes the ref only
-  after a fetch by name, as an ancestor of origin's tip and a verified
-  commit, and never falls back to origin's tip). Not
-  the branch's tip, which a light check lets move first. _Avoid_: proven
-  commit (**Proven** is a fix's), stable, release.
+  job (p54-5); its lead check is built (p54-7: `reconcile-rollout.py
+  master-runs` files a task when the ref's commit carries no successful run);
+  its readers built by p54-6: `green-tip.py`, read by the cut, the Primary
+  refresh, land.sh and the in-place refresh, takes the ref only after a fetch
+  by name, as an ancestor of origin's tip and a verified commit, and never
+  falls back to origin's tip). Not the branch's tip, which a light check lets
+  move first. _Avoid_: proven commit (**Proven** is a fix's), stable, release.
+- **Red-master fix** — the fix task `reconcile-rollout.py master-runs` files
+  when a default-branch `full suite` run is red on a suite its re-test
+  confirmed (or when the **Green tip**'s commit carries no successful run):
+  `priority: high`, marked `master_red: "<owner/repo>"`, joined at the top of
+  the running rollout's `## Queue`, and ranked ahead of every scheduled task by
+  `next`, so it starts first among its priority (p54-7; ADR 0084 Decided for
+  you 3). A Speed fix hold never holds it (p54-13 reads the mark): while master
+  is red no Speed fix goes live, so the fix comes first. Distinct from main red
+  (`next`'s `mainRed`, a RACE revert that did not land), which holds the whole
+  rollout: a red-master fix holds nothing, merges go on, and it is only
+  started first. _Avoid_: main red, revert task, CI fix.
 - **Speed fix** — a task filed against a measured cause of rollout time lost:
   a line of the Time-lost ledger, a suite audit's ranked change, a stall
   audit's cause. It names that evidence, and a task without it is never one.
@@ -1342,8 +1356,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   queue until its releasing task lands (its last, unless the phase names an
   earlier one), and the hold releases by itself. Once one in the engine's own
   repo is live at the **Green tip**, each running rollout takes it by an
-  **Engine catch-up** (ADR 0084 d4, d5, proposed; not yet built: Phase 54's hold is
-  made by hand). _Avoid_: perf task, optimisation, priority fix.
+  **Engine catch-up** (ADR 0084 d4, d5, proposed; the hold built by p54-13
+  (`speed_fix:`, `reconcile-rollout.py speed-hold`); the Engine catch-up not yet
+  built). _Avoid_: perf task, optimisation, priority fix.
 - **Engine catch-up** — a running rollout moving itself onto a fresh **Engine
   snapshot** at the **Green tip** because a **Speed fix** went live there: it
   starts nothing new, lets what is running finish, moves, and carries on, with

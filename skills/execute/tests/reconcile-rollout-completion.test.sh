@@ -10,8 +10,8 @@
 #       sha, the rc, the log and the failing ids).
 #   C4  a red that clears on the re-run of the same tree -> a Flake: recorded, no task.
 #   C5  completion_timeout: a deadline in the verifier is red at once; one in the env_bootstrap is `unrun`; a failed
-#       env_bootstrap is `unrun`; a bad completion_timeout is refused; a fix task already in the Archive is not
-#       refiled.
+#       env_bootstrap is `unrun`; a fix task already in the Archive is not refiled. A bad completion_timeout is refused
+#       (C12's table).
 #   C6  the halt streak: the third no-verdict run in a row halts, the fourth does not (the streak restarts at a halt),
 #       the sixth does; a `stopped` or `heat` line never counts.
 #   C7  a run in flight holds the attempt's lock: the read says in-flight, a second --run exits 3 and writes nothing;
@@ -22,9 +22,12 @@
 #       and an ack re-armed meanwhile still records `unrun`, never the run's verdict.
 #   C10 origin unread is exit 1 with nothing armed or written; a fix task that cannot be written on a final red is
 #       exit 1 with no line, so the attempt runs again.
-#   C11 the value: absent forms, kept comments, refused forms; env_bootstrap is read the same way.
+#   C11 the value: absent forms, kept comments, refused forms, env_bootstrap read the same way and C5's bad
+#       completion_timeout, as an in-process table in C12's block (each note's frontmatter built as scen builds it,
+#       read by _completion_config); end to end, a refused value --run refuses too with nothing written, verify-timeout
+#       refuses one at every loop entry, and a verifier removed before --run gets its lock is refused.
 #   C12 the outcome classes (verify's outcome file alone, never its log's text); verify's `heat` outcome is read and
-#       its log line parses (p31-4, the Heat hold).
+#       its log line parses (p31-4, the Heat hold); C11's table.
 #   C13 a verify with no --outcome (Integration, RACE) writes no outcome file; its --detach-at tree is pid-locked
 #       like --outcome's, so the daily sweep's reaper never removes a RACE re-verify's tree mid-run, and removed.
 #   C14 reconcile-rollout.py loads where fcntl does not (the Windows machine): a read verb still runs.
@@ -109,6 +112,9 @@ PY
 }
 # wait_for <file> <text> — up to 10 s for a line in a file
 wait_for() { for _ in $(seq 1 100); do grep -q "$2" "$1" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+# wait_held <pid> — a background lock holder is up: wait for its $D/held, touched once it holds, while it lives (a
+# 60 s liveness bound, never a guess at how long it takes to start)
+wait_held() { local i=0; while [ ! -e "$D/held" ] && kill -0 "$1" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done; }
 
 # ── C1 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c1
@@ -181,12 +187,6 @@ scen c5c '"true"' "env_bootstrap: 'exit 3'"
 cv --run; ok "$(js result)|$(js streak)" "unrun|1" "C5: a failed env_bootstrap → unrun"
 scen c5d '"true"' 'env_bootstrap: "touch .boot-ok"'
 cv --run; ok "$(js result)" "green" "C5: a green env_bootstrap runs first, then the verifier"
-for bad in 0 6601 abc; do
-  scen "c5x$bad" '"true"' "completion_timeout: $bad"
-  before=$(cksum < "$RO")
-  cv; ok "$rc" 2 "C5: completion_timeout: $bad → refused (2) by the read"
-  cv --run; ok "$rc|$(cksum < "$RO")" "2|$before" "C5: … and by --run, nothing written"
-done
 scen c5e "\"printf 'FAILED t::x'; exit 1\""
 mkdir -p "$D/tasks/Archive/2026"; printf -- '---\nstatus: done\n---\n' > "$D/tasks/Archive/2026/completion-red-ro-rollout-2026-10-24.md"
 cv --run; cv --run; ok "$(js result)|$(js followup)|$(red_exists)" "red|completion-red-ro-rollout-2026-10-24|no" "C5: a fix task already archived is named, never refiled"
@@ -219,11 +219,12 @@ out=$(cat "$D/bg.out")
 ok "$brc|$(js result)|$(js streak)" "0|stopped|0" "C7: TERMed, --run records its own stopped, the streak unmoved"
 ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(window)" "1|checked" "C7: … the locked tree removed, the window checked"
 cv; ok "$(js state)|$(js attempt)" "run|1" "C7: … the same attempt runs again"
-python3 - "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock" <<'PY' &
+rm -f "$D/held"
+python3 - "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock" "$D/held" <<'PY' &
 import fcntl, sys, time
-fh = open(sys.argv[1], "a"); fcntl.flock(fh, fcntl.LOCK_SH); time.sleep(0.5)
+fh = open(sys.argv[1], "a"); fcntl.flock(fh, fcntl.LOCK_SH); open(sys.argv[2], "w").close(); time.sleep(0.5)
 PY
-sp=$!; sleep 0.1
+sp=$!; wait_held "$sp"
 python3 - "$RO" <<'PY'
 import sys
 t = open(sys.argv[1]).read(); open(sys.argv[1], "w").write(t.replace('completion_verifier: "sleep 30"', 'completion_verifier: "true"'))
@@ -299,12 +300,15 @@ scen c10e '"true"'
 mkdir -p "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1x"
 cv --run --now 2026-10-24T09:10:00Z
 python3 - "$RO" <<'PY'
-import re, sys
-for l in open(sys.argv[1]):
-    m = re.search(r"\(run \S+; log (\S+)\)", l)
-    if m and m.group(1) != "-":
-        import os; print("ok   - C10: the line's log exists" if os.path.exists(m.group(1)) else f"FAIL - C10: {m.group(1)} missing")
+import os, re, sys
+logs = [m.group(1) for l in open(sys.argv[1]) if (m := re.search(r"\(run \S+; log (\S+)\)", l)) and m.group(1) != "-"]
+if not logs:
+    print("FAIL - C10: no log line names a log")
+for p in logs:
+    print("ok   - C10: the line's log exists" if os.path.exists(p) else f"FAIL - C10: {p} missing")
+sys.exit(1 if not logs or not all(map(os.path.exists, logs)) else 0)
 PY
+[ $? -eq 0 ] || fail=1
 
 scen c10f "\"exit 1\""
 o="$(integ)/completion-ro-rollout-2026-10-24-1"; mkdir -p "$(integ)"
@@ -350,87 +354,32 @@ ok "$(js result)" "stopped" "C10: a TERM to --run's whole group → stopped"
 has "$(grep ' -> stopped' "$RO")" "rc 143" "C10: … verify got it once, through --run, and ended cleanly (its own signal rc)"
 
 # ── C11 ───────────────────────────────────────────────────────────────────────────────────────────────────────
-scen c11 '  # optional (estate ADR 0009 d6): uncommented as written'
-cv; ok "$(js state)" "absent" "C11: a comment-only completion_verifier: → absent, never a passing bash comment"
-scen c11b 'null'
-cv; ok "$(js state)" "absent" "C11: completion_verifier: null → absent"
-scen c11c '"make test-all # every tier"   # the full suite'
-cv; ok "$(js verifier)" "make test-all # every tier" "C11: a quoted command keeps its own # and drops the trailing comment"
-scen c11d 'make test-all   # the full suite'
-cv; ok "$(js verifier)" "make test-all" "C11: a bare command drops its inline comment"
-scen c11e -
-python3 - "$RO" "$HERE/../../schedule/rollout-template.md" <<'PY'
-import sys
-ro, tpl = sys.argv[1:]
-t = open(ro).read()
-for key in ("# completion_verifier:", "# completion_timeout:"):
-    line = next(l for l in open(tpl) if l.startswith(key))
-    t = t.replace("verifier: \"true\"\n", "verifier: \"true\"\n" + line[2:], 1)
-open(ro, "w").write(t)
-PY
-cv; ok "$rc|$(js state)" "0|absent" "C11: the template's lines uncommented as they stand → absent"
-scen c11f '"true"' 'completion_timeout:   # optional (ADR 0052): uncommented as written'
-cv; ok "$rc|$(js state)" "0|run" "C11: with a verifier declared, a comment-only completion_timeout: → its default, never refused"
-scen c11h '"true"' 'completion_timeout: ""'
-cv; ok "$rc|$(js state)" "0|run" "C11: a quoted empty completion_timeout: → its default"
+# The value's forms (absent, kept comments, refused) are C12's in-process table; these three stay end to end: a refused
+# value, whose --run refuses too and writes nothing; verify-timeout's refusal at every loop entry; and a verifier
+# removed while --run waits for its lock.
 scen c11i "bash -c 'echo # hi'"
+before=$(cksum < "$RO")
 cv; ok "$rc|$out" "2|" "C11: a bare command holding a quote and a # → refused (2), never cut inside its own quotes"
-scen c11j "echo \"it's\" 'x #y' \"z's\""
-cv; ok "$rc|$out" "2|" "C11: a bare command with both quote kinds and a # inside quotes → refused (2)"
-scen c11k '"true"' '  # runs every tier'
-cv; ok "$rc|$(js verifier)" "0|true" "C11: an indented comment after the key is no continuation"
-scen c11l -
-python3 - "$RO" <<'PY'
-import sys
-t = open(sys.argv[1]).read()
-open(sys.argv[1], "w").write(t.replace('verifier: "true"\n', 'verifier: "true"\ncompletion_verifier: make\n\n  test-all\n', 1))
-PY
-cv; ok "$rc|$out" "2|" "C11: a value continued after a blank line → refused (2), never cut to its first line"
-scen c11m '"true"' 'completion_timeout:' '  900'
-cv; ok "$rc|$out" "2|" "C11: a completion_timeout: whose value sits on the next line → refused (2), never the default"
-for v in false off yes '"# todo"'; do
-  scen "c11b$v" "$v"
-  cv; ok "$rc|$out" "2|" "C11: completion_verifier: $v (a YAML boolean or a quoted comment) → refused (2), never run"
-done
-scen c11n -
-python3 - "$RO" <<'PY'
-import sys
-t = open(sys.argv[1]).read()
-open(sys.argv[1], "w").write(t.replace('verifier: "true"\n', 'verifier: "true"\ncompletion_verifier:\n  # the full suite\n  make test-all\n', 1))
-PY
-cv; ok "$rc|$out" "2|" "C11: a value below an indented comment line → refused (2), never read as none"
+cv --run; ok "$rc|$(cksum < "$RO")" "2|$before" "C11: … and by --run, nothing written"
 scen c11g '"true"' 'env_bootstrap: >-'
 HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 2 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (2, never verify_timeout's 1)"
 has "$(cat "$D/err")" "env_bootstrap" "C11: … naming it, before any work runs"
-i=0
-for v in '>-' '|' "'make test ''all'''" '"python3 -c \"x\""' '"make test" all' '[make, test]' 'make|  test-all' '|  make test-all' '- make test' 'make test: all'; do
-  i=$((i + 1)); scen "c11x$i" -
-  python3 - "$RO" "$v" <<'PY'
-import sys
-ro, v = sys.argv[1:]
-body = v.replace("|", "\n", 1) if v.startswith(("make|", "|  ")) else v
-t = open(ro).read()
-open(ro, "w").write(t.replace("verifier: \"true\"\n", "verifier: \"true\"\ncompletion_verifier: " + body + "\n", 1))
-PY
-  cv; ok "$rc|$out" "2|" "C11: completion_verifier: $v → refused (2), no command"
-done
-scen c11y '"true"' 'env_bootstrap: >-'
-cv; ok "$rc" 2 "C11: an env_bootstrap the reader cannot represent → refused (2)"
 
 scen c11z '"true"'
-python3 - "$D/repo/.git/thread" "$RO" <<'PY' &
+rm -f "$D/held"
+python3 - "$D/repo/.git/thread" "$RO" "$D/held" <<'PY' &
 import fcntl, os, sys, time
-d, ro = sys.argv[1:]; os.makedirs(d, exist_ok=True)
+d, ro, held = sys.argv[1:]; os.makedirs(d, exist_ok=True)
 fh = open(os.path.join(d, "completion-ro-rollout-2026-10-24-1.lock"), "a"); fcntl.flock(fh, fcntl.LOCK_EX)
-time.sleep(0.5)
+open(held, "w").close(); time.sleep(0.5)
 t = open(ro).read(); open(ro, "w").write(t.replace('completion_verifier: "true"\n', ""))
 PY
-hp=$!; sleep 0.2
+hp=$!; wait_held "$hp"
 cv --run; wait "$hp"
 ok "$rc|$(window)" "2|none" "C11: the verifier removed before --run gets its lock → refused (2), nothing armed"
 
 # ── C12 ───────────────────────────────────────────────────────────────────────────────────────────────────────
-python3 - "$SCRIPT" <<'PY'
+python3 - "$SCRIPT" "$HERE/../../schedule/rollout-template.md" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rr)
@@ -453,7 +402,60 @@ with tempfile.TemporaryDirectory() as d:
 print("ok   - C12: verify's heat outcome file reads heat, never unrun" if heat_ok else f"FAIL - C12: heat outcome read {got}")
 line = "- 2026-10-24T08:00+00:00 attempt 1 at " + "a" * 40 + " rc heat -> heat: x (run r; log -)"
 print("ok   - C12: a heat log line parses" if rr.COMPLETION_LINE_RE.match(line) else "FAIL - C12: a heat log line does not parse")
-sys.exit(1 if bad or not heat_ok or not rr.COMPLETION_LINE_RE.match(line) else 0)
+# C11 and C5's value forms: each note's frontmatter is built byte for byte as scen builds it, then read by
+# _completion_config, the one reader verify-timeout, the read and --run share. A row wants (verifier, env_bootstrap,
+# completion_timeout), or REFUSED: a CompletionValueError itself, the read's exit 2 (any other ValueError is its 1).
+FM = '---\ntags: [task, rollout]\nstatus: open\nprojects:\n  - "[[Demo]]"\nprotocol_version: 5\nverifier: "true"\n'
+BODY = '---\n\n## Notes\n\nProject root: `/c11/repo`\n\n## Queue\n\n- [[a]]\n'
+def note(v=None, *lines):   # scen <name> [completion_verifier value] [extra frontmatter line…]
+    return FM + ("" if v is None else f"completion_verifier: {v}\n") + "".join(l + "\n" for l in lines) + BODY
+def after_verifier(add):    # scen <name> -, then `add` put after its `verifier: "true"` line
+    return note().replace('verifier: "true"\n', 'verifier: "true"\n' + add, 1)
+template = note()           # the template's two lines, uncommented as they stand, each put after `verifier: "true"`
+for key in ("# completion_verifier:", "# completion_timeout:"):
+    template = template.replace('verifier: "true"\n', 'verifier: "true"\n' + next(l for l in open(sys.argv[2]) if l.startswith(key))[2:], 1)
+ABSENT, REFUSED, DEFAULT = ("", "", None), rr.CompletionValueError, rr.DEFAULT_COMPLETION_TIMEOUT
+X_FORMS = (">-", "|", "'make test ''all'''", '"python3 -c \\"x\\""', '"make test" all', "[make, test]", "make|  test-all",
+           "|  make test-all", "- make test", "make test: all")
+rows = [
+    ("a comment-only completion_verifier: → absent, never a passing bash comment",
+     note("  # optional (estate ADR 0009 d6): uncommented as written"), ABSENT),
+    ("completion_verifier: null → absent", note("null"), ABSENT),
+    ("a quoted command keeps its own # and drops the trailing comment",
+     note('"make test-all # every tier"   # the full suite'), ("make test-all # every tier", "", DEFAULT)),
+    ("a bare command drops its inline comment", note("make test-all   # the full suite"), ("make test-all", "", DEFAULT)),
+    ("the template's lines uncommented as they stand → absent", template, ABSENT),
+    ("with a verifier declared, a comment-only completion_timeout: → its default, never refused",
+     note('"true"', "completion_timeout:   # optional (ADR 0052): uncommented as written"), ("true", "", DEFAULT)),
+    ("a quoted empty completion_timeout: → its default", note('"true"', 'completion_timeout: ""'), ("true", "", DEFAULT)),
+    ("a bare command with both quote kinds and a # inside quotes → refused", note("echo \"it's\" 'x #y' \"z's\""), REFUSED),
+    ("an indented comment after the key is no continuation", note('"true"', "  # runs every tier"), ("true", "", DEFAULT)),
+    ("a value continued after a blank line → refused, never cut to its first line",
+     after_verifier("completion_verifier: make\n\n  test-all\n"), REFUSED),
+    ("a completion_timeout: whose value sits on the next line → refused, never the default",
+     note('"true"', "completion_timeout:", "  900"), REFUSED),
+    *((f"completion_verifier: {v} (a YAML boolean or a quoted comment) → refused, never run", note(v), REFUSED)
+      for v in ("false", "off", "yes", '"# todo"', "true")),
+    ("a value below an indented comment line → refused, never read as none",
+     after_verifier("completion_verifier:\n  # the full suite\n  make test-all\n"), REFUSED),
+    *((f"completion_verifier: {v} → refused, no command",   # make|… and |  … split on their first | as two lines
+       after_verifier("completion_verifier: " + (v.replace("|", "\n", 1) if v.startswith(("make|", "|  ")) else v) + "\n"),
+       REFUSED) for v in X_FORMS),
+    ("an env_bootstrap the reader cannot represent → refused", note('"true"', "env_bootstrap: >-"), REFUSED),
+    *((f"completion_timeout: {v} → refused", note('"true"', f"completion_timeout: {v}"), REFUSED)
+      for v in ("0", "6601", "abc")),
+]
+forms_bad = 0
+for name, text, want in rows:
+    try:
+        got = rr._completion_config(rr.Note(rr.Path("ro.md"), text))
+    except ValueError as e:
+        got = type(e)
+    if got == want:
+        print(f"ok   - C11: {name}")
+    else:
+        forms_bad += 1; print(f"FAIL - C11: {name}: expected [{want}] got [{got}]")
+sys.exit(1 if bad or not heat_ok or not rr.COMPLETION_LINE_RE.match(line) or forms_bad else 0)
 PY
 [ $? -eq 0 ] || fail=1
 
@@ -642,8 +644,7 @@ import fcntl, sys, time
 lock, ready, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
 fh = open(lock, "a"); fcntl.flock(fh, fcntl.LOCK_EX); open(ready, "w").close(); time.sleep(secs)
 PY
-  hp=$!
-  for _ in $(seq 1 100); do [ -e "$D/held" ] && break; sleep 0.1; done
+  hp=$!; wait_held "$hp"
 }
 before=$(cksum < "$RO")
 hold 3

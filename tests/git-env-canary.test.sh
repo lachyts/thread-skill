@@ -97,6 +97,17 @@ push2() { g -C "$C2" fetch -q origin; g -C "$C2" reset -q --hard origin/master; 
 ff() { g -C "$R" fetch -q origin; g -C "$R" merge -q --ff-only origin/master; }
 # await <pid> <cmd…> — poll <cmd> until it succeeds or <pid> has exited.
 await() { local p=$1; shift; while ! "$@" 2>/dev/null && kill -0 "$p" 2>/dev/null; do sleep 0.05; done; }
+# alive <pid file> — how many of the file's pids are still running, once none is or 30 s have passed (a liveness bound,
+# never a timing claim: a killed group's processes are gone well inside it, and a leaked one outlives it).
+alive() {
+  local n i=0
+  while :; do
+    n=0; while read -r pid; do kill -0 "$pid" 2>/dev/null && n=$((n + 1)); done < "$1"
+    [ "$n" -eq 0 ] || [ "$i" -ge 600 ] && break
+    sleep 0.05; i=$((i + 1))
+  done
+  echo "$n"
+}
 # holder — hold the lock in the background until `release` kills it (the kernel drops a flock with its process),
 # never for a fixed time a loaded host can outrun. A lock not taken within 60 s ends it by SIGALRM, and the `took
 # the lock` check fails by name; an unreleased hold ends after 300 s, so a canary that ignores its timeout fails
@@ -270,20 +281,22 @@ for v in local tracked bare fg fg2x fg2l url; do
   call; ok "$rc" 0 "bm-trip ($v): … check-all → 0"
 done
 # The budget: one network budget, min(STATE_TIMEOUT, 0.4 x the lock timeout), each call in its own process group.
-for b in slow slow2 cap; do
+# slow2 is two concurrent slow misses, so one slow miss is its subset.
+for b in slow2 cap; do
   scen "bm-$b"
   mkt A in_progress; mkt B in_progress; mkt C in_progress
   arm A; chk A; arm B; chk B
-  upwrap "$b" 'sleep 60 & echo $! >> "'"$S/$b"'.pids"; wait'
+  upwrap "$b" 'sleep 300 & echo $! >> "'"$S/$b"'.pids"; wait'
   case $b in
-    slow) ST=2 LT=8 ;;
     slow2) ST=2 LT=6 ;;
-    cap) ST=30 LT=5 ;;
+    cap) ST=120 LT=5 ;;
   esac
   if [ "$b" = cap ]; then
+    # The trip line's budget is the cap's evidence; the 60 s bound only tells a capped miss from one that ran its own
+    # 120 s budget (or the wrapper's 300 s sleep), never how fast a capped one is.
     t0=$(date +%s); THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT chk A; t1=$(date +%s)
-    ok "$rc|$(( t1 - t0 <= 4 ))" "0|1" "bm-cap: STATE_TIMEOUT=30 under LOCK_TIMEOUT=5 → the miss ends within 4 s (0.4 x the lock timeout)"
-    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "ls-remote origin master timed out after 2s" "bm-cap: … its ls-remote timed out after 2 s"
+    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "ls-remote origin master timed out after 2s" "bm-cap: STATE_TIMEOUT=120 under LOCK_TIMEOUT=5 → its ls-remote timed out after 2 s (0.4 x the lock timeout)"
+    ok "$rc|$(( t1 - t0 < 60 ))" "0|1" "bm-cap: … the miss → 0, ended long before its own 120 s budget"
   else
     THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug A --kind task > "$S/a.out" 2> "$S/a.err" & pa=$!
     pb=""
@@ -291,18 +304,15 @@ for b in slow slow2 cap; do
       THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug B --kind task > "$S/b.out" 2> "$S/b.err" & pb=$!
     fi
     await "$pa" test -s "$S/$b.pids"
-    t0=$(date +%s); THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT arm C; t1=$(date +%s)
+    THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT arm C
     ok "$rc|$(recf C task state)" '0|"armed"' "bm-$b: a concurrent task arm C behind the slow miss(es) (LOCK_TIMEOUT=$LT) → 0, armed"
-    ok "$(( t1 - t0 <= 6 ))" 1 "bm-$b: … within 6 s"
-    lacks "$err" "waiting for the lock" "bm-$b: … with no lock-timeout line"
+    lacks "$err" "waiting for the lock" "bm-$b: … inside its lock timeout: no lock-timeout line (each miss held the lock for its 2 s budget, below)"
     wait "$pa"; ra=$?; rb=0; [ -z "$pb" ] || { wait "$pb"; rb=$?; }
     ok "$ra|$rb" "0|0" "bm-$b: the slow miss's own check(s) → 0 (task windows)"
     has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "record not armed, and the state check failed: ls-remote origin master timed out after 2s" "bm-$b: … A trips: its ls-remote timed out after 2 s"
     [ "$b" = slow2 ] && has "$(grep 'git-env trip \[\[B\]\]' "$RO")" "timed out after 2s" "bm-slow2: … and B the same"
   fi
-  sleep 0.2; alive=0
-  while read -r pid; do kill -0 "$pid" 2>/dev/null && alive=$((alive + 1)); done < "$S/$b.pids"
-  ok "$alive" 0 "bm-$b: … every wrapper process is gone (its group killed)"
+  ok "$(alive "$S/$b.pids")" 0 "bm-$b: … every wrapper process is gone (its group killed)"
   g -C "$R" config --unset remote.origin.uploadpack
   call; ok "$rc" 9 "bm-$b: check-all → 9 (the lane)"
 done
@@ -444,9 +454,6 @@ chk A4; ok "$rc" 0 "r4: S11's shape (a local close-out rebased onto a moved orig
 g -C "$R" push -q origin master
 arm A5; echo t2 >> "$R/THREAD.md"; mkdir -p "$R/src"; echo x > "$R/src/x.py"; g -C "$R" add -A; g -C "$R" commit -q -m mixed
 chk A5; ok "$rc|$(trips A5)" "0|1" "r5: THREAD.md plus src/x.py → a trip"
-scen r6
-mkt A in_progress
-arm A; cpath docs/handoffs/sub/x.md; chk A; ok "$rc|$(trips A)" "0|1" "r6: a nested docs/handoffs/sub/x.md → a trip"
 scen r7
 mkt A in_progress
 g -C "$R" checkout -q -b side; cpath THREAD.md; g -C "$R" checkout -q master
@@ -466,17 +473,9 @@ mkdir -p "$R/docs/reviews/sub"; echo r > "$R/docs/reviews/r.md"; echo n > "$R/do
 g -C "$R" add -A; g -C "$R" commit -q -m "review docs"; g -C "$R" push -q origin master
 arm A; g -C "$R" rm -q docs/reviews/r.md; g -C "$R" commit -q -m "close-out: drop a consumed review doc"; cpath THREAD.md
 chk A; ok "$rc" 0 "r11: deleting docs/reviews/r.md (land.sh's review-doc deletion), then THREAD.md → 0"
-scen r12
-mkt A in_progress
-arm A; cpath docs/reviews/new.md; chk A; ok "$rc|$(trips A)" "0|1" "r12: adding docs/reviews/new.md → a trip"
-scen r13
-mkt A in_progress
-mkdir -p "$R/docs/reviews"; echo r > "$R/docs/reviews/r.md"; g -C "$R" add -A; g -C "$R" commit -q -m "review doc"; g -C "$R" push -q origin master
-arm A; cpath docs/reviews/r.md; chk A; ok "$rc|$(trips A)" "0|1" "r13: modifying docs/reviews/r.md → a trip"
-scen r14
-mkt A in_progress
-mkdir -p "$R/docs/reviews/sub"; echo n > "$R/docs/reviews/sub/n.md"; g -C "$R" add -A; g -C "$R" commit -q -m "nested review doc"; g -C "$R" push -q origin master
-arm A; g -C "$R" rm -q docs/reviews/sub/n.md; g -C "$R" commit -q -m "nested delete"; chk A; ok "$rc|$(trips A)" "0|1" "r14: deleting a nested docs/reviews/sub/n.md → a trip"
+mkt A2 in_progress; arm A2; cpath docs/reviews/new.md; chk A2
+ok "$rc|$(trips A2)" "0|1" "r11: … then, in a second window, adding docs/reviews/new.md → a trip (only a deletion is a review-doc close-out)"
+# A modified or nested review doc, a nested handoff: the rule's answers, pinned by r9's and r9b's lists below.
 # r9: the python port against land.sh's own function, extracted by sed.
 sed -n '/^closeout_shaped() {/,/^}/p' "$LAND" > "$TMP/closeout.sh"
 ok "$(grep -c 'closeout_shaped' "$TMP/closeout.sh")" 1 "r9: land.sh's closeout_shaped extracted"
@@ -502,6 +501,21 @@ spec = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.u
 for p in sys.stdin.read().split("\n"):
     if p: print(p, "y" if m.closeout_shaped(p) else "n")' "$CAN")
 ok "$got" "$want" "r9: the python closeout_shaped agrees with land.sh's on $(printf '%s\n' "$paths" | wc -l | tr -d ' ') paths"
+ok "$want" 'THREAD.md y
+sub/THREAD.md y
+a/b/THREAD.md y
+THREAD.md.bak n
+xTHREAD.md n
+docs/handoffs/x.md y
+docs/handoffs/ n
+docs/handoffs/sub/x.md n
+sub/docs/handoffs/y.md y
+sub/docs/handoffs/a/y.md n
+a/docs/handoffs/b/docs/handoffs/c.md y
+docs/handoffsx/y.md n
+src/x.py n
+README.md n
+docs/x.md n' "r9: … and land.sh's answer is the rule's: a THREAD.md anywhere, a handoff directly under a docs/handoffs/ (never a nested one)"
 # r9b: the review-doc deletion rule, ported the same way: closeout_change over (status, path) pairs.
 sed -n '/^review_doc() {/,/^}/p; /^closeout_change() {/,/^}/p' "$LAND" >> "$TMP/closeout.sh"
 ok "$(grep -cE '^(review_doc|closeout_change)\(\) \{' "$TMP/closeout.sh")" 2 "r9b: land.sh's review_doc and closeout_change extracted"
@@ -751,22 +765,7 @@ PY
 CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
 ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "9|not-run|failed:git-env:9" \
   "g: the backoff under a lane hold never runs merge-task.sh and leaves failed:git-env:9 (the lane-hold row)"
-# g3: the same under a bare checkout's hold: failed:git-env:3 (the trip row).
-scen g3
-mkt A in_progress
-PR="$S/plugin"; mkdir -p "$PR/skills/execute/scripts" "$R/.claude"
-ln -s "$CAN" "$PR/skills/execute/scripts/git-env-canary.py"
-printf '#!/usr/bin/env bash\ntouch "%s/stub-ran"\n' "$S" > "$PR/skills/execute/scripts/merge-task.sh"; chmod +x "$PR/skills/execute/scripts/merge-task.sh"
-python3 - "$TMP/g/backoff.tpl" "$S/backoff.sh" "$R" "$RO --tasks-dir $V" <<'PY2'
-import sys
-src, dst, repo, ro = sys.argv[1:]
-t = open(src).read().replace("<repoPath>", repo).replace("<rollout-note>", ro).replace("<the same four args>", "a b c d").replace("sleep 60", "sleep 0")
-open(dst, "w").write(t)
-PY2
-arm A; g -C "$R" config --local core.bare true; call; ok "$rc" 3 "g3: a bare flip → check-all 3"
-CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
-ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "3|not-run|failed:git-env:3" \
-  "g3: the backoff under a whole-rollout hold never runs merge-task.sh and leaves failed:git-env:3 (the trip row)"
+# The snippet writes failed:git-env:<its check-all's rc> for any rc, so a bare hold's 3 (c) needs no run of its own.
 # g2: a check-all that fails for another reason (a lock timeout, exit 2) records its own exit, so step 4 routes it
 # to `git-env canary failed`, never to the trip reason.
 scen g2
@@ -952,7 +951,8 @@ has "$(grep 'git-env trip \[\[A\]\]' "$RO" | tail -n 1)" "verify: record not arm
 # ── nv: a window acked mid-run gives no verdict (ADR 0053) ────────────────────────────────────────────────────
 # The lead halts on a trip while a verify runs on in the background; Lachy acks; the resumed lead reads the rc and
 # checks. The ack re-baselined the open window, so before ADR 0053 that check read clean and the rc was acted on.
-for k in verify race-verify integrate; do
+# One non-task kind: the check branches only on task versus not (nv-task), and nv-rearm and nv-rearm-closed run integrate.
+for k in verify; do
   scen "nv-$k"
   mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
   arm A "$k"; old=$(cur); code

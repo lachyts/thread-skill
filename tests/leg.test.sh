@@ -2,12 +2,15 @@
 # skills/execute/scripts/leg.py: a serial rollout's Legs (ADR 0040, p24-3; skills/execute/legs.md).
 #   L1   two Legs (5 + 2) with a handoff, then Complete: post-items, a follow-on, dispositions, the Completion log,
 #        the archive and one vault commit; an Archive collision; next --waiting; file-followup after Complete reads
-#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls; done's
+#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls (no GitHub
+#        origin, only a close-out commit ahead, a detached HEAD: leg.py reads every `not landed:` line one way, so
+#        land.sh's other routes, swept, register-listed and a non-default branch, are tests/land.test.sh's); done's
 #        leg_head stamp (L1, L1v, L1h: each checkout's newest trailered commit of the task, never a peer's HEAD, [] when
 #        it committed nowhere, none with no leg_base)
 #   L1cv a serial chain's completion verify at Complete (ADR 0055): close refuses it undecided, writes its summary
 #        line, puts a red's fix task in the vault commit, refuses a bare YAML boolean, and leaves a note without the
-#        key byte-for-byte as before
+#        key byte-for-byte as before (completion-verify's own read of those values is
+#        reconcile-rollout-completion.test.sh's C1 and C11)
 #   L2   a lost Leg: exit 3 for another session, --take-over inherits the claim, five fresh claims beside it, the
 #        same-session resume, CODEX_THREAD_ID, `unknown` never matching, --resume; L4c six smoke entries; L2b a Leg
 #        lost or stopped before its smoke test hands its unsmoked tasks on
@@ -19,7 +22,9 @@
 #   L5   the review gate on done; L5b change
 #   L6   set-aside --revert: the commit, a conflict, a dirty path; close --outcome halt and clear-halt
 #   L7   the launch check, a two-launch chain, a codex boundary and a manual hand-over
-#   L8   refusals; L9 an exported GIT_DIR; L10 the close-out landing under a Leg; L11 the status mapping
+#   L8   refusals; L9 an exported GIT_DIR; L10 the close-out under a Leg (done with an in-repo review doc, close
+#        --outcome stopped's commit_only; close's land snippet itself is tests/land.test.sh's 30b and 73); L11 the
+#        status mapping
 #   L12  the lock: an interleaved hand-over and successor, racing begins, the timeout
 #   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
 #        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
@@ -41,8 +46,8 @@
 #        worktree (L16a); begin remakes a deleted copy on its branch, exit 4 naming the copy line, and logs the
 #        primary folder (L16b, L16g); begin fast-forwards a clean copy to the primary's default branch, whatever the
 #        primary has checked out, and its controls, landFirst when the chain branch has commits that branch lacks (L16c); claim stamps the copy and the primary bases, done passes a copy commit and refuses one in the
-#        primary, which --revert reverts there, while a hand merge of the chain branch is never stray (L16d); two
-#        chains in one repo hold separate HEADs and indexes (L16e); the hand-over, handed --manual and status's restart
+#        primary, which --revert reverts there, while a hand merge of the chain branch is never stray (L16d; two chains'
+#        copies in one repo are tests/leg-land.test.sh's L17a); the hand-over, handed --manual and status's restart
 #        open in the copy, with the alias's paste line (a cd-less alias's whole command) or its prose fallback, and a
 #        missing copy blocks the restart (L16f); done's own-checkout rule across two copies (L16h); Complete refuses a
 #        task not yet landed, then files only the origin half once land puts it on master, and a stuck route still files
@@ -63,7 +68,6 @@ unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID XDG_STATE_HOME THREAD_LEG_LOCK_TIME
 root=$(pwd -P)
 LEG="$root/skills/execute/scripts/leg.py"
 RR="$root/skills/execute/scripts/reconcile-rollout.py"
-CLOSE="$root/skills/close/SKILL.md"
 HOOK="$root/hooks/rollout-stop-driver.py"
 
 TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
@@ -266,16 +270,8 @@ landctl() {
   has "$(cat "$T/Archive/Rollouts/$RO.md")" "- Chain commits: $R: $2" "$1: Chain commits: … $2"
   ok "$(ls "$T" | grep -c -- '-land-chain-')" "$( [ "${3:-n}" = y ] && echo 1 || echo 0)" "$1: land follow-on filed: ${3:-n}"
 }
-scen l1va; R="$HOME/repos/workspaces"; mkrepo "$R" https://github.com/o/ws.git; export CWD="$R"
-landctl "L1v (a) swept" "not landed: swept by the daily sweep, nothing filed"
 scen l1vb; mkdir -p "$S/srv"; git init -q --bare "$S/srv/r.git"; R="$S/r"; mkrepo "$R" "$S/srv/r.git"; export CWD="$R"
 landctl "L1v (b) no GitHub origin" "not landed: no GitHub origin, nothing filed"
-scen l1vc; R="$S/r"; mkrepo "$R" https://github.com/o/rc.git; export CWD="$R"
-printf -- '- o/rc — frozen for the audit\n' > "$LANDING_REGISTER"
-landctl "L1v (c) register-listed" "not landed: listed o/rc: frozen for the audit, nothing filed"
-: > "$LANDING_REGISTER"
-scen l1vd; R="$S/r"; mkrepo "$R" https://github.com/o/rd.git; git -C "$R" checkout -qb feat/x; export CWD="$R"
-landctl "L1v (d) a non-default branch" "not landed: on feat/x, not master, nothing filed"
 scen l1ve; R="$S/r"; mkrepo "$R" https://github.com/o/re.git; export CWD="$R"
 HOOK_CMD='git -C "$R" update-ref refs/remotes/origin/master HEAD; pcommit "$R" THREAD.md closed "📝 docs(thread): close-out"' \
   landctl "L1v (e) only a close-out commit ahead" "all on origin/master"
@@ -340,7 +336,6 @@ has "$(sed -n '/^## Completion log/,$p' "$A")" "- Completion verify: red at ${sh
 has "$(commit_files)" "A Work/Tasks/completion-red-$RO.md|" "L1cv (ii): the fix task is in the vault commit"
 ok "$(ls "$T" | grep -c '^completion-red-')" 1 "L1cv (ii): exactly one fix task"
 scen l1cv3; cvchain "L1cv (iii)"
-rcv; ok "$rc|$out" '0|{"verifier": null, "state": "absent"}' "L1cv (iii): no completion_verifier: → the read says absent"
 leg close --outcome complete --cwd "$R" --reflection "$REFL"
 ok "$rc|$(q '"completionVerify" in d')" "0|False" "L1cv (iii): complete → exit 0, no completionVerify"
 fu=$(q '[f for f in d["followups"] if "-land-chain-" in f][0]')
@@ -352,7 +347,6 @@ scen l1cv4; cvchain "L1cv (iv)" 'true'
 snap; leg close --outcome complete --cwd "$R" --reflection "$REFL"
 ok "$rc" 1 "L1cv (iv): a bare completion_verifier: true → complete exits 1"
 has "$err" "YAML boolean" "L1cv (iv): … naming the YAML boolean"; same "L1cv (iv): the refused complete"
-rcv; ok "$rc" 2 "L1cv (iv): … and the read refuses it (2)"
 ok "$(grep -c . "$TMP/net.log")" 0 "L1cv: no gh or ssh call was made"
 unset CWD
 
@@ -689,19 +683,6 @@ leg done --task t1 --verify pass --review "$R/docs/reviews/x.md" --cwd "$R"; ok 
 leg close --outcome stopped --reason "end of the session" --cwd "$R"
 ok "$rc|$(q "'$R' in d['commit_only']")" "0|True" "L10: commit_only lists the chain checkout"
 has "$(q 'd["status_line"]')" 'state=halted reason="stopped: end of the session"' "L10: close --outcome stopped"; keepline
-awk '{ l=$0; sub(/^[ \t]+/, "", l) }
-     l ~ /^# thread:land( |$)/ { on=1; ind=substr($0, 1, length($0)-length(l)); next }
-     l == "# end thread:land" { on=0 }
-     on { if (index($0, ind) == 1) print substr($0, length(ind)+1); else print $0 }' "$CLOSE" > "$S/snip.sh"
-sed -e "s|top='<top>'|top='$R'|" -e "s|slug='<slug>'|slug='t1'|" -e "s|mode=''|mode='--commit-only'|" \
-    -e "s|<message>|🔧 chore(review): consumed review docs — delete (history keeps them)|" -e "s| <paths>\$| '$R/docs/reviews/x.md'|" \
-    "$S/snip.sh" > "$S/run.sh"
-: > "$TMP/net.log"
-lout=$(cd "$R" && CLAUDE_PLUGIN_ROOT="$root" bash "$S/run.sh" 2>"$S/land.err"); lrc=$?
-ok "$lout|$lrc" "not landed: commit-only|0" "L10: close's land snippet, commit-only: not landed: commit-only, exit 0"
-hasnt "$lout$(cat "$S/land.err")" "stuck:" "L10: … never stuck:"
-ok "$(git -C "$R" show --name-status --format= HEAD | tr '\t\n' ' |')" "D docs/reviews/x.md|" "L10: … the consumed doc's deletion is committed"
-ok "$(grep -c . "$TMP/net.log")" 0 "L10: … and no gh or ssh call was made"
 unset CWD
 
 # ════ L11: the status mapping ═══════════════════════════════════════════════════════════════════════════════════════
@@ -728,7 +709,7 @@ hold() {  # hold <flag file> — an outside holder of the lock; $hp its pid, rec
 fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT); fcntl.flock(fd, fcntl.LOCK_EX); open(sys.argv[2], "w").write("held")
 time.sleep(120)' "$LOCK" "$1" &
   hp=$!; holders+=("$hp")
-  local i=0; while [ ! -f "$1" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+  local i=0; while [ ! -f "$1" ] && kill -0 "$hp" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
 }
 hold "$TMP/held1"; snap
 lb h1 s1 handed --started task_x; p1=$!
@@ -756,7 +737,6 @@ ok "$(find "$TMP" -path '*/Work/Tasks/*' -name '.*.tmp' | wc -l | tr -d ' ')" 0 
 
 # ════ L13: status and restarted (p24-4: /thread:status § 5, /thread:repair § 7) ══════════════════════════════════
 # Every chain is built through leg.py's own verbs; status is read-only and takes no lock.
-mstime() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 # (a) not started
 scen l13a
 mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
@@ -877,8 +857,8 @@ ok "$(q 'd["rows"][2]["held"]')|$(q 'd["rows"][0]["dependants"]')" "depends on [
 # (i) read-only: nothing changes, and it answers while another verb holds the lock
 before=$( { git -C "$V" status --porcelain; find "$V" -path "$V/.git" -prune -o -type f -print | sort | xargs shasum; ls -l "$THREAD_LEG_LOCK_DIR"; } 2>&1)
 hold "$TMP/held-l13"
-t0=$(mstime); leg status; t1=$(mstime)
-ok "$rc|$([ $((t1 - t0)) -lt 5000 ] && echo fast)" "0|fast" "L13i: status answers in under 5 s while the lock is held ($((t1 - t0)) ms)"
+leg status
+ok "$rc" 0 "L13i: status answers while the lock is held (a verb that waited on it ends exit 5 at THREAD_LEG_LOCK_TIMEOUT, L12)"
 kill "$hp"; wait "$hp" 2>/dev/null
 after=$( { git -C "$V" status --porcelain; find "$V" -path "$V/.git" -prune -o -type f -print | sort | xargs shasum; ls -l "$THREAD_LEG_LOCK_DIR"; } 2>&1)
 ok "$after" "$before" "L13i: … and writes nothing: the porcelain, every file's sha1 and the lock dir are unchanged"
@@ -1288,19 +1268,6 @@ tcommit "$C" t4 e.txt "t4 work"; git -C "$R" merge -q --no-edit "chain/$RO"
 leg set-aside --task t4 --reason "set aside after a hand merge" --revert
 ok "$rc|$(logn "Leg 1 reverted .* in $R\$")|$(logn "Leg 1 reverted .* in $C\$")" "0|1|1" "L16d: control: --revert finds nothing in \$R, only the copy's commit"
 unset CWD
-
-# ════ L16e: two chains in one repo hold separate HEADs and indexes ═════════════════════════════════════════════════
-cscen l16e
-R="$S/r"; crepo "$R" https://github.com/o/r16e.git; RO1=$RO; RO2=demo2-rollout-2026-10-20
-mkro '' "e1~cc-r~$R~\`repo:$R//a.txt\`"; mkt e1
-RO=$RO2; mkro '' "e2~cc-r~$R~\`repo:$R//b.txt\`"; mkt e2; leg copies; ok "$rc" 0 "L16e: the second chain's copies"
-RO=$RO1; leg copies; ok "$rc" 0 "L16e: the first chain's copies"
-C1="$S/chains/r-$RO1"; C2="$S/chains/r-$RO2"; rh=$(git -C "$R" rev-parse HEAD)
-tcommit "$C1" e1 a.txt "e1 work"; tcommit "$C2" e2 b.txt "e2 work"
-ok "$(git -C "$C1" symbolic-ref HEAD)|$(git -C "$C2" symbolic-ref HEAD)" "refs/heads/chain/$RO1|refs/heads/chain/$RO2" "L16e: each on its own branch"
-ok "$([ "$(git -C "$C1" rev-parse HEAD)" != "$(git -C "$C2" rev-parse HEAD)" ] && echo y)|$([ "$(git -C "$C1" rev-parse --path-format=absolute --git-path index)" != "$(git -C "$C2" rev-parse --path-format=absolute --git-path index)" ] && echo y)" \
-   "y|y" "L16e: a commit in each leaves two HEADs and two indexes"
-ok "$(git -C "$R" rev-parse HEAD)" "$rh" "L16e: … and \$R's HEAD unchanged"
 
 # ════ L16f: the hand-over, handed --manual and status's restart open in the copy ═══════════════════════════════════
 cscen l16f

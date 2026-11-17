@@ -141,11 +141,15 @@ for form in a b; do
   absent
   : > "$MT_STATE/gh.log"
   limit=$NEVER; [ "$form" = b ] && limit=900
-  MERGE_TASK_NO_RUNNER_LIMIT=$limit PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 5 "$I" "$B" > "$tmp/7.out" 2>&1 &
+  # Each form its own output file: 7b's poll once read 7a's `waiting on:` line before its job had opened the file, so the
+  # TERM reached the forked child before exec, and bash ran this suite's EXIT trap there, removing all of $tmp (PR #429's
+  # ubuntu runs 43930195186 and 43951804862).
+  f7="$tmp/7$form.out"
+  MERGE_TASK_NO_RUNNER_LIMIT=$limit PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 5 "$I" "$B" > "$f7" 2>&1 &
   pid=$!
-  i=0; while [ "$i" -lt 300 ] && ! grep -q 'waiting on:' "$tmp/7.out" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  i=0; while [ "$i" -lt 300 ] && ! grep -q 'waiting on:' "$f7" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
   kill -TERM "$pid"; wait "$pid"; rc=$?
-  out=$(cat "$tmp/7.out"); last=$(tail -1 "$tmp/7.out")
+  out=$(cat "$f7"); last=$(tail -1 "$f7")
   ok "$rc" 143 "7$form. SIGTERM mid-wait exits 143"; ok "$(sent)" "failed:143" "7$form. failed:143"
   has "$out" "CI in flight on head — waiting on: " "7$form. the in-flight line names what it waits on"
   has "$out" "build (in_progress)" "7$form. … the live job"

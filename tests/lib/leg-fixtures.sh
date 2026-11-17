@@ -153,5 +153,5 @@ holdlock() {
 fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT); fcntl.flock(fd, fcntl.LOCK_EX); open(sys.argv[2], "w").write("held")
 time.sleep(120)' "$1" "$2" &
   hp=$!; holders+=("$hp")
-  local i=0; while [ ! -f "$2" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+  local i=0; while [ ! -f "$2" ] && kill -0 "$hp" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
 }

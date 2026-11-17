@@ -416,31 +416,32 @@ PY
     "LC13 $n (h): no target, origin's tip: the same, through the ff mode"
 
   # ---- LC10: lc_bounded: the child's rc, the budget, and a signal or a normal exit kills the whole group -----------
-  # gone <pgid>: polls up to ~2 s until no process of the group is left (a reaped zombie can't fake a pass)
+  # gone <pgid>: polls until no process of the group is left (a reaped zombie can't fake a pass), under a 30 s liveness
+  # bound: a killed group is gone well inside it, and a leaked sleep outlives it
   gone() {
     local i=0; case ${1:-} in ''|*[!0-9]*) echo "no pgid"; return ;; esac
-    while kill -0 -- "-$1" 2>/dev/null; do [ "$i" -ge 20 ] && { echo alive; return; }; sleep 0.1; i=$((i+1)); done; echo gone
+    while kill -0 -- "-$1" 2>/dev/null; do [ "$i" -ge 300 ] && { echo alive; return; }; sleep 0.1; i=$((i+1)); done; echo gone
   }
   ok "$(src lc_bounded 5 sh -c 'exit 3'; echo "rc $?")" "rc 3" "LC10 $n: the child's own rc"
   ok "$(src lc_bounded 5 true; echo "rc $?")" "rc 0" "LC10 $n: … and 0"
   ok "$(src lc_bounded x true; echo "rc $?")" "rc 0" "LC10 $n: a non-integer budget reads as 1 s"
   ok "$(src lc_bounded 5 "$tmp/no-such-command" 2>/dev/null; echo "rc $?")" "rc 127" "LC10 $n: an argv that cannot exec: 127"
   rm -f "$tmp/g10"; s0=$SECONDS
-  ok "$(src lc_bounded 1 sh -c 'echo $$ > "$1"; exec sleep 30' _ "$tmp/g10"; echo "rc $?")" "rc 142" "LC10 $n: over the budget: 142"
-  ok "$([ $((SECONDS - s0)) -le 10 ] && echo soon)" soon "LC10 $n: … within a few seconds"
+  ok "$(src lc_bounded 1 sh -c 'echo $$ > "$1"; exec sleep 300' _ "$tmp/g10"; echo "rc $?")" "rc 142" "LC10 $n: over the budget: 142"
+  ok "$([ $((SECONDS - s0)) -lt 60 ] && echo cut)" cut "LC10 $n: … cut by its 1 s budget, never the child's own 300 s"
   ok "$(gone "$(cat "$tmp/g10" 2>/dev/null)")" gone "LC10 $n: … and the child's group is gone"
   rm -f "$tmp/g10"
-  ok "$(src lc_bounded 5 sh -c 'echo $$ > "$1"; sleep 30 >/dev/null 2>&1 & exit 0' _ "$tmp/g10"; echo "rc $?")" "rc 0" \
+  ok "$(src lc_bounded 5 sh -c 'echo $$ > "$1"; sleep 300 >/dev/null 2>&1 & exit 0' _ "$tmp/g10"; echo "rc $?")" "rc 0" \
     "LC10 $n: a child that exits 0 and leaves a descendant: 0"
   ok "$(gone "$(cat "$tmp/g10" 2>/dev/null)")" gone "LC10 $n: … and the descendant is killed with the group"
   for sig in TERM:143 HUP:129; do
     rm -f "$tmp/g10"
-    src lc_bounded 30 sh -c 'echo "$PPID $$" > "$1.t"; mv "$1.t" "$1"; sleep 30 | cat' _ "$tmp/g10" >/dev/null 2>&1 &
-    bg=$!; i=0; while [ ! -s "$tmp/g10" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+    src lc_bounded 30 sh -c 'echo "$PPID $$" > "$1.t"; mv "$1.t" "$1"; sleep 300 | cat' _ "$tmp/g10" >/dev/null 2>&1 &
+    bg=$!; i=0; while [ ! -s "$tmp/g10" ] && kill -0 "$bg" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
     pp= pg=; read -r pp pg < "$tmp/g10" 2>/dev/null
     [ -n "$pp" ] && kill -"${sig%%:*}" "$pp"; wait "$bg"; rc=$?
     ok "$rc" "${sig#*:}" "LC10 $n: a ${sig%%:*} to lc_bounded exits ${sig#*:}"
-    ok "$(gone "$pg")" gone "LC10 $n: … and kills the child's group (sleep 30 | cat) first"
+    ok "$(gone "$pg")" gone "LC10 $n: … and kills the child's group (sleep 300 | cat) first"
   done
 done
 
