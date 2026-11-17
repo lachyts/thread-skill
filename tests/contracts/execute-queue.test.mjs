@@ -962,8 +962,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   }
   // mac-verdict (p54-15, ADR 0084 Decided for you 1): the verify route records the Mac verdict pending, pushes, then arms
   // (the arm after the push) and launches merge-task --mac beside the verify; case (iii) is named; the join routes T's 1
-  // (held until the verify's rc) and 3 (the pair stopped) by the verdict; step 4 names exactly the launches that carry
-  // --mac, and rows 11 and 12; prepare's `wait` route launches and writes nothing.
+  // (held until the verify's rc) and 3 (the pair stopped) by the verdict, only a result for the verdict's head, and
+  // never a command it stopped; step 4 names exactly the launches that carry --mac, and rows 11 and 12; prepare's `wait`
+  // route launches and writes nothing, and a handle lost to a new session comes back through clause (7).
   {
     const vb = st3.slice(st3.indexOf('- **`verify`** —'), st3.indexOf('Otherwise, while the verdict reads `pending`'))
     const join = st3.slice(st3.indexOf("**The verify route's join.**"), st3.indexOf('- **`trouble`** —'))
@@ -976,9 +977,12 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !join.includes("T reports while the verdict reads `pending`: 1 → held until V's rc: red → `mac … --state red`, then the integrate call with `--after red` (T's 1 is never routed); green → `log-integration`, `mac … --state green`, then step 4's row 1 as written.") ||
       !join.includes('3 → `mac … --state stopped --why base-moved`, TaskStop V, then step 3 again from its start: `prepare` routes `wait` until V is gone, then case (iii)') ||
       !join.includes('T reports while the verdict reads `red` or `stopped`: never routed') ||
+      !join.includes("A V or T result is routed only while the verdict's `head` is the M that command ran on") ||
+      !join.includes("Every command TaskStopped here, at a canary trip or at the third `noslot` leaves this session's unreported set at the stop") ||
       !macList.includes("step 3's verify-route launch beside the verify (no shared file, not `--gated`), and that launch's own re-runs: the *Merge hold* release of a verify-route pair (`--gated` included), the exit-8 *Backoff*, the exit-6 re-run, the 143/130/129 or missing-sentinel re-run and the exit-12 re-run") ||
       !macList.includes("Never after an integrate call's `integrated` row, never on step 3's `merge` or `skip` route, never on the `## Integration log`'s pair after a cold resume, and never on a RACE revert PR") ||
       !waitB.includes('Launch nothing for it and write nothing: keep the lane held and end the turn `waiting`') ||
+      !waitB.includes("For a handle lost to a new session neither does") || !waitB.includes("heartbeat clause (7)'s stall re-entry does") ||
       !(rows['11'] ?? '').includes("step 3's *The verify route's join* routes it") || !(rows['12'] ?? '').includes('re-run step 4 with `--mac`')) {
       fails.push('mac-verdict')
     }
@@ -1340,6 +1344,10 @@ test('control: the verify route without its order, its join rows, its --mac list
   only(sk(', and never on a RACE revert PR.', '.'), 'mac-verdict', '--mac on a revert PR')
   only(sk('Launch nothing for it and write nothing: keep the lane held', 'Run `undo`, then keep the lane held'), 'mac-verdict', 'wait undoes')
   only(sk('; case (iii) never routes `merge` or `skip`:', ':'), 'mac-verdict', 'case (iii) may merge')
+  only(sk("A V or T result is routed only while the verdict's `head` is the M that command ran on", 'A V or T result is routed whatever head the verdict names'),
+    'mac-verdict', 'a stale head routed')
+  only(sk('Every command TaskStopped here, at a canary trip or at the third `noslot` leaves', 'A command TaskStopped here stays in'), 'mac-verdict', 'a stopped command routed')
+  only(sk("heartbeat clause (7)'s stall re-entry does,", 'the next notification does,'), 'mac-verdict', 'no clause (7) for a lost handle')
 })
 
 test('control: step 3 without the third-noslot Lane hold fails verify-slots', () => {
