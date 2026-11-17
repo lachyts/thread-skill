@@ -1180,21 +1180,24 @@ through time, from attention to merged PRs. Terms only — no implementation.
   merge, declared as the rollout's `verifier:`: the tests a change reaches from
   its **Verify base**, plus a small set that always runs, and the full suite
   whenever a change cannot be placed, less the **Slow tier** where a project
-  declares one. The full suite then runs as the
+  declares one and its `verifier:` leaves it out (Thread Skill's does, so both
+  **Checkpoints** run light, p54-8). The full suite then runs as the
   **Completion verifier** and on the default branch's own runs, so a break only
   the slow tests catch, in code the change did not reach, is found there and
   filed, not at its merge (estate ADR 0009 d6, ADR 0073). Not **Touched
   tests**, which an agent runs between Checkpoints. _Avoid_: quick suite,
   smoke tests, partial verify.
-- **Slow tier** — the suites GitHub's check before a merge leaves out because
-  each runs long, whatever the change reaches, and the Mac's verify too once
-  the **Green tip** decides what goes live: they run in the default
-  branch's full suite after every merge, which sets the **Green tip**, and at
-  the **Completion verifier**. The set is declared, derived from each suite's
-  measured seconds; a suite the change itself edits still runs before the
-  merge, and a suite red on the default branch twice in four weeks returns to
-  the **Fast tier** (ADR 0084 d3, proposed; built for GitHub's check by p54-1;
-  the Mac's verify by p54-8).
+- **Slow tier** — the suites the checks before a merge leave out because each
+  runs long, whatever the change reaches: GitHub's check, and the Mac's verify
+  (both **Checkpoints**) now that the **Green tip** decides what goes live.
+  They run in the default branch's full suite after every merge, which sets
+  the **Green tip**, and at the **Completion verifier**. The set is declared,
+  derived from each suite's measured seconds; a suite the change itself edits
+  still runs before the merge, and a suite red on the default branch twice in
+  four weeks returns to the **Fast tier** (ADR 0084 d3, proposed; built for
+  GitHub's check by p54-1, for the Mac's verify by p54-8: a project's declared
+  `verifier:` can leave the Slow tier out, Thread Skill's does, and a running
+  rollout takes it when its `verifier:` is restamped).
   _Avoid_: nightly tests, excluded tests.
 - **Suite budget** — how long a project's suite may take, read on the week's
   median, never one run: an Integration verify within 5 minutes and a full

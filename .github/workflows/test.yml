@@ -63,8 +63,9 @@ jobs:
       # is that sha and the diff is exactly what the PR lands; a base that moved after the event only grows the diff
       # (slower, never wrong). Each shard selects from the same checkout and base, so the split is the same in all three.
       # THREAD_SKIP_SLOW=1 leaves the Slow tier (tests/fast-tier.map's SLOW lines, ADR 0084 d3) out of this check, a FULL
-      # diff's full suite included, unless the PR edits a SLOW suite itself. The Mac's own verify (`make test-fast`
-      # without it) and master's full-suite.yml still run the Slow tier.
+      # diff's full suite included, unless the PR edits a SLOW suite itself. The Mac's own verify leaves it out too
+      # (CLAUDE.md's Verifier: is `THREAD_SKIP_SLOW=1 make test-fast`, ADR 0084 Decided for you 1), while `make test`
+      # (the completion verifier) and master's full-suite.yml still run the Slow tier.
       - run: bash tests/run.sh --fast --shard ${{ matrix.shard }}/3
         env:
           THREAD_TEST_JOBS: "4"

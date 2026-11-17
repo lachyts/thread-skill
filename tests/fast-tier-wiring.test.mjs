@@ -1,14 +1,15 @@
 // p43-2 (ADR 0073 d1): Thread Skill declares its fast tier, and nothing in the engine has to change for it.
 // - W1: the engine renders the rollout's `verifier:` at both Checkpoints, an agent's (the implementer, the approved-plan
-//   implementer, a reviser) and Integration's (the integrator, with the slot's priority), so `make test-fast` reaches
-//   all four through slotted(), and the full `make test` reaches none of them.
+//   implementer, a reviser) and Integration's (the integrator, with the slot's priority), so the light fast tier
+//   (`THREAD_SKIP_SLOW=1 make test-fast`, p54-8) reaches all four through slotted(), and the full `make test` none.
 // - W2: the engine never reads completion_verifier: the completion verify is the lead's (execute § 4.5 step 5).
-// - W3: the real CLAUDE.md declares `Verifier: \`make test-fast\`` and `Completion verifier: \`make test\`` at column 0
-//   (schedule § 2.5 reads "a line starting `Verifier:`"), never as list items, and estate-scan.py's VERIFIER_LINE reads
-//   the fast tier from it.
-// - W4: the rollout template stamped as schedule step 6 does it (`verifier: make test-fast`, `completion_verifier:
-//   "make test"`) passes step 6's *Check the stamped commands*: `reconcile-rollout.py verify-timeout` exits 0 with one
-//   JSON line.
+// - W3: the real CLAUDE.md declares `Verifier: \`THREAD_SKIP_SLOW=1 make test-fast\`` (the Slow tier left out of the
+//   Mac's verify, ADR 0084 Decided for you 1) and `Completion verifier: \`make test\`` at column 0 (schedule § 2.5 reads
+//   "a line starting `Verifier:`"), never as list items, and estate-scan.py's VERIFIER_LINE reads the fast tier from it.
+//   tests/fast-tier.test.sh G8 runs both lines.
+// - W4: the rollout template stamped as schedule step 6 does it (`verifier: THREAD_SKIP_SLOW=1 make test-fast`,
+//   `completion_verifier: "make test"`) passes step 6's *Check the stamped commands*: `reconcile-rollout.py
+//   verify-timeout` exits 0 with one JSON line.
 // tests/fast-tier.test.sh pins the selector and run.sh's modes. Reads the tree; W4 writes one note in an mkdtemp dir.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -21,7 +22,7 @@ import { loadEngine, enginePath, VERIFY_SLOT } from './lib/engine.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const text = (p) => fs.readFileSync(path.join(root, p), 'utf8')
-const FAST = 'make test-fast'
+const FAST = 'THREAD_SKIP_SLOW=1 make test-fast'
 
 const T = loadEngine(['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'integratorPrompt', 'slotted', 'rungState'])
 const task = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
@@ -93,7 +94,7 @@ test('W4: the template stamped as step 6 does it passes verify-timeout', () => {
     lines[i] = 'completion_verifier: "make test"'
     note = lines.join('\n')
     assert.ok(!note.includes('{{'), 'every placeholder is stamped')
-    assert.match(note, /^verifier: make test-fast$/m)
+    assert.ok(note.split('\n').includes(`verifier: ${FAST}`), 'the light verifier is stamped')
     const file = path.join(d, 'thread-skill-rollout-2026-11-08.md')
     fs.writeFileSync(file, note)
     const r = spawnSync('python3', ['-B', RECONCILE, 'verify-timeout', '--rollout', file], {

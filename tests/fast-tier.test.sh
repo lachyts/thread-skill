@@ -7,7 +7,8 @@
 # --shard-plan in R9-R10, and R11-R12's SKILL.md and docs reach through one index), tests/run.sh's --fast, --only,
 # --shard and --shard-plan modes on a fixture checkout (F1-F22, with F2b's untracked note; p54-3's node order, warm
 # knob and node-run.mjs signals in F23-F25; p54-10's --fast --shard in F26), and THREAD_SKIP_SLOW's filter on a second
-# one (G1-G7, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree). Each throwaway
+# one (G1-G7, p54-1, ADR 0084 d3; tests/ci-workflows.test.mjs S1 runs --shard-plan on the real tree), with the real
+# CLAUDE.md's Verifier: and Completion verifier: run there through the real Makefile (G8, p54-8). Each throwaway
 # repo has a local bare origin and a copy of the selector; no network, nothing written outside temp. Fixture basenames all start with zz, which no tracked
 # file uses. The fixture runs leave the warm's stdlib half out (THREAD_TEST_WARM_STDLIB=0, exported before F1), all but
 # F24's. bash 3.2-compatible (macOS).
@@ -1107,6 +1108,22 @@ ok "$grc|$(allmarkers "$gsh")|$(printf '%s\n' "$gsh" | grep -cxF "${LEFT%/}")" \
 gpo=$(cd "$G" && THREAD_SKIP_SLOW=1 THREAD_VERIFY_BASE=$GB bash tests/run.sh --fast --shard-plan 3 2>/dev/null); gprc=$?
 ok "$gprc|$(printf '%s\n' "$gpo" | cut -f2 | LC_ALL=C sort | tr '\n' ' ')" "0|@merge-task-self-tests tests/zzsfast.test.sh " \
   "G7: … and --fast --shard-plan 3 splits only that selection"
+
+# G8 (p54-8, ADR 0084 Decided for you 1): the real CLAUDE.md's two declared lines, run as the engine runs a verifier
+# (`bash -c`) through the real Makefile, on G7's diff. The Verifier: (the Mac's verify, at Integration and at an
+# agent's Checkpoint) leaves the SLOW suite out as GitHub's check does; the Completion verifier: runs it. MAKELEVEL and
+# MAKEFLAGS are dropped, so an outer `make` running this suite changes nothing here.
+cp "$root/Makefile" "$G/Makefile"
+V=$(sed -n 's/^Verifier: `\([^`]*\)`$/\1/p' "$root/CLAUDE.md"); CV=$(sed -n 's/^Completion verifier: `\([^`]*\)`$/\1/p' "$root/CLAUDE.md")
+gv() { out=$(cd "$G" && env -u MAKELEVEL -u MAKEFLAGS -u MFLAGS THREAD_VERIFY_BASE=$GB bash -c "$1" 2>&1); rc=$?; }
+gv "$V"
+ok "$rc|$(markers)|$(slowl)" "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast |$LEFT" \
+  "G8: CLAUDE.md's Verifier: ($V) leaves the SLOW suite out and names it"
+gv "$CV"
+ok "$rc|$(markers)|$(slowl)" \
+  "0|zzmarker-self-test --self-test-base zzmarker-self-test --self-test-classify zzmarker-sfast zzmarker-slow |" \
+  "G8: … and its Completion verifier: ($CV) runs it"
+rm -f "$G/Makefile"
 
 echo; [ "$fail" -eq 0 ] && echo "fast-tier: ALL PASS" || echo "fast-tier: SOME FAILED"
 exit "$fail"

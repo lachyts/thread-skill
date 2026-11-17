@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The Fast tier's selector (ADR 0073 d1, p43-2): the test files a diff reaches, read from tests/fast-tier.map.
 
-`bash tests/run.sh --fast` (`make test-fast`, the self-rollout's verifier) runs `select` and then only the test files
-it prints; `bash tests/run.sh`, `--fast` and `--only` all run `check` first. Stdlib only: it writes nothing, imports no
-repo module, and silences SyntaxWarning while it parses a script. This docstring is the one copy of its rules; the map's
-header holds only the line syntax and the glob rule.
+`bash tests/run.sh --fast` (`make test-fast`, which the self-rollout's verifier runs with THREAD_SKIP_SLOW=1) runs
+`select` and then only the test files it prints; `bash tests/run.sh`, `--fast` and `--only` all run `check` first.
+Stdlib only: it writes nothing, imports no repo module, and silences SyntaxWarning while it parses a script. This
+docstring is the one copy of its rules; the map's header holds only the line syntax and the glob rule.
 
 Commands
   select [--base REV] [--paths P...] [--ignore-full]
