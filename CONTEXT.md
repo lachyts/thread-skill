@@ -1180,9 +1180,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   merge, declared as the rollout's `verifier:`: the tests a change reaches from
   its **Verify base**, plus a small set that always runs, and the full suite
   whenever a change cannot be placed, less the **Slow tier** where a project
-  declares one and its `verifier:` leaves it out (Thread Skill's is
-  `THREAD_SKIP_SLOW=1 make test-fast`, so both **Checkpoints** run it light,
-  p54-8). The full suite then runs as the
+  declares one and its `verifier:` leaves it out (Thread Skill's does, so both
+  **Checkpoints** run light, p54-8). The full suite then runs as the
   **Completion verifier** and on the default branch's own runs, so a break only
   the slow tests catch, in code the change did not reach, is found there and
   filed, not at its merge (estate ADR 0009 d6, ADR 0073). Not **Touched
@@ -1196,9 +1195,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   derived from each suite's measured seconds; a suite the change itself edits
   still runs before the merge, and a suite red on the default branch twice in
   four weeks returns to the **Fast tier** (ADR 0084 d3, proposed; built for
-  GitHub's check by p54-1, for the Mac's verify by p54-8: the `Verifier:` sets
-  `THREAD_SKIP_SLOW=1`, and a running rollout takes it when its `verifier:` is
-  restamped).
+  GitHub's check by p54-1, for the Mac's verify by p54-8: a project's declared
+  `verifier:` can leave the Slow tier out, Thread Skill's does, and a running
+  rollout takes it when its `verifier:` is restamped).
   _Avoid_: nightly tests, excluded tests.
 - **Suite budget** — how long a project's suite may take, read on the week's
   median, never one run: an Integration verify within 5 minutes and a full
