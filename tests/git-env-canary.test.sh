@@ -474,7 +474,7 @@ g -C "$R" add -A; g -C "$R" commit -q -m "review docs"; g -C "$R" push -q origin
 arm A; g -C "$R" rm -q docs/reviews/r.md; g -C "$R" commit -q -m "close-out: drop a consumed review doc"; cpath THREAD.md
 chk A; ok "$rc" 0 "r11: deleting docs/reviews/r.md (land.sh's review-doc deletion), then THREAD.md → 0"
 mkt A2 in_progress; arm A2; cpath docs/reviews/new.md; chk A2
-ok "$rc|$(trips A2)" "0|1" "r11: … then, in a second window, adding docs/reviews/new.md → a trip (the commit walk reads A, never D)"
+ok "$rc|$(trips A2)" "0|1" "r11: … then, in a second window, adding docs/reviews/new.md → a trip (only a deletion is a review-doc close-out)"
 # A modified or nested review doc, a nested handoff: the rule's answers, pinned by r9's and r9b's lists below.
 # r9: the python port against land.sh's own function, extracted by sed.
 sed -n '/^closeout_shaped() {/,/^}/p' "$LAND" > "$TMP/closeout.sh"
