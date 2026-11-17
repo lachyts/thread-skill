@@ -3471,8 +3471,8 @@ def _sha(value):
 
 
 # The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row and
-# its RACE revert. inputs and plan are readers (status reads inputs); verify, push, undo and call (a reader of prepare's
-# record) follow a guarded prepare in one flow.
+# its RACE revert. inputs and plan are readers (status reads inputs); verify, mac, push, undo and call (mac and call read
+# prepare's record) follow a guarded prepare in one flow.
 GUARDED = ("prepare", "set-aside", "revert")
 
 
@@ -3492,7 +3492,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="The lead's side of Integration (ADR 0030 decision 3, p12-9).")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pr = sub.add_parser("prepare", help="decide how one approved task integrates: merge, verify, trouble or set-aside")
+    pr = sub.add_parser("prepare", help="decide how one approved task integrates: merge, verify, skip, trouble, set-aside or wait")
     pr.add_argument("--repo", required=True)
     pr.add_argument("--slug", required=True)
     pr.add_argument("--default", required=True, help="the repo's default branch (execute § 4's resolver)")

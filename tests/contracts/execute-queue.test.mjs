@@ -196,14 +196,15 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     fails.push('lost-call')
   }
 
-  // clean-path: prepare routes; merge runs no verifier; log-integration on case (i) and after a verified push;
-  // green → merge-task.sh → mark-done → step 1.
+  // clean-path: prepare routes; merge runs no verifier; log-integration on case (i) and on a verified, pushed M (p54-15:
+  // pushed before the verify), then the Mac verdict green, which step 4's merge-task waits on; → mark-done → step 1.
   const mergeB = st3.slice(st3.indexOf('**`merge`**'), st3.indexOf('**`verify`**'))
   const greenB = st3.slice(st3.indexOf('green (rc 0) and no shared file'), st3.indexOf('green with a shared file'))
   const rows = exitRows(skill)
   if (!st3.includes('lead-integrate.py prepare') || !mergeB.includes('no verifier runs') ||
     !mergeB.includes('Case (i) first records') || !mergeB.includes('log-integration') ||
-    !before(greenB, 'push', 'log-integration') || !before(greenB, 'log-integration', 'step 4') ||
+    !greenB.includes('M is already pushed') || !before(greenB, 'log-integration', '`mac … --state green`') ||
+    !before(greenB, '`mac … --state green`', 'step 4') ||
     !st4.includes('merge-task.sh') || !(rows['0 (`ok`)'] ?? '').includes('mark-done') || !(rows['0 (`ok`)'] ?? '').includes('step 1')) {
     fails.push('clean-path')
   }
@@ -230,7 +231,10 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   const sharedB = st3.slice(st3.indexOf('green with a shared file'), st3.indexOf('red, rc 124'))
   const redB = st3.slice(st3.indexOf('red, rc 124'), st3.indexOf('**`trouble`**'))
   if (!st3.includes("`mode: 'integrate'`") || !sharedB.includes('`leadMerge:') || !sharedB.includes('`trouble ["shared-file"]`') ||
-    redB.includes('leadMerge') || !redB.includes('`trouble ["red"]`') || !st3.includes('`trouble` (`["conflict"]` or `[]`)') ||
+    !before(sharedB, '`mac … --state green`', '`--after shared-green`') ||
+    redB.includes('leadMerge') || !redB.includes('`trouble ["red"]`') || /lead-integrate\.py undo/.test(redB) ||
+    !before(redB, '`mac … --state red --why <rc>`', 'TaskStop T by its task id') || !before(redB, 'TaskStop T by its task id', '`--after red`') ||
+    !redB.includes('There is no `undo`: M stays on the branch') || !st3.includes('`trouble` (`["conflict"]` or `[]`)') ||
     !st3.includes('`integrated` → step 4') || !st3.includes('`rejected` → the lane frees, step 1.2 launches the seeded revise') ||
     !st3.includes('`max_review_rounds` across those rounds sets it aside')) fails.push('trouble-path')
 
@@ -305,7 +309,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
 
   // merge-exits: every exit has a row; 5 never re-called; 6 bounded; 7 a hold; 8 a bounded backoff; the merge runs
   // in the background with the harness maximum.
-  const codes = ['0 (`ok`)', '1', '2', '3', '4', '5', '6', '7', '8', '70', '143 / 130 / 129, or a missing sentinel']
+  const codes = ['0 (`ok`)', '1', '2', '3', '4', '5', '6', '7', '8', '11', '12', '70', '143 / 130 / 129, or a missing sentinel']
   if (!codes.every((c) => c in rows) || !rows['5']?.includes('Never re-call merge-task') ||
     !rows['6']?.includes('Re-run once. A second 6') || !rows['7']?.includes('*Merge hold*') ||
     !rows['8']?.includes('*Backoff*') || !rows['8']?.includes('A third 8 sets aside') ||
@@ -471,7 +475,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
 
   // verify-slots (p23-4): the machine's verify slots. The verify line and the RACE re-verify each take one
   // (`--slots <verify_slots> --slot-wait <slot_wait>`); `noslot` is no verdict: step 3 re-arms and re-runs with M
-  // unpushed and the RACE re-runs with the lane held, and a third in a row halts (step 3 after `undo`); the verify
+  // pushed (p54-15) and the RACE re-runs with the lane held, and a third in a row holds the lane (step 3 after `mac
+  // --state stopped`, no `undo`); the verify
   // paragraph says the wait never counts against the deadline and the guard ends a SIGKILLed verify's verifier; § 3
   // has the machine-wide `verify_slots` row and verify-timeout's exit-3 halt with its "does not clear" remedy; § 4
   // passes `verifySlot` (and a resume never adds it); the *Verify slots* paragraph names both Integration waiters (the
@@ -490,8 +495,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !verifyP.includes('its `--timeout` deadline starts only once it holds one, so the wait never counts against `verify_timeout`') ||
       !verifyP.includes('only a SIGKILL leaves no rc, which reads as red; its guard still ends the verifier') ||
       !verifyP.includes('Any rc but 0 is red, except `noslot` (exit 75: no verify slot within `<slot_wait>`, the verifier never ran), which is no verdict') ||
-      !st3.includes('`noslot` (exit 75: no verify slot came within `<slot_wait>`; the verifier never ran, so this is no verdict, never red): M stays unpushed and the lane held. After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.') ||
-      !st3.includes('A third consecutive `noslot` on this verify: `undo`, then the *Lane hold* (`--cause verify-noslot`') || st3.includes('reason="no verify slot for [[slug]] in 3 tries"') ||
+      !st3.includes('`noslot` (exit 75: no verify slot came within `<slot_wait>`; the verifier never ran, so this is no verdict, never red): M stays pushed and the lane held, with T waiting (its exit 12 bounds it). After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.') ||
+      !st3.includes('A third consecutive `noslot` on this verify: `mac … --state stopped --why noslot`, TaskStop T, then the *Lane hold* (`--cause verify-noslot`') || st3.includes('reason="no verify slot for [[slug]] in 3 tries"') ||
       !raceLine.includes('`noslot` (no verify slot came within `<slot_wait>`: the verifier never ran, no verdict) → re-run the re-verify with the lane held') ||
       !raceLine.includes('a third consecutive `noslot` appends `- <now> [[<slug>]] re-verify not run: no verify slot in 3 tries; the RACE waits for you` to the `## Race log`, then `free-lane --tasks <slug>`: no halt') ||
       !vsRow.startsWith('| `verify_slots` | `2` | machine-wide; `[defaults]` only') || !vsRow.includes('never stamped on a rollout note') ||
@@ -955,6 +960,29 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       fails.push('surface-wait')
     }
   }
+  // mac-verdict (p54-15, ADR 0084 Decided for you 1): the verify route records the Mac verdict pending, pushes, then arms
+  // (the arm after the push) and launches merge-task --mac beside the verify; case (iii) is named; the join routes T's 1
+  // (held until the verify's rc) and 3 (the pair stopped) by the verdict; step 4 names exactly the launches that carry
+  // --mac, and rows 11 and 12; prepare's `wait` route launches and writes nothing.
+  {
+    const vb = st3.slice(st3.indexOf('- **`verify`** —'), st3.indexOf('Otherwise, while the verdict reads `pending`'))
+    const join = st3.slice(st3.indexOf("**The verify route's join.**"), st3.indexOf('- **`trouble`** —'))
+    const waitB = st3.slice(st3.indexOf('- **`wait`** (p54-15)'), st3.indexOf('- **exit 8**'))
+    const macList = collapse(stepRaw(skill, 4).split('\n').find((l) => l.startsWith('   **`--mac`** (p54-15)')) ?? '')
+    if (!before(vb, '`mac … --state pending`', 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M') ||
+      !before(vb, 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M', '`--kind verify`') ||
+      !before(vb, '`--kind verify`', '`merge-task.sh --mac <repoPath>/.claude/integration/<slug>.mac.json <repoPath> <pr> M <mainSha>`') ||
+      !vb.includes('in case (iii)') || !vb.includes('case (iii) never routes `merge` or `skip`') ||
+      !join.includes("T reports while the verdict reads `pending`: 1 → held until V's rc: red → `mac … --state red`, then the integrate call with `--after red` (T's 1 is never routed); green → `log-integration`, `mac … --state green`, then step 4's row 1 as written.") ||
+      !join.includes('3 → `mac … --state stopped --why base-moved`, TaskStop V, then step 3 again from its start: `prepare` routes `wait` until V is gone, then case (iii)') ||
+      !join.includes('T reports while the verdict reads `red` or `stopped`: never routed') ||
+      !macList.includes("step 3's verify-route launch beside the verify (no shared file, not `--gated`), and that launch's own re-runs: the *Merge hold* release of a verify-route pair (`--gated` included), the exit-8 *Backoff*, the exit-6 re-run, the 143/130/129 or missing-sentinel re-run and the exit-12 re-run") ||
+      !macList.includes("Never after an integrate call's `integrated` row, never on step 3's `merge` or `skip` route, never on the `## Integration log`'s pair after a cold resume, and never on a RACE revert PR") ||
+      !waitB.includes('Launch nothing for it and write nothing: keep the lane held and end the turn `waiting`') ||
+      !(rows['11'] ?? '').includes("step 3's *The verify route's join* routes it") || !(rows['12'] ?? '').includes('re-run step 4 with `--mac`')) {
+      fails.push('mac-verdict')
+    }
+  }
   return [...new Set(fails)]
 }
 
@@ -969,7 +997,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
   'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat', 'race-revert', 'main-red', 'surface-wait',
-  'settings-repair']
+  'settings-repair', 'mac-verdict']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1292,12 +1320,30 @@ test('control: the verify line without --slots fails verify-slots', () => {
 })
 
 test('control: a noslot read as green fails verify-slots', () => {
-  only(sk('so this is no verdict, never red): M stays unpushed and the lane held. After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.',
+  only(sk('so this is no verdict, never red): M stays pushed and the lane held, with T waiting (its exit 12 bounds it). After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.',
     'read it as green): push as on rc 0.'), 'verify-slots', 'noslot green')
 })
 
+test('control: a red verify that undoes the pushed M, or a green one that writes its verdict before its log line, fails its rule (p54-15)', () => {
+  only(sk('There is no `undo`: M stays on the branch, and the integrator', 'Then `lead-integrate.py undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, and the integrator'),
+    'trouble-path', 'red undoes M')
+  only(sk('M is already pushed, so `log-integration --tasks <slug> --started "$S" --anchor <anchor> --head M --base <mainSha>`, then `mac … --state green`:',
+    'M is already pushed, so `mac … --state green`, then `log-integration --tasks <slug> --started "$S" --anchor <anchor> --head M --base <mainSha>`:'),
+  'clean-path', 'verdict before the log line')
+})
+
+test('control: the verify route without its order, its join rows, its --mac list or its wait route fails mac-verdict (p54-15)', () => {
+  only(sk('Before the push: § 2.5, then `mac … --state pending` (its base', 'Before the push: § 2.5, then (its base'), 'mac-verdict', 'no pending before the push')
+  only(sk("then the integrate call with `--after red` (T's 1 is never routed); green", 'then the integrate call with `--after red`; green'), 'mac-verdict', "T's 1 routed")
+  only(sk('3 → `mac … --state stopped --why base-moved`, TaskStop V, then step 3', '3 → `mac … --state stopped --why base-moved`, then step 3'), 'mac-verdict', 'V left running on 3')
+  only(sk(' and the exit-12 re-run. Never after', '. Never after'), 'mac-verdict', 'no exit-12 re-run with --mac')
+  only(sk(', and never on a RACE revert PR.', '.'), 'mac-verdict', '--mac on a revert PR')
+  only(sk('Launch nothing for it and write nothing: keep the lane held', 'Run `undo`, then keep the lane held'), 'mac-verdict', 'wait undoes')
+  only(sk('; case (iii) never routes `merge` or `skip`:', ':'), 'mac-verdict', 'case (iii) may merge')
+})
+
 test('control: step 3 without the third-noslot Lane hold fails verify-slots', () => {
-  only(sk(" A third consecutive `noslot` on this verify: `undo`, then the *Lane hold* (`--cause verify-noslot`, the verify log's `no verify slot` line the evidence; ADR 0048: a verify slot held that long is a hung holder that reaches every merge, and `verify-slot.py status` names it), never a halt.", ''),
+  only(sk(" A third consecutive `noslot` on this verify: `mac … --state stopped --why noslot`, TaskStop T, then the *Lane hold* (`--cause verify-noslot`, the verify log's `no verify slot` line the evidence; ADR 0048: a verify slot held that long is a hung holder that reaches every merge, and `verify-slot.py status` names it), never a halt, with no `undo` (M is pushed): after Lachy's ack, `prepare` takes case (iii).", ''),
     'verify-slots', 'no third-noslot Lane hold')
 })
 
@@ -1749,8 +1795,8 @@ test('control: a Settings repair after the Automatic retry fails auto-retry', ()
   only(sk(l, l.replace(seg, '') + seg), 'auto-retry', 'repair after the retry')
 })
 
-test('the rules are all named (44) and each has a control', () => {
-  assert.equal(RULES.length, 44)
+test('the rules are all named (45) and each has a control', () => {
+  assert.equal(RULES.length, 45)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
 

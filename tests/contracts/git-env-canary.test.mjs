@@ -160,12 +160,15 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !before(s5resume, "§ 4's git-env check", 'the canary arm') || !before(s5resume, 'the canary arm', 'resume once') ||
     !integ.includes('The canary arm (*Git-env canary*: `--kind integrate`) runs right before its launch') ||
     !before(verifyB, '`--kind verify`', '*The background verify command*') ||
+    // p54-15: the verify route pushes M before its arm, so the window opens on the pushed merge.
+    !before(verifyB, 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M', '`--kind verify`') ||
     !before(race, "`## Race log`", '`--kind race-verify`') || !before(race, '`--kind race-verify`', 'lead-integrate.py verify')) fails.push('arm-sites')
 
   // check-sites: a check at each return and at the dead-call row.
   if (!before(st2, 'Run the canary `check` for its window first', 'Reconcile its row') || !st2.includes('whatever the exit') ||
     !before(integ, 'When it returns, run the canary `check`', 'reconcile the row') ||
-    !before(verifyB, 'run the canary `check` first, before `push` or `undo`', 'Otherwise:') ||
+    !before(verifyB, 'run the canary `check` first, before the verdict is written', 'Otherwise, while the verdict reads `pending`') ||
+    !bullet(canRaw, 'Check sites:').includes('the verify rc, before the verdict is written (`mac --state green|red|stopped`), `log-integration` or any integrate call') ||
     !before(race, 'run the canary `check` first', 'green → `mark-done`') ||
     !before(lost, 'Run the canary `check` for that call\'s window first', 'workflow call failed:') ||
     // A Lost call resume that returns a row checks its own window (task or integrate) before the reconcile.
@@ -194,7 +197,8 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !(rows['6'] ?? '').includes("check-all") || !(rows['143 / 130 / 129, or a missing sentinel'] ?? '').includes('check-all') ||
     !(iCA >= 0 && iCA < iSweep) || !(iRetire >= 0 && iRetire < iMove) ||
     !bullet(canRaw, 'check-all sites:').includes('before EVERY `merge-task.sh` launch') ||
-    !['step 4', '*Merge hold* release', '*Backoff* chain', 'exit-6 re-run', '143/130/129/missing-sentinel re-run'].every((k) => bullet(canRaw, 'check-all sites:').includes(k))) fails.push('check-all-sites')
+    !['step 4', "step 3's verify-route launch beside the verify", '*Merge hold* release', '*Backoff* chain', 'exit-6 re-run', 'exit-12 re-run',
+      '143/130/129/missing-sentinel re-run'].every((k) => bullet(canRaw, 'check-all sites:').includes(k))) fails.push('check-all-sites')
 
   // integrate-check: the integrate return checks, then reconciles whatever the exit, and acts on no outcome.
   if (!integ.includes('run the canary `check` for its window first, then reconcile the row whatever the exit') ||
@@ -204,7 +208,9 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   // prepare-cases: after the ack, prepare re-derives the case.
   const lane = bullet(canRaw, 'The lane-free rule.')
   if (!lane.includes("through step 3's `prepare`, which re-derives the case") ||
-    !/\*\*case \(i\)\*\* when the PR head is still the anchor \([^)]*after `undo`/.test(lane) ||
+    // p54-15: a verify trip leaves M pushed, so it re-enters through case (iii), never case (i) after an `undo`.
+    !/\*\*case \(iii\)\*\* when the verify route's pushed M has a verdict that reads `stopped` or `pending` \([^)]*verify-check trip/.test(lane) ||
+    /\*\*case \(i\)\*\* when the PR head is still the anchor \([^)]*verify-(arm|check) trip/.test(lane) ||
     !/\*\*case \(ii\)\*\* when a pushed Integration was logged \([^)]*(`log-integration`|`integrated` row)/.test(lane) ||
     !lane.includes('**`trouble []`** after a pushed shared-file merge that has no log line') ||
     /an Integration log line makes it case \(ii\)/.test(execute)) fails.push('prepare-cases')
@@ -215,8 +221,9 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !s11.includes('no *Lost call* `resumeFromRunId`') || !s11.includes('no § 3.7 signed-gate resume') || !s11.includes('no merge-task') ||
     !lost.includes('*Lost call* writes nothing and resumes nothing; after the ack the next entry\'s *Restart routing* handles it')) fails.push('step11-halt')
 
-  // lane-free: the lane frees at every lane-holding site; undo first after a verify trip; the RACE path ends undecided.
-  if (!lane.includes("*Lost call*'s `integrate` arm") || !lane.includes('`lead-integrate.py undo') ||
+  // lane-free: the lane frees at every lane-holding site; a verify trip writes the verdict stopped and undoes nothing (M is
+  // pushed, p54-15); the RACE path ends undecided.
+  if (!lane.includes("*Lost call*'s `integrate` arm") || !lane.includes('--head M --state stopped` and TaskStops its merge-task when it runs, with no `undo` (M is pushed') ||
     !lane.includes('`next` reports `halt: race`, `reason="RACE undecided: [[<slug>]]"` (step 1.5)') || !lane.includes('frees the lane') ||
     !lane.includes("the canary's exit 9 included, frees the lane")) fails.push('lane-free')
 
@@ -274,7 +281,7 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !ex.includes('It never halts, needs no ack and overrides the check site\'s non-zero route') ||
     !ex.includes('a task window checks 0 instead, naming the acked trip: a task call\'s work, PR or none, is taken as it stands') ||
     !ex.includes('an integrate call\'s row is reconciled with `--no-verdict`, so an `integrated` row\'s line reads `void` and is not acted on (no step 4)') ||
-    !ex.includes('the lead\'s verify runs `lead-integrate.py undo') ||
+    !ex.includes('the lead\'s verify writes `lead-integrate.py mac --repo <repoPath> --slug <slug> --head M --state stopped`, TaskStops its merge-task when it runs') ||
     !ex.includes('re-verify gave no verdict: an acked git-env trip (rc <rc|absent>)` to the `## Race log` and re-runs the re-verify')) fails.push('no-verdict')
 
   // owner-closeout: the owner rule and the close-out rule, stricter than S9, everywhere they are stated.
@@ -495,6 +502,19 @@ test('control: Lost call without its under-hold sentence fails step11-halt', () 
   const held = real.execute.split('\n').find((l) => l.startsWith('- Under a git-env hold (`gitEnvHold` non-empty, step 1.1), *Lost call*')) + '\n'
   only('execute', held, '',
     'step11-halt', 'lost call')
+})
+
+test('control: the verify route arming before its push, a verify trip back in case (i), or an undo after it fails its rule (p54-15)', () => {
+  {   // the push moved after the arm: two edits, one rule
+    const swapped = edit(edit(real.execute, 'then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py push --repo <repoPath> --slug <slug> --head M`. Push refused', 'then the push. Push refused'), '`--default` as passed to `prepare`): a non-zero arm',
+      '`--default` as passed to `prepare`), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py push --repo <repoPath> --slug <slug> --head M`: a non-zero arm')
+    CONTROLLED.add('arm-sites')
+    assert.deepEqual(check({ ...real, execute: swapped }), ['arm-sites'], 'arm before the push')
+  }
+  only('execute', '**case (i)** when the PR head is still the anchor (the integrate arm before any push;',
+    '**case (i)** when the PR head is still the anchor (a verify-arm or verify-check trip after `undo`; the integrate arm before any push;', 'prepare-cases', 'verify trip in case (i)')
+  only('execute', ', with no `undo` (M is pushed: `lead-integrate.py undo` runs only before the push).', ', then `lead-integrate.py undo`.', 'lane-free', 'undo after a verify trip')
+  only('execute', ', the exit-12 re-run and the 143/130/129/missing-sentinel re-run)', ' and the 143/130/129/missing-sentinel re-run)', 'check-all-sites', 'no exit-12 re-run')
 })
 
 test("control: the lane-free rule without Lost call's integrate arm fails lane-free", () => {

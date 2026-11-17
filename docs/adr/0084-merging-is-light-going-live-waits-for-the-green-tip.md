@@ -79,7 +79,22 @@ SLOW suite the diff edits; `Completion verifier:` stays `make test`, the full su
 G8 (both lines run through the real Makefile: the first leaves a SLOW suite out and names it, the second runs it).
 Nothing restamps a running rollout's `verifier:`: the running thread-skill rollout takes the line when it is restamped
 by hand at its next Reinstate, onto a snapshot at a Green tip that holds p54-6 and p54-7 (and p54-8 itself), or at
-p54-14's Engine catch-up. Its "at the same time as GitHub's check" half is not built here.
+p54-14's Engine catch-up. Its "at the same time as GitHub's check" half built by p54-15: on the verify route the lead
+records the Mac verdict (`lead-integrate.py mac`, `<repo>/.claude/integration/<slug>.mac.json`: pending, then green, red or
+stopped), pushes its merge M before it verifies, arms the git-env canary after that push, and runs its verify beside
+`merge-task.sh --mac`, which merges the pair only once the verdict reads green for exactly it: a red, stopped, missing or
+other pair's verdict is its exit 11 at the pre-flight, with no GitHub call; a pending one is waited on at the merge point,
+the base re-checked each poll, and past `MERGE_TASK_MAC_WAIT_MAX` is its exit 12; a verdict that is not green on the
+already-merged path is a RACE. The lead, never merge-task, ends a wait early: on a red or stopped verdict it TaskStops
+merge-task. A red goes back to the task's agent with M on its branch (`--after red`, no `undo`), and `--after
+shared-green` needs the green verdict. `prepare`'s case (iii) verifies again a pushed merge whose verdict never read
+green, or merges a moved `main` into it, never merging or skipping it, and `prepare` routes `wait` while an earlier verify
+or merge-task of the task still runs (each records its pid). Codex runs the four in the foreground: the push, the verify,
+the verdict, then merge-task. Measured from the running rollout's Run record before it was built: from 2026-11-16
+(macOS off the PR checks) its 12 verify-route merges held the lane a median 42.2 minutes, their Mac verify a median 20.4
+and GitHub's check a median 19.0; running the two together saves about the shorter of them per merge, a median 18
+minutes, so about 42 → 24. p54-8's light verify had no Integration suite in the record yet, so its lane is still this
+call's estimate (about 30 → 10-15).
 d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
 `tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
 preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
