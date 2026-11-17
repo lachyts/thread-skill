@@ -261,6 +261,62 @@ for (const [name, files, verifier, where] of TOOL_FAILS) {
   })
 }
 
+// p47-14 (xi): a nested package that declares a tool and runs it only inside itself counts only under itself; git's hook
+// slot (a quoted segment after `hooks`) is no tool.
+test('tool rule: a nested package\'s declarations count only under it; a hook path is no tool', (t) => {
+  const fx = fixture(t, {
+    'ext/package.json': '{"devDependencies":{"prettier":"^3"},"scripts":{"lint":"ray lint","build":"ray build -e dist"}}\n',
+    'ext/package-lock.json': '{"packages":{"node_modules/prettier":{"version":"3.0.0"}}}\n',
+    'tests/test_h.py': 'hook = root / ".git" / "hooks" / "pre-commit"\nHOOK = ".git/hooks/pre-commit"\n',
+  })
+  const res = prove(fx, ['THREAD.md', 'docs/handoffs/**', 'ext/notes/**'])
+  holds(res, 'THREAD.md'); holds(res, 'docs/handoffs/**')
+  fails(res, 'ext/notes/**', { kind: 'tool', path: 'ext/package.json' })
+  fails(res, 'ext/notes/**', { kind: 'tool', path: 'ext/package-lock.json' })
+})
+
+test('tool rule controls stay readers: a tool outside the dependency keys, pre-commit, the root package, a lock with no package, a quoted segment not after hooks', (t) => {
+  const fx = fixture(t, {
+    'x/package.json': '{"scripts":{"fmt":"prettier --check ."}}\n',
+    'y/package.json': '{"devDependencies":{"pre-commit":"1"}}\n',
+    'z/package.json': '{"devDependencies":{"prettier":"^3"},"prettier":{}}\n',
+    'package.json': '{"devDependencies":{"prettier":"^3"}}\n',
+    'vendor/yarn.lock': 'prettier@^3:\n  version "3.0.0"\n',
+    'tests/b.py': 'from pathlib import Path\nROOT = Path(__file__).parent\nBIN = ROOT / "node_modules" / ".bin" / "prettier"\n',
+  })
+  const res = prove(fx, ['THREAD.md'])
+  for (const p of ['x/package.json', 'y/package.json', 'z/package.json', 'package.json', 'vendor/yarn.lock', 'tests/b.py']) {
+    fails(res, 'THREAD.md', { kind: 'tool', path: p }, p)
+  }
+})
+
+test('tool rule: each climb marker and each listed git-root wrapper keeps a nested package unscoped', (t) => {
+  const pkg = (script, deps = {}) => JSON.stringify({ devDependencies: { prettier: '^3', ...deps }, scripts: { fmt: script } }) + '\n'
+  const MARKERS = {
+    'm-dotdot': 'ray lint ../..', 'm-abs': 'ray lint /srv/app', 'm-home': 'ray lint ~/proj', 'm-dollar': 'ray lint $ROOT',
+    'm-tick': 'ray lint `pwd`', 'm-git': 'git ls-files | xargs ray lint', 'm-initcwd': 'cd %INIT_CWD% && ray lint',
+    'm-prefix': 'ray lint --prefix=x', 'm-cwd': 'ray lint --cwd x', 'm-dir': 'ray lint --dir x', 'm-root': 'ray lint --root x',
+    'm-C': 'ray lint -C x', 'm-w': 'ray lint -w x', 'm-workspace': 'ray lint --workspace x', 'm-workspaces': 'ray lint --workspaces',
+    'm-ws': 'ray lint -ws', 'm-iwr': 'ray lint --include-workspace-root',
+    'w-pq': 'pretty-quick', 'w-ls': 'lint-staged', 'w-ns': 'nano-staged', 'w-pc': 'precise-commits', 'w-husky': 'husky',
+    'w-lh': 'lefthook run fmt',
+  }
+  const KEYS = { 'w-gfs': 'git-format-staged', 'w-sgh': 'simple-git-hooks', 'w-yorkie': 'yorkie' }
+  const files = { 'm-base/package.json': pkg('ray lint'), 'm-bad/package.json': '{"devDependencies":{"prettier":"^3"',
+    'm-dotdot/package-lock.json': '{"packages":{"node_modules/prettier":{"version":"3.0.0"}}}\n' }
+  for (const [d, s] of Object.entries(MARKERS)) files[`${d}/package.json`] = pkg(s)
+  for (const [d, k] of Object.entries(KEYS)) files[`${d}/package.json`] = pkg('ray lint', { [k]: '1' })
+  const res = prove(fixture(t, files), ['THREAD.md', 'm-base/notes/**'])
+  // prove() sorts readers by (path, line, kind) and returns only the first READERS_OUT, so an absence check over
+  // `readers` is sound only when the list is whole
+  assert.equal(res['THREAD.md'].readers.length, res['THREAD.md'].readersTotal, 'every reader is listed')
+  fails(res, 'm-base/notes/**', { kind: 'tool', path: 'm-base/package.json' })
+  assert.ok(!res['THREAD.md'].readers.some((r) => r.path === 'm-base/package.json'), 'the scoped baseline is no THREAD.md reader')
+  for (const p of [...Object.keys(MARKERS), ...Object.keys(KEYS), 'm-bad'].map((d) => `${d}/package.json`).concat('m-dotdot/package-lock.json')) {
+    fails(res, 'THREAD.md', { kind: 'tool', path: p }, p)
+  }
+})
+
 test('the link rule: a literal ]( in a non-prose file fails every glob', (t) => {
   const fx = fixture(t, { 'src/links.py': 'LINK = "[a](b)"\n' })
   const res = prove(fx, ['THREAD.md', 'docs/handoffs/**'])
@@ -288,14 +344,18 @@ test('the name rule reads a .txt blob (a fixture list of paths a test opens): .t
   fails(prove(fx, ['THREAD.md']), 'THREAD.md', { kind: 'name', path: 'tests/fixtures/paths.txt', line: 1 })
 })
 
-test("the name rule reads the steps, and a glob's own non-prose files are scanned (no own-files exclusion)", (t) => {
+test("the name rule reads the steps; a glob's own non-prose file is scanned, and under docs/ its walk counts once something reaches it", (t) => {
   let fx = fixture(t)
   fails(prove(fx, ['THREAD.md'], { verifier: 'cat THREAD.md' }), 'THREAD.md', { kind: 'name', path: '<verifier>' })
   fails(prove(fx, ['THREAD.md'], { bootstrap: 'wc -l THREAD.md' }), 'THREAD.md', { kind: 'name', path: '<bootstrap>' })
   fx = fixture(t, { 'docs/reviews/check.py': "from pathlib import Path\nfor p in Path(__file__).parent.glob('*.md'):\n    print(p)\n" }, { home: tmpHome(t) })
-  const res = prove(fx, ['docs/reviews/**', 'THREAD.md'])
+  // reached: the verifier names check.py (R2) and its directory (R4a); the step's own `reviews` is a name reader too
+  let res = prove(fx, ['docs/reviews/**', 'THREAD.md'], { verifier: 'python3 docs/reviews/check.py' })
   fails(res, 'docs/reviews/**', { kind: 'walk', path: 'docs/reviews/check.py', origin: 'repo' })
   holds(res, 'THREAD.md')
+  // unreached (narrowing x): nothing names, lists or runs it, so its walk is no reader
+  res = prove(fx, ['docs/reviews/**', 'THREAD.md'])
+  holds(res, 'docs/reviews/**'); holds(res, 'THREAD.md')
 })
 
 // ---- walks that count (fail THREAD.md, kind walk) ------------------------------------------------------------------------
@@ -338,6 +398,8 @@ const WALK_FAILS = [
   ['a bare glob in a JS execSync string after wc (cwd)', { 'tests/t.test.mjs': "import { execSync } from 'node:child_process'\nexecSync('wc -l *.md')\n" }, 'cwd'],
   ['a bare glob after a heredoc ends (cwd)', { 'tests/t.sh': '#!/bin/sh\ncat <<-EOF\n\tx\n\tEOF\ncat *.md\n' }, 'cwd'],
   ['a bare glob after a stray << that no delimiter closes (cwd)', { 'tests/t.sh': '#!/bin/sh\necho $((x<<y))\ncat *.md\n' }, 'cwd'],
+  // p47-14 (ix): only a docstring is prose; the same text in any other string expression is still read as shell
+  ['the same text in a non-docstring string expression (cwd)', { 'tests/a.py': 'x = 1\n"""find . -name \'*.md\'"""\n' }, 'cwd'],
 ]
 
 for (const [name, files, origin] of WALK_FAILS) {
@@ -363,6 +425,39 @@ test('walk counts: a step that walks the tree (cwd); a non-prose step walk does 
 })
 
 // ---- walks that hold -----------------------------------------------------------------------------------------------------
+
+// p47-14 (x): walk bodies for the out-of-reach rows; each covers THREAD.md. GO's exec string must be a backquoted raw
+// string: a double-quoted one is no walk the resolver reads (the REACH guard below pins every body).
+const WALK_PY = "import glob\nglob.glob('*.md')\n"
+const WALK_SH = "find . -name '*.md'\n"
+const WALK_JS = "require('fs').globSync('*.md')\n"
+const SWIFT = 'import Foundation\nlet xs = try FileManager.default.contentsOfDirectory(atPath: ".")\n'
+const GO = 'package gopkg\n\nimport "os/exec"\n\nfunc Run() {\n\texec.Command("sh", "-c", `find . -name \'*.md\'`).Run()\n}\n'
+const WALKER = "import os\nos.walk('.')\n"
+
+// Unreached candidates (x): [name, files, the candidates holding a walk]. No reacher token, word or listing names any
+// candidate (the collision rule: a red row is fixed by renaming, never by narrowing a rule).
+const UNREACHED_HOLDS = [
+  ["a glob's own non-prose file under docs/ that nothing reaches", { 'docs/reviews/check.py': WALK_PY }, ['docs/reviews/check.py']],
+  ['walks in spike/, docs/ and scripts/**/probe* that nothing reaches', {
+    'spike/walker.py': WALKER,
+    'docs/tools/count.sh': WALK_SH,
+    'scripts/stage/probe-tree.py': "import glob\nglob.glob('**/*.md', recursive=True)\n",
+    'scripts/probe-kit/list.sh': 'find .\n',
+    'spike/pkg/__init__.py': WALK_PY,
+    'spike/cli/__main__.py': WALK_PY,
+    'docs/tool/index.mjs': WALK_JS,
+    'spike/kit/kitwalk.swift': SWIFT,
+    'spike/gopkg/gowalk.go': GO,
+    'spike/svc/gen.sh': WALK_SH,
+    'spike/svc/package.json': '{"private": true}\n',
+    'spike/runners/go.js': WALK_JS,
+    // reachers: a *.csv-filtered listing, and words that are no repo root (an `a / b` operand, `//`, '/')
+    'tests/t.py': "import glob\nglob.glob('**/*.csv', recursive=True)\nlhs, rhs = 6, 3\nratio = lhs / rhs\n# //\nfsroot = '/'\n",
+    'tests/u.js': "// a comment\nconst r = '//'\n",
+  }, ['spike/walker.py', 'docs/tools/count.sh', 'scripts/stage/probe-tree.py', 'scripts/probe-kit/list.sh', 'spike/pkg/__init__.py',
+    'spike/cli/__main__.py', 'docs/tool/index.mjs', 'spike/kit/kitwalk.swift', 'spike/gopkg/gowalk.go', 'spike/svc/gen.sh', 'spike/runners/go.js']],
+]
 
 const WALK_HOLDS = [
   ['the helper called only with tempfile.mkdtemp()', { 'tests/t.py': `${PY_HEAD}def md_files(root):\n    return Path(root).rglob('*.md')\nmd_files(tempfile.mkdtemp())\n` }],
@@ -391,6 +486,15 @@ const WALK_HOLDS = [
       '    pages_dir = os.path.join(os.path.expanduser(args.vault), "Attachments", "Pages")\n    return _discover(pages_dir)\n',
     'tests/test_board.py': 'import tempfile\nfrom board import _discover\n\ndef test_it():\n    with tempfile.TemporaryDirectory() as d:\n        assert _discover(d) == []\n',
   }],
+  // p47-14 (ix): a module, class, def and async def docstring is prose, never read as shell
+  ['find in module, class, def and async def docstrings', {
+    'tests/a.py': `"""find . -name '*.md'"""\nclass C:\n    """find . -name '*.md'"""\n\ndef f():\n    """find . -name '*.md'"""\n\nasync def g():\n    """find . -name '*.md'"""\n`,
+  }],
+  ...UNREACHED_HOLDS.map(([name, files]) => [name, files]),
+  // p47-14 (x): an include outside a runner config and a package.json files key are no collection selector
+  ['a tsconfig include and a package.json files key leave the scope on', {
+    'spike/walker.py': WALKER, 'tsconfig.json': '{"include": ["spike/**/*.ts"]}\n', 'package.json': '{"files": ["dist"]}\n',
+  }],
 ]
 
 for (const [name, files] of WALK_HOLDS) {
@@ -398,6 +502,97 @@ for (const [name, files] of WALK_HOLDS) {
     holds(prove(fixture(t, files), ['THREAD.md']), 'THREAD.md')
   })
 }
+
+// ---- out of reach (p47-14, narrowing x) -----------------------------------------------------------------------------------
+
+test("out of reach: an unreached candidate's name and link hits still count", (t) => {
+  const res = prove(fixture(t, { 'spike/n.py': "open('THREAD.md')\n", 'spike/l.py': 'L = "[a](b)"\n' }), ['THREAD.md'])
+  fails(res, 'THREAD.md', { kind: 'name', path: 'spike/n.py' })
+  fails(res, 'THREAD.md', { kind: 'link', path: 'spike/l.py' })
+})
+
+// [name, files, verifier, the candidates whose walk must stay a reader, symlinks {path: target | (fx) => target}]. Each row
+// reaches its candidates by its named rule only (rows 6 and 18 by two), so each row fails when its rule is deleted.
+const REACH = [
+  ['R1: a test-shaped name, a .t file', { 'spike/test_walk.py': WALK_PY, 'spike/check.t': WALK_SH }, 'true', ['spike/test_walk.py', 'spike/check.t']],
+  ['R2: a stem imported', { 'docs/probes/echo_frames.py': WALK_PY, 'tests/test_echo.py': 'from echo_frames import frames\n' }, 'true', ['docs/probes/echo_frames.py']],
+  ['R2: a basename run', { 'scripts/probe-fork.py': WALK_PY, 'tests/test_fork.py': "import subprocess, sys\nsubprocess.run([sys.executable, 'scripts/probe-fork.py'])\n" }, 'true', ['scripts/probe-fork.py']],
+  ['a fixpoint: a reached candidate reaches another', {
+    'spike/second.py': WALK_PY, 'spike/first.py': 'import second\n', 'tests/test_chain.py': "import runpy\nrunpy.run_path('spike/first.py')\n",
+  }, 'true', ['spike/second.py']],
+  ['a step names it', { 'scripts/probe-z.sh': WALK_SH }, 'bash scripts/probe-z.sh', ['scripts/probe-z.sh']],
+  ['a relative symlink to the root (the symlink rule and R4c)', { 'spike/walker.py': WALKER }, 'true', ['spike/walker.py'], { 'tests/root': '..' }],
+  ['an absolute symlink to the repo: the resolved symlink rule alone', { 'spike/walker.py': WALKER }, 'true', ['spike/walker.py'], { 'tests/root': (fx) => fx.repo }],
+  ['not in scope: src/spike and scripts/ without probe', { 'src/spike/w.py': WALK_PY, 'scripts/tools/w.sh': WALK_SH }, 'true', ['src/spike/w.py', 'scripts/tools/w.sh']],
+  ['R4a: entry points by directory (import pkg, python -m spike.cli, require of a directory)', {
+    'spike/pkg/__init__.py': WALK_PY, 'tests/test_p.py': 'import pkg\n',
+    'spike/cli/__main__.py': WALK_PY, 'tests/run.sh': 'python3 -m spike.cli\n',
+    'docs/tool/index.mjs': WALK_JS, 'tests/t.test.cjs': "require('../docs/tool')\n",
+  }, 'true', ['spike/pkg/__init__.py', 'spike/cli/__main__.py', 'docs/tool/index.mjs']],
+  ['R4a: a runner pointed at a directory', { 'spike/runners/go.js': WALK_JS }, 'mocha spike/runners', ['spike/runners/go.js']],
+  ['R4b: a runner pointed at the top segment in a step', { 'spike/hello.js': WALK_JS }, 'mocha spike', ['spike/hello.js']],
+  ['R4b: the top segment in code', {
+    'docs/check.js': WALK_JS,
+    'tests/t.py': "import subprocess\nfrom pathlib import Path\nREPO = Path(__file__).resolve().parent.parent\nsubprocess.run(['tap', REPO / 'docs'])\n",
+  }, 'true', ['docs/check.js']],
+  ['R4c: the repo root', { 'spike/rooted.js': WALK_JS }, 'mocha --recursive .', ['spike/rooted.js']],
+  ['R3: a reached manifest reaches its directory', {
+    'spike/svc/gen.sh': WALK_SH, 'spike/svc/package.json': '{"private": true}\n', 'tests/t.sh': 'jq .private package.json\n',
+  }, 'true', ['spike/svc/gen.sh']],
+  ['R3: a reached module reaches its ancestor __init__.py', { 'spike/a1/__init__.py': WALK_PY, 'spike/a1/b1/test_c.py': 'def test_x():\n    pass\n' }, 'true', ['spike/a1/__init__.py']],
+  ['R4d: Swift siblings', { 'spike/kit/kitwalk.swift': SWIFT, 'spike/kit/KitTests.swift': 'import XCTest\nfinal class T: XCTestCase {}\n' }, 'true', ['spike/kit/kitwalk.swift']],
+  ['R4d: Go ./...', { 'spike/gopkg/gowalk.go': GO }, 'go vet ./...', ['spike/gopkg/gowalk.go']],
+  ['R5: a repo walk that runs what it lists', {
+    'docs/runners/stepper.sh': WALK_SH,
+    'tests/test_all.py': 'import os, subprocess\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n' +
+      "for d, _, names in os.walk(ROOT):\n    for n in names:\n        subprocess.run(['bash', os.path.join(d, n)])\n",
+  }, 'true', ['docs/runners/stepper.sh']],
+  ['R5 and R6: a for loop over a glob', { 'scripts/probe-y.sh': WALK_SH, 'tests/run_probes.sh': 'for p in scripts/probe-*.sh; do bash "$p"; done\n' }, 'true', ['scripts/probe-y.sh']],
+  ['R6: glob text the walk rule does not read', { 'docs/run-a.sh': WALK_SH, 'package.json': '{"scripts": {"probes": "bash docs/run-*.sh"}}\n' }, 'true', ['docs/run-a.sh']],
+  ['R6: glob text that climbs', {
+    'docs/run-b.sh': WALK_SH, 'tools/package.json': '{"scripts": {"probes": "bash ../docs/run-*.sh"}}\n',
+    'spike/climb.sh': WALK_SH, 'tests/t.py': 'import os, subprocess\nHERE = os.path.dirname(__file__)\nsubprocess.run(f"run-all {HERE}/../spike/*.sh", shell=True)\n',
+  }, 'true', ['docs/run-b.sh', 'spike/climb.sh']],
+  ["the off switch: an unreached candidate's own pytest config", { 'spike/walker.py': WALKER, 'spike/cfg/tox.ini': '[pytest]\npython_files = check_*.py\n' }, 'true', ['spike/walker.py']],
+  ['the off switch: a vitest include', { 'spike/walker.py': WALKER, 'vitest.config.ts': "export default { test: { include: ['spike/**/*.ts'] } }\n" }, 'true', ['spike/walker.py']],
+  ["the off switch: package.json's jest roots", { 'spike/walker.py': WALKER, 'package.json': '{"jest": {"roots": ["<rootDir>/tests"]}}\n' }, 'true', ['spike/walker.py']],
+  ['the off switch: a .mocharc spec', { 'spike/walker.py': WALKER, '.mocharc.yml': "spec: 'spike/**/*.cjs'\n" }, 'true', ['spike/walker.py']],
+  ['the off switch: unittest discover -p', { 'spike/walker.py': WALKER, 'tests/run.sh': "python3 -m unittest discover -s tests -p 'check_*.py'\n" }, 'true', ['spike/walker.py']],
+  ['the off switch: pytest --nbmake', { 'spike/walker.py': WALKER, 'tests/run.sh': 'pytest --nbmake tests/notebooks\n' }, 'true', ['spike/walker.py']],
+  ['the off switch: a mocha extension', { 'spike/walker.py': WALKER, '.mocharc.json': '{"extension": ["cjs"]}\n' }, 'true', ['spike/walker.py']],
+]
+
+for (const [name, files, verifier, paths, links] of REACH) {
+  test(`out of reach, reached: ${name}`, (t) => {
+    const fx = fixture(t, files)
+    if (links) {
+      for (const [p, target] of Object.entries(links)) {
+        fs.mkdirSync(path.dirname(path.join(fx.repo, p)), { recursive: true })
+        fs.symlinkSync(typeof target === 'function' ? target(fx) : target, path.join(fx.repo, p))
+      }
+      git(fx.home, fx.repo, 'add', '-A'); git(fx.home, fx.repo, 'commit', '-qm', 'links')
+    }
+    const res = prove(fx, ['THREAD.md'], { verifier })
+    for (const p of paths) fails(res, 'THREAD.md', { kind: 'walk', path: p }, `${name}: ${p}`)
+  })
+}
+
+// A REACH row that goes red has lost reach only if its walk form is read where nothing narrows it: one copy of every
+// asserted or held candidate body under ctl/ (no candidate there), each a walk reader. A row whose walk form the resolver
+// misses fails here by name instead.
+test('REACH guard: every asserted walk form is read where nothing narrows it', (t) => {
+  const copies = new Map()
+  const rows = [...REACH.map(([name, files, , paths]) => [name, files, paths]), ...UNREACHED_HOLDS]
+  for (const [name, files, paths] of rows) {
+    for (const p of paths) {
+      const key = `${path.basename(p)}\0${files[p]}`
+      if (!copies.has(key)) copies.set(key, { at: `ctl/${copies.size}/${path.basename(p)}`, body: files[p], name })
+    }
+  }
+  const res = prove(fixture(t, Object.fromEntries([...copies.values()].map((c) => [c.at, c.body]))), ['THREAD.md'])
+  assert.equal(res['THREAD.md'].readers.length, res['THREAD.md'].readersTotal, 'every reader is listed')
+  for (const c of copies.values()) fails(res, 'THREAD.md', { kind: 'walk', path: c.at }, `${c.name}: ${c.at}`)
+})
 
 // ---- brace filters (p34-2): BRACE_CAP during expansion, and a truncated filter fails closed --------------------------------
 

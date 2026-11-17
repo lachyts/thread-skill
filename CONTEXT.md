@@ -1027,7 +1027,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
 - **Inert proof** — the static check that nothing in the tree being merged
   reads a glob: no non-prose file or step names its deepest literal segment;
-  no walk (a copy or archive of the tree included) whose root is not
+  no walk (a copy or archive of the tree included) in a file the verifier
+  can reach (inert-paths.py's header: spike/, docs/ and scripts/**/probe*
+  are out of reach unless a scanned file, step or symlink names, lists,
+  builds or runs them) whose root is not
   provably outside the repo (a path that is the repo, inside it or an
   ancestor of it counts) covers it; no markdown tool, link parse, symlink
   into the glob or submodule. It fails closed (ADR 0045): any error in it
