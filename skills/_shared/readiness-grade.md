@@ -99,6 +99,17 @@ A fork that an orient end line names as `fork for Lachy` and that is still open 
 section or an ADR has ruled on is not a decision. A plan may overturn a Decided for you bullet on code evidence, and
 says why.
 
+**The live check's tools.** Read the tools a task's live check needs (its **Verify:** line, and any check its notes
+name: a real model run, a browser, a device, a signed-in account) against what a workflow agent holds. A rollout's
+planner, implementer and judges run inside the Workflow tool, on the lead session's tools less two: they have no native
+child-agent tool, so they start no subagent and no model run through one, and no question tool, so they never reach
+Lachy. A tool the lead itself lacks is the shape's concern (§ Shape: execution-fit.md's parallel clause). A task whose
+check needs a tool the lead holds and a workflow agent does not is never Ready: who runs that check, or whether it is
+waived, is a decision of his (owner `yours`: a sign-off on what proves the work), written in `decisions[]` with the
+tool named in its `question`, so the raise makes it at least a One call. Watch `b6c4c33c`
+(event-scanner-rollout-2026-10-29): a task graded Ready had a live check that needed a native child-agent tool, which
+no workflow implementer or judge holds, and its review came back needs-human.
+
 ## Shape
 
 The shape is the three-way test in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`, applied hard, with its

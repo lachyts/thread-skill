@@ -14,7 +14,8 @@
 //       again), as ADR 0047 § Build rulings says too.
 //   p4  what leaves: Orient tasks with their Dependent closure; a task left out unstamped, or, carried and queued,
 //       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient
-//       and names an `unreadable` one with its reason.
+//       and names an `unreadable` one with its reason; a task named decided whose note records no answer leaves as
+//       `unrecorded` (p51-4), and orient-all § 6 answer 16 says so.
 //       Step 5's dependency-cycle leavers go the same way: a carried `queued` one through step 6's `defer`, whose
 //       sentence names them (the carry takes every task still linked to the prior).
 //   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's candidates and --decided
@@ -148,7 +149,8 @@ function check(files) {
   // p4: what leaves, and how.
   need('p4', '§ 1.5', pf, ['Orient tasks stay out with their Dependent closure'])
   need('p4', '§ 1.5 **The final call.**', final, ['leaves now: no `rollout:` stamp, no `## Queue` row, no `## File-sets` line',
-    "A carried `queued` task in `out[]` leaves through step 6's `defer`"])
+    "A carried `queued` task in `out[]` leaves through step 6's `defer`",
+    'A task out as `unrecorded` (p51-4) was named decided, but its note holds no `## Decisions` bullet'])
   need('p4', 'step 6', s6, ['reconcile-rollout.py defer --tasks'])
   const s5 = C(sec(sch, /^### 5\. /))
   need('p4', 'step 5', s5, ["A dependency cycle's `queued` members and their dependants leave before step 6, unstamped and named in step 8, " +
@@ -169,10 +171,11 @@ function check(files) {
   const item16 = C(slice(answers, /^ {3}16\. /, /^ {3}\d+\. /) ?? '')
   need('p5', 'orient-all § 6 answer 16', item16, ["schedule's Pre-flight", 'no grading agent, no round and no Grade log line',
     'among them'])
+  need('p4', 'orient-all § 6 answer 16', item16, ['named decided whose note holds no record of an answer (`unrecorded`'])
   need('p5', 'orient-all § 6', C(sec(oa, /^### 6\. /)), ['Pre-flight: rank $S/rank.json, scan $S/scan.json',
     'among entry.members'])
   need('p5', 'orient-all § 8', C(sec(oa, /^### 8\. /)), ['waiting on your answer', 'listed by the `why` the fork returns',
-    '`/thread:orient [[<home>]]`', 'depends on [[<via>]]', '`unreadable` as "could not be read'])
+    '`/thread:orient [[<home>]]`', 'depends on [[<via>]]', '`unreadable` as "could not be read', '`unrecorded` as "answered, but'])
   for (const [name, text] of [['§ 1.5', pfRaw], ['S3.5', s35]]) never('p5', name, text, ['--regenerate'])
 
   // p6: no plan gate.
@@ -302,6 +305,13 @@ test('control p5: orient-all § 8 listing every leaver as waiting on your answer
   only(swap(FILES, ORIENT_ALL, '`dependency` as "depends on [[<via>]], which is left out"; ', '', /^### 8\. /), ['p5'], 'dependency why')
   only(swap(FILES, ORIENT_ALL, '; `unreadable` as "could not be read (<reason>): fix its\n  frontmatter, and the next pass grades it"', '',
     /^### 8\. /), ['p5'], 'unreadable why')
+})
+
+test('control p4: a decided task queued with no recorded answer fails p4 alone', () => {
+  only(swap(FILES, SCHEDULE, 'A task out as `unrecorded` (p51-4) was named decided, but', 'A task named decided is queued, even when', PF),
+    ['p4'], 'unrecorded at schedule')
+  only(swap(FILES, ORIENT_ALL, 'named decided whose note holds no record of an answer (`unrecorded`', 'named decided', S6), ['p4'],
+    'unrecorded under orient-all')
 })
 
 test('control p4: a left-out block that no longer names an unreadable task fails p4 alone', () => {

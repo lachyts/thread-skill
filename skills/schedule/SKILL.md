@@ -438,6 +438,9 @@ the round, and the rest stay undecided.
 **The final call.** `preflight` with the same four flags and `--decided <each decided slug>`. Its `queue[]` is the
 candidate set from step 2 on.
 - A task in `out[]` that is not carried leaves now: no `rollout:` stamp, no `## Queue` row, no `## File-sets` line.
+- A task out as `unrecorded` (p51-4) was named decided, but its note holds no `## Decisions` bullet for one of its
+  decisions, or no `orient ruling:` line for a decision's fork (its `reason` names which): it leaves the same way,
+  never queued on an answer nobody wrote down, since its planner would stop on the question mid-run.
 - A task out as `waits` (§ 3's hold: a dependency outside the candidates that nobody is building) leaves the same way,
   and so does each dependant out through it; step 7's cross-project waits write both on this note (with an empty
   queue there is none: **An empty queue.** below says where they go).
@@ -989,6 +992,7 @@ Pickup sweep (step 1.2):
 Left out by the Pre-flight (none is stamped; each waits on what its line names):
   - [[task-o]] — graded Orient: /thread:orient [[<home>]]
   - [[task-c]] — One call, waiting on your answer: the next schedule asks it again
+  - [[task-k]] — One call, answered but not recorded (no recorded answer to: Which way?): the next schedule asks it again
   - [[task-u]] — ungraded (no grade), left out at your answer: the next schedule asks again
   - [[task-n]] — unreadable (frontmatter does not parse (line 9, due)): fix its frontmatter; the next schedule grades it
   - [[task-d]] — depends on [[x]], which is left out (the Dependent closure)
