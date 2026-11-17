@@ -2373,6 +2373,11 @@ const P47_13 = [ // [new, old]
     'actionable feedback bullets.'], // the Decide line
 ]
 const preP4713 = (p) => P47_13.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// p52-1 (ADR 0081 d1) moved no prompt byte: the Unreachable-surface declaration rides the schemas alone (PLAN_VERDICT,
+// PLAN_JUDGE, IMPL_RESULT), and the calls pin only labels and prompts. Every row gains `unreachable`; the loop below pins
+// the rows as rendered (P52_1_ROWS) and deletes the key before every older rows pin, none of which moved. None of these
+// agents returns a reading, so each row carries the unmarked { marked: false, by: [], paths: [] }.
+const P52_1_ROWS = '9ebfb154a20c801898457c4861bfaa25330034f3800d9191549d0e5660eead34'
 const P47_13_PINS = {
   calls: '1a94f0bc1be99cf9fee64956b69a72c87a5dc76a36e53d430ae24f196ec69e54', // three whole task-mode calls, unslotted
   slotted: '1cfc799b2225fcc00b4c1fb70ff50726713980cf8c03b141f4b3d0927b1077d8', // the same calls as run, slotted
@@ -2482,6 +2487,7 @@ const P47_13_PINS = {
   const p312Slotted = []
   const p4713Calls = []
   const p4713Slotted = []
+  const p521Rows = []
   const treeCalls = []
   for (const args of [
     mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
@@ -2489,6 +2495,12 @@ const P47_13_PINS = {
     mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
   ]) {
     const r = await runTask(args, scripted)
+    // p52-1: the rows as rendered, then with `unreachable` deleted before every older rows pin below.
+    p521Rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
+    for (const row of (r.result && r.result.tasks) || []) {
+      ok(JSON.stringify(row.unreachable) === JSON.stringify({ marked: false, by: [], paths: [] }), `p52-1: ${row.slug} is unmarked`)
+      delete row.unreachable
+    }
     // p47-13: the calls as rendered, then through preP4713 (the innermost swap) before every push below, so each older
     // pin and chain, p31-2's included, reads its pre-p47-13 bytes.
     p4713Slotted.push(JSON.stringify(r.calls))
@@ -2597,6 +2609,8 @@ const P47_13_PINS = {
   for (const [i, [nw]] of P47_13.entries()) ok(p4713Slotted.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p47-13: fragment ${i + 1} renders in these calls, so its swap is no no-op`)
   ok(sha(p4713Calls.join('\n')) === P47_13_PINS.calls,
     'byte pin (p47-13): three whole task-mode calls, unslotted — the p31-2 calls pin above plus the plan judge\'s Unbounded acceptance bullet and Decide sentence')
+  ok(sha(p521Rows.join('\n')) === P52_1_ROWS,
+    'byte pin (p52-1): the same rows as rendered — the P29_PINS rows above plus each row\'s unreachable')
   ok(sha(p4713Slotted.join('\n')) === P47_13_PINS.slotted,
     'byte pin (p47-13): the same three calls as run, slotted — the p31-2 slotted pin above plus the same two fragments')
 }
