@@ -1847,7 +1847,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   miss is traced to the grading rules and never tuned as a knob. A line's
   `decisions` and `low` count his decisions (owner yours) only since ADR 0054:
   a decision ruled for him is never counted, so lines before ADR 0054 are not
-  comparable with lines after it. _Avoid_: grade history, calibration log.
+  comparable with lines after it. Since ADR 0079 a line may carry the
+  `model` and `effort` its graders ran on. _Avoid_: grade history,
+  calibration log.
 - **Quality** — the other headline: how few Escapes a rollout's landed work
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:

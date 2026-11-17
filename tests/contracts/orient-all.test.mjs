@@ -79,7 +79,7 @@ const SCRIPT = 'skills/_shared/scripts/estate-dispatch.py'
 
 const HEADINGS = ['## Scope', '## Invocation forms', '## Process', '### 1. The budget', '### 2. Scan, status and grade',
   '### 3. The Ranked slate', '### 4. The One-call round', '### 5. Grill rounds', '### 6. Schedule', '### 7. Start',
-  '### 8. Report', '### 9. Dry run', "## Don't"]
+  '### 8. Report', '### 9. Dry run', "## Don't", '## Steps that need no ask']
 // Words the skill must not use, built from parts where the word itself is pinned elsewhere in tests/ (queue-only,
 // rung-vocabulary and execution-fit-shapes count every hit).
 const FORBIDDEN = [new RegExp(['wa', 've'].join(''), 'i'), new RegExp(['rollout', '-?\\s*', 'shaped'].join(''), 'i'),
@@ -297,7 +297,7 @@ function check(files, consts) {
   if (JSON.stringify(starts) !== JSON.stringify(started)) flag('o10', `§ 7's table ${JSON.stringify(starts)} ≠ STATUS_ACTIONS ${JSON.stringify(started)}`)
 
   // o11: the Grade log.
-  if (!/Unless this is a dry run, `[^`]*estate-dispatch\.py log --rank "\$S\/rank\.json" --scan "\$S\/scan\.json"`/.test(s2)) {
+  if (!/Unless this is a dry run, `[^`]*estate-dispatch\.py log --rank "\$S\/rank\.json" --scan "\$S\/scan\.json"[^`]*`/.test(s2)) {
     flag('o11', '§ 2 does not run `estate-dispatch.py log --rank ... --scan ...` guarded "Unless this is a dry run"')
   }
   need('o11', '§ 9', s9, ['Runs §§ 2–3 (not § 2 step 7)'])

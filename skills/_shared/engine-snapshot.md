@@ -133,7 +133,8 @@ and its reinstate keeps the signed-gate handles and their cache replay. To move 
 or defer its gates and reinstate it; the next hard pause, then `/thread:execute`, is its move point. On a move or a
 first stamp (adopt's `changed: true`), the lead drops its runIds and signed-gate handles from the old snapshot's calls
 (a first stamp's are the Primary checkout's): they restart fresh. Nothing else moves a rollout: no launch, heartbeat,
-cold resume, Stage re-send or repair hand-off, and never the lead's own judgement; the Leg a launch or hand-off starts
+cold resume, Stage re-send or repair hand-off, and never the lead's own judgement, since a move drops the old
+snapshot's runIds and signed-gate handles (above); the Leg a launch or hand-off starts
 resolves at its own § 1 entry, so the stamp is that Leg's.
 
 ## The Engine catch-up's move

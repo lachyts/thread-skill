@@ -1398,6 +1398,32 @@ test('grade (p25-4) lands in grades.jsonl only, as v 1 with rollout null and its
   assert.deepEqual([b.task, b.grade, b.gates, b.held, 'raised' in b, 'rank' in b, 'linked' in b], ['t2', 'Orient', [], true, false, false, false])
 })
 
+// ADR 0079 decision 5 (p46-6): session-run work records the model and effort that ran on the line it already writes. A
+// grade (the graders), a reflection (the Reflection), an audit line (the Monthly audit's reader) and an attention line
+// (the owner labellers) take them; a time-lost record line is summed by script, so no model ran it. Each row: kind,
+// task, the line, and whether it lands.
+test('p46-6: grade, reflection, an audit and an attention line take the model and effort that ran; empty or on a record line is refused', (t) => {
+  const home = tmpHome(t)
+  const k = kinds('00000000', 'x')
+  const RAN = { model: 'claude-fable-5-2', effort: 'high' }
+  const rows = [
+    ['grade', 't1', { ...GRADE, ...RAN }, true],
+    ['reflection', null, { ...k.reflection, ...RAN }, true],
+    ['time-lost', null, { ...TL.audit, ...RAN }, true],
+    ['attention', null, { ...ATT, ...RAN }, true],
+    ['time-lost', null, { ...TL.record, model: RAN.model }, false],
+    ['grade', 't1', { ...GRADE, model: '' }, false],
+    ['reflection', null, { ...k.reflection, effort: 7 }, false],
+  ]
+  for (const [kind, task, fields, lands] of rows) {
+    const r = cli(home, ['emit', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, lands ? 0 : 2, `${kind} ${JSON.stringify(fields.model)}: ${r.stderr}`)
+  }
+  const ran = [...lines(path.join(ev(home), 'grades.jsonl')), ...lines(path.join(ev(home), 'reflections.jsonl'))]
+  assert.deepEqual(ran.map((l) => [l.kind, l.model, l.effort]),
+    [['grade', RAN.model, 'high'], ['reflection', RAN.model, 'high'], ['time-lost', RAN.model, 'high'], ['attention', RAN.model, 'high']])
+})
+
 test('grade refusals (p25-4): exit 2, one line and nothing written', (t) => {
   const home = tmpHome(t)
   const cases = [

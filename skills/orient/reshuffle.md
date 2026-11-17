@@ -112,7 +112,8 @@ project's roadmap is read only for numbering.
 phase's `## Build sequence` when a task moves out, so an ordinal is never reused. New phases
 number from `N_max + 1` (P1 when the project has none); a fractional `N_max` rounds up to the
 next whole phase, which is the first new one (`p3.5` → P4). Fractional naming otherwise follows
-`add-phase.md` § Step 3. Existing phase numbers are **never** changed.
+`add-phase.md` § Step 3. Existing phase numbers are **never** changed: a phase's number is in its notes'
+filenames, and every link names them.
 
 ## R2. Sort and propose
 
@@ -284,6 +285,12 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      the cwd, `Depends on [[...]]` links and the 1–2 line goal; the runnable prompt in the
      `## Resume prompt` block when the task qualifies for launch context, else as a fenced block
      under `## Notes`; and a closing `**Verify:**` line.
+   - **What ran** (ADR 0079 decision 5), on each task whose body R5.2 writes (a new, unbundled or decomposed task, or
+     one R3 respecced), once its note exists: one `## Notes` line, `- <UTC ISO> orient ran on <model id> at <effort>`,
+     this session's own model id as the harness names it and its effort (`$CLAUDE_EFFORT`; ` at <effort>` left off when
+     it is unset), so a later measure of orient's work can read which model shaped the task. A task only phased, moved
+     or renamed, its body unchanged apart from backlink rewrites (below), gets none: orient did not shape it. It records
+     what ran and never sets it: which model a Session opens on is Chorus's (Chorus ADR 0119).
    - **The grill's Decided for you lines** (R3), on any task R5.2 writes, once its note exists, each through
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --owner <technical|priorities> --question <fork> --answer <call> --why <reason> --by orient`,
      which writes it under the task's `## Decided for you (<date>)`, never `## Decisions`. A refusal is reported,
@@ -373,14 +380,17 @@ from here.
 The rules above are the contract; these are the ones most easily broken.
 
 - **Don't touch frozen items** (in flight, possibly landed, thread captures, decision tasks) beyond
-  adding new members to an in-flight phase.
-- **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
+  adding new members to an in-flight phase: each is under way, may already have landed, or is another owner's (R1).
+- **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused: a number is in
+  the notes' filenames, so a change breaks every link to them.
 - **Don't write before the R4 gate**, a Note's correction of a Priorities card (R3) aside, and
-  don't rename without the basename check and the backlink rewrite.
+  don't rename without the basename check and the backlink rewrite. The gate is where Lachy approves the
+  reshuffle, and a rename without the rewrite leaves dead links.
 - **Don't advance a declared check** except through `advance --expect <digest>` after R4 passed
-  every entry; never run its `--advance` by hand.
+  every entry; never run its `--advance` by hand: the digest binds the advance to the entries R4 passed (§ Declared
+  check).
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by
-  name; the inline shape is only the no-skills fallback.
+  name; the inline shape is only the no-skills fallback, so the skills' own edits reach every run (R3).
 - **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md`,
   `add-writers/add-phase.md` and `add-writers/add-project.md`.
 - **Under `--backlog`, B4's record stands in for R4's gate** (`skills/orient/backlog.md` § B4): nothing waits on his

@@ -488,7 +488,8 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   `escalated` and `flipped` are drift the run should have closed itself (repair § 3); `git-env` is execute § 4.5's
   canary; `raise` is a round cap (weigh it beside score.py's own knob); `deferred` is repair § 5. A rollout with no
   line in the window still brings its in-window repair lines, read `repairs-only` (or with its Escapes,
-  `escapes-only`).
+  `escapes-only`). A `repair: ran on <model id> …` line is repair § 6's *What ran* (ADR 0079 decision 5), the model
+  the run ran on: metadata, never friction, so span lists no item for it and it never makes a rollout `repairs-only`.
 - An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7): an Escape counts in the
   week it surfaced, against the rollout that landed the work; one dated outside the window is never an item. Its
   `cannotShow` line is reported, never traced: on a parallel rollout it names only the Escapes no week counts (§ What
@@ -622,11 +623,12 @@ for Lachy, never a knob. A null `masterRuns` is unread (its flag says why), neve
 into `/tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json`, `{"<id>": "<owner>"}`, the owner one of `yours`, `priorities`,
 `technical`, `gate` and `unknown`, one entry per `attention.questions.items` id whose `outcome` is not `failed`. Label
 in batches of at most 100 questions per subagent call, side by side when the harness offers subagents, and merge the
-labels by id. Judge each question as it stood when it was put to him, never by his answer, and use `unknown` only when
-its text cannot tell. When labelling cannot finish, step 13b runs with `--rest-unknown`, step 17 names how many went
-unlabelled, and close never waits on labels. Read `trails` and `waits` as reported, never traced. Trace each `circling`
-item to what held it: a set-aside item starts at its `heldBy` (the stage and reasonClass that stopped it), the others at
-the Sessions that touched it. Name the rule the trace reaches: step 15's `amends` cites it.
+labels by id; step 13b records the model and effort they ran on. Judge each question as it stood when it was put to him,
+never by his answer, and use `unknown` only when its text cannot tell. When labelling cannot finish, step 13b runs with
+`--rest-unknown`, step 17 names how many went unlabelled, and close never waits on labels. Read `trails` and `waits` as
+reported, never traced. Trace each `circling` item to what held it: a set-aside item starts at its `heldBy` (the stage
+and reasonClass that stopped it), the others at the Sessions that touched it. Name the rule the trace reaches: step 15's
+`amends` cites it.
 
 **The arms** (`span.json`'s `arms`, ADR 0079 d9) are reported, never traced as friction: a script counts them, so no part
 becomes a sighting, a bug or a knob of yours. For the master review, the builder, the investigator and the lead, put the
@@ -692,8 +694,14 @@ never filed here.
 Once, before step 14 (tune.py's load hold reads the line it writes), with `--audit` exactly when step 10a ran:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json [--audit /tmp/thread-reflect-week-<YYYY-MM-DD>/audit.json]
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json [--audit /tmp/thread-reflect-week-<YYYY-MM-DD>/audit.json --model <model id> --effort "${CLAUDE_EFFORT:-}"]
 ```
+
+With `--audit`, `--model` and `--effort` name what the audit's reader ran on (ADR 0079 decision 5). A reader step 10a
+ran inline, or started as a subagent with no model or effort of its own, ran on this session's: its model id, as the
+harness names it, and its effort. One step 10a started on another model or effort names that instead (an effort not
+known is passed empty), so this session's own is never recorded as the reader's. An empty `--effort`, from an unset
+`$CLAUDE_EFFORT` too, records none.
 
 It writes, each once and in this order: the baseline (the 2026-10-21 audit, on the first reading only), the Monthly
 audit's row, this reading's row, and, when this reading's top class also topped last week's row (or its Watch is
@@ -710,8 +718,12 @@ gaps; or a line over the Run record's 16 KiB: trim entries or their text, then r
 Once, after step 13a and before step 14, with the labels step 11 wrote:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --owners /tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --owners /tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json --model <model id> --effort "${CLAUDE_EFFORT:-}"
 ```
+
+`--model` and `--effort` name what labelled the owners (step 11; ADR 0079 decision 5), by step 13a's rule: this
+session's own when it labelled them itself or started its subagents with no model or effort of their own, else the
+subagents' (an effort not known is passed empty). A re-run compares only the labels: what ran is no change of them.
 
 It writes this reading's `attention` line (the questions by Owner, the trails, the waits and the circling items), then,
 for each circling rule with fresh items, that rule's Watch: counted in readings, so seen in a second reading it becomes a
@@ -788,8 +800,12 @@ unchecked line from that day's page: the task was written before this rule (ADR 
 ### 16. Close
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --model <model id> --effort "${CLAUDE_EFFORT:-}"
 ```
+
+The `reflection` line records the model this Reflection ran on (ADR 0079 decision 5): `--model` is this session's own
+model id, as the harness names it, and `--effort` its effort, which an unset `$CLAUDE_EFFORT` leaves unrecorded. It
+records what ran; the lock, not this step, says what should (step 9).
 
 When `span.json`'s `arms` block holds a row, `close` first writes its `arms` line, once (a re-run writes none): the next
 reading's agreement walk reads it back. An empty week, an all-`none` week and a plans-only week before the split write
@@ -928,9 +944,9 @@ open keeps the task open.
   squash-landed later PR's findings are missed too.
 - Reverts and review findings are read from the Project root's local ref, never fetched: `escapes.ref.tipDate`
   shows how old it is, and anything pushed since the last fetch is missed.
-- A repair run that writes no dated `repair:` line in the rollout note's `## Notes` and records no event is not seen
-  by the weekly reading, nor is a `repair:` line on a rollout with no Run record (one that never ran): the repair
-  lines are swept from the notes of the rollouts the record holds.
+- A repair run that writes no dated `repair:` line in the rollout note's `## Notes` but its `ran on` line (repair § 6's
+  *What ran*, metadata) and records no event is not seen by the weekly reading, nor is a `repair:` line on a rollout
+  with no Run record (one that never ran): the repair lines are swept from the notes of the rollouts the record holds.
 - A Human fix (ADR 0035) has no event of its own, nor does a gate signed on the note with no `gate-signed` line (one
   signed before p21-2's events, by Lachy or the Standing approval, or written by hand): the weekly reading sees
   either only as a set-aside whose `movedBy` is `unrecorded`, and then its task note's `## Needs you`,
@@ -1050,9 +1066,10 @@ open keeps the task open.
 ## Don'ts
 
 - Don't compute, round or restate a number the script did not print, and don't propose a Tuning score.py did not
-  emit.
+  emit: score.py holds the one copy of every rule, so a number made by hand is one nothing checks.
 - Don't run tune.py again once it has written this Reflection's line, or before Lachy has answered (or ended the
-  Reflection). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
+  Reflection): the run that wrote its line is the Reflection's one run (step 7), and a run before his answer would
+  write that one line without his pick, which is his alone (step 6). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
   `--record-only` (step 7), and never ends the Reflection without a line.
 - By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
   through `tune.py --auto` (ADR 0037 d5), never a rule.
@@ -1064,4 +1081,11 @@ open keeps the task open.
 - Never overwrite or edit a done task: reflect.py creates a note by exclusive create and refuses a taken path.
 - Never write a close line from the weekly reading: `--close` is close-score.py's alone (ADR 0037 d4).
 - Never decide a rule item or a held trade during a run (the weekly reading never `--pick`s), and never schedule
-  or reshuffle the decision task.
+  or reshuffle the decision task: they are Lachy's, decided with him at the Reflection Routine (ADR 0037 d5).
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (`score.py` and `serial-score.py`, which read only, and
+`land.sh --origin-slug`), and a re-run of one that died on a network error, are taken on your own: none of them
+writes a setting or a note. Only the *yours* questions this skill names reach Lachy
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
