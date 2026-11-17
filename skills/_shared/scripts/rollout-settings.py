@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 6                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 7                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -128,7 +128,9 @@ below), so its slot-taken records the built-in Weight.
 paths whose code no check in its rollouts' verifier exercises (Codex computer use, device-only code). A diff that
 touches one is on an Unreachable surface whatever its plan declares: the backstop behind the plan's own declaration
 (and the implementer's, for a task with no plan). Its value is a list of git pathspec globs read exactly as
-`inert_paths`' (the same glob_problem() rule, at most 64, no glob twice), empty by default (built-in []: no backstop).
+`inert_paths`' (the same glob_problem() rule, at most 64, no glob twice), and a glob holding a `[…]` class that will
+not compile (glob_class_problem(): `[b-a]`, a range out of order) is refused too, since the engine compiles each glob
+and would refuse the lead's args instead; empty by default (built-in []: no backstop).
 It is per repo, so `[defaults]` refuses it. It is never stamped on a rollout and is no Tuning key: an operator's hand
 edit, and no writer here adds it. It is not in `settings`: resolve() reports it as its own top-level
 `unreachable_paths` (Output). execute's lead passes its value as the engine's `args.unreachablePaths` (execute § 3),
@@ -209,7 +211,7 @@ schema rule above):
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
 - a `weight_mem_gb` or `weight_cores` under `[defaults]`, or one that is not a finite number > 0 (a boolean refused; p53-3);
-- an `unreachable_paths` under `[defaults]`, or one `inert_paths` would refuse (p52-1);
+- an `unreachable_paths` under `[defaults]`, one `inert_paths` would refuse, or a glob glob_class_problem() refuses (p52-1);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a bad or case-duplicate repo key.
@@ -261,6 +263,7 @@ Tuning may move; run_record.py's TUNING_KEYS is pinned to it), SETTING_KEYS (KEY
 DEFAULTS_ONLY, MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
 GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
+glob_class_problem(glob) (why a glob's `[…]` class will not compile, or None: unreachable_paths' extra check),
 credential_problem(value) (why a test_credentials value is refused, or None), logins_problem(value) (the same for
 test_logins),
 near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
@@ -279,6 +282,7 @@ import re
 import signal
 import subprocess
 import sys
+import warnings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAND_SH = os.path.join(HERE, "land.sh")
@@ -581,6 +585,30 @@ def glob_problem(glob):
     return None
 
 
+def glob_class_problem(glob):
+    """Why a `[…]` class in `glob` cannot be read (a range out of order, `[b-a]`), or None: `unreachable_paths`' check
+    beyond glob_problem() (p52-1). Each class is found and built as inert-paths.py's _seg_re builds it, and the engine's
+    unreachableGlobRe is that builder's port, so a glob this passes compiles in the engine too: the file, never the
+    engine's args refusal, names the bad glob. A class git would read as matching nothing is refused, never matched."""
+    for seg in glob.split("/"):
+        i = 0
+        while i < len(seg):
+            j = seg.find("]", i + 2) if seg[i] == "[" else -1
+            if j >= 0:
+                body = seg[i + 1:j]
+                if body[:1] in ("!", "^"):
+                    body = "^" + body[1:]
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")   # a `[` in a class is Python's "possible nested set"
+                        re.compile("[" + body.replace("\\", "\\\\") + "]")
+                except re.error as e:
+                    return "holds the class %s, which cannot be read as one (%s)" % (json.dumps(seg[i:j + 1]), e.msg)
+                i = j
+            i += 1
+    return None
+
+
 def credential_problem(value):
     """Why a `test_credentials` value is no valid test-credential class (the header's rules, the first failure wins), or
     None. A refused value is described, never echoed."""
@@ -773,7 +801,7 @@ def _validate(text, doc, path):
                 for glob in value:
                     if not isinstance(glob, str):
                         refuse("%s %s: each glob must be a string, got %s" % (label, key, _describe(glob)), at + (key,))
-                    why = glob_problem(glob)
+                    why = glob_problem(glob) or (glob_class_problem(glob) if key == "unreachable_paths" else None)
                     if why:
                         refuse("%s %s: the glob %s %s" % (label, key, json.dumps(glob), why), at + (key,))
                 if len(set(value)) != len(value):

@@ -16,24 +16,34 @@ const mkArgs = (task, over = {}) => ({
     maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh', ...task },
   ...over,
 })
-// s: { plan, judge, result, files }: what the planner, the plan judge and the implementer return for unreachable, and the
-// implementer's changedFiles (absent ⇒ the key is left out, as an older agent returns it).
+// s: { plan, judge, result, files, reviews, revised }: what the planner, the plan judge and the implementer return for
+// unreachable, the implementer's changedFiles (absent ⇒ the key is left out, as an older agent returns it), the review
+// judge's verdicts in order (absent or used up ⇒ approve), and the reviser's own { result, files }.
+const PR = 'https://github.com/o/r/pull/1'
+const BR = 'audit-fix/fix-u'
+const WT = '/repo/.claude/worktrees/proj-fix-u'
 function agentOf(s) {
+  const reviews = [...(s.reviews || [])]
+  const impl = (o) => ({
+    verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: 'done',
+    ...(o.result === undefined ? {} : { unreachable: o.result }), ...(o.files === undefined ? {} : { changedFiles: o.files }),
+  })
   return async (prompt, opts) => {
     const kind = opts.label.split(':')[0]
     if (kind === 'plan') return { ready: true, blocked: false, blockerCause: '', plan: PLAN_TEXT, ...(s.plan === undefined ? {} : { unreachable: s.plan }) }
     if (kind === 'plan-judge') return { verdict: 'approve', feedback: [], ...(s.judge === undefined ? {} : { unreachable: s.judge }) }
-    if (kind === 'review') return { verdict: 'approve', feedback: [] }
-    if (kind === 'implement') {
-      return {
-        verified: true, blocked: false, escalate: false, prUrl: 'https://github.com/o/r/pull/1', branch: 'audit-fix/u',
-        worktreePath: '/repo/.claude/worktrees/proj-fix-u', blockerDiagnosis: '', summary: 'done',
-        ...(s.result === undefined ? {} : { unreachable: s.result }), ...(s.files === undefined ? {} : { changedFiles: s.files }),
-      }
+    if (kind === 'review') {
+      const verdict = reviews.shift() || 'approve'
+      return { verdict, feedback: verdict === 'changes' ? ['fix the edge case'] : [] }
     }
+    if (kind === 'implement') return impl(s)
+    if (kind === 'revise') return impl(s.revised || {})
     throw new Error('unscripted label ' + opts.label)
   }
 }
+// A seeded revise (task.resume, after an Integration rejection): its first call approved a plan this call never sees.
+const RESUME = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: [{ round: 1, feedback: ['keep their rename'] }],
+  reviewRoundsUsed: 1, plan: PLAN_TEXT }
 const NOT = { marked: false, by: [], paths: [] }
 const GLOBS = ['skills/codex/**', 'Apps/**/*.swift']
 
@@ -51,6 +61,13 @@ test('the row carries the mark: a declaring plan, its judge, a no-plan result, a
     ['an approved plan wins over its implementer\'s declaration', { planGate: true }, { plan: false, judge: false, result: true }, {}, NOT],
     ['no list: a changed path marks nothing', {}, { result: false, files: ['skills/codex/cu.py'] }, {}, NOT],
     ['an older agent that returns neither field', {}, {}, { unreachablePaths: GLOBS }, NOT],
+    // Sticky: the reviser after a `changes` round declares false and reports no file, and clears neither reading.
+    ['a reviser\'s false and [] after a declaring implementer on a listed path', {},
+      { result: true, files: ['skills/codex/cu.py'], reviews: ['changes'], revised: { result: false, files: [] } }, { unreachablePaths: GLOBS },
+      { marked: true, by: ['result', 'paths'], paths: ['skills/codex/cu.py'] }],
+    // A seeded revise settles no plan, so its reviser's own declaration counts, even on a plan-gated task.
+    ['a seeded revise whose reviser declares it', { planGate: true, resume: RESUME }, { revised: { result: true, files: ['x.js'] } },
+      { unreachablePaths: GLOBS }, { marked: true, by: ['result'], paths: [] }],
   ]) {
     const r = await runTask(mkArgs(task, over), agentOf(s))
     assert.equal(r.error, undefined, name)
@@ -59,6 +76,20 @@ test('the row carries the mark: a declaring plan, its judge, a no-plan result, a
     assert.deepEqual(row.unreachable, want, name)
     assert.equal(r.logs.some((l) => l.startsWith('unreachable surface: proj-fix-u')), want.marked, `${name}: the log line`)
   }
+})
+
+// The JS port of inert-paths.py's glob_match, at its own layer: tests/inert-paths.test.mjs's 'glob_match agrees with git
+// on the glob forms' rows, verbatim, then a `[!x]` class and `?`, so a drift in the port fails here, by its row.
+test('unreachableGlobMatch reads each glob form as inert-paths.py\'s glob_match does', () => {
+  const { unreachableGlobMatch } = loadEngine(['unreachableGlobMatch'])
+  for (const [glob, path, want] of [
+    ['THREAD.md', 'THREAD.md', true], ['THREAD.md', 'a/THREAD.md', false], ['docs/handoffs/**', 'docs/handoffs/a.md', true],
+    ['docs/handoffs/**', 'docs/handoffs/x/y.md', true], ['docs/handoffs/**', 'docs/handoffsx/a.md', false], ['docs/*.md', 'docs/a.md', true],
+    ['docs/*.md', 'docs/x/a.md', false], ['**/THREAD.md', 'THREAD.md', true], ['**/THREAD.md', 'a/b/THREAD.md', true],
+    ['docs/**/x.md', 'docs/x.md', true],
+    ['src/[!x]y.py', 'src/ay.py', true], ['src/[!x]y.py', 'src/xy.py', false],
+    ['src/?.py', 'src/a.py', true], ['src/?.py', 'src/ab.py', false], ['a?b', 'a/b', false],
+  ]) assert.equal(unreachableGlobMatch(glob, path), want, `${glob} on ${path}`)
 })
 
 test('the declaration rides each schema: required of the planner, the plan judge and every code-writing agent', () => {

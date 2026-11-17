@@ -82,7 +82,7 @@ function check(f) {
   // § 3, § 6, Don'ts
   need('config-row', s3.includes('| `named_rerun` | none (omit): the lead\'s Flake check leaves a red red |') &&
     s3.includes('the line also carries `"namedRerun": <named_rerun>` after `verifySlot`') && s3.includes('A refused `named_rerun:` is exit 2 too'))
-  need('row-shape', s6.includes('gatedInputs, plan, reviewVerdicts, flakes }] }') && s6.includes('and `flakes` (p29-9, ADR 0050) is every Flake'))
+  need('row-shape', s6.includes('gatedInputs, plan, reviewVerdicts, flakes, unreachable }] }') && s6.includes('and `flakes` (p29-9, ADR 0050) is every Flake'))
   need('reconcile-bullet', s6.includes("- any status's `flakes` (p29-9, ADR 0050) → each entry is logged") && s6.includes('never fix it in the task') &&
     s6.includes('An integrate row reconciled with `--no-verdict`') && s6.includes('records none of its `flakes`'))
   need('dont', donts.includes('- Never fix a Flake inside a task, at a task call, at Integration or after a RACE (ADR 0050)'))
@@ -170,8 +170,8 @@ test('control: § 3 without the named_rerun row fails config-row', () => {
   only(sk(row + '\n', ''), 'config-row', 'no row')
 })
 
-test('control: § 6 with reviewVerdicts last fails row-shape', () => {
-  only(sk('gatedInputs, plan, reviewVerdicts, flakes }] }', 'gatedInputs, plan, reviewVerdicts }] }'), 'row-shape', 'old shape')
+test('control: § 6 with no flakes in the row fails row-shape', () => {
+  only(sk('gatedInputs, plan, reviewVerdicts, flakes, unreachable }] }', 'gatedInputs, plan, reviewVerdicts, unreachable }] }'), 'row-shape', 'old shape')
 })
 
 test('control: record-verify erroring on a verify that wrote no file fails run-record-bullet', () => {

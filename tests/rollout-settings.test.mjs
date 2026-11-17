@@ -1135,7 +1135,8 @@ test('K18 an older reader (schema 5, patched) ignores repo."o/r".weight_* under 
 
 // ---- K19: unreachable_paths, the first schema-7 key (p52-1, ADR 0081 d1) -------------------------------------------------
 // A repo's Unreachable surface: a list of git pathspec globs in a [repo."o/r"] table only, read by inert_paths' rule
-// (glob_problem, at most 64, none twice; K11 holds that rule's every row), resolved as its own top-level field (never in
+// (glob_problem, at most 64, none twice; K11 holds that rule's every row), plus glob_class_problem (a `[…]` class must
+// compile, as the engine compiles it), resolved as its own top-level field (never in
 // `settings`), built-in []. execute's lead passes its value as the engine's args.unreachablePaths.
 const NO_UNREACHABLE = { value: [], source: 'built-in' }
 
@@ -1154,13 +1155,16 @@ test('K19 unreachable_paths resolves from a repo table as file:repo, outside set
   assert.deepEqual(resolves(tmpHome(t)).unreachable_paths, NO_UNREACHABLE, 'no file: built-in []')
 })
 
-test('K19 refused: unreachable_paths under [defaults], in a schema-6 file, and a glob inert_paths would refuse', (t) => {
+test('K19 refused: unreachable_paths under [defaults], in a schema-6 file, a glob inert_paths would refuse, and a class the engine cannot compile', (t) => {
   for (const [lines, line, reason] of [
     [['schema = 7', '[defaults]', 'unreachable_paths = ["skills/codex/**"]'], 3, /unreachable_paths is per repo: set it under \[repo\."owner\/name"\]/],
     [['schema = 6', '[repo."o/r"]', 'unreachable_paths = ["skills/codex/**"]'], 3,
       /rollout\.unreachable_paths is a schema-7 key but the file says schema = 6: raise the file's top-level `schema` line to 7 in the same edit/],
     [['schema = 7', '[repo."o/r"]', 'unreachable_paths = "skills/codex/**"'], 3, /unreachable_paths must be a list of git pathspec globs, got a string/],
     [['schema = 7', '[repo."o/r"]', 'unreachable_paths = ["skills/codex/"]'], 3, /\[repo\."o\/r"\] unreachable_paths: the glob "skills\/codex\/" ends in \//],
+    // glob_class_problem: a range out of order would pass glob_problem, then halt every task call as an args refusal.
+    [['schema = 7', '[repo."o/r"]', 'unreachable_paths = ["a/[b-a]"]'], 3,
+      /\[repo\."o\/r"\] unreachable_paths: the glob "a\/\[b-a\]" holds the class "\[b-a\]", which cannot be read as one \(bad character range b-a\)/],
   ]) {
     const home = tmpHome(t)
     writeSettings(home, lines)

@@ -114,9 +114,10 @@ export const meta = {
 //                                    //   path (IMPL_RESULT's changedFiles) one of them matches is marked whatever its plan
 //                                    //   says (the row's `unreachable`). Absent, null or [] ⇒ no path backstop; prompts
 //                                    //   and opts never read it. A value rollout-settings.py would refuse (not an array,
-//                                    //   over 64 globs, a glob glob_problem refuses, one listed twice) is refused before
-//                                    //   any dispatch (unreachablePathsError, argsRefused), in both modes; mode
-//                                    //   'integrate' ignores a usable one.
+//                                    //   over 64 globs, a glob glob_problem refuses or with a class unreachableGlobRe
+//                                    //   cannot compile, which glob_class_problem refuses too, one listed twice) is
+//                                    //   refused before any dispatch (unreachablePathsError, argsRefused), in both
+//                                    //   modes; mode 'integrate' ignores a usable one.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
@@ -2345,7 +2346,8 @@ function unreachablePathsError(v) {
   for (const g of v) {
     const why = unreachableGlobProblem(g)
     if (why) return `the glob ${refusedEcho(g)} ${why}`
-    // A class git reads but a regex cannot (a range out of order): refused, never matched as nothing.
+    // A class git reads but a regex cannot (a range out of order): refused, never matched as nothing. The reader refuses
+    // it first (rollout-settings.py's glob_class_problem builds each class as this port does), naming the file's line.
     try { unreachableGlobRe(g) } catch (e) { return `the glob ${refusedEcho(g)} cannot be read as a glob (${(e && e.message) || e})` }
   }
   const dup = v.find((g, i) => v.indexOf(g) !== i)
