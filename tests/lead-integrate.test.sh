@@ -51,12 +51,12 @@
 #   with its line; `call` exits 2 (execute's Lane hold) on a merge route, a wrong --after, no record and another
 #   slug's; an exit-8 prepare leaves no record behind.
 #   C59–C65 (p54-15, ADR 0084 Decided for you 1) the Mac's check and GitHub's run at the same time: C59 the push
-#   precedes the verify's end (mac pending, push, then V; <out>.pid names V)   C60 GitHub green and the Mac red: merge-task
-#   --mac exits 11, the task goes back (--after red) with M on its branch   C60b GitHub red while the verdict is pending
-#   C61 a moved base: merge-task 3, mac stopped, prepare `wait` while V lives, then case (iii) re-integrates   C61b case
+#   precedes the verify's end (mac pending, push, then V; <out>.pid names V)   C60 GitHub's red leaves the verdict pending;
+#   the Mac red sends the task back (--after red) with M on its branch   C61 a moved base: merge-task 3, mac stopped,
+#   prepare `wait` while V lives, then case (iii) re-integrates   C61e case (iii) judges shared files from TB   C61b case
 #   (iii) re-verifies a pushed M on an unmoved base   C61c its tree trouble   C61d it never skips; a red or green verdict
 #   gives none   C62 --after shared-green only after the Mac's green   C63 the Run record: V's suite-started before
-#   GitHub's check ends, suite-ended after   C64 mac's transitions   C65 the holder check.
+#   GitHub's check ends, suite-ended after   C64 mac's transitions   C65 the holder check: only this task's own run holds.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -2614,40 +2614,24 @@ ok "$(alivepid "$(VO).pid" lead-integrate.py)" live "C59: <out>.pid names V's li
 touch "$F/go"; wait "$vp"
 ok "$(cat "$(VO).rc" 2>/dev/null)|$([ -e "$(VO).pid" ] && echo kept || echo gone)" "0|gone" "C59: go → rc 0, and <out>.pid is gone"
 
-# C60: a green CI with a red Mac never merges, and the task goes back with M on its branch.
+# C60: the Mac red goes back to the task with M on its branch. GitHub's red first (T's 1) leaves the verdict pending,
+# so V's rc routes it (merge-task's own exits are tests/merge-task-integrated.test.sh's; the join is SKILL.md prose,
+# pinned in tests/contracts/execute-queue.test.mjs).
 fx c60
 main m.txt "theirs" "theirs: m (#7)"
 prep; M=$(j "$J" 'd["mergeCommit"]')
 mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
-vlaunch false; wait "$vp"
-ok "$(cat "$(VO).rc")" 1 "C60: the verifier red → rc 1"
-mac red "$M" "rc 1"
-ok "$mrc|$(macf 'd["state"]')" "0|red" "C60: mac red"
-mkpr 5 "$M"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
-mtm 5 "$M" "$B"
-ok "$rc|$(cat "$R/.claude/merge-task.status")|$(grep -c '^pr merge' "$MT_STATE/gh.log")" "11|failed:11|0" "C60: merge-task --mac with GitHub green and the Mac red: 11, no merge"
-call --after red
-ok "$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '0|["red"]' "C60: call --after red → trouble [red]"
-ok "$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "$M" "C60: M stays on origin's branch"
-python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M" --to "$H0" >/dev/null 2>&1
-ok "$?" 1 "C60: undo refuses the pushed M (the red route has no undo)"
-
-# C60b: GitHub red while the verdict is pending: merge-task's 1 merges nothing and the verify runs on; its red then
-# routes as the join says (the routing itself is SKILL.md prose, pinned in tests/contracts/execute-queue.test.mjs).
-fx c60b
-main m.txt "theirs" "theirs: m (#7)"
-prep; M=$(j "$J" 'd["mergeCommit"]')
-mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
-vlaunch "$(gover false)"
 mkpr 5 "$M"; echo BLOCKED > "$MT_STATE/pr/5/mergeStateStatus"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
 chk 1 "$(printf 'ci\tfail\t1m\thttps://github.com/o/r/actions/runs/7/job/8\t')" ""; echo "Run tests" > "$MT_STATE/steps"
 mtm 5 "$M" "$B"
-ok "$rc|$(cat "$R/.claude/merge-task.status")|$(grep -c '^pr merge' "$MT_STATE/gh.log")" "1|failed:1|0" "C60b: a red required check: 1, nothing merged"
-ok "$([ -e "$(VO).rc" ] && echo rc || echo none)|$(macf 'd["state"]')" "none|pending" "C60b: … while V still runs and the verdict reads pending"
-touch "$F/go"; wait "$vp"
+ok "$rc|$(macf 'd["state"]')" "1|pending" "C60: T's 1 on GitHub's red leaves the verdict pending"
+vlaunch false; wait "$vp"
 mac red "$M" "rc $(cat "$(VO).rc")"
 call --after red
-ok "$(cat "$(VO).rc")|$mrc|$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '1|0|0|["red"]' "C60b: V red → mac red → call --after red → trouble [red]"
+ok "$(cat "$(VO).rc")|$mrc|$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '1|0|0|["red"]' "C60: V red → mac red → call --after red → trouble [red]"
+ok "$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "$M" "C60: M stays on origin's branch"
+python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M" --to "$H0" >/dev/null 2>&1
+ok "$?" 1 "C60: undo refuses the pushed M (the red route has no undo)"
 
 # C61: a moved base stops the verify: merge-task's 3, mac stopped, prepare waits while V lives, then case (iii)
 # re-integrates on the new base.
