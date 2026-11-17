@@ -601,5 +601,117 @@ run 5 "$I" "$B"
 ok "$rc" 8 "25m. BEHIND three times, then UNKNOWN for good: exits 8"; has "$out" "$SETTLE" "25m. the settling mark"
 lacks "$out" "did not converge" "25m. never 'did not converge' (the guard is derived)"
 
+# 26. the Mac's verdict (p54-15, ADR 0084 Decided for you 1): with --mac <file>, merge-task merges a pair only once the
+#     lead's verdict for exactly (I, B) reads green. A red, stopped, missing or mismatched one is 11 with zero gh calls at
+#     the pre-flight; a pending one is waited on at the merge point, the base re-checked each poll, bounded by
+#     MERGE_TASK_MAC_WAIT_MAX (12); the already-merged path waits too, and a non-green verdict there is a RACE (5).
+#     Every wait is bounded structurally: a `sleep` stub first on PATH runs $tmp/mac.act (a sh snippet) on each call,
+#     flipping the verdict, moving the base or signalling T; or MERGE_TASK_MAC_WAIT_MAX=0. $tmp/macsleeps logs the calls.
+MF="$tmp/repo/.claude/integration/t5.mac.json"; MPID="$tmp/repo/.claude/integration/t5.merge-task.pid"
+mkdir -p "$tmp/macbin"
+printf '#!/bin/sh\necho "$*" >> "%s/macsleeps"\n[ -f "%s/mac.act" ] && . "%s/mac.act"\nexit 0\n' "$tmp" "$tmp" "$tmp" > "$tmp/macbin/sleep"
+chmod +x "$tmp/macbin/sleep"
+verdict() {  # verdict <state> [head] [base] — the lead's verdict file for t5, written by hand
+  mkdir -p "$(dirname "$MF")"
+  printf '{"v": 1, "slug": "proj-t5", "head": "%s", "base": "%s", "state": "%s", "why": "rc 1", "at": "2026-11-18T10:00+11:00"}\n' \
+    "${2:-$I}" "${3:-$B}" "$1" > "$MF"
+}
+act() { printf '%s\n' "$1" > "$tmp/mac.act"; }   # act <sh snippet> — what the sleep stub does on each call
+later() {  # later <state> — the stub's act: write that verdict for (I, B) on its call
+  local f="$tmp/later-$1.json"; cp "$MF" "$tmp/now.json" 2>/dev/null; verdict "$1"; cp "$MF" "$f"
+  if [ -f "$tmp/now.json" ]; then cp "$tmp/now.json" "$MF"; else rm -f "$MF"; fi
+  act "cp '$f' '$MF'"
+}
+macfresh() { fresh; rm -rf "$tmp/repo/.claude/integration" "$tmp/mac.act" "$tmp/pidcopy" "$tmp/ppid"; : > "$tmp/macsleeps"; }
+runmac() {  # runmac <pr> <head> <base> — merge-task --mac "$MF" on $tmp/repo, the sleep stub first on PATH
+  : > "$MT_STATE/gh.log"
+  out=$(PATH="$tmp/macbin:$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" --mac "$MF" "$tmp/repo" "$@" 2>&1); rc=$?
+}
+# (a) GitHub's check green, the Mac red: never merges, at the pre-flight, before any GitHub call.
+macfresh; pair; mkpr 5 "$I"; seed 5 "$(b 1)"; verdict red
+runmac 5 "$I" "$B"
+ok "$rc" 11 "26a. a green CI with a red Mac verdict exits 11"; ok "$(sent)" "failed:11" "26a. failed:11"
+ok "$(nmerge)" 0 "26a. no merge call"; ok "$(glog)" "" "26a. zero gh calls (the pre-flight)"
+ok "$(ctr 5)" "$(b 1)" "26a. the counter is byte-unchanged"
+has "$out" "the Mac's verify of $I did not pass (red: rc 1): nothing merged" "26a. names the verdict"
+# (b) pending, and the stub writes green at the merge point: one head-pinned merge.
+macfresh; pair; mkpr 5 "$I"; verdict pending; later green
+runmac 5 "$I" "$B"
+ok "$rc" 0 "26b. pending, then green: exits 0"; ok "$(sent)" "ok" "26b. ok"
+ok "$(nmerge)" 1 "26b. one merge"; has "$(glog)" "pr merge 5 -R o/r --squash --match-head-commit $I" "26b. head-pinned"
+has "$out" "waiting on the Mac's verify of $I" "26b. the wait line names the Mac's verify"
+ok "$(awk '/^pr merge/{exit} /git\/ref\/heads\/master/{n++} END{print (n >= 3) ? "y" : "n"}' "$MT_STATE/gh.log")" y \
+  "26b. the base is re-read at the poll, before the merge"
+ok "$([ -e "$MPID" ] && echo kept || echo gone)" gone "26b. the pid record is gone after the exit"
+# (c) pending past MERGE_TASK_MAC_WAIT_MAX: 12, nothing merged, the counter untouched.
+macfresh; pair; mkpr 5 "$I"; seed 5 "$(b 1)"; verdict pending
+MERGE_TASK_MAC_WAIT_MAX=0 runmac 5 "$I" "$B"
+ok "$rc" 12 "26c. pending past the bound exits 12"; ok "$(sent)" "failed:12" "26c. failed:12"
+ok "$(nmerge)" 0 "26c. nothing merged"; ok "$(ctr 5)" "$(b 1)" "26c. the counter is untouched"
+has "$out" "no Mac verdict yet for $I after" "26c. says no verdict yet"
+# (d) a verdict for another head, another base, a stopped one, or none: 11 each, with zero gh calls.
+for k in head base stopped missing; do
+  macfresh; pair; mkpr 5 "$I"
+  case "$k" in
+    head) verdict green "$(b 7)" ;; base) verdict green "$I" "$(b 7)" ;; stopped) verdict stopped ;; missing) ;;
+  esac
+  runmac 5 "$I" "$B"
+  ok "$rc|$(sent)|$(glog)" "11|failed:11|" "26d. a verdict $k: 11, failed:11, zero gh calls"
+done
+# (e) pending, and the stub writes red at the merge point: 11, no merge.
+macfresh; pair; mkpr 5 "$I"; verdict pending; later red
+runmac 5 "$I" "$B"
+ok "$rc|$(nmerge)" "11|0" "26e. red while T waits at the merge point: 11, no merge"
+# (f) pending, and main moves during the wait: the base re-check's 3, the counter appended.
+macfresh; pair; mkpr 5 "$I"; verdict pending; X=$(mk "$B" moved)
+act "git --git-dir '$MT_SRV' update-ref refs/heads/master '$X'; echo '$X' > '$MT_STATE/base.seq'"
+runmac 5 "$I" "$B"
+ok "$rc|$(nmerge)" "3|0" "26f. main moves while T waits: 3, nothing merged"; ok "$(ctr 5)" "$B" "26f. the counter appended"
+# (g) already MERGED (17's setup): the wait, then 5 on a red, 0 on a green; a race-shaped merge (20's) is 5 at once.
+macfresh; pair; M=$(mk "$B" squash); git --git-dir "$MT_SRV" update-ref refs/heads/master "$M"
+mkpr 5 "$I" CLEAN MERGED; echo "$M" > "$MT_STATE/pr/5/mergeCommit"; verdict pending
+later red
+runmac 5 "$I" "$B"
+ok "$rc|$(sent)" "5|failed:5" "26g. merged while the Mac's verify ran, then red: 5"
+[[ $out =~ RACE:\ PR\ \#5\ merged\ as\ [0-9a-f]{40}\ before\ the\ Mac\'s\ verify ]] && ok y y "26g. the RACE line reconcile reads" \
+  || ok "[$out]" "RACE: PR #5 merged as <40-hex> before the Mac's verify" "26g. the RACE line reconcile reads"
+verdict pending; later green
+runmac 5 "$I" "$B"
+ok "$rc|$(sent)|$(nmerge)" "0|ok|0" "26g. merged, then green: 0, no merge call"
+macfresh; pair; O=$(mk "$B" other); M=$(mk "$B" squash); git --git-dir "$MT_SRV" update-ref refs/heads/master "$M"
+mkpr 5 "$O" CLEAN MERGED; echo "$M" > "$MT_STATE/pr/5/mergeCommit"; verdict pending
+runmac 5 "$I" "$B"
+ok "$rc|$(cat "$tmp/macsleeps")" "5|" "26g. a race-shaped merge: 5 at once, no Mac wait"
+# (h) parsing: --mac takes its argument only when it ends in .mac.json; every malformed form is a plain usage 2.
+macfresh; pair; mkpr 5 "$I"
+for form in bare three alone; do
+  mkdir -p "$tmp/repo/.claude"; printf 'ok\n' > "$tmp/repo/.claude/merge-task.status"; : > "$MT_STATE/gh.log"
+  case "$form" in
+    bare)  out=$(PATH="$tmp/bin:$PATH" bash "$MT" --mac "$tmp/repo" 5 "$I" "$B" 2>&1); rc=$? ;;
+    three) out=$(PATH="$tmp/bin:$PATH" bash "$MT" --mac "$MF" "$tmp/repo" 5 "$I" 2>&1); rc=$? ;;
+    alone) out=$(PATH="$tmp/bin:$PATH" bash "$MT" --mac 2>&1); rc=$? ;;
+  esac
+  ok "$rc|$(glog)" "2|" "26h. --mac $form: 2, zero gh calls"
+  has "$out" "usage:" "26h. --mac $form: a usage line"; lacks "$out" "merge-task args:" "26h. --mac $form: never merge-task args:"
+  [ "$form" = alone ] || ok "$(sent)" "failed:2" "26h. --mac $form: an earlier ok is replaced by failed:2"
+done
+# (i) a bad MERGE_TASK_MAC_WAIT_MAX is 2 before any GitHub call.
+macfresh; pair; mkpr 5 "$I"; verdict pending
+MERGE_TASK_MAC_WAIT_MAX=x runmac 5 "$I" "$B"
+ok "$rc|$(glog)" "2|" "26i. MERGE_TASK_MAC_WAIT_MAX=x: 2, zero gh calls"; has "$out" "MERGE_TASK_MAC_WAIT_MAX='x'" "26i. names it"
+# (j) the pid record names T while it waits, and is gone once it exits.
+macfresh; pair; mkpr 5 "$I"; verdict pending
+later green; act "cp '$MPID' '$tmp/pidcopy' 2>/dev/null; echo \$PPID > '$tmp/ppid'; $(cat "$tmp/mac.act")"
+runmac 5 "$I" "$B"
+ok "$rc" 0 "26j. T merges once green"
+ok "$(cat "$tmp/pidcopy" 2>/dev/null)|$([ -s "$tmp/ppid" ] && echo read)" "$(cat "$tmp/ppid" 2>/dev/null)|read" "26j. while T waits, its pid record names T's own pid"
+ok "$([ -e "$MPID" ] && echo kept || echo gone)" gone "26j. … and is gone after the exit"
+# (k) a TERM at the Mac wait (the lead's TaskStop): 143, the counter untouched, the last line the wait it cut.
+macfresh; pair; mkpr 5 "$I"; seed 5 "$(b 1)"; verdict pending; act 'kill -TERM $PPID'
+runmac 5 "$I" "$B"
+ok "$rc|$(sent)" "143|failed:143" "26k. a TERM at the Mac wait: 143"; ok "$(ctr 5)" "$(b 1)" "26k. the counter untouched"
+ok "$(printf '%s\n' "$out" | grep . | tail -1)" "  last wait: PR #5 — waiting on the Mac's verify of ${I}…" "26k. the last line names the Mac wait"
+ok "$([ -e "$MPID" ] && echo kept || echo gone)" gone "26k. the pid record is gone"
+
 echo; [ "$fail" -eq 0 ] && echo "merge-task integrated: ALL PASS" || echo "merge-task integrated: SOME FAILED"
 exit "$fail"

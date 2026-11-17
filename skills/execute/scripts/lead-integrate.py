@@ -11,22 +11,33 @@ Subcommands:
   prepare --repo R --slug S --default D --note N [--tasks-dir T] [--verifier CMD [--bootstrap CMD]]
       Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
       `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
-      stops here (p26-1). In order: fetch origin with --prune (retried once; failing
+      stops here (p26-1). Then the holder check (p54-15): while an earlier verify or merge-task --mac of the slug still
+      runs (_live_holders: <repo>/.claude/integration/<slug>.pid or <slug>.merge-task.pid names a live pid whose
+      `ps -o command=` holds lead-integrate.py or merge-task.sh; a dead pid, a reused one, a missing or unparsable file is
+      no holder), route `wait` with `an earlier verify (pid P) / merge-task (pid Q) of [[S]] still runs: wait for its
+      notification`: nothing fetched, merged or written, the prepare record kept. In order: fetch origin with --prune (retried once; failing
       twice is exit 8); H = origin/<branch> (absent: route `set-aside`, reason `origin/<branch> does not
       exist — the PR branch is gone`); the anchor A = the engine's ANCHOR_RECIPE (pinned copy) with
       WT=<repo> (a `stale-ref X` is deleted with `update-ref -d <ref> X`, guarded by X, and the recipe
       re-run: `staleRefDeleted`); TB = merge-base(A, origin/<default>); the record = the note's
       `## Integration log` LAST line when it is `integrated` with a full head and base; case (i) is H == A,
-      case (ii) is record.head == H, anything else routes `trouble []`. When the task tree exists it aborts a
+      case (ii) is record.head == H, case (iii) (p54-15) is a pushed lead merge never verified green: H ≠ A, no case
+      (ii), and the Mac verdict (<slug>.mac.json, `mac` below) reads pending or stopped for S and head H, with a 40-hex
+      base origin/<default> still contains (`mac` {head, base, state} is printed); anything else routes `trouble []`. When the task tree exists it aborts a
       merge left in progress and stashes tracked leftovers (`stashed: integration leftovers <head>`, never
       discarded). When B = origin/<default> equals TB (case i) or record.base (case ii) the route is
       `merge` (no merge commit, no verifier, no tree needed: merge H onto that base), whatever the tree's
-      state. Otherwise a missing tree, a tree off its branch or one ahead of origin routes `trouble []`;
+      state; case (iii) never routes `merge` or `skip`. Otherwise a missing tree, a tree off its branch or one ahead of
+      origin routes `trouble []` (case (iii) too, and its tree must then read H: else `trouble`, `the task tree is at X,
+      not origin's H`); in case (iii) with B equal to its verdict's base the route is `verify` with `mergeCommit` H and
+      nothing merged (a re-verify of the pushed M; sharedFiles the task files over base...H that main changed over
+      TB..base; inert off: `case (iii): the lead merge was never verified green, so no green run stands`);
       else it fast-forwards the tree only, then merges B into the
       branch (`git merge --no-ff --no-edit -m "Merge origin/<default> into <branch> (Integration)"`, the
       engine's message): a conflict records `conflictFiles`, aborts and routes `trouble ["conflict"]`; any
-      other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
-      `sharedFiles` (task files over B...H that main changed over TB..B, or record.base..B in case ii)
+      other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed, except case
+      (iii) with B its base: already on origin), `sharedFiles` (task files over B...H that main changed over TB..B, or
+      record.base..B in case ii, or the verdict's base..B in case iii; case iii's Inert check is off, as above)
       and `trouble` ["shared-file"] when there is one, else []. The Inert-path skip (ADR 0045, p29-3): with
       --verifier given and no shared file, one inert check runs there, all of it inside one `try/except
       Exception`: the lazy load of skills/_shared/scripts/inert-paths.py (never at module top, so a broken
@@ -57,13 +68,25 @@ Subcommands:
       exit 0, so a prepare that ends on exit 2 or 8 leaves no record; a failed write is one stderr WARN and never
       changes the verdict (`call` then finds no record: its exit 2).
 
+  mac --repo R --slug S --head SHA --state pending|green|red|stopped [--why TEXT]
+      The Mac verdict (p54-15, ADR 0084 Decided for you 1): the lead's verdict on its Integration verify of one lead
+      merge M, which merge-task.sh --mac waits on before it merges that pair. <repo>/.claude/integration/<slug>.mac.json
+      = {v: 1, slug, head, base, state, why, at}, written by tmp + rename. `pending` reads prepare's record (route
+      verify, mergeCommit == --head), so base is its mainSha and the lead types no base; a fresh pending replaces any
+      file. green, red and stopped need a file whose state is pending and whose head (and slug) is --head; anything
+      else exits 1 (`mac: refused: the verdict for <head> reads <state>`), so a late green never overwrites a stopped,
+      and an earlier attempt's never lands on a later head's file. Prints the verdict written. Exit 2 (`lead-integrate
+      mac: …`): usage and the environment: no record, an unreadable one or another slug's, a route other than verify,
+      mergeCommit ≠ --head, an unwritable directory.
+
   call --repo R --slug S --note N [--row FILE|-] [--after shared-green|red|push-refused]
       The integrate call's `integration`, whole (p47-11, execute § 4.5 step 3): the lead passes it verbatim and
       types no sha. From the prepare record: headSha = its anchor, taskBase, mainSha, landed, branch,
       worktreePath, and prepared = {anchor, taskBase}, the pair the engine's args check holds headSha and
       taskBase to (a retyped sha is refused before dispatch). trouble: the trouble route's own with no --after;
       the verify route's `--after shared-green` (["shared-file"] and leadMerge {mergeCommit: M, headSha: M,
-      baseSha: mainSha, verified: true}, M its merge commit, a shared file required), `--after red` (["red"],
+      baseSha: mainSha, verified: true}, M its merge commit, a shared file required, and the Mac verdict green for M,
+      else exit 2: `--after shared-green needs the Mac verdict green for M`), `--after red` (["red"],
       plus "shared-file" when it had one) or `--after push-refused` ([]), the skip route's `--after push-refused`.
       prUrl, reviewHistory, reviewRoundsUsed and rung are `inputs --row`'s integrate record; readyAt the note's
       `ready:` (absent with none); startedAt a fresh stamp. Prints {integration, source, rungSource, rowRefused,
@@ -78,7 +101,9 @@ Subcommands:
          [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
       appending to O.log, under one deadline of S seconds. The exit code goes to O.rc, written LAST (tmp +
-      rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
+      rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). Right after that
+      removal verify writes O.pid (its own pid: prepare's holder check reads <slug>.pid) and removes it as it ends, on
+      every path but a SIGKILL, while the file still holds its pid (p54-15). A
       failed bootstrap gives its rc and `env_bootstrap failed; verifier not run`. At the deadline the group
       gets SIGTERM, 10 s, then SIGKILL: rc 124. TERM/INT/HUP to verify itself kill the group the same way:
       rc 128+n. They are held while a step starts, so one landing before its group is recorded still kills it,
@@ -358,14 +383,14 @@ Subcommands:
       Now, in reconcile's `_stamp` form (log-integration's --started; `call` stamps the integrate call's startedAt).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc; shards --jobs: an id reduced), 1 refused (push,
-undo, prepare without integrating:, revert's guard; shards --jobs: an unreadable FILE or a roll-up not proven), 3 no id
+undo, prepare without integrating:, revert's guard, mac's refused end of a verdict; shards --jobs: an unreadable FILE or a roll-up not proven), 3 no id
 reduced (shards --jobs), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
 execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
 prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, call, plan, verify,
-push, undo, base-moved, ci-headroom, shards and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
+mac, push, undo, base-moved, ci-headroom, shards and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
 or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
 76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
@@ -785,6 +810,99 @@ def _tree_trouble(tree, br):
     return ""
 
 
+# ---- the Mac verdict (p54-15, ADR 0084 Decided for you 1) ------------------------------------------------------
+
+MAC_SUFFIX = ".mac.json"
+MAC_STATES = ("pending", "green", "red", "stopped")
+CASE_III_WHY = "case (iii): the lead merge was never verified green, so no green run stands"
+HOLDER_FILES = (("verify", ".pid", "lead-integrate.py"), ("merge-task", ".merge-task.pid", "merge-task.sh"))
+
+
+def mac_path(repo, slug):
+    """<repo>/.claude/integration/<slug>.mac.json: the lead's verdict on its Integration verify of one lead merge."""
+    return Path(os.path.expanduser(str(repo))) / ".claude" / "integration" / f"{slug}{MAC_SUFFIX}"
+
+
+def read_mac(repo, slug):
+    """The Mac verdict as a dict, or None when it is absent, unreadable or no JSON object."""
+    try:
+        d = json.loads(mac_path(repo, slug).read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _mac_case(repo, slug, h, b):
+    """Case (iii)'s verdict, {head, base, state}, when the Mac verdict reads pending or stopped for this slug and origin's
+    head h, with a 40-hex base that origin/<default> (b) still contains; else None (today's routes stand)."""
+    d = read_mac(repo, slug)
+    if not d or d.get("state") not in ("pending", "stopped") or d.get("slug") != slug or d.get("head") != h:
+        return None
+    base = d.get("base") or ""
+    if not re.fullmatch(r"[0-9a-f]{40}", base) or git(repo, "merge-base", "--is-ancestor", base, b).returncode != 0:
+        return None
+    return {"head": h, "base": base, "state": d["state"]}
+
+
+def _holder(path, script):
+    """The pid in `path` when that process is alive and its command names `script`; else None (no file, an unparsable
+    one, a dead pid, a pid reused by another command, or this process)."""
+    try:
+        pid = int(Path(path).read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0 or pid == os.getpid():
+        return None
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except OSError:
+        return None
+    p = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, env=ENV)
+    return pid if p.returncode == 0 and script in p.stdout else None
+
+
+def _live_holders(repo, slug):
+    """[(kind, pid)] for an earlier verify (<slug>.pid, `verify --out <slug>`) or merge-task --mac (<slug>.merge-task.pid)
+    of this task that still runs."""
+    d = Path(os.path.expanduser(str(repo))) / ".claude" / "integration"
+    found = [(kind, _holder(d / f"{slug}{suffix}", script)) for kind, suffix, script in HOLDER_FILES]
+    return [(kind, pid) for kind, pid in found if pid]
+
+
+def cmd_mac(args):
+    """The Mac verdict's one writer (tmp + rename). `pending` starts it from prepare's verify-route record; green, red
+    and stopped only end a pending verdict for the same head."""
+    path = mac_path(args.repo, args.slug)
+    if args.state == "pending":
+        rec = _read_prepared(args.repo, args.slug)
+        if rec.get("route") != "verify":
+            raise EnvError(f"prepare routed {json.dumps(rec.get('route'))}, not verify: no Mac verdict to start; nothing written")
+        if rec.get("mergeCommit") != args.head:
+            raise EnvError(f"prepare's mergeCommit is {json.dumps(rec.get('mergeCommit'))}, not {args.head}; nothing written")
+        base = rec.get("mainSha") or ""
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise EnvError(f"the prepare record's mainSha is {json.dumps(rec.get('mainSha'))}, not a 40-hex sha; nothing written")
+    else:
+        cur = read_mac(args.repo, args.slug)
+        if cur is None:
+            raise Refused(f"the verdict for {args.head} reads nothing (no {path})")
+        if cur.get("head") != args.head or cur.get("slug") != args.slug:
+            raise Refused(f"the verdict for {args.head} reads {cur.get('state')} for {cur.get('head')}")
+        if cur.get("state") != "pending":
+            raise Refused(f"the verdict for {args.head} reads {cur.get('state')}")
+        base = cur.get("base") or ""
+    verdict = {"v": 1, "slug": args.slug, "head": args.head, "base": base, "state": args.state,
+               "why": " ".join((args.why or "").split()), "at": rr._stamp(datetime.now())}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(path, json.dumps(verdict, ensure_ascii=False) + "\n")
+    except OSError as e:
+        raise EnvError(f"could not write the Mac verdict {path}: {e}")
+    return verdict
+
+
 def cmd_prepare(args):
     repo = Path(os.path.expanduser(args.repo))
     if not out_of(git(repo, "rev-parse", "--git-dir")):
@@ -797,6 +915,19 @@ def cmd_prepare(args):
                       f"{args.slug} first (execute § 4.5 step 3); nothing fetched or merged")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
+    out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
+           "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
+           "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
+           "abortedMerge": False, "stashed": "", "record": None, "note": "",
+           "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
+    # The holder check (p54-15): an earlier verify or merge-task of this task still running (a lost handle) routes
+    # `wait`, before the record goes and before the fetch: nothing fetched, merged or written, so the waiting command's
+    # own `call --after red` still finds the earlier route's record.
+    holders = _live_holders(repo, args.slug)
+    if holders:
+        out.update(route="wait", reason=" / ".join(f"an earlier {k} (pid {pid})" for k, pid in holders)
+                   + f" of [[{args.slug}]] still runs: wait for its notification")
+        return out
     # The record `call` builds the integrate call from (p47-11): an earlier prepare's goes first, so a prepare that
     # stops on an exit 2 or 8 leaves none behind for `call` to read.
     record = prepared_path(repo, args.slug)
@@ -806,11 +937,6 @@ def cmd_prepare(args):
         pass
     except OSError as e:
         raise EnvError(f"could not remove the old prepare record {record}: {e}")
-    out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
-           "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
-           "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
-           "abortedMerge": False, "stashed": "", "record": None, "note": "",
-           "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
     try:
         out = _prepare_route(args, repo, note, tasks_dir, br, tree, out)
     except TaskScoped as e:
@@ -868,6 +994,10 @@ def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
         out["case"] = "i"
     elif record and record.get("head") == h:
         out["case"] = "ii"
+    else:
+        mac = _mac_case(repo, args.slug, h, b)
+        if mac:
+            out.update(case="iii", mac=mac)
 
     if _own_tree(tree):
         out["abortedMerge"], out["stashed"] = _clean_tree(tree)
@@ -876,16 +1006,32 @@ def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
                    + (f"the last Integration record is {last['outcome']}" if last else "no Integration is recorded")
                    + ("" if not record else f" at head {record.get('head')}"))
         return out
-    base = tb if out["case"] == "i" else (record.get("base") or "")
+    base = {"i": tb, "ii": (record or {}).get("base") or "", "iii": (out.get("mac") or {}).get("base") or ""}[out["case"]]
     # The merge route touches no tree (merge-task merges origin's H onto `base`), so the tree's state is read
-    # only when the lead must merge main into it: an agent runs only for real trouble (ADR 0030 decision 3).
-    if b == base:
+    # only when the lead must merge main into it: an agent runs only for real trouble (ADR 0030 decision 3). Case (iii)
+    # never takes it: its pushed merge was never verified green.
+    if out["case"] != "iii" and b == base:
         out.update(route="merge", reason=f"origin/{args.default} has not moved since {'the task base' if out['case'] == 'i' else 'the recorded Integration'}")
         return out
     bad = _tree_trouble(tree, br)
     if bad:
         out.update(route="trouble", reason=bad)
         return out
+    if out["case"] == "iii":
+        at = rev(tree, "HEAD")
+        if at != h:
+            out.update(route="trouble", reason=f"the task tree is at {at or 'nothing'}, not origin's {h}")
+            return out
+        if b == base:
+            # A re-verify of the pushed M, nothing merged: origin/<default> has not moved since its verdict's base.
+            task_files = set(f for f in out_of(git(tree, "diff", "--name-only", f"{base}...{h}")).split("\n") if f)
+            main_files = set(f for f in out_of(git(tree, "diff", "--name-only", tb, base)).split("\n") if f)
+            shared = sorted(task_files & main_files)
+            out.update(route="verify", mergeCommit=h, sharedFiles=shared, trouble=["shared-file"] if shared else [],
+                       inert=_inert_off(CASE_III_WHY),
+                       reason=f"case (iii): the lead merge {h[:12]} on origin/{br} was never verified green and "
+                              f"origin/{args.default} has not moved since its base {base[:12]}: run the verifier on it again")
+            return out
     p = git(tree, "merge", "--no-ff", "--no-edit", "-m", merge_message(args.default, br), b)
     if p.returncode != 0:
         if rev(tree, "MERGE_HEAD"):
@@ -903,6 +1049,8 @@ def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
         inert = _inert_off("no --verifier given: the verifier runs")
     elif shared:
         inert = _inert_off(f"{len(shared)} shared file(s) ({', '.join(shared[:3])}): the verifier runs")
+    elif out["case"] == "iii":
+        inert = _inert_off(CASE_III_WHY)
     else:
         inert = _inert(args, repo, tree, base, b, m, note)
     if inert["skip"]:
@@ -1216,6 +1364,30 @@ def cmd_verify(args):
     for p in (rc_path, log_path, outcome_path, flake_path):
         if p:
             p.unlink(missing_ok=True)
+    # O.pid (p54-15): this run's pid, so `prepare` can tell a verify still running after a lost handle (_live_holders).
+    # Dropped once verify ends, while it still holds this pid; a SIGKILL leaves a dead pid, which is no holder.
+    pid_path = Path(f"{out}.pid")
+    try:
+        _write_atomic(pid_path, f"{os.getpid()}\n")
+    except OSError:
+        pid_path = None
+    try:
+        return _verify(args, verify_t0, rc_path, log_path, outcome_path, flake_path)
+    finally:
+        if pid_path is not None:
+            _drop_pid(pid_path)
+
+
+def _drop_pid(path):
+    try:
+        if path.read_text().strip() == str(os.getpid()):
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _verify(args, verify_t0, rc_path, log_path, outcome_path, flake_path):
+    """cmd_verify's run, once its old files are gone and O.pid is written."""
     if args.timeout <= 0:
         raise EnvError("--timeout must be a positive number of seconds")
     if args.diff_base is not None and args.outcome:
@@ -2503,8 +2675,9 @@ def _read_prepared(repo, slug):
     return rec
 
 
-def _call_trouble(rec, after):
-    """(trouble, leadMerge or None) for the integrate call that follows prepare's route and the lead's --after."""
+def _call_trouble(rec, after, mac=None):
+    """(trouble, leadMerge or None) for the integrate call that follows prepare's route and the lead's --after; `mac`
+    is the Mac verdict, which --after shared-green needs green for M (p54-15)."""
     route = rec.get("route")
     if route not in CALL_AFTER:
         raise EnvError(f"prepare routed {json.dumps(route)}, which launches no integrate call (execute § 4.5 step 3); "
@@ -2528,13 +2701,16 @@ def _call_trouble(rec, after):
     if not shared or not re.fullmatch(r"[0-9a-f]{40}", m):
         raise EnvError("--after shared-green needs prepare's verify route with a shared file and its merge commit; "
                        "nothing launched")
+    if not mac or mac.get("state") != "green" or mac.get("head") != m:
+        got = "no verdict" if not mac else f"{mac.get('state')} for {mac.get('head')}"
+        raise EnvError(f"--after shared-green needs the Mac verdict green for M ({m}), not {got}; nothing launched")
     return ["shared-file"], {"mergeCommit": m, "headSha": m, "baseSha": rec["mainSha"], "verified": True}
 
 
 def cmd_call(args):
     """The integrate call's `integration`, whole: the lead passes it verbatim and types no sha (p47-11)."""
     rec = _read_prepared(args.repo, args.slug)
-    trouble, lead_merge = _call_trouble(rec, args.after)
+    trouble, lead_merge = _call_trouble(rec, args.after, read_mac(args.repo, args.slug))
     path, note = _load_note(args.note)
     if path.stem != args.slug:
         raise EnvError(f"--note {path} is not {args.slug}'s task note; nothing launched")
@@ -3383,6 +3559,13 @@ def main(argv=None):
     pu.add_argument("--slug", required=True)
     pu.add_argument("--head", required=True, type=_sha)
 
+    mc = sub.add_parser("mac", help="write the Mac verdict on the lead's Integration verify of one lead merge (p54-15)")
+    mc.add_argument("--repo", required=True)
+    mc.add_argument("--slug", required=True)
+    mc.add_argument("--head", required=True, type=_sha, help="the lead merge M the verdict is on")
+    mc.add_argument("--state", required=True, choices=list(MAC_STATES))
+    mc.add_argument("--why", default="", help="one line: the rc, push-refused, base-moved, noslot, …")
+
     ud = sub.add_parser("undo", help="drop the lead's unpushed merge commit")
     ud.add_argument("--repo", required=True)
     ud.add_argument("--slug", required=True)
@@ -3446,7 +3629,7 @@ def main(argv=None):
             return cmd_ci_headroom(args)
         if args.cmd == "shards":
             return cmd_shards(args)
-        handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs, "call": cmd_call,
+        handler = {"prepare": cmd_prepare, "mac": cmd_mac, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs, "call": cmd_call,
                    "plan": cmd_plan, "set-aside": cmd_set_aside, "revert": cmd_revert}[args.cmd]
         emit(handler(args))
         return 0
