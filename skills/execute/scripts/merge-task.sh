@@ -978,7 +978,7 @@ done
 # a directory that cannot take it only leaves prepare's holder check blind to this run.
 if [ -n "$MAC_FILE" ]; then
   MAC_PID="${MAC_FILE%.mac.json}.merge-task.pid"
-  printf '%s\n' "$$" > "$MAC_PID" 2>/dev/null || true
+  { printf '%s\n' "$$" > "$MAC_PID"; } 2>/dev/null || true
 fi
 
 ORIGIN_URL=$(git -C "$REPO_PATH" remote get-url origin 2>/dev/null) || finish 2 "ERROR: no 'origin' remote in $REPO_PATH"
