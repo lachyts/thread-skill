@@ -1429,10 +1429,10 @@ const old465j = (p) => P46_5_OUTER_J.reduce((x, [nw, od]) => x.split(nw).join(od
 const P46_5_PINS = {
   integrator: '0ce62655058b512c12dd4fc1a2f042c9c2a13822147638eda47b92611ec7d8d6', // agentPrompts' 2 fixtures × baseline/none × slot/none: E8 and E14
   integrationReview: '0ba16f28ab3ed626980ecd536cae754fe171b8f9785e56c9cc315a09483c4269', // agentPrompts' 2 fixtures: E14
-  r2: 'd775d7a448ac09448a93f7c0b751d065e1a25b70c753866d3502620142497cb7', // the unseeded round-2 reviser
-  r3: '4ac37e023e64617396683babd4e988647c9bc5123af0a86e4fd9adddcc9b80cc', // the unseeded round-3 reviser with the plan
-  calls: '5afc1079e464dff562a37f60b9704ee61aa00160ef2be8deb949edd92fe97f90', // three whole task-mode calls, unslotted
-  slotted: 'ae0dd275489a268e63fd5f5764923060ee0307caebe77ee013fab3c0dbe90127', // the same calls as run, slotted
+  r2: 'd6bb7c759756d63bf0f5f3ab1319bff1d280126c3ffaf4f2a1b35264e8aa32eb', // the unseeded round-2 reviser
+  r3: '6cefcf0e1d978c1b39d557f208bbeddad87ac18c2bed16ee6c0fc165cb643fb4', // the unseeded round-3 reviser with the plan
+  calls: '537d083210881e77565d0a53a56fbe340f54d2aa8f178975cf45a436e5a95612', // three whole task-mode calls, unslotted
+  slotted: '52445bfcdb7a34fa8a1582a88222acbfd08cb25cd808569a221fa4e4fa513969', // the same calls as run, slotted
 }
 {
   const E = loadEngine(['ralphLoop', 'fullSuiteLoop', 'oneShotVerify', 'verifyBlock', 'baselineManifest', 'touchedOf', 'touchedTests',
@@ -2499,7 +2499,8 @@ const P31_2_PINS = {
   }
 
   // T3: the Worktree safety bullet restores a stray as a routine step and keeps one STOP, for a hand edit the agent did not
-  // make; ROUTINE_STEPS re-runs a cut-off read blindly, a cut-off write only after a read, and a cut-off test run once.
+  // make; ROUTINE_STEPS re-runs a cut-off read blindly, a cut-off write only after a read, and a cut-off test run once
+  // (in the background, waited on, when it already had the foreground cap).
   const bulletOf = (preflights) => preflights.split('\n').find((l) => l.startsWith('- Worktree safety:'))
   const preflightFails = (b) => {
     const out = []
@@ -2537,6 +2538,7 @@ const P31_2_PINS = {
       'Run a read or a fetch again when your tool cut it off before it printed its own result', 'neither changes the branch, the PR or the task note',
       'may already have taken effect', 'Check with a read first', 'run it again only when that read shows it did not take effect',
       'A test run cut off that way is no run', 'Run it again once, with a longer timeout', 'the one run your test instructions count',
+      'when it already had 600000 ms, in the background with a long timeout', 'waited on inside your turn until it prints its result',
       'If that run is cut off too, take it as a red that names no failing test', 'a failure that names a timeout or a hang included',
       'follows the Verify slot text in this prompt instead',
     ]) if (!s.includes(x)) out.push(x)
@@ -2551,6 +2553,7 @@ const P31_2_PINS = {
     ['Routine steps (take them on your own):\n- Run a command again that died before it gave a verdict (a timeout, a dropped connection): it changed nothing.\n- A command that did give a verdict, a test run among them, is not run again.', "round 2's text"],
     [R.replace(/- Run a read or a fetch again[^\n]*/, "- Run a command again when your tool cut it off before it printed its own result (the tool call's timeout, a dropped connection, a transient tool or `gh` error): a run that printed nothing decided nothing, so running it again is safe."), "round 3's first bullet"],
     [R.replace(writeLine + '\n', ''), 'the write bullet dropped'],
+    [R.replace(', or, when it already had 600000 ms, in the background with a long timeout (up to 7200000 ms), waited on inside your turn until it prints its result (the harness ends a background run when you return)', ''), 'the background way out dropped'],
     [R.replace(': the run that prints its result is the one run your test instructions count, so this rerun keeps every rule on how many times you run tests', ''), 'the one-run clause dropped'],
     [R.replace(' If that run is cut off too, take it as a red that names no failing test.', ''), 'the second-cut-off bound dropped'],
     [R.replace(', a failure that names a timeout or a hang included', ''), 'the timeout-red clause dropped'],

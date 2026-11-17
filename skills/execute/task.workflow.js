@@ -808,13 +808,16 @@ const TASK_SCOPE = `Scope: this change is scoped to its task. Make the change th
 // timeouts ... when they are not real blockers, work through them ... (wait and retry ...)". G-approval: "be specific
 // about the actions you want double-checked": a cut-off read is re-run blindly, a cut-off write only after a read shows
 // it did not land (no second diagnosis, PR or push), and a cut-off test run is no run, so a rerun keeps every "at most
-// once", "once" and EXACTLY ONCE (a second cut-off is a red that names no test, as the Flake check reads one). "A write
+// once", "once" and EXACTLY ONCE (a second cut-off is a red that names no test, as the Flake check reads one). A run
+// that already had the foreground cap (600000 ms) reruns in the background, waited on inside the turn (p31-3: the
+// harness ends a background run when the agent returns), so a healthy run of over ten minutes is no new stop (G-stop:
+// "remove or narrow the stopping conditions that you don't need"). "A write
 // your steps call for" grants no write: a judge has none, the planner's is its Blocker diagnosis, the investigator's
 // its Findings. A slotted verifier keeps SLOT_TEXT's own wait rule.
 const ROUTINE_STEPS = `Routine steps (take them on your own: none of them is a gated input or a question for a person):
 - Run a read or a fetch again when your tool cut it off before it printed its own result (the tool call's timeout, a dropped connection, a transient tool or \`gh\` error): neither changes the branch, the PR or the task note, so running it again is safe.
 - A write your steps call for (a commit, a push, a \`gh pr\` command that writes, a write to the task note) that was cut off that way may already have taken effect. Check with a read first (the branch's log, \`gh pr view\`, the task note itself), and run it again only when that read shows it did not take effect.
-- A test run cut off that way is no run. Run it again once, with a longer timeout (up to 600000 ms): the run that prints its result is the one run your test instructions count, so this rerun keeps every rule on how many times you run tests. If that run is cut off too, take it as a red that names no failing test.
+- A test run cut off that way is no run. Run it again once, with a longer timeout (up to 600000 ms), or, when it already had 600000 ms, in the background with a long timeout (up to 7200000 ms), waited on inside your turn until it prints its result (the harness ends a background run when you return): the run that prints its result is the one run your test instructions count, so this rerun keeps every rule on how many times you run tests. If that run is cut off too, take it as a red that names no failing test.
 - A test run that printed its result gave a verdict, a failure that names a timeout or a hang included: run it again only as your test instructions allow.
 - A verifier run through the verify slot follows the Verify slot text in this prompt instead: its wait has its own rule.`
 
