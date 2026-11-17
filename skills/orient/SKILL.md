@@ -206,7 +206,7 @@ and Drift and the slots for each swept project.
 - **In flight** (the reshuffle's reach tiers use it too): as defined once in
   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § In flight, which also holds the
   phase/task filename pattern and the status sets this sweep reads. Report it as such; never route
-  it again (§ 6) and never reshuffle it.
+  it again (§ 6) and never reshuffle it: it is already under way, so a second route would start it twice.
 - **Open forks** (the one definition; §§ 3, 5, 6 and 7 use it): each fork a task's latest
   orient end line names (`fork for Lachy: <fork>`) stays open until an
   `orient ruling: <fork> → <ruling>` line in its `## Notes`, timed after that end line, rules on
@@ -490,7 +490,8 @@ Under Autonomous or Mixed, run `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` 
 serial-shaped members of the clusters § 6 named, less Mixed's handed item. Each member goes in
 exactly one call, under the first project in its `projects:` that this orient swept, so no call
 spans two projects: schedule's `projects:` filter is strict, and it writes one serial rollout note
-per chain (schedule § Serial path). Never a bare project run. Schedule's serial path decides chains
+per chain (schedule § Serial path). Never a bare project run: it would also sweep up the parallel-shaped and
+session-lane phases (§ 6). Schedule's serial path decides chains
 and surfaces (ADR 0040). The steering answer authorises every call, and § 9 follows each
 note written. A project with nothing left gets no call, and orient says so. Schedule's Pre-flight (its serial
 path's S3.5, schedule § Serial path) may ask its decision round here too (decisions, never a confirm) and leave
@@ -608,24 +609,33 @@ given). It resolves, asks, reads and writes nothing.
   (grill-me): § 3 surfaces it, § 5's grill puts it to him, and § 6 and § 7 hold the task back
   until he rules. Nothing spawns a task for it: his ruling, written into the note as an
   `orient ruling:` line, is what decides it.
-- **Don't route in-flight work again** (§ 2). Don't stamp or write anything —
+- **Don't route in-flight work again** (§ 2): it is already under way. Don't stamp or write anything —
   the slot write included — in Look only or dry runs.
-- **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
+- **Don't reshuffle in-flight work.** Its scope, phase and body are frozen, since its rollout or session works from
+  them; only new members may
   join its phase (`reshuffle.md` R1).
 - **Don't write before the reshuffle's gate**, drift fixes, the unparseable-slot mend, the learned
   `repos:` entry (§ 4) and the
-  Priorities card with the Notes that correct it (§ 3.5) aside.
+  Priorities card with the Notes that correct it (§ 3.5) aside. The gate is where Lachy sees the reshuffle before
+  anything lands.
 - **Don't recommend more than one focus item**, and don't pad the audit —
-  headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
+  headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4): every extra item spends
+  his attention on a call he did not ask for.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
   logic; parallel- and serial-shaped work go to schedule (the execution-fit test
   decides, hard); execute runs only through the execute handoff.
-- **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
+- **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`):
+  the execution-fit test decides the shape, hard, and a bare run sweeps up every shape at once (§ 6).
 - **Never a second unfinished parallel rollout per repo and project, and never another rollout's
   lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
-  started); this project's running one is joined (§ 6); anything else waits (§ 6).
+  started); this project's running one is joined (§ 6); anything else waits (§ 6). Two would share one clone's
+  worktrees, canary windows and default branch (ADR 0064), and another rollout's lifecycle is its own lead's.
 - **Don't use orient for a single live thread** — that's `next`.
 - **Under `--backlog`, don't put a question before the start, or start a serial note**: its questions come last, a
   serial note is listed on the Chorus Stage at B8, never started through `create_thread`, and it never runs
   `/thread:repair` (`skills/orient/backlog.md` § B8, § B9).
+- **Steps that need no ask.** The reads and read-only commands this skill runs (`resolve-target.py` without `--learn`, `next-action.py read`, the reconcile dry run, `thread-placement.py
+  audit`, a plain `declared-check.py run`, `git status` and `git log`; `backlog.md` and `reshuffle.md` included), and a re-run of one
+  that died on a network error, are taken on your own: none of them writes anything. Only the *yours* questions this
+  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

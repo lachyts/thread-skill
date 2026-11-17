@@ -1050,9 +1050,9 @@ open keeps the task open.
 ## Don'ts
 
 - Don't compute, round or restate a number the script did not print, and don't propose a Tuning score.py did not
-  emit.
+  emit: score.py holds the one copy of every rule, so a number made by hand is one nothing checks.
 - Don't run tune.py again once it has written this Reflection's line, or before Lachy has answered (or ended the
-  Reflection). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
+  Reflection): the run that wrote its line is the Reflection's one run (step 7). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
   `--record-only` (step 7), and never ends the Reflection without a line.
 - By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
   through `tune.py --auto` (ADR 0037 d5), never a rule.
@@ -1064,4 +1064,7 @@ open keeps the task open.
 - Never overwrite or edit a done task: reflect.py creates a note by exclusive create and refuses a taken path.
 - Never write a close line from the weekly reading: `--close` is close-score.py's alone (ADR 0037 d4).
 - Never decide a rule item or a held trade during a run (the weekly reading never `--pick`s), and never schedule
-  or reshuffle the decision task.
+  or reshuffle the decision task: they are Lachy's, decided with him at the Reflection Routine (ADR 0037 d5).
+- **Steps that need no ask.** The reads and read-only commands this skill runs (`score.py` and `serial-score.py`, which read only, and `land.sh --origin-slug`), and a re-run of one
+  that died on a network error, are taken on your own: none of them writes a setting or a note. Only the *yours* questions this
+  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

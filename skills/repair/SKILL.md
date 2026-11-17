@@ -239,9 +239,9 @@ only `merge-settings.py free` moves it.
 |---|---|---|
 | **RACE re-verify in flight** | status's in-flight RACE (status § 3): a `## Race log` line names it, it still reads `integrating` with an `owner:` whose session is not known to have ended, no `paused:` stamp stands, and its verdict file is absent or reads `0` | nothing: execute's RACE procedure owns it (green → `mark-done`, red → its revert, the RACE revert); never escalate it or ask Lachy mid-re-verify. Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE**. So is one whose `## Race log` carries a `git-env halt` line naming it, or whose owner session shows a git-env halt (§ 3e hands it to § 3c) |
 | **RACE revert in flight** | status's revert in flight (status § 3): a `revert started:` line names it, no `revert did not land:` line does, and it still reads `integrating` | nothing: execute's RACE revert owns it (its revert PR merges through merge-task, then its landing tail sets the task aside); never escalate it, and never put it to Lachy mid-revert. Once it lands it is **RACE** (reverted); once a `revert did not land:` line names it, **RACE** (main red) |
-| **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided § 3a's `resume` does not run, and § 4's hand-off still runs for an undecided RACE (its `resume` holds the RACE back and `next` holds only the lane), never for an undecided UNVERIFIED. A RACE whose revert did not land (status's Main red) holds the whole rollout, the hand-off included: § 3c first |
+| **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task (main's state is Lachy's call); while it is undecided § 3a's `resume` does not run, and § 4's hand-off still runs for an undecided RACE (its `resume` holds the RACE back and `next` holds only the lane), never for an undecided UNVERIFIED. A RACE whose revert did not land (status's Main red) holds the whole rollout, the hand-off included: § 3c first |
 | **PR-less merge** | status's "possible PR-less merge" flag | escalate with evidence (§ 3c) |
-| **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
+| **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it (where the work landed is Lachy's call), and `resume` leaves it unchanged (it checks the base) |
 | **merged, never marked** | not landed (neither done nor a carried fix); its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) lands it (done, or a carried fix, ADR 0078); never hand it back or defer it |
 | **merge hold** | merge-task exit 7: review required on the integrating PR | "approve PR #N": Lachy's; never re-integrated, never set aside |
 | **lane held** | a `laneLog` entry names it (status's Lane hold flag): a cause that reaches every merge holds the lane on it (execute § 4.5 *Lane hold*, ADR 0048) | § 3g: the evidence, then Lachy's ack; never handed back, re-integrated or set aside by repair |
@@ -292,7 +292,8 @@ hand-back because a re-read reads differently; the one exception is § 3b's race
 ladder's source. The task's next call starts on the top rung, and reconcile overwrites the stamp with the rung
 it reaches. How a block on the top rung is triaged stays open (ADR 0029 Consequences).
 
-**A refused ladder** (status's Ladder refused flag). Repair never edits `~/.config/thread/ladder.toml`; under
+**A refused ladder** (status's Ladder refused flag). Repair never edits `~/.config/thread/ladder.toml`, the operator's one place for models and
+efforts (ADR 0029), so its fix is his; under
 it, § 3's vault work, § 4's hand-back routes (the `hand-back` re-entry verb and its relabel and raise writes, none of
 which start an agent) and § 5's defers (on Lachy's choice) still run. Repair stops at § 4's **Hand-off**: no
 execute loop and no § 6. Name the file and the line its error gives, and say the queue resumes at the next
@@ -1017,7 +1018,8 @@ record, and its Completion log is the last Leg's.
   the stamp or the flag, never hands back, never runs `resume` or the loop under either; reinstate, for a
   stamped pause only, is `/thread:execute [[<rollout>]]`.
 - **Don't act on a live queue's running or integrating note.** No `resume`, no loop, no write to it, even
-  when an empty `/workflows` was seen from a session other than the owner's.
+  when an empty `/workflows` was seen from a session other than the owner's: the live call's reconcile would
+  overwrite it (§ 1).
 - **Don't re-implement Integration, merge or convergence.** Set-aside → `hand-back` at its stage; merged,
   never marked → `resume`; everything else → execute's loop. If you're writing a start, integrate or merge
   loop, you've turned the conductor into an engine: stop.
@@ -1045,7 +1047,7 @@ record, and its Completion log is the last Leg's.
 - **Don't change a merge or CI setting except through `merge-settings.py`;** `restore` and `dismiss` only on
   Lachy's word (§ 3i), and never a `## Merge settings` row by hand.
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
-  for a RACE.
+  for a RACE: what becomes of each is Lachy's call (§ 3c).
 - **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided, but through an undecided RACE's
   hand-off.** Not in § 3a, not through § 4's hand-off for an undecided UNVERIFIED (an undecided RACE's hand-off
   runs once § 3c has shown it: its `resume` holds the RACE back, exit 3, and `next` holds only the lane), and never
@@ -1065,7 +1067,8 @@ record, and its Completion log is the last Leg's.
   A hand-off would re-run the completion ceremony on it.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
   finish its close-out instead (§ 1).
-- **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it. On a serial
+- **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it, since a
+  dependant left in the queue would wait on a task that no longer runs. On a serial
   chain the closure is `leg.py status`'s `dependants` (§ 7 (b)).
 - **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted` (its `--listed` form on the
   Chorus Stage), `leg.py clear-halt` (his word only), `leg.py copies` (on a `chain copy missing` blocker), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
@@ -1078,3 +1081,6 @@ record, and its Completion log is the last Leg's.
   asks the user decisions no agent can make, so an unattended loop would either hang on the question or
   steamroll it. Unattended driving belongs to execute (§8: the Stop-hook driver + heartbeat cron) and status
   (read-only sweeps); repair stays a hands-on verb.
+- **Steps that need no ask.** The reads and read-only commands this skill runs (the `/thread:status` scan, `leg.py status`, `gh pr view` and `list_sessions`), and a re-run of one
+  that died on a network error, are taken on your own: none of them writes anything. Only the *yours* questions this
+  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

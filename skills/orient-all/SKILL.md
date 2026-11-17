@@ -286,7 +286,7 @@ execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`f
    start order (execute and Leg items, then repair, then orient last; on the Chorus Stage a Leg item is listed, never
    started: step 4), and `left[]`: every live rollout that gets no
    item, with its action and its holds (a big project's one not ticked is held `own session`, with the item it would
-   get). Start exactly `items[]`, never another.
+   get). Start exactly `items[]`, never another: `sessions` has applied the allow-list to them.
 2. **The allow-list.** `sessions` applies it; the table is here for the reader, and its numbers are status § 4's
    **Recommended action** rules:
 
@@ -451,8 +451,9 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 - Reshape a project, or ask, schedule or start anything of a big project's (ADR 0061) unless it was ticked on the pick
   list: Orient-graded work goes to its own orient session, once ticked.
 - Start, relay or move a live rollout other than through `sessions`' items: never on status actions 1–5, 9, 10 or 12,
-  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute item for a rollout
-  a Session on the Stage leads by the roster.
+  nor on a plain `paused:` (§ 7 step 2: this pass cannot check those states, and a plain `paused:` is Lachy's). Never start a second lead: no `create_thread` for an execute item for a rollout
+  a Session on the Stage leads by the roster. Two leads would each launch and merge one rollout's tasks, and the
+  lead is its only merger (ADR 0030).
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
   its state.
 - Let any Session but one named exactly the orient item's `title` hold a child orient.
@@ -464,3 +465,7 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 - Ask past the budget, sign-offs and the pick list aside. § 6 step 2's sign-in list is raised whatever the budget too:
   a sign-in is his hands, not a decision (ADR 0074 d2).
 - Call the question tool from a fork or an agent.
+- **Steps that need no ask.** The reads and read-only commands this skill runs (`estate-scan.py`, `estate-dispatch.py slices`, the read-only grading and status agents, `list_sessions`
+  and the sign-in pass's read-only checks), and a re-run of one
+  that died on a network error, are taken on your own: none of them writes a note. Only the *yours* questions this
+  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
