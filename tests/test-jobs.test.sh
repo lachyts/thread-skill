@@ -174,7 +174,8 @@ ok "$(ls skills/execute/tests/*.test.sh tests/*.test.sh | grep -c '[[:space:]]')
 ci=$(cat .github/workflows/test.yml)
 has "$ci" 'THREAD_TEST_JOBS: "4"' "CI pins THREAD_TEST_JOBS to 4"
 has "$ci" 'name: make test (ubuntu-latest)' "CI keeps its job name (the required-check context)"
-has "$ci" 'runs-on: ubuntu-latest' "CI's PR check runs on ubuntu alone (ADR 0084 d3)"
+has "$ci" 'runs-on: ubuntu-latest' "CI's PR check runs on ubuntu"
+ok "$(grep -c 'macos-' .github/workflows/test.yml)" 0 "CI's PR check runs on ubuntu alone: test.yml names no macos- runner (ADR 0084 d3)"
 # The Slow tier (p54-1, ADR 0084 d3): GitHub's PR check leaves it out, run.sh unsets the flag so no suite inherits it,
 # and master's full suite never sets it. tests/fast-tier.test.sh G1-G6 pins what the flag does.
 has "$ci" 'THREAD_SKIP_SLOW: "1"' "CI's PR check sets THREAD_SKIP_SLOW=1"

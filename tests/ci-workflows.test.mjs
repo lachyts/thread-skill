@@ -114,8 +114,7 @@ test('W1: test.yml\'s job `test` is the one required check, a roll-up of the sha
   const job = wf.jobs.test
   assert.ok(job, 'job id test')
   assert.equal(job.name, REQUIRED[0], 'a literal name, so the context is byte-identical to the ruleset\'s')
-  assert.equal(job.strategy, undefined, 'no matrix')
-  assert.deepEqual(expand(job.name), REQUIRED)
+  assert.equal(job.strategy, undefined, 'no matrix, so the literal name is the one context it reports')
   assert.deepEqual([job.needs ?? []].flat(), ['shard'])
   assert.equal(String(job.if ?? '').replace(/\$\{\{|\}\}|\s/g, ''), 'always()', 'it runs whatever the shards concluded, and nothing else can skip it')
   assert.equal(job['runs-on'], 'ubuntu-latest')
