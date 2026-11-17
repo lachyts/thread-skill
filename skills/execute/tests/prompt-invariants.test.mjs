@@ -55,6 +55,11 @@
 //                               carries TEST_RULES, the test delta line and TEST_DELTA_REVIEW right after its depth
 //                               paragraph; no other prompt carries any of them; both static texts hold their phrases, with
 //                               controls; the whole-call pins swap the fragments out (P31_2), so no older pin moved.
+//   - Fable 5.2 (p46-5)       → TASK_SCOPE, ROUTINE_STEPS and the PR steps in the eight task-call builders (T1), no old
+//                               wording over the render matrix (T2), the Worktree safety bullet's one STOP and
+//                               ROUTINE_STEPS' clauses (T3), each with controls; the whole-call pins swap the fragments
+//                               back (P46_5_INNER) and the rewrites inside older chains last (P46_5_OUTER), so no older
+//                               pin moved.
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -1396,6 +1401,39 @@ const waitFails = (t) => {
 // on the top rung: proj-fix-p's plan judge climbs it there). They stay in p31Pairs for any other render, and the
 // p31-1 block pins the one-shot against PRE_P31.oneShot; the pins block checks that every other pair renders.
 const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot baseline']
+// p46-5 (the Fable 5.2 guidance, ADR 0079 Consequences): rules rewritten with their scope and reason, and the new
+// routine-step fragments. P46_5_OUTER holds the [new, old] rewrites that sit inside a text an older chain renders from
+// the current engine: the Worktree safety bullet (E6, inside P31_2[0]'s BUG_PREFLIGHTS), touchedTests' full-suite clause
+// (E7, inside p31Pairs' loops and tree bullets), SLOT_TEXT's bare-verifier sentence (E8, inside slotNote, slotRule,
+// unslot and p31Pairs) and branchTreeSetup's shared-checkout rule (E14, with the fixtures' "/repo"; Integration shares
+// it). old465 applies them LAST, to the value the existing chain produced, right before each sha against a pin recorded
+// before p46-5; they are never fed forward into a chain, where swapping them first would stop P31_2[0], p31Pairs and
+// unslot from matching. old465j is the same swap on JSON-joined calls. The pairs inside one builder are P46_5_INNER
+// (below, with the whole-call pins).
+const P46_5_S = loadEngine(['GIT_ENV_SCRUB']).GIT_ENV_SCRUB
+const P46_5_OUTER = [ // [new, old]
+  [`- Worktree safety: run \`${P46_5_S} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${P46_5_S} git diff HEAD --stat\`: it lists the uncommitted changes to tracked files, staged or not, and every path it lists must be in your task's scope. A listed path outside it that is your own edit, or a file a test run, a verifier run or the env bootstrap rewrote (a regenerated fixture, a lockfile), is a stray: restore it with \`${P46_5_S} git restore --staged --worktree -- <path>\` and carry on. A new file you created that is not part of the change is not in that list: remove it by its literal path (the Removing files rule above). STOP and report instead of committing only when a listed path outside your scope is a hand edit you did not make (another session's work): committing it would carry work nobody asked for into your PR, and a restore would destroy it.`,
+    `- Worktree safety: run \`${P46_5_S} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${P46_5_S} git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.`], // E6
+  ['never the whole suite under another command, since a full run outside the verifier line skips the verify slot, and the full suite runs only at the Checkpoints or when a brief asks for it (estate ADR 0009 d1).',
+    'never the whole suite under another command.'], // E7
+  ['Run the verifier only as this wrapped line, never bare: the wrapper holds the verify slot of this machine, and a suite run outside it overloads the Mac beside the others (p23-4). Stop no run but your own (the Stopping processes rule): the lead and other sessions run their suites on this Mac too.',
+    'Never run the bare verifier, and never stop a run of another session.'], // E8
+  ['never in the project\'s shared\ncheckout at "/repo", which may be stale, dirty or on another branch.', 'never in the project\'s shared\ncheckout at "/repo".'], // E14
+]
+const old465 = (p) => P46_5_OUTER.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+const P46_5_OUTER_J = P46_5_OUTER.map((pair) => pair.map((x) => JSON.stringify(x).slice(1, -1)))
+const old465j = (p) => P46_5_OUTER_J.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// The p46-5 pins: the renders as they now are (the whole calls, slotted and not, the integrator and the Integration judge
+// over agentPrompts' fixtures, and the two unseeded revisers). Through old465 (and preP465 inside one builder) each
+// older pin holds unchanged.
+const P46_5_PINS = {
+  integrator: '0ce62655058b512c12dd4fc1a2f042c9c2a13822147638eda47b92611ec7d8d6', // agentPrompts' 2 fixtures × baseline/none × slot/none: E8 and E14
+  integrationReview: '0ba16f28ab3ed626980ecd536cae754fe171b8f9785e56c9cc315a09483c4269', // agentPrompts' 2 fixtures: E14
+  r2: 'd6bb7c759756d63bf0f5f3ab1319bff1d280126c3ffaf4f2a1b35264e8aa32eb', // the unseeded round-2 reviser
+  r3: '6cefcf0e1d978c1b39d557f208bbeddad87ac18c2bed16ee6c0fc165cb643fb4', // the unseeded round-3 reviser with the plan
+  calls: '537d083210881e77565d0a53a56fbe340f54d2aa8f178975cf45a436e5a95612', // three whole task-mode calls, unslotted
+  slotted: '52445bfcdb7a34fa8a1582a88222acbfd08cb25cd808569a221fa4e4fa513969', // the same calls as run, slotted
+}
 {
   const E = loadEngine(['ralphLoop', 'fullSuiteLoop', 'oneShotVerify', 'verifyBlock', 'baselineManifest', 'touchedOf', 'touchedTests',
     'observeTests', 'reviewTests', 'TREE_TIDY', 'integrationVerify', 'slotted', 'slotRule', 'slotNote', 'SLOT_TEXT', 'KILL_RULE', 'GIT_ENV_SCRUB',
@@ -1443,19 +1481,26 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
     const over = touched === undefined ? {} : { touched }
     const integ = []
     for (const b of [undefined, B]) for (const s of [undefined, SLOT]) integ.push(...agentPrompts(E, argsOf(b, s, over)).integratorPrompt)
-    ok(integ.length === 8 && shaAll(integ.map((p) => preHeat(preP29(p)))) === PRE_P31.integrator, `p31-1: integratorPrompt with the p29-9 block swapped out is its pre-p31-1 bytes (2 fixtures × baseline × slot; p31-4's SLOT_TEXT sentence taken out), touched ${JSON.stringify(touched)}`)
-    ok(shaAll(integ.map(preHeat)) === P29_PRE_HEAT.integrator, `p29-9: integratorPrompt with p31-4's SLOT_TEXT sentence taken out is the p29-9 pin recorded before p31-4 landed, touched ${JSON.stringify(touched)}`)
-    ok(shaAll(integ.map((p) => preWait(preCap(p)))) === P31_3_PRE_WAIT.integrator, `p31-3: integratorPrompt with SLOT_TEXT's wait sentence (and p36-10's hold sentence) swapped back is the pin recorded before p31-3, touched ${JSON.stringify(touched)}`)
-    ok(shaAll(integ.map(preCap)) === P36_10_PRE_CAP.integrator, `p36-10: integratorPrompt with the hold sentence swapped back is the pin recorded before p36-10, touched ${JSON.stringify(touched)}`)
-    ok(shaAll(integ) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot; re-pinned at p29-9's Integration with p31-4, and by p31-3 and p36-10), touched ${JSON.stringify(touched)}`)
-    ok(shaAll(agentPrompts(E, over).integrationReviewPrompt) === PRE_P31.integrationReview, `p31-1: integrationReviewPrompt is its pre-p31-1 bytes, touched ${JSON.stringify(touched)}`)
+    ok(integ.length === 8 && shaAll(integ.map((p) => old465(preHeat(preP29(p))))) === PRE_P31.integrator, `p31-1: integratorPrompt with the p29-9 block swapped out is its pre-p31-1 bytes (2 fixtures × baseline × slot; p31-4's SLOT_TEXT sentence taken out), touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map((p) => old465(preHeat(p)))) === P29_PRE_HEAT.integrator, `p29-9: integratorPrompt with p31-4's SLOT_TEXT sentence taken out is the p29-9 pin recorded before p31-4 landed, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map((p) => old465(preWait(preCap(p))))) === P31_3_PRE_WAIT.integrator, `p31-3: integratorPrompt with SLOT_TEXT's wait sentence (and p36-10's hold sentence) swapped back is the pin recorded before p31-3, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map((p) => old465(preCap(p)))) === P36_10_PRE_CAP.integrator, `p36-10: integratorPrompt with the hold sentence swapped back is the pin recorded before p36-10, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map(old465)) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot; re-pinned at p29-9's Integration with p31-4, and by p31-3 and p36-10), touched ${JSON.stringify(touched)}`)
+    const review = agentPrompts(E, over).integrationReviewPrompt
+    ok(shaAll(review.map(old465)) === PRE_P31.integrationReview, `p31-1: integrationReviewPrompt is its pre-p31-1 bytes, touched ${JSON.stringify(touched)}`)
+    // p46-5: SLOT_TEXT's sentence (E8) and branchTreeSetup's (E14) reach Integration's two prompts; through old465 (above)
+    // every older pin holds, and the renders as they now are hold their own.
+    ok(integ.some((p) => p.includes(P46_5_OUTER[2][0])) && integ.every((p) => p.includes(P46_5_OUTER[3][0])) && review.every((p) => p.includes(P46_5_OUTER[3][0])),
+      `p46-5: E8 renders in the slotted integrator and E14 in every integrator and Integration judge, so their swaps are no no-op, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ) === P46_5_PINS.integrator, `p46-5: integratorPrompt as it now renders (E8, E14; 2 fixtures × baseline × slot), touched ${JSON.stringify(touched)}`)
+    ok(shaAll(review) === P46_5_PINS.integrationReview, `p46-5: integrationReviewPrompt as it now renders (E14), touched ${JSON.stringify(touched)}`)
   }
   const loops = []
   for (const n of [2, 3]) for (const b of [undefined, B]) for (const s of [undefined, SLOT, { ...SLOT, priority: true }]) loops.push(E.fullSuiteLoop(V, n, b, s))
-  ok(shaAll(loops.map(preHeat)) === PRE_P31.ralph, "p31-1: fullSuiteLoop is the pre-p31-1 ralphLoop, byte for byte (12 renders; p31-4's SLOT_TEXT sentence taken out)")
+  ok(shaAll(loops.map((l) => old465(preHeat(l)))) === PRE_P31.ralph, "p31-1: fullSuiteLoop is the pre-p31-1 ralphLoop, byte for byte (12 renders; p31-4's SLOT_TEXT sentence taken out)")
   const shots = []
   for (const b of [undefined, B]) for (const s of [undefined, SLOT]) shots.push(preOneShot(V, b, s))
-  ok(shaAll(shots.map(preHeat)) === PRE_P31.oneShot, "p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte (p31-4's SLOT_TEXT sentence taken out)")
+  ok(shaAll(shots.map((x) => old465(preHeat(x)))) === PRE_P31.oneShot, "p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte (p31-4's SLOT_TEXT sentence taken out)")
   ok(E.SLOT_TEXT.endsWith(SLOT_HEAT) && times(E.SLOT_TEXT, SLOT_HEAT) === 1, "p31-4: SLOT_TEXT ends with the Heat hold's sentence, once, so preHeat takes out exactly it")
   ok(SLOT_CAP[0] !== SLOT_CAP[1] && preCap(E.SLOT_TEXT).endsWith(SLOT_CAP[1]) && !preCap(E.SLOT_TEXT).includes('capacity stop'),
     "p36-10: preCap swaps SLOT_TEXT's hold sentence back to p31-4's, which names no Capacity stop")
@@ -1833,7 +1878,7 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // P1: unset (absent or null), both blocks are '' and every builder renders its unset bytes (the whole-call pins below run
 // without it). P2: set, each code-writing prompt is its unset bytes plus exactly securityCheckBlock right after
 // FLAKE_CHECK_TASK, once; every other builder is unchanged. P3: the fragment's pinned phrases, never a loop or one-shot
-// marker, with nine mutation controls (two on the secret fix's commit-then-push order, two on committing new files
+// marker, with ten mutation controls (two on the secret fix's commit-then-push order, two on committing new files
 // before the scan, which refuses an untracked one). P4: the review judge's block, after reviewTests, with four controls
 // (one on the cross-check covering changed dependencies, which the scan lists whenever an entry as written or its
 // section changes; one on the lines the engine cut). P5: the schemas (runTask). P6: dependencyLines, which shows the
@@ -1944,6 +1989,13 @@ await (async () => {
     `It reads commits only, so commit every change before it runs, new files included: \`${E.GIT_ENV_SCRUB} git -C ${shq("/re po/it's/.claude/worktrees/proj-fix-x")} add -A\`, then commit, never only \`commit -a\`, which leaves a new file untracked`,
     'Remove a new file that is not part of the change rather than commit it',
     'Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try',
+    // p46-5: each rule's reason (G-scope), and a stray restored, never committed (E6b, the Worktree safety bullet's sibling).
+    'The Flake check never applies to it: the scan reads committed history, so a re-run gives the same answer',
+    'never a value: the value is the secret, and blockerDiagnosis is written to the task note',
+    'to clear a finding: that hides it from every later scan instead of fixing it',
+    'A force-push would rewrite history the PR and Integration read (ADR 0030)',
+    'Restore a tracked file a test run, a verifier run or the env bootstrap rewrote, rather than commit it (Worktree safety, below)',
+    'A tracked file a test run, a verifier run or the env bootstrap rewrote is restored, never committed (Worktree safety, below)',
   ]
   const p3Fails = (b) => {
     const out = []
@@ -1969,6 +2021,8 @@ await (async () => {
       'with \\`${GIT_ENV_SCRUB} git -C ${wt} commit -a\\`.', 'the new files committed with commit -a only'],
     ['(tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again',
       ': commit, then run it again', 'the exit-2 clause narrowed to tracked changes'],
+    ['Remove a new file that is not part of the change rather than commit it. Restore a tracked file a test run, a verifier run or the env bootstrap rewrote, rather than commit it (Worktree safety, below).',
+      'Remove a new file that is not part of the change rather than commit it.', "E6b's stray clause dropped"],
   ]
   for (const [from, to, label] of P3_CONTROLS) {
     ok(src.includes(from), `security P3 control setup: ${label}`)
@@ -2252,6 +2306,252 @@ const P31_2_PINS = {
   }
 }
 
+// ---- The Fable 5.2 guidance (p46-5, ADR 0079 Consequences) ---------------------------------------------------------
+// Anthropic's guide for Claude Fable 5.2: a rule that says "never" is read as absolute, so a rule a role reads carries
+// its scope and its reason; the routine steps that need no approval are named; no line tells the model to think less
+// and no token budget is shown; a code-writer is told its change is scoped to its task; the review judge judges the
+// diff, never the summary. A prompt change reaches both arms (no text depends on the model or the arm).
+// T1 places the new fragments in the eight task-call builders (TASK_SCOPE, ROUTINE_STEPS and PR_STEPS_OPEN in the two
+// implementers; TASK_SCOPE, ROUTINE_STEPS and PR_STEPS_UPDATE in the reviser; ROUTINE_STEPS alone in the four tree
+// agents; ROUTINE_STEPS and REVIEW_READS_DIFF in the review judge; none in Integration's two), with arms absent and
+// every arm 'fable'. T2 rejects the old wordings over the whole render matrix. T3 holds the Worktree safety bullet's
+// one STOP and ROUTINE_STEPS' clauses. Each check has controls that must fail.
+{
+  const E = loadEngine(['TASK_SCOPE', 'ROUTINE_STEPS', 'PR_STEPS_OPEN', 'PR_STEPS_UPDATE', 'NOT_IRREVERSIBLE', 'REVIEW_READS_DIFF',
+    'BUG_PREFLIGHTS', 'KILL_RULE', 'GIT_ENV_SCRUB', 'slotRule', ...RULE_BUILDERS])
+  const S = E.GIT_ENV_SCRUB
+  const times = (hay, needle) => hay.split(needle).length - 1
+  const V = 'make test'
+  const SLOT = VERIFY_SLOT
+  const H = (c) => c.repeat(40)
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const FABLE = { 'master-review': 'fable', builder: 'fable', investigator: 'fable' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const h1 = [{ round: 1, feedback: ['fix it'] }]
+  const hist = [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }]
+  const I = {
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), prepared: { anchor: H('a'), taskBase: H('b') }, trouble: ['conflict'],
+    landed: [], reviewHistory: hist, reviewRoundsUsed: 2, rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
+  }
+  const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
+  const FRAGS = ['TASK_SCOPE', 'ROUTINE_STEPS', 'PR_STEPS_OPEN', 'PR_STEPS_UPDATE', 'REVIEW_READS_DIFF']
+  const CODER = ['TASK_SCOPE', 'ROUTINE_STEPS']
+  const WANT = {
+    implementerPrompt: [...CODER, 'PR_STEPS_OPEN'], approvedPlanImplementerPrompt: [...CODER, 'PR_STEPS_OPEN'], reviserPrompt: [...CODER, 'PR_STEPS_UPDATE'],
+    plannerPrompt: ['ROUTINE_STEPS'], planJudgePrompt: ['ROUTINE_STEPS'], planReviserPrompt: ['ROUTINE_STEPS'], readOnlyPrompt: ['ROUTINE_STEPS'],
+    reviewJudgePrompt: ['ROUTINE_STEPS', 'REVIEW_READS_DIFF'], integratorPrompt: [], integrationReviewPrompt: [],
+  }
+  const TREE = ['plannerPrompt', 'planJudgePrompt', 'planReviserPrompt', 'readOnlyPrompt']
+
+  // T1: the eight task-call builders, each named, and Integration's two, as [name, variant, prompt].
+  const t1Rows = (M, arms) => {
+    const t = arms ? { ...tk, arms } : tk
+    const a = { repoPath: '/repo', verifier: V, rolloutSlug: 'r', verifySlot: SLOT }
+    const bottom = M.rungState(t, a)
+    const top = M.rungState({ ...t, rung: 'opus-xhigh' }, a)
+    M.escalate(top, t.slug, 'implement')
+    return [
+      ['implementerPrompt', 'bottom', M.implementerPrompt(t, a, bottom, '')],
+      ['implementerPrompt', 'top', M.implementerPrompt(t, a, top, '')],
+      ['approvedPlanImplementerPrompt', 'bottom', M.approvedPlanImplementerPrompt(t, 'PLAN', a, bottom, '')],
+      ['reviserPrompt', 'r2', M.reviserPrompt(t, im, h1, 2, a, '')],
+      ['reviserPrompt', 'r3 plan', M.reviserPrompt(t, im, hist, 3, a, 'PLAN')],
+      ['reviserPrompt', 'r3', M.reviserPrompt(t, im, hist, 3, a, '')],
+      ['reviserPrompt', 'seeded', M.reviserPrompt(t, im, hist, 3, a, 'PLAN', { history: hist, roundsUsed: 2 })],
+      ['plannerPrompt', '', M.plannerPrompt(t, a, bottom, '')],
+      ['planJudgePrompt', '', M.planJudgePrompt(t, 'PLAN', a)],
+      ['planReviserPrompt', '', M.planReviserPrompt(t, 'PLAN', h1, 2, a)],
+      ['readOnlyPrompt', '', M.readOnlyPrompt({ ...t, scope: 'read-only' }, a, bottom, '')],
+      ['reviewJudgePrompt', 'r1', M.reviewJudgePrompt(t, im, a, [])],
+      ['reviewJudgePrompt', 'history', M.reviewJudgePrompt(t, im, a, hist)],
+      ['integratorPrompt', '', M.integratorPrompt({ ...t, approvedGates: [] }, a, I)],
+      ['integrationReviewPrompt', '', M.integrationReviewPrompt(t, a, I, J)],
+    ]
+  }
+  // [] when every fragment renders exactly once where it is wanted, in its place, and nowhere else; else what failed.
+  const placeFails = (rows, F) => {
+    const out = []
+    const rule = E.slotRule(V, SLOT)
+    for (const [name, k, p] of rows) {
+      const at = k ? `${name} ${k}` : name
+      for (const f of FRAGS) if (times(p, F[f]) !== (WANT[name].includes(f) ? 1 : 0)) out.push(`${at}: ${f} ${WANT[name].includes(f) ? 'once' : 'never'}`)
+      const coder = WANT[name].includes('TASK_SCOPE')
+      if (times(p, F.NOT_IRREVERSIBLE) !== (coder ? 1 : 0)) out.push(`${at}: NOT_IRREVERSIBLE ${coder ? 'once' : 'never'}`)
+      if (coder) {
+        const pr = name === 'reviserPrompt' ? F.PR_STEPS_UPDATE : F.PR_STEPS_OPEN
+        if (!p.includes(E.KILL_RULE + '\n\n' + F.TASK_SCOPE + '\n\n' + F.ROUTINE_STEPS + '\n' + pr)) out.push(`${at}: right after KILL_RULE`)
+      }
+      if (TREE.includes(name) && !p.includes(E.KILL_RULE + rule + '\n\n' + F.ROUTINE_STEPS)) out.push(`${at}: right after KILL_RULE and slotRule`)
+      if (name === 'reviewJudgePrompt') {
+        if (!p.includes('and the task brief. ' + F.REVIEW_READS_DIFF + ' Decide: ')) out.push(`${at}: REVIEW_READS_DIFF before Decide`)
+        if (!p.includes("(these become the reviser's instructions).\n\n" + F.ROUTINE_STEPS)) out.push(`${at}: ROUTINE_STEPS after Decide`)
+      }
+    }
+    return out
+  }
+  const F0 = Object.fromEntries([...FRAGS, 'NOT_IRREVERSIBLE'].map((f) => [f, E[f]]))
+  const NAMED = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'plannerPrompt', 'planJudgePrompt', 'planReviserPrompt', 'readOnlyPrompt', 'reviewJudgePrompt']
+  for (const arms of [undefined, FABLE]) {
+    const rows = t1Rows(E, arms)
+    ok(NAMED.every((n) => rows.some(([name]) => name === n)) && JSON.stringify(placeFails(rows, F0)) === '[]',
+      `p46-5 T1: the eight task-call builders render their fragments once, in place, and Integration's two none (arms ${arms ? 'fable' : 'absent'}) ${JSON.stringify(placeFails(rows, F0))}`)
+  }
+  // The fragments themselves: no licence to open a PR in the shared or reviser text, the irreversible carve-out, and no
+  // forbidden literal (NEEDS_HUMAN_RULE's out-builders, the p31-1 sweep's markers, a verifier line) or git span.
+  const FORBIDDEN = ['needsHuman', 'EXACTLY ONCE', 'ONE-SHOT', 'Max iterations', 'Keep running', 'full verifier', 'run the verifier', 'run the touched tests', V, 'verify-slot.py', '${']
+  const fragFails = (F) => {
+    const out = []
+    if (/\bopen/i.test(F.ROUTINE_STEPS)) out.push('ROUTINE_STEPS: no open')
+    if (/\bopen/i.test(F.PR_STEPS_UPDATE + F.NOT_IRREVERSIBLE)) out.push('PR_STEPS_UPDATE: no open')
+    if (!F.PR_STEPS_OPEN.endsWith(F.NOT_IRREVERSIBLE) || !F.PR_STEPS_UPDATE.endsWith(F.NOT_IRREVERSIBLE)) out.push('PR_STEPS end with NOT_IRREVERSIBLE')
+    if (!F.NOT_IRREVERSIBLE.includes("other than this task's branch and PR") || !F.NOT_IRREVERSIBLE.includes('a merge into the default branch')) out.push('NOT_IRREVERSIBLE: the carve-out and the merge')
+    for (const [name, text] of Object.entries(F)) {
+      for (const x of FORBIDDEN) if (text.includes(x)) out.push(`${name}: no ${x}`)
+      if ([...text.matchAll(/`([^`\n]*)`/g)].some((m) => /(^|[\s;&|(])git\s/.test(m[1]))) out.push(`${name}: no git span`)
+    }
+    return out
+  }
+  ok(JSON.stringify(fragFails(F0)) === '[]', `p46-5 T1: the fragments open no PR outside the implementers, carve the task's own PR out of the irreversible, and hold no forbidden literal ${JSON.stringify(fragFails(F0))}`)
+  // controls
+  const SCOPED = '${KILL_RULE}\n\n${TASK_SCOPE}\n\n${ROUTINE_STEPS}\n${PR_STEPS_UPDATE}'
+  const unscoped = src.replace(SCOPED, '${KILL_RULE}\n\n${ROUTINE_STEPS}\n${PR_STEPS_UPDATE}')
+  ok(src.includes(SCOPED) && unscoped !== src, 'p46-5 T1 control setup: the reviser interpolates TASK_SCOPE')
+  const U = loadEngine(['rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'plannerPrompt', 'planJudgePrompt',
+    'planReviserPrompt', 'readOnlyPrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt'], { source: unscoped })
+  ok(placeFails(t1Rows(U, undefined), F0).some((f) => f.startsWith('reviserPrompt')), 'p46-5 T1 control: a reviser without TASK_SCOPE fails')
+  const opened = t1Rows(E, undefined).map(([n, k, p]) => [n, k, n === 'reviserPrompt' ? p.replace(E.PR_STEPS_UPDATE, E.PR_STEPS_OPEN) : p])
+  ok(placeFails(opened, F0).some((f) => f.startsWith('reviserPrompt')), 'p46-5 T1 control: a reviser rendered with PR_STEPS_OPEN fails')
+  const uncarved = E.NOT_IRREVERSIBLE.replace(" other than this task's branch and PR", '')
+  ok(uncarved !== E.NOT_IRREVERSIBLE && fragFails({ ...F0, NOT_IRREVERSIBLE: uncarved }).length > 0, 'p46-5 T1 control: NOT_IRREVERSIBLE without its carve-out fails')
+
+  // T2: no old wording over every render of the inventory matrix: args (baseline × slot × security × gate pricer ×
+  // ladder, all with touched), task (ignoreGate × arms × scope), the states (bottom, plan- and implement-climbed, top)
+  // × prior, the revisers (round 2, round 3 with and without a plan, seeded with and without a plan after an
+  // Integration round), the review judge (with and without history, with newDependencies), a plan judge on a spend
+  // gate, a plan reviser, and Integration's two.
+  const OLD_SLOT = 'Never run the bare verifier, and never stop a run of another session.'
+  const OLD_TREE = /never in the project's shared\ncheckout at "[^"\n]*"\./
+  const absentFails = (p) => [
+    ...(/\bown it\b|\byou own\b/.test(p) ? ['you own it'] : []),
+    ...(/think less|without deliberat|answer directly|token budget|tokens? (left|remaining)/i.test(p) ? ['think less or a token budget'] : []),
+    ...(p.includes(OLD_SLOT) ? ['the old SLOT_TEXT sentence'] : []),
+    ...(p.includes('if you see unrelated files, STOP') ? ['the old Worktree safety STOP'] : []),
+    ...(OLD_TREE.test(p) ? ["branchTreeSetup's shared-checkout rule with no reason"] : []),
+  ]
+  const SEC = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
+  const PRICER = '/plugins/thread/x/skills/_shared/scripts/gated_inputs.py'
+  const LADDER3 = { source: 'test', rungs: [
+    { name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh', plan: 'fable' },
+    { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh', plan: 'fable' },
+    { name: 'fable-high', model: 'fable', effort: 'high', judge: 'high', review: 'high' },
+  ] }
+  const SPEND = 'Planned on: abc\n### Gated inputs\n- spend: fal.ai renders — cap 5 USD\n  - 5 renders at 1 USD'
+  const imD = { ...im, newDependencies: ['npm left-pad 1.3.0 (package.json)'] }
+  // Every render of one args object, for each task shape.
+  const matrix = (M, a) => {
+    const out = []
+    const L = a.ladder || { rungs: [{ name: 'opus-high' }, { name: 'opus-xhigh' }] }
+    const topName = L.rungs[L.rungs.length - 1].name
+    for (const ignoreGate of [false, true]) for (const arms of [undefined, FABLE]) for (const scope of ['cross-cutting', 'single-file']) {
+      const t = { ...tk, ignoreGate, scope, ...(arms ? { arms } : {}) }
+      const at = (stages, rung) => {
+        const st = M.rungState(rung ? { ...t, rung } : t, a)
+        for (const s of stages) M.escalate(st, t.slug, s)
+        return st
+      }
+      const states = [at([]), at(['plan']), at(['implement']), at(['plan', 'implement'], topName)]
+      for (const st of states) for (const prior of ['', 'PRIOR']) {
+        out.push(M.implementerPrompt(t, a, st, prior), M.approvedPlanImplementerPrompt(t, SPEND, a, st, prior),
+          M.readOnlyPrompt({ ...t, scope: 'read-only' }, a, st, prior), M.plannerPrompt(t, a, st, prior))
+      }
+      out.push(M.reviserPrompt(t, im, h1, 2, a, ''), M.reviserPrompt(t, im, hist, 3, a, SPEND), M.reviserPrompt(t, im, hist, 3, a, ''),
+        M.reviserPrompt(t, im, hist, 3, a, SPEND, { history: hist, roundsUsed: 2 }), M.reviserPrompt(t, im, hist, 3, a, '', { history: hist, roundsUsed: 2 }),
+        M.reviewJudgePrompt(t, imD, a, []), M.reviewJudgePrompt(t, imD, a, hist), M.planJudgePrompt(t, SPEND, a), M.planReviserPrompt(t, SPEND, h1, 2, a),
+        M.integratorPrompt({ ...t, approvedGates: [] }, a, I), M.integrationReviewPrompt(t, a, I, J))
+    }
+    return out
+  }
+  const argsList = []
+  for (const b of [undefined, ['t — env']]) for (const s of [undefined, SLOT]) for (const sec of [undefined, SEC]) for (const pr of [undefined, PRICER]) for (const ld of [undefined, LADDER3]) {
+    argsList.push({ repoPath: '/repo', verifier: V, rolloutSlug: 'r', touched: 'tests/test_{module}.py', ...(b ? { knownBaselineFailures: b } : {}),
+      ...(s ? { verifySlot: s } : {}), ...(sec ? { securityCheck: sec } : {}), ...(pr ? { gatePricer: pr } : {}), ...(ld ? { ladder: ld } : {}) })
+  }
+  const T2_NAMES = ['rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'plannerPrompt', 'planJudgePrompt',
+    'planReviserPrompt', 'readOnlyPrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt']
+  // The distinct failures over the matrix, and how many renders it read.
+  const sweep = (M, list) => {
+    const seen = new Set()
+    let n = 0
+    for (const a of list) for (const p of matrix(M, a)) { n += 1; for (const f of absentFails(p)) seen.add(f) }
+    return { fails: [...seen], n }
+  }
+  const all = sweep(E, argsList)
+  ok(all.n > 5000 && JSON.stringify(all.fails) === '[]', `p46-5 T2: no "own it", think-less or token-budget line, old SLOT_TEXT sentence, old Worktree safety STOP or reasonless shared-checkout rule in ${all.n} renders ${JSON.stringify(all.fails)}`)
+  // controls: each old wording put back fails (over the args that render it).
+  const OWN_NEW = 'did not land it, and you carry it on from here.'
+  const SLOT_NEW = 'Run the verifier only as this wrapped line, never bare: the wrapper holds the verify slot of this machine, and a suite run outside it overloads the Mac beside the others (p23-4). Stop no run but your own (the Stopping processes rule): the lead and other sessions run their suites on this Mac too.'
+  const TREE_NEW = 'checkout at "${a.repoPath}", which may be stale, dirty or on another branch.`'
+  for (const [from, to, label] of [[OWN_NEW, 'did not land it, and you own it from here.', 'one escalation variant reverted'], [SLOT_NEW, OLD_SLOT, 'SLOT_TEXT reverted'],
+    [TREE_NEW, 'checkout at "${a.repoPath}".`', 'branchTreeSetup reverted']]) {
+    ok(times(src, from) === 1, `p46-5 T2 control setup: ${label}`)
+    const M = loadEngine(T2_NAMES, { source: src.replace(from, to) })
+    ok(sweep(M, argsList.filter((a) => a.verifySlot && !a.ladder)).fails.length > 0, `p46-5 T2 control: ${label} fails`)
+  }
+
+  // T3: the Worktree safety bullet restores a stray as a routine step and keeps one STOP, for a hand edit the agent did not
+  // make; ROUTINE_STEPS re-runs a cut-off read blindly, a cut-off write only after a read, and a cut-off test run once
+  // (in the background, waited on, when it already had the foreground cap). The controls mutate the shipped text only.
+  const bulletOf = (preflights) => preflights.split('\n').find((l) => l.startsWith('- Worktree safety:'))
+  const preflightFails = (b) => {
+    const out = []
+    const diff = `\`${S} git diff HEAD --stat\``
+    const restore = `\`${S} git restore --staged --worktree -- <path>\``
+    if (!b.includes(diff)) out.push('the scrubbed git diff HEAD --stat')
+    if (!b.includes('uncommitted changes to tracked files, staged or not')) out.push('staged or not')
+    for (const x of ['is your own edit', 'a test run, a verifier run or the env bootstrap rewrote']) {
+      if (!(b.includes(x) && b.includes(restore) && b.indexOf(x) < b.indexOf(restore))) out.push(`${x}, then the restore`)
+    }
+    if (!b.includes('carry on')) out.push('carry on')
+    if (!b.includes('remove it by its literal path')) out.push('a new file removed by its literal path')
+    if (!b.includes('a hand edit you did not make') || !b.includes('a restore would destroy it')) out.push('the STOP for a hand edit, with its reason')
+    if (times(b, 'STOP') !== 1) out.push('one STOP')
+    if (b.includes('if you see unrelated files, STOP')) out.push('no if you see unrelated files, STOP')
+    return out
+  }
+  const ws = bulletOf(E.BUG_PREFLIGHTS)
+  ok(typeof ws === 'string' && JSON.stringify(preflightFails(ws)) === '[]', `p46-5 T3: the Worktree safety bullet restores a stray and STOPs only for a hand edit it did not make ${JSON.stringify(preflightFails(ws || ''))}`)
+  const OLD_WS = `- Worktree safety: run \`${S} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${S} git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.`
+  for (const [b, label] of [
+    [OLD_WS, 'the pre-p46-5 bullet'],
+    [String(ws).replace('that is your own edit, or a file', 'that is a file'), 'the own-edit clause dropped'],
+    [String(ws).replace(', or a file a test run, a verifier run or the env bootstrap rewrote (a regenerated fixture, a lockfile)', ''), 'the tool-rewrite clause dropped'],
+    [String(ws).replace(`${S} git diff HEAD --stat`, `${S} git diff --stat`), 'plain git diff --stat'],
+  ]) ok(b !== ws && preflightFails(b).length > 0, `p46-5 T3 control: ${label} fails`)
+  const routineFails = (s) => {
+    const out = []
+    for (const x of [
+      'Run a read or a fetch again when your tool cut it off before it printed its own result', 'neither changes the branch, the PR or the task note',
+      'may already have taken effect', 'Check with a read first', 'run it again only when that read shows it did not take effect',
+      'A test run cut off that way is no run', 'Run it again once, with a longer timeout', 'the one run your test instructions count',
+      'when it already had 600000 ms, in the background with a long timeout', 'waited on inside your turn until it prints its result',
+      'If that run is cut off too, take it as a red that names no failing test', 'a failure that names a timeout or a hang included',
+      'follows the Verify slot text in this prompt instead',
+    ]) if (!s.includes(x)) out.push(x)
+    for (const x of FORBIDDEN) if (s.includes(x)) out.push(`no ${x}`)
+    return out
+  }
+  const R = E.ROUTINE_STEPS
+  ok(JSON.stringify(routineFails(R)) === '[]', `p46-5 T3: ROUTINE_STEPS re-runs a cut-off read, checks a cut-off write first, and counts a cut-off test run as no run ${JSON.stringify(routineFails(R))}`)
+  const writeLine = R.split('\n').find((l) => l.startsWith('- A write your steps call for'))
+  for (const [s, label] of [
+    [R.replace(writeLine + '\n', ''), 'the write bullet dropped'],
+    [R.replace(', or, when it already had 600000 ms, in the background with a long timeout (up to 7200000 ms), waited on inside your turn until it prints its result (the harness ends a background run when you return)', ''), 'the background way out dropped'],
+    [R.replace(': the run that prints its result is the one run your test instructions count, so this rerun keeps every rule on how many times you run tests', ''), 'the one-run clause dropped'],
+    [R.replace(' If that run is cut off too, take it as a red that names no failing test.', ''), 'the second-cut-off bound dropped'],
+    [R.replace(', a failure that names a timeout or a hang included', ''), 'the timeout-red clause dropped'],
+  ]) ok(s !== R && routineFails(s).length > 0, `p46-5 T3 control: ${label} fails`)
+}
+
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
 // Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
 // and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
@@ -2377,6 +2677,34 @@ const P47_13_PINS = {
   calls: '1a94f0bc1be99cf9fee64956b69a72c87a5dc76a36e53d430ae24f196ec69e54', // three whole task-mode calls, unslotted
   slotted: '1cfc799b2225fcc00b4c1fb70ff50726713980cf8c03b141f4b3d0927b1077d8', // the same calls as run, slotted
 }
+// p46-5 (the Fable 5.2 guidance, ADR 0079 Consequences) moved no pin. P46_5_INNER holds the [new, old] pairs that live
+// inside one builder, anchored on their neighbours: the routine-step fragments (the PR steps first, then TASK_SCOPE and
+// ROUTINE_STEPS, each with the blank line it brings), the review judge's REVIEW_READS_DIFF (E4) and its read rule's
+// reason (E9), the step-back's scope (E3), the review history's two reasons (E10) and the approved-plan implementer's
+// reason (E13). preP465 swaps them back first, before every push below (the innermost swap, inside preP4713), and on
+// the revisers before preP312; old465 (P46_5_OUTER, above) swaps the rewrites inside a chain's own renders last, right
+// before each older sha. No pair overlaps a P23_1, P29_9, P31_2, P47_13 or p31Pairs literal, so the KILL-removal pins
+// still meet their old bytes. E1 (escalationContext), E6b and E11 (securityCheckBlock) and E12 (gatePricingBlock)
+// render in no pinned call: the scripted agents never fail, and no call has a security check or a pricer; T2, security
+// P3 and tests/contracts/cap-promise cover them. P46_5_PINS (above) holds the renders as they now are. A deliberate
+// resume-cache break, like p31-1's and p47-13's: every task-call prompt and Integration's two (E8, E14) changed; a
+// resume re-passes its run's own `scriptPath` (ADR 0043).
+const P465I = loadEngine(['PR_STEPS_OPEN', 'PR_STEPS_UPDATE', 'TASK_SCOPE', 'ROUTINE_STEPS', 'REVIEW_READS_DIFF'])
+const P46_5_INNER = [ // [new, old]
+  ['\n' + P465I.PR_STEPS_OPEN, ''], // the implementers
+  ['\n' + P465I.PR_STEPS_UPDATE, ''], // the reviser
+  ['\n\n' + P465I.TASK_SCOPE, ''], // the code-writers
+  ['\n\n' + P465I.ROUTINE_STEPS, ''], // every task-call builder
+  ['and the task brief. ' + P465I.REVIEW_READS_DIFF + ' Decide:', 'and the task brief. Decide:'], // E4
+  ["demands it, inside the task's scope (the Scope rule above), rather than", 'demands it, rather than'], // E3
+  ["shared checkout (it may be stale, dirty or on another branch). You are read-only", 'shared checkout. You are read-only'], // E9
+  ['- Do not contradict guidance you gave in an earlier round: the reviser has applied it in commits on this branch, so a reversal undoes a committed fix.\n',
+    '- Do not contradict guidance you gave in an earlier round.\n'], // E10
+  ["but do not reject on it, since each late objection spends one of the task's limited review rounds.", 'but do not reject on it.'], // E10
+  ['Do NOT re-plan or substantially deviate: the plan judge approved this plan, and a deviation is work no judge has checked.',
+    'Do NOT re-plan or substantially deviate.'], // E13
+]
+const preP465 = (p) => P46_5_INNER.reduce((x, [nw, od]) => x.split(nw).join(od), p)
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -2393,41 +2721,49 @@ const P47_13_PINS = {
   const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
   const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
-  const r2raw = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
-  const r3raw = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
-  ok(sha(r2raw) === P31_2_PINS.r2, 'byte pin (p31-2): unseeded reviserPrompt, round 2, as rendered (the p29-9 pin below plus the test rules and the test delta)')
-  ok(sha(r3raw) === P31_2_PINS.r3, 'byte pin (p31-2): unseeded reviserPrompt, round 3 with the plan, as rendered')
+  const r2465 = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
+  const r3465 = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  ok(sha(r2465) === P46_5_PINS.r2, 'byte pin (p46-5): unseeded reviserPrompt, round 2, as rendered (the p31-2 pin below plus TASK_SCOPE, ROUTINE_STEPS, PR_STEPS_UPDATE and E6, E7)')
+  ok(sha(r3465) === P46_5_PINS.r3, 'byte pin (p46-5): unseeded reviserPrompt, round 3 with the plan, as rendered (and E3)')
+  // The p46-5 base: the revisers with P46_5_INNER swapped back, then (old465, at every sha below) P46_5_OUTER, are their
+  // pre-p46-5 bytes (the p31-2 pins).
+  const r2raw = preP465(r2465)
+  const r3raw = preP465(r3465)
+  ok(r2raw !== r2465 && r3raw !== r3465 && old465(r2raw) !== r2raw && old465(r3raw) !== r3raw, 'p46-5: both revisers render an inner and an outer pair, so the swaps are no no-op')
+  ok(r3465.includes(P46_5_INNER[5][0]), 'p46-5: the round-3 reviser renders the step-back pair (E3), so its swap is no no-op')
+  ok(sha(old465(r2raw)) === P31_2_PINS.r2, 'byte pin (p31-2): unseeded reviserPrompt, round 2, as rendered (the p29-9 pin below plus the test rules and the test delta)')
+  ok(sha(old465(r3raw)) === P31_2_PINS.r3, 'byte pin (p31-2): unseeded reviserPrompt, round 3 with the plan, as rendered')
   ok(preP312(r2raw) !== r2raw && preP312(r3raw) !== r3raw, 'p31-2: both revisers render the test rules, so the swap is no no-op')
   // The p31-2 base: the revisers with p31-2's fragments swapped out are their pre-p31-2 bytes (the p29-9 pins).
   const r2now = preP312(r2raw)
   const r3now = preP312(r3raw)
-  ok(sha(r2now) === P29_PINS.r2, 'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p29-9: the p29-9 base below plus the Flake check block)')
-  ok(sha(r3now) === P29_PINS.r3, 'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p29-9)')
+  ok(sha(old465(r2now)) === P29_PINS.r2, 'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p29-9: the p29-9 base below plus the Flake check block)')
+  ok(sha(old465(r3now)) === P29_PINS.r3, 'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p29-9)')
   ok(preP29(r2now) !== r2now && preP29(r3now) !== r3now, 'p29-9: both revisers render the Flake check block, so the swap is no no-op')
   // The p29-9 base: the revisers with the block swapped out are their pre-p29-9 bytes (the p31-1 pins).
   const r2new = preP29(r2now)
   const r3new = preP29(r3now)
-  ok(sha(r2new) === '7b6822e41c7a117c865fc0522693bbffa61312e50a2e48456ea0599da54a5910',
+  ok(sha(old465(r2new)) === '7b6822e41c7a117c865fc0522693bbffa61312e50a2e48456ea0599da54a5910',
     'byte pin (p29-9 base): the round-2 reviser with the Flake check block swapped out is its pre-p29-9 bytes (the p31-1 pin)')
-  ok(sha(r3new) === '4ff225d5259b81bfbe93f7fa61c59a5d67b2091bc34920697dc955fe6d7996d7',
+  ok(sha(old465(r3new)) === '4ff225d5259b81bfbe93f7fa61c59a5d67b2091bc34920697dc955fe6d7996d7',
     'byte pin (p29-9 base): the round-3 reviser with the Flake check block swapped out is its pre-p29-9 bytes (the p31-1 pin)')
   ok(preP31(r2new) !== r2new && preP31(r3new) !== r3new, 'p31-1: both revisers render a p31-1 fragment (the loop), so the swap is no no-op')
   // The p31-1 base: the revisers with p31-1's fragments swapped back are their pre-p31-1 bytes (the p23-1 pins), and
   // every older base below chains on top of it.
   const r2 = preP31(r2new)
   const r3 = preP31(r3new)
-  ok(sha(r2) === 'c3efcd934c7a8cb35159177c8786d920092e9ed721e1ae21c609a7413111a703',
+  ok(sha(old465(r2)) === 'c3efcd934c7a8cb35159177c8786d920092e9ed721e1ae21c609a7413111a703',
     'byte pin (p31-1 base): the round-2 reviser with the p31-1 fragments swapped back is its pre-p31-1 bytes (p23-1 pin)')
-  ok(sha(r3) === '97ff33a14d2b551893ee237975369c7e5947db49345828a7f09a6978123c413c',
+  ok(sha(old465(r3)) === '97ff33a14d2b551893ee237975369c7e5947db49345828a7f09a6978123c413c',
     'byte pin (p31-1 base): the round-3 reviser with the p31-1 fragments swapped back is its pre-p31-1 bytes (p23-1 pin)')
   ok(preP23(r2) !== r2 && preP23(r3) !== r3, 'p23-1: both revisers render a p23-1 fragment (GATED_INPUTS_CHECK), so the swap is no no-op')
-  ok(sha(preP23(r2)) === '7c82d98ade2ee614902acc1de14809c93e8a1c029fe1d2ac4a3e370e5b307f33',
+  ok(sha(old465(preP23(r2))) === '7c82d98ade2ee614902acc1de14809c93e8a1c029fe1d2ac4a3e370e5b307f33',
     'byte pin (p23-1 base): the round-2 reviser with the ADR 0038 fragments swapped back is its pre-p23-1 bytes (p18-1 pin)')
-  ok(sha(preP23(r3)) === '7cf123a54536b064d21ec820b854216ab61a1c5c19ccb7d3050bffefb5370f07',
+  ok(sha(old465(preP23(r3))) === '7cf123a54536b064d21ec820b854216ab61a1c5c19ccb7d3050bffefb5370f07',
     'byte pin (p23-1 base): the round-3 reviser with the ADR 0038 fragments swapped back is its pre-p23-1 bytes (p18-1 pin)')
-  ok(sha(preP23(r2).replace(KILL, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
+  ok(sha(old465(preP23(r2).replace(KILL, ''))) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
     'byte pin (p18-1 base): the round-2 reviser with KILL_RULE removed is its pre-p18-1 bytes')
-  ok(sha(preP23(r3).replace(KILL, '')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
+  ok(sha(old465(preP23(r3).replace(KILL, ''))) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
     'byte pin (p18-1 base): the round-3 reviser with KILL_RULE removed is its pre-p18-1 bytes')
   ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
     'byte pin: a null seeded argument renders the unseeded reviser')
@@ -2482,6 +2818,8 @@ const P47_13_PINS = {
   const p312Slotted = []
   const p4713Calls = []
   const p4713Slotted = []
+  const p465Calls = []
+  const p465Slotted = []
   const treeCalls = []
   for (const args of [
     mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
@@ -2489,6 +2827,11 @@ const P47_13_PINS = {
     mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
   ]) {
     const r = await runTask(args, scripted)
+    // p46-5: the calls as rendered, then through preP465 (the innermost swap) before every push below; every older pin
+    // reads its pre-p46-5 bytes through old465j, right before its sha.
+    p465Slotted.push(JSON.stringify(r.calls))
+    p465Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))))
+    r.calls = r.calls.map((c) => ({ ...c, prompt: preP465(c.prompt) }))
     // p47-13: the calls as rendered, then through preP4713 (the innermost swap) before every push below, so each older
     // pin and chain, p31-2's included, reads its pre-p47-13 bytes.
     p4713Slotted.push(JSON.stringify(r.calls))
@@ -2535,9 +2878,9 @@ const P47_13_PINS = {
     }))
     ok(JSON.stringify(row.reviewVerdicts) === JSON.stringify(want), `p21-3: ${row.slug}'s reviewVerdicts are its judged rounds`)
   }
-  ok(sha(oldCalls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
+  ok(sha(old465j(oldCalls.join('\n'))) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
     'byte pin (p16-3 base): the same calls with KILL_RULE and NEEDS_HUMAN_RULE removed are the pre-p16-3 bytes')
-  ok(sha(baseCalls.join('\n')) === '8236605ff29f46cc2c59346eb3bd42916deb8c9fda1859cb9eaaadec9fa607c4',
+  ok(sha(old465j(baseCalls.join('\n'))) === '8236605ff29f46cc2c59346eb3bd42916deb8c9fda1859cb9eaaadec9fa607c4',
     'byte pin (p18-1 base): the same calls with KILL_RULE removed are the pre-p18-1 bytes')
   ok(sha(oldRows.join('\n')) === '0b7fa8531f41dad8da30902e500d4cc7746f1540424af004039ab890433972aa',
     'byte pin (p16-3 base): the same rows with needsHuman and reviewVerdicts deleted are the pre-p16-3 rows')
@@ -2545,14 +2888,14 @@ const P47_13_PINS = {
     'byte pin (p21-3 base): the same rows with reviewVerdicts deleted are the pre-p21-3 rows')
   for (const [i, [nw]] of P23_1.entries()) ok(calls.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p23-1: fragment ${i + 1} renders in these calls, so its swap is no no-op`)
   ok(logs.every((l) => !l.includes('ADR 0038')), 'p23-1: no log line of these calls names ADR 0038 (no gatePricer, no bounce)')
-  ok(sha(p23Calls.join('\n')) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
+  ok(sha(old465j(p23Calls.join('\n'))) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
     'byte pin (p23-1 base): the same calls with the ADR 0038 fragments swapped back are the pre-p23-1 bytes (the p18-1 calls pin)')
-  ok(sha(p31Calls.join('\n')) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
+  ok(sha(old465j(p31Calls.join('\n'))) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
     'byte pin (p31-1 base): the same calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the p23-1 calls pin)')
-  ok(sha(p29Calls.join('\n')) === 'b82f1748cd48dcbfbc737383ffd95e2b08f0aec066e36e3b7afe7ff1fd3adcaf',
+  ok(sha(old465j(p29Calls.join('\n'))) === 'b82f1748cd48dcbfbc737383ffd95e2b08f0aec066e36e3b7afe7ff1fd3adcaf',
     'byte pin (p29-9 base): the same calls with the Flake check block swapped out are the pre-p29-9 bytes (the p31-1 calls pin)')
   ok(calls.some((c) => c.includes(JSON.stringify(P29_9[0][0]).slice(1, -1))), 'p29-9: the task block renders in these calls, so its swap is no no-op')
-  ok(sha(calls.join('\n')) === P29_PINS.calls,
+  ok(sha(old465j(calls.join('\n'))) === P29_PINS.calls,
     'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p29-9: the p29-9 base above plus the Flake check block)')
   // Each p31-1 pair these calls can render renders here, so its swap is no no-op; the matrix-only pairs render nowhere.
   for (const [slot, hay, which] of [[undefined, calls, 'unslotted'], [PIN_SLOT, slottedCalls, 'slotted']]) {
@@ -2567,38 +2910,47 @@ const P47_13_PINS = {
   ok(sha(rows.join('\n')) === P29_PINS.rows,
     'byte pin: three whole task-mode calls — every row, rung record, reviewVerdicts and flakes included (re-pinned by p29-9: the p29-9 base above plus flakes)')
   ok(slottedCalls.join('\n') !== calls.join('\n'), 'ADR 0009 d4: the slot is in these calls, so taking it out is no no-op')
-  ok(sha(slottedP31Calls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
+  ok(sha(old465j(slottedP31Calls.join('\n'))) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
     "byte pin (p31-1 base, slotted): the slotted calls with the Flake check block swapped out, and the p31-1 fragments and p31-4's SLOT_TEXT sentence swapped back, are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)")
-  ok(sha(slottedP314Calls.join('\n')) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
+  ok(sha(old465j(slottedP314Calls.join('\n'))) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
     "byte pin (p31-4 base, slotted): the slotted calls with the Flake check block swapped out and p31-4's SLOT_TEXT sentence taken out are the pre-p31-4 bytes (the p31-1 slotted pin)")
   ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_HEAT).slice(1, -1))), "p31-4: the SLOT_TEXT sentence renders in these slotted calls, so its swap is no no-op")
   ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_WAIT[0]).slice(1, -1))), "p31-3: SLOT_TEXT's wait sentence renders in these slotted calls, so its swap is no no-op")
-  ok(sha(slottedP29Calls.join('\n')) === 'c78f36f1259bc212b1a7b03b656cd30ab2a6f65af32c4b030cc67f3d479c9b75',
+  ok(sha(old465j(slottedP29Calls.join('\n'))) === 'c78f36f1259bc212b1a7b03b656cd30ab2a6f65af32c4b030cc67f3d479c9b75',
     "byte pin (p29-9 base, slotted): the slotted calls with the Flake check block swapped out (and p31-3's wait sentence and p36-10's hold sentence swapped back) are the pre-p29-9 bytes (the p31-4 slotted pin)")
-  ok(sha(slottedPreWaitCalls.join('\n')) === P31_3_PRE_WAIT.slotted,
+  ok(sha(old465j(slottedPreWaitCalls.join('\n'))) === P31_3_PRE_WAIT.slotted,
     "byte pin (p31-3 base, slotted): the slotted calls with SLOT_TEXT's wait sentence (and p36-10's hold sentence) swapped back are the slotted pin recorded before p31-3")
-  ok(sha(slottedPreCapCalls.join('\n')) === P36_10_PRE_CAP.slotted,
+  ok(sha(old465j(slottedPreCapCalls.join('\n'))) === P36_10_PRE_CAP.slotted,
     "byte pin (p36-10 base, slotted): the slotted calls with the hold sentence swapped back to p31-4's are the slotted pin recorded before p36-10")
-  ok(sha(slottedPreHeatCalls.join('\n')) === P29_PRE_HEAT.slotted,
+  ok(sha(old465j(slottedPreHeatCalls.join('\n'))) === P29_PRE_HEAT.slotted,
     "byte pin (p29-9 before p31-4, slotted): the slotted calls with p31-4's SLOT_TEXT sentence taken out are the p29-9 slotted pin recorded before p31-4 landed")
-  ok(sha(slottedCalls.join('\n')) === P29_PINS.slotted,
+  ok(sha(old465j(slottedCalls.join('\n'))) === P29_PINS.slotted,
     'byte pin (estate ADR 0009 d4; re-pinned by p31-1, p31-4, p29-9, p31-3 and p36-10): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
   // p31-2: each pair renders in these calls (no no-op swap), the tree agents' calls have none to swap, and the calls as
   // rendered hold their own pins; the pins above, through preP312, are the pre-p31-2 ones, none moved.
   for (const [i, [nw]] of P31_2.entries()) ok(p312Slotted.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p31-2: pair ${i + 1} renders in these calls, so its swap is no no-op`)
   ok(treeCalls.length > 0 && treeCalls.every((c) => preP312(c.prompt) === c.prompt),
     'p31-2: no planner, plan judge, plan reviser or investigator call renders a p31-2 fragment')
-  ok(sha(p312Calls.join('\n')) === P31_2_PINS.calls,
+  ok(sha(old465j(p312Calls.join('\n'))) === P31_2_PINS.calls,
     'byte pin (p31-2): three whole task-mode calls, unslotted — the p29-9 calls pin above plus the test rules and the test delta')
-  ok(sha(p312Slotted.join('\n')) === P31_2_PINS.slotted,
+  ok(sha(old465j(p312Slotted.join('\n'))) === P31_2_PINS.slotted,
     'byte pin (p31-2): the same three calls as run, slotted — the p29-9 slotted pin above plus the test rules and the test delta')
   // p47-13: each fragment renders in these calls (no no-op swap), and the calls as rendered hold their own pins; the pins
   // above, through preP4713, are the pre-p47-13 ones, none moved.
   for (const [i, [nw]] of P47_13.entries()) ok(p4713Slotted.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p47-13: fragment ${i + 1} renders in these calls, so its swap is no no-op`)
-  ok(sha(p4713Calls.join('\n')) === P47_13_PINS.calls,
+  ok(sha(old465j(p4713Calls.join('\n'))) === P47_13_PINS.calls,
     'byte pin (p47-13): three whole task-mode calls, unslotted — the p31-2 calls pin above plus the plan judge\'s Unbounded acceptance bullet and Decide sentence')
-  ok(sha(p4713Slotted.join('\n')) === P47_13_PINS.slotted,
+  ok(sha(old465j(p4713Slotted.join('\n'))) === P47_13_PINS.slotted,
     'byte pin (p47-13): the same three calls as run, slotted — the p31-2 slotted pin above plus the same two fragments')
+  // p46-5: each inner pair renders in these calls, and each outer pair but E14 (Integration's, pinned above), so no swap
+  // is a no-op; the calls as rendered hold their own pins; the pins above, through preP465 and old465j, are the
+  // pre-p46-5 ones, none moved.
+  for (const [i, [nw]] of P46_5_INNER.entries()) ok(p465Slotted.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p46-5: inner pair ${i + 1} renders in these calls, so its swap is no no-op`)
+  for (const [i, [nw]] of P46_5_OUTER_J.slice(0, 3).entries()) ok(p465Slotted.some((c) => c.includes(nw)), `p46-5: outer pair ${i + 1} renders in these calls, so its swap is no no-op`)
+  ok(sha(p465Calls.join('\n')) === P46_5_PINS.calls,
+    'byte pin (p46-5): three whole task-mode calls, unslotted — the p47-13 calls pin above plus the routine steps, the scope and the reasons')
+  ok(sha(p465Slotted.join('\n')) === P46_5_PINS.slotted,
+    'byte pin (p46-5): the same three calls as run, slotted — the p47-13 slotted pin above plus the same, and SLOT_TEXT\'s reason')
 }
 
 console.log()

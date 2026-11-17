@@ -112,7 +112,8 @@ project's roadmap is read only for numbering.
 phase's `## Build sequence` when a task moves out, so an ordinal is never reused. New phases
 number from `N_max + 1` (P1 when the project has none); a fractional `N_max` rounds up to the
 next whole phase, which is the first new one (`p3.5` → P4). Fractional naming otherwise follows
-`add-phase.md` § Step 3. Existing phase numbers are **never** changed.
+`add-phase.md` § Step 3. Existing phase numbers are **never** changed: a phase's number is in its notes'
+filenames, and every link names them.
 
 ## R2. Sort and propose
 
@@ -373,14 +374,17 @@ from here.
 The rules above are the contract; these are the ones most easily broken.
 
 - **Don't touch frozen items** (in flight, possibly landed, thread captures, decision tasks) beyond
-  adding new members to an in-flight phase.
-- **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
+  adding new members to an in-flight phase: each is under way, may already have landed, or is another owner's (R1).
+- **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused: a number is in
+  the notes' filenames, so a change breaks every link to them.
 - **Don't write before the R4 gate**, a Note's correction of a Priorities card (R3) aside, and
-  don't rename without the basename check and the backlink rewrite.
+  don't rename without the basename check and the backlink rewrite. The gate is where Lachy approves the
+  reshuffle, and a rename without the rewrite leaves dead links.
 - **Don't advance a declared check** except through `advance --expect <digest>` after R4 passed
-  every entry; never run its `--advance` by hand.
+  every entry; never run its `--advance` by hand: the digest binds the advance to the entries R4 passed (§ Declared
+  check).
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by
-  name; the inline shape is only the no-skills fallback.
+  name; the inline shape is only the no-skills fallback, so the skills' own edits reach every run (R3).
 - **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md`,
   `add-writers/add-phase.md` and `add-writers/add-project.md`.
 - **Under `--backlog`, B4's record stands in for R4's gate** (`skills/orient/backlog.md` § B4): nothing waits on his

@@ -13,8 +13,8 @@ harness — must be able to resume the work from the task file alone.
 
 ## 1. Resolve the project
 
-The task is never orphaned and never lands in `_Inbox/`. Resolve `projects:`
-in this order:
+The task is never orphaned and never lands in `_Inbox/`, since a task with no
+project reaches no project's orient or schedule. Resolve `projects:` in this order:
 
 1. **CWD inside a code repo** → grep `repos:` frontmatter across
    `~/repos/obsidian/Work/Projects/**` for an entry matching the current
@@ -251,7 +251,8 @@ write and changes nothing: a dead task (the pointer would be dead), or an
 action that is blank or spans lines. Exit 3
 means no vault or no PyYAML (`python3 -m pip install pyyaml`). Either way
 the capture stands: say `Next action not written: <stderr>` in the
-confirmation, and never retry the write by hand. An exit 2 with `python3`'s
+confirmation, and never retry the write by hand: the script's re-parse guard is
+what keeps an edit from breaking frontmatter, and a hand edit has none. An exit 2 with `python3`'s
 `can't open file '/skills/…'` is not that refusal: the script never ran, so
 export the root and re-run the same call by `plugin-root.md` rule 4, then
 apply the rules above to that run.
@@ -312,7 +313,8 @@ only its closing line gets the block above it; a Now with no dated opener
 is left alone. It never adds a `## Now` to a note without one. Close only:
 stash and defer leave the Now alone, because they never rewrite Where we
 are. On exit 2 or 3, say `Now not written: <stderr>` in step 8 and never
-edit the note by hand. An exit 2 with `python3`'s
+edit the note by hand: the thread guard above is what keeps one thread's state out of
+another's Now. An exit 2 with `python3`'s
 `can't open file '/skills/…'` is not that refusal: export the root and
 re-run the same call by `plugin-root.md` rule 4, then apply these rules to
 that run.
