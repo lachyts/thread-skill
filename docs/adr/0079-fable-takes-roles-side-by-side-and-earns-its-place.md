@@ -55,6 +55,27 @@ which the next reading's agreement reads back. Four readings are declared, the r
    roles draw on their own (decision 3); a climb to the Fable rung runs every role on Fable, so it leaves every role,
    the lead's included.*
 
+*(Amended 2026-11-18 by thread-skill-p46-5: the Consequences' prompt check is built, for both arms (no prompt text
+depends on the model or the arm). Every task call carries `ROUTINE_STEPS` (a read the tool cut off is run again, a
+write only after a read shows it did not land, a cut-off test run is no run); the code-writers carry `TASK_SCOPE` and
+their PR steps (`PR_STEPS_OPEN`, the reviser's `PR_STEPS_UPDATE`), each ending in `NOT_IRREVERSIBLE`, which carves the
+task's own push and PR out of the Gated inputs rule; the review judge carries `REVIEW_READS_DIFF`; and the escalation
+hand-over no longer says "you own it". The Worktree safety preflight restores a stray (an agent's own out-of-scope
+edit, or a tracked file a test run, a verifier run or the env bootstrap rewrote) as a routine step and keeps one STOP,
+for a hand edit the agent did not make. Each rewritten "never" rule gives its scope and reason; two of them reach
+Integration's prompts too, `SLOT_TEXT` (the integrator can be a Fable reader once every rung is all-Fable) and
+`branchTreeSetup`'s shared-checkout rule. The skill text is bounded as the seven files the Shaping session, repair and
+the Reflection run (orient with `backlog.md` and `reshuffle.md`, orient-all, schedule, repair, reflect) plus the eight
+`_shared` files they cite by path (asking, engine-snapshot, execution-fit, grill-fit, plugin-root, readiness-grade,
+task-writer, vault-grammar): their 856 lines holding a "never", "do not", "don't" or "must not" form were triaged, and
+the rules whose own sentence gave no reason gained one. Follow-ups, out of this bound: `_shared/handoff-lifecycle.md`
+and `_shared/process-scan.md`; the lead's skill text (execute's SKILL.md, `legs.md`, `away.md`); Integration's
+prompts beyond those two rules (`INTEGRATION_PREFLIGHTS`' Scope STOP, `branchTreeSetup`'s fetch-failed STOP, a
+transient failure that could become a one-retry routine step, and `ROUTINE_STEPS` for the integrator); the
+`LEAN_TESTS_SHORT` copy, the writing-lean-tests skill's owner's; the out-of-repo files the skills cite
+(`~/.agents/knowledge/how-lachy-decides.md`, `~/repos/workspaces/_shared/workspace-registry.md`,
+`~/repos/workspaces/_shared/scripts/native_workflow.md`); and the script output a skill session reads.)*
+
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.
