@@ -13,7 +13,7 @@ import { runTask, loadEngine, enginePath, VERIFY_SLOT } from '../../../tests/lib
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts', 'flakes',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts', 'flakes', 'unreachable',
 ]
 const THREW = 'workflow stage threw — see /workflows'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
@@ -108,7 +108,7 @@ async function run(args, script) {
   return { ...out, unknown: s.unknown, labels: out.calls.map((c) => c.label), opts: s.seen }
 }
 
-test('one code-writing task: one row with exactly the 23 result fields (args stringified or object)', async () => {
+test('one code-writing task: one row with exactly the 24 result fields (args stringified or object)', async () => {
   const task = mkTask('proj-fix-a')
   const r = await run(JSON.stringify(mkArgs(task)))
   assert.equal(r.error, undefined)
@@ -1000,11 +1000,11 @@ test('ADR 0038 C15: a judge that wrongly bounces the priced gate on both rounds:
 
 // ---- The Security check (execute § 3 `security_checks`): E1-E6 ----------------------------------------------------
 // args.securityCheck set: the implementer's and reviser's prompts carry the scan, the review judge reads the agent's copy
-// of its brief and runs the same scan; the row keeps its 23 keys. A scan's question stops the task with no climb.
+// of its brief and runs the same scan; the row keeps its 24 keys. A scan's question stops the task with no climb.
 const SECURITY = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
 const BRIEF = 'npm left-pad 1.3.0 (package.json)'
 
-test('E1: newDependencies reach the review judge with the scan command; the row is review with its 23 keys', async () => {
+test('E1: newDependencies reach the review judge with the scan command; the row is review with its 24 keys', async () => {
   const task = mkTask('proj-fix-a')
   const r = await run(mkArgs(task, { securityCheck: SECURITY }), { result: (l) => (l.startsWith('implement:') ? { newDependencies: [BRIEF] } : {}) })
   assert.equal(r.error, undefined)

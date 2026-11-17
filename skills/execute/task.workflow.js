@@ -107,6 +107,17 @@ export const meta = {
 //                                    //   INTEGRATION_REVIEW_SECURED. Absent/null ⇒ every prompt and schema byte-identical.
 //                                    //   Any other shape is refused before any dispatch (securityCheckArgsError,
 //                                    //   argsRefused), in both modes.
+//   unreachablePaths : string[],     // optional (p52-1, ADR 0081 d1); the repo's Unreachable surface, rollout-settings.py's
+//                                    //   `unreachable_paths.value` for the Project root, verbatim: git pathspec globs
+//                                    //   (`:(glob)`, read as inert-paths.py's glob_match reads them) naming code no check
+//                                    //   in the verifier exercises. A task whose code-writing agents report a changed
+//                                    //   path (IMPL_RESULT's changedFiles) one of them matches is marked whatever its plan
+//                                    //   says (the row's `unreachable`). Absent, null or [] ⇒ no path backstop; prompts
+//                                    //   and opts never read it. A value rollout-settings.py would refuse (not an array,
+//                                    //   over 64 globs, a glob glob_problem refuses or with a class unreachableGlobRe
+//                                    //   cannot compile, which glob_class_problem refuses too, one listed twice) is
+//                                    //   refused before any dispatch (unreachablePathsError, argsRefused), in both
+//                                    //   modes; mode 'integrate' ignores a usable one.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
@@ -292,7 +303,7 @@ export const meta = {
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
 //   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan,
-//   reviewVerdicts, flakes }] }
+//   reviewVerdicts, flakes, unreachable }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -336,6 +347,17 @@ export const meta = {
 // at most 300 characters, a 7-40 hex sha lowercased, at most 20), kept on every status, a stage throw included; []
 // when there are none (read-only, the pre-flight block, plan-blocked, a dead agent). reconcile logs each one and
 // files it for its repo (one follow-up per test), never as the task's to fix.
+// unreachable (p52-1, ADR 0081 d1) is the task's mark: { marked, by, paths }. by lists, in this order, what marked it:
+// `plan` (the approved plan's own declaration, PLAN_VERDICT's unreachable), `plan-judge` (the approving plan judge's
+// own reading of the plan's files, PLAN_JUDGE's unreachable: it checks the declaration, so a plan that forgot is
+// still marked), `result` (a code-writing agent's declaration, IMPL_RESULT's unreachable, read only when this call
+// settled no plan: a task with no plan gate, a seeded revise) and `paths` (a changed path one of args.unreachablePaths
+// matches, whatever the plan says). paths lists those changed paths (sorted, at most UNREACHABLE_PATHS_MAX). marked is
+// true when by is not empty. Kept on every status, a stage throw included; { marked: false, by: [], paths: [] } when
+// nothing marked it (read-only, the pre-flight block, plan-blocked before an approve). Each reading is sticky within the
+// call: a later agent's false never clears an earlier true. The mark is the call's own: a seeded revise does not see
+// the plan its first call approved, so a reader keeps the first call's mark (ADR 0081 d2 and d3 read it, p52-2). A mode
+// 'integrate' row carries null, like plan: Integration takes no reading of the task's surface.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -352,6 +374,13 @@ export const meta = {
 // below is the prompt side. The engine reads it through askOf().
 const NEEDS_HUMAN_DESCRIPTION = 'ONLY when the task cannot go on without a decision only a person can make (a value, a design choice, or out-of-band input the task note does not supply and the repo cannot settle): that exact question, one line. Empty otherwise. A test failure, a red verifier or a concrete fix is never needsHuman; spend, credentials and irreversible actions are gated inputs.'
 
+// An Unreachable surface (p52-1, ADR 0081 d1): code that no check in the rollout's verifier exercises. The plan
+// declares it (PLAN_VERDICT), the plan judge checks the declaration against the plan's files with its own reading
+// (PLAN_JUDGE), a task with no plan declares it in its code-writing agent's result (IMPL_RESULT), and the repo's
+// path list backs every one up (args.unreachablePaths, IMPL_RESULT's changedFiles). Each is steered through its
+// schema alone, so no prompt byte moves; the engine reads them into the row's `unreachable` (unreachableRow).
+const UNREACHABLE_WHAT = "code that no check in the rollout's verifier exercises (an Unreachable surface, ADR 0081: Codex computer use, device-only code for Vision Pro or Quest, anything only a person trying it by hand can see work)"
+
 const PLAN_VERDICT = {
   type: 'object',
   additionalProperties: false,
@@ -360,8 +389,9 @@ const PLAN_VERDICT = {
     blocked: { type: 'boolean', description: 'true if the task is malformed / unrecoverable' },
     blockerCause: { type: 'string', description: 'one-line cause when blocked, else empty string' },
     plan: { type: 'string', description: 'full structured plan text (Files to modify, Test strategy, Sibling-site check, Caller-wiring, Edge cases, Risks, Gated inputs). Empty string if blocked.' },
+    unreachable: { type: 'boolean', description: `the plan's declaration: true when a file under its "Files to modify" is ${UNREACHABLE_WHAT}; false when every change is code some check in that verifier runs. Read the verifier and what it runs; never true for a test or a doc alone.` },
   },
-  required: ['ready', 'blocked', 'blockerCause', 'plan'],
+  required: ['ready', 'blocked', 'blockerCause', 'plan', 'unreachable'],
 }
 
 // An acceptance review can never close (p47-13; Watch 2eeb9875 of chorus-rollout-2026-10-26, where the gate approved
@@ -379,8 +409,9 @@ const PLAN_JUDGE = {
     verdict: { type: 'string', enum: ['approve', 'changes'] },
     feedback: { type: 'array', items: { type: 'string' }, description: `3–8 specific bullets when verdict is changes; empty when approve. An acceptance that asks to cover every form of an open set gets a bullet that starts "${UNBOUNDED_ACCEPTANCE}", names the open set and asks for a bounded acceptance (an allowlist, a named set)` },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
+    unreachable: { type: 'boolean', description: `your own reading, the check on the plan's declaration of an Unreachable surface: true when a file under the plan's "Files to modify" is ${UNREACHABLE_WHAT}, whatever the plan says; false otherwise. Read the verifier and grep what it runs.` },
   },
-  required: ['verdict', 'feedback'],
+  required: ['verdict', 'feedback', 'unreachable'],
 }
 
 // The plan judge's schema while args.gatePricer is set (ADR 0038): PLAN_JUDGE plus an optional gateBounce, the
@@ -409,6 +440,8 @@ const IMPL_RESULT = {
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap N USD", one line whose Cap holds the whole spend, with how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
     flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
+    unreachable: { type: 'boolean', description: `true when your PR changes ${UNREACHABLE_WHAT}; false otherwise (and when you changed nothing).` },
+    changedFiles: { type: 'array', items: { type: 'string' }, description: 'every repo-relative path `gh pr diff <your PR> --name-only` prints, run after your last push, one per entry; [] when you opened or updated no PR.' },
     // p31-2 (estate ADR 0011 d3): the counts are 'number' (the keywords the engine's schemas already use); testDeltaOf
     // enforces whole numbers and bounds, and drops a malformed delta whole.
     testDelta: {
@@ -426,7 +459,7 @@ const IMPL_RESULT = {
       description: "ONLY from a code-writing pass whose verification went green, as the prompt's Test delta section says: what the whole PR adds to the suite against its base. Omit it otherwise.",
     },
   },
-  required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
+  required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary', 'unreachable', 'changedFiles'],
 }
 
 // The code-writing agents' schema while args.securityCheck is set (execute § 3 `security_checks`; implSchema): IMPL_RESULT
@@ -2396,6 +2429,71 @@ function taskArmsError(arms) {
   return ''
 }
 
+// args.unreachablePaths (p52-1, ADR 0081 d1): '' when absent (or null) or usable, else why not. The repo's
+// `unreachable_paths` exactly as rollout-settings.py resolves it: an array of at most UNREACHABLE_GLOBS_MAX globs, each
+// one unreachableGlobProblem passes (rollout-settings.py's glob_problem, ported), none twice. A bad value is a lead bug,
+// refused before any dispatch in both modes (argsRefused): the list is a backstop, so it is never read as absent.
+const UNREACHABLE_GLOBS_MAX = 64   // rollout-settings.py's MAX_INERT_GLOBS
+function unreachableGlobProblem(g) {
+  if (typeof g !== 'string') return `is not a string (got ${refusedEcho(g)})`
+  if (!g) return 'is empty'
+  if (g.length > 200) return `is ${g.length} characters (at most 200)`
+  if (g !== g.trim()) return 'has leading or trailing whitespace'
+  if (/[\u0000-\u001f\u007f]/.test(g)) return 'holds a control character'
+  if (g.includes('\\')) return 'holds a backslash'
+  if ('/:!'.includes(g[0])) return `starts with ${JSON.stringify(g[0])} (a glob is repo-relative, with no pathspec magic or negation)`
+  if (g.endsWith('/')) return `ends in / (write ${JSON.stringify(g + '**')})`
+  if (g.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) return 'has an empty, . or .. segment'
+  return ''
+}
+function unreachablePathsError(v) {
+  if (v === undefined || v === null) return ''
+  if (!Array.isArray(v)) return `must be an array of git pathspec globs (rollout-settings.py's unreachable_paths.value), got ${refusedEcho(v)}`
+  if (v.length > UNREACHABLE_GLOBS_MAX) return `holds ${v.length} globs (at most ${UNREACHABLE_GLOBS_MAX})`
+  for (const g of v) {
+    const why = unreachableGlobProblem(g)
+    if (why) return `the glob ${refusedEcho(g)} ${why}`
+    // A class git reads but a regex cannot (a range out of order): refused, never matched as nothing. The reader refuses
+    // it first (rollout-settings.py's glob_class_problem builds each class as this port does), naming the file's line.
+    try { unreachableGlobRe(g) } catch (e) { return `the glob ${refusedEcho(g)} cannot be read as a glob (${(e && e.message) || e})` }
+  }
+  const dup = v.find((g, i) => v.indexOf(g) !== i)
+  if (dup !== undefined) return `the glob ${refusedEcho(dup)} is listed twice`
+  return ''
+}
+// git's `:(glob)` match of `glob` against a repo-relative `path`: inert-paths.py's glob_match, ported (wildmatch with
+// pathname semantics). A `**` segment matches any run of directories (the last one, everything below), `*` any run of
+// characters but `/`, `?` one, `[…]` a class (`!` or `^` negates it); anything else is literal.
+function unreachableGlobRe(glob) {
+  const seg = (s) => {
+    let out = ''
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i]
+      if (c === '*') out += '[^/]*'
+      else if (c === '?') out += '[^/]'
+      else if (c === '[' && s.indexOf(']', i + 2) >= 0) {
+        const j = s.indexOf(']', i + 2)
+        let body = s.slice(i + 1, j)
+        const neg = body[0] === '!' || body[0] === '^'
+        if (neg) body = body.slice(1)
+        out += '[' + (neg ? '^' : '') + body.replace(/[\\\]\[^]/g, (m) => '\\' + m) + ']'
+        i = j
+      } else out += c.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&')
+    }
+    return out
+  }
+  const segs = glob.split('/')
+  const parts = segs.map((s, k) => {
+    const last = k === segs.length - 1
+    if (s === '**') return last ? '.*' : '(?:[^/]*/)*'
+    return seg(s) + (last ? '' : '/')
+  })
+  return new RegExp('^' + parts.join('') + '$', 's')
+}
+function unreachableGlobMatch(glob, path) {
+  return unreachableGlobRe(glob).test(path)
+}
+
 // args.verifySlot (p23-4): '' when usable, else why not. Required (estate ADR 0009 d4): absent or null is refused.
 // Exactly { script, slots }: the absolute, single-line path of verify-slot.py (never under a bare /skills/, an
 // unexported plugin root) and an integer >= 1. Any other key (`priority` included: only integrationVerify sets
@@ -2443,8 +2541,14 @@ function rungState(task, a) {
   // verdicts (p21-3): every master-review round this call judged, pushed by reviewLoop (reviewVerdictOf).
   // flakes (p29-9): every Flake the call's code-writing agents returned, pushed by runAgent (flakesOf).
   // arms (p46-2): the task's stamped arms (args.task.arms), read only through armOf.
+  // unreachable (p52-1): the call's readings of an Unreachable surface, set by planLoop (plan, judge, planned) and runAgent
+  // (result, paths), against args.unreachablePaths' globs; unreachableRow reads them into the row.
   const arms = task && task.arms && typeof task.arms === 'object' ? { ...task.arms } : {}
-  return { source: L.source, rungs: L.rungs, roles: L.roles || {}, arms, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
+  const globs = a && Array.isArray(a.unreachablePaths) ? a.unreachablePaths.slice() : []
+  return {
+    source: L.source, rungs: L.rungs, roles: L.roles || {}, arms, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [],
+    unreachable: { globs, plan: false, judge: false, planned: false, result: false, paths: [] },
+  }
 }
 
 function cur(st) { return st.rungs[st.at] }
@@ -2460,6 +2564,7 @@ function rowRecord(st) {
     ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })),
     reviewVerdicts: (st.verdicts || []).map((v) => ({ ...v, feedback: [...v.feedback] })),
     flakes: (st.flakes || []).map((f) => ({ ...f })),
+    unreachable: unreachableRow(st),
   }
 }
 
@@ -2601,6 +2706,41 @@ function flakesOf(r, have, label) {
   return out
 }
 
+// p52-1 (ADR 0081 d1): a code-writing agent's result read into the call's Unreachable-surface readings (st.unreachable).
+// Its own declaration (`unreachable` true; unreachableRow counts it only when the call settled no plan) and every
+// changedFiles entry one of args.unreachablePaths' globs matches: a one-line string of at most UNREACHABLE_PATH_MAX
+// characters, trimmed, else dropped with one log line per result. Sticky: a later false or [] clears nothing.
+const UNREACHABLE_PATHS_MAX = 20
+const UNREACHABLE_PATH_MAX = 300
+function noteUnreachable(st, r, label) {
+  const u = st.unreachable
+  if (!u) return
+  if (r.unreachable === true) u.result = true
+  const raw = r.changedFiles
+  if (raw === undefined || raw === null || !u.globs.length) return
+  if (!Array.isArray(raw)) {
+    log(`unreachable: ${label}: changedFiles is not an array (${typeof raw}); dropped`)
+    return
+  }
+  let bad = 0
+  for (const e of raw) {
+    const p = typeof e === 'string' ? e.trim() : ''
+    if (!p || p.length > UNREACHABLE_PATH_MAX || /[\u0000-\u001f\u007f]/.test(p)) { bad += 1; continue }
+    if (!u.paths.includes(p) && u.globs.some((g) => unreachableGlobMatch(g, p))) u.paths.push(p)
+  }
+  if (bad) log(`unreachable: ${label}: dropped ${bad} malformed changedFiles entr${bad === 1 ? 'y' : 'ies'}`)
+}
+// The row's `unreachable` (the header's row docs): { marked, by, paths }.
+function unreachableRow(st) {
+  const u = st.unreachable || { plan: false, judge: false, planned: false, result: false, paths: [] }
+  const by = []
+  if (u.plan) by.push('plan')
+  if (u.judge) by.push('plan-judge')
+  if (u.result && !u.planned) by.push('result')
+  if (u.paths.length) by.push('paths')
+  return { marked: by.length > 0, by, paths: u.paths.slice().sort().slice(0, UNREACHABLE_PATHS_MAX) }
+}
+
 // st (optional): a task-mode call's rung state. Each dispatch is recorded on st.ran BEFORE it runs, so a
 // stage that throws still reports what it dispatched (ADR 0029 decision 7). The integrate mode passes none:
 // it records its agents on its own trace, also before each runs (integrate()).
@@ -2615,6 +2755,7 @@ async function runAgent(prompt, opts, st) {
   }
   if (r != null && st && opts && (opts.schema === IMPL_RESULT || opts.schema === IMPL_RESULT_SECURED) && !String(opts.label || '').startsWith('investigate:')) {
     st.flakes = flakesOf(r, st.flakes || [], opts.label || '?')
+    noteUnreachable(st, r, opts.label || '?')
   }
   return r == null ? { __dead: true } : r
 }
@@ -2688,7 +2829,11 @@ async function planLoop(task, st, a) {
   let gateBounced = false
   // The approve path, on the current plan: the judge's approve, or a gates-only bounce it overrides (ADR 0038, with
   // `note` added to the gate-pending diagnosis).
-  const settle = (at, note) => {
+  const settle = (at, note, verdict) => {
+    // p52-1 (ADR 0081 d1): the approved plan's declaration and the approving judge's own reading of its files.
+    st.unreachable.planned = true
+    if (plan.unreachable === true) st.unreachable.plan = true
+    if (verdict && verdict.unreachable === true) st.unreachable.judge = true
     // Gated inputs (ADR 0008): a declared gate always pauses for a human — regardless of
     // plan_approval config or continuous mode. Gates already approved on the note
     // (task.approvedGates) are skipped, so re-dispatches never re-ask those exact gates.
@@ -2722,7 +2867,7 @@ async function planLoop(task, st, a) {
       if (Array.isArray(verdict.gateBounce) && verdict.gateBounce.some((g) => typeof g === 'string' && g.trim())) {
         log(`plan-judge:${task.slug} r${round}: gateBounce on an approve verdict ignored (ADR 0038)`)
       }
-      return settle(round, '')
+      return settle(round, '', verdict)
     }
     // Record this round's rejection BEFORE the max-rounds return and the reviser dispatch, so both the
     // plan-blocked diagnosis and the next reviser see the complete accumulated rationale (push with the
@@ -2748,7 +2893,7 @@ async function planLoop(task, st, a) {
     const bounce = gateBounceOf(a, verdict, parseGatedInputs(plan.plan))
     if (bounce && (gateBounced || round === task.maxPlanRounds)) {
       log(`plan-judge:${task.slug} r${round}: gate format only (${gateBounced ? 'bounced once already' : 'the last plan round'}) — the gates go to sign-off (ADR 0038)`)
-      return settle(round, bounceNote(round, verdict, gateBounced, bounce))
+      return settle(round, bounceNote(round, verdict, gateBounced, bounce), verdict)
     }
     if (round === task.maxPlanRounds) {
       return {
@@ -3051,6 +3196,8 @@ function taskResult(t, r, st) {
     reviewVerdicts: norm.reviewVerdicts || [],
     // p29-9: every Flake the call's code-writing agents returned (rowRecord), sanitised and deduped.
     flakes: norm.flakes || [],
+    // p52-1: the task's Unreachable-surface mark (rowRecord, unreachableRow).
+    unreachable: norm.unreachable || { marked: false, by: [], paths: [] },
   }
 }
 
@@ -4054,6 +4201,8 @@ function integrationResult(task, out, a, trace) {
     reviewVerdicts: [],
     // p29-9: the integrator's Flakes (flakesOf), [] for a P1 call, a dead or thrown integrator.
     flakes: (trace.flakes || []).map((f) => ({ ...f })),
+    // p52-1: null, like `plan`: Integration writes no code of the task's own, so it takes no reading of its surface.
+    unreachable: null,
     integration: {
       outcome: o.outcome,
       path: trace.path,
@@ -4104,6 +4253,10 @@ if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRe
 // modes; mode 'integrate' takes no arms and ignores a usable one.
 const badArms = taskArmsError(a.task.arms)
 if (badArms) throw argsRefused('args.task.arms: ' + badArms)
+// args.unreachablePaths (p52-1, ADR 0081 d1): the repo's Unreachable surface. A malformed one is a lead bug, refused
+// before any dispatch in both modes (a backstop is never read as absent); mode 'integrate' ignores a usable one.
+const badUnreachable = unreachablePathsError(a.unreachablePaths)
+if (badUnreachable) throw argsRefused('args.unreachablePaths: ' + badUnreachable)
 // args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
@@ -4204,5 +4357,6 @@ try {
 }
 const row = taskResult(callTask, r, st)
 log(`${row.slug} → ${row.status}`)
+if (row.unreachable.marked) log(`unreachable surface: ${row.slug} (${row.unreachable.by.join(', ')}${row.unreachable.paths.length ? ': ' + row.unreachable.paths.join(', ') : ''})`)
 
 return { rolloutSlug: a.rolloutSlug, tasks: [row] }

@@ -1803,7 +1803,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: monitor, heartbeat.
 
 - **Unreachable surface** — code that no check in its rollout's verifier
-  exercises: Codex computer use, device-only code. A task on one takes a
+  exercises: Codex computer use, device-only code. A task's plan declares
+  it and its plan judge checks the declaration; a task with no plan
+  declares it in its implementer's result; the repo's `unreachable_paths`
+  (rollouts.toml) marks any diff that touches a listed path whatever the
+  plan says. The engine's row carries the mark (p52-1). A task on one takes a
   doubled master review and lands with a **Felt check** open (ADR 0081).
   _Avoid_: untestable (some of it is testable by hand), risky code.
 - **Felt check** — Lachy's own try of landed work on an **Unreachable

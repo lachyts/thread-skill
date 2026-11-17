@@ -179,7 +179,7 @@ skills/execute/scripts/verify-slot.py HUB skills/execute/tests/reconcile-rollout
 skills/execute/scripts/verify-slot.py HUB skills/execute/tests/task-engine.test.mjs tests/background-job.test.mjs tests/contracts/cap-promise.test.mjs tests/contracts/execute-args-refusal.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/contracts/execute-legs.test.mjs tests/contracts/execute-queue.test.mjs tests/contracts/note-overlap-opener.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/contracts/run-record-hermetic.test.mjs tests/contracts/run-record-writers.test.mjs tests/contracts/security-check.test.mjs
-skills/execute/scripts/verify-slot.py HUB tests/merge-settings.test.sh
+skills/execute/scripts/verify-slot.py HUB tests/merge-settings.test.sh skills/execute/tests/unreachable-surface.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/contracts/status-repair-queue.test.mjs tests/contracts/verify-slot-hermetic.test.mjs tests/default-branch.test.mjs tests/default-branch.test.sh
 skills/execute/scripts/verify-slot.py HUB tests/engine-ladder.test.mjs tests/fast-tier-wiring.test.mjs tests/fast-tier.test.sh tests/gated-inputs.test.mjs tests/git-env-scrub.test.mjs
 skills/execute/scripts/verify-slot.py HUB tests/git-env-scrub.test.sh tests/integration-marker-roundtrip.test.mjs tests/integration-tree.test.sh tests/ladder.test.mjs tests/lead-integrate.test.sh

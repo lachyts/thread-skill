@@ -5,6 +5,10 @@ Status: accepted, not built (grilled with Lachy 2026-11-12, from the weekly Refl
 and Watch `9929d6e6`; builds as Phase 52). Changes the master review of execute § 5 for one kind of task; leans on
 ADR 0079. ADR 0078's **Proven** is unchanged.
 
+*(Decision 1 built by thread-skill-p52-1: the plan's `unreachable` field, its plan judge's own reading, the
+implementer's for a task with no plan, and the repo's `unreachable_paths` in `rollouts.toml` read into the engine row's
+`unreachable` mark. Decisions 2 and 3 build as p52-2.)*
+
 *(Amended 2026-11-12 by thread-skill-p46-8: findings 6, 9, 10, 12 and 13 of review round 45adf20/cdf93d are settled
 in the decisions and the Decided list, each marked "review #N".)*
 

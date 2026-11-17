@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 6                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 7                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -42,6 +42,7 @@ of the file format:
     inert_paths = ["THREAD.md"]  # schema 2 (p29-3, ADR 0045): this repo's Inert paths; a repo table only
     weight_mem_gb = 1            # schema 6 (p53-3, ADR 0083 DfL 8): a task's estimated Weight in this repo, memory in GB
     weight_cores = 1             # ... and cores; numbers > 0, a repo table only (built-in 3 and 2)
+    unreachable_paths = ["skills/codex/**"]  # schema 7 (p52-1, ADR 0081 d1): code no check in the verifier exercises
 
     [repo."Animately/optimizer"]  # schema 3 (ADR 0063): the repo's test-credential class, ONE line in its repo table
     test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
@@ -50,7 +51,7 @@ The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` (retire
 holds every rollout key but `verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus
 `auto_retries`, `spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and
 `capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths`,
-`test_credentials`, `weight_mem_gb` and `weight_cores` (REPO_ONLY: each refused under `[defaults]` with `<key> is per
+`test_credentials`, `weight_mem_gb`, `weight_cores` and `unreachable_paths` (REPO_ONLY: each refused under `[defaults]` with `<key> is per
 repo: set it under [repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
 `[repo."o/r"]` label as MACHINE_ONLY's keys are, and kept out of `settings`). Dotted keys
 (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form, with two exceptions:
@@ -122,6 +123,19 @@ from until its project and `scope:` have measured runs (`_weight`; execute away.
 is an operator's hand edit, or a Reflection's Tuning through tune.py (p53-5: one whole unit toward its measure); no
 writer here adds them. A schema-5 reader ignores them under a schema-6 file (the schema rule
 below), so its slot-taken records the built-in Weight.
+
+`unreachable_paths` (p52-1, ADR 0081 d1; schema 7, the first schema-7 key) is the repo's Unreachable surface: the
+paths whose code no check in its rollouts' verifier exercises (Codex computer use, device-only code). A diff that
+touches one is on an Unreachable surface whatever its plan declares: the backstop behind the plan's own declaration
+(and the implementer's, for a task with no plan). Its value is a list of git pathspec globs read exactly as
+`inert_paths`' (the same glob_problem() rule, at most 64, no glob twice), and a glob holding a `[…]` class that will
+not compile (glob_class_problem(): `[b-a]`, a range out of order) is refused too, since the engine compiles each glob
+and would refuse the lead's args instead; empty by default (built-in []: no backstop).
+It is per repo, so `[defaults]` refuses it. It is never stamped on a rollout and is no Tuning key: an operator's hand
+edit, and no writer here adds it. It is not in `settings`: resolve() reports it as its own top-level
+`unreachable_paths` (Output). execute's lead passes its value as the engine's `args.unreachablePaths` (execute § 3),
+and the engine marks a task whose code-writing agents report a changed path one of these globs matches. A schema-6
+reader ignores it under a schema-7 file (the schema rule below), so that rollout marks only what a task declares.
 
 `[notify]` is retired (ADR 0075 d2: no rollout code notifies Lachy, so nothing reads the ntfy topic it held, ADR 0038
 d3). A top-level `notify`, in any form (a table, a scalar, dotted or inline, valid or not), is skipped whole: never
@@ -197,6 +211,7 @@ schema rule above):
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
 - a `weight_mem_gb` or `weight_cores` under `[defaults]`, or one that is not a finite number > 0 (a boolean refused; p53-3);
+- an `unreachable_paths` under `[defaults]`, one `inert_paths` would refuse, or a glob glob_class_problem() refuses (p52-1);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a bad or case-duplicate repo key.
@@ -222,6 +237,7 @@ Output. Exit 0 and one JSON line on stdout:
      "test_logins": {"value": ["<name>", ...], "source": "file:defaults"|"built-in"},  # built-in []: none
      "weight": {"mem_gb": {"value": <num>, "source": "file:repo"|"built-in"},       # built-in 3
                 "cores": {"value": <num>, "source": "file:repo"|"built-in"}},       # built-in 2
+     "unreachable_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},  # built-in []
      "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
      "ignored": ["<scope path of each ignored key>", ...],     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
      "retired": ["notify"] | []}                               # a retired table the file holds (ADR 0075 d2)
@@ -247,6 +263,7 @@ Tuning may move; run_record.py's TUNING_KEYS is pinned to it), SETTING_KEYS (KEY
 DEFAULTS_ONLY, MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
 GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
+glob_class_problem(glob) (why a glob's `[…]` class will not compile, or None: unreachable_paths' extra check),
 credential_problem(value) (why a test_credentials value is refused, or None), logins_problem(value) (the same for
 test_logins),
 near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
@@ -265,6 +282,7 @@ import re
 import signal
 import subprocess
 import sys
+import warnings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAND_SH = os.path.join(HERE, "land.sh")
@@ -282,7 +300,8 @@ MACHINE_ONLY = ("verify_slots", "capacity_max")
 # (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045);
 # `test_credentials` its test-credential class (ADR 0063), one line in its table.
 # `weight_mem_gb` and `weight_cores` (p53-3, ADR 0083 DfL 8) its estimated Weight, numbers > 0.
-REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores")
+# `unreachable_paths` (p52-1, ADR 0081 d1) its Unreachable surface, globs read as inert_paths' are.
+REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores", "unreachable_paths")
 # A task's estimated Weight (p53-3): the repo's two keys, and the built-in middle value of each (3 GB and 2 cores).
 WEIGHT_KEYS = ("weight_mem_gb", "weight_cores")
 WEIGHT_BUILT_IN = {"weight_mem_gb": 3, "weight_cores": 2}
@@ -321,7 +340,7 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 6
+SCHEMA = 7
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k != "capacity_max"})
@@ -333,6 +352,7 @@ KEY_SCHEMA[("rollout", "capacity_max")] = 4   # p36-7 (ADR 0067 d8): the first s
 KEY_SCHEMA[("rollout", "test_logins")] = 5   # p37-4 (ADR 0034's 2026-11-05 amendment): the first schema-5 key
 KEY_SCHEMA[("rollout", "weight_mem_gb")] = 6   # p53-3 (ADR 0083 DfL 8): the first schema-6 keys
 KEY_SCHEMA[("rollout", "weight_cores")] = 6
+KEY_SCHEMA[("rollout", "unreachable_paths")] = 7   # p52-1 (ADR 0081 d1): the first schema-7 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -565,6 +585,30 @@ def glob_problem(glob):
     return None
 
 
+def glob_class_problem(glob):
+    """Why a `[…]` class in `glob` cannot be read (a range out of order, `[b-a]`), or None: `unreachable_paths`' check
+    beyond glob_problem() (p52-1). Each class is found and built as inert-paths.py's _seg_re builds it, and the engine's
+    unreachableGlobRe is that builder's port, so a glob this passes compiles in the engine too: the file, never the
+    engine's args refusal, names the bad glob. A class git would read as matching nothing is refused, never matched."""
+    for seg in glob.split("/"):
+        i = 0
+        while i < len(seg):
+            j = seg.find("]", i + 2) if seg[i] == "[" else -1
+            if j >= 0:
+                body = seg[i + 1:j]
+                if body[:1] in ("!", "^"):
+                    body = "^" + body[1:]
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")   # a `[` in a class is Python's "possible nested set"
+                        re.compile("[" + body.replace("\\", "\\\\") + "]")
+                except re.error as e:
+                    return "holds the class %s, which cannot be read as one (%s)" % (json.dumps(seg[i:j + 1]), e.msg)
+                i = j
+            i += 1
+    return None
+
+
 def credential_problem(value):
     """Why a `test_credentials` value is no valid test-credential class (the header's rules, the first failure wins), or
     None. A refused value is described, never echoed."""
@@ -757,7 +801,7 @@ def _validate(text, doc, path):
                 for glob in value:
                     if not isinstance(glob, str):
                         refuse("%s %s: each glob must be a string, got %s" % (label, key, _describe(glob)), at + (key,))
-                    why = glob_problem(glob)
+                    why = glob_problem(glob) or (glob_class_problem(glob) if key == "unreachable_paths" else None)
                     if why:
                         refuse("%s %s: the glob %s %s" % (label, key, json.dumps(glob), why), at + (key,))
                 if len(set(value)) != len(value):
@@ -955,8 +999,11 @@ def resolve(repo=None, path=None):
         part = key[len("weight_"):]
         weight[part] = ({"value": overrides[key], "source": "file:repo"} if key in overrides
                         else {"value": WEIGHT_BUILT_IN[key], "source": "built-in"})
+    unreachable = ({"value": list(overrides["unreachable_paths"]), "source": "file:repo"}
+                   if "unreachable_paths" in overrides else {"value": [], "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
             "inert_paths": inert, "test_credentials": creds, "test_logins": logins, "weight": weight,
+            "unreachable_paths": unreachable,
             "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"]),
             "retired": list(tables["retired"])}
 
