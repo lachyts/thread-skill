@@ -13,7 +13,7 @@ Label each question before it is asked:
 | *yours* | intent, how important it is, how robust it must be, who it is for, how it feels, his taste or lived use, which thing he meant, and an authorisation an ADR keeps as his (ADR 0008's sign-offs, ADR 0011's vault tasks) | Ask it, in the Framing (§ 3). |
 | *priorities* | a call his stated priorities, or the project's `## Priorities` card, already answer | Decide it and list it (§ 2). |
 | *technical* | a call the code, the data, the ADRs or research can settle | Research it, decide it and list it (§ 2). |
-| *gate* | a process step: "next move?", "archive?", a "write it?" he already approved, confirming a queue he approved, a review STOP, "shall I carry on?" | Never ask: design it out, or decide and say so in one line. |
+| *gate* | a process step: "next move?", "archive?", a "write it?" he already approved, confirming a queue he approved, a review STOP, "shall I carry on?" | Never ask: design it out, or decide and say so in one line, since a process step spends his attention on a call that is not his to make. |
 
 - A confirm of content he owns but has not seen (a roadmap, a draft in his voice) is *yours*.
 - The steering exception (Chorus ADR 0110 d3): a detail he has said he steers is *yours*, whatever its kind.
@@ -21,7 +21,10 @@ Label each question before it is asked:
 - Spend under the standing approval is never asked (Chorus ADR 0108 d4): a fork about spend alone is *priorities*.
 - A credential in its repo's declared test-credential class is never asked ahead (ADR 0063): the standing approval signs it at the stop, or asks then.
 - A credential gate naming only a declared test Login (`[defaults] test_logins`) is never asked ahead (p37-4): the standing approval signs it at the stop, or asks then.
-- A review STOP or a design gap is never his by default: it goes to the agent that can resolve it.
+- A review STOP or a design gap is never his by default: it goes to the agent that can resolve it, unless he has said he
+  steers it (the steering exception above).
+- A routine step needs no question at all: a read, a read-only command a skill names (`gh pr view`, /thread:status, a scan its own § says writes
+  nothing) and a re-run of a read that died on a network error are taken on your own, since none of them changes anything he would overturn. Each skill's § Don't lists its own.
 - An open `fork for Lachy` stays *yours* until he rules on it.
 - The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question until p30-10 decides it: until
   then it is asked, in the Framing, except under the Backlog orient, which creates it (ADR 0071).

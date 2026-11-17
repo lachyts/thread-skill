@@ -20,7 +20,7 @@ there, whatever else it links. Every other open task is skipped with the first r
 
 - `unhomed`: no live project;
 - `in flight`: in progress, in review, or in a live rollout (`_shared/vault-grammar.md` § In flight). In-flight work
-  is never graded or routed again. At schedule's Pre-flight on a supersede, a carried task still queued (status
+  is never graded or routed again, since it already runs and a second route would start it twice. At schedule's Pre-flight on a supersede, a carried task still queued (status
   `open`, its `rollout:` naming the rollout being superseded) is gradeable (`--superseding`, ADR 0047); one that has
   started stays `in flight`;
 - `hold`: any other status.
@@ -308,7 +308,7 @@ agent time, since Lachy is there throughout.
 
 Each run lists its members in rank order as `ready`, `waiting` (One call and Grill) and `blocked` (held). It sums the
 agent minutes, decision minutes and Review load of its ready and waiting members, carries its home project's (else
-its repo row's) `blockers` and `unchecked` verbatim (unchecked never means clear), and takes the best rank among its ready and waiting members,
+its repo row's) `blockers` and `unchecked` verbatim (unchecked never means clear: a check nobody ran may still stop the run), and takes the best rank among its ready and waiting members,
 or none when every member is blocked. The runs are listed in rank order, the unranked last.
 
 **decisions[].** The One call tasks first (round `one-call`), then the Grill tasks (round `grill`), each in rank order,
