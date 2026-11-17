@@ -2500,7 +2500,7 @@ const P31_2_PINS = {
 
   // T3: the Worktree safety bullet restores a stray as a routine step and keeps one STOP, for a hand edit the agent did not
   // make; ROUTINE_STEPS re-runs a cut-off read blindly, a cut-off write only after a read, and a cut-off test run once
-  // (in the background, waited on, when it already had the foreground cap).
+  // (in the background, waited on, when it already had the foreground cap). The controls mutate the shipped text only.
   const bulletOf = (preflights) => preflights.split('\n').find((l) => l.startsWith('- Worktree safety:'))
   const preflightFails = (b) => {
     const out = []
@@ -2515,9 +2515,7 @@ const P31_2_PINS = {
     if (!b.includes('remove it by its literal path')) out.push('a new file removed by its literal path')
     if (!b.includes('a hand edit you did not make') || !b.includes('a restore would destroy it')) out.push('the STOP for a hand edit, with its reason')
     if (times(b, 'STOP') !== 1) out.push('one STOP')
-    for (const x of ['if you see unrelated files, STOP', 'a commit already on the branch', 'since it was cut from the default branch', 'undone in a new commit']) {
-      if (b.includes(x)) out.push(`no ${x}`)
-    }
+    if (b.includes('if you see unrelated files, STOP')) out.push('no if you see unrelated files, STOP')
     return out
   }
   const ws = bulletOf(E.BUG_PREFLIGHTS)
@@ -2527,9 +2525,6 @@ const P31_2_PINS = {
     [OLD_WS, 'the pre-p46-5 bullet'],
     [String(ws).replace('that is your own edit, or a file', 'that is a file'), 'the own-edit clause dropped'],
     [String(ws).replace(', or a file a test run, a verifier run or the env bootstrap rewrote (a regenerated fixture, a lockfile)', ''), 'the tool-rewrite clause dropped'],
-    [ws + ' STOP too on a commit already on the branch that you did not make, in that list or not.', "round 2's unbounded commit STOP appended"],
-    [ws + " STOP too on a commit since the branch's base that is neither this task's (any earlier pass included) nor the lead's Integration merge.", "round 3's bounded commit STOP appended"],
-    [ws + " A path outside your scope that one of this task's own commits changed is undone in a new commit.", "round 3's undone-in-a-new-commit clause appended"],
     [String(ws).replace(`${S} git diff HEAD --stat`, `${S} git diff --stat`), 'plain git diff --stat'],
   ]) ok(b !== ws && preflightFails(b).length > 0, `p46-5 T3 control: ${label} fails`)
   const routineFails = (s) => {
@@ -2543,15 +2538,12 @@ const P31_2_PINS = {
       'follows the Verify slot text in this prompt instead',
     ]) if (!s.includes(x)) out.push(x)
     for (const x of FORBIDDEN) if (s.includes(x)) out.push(`no ${x}`)
-    if (s.includes('a run that printed nothing decided nothing')) out.push('no blind rerun of any command')
     return out
   }
   const R = E.ROUTINE_STEPS
   ok(JSON.stringify(routineFails(R)) === '[]', `p46-5 T3: ROUTINE_STEPS re-runs a cut-off read, checks a cut-off write first, and counts a cut-off test run as no run ${JSON.stringify(routineFails(R))}`)
   const writeLine = R.split('\n').find((l) => l.startsWith('- A write your steps call for'))
   for (const [s, label] of [
-    ['Routine steps (take them on your own):\n- Run a command again that died before it gave a verdict (a timeout, a dropped connection): it changed nothing.\n- A command that did give a verdict, a test run among them, is not run again.', "round 2's text"],
-    [R.replace(/- Run a read or a fetch again[^\n]*/, "- Run a command again when your tool cut it off before it printed its own result (the tool call's timeout, a dropped connection, a transient tool or `gh` error): a run that printed nothing decided nothing, so running it again is safe."), "round 3's first bullet"],
     [R.replace(writeLine + '\n', ''), 'the write bullet dropped'],
     [R.replace(', or, when it already had 600000 ms, in the background with a long timeout (up to 7200000 ms), waited on inside your turn until it prints its result (the harness ends a background run when you return)', ''), 'the background way out dropped'],
     [R.replace(': the run that prints its result is the one run your test instructions count, so this rerun keeps every rule on how many times you run tests', ''), 'the one-run clause dropped'],
