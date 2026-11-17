@@ -71,6 +71,15 @@ and 10.0 minutes and the roll-up at 3 seconds, so the check took 15.8 minutes; e
 twice the slowest rounded up to a multiple of 5. Shard 1 is the long pole: it holds `tests/reflect-weekly.test.mjs`,
 about 10.3 minutes of CI alone. Pinned by `tests/ci-workflows.test.mjs` W1-W3 and W8 (W8 runs the roll-up's script and
 reads the file with lead-integrate.py's own line reader).
+Decided for you 1's light Mac verify built by p54-8, the task the queue's hold releases on: `CLAUDE.md`'s `Verifier:`
+is `THREAD_SKIP_SLOW=1 make test-fast`, so the rollout's `verifier:` schedule stamps from it leaves the Slow tier out at
+Integration and at an agent's Checkpoint (one line, so the two go light together), as GitHub's check does, and keeps a
+SLOW suite the diff edits; `Completion verifier:` stays `make test`, the full suite. Pinned by
+`tests/fast-tier-wiring.test.mjs` W3 (both lines) and W4 (the template stamped with it), and `tests/fast-tier.test.sh`
+G8 (both lines run through the real Makefile: the first leaves a SLOW suite out and names it, the second runs it).
+Nothing restamps a running rollout's `verifier:`: the running thread-skill rollout takes the line when it is restamped
+by hand at its next Reinstate, onto a snapshot at a Green tip that holds p54-6 and p54-7 (and p54-8 itself), or at
+p54-14's Engine catch-up. Its "at the same time as GitHub's check" half is not built here.
 d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
 `tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
 preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and

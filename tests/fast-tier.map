@@ -18,7 +18,8 @@
 # does not select them; each line's trailing comment says what they hold it as. `OWN-LISTINGS <test>...` excuses tests
 # from check (f) on one of the two kinds the selector's docstring defines; each line's trailing comment says which kind
 # applies and what it lists. `SLOW <test>...` declares the Slow tier (ADR 0084 d3): exact collected test paths, which
-# place and select nothing; THREAD_SKIP_SLOW=1 (GitHub's check) leaves them out of --fast unless the diff edits them.
+# place and select nothing; THREAD_SKIP_SLOW=1 (GitHub's check, and the Mac's verify through CLAUDE.md's Verifier:)
+# leaves them out of --fast unless the diff edits them.
 # `READERS <name>...` declares FOREIGN names whose readers are declared on each file's line, so such a file selects only
 # its lines' entries, and check (k) keeps the lines true.
 
@@ -26,7 +27,7 @@ FOREIGN SKILL.md CONTEXT.md README.md THREAD.md CLAUDE.md
 READERS SKILL.md
 
 # ---- FOREIGN-ONLY: tests that never read this repo's copy of the name (a reader stays off: repo-threads reads the real
-# CONTEXT.md, fast-tier-wiring the real CLAUDE.md, inert-paths proves globs on this tree) ----
+# CONTEXT.md, fast-tier-wiring and fast-tier's G8 the real CLAUDE.md, inert-paths proves globs on this tree) ----
 FOREIGN-ONLY THREAD.md tests/leg.test.sh tests/lead-integrate.test.sh tests/git-env-canary.test.sh  # fixture repos' close-outs
 FOREIGN-ONLY THREAD.md tests/leg-land.test.sh tests/leg-security.test.sh  # fixture repos' close-outs
 FOREIGN-ONLY THREAD.md tests/primary-refresh.test.sh tests/land.test.sh tests/pushed-base.test.sh  # fixture repos' close-outs
@@ -44,7 +45,6 @@ FOREIGN-ONLY CONTEXT.md tests/thread-placement.test.mjs tests/reflect-grades.tes
 FOREIGN-ONLY CONTEXT.md tests/fast-tier.test.sh  # R8's select --paths argument
 FOREIGN-ONLY CLAUDE.md tests/self-rollout-check.test.sh tests/estate-scan.test.mjs  # fixture repos' files
 FOREIGN-ONLY CLAUDE.md skills/execute/tests/prompt-invariants.test.mjs tests/reflect-score.test.mjs tests/reflect-weekly.test.mjs  # prompt strings, comments
-FOREIGN-ONLY CLAUDE.md tests/fast-tier.test.sh  # R8's select --paths argument
 FOREIGN-ONLY SKILL.md tests/serial-chains.test.sh tests/estate-dispatch.test.mjs  # a fixture note's ~/.agents path, a header comment
 FOREIGN-ONLY SKILL.md tests/fast-tier.test.sh  # R11's select --paths arguments, C4's temp skills tree
 FOREIGN-ONLY SKILL.md skills/execute/tests/approved-gates-resume.test.mjs  # a header comment

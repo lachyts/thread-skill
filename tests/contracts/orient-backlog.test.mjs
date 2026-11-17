@@ -176,7 +176,7 @@ function check(F) {
   const nums = b6.split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => Number(l.split('.')[0]))
   if (JSON.stringify(nums) !== JSON.stringify(Array.from({ length: 23 }, (_, i) => i + 1))) flag('answers', `B6 is numbered ${JSON.stringify(nums)}`)
   need('answers', 'B6', b6, ['A fork asks nothing', 'Yes, without the question (ADR 0071)', '`timeout: 600000`', 'the fork routes nothing',
-    "Step 2.6's baseline: `none`", '`plan_approval: required`', "the prompt's `projectSlug`", 'because B8 owns the start',
+    "Step 2.6's baseline: captured as written", '`plan_approval: required`', "the prompt's `projectSlug`", 'because B8 owns the start',
     "its own read-only grading agents", 'there is no round and no `record`'])
 
   // write-back

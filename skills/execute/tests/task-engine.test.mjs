@@ -39,7 +39,8 @@ const slugOf = (label) => label.split(':')[1].split(/[ @]/)[0]
 //   the key is left out); dead(label) → true makes the agent return null on both runAgent attempts;
 //   result(label) → fields merged over an implement / investigate / revise result; bounce(label) → the gateBounce
 //   a plan judge returns (absent ⇒ the key is left out, ADR 0038); revisedPlan: the plan reviser's text, a string
-//   or (label) → string (default the planner's) }
+//   or (label) → string (default the planner's); planFeedback(label, prompt) → a plan judge's bullets (default one
+//   `fix <label>` on changes); planJudge and review also receive the rendered prompt as their second argument }
 // Every dispatch's opts are recorded, in order, as { label, opts } (run()'s `opts`).
 function stub(script = {}) {
   const unknown = []
@@ -60,9 +61,10 @@ function stub(script = {}) {
       case 'plan-judge':
       case 'review': {
         const fn = kind === 'review' ? script.review : script.planJudge
-        const verdict = fn ? fn(label) : 'approve'
+        const verdict = fn ? fn(label, prompt) : 'approve'
         const q = script.ask ? script.ask(label) : undefined
-        const fb = kind === 'review' && script.feedback ? script.feedback(label) : undefined
+        const fb = kind === 'review' && script.feedback ? script.feedback(label)
+          : kind === 'plan-judge' && script.planFeedback ? script.planFeedback(label, prompt) : undefined
         const h = kind === 'review' && script.head ? script.head(label) : undefined
         const b = kind === 'plan-judge' && script.bounce ? script.bounce(label) : undefined
         return {
@@ -719,6 +721,38 @@ test('p31-2: a fixture PR: each judge reads its latest code-writer\'s delta line
   const d = DT.IMPL_RESULT.properties.testDelta
   assert.ok(d && d.type === 'object' && !DT.IMPL_RESULT.required.includes('testDelta'), 'IMPL_RESULT: testDelta is optional')
   assert.equal(DT.IMPL_RESULT_SECURED.properties.testDelta, d, 'IMPL_RESULT_SECURED inherits the same testDelta')
+})
+
+// ---- p47-13: the plan gate rejects a plan whose acceptance review can never close -------------------------------
+// A fixture plan whose acceptance covers every form of an open set (Watch 2eeb9875: a write guard that parses every
+// shell form). The scripted judge applies the criterion only when its rendered prompt carries it, and only to the plan
+// it is shown (planOf: the text between the prompt's `---` lines, since the criterion's own example names a shell form
+// too), so a prompt that lost the criterion lets the plan through and fails here. Kept unbounded through the revise,
+// the plan is plan-blocked before any code, with the reason in its diagnosis; revised to an allowlist, it is approved
+// and built.
+const UNBOUNDED = 'Unbounded acceptance:'
+const planOf = (prompt) => (prompt.split('The plan to review:\n---\n')[1] || '').split('\n---\n')[0]
+const PLAN_UNBOUNDED = 'Planned on: abc\n### Files to modify\n- guard.py\n### Test strategy\n- acceptance: the guard refuses every shell form that writes the file\n### Gated inputs\nNone'
+const PLAN_BOUNDED = 'Planned on: abc\n### Files to modify\n- guard.py\n### Test strategy\n- acceptance: only the allowlisted commands (cp, mv, tee) may write the file; every other command is refused\n### Gated inputs\nNone'
+const judgeOpenSets = {
+  planJudge: (l, prompt) => (prompt.includes(`bullet starts "${UNBOUNDED}"`) && planOf(prompt).includes('every shell form') ? 'changes' : 'approve'),
+  planFeedback: () => [`${UNBOUNDED} "every shell form that writes the file" is an open set; bound it with an allowlist of the commands allowed to write`],
+}
+
+test('p47-13: a fixture plan with an unbounded acceptance is plan-blocked with that reason; its bounded revision is built', async () => {
+  const task = mkTask('proj-guard', { rung: 'opus-high', planGate: true, maxPlanRounds: 2 })
+  const blocked = await run(mkArgs(task), { ...judgeOpenSets, plan: PLAN_UNBOUNDED })
+  assert.equal(blocked.error, undefined)
+  assert.deepEqual(blocked.unknown, [])
+  assert.deepEqual(blocked.labels, ['plan:proj-guard', 'plan-judge:proj-guard r1', 'plan-revise:proj-guard r2', 'plan-judge:proj-guard r2'], 'no code is written')
+  const row = blocked.result.tasks[0]
+  assert.deepEqual([row.status, row.plan, row.prUrl], ['plan-blocked', null, ''])
+  assert.match(row.blockerDiagnosis, /^plan not approved after 2 rounds\.[\s\S]*Round 1: Unbounded acceptance: "every shell form/)
+  assert.ok(blocked.calls.find((c) => c.label === 'plan-revise:proj-guard r2').prompt.includes(`${UNBOUNDED} "every shell form`), 'the reviser reads the reason')
+
+  const bounded = await run(mkArgs(task), { ...judgeOpenSets, plan: PLAN_UNBOUNDED, revisedPlan: PLAN_BOUNDED })
+  assert.deepEqual(bounded.unknown, [])
+  assert.deepEqual([bounded.result.tasks[0].status, bounded.result.tasks[0].plan], ['review', PLAN_BOUNDED])
 })
 
 // ---- ADR 0038: a Cap is a promise. The plan judge prices spend gates while args.gatePricer is set ---------------
