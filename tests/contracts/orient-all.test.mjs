@@ -297,7 +297,7 @@ function check(files, consts) {
   if (JSON.stringify(starts) !== JSON.stringify(started)) flag('o10', `§ 7's table ${JSON.stringify(starts)} ≠ STATUS_ACTIONS ${JSON.stringify(started)}`)
 
   // o11: the Grade log.
-  if (!/Unless this is a dry run, `[^`]*estate-dispatch\.py log --rank "\$S\/rank\.json" --scan "\$S\/scan\.json"`/.test(s2)) {
+  if (!/Unless this is a dry run, `[^`]*estate-dispatch\.py log --rank "\$S\/rank\.json" --scan "\$S\/scan\.json"[^`]*`/.test(s2)) {
     flag('o11', '§ 2 does not run `estate-dispatch.py log --rank ... --scan ...` guarded "Unless this is a dry run"')
   }
   need('o11', '§ 9', s9, ['Runs §§ 2–3 (not § 2 step 7)'])

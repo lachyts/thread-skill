@@ -139,6 +139,8 @@ overwrites, because each is independent of the pause and the lead:
   block-keyed so a later run, status and the lead find it). Its one save carries, the entry last, the removal of the
   `## Needs you` section it answers, a `--raise <field>` on Lachy's word and a confirmed `--pr`.
 - § 5: a defer of a set-aside task with its queued dependants.
+- § 6's *What ran* line: one dated `repair: ran on …` line on the rollout note's `## Notes`, before a run's first write.
+  It names no task, so no read a live call makes of `## Notes` matches it.
 - § 3g: the lane ack, on Lachy's word (`reconcile-rollout.py lane-ack`, ADR 0048). It writes only the rollout note's
   `## Lane log`: no task note, no event, and nothing a live call reads, so a pause or a live lead never holds it back.
 - § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
@@ -843,6 +845,18 @@ missing branch (task + restore, recut, defer or leave), and the escalations of �
 possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + the recorded decision), and
 merges into another base (task + PR + base), and each git-env trip (§ 3e: the trip lines, the evidence's sha,
 the choice, any restore and its rescue line, and the ack line).
+
+**What ran (ADR 0079 decision 5).** Every run that acts writes one dated line on the rollout note's `## Notes` before
+its first write: `- <YYYY-MM-DD> repair: ran on <model id> at <effort>`, this session's own model id as the harness
+names it and its effort (`$CLAUDE_EFFORT`; ` at <effort>` left off when it is unset). A run acts when it writes
+anything §§ 3–5 name, on the rollout note or a task note: a dated `repair:` line, an answer (`record-answer`), a
+sign-off (`approve-gates`), a hand-back, a descope, a defer, a `resume`, an ack, a `prove`, or a merge setting restored
+or dismissed. A run that only diagnoses writes none. It is an every-mode write (§ 1), so a run under a pause or beside a
+live lead that records an answer writes it too. The weekly Reflection reads it as metadata, never friction (reflect
+step 11), so it never makes a rollout repairs-only; the Completion log copies it with the rest, and a later measure of
+repair (the share of runs after which the rollout completes, by model) reads it. It records what ran and never sets
+it: which model a Session opens on is Chorus's (Chorus ADR 0119). Two runs write none: § 1's close-out, which writes
+nothing else in the vault, and a serial chain's repair (§ 7), which writes no `## Notes` line by hand.
 
 ### 7. A serial chain
 

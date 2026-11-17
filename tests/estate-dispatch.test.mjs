@@ -1188,6 +1188,7 @@ test('D16. log: one grade line per graded task, Orient included, under one pass;
     assert.equal(l.rank, t.rank ?? undefined, `${t.slug}: rank`)
     assert.equal(rowOf[l.task]?.rollout ?? null, null, `${t.slug}: the fixture rows link no rollout`)
     assert.equal(l.linked, undefined)
+    assert.deepEqual(['model' in l, 'effort' in l], [false, false], `${t.slug}: no --model, no model (p46-6)`)
   })
   const by = Object.fromEntries(lines.map((l) => [l.task, l]))
   assert.deepEqual([by['act-orient'].grade, by['act-orient'].shape, 'rank' in by['act-orient']], ['Orient', 'serial', false])
@@ -1598,13 +1599,19 @@ test('D20. record --by schedule names the Pre-flight; --superseding writes a car
 })
 
 // ---- D21. log over the Pre-flight's rank ------------------------------------------------------------------------------
-test('D21. log over the Pre-flight rank: one grade line per graded candidate, the carried one linked to its prior', () => {
+test('D21. log over the Pre-flight rank: one grade line per graded candidate, the carried one linked to its prior, each with the graders\' model and effort', () => {
   const rk = pfRanked()
   const EV = path.join(S, 'pf', 'events')
-  const run = py(['log', '--rank', VF_RANK, '--scan', VF_SCAN], { THREAD_EVENTS_DIR: EV })
+  // p46-6 (ADR 0079 decision 5): the lead passes the model and effort its graders ran on; an empty --effort (an unset
+  // $CLAUDE_EFFORT) records none.
+  const empty = py(['log', '--rank', VF_RANK, '--scan', VF_SCAN, '--model', 'claude-opus-5-5', '--effort', '', '--dry-run'], { THREAD_EVENTS_DIR: EV })
+  assert.equal(empty.status, 0, empty.stderr)
+  assert.ok(empty.stdout.includes('"model": "claude-opus-5-5"') && !empty.stdout.includes('"effort"'), empty.stdout)
+  const run = py(['log', '--rank', VF_RANK, '--scan', VF_SCAN, '--model', 'claude-fable-5-2', '--effort', 'high'], { THREAD_EVENTS_DIR: EV })
   assert.equal(run.status, 0, run.stderr)
   assert.match(run.stdout, /^logged 8 grade\(s\), pass g-/)
   const lines = fs.readFileSync(path.join(EV, 'grades.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  assert.deepEqual(lines.map((l) => [l.model, l.effort]), lines.map(() => ['claude-fable-5-2', 'high']))
   assert.deepEqual(lines.map((l) => l.task), rk.tasks.map((t) => t.slug))
   assert.deepEqual([...lines.map((l) => l.task)].sort(), ['c', 'co', 'd1', 'd2', 'g', 'o', 'q', 'r'])
   assert.deepEqual(lines.filter((l) => 'linked' in l).map((l) => [l.task, l.linked]), [['q', 'prior']])

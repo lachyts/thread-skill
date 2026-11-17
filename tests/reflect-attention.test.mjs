@@ -283,11 +283,14 @@ test('L2: attention refuses a bad owners file with nothing written; labels by Ow
   assert.match(dry.stdout, /^would write attention: /m)
   assert.equal(sha(reflectionsFile(h)), 'absent')
   // all unknown: no remainder, no flag
-  const unk = ok(h, att(['--owners', writeJson(sp.dir, 'unknown.json', Object.fromEntries(ids.map((i) => [i, 'unknown'])))]))
+  const unk = ok(h, att(['--owners', writeJson(sp.dir, 'unknown.json', Object.fromEntries(ids.map((i) => [i, 'unknown']))), '--model', 'claude-opus-5-5', '--effort', 'xhigh']))
   assert.ok(!/^flag:/m.test(unk.stdout), unk.stdout)
   assert.match(unk.stdout, new RegExp(`^attention ${rid}: 8 questions \\(0 yours, 0 unlabelled\\), 0 trails, 0 circling; attention line written\\n$`))
   let line = rlines(h).filter((l) => l.kind === 'attention').at(-1)
   assert.deepEqual([line.v, line.rollout, line.task, line.questions.byOwner.unknown, line.questions.unlabelled], [1, null, null, 8, 0])
+  // p46-6 (ADR 0079 decision 5): the line records the model and effort the labels were made on; a re-run with the same
+  // labels is no change, whatever it names as ran
+  assert.deepEqual([line.model, line.effort], ['claude-opus-5-5', 'xhigh'])
   assert.equal(ok(h, att(['--owners', path.join(sp.dir, 'unknown.json')])).stdout, `exists attention ${rid}\n`)
   // no owners at all with --rest-unknown: every question unlabelled
   const none = ok(h, att(['--rest-unknown']))

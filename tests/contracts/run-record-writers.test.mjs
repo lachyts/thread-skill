@@ -2,8 +2,8 @@
 // suite-started, suite-ended, base-moved) are each emitted by a script under skills/**/scripts or hooks/, never by
 // prose: no skill or doc tells an agent to run `run_record.py emit`. And recording never delays a result a caller waits
 // on: lead-integrate.py verify writes its suite-ended only after the rc and outcome files, and verify-slot.py run only
-// after its slot is released, a heat-stopped run's (_heat_run_ended) too. Pure matchers, so the real tree and the controls run through the same code. Reads files
-// only.
+// after its slot is released, a heat-stopped run's (_heat_run_ended) too. Session-run work names the model that ran
+// (p46-6). Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { read, textFiles } from '../lib/contract-text.mjs'
@@ -109,6 +109,26 @@ test('control: an arms write outside cmd_close, or after the reflection line, fa
   assert.equal(armsWriters(rx.replace(close, late)).inClose, false)
   const decide = defBody(rx, 'cmd_decide')
   assert.equal(armsWriters(rx.replace(decide, `${decide}    write_line("arms", {}, False)\n`)).elsewhere, true)
+})
+
+// p46-6 (ADR 0079 decision 5): session-run work records the model and effort that ran beside the result it already
+// writes, through the script that writes it (never an emit) or on its own vault note: the graders' grade lines
+// (orient-all, schedule), the Monthly audit's line, the owner labels' attention line and the Reflection's own (reflect),
+// each task orient shapes and each repair run's rollout note. The model is named by the session (a skill cannot read
+// or set it), so the prose is the pin.
+const EFFORT = '--effort "${CLAUDE_EFFORT:-}"'
+const RAN_ON = [
+  ['skills/orient-all/SKILL.md', `--scan "$S/scan.json" --model <model id> ${EFFORT}\``],
+  ['skills/schedule/SKILL.md', `--scan "$S/scan.json" --model <model id> ${EFFORT}\``],
+  ['skills/reflect/SKILL.md', `audit.json --model <model id> ${EFFORT}]`],
+  ['skills/reflect/SKILL.md', `owners.json --model <model id> ${EFFORT}\n`],
+  ['skills/reflect/SKILL.md', `span.json --model <model id> ${EFFORT}\n`],
+  ['skills/orient/reshuffle.md', '`- <UTC ISO> orient ran on <model id> at <effort>`'],
+  ['skills/repair/SKILL.md', '`- <YYYY-MM-DD> repair: ran on <model id> at <effort>`'],
+]
+
+test('session-run work names the model and effort that ran on the result it writes', () => {
+  assert.deepEqual(RAN_ON.filter(([file, needle]) => !read(file).includes(needle)), [])
 })
 
 test('no skill or doc tells an agent to run run_record.py emit', () => {
