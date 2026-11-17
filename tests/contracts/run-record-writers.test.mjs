@@ -31,7 +31,8 @@ export function defBody(text, name) {
 
 export function checkOrder({ li, vs }) {
   const bad = []
-  const verify = defBody(li, 'cmd_verify')
+  // cmd_verify writes <out>.pid and runs its body, _verify, inside a try whose finally drops it (p54-15).
+  const verify = defBody(li, '_verify')
   const end = verify.lastIndexOf('_suite_end(')
   const rcWrite = verify.indexOf('_write_atomic(rc_path')
   const outcomeWrite = verify.lastIndexOf('_write_atomic(outcome_path')

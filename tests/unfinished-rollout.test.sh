@@ -89,7 +89,7 @@
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   J1-J10  this project's running rollout is joined (ADR 0078 d6): the check's `join`, the verb's rows, File-sets,
-#           stamps, re-runs, refusals, WARNs, holds and a concurrent replay
+#           stamps, re-runs, refusals, WARNs, holds and a concurrent replay; J1b an Engine catch-up (p54-14) is joined
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 #   P1-P13  two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4): check's step 2c
@@ -3191,6 +3191,29 @@ ok "$out|$rc" "refuse ro-p|3" "J1: an incomplete never-started note is still ref
 mkro ro-p.md "$R" "$DEMO" "$PAUSED"
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "supersede ro-p|0" "J1: a paused one with --regenerate is still superseded"
+
+# J1b (p54-14): an Engine catch-up (`paused_for: catch-up`) is the engine's own pause, never his: joined in its drain and
+# its move window, never superseded or refused as pausing; carry refuses it; an idle one keeps its Project root
+# (parallel_hold reads it unpaused). J1's draining refusal is the control.
+scen j1b
+CUL=$'\n## Catch-up log\n\n- 2026-10-01T09:00+00:00 drain [[r]] (p9) at 0123456789ab from 0123456789ab: [[f]]\n'
+BODY="$QB$CUL" mkro ro-p.md "$R" "$DEMO" 'pause_requested: true' 'paused_for: catch-up'
+mkt t1.md ro-p in_progress 'owner: execute-live'
+mkt fix.md - open "$DEMO"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "join ro-p|0" "J1b: a catch-up's drain reads join, never is pausing"
+jn --rollout "$T/ro-p.md" --tasks fix
+ok "$rc|$(fm fix.md rollout)" '0|rollout: "[[ro-p]]"' "J1b: … and join joins a task during the drain"
+BODY="$QB$CUL" mkro ro-p.md "$R" "$DEMO" "$PAUSED" 'paused_for: catch-up'
+mkt t1.md ro-p blocked 'owner: execute-live'
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "join ro-p|0" "J1b: its move window (paused: under paused_for: catch-up) reads join, never supersede"
+carry --from "$T/ro-p.md" --dry-run
+ok "$rc" 2 "J1b: carry --from a catching-up rollout is refused"
+has "$err" "is catching up (an Engine catch-up): it resumes by itself; nothing carried" "J1b: … saying why"
+python3 "$CHECK" hold --tasks-dir "$T" --rollout ro-p > "$S.out" 2> "$S.err"
+ok "$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["scope"], d["why"].split(":")[0])' "$S.out")" \
+   "whole not halted on its set-asides" "J1b: an idle catch-up keeps its Project root, read unpaused (his pause would read paused)"
 
 scen j2
 render ro - "$(row 1 r1 —)

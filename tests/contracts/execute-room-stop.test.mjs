@@ -209,14 +209,15 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
     !s14.includes('a room-stopped integrate call (§ Room stop), which holds the lane, is resumed first') ||
     !s14.includes('(`--kind integrate`)') || !s14.includes('no `prepare` runs on its task')) fails.push('lane')
 
-  // stopped-verify: item 9 undoes a stopped verify's M with no canary check (its rc is never a verify result, and a
-  // check there trips `record not armed`); item 4 records what it needs; Check sites says it is none.
+  // stopped-verify: item 9 neither undoes a stopped verify's M nor checks its window (p54-15: the verify route pushed M
+  // before it verified, its verdict stays pending, so prepare takes case (iii); its rc is never a verify result, and a
+  // check there trips `record not armed`); item 4 records nothing for it; Check sites says it is none.
   const sv = bulletOf(skill, 9, 'A stopped verify.')
-  if (!sv.includes('`lead-integrate.py undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, with no canary `check` before it') ||
-    /check --kind verify/.test(sv) || sv.includes('`--kind verify`') ||
+  if (!sv.includes('gets no `undo` and no canary `check`') || !sv.includes('`prepare` takes case (iii)') ||
+    /lead-integrate\.py undo/.test(sv) || /check --kind verify/.test(sv) || sv.includes('`--kind verify`') ||
     !sv.includes('never read as a verify result') || !sv.includes('`record not armed`') ||
-    !it(4).includes('M (`mergeCommit`), `prHead`') ||
-    !checkSites.includes('A verify a room stop stopped is not a check site')) fails.push('stopped-verify')
+    !it(4).includes('records nothing for item 9') ||
+    !checkSites.includes("A verify the lead stopped (a room stop, a hard pause, or the join's TaskStop) is not a check site")) fails.push('stopped-verify')
 
   // stop-at-boundary: mark, then the background watch; TaskStop on `boundary`; relaunch until `all `; exit 3 relaunches;
   // exit 1 or 2 leaves the calls running; nothing live skips only the mark and watch; a gap relaunch re-marks first.
@@ -583,14 +584,16 @@ test('control: the lane freed after the mark, a freed integrate lane, step 1.4 w
   only(sk(l + '\n', ''), 'lane', 'no clause-(4) sentence')
 })
 
-test('control: a canary check before the undo, no bullet, a routed rc, or no Check sites sentence fails stopped-verify', () => {
-  only(sk('gets `lead-integrate.py undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, with no canary',
-    'gets the canary `check` (`--kind verify`, with `--default` as passed to `prepare`), then `lead-integrate.py undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, with no canary'),
+test('control: a canary check or an undo on a stopped verify, no bullet, a routed rc, or no Check sites sentence fails stopped-verify', () => {
+  only(sk('gets no `undo` and no canary `check`:',
+    'gets the canary `check` (`--kind verify`, with `--default` as passed to `prepare`), then no `undo` and no canary `check`:'),
   'stopped-verify', 'check re-added')
+  only(sk('gets no `undo` and no canary `check`:', 'gets `lead-integrate.py undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, with no canary `check`:'),
+    'stopped-verify', 'undo re-added')
   const l = rawItem(9).split('\n').find((x) => x.startsWith('   - **A stopped verify.**'))
   only(sk(l + '\n', ''), 'stopped-verify', 'no bullet')
   only(sk('Its rc is never read as a verify result', 'Its rc is routed as step 3 routes a verify rc'), 'stopped-verify', 'rc routed')
-  only(sk(' A verify a room stop stopped is not a check site: its rc is never read, the entry\'s `check-all` has compared its window, and its `undo` runs with no `check` (§ Room stop).', ''),
+  only(sk(" A verify the lead stopped (a room stop, a hard pause, or the join's TaskStop) is not a check site: its rc is never read; the next `check-all` compares its window, which the route's next `arm` overwrites (§ Room stop).", ''),
     'stopped-verify', 'no Check sites sentence')
 })
 

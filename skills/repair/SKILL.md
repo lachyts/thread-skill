@@ -161,6 +161,9 @@ included) or under a stamped pause, where no call is live; otherwise they wait f
   nothing to do" while a lead is live (the owner check below, under which a room stop counts as live); with
   none, nothing is draining it, so `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
   RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
+- Under `paused_for: catch-up` (an Engine catch-up, execute § 4.5 *Engine catch-up*), repair reports "catching up:
+  the lead's own move", never clears its stamps or its `## Catch-up log`, and with no live lead points at
+  `/thread:execute [[<rollout>]]`, whose self-Reinstate finishes the move.
 - Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, a raise beyond the one
   an answer's entry carries, `resume` or the loop, and it never clears the stamp or the flag.
 - One exception, the sign-off pause (ADR 0034): under a stamped pause whose `paused_for` is `sign-off` (execute

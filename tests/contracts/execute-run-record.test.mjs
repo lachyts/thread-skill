@@ -211,7 +211,8 @@ function checkLedger(md) {
     p.includes("The heartbeat's lapse re-entry (clause (2) exit 4) runs it as the entry's first act; its stall re-entry (clause (7)) does not"))
   need('by-forms', [['his own `/thread:execute` or resume', 'lachy'], ['a `Chorus: ` Prompt (a start, a room resume or a re-send)', 'stage'],
     ['a `Chorus: ` Prompt naming a Watchdog recovery', 'watchdog'], ['a heartbeat tick or its re-entry', 'heartbeat'],
-    ["`/thread:repair`'s hand-off", 'repair'], [UPKEEP, 'repair']].every(([what, by]) => p.includes(`| ${what} | \`${by}\` |`)) &&
+    ["`/thread:repair`'s hand-off", 'repair'], [UPKEEP, 'repair'],
+    ["the lead's own self-Reinstate at an Engine catch-up (step 5's `catch-up` halt)", 'catch-up']].every(([what, by]) => p.includes(`| ${what} | \`${by}\` |`)) &&
     p.includes(`| a \`Chorus: \` Prompt naming a Watchdog recovery | \`watchdog\` | | ${UPKEEP} |`))
   // p37-5: Upkeep's halt-repair Prompt is no entry by itself: it runs /thread:repair, whose § 4 hand-off writes the one
   // lead-entry (by: repair, after its launch-directory check), and a Watchdog recovery's repair stays watchdog.
@@ -225,7 +226,7 @@ function checkLedger(md) {
   need('no-hand-writes', p.includes('The lead adds nothing for a halt or a room stop: the Stop hook records each halt (§ 8), and `step-boundary.py begin` each room stop'))
   const hb = md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
   // p54-7: clause (2c), master's full suite, sits between (2b) and (3)
-  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note's path> || true` once, with the Bash tool's `timeout: 600000` (master's full suite, execute § 4.5 *Master's full suite*: never routed on, never blocking), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
+  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (2c) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py master-runs --rollout <the rollout note's path> || true` once, with the Bash tool's `timeout: 600000` (master's full suite, execute § 4.5 *Master's full suite*: never routed on, never blocking), then go on to the next clause. (2d) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py catch-up --rollout <the rollout note's path> || true` once, with the Bash tool's `timeout: 600000` (an Engine catch-up, execute § 4.5 *Engine catch-up*: never routed on), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
   need('heartbeat-2b', hb.includes(B2))
   need('entry-order', md.includes("**Validate `verify_timeout` once per loop entry, before anything the entry writes.** (The Run record's `record-entry` aside: § 2's first write.)") &&
     labelled(md, 'Landing-register re-check.').includes('re-runs § 2.5 before anything else it does, `record-entry` aside (*Run record*)') &&

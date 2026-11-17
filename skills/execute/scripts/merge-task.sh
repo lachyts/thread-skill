@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # merge-task.sh — merge ONE integrated PR, and only onto the base its Integration used (ADR 0030, p12-7).
 #
-# Usage:  merge-task.sh <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>
+# Usage:  merge-task.sh [--mac <slug>.mac.json] <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>
 #         merge-task.sh --classify-steps < <failed step names>   the classifier's verdict alone (land-carrier.py)
+#   --mac <file> the Mac verdict file, <repoPath>/.claude/integration/<slug>.mac.json (lead-integrate.py mac): merge only
+#                once it reads green for exactly this pair (The Mac's verdict, below). Taken only when the next argument
+#                ends in `.mac.json`; any other form is a plain `usage:` exit 2.
 #   <repoPath>   absolute path to the target repo (origin must be a github.com remote).
 #   <pr>         a positive PR number, or a https://github.com/<o>/<r>/pull/<N> URL (an optional /…, ?… or #…
 #                suffix is fine) in origin's repo, compared case-insensitively: the lead passes the row's `pr`
@@ -80,6 +83,15 @@
 #                                                                        counter cleared    lead: pause for a
 #                                                                                          human approval,
 #                                                                                          then re-run
+#   11 The Mac's verify of the pair did not pass (`--mac` only): the verdict reads red or stopped, or is missing,
+#      unreadable or for another pair. Prints `the Mac's verify of <IHEAD> did not pass (<state>: <why>): nothing merged`.
+#      At the pre-flight it makes zero GitHub calls.                     counter UNTOUCHED  lead: the verify
+#                                                                                          route's join (execute
+#                                                                                          § 4.5 step 3)
+#   12 No Mac verdict yet (`--mac` only): it still read pending past MERGE_TASK_MAC_WAIT_MAX seconds of the run. Prints
+#      `no Mac verdict yet for <IHEAD> after <n>s: nothing merged; re-run once the verdict is in`.
+#                                                                        counter UNTOUCHED  lead: re-run with
+#                                                                                          --mac once green
 #   8  Retryable, nothing decided: a GitHub read failed transiently after MERGE_TASK_READ_TRIES; origin's
 #      head branch unreadable; GitHub's PR head still lags origin's branch (which holds the integrated head)
 #      after HEAD_LAG_MAX reads; GitHub refused with `Head branch was modified` while the PR head and
@@ -147,8 +159,27 @@
 # script: the lead never re-calls it for that PR, including the cold-resume flush. The lead 1. records the
 # RACE line as a Lead action; 2. runs the rollout verifier on the merge commit; 3. on green, mark-dones the
 # task itself, keeping the RACE line; 4. on red, pauses the rollout for a human. On every MERGED path the
-# exit precedence is 5 > 8 > 6 > 0, and the refresh WARN is printed regardless, so the cold-resume flush can
-# never turn a RACE or an UNVERIFIED into `ok`.
+# exit precedence is 5 > 8 > 6 > 0 (5 > 8 > 12 > 6 > 0 with --mac), and the refresh WARN is printed regardless, so the
+# cold-resume flush can never turn a RACE or an UNVERIFIED into `ok`.
+#
+# The Mac's verdict (ADR 0084 Decided for you 1, p54-15). On the verify route the lead pushes its merge M first, then
+# runs its own verify and this script side by side, so the lane costs the slower of the Mac's verify and GitHub's
+# required checks, never their sum. With --mac <file> (lead-integrate.py mac writes it: {v, slug, head, base, state,
+# why, at}) the verdict is read at three sites, and nowhere else: (a) the pre-flight, right before the pre-pass, with
+# zero GitHub calls: red, stopped, missing, unreadable or another pair's (head ≠ IHEAD, base ≠ IBASE, an unknown state)
+# is 11; pending or green goes on. (c) The merge point, in merge_pr after its base re-check and right before `gh pr
+# merge`: green merges; pending waits (`waiting on the Mac's verify of <IHEAD>`, a MERGE_TASK_WAIT_WORDS line),
+# CHECK_INTERVAL apart, re-checking the base on each poll (a move is 3, the counter appended); anything else is 11.
+# (d) The already-merged path (land_and_finish 0), after verify_merged and before any cleanup: a race or an unverified
+# merge keeps its 5 or 8 at once; an ok one waits the same way, with no base re-check, and a verdict that is not green
+# turns it into a RACE (`RACE: PR #N merged as <M> before the Mac's verify of <IHEAD> passed (<state>: <why>); …`, which
+# reconcile-rollout.py's RACE_LINE_RE reads), so 5. Each wait is bounded: past MERGE_TASK_MAC_WAIT_MAX seconds (6600,
+# under the harness's 7200 s, counted by bash's SECONDS from the run's start) it is 12. So with --mac it never merges
+# and never says `ok` without a green verdict for exactly (IHEAD, IBASE). It writes its pid to <file minus
+# .mac.json>.merge-task.pid before any GitHub call and removes it at its exit while it still holds that pid, so the
+# lead's `prepare` can tell a run still going after a lost handle. The lead, never this script, ends a wait early on a
+# red: it writes the verdict, then TaskStops this run by its task id (143, the counter untouched, never routed), so no
+# wait here holds the lane after a red. Without --mac nothing changes.
 #
 # The head pin. GitHub's PR record (headRefOid) can lag a push the lead just made; origin's branch, read
 # with `git ls-remote` (the same read Integration verifies its push with: task.workflow.js pushedSha), is
@@ -297,6 +328,8 @@ HEAD_LAG_MAX=6         # PR re-reads while GitHub's head lags origin's branch at
 HEAD_LAG_INTERVAL=${MERGE_TASK_HEAD_LAG_INTERVAL:-5}
 REINTEGRATE_MAX=${MERGE_TASK_REINTEGRATE_MAX:-3}         # re-integrations allowed; the next refusal sets aside
 FETCH_TIMEOUT=${MERGE_TASK_FETCH_TIMEOUT:-60}            # seconds per try of the local refresh's fetch (0 reads as 1)
+MAC_WAIT_MAX=${MERGE_TASK_MAC_WAIT_MAX:-6600}            # --mac: seconds of the run (SECONDS) a pending verdict is waited
+                                                         # on before 12; under the harness's 7200 s
 
 # ---- infra-vs-genuine failure classifier (finding #4) ----------------------
 # A red REQUIRED check can be a transient CI infra/setup flake (dependency-install timeout, network blip,
@@ -840,8 +873,9 @@ fi
 # ---- args, environment, sentinel (no gh call precedes the end of this block) ----------------------------
 # The EXIT trap and finish come first, so every exit below, the usage ones included, goes through them.
 # FINAL_RC is set only by finish, SIG_RC only by a signal trap; SENTINEL, PR and COUNTER only once known. LAST_WAIT is
-# the wait the run is in (wait_line), cleared once that wait ends: a signal's last line names it.
-SENTINEL=''; FINAL_RC=''; SIG_RC=''; LAST_WAIT=''; PR=''; COUNTER=''; tmp=''
+# the wait the run is in (wait_line), cleared once that wait ends: a signal's last line names it. MAC_FILE and MAC_PID
+# are --mac's verdict file and this run's pid record beside it (The Mac's verdict, above).
+SENTINEL=''; FINAL_RC=''; SIG_RC=''; LAST_WAIT=''; PR=''; COUNTER=''; tmp=''; MAC_FILE=''; MAC_PID=''; MAC_BAD=0
 ABORT_RC=70   # an exit outside finish and the signal traps: a defect, never 0 and never a table code
 on_exit() {  # EXIT trap — $? MUST be captured first, before any other command overwrites it
   local code=$? out
@@ -864,6 +898,8 @@ on_exit() {  # EXIT trap — $? MUST be captured first, before any other command
     esac
   fi
   [ -n "$tmp" ] && rm -rf "$tmp"
+  # The pid record (--mac) goes once this run ends, and only while it still names this run.
+  if [ -n "$MAC_PID" ] && [ "$(cat "$MAC_PID" 2>/dev/null)" = "$$" ]; then rm -f "$MAC_PID" 2>/dev/null; fi
   # A signal's last line is the wait it cut, never the signal (ADR 0033 d4 as amended 2026-11-12): the lead's reason is
   # `merge-task signalled twice (<code>): <its last line>`. On stdout, which no function call's redirection holds when
   # a trap runs (bash runs a trap inside the redirection of a function call the signal cut, so checks_watch runs its
@@ -889,6 +925,15 @@ wait_line() {  # wait_line <the wait> — print a wait this run is in, and keep 
   echo "  $LAST_WAIT"
 }
 
+# --mac <file> (The Mac's verdict): its argument is taken only when it ends in `.mac.json`; any other form shifts the
+# flag alone, so the sentinel below still clears from the repo path, and the usage exit follows it.
+if [ "${1:-}" = "--mac" ]; then
+  case "${2:-}" in
+    *.mac.json) MAC_FILE=$2; shift 2 ;;
+    *) MAC_BAD=1; shift ;;
+  esac
+fi
+
 # The result sentinel (see the header), cleared before the arg count: one call per PR means the previous
 # call's `ok` is always sitting there, so no exit may leave it standing. A $1 that is no longer a repo (git
 # missing, a broken checkout) still has an existing sentinel there replaced.
@@ -901,7 +946,9 @@ elif [ -n "$REPO_PATH" ] && [ -f "$REPO_PATH/.claude/merge-task.status" ]; then
 fi
 [ -z "$SENTINEL" ] || rm -f "$SENTINEL" 2>/dev/null || true
 
-[ "$#" -eq 4 ] || finish 2 "usage: merge-task.sh <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>"
+USAGE="usage: merge-task.sh [--mac <slug>.mac.json] <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>"
+[ "$MAC_BAD" = 1 ] && finish 2 "$USAGE"
+[ "$#" -eq 4 ] || finish 2 "$USAGE"
 PR_ARG="$2"; IHEAD="$3"; IBASE="$4"
 if [ "$IS_REPO" != 1 ]; then
   command -v git >/dev/null 2>&1 || finish 2 "ERROR: git not found on PATH"
@@ -922,11 +969,17 @@ done
 int_re='^(0|[1-9][0-9]{0,8})$'
 for v in MERGE_TASK_CHECK_INTERVAL MERGE_TASK_STATE_INTERVAL MERGE_TASK_CONFIRM_INTERVAL MERGE_TASK_READ_TRIES \
          MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX MERGE_TASK_FETCH_TIMEOUT \
-         MERGE_TASK_NO_RUNNER_LIMIT MERGE_TASK_NO_RUNNER_POLL MERGE_TASK_UNREPORTED_WAIT_MAX; do
+         MERGE_TASK_NO_RUNNER_LIMIT MERGE_TASK_NO_RUNNER_POLL MERGE_TASK_UNREPORTED_WAIT_MAX MERGE_TASK_MAC_WAIT_MAX; do
   val=${!v:-}
   [ -z "$val" ] || [[ $val =~ $int_re ]] \
     || finish 2 "ERROR: $v='$val' is not a non-negative integer (at most 9 digits) — nothing was read or merged."
 done
+# The pid record (--mac): this run's pid beside the verdict file, before any GitHub call; on_exit removes it. Best-effort:
+# a directory that cannot take it only leaves prepare's holder check blind to this run.
+if [ -n "$MAC_FILE" ]; then
+  MAC_PID="${MAC_FILE%.mac.json}.merge-task.pid"
+  { printf '%s\n' "$$" > "$MAC_PID"; } 2>/dev/null || true
+fi
 
 ORIGIN_URL=$(git -C "$REPO_PATH" remote get-url origin 2>/dev/null) || finish 2 "ERROR: no 'origin' remote in $REPO_PATH"
 SLUG=$(printf '%s' "$ORIGIN_URL" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##')
@@ -1163,6 +1216,67 @@ record_base_moved() {  # record_base_moved <live> — the cap, inline before exi
   finish 3 "$moved (refusal $n; set aside after the $((REINTEGRATE_MAX + 1))th)"
 }
 check_base() { read_base; [ "$LIVE" = "$IBASE" ] || record_base_moved "$LIVE"; }
+
+# ---- the Mac's verdict (--mac; see the header) -------------------------------------------------------------
+MAC_STATE=''; MAC_WHY=''
+mac_read() {  # sets MAC_STATE (green | red | stopped | pending | missing | mismatch) and MAC_WHY; one read, never exits
+  local v
+  MAC_STATE=missing; MAC_WHY="no readable verdict at $MAC_FILE"
+  v=$(python3 - "$MAC_FILE" "$IHEAD" "$IBASE" <<'PY2'
+import json, shlex, sys
+path, head, base = sys.argv[1:4]
+try:
+    with open(path) as fh:
+        d = json.load(fh)
+except Exception:
+    sys.exit(0)
+if not isinstance(d, dict):
+    sys.exit(0)
+st, why = d.get("state"), " ".join(str(d.get("why") or "").split())
+if d.get("head") != head or d.get("base") != base:
+    st, why = "mismatch", "the verdict is for head %s, base %s" % (d.get("head"), d.get("base"))
+elif st not in ("green", "red", "stopped", "pending"):
+    st, why = "mismatch", "an unknown state %r" % (st,)
+print("MAC_STATE=%s MAC_WHY=%s" % (shlex.quote(st), shlex.quote(why)))
+PY2
+) && [ -n "$v" ] && eval "$v"
+  return 0
+}
+mac_refuse() { finish 11 "ERROR: the Mac's verify of $IHEAD did not pass ($MAC_STATE: ${MAC_WHY:-no why}): nothing merged"; }
+mac_bound() {  # 12 once the run has waited past MAC_WAIT_MAX
+  [ "$SECONDS" -ge "$MAC_WAIT_MAX" ] || return 0
+  finish 12 "no Mac verdict yet for $IHEAD after ${SECONDS}s: nothing merged; re-run once the verdict is in"
+}
+mac_gate() {  # (c) the merge point: green → 0; pending → wait, the base re-checked each poll (3), bounded (12); else 11
+  [ -n "$MAC_FILE" ] || return 0
+  while : ; do
+    mac_read
+    case "$MAC_STATE" in
+      green) LAST_WAIT=''; return 0 ;;
+      pending) ;;
+      *) mac_refuse ;;
+    esac
+    wait_line "PR #$PR — waiting on the Mac's verify of ${IHEAD}…"
+    sleep "$CHECK_INTERVAL"
+    mac_bound
+    check_base
+  done
+}
+mac_merged() {  # (d) the already-merged path, VERDICT ok: wait for green; not green → a RACE; pending past the bound → 12
+  while : ; do
+    mac_read
+    case "$MAC_STATE" in
+      green) LAST_WAIT=''; return 0 ;;
+      pending) ;;
+      *) LAST_WAIT=''; VERDICT=race
+         VMSG="RACE: PR #$PR merged as $M before the Mac's verify of $IHEAD passed ($MAC_STATE: ${MAC_WHY:-no why}); origin/$BASE holds a combination the Mac did not pass; re-verify it"
+         return 0 ;;
+    esac
+    wait_line "PR #$PR — merged; waiting on the Mac's verify of ${IHEAD}…"
+    sleep "$CHECK_INTERVAL"
+    mac_bound
+  done
+}
 
 NR_RUNS=0; NR_HELD=0; NR_ROWS=''; NR_LIVE=''
 no_runner_scan() {  # no_runner_scan <runs.json> <jobs-file prefix> <limit> — shell assignments for the NR_* fields (eval'd)
@@ -2088,11 +2202,14 @@ anchor_cleanup() {  # p12-6's anchor lifecycle: the ref goes once the PR merges;
   fi
 }
 
-land_and_finish() {  # land_and_finish <fresh 1|0> — verify, clean up, refresh; exit by 5 > 8 > 6 > 0
+land_and_finish() {  # land_and_finish <fresh 1|0> — verify, clean up, refresh; exit by 5 > 8 > 6 > 0 (5 > 8 > 12 > 6 > 0, --mac)
   local fresh="$1" rrc br
   if [ "$fresh" = 1 ]; then echo "  PR #$PR merged (squash) — verifying the squash commit…"
   else echo "PR #$PR already merged — verifying it against the integrated pair…"; fi
   verify_merged
+  # (d) --mac: a merge this run did not make waits for the Mac's green before any cleanup (a race or an unverified one
+  # keeps its 5 or 8): this run's own merge passed mac_gate green.
+  [ -n "$MAC_FILE" ] && [ "$fresh" = 0 ] && [ "$VERDICT" = ok ] && mac_merged
   anchor_cleanup
   br="$S_HEADREF"
   # Best-effort REMOTE branch cleanup after this run's merge (non-fatal). Local branch + worktree are the reaper's job.
@@ -2197,9 +2314,10 @@ confirm_merged() {  # gh pr merge returned 0: re-read until MERGED; never trust 
   finish 1 "ERROR: gh reported success but PR #$PR is not confirmed merged (queued or auto-merge?); auto-merge disable $dis; a re-run takes the already-merged path if it lands later"
 }
 
-merge_pr() {  # base re-check, the head-pinned squash merge, then confirmation or the refusal order
+merge_pr() {  # base re-check, the Mac's verdict (--mac), the head-pinned squash merge, then confirmation or the refusal order
   local rc err
   check_base
+  mac_gate
   echo "  PR #$PR is $S_MSS — squash-merging at the integrated head ${IHEAD}…"
   gh pr merge "$PR" -R "$OWNER/$REPO" --squash --match-head-commit "$IHEAD" >"$tmp/merge.out" 2>"$tmp/merge.err"; rc=$?
   cat "$tmp/merge.out" "$tmp/merge.err" 2>/dev/null | sed 's/^/  gh: /'
@@ -2230,6 +2348,12 @@ merge_pr() {  # base re-check, the head-pinned squash merge, then confirmation o
   fi
   finish 8 "retryable: gh pr merge failed for PR #$PR ($err) and nothing changed (state $S_STATE, base and head unmoved); re-run"
 }
+
+# ---- (a) the Mac's verdict, pre-flight (--mac): no GitHub call yet ---------------------------------------
+if [ -n "$MAC_FILE" ]; then
+  mac_read
+  case "$MAC_STATE" in green|pending) ;; *) mac_refuse ;; esac
+fi
 
 # ---- pre-pass: default branch, PR, head pin, merge queue, base in head, live base ------------------------
 gh_read "$tmp/repo.json" "default branch" defaultBranchRef.name -- gh repo view "$OWNER/$REPO" --json defaultBranchRef; rc=$?
