@@ -275,33 +275,32 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   launch?, prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
 
 log --rank R --scan S [--model ID] [--effort E] [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md
-  **Grade log**), at
-  orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
-  fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
-  task its key (grade_key below), project its home, grade, agentGrade, shape and size; decisions the
-  count of its decisions[], his decisions only (owner yours, ADR 0054: a decision ruled for him, in decidedForYou[], is
-  never counted, so lines before ADR 0054 are not comparable), and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
-  its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
-  row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name; model and effort,
-  --model and --effort verbatim, on every line of the pass, each left off when not given or empty (p46-6, ADR 0079
-  decision 5: the model and effort the pass's graders ran on, which the lead names; nothing here reads a ladder, and
-  neither is part of the digest, so a rerun that names them differently still completes the same pass). The pass shares one
-  minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank
-  file's realpath, the rank's `today` and the sorted (slug, grade, agentGrade, shape, size) tuples: orient-all's $S is
-  a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. The key (p34-6): a
-  slug is normalise_slug's; estate-scan's slug is the raw file stem, so a titled vault note (spaces, capitals, an em
-  dash: a quick capture's) is keyed by run_record's title_key and its line carries the exact name as `note`, which
-  grades.py looks the note up by. A slug-named task holds its key first, whatever the rank order, and a titled name
-  holds its key next, in rank order, so a titled name whose key another graded task of the pass holds, or a name with
-  no ASCII letter or digit, has no key and is skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each,
-  and the rest are still logged. Every other line passes run_record's check before any is written. A (digest, task)
-  already in grades.jsonl is skipped: with every task there it prints `exists <pass> (<n> grade(s))`; with some, it
-  writes the rest under that pass's id and ts, printing `completed <pass>: <k> more`, so a pass whose write stopped
-  part-way is completed by a rerun; else
-  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (no key): <slug>, ...` when a task was
-  skipped (orient-all § 8 reports it as a caveat). --dry-run prints each line (`would log grade <task>: <fields>`) and
-  that outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log
-  that cannot be read counts as empty.
+  **Grade log**), at orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but
+  an orient-all fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient
+  included, in rank order: task its key (grade_key below), project its home, grade, agentGrade, shape and size;
+  decisions the count of its decisions[], his decisions only (owner yours, ADR 0054: a decision ruled for him, in
+  decidedForYou[], is never counted, so lines before ADR 0054 are not comparable), and low those whose confidence is
+  low; held true when its blockedBy[] is non-empty; gates its gates[]; raised the `why` of each raised[] step, when
+  there is one; rank when it is not null; linked the scan row's `rollout`, through run_record's normalise_slug, when it
+  is a slug and not a reserved name; model and effort, --model and --effort verbatim, on every line of the pass, each
+  left off when not given or empty (p46-6, ADR 0079 decision 5: the model and effort the pass's graders ran on, which
+  the lead names; nothing here reads a ladder, and neither is part of the digest, so a rerun that names them differently
+  still completes the same pass). The pass shares one minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its
+  digest is the first 12 hex of sha1 over the rank file's realpath, the rank's `today` and the sorted (slug, grade,
+  agentGrade, shape, size) tuples: orient-all's $S is a fresh mktemp per pass, so two passes never share a digest, and a
+  rerun of one pass keeps it. The key (p34-6): a slug is normalise_slug's; estate-scan's slug is the raw file stem, so a
+  titled vault note (spaces, capitals, an em dash: a quick capture's) is keyed by run_record's title_key and its line
+  carries the exact name as `note`, which grades.py looks the note up by. A slug-named task holds its key first,
+  whatever the rank order, and a titled name holds its key next, in rank order, so a titled name whose key another
+  graded task of the pass holds, or a name with no ASCII letter or digit, has no key and is skipped: one
+  `estate-dispatch: skipped <slug>: <why>` stderr line each, and the rest are still logged. Every other line passes
+  run_record's check before any is written. A (digest, task) already in grades.jsonl is skipped: with every task there
+  it prints `exists <pass> (<n> grade(s))`; with some, it writes the rest under that pass's id and ts, printing
+  `completed <pass>: <k> more`, so a pass whose write stopped part-way is completed by a rerun; else
+  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (no key): <slug>, ...` when a task was skipped
+  (orient-all § 8 reports it as a caveat). --dry-run prints each line (`would log grade <task>: <fields>`) and that
+  outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log that
+  cannot be read counts as empty.
 
 record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--by B] [--superseding PRIOR] [--today D]:
   one answer into its task. Q, A, R and F have every whitespace run (newlines included) folded to one space, and Q

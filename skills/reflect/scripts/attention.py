@@ -166,10 +166,11 @@ block(): {questions {items, counts}, trails {items, counts}, waits, circling {W1
 rule, shape, fresh, held}}, trend (up to TREND earlier readings' `attention` lines, the last per Reflection, each
 {reflection, since, until, asked, yours, unlabelled, trails, rounds, W1, W2}, read off the line as it stands and never
 through run_record's check, so a line from before a key's retirement, its trails carrying stops and simplifyRounds,
-still reads), flags, cannotShow}. ledger_line(block, owners, rest_unknown): the `attention` line (run_record's
-schema): reflection, since, until, questions (question_counts with owners), trails (the counts), waits (at most
-WAITS_MAX) and circling {W1, W2} (at most CIRCLE_MAX each); a line over run_record's MAX_LINE is trimmed, the circling
-lists and the waits first, flagged.
+still reads), flags, cannotShow}. ledger_line(block, owners, rest_unknown, rid, since, until, ran): the `attention` line
+(run_record's schema): reflection, since, until, questions (question_counts with owners), trails (the counts), waits
+(at most WAITS_MAX), circling {W1, W2} (at most CIRCLE_MAX each), and ran's model and effort, the model and effort the
+owner labels were made on (p46-6, ADR 0079 decision 5; reflect.py's ran_on(), absent when not given); a line over
+run_record's MAX_LINE is trimmed, the circling lists and the waits first, flagged.
 
 tally (read-only). The questions of span.json's attention block whose session starts with a --session prefix (at least
 8 characters, matching exactly one Session), with --owners F joined: {sessions {id: counts}, total: counts}, each
@@ -1397,7 +1398,7 @@ def _line_item(rule, x):
     return out
 
 
-def ledger_line(block, owners, rest_unknown, rid, since, until):
+def ledger_line(block, owners, rest_unknown, rid, since, until, ran=None):
     """The `attention` line (the module docstring), and its flags. ValueError when the owners file is refused."""
     items = block["questions"]["items"]
     errors, _missing = check_owners(items, owners if owners is not None else {}, rest_unknown, owners is not None)
@@ -1412,6 +1413,7 @@ def ledger_line(block, owners, rest_unknown, rid, since, until):
         circ[rule] = [_line_item(rule, x) for x in ordered[:CIRCLE_MAX]]
     fields = {"reflection": rid, "since": since, "until": until, "questions": q, "trails": block["trails"]["counts"],
               "waits": [dict(w) for w in (block.get("waits") or [])[:WAITS_MAX]], "circling": circ}
+    fields.update(ran or {})  # model and effort (p46-6), in before the trim so it measures them
     flags = []
     while RR.line_bytes("attention", fields) > RR.MAX_LINE:
         biggest = max(("W1", "W2"), key=lambda r: len(fields["circling"][r]))

@@ -404,8 +404,9 @@ rollout note (ADR 0047 § Build rulings).
 6. On every run that grades, all but an orient-all fork,
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json" --model <model id> --effort "${CLAUDE_EFFORT:-}"`:
    one line per graded task into the Grade log (CONTEXT.md **Grade log**), each with the model and effort the grading
-   agents ran on, as orient-all § 2 step 7 passes them (ADR 0079 decision 5). Its outcome line and any skipped slugs go
-   to step 8; a non-zero exit is a caveat there, never a stop.
+   agents ran on, named by orient-all § 2 step 7's rule (ADR 0079 decision 5): this session's own only for agents
+   step 4 started with no model or effort of their own, else theirs, an effort not known passed empty. Its outcome line
+   and any skipped slugs go to step 8; a non-zero exit is a caveat there, never a stop.
 7. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank "$S/rank.json" --scan "$S/scan.json" --tasks <every candidate> [--kept <each kept slug>] > "$S/preflight.json"`.
    Every later `preflight` call in this run passes the same `--rank`, `--scan`, `--tasks` and `--kept`, and adds only
    `--decided` and `--dep`.

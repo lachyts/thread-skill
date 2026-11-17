@@ -747,6 +747,7 @@ test('span: repair lines: dated in-window ones by shape, since\'s date counted a
     notes: ['- 2026-09-03 repair: [[s]] deferred: on since\'s date',
       '- 2026-09-05 repair: [[a]] RACE decided: keep',
       '- 2026-09-05 repair: [[a]], [[b]] git-env trip, acked at abc1234: restored',
+      '- 2026-09-05 repair: ran on claude-fable-5-2 at high', // p46-6: repair § 6's What ran, metadata: no item
       '- 2026-09-09 repair: [[g]] max_review_rounds raised to 5, one round',
       '- 2026-09-10 repair: [[u]] deferred: on until\'s date',
       '- 2026-09-01 repair: [[c]] deferred: x',

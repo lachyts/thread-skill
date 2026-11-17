@@ -58,10 +58,15 @@ which the next reading's agreement reads back. Four readings are declared, the r
 *(Amended 2026-11-18 by thread-skill-p46-6: decision 5 is built. Session-run work records the model id and effort that
 ran beside the result it already writes, and takes no arm: the estate pass's and schedule's graders on each `grade`
 line (`estate-dispatch.py log --model --effort`), the Monthly audit's reader on its `time-lost` audit line (`reflect.py
-ledger`), the Reflection on its `reflection` line (`reflect.py close`), orient on each task its reshuffle writes and
-repair on its rollout note's `## Notes` (a `ran on <model id> at <effort>` line). The session names its own model, as
-the harness gives it, and its effort from `$CLAUDE_EFFORT`, unrecorded when unset; nothing here reads a ladder or sets
-a model, which stays Chorus's (Chorus ADR 0119). With neither flag a line is as before. No measure reads them yet.)*
+ledger`), the owner labellers on the Reflection's `attention` line (`reflect.py attention`), the Reflection on its
+`reflection` line (`reflect.py close`), orient on each task whose body its reshuffle writes, and every repair run that
+acts on its rollout note's `## Notes` (a `- <date> repair: ran on <model id> at <effort>` line, which the weekly
+Reflection reads as metadata, never as friction). The session names its own model, as the harness gives it, and its
+effort from `$CLAUDE_EFFORT`, unrecorded when unset; for agents it started on another model or effort it names theirs,
+an effort not known left unrecorded, so the lead's own is never recorded as theirs. Two repair runs record none: a
+close-out (repair § 1), which writes nothing else in the vault, and a serial chain's repair (repair § 7), which writes
+no `## Notes` line by hand. Nothing here reads a ladder or sets a model, which stays Chorus's (Chorus ADR 0119). With
+neither flag a line is as before. No measure reads them yet.)*
 
 ## Context
 

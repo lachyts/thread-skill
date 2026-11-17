@@ -375,30 +375,28 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
   grade           T  pass, digest, project, grade, agentGrade, shape, size, decisions, low, held, gates; raised?, rank?,
-                     linked?, note?, model?, effort? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's
-                     tasks[] row; note (p34-6) only for a titled note, its exact name: no `/`, not a slug itself,
-                     and title_key(note) the task; pass a g- id and digest 12 lowercase
-                     hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
-                     Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
-                     parallel | serial | session; size S | M | L; decisions and low integers >= 0, the count of his
-                     decisions (owner yours, ADR 0054: a decision ruled for him is never counted, so lines before ADR
-                     0054 are not comparable) and those of low confidence, low <= decisions; held a boolean, the task
-                     held by a dependency; gates a list of distinct gate kinds, spend | credential | irreversible,
-                     possibly empty; raised a non-empty list of distinct raise whys, decisions | confidence; rank an
-                     integer >= 1, absent for Orient; linked the scan row's rollout slug at grade time, never a reserved
-                     name; model and effort (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort
-                     the pass's graders ran on, as the lead passed them to `log`, each absent when not given). No
-                     rollout; lands in grades.jsonl.
+                     linked?, note?, model?, effort? (p25-4, ADR 0041: one line per task an estate pass grades, from
+                     estate-rank.py's tasks[] row; note (p34-6) only for a titled note, its exact name: no `/`, not a
+                     slug itself, and title_key(note) the task; pass a g- id and digest 12 lowercase hex, both shared by
+                     the pass's lines; project the task's home; grade and agentGrade each one of Ready | One call |
+                     Grill | Orient, the ranker's grade after the raise and the agent's own; shape parallel | serial |
+                     session; size S | M | L; decisions and low integers >= 0, the count of his decisions (owner yours,
+                     ADR 0054: a decision ruled for him is never counted, so lines before ADR 0054 are not comparable)
+                     and those of low confidence, low <= decisions; held a boolean, the task held by a dependency; gates
+                     a list of distinct gate kinds, spend | credential | irreversible, possibly empty; raised a
+                     non-empty list of distinct raise whys, decisions | confidence; rank an integer >= 1, absent for
+                     Orient; linked the scan row's rollout slug at grade time, never a reserved name; model and effort
+                     (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort the pass's graders ran on,
+                     as the lead passed them to `log`, each absent when not given). No rollout; lands in grades.jsonl.
   reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence?, repairsOnly?,
-                     model?, effort?
-                     (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts, escapesOnly
-                     and repairsOnly lists of slugs: the rollouts read, those not read that hold an in-window
-                     Escape, and those not read that hold only in-window repair lines, repairsOnly written only when
-                     non-empty; counts exactly sightings, newWatches, rules, bugs, filed, knobs, landed, reverted and
-                     breaches, each an integer >= 0; quiet a boolean; cadence 7 or 14, absent read as 7; model and
-                     effort (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort the Reflection's
-                     session ran on, as passed to `close`, each absent when not given). No rollout, no task; lands in
-                     reflections.jsonl.
+                     model?, effort? (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts,
+                     escapesOnly and repairsOnly lists of slugs: the rollouts read, those not read that hold an
+                     in-window Escape, and those not read that hold only in-window repair lines, repairsOnly written
+                     only when non-empty; counts exactly sightings, newWatches, rules, bugs, filed, knobs, landed,
+                     reverted and breaches, each an integer >= 0; quiet a boolean; cadence 7 or 14, absent read as 7;
+                     model and effort (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort the
+                     Reflection's session ran on, as passed to `close`, each absent when not given). No rollout, no
+                     task; lands in reflections.jsonl.
   stopped            cause (usage-limit | dead-lead | mac-restart | mac-sleep | halt | watchdog), inferred (a bool:
                      false for a stop a live process logged as it began, true for one a later entry found), calls (at
                      most 64 {task, runId?, call?}, call task | revise | integrate | resume: the calls the record shows
@@ -436,45 +434,47 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running?,
                      runningWeight? (as suite-started).
   time-lost          id, source, since, until; month?, reflection?, hours?, recorded?, rank?, top?, byCause?, rollouts?,
-                     other?, events?, streak?, audit?, ranges?, cites?, model?, effort? (p29-11, ADR 0051: the Time-lost ledger, one line
-                     per (Reflection, source), reflect.py `ledger` its one writer; skills/reflect/scripts/ledger.py's
-                     docstring holds the model. id a tl- id; source record (the week's row, summed by ledger.py from the
-                     Run record), audit (a Monthly audit's row) or baseline (the 2026-10-21 audit, written once); since
-                     and until UTC Z stamps, since <= until; month YYYY-MM, the Melbourne month of the reading's until,
-                     required on an audit or a baseline line; reflection an r- id, required on a record or an audit line;
-                     hours exactly the six TIME_LOST_CLASSES, each a finite number >= 0, required on a record or an
-                     audit line and on no other; recorded, audit only, the same six; rank, audit only, the six classes
-                     each once; top, record only, a class or null; byCause {class: {cause: hours}}, each cause in
-                     TIME_LOST_CAUSES of its class; rollouts {class: at most 8 [slug, hours]}; other {cause: hours},
-                     each cause in TIME_LOST_OTHER; events {name: an integer >= 0}; streak, record only, an integer >=
-                     0; audit, required on an audit line and only there, {sources (1 to 8 {source, read, why?}), entries
-                     (at most 16 {class, cause, rollout, from, to, hours, what, evidence}), gaps (at most 8 {what,
-                     evidence})}, the caps sized so a full audit of plain text fits the 16 KiB line (text JSON escapes
-                     can still overflow it, and ledger.py's audit_line() refuses that first); ranges and cites,
-                     baseline only, lists of at most 16 objects; model and effort, audit only (p46-6, ADR 0079 decision
-                     5), non-empty strings, the model id and effort the Monthly audit's reader ran on, as passed to
-                     `ledger`, each absent when not given). No rollout, no task; lands in reflections.jsonl.
-  attention          reflection, since, until, questions, trails; waits?, circling? (p30-7, ADR 0056: the attention
-                     ledger, one line per Reflection, a changed re-run appending one that readers take as the last;
-                     reflect.py `attention` its one writer; skills/reflect/scripts/attention.py's docstring holds the
-                     rules. reflection an r- id; since and until UTC Z stamps, since <= until; questions exactly asked,
-                     calls, answered, dismissed, dropped, open, failed, unparsed, notes, ownWords and unlabelled
-                     (integers >= 0, unlabelled <= asked), recommended {offered, picked} (picked <= offered), hoursHeld
-                     (a finite number >= 0), longest (at most 5 {call, session, repo, header of at most 60 characters,
-                     hours, outcome}), byRepo ({repo: count}, at most 12 repos and `other`), byOwner and hoursByOwner
-                     (keyed by exactly ATTENTION_OWNERS, byOwner summing to asked); trails exactly count, rounds,
-                     codeRounds, findings, regression and engineStops (integers >= 0), docsOnly {trails, rounds},
-                     longest (at most 5 {label of at most 120 characters, rounds, docsOnly true, false or null});
-                     waits at most 16 {rollout (a slug), ask (a UTC Z stamp), scheduled and started (a stamp or null),
-                     hours, scheduleHours (or null), open}; circling W1 and W2 only (never span's readings), at most 32
-                     items each {slug (a slug, not reserved), sessions, questions, hours?}. The caps keep a full line
-                     under 16 KiB with 64-character slugs; attention.py trims the circling lists, then the waits, when
-                     a line would pass it. A line written before fresh-review ADR 0001 retired the stop verdict and the
-                     simplify round carries trails' simplifyRounds, stopRounds, stops and stopsHanded, and longest's
-                     stopRounds, stops, stopsHanded and handedAfterStop: emit refuses them now, and that older line
-                     still reads, since its readers, attention.py's trend and reflect.py's attention_record, take
-                     reflections.jsonl's lines as they stand and never through this check). No rollout, no task;
-                     lands in reflections.jsonl.
+                     other?, events?, streak?, audit?, ranges?, cites?, model?, effort? (p29-11, ADR 0051: the Time-lost
+                     ledger, one line per (Reflection, source), reflect.py `ledger` its one writer;
+                     skills/reflect/scripts/ledger.py's docstring holds the model. id a tl- id; source record (the
+                     week's row, summed by ledger.py from the Run record), audit (a Monthly audit's row) or baseline
+                     (the 2026-10-21 audit, written once); since and until UTC Z stamps, since <= until; month YYYY-MM,
+                     the Melbourne month of the reading's until, required on an audit or a baseline line; reflection an
+                     r- id, required on a record or an audit line; hours exactly the six TIME_LOST_CLASSES, each a
+                     finite number >= 0, required on a record or an audit line and on no other; recorded, audit only,
+                     the same six; rank, audit only, the six classes each once; top, record only, a class or null;
+                     byCause {class: {cause: hours}}, each cause in TIME_LOST_CAUSES of its class; rollouts {class: at
+                     most 8 [slug, hours]}; other {cause: hours}, each cause in TIME_LOST_OTHER; events {name: an
+                     integer >= 0}; streak, record only, an integer >= 0; audit, required on an audit line and only
+                     there, {sources (1 to 8 {source, read, why?}), entries (at most 16 {class, cause, rollout, from,
+                     to, hours, what, evidence}), gaps (at most 8 {what, evidence})}, the caps sized so a full audit of
+                     plain text fits the 16 KiB line (text JSON escapes can still overflow it, and ledger.py's
+                     audit_line() refuses that first); ranges and cites, baseline only, lists of at most 16 objects;
+                     model and effort, audit only (p46-6, ADR 0079 decision 5), non-empty strings, the model id and
+                     effort the Monthly audit's reader ran on, as passed to `ledger`, each absent when not given). No
+                     rollout, no task; lands in reflections.jsonl.
+  attention          reflection, since, until, questions, trails; waits?, circling?, model?, effort? (p30-7, ADR 0056:
+                     the attention ledger, one line per Reflection, a changed re-run appending one that readers take as
+                     the last; reflect.py `attention` its one writer; skills/reflect/scripts/attention.py's docstring
+                     holds the rules. reflection an r- id; since and until UTC Z stamps, since <= until; questions
+                     exactly asked, calls, answered, dismissed, dropped, open, failed, unparsed, notes, ownWords and
+                     unlabelled (integers >= 0, unlabelled <= asked), recommended {offered, picked} (picked <= offered),
+                     hoursHeld (a finite number >= 0), longest (at most 5 {call, session, repo, header of at most 60
+                     characters, hours, outcome}), byRepo ({repo: count}, at most 12 repos and `other`), byOwner and
+                     hoursByOwner (keyed by exactly ATTENTION_OWNERS, byOwner summing to asked); trails exactly count,
+                     rounds, codeRounds, findings, regression and engineStops (integers >= 0), docsOnly {trails,
+                     rounds}, longest (at most 5 {label of at most 120 characters, rounds, docsOnly true, false or
+                     null}); waits at most 16 {rollout (a slug), ask (a UTC Z stamp), scheduled and started (a stamp or
+                     null), hours, scheduleHours (or null), open}; circling W1 and W2 only (never span's readings), at
+                     most 32 items each {slug (a slug, not reserved), sessions, questions, hours?}; model and effort
+                     (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort the owner labels were made
+                     on, as passed to `attention`, each absent when not given. The caps keep a full line under 16 KiB
+                     with 64-character slugs; attention.py trims the circling lists, then the waits, when a line would
+                     pass it. A line written before fresh-review ADR 0001 retired the stop verdict and the simplify
+                     round carries trails' simplifyRounds, stopRounds, stops and stopsHanded, and longest's stopRounds,
+                     stops, stopsHanded and handedAfterStop: emit refuses them now, and that older line still reads,
+                     since its readers, attention.py's trend and reflect.py's attention_record, take reflections.jsonl's
+                     lines as they stand and never through this check). No rollout, no task; lands in reflections.jsonl.
   arms               reflection, since, until, roles; plans?, fableCalls?, fellBack? (p46-4, ADR 0079 d9: the arms
                      reading's line, at most one per Reflection, reflect.py `close` its one writer;
                      skills/reflect/scripts/arms.py's docstring holds the rules. reflection an r- id; since and until UTC
@@ -1836,7 +1836,7 @@ KINDS = {
     # last), reflect.py `attention` its writer.
     "attention": (False, {"reflection": _rid, "since": _stampz, "until": _stampz, "questions": _att_questions,
                           "trails": _att_trails},
-                  {"waits": _att_waits, "circling": _att_circling}),
+                  {"waits": _att_waits, "circling": _att_circling, "model": _str, "effort": _str}),
     # The arms reading's line (p46-4, ADR 0079 d9): at most one per Reflection, reflect.py `close` its writer.
     "arms": (False, {"reflection": _rid, "since": _stampz, "until": _stampz, "roles": _arms_roles},
              {"plans": _arms_plans, "fableCalls": _arms_fable_calls, "fellBack": _arms_fell_back}),

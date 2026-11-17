@@ -17,7 +17,7 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span F [--audit F [--model ID] \\
         [--effort E]] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span F [--owners F] [--rest-unknown] \\
-        [--dry-run]
+        [--model ID] [--effort E] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span F [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span F [--decisions F] [--tasks-dir D] \\
         [--now ISO] [--dry-run]
@@ -155,7 +155,9 @@ parallel with no note). For each:
   repair    each line of the rollout note's `## Notes` matching `- <YYYY-MM-DD> repair: ...` whose date is in the
             window (date_in()): {date, tasks (every wikilink), text (at most 300), shape}. shape is the first match of
             RACE decided (race-decided), `possible PR-less merge` (escalated), `merged, never marked` (flipped),
-            `git-env trip` (git-env), `raised to` (raise), `deferred:` (deferred), else other. An undated
+            `git-env trip` (git-env), `raised to` (raise), `deferred:` (deferred), else other. A line whose text
+            starts `ran on ` (repair § 6's What ran, p46-6, ADR 0079 decision 5) is no item: it records the model
+            the run ran on, metadata and no friction, so it never makes a rollout repairs-only. An undated
             `- repair:` line is flagged (on a read rollout only). auto-retry and descope lines are other items, and
             nothing outside `## Notes` is read. A line is date-only, so it is read by its date from the note of every
             record, read this week or not: a rollout with no line in the window that holds one is read light (below).
@@ -445,12 +447,12 @@ mac-history), read, why?}], entries [{class, cause, rollout, from, to, what, evi
 line's hours come from each entry's from .. to (the model never types a number), recorded from span's audit block, rank
 over found + recorded (shown, never acted on), month the reading's, and model and effort --model and --effort verbatim,
 each left off when not given or empty (p46-6, ADR 0079 decision 5: the model and effort the audit's reader ran on, which
-the session names; only the audit line carries them, since the record line is summed by script). Exit 2: the audit is due and neither --audit is given
-nor this Reflection has an audit line; --audit is given and none is due; ledger.py's audit_line() refuses it (the month,
-an unknown class or cause, an entry outside the audit window or overlapping a known interval of the same rollout and
-class, more than 16 entries or 8 gaps, or a line over run_record's 16 KiB, `trim entries or their text`; text is folded
-and cut to 160 or 200 characters). It prints `ledger <rid>: top <class> (<h> h) of <total> h; <what> written`, or
-`exists ledger <rid>` when every line is in.
+the session names; only the audit line carries them, since the record line is summed by script). Exit 2: the audit is
+due and neither --audit is given nor this Reflection has an audit line; --audit is given and none is due; ledger.py's
+audit_line() refuses it (the month, an unknown class or cause, an entry outside the audit window or overlapping a known
+interval of the same rollout and class, more than 16 entries or 8 gaps, or a line over run_record's 16 KiB,
+`trim entries or their text`; text is folded and cut to 160 or 200 characters). It prints
+`ledger <rid>: top <class> (<h> h) of <total> h; <what> written`, or `exists ledger <rid>` when every line is in.
 
 attention (p30-7, ADR 0056). Once, at SKILL step 13b, after the ledger and before decide. It refuses a closed Reflection
 and a span whose attention is not a block (one from before p30-7, or one whose read failed: a new span is a new
@@ -460,14 +462,17 @@ without: a file that is no JSON object, an id the span lacks, or an owner outsid
 question the file leaves out, or no --owners while questions were asked, is exit 2 unless --rest-unknown, which writes
 them as unknown and counts them in `unlabelled` (`flag: <n> of <asked> questions unlabelled, written as unknown`); an
 explicit unknown is a label. The lines, each checked (run_record.check) before any is written: the `attention` line
-(attention.py's ledger_line: the questions counted with the labels, the trails' counts, the waits, the circling lists),
-then, for each circling rule whose items attention.py's fresh_items() leaves (the items no closed cycle named), its Watch
-(attention.py's watch_line: circling the rule, rollouts the items by weight, count their number), the lists both read
-from circling_items(), which drops an item whose slug is no rollout slug (`flag: dropped <slug> from <rule>: not a
-rollout slug`) so run_record never refuses the write. A rule whose items a closed cycle all named prints `held <id>:
-every item was in a closed cycle`. Re-runs: an attention line equal to this Reflection's last prints `exists attention
-<rid>`, a changed one appends one line (readers take the last); a Watch whose set is this Reflection's latest line's prints
-`exists <id>`, a strict superset writes one extending line, any other set prints `held <id>` with both sets. It prints
+(attention.py's ledger_line: the questions counted with the labels, the trails' counts, the waits, the circling lists,
+and model and effort --model and --effort verbatim, each left off when not given or empty: p46-6, ADR 0079 decision 5,
+the model and effort the owner labels were made on, which the session names), then, for each circling rule whose items
+attention.py's fresh_items() leaves (the items no closed cycle named), its Watch (attention.py's watch_line: circling
+the rule, rollouts the items by weight, count their number), the lists both read from circling_items(), which drops an
+item whose slug is no rollout slug (`flag: dropped <slug> from <rule>: not a rollout slug`) so run_record never refuses
+the write. A rule whose items a closed cycle all named prints `held <id>: every item was in a closed cycle`. Re-runs: an
+attention line equal to this Reflection's last, model and effort aside (what ran is no change of the labels), prints
+`exists attention <rid>`, a changed one appends one line (readers take the last); a Watch whose set is this Reflection's
+latest line's prints `exists <id>`, a strict superset writes one extending line, any other set prints `held <id>` with
+both sets. Its outcome line:
 `attention <rid>: <asked> questions (<yours> yours, <unlabelled> unlabelled), <n> trails, <k> circling; <what> written`.
 
 knobs. Once, after step 14's tune.py calls (its lines are knob_lines(), which close re-reads): one `proposal` line per
@@ -565,12 +570,11 @@ distinct (rollout, Guardrail) pairs over breachCounts rollouts), quiet (newWatch
 audit's gaps never count, since the audit runs at either cadence, and like a held trade it leaves the week quiet),
 repairsOnly when a rollout was read repairs-only, decisionTask when a rule line names one (else the first task, sorted,
 whose line passed (ii) or (iii)), model and effort --model and --effort verbatim, each left off when not given or
-empty (p46-6, ADR 0079 decision 5: the model and effort this Reflection's session ran on, which it names), and
-cadence: run_record's cadence() over reflections.jsonl with this line appended
-(three quiet Reflections in a row: 14; any that is not quiet: 7), on every line, so each change of cadence is on a
-record line, and the outcome line ends `cadence <old> -> <new>` when it changes. The writers watch, bug, knobs and
-decide refuse a closed Reflection. reflect-due.py beside it reads the same rule to say when the next reading is due (ADR
-0037 d4 and d6).
+empty (p46-6, ADR 0079 decision 5: the model and effort this Reflection's session ran on, which it names), and cadence:
+run_record's cadence() over reflections.jsonl with this line appended (three quiet Reflections in a row: 14; any that is
+not quiet: 7), on every line, so each change of cadence is on a record line, and the outcome line ends
+`cadence <old> -> <new>` when it changes. The writers watch, bug, knobs and decide refuse a closed Reflection.
+reflect-due.py beside it reads the same rule to say when the next reading is due (ADR 0037 d4 and d6).
 
 moot. Lachy's yes to a held trade that cannot apply (the fresh score no longer proposes its key and rule, or tune.py
 refuses a stale from), or to a Fable ceiling whose `[share]` no longer reads its from (p46-4: --trade takes its kid, and
@@ -638,6 +642,9 @@ DECISION_SUFFIX_MAX = 9
 PROJECTS = '["[[Thread Skill]]", "[[AI]]"]'
 REPAIR_RE = re.compile(r"^- (\d{4}-\d\d-\d\d) repair:\s*(.+)$", re.I)
 UNDATED_REPAIR_RE = re.compile(r"^-\s+(?:(\S+)\s+)?repair:", re.I)
+# repair § 6's What ran line, `- <date> repair: ran on <model id> at <effort>` (p46-6, ADR 0079 decision 5): metadata
+# of the run, never friction, so repairs() skips it
+REPAIR_RAN_ON_RE = re.compile(r"ran on\s", re.I)
 SLUG_WORDS_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+){0,4}\Z")
 ASKED_AHEAD_RE = re.compile(r"^## Decisions \(asked ahead|asked ahead at schedule", re.M)
 # A serial note's Leg log (leg.py's LEG_LOG) and the stamp of each of its line forms (leg.py's LOG_RE, CLEARED_RE and
@@ -1825,8 +1832,9 @@ class Span:
         return moved, mover
 
     def repairs(self, slug, note_path, since, until, flag_undated=True):
-        """The repair items of one rollout note: its `## Notes` lines dated in the window (date_in()). An undated line
-        is flagged only for a read rollout (flag_undated), so a swept old note does not repeat its flag every week."""
+        """The repair items of one rollout note: its `## Notes` lines dated in the window (date_in()), but one whose
+        text starts `ran on ` (repair § 6's What ran, metadata and no friction). An undated line is flagged only for a
+        read rollout (flag_undated), so a swept old note does not repeat its flag every week."""
         note = read_note(note_path)
         if note is None:
             self.flag("[[%s]]: its note cannot be read: no repair lines" % slug)
@@ -1841,7 +1849,7 @@ class Span:
                     self.flag("[[%s]]: an undated repair line in ## Notes: %s" % (slug, line[:120]))
                 continue
             day, text = m.group(1), m.group(2)
-            if not date_in(day, since, until):
+            if REPAIR_RAN_ON_RE.match(text) or not date_in(day, since, until):
                 continue
             tasks = []
             for link in WIKILINK_OPEN_RE.findall(text):
@@ -2486,8 +2494,8 @@ class Span:
                             "root": root, "repo": self.origin(root), "status": None, "closeLine": None, "score": None,
                             "window": None, "partial": None, "headline": None, "breached": [], "breachCounts": False,
                             "binding": None, "proposals": [], "flags": [], "friction": inw + reps, "laneTime": None})
-        self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
-                         "repair: line on a rollout with no Run record")
+        self.cannot_show("a repair run that writes no dated repair: line but its ran-on line (metadata) and records "
+                         "no event is not seen, nor is a repair: line on a rollout with no Run record")
         arms = self.arms(ev, records, read, entries, scores, reflections, since, until, rid)
         fresh, levels = self.fresh_review(ev, since, until)
         ws = watches(reflections, rid, until)
@@ -3050,6 +3058,14 @@ def cmd_ledger(a):
 # ---- the attention ledger (p30-7, ADR 0056) --------------------------------------------------------------------------
 
 LINE_KEYS = ("v", "ts", "host", "rollout", "task", "kind")
+RAN_ON_KEYS = ("model", "effort")
+
+
+def ran_on(a):
+    """{model, effort}: the model and effort a session-run line ran on (p46-6, ADR 0079 decision 5), --model and
+    --effort verbatim, each left off when not given or empty. A skill cannot read or set its own model, so the session
+    names it; nothing here reads a ladder. ledger's audit line, attention's line and close's reflection line take it."""
+    return {k: getattr(a, k) for k in RAN_ON_KEYS if getattr(a, k, "")}
 
 
 def cmd_attention(a):
@@ -3064,14 +3080,18 @@ def cmd_attention(a):
     refuse_closed(lines, rid)
     owners = read_json(a.owners, "--owners") if a.owners else None
     try:
-        fields, trims = ATTN.ledger_line(att, owners, a.rest_unknown, rid, span.get("since"), span.get("until"))
+        fields, trims = ATTN.ledger_line(att, owners, a.rest_unknown, rid, span.get("since"), span.get("until"),
+                                         ran_on(a))
     except ValueError as e:
         raise Stop("the owners are refused: %s: nothing written" % e, 2)
     lists, dropped = ATTN.circling_items(att)
     plan, said = [], []  # (kind, fields, what) in write order: the attention line, then each rule's Watch
     have = attention_record(lines, rid)
-    if have is not None and json.dumps({k: v for k, v in have.items() if k not in LINE_KEYS}, sort_keys=True) == \
-            json.dumps(fields, sort_keys=True):
+
+    def labels(d):  # a line as a re-run compares it: what ran (ran_on()) is never a change of its labels
+        return json.dumps({k: v for k, v in d.items() if k not in LINE_KEYS + RAN_ON_KEYS}, sort_keys=True)
+
+    if have is not None and labels(have) == labels(fields):
         said.append("exists attention %s" % rid)
     else:
         plan.append(("attention", fields, "attention line"))
@@ -3530,13 +3550,6 @@ def cmd_decide(a):
 
 # ---- close -----------------------------------------------------------------------------------------------------------
 
-def ran_on(a):
-    """{model, effort}: the model and effort a session-run line ran on (p46-6, ADR 0079 decision 5), --model and
-    --effort verbatim, each left off when not given or empty. A skill cannot read or set its own model, so the session
-    names it; nothing here reads a ladder."""
-    return {k: getattr(a, k) for k in ("model", "effort") if getattr(a, k, "")}
-
-
 def cmd_close(a):
     span = read_span(a.span)
     rid = span["reflection"]
@@ -3793,6 +3806,8 @@ def main(argv):
     att.add_argument("--span", required=True)
     att.add_argument("--owners")
     att.add_argument("--rest-unknown", action="store_true")
+    att.add_argument("--model", default="")
+    att.add_argument("--effort", default="")
     att.add_argument("--dry-run", action="store_true")
     d = sub.add_parser("decide")
     d.add_argument("--span", required=True)
