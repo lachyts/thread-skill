@@ -103,9 +103,9 @@ says why.
 name: a real model run, a browser, a device, a signed-in account) against what the agent that runs it holds, which its
 shape (§ Shape) decides. A `parallel` task's planner, implementer and judges run inside the Workflow tool, on the lead
 session's tools less two: they have no native child-agent tool, so they start no subagent and no model run through
-one, and no question tool, so they never reach Lachy. A `serial` task runs in a Leg (`skills/execute/legs.md`), a
-session on its own launch's tools that lacks the same two by rule: it starts no subagent but each code-writing task's
-clean-room review (ADR 0040), and never calls the question tool (legs.md § Needs you).
+one, and no question tool, so they never reach Lachy. A `serial` task runs in a Leg, a session on its own launch's
+tools that lacks the same two by rule: it starts no subagent but each code-writing task's clean-room review
+(ADR 0040), and never calls the question tool (`skills/execute/legs.md` § Needs you).
 A `session` task runs in his own session, which holds both, so this rule never raises it. A tool the lead itself
 lacks is the shape's concern (§ Shape: execution-fit.md's parallel-shaped test needs no external tool the lead lacks).
 A `parallel` or `serial` task whose check needs a child agent or a question, which the lead holds and its runner

@@ -166,7 +166,7 @@ function check(files, consts) {
   need('c6', '§ The grade', grade, ['grill-fit.md', 'step 2(a)', 'step 2(b)', 'orient § 2 Open forks', '*His*', '*Ruled now*',
     "*The session's*", '`owner`', "only with the project's design in view (its ADRs, CONTEXT.md, its thread) makes the task Orient, never a One call",
     "**The live check's tools.**", 'no native child-agent tool', 'no question tool',
-    "it starts no subagent but each code-writing task's clean-room review (ADR 0040), and never calls the question tool (legs.md § Needs you)",
+    "it starts no subagent but each code-writing task's clean-room review (ADR 0040), and never calls the question tool (`skills/execute/legs.md` § Needs you)",
     'A `session` task runs in his own session, which holds both, so this rule never raises it',
     'A `parallel` or `serial` task whose check needs a child agent or a question, which the lead holds and its runner does not, is never Ready',
     'a decision of his (owner `yours`'])
