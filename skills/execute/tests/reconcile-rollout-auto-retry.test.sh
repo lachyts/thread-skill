@@ -5,7 +5,9 @@
 # one writing verb, reconcile-rollout.py auto-retry, which re-runs the verdict before it writes: the rollout's
 # `## Notes` line, the task note (hand-back's own transition, the markers, the raise) and the Run record events.
 #   A1  a first and second plan-block retried, a third stopped by the budget   A2 an identical fingerprint stops
-#   A3  a `## Needs you` question never retries   A4 every excluded kind   A5 merge-task's fixable exit-1 texts
+#   A3  a `## Needs you` question never retries   A4 every excluded kind, and each one's humanFix on the same read
+#       (reconcile-rollout-human-fix.test.sh's H1, H3, H5 after a descope, H6, H7 at Integration, H8, H10's merge-task
+#       text and declined merge, H11 and the autoRevise null case)   A5 merge-task's fixable exit-1 texts
 #   A5b the fixable texts read in the reason's own cause (from its last `ERROR:` line), as the record's reasonClass
 #   A6  the budget: task, rollout, rollouts.toml and built-in; invalid stamps; a refused file; the assertions
 #   A7  the records (the brief untouched, repair's raise regex, a re-run, a partial write)   A8 the raise
@@ -13,11 +15,13 @@
 #   A13 the queue   A14 the Run record   A15 the pins (merge-task.sh, lead-integrate.py, execute SKILL.md, the cool-downs)
 #   A16 an answered block (ADR 0035: `inputs`' answerRecorded) is never retried
 #   A17 a repeat stall at Integration (ADR 0033 d4 as amended): the same held stop twice running is Lachy's, the exempt
-#       routes still cool, and a kill that names no wait carries the last real reason on its second line
+#       routes still cool, and a kill that names no wait carries the last real reason on its second line; a first stop's
+#       infra cool-down is asserted only where no other scenario pins it (a17first's check)
 #   A18 a settings block (ADR 0080): the same stop is the settings point, 22a re-enters a changed block exactly once
 #       (the `re-entered` boundary in the verb's one save, a set-aside in the same minute included), an
 #       unreported-context block on another head is the same stop, and a budget spent at the first sighting gets its one
-#       cool-down retry free before the same stop is due (once: a second first sighting past it is H10)
+#       cool-down retry free before the same stop is due, never the budget's H10 (once: a second first sighting past it
+#       is H10)
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
 # scenario's Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the
@@ -119,6 +123,9 @@ ms() {
 }
 nxt() { python3 "$SCRIPT" next --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" --running "$1" --dry-run 2>/dev/null; }
 j() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); v=eval(sys.argv[1]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), sort_keys=True))' "$2"; }
+# hf <inputs json>: [act, handBack, raise] of humanFix, or null
+hf() { j "$1" '[d["humanFix"]["act"], d["humanFix"]["handBack"], d["humanFix"]["raise"]] if d["humanFix"] else None'; }
+fix() { j "$1" "d['humanFix']['$2'] if d['humanFix'] else None"; }
 snap() { (cd "$D" && find . -path ./events -prune -o -type f -print | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done) | shasum | cut -c1-40; }
 sha12() { python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])' "$1"; }
 # The Run record: cnt = its line count; since <n> [expr] = each later line as kind:task (or expr over d)
@@ -230,9 +237,11 @@ for st in plan-blocked blocked review-blocked; do
 done
 
 # ── A4: each excluded kind never retries, and the verb writes nothing ──────────────────────────────────────
-# excluded <label> <expected why fragment> [expected verb exit]
+# Each scenario also reads its block's humanFix, the H row reconcile-rollout-human-fix.test.sh names for it (H1, H3,
+# H5, H6, H7, H8, H10, H11 and the autoRevise null case), on the same `inputs` read.
+# excluded <label> <expected why fragment> [expected verb exit]: its read stays in I (no --repo)
 excluded() {
-  local I; I=$(inp "$A")
+  I=$(inp "$A")
   ok "$(j "$I" 'd["autoRetry"]')" false "A4 $1: autoRetry false"
   has "$(j "$I" 'd["autoRetryWhy"]')" "$2" "A4 $1: why names it"
   before=$(snap); M=$(cnt)
@@ -241,26 +250,33 @@ excluded() {
 }
 scen a4-gate
 mkro; mkt "$A" in_progress "owner: execute-test"; mkt "$B" open
-GATED='{"gatedInputs":["spend: Replicate — cap USD 5"]}'
+GATED='{"gatedInputs":["spend: Replicate — cap USD 5","credential: a token"]}'
 rec "$(row "$A" gate-pending "" "$GATED")"
 excluded gate-pending "gate-pending: sign-off is the human's"
+ok "$(hf "$I")" '["sign off gated input",false,null]' "H1: a gate"
+ok "$(fix "$I" detail)|$(fix "$I" label)" "spend: Replicate — cap USD 5; credential: a token|(gate-pending)" "H1: the pending gates, label (gate-pending)"
 
 scen a4-race
 mkro; mkt "$A" open; mkt "$B" open
 planblock "$A" "$FA"
 printf '\n## Race log\n\n- 2026-10-03T08:30+00:00 [[%s]] RACE: PR #5 merged as x\n' "$A" >> "$D/$RO.md"
 excluded RACE "RACE undecided" 2
+ok "$(hf "$I")" '["decide RACE",false,null]' "H3: an undecided RACE"
+ok "$(fix "$I" detail)" "- 2026-10-03T08:30+00:00 [[$A]] RACE: PR #5 merged as x" "H3 RACE: the Race log line"
 has "$out" "ERROR: auto-retry: [[$A]] RACE undecided: no \"repair: [[$A]] RACE decided:\" line on $RO" "A4 RACE: hand-back's ERROR line, for auto-retry"
 
 scen a4-unverified
 mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration "UNVERIFIED: PR #5 merged as abc; not verifiable yet; re-run to verify"
 excluded UNVERIFIED "UNVERIFIED undecided" 2
+ok "$(hf "$I")" '["decide UNVERIFIED",false,null]' "H3: an undecided UNVERIFIED"
+has "$(fix "$I" detail)" "UNVERIFIED: PR #5 merged as abc" "H3 UNVERIFIED: its line"
 
 scen a4-branch-gone
 mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration "origin/audit-fix/p1-1-a does not exist — the PR branch is gone"
 excluded "branch gone" "the PR branch is gone"
+ok "$(hf "$I")|$(fix "$I" detail)" '["restore, recut or defer",false,null]|origin/audit-fix/p1-1-a does not exist — the PR branch is gone' "H8: the branch is gone"
 
 # merge-task's exit-1 texts that need a human (each pinned against merge-task.sh in A15)
 HUMAN_TEXTS=(
@@ -280,22 +296,27 @@ for text in "${HUMAN_TEXTS[@]}"; do
   mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
   lead "$A" own "merge-task: $text"
   excluded "merge-task text $i" "merge-task needs a human: merge-task: $text"
+  if [ "$i" -eq 1 ]; then ok "$(hf "$I")" '["hand back or defer",true,null]' "H10: merge-task's human text"; fi
 done
 
 scen a4-declined
 mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration "merge declined at the --gated hold"
 excluded declined "merge declined at the --gated hold"
+ok "$(hf "$I")" '["hand back or defer",true,null]' "H10: a declined merge"
 
 scen a4-review-no-pr
 mkro; mkt "$A" review "review_rounds_used: 1"; mkt "$B" open
 excluded "review with no pr:" "approved without a PR"
+ok "$(hf "$I")|$(fix "$I" label)" '["hand back or defer",true,null]|(review, no PR)' "H11: a code-writing review with no PR"
 
 scen a4-integration-no-pr
 mkro; mkt "$A" in_progress "owner: execute-test"; mkt "$B" open
 rec "$(row "$A" blocked 'integration: base moved before the merge 4 times in a row')"
 ok "$(j "$(nxt "")" '[e["setAsideAt"] for e in d["setAside"]]')" '["integration"]' "A4: (set aside at Integration)"
 excluded "Integration with no pr:" "set aside at Integration with no pr:"
+ok "$(hf "$I")" '["restore, recut or defer",false,null]' "H6: at Integration with no pr:, never hand-back"
+ok "$(fix "$I" detail)" "base moved before the merge 4 times in a row; restore finds its branch's PR (repair § 4), and a MERGED one is § 3c's PR-less merge" "H6: the block's first line, then § 4 and § 3c"
 
 # p17-1's prUrlError: a pr: the engine refuses, on a way back that launches on it (here at Integration), is a human's:
 # no launch goes ahead on it, so a hand-back alone never moves it (`inputs`' humanFix H7, `fix the note's pr: or defer`).
@@ -305,8 +326,11 @@ mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" 
 lead "$A" integration "merge-task exit 8 three times: origin unreachable"
 setfm "$A" pr '"#5"'
 excluded "a bare #5 and no GitHub origin (prUrlError)" "the note's pr: gives no PR URL the engine takes"
-ok "$(j "$(inp "$A" --repo "$D/root")" '[d["autoRetry"], d["prUrlError"] != ""]')" '[false,true]' \
+I=$(inp "$A" --repo "$D/root")
+ok "$(j "$I" '[d["autoRetry"], d["prUrlError"] != ""]')" '[false,true]' \
   "A4 prUrlError: inputs --repo <a Project root with no GitHub origin> → autoRetry false"
+ok "$(hf "$I")" "[\"fix the note's pr: or defer\",false,null]" "H7: at Integration, handBack false"
+ok "$(fix "$I" detail)" "$(j "$I" 'd["prUrlError"]')" "H7: its detail is prUrlError"
 git init -q "$D/root" && git -C "$D/root" remote add origin https://github.com/o/r
 ok "$(j "$(inp "$A" --repo "$D/root")" '[d["autoRetry"], d["prUrl"], d["prUrlError"]]')" "[true,\"$PR\",\"\"]" \
   "A4 prUrlError control: a GitHub origin builds the PR URL → autoRetry true"
@@ -321,7 +345,7 @@ Round 1 (Integration) rejection:
 - the merge dropped the retry guard"
 EXTRA="{\"prUrl\":\"$PR\",\"reviewHistory\":[{\"round\":1,\"stage\":\"integration\",\"feedback\":[\"the merge dropped the retry guard\"]}],\"integration\":{\"outcome\":\"rejected\",\"path\":\"judge-only\",\"headSha\":\"$B40\",\"baseSha\":\"$C40\",\"anchor\":{\"headSha\":\"$A40\"},\"metrics\":{\"startedAt\":\"2026-10-03T07:00:00Z\"}}}"
 rec "$(row "$A" blocked "$DIAG" "$EXTRA")"
-ok "$(j "$(inp "$A" --max-review-rounds 4)" 'd["autoRevise"]')" true "A4: (inputs --max-review-rounds 4 → autoRevise true)"
+ok "$(j "$(inp "$A" --max-review-rounds 4)" '[d["autoRevise"], d["humanFix"]]')" '[true,null]' "A4: (inputs --max-review-rounds 4 → autoRevise true); null: autoRevise"
 excluded "autoRevise true" "autoRevise: step 1.2's seeded revise owns it"
 
 scen a4-descoped
@@ -329,13 +353,10 @@ mkro; mkt "$A" open; mkt "$B" open
 planblock "$A" "$FA"
 printf '\n## Scope decision (automatic)\n\n- descoped (automatic) 2026-10-03T07:00+00:00, Plan-blocked feedback run 1: "x" is optional in the brief\n<!-- descope run=1 part=%s mode=optional -->\n' "$(sha12 x)" >> "$D/$A.md"
 excluded "plan-blocked after a descope" "plan-blocked again after an automatic descope"
+ok "$(hf "$I")" '["decide scope or defer",true,null]' "H5: plan-blocked after a descope"
+ok "$(fix "$I" detail)" "plan-blocked again after an automatic descope (Plan-blocked feedback run 1)" "H5: its detail"
 setfm "$A" descope_armed 2026-10-03T07:00+00:00
 ok "$(j "$(inp "$A")" 'd["autoRetry"]')" true "A4 control: with descope_armed: standing (the descope's own hand-back pending) it is retryable"
-
-scen a4-zero
-mkro; mkt "$A" open "auto_retries: 0"; mkt "$B" open
-planblock "$A" "$FA"
-excluded "auto_retries: 0" "auto_retries is 0"
 
 # ── A5: merge-task's fixable exit-1 texts retry, at the task's own run ──────────────────────────────────────
 i=0
@@ -464,12 +485,12 @@ ok "$(j "$I" '[d["humanFix"]["act"], d["humanFix"]["handBack"]]')" '["hand back 
 scen a6-task-zero
 mkro; mkt "$A" open "auto_retries: 0"; mkt "$B" open
 planblock "$A" "$FA"
-before=$(snap)
+before=$(snap); M=$(cnt)
 ar "$A" --auto-retries 2
 ok "$rc|$(snap)" "1|$before" "A6: task auto_retries: 0 with --auto-retries 2 → exit 1, both notes byte-identical"
 has "$out" "the note changed since \`inputs\`" "A6: the mismatch names the note change"
 ar "$A"
-ok "$rc|$(snap)" "1|$before" "A6: the same without the flag → exit 1, nothing written"
+ok "$rc|$(snap)|$(since "$M")" "1|$before|" "A6: the same without the flag → exit 1, nothing written or recorded"
 has "$out" "auto_retries is 0" "A6: why"
 
 scen a6-rollout
@@ -872,12 +893,16 @@ has "$out" "not auto-retryable: answered for this block" "A16: its ERROR line"
 mig() { python3 "$SCRIPT" mark-integrating --tasks "$1" --tasks-dir "$D" --now "$2" >/dev/null 2>&1 || { echo "FAIL - mark-integrating $1"; fail=1; }; }
 # a17int <name>: a fresh scenario with A awaiting Integration (a pr:, integrating:)
 a17int() { scen "a17-$1"; mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open; }
-# a17first <label> <reason>: A's first stop at 08:00 cools 15 minutes as infra, is retried at 08:15 and re-enters
-# Integration at 08:20
+# a17first <label> <reason> [check]: A's first stop at 08:00 is retried at 08:15 and re-enters Integration at 08:20.
+# With a third argument it first asserts that stop cools 15 minutes as infra: the rows that leave it out stop first on
+# a reason another scenario pins so (GH_NEVER A5c-int, GH_CANCEL A5c-cancel, a no-runner job A5c-no-runner, a kill
+# A17a's call), and their later assertions hold only for an infra stop.
 a17first() {
   lead "$A" integration "$2"
-  ok "$(j "$(INOW=2026-10-03T08:05:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" \
-    '["infra",false,"2026-10-03T08:15+00:00"]' "A17 $1: the first stop → infra, cooling 15 minutes"
+  if [ -n "${3:-}" ]; then
+    ok "$(j "$(INOW=2026-10-03T08:05:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" \
+      '["infra",false,"2026-10-03T08:15+00:00"]' "A17 $1: the first stop → infra, cooling 15 minutes"
+  fi
   ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "A17 $1: (the first stop retried)"
   mig "$A" 2026-10-03T08:20:00Z
 }
@@ -889,7 +914,7 @@ WAITING="PR #5 — required checks not created yet; CI in flight on head — wai
 # A17a: p2-1's shape: the same kill twice running, its reason written whole the second time (no Run 2)
 R1="merge-task signalled twice (143): last wait: $WAITING on: build (in_progress), alpine (queued, no runner)…"
 a17int a
-a17first a "$R1"
+a17first a "$R1" check
 lead "$A" integration "$R1" 2026-10-03T08:30:00Z
 ok "$(grep -c '^### Run ' "$D/$A.md")" 1 "A17a: the identical kill wrote no Run 2"
 I=$(INOW=2026-10-03T09:30:00Z inp "$A")
@@ -932,16 +957,16 @@ EOF
 HELD=" job \"alpine\" queued 47 minutes with no runner (run 7, job 8)"
 HELD2=" job \"alpine\" queued 112 minutes with no runner (run 9, job 11)"
 i=0
-while IFS='|' read -r first second; do
+while IFS='|' read -r first second chk; do
   i=$((i+1)); a17int "b-$i"
-  a17first "b $i" "$first"
+  a17first "b $i" "$first" "$chk"
   lead "$A" integration "$second" 2026-10-03T08:30:00Z
   I=$(INOW=2026-10-03T09:30:00Z inp "$A")
   ok "$(refused "$I")" "$REFUSED" "A17b $i: ${first:0:40}… twice running → refused"
   has "$(j "$I" 'd["autoRetryWhy"]')" "$SAME${first:0:20}" "A17b $i: the why names the same stop"
 done <<EOF
 merge-task exit 1, GitHub-side: $GH_NEVER|merge-task exit 1, GitHub-side: $GH_NEVER
-merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD|merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD2
+merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD|merge-task exit 1, GitHub-side: $GH_NEVER; held only by jobs no runner took:$HELD2|check
 merge-task exit 1, GitHub-side: $GH_CANCEL|merge-task exit 1, GitHub-side: ${GH_CANCEL/ci (run 7)/ci (run 9)}
 EOF
 
@@ -950,7 +975,7 @@ EOF
 i=0
 while IFS= read -r reason; do
   i=$((i+1)); a17int "c-$i"
-  a17first "c $i" "$reason"
+  a17first "c $i" "$reason" check
   lead "$A" integration "$reason" 2026-10-03T08:30:00Z
   ok "$(j "$(INOW=2026-10-03T09:00:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"], d["humanFix"]]')" \
     '[false,"infra","2026-10-03T09:15+00:00",null]' "A17c $i: ${reason:0:40}… twice → still cooling, no human fix"
@@ -1107,7 +1132,7 @@ ok "$rc|$(reentered)|$(j "$(INOW=2026-10-03T09:01:00Z inp "$A")" 'd["autoRetry"]
   "A18: a failed task save leaves no boundary row, and the verdict stays 22a"
 # R4: an unreported-context block carries no sha, so the same rename on another head is the same stop
 UR="unreported-context: required check \"build\" is reported by no check run or status on the PR's head, and no run on it is in flight"
-a17int ur; a17first ur "$UR"
+a17int ur; a17first ur "$UR" check
 lead "$A" integration "$UR" 2026-10-03T08:30:00Z
 I=$(INOW=2026-10-03T09:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetryClass"], d["settingsBlock"]["kind"], d["settingsBlock"]["contexts"], d["settingsBlock"]["due"]]')" \
@@ -1124,6 +1149,7 @@ for k in nr ur; do
   I=$(INOW=2026-10-03T08:05:00Z inp "$A")
   ok "$(j "$I" '[d["autoRetry"], d["humanFix"], d["autoRetryAfter"], d["settingsBlock"]["state"], d["settingsBlock"]["due"], d["settingsBlock"]["freeNow"]]')" \
     '[false,null,"2026-10-03T08:15+00:00","unfreed",false,false]' "A18 spent ($k): the first sighting with 2/2 used → not due, the 15-minute cool-down"
+  hasnt "$(j "$I" 'd["autoRetryWhy"]')" "budget:" "A18 spent ($k): … never the budget's H10"
   ok "$(j "$(INOW=2026-10-03T08:15:00Z inp "$A")" '[d["autoRetry"], d["settingsBlock"]["due"]]')" '[true,false]' \
     "A18 spent ($k): … then retryable, still not due"
   ANOW=2026-10-03T08:15:00Z ar "$A"

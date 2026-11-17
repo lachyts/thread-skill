@@ -1685,11 +1685,10 @@ parity() {
     "landable "*) case $out in "not landed: "*|"stuck: landing register"*) ok "$out" "past S2" "$label: parity: a plain call goes on past S2" ;; *) ok y y "$label: parity: a plain call goes on past S2 ($out)" ;; esac ;;
   esac
 }
-for e in repos/workspaces repos/obsidian .claude .agents Projects Projects/Life/audio-archive \
-         Projects/Life/grandma-shirleys-book Projects/Narcissus/narcissus-echo repos/concepts/cc; do
-  sw "$HOME/$e"; git -C "$HOME/$e" add THREAD.md; git -C "$HOME/$e" commit -qm t
-  parity "case 75 ~/$e" "$HOME/$e" "not landed: swept by the daily sweep" 0
-done
+# One swept path: case 19 runs every swept path in plain mode, and both modes read route_class.
+e=repos/workspaces
+sw "$HOME/$e"; git -C "$HOME/$e" add THREAD.md; git -C "$HOME/$e" commit -qm t
+parity "case 75 ~/$e" "$HOME/$e" "not landed: swept by the daily sweep" 0
 ghreset; mkrepo c75r; printf -- '- o/c75r — shared team repo\n' > "$LANDING_REGISTER"; edit
 parity "case 75 registered" "$W" "not landed: listed o/c75r: shared team repo" 0
 : > "$LANDING_REGISTER"
