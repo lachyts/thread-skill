@@ -1079,6 +1079,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a fast tier with a reach reads it as its base, so the reach is the task's
   diff even after merge-task refreshed `origin/<default>` (ADR 0062).
   _Avoid_: reach base, origin/main.
+- **Mac verdict** — the lead's verdict on its **Integration** verify of one
+  lead merge, which merge-task waits on before it merges that pair: pending
+  while the verify runs, then green, red or stopped. The lead pushes its merge
+  before it verifies, so the Mac's verify and GitHub's required checks run at
+  the same time and the **Integration lane** costs the slower of the two, not
+  their sum (ADR 0084 Decided for you 1); a pushed merge whose verdict never
+  read green is verified again, never merged as it stands. _Avoid_: local
+  verify, Mac check (the verify itself, not its verdict).
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,
