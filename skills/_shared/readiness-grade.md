@@ -103,12 +103,13 @@ says why.
 name: a real model run, a browser, a device, a signed-in account) against what a workflow agent holds. A rollout's
 planner, implementer and judges run inside the Workflow tool, on the lead session's tools less two: they have no native
 child-agent tool, so they start no subagent and no model run through one, and no question tool, so they never reach
-Lachy. A tool the lead itself lacks is the shape's concern (§ Shape: execution-fit.md's parallel clause). A task whose
+Lachy. A tool the lead itself lacks is the shape's concern (§ Shape: execution-fit.md's parallel-shaped test needs no
+external tool the lead lacks). A task whose
 check needs a tool the lead holds and a workflow agent does not is never Ready: who runs that check, or whether it is
 waived, is a decision of his (owner `yours`: a sign-off on what proves the work), written in `decisions[]` with the
 tool named in its `question`, so the raise makes it at least a One call. Watch `b6c4c33c`
-(event-scanner-rollout-2026-10-29): a task graded Ready had a live check that needed a native child-agent tool, which
-no workflow implementer or judge holds, and its review came back needs-human.
+(event-scanner-rollout-2026-10-29): a task graded Ready had a live check that needed native child agents, which no
+workflow implementer or judge holds; its review came back needs-human, and the lead ran the check on his answer.
 
 ## Shape
 

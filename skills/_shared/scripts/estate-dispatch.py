@@ -384,7 +384,9 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   ER.slug_key among the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose
   dependency is out, or that waits as above, gives one warnings[] line naming it. First what leaves whatever Lachy
   answers (LEAVES): every candidate that depends on an Orient, unreadable or waiting one, directly or through others,
-  leaves as `dependency` (Ready, decided, undecided or ungraded alike), via its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a
+  leaves as `dependency` (Ready, decided, undecided or ungraded alike), via its first dependency in that closure. Only
+  then is a One call's or Grill's note read, for one still in as `decided`: unrecorded, it leaves as above (so one
+  already out through a LEAVES dependency keeps its `dependency` why, its note unread). Then a candidate still in leaves, to a fixpoint, when a
   dependency is out: `dependency`, via the first such dependency.
   The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
   so never an unreadable task nor one already out through an Orient or unreadable dependency, which leaves whatever the
@@ -2423,8 +2425,9 @@ def decision_of(d):
 
 
 class Preflight:
-    """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank and the
-    scan only; ER is loaded for slug_key alone."""
+    """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank, the scan
+    and the note of each decided One call or Grill still in after the first closure step (unrecorded); ER is loaded
+    for slug_key alone."""
 
     def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
         self.ER, self.rank, self.scan = ER, rank, scan
@@ -2598,14 +2601,8 @@ class Preflight:
                     e["project"] = project
             elif grade == "Ready":
                 e.update({"in": True, "why": "ready"})
-            elif grade in ("One call", "Grill"):
-                gap = self.unrecorded(k) if k in self.decided else None
-                if k not in self.decided:
-                    e.update({"in": False, "why": "undecided"})
-                elif gap:  # named decided, but its note records no answer: its planner would stop on the question
-                    e.update({"in": False, "why": "unrecorded", "reason": gap})
-                else:
-                    e.update({"in": True, "why": "decided"})
+            elif grade in ("One call", "Grill"):  # a decided one's note is read after the first closure step, below
+                e.update({"in": k in self.decided, "why": "decided" if k in self.decided else "undecided"})
             else:
                 reason = self.reason(k)
                 e.update({"in": k in self.decided, "why": "queued as it stands" if k in self.decided else "ungraded",
@@ -2618,6 +2615,14 @@ class Preflight:
         for k in self.order:
             if k in fixed and entry[k]["why"] not in LEAVES:
                 entry[k].update({"in": False, "why": "dependency", "via": self.via(k, fixed)})
+        # A One call or Grill named decided whose note records no answer leaves as `unrecorded` (p51-4): its planner
+        # would stop on his question mid-run. Read only once the first step has run, so a task that leaves whatever
+        # he answers keeps its `dependency` why, and its note is never read.
+        for k in self.order:
+            if entry[k]["why"] == "decided":
+                gap = self.unrecorded(k)
+                if gap:
+                    entry[k].update({"in": False, "why": "unrecorded", "reason": gap})
         # Then the rest: a task that is in leaves when a dependency is out (one undecided or ungraded included).
         out = self.closure(k for k in self.order if not entry[k]["in"])
         for k in self.order:

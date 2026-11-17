@@ -247,8 +247,9 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        decided (a One call or Grill the round never reached, or an Orient one) is left out with its Dependent closure,
        unstamped, and returned. So is a member named decided whose note holds no record of an answer (`unrecorded`,
        p51-4): a One call or Grill is scheduled only with each decision's `## Decisions` bullet, and a fork's
-       `orient ruling:` line, in its note, so no planner stops on his question mid-run. Its queue's ruled calls are written by its `decided-for-you --write --by orient-all`
-       (schedule § 1.5's orient-all form), and the fork returns their block.
+       `orient ruling:` line, in its note, so no planner stops on his question mid-run. Its queue's ruled calls are
+       written by its `decided-for-you --write --by orient-all` (schedule § 1.5's orient-all form), and the fork
+       returns their block.
 4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, its Pre-flight's
    left-out members with each one's why, or its stop line, or, at a join, its `Joined [[<X>]]` line, its tasks and its
    hold lines, with no note path. A project whose own rollout is running carries no unfinished-rollout blocker in the
@@ -379,8 +380,8 @@ One message of statements, no question:
   `/thread:orient [[<home>]]`; `dependency` as "depends on [[<via>]], which is left out"; `waits` as "waits on
   [[<via>]] (<project>; <reason>): nobody is building it; schedule or land it, and the next pass takes this one", its
   `<project>` the row's `project`, or `no project` when it has none; `unrecorded` as "answered, but its note records
-  no answer (<reason>): the next round asks it again"; `ungraded` as "could not be
-  graded (<reason>): the next pass grades it again"; `unreadable` as "could not be read (<reason>): fix its
+  no answer (<reason>): the next round asks it again"; `ungraded` as "could not be graded (<reason>): the next pass
+  grades it again"; `unreadable` as "could not be read (<reason>): fix its
   frontmatter, and the next pass grades it";
 - each task the rank skipped as `unreadable` (its `skipped[]` row in `$S/rank.json`, a task note whose frontmatter the
   scan could not read) as "[[<slug>]] could not be read (<reason>): fix its frontmatter (`next-action.py mend <slug>`
