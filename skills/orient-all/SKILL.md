@@ -92,9 +92,11 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
    `invalid[]`, is re-asked once with its errors; still invalid, it stays ungraded. A status answer with no number in
    1–13 is recorded as unread, and so is a serial chain's: its rule is one of status § 5's S rules, never a § 4 number.
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
-7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json"`:
+7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json" --model <model id> --effort "${CLAUDE_EFFORT:-}"`:
    one line per graded task into the Grade log (CONTEXT.md **Grade log**), which the weekly Reflection reads against
-   what followed each grade. A titled note (spaces, capitals, an em dash) is logged under a key made from its name,
+   what followed each grade. Each line records the model the grading agents ran on (ADR 0079 decision 5): `--model` is
+   this session's own model id, as the harness names it, unless step 4 started them on another, and `--effort` their
+   effort, which an unset `$CLAUDE_EFFORT` leaves unrecorded. Nothing here picks or switches a model. A titled note (spaces, capitals, an em dash) is logged under a key made from its name,
    the name kept beside it; only a name with no key (no ASCII letter or digit, or another graded task's key) is skipped,
    named on stderr and counted in the outcome line (`; <k> skipped (no key): …`), and the rest are logged. A skip or a
    non-zero exit is a § 8 caveat, and the pass goes on.

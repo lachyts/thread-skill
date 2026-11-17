@@ -734,7 +734,7 @@ test('L6: October stands on the baseline; November\'s first reading audits from 
   refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'many.json', AUDIT_DOC(Array.from({ length: 17 }, () => entry({}))))], /at most 16 entries/)
   refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'gaps.json', AUDIT_DOC([], Array.from({ length: 9 }, () => ({ what: 'w', evidence: 'e' }))))], /at most 8 gaps/)
   refused(h, ['ledger', '--span', oct.out, '--audit', writeJson(nov.dir, 'oct.json', AUDIT_DOC([], undefined, '2026-10'))], /no Monthly audit is due this reading/)
-  const r = ok(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'audit.json', AUDIT_DOC([entry({})]))])
+  const r = ok(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'audit.json', AUDIT_DOC([entry({})])), '--model', 'claude-opus-5-5', '--effort', 'xhigh'])
   // the week itself (29 October to 5 November) lost nothing; the audit window's 2 h are October's
   assert.match(r.stdout, /^ledger r-\S+: no time lost of 0 h; baseline 2026-10, audit 2026-11 \(1 entry, 1 gap\), record written\n$/)
   assert.deepEqual(tl(h).map((l) => l.source), ['baseline', 'audit', 'record'], 'the audit lands before its ledger')
@@ -742,6 +742,9 @@ test('L6: October stands on the baseline; November\'s first reading audits from 
   assert.deepEqual([au.month, au.since, au.until, au.hours.load, au.recorded, au.rank.slice(0, 2)], ['2026-11', A.since, A.until, 1.5, A.recorded, ['stalls', 'load']])
   assert.deepEqual(au.audit.entries.map((e) => [e.from, e.to, e.hours]), [['2026-10-25T01:00:00.000Z', '2026-10-25T02:30:00.000Z', 1.5]], 'hours from from .. to')
   assert.deepEqual(au.audit.sources.find((s) => !s.read), { source: 'mac-history', read: false, why: 'pmset -g log keeps two days' })
+  // p46-6 (ADR 0079 decision 5): the audit line carries the model and effort its reader ran on; the record line, summed
+  // by script, carries none
+  assert.deepEqual([au.model, au.effort, 'model' in tl(h, 'record')[0]], ['claude-opus-5-5', 'xhigh', false])
   // a second reading in November is not due; a reading ending 30 November 14:00 UTC is Melbourne's 1 December: due
   assert.equal(span(h, '2026-11-05T02:00:00Z', '2026-11-12T02:00:00Z').s.ledger.audit.due, false)
   const dec = span(h, '2026-11-23T14:00:00Z', '2026-11-30T14:00:00Z').s.ledger.audit

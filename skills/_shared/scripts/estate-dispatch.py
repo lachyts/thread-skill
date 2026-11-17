@@ -32,7 +32,8 @@ need none). Called as:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py decided-for-you --rank FILE
         --tasks SLUG[,SLUG]... [--by orient-all|schedule] [--superseding PRIOR] [--write] [--today YYYY-MM-DD]
         [--vault PATH]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--model ID]
+        [--effort E] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank FILE --scan FILE
         --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank FILE --plan FILE
@@ -273,14 +274,18 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   Output: {schema, today, items[] {kind (execute | leg | repair | orient), rollout | project, note, title, cwd, alias?,
   launch?, prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
 
-log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), at
+log --rank R --scan S [--model ID] [--effort E] [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md
+  **Grade log**), at
   orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
   fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
   task its key (grade_key below), project its home, grade, agentGrade, shape and size; decisions the
   count of its decisions[], his decisions only (owner yours, ADR 0054: a decision ruled for him, in decidedForYou[], is
   never counted, so lines before ADR 0054 are not comparable), and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
   its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
-  row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name. The pass shares one
+  row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name; model and effort,
+  --model and --effort verbatim, on every line of the pass, each left off when not given or empty (p46-6, ADR 0079
+  decision 5: the model and effort the pass's graders ran on, which the lead names; nothing here reads a ladder, and
+  neither is part of the digest, so a rerun that names them differently still completes the same pass). The pass shares one
   minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank
   file's realpath, the rank's `today` and the sorted (slug, grade, agentGrade, shape, size) tuples: orient-all's $S is
   a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. The key (p34-6): a
@@ -2399,6 +2404,9 @@ def cmd_log(args):
         fields = grade_fields(RRec, t, rows.get(t["slug"].lower()), pass_id, digest)
         if note is not None:
             fields["note"] = note
+        for k in ("model", "effort"):  # what the graders ran on (p46-6); an empty flag records nothing
+            if getattr(args, k):
+                fields[k] = getattr(args, k)
         try:
             RRec.check(None, "grade", task, fields, ts=ts)
         except RRec.Refused as e:
@@ -2785,6 +2793,8 @@ def parse(argv):
     lg = sub.add_parser("log", allow_abbrev=False)
     lg.add_argument("--rank", required=True)
     lg.add_argument("--scan", required=True)
+    lg.add_argument("--model", default="")
+    lg.add_argument("--effort", default="")
     lg.add_argument("--dry-run", action="store_true")
     rs = sub.add_parser("rank-stamp", allow_abbrev=False)
     rs.add_argument("--rank", required=True)

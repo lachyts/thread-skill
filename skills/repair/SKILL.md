@@ -843,6 +843,12 @@ possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + 
 merges into another base (task + PR + base), and each git-env trip (§ 3e: the trip lines, the evidence's sha,
 the choice, any restore and its rescue line, and the ack line).
 
+**What ran (ADR 0079 decision 5).** A run that writes any dated `repair:` line on the rollout note (§§ 3–5) writes one
+more before its first: `- <YYYY-MM-DD> repair: ran on <model id> at <effort>`, this session's own model id as the
+harness names it and its effort (`$CLAUDE_EFFORT`; ` at <effort>` left off when it is unset). The Completion log copies
+it with the rest, and a later measure of repair reads it. It records what ran and never sets it: which model a Session
+opens on is Chorus's (Chorus ADR 0119). A serial chain's repair (§ 7) writes no `## Notes` line by hand, so none.
+
 ### 7. A serial chain
 
 A `shape: serial` note (§ 1) is a chain of **Legs** (`skills/execute/legs.md`), and repair is its conductor, never a

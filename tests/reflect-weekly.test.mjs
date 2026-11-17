@@ -1328,12 +1328,15 @@ test('the Watch reader: recurring needs two rollouts in the cycle, not one rollo
   const h = setup(t)
   const [wid] = ids(h, [['w', RULE, SHAPE]])
   ok(h, watchArgs(fakeSpan(h, RID(1), ['a']), ['a']))
-  ok(h, ['close', '--span', fakeSpan(h, RID(1), ['a'])])
+  ok(h, ['close', '--span', fakeSpan(h, RID(1), ['a']), '--model', 'claude-fable-5-2', '--effort', 'high'])
   fs.appendFileSync(reflectionsFile(h), '{"kind": "watch", "id": "torn\n')
   const sp2 = fakeSpan(h, RID(2), ['a'])
   ok(h, watchArgs(sp2, ['a']))
   assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks]).stdout, 'no rule proposal or held trade: no decision task\n', 'one rollout in two weeks')
   ok(h, ['close', '--span', sp2])
+  // p46-6 (ADR 0079 decision 5): the reflection line records the model and effort it ran on, only when close is told
+  assert.deepEqual(rlines(h).filter((l) => l.kind === 'reflection').map((l) => [l.model, l.effort]),
+    [['claude-fable-5-2', 'high'], [undefined, undefined]])
   const sp3 = fakeSpan(h, RID(3), ['b'])
   ok(h, watchArgs(sp3, ['b']))
   const span3 = (() => { ok(h, ['decide', '--span', sp3, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00']); return rlines(h).filter((l) => l.kind === 'proposal') })()

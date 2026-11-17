@@ -284,6 +284,11 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      the cwd, `Depends on [[...]]` links and the 1–2 line goal; the runnable prompt in the
      `## Resume prompt` block when the task qualifies for launch context, else as a fenced block
      under `## Notes`; and a closing `**Verify:**` line.
+   - **What ran** (ADR 0079 decision 5), on every task R5.2 writes, once its note exists: one `## Notes` line,
+     `- <UTC ISO> orient ran on <model id> at <effort>`, this session's own model id as the harness names it and its
+     effort (`$CLAUDE_EFFORT`; ` at <effort>` left off when it is unset), so a later measure of orient's work can read
+     which model shaped the task. It records what ran and never sets it: which model a Session opens on is Chorus's
+     (Chorus ADR 0119).
    - **The grill's Decided for you lines** (R3), on any task R5.2 writes, once its note exists, each through
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --owner <technical|priorities> --question <fork> --answer <call> --why <reason> --by orient`,
      which writes it under the task's `## Decided for you (<date>)`, never `## Decisions`. A refusal is reported,

@@ -55,6 +55,14 @@ which the next reading's agreement reads back. Four readings are declared, the r
    roles draw on their own (decision 3); a climb to the Fable rung runs every role on Fable, so it leaves every role,
    the lead's included.*
 
+*(Amended 2026-11-18 by thread-skill-p46-6: decision 5 is built. Session-run work records the model id and effort that
+ran beside the result it already writes, and takes no arm: the estate pass's and schedule's graders on each `grade`
+line (`estate-dispatch.py log --model --effort`), the Monthly audit's reader on its `time-lost` audit line (`reflect.py
+ledger`), the Reflection on its `reflection` line (`reflect.py close`), orient on each task its reshuffle writes and
+repair on its rollout note's `## Notes` (a `ran on <model id> at <effort>` line). The session names its own model, as
+the harness gives it, and its effort from `$CLAUDE_EFFORT`, unrecorded when unset; nothing here reads a ladder or sets
+a model, which stays Chorus's (Chorus ADR 0119). With neither flag a line is as before. No measure reads them yet.)*
+
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.

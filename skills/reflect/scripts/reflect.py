@@ -14,13 +14,15 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py bug --span F --rule R --shape H --slug <words> \\
         --title T --why W --rollout S [--rollout S2 ...] [--fixes <landed task>] [--tasks-dir D] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py suite-audit --span F [--tasks-dir D] [--dry-run]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span F [--audit F] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span F [--audit F [--model ID] \\
+        [--effort E]] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span F [--owners F] [--rest-unknown] \\
         [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span F [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span F [--decisions F] [--tasks-dir D] \\
         [--now ISO] [--dry-run]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span F [--tasks-dir D] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span F [--tasks-dir D] [--model ID] \\
+        [--effort E] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py moot --task <slug> --trade <knob id> --from N \\
         --why W [--tasks-dir D] [--now ISO] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
@@ -441,7 +443,9 @@ WATCH_RULE, shape `<words> tops the Time-lost ledger`, ledgerClass the class, ro
 count 1. --audit F is the Monthly audit's audit.json, {month, sources [{source (transcripts | suite-logs | pause-logs |
 mac-history), read, why?}], entries [{class, cause, rollout, from, to, what, evidence}], gaps [{what, evidence}]}: its
 line's hours come from each entry's from .. to (the model never types a number), recorded from span's audit block, rank
-over found + recorded (shown, never acted on), month the reading's. Exit 2: the audit is due and neither --audit is given
+over found + recorded (shown, never acted on), month the reading's, and model and effort --model and --effort verbatim,
+each left off when not given or empty (p46-6, ADR 0079 decision 5: the model and effort the audit's reader ran on, which
+the session names; only the audit line carries them, since the record line is summed by script). Exit 2: the audit is due and neither --audit is given
 nor this Reflection has an audit line; --audit is given and none is due; ledger.py's audit_line() refuses it (the month,
 an unknown class or cause, an entry outside the audit window or overlapping a known interval of the same rollout and
 class, more than 16 entries or 8 gaps, or a line over run_record's 16 KiB, `trim entries or their text`; text is folded
@@ -560,7 +564,9 @@ newWatches: those that are new; rules, bugs, filed, knobs, landed and reverted f
 distinct (rollout, Guardrail) pairs over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0: an
 audit's gaps never count, since the audit runs at either cadence, and like a held trade it leaves the week quiet),
 repairsOnly when a rollout was read repairs-only, decisionTask when a rule line names one (else the first task, sorted,
-whose line passed (ii) or (iii)), and cadence: run_record's cadence() over reflections.jsonl with this line appended
+whose line passed (ii) or (iii)), model and effort --model and --effort verbatim, each left off when not given or
+empty (p46-6, ADR 0079 decision 5: the model and effort this Reflection's session ran on, which it names), and
+cadence: run_record's cadence() over reflections.jsonl with this line appended
 (three quiet Reflections in a row: 14; any that is not quiet: 7), on every line, so each change of cadence is on a
 record line, and the outcome line ends `cadence <old> -> <new>` when it changes. The writers watch, bug, knobs and
 decide refuse a closed Reflection. reflect-due.py beside it reads the same rule to say when the next reading is due (ADR
@@ -3003,6 +3009,7 @@ def cmd_ledger(a):
             fields = LEDGER.audit_line(doc, audit, rid, known)
         except (ValueError, KeyError, TypeError) as e:
             raise Stop("the audit is refused: %s: nothing written" % e, 2)
+        fields.update(ran_on(a))
         if not any(x["read"] for x in fields["audit"]["sources"]):
             say("the audit read no source: it is recorded with each source's why, and it still closes %s"
                 % fields["month"])
@@ -3523,6 +3530,13 @@ def cmd_decide(a):
 
 # ---- close -----------------------------------------------------------------------------------------------------------
 
+def ran_on(a):
+    """{model, effort}: the model and effort a session-run line ran on (p46-6, ADR 0079 decision 5), --model and
+    --effort verbatim, each left off when not given or empty. A skill cannot read or set its own model, so the session
+    names it; nothing here reads a ladder."""
+    return {k: getattr(a, k) for k in ("model", "effort") if getattr(a, k, "")}
+
+
 def cmd_close(a):
     span = read_span(a.span)
     rid = span["reflection"]
@@ -3617,6 +3631,7 @@ def cmd_close(a):
               "counts": counts, "quiet": quiet}
     if repairs_only:
         fields["repairsOnly"] = repairs_only
+    fields.update(ran_on(a))
     task = next((d.get("vaultTask") for d in mine if d.get("altitude") == "rule" and d.get("vaultTask")), None)
     task = task or (sorted(listed_in)[0] if listed_in else None)
     if task:
@@ -3771,6 +3786,8 @@ def main(argv):
     led = sub.add_parser("ledger")
     led.add_argument("--span", required=True)
     led.add_argument("--audit")
+    led.add_argument("--model", default="")
+    led.add_argument("--effort", default="")
     led.add_argument("--dry-run", action="store_true")
     att = sub.add_parser("attention")
     att.add_argument("--span", required=True)
@@ -3786,6 +3803,8 @@ def main(argv):
     c = sub.add_parser("close")
     c.add_argument("--span", required=True)
     c.add_argument("--tasks-dir")
+    c.add_argument("--model", default="")
+    c.add_argument("--effort", default="")
     c.add_argument("--dry-run", action="store_true")
     m = sub.add_parser("moot")
     m.add_argument("--task", required=True)

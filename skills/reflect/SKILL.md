@@ -692,8 +692,11 @@ never filed here.
 Once, before step 14 (tune.py's load hold reads the line it writes), with `--audit` exactly when step 10a ran:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json [--audit /tmp/thread-reflect-week-<YYYY-MM-DD>/audit.json]
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json [--audit /tmp/thread-reflect-week-<YYYY-MM-DD>/audit.json --model <model id> --effort "${CLAUDE_EFFORT:-}"]
 ```
+
+With `--audit`, `--model` and `--effort` name what the audit's reader ran on (ADR 0079 decision 5), as step 16 names
+them for this session: this session's own, unless step 10a started its subagent on another model.
 
 It writes, each once and in this order: the baseline (the 2026-10-21 audit, on the first reading only), the Monthly
 audit's row, this reading's row, and, when this reading's top class also topped last week's row (or its Watch is
@@ -788,8 +791,12 @@ unchecked line from that day's page: the task was written before this rule (ADR 
 ### 16. Close
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --model <model id> --effort "${CLAUDE_EFFORT:-}"
 ```
+
+The `reflection` line records the model this Reflection ran on (ADR 0079 decision 5): `--model` is this session's own
+model id, as the harness names it, and `--effort` its effort, which an unset `$CLAUDE_EFFORT` leaves unrecorded. It
+records what ran; the lock, not this step, says what should (step 9).
 
 When `span.json`'s `arms` block holds a row, `close` first writes its `arms` line, once (a re-run writes none): the next
 reading's agreement walk reads it back. An empty week, an all-`none` week and a plans-only week before the split write
