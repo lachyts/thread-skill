@@ -6,7 +6,7 @@
 # logs argv with the three prompt vars and copies the state file at each push ($GIT_SNAP). Every pass runs at a clock
 # 20 minutes on from the last, so each is due.
 #   C0 quiet passes and the rate limit · C1 C1b C1c update-branch, one per repo per pass · C2 an unsettled mergeability
-#   C3 C3b C4 C4d the resolver · C5 C5b C5c C5d C5e the rerun rule · C6 C6g C6h C6i merges and the binding
+#   C3 C3b C4 C4d the resolver · C5 C5b C5c C5d C5e C5f the rerun rule · C6 C6g C6h C6i merges and the binding
 #   C7 C7n supersession and tombstones · C8 the clock · C9 C10 no write · C11 the deadline and a TERM
 #   C12 discovery and scope · C13 a refused auto-merge falls through · C14 the prompt vars · C15 stuck
 #   C16 marker · C17 --dry-run · C18 skipped PRs
@@ -386,6 +386,52 @@ ok "$(reruns)" 1 "C5e (iii): startup_failure with no step: no rerun"
 put "$B" THREAD.md "- e4"
 carrier GH_CHECKS=jobs GH_JOBS="1:action_required:"
 ok "$(reruns)|$(ef "o/r5e#$N" outcome)" "1|not re-run: job0 concluded action_required" "C5e (iv): action_required: no rerun"
+
+echo "== C5f. a roll-up check is read through the shards it needs (p54-12)"
+# The head's test.yml: `make test (ubuntu-latest)` is a roll-up (needs: shard, if: always()) over three shards. Its own
+# step reads genuine, so without the roll-up read every red shard would leave it unproven and nothing re-run.
+reset; repo r5f; B=$(cb r5f); co "$B"; mkdir -p "$W/.github/workflows"
+cat > "$W/.github/workflows/test.yml" <<'YML'
+name: test
+on:
+  pull_request:
+jobs:
+  shard:
+    name: fast tier (shard ${{ matrix.shard }}/3)
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash tests/run.sh --fast --shard ${{ matrix.shard }}/3
+  test:
+    name: make test (ubuntu-latest)
+    needs: shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.shard.result }}" = success ]'
+YML
+ci "the roll-up's workflow"; pr r5f "$B" "$AM"
+RU='Run [ "${SHARDS}" = success ]'
+SH=(GH_CHECKS=jobs GH_WORKFLOW=test "GH_JOB_NAMES=fast tier (shard 1/3);fast tier (shard 2/3);fast tier (shard 3/3);make test (ubuntu-latest)")
+ok "$(printf '%s\n' "$RU" | bash "$MT" --classify-steps)" genuine "C5f: the roll-up's own step reads genuine"
+carrier "${SH[@]}" "GH_JOBS=1:cancelled:;1:success:;1:success:;1:failure:$RU"
+ok "$(reruns)|$(ef "o/r5f#$N" outcome)" "1|re-ran run 1 (cancelled jobs; 1 of 2)" "C5f (i): a shard cancelled, the roll-up failed: re-run"
+put "$B" THREAD.md "- f2"
+carrier "${SH[@]}" "GH_JOBS=1:success:;1:failure:Run actions/checkout@v5;1:success:;1:failure:$RU"
+ok "$(reruns)|$(ef "o/r5f#$N" outcome)" "1 1|re-ran run 1 (infra steps Run actions/checkout@v5; 1 of 2)" \
+  "C5f (ii): a shard failed in its checkout, the roll-up failed: re-run, the roll-up's step never classed"
+put "$B" THREAD.md "- f3"
+carrier "${SH[@]}" "GH_JOBS=1:failure:Run bash tests/run.sh --fast --shard 1/3;1:success:;1:cancelled:;1:failure:$RU"
+ok "$(reruns)|$(ef "o/r5f#$N" outcome)" \
+  "1 1|not re-run: a genuine failure in fast tier (shard 1/3) (Run bash tests/run.sh --fast --shard 1/3)" \
+  "C5f (iii): a shard failed in its test step, the roll-up failed: not re-run, the shard named"
+put "$B" THREAD.md "- f4"
+carrier GH_CHECKS=jobs GH_WORKFLOW=test "GH_JOB_NAMES=unit 1;unit 2;unit 3;make test (ubuntu-latest)" \
+  "GH_JOBS=1:cancelled:;1:success:;1:success:;1:failure:$RU"
+ok "$(reruns)" "1 1" "C5f (iv): a roll-up whose shards map to no job of the run is not proven: no rerun (fail-closed)"
+has "$(ef "o/r5f#$N" outcome)" "not re-run: run 1: a roll-up check is not proven" "C5f (iv): … says so"
 
 echo "== C13. a refused auto-merge falls through to update-branch, the resolver and the rerun"
 reset

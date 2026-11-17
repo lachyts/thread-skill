@@ -17,9 +17,10 @@ state_path, read_state, write_state and kill_group. When it cannot be loaded the
 broken BJ never breaks land.sh's withdrawal read. Every child gets one environment: the repo-local GIT_* variables
 scrubbed (the two config channels kept), GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1 GCM_INTERACTIVE=never (land.sh's),
 and gc.auto=0 and maintenance.auto=false appended through GIT_CONFIG_COUNT. Each child runs in its own session under a
-bound: gh 30 s, a clone or fetch 90 s, a push 60 s, local git 60 s, the classifier 30 s, each cut to what is left of
-the pass's deadline; one that reaches it has its process group stopped (BJ.kill_group, 5 s grace). TERM, INT and HUP
-stop the live child's group and the pass exits 128 + N, landings.json as the last per-PR write left it.
+bound: gh 30 s, a clone or fetch 90 s, a push 60 s, local git 60 s, the classifier 30 s, the roll-up reader (6.4) 60
+s, each cut to what is left of the pass's deadline; one that reaches it has its process group stopped (BJ.kill_group,
+5 s grace). TERM, INT and HUP stop the live child's group and the pass exits 128 + N, landings.json as the last per-PR
+write left it.
 
 run, one pass:
   1. The rate limit. The state is read; a `_pass.lastPass` less than --every minutes (15) old is exit 3, not due, with
@@ -98,7 +99,18 @@ run, one pass:
         gives the steps that concluded failure, and a job with no failed step is genuine (merge-task's per-run guard:
         a hang or a timeout is never proven to be setup); anything else is genuine (action_required, stale, a check run
         that is no Actions job, any failed or errored status context, a details_url naming no run, a jobs read that
-        fails, a run whose jobs show no non-pass job). Every collected step name, from every job on the head, goes once
+        fails, a run whose jobs show no non-pass job). A roll-up check is read through the jobs it needs first (p54-11,
+        p54-12): a job with a non-empty `needs:` and a job-level `if:` holding `always()` or `!cancelled()`, like this
+        repo's `make test (ubuntu-latest)` over its `fast tier (shard K/3)` jobs, fails whenever a job it needs failed
+        or was cut, and its own failed step reads genuine. A run with two or more non-pass jobs, one of them not
+        cancelled, is read through the head's workflow: the scratch clone (below) at the PR's head, then `python3
+        <skills>/execute/scripts/lead-integrate.py shards --repo <clone> --head <head.sha> --jobs <the run's jobs>
+        --whole --job-id <its non-pass jobs>` (_rollup and _stands_for, the reader merge-task.sh runs). Exit 0 leaves
+        out each roll-up that stands for a non-pass job it needs, so only those jobs are classed (`rerun-failed-jobs`
+        re-runs the roll-up with them); exit 3 (no roll-up, or one whose needed jobs all passed, so its red is its own)
+        classes the run's jobs as they are; anything else (no lead-integrate.py, a clone or head fetch that fails, a
+        roll-up not proven, a reader cut at its bound) is genuine (fail-closed). A run with one non-pass job, or only
+        cancelled ones, is never read so. Every collected step name, from every job on the head, goes once
         to `bash <skills>/execute/scripts/merge-task.sh --classify-steps`, which prints classify_failed_steps' verdict,
         the classifier merge-task.sh itself runs on a red required check's failed steps before its own
         rerun-failed-jobs; anything but `infra`, or no merge-task.sh, is genuine. Not the brief's classifier:
@@ -144,7 +156,8 @@ helpers first. Then `fetch origin +refs/heads/<head.ref>:refs/carrier/<n>`, chec
 that moved is "the PR moved during the pass (its head)", for the next pass. The base tip, `base` below, is the clone's
 refs/heads/<base.ref>, and before there is a clone one `GET repos/<slug>/git/ref/heads/<base.ref>` per repo per pass (a
 failed read fails the step that needed it). Never the PR's base.sha: GitHub moves it only when the head moves, so it
-reads stale whenever the base moved after the PR's last push, the usual way a PR comes to be dirty or behind.
+reads stale whenever the base moved after the PR's last push, the usual way a PR comes to be dirty or behind. The rerun
+rule's roll-up read (6.4) makes one too.
 
 The resolver (step 6.3), for close-out, own-auto and own-marked PRs. `git merge-tree --write-tree -z <head> <base>`:
 exit 0 (GitHub said dirty, the merge is clean) is left to update-branch; exit 1 is parsed (the tree, `<mode> <oid>
@@ -216,6 +229,7 @@ SKILLS = HERE.parent.parent
 BJ_FILE = HERE / "background_job.py"
 REGISTER = HERE / "landing-register.py"
 MERGE_TASK = SKILLS / "execute" / "scripts" / "merge-task.sh"
+LEAD_INTEGRATE = SKILLS / "execute" / "scripts" / "lead-integrate.py"   # its `shards` verb: step 6.4's roll-up read
 STATE_NAME = "landings.json"
 STATE_KEY = "landings"
 STATE_VERSION = 1
@@ -227,6 +241,7 @@ CLONE_TIMEOUT = 90
 PUSH_TIMEOUT = 60
 GIT_TIMEOUT = 60
 CLASSIFY_TIMEOUT = 30
+ROLLUP_TIMEOUT = 60
 KILL_GRACE = 5
 SETTLE_TRIES = 3
 RERUN_MAX = 2
@@ -1090,6 +1105,42 @@ def _classify(steps):
     return "infra" if not timed_out and rc == 0 and out.strip() == "infra" else "genuine"
 
 
+def _rollups(ctx, it, pr, run, jobs, bad):
+    """Step 6.4's roll-up read: (bad less each roll-up job that stands for a non-pass job it needs, None), or (None,
+    why) when the head's workflow cannot be read or a roll-up is not proven (fail-closed)."""
+    head = pr["head"]["sha"]
+    if not LEAD_INTEGRATE.is_file():
+        return None, f"run {run}'s roll-up checks cannot be read (no lead-integrate.py)"
+    try:
+        cl = ctx.clone(it.slug, pr["base"]["ref"])
+        cl.fetch_head(it.n, pr["head"]["ref"], head)
+    except CloneError as ex:
+        return None, f"run {run}'s roll-up checks cannot be read ({ex})"
+    ids = [str(j["id"]) for j in bad if isinstance(j.get("id"), int)]
+    if len(ids) != len(bad):
+        return None, f"run {run} has a non-pass job with no id"
+    doc = {"jobs": [dict(j, databaseId=j.get("id")) for j in jobs if isinstance(j, dict)]}
+    wf = next((j.get("workflow_name") for j in jobs if isinstance(j, dict) and j.get("workflow_name")), None)
+    if isinstance(wf, str):
+        doc["workflowName"] = wf   # the file the run ran, as `gh run view --json workflowName` names it
+    f = Path(ctx.scratch()) / f"jobs-{it.n}-{run}.json"
+    f.write_text(json.dumps(doc))
+    t = _bound(ROLLUP_TIMEOUT)
+    rc, out, err, timed_out = _run([sys.executable, "-B", str(LEAD_INTEGRATE), "shards", "--repo", str(cl.dir),
+                                    "--head", head, "--jobs", str(f), "--whole", "--job-id", *ids], t)
+    if timed_out:
+        return None, f"run {run}'s roll-up read ran past {t:.0f} s and was stopped"
+    if rc == 3:
+        return bad, None
+    try:
+        kept = {j.get("databaseId") for j in json.loads(out)["jobs"]} if rc == 0 else None
+    except (ValueError, KeyError, TypeError, AttributeError):
+        kept = None
+    if kept is None:
+        return None, f"run {run}: a roll-up check is not proven ({_why(err) or f'lead-integrate.py shards exit {rc}'})"
+    return [j for j in bad if j.get("id") in kept], None
+
+
 def rerun(ctx, it, pr, e, checks, reruns):
     slug, key, head = it.slug, it.key, pr["head"]["sha"]
     genuine, runs, steps, owners = None, [], [], []
@@ -1117,6 +1168,12 @@ def rerun(ctx, it, pr, e, checks, reruns):
         if not bad:
             genuine = f"run {run} shows no failed job"
             break
+        if len(bad) > 1 and any((j.get("conclusion") or "") != "cancelled" for j in bad):
+            bad, genuine = _rollups(ctx, it, pr, run, jobs, bad)   # a roll-up is read through the jobs it needs
+            if not genuine and not bad:
+                genuine = f"run {run} shows no failed job beside its roll-up checks"
+            if genuine:
+                break
         for j in bad:
             c, jn = j.get("conclusion") or "", _flat(j.get("name")) or str(j.get("id"))
             if c == "cancelled":

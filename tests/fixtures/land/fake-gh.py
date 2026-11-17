@@ -27,6 +27,8 @@ Behaviour per call is chosen by environment variables (default in brackets):
   GH_PUTMERGE [ok]   ok | fail                                       PUT  …/pulls/<n>/merge
   GH_PATCH   [ok]    ok | fail                                       PATCH …/pulls/<n>
   GH_JOBS            "<run>:<conclusion>:<failed steps, |-separated>[;…]", the checks kind `jobs`
+  GH_JOB_NAMES       "<name>[;…]", GH_JOBS' job names in its order (an empty or missing one: job<i>)
+  GH_WORKFLOW        the `workflow_name` each GH_JOBS job carries in `actions/runs/<run>/jobs` (unset: none)
   GH_STEPS   [Run tests]  the single-run kinds' failed steps, |-separated (empty: no failed step)
   GH_SNAP    [unset] a file each PUT, POST, PATCH and `pr merge` first copies to $GH_STATE/snaps/<seq>-<verb>.json
   GH_CHECKS  [none]  the checks kind for any SHA GH_CHECKS_MAP does not name
@@ -35,7 +37,7 @@ Behaviour per call is chosen by environment variables (default in brackets):
 Checks kinds: none | pending | pass | neutral | fail | fail-notitle | status-fail | status-fail-nodesc |
 cancelled | timed_out | startup_failure | action_required | status-error | stale | jobs | 404 | hang, served as REST
 JSON (a check run named `build`, a GitHub Actions job of run 1, or one job per GH_JOBS entry, id run*10+i, named
-job<i>; a status context `ci/legacy`); 404 exits 1 with gh's `gh: Not Found (HTTP 404)`.
+by GH_JOB_NAMES, else job<i>; a status context `ci/legacy`); 404 exits 1 with gh's `gh: Not Found (HTTP 404)`.
 fail-notitle is a failed run with `output.title: null`, as GitHub Actions reports one; status-fail-nodesc
 is a failed status with `description: null`. `actions/runs/<run>/jobs` serves that run's GH_JOBS entries, else for run
 1 one job with the conclusion of the single-run kind last served for it and GH_STEPS as failed steps (failure,
@@ -304,11 +306,16 @@ def gh_jobs():
     return out
 
 
+def job_name(i):
+    names = E("GH_JOB_NAMES", "").split(";")
+    return (names[i] if i < len(names) else "") or "job%d" % i
+
+
 def job_runs():
     runs = []
     for i, (run, conc, _) in enumerate(gh_jobs()):
         done = conc != "pending"
-        runs.append({"id": run * 10 + i, "name": "job%d" % i, "status": "completed" if done else "in_progress",
+        runs.append({"id": run * 10 + i, "name": job_name(i), "status": "completed" if done else "in_progress",
                      "conclusion": conc if done else None, "output": {"title": None},
                      "html_url": "https://github.com/%s/%s/actions/runs/%d/job/%d" % (owner, name, run, run * 10 + i),
                      "details_url": "https://github.com/%s/%s/actions/runs/%d/job/%d" % (owner, name, run, run * 10 + i),
@@ -346,10 +353,12 @@ if method == "GET" and rest[:2] == ["actions", "runs"] and rest[3:] == ["jobs"]:
     jobs = []
     if listed:
         for i, r, c, s in listed:
-            jobs.append({"id": r * 10 + i, "name": "job%d" % i, "status": "completed" if c != "pending" else "in_progress",
+            jobs.append({"id": r * 10 + i, "name": job_name(i), "status": "completed" if c != "pending" else "in_progress",
                          "conclusion": c if c != "pending" else None,
                          "steps": [{"name": "Set up job", "conclusion": "success"}]
                          + [{"name": x, "conclusion": "failure"} for x in s]})
+            if E("GH_WORKFLOW"):
+                jobs[-1]["workflow_name"] = E("GH_WORKFLOW")
     else:
         try:
             kind = open(os.path.join(st, "runs", "%d.kind" % run)).read().strip()
