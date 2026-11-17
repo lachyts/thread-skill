@@ -98,6 +98,7 @@ function checkCap(f, E) {
   // unpriced after the bounce going to Lachy, never to the standing approval.
   if (!jPricedRaw.includes(`\`\`\`bash\npython3 -I '${PRICER}' exposure - <<'EOF'\n${GATE}\nEOF\n\`\`\``) ||
     !has(jPriced, 'Spend gate pricing (ADR 0038; the standing approval is on for this task)', 'Price each EXACTLY as shown, the gate on stdin, never as a shell argument',
+      'never as a shell argument (a gate line can hold a `$`, a quote or a backtick the shell would expand)',
       'Skip a gate the task note\'s "## Approved gates" section already holds', 'quote its "why" verbatim and ask for one Cap that holds the whole spend',
       'when its sub-bullets name spend its Cap does not hold', 'when such gates are your ONLY reason for "changes", list each in gateBounce exactly as shown above',
       'the engine sends the plan back once without a climb, and a gate still unpriced after that goes to Lachy for sign-off, never to the standing approval.') ||

@@ -540,7 +540,12 @@ function slotted(verifier, slot) {
 // p36-10: the hold sentence also names the Capacity stop (memory critical, verify-slot.py contract 7) and its
 // `waiting (memory: critical)` and `capacity stop` lines, since it holds and stops a suite exactly as the heat does.
 // The same resume-cache break.
-const SLOT_TEXT ='The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms). The first line of its output file (the file the harness names), `verify-slot: run <pid> started; wait for its verdict with: …`, gives its pid and the exact wait command. Then wait inside your turn: run that wait command in the foreground with a 600000 ms timeout, and again after each `verify-slot: still running …` line, until it prints `verify-slot: exit <rc> (run <pid>)`, whose rc is the verdict. A wait cut by its own timeout is no verdict either: run it again. Never end your turn or return while the run goes on, and never wait with a sleep or a monitor: the harness ends your background run when you return, so an early return is no verdict and costs the task a retry. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session. When the Mac is hot or its memory is critical (the Capacity stop) the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, `verify-slot: waiting (memory: critical)`, `verify-slot: heat stop …`, `verify-slot: capacity stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration, so run it again.'
+// p46-5 (G-never: "The model treats an instruction that contains "never" as absolute"; G-scope: "rewrite absolute rules
+// with their scope and reason"): "Never run the bare verifier, and never stop a run of another session." became a rule
+// with its scope and reason (the slot, and the Stopping processes rule). SLOT_TEXT is shared with Integration, and the
+// change is taken there too: integrationRungOf runs Integration on the top rung once every rung is all-Fable (ADR 0079
+// d2), so the integrator, which carries SLOT_TEXT and KILL_RULE, can be a Fable reader. The same resume-cache break.
+const SLOT_TEXT ='The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms). The first line of its output file (the file the harness names), `verify-slot: run <pid> started; wait for its verdict with: …`, gives its pid and the exact wait command. Then wait inside your turn: run that wait command in the foreground with a 600000 ms timeout, and again after each `verify-slot: still running …` line, until it prints `verify-slot: exit <rc> (run <pid>)`, whose rc is the verdict. A wait cut by its own timeout is no verdict either: run it again. Never end your turn or return while the run goes on, and never wait with a sleep or a monitor: the harness ends your background run when you return, so an early return is no verdict and costs the task a retry. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Run the verifier only as this wrapped line, never bare: the wrapper holds the verify slot of this machine, and a suite run outside it overloads the Mac beside the others (p23-4). Stop no run but your own (the Stopping processes rule): the lead and other sessions run their suites on this Mac too. When the Mac is hot or its memory is critical (the Capacity stop) the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, `verify-slot: waiting (memory: critical)`, `verify-slot: heat stop …`, `verify-slot: capacity stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration, so run it again.'
 
 // SLOT_TEXT beside a verify block's `- Verifier:` line; '' when slot is absent.
 function slotNote(slot) {
@@ -572,10 +577,12 @@ const DIFF_FILES = 'the files your diff changes, plus any test file you add or e
 // to run one file's or module's tests: most repos' line names only the full suite (`Tests: make test`), which falls
 // through to the git grep, so "the first source that applies" never meets "never the whole suite". One line, so it
 // sits inside a bullet or a step; its one git span is scrubbed, and a pattern touchedOf passed holds no backtick,
-// quote or whitespace, so it never opens a span of its own.
+// quote or whitespace, so it never opens a span of its own. p46-5 (G-scope): "never the whole suite under another
+// command" gives its reason, the verify slot a full run outside the verifier line skips, and the Checkpoint rule with its
+// exception (a brief that asks), since the planner, the judges and the investigator may run the verifier when asked.
 function touchedTests(pattern, files) {
   const pin = pattern ? ` the rollout's \`touched:\` pattern \`${pattern}\`, with \`{module}\` replaced by each changed module's name; else` : ''
-  return `the test files that reach ${files}. Take the first source that applies:${pin} the Tests line of the repo's own \`CLAUDE.md\` or \`AGENTS.md\`, which applies only when it says how to run one file's or one module's tests (a Tests line that names only the whole suite's command does not apply: fall through to the next source); else the test files that import or name each file, from \`${GIT_ENV_SCRUB} git grep -l '<module or file name>'\` over the test directories. Run only those files, with the repo's own test runner: never the verifier line, and never the whole suite under another command. When no test file reaches them (a docs-only change), there are none; say so.`
+  return `the test files that reach ${files}. Take the first source that applies:${pin} the Tests line of the repo's own \`CLAUDE.md\` or \`AGENTS.md\`, which applies only when it says how to run one file's or one module's tests (a Tests line that names only the whole suite's command does not apply: fall through to the next source); else the test files that import or name each file, from \`${GIT_ENV_SCRUB} git grep -l '<module or file name>'\` over the test directories. Run only those files, with the repo's own test runner: never the verifier line, and never the whole suite under another command, since a full run outside the verifier line skips the verify slot, and the full suite runs only at the Checkpoints or when a brief asks for it (estate ADR 0009 d1). When no test file reaches them (a docs-only change), there are none; say so.`
 }
 
 // The before/after status diff that tidies one test run in the task tree (the touched tests or the verifier), for
@@ -632,12 +639,19 @@ every agent on the task; the implementer builds in it after you, so you edit not
 
 // The bug classes reviewers caught in the giflab rollout — every code-writing
 // agent gets these as explicit preflight checks before opening/updating a PR.
+// p46-5 (G-stop: "remove or narrow the stopping conditions that you don't need"; G-scope): the Worktree safety bullet
+// STOPped on any unrelated file. Now a stray (the agent's own out-of-scope edit, or a tracked file a test run, a verifier
+// run or the env bootstrap rewrote) is restored as a routine step, with the integrator's own command (its security
+// block's exit-2 bullet), and a new scratch file is removed by its literal path (RM_RULE renders above this in all three
+// code-writers). One STOP stays, with its reason: a hand edit the agent did not make, which a restore would destroy.
+// `git diff HEAD --stat` lists staged and unstaged tracked changes (plain `git diff --stat` misses a staged stray) and no
+// untracked file, so an unignored venv adds no STOP. Committed scope is the review judge's, from the whole PR diff.
 const BUG_PREFLIGHTS = `
 Before you open or update a PR, run these preflight checks:
 - Dead code: if you add a new function/helper, verify it has at least one PRODUCTION caller, not just tests.
 - No-op assertions: if you write a bounded assertion, check whether upstream code already clamps to the same bounds — if so your assertion tests nothing.
 - Sibling-site blindness: after a fix, grep the whole file AND codebase for the same code shape; fix every sibling occurrence in this PR (or justify leaving them).
-- Worktree safety: run \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${GIT_ENV_SCRUB} git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.
+- Worktree safety: run \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${GIT_ENV_SCRUB} git diff HEAD --stat\`: it lists the uncommitted changes to tracked files, staged or not, and every path it lists must be in your task's scope. A listed path outside it that is your own edit, or a file a test run, a verifier run or the env bootstrap rewrote (a regenerated fixture, a lockfile), is a stray: restore it with \`${GIT_ENV_SCRUB} git restore --staged --worktree -- <path>\` and carry on. A new file you created that is not part of the change is not in that list: remove it by its literal path (the Removing files rule above). STOP and report instead of committing only when a listed path outside your scope is a hand edit you did not make (another session's work): committing it would carry work nobody asked for into your PR, and a restore would destroy it.
 - Worktree path discipline: your worktree root is the absolute path \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints — call it $WT. Every Read/Edit/Write MUST target a path UNDER $WT (e.g. \`$WT/src/foo.py\`). Edit requires an absolute path — do NOT absolutize against the project root you were handed (that is the MAIN checkout): an edit to a \`<project-root>/…\` path lands in the main checkout, OUTSIDE your branch and invisible to your PR — which looks exactly like a "silent Edit no-op" but is really a wrong-tree edit. After editing, \`${GIT_ENV_SCRUB} git -C $WT diff\` MUST show your change; if it does not, you edited the wrong tree — redo it against the \`$WT/…\` path.`.trim()
 
 // The test rules and the test delta (p31-2, estate ADR 0011 d3: a suite keeps its budget).
@@ -769,6 +783,59 @@ missing gate in gatedInputs ("spend: <what> — cap N USD", one line whose Cap h
 how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>") and name them in
 blockerDiagnosis — a human signs off on the note and you'll be re-dispatched.
 No operator override elsewhere in this prompt (release/hold gates) ever overrides THIS rule.`
+
+// ---- The Fable 5.2 guidance (p46-5, ADR 0079 Consequences) ------------------------------------------------
+// Anthropic's guide for Claude Fable 5.2 (platform.claude.com, "Prompting Claude Fable 5.2") names what a Fable role
+// reads differently: it treats an instruction that contains "never" as absolute, keeps following old cautions, and
+// takes a prompt's say-so on scope. ADR 0079 lets Fable take the drawn roles side by side with Opus, so every prompt a
+// task call renders is held to that guide, for both arms (no text below depends on the model or the arm). The
+// fragments below are static template literals (an apostrophe is fine; PR_STEPS_* interpolate only
+// NOT_IRREVERSIBLE). None holds a forbidden literal of NEEDS_HUMAN_RULE's out-builders ("needsHuman") or of the p31-1,
+// p29-9 and p31-2 sweeps (a one-shot or loop marker, "full verifier", "run the verifier", a verifier line), and none
+// holds a git span. Adding them is a deliberate resume-cache break, like p31-1's and p47-13's: every task-call prompt
+// changes; a resume re-passes its run's own `scriptPath` (ADR 0043).
+
+// The code-writers' scope (implementer, approved-plan implementer, reviser), right after KILL_RULE. G-owner: "When the
+// prompt said the code base was the model's own, it often consolidated duplicated code and sometimes made related
+// fixes without being asked ... A rule that limits scope doesn't cancel it." So the escalation hand-over no longer
+// says "you own it" (escalationContext), and this names what the change may touch and where an unasked change goes.
+const TASK_SCOPE = `Scope: this change is scoped to its task. Make the change the brief (and an approved plan) asks for, the sibling-site fixes the preflight below finds, and the fixes a review round asks for. Leave other code as it is: a refactor, a rename, a consolidation, a reformat, or a test or doc the task does not need widens the review and can change behaviour nobody asked to change. If you find such a change worth making, name it in the PR body instead.`
+
+// The steps every task-call role takes on its own (all eight task-call builders): the code-writers' right after
+// TASK_SCOPE, the four tree agents' right after KILL_RULE and slotRule, the review judge's after its Decide paragraph
+// (prompt-invariants pins KILL_RULE + slotRule + "The PR is authoritative" there). G-name: "Name the steps that need no
+// approval ... list the routine steps that it can take on its own." G-retry: ordinary obstacles such as "errors,
+// timeouts ... when they are not real blockers, work through them ... (wait and retry ...)". G-approval: "be specific
+// about the actions you want double-checked": a cut-off read is re-run blindly, a cut-off write only after a read shows
+// it did not land (no second diagnosis, PR or push), and a cut-off test run is no run, so a rerun keeps every "at most
+// once", "once" and EXACTLY ONCE (a second cut-off is a red that names no test, as the Flake check reads one). "A write
+// your steps call for" grants no write: a judge has none, the planner's is its Blocker diagnosis, the investigator's
+// its Findings. A slotted verifier keeps SLOT_TEXT's own wait rule.
+const ROUTINE_STEPS = `Routine steps (take them on your own: none of them is a gated input or a question for a person):
+- Run a read or a fetch again when your tool cut it off before it printed its own result (the tool call's timeout, a dropped connection, a transient tool or \`gh\` error): neither changes the branch, the PR or the task note, so running it again is safe.
+- A write your steps call for (a commit, a push, a \`gh pr\` command that writes, a write to the task note) that was cut off that way may already have taken effect. Check with a read first (the branch's log, \`gh pr view\`, the task note itself), and run it again only when that read shows it did not take effect.
+- A test run cut off that way is no run. Run it again once, with a longer timeout (up to 600000 ms): the run that prints its result is the one run your test instructions count, so this rerun keeps every rule on how many times you run tests. If that run is cut off too, take it as a red that names no failing test.
+- A test run that printed its result gave a verdict, a failure that names a timeout or a hang included: run it again only as your test instructions allow.
+- A verifier run through the verify slot follows the Verify slot text in this prompt instead: its wait has its own rule.`
+
+// What the routine PR steps are not (PR_STEPS_*). G-irrev: "Keep your own confirmation step for risky or irreversible
+// actions." GATED_INPUTS_CHECK stops before an irreversible action and is left as it is (the integrator and P23_1 pin
+// it), so this defines the word for the code-writers: the task's own push and PR are carved out, and a merge into the
+// default branch stays in (the lead is its only merger, ADR 0030). No "open": the reviser renders it too.
+const NOT_IRREVERSIBLE = `None of these is an irreversible action under the Gated inputs rule below: that rule means an action no later commit on this branch can undo, such as a force-push, a merge into the default branch (the lead is its only merger), deleting a remote branch, a release, a deploy, or a write to a live external service other than this task's branch and PR.`
+
+// The implementers' PR steps (implementer, approved-plan implementer), right after ROUTINE_STEPS. G-name, G-irrev.
+const PR_STEPS_OPEN = `Also routine, whenever your steps call for them: a commit on your task branch, a plain push of it, opening the task PR with the title and body your steps name, and removing a scratch file you created by its literal path. ${NOT_IRREVERSIBLE}`
+
+// The reviser's PR steps (seeded and unseeded), right after ROUTINE_STEPS: it updates the open PR and never opens one
+// (its "do NOT open a new PR" stays), so this holds no "open"; the PR-body edit is the one TEST_DELTA_TASK and a
+// step-back round ask of it. G-name, G-irrev.
+const PR_STEPS_UPDATE = `Also routine, whenever your steps call for them: a commit on this branch, a plain push of it (the PR updates itself), an edit to this PR's body your steps ask for (the test delta's answer, a step-back's declared changes), and removing a scratch file you created by its literal path. ${NOT_IRREVERSIBLE}`
+
+// The review judge reads the diff, never the summary (reviewJudgePrompt only), between its "Read `gh pr diff …` and the
+// task brief." and its Decide line. G-summary: "A closing PR summary from Claude Fable 5.2 often left out small
+// changes, so review the reported diff and the summary."
+const REVIEW_READS_DIFF = `Judge every hunk of the diff itself: the PR body and the code-writer's summary are claims, not evidence, and a summary can leave small changes out, so a change the diff shows and the body does not mention is still one you judge.`
 
 // Parse the plan's "### Gated inputs" section (any ##–#### level). Only TOP-LEVEL markdown list items
 // ("- " / "* " / "+ " / "1. " / "1) ") count as declarations — prose, footnotes, and nested sub-bullets
@@ -914,6 +981,7 @@ function capAmounts(gate) {
 // usable pricer or with no parsed spend gate (so the prompt is byte-identical), else this text with its own leading
 // "\n\n". The gates are the engine's parse of the plan text, never task.approvedGates; each goes on stdin through a
 // quoted heredoc, where `$` and backticks stay literal (a gate starts with its kind, so it is never `EOF`).
+// p46-5 (G-scope): "never as a shell argument" says why (what the shell would expand).
 function gatePricingBlock(a, planText) {
   const pricer = pricerOf(a)
   if (!pricer) return ''
@@ -926,7 +994,7 @@ Spend gate pricing (ADR 0038; the standing approval is on for this task): a spen
 \`spend: <what> — cap N USD\` (optionally \`total\`, a month, or \`per Login per month across K Logins\`), whose
 Cap holds the whole spend; how it splits goes in sub-bullets nested under it. The engine parsed these
 top-level spend gates from the plan's "### Gated inputs" (soft-wraps joined, list markers stripped). Price
-each EXACTLY as shown, the gate on stdin, never as a shell argument:
+each EXACTLY as shown, the gate on stdin, never as a shell argument (a gate line can hold a \`$\`, a quote or a backtick the shell would expand):
 ${blocks}
 It prints one JSON line {"usd": "<amount>" | null, "why": "<reason>"}. Skip a gate the task note's
 "## Approved gates" section already holds (its "(approved …)" annotation stripped, whitespace and case
@@ -1272,22 +1340,24 @@ function securityAskOf(r) {
 }
 
 // The code-writing agents' side, its own leading "\n" ('' when off), right after FLAKE_CHECK_TASK. It never renders a
-// loop or one-shot marker, and every git span is scrubbed.
+// loop or one-shot marker, and every git span is scrubbed. p46-5: four of its "never" rules give their reason (G-scope),
+// and a tracked file a test run, a verifier run or the env bootstrap rewrote is restored, never committed, so its
+// "commit every change" never sweeps a stray into a commit before the Worktree safety preflight sees it.
 function securityCheckBlock(a, task) {
   if (!securityOf(a)) return ''
   const wt = shq(worktreeDir(a.repoPath, task.slug))
   return `
 Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${securityScanCmd(a, task)}\`
-- Run it only once the touched tests and the verifier are green, before you open or update the PR and before any push. The Flake check never applies to it.
-- It reads commits only, so commit every change before it runs, new files included: \`${GIT_ENV_SCRUB} git -C ${wt} add -A\`, then commit, never only \`commit -a\`, which leaves a new file untracked. Remove a new file that is not part of the change rather than commit it.
+- Run it only once the touched tests and the verifier are green, before you open or update the PR and before any push. The Flake check never applies to it: the scan reads committed history, so a re-run gives the same answer.
+- It reads commits only, so commit every change before it runs, new files included: \`${GIT_ENV_SCRUB} git -C ${wt} add -A\`, then commit, never only \`commit -a\`, which leaves a new file untracked. Remove a new file that is not part of the change rather than commit it. Restore a tracked file a test run, a verifier run or the env bootstrap rewrote, rather than commit it (Worktree safety, below).
 - Exit 0. Copy its \`brief\` lines, verbatim and in order, into \`newDependencies\` ([] when it printed none).
-- Exit 1 with \`action\` fix uses up its try. For a secret: \`${GIT_ENV_SCRUB} git -C ${wt} reset --soft <rewriteFrom>\`, take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green. Build any test data that must look like a secret at run time. For an advisory: move to a version it reports fixed, or drop the dependency only when the task brief does not need it. Then the next try runs the touched tests, the verifier, its Flake check, then this scan again.
-- On the last try, or in a one-shot: blocked=true and verified=false (escalate=true in a one-shot), with rule, file and commit named in blockerDiagnosis, never a value.
+- Exit 1 with \`action\` fix uses up its try. For a secret: \`${GIT_ENV_SCRUB} git -C ${wt} reset --soft <rewriteFrom>\`, take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green. A force-push would rewrite history the PR and Integration read (ADR 0030). Build any test data that must look like a secret at run time. For an advisory: move to a version it reports fixed, or drop the dependency only when the task brief does not need it. Then the next try runs the touched tests, the verifier, its Flake check, then this scan again.
+- On the last try, or in a one-shot: blocked=true and verified=false (escalate=true in a one-shot), with rule, file and commit named in blockerDiagnosis, never a value: the value is the secret, and blockerDiagnosis is written to the task note.
 - If you judge a reported secret not a credential the task needs as written (test data, a hash, a public id), return blocked with needsHuman: "The secret scan reports <rule> in <file>, commit <sha7>, line <n>, which reads as not a credential: <reason>. Accept it (answer \`security-accept <its accept>\`), or say how the task should change it?", the accept copied from that entry's \`accept\`. Several such findings go in that one question, each named with its own accept, so one answer can settle them all.
 - Exit 1 with \`action\` human: return blocked=true and verified=false, with its \`why\`, verbatim, as needsHuman. Push nothing more. An advisory with no fixed release is the scan's question, never a drop.
-- Never create, edit or leave an uncommitted \`.gitleaks.toml\` or \`.gitleaksignore\` to clear a finding. A change the task brief itself asks for is made and committed, and goes to Lachy through the scan's question.
+- Never create, edit or leave an uncommitted \`.gitleaks.toml\` or \`.gitleaksignore\` to clear a finding: that hides it from every later scan instead of fixing it. A change the task brief itself asks for is made and committed, and goes to Lachy through the scan's question.
 - The command reads the task note's \`## Repair input\` itself: never write a \`## Repair input\` entry or a \`security-accept\` token yourself, anywhere.
-- Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try. Any other exit 2 is blocked, with its ERROR line.
+- Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try. A tracked file a test run, a verifier run or the env bootstrap rewrote is restored, never committed (Worktree safety, below). Any other exit 2 is blocked, with its ERROR line.
 - Set verified=true only when the verifier is green AND this scan exited 0 on that head.`
 }
 
@@ -1375,6 +1445,8 @@ The engine shows at most the agent's first ${DEPS_SHOWN} lines, each cut at ${DE
 // read-only investigator ('readonly') and the planner ('planner') work in the task tree with no source
 // edits, no commits and no PR, so their two arms restate that contract and never mention verification or
 // a branch. Both arms keep their marker (SECOND PASS, ONE RUNG UP) whatever the kind.
+// p46-5 (G-owner: when a prompt said the code base was the model's own, Fable "sometimes made related fixes without
+// being asked"): every variant says "you carry it on from here", never "you own it"; TASK_SCOPE bounds the work.
 function escalationContext(prior, st, stage, kind) {
   if (!prior) return ''
   const c = climbOf(st, stage)
@@ -1390,7 +1462,7 @@ function escalationContext(prior, st, stage, kind) {
     // takeover.
     if (kind === 'planner' && moved && planHeld(st, c)) return `
 
-SECOND PASS: a first attempt at this plan did not complete, and you own it from here. The plan
+SECOND PASS: a first attempt at this plan did not complete, and you carry it on from here. The plan
 runs on the same model and effort on this rung as on the one below, so the climb changed nothing for it and
 there is no hand-over — finish the plan yourself.
 ${contract}
@@ -1398,7 +1470,7 @@ The prior attempt's diagnosis (verbatim):
 ${prior}`
     if (own) return `
 
-SECOND PASS: a first attempt at this ${work} did not complete, and you own it from here. This
+SECOND PASS: a first attempt at this ${work} did not complete, and you carry it on from here. This
 role runs on its own model, not the rung's, so a climb would not strengthen it and there is no hand-over —
 finish the ${work} yourself.
 ${contract}
@@ -1406,7 +1478,7 @@ The prior attempt's diagnosis (verbatim):
 ${prior}`
     if (!moved) return `
 
-SECOND PASS: a first attempt at this ${work} did not complete, and you own it from here. This
+SECOND PASS: a first attempt at this ${work} did not complete, and you carry it on from here. This
 task is on the ladder's top rung, so there is no hand-over — finish the ${work} yourself.
 ${contract}
 The prior attempt's diagnosis (verbatim):
@@ -1414,7 +1486,7 @@ ${prior}`
     return `
 
 ESCALATION: you take this ${work} over ONE RUNG UP (a stronger model or more effort) — a first-pass attempt
-one rung down did not complete it, and you own it from here.
+one rung down did not complete it, and you carry it on from here.
 ${contract}
 The prior attempt's diagnosis (verbatim):
 ${prior}
@@ -1422,7 +1494,7 @@ Do not blindly repeat the failed approach.`
   }
   if (own) return `
 
-SECOND PASS: a first attempt did not land this task, and you own it from here. This role runs on
+SECOND PASS: a first attempt did not land this task, and you carry it on from here. This role runs on
 its own model, not the rung's, so a climb would not strengthen it and there is no hand-over: run the FULL
 verification loop and finish the work.
 The prior attempt's diagnosis (verbatim):
@@ -1431,7 +1503,7 @@ Any committed work from that attempt is already on your branch — build on or r
 warrants.`
   if (!moved) return `
 
-SECOND PASS: a first attempt did not land this task, and you own it from here. This task is on
+SECOND PASS: a first attempt did not land this task, and you carry it on from here. This task is on
 the ladder's top rung, so there is no hand-over: run the FULL verification loop and finish the work.
 The prior attempt's diagnosis (verbatim):
 ${prior}
@@ -1440,7 +1512,7 @@ warrants.`
   return `
 
 ESCALATION: you take this task over ONE RUNG UP (a stronger model or more effort) — a first-pass attempt
-one rung down did not land it, and you own it from here. The prior attempt's diagnosis (verbatim):
+one rung down did not land it, and you carry it on from here. The prior attempt's diagnosis (verbatim):
 ${prior}
 Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
 warrants; do not blindly repeat the failed approach.`
@@ -1473,7 +1545,8 @@ function groupedRounds(priorFeedback) {
 
 // Judge side: the accumulated history of the judge's OWN prior rejections plus an anti-goalpost
 // discipline. A regression of an earlier fix is grounds for rejection; a brand-new objection that was
-// visible in round 1 is not — that path rides tasks to the ceiling.
+// visible in round 1 is not — that path rides tasks to the ceiling. p46-5 (G-scope): both Discipline rules give their
+// reason (a reversal undoes a committed fix; a late objection spends one of the task's limited review rounds).
 function reviewHistoryBlock(priorFeedback) {
   if (!priorFeedback || !priorFeedback.length) return ''
   return `
@@ -1484,10 +1557,10 @@ ${groupedRounds(priorFeedback)}
 
 Discipline for this round:
 - VERIFY each earlier concern is still resolved — a regression of an earlier fix is grounds for rejection.
-- Do not contradict guidance you gave in an earlier round.
+- Do not contradict guidance you gave in an earlier round: the reviser has applied it in commits on this branch, so a reversal undoes a committed fix.
 - A NEW objection justifies "changes" ONLY if the new commits introduced it, or it was genuinely not
   visible earlier. Anything you could have raised in round 1 but didn't is a nitpick — note it in your
-  feedback if you must, but do not reject on it.`
+  feedback if you must, but do not reject on it, since each late objection spends one of the task's limited review rounds.`
 }
 
 // After this many accumulated rejections the reviser prompt upgrades to a STEP-BACK round. Fixed in
@@ -1499,6 +1572,7 @@ const STEP_BACK_AFTER = 2
 // gate mid-worktree. planText is the original approved plan for a plan-gated task ('' otherwise; the
 // licence then runs against the task brief alone). The brief stays the contract; the plan is reference,
 // not law — deviations must be DECLARED so the reviewer (who sees the same history) judges them open-eyed.
+// p46-5 (G-owner): the licence to restructure stays inside the task's scope (TASK_SCOPE, rendered above it).
 function stepBackBlock(priorFeedback, planText) {
   if (!priorFeedback || priorFeedback.length < STEP_BACK_AFTER) return ''
   const plan = planText ? `
@@ -1512,12 +1586,15 @@ ${planText}
 STEP-BACK ROUND: ${priorFeedback.length} review rounds have not converged — stop patching, step back.
 Re-read the task brief${planText ? ' and the original approved plan below' : ''}. You are LICENSED to
 restructure the approach${planText ? ' — including deviating from the approved plan —' : ''} where the
-accumulated feedback demands it, rather than only applying this round's bullets. The brief remains your
+accumulated feedback demands it, inside the task's scope (the Scope rule above), rather than only applying this round's bullets. The brief remains your
 contract${planText ? '; the plan is reference, not law' : ''}. State every ${planText ? 'deviation from the plan' : 'structural change of approach'}
 explicitly in the PR body and your summary so the reviewer judges it with eyes open.${plan}`
 }
 
 // ---- Prompt builders (5 variants, inlined; this file cannot read .md at runtime) ----
+// p46-5 (G-scope): the review judge's read rule (never the shared checkout) and the approved-plan implementer's
+// "Do NOT re-plan" give their reasons; the fragments the builders carry are TASK_SCOPE, ROUTINE_STEPS, PR_STEPS_* and
+// REVIEW_READS_DIFF (above, with GATED_INPUTS_CHECK).
 
 function implementerPrompt(task, a, st, prior) {
   return `You're picking up [[${task.slug}]] from the rollout at [[${a.rolloutSlug}]].
@@ -1532,6 +1609,11 @@ ${GIT_ENV_RULE}
 ${RM_RULE}
 
 ${KILL_RULE}
+
+${TASK_SCOPE}
+
+${ROUTINE_STEPS}
+${PR_STEPS_OPEN}
 
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
@@ -1576,6 +1658,8 @@ ${RM_RULE}
 
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
+${ROUTINE_STEPS}
+
 Steps:
 1. Read the task note in full + every file it references (under the task tree).
 2. Run the read-only investigation it asks for (greps, reading tests). To OBSERVE tests, ${observeTests('the files the investigation targets (none when it targets no code)', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
@@ -1609,6 +1693,8 @@ ${GIT_ENV_RULE}
 ${RM_RULE}
 
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
+
+${ROUTINE_STEPS}
 
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
@@ -1694,6 +1780,8 @@ ${RM_RULE}
 
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
+${ROUTINE_STEPS}
+
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Tests: you need not run any. To check a claim, ${observeTests('the files the plan names', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
@@ -1728,6 +1816,8 @@ ${RM_RULE}
 
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
+${ROUTINE_STEPS}
+
 Run additional READ-ONLY investigation in the task tree as needed.
 Tests: to re-check a baseline or a claim, ${observeTests('the files your plan will change', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 Rewrite the plan so that its
@@ -1754,12 +1844,17 @@ ${RM_RULE}
 
 ${KILL_RULE}
 
+${TASK_SCOPE}
+
+${ROUTINE_STEPS}
+${PR_STEPS_OPEN}
+
 The approved plan:
 ---
 ${planText}
 ---
 
-Implement the plan as written. Do NOT re-plan or substantially deviate. Minor refinements within the
+Implement the plan as written. Do NOT re-plan or substantially deviate: the plan judge approved this plan, and a deviation is work no judge has checked. Minor refinements within the
 plan's spirit (a slightly different test name, a one-line helper not listed) are fine — the bar is "would
 the reviewer recognise this as the approved plan?". If you discover during implementation that the plan is
 wrong (an assumption breaks, a named file doesn't exist as described), STOP and return blocked=true with
@@ -1816,12 +1911,14 @@ The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. 
 \`gh pr view ${prevImpl.prUrl} --json headRefOid -q .headRefOid\` AND
 \`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" status --porcelain\` prints nothing.
 On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh pr view\` only — never the
-project's shared checkout. You are read-only: no edit, commit or push, in the tree or anywhere else.
+project's shared checkout (it may be stale, dirty or on another branch). You are read-only: no edit, commit or push, in the tree or anywhere else.
 
 ${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}${securityReviewBlock(a, task, prevImpl)}
 
-Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
-"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEEDS_HUMAN_RULE}`
+Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. ${REVIEW_READS_DIFF} Decide: verdict "approve" if the PR is sound, else
+"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).
+
+${ROUTINE_STEPS}${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEEDS_HUMAN_RULE}`
 }
 
 // priorFeedback is the FULL accumulated [{ round, feedback }] history (latest round last) — the latest
@@ -1855,6 +1952,11 @@ ${GIT_ENV_RULE}
 ${RM_RULE}
 
 ${KILL_RULE}
+
+${TASK_SCOPE}
+
+${ROUTINE_STEPS}
+${PR_STEPS_UPDATE}
 
 Review feedback — ROUND ${latest.round} (your work order; apply every bullet, verbatim below):
 ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, planText)}
@@ -2092,6 +2194,8 @@ function treeLockLines(g) {
 // git refuses and the STOP line prints, the tree and the edit left as they were. A modified file the
 // fast-forward does not touch stays in place, as on any checkout. The integrator gets no fast-forward
 // here: its merge step stashes leftovers first, then fast-forwards under the same divergence STOP.
+// p46-5 (G-scope): its shared-checkout rule gives the reason taskTreeSetup and TASK_TREE_RULE (i) give. It renders in the
+// seeded reviser, a builder that can draw a Fable arm, and in Integration's two prompts, where the change is taken too.
 function branchTreeSetup(a, task, bootstrap, ff) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
@@ -2126,7 +2230,7 @@ or tracks origin/${br} after a fetch; it never cuts a new branch from the defaul
 against the daily worktree reaper, puts it on ${br}${ff ? `, fast-forwards it to origin/${br} (never past a divergence)` : ''} and prints \`tree head: <sha>\`. Any printed line that
 ends in STOP (or a toplevel that is not the task tree) means: change nothing, and return blocked with that
 line as your diagnosis. Every repo read and command runs in this tree, never in the project's shared
-checkout at "${a.repoPath}".`
+checkout at "${a.repoPath}", which may be stale, dirty or on another branch.`
 }
 
 // ---- The ladder (ADR 0029, as amended by ADR 0079) ----------------------------
