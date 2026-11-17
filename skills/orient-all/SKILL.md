@@ -291,7 +291,7 @@ execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`f
    start order (execute and Leg items, then repair, then orient last; on the Chorus Stage a Leg item is listed, never
    started: step 4), and `left[]`: every live rollout that gets no
    item, with its action and its holds (a big project's one not ticked is held `own session`, with the item it would
-   get). Start exactly `items[]`, never another.
+   get). Start exactly `items[]`, never another: `sessions` has applied the allow-list to them.
 2. **The allow-list.** `sessions` applies it; the table is here for the reader, and its numbers are status § 4's
    **Recommended action** rules:
 
@@ -456,16 +456,41 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 - Reshape a project, or ask, schedule or start anything of a big project's (ADR 0061) unless it was ticked on the pick
   list: Orient-graded work goes to its own orient session, once ticked.
 - Start, relay or move a live rollout other than through `sessions`' items: never on status actions 1–5, 9, 10 or 12,
-  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute item for a rollout
-  a Session on the Stage leads by the roster.
+  nor on a plain `paused:` (§ 7 step 2's table gives those nothing: the lineage, the protocol version, an incomplete
+  note, a drain, a live queue or room stop, and a resume status cannot check from here; and a plain `paused:` is
+  Lachy's). Never start a second lead: no `create_thread` for an execute item for a rollout
+  a Session on the Stage leads by the roster. Two leads would each launch and merge one rollout's tasks, and the
+  lead is its only merger (ADR 0030).
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
-  its state.
-- Let any Session but one named exactly the orient item's `title` hold a child orient.
-- Sign a gate Lachy did not sign in this pass, or ask a sign-off whose gates he has not been shown verbatim.
-- Start session-lane or parked work, other than a project unparked in this pass.
-- Schedule a run that waits, run two batches at once, route a fork's misfits, or run its follow-up line.
-- Supersede anything: no `--regenerate`.
+  its state: a relay would land on work under way, a question to Lachy or a failure he has not seen, so § 7 step 4.3
+  names that Session for him instead, and the list already gives each Session's state (§ 7 step 4.1).
+- Let any Session but one named exactly the orient item's `title` hold a child orient: that title is the name
+  `create_thread` gave the project's orient session (§ 7 step 4.2), so any other Session, a lead in the project
+  included, is at other work.
+- Sign a gate Lachy did not sign in this pass, or ask a sign-off whose gates he has not been shown verbatim: a
+  sign-off is his authorisation (ADR 0008), and he can sign only what he has read (§ 4).
+- Start session-lane or parked work, other than a project unparked in this pass: session-lane work needs Lachy present
+  or waits on a date (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`), and a park is his standing call
+  (ADR 0041), lifted only by his Unpark answer.
+- Schedule a run that waits, run two batches at once, route a fork's misfits, or run its follow-up line. A waiting
+  run's why still holds, and § 8 names it; two batches at once would race schedule step 6's note naming and each
+  fork's § 0 `clone` (§ 6 step 2); and a misfit's route (a defer, an open or a serial schedule) is not the schedule
+  the round authorised, so § 8 lists it as a fit disagreement (§ 6 step 3).
+- Supersede anything: no `--regenerate`. A supersede retires a paused or unstarted rollout and carries its tasks, and
+  its preview can stop on a call that is Lachy's or repair's (schedule § 1's refusals and Re-root guard), which a fork
+  that asks nothing cannot settle; such a run waits on its blocker instead (ADR 0041).
 - Write `start: unattended` other than through § 7 step 4's `stamp-start` on a Leg item on the Chorus Stage.
-- Ask past the budget, sign-offs and the pick list aside. § 6 step 2's sign-in list is raised whatever the budget too:
-  a sign-in is his hands, not a decision (ADR 0074 d2).
-- Call the question tool from a fork or an agent.
+  The stamp has the Stage start a run with nobody present: a Leg item's listing on the Waiting list is the one start
+  this pass makes that way (ADR 0076 d4), and § 7 starts or prints every other item itself.
+- Ask past the budget, sign-offs and the pick list aside. The budget is the minutes he gave this pass's decisions
+  (§ 1). § 6 step 2's sign-in list is raised whatever the budget too: a sign-in is his hands, not a decision
+  (ADR 0074 d2).
+- Call the question tool from a fork or an agent: neither has a route to Lachy (§ 6 step 2), and § 6 step 3 answers
+  each question schedule would ask.
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (`estate-scan.py`, `estate-dispatch.py slices`, the read-only
+grading and status agents, `list_sessions` and the sign-in pass's read-only checks), and a re-run of one that died on
+a network error, are taken on your own: none of them writes a note. Only the *yours* questions this skill names reach
+Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

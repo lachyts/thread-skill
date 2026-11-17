@@ -277,7 +277,7 @@ rollout rooted in place before ADR 0042 keeps the strict rule for every member.
   since a reset to `origin/<default>` would take live code past the Green tip (ADR 0084 d1). When that
   clone's HEAD is the default branch, close's `repo-state.sh` line is reused with merge-task's wording:
   commits **queued** in a
-  `close/…` landing PR mean wait for GitHub to merge it (never a second PR); **stranded** ones must be
+  `close/…` landing PR mean wait for GitHub to merge it (never a second PR: the queued one already lands them); **stranded** ones must be
   landed; a split names both. Otherwise the remedy is the generic one.
   Ahead by ancestry alone is not a block: commits whose content already reached `origin/<default>` by a
   squash or cherry-picked PR (no file they touch, merges included, differs from `origin/<default>`) are a

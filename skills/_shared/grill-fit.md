@@ -11,7 +11,8 @@ checklist step inside composition, not a new phase.
    every other fork is (a)): bake a gate line into the prompt. The fork returns to Lachy via grill-me: the session reports the fork and its evidence,
    never resolves it downstream and never spawns a task for it.
 3. **No forks → no grill language at all**: no gate lines and no "decide X from Y" lines. Don't
-   manufacture ceremony.
+   manufacture ceremony: a gate line with no fork behind it stops the executing session for a call nobody has to
+   make.
 
 **Example.** The Smart Slider silent-stall diagnosis needed this gate, and got it only by hand:
 

@@ -239,7 +239,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 - **Off the Stage** nothing is stamped there, parallel or serial: the parallel stamps wait like Not yet, and each
   serial note's Leg 1 is a paste-ready prompt in the record (`leg.py status`'s `restart.launch`), never listed, its
   one start path.
-- Every result is a Rollouts started row. Never `/thread:repair`, run or relayed.
+- Every result is a Rollouts started row. Never `/thread:repair`, run or relayed: the mode needs nobody present, and
+  repair asks decisions only Lachy can make (repair § Don'ts), so a refusal goes in the record with its command
+  instead (ADR 0071).
 
 ## B9. The questions, last
 
@@ -316,12 +318,16 @@ no `create_thread` and no write-back.
 
 ## Don'ts
 
-- **Never stamp a note beside a hold, or a serial note off the Stage**, and never run or relay `/thread:repair`.
-- **Never reopen, schedule or obsolete a held park.**
-- **Never supersede a prior that answer 6 stops on.**
+- **Never stamp a note beside a hold, or a serial note off the Stage**, and never run or relay `/thread:repair`: a held
+  queue starts on Lachy's word, off the Stage a serial note's one start path is its paste-ready Leg 1 prompt (B8),
+  and repair asks decisions only Lachy can make, while this mode needs nobody present (repair § Don'ts; ADR 0071).
+- **Never reopen, schedule or obsolete a held park.** He parked it, and a strategy deferral is his to lift (B3).
+- **Never supersede a prior that answer 6 stops on.** It still holds: he paused, signed off, launched or approved it
+  behind a PR, or it carries a `hold_until` or an `on_merge:` (ADR 0071).
 - **Never park for size alone, or close a task for being small**: a task closes only once it stops being true.
 - **Never rename a task**: the Pulse keys it by its path.
 - **Never write the trigger file except through `trigger --write`**: write-back #1 never before the last task write
   of B5 and its forks (B7), and the re-stamp (`--restamp`) only after B9's last write, never after a held write-back
   #1.
-- **Never put a question before the start**, and never leave a note the post-question round wrote unstarted.
+- **Never put a question before the start**, and never leave a note the post-question round wrote unstarted: the
+  mode runs with nobody present, so a question asked first would hold every start (ADR 0071).
