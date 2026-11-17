@@ -1265,18 +1265,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (~/.claude's config repo), has none, and a snapshot stands for the checkout
   it was cut from (`engine-snapshot.py`'s git_primary). What moves it is the
   **Primary refresh** (ADR 0066), and land.sh S4 and merge-task's in-place
-  refresh whenever the hold is clear. Not the engine's "main
+  refresh whenever the hold is clear. Each of them stops at the **Green tip**
+  (ADR 0084 d1, built by p54-6), so the checkout may stand behind origin while
+  the default branch is red (a wait, never a stuck spell); one pulled past it
+  by hand reads `past` and is never moved back; and its THREAD.md may hold a
+  landed close-out's copy, ahead of HEAD, until the Green tip passes it.
+  Not the engine's "main
   checkout", which is a rollout's own repo. _Avoid_: live checkout, installed
   copy.
 - **Primary refresh** — the background job that keeps the **Primary checkout**
   current with origin: every few minutes it fast-forwards it whenever ADR
   0031's hold is clear, and keeps the other checkouts sessions load live from
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
+  In a repo that publishes a **Green tip** it moves to the Green tip and never
+  past it (ADR 0084 d1, built by p54-6: `green-tip.py`'s reading, which
+  follows only a commit verified by its publish run, recorded or asked of gh);
+  a missing, moved or untested ref moves nothing (`no move:`, a green-held
+  spell after a day), never origin's tip. A checkout waiting at a Green tip
+  behind origin is no spell: it is kept in a separate waits file, and the
+  status line names it only once it has waited 2 hours.
   Fast-forward only: a checkout with an uncommitted edit origin would
   overwrite is left as it is (an edit origin never touches rides along;
   `refused` only once the hold is clear), and a diverged `~/.agents` too. A
   diverged **Primary checkout** repairs itself instead (ADR 0078 d4), under
-  the hold: its commits' content already on origin, it resets to origin,
+  the hold: its commits' content already on origin, it resets to origin (to
+  the Green tip once that holds them, never past it),
   keeping a backup ref; otherwise land.sh carries its close-out commits (a
   landing PR where origin is protected), and any other local commit stays
   and is recorded, a stop for the Stage after a day. One that stays unable to
@@ -1289,8 +1302,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in the same state file, read on the same line. Each installed pass ends by
   running the **Landing carrier**. _Avoid_: auto-update, plugin
   update (Claude Code's own verb).
-- **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
-  default branch, fetched fresh when schedule writes the rollout note (never
+- **Engine snapshot** — a frozen copy of the plugin at the **Green tip** of
+  its default branch (origin's tip for a repo that publishes none), fetched
+  fresh when schedule writes the rollout note (never
   the **Primary checkout**'s working state) and named on it: the
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
@@ -1299,7 +1313,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note that names none is stamped at its next Reinstate or Leg begin. A
   session's rendered prose is followed only when its git `ident` prose id is
   the snapshot's own; otherwise the snapshot's SKILL.md is read as a file
-  (`skills/_shared/engine-snapshot.md`). _Avoid_: pinned root, frozen plugin,
+  (`skills/_shared/engine-snapshot.md`). An unverified Green tip steps back to
+  the newest verified commit before it; with none, the cut cuts nothing, and
+  `cut --at <sha>` makes a named commit live by hand, on Lachy's word only (ADR
+  0084 d1 and Decided for you 8, p54-6). _Avoid_: pinned root, frozen plugin,
   engine version.
 - **Engine root** — the root every command acting on one rollout runs from:
   its **Engine snapshot**; for a note that names none, the **Primary
@@ -1316,9 +1333,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   proposed; published as `refs/thread/green` by full-suite.yml's `green-tip`
   job (p54-5); its lead check is built (p54-7: `reconcile-rollout.py
   master-runs` files a task when the ref's commit carries no successful run);
-  its readers not yet built: both still take origin's tip). Not the branch's
-  tip, which a light check lets move first. _Avoid_: proven commit
-  (**Proven** is a fix's), stable, release.
+  its readers built by p54-6: `green-tip.py`, read by the cut, the Primary
+  refresh, land.sh and the in-place refresh, takes the ref only after a fetch
+  by name, as an ancestor of origin's tip and a verified commit, and never
+  falls back to origin's tip). Not the branch's tip, which a light check lets
+  move first. _Avoid_: proven commit (**Proven** is a fix's), stable, release.
 - **Red-master fix** — the fix task `reconcile-rollout.py master-runs` files
   when a default-branch `full suite` run is red on a suite its re-test
   confirmed (or when the **Green tip**'s commit carries no successful run):
@@ -1706,7 +1725,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (alone).
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. It moves the rollout onto a fresh
-  **Engine snapshot** at origin's tip (ADR 0043); for a serial chain, which is
+  **Engine snapshot** at the **Green tip** (ADR 0043, ADR 0084 d1); for a serial chain, which is
   never paused, it is the first Leg begun after a Leg closed `stopped`; never
   a **Sign-off pause**'s reinstate. An unstamped note is stamped at it, and an
   unstamped chain also at its first Leg or the first Leg begun after any close

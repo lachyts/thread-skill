@@ -342,14 +342,27 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
 - **`reset-primary`** runs one `skills/_shared/scripts/primary-refresh.py run` pass in place (ADR 0078 Decided 3: a second
   reset path would bypass its rule). `run` exits 0 whatever it finds, so `fire` reads the pass's outcome line, and records
   only an outcome that read the checkout to a standing verdict (`current`, `ahead`, `moved`, `repaired:`, `diverged`,
-  `held:`, `refused:`; RESET_PRIMARY_RECORDED). `repaired: reset <head12> to origin/<b> at <tip12> (…)` is the refresh's
-  repair of a diverged Primary whose commits are already on origin, and ends the stuck spell as `current` does. On the
-  Primary every other `diverged (ahead a, behind b): …` line is that repair's too (`repair waits (…)`, `repair held: …`,
-  `repair refused: …`, `carried: …`, `not carried (…)`), recorded under the `diverged` prefix: the job keeps passing, and
-  a repair blocked for a day shows on /thread:status. `never integrated here` is an `--also` checkout's line, never the
-  Primary's. Every other outcome (`not a primary checkout:`, `fetch failed:`, `broken:`, `unreadable:`, `timed out:`,
-  `busy:`, a dry pass's `would …`; RESET_PRIMARY_RETRIED), no line, an outcome in neither list and a non-zero exit are not
-  recorded: `fire` exits 1, due again next tick, and its ERROR names an outcome in neither list as one it does not know.
+  `held:`, `refused:`, `past`, `no move:`; RESET_PRIMARY_RECORDED). In a repo that publishes a Green tip (ADR 0084 d1)
+  the pass moves the Primary to it and never past it, so `current` and `moved` have Green-tip forms, `current at the
+  Green tip <g12> (<n> behind origin/<b>: waits on the Green tip)` and `moved <a12>..<b12> (<k> commits) to the Green
+  tip (<n> behind origin/<b>)`. `past the Green tip <g12> by <m> (on origin/<b>): waits on the Green tip` is a Primary
+  pulled past it by hand, never moved back: a standing verdict. `no move: <why> (never origin's tip)` is a hold (the
+  Green tip absent, not an ancestor of origin's tip, unverified or unreadable): recorded, because the job re-reads it
+  every pass and a retry would rerun a pass of up to 15 minutes on every tick while it holds, and a hold a day old shows
+  on /thread:status as a green-held spell. `repaired: reset <head12> to origin/<b> at <tip12> (…)` (`repaired: reset
+  <head12> to the Green tip <g12> of origin/<b> (…)` in a repo that publishes one) is the refresh's repair of a
+  diverged Primary whose commits are already on origin, and ends the stuck spell as `current` does. On the Primary
+  every other `diverged (ahead a, behind b): …` line is that repair's too (`repair waits (…)`, among them `repair waits
+  (no Green tip to reset to: …)` on a hold and `repair waits (its content is on origin/<b>, not yet at the Green tip
+  <g12>)`, `repair held: …`, `repair refused: …`, `carried: …`, `not carried (…)`), recorded under the `diverged`
+  prefix: the job keeps passing, and a repair blocked for a day shows on /thread:status. `never integrated here` is an
+  `--also` checkout's line, never the Primary's. A recorded pass can leave the Primary behind the merged PR N a `merged`
+  trigger waited for (`current at the Green tip …` while the Green tip has not reached N): the trigger is spent, and
+  the job carries the Primary to N once the Green tip reaches it. Every other outcome (`not a primary checkout:`,
+  `fetch failed:`, the transient hold `fetch failed: refs/thread/green: …` among them, `broken:`, `unreadable:`, `timed
+  out:`, `busy:`, a dry pass's `would …`; RESET_PRIMARY_RETRIED), no line, an outcome in neither list and a non-zero
+  exit are not recorded: `fire` exits 1, due again next tick, and its ERROR names an outcome in neither list as one it
+  does not know.
   tests/contracts/vault-grammar.test.mjs classifies every outcome a pass can return into one list or the other, so a new
   or renamed outcome fails there. It blocks on the pass, up to about 15 minutes, so its caller runs it off the 5-minute
   tick.

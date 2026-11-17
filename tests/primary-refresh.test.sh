@@ -21,6 +21,10 @@
 #             transition), S8 S9, S10a-S10c (the candidate's table), I6 (the frozen contract)
 #   carrier   LC1-LC6 (the landing carrier, ADR 0078 d2: run last in an installed pass, its lines, its exit 3, the
 #             `carrier` spell of kind broken, the primary's copy as the fallback, never under --dry-run or from a checkout)
+#   green     GR0-GR7, GR-W, GR-T1-GR-T4, GR-B, GR-R (ADR 0084 d1, p54-6: the fast-forward, the repair and the
+#             self-update stop at the Green tip; the waits file and its 2 h line; holds that move nothing, never to
+#             origin's tip; an untested ref never followed, gh once per 15 min; past; a kept THREAD.md; the transition
+#             across p54-6; a fetch that moves origin/<d> mid-pass never followed)
 # Origins over ssh are git@github.com:o/origin.git, served by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`. Every pid
 # an arm records is checked gone (`gone`). Hermetic: HOME, XDG_STATE_HOME and every path live under mktemp; commits carry
 # an inline identity; global/system git config is ignored; no server runs.
@@ -108,8 +112,8 @@ ok "${bad:-none}" none "I1: an empty bin directory gets every bundle file, byte 
 ok "$(cd "$tmp/bin" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')" \
   "$( (cut -d' ' -f3 "$tmp/table"; echo primary-refresh.installed) | LC_ALL=C sort | tr '\n' ' ')" \
   "I5: … exactly the table's install-rels plus the marker"
-ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "9|9" \
-  "I5: primary-refresh.py bundle prints nine lines in the strict form"
+ok "$(wc -l < "$tmp/table" | tr -d ' ')|$(grep -cE '^0[0-7]{3} [A-Za-z0-9._/-]+ [A-Za-z0-9._/-]+$' "$tmp/table")" "10|10" \
+  "I5: primary-refresh.py bundle prints ten lines in the strict form"
 lacks "$(cat "$tmp/table")" "ntfy-push" "I5: … and no ntfy-push.py row (ADR 0075 d2: a self-update removes the installed copy)"
 has "$(head -1 "$tmp/table")" "0755 skills/_shared/scripts/primary-refresh.py primary-refresh.py" "I5: … the copy's own row first"
 JOB=(); while IFS= read -r -d '' a; do JOB+=("$a"); done < <(python3 -c 'import plistlib,sys; sys.stdout.write("\0".join(plistlib.load(open(sys.argv[1],"rb"))["ProgramArguments"]) + "\0")' "$tmp/job.plist")
@@ -518,8 +522,8 @@ ok "$(sline --state "$S" --now "$(at 1500)")" \
   "Primary refresh: primary-refresh self-update: origin's bundle at abc failed its smoke run (x): the installed copy is kept (stuck since $(at -600 | cut -c1-16)) · primary-refresh job: the launchd job predates this copy (stuck since $(at -300 | cut -c1-16)) · junk: h (stuck since $(at -100 | cut -c1-16)) · primary: held: [[q-rollout]] running on it (stuck since $(at 0 | cut -c1-16); git -C $tmp/primary status)" \
   "ST3: spells oldest first, joined with ' · '; the copy's own named as such with no git tail; a junk key named as itself"
 ok "$(stk --state "$S" --now "$(at 1500)" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sorted(d), [s["key"] for s in d["stuck"]], sorted(d["stuck"][0]))')" \
-  "['line', 'state', 'stuck'] ['self-update', 'job', 'junk', '$tmp/primary'] ['key', 'kind', 'name', 'outcome', 'since']" \
-  "ST7: the JSON's keys are exactly state, stuck and line, each spell {key, name, kind, since, outcome}"
+  "['line', 'state', 'stuck', 'waits'] ['self-update', 'job', 'junk', '$tmp/primary'] ['key', 'kind', 'name', 'outcome', 'since']" \
+  "ST7: the JSON's keys are exactly state, stuck, waits and line, each spell {key, name, kind, since, outcome}"
 S4="$tmp/s-st4.json"; printf '{not json' > "$S4"
 out=$(stk --state "$S4" --now "$(at 1500)"); rc=$?
 ok "$rc|$(printf '%s\n' "$out" | grep -c '^WARN: ')|$(printf '%s\n' "$out" | grep -c Traceback)" "0|1|0" "ST4: a corrupt file is one WARN, no traceback, exit 0"
@@ -837,8 +841,8 @@ ok "$(grep -c . "$SMOKE_MARK")|$(sv "$S" self-update kind)" "1|None" "S9: … wi
 unset SMOKE_MARK; real; commit "real again"; job >/dev/null
 
 # ---- S10a-S10c: the candidate's own table -------------------------------------------------------------------------------------------------
-X="skills/_shared/scripts/extra.txt"; addrow() { edit "$SELF" '    ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
-)' '    ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
+X="skills/_shared/scripts/extra.txt"; addrow() { edit "$SELF" '    ("0755", GREEN_REL, GREEN_REL),
+)' '    ("0755", GREEN_REL, GREEN_REL),
     ("0644", "skills/_shared/scripts/extra.txt", "skills/_shared/scripts/extra.txt"),
 )'; }
 addrow; echo extra > "$tmp/seed/$X"; chmod 0644 "$tmp/seed/$X"; commit s10a
@@ -875,8 +879,8 @@ snap() { (cd "$tmp" && find bin x -type f 2>/dev/null | LC_ALL=C sort | while re
 for c in dotdot nocopy; do
   real
   case $c in
-    dotdot) edit "$SELF" '    ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
-)' '    ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
+    dotdot) edit "$SELF" '    ("0755", GREEN_REL, GREEN_REL),
+)' '    ("0755", GREEN_REL, GREEN_REL),
     ("0644", "../x", "../x"),
 )' ;;
     nocopy) edit "$SELF" '    ("0755", SELF_REL, COPY),
@@ -893,7 +897,7 @@ ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "S10c: (the copy is this t
 LS="$XDG_STATE_HOME/thread/landings.json"; S="$tmp/s-lc.json"; CR=skills/_shared/scripts/land-carrier.py
 ok "$(grep -E " $CR | skills/_shared/scripts/landing-register.py | skills/execute/scripts/merge-task.sh " "$tmp/table" | cut -d' ' -f1 | tr '\n' ' ')" "0755 0755 0755 " \
   "LC6: the carrier, the register reader and merge-task.sh are bundle rows, 0755 each"
-ok "$(grep -n '' "$tmp/table" | grep -E "land-carrier|ladder" | cut -d: -f1 | tr '\n' ' ')" "6 9 " "LC6: … before the ladder.py row, which stays last"
+ok "$(grep -n '' "$tmp/table" | grep -E "land-carrier|ladder|green-tip" | cut -d: -f1 | tr '\n' ' ')" "6 9 10 " "LC6: … before the ladder.py row (row 9) and green-tip.py's (row 10, last)"
 ok "$(for f in "$CR" skills/_shared/scripts/landing-register.py skills/execute/scripts/merge-task.sh; do mode_of "$tmp/bin/$f"; done | tr '\n' ' ')" "0755 0755 0755 " "LC6: … installed with their modes"
 rm -f "$LS"; : > "$LOG_GH"
 out=$(job --state "$S" --now "$(at 3000)")
@@ -1068,7 +1072,7 @@ lacks "$out" "Traceback" "I7c: … no traceback"
 ok "$([ -e "$tmp/s-i7c.json" ] && echo written)" "" "I7c: … and no state"
 # I8: `bundle` loads no helper, so the lone copy prints the whole table
 python3 "$tmp/lone/x/y/z/primary-refresh.py" bundle > "$tmp/i8.out" 2> "$tmp/i8.err"; rc=$?
-ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the nine-row table, stderr empty"
+ok "$rc|$(same "$tmp/i8.out" "$tmp/table")|$(wc -c < "$tmp/i8.err" | tr -d ' ')" "0|same|0" "I8: bundle from a copy with no helper beside it prints the ten-row table, stderr empty"
 
 # ---- LV1-LV6: the live file and the prove step (ADR 0078 d1) -----------------------------------------------------------
 LF="$XDG_STATE_HOME/thread/primary-live.json"
@@ -1142,6 +1146,232 @@ has "$out" "primary-refresh prove: timed out after 1 s" "LV6: the step is bounde
 gone "$(cat "$PROVE_PID" 2>/dev/null)" "LV6: … the stub is stopped"
 ok "$(sv "$LS" prove kind)" prove-failed "LV6: … and the spell opens"
 rm -rf "$tmp/primary/skills/execute"; rm -f "$PROVE_MODE"
+
+# ---- GR: the Green tip (ADR 0084 d1, p54-6): the primary moves to it and never past it ---------------------------------
+# Its own record; the origin is the local path (no GitHub slug, so gh is never asked) but in GR5. The seed gains
+# full-suite.yml's green-tip job here, so every arm above ran on a repo that publishes no Green tip (origin's tip, as ever).
+export THREAD_GREEN_TIP_FILE="$tmp/green-tip.json"; OK="$tmp/origin.git"; mkdir -p "$tmp/gr"
+g -C "$tmp/primary" checkout -q -- skills/execute 2>/dev/null   # LV6 removed it
+grec() { python3 - "$THREAD_GREEN_TIP_FILE" "$@" <<'PY'
+import json, sys
+f, key, shas = sys.argv[1], sys.argv[2], sys.argv[3:]
+json.dump({"v": 1, "repos": {key: {"verified": [{"sha": x, "at": "2026-11-01T10:00:00+11:00", "by": "test"} for x in shas],
+                                   "unverified": []}}}, open(f, "w"))
+PY
+}
+setgreen() { git --git-dir "$OK" update-ref refs/thread/green "$1"; }
+green_at() { setgreen "$1"; grec "$OK" "$@"; }   # green_at <sha> [<older verified>…]: the ref there, recorded verified
+c12() { printf '%s' "$1" | cut -c1-12; }
+gstub() {  # gstub <file> <kind> <cause> <why>: a green-tip.py whose resolve() always reads <kind> (origin: origin's tip)
+  cat > "$1" <<PY
+import subprocess
+def resolve(repo, branch, **kw):
+    o = subprocess.run(["git", "-C", str(repo), "rev-parse", "refs/remotes/origin/" + branch], capture_output=True, text=True).stdout.strip()
+    k = "$2"
+    return {"kind": k, "target": o if k == "origin" else None, "green": None, "origin": o, "behind": 0 if k == "origin" else None,
+            "publishes": True, "verified": None, "stepped": False, "fallback": None, "cause": "$3" or None, "why": "$4"}
+PY
+}
+real; mkdir -p "$tmp/seed/.github/workflows"
+printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green\n' > "$tmp/seed/.github/workflows/full-suite.yml"
+commit "the green-tip job"; G1=$(tip); green_at "$G1"; job >/dev/null
+ok "$(head_of "$tmp/primary")" "$G1" "GR0: (the primary at the job's commit, the Green tip, recorded)"
+
+# GR1 / GR-W: the fast-forward stops at the Green tip; a wait shows only after 2 h at the same Green tip
+S="$tmp/gr/s.json"; WF="$tmp/gr/primary-green.json"
+land gr1.txt one; G=$(tip); land gr1b.txt two; O=$(tip); green_at "$G" "$G1"
+out=$(job --state "$S" --now "$(at 0)")
+has "$out" "primary: moved $(c12 "$G1")..$(c12 "$G") (1 commits) to the Green tip (1 behind origin/master)" "GR1: the fast-forward stops at the Green tip"
+ok "$(head_of "$tmp/primary")" "$G" "GR1: … HEAD is the Green tip, not origin's tip"
+lacks "$out" "self-update" "GR1: … its bundle is the copy's: no self-update line"
+out=$(job --state "$S" --now "$(at 5)")
+has "$out" "primary: current at the Green tip $(c12 "$G") (1 behind origin/master: waits on the Green tip)" "GR1: the next pass: current at the Green tip"
+ok "$(sv "$S" "$tmp/primary" kind | grep . || echo None)" None "GR1: … with no spell"
+wl() { python3 "$pr" stuck --state "$S" --now "$1" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sorted(w["key"] for w in d["waits"]), d["line"])'; }
+ok "$(wl "$(at 10)")" "['$tmp/agents', '$tmp/primary'] None" "GR-W: 10 min in: waits holds the entry, the line is null"
+has "$(sline --state "$S" --now "$(at 130)")" "primary: waits on the Green tip $(c12 "$G"), 1 behind origin/master (since $(at 0 | cut -c1-16))" "GR-W: 130 min in: the line names the wait"
+ok "$(python3 -c 'import json, os, sys
+st = json.load(open(sys.argv[3]))["stuck"] if os.path.exists(sys.argv[3]) else {}
+print(sys.argv[2] in json.load(open(sys.argv[1]))["green"], sys.argv[2] in st)' "$WF" "$tmp/primary" "$S" 2>&1)" "True False" \
+   "GR-W: … the wait lives in primary-green.json, never primary-refresh.json's stuck map (no older stuck, no Chorus FILES reader opens it)"
+land gr1c.txt three; O2=$(tip); green_at "$O" "$G" "$G1"
+has "$(job --state "$S" --now "$(at 200)")" "primary: moved $(c12 "$G")..$(c12 "$O") (1 commits) to the Green tip (1 behind origin/master)" "GR-W: the Green tip moves, still behind origin"
+ok "$(sline --state "$S" --now "$(at 270)")" None "GR-W: … since reset: 70 min after the move, null"
+has "$(sline --state "$S" --now "$(at 330)")" "primary: waits on the Green tip $(c12 "$O"), 1 behind origin/master (since $(at 200 | cut -c1-16))" "GR-W: … 130 min after it, named"
+green_at "$O2" "$O"; job --state "$S" --now "$(at 400)" >/dev/null
+ok "$(head_of "$tmp/primary")|$(wl "$(at 600)")" "$O2|[] None" "GR-W: at origin's tip, the entries drop"
+mkdir -p "$XDG_STATE_HOME/thread"; printf '{"v": 1, "green": {"%s": {"since": "x"}, "/nowhere/w": {"since": "x"}}}\n' "$tmp/primary" > "$XDG_STATE_HOME/thread/primary-green.json"
+out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/binq" --plist "$tmp/q.plist" --log "$tmp/q.log" 2>&1)
+has "$out" "dropped waits entry: /nowhere/w (not watched by this job)" "GR-W: install's prune drops an unwatched checkout's wait"
+ok "$(python3 -c 'import json,sys; print(sorted(json.load(open(sys.argv[1]))["green"]))' "$XDG_STATE_HOME/thread/primary-green.json")" "['$tmp/primary']" "GR-W: … and keeps a watched one's"
+rm -f "$DS" "$XDG_STATE_HOME/thread/primary-green.json"
+
+# GR2: the repair of a diverged primary resets to the Green tip, and waits for content not yet at it
+echo gr2 > "$tmp/primary/gr2.txt"; g -C "$tmp/primary" add gr2.txt; g -C "$tmp/primary" commit -qm "local gr2"; L=$(head_of "$tmp/primary")
+land gr2.txt gr2; N=$(tip); land gr2b.txt z; green_at "$N" "$O2"
+out=$(job --state "$tmp/gr/s2.json")
+has "$out" "primary: repaired: reset $(c12 "$L") to the Green tip $(c12 "$N") of origin/master (ahead 1, behind 2: their content is already on origin; backup refs/thread/primary-backup/" \
+   "GR2: a diverged primary whose content is on origin resets to the Green tip, never past it"
+ok "$(head_of "$tmp/primary")" "$N" "GR2: … HEAD is the Green tip"
+P2=$(tip); echo gr2c > "$tmp/primary/gr2c.txt"; g -C "$tmp/primary" add gr2c.txt; g -C "$tmp/primary" commit -qm "local gr2c"
+land gr2c.txt gr2c; land gr2d.txt y; green_at "$P2" "$N"
+has "$(job --state "$tmp/gr/s2.json")" "primary: diverged (ahead 1, behind 3): repair waits (its content is on origin/master, not yet at the Green tip $(c12 "$P2"))" \
+   "GR2: content on origin but not yet at the Green tip: the repair waits"
+green_at "$(tip)"; job --state "$tmp/gr/s2.json" >/dev/null; job >/dev/null
+ok "$(head_of "$tmp/primary")" "$(tip)" "GR2: (once the Green tip holds it, the repair resets, and the primary is current)"
+
+# GR3: the self-update installs from the Green tip's blobs, not origin's
+echo "# gr3" >> "$tmp/seed/$SELF"; commit gr3; G3=$(tip); echo "# gr3 later" >> "$tmp/seed/$SELF"; commit "gr3 later"; green_at "$G3" "$(git -C "$tmp/seed" rev-parse HEAD~2)"
+out=$(job --state "$tmp/gr/s3.json")
+has "$out" "self-update: the installed bundle now matches the Green tip $(c12 "$G3") of origin/master (installed primary-refresh.py)" "GR3: the self-update installs the Green tip's bundle"
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# gr3" "GR3: … its content, not origin's tip's"
+real; commit "real again (gr3)"; green_at "$(tip)"; job >/dev/null
+ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "GR3: (the copy is this tree's script again)"
+
+# GR4: holds: nothing moves, never to origin's tip, and a real pass makes no self-update
+S="$tmp/gr/s4.json"; job --state "$S" >/dev/null   # seen
+git --git-dir "$OK" update-ref -d refs/thread/green; echo "# gr4" >> "$tmp/seed/$SELF"; commit gr4; H4=$(head_of "$tmp/primary")
+out=$(job --state "$S" --now "$(at 0)")
+has "$out" "primary: no move: refs/thread/green is gone from origin after it was seen (" "GR4 (a): the ref gone after it was seen: no move"
+has "$out" "(never origin's tip)" "GR4 (a): … never origin's tip"
+lacks "$out" "self-update" "GR4 (a): … and no self-update line, though origin's bundle differs"
+ok "$(head_of "$tmp/primary")|$(sv "$S" "$tmp/primary" kind)" "$H4|green-held" "GR4 (a): HEAD unmoved, the spell green-held"
+has "$(sline --state "$S" --now "$(at 1440)")" "primary: no move: refs/thread/green is gone from origin after it was seen" "GR4 (a): … named by stuck at 24 h"
+setgreen "$(tip)"; git --git-dir "$OK" config uploadpack.hideRefs refs/thread/green; git -C "$tmp/primary" update-ref refs/thread/fetched/green "$(tip)"
+has "$(job --state "$S")" "primary: no move: refs/thread/green is gone from origin after it was seen" "GR4 (b): a ref a fetch cannot bring (hideRefs), a stale fetched copy planted: no move, the copy never read"
+ok "$(head_of "$tmp/primary")" "$H4" "GR4 (b): … HEAD unmoved"
+git --git-dir "$OK" config --unset uploadpack.hideRefs; git --git-dir "$OK" update-ref -d refs/thread/green
+GB="$tmp/bin/skills/_shared/scripts/green-tip.py"; cp "$GB" "$tmp/gr/green-tip.real"
+gstub "$GB" hold unreachable "refs/thread/green: origin did not answer (stub)"
+out=$(job --state "$S")
+has "$out" "primary: fetch failed: refs/thread/green: origin did not answer (stub)" "GR4 (c): an unreachable ref: fetch failed (retried, transient)"
+lacks "$out" "self-update" "GR4 (c): … no self-update line"
+cp "$tmp/gr/green-tip.real" "$GB"
+echo "c4d" >> "$tmp/primary/THREAD.md"; g -C "$tmp/primary" add THREAD.md; g -C "$tmp/primary" commit -qm "📝 docs(thread): close-out"
+has "$(job --state "$S" --now "$(at 60)")" "primary: diverged (ahead 1, behind 1): not carried (not landed: no GitHub origin)" "GR4 (d): a diverged primary under the hold: the carry still runs"
+g -C "$tmp/primary" reset -q --hard "$H4"; echo e4 > "$tmp/primary/gr4e.txt"; g -C "$tmp/primary" add gr4e.txt; g -C "$tmp/primary" commit -qm "local e4"
+land gr4e.txt e4; L4=$(head_of "$tmp/primary"); nb=$(git -C "$tmp/primary" for-each-ref refs/thread/primary-backup/ | grep -c .)
+out=$(job --state "$S" --now "$(at 120)")
+has "$out" "primary: diverged (ahead 1, behind 2): repair waits (no Green tip to reset to: refs/thread/green is gone from origin after it was seen" "GR4 (e): a landed diverged primary under the hold: the reset waits"
+ok "$(head_of "$tmp/primary")|$(git -C "$tmp/primary" for-each-ref refs/thread/primary-backup/ | grep -c .)" "$L4|$nb" "GR4 (e): … HEAD unmoved, no backup ref written"
+g -C "$tmp/primary" reset -q --hard "$(tip)"; g -C "$tmp/primary" commit -q --allow-empty -m "local f"
+has "$(job --state "$S")" "primary: ahead 1: left to its landing route" "GR4 (f): an ahead primary under the hold reads ahead, as ever"
+g -C "$tmp/primary" reset -q --hard HEAD~2; : > "$tmp/primary/.git/index.lock"
+has "$(job --state "$S")" "primary: busy: index.lock present" "GR4 (f): … and an index.lock reads busy"
+rm -f "$tmp/primary/.git/index.lock"; real; commit "real again (gr4)"; green_at "$(tip)"; job >/dev/null
+ok "$(head_of "$tmp/primary")|$(same "$pr" "$tmp/bin/primary-refresh.py")" "$(tip)|same" "GR4: (healed: the primary at the Green tip, the copy this tree's)"
+
+# GR5: a ref moved to origin's untested tip is never followed; gh is asked once per 15 min, never under --dry-run
+g -C "$tmp/primary" remote set-url origin git@github.com:o/origin.git; V=$(tip); land gr5.txt five; O5=$(tip)
+setgreen "$O5"; grec o/origin "$V"; : > "$LOG_GH"
+run --state "$tmp/gr/s5.json" --now "$(at 0)" >/dev/null; out=$(run --state "$tmp/gr/s5.json" --now "$(at 5)")
+ok "$(grep -c 'check-runs' "$LOG_GH")" 1 "GR5: two passes 5 min apart: one gh check-runs read (fake gh's runs are named build)"
+has "$out" "primary: current at the Green tip $(c12 "$V") (1 behind origin/master: waits on the Green tip)" "GR5: … the unverified ref at origin's tip is not followed: the step back to the recorded commit"
+run --state "$tmp/gr/s5.json" --now "$(at 16)" >/dev/null
+ok "$(grep -c 'check-runs' "$LOG_GH")" 2 "GR5: 16 min on: asked again"
+cp "$THREAD_GREEN_TIP_FILE" "$tmp/gr/rec.before"
+out=$(run --state "$tmp/gr/s5.json" --now "$(at 40)" --dry-run)
+ok "$(grep -c 'check-runs' "$LOG_GH")|$(same "$tmp/gr/rec.before" "$THREAD_GREEN_TIP_FILE")" "2|same" "GR5: a --dry-run pass asks no gh and leaves the record byte-identical"
+g -C "$tmp/primary" remote set-url origin "$OK"; green_at "$O5" "$V"; job >/dev/null
+
+# GR6: a primary pulled by hand past the Green tip is never moved back
+land gr6.txt six; G6=$(git -C "$tmp/seed" rev-parse HEAD~1); green_at "$G6"
+g -C "$tmp/primary" fetch -q origin; g -C "$tmp/primary" merge -q --ff-only origin/master
+out=$(job --state "$tmp/gr/s6.json")
+has "$out" "primary: past the Green tip $(c12 "$G6") by 1 (on origin/master): waits on the Green tip" "GR6: pulled by hand to origin's tip: past the Green tip by 1"
+ok "$(head_of "$tmp/primary")|$(sv "$tmp/gr/s6.json" "$tmp/primary" kind | grep . || echo None)" "$(tip)|None" "GR6: … unmoved, with no spell"
+
+# GR7: a kept THREAD.md (a landed close-out's copy) never holds the move back
+green_at "$(tip)"; job >/dev/null; land THREAD.md n7; N7=$(tip); land THREAD.md n7b; N7b=$(tip); land gr7.txt o; green_at "$N7b"
+printf 'n7\n' > "$tmp/primary/THREAD.md"
+out=$(job --state "$tmp/gr/s7.json")
+has "$out" "primary: moved" "GR7: the Green tip past the landed copy, which it changed again: moved"
+has "$out" "to the Green tip" "GR7: … to the Green tip"
+ok "$(head_of "$tmp/primary")|$(cat "$tmp/primary/THREAD.md")|$(git -C "$tmp/primary" status --porcelain)" "$N7b|n7b|" "GR7: … THREAD.md is the Green tip's, the tree clean"
+land THREAD.md b7; B7=$(tip); land THREAD.md n7c; land gr7b.txt o; green_at "$B7"; printf 'n7c\n' > "$tmp/primary/THREAD.md"
+job --state "$tmp/gr/s7.json" >/dev/null
+ok "$(head_of "$tmp/primary")|$(cat "$tmp/primary/THREAD.md")|$(git -C "$tmp/primary" status --porcelain)" "$B7|n7c| M THREAD.md" "GR7: a Green tip at an earlier commit that changed THREAD.md: moved there, the landed copy kept"
+g -C "$tmp/primary" checkout -q -- THREAD.md; green_at "$(tip)"; job >/dev/null
+
+# GR-T1 / GR-B: the transition: an older copy (origin's tip) installs p54-6's merge M; the new copy then takes the
+# bundle back to the Green tip G = M~1, its candidate's dry run accepting a stage built at origin's tip
+gstub "$GB" origin "" "origin/master: an older copy's rule"
+G=$(tip); green_at "$G"; echo "# gr-t1 mark" >> "$tmp/seed/$SELF"; commit "gr-t1"; M=$(tip)
+out=$(job --state "$tmp/gr/st.json")
+has "$out" "self-update: the installed bundle now matches origin/master at $(c12 "$M") (installed skills/_shared/scripts/green-tip.py, primary-refresh.py)" \
+   "GR-T1: the older rule installs M: M's candidate reads current through its origin arm, never refused"
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")|$(same "$root/skills/_shared/scripts/green-tip.py" "$GB")" "# gr-t1 mark|same" "GR-T1: … the bin holds M's script, and the real green-tip.py"
+out=$(job --state "$tmp/gr/st.json")
+has "$out" "primary: past the Green tip $(c12 "$G") by 1" "GR-B: the new copy: the primary past the Green tip"
+has "$out" "self-update: the installed bundle now matches the Green tip $(c12 "$G") of origin/master (installed primary-refresh.py)" "GR-B: … the bundle follows the Green tip back"
+ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "GR-B: … the bin's copy loses M's mark"
+out=$(job --state "$tmp/gr/st.json")
+lacks "$out" "self-update" "GR-B: a further pass: no self-update line"
+ok "$(ls -a "$tmp/bin" | grep -c '^\.stage-')" 0 "GR-B: … and no stage left"
+
+# GR-T2: no step back across p54-6: a Green tip whose green-tip.py reads origin (a pre-p54-6 copy) is refused
+real; gstub "$tmp/seed/skills/_shared/scripts/green-tip.py" origin "" "origin/master: an older copy's rule"; commit "gr-t2 old reader"; G2=$(tip)
+real; echo "# gr-t2 mark" >> "$tmp/seed/$SELF"; commit "gr-t2"; green_at "$(tip)" "$G2"; job --state "$tmp/gr/st2.json" >/dev/null
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# gr-t2 mark" "GR-T2: (the bin at G2+1, marked)"
+green_at "$G2"; cp "$tmp/bin/primary-refresh.py" "$tmp/gr/bin.before"
+out=$(job --state "$tmp/gr/st2.json")
+has "$out" "self-update: the Green tip's bundle at $(c12 "$G2") failed its smoke run (no self-update: current line): the installed copy is kept" \
+   "GR-T2: G2's candidate compares with origin's tip and is refused: nothing installs back across p54-6"
+ok "$(same "$tmp/gr/bin.before" "$tmp/bin/primary-refresh.py")|$(sv "$tmp/gr/st2.json" self-update kind)|$(sv "$tmp/gr/st2.json" self-update tip)" "same|refused|$G2" \
+   "GR-T2: … the bin unchanged, the spell refused at G2"
+
+# GR-T3: an older copy's frozen reading of this candidate (I6's tokens): on an empty record its dry run holds and
+# still reads current, through its origin arm, asking no gh
+rm -f "$THREAD_GREEN_TIP_FILE"; : > "$LOG_GH"
+out=$(cd "$tmp/out" && python3 "$tmp/bin/primary-refresh.py" run --primary "$tmp/primary" --state "$tmp/gr/t3.json" --log "$tmp/gr/t3.log" --now 2026-11-20T10:00:00+11:00 --dry-run 2>&1)
+has "$out" "primary-refresh $tmp/primary: no move:" "GR-T3: run --primary --state --log --now --dry-run on an empty record: a no move: line"
+has "$out" "primary-refresh $tmp/primary: self-update: current" "GR-T3: … and a self-update: current line"
+ok "$(grep -c . "$LOG_GH")" 0 "GR-T3: … asking no gh"
+ok "$(python3 -c 'print("no move:".startswith(("fetch failed:", "not a primary checkout:", "broken:", "unreadable")))')" False \
+   "GR-T3: no move: starts with none of an older copy's denied prefixes"
+
+# GR-T4: a new copy refuses a candidate whose green-tip.py always holds
+real; gstub "$tmp/seed/skills/_shared/scripts/green-tip.py" hold unverified "a stub that always holds"; commit "gr-t4"; green_at "$(tip)"
+out=$(job --state "$tmp/gr/st4.json")
+has "$out" "failed its smoke run (no move: a stub that always holds" "GR-T4: a candidate whose resolver always holds is refused (no move: is denied)"
+real; commit "real again (gr)"; green_at "$(tip)"; job >/dev/null
+ok "$(same "$pr" "$tmp/bin/primary-refresh.py")|$(same "$root/skills/_shared/scripts/green-tip.py" "$GB")" "same|same" "GR: (the copy and its resolver this tree's again)"
+
+# GR-R: the pass moves to the commit the resolver verified, never to origin/<d> as another fetch leaves it mid-pass
+# (merge-task's in-place refresh, land.sh S4, a cut: this Primary is a self-rollout's twin). The resolver reads
+# origin's tip O, moves refs/remotes/origin/master to N (that other fetch: a commit no full suite passed), then answers
+# green O. Both checkouts reach O, never N, in origin's words, and the self-update installs nothing from N.
+grace() {  # grace <file>: that resolver; the ref moves only while $GR_RACE names N
+  cat > "$1" <<'PY'
+import os, subprocess
+def resolve(repo, branch, **kw):
+    ref = "refs/remotes/origin/" + branch
+    o = subprocess.run(["git", "-C", str(repo), "rev-parse", ref], capture_output=True, text=True).stdout.strip()
+    if os.environ.get("GR_RACE"):
+        subprocess.run(["git", "-C", str(repo), "update-ref", ref, os.environ["GR_RACE"]], capture_output=True)
+    return {"kind": "green", "target": o, "green": o, "origin": o, "behind": 0, "publishes": True, "verified": True,
+            "stepped": False, "fallback": None, "cause": None, "why": "the Green tip %s, 0 behind origin/%s" % (o[:12], branch)}
+PY
+}
+P=$(tip); grace "$tmp/seed/skills/_shared/scripts/green-tip.py"; commit "gr-r resolver"; O=$(tip)
+cp -p "$tmp/seed/skills/_shared/scripts/green-tip.py" "$GB"
+echo "# gr-r mark" >> "$tmp/seed/$SELF"; g -C "$tmp/seed" commit -qam "gr-r untested"; N=$(tip)
+for c in primary agents; do g -C "$tmp/$c" fetch -q "$tmp/seed" master:refs/gr/n; done; g -C "$tmp/seed" reset -q --hard "$O"
+ok "$(head_of "$tmp/primary")|$(head_of "$tmp/agents")|$(git --git-dir "$OK" rev-parse master)" "$P|$P|$O" "GR-R: (both checkouts one behind origin's tip O; N on no origin branch)"
+out=$(GR_RACE="$N" job --state "$tmp/gr/sr.json")
+has "$out" "primary: moved $(c12 "$P")..$(c12 "$O") (1 commits)" "GR-R: the primary moves to O, the commit the resolver read"
+ok "$(head_of "$tmp/primary")|$(head_of "$tmp/agents")" "$O|$O" "GR-R: … both checkouts stand at O, never at N"
+lacks "$out" "$(c12 "$N")" "GR-R: … no line names N"
+lacks "$out" "Green tip" "GR-R: … in origin's words (the Green tip was origin's tip when read)"
+lacks "$out" "self-update" "GR-R: … and the self-update reads O's bundle, the installed one: nothing from N"
+ok "$(same "$pr" "$tmp/bin/primary-refresh.py")" same "GR-R: … the bin's copy lacks N's mark"
+out=$(GR_RACE="$N" job --state "$tmp/gr/sr.json")
+has "$out" "primary: current" "GR-R: the next pass, raced again: current at O"
+ok "$(head_of "$tmp/primary")|$(head_of "$tmp/agents")" "$O|$O" "GR-R: … neither checkout moves to N"
+for c in primary agents; do g -C "$tmp/$c" update-ref -d refs/gr/n; done
+real; commit "real again (gr-r)"; green_at "$(tip)"; job >/dev/null
+ok "$(head_of "$tmp/primary")|$(same "$pr" "$tmp/bin/primary-refresh.py")|$(same "$root/skills/_shared/scripts/green-tip.py" "$GB")" "$(tip)|same|same" \
+   "GR-R: (healed: the primary at the Green tip, the copy and its resolver this tree's)"
 
 ok "$(ls -a "$tmp/bin" | grep -c '^\.stage-')" 0 "no stage is left beside the copy"
 exit $fail

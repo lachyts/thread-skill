@@ -387,7 +387,10 @@ if [ "${1:-}" = "--classify-steps" ]; then classify_failed_steps; echo; exit 0; 
 # Every refusal but the fetch's (a non-base checkout, an operation, local-only commits, a dirty tree, git's own) is a
 # non-fatal WARN or NOTE and returns 0 (a false halt after a successful merge). Defined before the self-test hooks so
 # --self-test-base can exercise it against a temp repo. For a rollout clone (every rollout scheduled after ADR 0042)
-# repoPath is the clone, so refresh_in_place (below) then fast-forwards its in-place twin.
+# repoPath is the clone, so refresh_in_place (below) then fast-forwards its in-place twin. It keeps origin's tip by
+# design, never the Green tip (ADR 0084 d1, p54-6): a Rollout clone, or a pre-ADR-0042 in-place root, is the code being
+# built, not the engine running it (a later task's worktree branches from origin/<base>), and no Thread Skill rollout
+# runs from an in-place root.
 REPO_STATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../close/scripts/repo-state.sh"
 LIVE_CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/live-checkout.sh"
 refresh_bounded() { lc_bounded "$FETCH_TIMEOUT" "$@"; }   # lc_fetch's runner: one command word
@@ -503,8 +506,9 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a
 # `self-rollout-check.sh --refresh-in-place <repoPath>` fast-forwards the twin when it can (fetch, then
 # `merge --ff-only --no-autostash`, never a merge commit, held while the twin is the primary checkout under a running
 # rollout, ADR 0031) and prints one line, indented here; for an in-place root (a rollout scheduled before ADR 0042) it
-# prints nothing, and this prints nothing either. It never changes merge-task's exit, and costs one fetch per merge,
-# only for a clone root.
+# prints nothing, and this prints nothing either. The twin is a live checkout, so in a repo that publishes a Green tip
+# it moves to the Green tip, never past it (ADR 0084 d1, p54-6: green-tip.py's reading, one more fetch by name). It
+# never changes merge-task's exit, and costs one fetch per merge, only for a clone root.
 SELF_ROLLOUT_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/self-rollout-check.sh"
 refresh_in_place() {  # $1=repoPath
   local line

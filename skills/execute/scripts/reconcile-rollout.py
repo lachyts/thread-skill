@@ -15652,9 +15652,15 @@ TRIGGER_LOCK = "trigger.lock"   # machine-wide, beside the note locks (_note_loc
 PRIMARY_REFRESH_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "primary-refresh.py"
 # A pass's outcome that read the checkout to a standing verdict: recorded. `repaired: ` is the repair of a diverged
 # Primary (ADR 0078 d4), which ends the stuck spell as `current` does; on the Primary every other `diverged (…): …`
-# line is that repair's (repair waits, repair held, repair refused, carried, not carried), the job's to retry. An
-# allowlist, so a new outcome or no line fails closed.
-RESET_PRIMARY_RECORDED = ("current", "ahead ", "moved ", "repaired: ", "diverged ", "held: ", "refused: ")
+# line is that repair's (repair waits, repair held, repair refused, carried, not carried), the job's to retry. The
+# Green tip (ADR 0084 d1, p54-6) adds two: `past ` (a checkout pulled past the Green tip by hand, never moved back: a
+# standing verdict) and `no move: ` (the Green tip is absent, not an ancestor, unverified or unreadable: a hold the job
+# keeps re-reading every pass, so retrying here would rerun a pass of up to ~15 minutes on every tick while it holds
+# anyway; a day-old hold shows on /thread:status as a green-held spell, as `held: ` and `diverged ` do). The Green-tip
+# forms of current, moved and repaired open with their own literals. Its transient hold, `fetch failed:
+# refs/thread/green: …`, stays retried. An allowlist, so a new outcome or no line fails closed.
+RESET_PRIMARY_RECORDED = ("current", "ahead ", "moved ", "repaired: ", "diverged ", "held: ", "refused: ", "past ",
+                          "no move: ")
 # A pass's outcome that is not recorded, so the trigger stays due: transient (busy, a fetch failure, a timeout), a
 # checkout that is no Primary, a broken or unreadable step, or a dry pass's `would …`. `fire` names an outcome in
 # neither tuple as one it does not know; tests/contracts/vault-grammar.test.mjs classifies every outcome

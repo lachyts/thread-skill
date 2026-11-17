@@ -167,6 +167,7 @@ allow "$P" 'echo "git commit -m x"' "a quoted string"
 allow "$P" 'git pull --ff-only' "a fast-forward"
 deny "$P" 'git pull' "a pull that may merge"
 has "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecisionReason"]')" "git pull --ff-only" "a refused pull names the update the guard allows"
+has "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecisionReason"]')" "waits on the Green tip" "… and that a behind Primary waits on the Green tip (ADR 0084 d1)"
 
 # ── 4. which branch: the command's own switch ─────────────────────────────────────────────────────────────────────
 allow "$P" 'git checkout -b fix && git commit -m x' "the remedy: checkout -b, then commit"
@@ -190,6 +191,7 @@ git -C "$P" checkout -q feature
 deny "$P" 'git checkout master && git commit -m x' "from a branch, checkout master, then commit"
 deny "$P" 'git switch master; git merge feature' "from a branch, switch master, then merge"
 has "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecisionReason"]')" "git pull --ff-only" "a refused merge names the update the guard allows"
+has "$(H get "$T/out" 'd["hookSpecificOutput"]["permissionDecisionReason"]')" "waits on the Green tip" "… and that a behind Primary waits on the Green tip"
 allow "$P" 'git rebase origin/master' "rebase of the branch it is on"
 deny "$P" 'git rebase origin/master master' "rebase naming the default branch"
 deny "$P" 'git rebase --onto origin/master a1 master' "rebase --onto naming the default branch"

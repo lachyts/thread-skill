@@ -487,6 +487,36 @@ test('13. behind: HEAD lacks a THREAD.md commit on origin\'s default', () => {
   assert.match(b[0].detail, /\b1 THREAD\.md commit/)
   assert.match(b[0].detail, /feat\/x/)
   assert.deepEqual(b[0].owners, [N('Behindy')])
+  assert.match(b[0].fix, /merge --ff-only origin\/main on main/, 'a repo that publishes no Green tip keeps the fast-forward advice')
+})
+
+test('13b. behind in a checkout that waits on the Green tip (ADR 0084 d1): a wait, never a fast-forward; none with the landed copy on disk', () => {
+  const HG = path.join(scratch, 'home-green')
+  const G = path.join(HG, 'repos/tools/greeny')
+  repo(path.join(HG, 'Projects'), { commit: true })
+  repo(G, { commit: true })
+  commitFile(G, '.github/workflows/full-suite.yml', 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green\n')
+  commitFile(G, 'THREAD.md', thread('greeny'))
+  const o = origin(G, 'greeny')
+  // A close-out lands on origin (from a second clone here) and the checkout fetches it without moving: S11 never follows.
+  const other = path.join(scratch, 'greeny-other')
+  git(['clone', '-q', o, other])
+  commitFile(other, 'THREAD.md', `${thread('greeny')}closed\n`, 'close-out')
+  git(['-C', other, 'push', '-q', 'origin', 'main'])
+  git(['-C', G, 'fetch', '-q', 'origin'])
+  const V = path.join(scratch, 'vault-green')
+  write(path.join(V, `${P}/Tools/Tools.md`), fm('tags:\n  - area'))
+  write(path.join(V, `${P}/Tools/Greeny.md`), proj('Tools', ['~/repos/tools/greeny']))
+  const opts = { home: HG, vault: V }
+  const w = audit(['--thread', `${G}/THREAD.md`], opts).findings
+  assert.deepEqual(kinds(w), ['behind'])
+  assert.match(w[0].detail, /\b1 THREAD\.md commit on origin\/main, as last fetched: .*waits on it/)
+  assert.match(w[0].fix, /^wait: the Primary refresh moves it to the Green tip/)
+  assert.doesNotMatch(w[0].fix, /merge/, 'no fast-forward advice: it would take live code past the Green tip')
+  // The landed close-out's copy on disk, as land.sh's settle_handed leaves it in such a checkout: nothing reads stale.
+  write(path.join(G, 'THREAD.md'), `${thread('greeny')}closed\n`)
+  assert.deepEqual(audit(['--thread', `${G}/THREAD.md`], opts).findings, [])
+  assert.equal(text(['--project', 'Greeny'], opts), 'placement: none\n')
 })
 
 test('14. unchecked: no origin/HEAD where a thread exists, on disk or only on a branch', () => {

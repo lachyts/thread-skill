@@ -34,7 +34,7 @@ notes lack it. Either read of the settings file runs land.sh's `--origin-slug` r
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
 execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*), and
 `reconcile-rollout.py moving`, the Watchdog's reading (§ 2's *Moving*; § The Watchdog's reading), which runs `next`'s
-dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. It also runs `reconcile-rollout.py prove` with `--dry-run --no-gh` for § 4's Carried line, a read that writes nothing and calls no gh (ADR 0078 d1). On a
+dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. That read also opens primary-green.json beside it, a checkout waiting on the Green tip. It also runs `reconcile-rollout.py prove` with `--dry-run --no-gh` for § 4's Carried line, a read that writes nothing and calls no gh (ADR 0078 d1). On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
 read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
@@ -459,12 +459,14 @@ names, once, then ` — lane only`, or ` — whole rollout` when an entry reads 
 refresh cannot catch up is seen here, at a sitting). Run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py stuck` with `<root>` in place, as every command
 here runs. Print its JSON's `line` verbatim when it is not null, on a line of its own. Print nothing when it is null
-(no state file, or no spell old enough). A non-zero exit prints `Primary refresh: not read (<its last stderr line>)`.
+(no state file, no spell old enough and no checkout waiting on the Green tip past 2 h). A non-zero exit prints `Primary refresh: not read (<its last stderr line>)`.
 The line is the Primary refresh job's last recorded state, a point-in-time read with no freshness check: a spell stands
 as the job's last pass wrote it until a pass clears it, so with the job unloaded or dead it can be old. In plain words,
 it names each stuck checkout (a spell a day old, or one whose fast-forward timed out, at once), its outcome, since when,
-and for a checkout the git command that shows its state. A diverged Primary the job repaired or is carrying shows here
-only once its repair has been blocked a day. This section never quotes the line, nor any part of it (an
+and for a checkout the git command that shows its state. It also names each checkout that has waited on the Green tip
+for 2 hours or more (ADR 0084 d1: live code never runs past the Green tip, so a checkout stands behind origin while
+the default branch is red); that is a wait, not a stuck checkout. A diverged Primary the job repaired or is carrying
+shows here only once its repair has been blocked a day. This section never quotes the line, nor any part of it (an
 outcome, its advice, the git command), in a code span or a fenced block, and shows no example line: status's read-only
 rule reads every span as a command status runs.
 

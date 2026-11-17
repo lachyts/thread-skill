@@ -1,7 +1,7 @@
 # 0043 — A rollout runs on its Engine snapshot
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18` (83 h, 17 of 34 merged), built by P29. Supersedes ADR 0031 in part (§ Decision), so the Primary checkout no longer has to stand still while a rollout runs. *(Amended by ADR 0066, 2026-11-02: the Primary refresh is what moves it.)* *(Amended 2026-11-03, p36-1: an unstamped note is stamped at its next Reinstate or Leg begin.)*
+Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18` (83 h, 17 of 34 merged), built by P29. Supersedes ADR 0031 in part (§ Decision), so the Primary checkout no longer has to stand still while a rollout runs. *(Amended by ADR 0066, 2026-11-02: the Primary refresh is what moves it.)* *(Amended 2026-11-03, p36-1: an unstamped note is stamped at its next Reinstate or Leg begin.)* *(Amended by ADR 0084 d1, 2026-11-16, p54-6: the snapshot is cut at the Green tip, not origin's tip: `engine-snapshot.py cut` takes `green-tip.py`'s reading, steps back to the newest verified commit before an unverified Green tip, cuts nothing on a hold with none recorded, and `cut --at <sha>` makes a named commit live by hand, on Lachy's word only; a repo that publishes no Green tip cuts origin's tip as before.)*
 
 ## Context
 

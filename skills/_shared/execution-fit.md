@@ -270,8 +270,13 @@ rollout rooted in place before ADR 0042 keeps the strict rule for every member.
   (`git log --oneline origin/<default>..<default>`) and the remedy. The remedy is to land them on
   `origin/<default>` by PR first (the default branch is PR-only, ADR 0025), then drop the local copies
   with `git reset --keep origin/<default>` (that clone on the default branch) or
-  `git branch -f <default> origin/<default>` (not checked out). When that clone's HEAD is the default
-  branch, close's `repo-state.sh` line is reused with merge-task's wording: commits **queued** in a
+  `git branch -f <default> origin/<default>` (not checked out). A clone on the default branch that waits
+  on the Green tip (`green-tip.py waits`: a live checkout of a repo that publishes one, such as the
+  primary checkout, a peer member whenever the repo is a directory-source marketplace) is named no reset:
+  the Primary refresh's repair resets it to the Green tip once the tip holds them, and the remedy says so,
+  since a reset to `origin/<default>` would take live code past the Green tip (ADR 0084 d1). When that
+  clone's HEAD is the default branch, close's `repo-state.sh` line is reused with merge-task's wording:
+  commits **queued** in a
   `close/…` landing PR mean wait for GitHub to merge it (never a second PR); **stranded** ones must be
   landed; a split names both. Otherwise the remedy is the generic one.
   Ahead by ancestry alone is not a block: commits whose content already reached `origin/<default>` by a

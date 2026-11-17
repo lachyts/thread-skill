@@ -4,7 +4,9 @@
 # with close's `# thread:land-own` snippet (cases 42–70; 71–73b are close-out cases), and its read-only route mode,
 # `--route` (case 74, leg.py's Complete; case 75, its parity with a landing, which self-rollout-check.sh
 # --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0058 d5); case 79 is the
-# scratch commit (ADR 0078 d3); case 80 is the own branch's queue marker and the landing carrier that reads it (ADR 0078 d2). Fixture repos talk to bare "servers" under $tmp/srv
+# scratch commit (ADR 0078 d3); case 80 is the own branch's queue marker and the landing carrier that reads it (ADR 0078 d2);
+# case 81 is the Green tip (ADR 0084 d1, p54-6: S4 stops at it, S11 never follows, THREAD.md kept as the close-out's,
+# the read's derived budget, O9's refusal). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
@@ -676,7 +678,7 @@ has "$(printf '%s\n' "$code" | grep "trap '")" 'git worktree remove --force "$wt
 has "$(printf '%s\n' "$code" | grep "trap '")" 'git worktree prune' "structural: worktree prune in a trap"
 s4=$(awk '/---- S4\./{on=1} /---- S5\./{on=0} on' "$LAND")
 has "$(printf '%s\n' "$s4" | sed -n 2p)" 'if [ "$class" = landable ] && [ "$b" = "$d" ]; then' "structural: S4 sits inside the landable-and-on-<d> guard"
-has "$s4" 'lc_fetch "$top" "$d" bounded' "structural: …holding the fetch"; has "$s4" 'out=$(lc_ff "$top" "$d"); rc=$?' "structural: …and the fast-forward (live-checkout.sh's, the overlap checked first)"
+has "$s4" 'lc_fetch "$top" "$d" bounded' "structural: …holding the fetch"; has "$s4" 'out=$(lc_ff "$top" "$d" ${GREEN_SHA:+"$GREEN_SHA"}); rc=$?' "structural: …and the fast-forward (live-checkout.sh's, the overlap checked first; to the Green tip when there is one)"
 # The own-branch mode is one delimited block; the close-out route outside it fetches and fast-forwards only in S4.
 ownb=$(awk '/^# ==== own-branch mode/{on=1} on{print} /^# ==== end own-branch mode/{exit}' "$LAND" | grep -v '^[[:space:]]*#')
 closeout=$(awk '/^# ==== own-branch mode/{on=1} !on{print} /^# ==== end own-branch mode/{on=0}' "$LAND" | grep -v '^[[:space:]]*#')
@@ -2290,6 +2292,108 @@ ok "$crc" 0 "case 80m: the carrier pass exits 0"
 has "$(ghlog)" "search prs --state open --author @me --head close" "case 80m: the --head close search"
 has "$(ghlog)" "pr merge 1 -R o/c80m --auto --merge" "case 80m: classed close-out by land.sh's own branch name: auto-merge queued"
 }  # end shard_14
+
+# ==== The Green tip (ADR 0084 d1, p54-6): a live checkout of a repo that publishes one runs from it ======================
+# Each case commits full-suite.yml's green-tip job to its server and seeds its own record; the origin is a GitHub URL,
+# so an unrecorded Green tip asks the fake gh, whose runs are named `build` and never verify.
+shard_15() {
+export THREAD_GREEN_TIP_FILE="$tmp/green-tip.json"
+GYML='jobs:
+  green-tip:
+    name: publish the Green tip
+    env:
+      GREEN_REF: refs/thread/green'
+# gsetup <name>: W at base, the server one commit ahead with the job (G, the Green tip) and one more (O, origin's tip)
+gsetup() { mkrepo "$1"; srvcommit "$1" .github/workflows/full-suite.yml "$GYML"; G=$(srvref "$1" master); srvcommit "$1" x.txt X; O=$(srvref "$1" master)
+  git --git-dir "$SRV/o/$1.git" update-ref refs/thread/green "$G"; }
+grec() { python3 - "$THREAD_GREEN_TIP_FILE" "$@" <<'PY'
+import json, sys
+f, key, shas = sys.argv[1], sys.argv[2], sys.argv[3:]
+json.dump({"v": 1, "repos": {key: {"verified": [{"sha": x, "at": "2026-11-01T10:00:00+11:00", "by": "test"} for x in shas],
+                                   "unverified": []}}}, open(f, "w"))
+PY
+}
+gseen() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repos"].get(sys.argv[2], {}).get("seen"))' "$THREAD_GREEN_TIP_FILE" "$1"; }
+CR="api -X GET repos/o/%s/commits/%s/check-runs -f check_name=publish the Green tip -f filter=latest"
+
+echo "== 81. (S4-G) unprotected: the live checkout stops at the Green tip, never follows its push, keeps the close-out's THREAD.md"
+ghreset; gsetup c81; grec o/c81 "$G"; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 81" 0 landed
+N=$(made)
+ok "$(git -C "$W" rev-parse HEAD)" "$G" "case 81: HEAD is the Green tip, one behind origin's tip"
+has "$err" "land: not moved to $(printf '%s' "$N" | cut -c1-12): the checkout waits on the Green tip" "case 81: S11 does not follow the pushed close-out"
+has "$err" "land: kept THREAD.md as the close-out's copy (the checkout waits on the Green tip)" "case 81: THREAD.md is kept as the close-out's copy"
+ok "$(git -C "$W" hash-object THREAD.md)|$(git -C "$W" status --porcelain -- THREAD.md)" "$(git -C "$W" rev-parse "$N:THREAD.md")| M THREAD.md" \
+   "case 81: … on disk it is N's blob, dirty against HEAD"
+ok "$(gseen o/c81)|$(cnt "$(ghlog)" check-runs)" "$G|0" "case 81: the resolver ran (its fetch by name recorded seen), and asked no gh (G recorded)"
+ok "$(git -C "$W" rev-parse "$N^")" "$O" "case 81: N sits on origin's tip"
+ghreset; gsetup c81-rollout; grec o/c81-rollout "$G"; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 81 -rollout" 0 landed
+ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" status --porcelain -- THREAD.md)" "$(made)|" "case 81: a *-rollout clone is no live checkout: it reaches origin's tip and follows its push, as before"
+
+echo "== 81b. (S4-G2) an unrecorded ref at origin's tip: one gh read, no fast-forward"
+ghreset; gsetup c81b; git --git-dir "$SRV/o/c81b.git" update-ref refs/thread/green "$O"; rm -f "$THREAD_GREEN_TIP_FILE"; H0=$(git -C "$W" rev-parse HEAD); edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 81b" 0 landed
+ok "$(ghlog | grep -c check-runs)|$(ghlog | grep -cxF "$(printf "$CR" c81b "$O")")" "1|1" "case 81b: exactly one gh check-runs read, the resolver's exact argv"
+has "$err" "land: not fast-forwarded: no move: the Green tip $(printf '%s' "$O" | cut -c1-12) is not verified" "case 81b: no move, and why"
+has "$err" "(never origin's tip)" "case 81b: … never origin's tip"
+ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 81b: HEAD unmoved"
+
+echo "== 81c. (S4-G3) near the deadline: the read's own bound fires first, and its hung child dies with its group"
+ghreset; gsetup c81c; grec o/c81c "$G"; edit
+cat > "$tmp/bin/hang2-ssh" <<'EOF2'
+#!/usr/bin/env bash
+n=$(( $(cat "$HANG2_COUNT" 2>/dev/null || echo 0) + 1 )); echo $n > "$HANG2_COUNT"
+if [ "$n" = 2 ]; then echo $$ > "$HANG2_PID"; exec sleep 120; fi
+exec "$FAKE_SSH_REAL" "$@"
+EOF2
+chmod +x "$tmp/bin/hang2-ssh"; rm -f "$tmp/hang2.count" "$tmp/hang2.pid"
+HANG_BOUND=14 land GH_PROT=false LAND_DEADLINE=14 GIT_SSH_COMMAND="$tmp/bin/hang2-ssh" FAKE_SSH_REAL="$tmp/bin/fake-ssh" HANG2_COUNT="$tmp/hang2.count" HANG2_PID="$tmp/hang2.pid" -- "$W" "$W/THREAD.md"
+has "$err" "land: not fast-forwarded: no move: refs/thread/green: " "case 81c: the resolver's own hold, its why naming the ref"
+hasnt "$err" "green-tip.py ran past" "case 81c: … never the outer bound's"
+ok "$([ "$el" -le 14 ] && echo y)|$out" "y|landed" "case 81c: the landing still finishes within the 14 s deadline (${el}s)"
+p2=$(cat "$tmp/hang2.pid" 2>/dev/null); ok "$([ -n "$p2" ] && ! kill -0 "$p2" 2>/dev/null && echo gone)" gone "case 81c: the hung ssh is gone"
+
+echo "== 81d. (S4-G4) protected: queued, and THREAD.md on disk is the PR commit's"
+ghreset; gsetup c81d; grec o/c81d "$G"; edit
+land -- --slug c81d -- "$W" "$W/THREAD.md"
+res "case 81d" 0 "queued https://github.com/o/c81d/pull/1"
+C=$(made)
+ok "$(git -C "$W" rev-parse HEAD)|$(git -C "$W" hash-object THREAD.md)|$(git -C "$W" status --porcelain -- THREAD.md)" "$G|$(git -C "$W" rev-parse "$C:THREAD.md")| M THREAD.md" \
+   "case 81d: at the Green tip, THREAD.md the close-out commit's copy, dirty"
+
+echo "== 81e. (S4-G5) behind origin's THREAD.md: the kept copy holds both lines, and the move past it later replaces it"
+ghreset; mkrepo c81e; printf 't1\nt2\nt3\nt4\nt5\nt6\n' > "$W/THREAD.md"; git -C "$W" commit -qam seed
+git -C "$W" push -q "$SRV/o/c81e.git" master; fetchsrv c81e
+srvcommit c81e .github/workflows/full-suite.yml "$GYML"; G=$(srvref c81e master)
+srvcommit c81e THREAD.md "$(printf 't1\nt2\nt3\nt4\nt5\nt6\norigin-line')"
+git --git-dir "$SRV/o/c81e.git" update-ref refs/thread/green "$G"; grec o/c81e "$G"
+printf 'mine\n' | cat - "$W/THREAD.md" > "$W/THREAD.new" && mv "$W/THREAD.new" "$W/THREAD.md"
+land -- --slug c81e -- "$W" "$W/THREAD.md"
+res "case 81e" 0 "queued https://github.com/o/c81e/pull/1"
+N=$(made)
+ok "$(head -n 1 "$W/THREAD.md")/$(tail -n 1 "$W/THREAD.md")|$(git -C "$W" hash-object THREAD.md)" "mine/origin-line|$(git -C "$W" rev-parse "$N:THREAD.md")" \
+   "case 81e: on disk, N's merged copy: the local edit and origin's newer line"
+git -C "$W" push -q "$SRV/o/c81e.git" "$N:refs/heads/master"; srvcommit c81e THREAD.md "n2 rewrote it"; N2=$(srvref c81e master); fetchsrv c81e
+ok "$(bash "$LC" ff "$W" master "$N2" | cut -d' ' -f1)|$(git -C "$W" rev-parse HEAD)|$(cat "$W/THREAD.md")|$(git -C "$W" status --porcelain)" "moved|$N2|n2 rewrote it|" \
+   "case 81e: the PR merged and the Green tip moved past it to N2: the move goes through, THREAD.md N2's, clean"
+
+echo "== 81f. (O9-G) own branch: origin/<B> carrying master past the Green tip is refused in the live checkout"
+ghreset; mkbranch c81f; own --; R=$(tip)
+srvcommit c81f .github/workflows/full-suite.yml "$GYML"; G=$(srvref c81f master); srvcommit c81f x.txt X; O=$(srvref c81f master)
+git --git-dir "$SRV/o/c81f.git" update-ref refs/thread/green "$G"; grec o/c81f "$G"
+own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+L=$(tip)
+own --
+ores "case 81f" 1 "stuck: origin/$OB carries origin/master commits past the Green tip ($(printf '%s' "$O" | cut -c1-12), not at $(printf '%s' "$G" | cut -c1-12)): the checkout runs live; land $OB from a worktree (ADR 0084)"
+ok "$(tip)" "$L" "case 81f: HEAD unmoved"
+grec o/c81f "$O"; git --git-dir "$SRV/o/c81f.git" update-ref refs/thread/green "$O"
+own --; ores "case 81f at the Green tip" 0 "pr open https://github.com/o/c81f/pull/1"
+ok "$(tip)" "$(srvref c81f "$OB")" "case 81f: … once the Green tip holds them, it fast-forwards as before"
+}  # end shard_15
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }

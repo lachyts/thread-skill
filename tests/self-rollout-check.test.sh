@@ -48,7 +48,7 @@ ln -s "$home/repos/plug" "$tmp/link"
 plugin_copy() {
   mkdir -p "$1/skills/execute/scripts" "$1/skills/_shared/scripts"
   cp "$root/skills/execute/scripts/self-rollout-check.sh" "$root/skills/execute/scripts/default-branch.sh" "$1/skills/execute/scripts/"
-  cp "$root/skills/_shared/scripts/land.sh" "$root/skills/_shared/scripts/live-checkout.sh" "$1/skills/_shared/scripts/"
+  cp "$root/skills/_shared/scripts/land.sh" "$root/skills/_shared/scripts/live-checkout.sh" "$root/skills/_shared/scripts/green-tip.py" "$1/skills/_shared/scripts/"
 }
 pd="$home/repos/pd"; plugin_copy "$pd/plugin"; mkdir -p "$pd-x"; ln -s "$pd" "$tmp/pdlink"
 reg="$cfg/plugins/known_marketplaces.json"
@@ -718,6 +718,56 @@ ok "$([ -n "$srl" ] && [ -n "$gol" ] && [ "$srl" -lt "$gol" ] && echo y)" y "Sel
 s26f=$(printf '%s\n' "$s26" | tr '\n' ' ')
 has "$s26f" "execution-fit.md\` § Dispatch blockers (point at it; never copy the snippet here), with \`<mode>\` empty" "execute § 2.6 points at execution-fit.md § Dispatch blockers, plain mode"
 has "$s26f" "Execute never swaps a root itself" "execute § 2.6 never swaps a root"
+
+# SR-G: --refresh-in-place stops the twin at the Green tip (ADR 0084 d1, p54-6); --refresh keeps the Rollout clone on
+# origin's tip (the code being built). The record is seeded, and a gh stub logs every call: there are none.
+rg="$home/repos/rg"; srv o/rg; cl o/rg "$rg"; cl o/rg "$rg-rollout"; old=$(git -C "$rg" rev-parse HEAD)
+push o/rg .github/workflows/full-suite.yml "$(printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green')"
+G=$(srvtip o/rg); push o/rg b.txt 1; O=$(srvtip o/rg); git --git-dir "$SRV/o/rg.git" update-ref refs/thread/green "$G"
+GT="$tmp/gt.json"; printf '{"v": 1, "repos": {"o/rg": {"verified": [{"sha": "%s", "at": "2026-11-01T10:00:00+11:00", "by": "test"}], "unverified": []}}}\n' "$G" > "$GT"
+mkdir -p "$tmp/ghbin"; printf '#!/bin/sh\necho "gh $*" >> "%s/gh-sr.log"\nexit 1\n' "$tmp" > "$tmp/ghbin/gh"; chmod +x "$tmp/ghbin/gh"; : > "$tmp/gh-sr.log"
+GENV="THREAD_GREEN_TIP_FILE=$GT PATH=$tmp/ghbin:$PATH"
+sr --refresh-in-place "$rg-rollout" $GENV
+ok "$rc|$out" "0|in-place: $rg fast-forwarded to the Green tip (${old:0:7}..${G:0:7})" "SR-G: the twin is fast-forwarded to the Green tip"
+ok "$(git -C "$rg" rev-parse HEAD)" "$G" "SR-G: … not to origin's tip"
+sr --refresh-in-place "$rg-rollout" $GENV
+ok "$out" "in-place: $rg at the Green tip ${G:0:7}, 1 behind origin/master (waits on the Green tip)" "SR-G: the next run: at the Green tip, waiting on it"
+git --git-dir "$SRV/o/rg.git" update-ref -d refs/thread/green
+sr --refresh-in-place "$rg-rollout" $GENV
+has "$out" "in-place: $rg not moved: no move: refs/thread/green is gone from origin after it was seen" "SR-G: a vanished ref: not moved, no move"
+ok "$(git -C "$rg" rev-parse HEAD)" "$G" "SR-G: … HEAD unmoved, never origin's tip"
+sr --refresh "$rg-rollout" $GENV
+ok "$rc|$(git -C "$rg-rollout" rev-parse HEAD)" "0|$O" "SR-G: --refresh moves the Rollout clone to origin's tip (the code being built)"
+ok "$(grep -c . "$tmp/gh-sr.log")" 0 "SR-G: … and gh is never called (the Green tip recorded)"
+# On a hold only the move, at and past need a target: a twin ahead of origin keeps its ahead line, a diverged one its
+# remedy (primary-refresh.py's c2 rule), and a WARN green-tip.py prints passes through to stderr.
+g -C "$rg" merge -q --ff-only origin/master; echo mine > "$rg/mine.txt"; g -C "$rg" add mine.txt; g -C "$rg" commit -qm mine
+printf '{not json' > "$tmp/gt-bad.json"
+sr --refresh-in-place "$rg-rollout" "THREAD_GREEN_TIP_FILE=$tmp/gt-bad.json" "PATH=$tmp/ghbin:$PATH"
+ok "$rc|${out#"in-place: $rg ahead: "}" "0|on master, 1 commit(s) not on origin/master — stranded" "SR-G: a hold, a twin ahead of origin: its ahead line, never no move"
+has "$err" "green-tip: WARN: the record $tmp/gt-bad.json is corrupt" "SR-G: … and green-tip.py's WARN passes through to stderr"
+g -C "$rg" reset -q --hard "$G"; echo mine2 > "$rg/mine2.txt"; g -C "$rg" add mine2.txt; g -C "$rg" commit -qm mine2
+sr --refresh-in-place "$rg-rollout" $GENV
+has "$out" "in-place: $rg not moved: diverged: 1 local-only commit(s)" "SR-G: a hold, a diverged twin: its diverged line, with its remedy"
+lacks "$out" "no move" "SR-G: … never no move"
+# SR-G race: a Green tip read at origin's tip keeps origin's words, but the twin moves to that commit, never to
+# origin/<d> as another fetch in the twin leaves it before the move (merge-task, land.sh S4, another clone's lead). A
+# plugin copy's repo-state.sh, run in that window on the origin path, stands in for the fetch: it moves the twin's
+# refs/remotes/origin/master to N, a commit no full suite passed.
+rr="$home/repos/rr"; srv o/rr; cl o/rr "$rr"; cl o/rr "$rr-rollout"; old=$(git -C "$rr" rev-parse HEAD)
+push o/rr .github/workflows/full-suite.yml "$(printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green')"
+O=$(srvtip o/rr); git --git-dir "$SRV/o/rr.git" update-ref refs/thread/green "$O"
+printf '{"v": 1, "repos": {"o/rr": {"verified": [{"sha": "%s", "at": "2026-11-01T10:00:00+11:00", "by": "test"}], "unverified": []}}}\n' "$O" > "$tmp/gt-rr.json"
+w="$tmp/t/seed-o-rr"; echo n > "$w/n.txt"; g -C "$w" add -A; g -C "$w" commit -qm untested; N=$(git -C "$w" rev-parse HEAD)
+g -C "$rr" fetch -q "$w" master:refs/sr/n; g -C "$w" reset -q --hard "$O"
+race="$tmp/race"; plugin_copy "$race"; mkdir -p "$race/skills/close/scripts"
+printf '#!/usr/bin/env bash\n[ -n "${SR_RACE:-}" ] && git -C "$1" update-ref refs/remotes/origin/master "$SR_RACE"\necho "on master, a stub"\n' > "$race/skills/close/scripts/repo-state.sh"
+RENV="THREAD_GREEN_TIP_FILE=$tmp/gt-rr.json PATH=$tmp/ghbin:$PATH SR_RACE=$N"
+SC="$race/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rr-rollout" $RENV
+ok "$rc|$out" "0|in-place: $rr fast-forwarded to origin/master (${old:0:7}..${O:0:7})" "SR-G race: the Green tip read at origin's tip: moved there, in origin's words"
+ok "$(git -C "$rr" rev-parse HEAD)" "$O" "SR-G race: … never to N, the commit the other fetch brought"
+SC="$race/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rr-rollout" $RENV
+ok "$out|$(git -C "$rr" rev-parse HEAD)" "in-place: $rr already at origin/master|$O" "SR-G race: the next run: already at origin's tip as read, unmoved"
 
 echo; [ "$fail" -eq 0 ] && echo "self-rollout-check: ALL PASS" || echo "self-rollout-check: SOME FAILED"
 exit "$fail"

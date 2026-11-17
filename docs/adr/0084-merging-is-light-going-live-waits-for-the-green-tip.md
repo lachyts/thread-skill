@@ -25,7 +25,21 @@ Green tip trailed). Decided for you 13 by p54-7, with "on the next default-branc
 red that returns on the next run after a run that got no re-run (a newer run was already waiting): that one is covered
 and files a publisher task with no re-run, while a publisher red straight after a blip is a first red with its own one
 re-run. Decided for you 11's lead check by p54-7: a `refs/thread/green` commit with no successful `full suite` run files
-its own task. Readers not yet built (p54-6).
+its own task.
+d1's and d2's readers built by p54-6: `skills/_shared/scripts/green-tip.py` (its docstring holds the rules) is the one
+resolver, read by the snapshot cut (`cut --at <sha>` is Decided for you 8's hand cut), the Primary refresh, land.sh S4,
+S11 and O9, and `self-rollout-check.sh --refresh-in-place`. It fetches the ref by name, decides "publishes" from
+origin's `full-suite.yml` job or a recorded `seen`, takes the ref only as an ancestor of origin's tip, and follows only
+a verified commit: one recorded in `green-tip.json`, or one gh shows a passing `publish the Green tip` run on. The
+Primary refresh asks gh too, best effort in its launchd pass, where Decided for you 11 assumed it had none
+(full-suite.yml's header still says so): a negative answer is cached 15 minutes, a pending one never. An unverified
+Green tip steps back to the newest verified commit before it, and a hold never yields origin's tip. The reset-primary
+trigger records two new outcomes, `past` and `no move:`. The readers that only advise, thread-placement.py's `behind`
+finding and pushed-base.sh's reset hint, ask its local `waits` (a live checkout of a repo that publishes one) and name
+the wait, never a move past the Green tip. The installed bundle follows the Green tip, backwards included. A checkout
+that waits on the Green tip keeps the close-out commit's THREAD.md, which a later fast-forward replaces once origin
+holds it (live-checkout.sh's lc_landed). Decided for you 9's reading on the Mac is the Primary refresh line's 2-hour
+waits line.
 d4's Speed fix for the fast tier's fan-out built by p54-4 (`tests/lib/fast-tier.py`'s
 header holds the rules): a file under `docs/` and an untracked file are no carriers, and the reach stops one carrier
 deep; the `SKILL.md` readers are declared on `READERS` lines in `tests/fast-tier.map`, held by check (k);

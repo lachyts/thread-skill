@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """primary-refresh.py — the Primary refresh (ADR 0066, amended 2026-11-05 by p37-7): keep the live-loaded checkouts
-current with origin.
+current with origin: at its Green tip in a repo that publishes one (ADR 0084 d1, p54-6), never past it.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/primary-refresh.py run [--primary DIR] [--also DIR]...
         [--state F] [--log F] [--now ISO] [--dry-run] [--job-shape N] [--ff-timeout N] [--smoke-timeout N]
@@ -16,7 +16,10 @@ merge-task's in-place refresh (`self-rollout-check.sh --refresh-in-place`) also 
 when they run and ADR 0031's hold is clear: on 2026-11-02 it sat 97 commits behind because the hold never cleared. The
 Primary refresh is the background job that keeps trying: every pass it fast-forwards the primary to origin while the
 hold is clear, and each `--also` checkout (`~/.agents`, which holds /fresh-review and the shared skills) whenever it is
-behind.
+behind. "Origin" is the pass's target: skills/_shared/scripts/green-tip.py's reading (its docstring holds the rules),
+the Green tip of a repo that publishes one (Thread Skill's full-suite.yml moves refs/thread/green once every shard
+passed), origin's tip for every other repo. Nothing live runs from a commit the full suite has not passed ("Everything
+waits", ADR 0084 d2), so a primary may stand behind origin while master is red: that is a wait, never a stuck spell.
 
 run, one pass, in this order:
   1. --log F: a log over 1 MiB moves to F.1 first, one generation kept (a pass whose stdout or stderr is that file
@@ -61,7 +64,25 @@ never current or moved, and never leads to a merge.
      land.sh's ssh rule (BatchMode unless the operator set an ssh command; never a prompt), so an unrelated ref
      conflict never fails it. A failure is `fetch failed: <git's last fatal: or error: line, else its last line>`,
      and nothing later reads the stale refs.
-  d. The read (`check`): `current` (HEAD at origin's tip, on any branch); `ahead <n>: left to its landing route`;
+  c2. The target: green-tip.py (the bundle's copy, else the primary's; one that will not load is `broken: cannot load
+     skills/_shared/scripts/green-tip.py (<why>)`, one that raises `broken: green-tip.py raised <Type>: <msg>`), run
+     in process with this pass's child runner: resolve(<checkout>, <d>, checkout=True), gh asked and the record written
+     with a 150 s budget on a real pass, under --dry-run neither, 30 s. Kind origin (a repo that publishes no Green
+     tip) is the pass below with every word as it was. Kind green reads every step against the resolver's commit
+     (live-checkout.sh's optional target: check, content, the reset's overlap and ff), at origin's tip included, so a
+     fetch that moves origin/<d> while the pass runs (merge-task's in-place refresh, land.sh S4, a snapshot cut, in
+     this very checkout) is never followed and its bundle never installed. At origin's tip every word is as it was; a
+     Green tip behind origin's tip reads in the Green-tip words below. A hold (the ref absent, not an ancestor of
+     origin's tip, unverified or unreadable) moves nothing and never reads origin's tip: the read runs against origin
+     with no target, and only its target-independent forms stand (ahead, busy, unreadable, a helper that breaks, and
+     diverged: the primary's repair, its reset waiting, `repair waits (no Green tip to reset to: <why>)`); current,
+     behind and an overlap read the hold's outcome, before the hold below is asked: `no move: <why> (never origin's
+     tip)` (kind green-held), or for the one transient cause, an unreachable ref, `fetch failed: refs/thread/green:
+     <why>` (kind fetch-failed). The tip is None on every hold, so a real pass makes no self-update.
+  d. The read (`check`): `current` (HEAD at origin's tip, on any branch; `current at the Green tip <g12> (<n> behind
+     origin/<d>: waits on the Green tip)` at a Green tip behind origin's tip); `past the Green tip <g12> by <m> (on
+     origin/<d>): waits on the Green tip` (a Green tip only: HEAD on origin but past it, a hand pull say; never moved
+     back, kind None); `ahead <n>: left to its landing route`;
      `diverged (ahead <a>, behind <b>)`: an --also checkout reads `never integrated here` (ADR 0042's rule), the primary
      goes to the repair below (read before the hold, since a divergence never clears by itself); behind and `busy:
      <why>` (an index.lock, a rebase, merge, cherry-pick, revert, bisect or sequencer in progress, a detached HEAD,
@@ -72,18 +93,24 @@ never current or moved, and never leads to a merge.
      sessions commit there in place, so a fast-forward is no different from a peer's commit. Asked only here, so
      `refused` below always means the hold is clear and git still would not move.
   f. An uncommitted edit origin's commits would overwrite (live-checkout.sh's overlap: dirty or staged tracked files,
-     and untracked ones where origin adds a path): `refused: local changes overlap origin/<d> (<paths>)`. No merge
-     runs, so ORIG_HEAD is never rewritten.
+     and untracked ones where origin adds a path): `refused: local changes overlap origin/<d> (<paths>)` (`… overlap
+     the Green tip <g12> (<paths>)`). No merge runs, so ORIG_HEAD is never rewritten. A landed close-out's THREAD.md
+     (live-checkout.sh's lc_landed: land.sh leaves one on disk in a checkout that waits on the Green tip) is no overlap.
   g. Behind and free: `would move <old12>..<new12> (<n> commits)` under --dry-run; else `ff`, `git merge -q --ff-only
      --no-autostash`, bounded by --ff-timeout (600 s): `moved <old12>..<new12> (<n> commits)` (HEAD re-read and checked
      against what the helper said), `refused: <git's reason>`, or `timed out: git merge --ff-only ran past <N> s and was
-     stopped: the working tree may be partly updated (git -C <d> status)`.
+     stopped: the working tree may be partly updated (git -C <d> status)`. To a Green tip behind origin's tip the two
+     read `would move <a12>..<b12> (<k> commits) to the Green tip (<n> behind origin/<d>)` and `moved <a12>..<b12> (<k>
+     commits) to the Green tip (<n> behind origin/<d>)`.
 
 The repair, the primary only (ADR 0078 d4): a diverged primary returns to origin by itself; nothing is ever merged here.
 Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwise, kind `diverged`, in this order:
-  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block): `busy` reads `repair waits
-     (<why>)` (a half-applied operation, HEAD detached or on another branch: a commit there is someone's work); a read
-     that fails reads `unreadable: <why>`, kind unreadable.
+  1. live-checkout.sh's content read (`content`, the same test as pushed-base.sh's block, against the Green tip too,
+     at origin's tip included): `busy` reads `repair waits (<why>)` (a half-applied operation, HEAD detached or on
+     another branch: a commit there is someone's work); a read that fails reads `unreadable: <why>`, kind unreadable.
+     `pending` (on origin by content, not yet at the Green tip) reads, after the hold, `repair waits (its content is on
+     origin/<d>, not yet at the Green tip <g12>)`, and on a hold `landed` reads `repair waits (no Green tip to reset to:
+     <why>)`: nothing resets, while the carry below runs as ever.
   2. The hold, as for a behind checkout (`held` above; the same primary-hold.sh): `repair held: <it>`, for a reset and a
      carry alike.
   3. `landed` (no file the ahead commits touch differs from origin/<d>, THREAD.md included): the reset. An uncommitted
@@ -93,8 +120,11 @@ Every line reads `diverged (ahead <a>, behind <b>): …` unless it says otherwis
      the hold, which can run 120 s, so a HEAD that has moved reads `repair waits (HEAD moved during the pass)`, with no
      backup ref and no reset, and the next pass re-reads the content. Else the backup ref
      refs/thread/primary-backup/<YYYYMMDDTHHMMSS> (the pass's stamp) is written, must-not-exist, at the old HEAD, and
-     `git reset --keep <tip>` runs, bounded by --ff-timeout: the line `repaired: reset <head12> to origin/<d> at <tip12>
-     (…; backup <ref>)` (HEAD re-read and checked; kind None, which ends the spell), `repair refused: git reset --keep:
+     `git reset --keep <tip>` runs (tip the pass's target: the Green tip, never past it), bounded by --ff-timeout: the
+     line `repaired: reset <head12> to origin/<d> at <tip12> (…; backup <ref>)` (to a Green tip behind origin's tip
+     `repaired: reset <head12> to the Green tip <g12> of origin/<d> (…; backup <ref>)`, its dry form `would reset
+     <head12> to the Green tip <g12> of origin/<d> (…)`; HEAD re-read and checked; kind None, which ends the spell),
+     `repair refused: git reset --keep:
      <why>` with the backup ref removed, or `timed out: git reset --keep ran past <N> s …` (kind timed-out, as for a
      merge). The state entry `repaired:<checkout path>` (kind repaired; its since, outcome, backup, head and tip)
      records the last repair; it is no spell: the stuck read skips it and only an install's prune may drop it (never one
@@ -117,8 +147,8 @@ by a merge (the landing PR's, as queued) leaves the primary only behind: the ord
 
 The spells. A pass sends no notice (ADR 0075 d2: no rollout code notifies Lachy); a stuck checkout is read at a sitting,
 on /thread:status's Primary refresh line (`stuck`, below). A stuck spell runs from the first pass whose kind is stuck
-(not-primary, busy, fetch-failed, broken, unreadable, diverged, stuck, held, refused, timed-out) to the next that reads
-current, moved or ahead (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
+(not-primary, busy, fetch-failed, broken, unreadable, diverged, stuck, held, refused, timed-out, green-held) to the
+next that reads current, moved, ahead or past (would move changes nothing). Its entry is {since, kind, kindSince, outcome}: `since` never
 moves within the spell, a change of kind restarts only `kindSince`, `outcome` is the latest pass's. The installed copy's
 own `self-update` and `job` spells, and the landing carrier's `carrier` spell, are entries of the same shape. The spells live in the state file
 ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json (or --state), {"v": 1, "stuck": {<checkout path, or
@@ -134,24 +164,38 @@ A pass never prunes: it drops only the key of a checkout it read as current, mov
 either copy, with other targets or with --also left off, never drops the job's spells. A spell a hand-run leaves for a
 checkout the job does not watch stands until a pass on that checkout clears it or the next install drops it (below).
 
+The waits file (ADR 0084 d1 and Decided for you 9), beside the state file: primary-green.json, {"v": 1, "green":
+{<checkout path>: {since, green, origin, behind, branch, outcome}}}, through background_job.py's read_state and
+write_state, written only when it changes, never under --dry-run; a corrupt file is one WARN. An entry is opened or kept
+after a pass that leaves the checkout at a Green tip behind origin's tip (current at it, moved to it, repaired to it),
+`since` reset whenever the Green tip moves; dropped once the repo reads origin's tip (no Green tip, or the Green tip at
+origin's tip) or the checkout stands past it; left as it is on a hold, a failed fetch or any other stuck outcome. A wait
+is no spell: it never enters primary-refresh.json, so `_due` and every older copy's `stuck` never see it, and Chorus
+reads only its FILES (carried-fixes.json, primary-live.json, primary-refresh.json) and `stuck` rows.
+
 stuck, a read that writes nothing (no rotation, no prune, no fetch, no temp file): the spells due now, for
 /thread:status's Primary refresh line. It prints one JSON line, {"state": <path>, "stuck": [{key, name, kind, since,
-outcome}], "line": <str or null>}. A spell is due once it is 24 h old from `since` (STUCK_AFTER, ADR 0066's first
+outcome}], "waits": [{key, name, since, green, origin, behind, branch, outcome}], "line": <str or null>}: waits holds
+every entry of the waits file beside the state file, sorted by key. A spell is due once it is 24 h old from `since` (STUCK_AFTER, ADR 0066's first
 notice), or at once when its kind is timed-out (a merge stopped mid-checkout may have left the live-loaded tree half
 updated); a `since` in the future is never due. Due spells are ordered oldest first. A path key is named by its
 directory's name, with the tail `; git -C <key> status`; `self-update` reads `primary-refresh self-update`, `job`
 `primary-refresh job`, `prove` `primary-refresh prove` and `carrier` `landing carrier`, with no git tail; any other key is named as itself. `line` is `Primary refresh: ` and the spells
 joined with ` · `, each `<name>: <outcome> (stuck since <since16>[; git -C <key> status])`, never cut; null when none is
 due (no file included). An entry with no kind (before p37-7) reads the outcome `stuck (kind not yet read)`. It is a
-point-in-time read with no window, only --now, and no freshness check: a spell stands as the job's last pass wrote it
+point-in-time read with no window, only --now, and no freshness check. `line` also joins, after the spells, every wait
+at least GREEN_WAIT_SHOW (2 h) old from its since and not in the future, `<name>: waits on the Green tip <g12>, <n>
+behind origin/<d> (since <since16>)` (a Green tip trailing origin for 2 hours, never the minutes of a normal full-suite
+run; a merge burst moves the Green tip, so its since resets and the wait never shows). It is a
+point-in-time read: a spell stands as the job's last pass wrote it
 until a pass clears it, so with the job unloaded or dead it can be old, and a pass writes the file only when the map
 changes, so its mtime says nothing about the job's health. A corrupt file is one WARN and a null line. Exit 0 for any
 read; 1 when background_job.py cannot be loaded; 2 on usage (a bad --now).
 
-The bundle: install writes BUNDLE's nine files beside each other in --bin-dir, with the marker
+The bundle: install writes BUNDLE's ten files beside each other in --bin-dir, with the marker
 primary-refresh.installed: this copy (its install-rel primary-refresh.py, the plist's path), and live-checkout.sh,
-default-branch.sh, background_job.py, rollout-settings.py, land-carrier.py, landing-register.py, merge-task.sh and
-ladder.py each at its repo path below the copy's directory (a mirrored mini plugin root, so live-checkout.sh's and
+default-branch.sh, background_job.py, rollout-settings.py, land-carrier.py, landing-register.py, merge-task.sh,
+ladder.py and green-tip.py (the pass's target, p54-6) each at its repo path below the copy's directory (a mirrored mini plugin root, so live-checkout.sh's and
 land-carrier.py's own sibling lookups work unchanged: the carrier's register check and rerun classifier). `bundle` prints the
 table, one `<mode> <repo-rel> <install-rel>` line per file. The ntfy-push.py row an earlier table carried is dropped
 (ADR 0075 d2), so a self-update's step 5 removes an installed ntfy-push.py as a file the candidate's table drops.
@@ -164,13 +208,19 @@ verb prints one line, `ERROR: primary-refresh <verb>: cannot load skills/_shared
 beside the copy or in <primary> | <the path> raised <Type>: <msg>): run primary-refresh.py install from a checkout that
 holds the whole bundle`, and runs no further (no log rotation, no state).
 
-The self-update, on the installed copy (the marker beside it) only, on every pass whose primary fetch succeeded,
-whatever the primary read, at the tip that fetch read (`git cat-file blob <tip>:<rel>`: one sha, never a short name,
-never the working tree). Its exceptions are caught (`self-update: failed (<Type>: <msg>)`, kind failed), so it never
-skips the job check or the state.
-  1. origin's primary-refresh.py at the tip equal to this copy: compare every row of this copy's own table (bytes and
-     mode) with the copy's directory. Nothing differs: current, which clears the self-update spell (printed only under
-     --dry-run, which otherwise prints `would install …` and stops there).
+The self-update, on the installed copy (the marker beside it) only, on every pass whose primary fetch succeeded and
+whose target was read, whatever the primary read, at that target (`git cat-file blob <tip>:<rel>`: one sha, never a
+short name, never the working tree): the bundle follows the Green tip, backwards included (a hand install past it goes
+back once the Green tip's candidate smokes current). A real pass on a hold or a `fetch failed:` makes none. Its
+exceptions are caught (`self-update: failed (<Type>: <msg>)`, kind failed), so it never skips the job check or the
+state.
+  1. The tip's primary-refresh.py equal to this copy: compare every row of this copy's own table (bytes and mode) with
+     the copy's directory. Nothing differs: current, which clears the self-update spell (printed only under --dry-run,
+     which otherwise prints `would install …` and stops there). Under --dry-run only, a stage that matches origin's
+     freshly fetched tip reads current too: an older installed copy (origin's tip, its frozen rule) stages and smokes
+     this candidate at origin's tip, so the candidate's own dry pass, which reads a Green tip behind it, still accepts
+     it. A dry run on a hold has no target: current when the stage matches origin's tip, else `self-update: waits: no
+     Green tip to install from (<why>)`.
   2. A tip already refused within the last 24 h (SMOKE_RETRY) is skipped, so each tip is smoked once; a tip whose
      install failed partway is restaged and installed with no second smoke.
   3. Stage, in a `.stage-*` directory beside the copy (leftovers removed first): the candidate script (compiled first),
@@ -182,15 +232,19 @@ skips the job check or the state.
      replaced in place where present (<stage>/smoke-state.json, <stage>/smoke.log, this pass's stamp), --state added if
      absent, and --dry-run added: so it fetches for real through its own staged live-checkout.sh, reads the hold, and
      runs its compare-only self-update against the stage it was built from. Accepted only at exit 0 with no Traceback,
-     its primary's outcome line neither `fetch failed:`, `not a primary checkout:`, `broken:` nor `unreadable`, and a
-     `self-update: current` line; bounded by --smoke-timeout (300 s). A refusal: `self-update: origin's bundle at
-     <tip12> failed its smoke run (<why>): the installed copy is kept`.
+     its primary's outcome line neither `fetch failed:`, `not a primary checkout:`, `broken:`, `unreadable` nor `no
+     move:` (a candidate whose resolver holds), and a `self-update: current` line; bounded by --smoke-timeout (300 s).
+     A candidate that cannot read its own stage as current is refused, so the bundle never steps back to a Green tip
+     whose copy reads origin's tip (one older than p54-6), nor onto one whose resolver holds. A refusal:
+     `self-update: origin's bundle at <tip12> failed its smoke run (<why>): the installed copy is kept` (`the Green
+     tip's bundle at <tip12> …` when the target is a Green tip behind origin's tip).
   5. Install, by the candidate's table: the helpers that differ, then every file of this copy's own table that the
      candidate's drops (removed, so a stale helper never shadows the primary's), then this copy, last, so a failure
      partway leaves the old copy running with its own table (and, once background_job.py is installed, calling the new
      module in process: the frozen interface below keeps it running): `installed <k> of <n> files, then <rel> failed
      (<e>): the next fetched pass finishes it` (kind install-failed). Success: `the installed bundle now matches
-     origin/<d> at <tip12> (installed …; removed …)`.
+     origin/<d> at <tip12> (installed …; removed …)`, or `the installed bundle now matches the Green tip <tip12> of
+     origin/<d> (…)`.
   A refusal opens or continues the `self-update` spell (kind refused, install-failed or failed, with the tip and tipAt),
   read by `stuck` like any spell. A helper an older copy cannot parse reads `broken:`, never moved, and the next
   fetched pass heals it.
@@ -199,7 +253,10 @@ The self-update contract is frozen: an installed copy sends every candidate `run
 --dry-run, the `bundle` subcommand, and reads its `<mode> <repo-rel> <install-rel>` lines and the `primary-refresh
 <P>: <outcome>` and `self-update: current` lines back. Change any of them and every installed copy refuses every
 candidate: the self-update spell shows on /thread:status's Primary refresh line after 24 h, and a hand-run install
-recovers (tests/primary-refresh.test.sh I6 pins the literal tokens). `run` takes no abbreviated flag, so the smoke's
+recovers (tests/primary-refresh.test.sh I6 pins the literal tokens). p54-6 changed none of them: the green-tip.py row
+is additive, live-checkout.sh with no target reads as an older copy expects, `no move:` is a new outcome an older copy
+does not deny (GR-T3 pins that an older copy's smoke of this candidate reads `self-update: current`), and an installed
+copy older than p54-6 installs p54-6's merge at origin's tip once, by its frozen rule. `run` takes no abbreviated flag, so the smoke's
 rewrite names every flag one way. background_job.py's interface is in the contract too, additive only. Step 5 installs
 it as a helper before this copy, so an install that fails partway leaves the OLD copy calling the NEW module in
 process, and "the next fetched pass finishes it" holds only while every old call still binds. One that no longer binds
@@ -303,6 +360,7 @@ LC_REL = "skills/_shared/scripts/live-checkout.sh"
 BJ_REL = "skills/_shared/scripts/background_job.py"
 SELF_REL = "skills/_shared/scripts/primary-refresh.py"
 CARRIER_REL = "skills/_shared/scripts/land-carrier.py"  # the landing carrier (ADR 0078 d2), run at the end of a pass
+GREEN_REL = "skills/_shared/scripts/green-tip.py"  # the live target, the Green tip (ADR 0084 d1, p54-6)
 COPY = "primary-refresh.py"  # the copy's install-rel: the plist's path, part of the self-update contract
 # (mode, repo-rel, install-rel): what install writes, what the self-update stages and installs, what `bundle` prints.
 BUNDLE = (
@@ -315,6 +373,7 @@ BUNDLE = (
     ("0755", "skills/_shared/scripts/landing-register.py", "skills/_shared/scripts/landing-register.py"),
     ("0755", "skills/execute/scripts/merge-task.sh", "skills/execute/scripts/merge-task.sh"),
     ("0644", "skills/_shared/scripts/ladder.py", "skills/_shared/scripts/ladder.py"),
+    ("0755", GREEN_REL, GREEN_REL),
 )
 # Bump whenever install's ProgramArguments or EnvironmentVariables change: the self-update never rewrites the plist,
 # so only this tells a job left on the old one (tests/primary-refresh.test.sh I4 pins both beside it).
@@ -332,6 +391,10 @@ REPAIRED = "repaired:"                 # a state key's prefix: the last repair's
 LAND_REL = "skills/_shared/scripts/land.sh"  # the primary's own copy: not in the bundle, like the hold
 PROVE_REL = "skills/execute/scripts/reconcile-rollout.py"  # the prove step runs the primary's own copy (ADR 0078 d1)
 LIVE_NAME = "primary-live.json"        # the live file, beside the state file
+GREEN_NAME = "primary-green.json"      # the waits file (a checkout waiting on the Green tip), beside the state file
+GREEN_WAIT_SHOW = timedelta(hours=2)   # a wait joins the stuck line this long from its since (ADR 0084 Decided 9)
+GREEN_BUDGET = 150                     # green-tip.py's budget on a real pass (gh asked, the record written)
+GREEN_DRY_BUDGET = 30                  # … under --dry-run, the smoke's (no gh, nothing written)
 PROVE_TIMEOUT = 120
 GIT_TIMEOUT = 60
 HOLD_TIMEOUT = 120
@@ -351,6 +414,7 @@ CHECK_FORMS = {
     "current": re.compile(r"^current ([0-9a-f]{40})$"),
     "ahead": re.compile(r"^ahead ([0-9a-f]{40}) ([0-9]+)$"),
     "diverged": re.compile(r"^diverged ([0-9a-f]{40}) ([0-9]+) ([0-9]+)$"),
+    "past": re.compile(r"^past ([0-9a-f]{40}) ([0-9]+)$"),  # a target only: on origin, past the Green tip
     "busy": re.compile(r"^busy ([0-9a-f]{40}) (.+)$"),
     "overlap": re.compile(r"^overlap ([0-9a-f]{40}) ([0-9]+) (.+)$"),
     "behind": re.compile(r"^behind ([0-9a-f]{40}) ([0-9]+) ([0-9a-f]{40})$"),
@@ -361,6 +425,7 @@ CONTENT_FORMS = {  # live-checkout.sh content: a diverged checkout, read for its
     "unreadable": re.compile(r"^unreadable (.+)$"),
     "untouched": re.compile(r"^untouched$"),
     "landed": re.compile(r"^landed ([0-9]+)$"),
+    "pending": re.compile(r"^pending ([0-9]+)$"),  # a target only: on origin by content, not yet at the Green tip
     "unlanded": re.compile(r"^unlanded ([0-9]+) (.+)$"),
 }
 OVERLAP_FORMS = {
@@ -374,7 +439,7 @@ FF_FORMS = {
 }
 _SEG = r"[A-Za-z0-9._-]+"
 ROW_RE = re.compile(rf"^(0[0-7]{{3}}) ({_SEG}(?:/{_SEG})*) ({_SEG}(?:/{_SEG})*)$")
-SMOKE_DENIED = ("fetch failed:", "not a primary checkout:", "broken:", "unreadable")
+SMOKE_DENIED = ("fetch failed:", "not a primary checkout:", "broken:", "unreadable", "no move:")
 _STAMP = ""  # the pass's time, for the lines it prints
 _ARGV = []   # the argv main parsed: the smoke runs the job's own
 BJ = None    # background_job.py, loaded by main for run, install and stuck (_load_bj); importing this loads nothing
@@ -576,13 +641,38 @@ def _origin_tip(d, branch):
     return t if rc == 0 and HEX40.match(t) else None
 
 
-def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
-    """One checkout's pass: (outcome, kind, tip, branch). kind None clears a stuck spell (current, moved, ahead,
-    repaired), `dry` changes nothing (would move), any other is stuck. tip is origin's tip as this pass fetched it (ff's
-    verified new sha after a move), None when the fetch did not succeed: the self-update runs on it whatever the
-    checkout read. `entry` is this checkout's spell as last written (its repair field read by the carry), `now` the
-    pass's time, and `extra` a dict a repair fills: "repair" (the spell's repair field) or "record" (the repaired:
-    entry)."""
+def _load_green(primary):
+    """green-tip.py, the bundle's copy else the primary's: (module, None), or (None, why it cannot be loaded)."""
+    f = _helper(GREEN_REL, primary)
+    if f is None:
+        return None, f"no file beside the copy or in {primary}"
+    try:
+        spec = importlib.util.spec_from_file_location("thread_green_tip", str(f))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:  # noqa: BLE001 — a resolver that will not load holds, never origin's tip
+        return None, f"{type(e).__name__}: {_flat(e)[:160]}"
+    return mod, None
+
+
+def _no_move(r, branch):
+    """A hold's outcome (the module docstring's d): nothing moves, and never to origin's tip."""
+    if r.get("cause") == "unreachable":
+        return f"fetch failed: {r.get('why')}", "fetch-failed", None, branch
+    return f"no move: {r.get('why')} (never origin's tip)", "green-held", None, branch
+
+
+def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra, green=None):
+    """One checkout's pass: (outcome, kind, tip, branch). kind None clears a stuck spell (current, moved, ahead, past,
+    repaired), `dry` changes nothing (would move), any other is stuck. tip is the pass's target as this pass read it:
+    the Green tip (green-tip.py's), or origin's tip for a repo that publishes none (ff's verified new sha after a move),
+    None when the fetch did not succeed or on a hold: the self-update runs on it whatever the checkout read. `entry` is
+    this checkout's spell as last written (its repair field read by the carry), `now` the pass's time, `extra` a dict a
+    repair fills: "repair" (the spell's repair field) or "record" (the repaired: entry), and `green` a dict the pass
+    fills once the default branch's fetch succeeded: {fetched, kind (green, origin or hold), target, origin, behind,
+    cause, why}."""
+    if green is None:
+        green = {}
     why = checkout_problem(d)
     if why:
         return f"not a primary checkout: {why}", "not-primary", None, None
@@ -604,34 +694,71 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
         return f"fetch failed: git fetch ran past {GIT_TIMEOUT} s and was stopped", "fetch-failed", None, branch
     if frc != 0:
         return f"fetch failed: {_why_line(ferr) or f'exit {frc}'}", "fetch-failed", None, branch
-    rc, out, _, timed_out = _lc(lc, "check", d, branch)
+    gt, gwhy = _load_green(primary)
+    if gt is None:
+        return f"broken: cannot load {GREEN_REL} ({gwhy})", "broken", None, branch
+    try:
+        r = gt.resolve(d, branch, checkout=True, gh=not dry_run, write=not dry_run,
+                       budget=GREEN_DRY_BUDGET if dry_run else GREEN_BUDGET, now=now, run=_run,
+                       nogh_why="gh is not asked under --dry-run")
+    except Exception as e:  # noqa: BLE001 — a resolver that raises holds, never origin's tip
+        return f"broken: green-tip.py raised {type(e).__name__}: {_flat(e)[:160]}", "broken", None, branch
+    origin = r.get("origin")
+    hold_why = r.get("why") if r.get("kind") == "hold" else None
+    target = None if hold_why is not None else r.get("target")
+    # pin: the commit every step below reads and moves to, the resolver's verified Green tip whenever its kind is
+    # green, at origin's tip included, so a fetch that moves origin/<d> mid-pass is never followed (c2). lead: the
+    # Green-tip words, only when that tip is not origin's.
+    pin = target if r.get("kind") == "green" and target else None
+    lead = pin if pin and pin != origin else None
+    n = r.get("behind")
+    green.update(fetched=True, kind="hold" if hold_why is not None else ("green" if lead else "origin"),
+                 target=target, origin=origin, behind=n, cause=r.get("cause"), why=r.get("why"))
+    rc, out, _, timed_out = _lc(lc, "check", d, branch, *([pin] if pin else []))
     form, m = _form(CHECK_FORMS, rc, out, timed_out)
+    ptip = None if hold_why is not None else (pin or _origin_tip(d, branch))
     if form is None:
-        return (f"broken: live-checkout.sh check: {_said(rc, out, timed_out)}", "broken", _origin_tip(d, branch),
+        return (f"broken: live-checkout.sh check: {_said(rc, out, timed_out)}", "broken", ptip,
                 branch)
     if form == "unreadable":
-        return f"unreadable: {m.group(1)}", "unreadable", _origin_tip(d, branch), branch
-    tip = m.group(1)
+        return f"unreadable: {m.group(1)}", "unreadable", ptip, branch
+    tip = None if hold_why is not None else m.group(1)
     if form == "current":
+        if hold_why is not None:
+            return _no_move(r, branch)
+        if lead:
+            return (f"current at the Green tip {lead[:12]} ({n} behind origin/{branch}: waits on the Green tip)", None,
+                    tip, branch)
         return "current", None, tip, branch
+    if form == "past":
+        return (f"past the Green tip {tip[:12]} by {m.group(2)} (on origin/{branch}): waits on the Green tip", None,
+                tip, branch)
     if form == "ahead":
         return f"ahead {m.group(2)}: left to its landing route", None, tip, branch
     if form == "diverged":
         if is_primary:
-            return repair(d, lc, primary, branch, tip, (m.group(2), m.group(3)), dry_run, ff_timeout, now, entry, extra)
+            return repair(d, lc, primary, branch, tip, (m.group(2), m.group(3)), dry_run, ff_timeout, now, entry, extra,
+                          lead=lead, hold_why=hold_why, pin=pin)
         return f"diverged (ahead {m.group(2)}, behind {m.group(3)}): never integrated here", "diverged", tip, branch
     if form == "busy":
         return f"busy: {m.group(2)}", "busy", tip, branch
+    if hold_why is not None:  # behind, or an overlap, with no Green tip to move to: nothing moves
+        return _no_move(r, branch)
     if is_primary:
         h = hold(d)
         if h:
             return f"held: {h}", "held", tip, branch
     if form == "overlap":
+        if lead:
+            return f"refused: local changes overlap the Green tip {lead[:12]} ({m.group(3)})", "refused", tip, branch
         return f"refused: local changes overlap origin/{branch} ({m.group(3)})", "refused", tip, branch
     behind, head = m.group(2), m.group(3)
     if dry_run:
+        if lead:
+            return (f"would move {head[:12]}..{tip[:12]} ({behind} commits) to the Green tip ({n} behind "
+                    f"origin/{branch})", "dry", tip, branch)
         return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", "dry", tip, branch
-    rc, out, _, timed_out = _lc(lc, "ff", d, branch, timeout=ff_timeout)
+    rc, out, _, timed_out = _lc(lc, "ff", d, branch, *([pin] if pin else []), timeout=ff_timeout)
     if timed_out:
         return (f"timed out: git merge --ff-only ran past {ff_timeout} s and was stopped: the working tree may be "
                 f"partly updated (git -C {d} status)", "timed-out", tip, branch)
@@ -642,8 +769,13 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
         if now_head != new:
             return (f"broken: live-checkout.sh ff: said moved to {new[:12]}, HEAD is {now_head[:12] or 'unreadable'}",
                     "broken", tip, branch)
+        if lead:
+            return (f"moved {m.group(1)[:12]}..{new[:12]} ({behind} commits) to the Green tip ({n} behind "
+                    f"origin/{branch})", None, new, branch)
         return f"moved {m.group(1)[:12]}..{new[:12]} ({behind} commits)", None, new, branch
     if form == "overlap":
+        if lead:
+            return f"refused: local changes overlap the Green tip {lead[:12]} ({m.group(1)})", "refused", tip, branch
         return f"refused: local changes overlap origin/{branch} ({m.group(1)})", "refused", tip, branch
     if form == "refused":
         return f"refused: {m.group(1)}", "refused", tip, branch
@@ -652,10 +784,14 @@ def refresh(d, primary, is_primary, dry_run, ff_timeout, now, entry, extra):
 
 # ---- the repair of a diverged primary (ADR 0078 d4; the rules are the module docstring's) ---------------------------------
 
-def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra):
-    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple."""
+def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry, extra, lead=None, hold_why=None,
+           pin=None):
+    """A diverged primary's pass (the module docstring's repair), refresh's 4-tuple. pin is the Green tip the content is
+    read against and the reset goes to (refresh's pin: at origin's tip included), lead the same commit when it is not
+    origin's tip (the Green-tip words); hold_why a hold's why: no Green tip, so the reset waits while the read, the hold
+    and the carry run as ever."""
     base = f"diverged (ahead {counts[0]}, behind {counts[1]})"
-    rc, out, _, timed_out = _lc(lc, "content", d, branch)
+    rc, out, _, timed_out = _lc(lc, "content", d, branch, *([pin] if pin else []))
     form, m = _form(CONTENT_FORMS, rc, out, timed_out)
     if form is None:
         return f"broken: live-checkout.sh content: {_said(rc, out, timed_out)}", "broken", tip, branch
@@ -669,20 +805,33 @@ def repair(d, lc, primary, branch, tip, counts, dry_run, ff_timeout, now, entry,
     h = hold(d)
     if h:
         return f"{base}: repair held: {h}", "diverged", tip, branch
+    if form == "pending":
+        return (f"{base}: repair waits (its content is on origin/{branch}, not yet at the Green tip {(pin or '')[:12]})",
+                "diverged", tip, branch)
     if form == "landed":
-        return _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra)
+        if hold_why is not None:
+            return f"{base}: repair waits (no Green tip to reset to: {hold_why})", "diverged", tip, branch
+        return _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra, green=bool(lead))
     return _carry(d, primary, branch, tip, head, base, dry_run, now, entry, extra)
 
 
-def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra):
-    """The reset of a primary whose ahead commits are all on origin by content: a backup ref, then `reset --keep`."""
-    where = f"reset {head[:12]} to origin/{branch} at {tip[:12]}"
+def _reset(d, lc, branch, tip, head, base, counts, dry_run, ff_timeout, extra, green=False):
+    """The reset of a primary whose ahead commits are all on origin by content: a backup ref, then `reset --keep` to
+    tip, the pass's target as check read it (the Green tip, else origin's tip), the overlap read against that same
+    commit, never the ref as it stands later; green chooses the Green-tip words (a Green tip behind origin's tip)."""
+    if green:
+        where = f"reset {head[:12]} to the Green tip {tip[:12]} of origin/{branch}"
+    else:
+        where = f"reset {head[:12]} to origin/{branch} at {tip[:12]}"
     why = f"ahead {counts[0]}, behind {counts[1]}: their content is already on origin"
-    rc, out, _, timed_out = _lc(lc, "overlap", d, f"refs/remotes/origin/{branch}")
+    rc, out, _, timed_out = _lc(lc, "overlap", d, tip)
     form, m = _form(OVERLAP_FORMS, rc, out, timed_out)
     if form is None:
         return f"broken: live-checkout.sh overlap: {_said(rc, out, timed_out)}", "broken", tip, branch
     if form == "overlap":
+        if green:
+            return (f"{base}: repair refused: local changes overlap the Green tip {tip[:12]} ({m.group(1)})",
+                    "diverged", tip, branch)
         return f"{base}: repair refused: local changes overlap origin/{branch} ({m.group(1)})", "diverged", tip, branch
     if dry_run:
         return f"would {where} ({why})", "dry", tip, branch
@@ -970,7 +1119,7 @@ def _smoke(stage, primary, stamp, smoke_timeout):
     return _flat(why)[:80]
 
 
-def _install(stage, table, me, branch, t12):
+def _install(stage, table, me, branch, t12, green=False):
     """The helpers that differ, then the files this copy's table has and the candidate's drops, then the copy."""
     cdir = me.parent
     irels = {irel for _, _, irel in table}
@@ -999,29 +1148,60 @@ def _install(stage, table, me, branch, t12):
     parts = [f"installed {', '.join(done['install'])}"] if done["install"] else []
     if done["remove"]:
         parts.append(f"removed {', '.join(done['remove'])}")
+    if green:
+        return (f"self-update: the installed bundle now matches the Green tip {t12} of origin/{branch} "
+                f"({'; '.join(parts)})"), None
     return f"self-update: the installed bundle now matches origin/{branch} at {t12} ({'; '.join(parts)})", None
 
 
-def self_update(primary, branch, tip, args, stuck, now, stamp):
-    """The installed copy's self-update at `tip` (the module docstring's steps): (line or None, kind). kind None clears
-    the self-update spell, `keep` leaves it as it is, any other opens or continues it."""
+def _bundle_diff(primary, t, src, me):
+    """(same, diff): whether t's primary-refresh.py (its bytes in src, read here when None) is this copy's, and then the
+    install-rels of every other row of this copy's table whose blob or mode at t differs from the copy's directory."""
+    if src is None:
+        rc, src, _ = git(primary, "cat-file", "blob", f"{t}:{SELF_REL}", raw=True)
+        if rc != 0 or not src:
+            return False, []
+    if src != me.read_bytes():
+        return False, []
+    diff = []
+    for mode, rel, irel in BUNDLE:
+        if irel == COPY:
+            continue
+        rc, data, _ = git(primary, "cat-file", "blob", f"{t}:{rel}", raw=True)
+        if rc != 0 or _differs(data, me.parent / irel, mode):
+            diff.append(irel)
+    return True, diff
+
+
+def _matches(primary, t, me):
+    """Whether the installed bundle is t's (step 1's compare): t's primary-refresh.py equals this copy's bytes and every
+    other row matches t's blob and mode."""
+    same, diff = _bundle_diff(primary, t, None, me)
+    return same and not diff
+
+
+def self_update(primary, branch, tip, args, stuck, now, stamp, origin=None, green=False, why=None):
+    """The installed copy's self-update at `tip`, the pass's target (the module docstring's steps): (line or None,
+    kind). kind None clears the self-update spell, `keep` leaves it as it is, any other opens or continues it. origin is
+    origin's freshly fetched tip (read only under --dry-run, step 1's origin arm), green whether tip is a Green tip
+    that is not origin's tip (the wording), and why a hold's why when tip is None (a dry run on a hold)."""
+    if tip is None:  # a dry run on a hold (cmd_run's gate): nothing to install from
+        if origin and _matches(primary, origin, Path(__file__).resolve()):
+            return "self-update: current", None
+        return f"self-update: waits: no Green tip to install from ({why})", "keep"
     me = Path(__file__).resolve()
     t12 = tip[:12]
     rc, src, _ = git(primary, "cat-file", "blob", f"{tip}:{SELF_REL}", raw=True)
     if rc != 0 or not src:
+        if green:
+            return f"self-update: the Green tip {t12} lacks {SELF_REL}: the installed bundle is kept", "refused"
         return f"self-update: origin's tip {t12} lacks {SELF_REL}: the installed bundle is kept", "refused"
-    same = src == me.read_bytes()
-    if same:
-        diff = []
-        for mode, rel, irel in BUNDLE:
-            if irel == COPY:
-                continue
-            rc, data, _ = git(primary, "cat-file", "blob", f"{tip}:{rel}", raw=True)
-            if rc != 0 or _differs(data, me.parent / irel, mode):
-                diff.append(irel)
-        if not diff:
-            return ("self-update: current" if args.dry_run else None), None
+    same, diff = _bundle_diff(primary, tip, src, me)
+    if same and not diff:
+        return ("self-update: current" if args.dry_run else None), None
     if args.dry_run:
+        if origin and origin != tip and _matches(primary, origin, me):
+            return "self-update: current", None  # an older copy's smoke: its stage was built at origin's tip
         if same:
             return f"self-update: would install {', '.join(diff)}", "keep"
         return f"self-update: would install origin's bundle at {t12} (its primary-refresh.py differs)", "keep"
@@ -1043,12 +1223,13 @@ def self_update(primary, branch, tip, args, stuck, now, stamp):
                 pass
     stage = Path(tempfile.mkdtemp(prefix=".stage-", dir=str(me.parent)))
     try:
-        return _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, args.smoke_timeout)
+        return _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, args.smoke_timeout,
+                                  green=green)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, smoke_timeout):
+def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp, smoke_timeout, green=False):
     t12 = tip[:12]
 
     def refused(why):
@@ -1099,8 +1280,10 @@ def _stage_and_install(primary, branch, tip, src, same, stage, me, smoke, stamp,
     if smoke:
         why = _smoke(stage, primary, stamp, smoke_timeout)
         if why:
+            if green:
+                return refused(f"the Green tip's bundle at {t12} failed its smoke run ({why})")
             return refused(f"origin's bundle at {t12} failed its smoke run ({why})")
-    return _install(stage, table, me, branch, t12)
+    return _install(stage, table, me, branch, t12, green=green)
 
 
 def live_entry(d, is_primary, prev, stamp):
@@ -1176,6 +1359,56 @@ def _carrier(args, primary, stuck, stamp):
     return json.dumps(stuck.get("carrier"), sort_keys=True) != before
 
 
+def _wait(waits, d, gr, kind, outcome, branch, stamp):
+    """The waits file's entry for one checkout (the module docstring's stuck): opened or kept after a pass that left it
+    at a Green tip behind origin (since reset when the Green tip moves), dropped once the repo reads origin's tip (no
+    Green tip, or the Green tip at origin's tip) or the checkout stands past it, left as it is on a hold, a failed
+    fetch or any other stuck outcome."""
+    key = str(d)
+    if not gr.get("fetched") or gr.get("kind") == "hold":
+        return
+    if gr.get("kind") == "origin":
+        waits.pop(key, None)
+        return
+    if kind is not None:
+        return
+    behind, target = gr.get("behind"), gr.get("target")
+    head = git(d, "rev-parse", "-q", "--verify", "HEAD^{commit}")[1]
+    if head != target or not isinstance(behind, int) or behind < 1:
+        waits.pop(key, None)
+        return
+    prev = waits.get(key)
+    since = prev["since"] if isinstance(prev, dict) and prev.get("green") == target and \
+        isinstance(prev.get("since"), str) else stamp
+    waits[key] = {"since": since, "green": target, "origin": gr.get("origin"), "behind": behind, "branch": branch,
+                  "outcome": outcome}
+
+
+def _wait_rows(waits):
+    """The waits file's entries as the `stuck` verb's rows, sorted by key."""
+    rows = []
+    for k in sorted(waits):
+        e = waits[k]
+        if not isinstance(e, dict):
+            continue
+        rows.append({"key": k, "name": _stuck_name(k)[0], "since": e.get("since"), "green": e.get("green"),
+                     "origin": e.get("origin"), "behind": e.get("behind"), "branch": e.get("branch"),
+                     "outcome": e.get("outcome")})
+    return rows
+
+
+def _wait_text(w):
+    """`<name>: waits on the Green tip <g12>, <n> behind origin/<d> (since <since16>)`."""
+    return (f"{w['name']}: waits on the Green tip {str(w.get('green') or '')[:12]}, {w.get('behind')} behind "
+            f"origin/{w.get('branch')} (since {str(w.get('since') or '')[:16]})")
+
+
+def _wait_due(w, now):
+    """A wait on the stuck line: GREEN_WAIT_SHOW (2 h) from its since, never a since in the future."""
+    since = _parse_iso(w.get("since"))
+    return since is not None and since <= now and now - since >= GREEN_WAIT_SHOW
+
+
 # ---- the verbs ------------------------------------------------------------------------------------------------------
 
 def cmd_run(args):
@@ -1197,20 +1430,24 @@ def cmd_run(args):
     state_path = _state_file(args.state)
     stuck, dirty = _read_state(state_path, stamp)
     before = json.dumps(stuck, sort_keys=True)
-    tip, branch = None, None
+    tip, branch, gp = None, None, {}
     live_path = Path(state_path).parent / LIVE_NAME
     live, live_dirty = BJ.read_state(live_path, "primary-refresh", "live", STATE_VERSION)
     live_before = json.dumps(live, sort_keys=True)
+    waits_path = Path(state_path).parent / GREEN_NAME
+    waits, waits_dirty = BJ.read_state(waits_path, "primary-refresh", "green", STATE_VERSION)
+    waits_before = json.dumps(waits, sort_keys=True)
     for d, is_primary in targets:
-        entry, extra = stuck.get(str(d)), {}
-        outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout, now, entry, extra)
+        entry, extra, gr = stuck.get(str(d)), {}, {}
+        outcome, kind, t, b = refresh(d, primary, is_primary, args.dry_run, args.ff_timeout, now, entry, extra, gr)
         _line(d, outcome)
         if kind != "not-primary":
             le = live_entry(d, is_primary, live.get(str(d)), stamp)
             if le is not None:
                 live[str(d)] = le
+            _wait(waits, d, gr, kind, outcome, b, stamp)
         if is_primary:
-            tip, branch = t, b
+            tip, branch, gp = t, b, gr
         if "record" in extra:
             stuck[REPAIRED + str(d)] = extra.pop("record")
         if kind == "diverged" and is_primary and entry is not None:  # d4: a repair blocked a day is recorded stuck
@@ -1226,6 +1463,11 @@ def cmd_run(args):
             BJ.write_state(live_path, "live", live, STATE_VERSION)
         except OSError as e:
             print(f"WARN: primary-refresh: cannot write the live file {live_path}: {e}", file=sys.stderr)
+    if not args.dry_run and (waits_dirty or json.dumps(waits, sort_keys=True) != waits_before):
+        try:
+            BJ.write_state(waits_path, "green", waits, STATE_VERSION)
+        except OSError as e:
+            print(f"WARN: primary-refresh: cannot write the waits file {waits_path}: {e}", file=sys.stderr)
     if (INSTALLED or args.prove) and not args.dry_run:
         line, verdict = prove_step(primary, live_path, args.prove_timeout)
         _line("prove", line)
@@ -1233,16 +1475,17 @@ def cmd_run(args):
             stuck.pop("prove", None)
         elif verdict is False:
             _spell(stuck, "prove", "prove-failed", line, stamp)
-    if INSTALLED and tip is not None:
+    if INSTALLED and (tip is not None or (args.dry_run and gp.get("fetched") and gp.get("origin"))):
         try:
-            line, kind = self_update(primary, branch, tip, args, stuck, now, stamp)
+            line, kind = self_update(primary, branch, tip, args, stuck, now, stamp, origin=gp.get("origin"),
+                                     green=gp.get("kind") == "green", why=gp.get("why"))
         except Exception as e:  # noqa: BLE001 — the self-update never skips the job check or the state
             line, kind = f"self-update: failed ({type(e).__name__}: {_flat(e)[:160]})", "failed"
         if line:
             _line(primary, line)
         if kind is None:
             stuck.pop("self-update", None)
-        elif kind != "keep" and not args.dry_run:
+        elif kind != "keep" and not args.dry_run and tip is not None:
             _spell(stuck, "self-update", kind, line[len("self-update: "):], stamp, tip=tip, tipAt=stamp)
     if INSTALLED:
         job_check(args, stuck, stamp, primary)
@@ -1270,8 +1513,11 @@ def cmd_stuck(args):
     due = sorted(((_parse_iso(e["since"]), k, e) for k, e in stuck.items() if _due(e, now)), key=lambda x: (x[0], x[1]))
     spells = [{"key": k, "name": _stuck_name(k)[0], "kind": e.get("kind") if isinstance(e.get("kind"), str) else None,
                "since": e.get("since"), "outcome": _stuck_outcome(e)} for _, k, e in due]
-    line = ("Primary refresh: " + " · ".join(_stuck_text(k, e) for _, k, e in due)) if due else None
-    print(json.dumps({"state": str(path), "stuck": spells, "line": line}, ensure_ascii=False))
+    waits, _ = BJ.read_state(Path(path).parent / GREEN_NAME, "primary-refresh", "green", STATE_VERSION)
+    rows = _wait_rows(waits)
+    texts = [_stuck_text(k, e) for _, k, e in due] + [_wait_text(w) for w in rows if _wait_due(w, now)]
+    line = ("Primary refresh: " + " · ".join(texts)) if texts else None
+    print(json.dumps({"state": str(path), "stuck": spells, "waits": rows, "line": line}, ensure_ascii=False))
     return 0
 
 
@@ -1283,7 +1529,8 @@ def _prune(primary, also):
     for p, key, watched, noun in ((path, "stuck",
                                    {"self-update", "job", "prove", "carrier", REPAIRED + str(primary)} | checkouts,
                                    "spell"),
-                                  (path.parent / LIVE_NAME, "live", checkouts, "live entry")):
+                                  (path.parent / LIVE_NAME, "live", checkouts, "live entry"),
+                                  (path.parent / GREEN_NAME, "green", checkouts, "waits entry")):
         entries, corrupt = BJ.read_state(p, "primary-refresh", key, STATE_VERSION)
         dropped = [] if corrupt else [k for k in entries if k not in watched]
         if not dropped:

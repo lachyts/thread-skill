@@ -342,6 +342,79 @@ PY
     ok "$rc|$out" "2|" "LC11 $n: usage '$args' exits 2, stdout empty"
   done
 
+  # ---- LC12: the target (p54-6): a live checkout moves to the Green tip, never past it --------------------------------
+  srv t12; c12="$tmp/w/t12"; cl t12 "$c12"; B12=$(tipof t12)
+  push t12 b.txt two; G12=$(tipof t12); push t12 c.txt three; O12=$(tipof t12); fetchall "$c12"; : > "$tmp/forms12"
+  f12() { printf '%s\n' "$1" >> "$tmp/forms12"; printf '%s\n' "$1"; }
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "behind $G12 1 $B12" "LC12 $n: behind a target: the target first, counted against it"
+  ok "$(src lc_check "$c12" master)" "behind $O12 2 $B12" "LC12 $n: … with none, origin's tip as before"
+  printf 'two\n' > "$c12/b.txt"
+  ok "$(src lc_overlap "$c12" master "$G12")|$(src lc_overlap "$c12" master)" "|" "LC12 $n: a copy with the target's bytes: no overlap against it (lc_same against the target)"
+  printf 'mine\n' > "$c12/b.txt"
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "overlap $G12 1 b.txt" "LC12 $n: … other bytes: an overlap against the target"
+  rm -f "$c12/b.txt"; : > "$c12/.git/index.lock"
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "busy $G12 index.lock present" "LC12 $n: busy names the target"
+  rm -f "$c12/.git/index.lock"
+  ok "$(mode ff "$c12" master "$G12")" "moved $B12 $G12" "LC12 $n: ff with a target moves to it, not to origin's tip"
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "current $G12" "LC12 $n: at the target: current"
+  g -C "$c12" merge -q --ff-only origin/master
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "past $G12 1" "LC12 $n: pulled to origin's tip by hand: past the target by 1, never moved back"
+  ok "$(mode ff "$c12" master "$G12" >/dev/null; git -C "$c12" rev-parse HEAD)" "$O12" "LC12 $n: … and ff to the target leaves HEAD where it is (never back)"
+  g -C "$c12" commit -q --allow-empty -m local
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "ahead $G12 1" "LC12 $n: ahead counts against origin, the target first"
+  push t12 d.txt four; fetchall "$c12"
+  ok "$(f12 "$(src lc_check "$c12" master "$G12")")" "diverged $G12 1 1" "LC12 $n: diverged counts against origin too"
+  ok "$(f12 "$(src lc_check "$c12" master 0000000000000000000000000000000000000000)")" "unreadable 0000000000000000000000000000000000000000 names no commit" \
+    "LC12 $n: a target that does not resolve reads unreadable"
+  ok "$(python3 - "$PR" "$tmp/forms12" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("pr", sys.argv[1]); m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+bad = [l for l in open(sys.argv[2]).read().splitlines() if not m.CHECK_FORMS[l.split(" ", 1)[0]].match(l)]
+print(bad or "all")
+PY
+)" all "LC12 $n: every form with a target, past included, matches primary-refresh.py's CHECK_FORMS"
+  ok "$(mode check "$c12" master "$G12" >/dev/null; echo $?)|$(mode check "$c12" master abc 2>/dev/null; echo $?)|$(mode ff "$c12" master HEAD 2>/dev/null; echo $?)" "0|2|2" \
+    "LC12 $n: the run modes take a 40-hex target; anything else is a usage error"
+  ok "$(mode ff "$c12" master 0000000000000000000000000000000000000000)" "refused 0000000000000000000000000000000000000000 names no commit" "LC12 $n: ff to a target that does not resolve refuses"
+  ok "$(mode overlap "$c12" "$G12")" "clear" "LC12 $n: the overlap mode takes a commit id"
+  # content against a target: on origin by content, but the target does not hold it yet (pending), or does (landed)
+  srv u12; u12="$tmp/w/u12"; cl u12 "$u12"; push u12 x.txt x0; GU=$(tipof u12); fetchall "$u12"; g -C "$u12" merge -q --ff-only origin/master
+  echo same > "$u12/s.txt"; g -C "$u12" add -A; g -C "$u12" commit -qm local-s; push u12 s.txt same; NU=$(tipof u12); push u12 y.txt y; fetchall "$u12"
+  ok "$(mode content "$u12" master "$GU")" "pending 1" "LC12 $n: content with a target behind the landed commit: pending"
+  ok "$(mode content "$u12" master "$NU")|$(mode content "$u12" master)" "landed 1|landed 1" "LC12 $n: … a target that holds it, and none: landed"
+  ok "$(mode content "$u12" master 0000000000000000000000000000000000000000)" "unreadable 0000000000000000000000000000000000000000 names no commit" "LC12 $n: … a target that does not resolve: unreadable"
+
+  # ---- LC13: lc_landed: a landed close-out's THREAD.md never holds a move back ------------------------------------------
+  thr() { srv "$1"; push "$1" THREAD.md t0 >/dev/null; T="$tmp/w/$1"; cl "$1" "$T"; }
+  thr l13a; push l13a THREAD.md n; Na=$(tipof l13a); push l13a THREAD.md n2; N2a=$(tipof l13a); push l13a o.txt o; fetchall "$T"
+  printf 'n\n' > "$T/THREAD.md"
+  ok "$(src lc_landed "$T" master THREAD.md)" "$Na" "LC13 $n (a): a THREAD.md equal to a commit's on origin: lc_landed names it"
+  ok "$(src lc_overlap "$T" master "$N2a")" "" "LC13 $n (a): … no overlap against a target past it that changed it again"
+  ok "$(src lc_ff "$T" master "$N2a"; echo "rc $?")" "rc 0" "LC13 $n (a): … lc_ff goes through"
+  ok "$(git -C "$T" rev-parse HEAD)|$(cat "$T/THREAD.md")|$(git -C "$T" status --porcelain)" "$N2a|n2|" "LC13 $n (a): … at the target, its copy written, the tree clean"
+  thr l13b; push l13b THREAD.md b; Bb=$(tipof l13b); push l13b THREAD.md n; push l13b o.txt o; fetchall "$T"
+  printf 'n\n' > "$T/THREAD.md"
+  ok "$(src lc_ff "$T" master "$Bb"; echo "rc $?")" "rc 0" "LC13 $n (b): a target before the landed commit that changed THREAD.md: no overlap"
+  ok "$(git -C "$T" rev-parse HEAD)|$(cat "$T/THREAD.md")|$(git -C "$T" status --porcelain)" "$Bb|n| M THREAD.md" "LC13 $n (b): … moved to it, the landed copy kept, dirty"
+  thr l13c; g -C "$tmp/seed-l13c" checkout -q -b side; push l13c THREAD.md n >/dev/null; g -C "$tmp/seed-l13c" checkout -q master
+  push l13c THREAD.md b >/dev/null; g -C "$T" fetch -q origin side master 2>/dev/null; printf 'n\n' > "$T/THREAD.md"
+  ok "$(src lc_overlap "$T" master)" "THREAD.md" "LC13 $n (c): the same copy held only by a side branch, not origin/<d>: an overlap"
+  thr l13d; push l13d THREAD.md n >/dev/null; push l13d THREAD.md n2 >/dev/null; fetchall "$T"; printf 'mine\n' > "$T/THREAD.md"
+  ok "$(src lc_overlap "$T" master)" "THREAD.md" "LC13 $n (d): a THREAD.md no commit holds: an overlap"
+  printf 'x\n' > "$T/THREAD.md"; g -C "$T" add THREAD.md; printf 'n\n' > "$T/THREAD.md"
+  ok "$(src lc_overlap "$T" master)" "THREAD.md" "LC13 $n (e): a landed copy over a staged third blob: an overlap"
+  thr l13f; push l13f notes.md n >/dev/null; push l13f notes.md n2 >/dev/null; fetchall "$T"; printf 'n\n' > "$T/notes.md"
+  ok "$(src lc_overlap "$T" master)" "notes.md" "LC13 $n (f): a non-THREAD.md file equal to a landed blob: still an overlap"
+  thr l13g; push l13g THREAD.md n >/dev/null; push l13g THREAD.md n2; N2g=$(tipof l13g); fetchall "$T"
+  g -C "$T" commit -q --allow-empty -m local; printf 'n\n' > "$T/THREAD.md"
+  ok "$(src lc_ff "$T" master "$N2g" >/dev/null; echo "rc $?")" "rc 1" "LC13 $n (g): a merge git refuses after the restore: rc 1"
+  ok "$(git -C "$T" diff --cached --name-only)|$(cat "$T/THREAD.md")" "|n2" "LC13 $n (g): … THREAD.md unstaged, its copy the target's"
+  thr l13h; push l13h THREAD.md n >/dev/null; push l13h THREAD.md n2; N2h=$(tipof l13h); fetchall "$T"; printf 'n\n' > "$T/THREAD.md"
+  ok "$(mode ff "$T" master | cut -d' ' -f1)|$(git -C "$T" rev-parse HEAD)|$(cat "$T/THREAD.md")|$(git -C "$T" status --porcelain)" "moved|$N2h|n2|" \
+    "LC13 $n (h): no target, origin's tip: the same, through the ff mode"
+
   # ---- LC10: lc_bounded: the child's rc, the budget, and a signal or a normal exit kills the whole group -----------
   # gone <pgid>: polls until no process of the group is left (a reaped zombie can't fake a pass), under a 30 s liveness
   # bound: a killed group is gone well inside it, and a leaked sleep outlives it

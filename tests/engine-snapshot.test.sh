@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # skills/_shared/scripts/engine-snapshot.py: a rollout runs on its Engine snapshot (ADR 0043, p29-1;
 # skills/_shared/engine-snapshot.md).
-#   S1-S8  cut: a detached, locked worktree at origin's fresh tip; the Primary's own state never reaches it; an
+#   S1-S8  cut: a detached, locked worktree at origin's fresh tip (no Green tip published); the Primary's own state never reaches it; an
 #          unreachable origin; a version-cache copy (nested in an unrelated repo, through a symlink; and bare) has no
 #          git Primary and fetches nothing; a tip without the script; a nested home; a squatter; two cuts at one tip
 #   A1-A3  adopt: the two stamps below protocol_version:, idempotent, ~/-form; refused from the Primary and on an
@@ -23,6 +23,9 @@
 #   T1-T2  retire: the keep-list, the archived grace, an unreadable Archive, no Archive, no git Primary
 #   H1     ADR 0031's hold: only an unsnapshotted running rollout holds; a snapshot stands for its Primary; a cache
 #          copy holds nothing
+#   C1-C5  the cut at the Green tip (ADR 0084 d1, p54-6): the Green tip one behind origin's tip; cut --at by hand (an
+#          off-branch commit and a non-commit refused); an unverified ref at origin's tip steps back; a vanished ref
+#          cuts the recorded verified commit; nothing recorded is exit 3 naming cut --at, nothing cut
 # Hermetic: HOME, the global git config, the vault, the events dir, the note locks and the canary's state are temp;
 # origin is a local bare repo seeded from this tree's files (tracked and new, never ignored), so nothing reaches the
 # network. bash 3.2-compatible (macOS).
@@ -159,6 +162,7 @@ ok "$X" "$(git -C "$S1" rev-parse HEAD:skills/execute/SKILL.md)" "S1: … its ex
 ok "$(j 'd["prose"]["rootId"]')|$(j 'd["prose"]["identical"]')" "$X|false" "S1: … prose.rootId is that id; no --prose-id is never identical"
 ok "$([ -f "$H/.cut/${V1:0:12}" ] && echo y)" y "S1: … its .cut marker"
 ok "$(git -C "$P" status --porcelain)" "" "S1: … the Primary's tree untouched"
+ok "$(j 'd["from"]')|$(j 'd["green"]')|$(j 'd["origin"]')" "origin|null|$V1" "S1: … from origin: a repo that publishes no Green tip cuts origin's tip"
 
 # ════ S2: the Primary's own state never reaches a snapshot ══════════════════════════════════════════════════════
 echo "== S2"
@@ -740,6 +744,49 @@ has "$out" "retired $N5" "T2: no Archive/Rollouts dir → the old orphan is reti
 es "$CL" retire --tasks-dir "$TASKS"
 ok "$rc|$out" "0|retire: no git Primary (the plugin root is not its work tree's toplevel (a version-cache install)): nothing to retire" \
    "T2: from the nested cache copy → no git Primary, exit 0"
+
+# ════ C1-C5: the cut at the Green tip (ADR 0084 d1, p54-6) ══════════════════════════════════════════════════════
+# The origin is a local path (no GitHub slug), so gh is never asked: only a recorded commit verifies.
+echo "== C1"
+REC="$HOME/.local/state/thread/green-tip.json"
+grec() { mkdir -p "$(dirname "$REC")"; python3 - "$REC" "$ORIGIN" "$@" <<'PY'
+import json, sys
+f, key, shas = sys.argv[1], sys.argv[2], sys.argv[3:]
+json.dump({"v": 1, "repos": {key: {"verified": [{"sha": x, "at": "2026-11-01T10:00:00+11:00", "by": "test"} for x in shas],
+                                   "unverified": []}}}, open(f, "w"))
+PY
+}
+mkdir -p "$W/.github/workflows"
+printf 'jobs:\n  green-tip:\n    name: publish the Green tip\n    env:\n      GREEN_REF: refs/thread/green\n' > "$W/.github/workflows/full-suite.yml"
+git -C "$W" add -A; git -C "$W" commit -qm "the green-tip job"; git -C "$W" push -q origin master; G1=$(tip)
+push notes/c1.txt c1; O1=$(tip); git --git-dir "$ORIGIN" update-ref refs/thread/green "$G1"; grec "$G1"
+es "$P" cut --tasks-dir "$TASKS"
+ok "$rc|$(j 'd["sha"]')|$(j 'd["from"]')|$(j 'd["green"]')|$(j 'd["origin"]')" "0|$G1|green|$G1|$O1" "C1: the cut is at the Green tip, one behind origin's tip"
+ok "$(git -C "$H/${G1:0:12}" rev-parse HEAD)" "$G1" "C1: … the snapshot sits at it"
+echo "== C2"
+es "$P" cut --at "$O1" --tasks-dir "$TASKS"
+ok "$rc|$(j 'd["sha"]')|$(j 'd["from"]')" "0|$O1|at" "C2: cut --at origin's tip, by hand: at that commit"
+side=$(git -C "$P" commit-tree -p "$G1" -m side "$G1^{tree}"); before=$(snaps)
+es "$P" cut --at "$side" --tasks-dir "$TASKS"
+ok "$rc|$out|$(snaps)" "3||$before" "C2: … an off-branch commit: exit 3, nothing cut"
+has "$err" "not origin/master or an ancestor of it" "C2: … saying why"
+es "$P" cut --at "$(git -C "$P" rev-parse "$G1^{tree}")" --tasks-dir "$TASKS"
+ok "$rc|$out|$(snaps)" "3||$before" "C2: … a tree, not a commit: exit 3, nothing cut"
+echo "== C3"
+git --git-dir "$ORIGIN" update-ref refs/thread/green "$O1"; grec "$G1"
+es "$P" cut --tasks-dir "$TASKS"
+ok "$rc|$(j 'd["sha"]')|$(j 'd["from"]')|$(j 'd["green"]')" "0|$G1|verified|$O1" "C3: the ref at origin's untested tip: the cut steps back to the recorded commit"
+echo "== C4"
+git --git-dir "$ORIGIN" update-ref -d refs/thread/green
+es "$P" cut --tasks-dir "$TASKS"
+ok "$rc|$(j 'd["sha"]')|$(j 'd["from"]')" "0|$G1|verified" "C4: the ref gone after it was seen: the newest recorded verified commit"
+has "$(j 'd["why"]')" "gone from origin after it was seen" "C4: … the why says so"
+echo "== C5"
+git --git-dir "$ORIGIN" update-ref refs/thread/green "$O1"; rm -f "$REC"; before=$(snaps)
+es "$P" cut --tasks-dir "$TASKS"
+ok "$rc|$out|$(snaps)" "3||$before" "C5: nothing recorded: exit 3, nothing cut, never origin's tip"
+has "$err" "engine-snapshot cut: no Green tip to cut at (" "C5: … no Green tip to cut at"
+has "$err" "cut --at <sha> (ADR 0084 Decided for you 8)" "C5: … naming cut --at"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "engine-snapshot: ALL PASS"; else echo "engine-snapshot: FAILED"; fi
