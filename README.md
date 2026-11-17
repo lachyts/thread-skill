@@ -475,18 +475,20 @@ consumers line, or a test that lists a directory but sits on neither the walkers
 The map is itself FULL, so a diff that edits it runs the full suite: edit it only when the check names a missing
 line. `bash tests/run.sh --only <test file>...` runs named files in the same hermetic harness. In CI (ADR 0073
 d3), a PR's one required check (`make test (ubuntu-latest)`, ADR 0025; macOS left it by ADR 0084 d3 and runs in
-master's shards) runs `make test-fast` against the PR's base, and every push to master runs the full suite as 4 shards per OS
+master's shards) is a roll-up over three `fast tier (shard K/3)` jobs (p54-12): each runs
+`bash tests/run.sh --fast --shard K/3` against the PR's base, shard K of the fast tier's selection, and the roll-up
+passes only when all three did. Every push to master runs the full suite as 4 shards per OS
 (`.github/workflows/full-suite.yml`: `bash tests/run.sh --shard K/N`, split by `tests/lib/shard.py`, every test file
 in exactly one shard; `--shard-plan N` is the dry run). Those runs coalesce in one concurrency group, and the last job
 fast-forwards `refs/thread/green` (the Green tip, ADR 0084) to the run's commit once every shard has passed. A test
 that holds a FOREIGN name (`THREAD.md`, `CONTEXT.md` and the other root prose) only as a fixture repo's file sits on
 a `FOREIGN-ONLY` line, so a change to the real file does not select it; the over-selection still left (message
 strings, broad walkers, rule (1)'s namers) is measured in `thread-skill-followup-fast-tier-over-selection`. The
-**Slow tier** (ADR 0084 d3), the suites on the map's `SLOW` lines, is left out of the PR checks: their
-`make test-fast` step sets `THREAD_SKIP_SLOW=1`, which drops every SLOW suite the diff does not edit itself, a
-full-suite fallback included, while the Mac's verify, `make test` and master's shards still run them. Check (j) holds
-the SLOW lines to `tests/ci-seconds.tsv`, each suite's macOS CI median: a suite joins at 180 s and leaves only under
-150 s.
+**Slow tier** (ADR 0084 d3), the suites on the map's `SLOW` lines, is left out of the PR check: each shard's
+`bash tests/run.sh --fast --shard K/3` step sets `THREAD_SKIP_SLOW=1`, which drops every SLOW suite the diff does
+not edit itself, a full-suite fallback included, while the Mac's verify, `make test` and master's shards still run
+them. Check (j) holds the SLOW lines to `tests/ci-seconds.tsv`, each suite's macOS CI median: a suite joins at 180 s
+and leaves only under 150 s.
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
