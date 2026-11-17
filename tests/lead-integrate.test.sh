@@ -50,6 +50,13 @@
 #   and push-refused), the engine takes it unchanged and refuses a hand-altered headSha or taskBase before any dispatch
 #   with its line; `call` exits 2 (execute's Lane hold) on a merge route, a wrong --after, no record and another
 #   slug's; an exit-8 prepare leaves no record behind.
+#   C59–C65 (p54-15, ADR 0084 Decided for you 1) the Mac's check and GitHub's run at the same time: C59 the push
+#   precedes the verify's end (mac pending, push, then V; <out>.pid names V)   C60 GitHub's red leaves the verdict pending;
+#   the Mac red sends the task back (--after red) with M on its branch   C61 a moved base: merge-task 3, mac stopped,
+#   prepare `wait` while V lives, then case (iii) re-integrates   C61e case (iii) judges shared files from TB   C61b case
+#   (iii) re-verifies a pushed M on an unmoved base   C61c its tree trouble   C61d it never skips; a red or green verdict
+#   gives none   C62 --after shared-green only after the Mac's green   C63 the Run record: V's suite-started before
+#   GitHub's check ends, suite-ended after   C64 mac's transitions   C65 the holder check: only this task's own run holds.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -2548,6 +2555,9 @@ M=$(j "$J" 'd["mergeCommit"]')
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["sharedFiles"]')" 'verify|["a.txt"]' "C58v: a shared file → route verify"
 call
 ok "$crc" 2 "C58v: the verify route with no --after → exit 2"
+# p54-15: --after shared-green needs the Mac verdict green for M (C62 holds the refusal while it is pending).
+python3 "$LI" mac --repo "$R" --slug "$SLUG" --head "$M" --state pending >/dev/null
+python3 "$LI" mac --repo "$R" --slug "$SLUG" --head "$M" --state green >/dev/null
 call --after shared-green
 ok "$crc|$(j "$CJ" '[d["integration"]["trouble"], d["integration"]["leadMerge"]]')" \
   "0|[[\"shared-file\"],{\"mergeCommit\":\"$M\",\"headSha\":\"$M\",\"baseSha\":\"$B\",\"verified\":true}]" "C58v: --after shared-green → trouble [shared-file], leadMerge (M, M, mainSha)"
@@ -2569,6 +2579,236 @@ has "$(cat "$F/call.err")" "prepare routed \"merge\", which launches no integrat
 git -C "$R" remote set-url origin "$F/nowhere.git"
 prep
 ok "$prc|$([ -e "$R/.claude/integration/$SLUG.prepare.json" ] && echo kept || echo gone)" "8|gone" "C58m: an exit-8 prepare removes the old record"
+
+# ======== C59–C65: the Mac's check and GitHub's run at the same time (p54-15, ADR 0084 Decided for you 1) ==========
+# The verify route pushes the lead's merge M first and records the Mac verdict (`mac`), then runs the verify (V, the
+# SKILL.md line) and `merge-task.sh --mac` (T) side by side. Every V here is launched in the background with a verifier
+# that blocks on a go-file wherever the order matters (bounded at 60 s, a liveness bound), and every wait is a bounded
+# poll (`within`), never a stopwatch.
+MACF() { printf '%s' "$R/.claude/integration/$SLUG.mac.json"; }
+mac() { MJ=$(python3 "$LI" mac --repo "$R" --slug "$SLUG" --state "$1" --head "$2" ${3:+--why "$3"} 2>"$F/mac.err"); mrc=$?; }
+macf() { j "$(cat "$(MACF)" 2>/dev/null || echo '{}')" "$1"; }
+mtm() { : > "$MT_STATE/gh.log"; out=$(PATH="${MTPATH:-$tmp/bin}:$PATH" GIT_SSH_COMMAND=false bash "$MT" --mac "$(MACF)" "$R" "$@" 2>&1); rc=$?; }
+gover() { printf 'i=0; while [ ! -e %s ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done; [ -e %s ] && %s' "$F/go" "$F/go" "$1"; }
+vlaunch() {  # vlaunch <verifier>: V, the SKILL.md verify line, in the background (vp), its Run record in $F/events
+  local cmd; cmd=$(MAIN_SHA="$B" verify_line "$WT" "$SLUG" "$1")
+  mkdir -p "$F/home"
+  HOME="$F/home" THREAD_EVENTS_DIR="$F/events" CLAUDE_PLUGIN_ROOT="$root" bash -c "$cmd" >/dev/null 2>&1 &
+  vp=$!
+}
+VO() { printf '%s' "$R/.claude/integration/$SLUG"; }
+inverifier() { grep -q '^== verifier' "$(VO).log"; }
+alivepid() { local x; x=$(cat "$1" 2>/dev/null) && kill -0 "$x" 2>/dev/null && ps -o command= -p "$x" | grep -q "$2" && echo live || echo none; }
+
+# C59: the push precedes the verify's end: prepare → mac pending → push; V runs while origin already reads M.
+fx c59
+main m.txt "theirs" "theirs: m (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"
+ok "$mrc|$(macf '[d["head"], d["base"], d["state"], d["slug"]]')" "0|[\"$M\",\"$B\",\"pending\",\"$SLUG\"]" "C59: mac pending writes head M, base B (prepare's mainSha), state pending"
+ok "$(python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; echo $?)" 0 "C59: push M, before any verify"
+vlaunch "$(gover true)"
+within 120 inverifier || echo "FAIL - C59: V's verifier never started"
+ok "$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")|$([ -e "$(VO).rc" ] && echo rc || echo none)" "$M|none" "C59: origin's branch is M while V has no rc yet"
+ok "$(alivepid "$(VO).pid" lead-integrate.py)" live "C59: <out>.pid names V's live pid"
+touch "$F/go"; wait "$vp"
+ok "$(cat "$(VO).rc" 2>/dev/null)|$([ -e "$(VO).pid" ] && echo kept || echo gone)" "0|gone" "C59: go → rc 0, and <out>.pid is gone"
+
+# C60: the Mac red goes back to the task with M on its branch. GitHub's red first (T's 1) leaves the verdict pending,
+# so V's rc routes it (merge-task's own exits are tests/merge-task-integrated.test.sh's; the join is SKILL.md prose,
+# pinned in tests/contracts/execute-queue.test.mjs).
+fx c60
+main m.txt "theirs" "theirs: m (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
+mkpr 5 "$M"; echo BLOCKED > "$MT_STATE/pr/5/mergeStateStatus"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
+chk 1 "$(printf 'ci\tfail\t1m\thttps://github.com/o/r/actions/runs/7/job/8\t')" ""; echo "Run tests" > "$MT_STATE/steps"
+mtm 5 "$M" "$B"
+ok "$rc|$(macf 'd["state"]')" "1|pending" "C60: T's 1 on GitHub's red leaves the verdict pending"
+vlaunch false; wait "$vp"
+mac red "$M" "rc $(cat "$(VO).rc")"
+call --after red
+ok "$(cat "$(VO).rc")|$mrc|$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '1|0|0|["red"]' "C60: V red → mac red → call --after red → trouble [red]"
+ok "$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "$M" "C60: M stays on origin's branch"
+python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M" --to "$H0" >/dev/null 2>&1
+ok "$?" 1 "C60: undo refuses the pushed M (the red route has no undo)"
+
+# C61: a moved base stops the verify: merge-task's 3, mac stopped, prepare waits while V lives, then case (iii)
+# re-integrates on the new base.
+fx c61
+main m.txt "theirs" "theirs: m (#7)"; B1=$B
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
+vlaunch "$(gover true)"
+within 120 inverifier || echo "FAIL - C61: V's verifier never started"
+main n.txt "later" "later: n (#8)"; B2=$B
+mkpr 5 "$M"; printf '%s\n' "$B2" > "$MT_STATE/base.seq"
+mtm 5 "$M" "$B1"
+ok "$rc|$(cat "$R/.claude/merge-task/5.base-moved" 2>/dev/null)" "3|$B1" "C61: main moved while V runs: merge-task 3, the counter appended"
+mac stopped "$M" base-moved
+ok "$mrc|$(macf 'd["state"]')" "0|stopped" "C61: mac stopped"
+RECF="$R/.claude/integration/$SLUG.prepare.json"; rec0=$(shasum < "$RECF")
+VPID=$(cat "$(VO).pid")
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|wait" "C61: while V lives, prepare routes wait"
+has "$(j "$J" 'd["reason"]')" "an earlier verify (pid $VPID) of [[$SLUG]] still runs" "C61: … naming V's pid"
+ok "$(shasum < "$RECF")|$(git -C "$WT" rev-parse HEAD)" "$rec0|$M" "C61: … the prepare record byte-unchanged, nothing merged"
+kill -TERM "$VPID"; wait "$vp"
+ok "$(cat "$(VO).rc" 2>/dev/null)|$([ -e "$(VO).pid" ] && echo kept || echo gone)" "143|gone" "C61: TERM by <out>.pid's pid → rc 143, <out>.pid gone"
+prep; M2=$(j "$J" 'd["mergeCommit"]')
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "0|iii|verify|false" "C61: then case (iii), route verify, no skip"
+ok "$(git -C "$WT" rev-list --parents -n 1 HEAD)" "$M2 $M $B2" "C61: M′ merges the new base into M"
+ok "$(j "$J" 'd["mac"]')" "{\"head\":\"$M\",\"base\":\"$B1\",\"state\":\"stopped\"}" "C61: prepare prints the verdict case (iii) read"
+mac pending "$M2"
+ok "$mrc|$(macf '[d["head"], d["base"], d["state"]]')" "0|[\"$M2\",\"$B2\",\"pending\"]" "C61: mac pending for M′ replaces the stopped verdict"
+mac green "$M"
+ok "$mrc|$(macf '[d["head"], d["state"]]')" "1|[\"$M2\",\"pending\"]" "C61: a late green for M exits 1 and lands nowhere"
+has "$(cat "$F/mac.err")" "mac: refused: the verdict for $M reads pending for $M2" "C61: … with its line"
+
+# C61e: case (iii) judges shared files from TB, never its verdict's base: a shared-file verify stopped before its green,
+# then main moves in another file only, keeps trouble ["shared-file"] (main's TB..base was never judged).
+fx c61e
+main a.txt "$(printf 'a1\na2\na3\na4\nA5 theirs')" "theirs: a5 (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; mac stopped "$M" base-moved
+main z.txt "later" "later: z (#8)"
+prep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["trouble"]')" \
+  '0|iii|verify|["a.txt"]|["shared-file"]' "C61e: main moved in z.txt only → case (iii) still names a.txt, trouble [shared-file]"
+
+# C61b: a crash with the verdict pending and main unmoved: case (iii) re-verifies the pushed M, nothing merged.
+fx c61b
+main m.txt "theirs" "theirs: m (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
+prep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')|$(j "$J" 'd["mergeCommit"]')|$(j "$J" 'd["trouble"]')" "0|iii|verify|$M|[]" "C61b: case (iii), route verify, mergeCommit M"
+ok "$(git -C "$WT" rev-parse HEAD)|$(j "$J" 'd["inert"]["why"]')" "$M|case (iii): the lead merge was never verified green, so no green run stands" "C61b: the tree at M, nothing merged; inert off"
+ok "$(python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; echo $?)" 0 "C61b: push M again is git's no-op, exit 0"
+mac pending "$M"
+ok "$mrc|$(macf '[d["head"], d["base"]]')" "0|[\"$M\",\"$B\"]" "C61b: mac pending on the re-verify's record"
+
+# C61c: case (iii)'s tree trouble: a detached tree, or one with a local commit, routes trouble before any verifier route.
+git -C "$WT" checkout -q --detach
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["reason"]')" "trouble|the task tree is on a detached HEAD, not $BR" "C61c: a detached tree → trouble, _tree_trouble's reason"
+git -C "$WT" checkout -q "$BR"; g -C "$WT" commit -q --allow-empty -m local
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["reason"]')" "trouble|the task tree has 1 commit(s) origin/$BR lacks" "C61c: a local commit → trouble"
+
+# C61d: case (iii) never skips: a THREAD.md-only move after a pending verdict re-verifies; a red or green verdict for M
+# gives no case (iii).
+ifx c61d '["THREAD.md"]'
+main m.txt "theirs" "theirs: m (#7)"
+iprep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
+main THREAD.md "a peer's close-out" "docs(thread): close-out"
+iprep; M2=$(j "$J" 'd["mergeCommit"]')
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "0|iii|verify|false" "C61d: an Inert-only move after a pending verdict → verify, never skip"
+python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M2" --to "$M" >/dev/null 2>&1
+for st in red green; do
+  python3 - "$(MACF)" "$st" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1])); d["state"] = sys.argv[2]; json.dump(d, open(sys.argv[1], "w"))
+PY2
+  iprep
+  ok "$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')" "null|trouble" "C61d: a $st verdict for M → no case (iii): trouble"
+done
+
+# C62: the shared-file route passes verified: true only after the Mac's green.
+fx c62
+main a.txt "$(printf 'a1\na2\na3\na4\nA5 theirs')" "theirs: a5 (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"
+call --after shared-green
+ok "$crc" 2 "C62: --after shared-green while the verdict reads pending → exit 2"
+has "$(cat "$F/call.err")" "--after shared-green needs the Mac verdict green for M ($M), not pending for $M" "C62: … named"
+mac green "$M"
+call --after shared-green
+ok "$crc|$(j "$CJ" 'd["integration"]["leadMerge"]["verified"]')" "0|true" "C62: after mac green, leadMerge.verified is true"
+
+# C63: the Run record shows the Mac's suite running while GitHub's check ends: V's suite-started is in before T's
+# required checks end, and suite-ended only after. T's sleep stub (first on its PATH) acts at T's Mac gate, once.
+fx c63
+main m.txt "theirs" "theirs: m (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac pending "$M"; python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1
+vlaunch "$(gover true)"
+within 120 grep -q '"suite-started"' "$F/events/ro.jsonl" || echo "FAIL - C63: no suite-started within 120 s"
+ok "$(python3 -c 'import json,sys; print([json.loads(l)["by"] for l in open(sys.argv[1]) if "suite-started" in l])' "$F/events/ro.jsonl")" "['integration']" "C63: V's suite-started, by integration"
+mkpr 5 "$M"; echo UNSTABLE > "$MT_STATE/pr/5/mergeStateStatus"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
+chk 0 "$(printf 'ci\tpass\t1m\thttps://github.com/o/r/actions/runs/7/job/8\t')" ""
+mkdir -p "$F/sbin"
+cat > "$F/sbin/sleep" <<STUB
+#!/bin/sh
+[ -e "$F/snap" ] && exit 0
+{ grep -q '^pr checks' "$MT_STATE/gh.log" && echo checked || echo unchecked; grep -c '"suite-started"' "$F/events/ro.jsonl"; grep -c '"suite-ended"' "$F/events/ro.jsonl"; } | tr '\n' ' ' > "$F/snap"
+touch "$F/go"
+i=0; while [ ! -e "$(VO).rc" ] && [ "\$i" -lt 600 ]; do /bin/sleep 0.1; i=\$((i+1)); done
+python3 "$LI" mac --repo "$R" --slug "$SLUG" --head "$M" --state green >/dev/null 2>&1
+exit 0
+STUB
+chmod +x "$F/sbin/sleep"
+MTPATH="$F/sbin:$tmp/bin" mtm 5 "$M" "$B"
+ok "$(cat "$F/snap" 2>/dev/null)" "checked 1 0 " "C63: at T's Mac gate, GitHub's check had ended and V's suite had started, not ended"
+ok "$rc|$(cat "$R/.claude/merge-task.status")|$(grep -c '^pr merge' "$MT_STATE/gh.log")" "0|ok|1" "C63: T merges once the Mac's verdict is green"
+wait "$vp"
+within 60 grep -q '"suite-ended"' "$F/events/ro.jsonl" || echo "FAIL - C63: no suite-ended within 60 s"
+ok "$(python3 -c 'import json,sys; print([json.loads(l).get("outcome") for l in open(sys.argv[1]) if "suite-ended" in l])' "$F/events/ro.jsonl")" "['green']" "C63: V's suite ended green"
+
+# C64: mac's transitions: pending ends once (green, red or stopped); a fresh pending replaces any verdict.
+fx c64
+main m.txt "theirs" "theirs: m (#7)"
+prep; M=$(j "$J" 'd["mergeCommit"]')
+mac green "$M"; ok "$mrc" 1 "C64: green with no verdict file → 1"
+for to in green red stopped; do
+  mac pending "$M"; mac "$to" "$M" "why $to"
+  ok "$mrc|$(macf '[d["state"], d["why"]]')" "0|[\"$to\",\"why $to\"]" "C64: pending → $to"
+done
+for pair in "green stopped" "red green" "stopped green"; do
+  set -- $pair; mac pending "$M"; mac "$1" "$M"; mac "$2" "$M"
+  ok "$mrc|$(macf 'd["state"]')" "1|$1" "C64: $1 → $2 refused (exit 1), $1 kept"
+done
+mac pending "$M"; mac green "$(sha a)"
+ok "$mrc|$(macf '[d["head"], d["state"]]')" "1|[\"$M\",\"pending\"]" "C64: a --head that is not the file's → 1"
+mac pending "$M"; mac stopped "$M"; mac pending "$M"
+ok "$mrc|$(macf 'd["state"]')" "0|pending" "C64: a fresh pending replaces stopped"
+mac pending "$(sha b)"
+ok "$mrc" 2 "C64: pending with mergeCommit ≠ --head → 2"; has "$(cat "$F/mac.err")" "lead-integrate mac: prepare's mergeCommit is" "C64: … named"
+rm -f "$R/.claude/integration/$SLUG.prepare.json"; mac pending "$M"
+ok "$mrc" 2 "C64: pending with no prepare record → 2"
+fx c64m
+prep; ok "$(j "$J" 'd["route"]')" merge "C64: main unmoved → route merge"
+mac pending "$H0"
+ok "$mrc|$([ -e "$(MACF)" ] && echo written || echo none)" "2|none" "C64: pending on a route other than verify → 2, nothing written"
+
+# C65: holders: a live merge-task (or verify, C61) of this task makes prepare wait; a dead pid, or a live one whose
+# command line is not this task's own run (a reused pid), is no holder. Each holder is a sleeper carrying the arguments.
+fx c65
+main m.txt "theirs" "theirs: m (#7)"
+prep; rec0=$(shasum < "$R/.claude/integration/$SLUG.prepare.json")
+SLEEPER='import time; time.sleep(60)'
+python3 -c "$SLEEPER" merge-task.sh --mac "$(MACF)" & hp=$!
+echo "$hp" > "$R/.claude/integration/$SLUG.merge-task.pid"
+within 30 sh -c "ps -o command= -p $hp | grep -q time.sleep"
+prep
+ok "$prc|$(j "$J" 'd["route"]')|$(shasum < "$R/.claude/integration/$SLUG.prepare.json")" "0|wait|$rec0" "C65: a live merge-task of this task → wait, the record untouched"
+has "$(j "$J" 'd["reason"]')" "an earlier merge-task (pid $hp) of [[$SLUG]] still runs" "C65: … naming it"
+kill "$hp"; wait "$hp" 2>/dev/null; git -C "$WT" reset -q --hard "$H0"
+prep
+ok "$(j "$J" 'd["route"]')" verify "C65: its pid dead → prepare routes as before"
+nohold() {  # nohold <pid-file suffix> <what> [args…]: a live sleeper with those args, its pid in that file, holds nothing
+  local sfx=$1 what=$2 np; shift 2
+  python3 -c "$SLEEPER" "$@" & np=$!
+  echo "$np" > "$R/.claude/integration/$SLUG$sfx"
+  within 30 sh -c "ps -o command= -p $np | grep -q time.sleep"
+  git -C "$WT" reset -q --hard "$H0"; prep
+  ok "$(j "$J" 'd["route"]')" verify "C65: $what → no holder"
+  kill "$np"; wait "$np" 2>/dev/null; rm -f "$R/.claude/integration/$SLUG$sfx"
+}
+nohold .pid "a live pid whose command names neither script"
+nohold .merge-task.pid "another task's merge-task" merge-task.sh --mac "$R/.claude/integration/other.mac.json"
+nohold .pid "a verify of another task whose path starts with this one's" lead-integrate.py verify --out "$R/.claude/integration/$SLUG-b"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

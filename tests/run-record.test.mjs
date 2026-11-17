@@ -1663,6 +1663,25 @@ test('the ledger kinds are refused, exit 2 and nothing written, when malformed',
   }
 })
 
+// p54-14 (ADR 0084 d5): the Engine catch-up's values, each accepted at its kind, and a malformed one refused (a by the
+// enums never held stays refused: the ledger kinds' test above keeps `by: cron`).
+test('the Engine catch-up (p54-14): its kind, the paused mode, the idle reason, the entry by and stop, and time-lost other', (t) => {
+  const home = tmpHome(t)
+  const CU = { from: 'a'.repeat(40), to: 'b'.repeat(40), fixes: ['x-p9-1'], release: 'x-p9-2', drainMinutes: 20, shape: 'parallel', outcome: 'moved' }
+  const good = [['catch-up', CU], ['catch-up', { from: 'a'.repeat(40), shape: 'serial', outcome: 'not-moved', why: 'his pause' }],
+    ['catch-up', { from: 'a'.repeat(40), shape: 'parallel', outcome: 'bound', drainMinutes: 161 }], ['paused', { mode: 'catch-up' }],
+    ['idle-slots', { reason: 'catch-up-drain', free: 1, settings: { parallel_ceiling: 2 } }], ['lead-entry', { by: 'catch-up', stop: 'catch-up' }]]
+  for (const [kind, f] of good) emitOk(home, ['--rollout', 'r', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emitOk(home, ['--kind', 'time-lost', '--json', JSON.stringify({ ...TL.record, other: { 'catch-up': 0.5, 'catch-up-drain': 0.25 } })], { env: EV(home) })
+  assert.deepEqual(lines(path.join(ev(home), 'r.jsonl')).map((l) => l.kind), good.map(([k]) => k))
+  for (const [kind, f] of [['catch-up', { ...CU, outcome: 'moving' }], ['catch-up', { ...CU, shape: 'chain' }], ['catch-up', { to: CU.to, shape: 'parallel', outcome: 'moved' }],
+    ['paused', { mode: 'catch-ups' }]]) {
+    const r = cli(home, ['emit', '--rollout', 'r2', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${JSON.stringify(f)}: ${r.stderr}`)
+  }
+  assert.ok(!listing(ev(home)).includes('r2.jsonl'), 'nothing written for a refused line')
+})
+
 // ADR 0080 (p47-9): merge-settings.py's four kinds, one line per change of a repo's merge settings and per verdict on it.
 const CHANGED = { id: 'a'.repeat(12), repo: 'o/r', branch: 'master', source: 'ruleset', rulesetId: 42, block: 'unreported-context',
   change: 'replaced', context: 'build', newContext: 'build-and-test', before: '{"rules":[]}', after: '{"rules":[]}',

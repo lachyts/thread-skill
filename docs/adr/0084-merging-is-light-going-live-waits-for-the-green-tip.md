@@ -79,7 +79,22 @@ SLOW suite the diff edits; `Completion verifier:` stays `make test`, the full su
 G8 (both lines run through the real Makefile: the first leaves a SLOW suite out and names it, the second runs it).
 Nothing restamps a running rollout's `verifier:`: the running thread-skill rollout takes the line when it is restamped
 by hand at its next Reinstate, onto a snapshot at a Green tip that holds p54-6 and p54-7 (and p54-8 itself), or at
-p54-14's Engine catch-up. Its "at the same time as GitHub's check" half is not built here.
+p54-14's Engine catch-up. Its "at the same time as GitHub's check" half built by p54-15: on the verify route the lead
+records the Mac verdict (`lead-integrate.py mac`, `<repo>/.claude/integration/<slug>.mac.json`: pending, then green, red or
+stopped), pushes its merge M before it verifies, arms the git-env canary after that push, and runs its verify beside
+`merge-task.sh --mac`, which merges the pair only once the verdict reads green for exactly it: a red, stopped, missing or
+other pair's verdict is its exit 11 at the pre-flight, with no GitHub call; a pending one is waited on at the merge point,
+the base re-checked each poll, and past `MERGE_TASK_MAC_WAIT_MAX` is its exit 12; a verdict that is not green on the
+already-merged path is a RACE. The lead, never merge-task, ends a wait early: on a red or stopped verdict it TaskStops
+merge-task. A red goes back to the task's agent with M on its branch (`--after red`, no `undo`), and `--after
+shared-green` needs the green verdict. `prepare`'s case (iii) verifies again a pushed merge whose verdict never read
+green, or merges a moved `main` into it, never merging or skipping it, and `prepare` routes `wait` while an earlier verify
+or merge-task of the task still runs (each records its pid). Codex runs the four in the foreground: the push, the verify,
+the verdict, then merge-task. Measured from the running rollout's Run record before it was built: from 2026-11-16
+(macOS off the PR checks) its 12 verify-route merges held the lane a median 42.2 minutes, their Mac verify a median 20.4
+and GitHub's check a median 19.0; running the two together saves about the shorter of them per merge, a median 18
+minutes, so about 42 → 24. p54-8's light verify had no Integration suite in the record yet, so its lane is still this
+call's estimate (about 30 → 10-15).
 d4's Speed fix from the audit's row 3 built by p54-9: `tests/leg.test.sh` splits in four, L1-L16 keeping the name,
 `tests/leg-land.test.sh` L17, `tests/leg-rank.test.sh` L18 and `tests/leg-security.test.sh` L19-L21, each with its own
 preamble and the shared helpers in `tests/lib/leg-fixtures.sh`; their seconds in `tests/ci-seconds.tsv` and
@@ -100,6 +115,23 @@ approval signs its gate or he defers it), with a `speed-hold` Run record line; `
 `carry` copies the record, and `status` reports `speedHolds`. A red-master fix (Decided for you 3) is exempt by its key
 alone: `master_red:`, the mark p54-7's `master-runs` stamps on its fix task, or `completion_red_of:`, the completion
 verifier's fix task's.
+d5 and Decided for you 5, 6 and 7 built by p54-14, the Engine catch-up: `reconcile-rollout.py catch-up` (its docstring
+holds the drain rule; engine-snapshot.py's header the `## Catch-up log`) compares a rollout's `engine_sha` with the Green
+tip read in its own snapshot's Primary checkout, maps the marked Speed fix units onto those commits (`merge_commit:`,
+else the `pr:` number on a `(#N)` or `Merge pull request #N` subject, only on the engine's own repo key) and tests each
+matched commit's first-parent diff for engine code (`skills/` or `hooks/`, their tests and fixtures excluded). A phase
+drains a rollout once, when its release lands with one of its engine fixes lacking: `pause_requested` with `paused_for:
+catch-up` (Decided for you 5: the soft pause's drain, never a cut mid-step); any other lacking engine fix is a take, only
+with nothing running; an ordinary merge and another repo's Speed fix cause none (Decided for you 6); the read reaches
+every project's rollout on the Mac (Decided for you 7). The drain's bound is 160 minutes, the Slot p90 on the Run
+record: past it the rollout goes on on its old snapshot and takes the catch-up later. Drained, the lead moves itself (a
+self-Reinstate: cut, adopt, `record-entry --by catch-up`, `clear-pause`); a serial chain moves at its next Leg begin.
+Each move restamps `verifier:` from the project's CLAUDE.md, and each catch-up is a Run record `catch-up` line. Accepted
+gap: Chorus reads the pause stamps directly, so during a catch-up its own pause, a battery pause or a quiet's drain can
+read "already asked" and be lost when the catch-up clears its stamps; follow-up
+`chorus-the-stage-reads-an-engine-catch-up`. The Speed fix hold lets go at the release's merge, before the Green tip
+holds it, so held tasks may start on the old snapshot first; follow-up
+`thread-skill-an-engine-speed-fix-hold-lets-go-at-the-catch-up`.
 Phase 54 builds the rest.
 
 ## Context

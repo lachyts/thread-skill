@@ -193,11 +193,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      the <owner>/<name> yielded on, with release origin)
   merged          T  pr?; readOnly? (bool); stamp?; reconciledAt? (as slot-freed)
   paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
-                     Lachy and closed, ADR 0034)
+                     Lachy and closed, ADR 0034 | catch-up: `next` drained an Engine catch-up, p54-14, the engine's own
+                     pause, never his)
   resumed            (no fields)
   hold-started       hold (merge | git-env | race)
   hold-ended         hold (merge | git-env | race)
-  idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
+  idle-slots         reason (dependency | solo | pause-drain | catch-up-drain: an Engine catch-up's drain, p54-14 |
+                     queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
                      hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
@@ -400,10 +402,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      required there and only there, never before at), reason? (at most 200 characters: a halt's reason,
                      a room stop's line). p29-10, ADR 0051: the run stopped for a cause other than Lachy's pause (the
                      stop model, below), never a `paused` line.
-  lead-entry         by (lachy | stage | watchdog | heartbeat | repair: what opened the lead's entry); session? (its
-                     CLAUDE_CODE_SESSION_ID), stop? (usage-limit | dead-lead | mac-restart | halt | watchdog | pause:
-                     the stop this entry resumes from, absent when the lead was alive). p29-10: reconcile-rollout.py
-                     record-entry, one per loop entry and per heartbeat tick.
+  lead-entry         by (lachy | stage | watchdog | heartbeat | repair | catch-up: what opened the lead's entry,
+                     catch-up the lead's own self-Reinstate at an Engine catch-up, p54-14); session? (its
+                     CLAUDE_CODE_SESSION_ID), stop? (usage-limit | dead-lead | mac-restart | halt | watchdog | pause |
+                     catch-up: the stop this entry resumes from, absent when the lead was alive; catch-up an Engine
+                     catch-up's pause). p29-10:
+                     reconcile-rollout.py record-entry, one per loop entry and per heartbeat tick. ledger.py reads a
+                     lead-entry only by its ts (stop_spans), so neither value feeds a sum.
   suite-started      suite (s- and 16 lowercase hex, shared with its suite-ended), by (task | integration | race |
                      completion), runner (agent | lead), sha (the tree's HEAD), dirty (a bool: tracked changes on
                      it); load? (exactly 3 finite numbers >= 0: the 1, 5 and 15 minute load average), diff? (12 hex:
@@ -513,6 +518,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      hold (vault-grammar § Speed fix hold): one line per hold made (reconcile-rollout.py `speed-hold
                      apply` or `join`) and per hold released (`next`'s let-go, `speed-hold release`, a move); a let-go's
                      line names the task it let go for as its task.
+  catch-up           from (the old engine_sha), shape (parallel | serial), outcome (moved | bound | not-moved); to? (the
+                     new engine_sha, on moved), fixes? (the Speed fix units the move brings), release? (the drained
+                     releases, comma-joined), drainMinutes? (an int >= 0: a drain's minutes, to its `paused:` on moved,
+                     to its bound on bound), why? (at most 200 characters: a not-moved line's words). p54-14 (ADR 0084
+                     d5), the Engine catch-up: engine-snapshot.py adopt (moved), reconcile-rollout.py `next` (bound) and
+                     `catch-up --abort` (not-moved). An older reader skips the kind, as every reader skips one it does
+                     not know.
   master-run         repo (owner/name, lowercased), outcome (red | unconfirmed | rerun-pass | green | unproven), sha
                      (the run's head, or the Green tip commit for unproven), at (a UTC Z stamp: the row's time, above);
                      runId?, attempt? (ints >= 1: the run and the decided attempt), suites?, newSuites? (at most
@@ -1117,7 +1129,7 @@ TIME_LOST_CAUSES = {
     "plan-rejected": ("plan-rejected",),
 }
 TIME_LOST_OTHER = ("pause", "pause-drain", "dependency", "solo", "queue-tail", "hold-last-start", "hold-pr", "revise",
-                   "hold-surface")
+                   "hold-surface", "catch-up", "catch-up-drain")
 TIME_LOST_SOURCES = ("record", "audit", "baseline")
 AUDIT_SOURCES = ("transcripts", "suite-logs", "pause-logs", "mac-history")
 MAX_TL_ROLLOUTS = 8        # contributors kept per class on a time-lost line
@@ -1469,8 +1481,8 @@ INERT_OPTIONAL = {"base": _str, "main": _str, "head": _str, "globs": _capped(MAX
 # suite-started and suite-ended (verify-slot.py run, lead-integrate.py verify), base-moved (lead-integrate.py base-moved).
 
 STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "halt", "watchdog")
-ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")
-ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause")
+ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair", "catch-up")
+ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause", "catch-up")
 CALL_KINDS = ("task", "revise", "integrate", "resume")      # run-bound's `call`
 # role-call's `role` (p46-2): the engine's dispatch roles, from each label's prefix.
 ROLE_CALL_ROLES = ("planner", "plan-judge", "builder", "investigator", "master-review", "integrator",
@@ -1724,11 +1736,12 @@ KINDS = {
     "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt", "origin")},
                    {"path": _str, "triggers": _strlist, "conflict": _bool, "origin": _str}),
     "merged": (True, {}, {"pr": _pr, "readOnly": _bool, **CALL_END}),
-    "paused": (False, {"mode": _enum("soft", "hard", "sign-off")}, {}),
+    "paused": (False, {"mode": _enum("soft", "hard", "sign-off", "catch-up")}, {}),
     "resumed": (False, {}, {}),
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
-    "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
+    "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "catch-up-drain", "queue-tail",
+                                           "awaiting-hand-back",
                                            "hold-surface",
                                            "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
                                            "hold-away-cap", "hold-last-start", "hold-quota"),
@@ -1853,6 +1866,11 @@ KINDS = {
     "speed-hold": (False, {"act": _enum("made", "released"), "release": _str, "phase": _str},
                    {"by": _enum("schedule", "join"), "held": _int(0),
                     "cause": _enum("set-aside", "left-queue", "by-hand", "superseded"), "removed": _int(0), "to": _str}),
+    # p54-14 (ADR 0084 d5), the Engine catch-up: engine-snapshot.py adopt, reconcile-rollout.py next and
+    # catch-up --abort.
+    "catch-up": (False, {"from": _str, "shape": _enum("parallel", "serial"),
+                         "outcome": _enum("moved", "bound", "not-moved")},
+                 {"to": _str, "fixes": _strlist, "release": _str, "drainMinutes": _int(0), "why": _short(REASON_MAX)}),
     # p54-7 (ADR 0084 Decided for you 3, 11, 13): reconcile-rollout.py master-runs, in master-runs.jsonl.
     "master-run": (False, {"repo": _str, "outcome": _enum(*MASTER_OUTCOMES), "sha": _str, "at": _stampz},
                    {"runId": _int(1), "attempt": _int(1),

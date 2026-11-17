@@ -164,7 +164,8 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
    passes `--decided` only for the prompt line's slugs among its candidates. A One call, a Grill or an ungraded member
    leaves with its Dependent closure, unstamped, and its `asks[]` and `index[]` are returned for B9.
 9. Step 2.5's verifier and merge gate: stated, never asked. With no verifier, the fork stops before writing.
-10. Step 2.6's baseline: `none`.
+10. Step 2.6's baseline: captured as written (it asks nothing, and the fork waits for it inside its turn): its
+    `block`, or `none`, and its `line` in the summary.
 11. Step 2.7's env bootstrap: CLAUDE.md detection only, else unset.
 12. Step 2.8's settings: as written. A non-zero exit stops the fork.
 13. Step 2.9's Inert paths: `drop` runs; a `proposed` entry is named and never recorded.

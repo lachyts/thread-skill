@@ -145,7 +145,8 @@ Act on each answer as it lands:
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <decision.question> --answer <the full option text, or his typed words> --recommended <decision.options[0]> [--fork <decision.fork>]`,
   `--fork` exactly when the decision carries one. `decision.question` is the bare question: the index text opens
   with `[[<slug>]] `, which `record` cuts too, so the note never links to itself. A refusal (the task went in flight
-  since the scan, say) is reported in § 8 with the answer, unrecorded.
+  since the scan, say) is reported in § 8 with the answer, unrecorded, and the task is not decided: § 6 never passes
+  it in `--decided`.
 - **Sign-off**: `Sign off` writes to a rollout this pass does not run, so it runs from that rollout's own engine
   root, never this session's (ADR 0043; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md` § Another rollout's
   commands): first
@@ -221,7 +222,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
       stops before step 1 with its stderr verbatim (ADR 0064: every clone this project may take is held).
    4. Step 2.5's verifier: as detected. A section-only CLAUDE.md is read for its one command; with none, stop before
       writing.
-   5. Step 2.6's baseline: `none`, and the summary says "not captured".
+   5. Step 2.6's baseline: captured as written (it asks nothing, and the fork waits for it inside its turn): its
+      `block`, or `none`, and its `line` in the summary.
    6. Step 2.7's env bootstrap: CLAUDE.md detection only, else unset.
    7. schedule § 3's body dependencies: written only between two members of this call; any other is named.
    8. schedule § 3.5's gates: a match that a recorded `## Decisions` answer settles is dismissed. Any other match drops
@@ -243,8 +245,12 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        stand: no grading agent, no round and no Grade log line (§ 2 step 7 logged them). Its `--tasks` is the fork's
        step 1 candidates, and its `--decided` the prompt line's decided slugs among them. A member not
        decided (a One call or Grill the round never reached, or an Orient one) is left out with its Dependent closure,
-       unstamped, and returned. Its queue's ruled calls are written by its `decided-for-you --write --by orient-all`
-       (schedule § 1.5's orient-all form), and the fork returns their block.
+       unstamped, and returned. So is a member named decided whose note holds no record of an answer (`unrecorded`,
+       p51-4): a One call or Grill is scheduled only with each decision's `## Decisions` bullet in its note, and a
+       fork's `orient ruling:` line in its `## Notes` after the latest `orient end:` line that names the fork
+       (orient § 2 Open forks), so no planner stops on his question mid-run. Its queue's ruled calls are
+       written by its `decided-for-you --write --by orient-all` (schedule § 1.5's orient-all form), and the fork
+       returns their block.
 4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, its Pre-flight's
    left-out members with each one's why, or its stop line, or, at a join, its `Joined [[<X>]]` line, its tasks and its
    hold lines, with no note path. A project whose own rollout is running carries no unfinished-rollout blocker in the
@@ -374,8 +380,9 @@ One message of statements, no question:
   them: `undecided` as "waiting on your answer, so it reaches the next round"; `orient` with its pointer,
   `/thread:orient [[<home>]]`; `dependency` as "depends on [[<via>]], which is left out"; `waits` as "waits on
   [[<via>]] (<project>; <reason>): nobody is building it; schedule or land it, and the next pass takes this one", its
-  `<project>` the row's `project`, or `no project` when it has none; `ungraded` as "could not be
-  graded (<reason>): the next pass grades it again"; `unreadable` as "could not be read (<reason>): fix its
+  `<project>` the row's `project`, or `no project` when it has none; `unrecorded` as "answered, but its note records
+  no answer (<reason>): the next round asks it again"; `ungraded` as "could not be graded (<reason>): the next pass
+  grades it again"; `unreadable` as "could not be read (<reason>): fix its
   frontmatter, and the next pass grades it";
 - each task the rank skipped as `unreadable` (its `skipped[]` row in `$S/rank.json`, a task note whose frontmatter the
   scan could not read) as "[[<slug>]] could not be read (<reason>): fix its frontmatter (`next-action.py mend <slug>`
