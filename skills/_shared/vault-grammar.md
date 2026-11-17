@@ -388,6 +388,95 @@ live rollout note as it stands, one line per unit a dependant waits on, removing
 only while its dependant is still open and its dependency is still an open task on no live rollout) and orient-all
 lists them (§ 3, § 8).
 
+## Speed fix hold
+
+A **Speed fix** (CONTEXT.md; ADR 0084 d4) goes first by itself: its phase holds every other queued task of its
+rollout until the phase's release lands, and the hold releases by itself (p54-13). The mark is the task-note key
+`speed_fix`, its value the citation of the measured cause, in one of three evidence forms (task-writer § 4 and the
+reshuffle's R5.2 use the same words):
+
+- `docs/audits/<file>.md row <N>`: a suite audit's ranked change.
+- `docs/audits/<file>.md cause <words>` or `docs/audits/<file>.md#<anchor>`: a stall audit's cause.
+- `time-lost <id> [<class>]`: a Time-lost ledger line by its `id` (`tl-…`, run_record.py's `TL_ID_RE`); its class,
+  when named, is one of run_record.py's `TIME_LOST_CLASSES`.
+
+- **The mark.** Read as a list (a scalar is a one-item list); the task is marked when any item cites. Anything else is
+  refused, its why the first that applies: `empty`, `a flag (<v>), not a citation`, `time-lost <x>: a tl- id (a
+  Time-lost ledger line's)`, `<c> is none of stalls, quota-bound, load, lane-bound, rework, plan-rejected`, `no
+  citation (an ADR decision or prose is no evidence)`. A refused mark makes an ordinary task: held like any other,
+  never stopped, never asked about, its note never edited. A combined note is read per unit: a unit is marked when its
+  own key cites or a task folded into it (`merged_into:`) carries one that does.
+- **The release.** A phase's members are its tasks named with its literal prefix `<slug>-p<N>-` and a task number that
+  starts with digits (`2`, and `2b` too), at any status but `dropped` (a unit a member folds into is a member too). A
+  phase is a Speed fix phase while any member is marked. Its release is its last task, unless the phase names another
+  (ADR 0084 d4): the phase note in `Work/Phases/` may name it, `speed_fix_release: "[[x]]"`, where x is any member of
+  the phase, marked or not, else a `WARN` and no hold for the phase, with no fallback. Otherwise the release is the
+  phase's last member, marked or not, landed ones included: the highest number by the task number's leading digits, the
+  whole task number breaking a tie (`1` before `1b` before `2`). The release R is that task's unit; a release that is no
+  Speed fix itself is still never held (the reach's arm 5). A hold is made only while R has not landed, is linked to the
+  rollout (or is being joined), has no let-go cause and has no `released` line. The hold follows its phase's release at
+  every apply and every join, never at `next`: when R moves to R' and R' can hold, the new hold's line and entries come
+  first, then `released [[R]] (p<N>): superseded by [[R']]` and R's entries dropped; when R' cannot hold, the hold on R
+  is kept with a `speed-hold skip` line. A standing hold whose phase has no marked member left keeps standing, still
+  never holding its release or anything upstream of it, until R lands or `speed-hold release` ends it. A marked task
+  outside any phase makes no hold, and is still never held.
+- **The reach.** One rule: a hold on R for phase P stamps a task only when (1) it is linked to the rollout (or being
+  joined) and queued, the fix's own project's queue only; (2) its unit carries no valid mark; (3) it is no red-master
+  fix (below); (4) its unit is a member of no Speed fix phase in play: P, every phase with an unlanded marked unit
+  linked to the rollout or being joined, and every standing hold's phase (so two Speed fix phases hold no task of each
+  other's, and order among themselves by priority and row); (5) it is neither a root nor upstream (`depends-on:` /
+  `blocked-by:`, transitively) of one, the roots being every unlanded marked unit linked to the rollout or being
+  joined, every standing hold's release, and the release of every phase with such a mark while it is unlanded and
+  linked; (6) R is not already among its `depends-on:` or `blocked-by:` by hand (an entry a recorded hold wrote is not
+  a hand-written one, and a hand-written entry is never recorded). **Out of reach**: a recorded task that carries R's
+  entry but now fails "linked" or (2) to (5) loses that entry at the next join, apply or `next`, why `left the
+  rollout`, `a Speed fix now`, `a red-master fix`, `a member of p<N>` (P's own, or a phase that came into play since,
+  such as a second Speed fix phase joined to the queue), `a Speed fix release` or `upstream of [[M]]`. So no hold ever
+  holds a release, directly or transitively: two Speed fix phases never deadlock, and a held queue always has its
+  phase's own tasks startable.
+- **Red-master.** The key `master_red:` or `completion_red_of:` alone exempts a task, either one non-empty: never
+  held, joined under a hold or not. `master_red:` marks the red-master fix `reconcile-rollout.py master-runs` files and
+  joins first (p54-7, CONTEXT.md **Red-master fix**), and `completion_red_of:` the completion verifier's fix task; a
+  key beside them (`master_red_since:` alone) exempts nothing.
+- **The entry.** A held task's `depends-on:` gains `- "[[R]]"` (an inline list becomes a block list, its items kept;
+  the key inserted after `status:` when absent), released by itself once R lands, as any dependency is.
+- **The record.** The rollout note's `## Speed fix holds` section, append-only, two line forms:
+  `- <stamp> hold [[R]] (p<N>, schedule|join): [[a]], [[b]]` (or `: none`, so a later join is still held; a later line
+  names only the tasks it adds), and `- <stamp> released [[R]] (p<N>): <why>`, its why one of `by hand`, `[[X]] set
+  aside, its retries spent (<humanFix label>)`, `[[X]] left the queue (<why>)` and `superseded by [[R']]`. A hold
+  **stands** while it has a hold line, no released line, and R has not landed; a released hold is never re-made for
+  the same R, so a reading never depends on line order and carry's union is safe. A recorded task later given the same
+  R by hand loses that entry at a release or a defer.
+- **The let-go.** A standing hold lets go when R, or an unlanded unit upstream of it, leaves the queue (no note; a
+  status outside the carried states, such as `dropped` or `parked`; R unlinked, `deferred` or `moved to [[ro]]`; an
+  upstream unit on no live rollout, `deferred` or `[[ro]] closed`) or is linked, set aside at `run` or `integration`
+  and its retries spent (a non-null humanFix, read as needs-you reads it). R is read through its tombstone first: a
+  release folded into a live combined unit keeps its hold, which the next apply or join moves to the unit; only an
+  unresolved tombstone leaves the queue. A `gate-pending` task never lets a hold go: a gate has no automatic retries,
+  and the Standing approval may still sign it. So a gate-pending release, or a unit upstream of it, is the one wait on
+  Lachy the hold keeps: the queue waits until he or the Standing approval signs the gate, or he defers the task (which
+  leaves the queue and lets the hold go).
+- **Write orders.** A new hold: its line, then its entries. A join of unmarked tasks under a hold: the extension line
+  in the rows' save, then each task's `rollout:` and its entry in one save. A join that makes or moves a hold (a joined
+  Speed fix, or a joined task that is a Speed fix phase's release, marked or not): the stamps, the out-of-reach drops,
+  then the hold line, then its entries. A let-go, a release or a move's old hold: the released line, then the drops,
+  then one Run record line (`speed-hold`). A lift: drops only, no line.
+- **Writers**: `reconcile-rollout.py speed-hold apply` (schedule step 7; § 0's Put back), `speed-hold release` (by
+  hand, any note, an archived one included; a hold whose R landed ended by itself, so it is only named `ended`, with no
+  line, no drop and no event), `speed-hold lift` (schedule step 1, on a supersede, from the prior's root), `join` (read
+  whenever a Speed fix is in play: the note records a hold, or an unlanded marked unit is linked to the rollout or
+  being joined; its extension, new or moved hold, made or moved by a joined Speed fix or by a joined task that is a
+  Speed fix phase's release, marked or not, its out-of-reach drops and re-stamps; a joined task's refused mark is named
+  whether or not a hold is read, and a task already on the queue is never named again), `next` (the let-go and the
+  clean-up, never a stamp), `defer` (a deferred task's recorded entries, in the save that clears `rollout:`) and
+  `carry` (the section's lines, a union).
+- **Readers**: `reconcile-rollout.py status` (`speedHolds`, rendered by status § 4), the carry preview's `speed_hold`
+  lines (schedule step 1), repair § 5 step 1 (a hold entry is no dependency) and every dependency reader, through
+  the entries themselves.
+- **Cross-version.** The entries are read by every protocol-5 engine; the section's lines by engines carrying the
+  `SPEED_HOLD_ENGINE` line. join and apply write either only when the rollout's engine has it
+  (engine-snapshot.md § Cross-version state); the line forms change only by migration.
+
 ## Readers
 
 - `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
@@ -425,6 +514,10 @@ lists them (§ 3, § 8).
 - `skills/execute/scripts/reconcile-rollout.py` `triggers due` and `triggers fire`: `WHEN_KEY` (§ When's key), read by
   `_when`, the one reader of its forms and of `on` and `do`; a target's status through `FINISHED_STATUSES`; and
   `LOCAL_RE`, a literal copy of `skills/_shared/scripts/serial-chains.py`'s, pinned by this file's contract test.
+- `skills/execute/scripts/reconcile-rollout.py` `speed-hold`, `join`, `next`, `defer`, `status` and `carry`:
+  `SPEED_FIX_KEY`, `SPEED_FIX_RELEASE_KEY`, `MASTER_RED_KEY`, `COMPLETION_RED_KEY` and `SPEED_HOLD_SECTION` (§ Speed fix
+  hold's keys and section), read by `_speed_fix_mark`, `_speed_release`, `_red_master_fix` and `_speed_holds`, the one
+  reader of the record's line forms; the phase by `_speed_phase` on `PHASED_STEM_RE`.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,

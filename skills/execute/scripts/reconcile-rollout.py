@@ -152,6 +152,12 @@ Subcommands:
               holds a row and no pause stands, `halt` stays null; a soft pause drains past the held rows (it reads no
               awaiting row) and stamps, so a pause still reads `paused`. Only the calls in flight and an Integration
               already begun (`integrating:`) go on.
+              The Speed fix hold (p54-13; Speed fix hold, below): right after the lease write, when the note has a `##
+              Speed fix holds` section, each standing hold that cannot release lets go (its released line, its entries
+              dropped, one Run record line) and the clean-up drops a released hold's leftover entries and a standing
+              one's out-of-reach entries, before any dependency is read; --dry-run writes nothing and reads those rows
+              without those entries instead. It never stamps or moves a hold. `speedHoldReleased` ([{release, phase,
+              cause, task, label, removed}]) follows `surfaceWait`: the holds this call let go (on --dry-run, would).
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -419,7 +425,12 @@ Subcommands:
               below): the note's on_merge as read, {value, error}, on a parallel note carrying a rollout hold_until,
               else null; `chainStart`: {prior, pr} when the note is a chain's N never started, unstamped and not
               started by the Stage, whose `supersedes:` prior carries `on_merge: regenerate` (_chain_start), else
-              null. Pure read; no network.
+              null. `speedHolds` (p54-13; Speed fix hold, below), always present ([] with no `## Speed fix holds`): one
+              {release, phase, by, held, standing, ended, released: {why, at} | null, missing, outOfReach: [{task,
+              why}], lettingGo: {cause, task, why} | null, moved} per recorded hold; missing (recorded tasks in reach
+              that lack the entry: apply restores them), outOfReach (recorded tasks carrying the entry out of reach: the
+              lead's next call drops them), lettingGo and moved (the phase's release now, when it is another) are read
+              for a standing hold only. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -536,6 +547,11 @@ Subcommands:
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill. A carried fix is
               refused (exit 1, `merged:` and `rollout:` kept): deferring it would take back a landed fix (ADR 0078).
+              The Speed fix hold (p54-13; Speed fix hold, below): every hold entry the task's rollout note records for
+              it (standing, released or ended) that its `depends-on:` still carries is removed in the same save that
+              clears `rollout:` (_speed_hold_strip; an inline list keeps its other items), one `speed-hold dropped
+              [[<R>]] from <slug> (deferred)` line each after its own line (` (dry-run)` on a dry run); no rollout-note
+              write and no event. A rollout note that is missing or unreadable, or records no hold, drops nothing.
 
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
@@ -641,6 +657,10 @@ Subcommands:
               dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
+              The Speed fix hold (p54-13; Speed fix hold, below): in both modes, after the `security_checks` line, one
+              `speed_hold [[<R>]] (p<N>) standing, <K> recorded` (or `released`, or `ended (landed)`) line per hold the
+              prior records; --to appends each line of the prior's `## Speed fix holds` it lacks, in the prior's order,
+              in the same save as the hold and `security_checks:`, before any task write (a re-run writes nothing).
 
   join        `--rollout <note> --tasks <slug,...> [--files <slug>=<a,b>]... [--tasks-dir <dir>] [--dry-run] [--now
               <iso>]` (ADR 0078 d6; /thread:schedule step 7's **Join**, after unfinished-rollout.py check printed `join
@@ -678,6 +698,42 @@ Subcommands:
               `WARN: join:` lines: a queued linked task a ranked line above the queue's table ranks above the joined
               ones (never for a top join: its red-master fix ranks first anyway), and a queued linked task whose
               `priority:` outweighs a joined one's (next orders by priority first).
+              The Speed fix hold (p54-13; Speed fix hold, below), read whenever a Speed fix is in play (the note records
+              a hold, or an unlanded marked unit is linked to the rollout or being joined: _SpeedCtx.in_play), so a
+              joined task that is a Speed fix phase's release (its last task or the one its phase note names, marked or
+              not) makes that phase's hold, and decided before any write with the joining tasks read as linked: the
+              extension lines of every standing hold a joining unmarked task falls under (a hold about to move included)
+              go in the rows' save; each joining task's hold entries in the save of its `rollout:` stamp; then the
+              out-of-reach drops (the joined marks counted); then, on the rows re-read, each new or moved-to hold's line
+              and its entries, a move's `superseded` released line and its drops, and the re-stamps of recorded tasks
+              missing their entry. It writes no let-go line (the lead's `next` does): a phase whose hold lets go is left
+              alone, with a `speed-hold skip … (lets go at the lead's next call)` line. A joining task that carries a
+              refused `speed_fix:` gets its `speed-hold refuse` line whether or not a hold is read (a task already on
+              the queue is never named again), and a join that reads no hold writes nothing more for the hold. Its
+              stdout lines, before the last line:
+              `speed-hold refuse|made|moved|drop|skip|restamp …` and `speed-hold [[<R>]] (p<N>) holds [[<t>]]`. Its
+              writes wait on _engine_reads_speed_hold, read only when it would write: False is one stderr `WARN:
+              speed-hold: [[<ro>]]: <why> (engine-snapshot.md § Cross-version state): no Speed fix hold made`, and the
+              join goes on. A hold write that fails is exit 1 with an `ERROR: join:` line naming what was not written;
+              a re-run of the same join finishes it.
+
+  speed-hold  `apply | release (--release <R> | --all) | lift --rollout <note> [--tasks-dir <dir>] [--dry-run] [--now
+              <iso>]` (p54-13, ADR 0084 d4; Speed fix hold, below; vault-grammar § Speed fix hold). Guarded. Refuses
+              (exit 2): a missing or untagged note, a serial note, a protocol other than 5, an unknown --release, and
+              apply on a done, dropped or superseded note. `apply` (schedule step 7, and § 0's Put back from the
+              prior's root) runs on an incomplete or paused note too: in order, the let-go of each standing hold that
+              cannot release (its released line, its entries dropped, one Run record line), each move to the phase's
+              current release, the out-of-reach drops, each standing hold's extension line and entries and its
+              re-stamps, then each new hold's line and entries; its writes wait on _engine_reads_speed_hold (False: one
+              WARN, exit 0, nothing written). `release` (by hand) writes `released [[<R>]] (p<N>): by hand` for each
+              named hold not yet released, then drops its recorded entries (a released hold's leftovers too), then
+              its event; a hold whose release landed (ended) is only named, `speed-hold ended [[<R>]] (p<N>): its
+              release landed; nothing released`, with no line, no drop and no event; it works on any note, an archived
+              one included. `lift` (schedule step 1 on a supersede)
+              drops every standing hold's recorded entries, whatever each task's state, and writes no line and no
+              event (`speed-hold lifted [[<R>]] (p<N>): <K> entries`). stdout: `speed-hold …` lines, then `[written:
+              <n notes saved>]`, `[no-change]` or `(dry-run)`; exit 1 when a save fails, naming what it wrote: a re-run
+              finishes it.
 
   approve-queue  `--rollout <note> --pr <owner/repo#N | PR URL>` (p30-4; Approved queue below): run on Lachy's words
               naming a queue and its gating PR (execute § Invocation forms, orient § 9, schedule step 8). Writes, in one
@@ -1406,6 +1462,11 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     (the Standing approval's, never counted as his act); then the Integration arm records ready pr=.
   defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
                     holder a merge-hold close and lane-freed release=halt; an open race hold closes.
+  speed-hold        (p54-13) speed-hold {act: made, release, phase, by, held} per hold apply makes or moves to;
+                    speed-hold {act: released, release, phase, cause, removed[, to]} per hold it lets go (cause
+                    set-aside | left-queue, the task it let go for as the line's task), releases by hand (by-hand) or
+                    moves from (superseded, to the new release). join writes the made and superseded lines too; next
+                    the let-go lines; lift none.
   carry             to the --from rollout, after each carried note saves: slot-freed stopped for a running
                     note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
                     (the writer appends it to both files).
@@ -1774,6 +1835,33 @@ the note's first project (_norm_project). While it holds nothing starts, restart
 (`awaitingIntegration` is []), and the hold is never cleared. A plain release (the verdict's `released`, or a done or
 dropped note) clears the hold and its `on_merge:` lines in one compare-and-swap (Note.remove_block's `also`), so a hold
 added by hand later is a plain hold. `carry` never copies `on_merge`.
+
+Speed fix hold (p54-13, ADR 0084 d4; _SpeedCtx, read by `speed-hold`, `join`, `next`, `defer`, `carry` and `status`; the
+grammar is skills/_shared/vault-grammar.md § Speed fix hold): a task marked `speed_fix: <citation>` (a suite audit's
+row, a stall audit's cause, or a Time-lost ledger line by its tl- id; _speed_fix_mark, else refused: an ordinary task)
+makes its phase (PHASED_STEM_RE's prefix and a task number that starts with digits, `2b` as `2`, _speed_phase) hold
+every other queued task of its rollout. The phase's release R (its last task, unless the phase names another: ADR 0084
+d4) is the unit of the phase note's `speed_fix_release:` (any member of the phase, marked or not, else a WARN and no
+hold), else of its last member (the highest M, the task number's leading digits, the whole task number breaking a tie:
+`1` < `1b` < `2`), marked or not, landed ones included; a phase with no marked member has none. A hold is made only
+while R is unlanded, linked, not letting go and never released. The hold is `depends-on: - "[[R]]"` on each task in its
+reach (the one rule, the block comment above SPEED_FIX_KEY: no mark, no member of a Speed fix phase in play, no release
+and nothing upstream of either is ever held, so two Speed fix phases hold no task of each other's), released by itself
+once R lands, and recorded on the rollout note's `## Speed fix holds` (`- <stamp> hold [[R]] (p<N>, schedule|join):
+[[a]], …` or `: none`; `- <stamp> released [[R]] (p<N>): <why>`), append-only, so a released hold is never re-made for
+the same R. The hold follows its phase's release at every apply and join (a move: the new hold's
+line and entries, then the old one's `superseded by [[R']]` line and drops; join reads it whenever a Speed fix is in
+play, _SpeedCtx.in_play, so a joined release makes its phase's hold), never at `next`; a standing hold whose phase has
+no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R, read
+through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
+leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, read
+as `moving` reads it): `next` writes the released line, drops the entries and records one Run record line, reported as
+`speedHoldReleased`, and on --dry-run reads its rows as if it had. A gate-pending one never lets it go (a gate has no
+automatic retries, and the Standing approval may still sign it), so a gate-pending release, or a unit upstream of it, is
+the one wait on Lachy the hold keeps, until he or the Standing approval signs its gate or he defers it. Out-of-reach and
+leftover entries are dropped by join, apply and `next` (_speed_hold_converge), before `next` computes its starts. The
+section's lines change only by migration (engine-snapshot.md § Cross-version state), and join and apply write a line or
+an entry only on a rollout whose engine has the SPEED_HOLD_ENGINE line.
 
 Durable triggers (p45-7, ADR 0078 d5; the grammar is skills/_shared/vault-grammar.md § When): a "when X, then Y" step
 written on a rollout or task note as a `when:` entry, so it survives any session. _when reads every form; _trigger_eval
@@ -3651,16 +3739,27 @@ def _file_sets(rollout_note):
     return out
 
 
+def _record_marked(body):
+    """Each body line with whether it sits in the `## Speed fix holds` record section (p54-13): its list lines name tasks
+    but are machine records, which neither rank (_schedule_positions) nor read as prose (_order_hints)."""
+    record = False
+    for line in body.split("\n"):
+        if line.startswith("## "):
+            record = line.strip() == SPEED_HOLD_SECTION
+        yield line, record
+
+
 def _schedule_positions(rollout_note):
     """slug (lowercased) -> the ordinal of its first wikilink on a list-item or table-row line of the
     rollout body (the `## Queue` table or a queue list), outside fenced code. Prose never ranks,
-    so a note the lead adds above the list mid-rollout cannot reorder the queue."""
+    so a note the lead adds above the list mid-rollout cannot reorder the queue, and nor does the `## Speed fix holds`
+    record (p54-13), whose list lines name tasks."""
     pos, i, fenced = {}, 0, False
-    for line in rollout_note._body.split("\n"):
+    for line, record in _record_marked(rollout_note._body):
         if FENCE_RE.match(line):
             fenced = not fenced
             continue
-        if fenced or not RANKED_LINE_RE.match(line):
+        if fenced or record or not RANKED_LINE_RE.match(line):
             continue
         for m in WIKILINK_OPEN_RE.finditer(line):
             slug = (_wikilink_slug(m.group(1)) or "").lower()
@@ -7004,7 +7103,8 @@ def _superseded_output(stem, successor, progress) -> dict:
             "heat": None, "start": [], "restart": [], "hold": [], "running": [], "awaitingIntegration": [],
             "integrating": [], "setAside": [], "raceHold": [], "gitEnvHold": [], "laneHold": [], "mainRed": [],
             "holdUntil": [], "onMerge": None, "supersededBy": successor, "paused": None, "pauseRequested": False,
-            "pausedNow": False, "surfaceWait": None, "startUnattended": False, "startCleared": False,
+            "pausedNow": False, "surfaceWait": None, "speedHoldReleased": [], "startUnattended": False,
+            "startCleared": False,
             "halt": "superseded",
             "awaitingSignOff": [], "progress": progress}
 
@@ -7202,6 +7302,14 @@ def cmd_next(args) -> int:
     # that runs the rollout renews it, and --dry-run never does. Best-effort: a failure prints one LEASE_WARN line.
     if not args.dry_run:
         _lease_write(rollout_path.stem, now, "next", login=_caller_login())
+    # The Speed fix hold (p54-13; vault-grammar § Speed fix hold), before anything reads a dependency: a hold that cannot
+    # release lets go and the clean-up drops leftover and out-of-reach entries (off --dry-run, written; on --dry-run,
+    # in memory only), so no hold ever holds a release when the starts are computed. It never stamps or moves a hold.
+    speed_released = []
+    if rollout_note.has_heading(SPEED_HOLD_SECTION):
+        speed_released, changed = _speed_hold_next(rollout_path, rollout_note, rows, index, tasks_dir, now, args)
+        if changed:
+            rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     # The start stamp (START_KEY): reported as read at this call; the lead's call (not --dry-run) removes it, since a
     # lead now runs the rollout. Every refusal above returned first, so a refused call leaves it for the Stage.
     start_unattended = _start_unattended(rollout_note)
@@ -7966,6 +8074,9 @@ def cmd_next(args) -> int:
             "since": (sw[1] or {}).get("since") if sw[0] == "ok" and isinstance((sw[1] or {}).get("since"), str)
             else None,
             "held": slugs(sw_held)},
+        # The Speed fix holds this call let go (p54-13; vault-grammar § Speed fix hold): [{release, phase, cause
+        # (set-aside | left-queue), task, label, removed}], on --dry-run what it would let go; the lead reports each.
+        "speedHoldReleased": speed_released,
         "startUnattended": start_unattended,
         "startCleared": start_cleared,
         "halt": halt,
@@ -9258,6 +9369,9 @@ def cmd_status(args) -> int:
         "onMerge": _on_merge(rollout_note) if _shape(rollout_note) == SHAPES[0] and
         rollout_note.fm_block(HOLD_KEY) is not None else None,
         "chainStart": _chain_start(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index),
+        # The Speed fix holds the note records (p54-13; vault-grammar § Speed fix hold), [] with no section: {release,
+        # phase, by, held, standing, ended, released, missing, outOfReach, lettingGo, moved} (_speed_hold_status).
+        "speedHolds": _speed_hold_status(rollout_path, rollout_note, rows, index, tasks_dir, now),
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -9392,6 +9506,14 @@ ROLE_CALL_MODELS_MAX = 8
 ROLE_CALL_ENGINE = 1
 ROLE_CALL_MARK_RE = re.compile(r"^ROLE_CALL_ENGINE = 1$", re.M)
 ROLE_CALL_LACKS = "reads a role-call line as live (it predates p46-2)"
+# The marker _engine_reads_speed_hold greps for in an engine's own copy of this file (p54-13, ADR 0084 d4): an engine
+# whose reconcile-rollout.py has this exact line lets a Speed fix hold go (`next`'s let-go and clean-up, `defer`'s drop,
+# carry's copy of `## Speed fix holds`), so join and `speed-hold apply` write a hold line or a hold's `depends-on:` entry
+# only on a rollout whose engine has it (engine-snapshot.md § Cross-version state). Never rename it, change its value or
+# reference it in code.
+SPEED_HOLD_ENGINE = 1
+SPEED_HOLD_MARK_RE = re.compile(r"^SPEED_HOLD_ENGINE = 1$", re.M)
+SPEED_HOLD_LACKS = "has no Speed fix let-go (it predates p54-13)"
 
 
 def _label_role(label):
@@ -11900,10 +12022,14 @@ def cmd_defer(args) -> int:
             continue
         # Read before anything is cleared: `rollout:` goes, and with it the only way to record the frees.
         rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
+        # The Speed fix hold entries its rollout recorded for it (p54-13): dropped in the save that clears `rollout:`.
+        sh_drop = [r for r in _speed_defer_releases(tasks_dir, rollout, slug) if r.lower() in _speed_entries(note)]
         note.set("status", "open")
         for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
                     DESCOPE_ARMED_KEY, HANDED_BACK_KEY, *AUTO_RETRY_KEYS):
             note.remove(key)
+        if sh_drop:
+            _speed_hold_strip(note, sh_drop)
         note.save(dry_run=args.dry_run)
         if rollout and not args.dry_run:
             state = _record_state(rollout)
@@ -11916,6 +12042,8 @@ def cmd_defer(args) -> int:
               f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY}/{'/'.join(AUTO_RETRY_KEYS)} cleared, "
               "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
+        for r in sh_drop:
+            print(f"speed-hold dropped [[{r}]] from {slug} (deferred)" + (" (dry-run)" if args.dry_run else ""))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
@@ -13556,11 +13684,11 @@ def _order_hints(src_note, rows) -> list:
         return hits[0] if len(hits) == 1 else None
 
     out, fenced = [], False
-    for line in src_note._body.split("\n"):
+    for line, record in _record_marked(src_note._body):
         if FENCE_RE.match(line):
             fenced = not fenced
             continue
-        if fenced:
+        if fenced or record:
             continue
         held = []  # placeholder index -> (original text, lowercased slug)
 
@@ -13608,7 +13736,7 @@ def cmd_carry(args) -> int:
         rerun = src_status == "done" and dst is not None and _link_slug(src_note, "superseded_by") == dst.stem.lower()
         if not rerun:
             return refuse(f"--from {src.stem} is {src_status}: a closed rollout carries nothing")
-    linked = _scan(src, tasks_dir)[0]
+    linked, src_index = _scan(src, tasks_dir)
     # An approved queue whose only marks are the Stage's ended room stops reads as never started (approved_unrun,
     # vault-grammar § Approved queue): its regenerate's carry, and § 0's interrupted finish, take it. --to keeps
     # never_started below.
@@ -13687,6 +13815,11 @@ def cmd_carry(args) -> int:
         src_security = None
     else:
         print(f"{SECURITY_CHECKS_KEY} {src_security}")
+    # The prior's Speed fix holds (p54-13; vault-grammar § Speed fix hold): named in both modes, and every line of its
+    # `## Speed fix holds` copied below (a union: the record is append-only), so the new note's apply re-makes, moves or
+    # lets go what still stands. Schedule step 1 lifts a standing hold's entries off from the prior's root first.
+    for line in _speed_carry_preview(src_note, src_index):
+        print(line)
     # The order hints read --from's prose against its carried tasks and, while --from is still open, against the
     # tasks already on --to: an interrupted supersede whose own carry ran before it died (§ 0's finish) left none
     # on --from, and this is the only run that reads that prose. A closed re-run's step 7 has confirmed them.
@@ -13721,6 +13854,8 @@ def cmd_carry(args) -> int:
         elif _scalar(dst_note.get(SECURITY_CHECKS_KEY)).lower() != src_security.lower():
             print(f"WARN: carry: {SECURITY_CHECKS_KEY} on {dst.stem} differs from {src.stem}'s; {dst.stem}'s kept",
                   file=sys.stderr)
+    for line in _speed_section_lines(src_note):
+        _speed_hold_line(dst_note, line)
     if dst_note.dirty:
         try:
             dst_note.save()
@@ -13759,6 +13894,1123 @@ def cmd_carry(args) -> int:
         _event(dst.stem, "carried", path.stem, {"from": src.stem}, args)
     print(f"[written: {written}]" if written else "[no-change]")
     return 0
+
+
+# ---- the Speed fix hold (p54-13, ADR 0084 d4; vault-grammar § Speed fix hold) ---------------------------------------------
+# A Speed fix (CONTEXT.md) goes first by itself: a phase with a task marked `speed_fix: <citation>` holds every other
+# queued task of its rollout until the phase's release lands. The hold is plain `depends-on:` entries naming the release,
+# which every protocol-5 engine reads and which release by themselves once it lands (_unsatisfied, _dep_status); the
+# rollout note's `## Speed fix holds` section records each (task, release) pair the engine wrote, append-only, so a hold
+# is listed, lifted, released and let go exactly, and a task an earlier hold already holds is still recorded under the
+# next. vault-grammar § Speed fix hold is the one copy of the forms; these functions are its writers and readers.
+#
+# The reach is one rule (_SpeedCtx.reach): a hold H(P, R) stamps task t only when (1) t is linked to this rollout (or
+# being joined) and queued; (2) t's unit carries no valid mark; (3) t carries no `master_red:` or `completion_red_of:`
+# (a red-master fix, _red_master_fix); (4) t's unit is a member of no Speed fix phase in play (_SpeedCtx.play_phases:
+# P, every phase with an unlanded marked unit linked to this rollout or being joined, and every standing hold's phase),
+# so two Speed fix phases hold no task of each other's and order among themselves by priority and row; (5) t is
+# neither a root nor upstream of one (_SpeedCtx.roots: every unlanded marked unit linked to this rollout or being
+# joined, every standing hold's release, and the release of every phase with such a mark while it is unlanded and
+# linked); (6) R's unit is not already among t's `depends-on:` / `blocked-by:` by hand (a recorded hold's entry is not,
+# and a hand-written entry is never recorded). A recorded task that carries R's entry but now fails "linked" or arms
+# 2-5 is out of reach: join, apply and `next` drop that entry (a member of a phase that came into play since, why `a
+# member of p<N>`). So no entry is ever stamped on a marked unit, on a Speed fix phase's member, on a release or on
+# anything upstream of either, and no hold holds a release, directly or transitively, even one that is no Speed fix
+# itself (the phase's last task) or one whose phase lost its marks: two Speed fix phases never deadlock, and a held
+# queue always has its phase's own tasks startable.
+
+SPEED_FIX_KEY = "speed_fix"                    # a task's mark: its measured cause, cited
+SPEED_FIX_RELEASE_KEY = "speed_fix_release"    # a phase note's own choice of release, any member of the phase
+COMPLETION_RED_KEY = "completion_red_of"       # the completion verifier's fix task (_write_completion_red): never held
+MASTER_RED_KEY = "master_red"                  # master-runs' red-master fix (written by _write_master_red): never held
+SPEED_HOLD_SECTION = "## Speed fix holds"
+# The queue states (_queue_state) a set-aside task's retries can be spent in, as `moving` reads them: set aside at `run`
+# or `integration`. A gate-pending task (`gate`) has no automatic retries, so a Speed fix hold never lets go for it.
+SPEED_SPENT_STATES = (("set-aside", "run"), ("set-aside", "integration"))
+# The evidence forms (vault-grammar § Speed fix hold; task-writer § 4 and reshuffle R5.2 use the same words): a suite
+# audit's ranked change (`docs/audits/<file>.md row <N>`), a stall audit's cause (`docs/audits/<file>.md cause <words>` or
+# `docs/audits/<file>.md#<anchor>`), and a Time-lost ledger line by its id (`time-lost <id> [<class>]`, the id checked by
+# run_record.py's TL_ID_RE and the class, when named, against its TIME_LOST_CLASSES).
+SPEED_FIX_AUDIT_RE = re.compile(r"(?<![\w/])docs/audits/[A-Za-z0-9._-]+\.md(?:#[A-Za-z0-9._-]+|\s+row\s+\d+\b|\s+cause\s+\S)")
+SPEED_FIX_LEDGER_RE = re.compile(r"(?<!\S)time-lost\s+(?P<id>\S+)(?:\s+(?P<cls>[a-z][a-z-]*)(?!\S))?")
+SPEED_FIX_FLAGS = RUNG_YAML_WORDS | {"0", "1"}
+# The section's two line forms: `- <stamp> hold [[R]] (p<N>, schedule|join): [[a]], [[b]]` (or `: none`) and
+# `- <stamp> released [[R]] (p<N>): <why>`.
+SPEED_HOLD_LINE_RE = re.compile(r"^-\s+(?P<at>\S+)\s+(?P<verb>hold|released)\s+\[\[(?P<r>[^\]|#^\\]+)[^\]]*\]\]\s+"
+                                r"\((?P<phase>p\d+(?:\.\d+)?)(?:,\s*(?P<by>schedule|join))?\):\s*(?P<rest>.*?)\s*$")
+
+
+def _speed_fix_cites(item):
+    """None when one `speed_fix:` item cites its evidence (SPEED_FIX_AUDIT_RE, or SPEED_FIX_LEDGER_RE with a tl- id and a
+    known class), else the refusal's why, the first that applies: empty, a flag, a ledger line by no tl- id, a ledger
+    class that is none of the six, no citation."""
+    v = str(item).strip()
+    if not v:
+        return "empty"
+    if v.lower() in SPEED_FIX_FLAGS:
+        return f"a flag ({v}), not a citation"
+    if SPEED_FIX_AUDIT_RE.search(v):
+        return None
+    m = SPEED_FIX_LEDGER_RE.search(v)
+    if m:
+        rr = _run_record()
+        if not rr.TL_ID_RE.match(m.group("id")):
+            return f"time-lost {m.group('id')}: a tl- id (a Time-lost ledger line's)"
+        if m.group("cls") is not None and m.group("cls") not in rr.TIME_LOST_CLASSES:
+            return f"{m.group('cls')} is none of {', '.join(rr.TIME_LOST_CLASSES)}"
+        return None
+    return "no citation (an ADR decision or prose is no evidence)"
+
+
+def _speed_fix_mark(note):
+    """(state, why) of a note's `speed_fix:` (read through get_list, so a scalar is a one-item list): ("none", None) with
+    no key, ("marked", None) when any item cites (_speed_fix_cites), else ("refused", the first item's why; "empty" for an
+    empty value). A refused mark is an ordinary task: held like any other, never asked about, its note never edited."""
+    if note.get(SPEED_FIX_KEY) is None:
+        return "none", None
+    items = note.get_list(SPEED_FIX_KEY)
+    if not items:
+        return "refused", "empty"
+    whys = [_speed_fix_cites(item) for item in items]
+    return ("marked", None) if None in whys else ("refused", whys[0])
+
+
+def _red_master_fix(note) -> bool:
+    """A red-master fix (ADR 0084 Decided for you 3): a non-empty `master_red:`, the mark master-runs' fix task carries
+    (p54-7, CONTEXT.md **Red-master fix**), or a non-empty `completion_red_of:`, the completion verifier's fix task's.
+    Those two keys alone exempt a task from every Speed fix hold (a `master_red_since:` alone exempts nothing)."""
+    return _valued(note.get(MASTER_RED_KEY)) or _valued(note.get(COMPLETION_RED_KEY))
+
+
+def _speed_phase(stem):
+    """((slug lowercased, phase key), (M, number)) for a phased task's stem, by PHASED_STEM_RE and its task number (the
+    text after the match up to its next `-`), kept when it starts with digits, so `2b` is a member as `2` is (the vault
+    names `chorus-p105-2b-…`): M is its leading digits as a number, and number the whole task number lowercased, the
+    release order's tiebreak (`1` < `1b` < `2`). Else None: a loose task, or a phase note."""
+    m = PHASED_STEM_RE.match(stem)
+    if not m:
+        return None
+    n = stem[m.end():].partition("-")[0]
+    lead = re.match(r"[0-9]+", n)
+    if not lead:
+        return None
+    return (m.group("slug").lower(), _phase_key(m.group("n"))), (int(lead.group()), n.lower())
+
+
+def _speed_label(pkey) -> str:
+    return f"p{pkey[1]}"
+
+
+def _speed_pkey_sort(pkey):
+    return pkey[0], _phase_sort(pkey[1])
+
+
+def _speed_units(index):
+    """The phases and the marks, read over the whole index (Archive included; a note tagged rollout, decisions or phase,
+    or at `status: dropped`, counts for neither): {phases: {pkey: {tasks: [(order, slug)], marked: [(order, slug)], units:
+    {unit lowercased}}}, marked: {unit lowercased}, refused: {slug lowercased: why}}, order _speed_phase's (M, number). A
+    phase's members are its prefixed tasks whose task number starts with digits (_speed_phase); a unit is a member when
+    its own stem has the prefix or a member folds into it (_fold_unit). A unit is marked when its own `speed_fix:` cites,
+    or a task folded into it does."""
+    phases, marked, refused = {}, set(), {}
+    for key, (path, note) in index.items():
+        if _tags(note) & {"rollout", "decisions", "phase"} or _status(note) == "dropped":
+            continue
+        state, why = _speed_fix_mark(note)
+        unit = _fold_unit(path.stem, index)[0].lower()
+        if state == "marked":
+            marked.add(unit)
+        elif state == "refused":
+            refused[key] = why
+        ph = _speed_phase(path.stem)
+        if ph is None:
+            continue
+        p = phases.setdefault(ph[0], {"tasks": [], "marked": [], "units": set()})
+        p["tasks"].append((ph[1], path.stem))
+        p["units"].add(unit)
+        if state == "marked":
+            p["marked"].append((ph[1], path.stem))
+    return {"phases": phases, "marked": marked, "refused": refused}
+
+
+def _speed_release_named(pkey, tasks_dir):
+    """The release a phase note in Work/Phases names (`speed_fix_release: "[[x]]"`), or None: the first note there whose
+    own PHASED_STEM_RE prefix is the phase's and that carries the key."""
+    pdir = _phases_dir(tasks_dir)
+    if not pdir.is_dir():
+        return None
+    for path in sorted(pdir.glob("*.md")):
+        m = PHASED_STEM_RE.match(path.stem)
+        if not m or (m.group("slug").lower(), _phase_key(m.group("n"))) != pkey:
+            continue
+        try:
+            note = Note(path)
+        except (OSError, ValueError):
+            continue
+        named = _wikilink_slug(_scalar(note.get(SPEED_FIX_RELEASE_KEY)))
+        if named:
+            return named
+    return None
+
+
+def _speed_release(pkey, units, index, tasks_dir):
+    """(R, warn): phase P's release (ADR 0084 d4: its last task, unless the phase names another), the unit (_fold_unit)
+    of the phase note's `speed_fix_release:` when it names one (any member of P, marked or not, a unit a member folds
+    into included: else no release and a WARN, with no fallback), else of P's last member by _speed_phase's order (the
+    highest M, the whole task number breaking a tie, then the stem), marked or not, landed ones included; (None, None)
+    when P has no marked member, so is no Speed fix phase. A release that is no Speed fix itself is still never held
+    (_SpeedCtx.roots)."""
+    p = units["phases"].get(pkey) or {"tasks": [], "marked": [], "units": set()}
+    if not p["marked"]:
+        return None, None
+    label = _speed_label(pkey)
+    named = _speed_release_named(pkey, tasks_dir)
+    if named is not None:
+        hit = next((s for _m, s in p["tasks"] if s.lower() == named.lower()), None)
+        if hit is None and named.lower() in p["units"]:
+            hit = index[named.lower()][0].stem if named.lower() in index else named
+        if hit is None:
+            return None, (f"WARN: speed-hold: {label}'s {SPEED_FIX_RELEASE_KEY}: [[{named}]] is not a member of the "
+                          f"phase: no hold for {label}")
+        return _fold_unit(hit, index)[0], None
+    return _fold_unit(max(p["tasks"], key=lambda ms: (ms[0], ms[1].lower()))[1], index)[0], None
+
+
+def _speed_holds(note, index=None):
+    """The `## Speed fix holds` section read, its lines in any order: {R lowercased: {release, phase (`p<N>`), by, held
+    ({task lowercased: name}, every task a hold line names), made, released ((why, at) or None), ended ("landed" or None),
+    standing}}. A hold stands when it has a hold line, no released line and its release has not landed (read through
+    `index`, _dep_status; with no index, never landed). A line of any other shape is skipped."""
+    holds = {}
+    if not note.has_heading(SPEED_HOLD_SECTION):
+        return holds
+    for line in note.section_text(SPEED_HOLD_SECTION).split("\n"):
+        m = SPEED_HOLD_LINE_RE.match(line.strip())
+        r = _wikilink_slug(m.group("r")) if m else None
+        if not r:
+            continue
+        h = holds.setdefault(r.lower(), {"release": r, "phase": m.group("phase"), "by": None, "held": {}, "made": None,
+                                         "released": None, "lines": 0})
+        if m.group("verb") == "hold":
+            h["lines"] += 1
+            h["by"] = h["by"] or m.group("by")
+            h["made"] = h["made"] or m.group("at")
+            if m.group("rest").strip().lower() != "none":
+                for link in WIKILINK_OPEN_RE.finditer(m.group("rest")):
+                    s = _wikilink_slug(link.group(1))
+                    if s:
+                        h["held"].setdefault(s.lower(), s)
+        elif h["released"] is None:
+            h["released"] = (m.group("rest"), m.group("at"))
+    for h in holds.values():
+        landed = index is not None and _dep_status(h["release"], index)[0]
+        h["ended"] = "landed" if landed else None
+        h["standing"] = h["lines"] > 0 and h["released"] is None and not landed
+    return holds
+
+
+def _speed_gone(slug, index, tasks_dir, rollout_stem, is_release, joined=()):
+    """Why an unlanded unit has left the queue, else None (the let-go's left-queue test): no note; a queue state outside
+    CARRIED_STATES (its status: dropped, parked, `merged` for an unresolved tombstone, or another); for the release, a
+    `rollout:` that does not name this rollout (`deferred` when empty, else `moved to [[ro]]`); for a unit upstream of
+    it, a `rollout:` that links no live rollout (`deferred` when empty, else `[[ro]] closed`). A unit being joined is
+    linked."""
+    entry = index.get(slug.lower())
+    if entry is None:
+        return "no note"
+    note = entry[1]
+    if _landed(note):
+        return None
+    if _queue_state(note)[0] not in CARRIED_STATES:
+        return _status(note) or "no status"
+    if slug.lower() in joined:
+        return None
+    ro = _wikilink_slug(_scalar(note.get("rollout")))
+    if is_release:
+        if (ro or "").lower() != rollout_stem.lower():
+            return "deferred" if not ro else f"moved to [[{ro}]]"
+    elif not _live_rollout(tasks_dir, note.get("rollout")):
+        return "deferred" if not ro else f"[[{ro}]] closed"
+    return None
+
+
+def _speed_entries(note):
+    """The lowercased slugs a note's `depends-on:` names (where a hold's entry sits)."""
+    return {(_wikilink_slug(x) or "").lower() for x in note.get_list("depends-on")}
+
+
+def _speed_dep_scan(note):
+    """(i, items) for the note's top-level `depends-on:` line i and its block items [(line index, slugs)], read as
+    get_list reads them (item lines and blanks, up to the first other non-blank line); None when the key is absent."""
+    for i, line in enumerate(note._fm):
+        if not re.match(r"^depends-on:", line):
+            continue
+        items, k = [], i + 1
+        while k < len(note._fm):
+            mi = re.match(r"^\s*-\s*(.*)$", note._fm[k])
+            if mi:
+                items.append((k, [(_wikilink_slug(x) or "").lower() for x in _list_items(_drop_comment(mi.group(1)).strip())]))
+            elif note._fm[k].strip():
+                break
+            k += 1
+        return i, items
+    return None
+
+
+def _speed_inline_raw(value):
+    """An inline `depends-on:` value's items as written (quotes kept), its `[...]` dropped; a wikilink's comma never
+    splits; empty and null items dropped."""
+    v = value.strip()
+    listed = v.startswith("[") and v.endswith("]") and not v.startswith("[[")
+    if listed:
+        v = v[1:-1]
+    parts = [p.strip() for p in re.split(r",(?![^\[]*\]\])", v)]
+    return [p for p in parts if p.strip("\"'").strip().lower() not in ("", "null", "~")], listed
+
+
+def _speed_quote(raw):
+    return f'"{raw}"' if raw.startswith("[[") else raw
+
+
+def _speed_dep_edit(note, r, stem):
+    """_speed_hold_add's journaled body: re-checked on every replay, so a task that started, or left the rollout, since the
+    read gets no entry. Appends `- "[[R]]"` to `depends-on:` (an inline list becomes a block list, its items kept; the key
+    inserted after `status:` when absent) when the task is queued, linked to `stem` and lacks R. True when it wrote."""
+    if _queue_state(note)[0] != "queued" or _link_slug(note, "rollout") != stem.lower() or r.lower() in _speed_entries(note):
+        return False
+    entry = f'"[[{r}]]"'
+    found = _speed_dep_scan(note)
+    if found is None:
+        at = next((n + 1 for n, line in enumerate(note._fm) if re.match(r"^status:", line)), len(note._fm))
+        note._fm[at:at] = ["depends-on:", f"  - {entry}"]
+    else:
+        i, items = found
+        value = _drop_comment(note._fm[i].split(":", 1)[1]).strip()
+        if value:
+            raws, _listed = _speed_inline_raw(value)
+            note._fm[i:i + 1] = ["depends-on:", *[f"  - {_speed_quote(x)}" for x in raws], f"  - {entry}"]
+        elif items:
+            last = items[-1][0]
+            prefix = re.match(r"^(\s*-\s*)", note._fm[last]).group(1)
+            note._fm.insert(last + 1, f"{prefix}{entry}")
+        else:
+            note._fm.insert(i + 1, f"  - {entry}")
+    note.dirty = True
+    return True
+
+
+def _speed_strip_edit(note, releases):
+    """_speed_hold_strip's journaled body: remove each `[[R]]` entry for R in `releases` from `depends-on:` (an inline list
+    keeps its other items, in its own form; a block list loses only those item lines), and the key once its list empties.
+    `blocked-by:` is never touched. True when it removed one."""
+    rl = {r.lower() for r in releases}
+    found = _speed_dep_scan(note)
+    if found is None:
+        return False
+    i, items = found
+    value = _drop_comment(note._fm[i].split(":", 1)[1]).strip()
+    if value:
+        raws, listed = _speed_inline_raw(value)
+        keep = [x for x in raws if (_wikilink_slug(x) or "").lower() not in rl]
+        if len(keep) == len(raws):
+            return False
+        if keep:
+            note._fm[i] = f"depends-on: [{', '.join(keep)}]" if listed or len(keep) > 1 else f"depends-on: {keep[0]}"
+        else:
+            del note._fm[i]
+        note.dirty = True
+        return True
+    gone = [k for k, slugs in items if slugs and all(s in rl for s in slugs)]
+    if not gone:
+        return False
+    drop = set(gone) | ({i} if len(gone) == len(items) else set())
+    note._fm = [line for n, line in enumerate(note._fm) if n not in drop]
+    note.dirty = True
+    return True
+
+
+def _speed_hold_add(note, r, stem):
+    """Stamp a hold's entry on a task note, journaled (Note.apply): the caller saves, so a join's entry goes in the same
+    save as its `rollout:` stamp. True when the note changed."""
+    return bool(note.apply(_speed_dep_edit, r, stem))
+
+
+def _speed_hold_strip(note, releases):
+    """Remove the hold entries for `releases` from a task note in memory, journaled (Note.apply): cmd_defer's drop, in the
+    same save that clears `rollout:`, and _speed_hold_drop's. True when the note changed."""
+    return bool(note.apply(_speed_strip_edit, tuple(releases)))
+
+
+def _speed_hold_drop(path, releases, dry_run=False):
+    """Remove the hold entries for `releases` from the task note at `path` and save it. True when it removed one; a note
+    that is gone or unreadable removes nothing (False); a save that fails raises OSError."""
+    try:
+        note = Note(path)
+    except (OSError, ValueError):
+        return False
+    if not _speed_hold_strip(note, releases):
+        return False
+    note.save(dry_run=dry_run)
+    return True
+
+
+def _speed_line_edit(note, line):
+    found = note._section_bounds(SPEED_HOLD_SECTION)
+    if found is not None:
+        lines, start, end = found
+        if any(x.strip() == line for x in lines[start + 1:end]):
+            return
+    note.append_line(SPEED_HOLD_SECTION, line)
+
+
+def _speed_hold_line(note, line):
+    """Append one line to the rollout note's `## Speed fix holds` (created when absent) unless the section already holds it,
+    journaled: the caller saves."""
+    note.apply(_speed_line_edit, line)
+
+
+def _engine_reads_speed_hold(rollout_path, rollout_note, tasks_dir):
+    """(bool, why): the engine that runs this rollout lets a Speed fix hold go (its copy has the SPEED_HOLD_ENGINE line), by
+    _engine_reads_carried's four clauses. join and `speed-hold apply` read it, lazily, before writing a hold line or a hold
+    entry."""
+    return _engine_reads(rollout_path, rollout_note, tasks_dir, SPEED_HOLD_MARK_RE, SPEED_HOLD_LACKS,
+                         lambda path: _unstamped_verdict(path, SPEED_HOLD_MARK_RE, SPEED_HOLD_LACKS))
+
+
+class _SpeedCtx:
+    """One call's read of the Speed fix hold: the rollout, its linked tasks (and the tasks being joined, read as linked),
+    the index, the phases and marks (_speed_units) and the recorded holds (_speed_holds). Every verb's decision reads one,
+    so the reach, the let-go and the release agree everywhere."""
+
+    def __init__(self, rollout_path, rollout_note, rows, index, tasks_dir, now, joined=()):
+        self.path, self.note, self.index, self.tasks_dir, self.now = rollout_path, rollout_note, index, tasks_dir, now
+        self.stem = rollout_path.stem
+        self.joined = {s.lower() for s in joined}
+        self.linked = {r["slug"].lower() for r in rows} | self.joined
+        self.units = _speed_units(index)
+        self.holds = _speed_holds(rollout_note, index)
+        self.warns = []
+        self._fix, self._up, self._lg, self._rel = {}, {}, {}, {}
+        self._marks, self._roots, self._play = None, None, None
+
+    def name(self, slug):
+        e = self.index.get(slug.lower())
+        return e[0].stem if e is not None else slug
+
+    def unit(self, slug):
+        return _fold_unit(slug, self.index)[0]
+
+    def landed(self, slug):
+        return _dep_status(slug, self.index)[0]
+
+    def upstream(self, slug):
+        key = slug.lower()
+        if key not in self._up:
+            self._up[key] = _upstream(slug, self.index)
+        return self._up[key]
+
+    def live_marks(self):
+        """The unlanded marked units linked to this rollout or being joined, lowercased (read once per context)."""
+        if self._marks is None:
+            self._marks = sorted(u for u in self.units["marked"] if u in self.linked and not self.landed(u))
+        return self._marks
+
+    def in_play(self):
+        """Whether a Speed fix is in play on this rollout, so join reads its hold: the note records one (its `## Speed
+        fix holds` section), or a live mark stands (live_marks). Every hold a plan can make, extend, move or trim needs
+        one of the two, so a join reading neither is as before; a joined task that is a live mark's phase's release
+        (its last task, or the one its phase note names, marked or not) makes that phase's hold, as does a mark added
+        by hand since the last apply."""
+        return self.note.has_heading(SPEED_HOLD_SECTION) or bool(self.live_marks())
+
+    def phases_of(self, unit):
+        return [k for k, p in self.units["phases"].items() if unit.lower() in p["units"]]
+
+    def release(self, pkey):
+        """(R, warn): phase pkey's release now (_speed_release), memoised, so its WARN is read once per context."""
+        if pkey not in self._rel:
+            self._rel[pkey] = _speed_release(pkey, self.units, self.index, self.tasks_dir)
+        return self._rel[pkey]
+
+    def roots(self):
+        """The units no hold stamps, nor anything upstream of them (the reach's arm 5), lowercased and sorted: every
+        live mark, every standing hold's release (through _fold_unit), and the release of every phase with a live mark
+        while it is unlanded and linked. A release that is no Speed fix itself (the phase's last task), and the release
+        of a standing hold whose phase has lost its marks, are protected as a mark is, so no hold ever holds a
+        release."""
+        if self._roots is None:
+            out = set(self.live_marks())
+            out.update(self.unit(h["release"]).lower() for h in self.holds.values() if h["standing"])
+            for pkey in {k for u in self.live_marks() for k in self.phases_of(u)}:
+                r = self.release(pkey)[0]
+                if r is not None and r.lower() in self.linked and not self.landed(r):
+                    out.add(r.lower())
+            self._roots = sorted(out)
+        return self._roots
+
+    def phase_of_hold(self, h):
+        """The phase key a recorded hold belongs to: the phase labelled as its line says whose units hold its release, else
+        the one phase with that label."""
+        same = [k for k in self.units["phases"] if _speed_label(k) == h["phase"]]
+        hit = [k for k in same if h["release"].lower() in self.units["phases"][k]["units"]]
+        if hit:
+            return hit[0]
+        return same[0] if len(same) == 1 else None
+
+    def play_phases(self):
+        """The Speed fix phases in play, in phase order (the reach's arm 4): every phase with a live mark (live_marks,
+        phases_of) and every standing hold's phase (phase_of_hold). Read once per context."""
+        if self._play is None:
+            keys = {k for u in self.live_marks() for k in self.phases_of(u)}
+            keys.update(self.phase_of_hold(h) for h in self.holds.values() if h["standing"])
+            self._play = sorted((k for k in keys if k is not None), key=_speed_pkey_sort)
+        return self._play
+
+    def has_entry(self, slug, r):
+        e = self.index.get(slug.lower())
+        return e is not None and r.lower() in _speed_entries(e[1])
+
+    def reach(self, pkey, r, slug, queued=True, hand=True):
+        """None when hold H(pkey, r) reaches `slug` (the reach's arms in order), else the first failing arm's why. With
+        queued=False the queued half of arm 1 is skipped, with hand=False arm 6: out of reach reads (linked, 2-5), a
+        recorded task's missing entry (1-5)."""
+        e = self.index.get(slug.lower())
+        if e is None:
+            return "no note"
+        note = e[1]
+        if slug.lower() not in self.linked:
+            return "left the rollout"
+        if queued and _queue_state(note)[0] != "queued":
+            return _queue_state(note)[0]
+        u = self.unit(slug).lower()
+        if u in self.units["marked"]:
+            return "a Speed fix now"
+        if _red_master_fix(note):
+            return "a red-master fix"
+        # Arm 4: a member of the hold's own phase, or of any other Speed fix phase in play (the own one named first).
+        for k in dict.fromkeys([pkey, *self.play_phases()]):
+            p = self.units["phases"].get(k)
+            if p is not None and u in p["units"]:
+                return f"a member of {_speed_label(k)}"
+        for m in self.roots():
+            if u == m or slug.lower() == m:
+                return "a Speed fix release"
+            up = self.upstream(m)
+            if slug.lower() in up or u in up:
+                return f"upstream of [[{self.name(m)}]]"
+        # Arm 6 reads only an entry no recorded hold wrote: a recorded entry on a release now folded into r (a move to
+        # the combined unit) is the old hold's, which the move drops once r's entry is stamped.
+        if hand and r.lower() in {self.unit(d).lower() for d in _dep_entries(note) if not self.recorded(slug, d)}:
+            return "holds it by hand"
+        return None
+
+    def recorded(self, slug, r):
+        """Whether a recorded hold on release r (by its own name) names `slug`: that entry is the engine's, not by
+        hand."""
+        h = self.holds.get(r.lower())
+        return h is not None and slug.lower() in h["held"]
+
+    def spent(self, x):
+        """humanFix's label when x is linked to this rollout, set aside at `run` or `integration` and its retries spent
+        (moving's read: only those two setAsideAt, then _retry_budget, task_inputs, auto_retry_verdict), else None;
+        memoised. A gate-pending task (setAsideAt `gate`) is never spent: a gate has no automatic retries, and step
+        1.2's Standing approval may still sign it. A read that raises keeps the hold, with one WARN."""
+        key = x.lower()
+        if key in self._fix:
+            return self._fix[key]
+        out = None
+        e = self.index.get(key)
+        if e is not None and key in self.linked and _queue_state(e[1]) in SPEED_SPENT_STATES:
+            try:
+                note = Note(e[0])
+                budget = _retry_budget(note, self.note)
+                k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] and not budget["error"] else None
+                root = _project_root(self.note)
+                repo = str(root) if root is not None and root.is_dir() else None
+                inp = _lead().task_inputs(e[0], note, max_rounds=k, repo=repo)
+                fix = _lead().auto_retry_verdict(e[0], note, inp, self.note, self.now).get("humanFix")
+                if fix is not None:
+                    out = fix.get("label") or fix.get("act") or "a human fix"
+            except Exception as ex:  # noqa: BLE001 — a lost look keeps the hold; the next call reads again
+                self.warns.append(f"WARN: speed-hold: [[{self.name(x)}]]: its retry read raised {type(ex).__name__}: "
+                                  f"{ex}: the hold on it stands")
+        self._fix[key] = out
+        return out
+
+    def let_go(self, r):
+        """(cause, task, why, label) when a hold on release r lets go now, else None. r is read through _fold_unit
+        first, so a release folded into a live combined unit keeps its hold (the next apply or join moves it to the
+        unit) and only an unresolved tombstone leaves the queue. Its closure is that unit, then every unlanded unit
+        upstream of it (_upstream, each through _fold_unit), sorted by slug; for each in order, the first that
+        applies: left-queue (_speed_gone), then set-aside (linked, set aside at run or integration, its humanFix
+        non-null: spent)."""
+        if r.lower() in self._lg:
+            return self._lg[r.lower()]
+        ru = self.unit(r)
+        key = ru.lower()
+        closure, seen = [ru], {key}
+        for s in sorted(self.upstream(ru)):
+            u, e, _f = _fold_unit(s, self.index)
+            if u.lower() in seen or (e is not None and _landed(e[1])):
+                continue
+            seen.add(u.lower())
+            closure.append(self.name(u))
+        out = None
+        for x in [closure[0], *sorted(closure[1:], key=str.lower)]:
+            why = _speed_gone(x, self.index, self.tasks_dir, self.stem, x.lower() == key, self.joined)
+            if why:
+                out = ("left-queue", self.name(x), f"[[{self.name(x)}]] left the queue ({why})", None)
+                break
+            label = self.spent(x)
+            if label:
+                inner = label[1:-1] if label.startswith("(") and label.endswith(")") else label
+                out = ("set-aside", self.name(x), f"[[{self.name(x)}]] set aside, its retries spent ({inner})", label)
+                break
+        self._lg[r.lower()] = out
+        return out
+
+    def cannot_hold(self, r):
+        """Why release r cannot make (or take over) a hold now, else None: landed, not linked, letting go, or released."""
+        if self.landed(r):
+            return "landed"
+        if r.lower() not in self.linked:
+            return f"not on [[{self.stem}]]"
+        h = self.holds.get(r.lower())
+        if h is not None and h["released"] is not None:
+            return f"released ({h['released'][0]})"
+        lg = self.let_go(r)
+        return lg[2] if lg else None
+
+    def reached(self, pkey, r):
+        """The linked tasks a new hold H(pkey, r) stamps, by name, sorted."""
+        return sorted((self.name(s) for s in self.linked if self.reach(pkey, r, s) is None), key=str.lower)
+
+    def out_of_reach(self, pkey, h):
+        """[(task, why)]: a recorded task of hold h that carries its entry but fails "linked" or arms 2-5."""
+        out = []
+        for s in sorted(h["held"]):
+            if not self.has_entry(s, h["release"]):
+                continue
+            why = self.reach(pkey, h["release"], s, queued=False, hand=False)
+            if why:
+                out.append((self.name(s), why))
+        return out
+
+    def missing(self, pkey, h):
+        """A recorded task of hold h that passes arms 1-5 and lacks its entry, by name."""
+        return [self.name(s) for s in sorted(h["held"])
+                if not self.has_entry(s, h["release"]) and self.reach(pkey, h["release"], s, hand=False) is None]
+
+
+def _speed_refusals(ctx, slugs):
+    """`speed-hold refuse [[x]]: <why>` for each of `slugs` whose `speed_fix:` is refused (_speed_fix_mark) and whose
+    unit no valid mark makes a Speed fix, sorted by slug."""
+    out = []
+    for s in sorted(x.lower() for x in slugs):
+        why = ctx.units["refused"].get(s)
+        if why and ctx.unit(s).lower() not in ctx.units["marked"]:
+            out.append(f"speed-hold refuse [[{ctx.name(s)}]]: {why}")
+    return out
+
+
+def _speed_hold_plan(ctx):
+    """What the hold does now, read-only, in write order: {letgo: [(hold, (cause, task, why, label))], moves: [{phase,
+    old: [holds], to, held, standing}], oor: [(hold, task, why)], extend: [(hold, phase, [tasks])], restamp: [(hold,
+    task)], new: [{phase, release, held}], skips, warns: [lines]}. A standing hold whose let-go cause stands is in letgo
+    and takes no other step; each phase's release R' is computed afresh (_speed_release), and the hold follows it: a new
+    hold when none stands and R' can hold; a move when one stands on another release and R' can hold (or already holds:
+    an interrupted move); else the standing hold is kept, with a skip line. Its refusals are the caller's
+    (_speed_refusals: apply's over the whole rollout, join's over the joined tasks)."""
+    plan = {"letgo": [], "moves": [], "oor": [], "extend": [], "restamp": [], "new": [], "skips": [], "warns": []}
+    standing = {}
+    for rl, h in sorted(ctx.holds.items()):
+        if not h["standing"]:
+            continue
+        lg = ctx.let_go(h["release"])
+        if lg:
+            plan["letgo"].append((h, lg))
+            continue
+        pkey = ctx.phase_of_hold(h)
+        standing.setdefault(pkey, []).append(h)
+    live_phases = set()
+    for u in ctx.live_marks():
+        ph = ctx.phases_of(u)
+        if not ph:
+            plan["skips"].append(f"speed-hold skip [[{ctx.name(u)}]]: a Speed fix outside a phase makes no hold")
+        live_phases.update(ph)
+    for pkey in sorted(live_phases | {k for k in standing if k is not None}, key=_speed_pkey_sort):
+        label = _speed_label(pkey)
+        mine = standing.get(pkey, [])
+        target, warn = ctx.release(pkey)
+        if warn:
+            plan["warns"].append(warn)
+        if not mine:
+            if target is None:
+                continue
+            why = ctx.cannot_hold(target)
+            if why:
+                plan["skips"].append(f"speed-hold skip [[{target}]] ({label}): {why}")
+                continue
+            plan["new"].append({"phase": pkey, "release": target, "held": ctx.reached(pkey, target)})
+            continue
+        interrupted = False
+        if target is None or any(h["release"].lower() == target.lower() for h in mine):
+            keep = [h for h in mine if target is not None and h["release"].lower() == target.lower()] or mine
+            old = [h for h in mine if h not in keep]
+            if old:   # an interrupted move: R' already holds; the move stamps what it misses, then supersedes the rest
+                interrupted = True
+                plan["moves"].append({"phase": pkey, "old": old, "to": keep[0]["release"], "held": [],
+                                      "standing": keep[0], "extend": []})
+        else:
+            why = ctx.cannot_hold(target)
+            if why:
+                plan["skips"].append(f"speed-hold skip [[{target}]] ({label}): {why}; "
+                                     + ", ".join(f"[[{h['release']}]]" for h in mine) + " kept")
+                keep = mine
+            else:
+                # join holds a joining task under the old hold first (its extension), so no task is unheld while it moves
+                ext = [(h, [ctx.name(s) for s in sorted(ctx.joined)
+                            if s not in h["held"] and ctx.reach(pkey, h["release"], s) is None]) for h in mine]
+                plan["moves"].append({"phase": pkey, "old": mine, "to": target, "held": ctx.reached(pkey, target),
+                                      "standing": None, "extend": [(h, new) for h, new in ext if new]})
+                continue
+        for h in keep:
+            for task, why in ctx.out_of_reach(pkey, h):
+                plan["oor"].append((h, task, why))
+            new = [ctx.name(s) for s in sorted(ctx.linked)
+                   if s not in h["held"] and ctx.reach(pkey, h["release"], s) is None]
+            if new:
+                plan["extend"].append((h, pkey, new))
+            if not interrupted:
+                for task in ctx.missing(pkey, h):
+                    plan["restamp"].append((h, task))
+    return plan
+
+
+def _speed_plan_writes(plan) -> bool:
+    """Whether a plan writes anything but let-go lines (the gate's question)."""
+    return bool(plan["moves"] or plan["oor"] or plan["extend"] or plan["restamp"] or plan["new"])
+
+
+class _SpeedWriter:
+    """The hold's writes for one call, in the order a caller drives them: a line saves the rollout note first (a failure
+    raises), an entry or a drop saves one task note (a failure is collected, so the other tasks still take theirs, and
+    the caller exits 1). `done` names what was written, `failed` what was not."""
+
+    def __init__(self, ctx, args, by):
+        self.ctx, self.args, self.by = ctx, args, by
+        self.dry = bool(getattr(args, "dry_run", False))
+        self.stamp = _stamp(ctx.now)
+        self.written, self.done, self.failed = 0, [], []
+
+    def line(self, text):
+        if self.dry:
+            return
+        before = self.ctx.note._text
+        _speed_hold_line(self.ctx.note, f"- {self.stamp} {text}")
+        self.ctx.note.save()
+        if self.ctx.note._text != before:
+            self.written += 1
+            self.done.append(f"[[{self.ctx.stem}]]'s {text.split(' ', 1)[0]} line")
+
+    def add(self, task, r):
+        if self.dry:
+            return True
+        e = self.ctx.index.get(task.lower())
+        if e is None:
+            return True
+        try:
+            note = Note(e[0])
+            if _speed_hold_add(note, r, self.ctx.stem):
+                note.save()
+                self.written += 1
+                self.done.append(f"[[{task}]]'s [[{r}]] entry")
+            return True
+        except (OSError, ValueError) as ex:
+            self.failed.append(f"[[{task}]]'s [[{r}]] entry ({ex})")
+            return False
+
+    def drop(self, task, releases):
+        if self.dry:
+            return True
+        e = self.ctx.index.get(task.lower())
+        if e is None:
+            return True
+        try:
+            if _speed_hold_drop(e[0], releases):
+                self.written += 1
+                self.done.append(f"[[{task}]]'s " + ", ".join(f"[[{r}]]" for r in releases) + " entry")
+            return True
+        except OSError as ex:
+            self.failed.append(f"[[{task}]]'s drop ({ex})")
+            return False
+
+    def event(self, fields, task=None):
+        _event(self.ctx.stem, "speed-hold", task, fields, self.args)
+
+    def drop_hold(self, h):
+        """Drop hold h's entry from every recorded task still carrying it; the count dropped."""
+        n = 0
+        for s in sorted(h["held"]):
+            if self.ctx.has_entry(s, h["release"]) and self.drop(self.ctx.name(s), [h["release"]]):
+                n += 1
+        return n
+
+    def release(self, h, why, cause, task=None, to=None):
+        """A hold's release: its released line, then its entries dropped, then one Run record line. The count dropped."""
+        self.line(f"released [[{h['release']}]] ({h['phase']}): {why}")
+        n = self.drop_hold(h)
+        fields = {"act": "released", "release": h["release"], "phase": h["phase"], "cause": cause, "removed": n}
+        if to:
+            fields["to"] = to
+        self.event(fields, task)
+        return n
+
+    def hold(self, label, r, held, by=None):
+        """A hold line naming `held` (`none` when empty), then its entries; True when every entry was written."""
+        self.line(f"hold [[{r}]] ({label}, {by or self.by}): " + (", ".join(f"[[{t}]]" for t in held) or "none"))
+        return all([self.add(t, r) for t in held])
+
+    def fail_line(self):
+        return (f"written so far: {', '.join(self.done) or 'nothing'}; not written: {', '.join(self.failed)}"
+                if self.failed else "")
+
+
+def _speed_letgo_write(w, plan, out):
+    """Write the plan's let-go: for each, the released line, the drops, the event; print and report into `out`."""
+    released = []
+    for h, (cause, task, why, label) in plan["letgo"]:
+        n = w.release(h, why, cause, task)
+        out.append(f"speed-hold released [[{h['release']}]] ({h['phase']}): {why}")
+        released.append({"release": h["release"], "phase": h["phase"], "cause": cause, "task": task, "label": label,
+                         "removed": n})
+    return released
+
+
+def _speed_moves_write(w, plan, out):
+    """Write the plan's moves: the new hold's line naming its reach and its stamps (or, for an interrupted move, the
+    standing new hold's missing stamps), then, only once every stamp is written, the old hold's `superseded` released line
+    and its drops."""
+    ctx = w.ctx
+    for mv in plan["moves"]:
+        label = _speed_label(mv["phase"])
+        if mv["standing"] is None:
+            ok_all = w.hold(label, mv["to"], mv["held"])
+            w.event({"act": "made", "release": mv["to"], "phase": label, "by": w.by, "held": len(mv["held"])})
+            out.append(f"speed-hold moved " + ", ".join(f"[[{h['release']}]]" for h in mv["old"])
+                       + f" → [[{mv['to']}]] ({label}): " + (", ".join(f"[[{t}]]" for t in mv["held"]) or "none"))
+        else:
+            ok_all = all([w.add(t, mv["to"]) for t in ctx.missing(mv["phase"], mv["standing"])])
+            out.append(f"speed-hold moved " + ", ".join(f"[[{h['release']}]]" for h in mv["old"]) + f" → [[{mv['to']}]] "
+                       f"({label}): finished")
+        if not ok_all:
+            continue
+        for h in mv["old"]:
+            w.release(h, f"superseded by [[{mv['to']}]]", "superseded", to=mv["to"])
+
+
+def _speed_oor_write(w, plan, out):
+    for h, task, why in plan["oor"]:
+        w.drop(task, [h["release"]])
+        out.append(f"speed-hold drop [[{h['release']}]] from [[{task}]]: {why}")
+
+
+def _speed_extend_write(w, plan, out):
+    """The extensions' lines, then their entries, each task note in its own save. (join writes the extensions it read
+    before its rows' save itself, a joining task's entry in the save of its `rollout:` stamp; this writes the ones it
+    reads on the rows re-read, and apply's.)"""
+    for h, pkey, new in plan["extend"]:
+        w.line(f"hold [[{h['release']}]] ({h['phase']}, {w.by}): " + ", ".join(f"[[{t}]]" for t in new))
+        for t in new:
+            w.add(t, h["release"])
+            out.append(f"speed-hold [[{h['release']}]] ({h['phase']}) holds [[{t}]]")
+
+
+def _speed_restamp_write(w, plan, out):
+    for h, task in plan["restamp"]:
+        w.add(task, h["release"])
+        out.append(f"speed-hold restamp [[{h['release']}]] on [[{task}]]")
+
+
+def _speed_new_write(w, plan, out):
+    for nh in plan["new"]:
+        label = _speed_label(nh["phase"])
+        w.hold(label, nh["release"], nh["held"])
+        w.event({"act": "made", "release": nh["release"], "phase": label, "by": w.by, "held": len(nh["held"])})
+        out.append(f"speed-hold made [[{nh['release']}]] ({label}, {w.by}): "
+                   + (", ".join(f"[[{t}]]" for t in nh["held"]) or "none"))
+
+
+def _speed_hold_converge(w, write=True):
+    """`next`'s clean-up, after the let-go: drop the entries of every released hold's recorded tasks still carrying them
+    (leftovers), and those of a standing hold's out-of-reach recorded tasks. It never stamps. Returns {task lowercased:
+    {release lowercased}} of what it dropped (or, with write=False, would drop)."""
+    ctx, gone = w.ctx, {}
+    for rl, h in sorted(ctx.holds.items()):
+        if h["ended"]:
+            continue
+        if h["released"] is not None:
+            tasks = [(s, "released") for s in sorted(h["held"]) if ctx.has_entry(s, h["release"])]
+        elif h["standing"]:
+            tasks = [(t.lower(), why) for t, why in ctx.out_of_reach(ctx.phase_of_hold(h), h)]
+        else:
+            continue
+        for s, _why in tasks:
+            if write:
+                w.drop(ctx.name(s), [h["release"]])
+            gone.setdefault(s, set()).add(rl)
+    return gone
+
+
+def _speed_hold_next(rollout_path, rollout_note, rows, index, tasks_dir, now, args):
+    """`next`'s Speed fix step, right after its lease write, when the note has the section: (released, changed). Off
+    --dry-run the let-go writes (released line, drops, event) and the clean-up drops (_speed_hold_converge), and
+    `changed` says the caller must re-read its rows. On --dry-run nothing is written: each recorded row of a released or
+    letting-go hold, and each out-of-reach recorded row, loses that release from its in-memory `deps`. `released` is
+    `speedHoldReleased`."""
+    ctx = _SpeedCtx(rollout_path, rollout_note, rows, index, tasks_dir, now)
+    w = _SpeedWriter(ctx, args, "schedule")
+    plan = {"letgo": [(h, lg) for h in ctx.holds.values() if h["standing"] for lg in [ctx.let_go(h["release"])] if lg]}
+    for line in ctx.warns:
+        print(line, file=sys.stderr)
+    if args.dry_run:
+        released, trim = [], {}
+        for h, (cause, task, why, label) in plan["letgo"]:
+            n = 0
+            for s in h["held"]:
+                trim.setdefault(s, set()).add(h["release"].lower())
+                n += ctx.has_entry(s, h["release"])
+            released.append({"release": h["release"], "phase": h["phase"], "cause": cause, "task": task, "label": label,
+                             "removed": n})
+        for s, rs in _speed_hold_converge(w, write=False).items():
+            trim.setdefault(s, set()).update(rs)
+        for r in rows:
+            rs = trim.get(r["slug"].lower())
+            if rs:
+                r["deps"] = [d for d in r["deps"] if d.lower() not in rs]
+        return released, False
+    released = _speed_letgo_write(w, plan, [])
+    if released:
+        ctx = _SpeedCtx(rollout_path, rollout_note, *_rows(rollout_path, rollout_note, tasks_dir), tasks_dir, now)
+        w.ctx = ctx
+    _speed_hold_converge(w)
+    for line in w.failed:
+        print(f"WARN: speed-hold: cannot write {line}: the next call drops it", file=sys.stderr)
+    return released, w.written > 0
+
+
+def _speed_hold_status(rollout_path, rollout_note, rows, index, tasks_dir, now):
+    """`status`'s speedHolds: one entry per recorded hold, in release order, read-only (no write, no event):
+    {release, phase, by, held, standing, ended, released: {why, at} | null, missing, outOfReach: [{task, why}], lettingGo:
+    {cause, task, why} | null, moved}. missing, outOfReach, lettingGo and moved are read for a standing hold only."""
+    if not rollout_note.has_heading(SPEED_HOLD_SECTION):
+        return []
+    ctx = _SpeedCtx(rollout_path, rollout_note, rows, index, tasks_dir, now)
+    out = []
+    for rl, h in sorted(ctx.holds.items()):
+        pkey = ctx.phase_of_hold(h)
+        entry = {"release": h["release"], "phase": h["phase"], "by": h["by"],
+                 "held": sorted(h["held"].values(), key=str.lower), "standing": h["standing"], "ended": h["ended"],
+                 "released": {"why": h["released"][0], "at": h["released"][1]} if h["released"] else None,
+                 "missing": [], "outOfReach": [], "lettingGo": None, "moved": None}
+        if h["standing"]:
+            entry["missing"] = ctx.missing(pkey, h)
+            entry["outOfReach"] = [{"task": t, "why": why} for t, why in ctx.out_of_reach(pkey, h)]
+            lg = ctx.let_go(h["release"])
+            entry["lettingGo"] = {"cause": lg[0], "task": lg[1], "why": lg[2]} if lg else None
+            target = ctx.release(pkey)[0] if pkey is not None else None
+            entry["moved"] = target if target is not None and target.lower() != rl else None
+        out.append(entry)
+    return out
+
+
+def _speed_defer_releases(tasks_dir, rollout, slug):
+    """The releases of every hold (standing, released or ended) that the task's rollout recorded for it: cmd_defer drops
+    them in the save that clears `rollout:`. [] when the rollout note is missing or unreadable."""
+    if not rollout:
+        return []
+    path = Path(tasks_dir) / f"{rollout}.md"
+    if not path.is_file():
+        return []
+    try:
+        note = Note(path)
+    except (OSError, ValueError):
+        return []
+    return [h["release"] for _rl, h in sorted(_speed_holds(note).items()) if slug.lower() in h["held"]]
+
+
+def _speed_carry_preview(src_note, index):
+    """carry's preview lines for the prior's holds (both modes): `speed_hold [[R]] (p<N>) standing, K recorded`, or
+    `… released`, or `… ended (landed)`."""
+    out = []
+    for _rl, h in _speed_holds(src_note, index).items():
+        state = (f"standing, {len(h['held'])} recorded" if h["standing"] else "released" if h["released"] else
+                 "ended (landed)" if h["ended"] else "recorded")
+        out.append(f"speed_hold [[{h['release']}]] ({h['phase']}) {state}")
+    return out
+
+
+def _speed_section_lines(note):
+    """The `## Speed fix holds` section's record lines, stripped, in order."""
+    if not note.has_heading(SPEED_HOLD_SECTION):
+        return []
+    return [line.strip() for line in note.section_text(SPEED_HOLD_SECTION).split("\n")
+            if SPEED_HOLD_LINE_RE.match(line.strip())]
+
+
+def cmd_speed_hold(args) -> int:
+    """`speed-hold apply | release | lift` (the module docstring's Subcommands; vault-grammar § Speed fix hold)."""
+    def refuse(msg):
+        print(f"ERROR: speed-hold: {msg}", file=sys.stderr)
+        return 2
+
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        return refuse(f"tasks dir {tasks_dir} not found")
+    path = Path(os.path.expanduser(args.rollout))
+    note, why = _carry_note(path, "--rollout")
+    if why:
+        return refuse(why)
+    if _shape(note) == SHAPES[1]:
+        return refuse(f"--rollout {path.stem} is a serial rollout (shape: serial): a Speed fix hold holds a parallel queue")
+    protocol = _scalar(note.get("protocol_version"))
+    if protocol != "5":
+        return refuse(f"--rollout {path.stem} is at protocol_version {protocol or 'none'}: only a protocol-5 queue is held")
+    now = _now(args)
+    rows, index = _rows(path, note, tasks_dir)
+    ctx = _SpeedCtx(path, note, rows, index, tasks_dir, now)
+    out = []
+    if args.verb == "apply":
+        if _status(note) in CLOSED_ROLLOUT_STATUSES:
+            return refuse(f"--rollout {path.stem} is {_status(note)}: a closed rollout holds nothing")
+        if _valued(note.get("superseded_by")):
+            return refuse(f"--rollout {path.stem} is superseded by [[{_link_slug(note, 'superseded_by')}]]: apply it there")
+        plan = _speed_hold_plan(ctx)
+        for line in ctx.warns + plan["warns"]:
+            print(line, file=sys.stderr)
+        for line in _speed_refusals(ctx, ctx.linked):
+            print(line)
+        if plan["letgo"] or _speed_plan_writes(plan):
+            gate, gate_why = _engine_reads_speed_hold(path, note, tasks_dir)
+            if not gate:
+                print(f"WARN: speed-hold: [[{path.stem}]]: {gate_why} (engine-snapshot.md § Cross-version state): no "
+                      "Speed fix hold written", file=sys.stderr)
+                print("[no-change]")
+                return 0
+        w = _SpeedWriter(ctx, args, "schedule")
+        try:
+            _speed_letgo_write(w, plan, out)
+            if plan["letgo"]:   # a let-go may free a phase for a new hold: decide the rest on the note as written
+                ctx = _SpeedCtx(path, note, *_rows(path, note, tasks_dir), tasks_dir, now)
+                if not w.dry:
+                    ctx.holds = _speed_holds(note, ctx.index)
+                else:
+                    for h, _lg in plan["letgo"]:
+                        ctx.holds[h["release"].lower()]["standing"] = False
+                        ctx.holds[h["release"].lower()]["released"] = ("let go", w.stamp)
+                w.ctx = ctx
+                plan = {**_speed_hold_plan(ctx), "letgo": []}
+            _speed_moves_write(w, plan, out)
+            _speed_oor_write(w, plan, out)
+            _speed_extend_write(w, plan, out)
+            _speed_restamp_write(w, plan, out)
+            _speed_new_write(w, plan, out)
+        except OSError as e:
+            for line in out:
+                print(line)
+            print(f"ERROR: speed-hold: cannot write: {e} (written so far: {', '.join(w.done) or 'nothing'}; a re-run "
+                  "finishes it)", file=sys.stderr)
+            return 1
+        for line in out + plan["skips"]:
+            print(line)
+        if w.failed:
+            print(f"ERROR: speed-hold: cannot write: {w.fail_line()} (a re-run finishes it)", file=sys.stderr)
+            return 1
+        print("(dry-run)" if w.dry else f"[written: {w.written}]" if w.written else "[no-change]")
+        return 0
+    w = _SpeedWriter(ctx, args, "schedule")
+    if args.verb == "release":
+        if args.all:
+            names = [h for _rl, h in sorted(ctx.holds.items())]
+        elif args.release:
+            h = ctx.holds.get((_wikilink_slug(args.release) or "").lower())
+            if h is None:
+                return refuse(f"--release {args.release}: [[{path.stem}]] records no Speed fix hold on it")
+            names = [h]
+        else:
+            return refuse("usage: release needs --release <R> or --all")
+        try:
+            for h in names:
+                if h["ended"]:
+                    # Its release landed: the hold ended by itself, so it is no hand release, and its entries are
+                    # satisfied dependencies, left as they are.
+                    out.append(f"speed-hold ended [[{h['release']}]] ({h['phase']}): its release landed; nothing "
+                               "released")
+                elif h["released"] is None:
+                    n = w.release(h, "by hand", "by-hand")
+                    out.append(f"speed-hold released [[{h['release']}]] ({h['phase']}): by hand, {n} entries")
+                else:
+                    n = w.drop_hold(h)
+                    if n:
+                        out.append(f"speed-hold drop [[{h['release']}]] ({h['phase']}): {n} leftover entries")
+        except OSError as e:
+            print(f"ERROR: speed-hold: cannot write: {e} (written so far: {', '.join(w.done) or 'nothing'}; a re-run "
+                  "finishes it)", file=sys.stderr)
+            return 1
+    elif args.verb == "lift":
+        for _rl, h in sorted(ctx.holds.items()):
+            if h["standing"]:
+                n = w.drop_hold(h)
+                out.append(f"speed-hold lifted [[{h['release']}]] ({h['phase']}): {n} entries")
+    for line in out:
+        print(line)
+    if w.failed:
+        print(f"ERROR: speed-hold: cannot write: {w.fail_line()} (a re-run finishes it)", file=sys.stderr)
+        return 1
+    print("(dry-run)" if w.dry else f"[written: {w.written}]" if w.written else "[no-change]")
+    return 0
+
+
+def _speed_join_plan(ctx):
+    """join's plan (_speed_hold_plan), every phase whose standing hold lets go left alone: join reads the let-go only to
+    decide (the lead's `next` writes it), so it never extends, makes or moves such a hold, and says so in a skip line.
+    Returns (plan, the phases left alone); the plan's letgo is empty."""
+    plan = _speed_hold_plan(ctx)
+    skip = set()
+    for h, lg in plan["letgo"]:
+        skip.add(ctx.phase_of_hold(h))
+        plan["skips"].append(f"speed-hold skip [[{h['release']}]] ({h['phase']}): {lg[2]} (lets go at the lead's next "
+                             "call)")
+    plan["new"] = [nh for nh in plan["new"] if nh["phase"] not in skip]
+    plan["moves"] = [mv for mv in plan["moves"] if mv["phase"] not in skip]
+    plan["letgo"] = []
+    return plan, skip
+
+
+def _speed_join_rest(w, plan0, entries, out, x_path, x_note, tasks_dir, now, joined, args):
+    """join's hold writes after the rows' save and the joining tasks' stamps (cmd_join wrote steps 1 and 2): the extension
+    and re-stamp entries of a task already on the queue (its own save), the out-of-reach drops with the joined marks
+    counted, then, on the rows re-read, each new or moved-to hold's line and entries, a move's `superseded` release and
+    its drops, and the re-stamps of recorded tasks still missing their entry. 0, or 1 when a task note's write failed
+    (w.failed); a hold line's save of the rollout note raises OSError, which cmd_join turns into its ERROR line."""
+    for t, rs in sorted(entries.items()):
+        for r in rs:
+            w.add(w.ctx.name(t), r)
+    _speed_oor_write(w, plan0, out)
+    if args.dry_run:
+        _speed_moves_write(w, plan0, out)
+        _speed_new_write(w, plan0, out)
+        out.extend(plan0["skips"])
+        return 0
+    w.ctx = _SpeedCtx(x_path, x_note, *_rows(x_path, x_note, tasks_dir), tasks_dir, now, joined=joined)
+    plan, _skip = _speed_join_plan(w.ctx)
+    _speed_moves_write(w, plan, out)
+    _speed_new_write(w, plan, out)
+    _speed_oor_write(w, plan, out)
+    _speed_extend_write(w, plan, out)
+    _speed_restamp_write(w, plan, out)
+    out.extend(plan["skips"])
+    return 1 if w.failed else 0
 
 
 # ---- join (ADR 0078 d6) -------------------------------------------------------------------------------------------------
@@ -14097,6 +15349,45 @@ def cmd_join(args) -> int:
     # `top` only from master-runs' in-process Namespace (Note.apply takes no kwargs, so it goes fifth, positional)
     x_note.apply(_join_edit, rows, [(r[0], files[r[0].lower()]) for r in rows if files.get(r[0].lower())], day,
                  getattr(args, "top", False))
+    # The Speed fix hold (p54-13; vault-grammar § Speed fix hold), decided before any write, with the joining tasks read
+    # as linked: read whenever a Speed fix is in play on the rollout (_SpeedCtx.in_play: the note records a hold, or an
+    # unlanded marked unit is linked to it or being joined), so the hold follows its phase's release at every join (a
+    # joined release, marked or not, makes its phase's hold) and a rollout with no Speed fix joins as before.
+    joined_names = [r[0] for r in rows]
+    sh_ctx = _SpeedCtx(x_path, x_note, [{"slug": p.stem} for p, _n in linked], index, tasks_dir, now,
+                       joined=joined_names)
+    sh_on = sh_ctx.in_play()
+    sh_out, sh_entries, sh_plan, sh_w = [], {}, None, None
+    # A joining task's refused `speed_fix:` reaches step 8, held or not; a task already on the queue was named at its
+    # own schedule or join, so it is never named again.
+    sh_out.extend(_speed_refusals(sh_ctx, joined_names))
+    if sh_on:
+        sh_plan, _sh_skip = _speed_join_plan(sh_ctx)
+        for line in sh_ctx.warns + sh_plan["warns"]:
+            print(line, file=sys.stderr)
+        if not _speed_plan_writes(sh_plan):
+            sh_out.extend(sh_plan["skips"])
+            sh_plan = None
+        else:
+            gate, gate_why = _engine_reads_speed_hold(x_path, x_note, tasks_dir)
+            if not gate:
+                print(f"WARN: speed-hold: [[{stem}]]: {gate_why} (engine-snapshot.md § Cross-version state): no Speed fix "
+                      "hold made", file=sys.stderr)
+                sh_plan = None
+        if sh_plan is not None:
+            sh_w = _SpeedWriter(sh_ctx, args, "join")
+            # Step 1: the extension lines (a hold about to move included), in the rows' own save.
+            ext = list(sh_plan["extend"]) + [(h, mv["phase"], new) for mv in sh_plan["moves"] for h, new in mv["extend"]]
+            for h, _pkey, new in ext:
+                if not args.dry_run:
+                    _speed_hold_line(x_note, f"- {sh_w.stamp} hold [[{h['release']}]] ({h['phase']}, join): "
+                                             + ", ".join(f"[[{t}]]" for t in new))
+                for t in new:
+                    sh_entries.setdefault(t.lower(), []).append(h["release"])
+                    sh_out.append(f"speed-hold [[{h['release']}]] ({h['phase']}) holds [[{t}]]")
+            for h, task in sh_plan["restamp"]:
+                sh_entries.setdefault(task.lower(), []).append(h["release"])
+                sh_out.append(f"speed-hold restamp [[{h['release']}]] on [[{task}]]")
     written, done = 0, []
     if not args.dry_run:
         try:
@@ -14107,9 +15398,12 @@ def cmd_join(args) -> int:
                     written += 1
                     done.append(f"[[{stem}]]'s rows")
             for path, note, mine in tasks:
-                if mine:
-                    continue
-                note.set("rollout", f'"[[{stem}]]"')
+                if not mine:
+                    note.set("rollout", f'"[[{stem}]]"')
+                if not mine or sh_entries.get(path.stem.lower()):
+                    # Step 2: a joining task's hold entries go in the same save as its rollout: stamp.
+                    for r in sh_entries.pop(path.stem.lower(), []):
+                        _speed_hold_add(note, r, stem)
                 if note.dirty:
                     note.save()
                     written += 1
@@ -14128,6 +15422,23 @@ def cmd_join(args) -> int:
             print(f"ERROR: join: {', '.join(f'[[{s}]]' for s in missing)} not on a ranked ## Queue line of [[{stem}]] "
                   "after the write: a re-run of the same join finishes it", file=sys.stderr)
             return 1
+    if sh_plan is not None:
+        try:
+            rc = _speed_join_rest(sh_w, sh_plan, sh_entries, sh_out, x_path, x_note, tasks_dir, now, joined_names, args)
+        except OSError as e:
+            # A hold line saves the rollout note (_SpeedWriter.line), which raises (a lock timeout, an edit it cannot
+            # replay, a read-only note) after the rows and stamps above are written: name them, and the re-run.
+            for line in sh_out:
+                print(line)
+            print(f"ERROR: join: cannot write: {e} (written so far: {', '.join(done + sh_w.done) or 'nothing'}; a re-run "
+                  "of the same join finishes it)", file=sys.stderr)
+            return 1
+        if rc:
+            for line in sh_out:
+                print(line)
+            print(f"ERROR: join: cannot write: {sh_w.fail_line()} (a re-run of the same join finishes it)", file=sys.stderr)
+            return 1
+        written += sh_w.written
     sets = _file_sets(x_note)
     for slug, *_rest in rows:
         print(f"join {slug} {'already' if slug.lower() in had else 'row'}")
@@ -14152,6 +15463,8 @@ def cmd_join(args) -> int:
         if beat:
             print(f"WARN: join: {', '.join(beat)} outrank the joined [[{path.stem}]] ({mine_p}): next orders by "
                   "priority: first, so they start first", file=sys.stderr)
+    for line in sh_out:
+        print(line)
     print("(dry-run)" if args.dry_run else f"[written: {written}]" if written else "[no-change]")
     return 0
 
@@ -19821,6 +21134,18 @@ def _parser():
     jn.add_argument("--dry-run", action="store_true", help="print the outcome; write nothing")
     jn.set_defaults(func=cmd_join)
 
+    sp = sub.add_parser("speed-hold", help="the Speed fix hold (p54-13, ADR 0084 d4; vault-grammar § Speed fix hold): "
+                                           "apply makes, extends, moves and trims it; release ends one by hand; lift "
+                                           "takes every standing hold's entries off (a supersede's step 1)")
+    sp.add_argument("verb", choices=("apply", "release", "lift"))
+    sp.add_argument("--rollout", required=True, help="path to the rollout note")
+    sp.add_argument("--release", default=None, help="release: the hold's release, by its slug")
+    sp.add_argument("--all", action="store_true", help="release: every recorded hold")
+    sp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    sp.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the section lines' stamp)")
+    sp.add_argument("--dry-run", action="store_true", help="print the outcome; write nothing")
+    sp.set_defaults(func=cmd_speed_hold)
+
     aq = sub.add_parser("approve-queue", help="approve a queue on Lachy's words (p30-4; vault-grammar § Approved queue): "
                                               "write hold_until, on_merge: regenerate and start: unattended, print "
                                               "one undo line; exit 1 refused, nothing written")
@@ -20034,8 +21359,11 @@ GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
 # reads the kind); join (ADR 0078 d6) is run by a newer schedule on a running
 # rollout whose snapshot predates the verb, and writes only forms every protocol-5 engine reads, under the same note
 # lock: a `## Queue` row (a wikilink on a ranked line, its Mode `joined <date>` or `joined <date>, solo`), a
-# `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp. Those forms and the note lock's path are a
-# cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration. And prove writes
+# `- <slug>: a, b` `## File-sets` line and a task's `rollout:` stamp; and, only on a rollout whose engine has the
+# SPEED_HOLD_ENGINE line (_engine_reads_speed_hold, p54-13), a `## Speed fix holds` line and a task's `depends-on:`
+# entry naming a Speed fix hold's release, which every protocol-5 engine reads as a dependency. Those forms and the note
+# lock's path are a cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration.
+# speed-hold itself is guarded: every caller runs it from the rollout's own root. And prove writes
 # only proof stamps every engine reads as landed, gating each write a queue reads per note on _carry_readers (ADR 0078
 # d1).
 GUARD_EXEMPT = ("status", "fold-journals", "moving", "join", "prove")

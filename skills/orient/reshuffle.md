@@ -300,6 +300,15 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      confirms the slug when it is unclear. An existing `fixes:` survives the rename. The key's rule is
      `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4's: never a phase, a rollout or planned
      follow-on work.
+   - **A Speed fix** (CONTEXT.md; ADR 0084 d4: work that makes the machine itself faster, measured, which
+     goes first by itself) carries `speed_fix: "<citation>"`, citing its measured cause in one of the three
+     evidence forms (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § Speed fix hold):
+     - `docs/audits/<file>.md row <N>`: a suite audit's ranked change.
+     - `docs/audits/<file>.md cause <words>` or `docs/audits/<file>.md#<anchor>`: a stall audit's cause.
+     - `time-lost <id> [<class>]`: a Time-lost ledger line by its `id`.
+     With no such evidence the task carries no mark (schedule refuses one without it). Its phase note may name
+     the phase's release, `speed_fix_release: "[[<task>]]"`, any task of the phase, marked or not; otherwise the
+     phase's last (highest-numbered) task releases the hold.
    - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
    - **Records from R3 (c)** are written exactly as schedule step 7 does: for a spend smell, the
      `## Decisions (recorded <date>)` section holding the Planner line alone; for a limit Lachy

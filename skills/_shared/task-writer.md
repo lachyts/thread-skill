@@ -160,6 +160,7 @@ scheduled: <YYYY-MM-DD>        # defer only — OMIT the line entirely for stash
 captured: <YYYY-MM-DD today>
 launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias applies
 fixes: ["[[<landed task>]]"]   # OMIT unless the task fixes landed work
+speed_fix: "<citation>"        # OMIT unless the task is a Speed fix
 ---
 ```
 
@@ -192,6 +193,16 @@ fixes: ["[[<landed task>]]"]   # OMIT unless the task fixes landed work
   and never marks planned follow-on work. A list or a scalar both read. The
   Reflection's score counts it against the rollout that landed the task, so
   Quality can see it (ADR 0037 d7).
+- `speed_fix:` = set only when the task is a **Speed fix** (the plugin's
+  `CONTEXT.md`; ADR 0084 d4): it goes first by itself, and schedule holds the
+  rest of its project's queue until its phase's release lands. Its value cites
+  the measured cause, in one of the three evidence forms
+  (`skills/_shared/vault-grammar.md` § Speed fix hold is their one copy):
+  - `docs/audits/<file>.md row <N>`: a suite audit's ranked change.
+  - `docs/audits/<file>.md cause <words>` or `docs/audits/<file>.md#<anchor>`: a stall audit's cause.
+  - `time-lost <id> [<class>]`: a Time-lost ledger line by its `id`.
+  Anything else (`true`, an ADR decision, prose) is refused: the task is then
+  an ordinary task, held like any other, and nobody is asked.
 - Typed values: dates as `YYYY-MM-DD`, wiki-links quoted.
 - `next_action:` is not in this template: § 4b's script adds it to every
   stash and defer, quoted safely. Don't hand-write it.
