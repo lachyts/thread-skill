@@ -326,6 +326,8 @@ A rollout note that still carries `max_tier:` (any value, an empty one included)
 - `plan_approval: required` → `planGate: true`
 - `plan_approval: scope-gated` → `planGate: true` iff `scope: cross-cutting`; `single-file` and `read-only` → `false`
 
+**A plan whose acceptance review can never close is rejected here (p47-13).** The plan judge returns `changes` on a plan whose acceptance asks to cover every form of an open set (every shell form that could write a file, every spelling of a path): review would find one more form each round and never close. Its bullet starts `Unbounded acceptance:`, names the open set and calls for a bounded acceptance (an allowlist, a named set), so the reason reaches the plan reviser and, on the last round, the plan-blocked row before any code is written.
+
 (`/thread:schedule`'s gated-input sweep may have stamped `plan_approval: required` on tasks that smell of spend/credentials — that per-task frontmatter wins here as usual. It is advisory: it guarantees a plan-gate exists where the plan's own declaration can pause; the declaration itself is authoritative — §3.7.)
 
 ### 3.7. Gated inputs — the human stop (ADR 0008, ADR 0034)
