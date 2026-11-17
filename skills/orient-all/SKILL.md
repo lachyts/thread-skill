@@ -221,7 +221,7 @@ rounds. A Grill task is decided only when every one of its decisions is answered
       stops before step 1 with its stderr verbatim (ADR 0064: every clone this project may take is held).
    4. Step 2.5's verifier: as detected. A section-only CLAUDE.md is read for its one command; with none, stop before
       writing.
-   5. Step 2.6's baseline: `none`, and the summary says "not captured".
+   5. Step 2.6's baseline: captured as written (it asks nothing), its `line` in the summary.
    6. Step 2.7's env bootstrap: CLAUDE.md detection only, else unset.
    7. schedule § 3's body dependencies: written only between two members of this call; any other is named.
    8. schedule § 3.5's gates: a match that a recorded `## Decisions` answer settles is dismissed. Any other match drops
