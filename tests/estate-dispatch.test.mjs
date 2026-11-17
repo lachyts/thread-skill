@@ -1358,6 +1358,20 @@ const preflight = (more = [], rankFile = VF_RANK, scanFile = VF_SCAN) =>
   py(['preflight', '--rank', rankFile, '--scan', scanFile, ...more])
 const PRE = (more = []) => { pfRanked(); return preflight(['--tasks', PF.join(','), '--kept', 's', ...more]) }
 const outOf = (j) => j.out.map((o) => [o.slug, o.why, o.via ?? null])
+// A copy of a fixture vault whose notes take `lines` (appended as written), each answer in `answers` recorded through
+// the real `record`, and a copy of the scan pointing at it: preflight reads a decided One call's or Grill's note in the
+// scan's vault (p51-4).
+function recordedIn(name, src, scanFile, answers, lines = {}) {
+  const dir = path.join(S, 'recorded', name)
+  fs.cpSync(src, dir, { recursive: true })
+  for (const [slug, text] of Object.entries(lines)) fs.appendFileSync(path.join(dir, 'Work', 'Tasks', `${slug}.md`), text)
+  for (const [slug, question, answer, more = []] of answers) {
+    const w = py(['record', '--task', slug, '--question', `[[${slug}]] ${question}`, '--answer', answer, '--recommended', answer,
+      '--today', TODAY, '--vault', dir, ...more])
+    assert.equal(w.status, 0, w.stderr)
+  }
+  return keep(`scan-${name}.json`, JSON.stringify({ ...JSON.parse(fs.readFileSync(scanFile, 'utf8')), vault: dir }))
+}
 
 // ---- D17. slices: the Pre-flight's graded set -----------------------------------------------------------------------
 test('D17. slices --tasks keeps only the named gradeable tasks; --superseding makes a carried queued one gradeable', () => {
@@ -1450,8 +1464,9 @@ test('D18. preflight: Ready and kept tasks queue, One calls and Grills wait on t
   assert.deepEqual(empty.out, [{ slug: 'e', grade: null, why: 'ungraded', reason: 'status outside Active', note: 'Work/Tasks/e.md' }])
   assert.deepEqual(empty.asks.map((call) => call[0].question),
     [`[[e]] could not be graded (status outside Active): leave it out of this rollout, or queue it as it stands? ${INVITE}`])
-  // The answers in: c, g and u decided join the queue; o and its closure stay out; nothing is asked.
-  const decided = ok(PRE(['--decided', 'c,g', '--decided', 'u']))
+  // The answers in and recorded: c, g and u decided join the queue; o and its closure stay out; nothing is asked.
+  const answered = recordedIn('d18', VF, VF_SCAN, [['c', 'Which way?', 'left'], ['g', 'Schema?', 'flat'], ['g', 'Cache?', 'none']])
+  const decided = ok(preflight(['--tasks', PF.join(','), '--kept', 's', '--decided', 'c,g', '--decided', 'u'], VF_RANK, answered))
   assert.deepEqual(decided.queue, ['r', 'c', 'g', 'q', 's', 'u'])
   assert.deepEqual(outOf(decided), [['o', 'orient', null], ['d1', 'dependency', 'o'], ['d2', 'dependency', 'd1'],
     ['co', 'dependency', 'o'], ['uo', 'dependency', 'o']])
@@ -1494,13 +1509,59 @@ test('D19. preflight under orient-all: a One call the round never reached leaves
   const p = ok(PLAN())
   assert.ok(!p.schedule.some((e) => e.members.includes('act-call')), 'plan schedules no undecided member')
   assert.ok(p.undecided.some((x) => x.slug === 'act-call'))
-  // The fork passes its step 1's candidates as --tasks, and the line's decided slugs among them only.
-  const cut = ok(py(['preflight', '--rank', RANK_FILE, '--scan', SCAN_FILE, '--tasks', 'act-a,act-call', '--decided', 'act-call']))
+  // The fork passes its step 1's candidates as --tasks, and the line's decided slugs among them only (act-call's answer
+  // and its fork's ruling recorded, D19b).
+  const END = '\n## Notes\n\n- 2026-10-19T09:00:00Z orient end: fork for Lachy: Store choice\n'
+  const answered = recordedIn('d19', V, SCAN_FILE, [['act-call', 'Which store?', 'sqlite', ['--fork', 'Store choice']]], { 'act-call': END })
+  const cut = ok(py(['preflight', '--rank', RANK_FILE, '--scan', answered, '--tasks', 'act-a,act-call', '--decided', 'act-call']))
   assert.deepEqual(cut.queue, ['act-a', 'act-call'])
   for (const k of ['tasks', 'out']) assert.ok(!cut[k].some((x) => x.slug === 'lab-01'), k)
   assert.ok(!cut.queue.includes('lab-01'))
   refusal(py(['preflight', '--rank', RANK_FILE, '--scan', SCAN_FILE, '--tasks', 'act-a,act-call', '--decided', 'act-call,lab-01']),
     /--decided lab-01/)
+})
+
+// ---- D19b. a decided One call or Grill is queued only with its answers recorded (p51-4) -----------------------------
+// Watch ae344381 (chorus-rollout-2026-10-29): a One call was scheduled with no record of his answer in its note, and its
+// planner stopped on the question for 15 hours. Named --decided, a One call or Grill whose note lacks a decision's
+// `## Decisions` bullet, or a fork's `orient ruling:` line in `## Notes` after the latest end line naming it, is out as
+// `unrecorded` with that line, never asked, and its dependants leave through it.
+test('D19b. preflight leaves a decided One call or Grill out as unrecorded until its note records every answer', () => {
+  pfRanked()
+  ranked()
+  const END = '\n## Notes\n\n- 2026-10-19T09:00:00Z orient end: fork for Lachy: Store choice\n'
+  const pf = (scanFile) => ok(preflight(['--tasks', 'r,c,g', '--decided', 'c,g'], VF_RANK, scanFile))
+  const act = (scanFile) => ok(py(['preflight', '--rank', RANK_FILE, '--scan', scanFile, '--tasks', 'act-a,act-call,act-dep',
+    '--decided', 'act-call']))
+  const cases = [
+    // [name, run, the leavers [slug, why, via, reason]]
+    ['nothing recorded (the Watch)', () => pf(VF_SCAN), [['c', 'unrecorded', null, 'no recorded answer to: Which way?'],
+      ['g', 'unrecorded', null, 'no recorded answer to: Schema?']]],
+    ['a Grill half answered', () => pf(recordedIn('d19b-half', VF, VF_SCAN, [['c', 'Which way?', 'left'], ['g', 'Schema?', 'flat']])),
+      [['g', 'unrecorded', null, 'no recorded answer to: Cache?']]],
+    ['a bullet in a fence, or under another heading, is no record', () => pf(recordedIn('d19b-fence', VF, VF_SCAN, [], {
+      c: '\n```\n## Decisions (asked ahead 2026-10-19)\n\n- Which way? → left\n```\n',
+      g: '\n## Decided for you (2026-10-19)\n\n- Schema? → flat\n- Cache? → none\n' })),
+    [['c', 'unrecorded', null, 'no recorded answer to: Which way?'], ['g', 'unrecorded', null, 'no recorded answer to: Schema?']]],
+    ['a fork answered with no ruling line, its dependant out through it', () => act(recordedIn('d19b-fork', V, SCAN_FILE,
+      [['act-call', 'Which store?', 'sqlite']])), [['act-call', 'unrecorded', null, 'no `orient ruling:` line for its fork: Store choice'],
+      ['act-dep', 'dependency', 'act-call', null]]],
+    ['a ruling before a later end line that reopens the fork rules nothing (orient § 2 Open forks)', () => act(recordedIn(
+      'd19b-reopened', V, SCAN_FILE, [['act-call', 'Which store?', 'postgres']], { 'act-call': END +
+        '- 2026-10-19T10:00:00Z orient ruling: Store choice → sqlite\n- 2026-10-20T09:00:00Z orient end: fork for Lachy: Store choice\n' })),
+    [['act-call', 'unrecorded', null, 'no `orient ruling:` line for its fork: Store choice'], ['act-dep', 'dependency', 'act-call', null]]],
+    ['the fork ruled too', () => act(recordedIn('d19b-ruled', V, SCAN_FILE, [['act-call', 'Which store?', 'sqlite',
+      ['--fork', 'Store choice']]], { 'act-call': END })), []],
+    ['a note gone since the scan', () => act(keep('scan-d19b-gone.json', JSON.stringify({ ...JSON.parse(fs.readFileSync(SCAN_FILE, 'utf8')),
+      vault: path.join(S, 'no-vault') }))), [['act-call', 'unrecorded', null, 'its note cannot be read'],
+      ['act-dep', 'dependency', 'act-call', null]]],
+  ]
+  for (const [name, run, leavers] of cases) {
+    const j = run()
+    assert.deepEqual(j.out.map((o) => [o.slug, o.why, o.via ?? null, o.reason ?? null]), leavers, name)
+    assert.deepEqual([j.asks, j.index], [[], []], `${name}: an unrecorded task is never asked`)
+  }
+  assert.deepEqual(snap(VF), VF_BEFORE, 'the vault is untouched')
 })
 
 // ---- D20. record --by schedule and --superseding ---------------------------------------------------------------------

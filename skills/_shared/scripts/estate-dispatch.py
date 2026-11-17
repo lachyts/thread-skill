@@ -355,12 +355,20 @@ rank-stamp --rank R --plan P [--wrote NOTE]... [--at ISO] [--vault V] [--dry-run
   line once more; a second exit 1 is § 8's caveat); --dry-run writes nothing.
 
 preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...: schedule
-  § 1.5's split of its candidates (ADR 0047). It reads only the two files. --tasks is every candidate, deduplicated
+  § 1.5's split of its candidates (ADR 0047). It reads the two files and, for each One call or Grill named --decided,
+  its task note (the scan's `vault` joined to its row's `note`). --tasks is every candidate, deduplicated
   by ER.slug_key in first-seen order (a scan task is shown by its scan slug); --kept, --decided and --dep (each
   repeatable, --kept and --decided also comma-joined) must name candidates. Each candidate, in order:
   - kept (a carried task that has started): in, `kept`, never graded or asked;
   - graded Ready (the rank's tasks[]): in, `ready`;
-  - One call or Grill: in when decided (`decided`), else out (`undecided`);
+  - One call or Grill: in as `decided` when named --decided and its note records every answer; out as `undecided`
+    when not named; named but unrecorded (p51-4, Watch ae344381: a planner stops on his question mid-run), out as
+    `unrecorded`, never asked, its reason UNRECORDED_ANSWER naming the first of the rank's decisions with no
+    `- <question> → ` bullet under a `## Decisions (asked ahead <date>)` heading (the question folded, a leading link
+    to its own task cut, as record writes it), UNRECORDED_RULING naming a decision's fork that its `## Notes` does not
+    rule (orient § 2 Open forks, read as record reads it: the latest `orient end:` line in `## Notes` names the fork,
+    and a ` orient ruling: <fork> → ` line in `## Notes` comes after that end line; a ruling before a later end line
+    that names the fork again rules nothing), or UNRECORDED_NOTE when the note cannot be read;
   - Orient: out (`orient`, with its `home`), decided or not;
   - waiting (schedule § 3, ADR 0078 d7): a candidate not kept, not Orient and readable, one of whose dependencies (its
     scan `dependsOn`, then its `bodyDependsOn`, the body's *Depends on* lines and `## Depends on` paragraph) is no
@@ -380,7 +388,9 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   ER.slug_key among the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose
   dependency is out, or that waits as above, gives one warnings[] line naming it. First what leaves whatever Lachy
   answers (LEAVES): every candidate that depends on an Orient, unreadable or waiting one, directly or through others,
-  leaves as `dependency` (Ready, decided, undecided or ungraded alike), via its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a
+  leaves as `dependency` (Ready, decided, undecided or ungraded alike), via its first dependency in that closure. Only
+  then is a One call's or Grill's note read, for one still in as `decided`: unrecorded, it leaves as above (so one
+  already out through a LEAVES dependency keeps its `dependency` why, its note unread). Then a candidate still in leaves, to a fixpoint, when a
   dependency is out: `dependency`, via the first such dependency.
   The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
   so never an unreadable task nor one already out through an Orient or unreadable dependency, which leaves whatever the
@@ -452,6 +462,13 @@ STATUS_OUTSIDE = "status outside Active"  # an ungraded candidate's reason when 
 # candidates that nobody is building (schedule § 3, ADR 0078 d7), which would only block mid-run.
 LEAVES = ("orient", "unreadable", "waits")
 WAITS_UNREAD = "its note does not parse"  # a `waits` leaver's reason when its dependency is an unread note
+# An `unrecorded` leaver's reasons (p51-4, Watch ae344381): a One call or Grill named --decided whose note holds no
+# record of an answer, so its planner would stop on his question mid-run. The first names the decision with no
+# `## Decisions` bullet, the second a fork with no `orient ruling:` line in `## Notes` after the latest `orient end:`
+# line that names it (orient § 2 Open forks), the third a note preflight cannot read.
+UNRECORDED_ANSWER = "no recorded answer to: {question}"
+UNRECORDED_RULING = "no `orient ruling:` line for its fork: {fork}"
+UNRECORDED_NOTE = "its note cannot be read"
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
@@ -2421,8 +2438,9 @@ def decision_of(d):
 
 
 class Preflight:
-    """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank and the
-    scan only; ER is loaded for slug_key alone."""
+    """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank, the scan
+    and the note of each decided One call or Grill still in after the first closure step (unrecorded); ER is loaded
+    for slug_key alone."""
 
     def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
         self.ER, self.rank, self.scan = ER, rank, scan
@@ -2515,6 +2533,48 @@ class Preflight:
         row = self.scanned.get(k) or self.rows.get(k) or self.unread.get(k) or {}
         return row.get("note") if isinstance(row.get("note"), str) else None
 
+    def unrecorded(self, k):
+        """Why a One call or Grill named --decided holds no record of its answers, else None (p51-4). Each of the rank's
+        decisions needs its `## Decisions` bullet (record's DECISION_BULLET, under any date's DECISIONS_HEADING), and
+        one that carries a fork needs that fork ruled, as orient § 2 Open forks and record_core's `ruled` read it: the
+        latest `orient end:` line in `## Notes` (section_span, latest_end_forks) names the fork, and a
+        ` orient ruling: <fork> → ` line (RULING_LINE) in `## Notes` comes after it. A ruling before that end line, or
+        outside `## Notes`, rules nothing. The note is the scan's `vault` joined to its row's `note`; one that cannot
+        be read is unrecorded (UNRECORDED_NOTE), fail closed."""
+        rel, root = self.note_of(k), self.scan.get("vault")
+        try:
+            with open(os.path.join(os.path.expanduser(root), rel), encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except (OSError, TypeError, ValueError):  # TypeError: no vault or no note; ValueError: not UTF-8
+            return UNRECORDED_NOTE
+        asked = DECISIONS_HEADING.split("{date}")[0]  # `## Decisions (asked ahead `, any date
+        body, bullets, fence, heading = 0, [], False, ""
+        if lines and lines[0].strip() == "---":
+            body = next((i + 1 for i in range(1, len(lines)) if lines[i].strip() == "---"), len(lines))
+        for ln in lines[body:]:
+            if FENCE.match(ln):
+                fence = not fence
+                continue
+            if fence:
+                continue
+            if ln.startswith("## "):
+                heading = ln.strip()
+            elif heading.startswith(asked):
+                bullets.append(fold(ln))
+        notes = section_span(lines, body, NOTES_HEADING)
+        end_at, forks = latest_end_forks(lines, notes) if notes else (None, [])
+        name = os.path.basename(rel)[:-3]
+        for d in (x for x in self.rows[k].get("decisions") or [] if isinstance(x, dict)):
+            q = without_self_link(fold(d.get("question") if isinstance(d.get("question"), str) else ""), name,
+                                  self.ER.slug_key)
+            if not any(b.startswith("- %s → " % q) for b in bullets):
+                return UNRECORDED_ANSWER.format(question=q)
+            fork = fold(d.get("fork")) if isinstance(d.get("fork"), str) else ""
+            if fork and not (fork in forks and any(" orient ruling: %s → " % fork in ln
+                                                   for ln in lines[end_at + 1:notes[1]])):
+                return UNRECORDED_RULING.format(fork=fork)
+        return None
+
     def reason(self, k):
         """Why a candidate could not be graded: the rank's why, else `no grade` or `not in the scan`. A task whose own
         status is outside Active (its scan statusClass `hold`) is skipped by the ranker as `hold`, or as `in flight`
@@ -2559,7 +2619,7 @@ class Preflight:
                     e["project"] = project
             elif grade == "Ready":
                 e.update({"in": True, "why": "ready"})
-            elif grade in ("One call", "Grill"):
+            elif grade in ("One call", "Grill"):  # a decided one's note is read after the first closure step, below
                 e.update({"in": k in self.decided, "why": "decided" if k in self.decided else "undecided"})
             else:
                 reason = self.reason(k)
@@ -2573,6 +2633,14 @@ class Preflight:
         for k in self.order:
             if k in fixed and entry[k]["why"] not in LEAVES:
                 entry[k].update({"in": False, "why": "dependency", "via": self.via(k, fixed)})
+        # A One call or Grill named decided whose note records no answer leaves as `unrecorded` (p51-4): its planner
+        # would stop on his question mid-run. Read only once the first step has run, so a task that leaves whatever
+        # he answers keeps its `dependency` why, and its note is never read.
+        for k in self.order:
+            if entry[k]["why"] == "decided":
+                gap = self.unrecorded(k)
+                if gap:
+                    entry[k].update({"in": False, "why": "unrecorded", "reason": gap})
         # Then the rest: a task that is in leaves when a dependency is out (one undecided or ungraded included).
         out = self.closure(k for k in self.order if not entry[k]["in"])
         for k in self.order:
