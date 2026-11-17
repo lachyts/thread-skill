@@ -59,19 +59,22 @@ fails closed: anything it cannot read reads as a reader. A glob holds only when 
   (TOOL_CONFIG_RE: .prettierrc*, prettier.config.*, .markdownlint*, .vale.ini, .remarkrc*, cspell.json, .cspell*,
   .mdformat.toml, lychee.toml, .lycheeignore, .pre-commit-config.yaml/.yml). A lock file counts: one named tool anywhere
   fails every glob, but for (xi). The first match is the reader, at its line, skipping (xi-a) a match that is a quoted
-  path segment directly after a `hooks` segment and followed by a quote or `/` (`.git/hooks/pre-commit"`,
-  `"hooks" / "pre-commit"`, `"hooks", "pre-commit"`): git's hook slot, never the tool. (xi-b) A nested package's hit is
-  a reader only for a glob G with `_covers(<its directory's segments>, G)` when its package.json (1) parses, (2) names
-  no tool (TOOL_RE, TOOL_CMD_RE) once its dependency keys (dependencies, devDependencies, peerDependencies,
-  optionalDependencies, bundledDependencies, bundleDependencies) are removed, (3) holds no climb marker in any `scripts`
-  value (a `..` segment; a word starting `/` or `~`; any `$` or backquote; `git` or `INIT_CWD` bounded by characters
-  outside [A-Za-z0-9]; an option, a whole word alone or before `=`: --prefix, --cwd, --dir, --root, -C, -w,
-  --workspace, --workspaces, -ws, --include-workspace-root), and (4) names no git-root wrapper in any key or value,
-  bounded the same way (GIT_ROOT_WRAPPERS: pretty-quick, lint-staged, nano-staged, precise-commits, git-format-staged,
-  husky, lefthook, simple-git-hooks, yorkie). Its lock file (package-lock.json, npm-shrinkwrap.json, yarn.lock,
-  pnpm-lock.yaml, bun.lock) is scoped exactly when its tracked sibling package.json is. Any other file, the root
-  package, a file whose matches include `pre-commit` (it installs git's hook at the root) and the tool configs stay
-  unscoped.
+  path segment directly after a `hooks` segment, its closing quote right after it (`.git/hooks/pre-commit"`,
+  `"hooks" / "pre-commit"`, `"hooks", "pre-commit"`): git's hook slot, never the tool. A match followed by `/` is a
+  directory (`tools/hooks/prettier/run.sh`) and stays a reader. (xi-b) A nested package's hit is a reader only for a
+  glob G with `_covers(<its directory's segments>, G)` when its package.json (1) parses, (2) names no tool (TOOL_RE,
+  TOOL_CMD_RE) once its dependency keys (dependencies, devDependencies, peerDependencies, optionalDependencies,
+  bundledDependencies, bundleDependencies) are removed, (3) holds no climb marker in any `scripts` value (a `..`
+  segment; a word starting `/` or `~`; any `$` or backquote; `git` or `INIT_CWD` bounded by characters outside
+  [A-Za-z0-9]; an option, a whole word alone or before `=`: --prefix, --cwd, --dir, --root, -C, -w, --workspace,
+  --workspaces, -ws, --include-workspace-root), and (4) no scanned file (binaries included) or step names a git-root
+  wrapper anywhere, bounded the same way (GIT_ROOT_WRAPPERS: pretty-quick, lint-staged, nano-staged, precise-commits,
+  git-format-staged, husky, lefthook, simple-git-hooks, yorkie): a wrapper run from the package's own scripts, the
+  verifier (`cd ext && npx pretty-quick --check`), a root Makefile, a CI workflow or a hook formats changed files from
+  the git root, so one name leaves every nested package unscoped. Its lock file (package-lock.json,
+  npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml, bun.lock) is scoped exactly when its tracked sibling package.json is.
+  Any other file, the root package, a file whose matches include `pre-commit` (it installs git's hook at the root) and
+  the tool configs stay unscoped.
 - link (every glob): a literal `](` in a scanned file or step (code that parses markdown links).
 - walk: a walk site whose root is not provably outside the repo and that covers the glob (below), in a file that is
   not an unreached out-of-reach candidate (below, narrowing x).
@@ -185,8 +188,10 @@ candidate's call sites still bind parameters.
   scripts). A tracked symlink is never a candidate.
 - Reachers: every step, every non-candidate scanned file (binaries included), every tracked symlink (its target text,
   and its resolved target by the symlink rule), and every candidate once it is reached. The rules run to a fixpoint,
-  in this order: the off switch, R1, the symlink rule, R2-R4, R5, R6; each round stops once no candidate is left. The
-  deadline is checked per file, per walk and per 1000 words.
+  in this order: the off switch, R1, the symlink rule, R2-R4, R5, R6. Only a candidate holding a walk with counted
+  origins can add a reader, so with none nothing is read, and each round stops once every such candidate is reached
+  (the others still reach on: a reached candidate with no walk is a reacher like any other). The deadline is checked
+  per file, per walk and per 1000 words.
 - A reacher's whole text, comments and docstrings included, is read three ways (a symlink's text is its target, read
   by R2, R4 and R6). Tokens: its [A-Za-z0-9_.-] runs, lowercased (macOS is case-insensitive), plus each run split
   again on `.`. Words: maximal runs of characters other than whitespace and these 14: `'` `"` backquote `,` `;` `(`
@@ -232,11 +237,13 @@ candidate's call sites still bind parameters.
 - R5, listings (the walk rule's own forms): a walk in a reacher reaches a candidate when its counted origins (the
   readers' _classify) and name filter cover the candidate's path, read as a literal-file glob (_covers). A candidate
   path holding `*?[` is always covered; TMP, ELSEWHERE and HOME-open roots reach nothing.
-- R6, glob text, for globs the walk rule does not read as listings: a word holding `*`, `?` or `[`, normalised. With
-  no `/` it reaches every candidate whose basename it matches; with one, a candidate whose path, or a suffix of it
-  starting at a segment boundary, it matches; left empty, nothing. Matching is case-insensitive fnmatch whose `*`
-  crosses `/`; a bracket expression that does not close or cannot compile reads as `?` (R6 never calls glob_match).
-  It over-reaches on purpose (a lone `*`, `xs[0]`, a regex class).
+- R6, glob text, for globs the walk rule does not read as listings: a word holding `*`, `?` or `[`, or one whose
+  normalised form gains a `*` from a variable segment (`"$ROOT/spike/$PROBE.sh"` reads `spike/*`, and the JS template
+  `${ROOT}/spike/${P}.mjs` holds the word `/spike/$`, read `spike/*` too), normalised. With no `/` it reaches every
+  candidate whose basename it matches; with one, a candidate whose path, or a suffix of it starting at a segment
+  boundary, it matches; left empty, nothing. Matching is case-insensitive fnmatch whose `*` crosses `/`; a bracket
+  expression that does not close or cannot compile reads as `?` (R6 never calls glob_match). It over-reaches on
+  purpose (a lone `*`, `xs[0]`, a regex class, any `$x/$y`).
 - The symlink rule (resolved, not read as text): a tracked symlink's target, resolved as the symlink reader resolves
   it (a relative target against the link's directory, an absolute one through the places), reaches the candidate it
   names, or every candidate in the directory it names and below; every candidate when it resolves to the root, to a
@@ -270,13 +277,14 @@ form (the (v) forms) that has no glob text; a runner's collection widened by a k
 the off switch's lists; and an out-of-tree executor (a step that runs a script outside the tree, or an installed
 runner or plugin whose built-in collection rules execute in-tree candidates by rules the tree's text never states).
 This list and R1-R6 with the symlink rule are the narrowing's whole bound (p47-13): a form on neither list is a miss
-to add here, never an open rule; (xi) the tool rule's two narrowings (above): a TOOLS name used as a file name
-directly under a `hooks` directory is missed, and so is a git-root wrapper not in GIT_ROOT_WRAPPERS run by a nested
-package's script with no climb marker. The ruling's item 4 reads "a quoted path segment never a tool"; it is taken
-only for hooks, since a quoted segment elsewhere can name the tool's own executable (`ROOT / "node_modules" / ".bin" /
-"prettier"`), while after `hooks/`, `pre-commit` names git's hook slot. Ruled out on 2026-11-12 (Lachy, p47-14): (2a)
-bare-name call-site binding, (2d) names-only listing, (3) the link rule's data-file and string-literal exemptions, (5)
-names outside comments: each guesses what a name or a link refers to. Nothing else is exempt.
+to add here, never an open rule; (xi) the tool rule's two narrowings (above): a TOOLS name used as a quoted file name
+directly under a `hooks` directory is missed, and so is a git-root wrapper not in GIT_ROOT_WRAPPERS that runs a nested
+package's tool from the git root, whether a script with no climb marker or anything else in the tree runs it. The
+ruling's item 4 reads "a quoted path segment never a tool"; it is taken only for hooks, since a quoted segment
+elsewhere can name the tool's own executable (`ROOT / "node_modules" / ".bin" / "prettier"`), while after `hooks/`,
+`pre-commit` names git's hook slot. Ruled out on 2026-11-12 (Lachy, p47-14): (2a) bare-name call-site binding, (2d)
+names-only listing, (3) the link rule's data-file and string-literal exemptions, (5) names outside comments: each
+guesses what a name or a link refers to. Nothing else is exempt.
 
 CLI. JSON on stdout for prove and propose (one line), human lines for record and drop.
 - prove: {repo, tree, globs: {G: {held, readers (at most 50), readersTotal}}}; exit 0 with the verdict in the JSON,
@@ -368,9 +376,10 @@ TOOL_CONFIG_RE = re.compile(r"(?:\.prettierrc.*|prettier\.config\..*|\.markdownl
                             r"|cspell\.json|\.cspell.*|\.mdformat\.toml|lychee\.toml|\.lycheeignore"
                             r"|\.pre-commit-config\.ya?ml)\Z")
 LINK = "]("
-# narrowing xi-a: a TOOLS match that is a quoted path segment directly after a `hooks` segment (git's hook slot)
+# narrowing xi-a: a TOOLS match that is a quoted path segment directly after a `hooks` segment (git's hook slot), its
+# quote closing right after the name: a name followed by `/` is a directory, which can hold the tool's own runner
 HOOK_BEFORE_RE = re.compile(r"(?:(?:^|[/'\"`\s])hooks/|['\"]hooks['\"]\s*[/,]\s*['\"])\Z")
-HOOK_AFTER = "'\"`/"
+HOOK_AFTER = "'\"`"
 # narrowing xi-b: a nested package's tools scoped to its own subtree
 DEP_KEYS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "bundledDependencies",
             "bundleDependencies")
@@ -3476,7 +3485,7 @@ def _shell_walks(f, items, line, ctx, step, globs=None, depth=0):
 
 def _tool_matches(text):
     """[(pos, name)]: the tool rule's matches in `text`, in order, less a hook path (narrowing xi-a: a quoted path
-    segment directly after a `hooks` segment, followed by a quote or `/`)."""
+    segment directly after a `hooks` segment, followed by its closing quote)."""
     out = []
     for m in TOOL_RE.finditer(text):
         e = m.end()
@@ -3505,9 +3514,9 @@ def _climbs(script):
 
 def _tool_scope(f, by_path):
     """Narrowing xi-b: a nested package's directory segments, when its tool hits count only under it; None (unscoped)
-    otherwise. A nested package.json is scoped when (1) it parses, (2) its text less the dependency keys names no tool,
-    (3) no `scripts` value climbs, and (4) nothing in it names a git-root wrapper; a lock file when its tracked sibling
-    package.json is."""
+    otherwise. A nested package.json is scoped when (1) it parses, (2) its text less the dependency keys names no tool
+    and (3) no `scripts` value climbs; a lock file when its tracked sibling package.json is. Condition (4), no git-root
+    wrapper named anywhere in the tree, is the caller's: one name leaves every nested package unscoped."""
     if f is None or f.step or "/" not in f.path:
         return None
     d, base = posixpath.split(f.path)
@@ -3527,9 +3536,22 @@ def _tool_scope(f, by_path):
     scripts = data.get("scripts", {})
     if not isinstance(scripts, dict) or any(not isinstance(v, str) or _climbs(v) for v in scripts.values()):
         return None
-    if WRAPPER_RE.search(f.text):
-        return None
     return tuple(d.split("/"))
+
+
+def _wrapper_named(files, deadline):
+    """Narrowing xi-b's condition (4): a scanned file (binaries included) or step names a git-root wrapper. A wrapper
+    run from anywhere (the verifier's `cd ext && npx pretty-quick --check`, a root Makefile, a CI workflow, a .husky
+    hook) formats changed files from the git root, so one name leaves every nested package unscoped. A text whose
+    lowercase holds no name is skipped unread by WRAPPER_RE: only a non-ASCII case-fold lookalike (`huſky`), which no
+    shell runs as the wrapper, differs."""
+    for f in files:
+        if _now() > deadline:
+            raise _Budget()
+        low = f.text.lower()
+        if any(w in low for w in GIT_ROOT_WRAPPERS) and WRAPPER_RE.search(f.text):
+            return True
+    return False
 
 
 # ---- out of reach (narrowing x) --------------------------------------------------------------------------------------
@@ -3544,6 +3566,7 @@ OFF_KEYS = frozenset(k.lower() for k in ("python_files", "testMatch", "testRegex
                                          "pytest_pycollect_makemodule"))
 OFF_OPTS = frozenset(k.lower() for k in ("--spec", "--roots", "--testMatch", "--testRegex", "--extension", "--nbval",
                                          "--nbval-lax", "--nbmake"))
+_OFF_WORDS = tuple(sorted(OFF_KEYS | OFF_OPTS))
 RUNNER_KEYS = frozenset(("include", "spec", "files", "roots", "extension", "spec_dir", "spec_files"))
 PKG_RUNNERS = ("jest", "ava", "mocha", "vitest", "tap")
 _TOK_RE = re.compile(r"[a-z0-9_.-]+")
@@ -3654,12 +3677,18 @@ def _glob_rx(pat):
     return "".join(out)
 
 
-def _off_switch(f, toks):
-    """The off switch: f (a scanned file, candidates included, or a step) sets a collection selector."""
-    if toks & OFF_KEYS or toks & OFF_OPTS:
-        return True
+def _off_switch(f):
+    """The off switch: f (a scanned file, candidates included, or a step) sets a collection selector. A token is a
+    substring of the lowercased text, so a text holding none of the keys and options as one is never tokenised (most
+    of a tree: the off switch reads every file before any rule runs)."""
+    low = f.text.lower()
+    toks = None
+    if any(k in low for k in _OFF_WORDS):
+        toks = _tokens(f.text)
+        if toks & OFF_KEYS or toks & OFF_OPTS:
+            return True
     base = "" if f.step else posixpath.basename(f.path)
-    if base and RUNNER_CONFIGS.match(base) and toks & RUNNER_KEYS:
+    if base and RUNNER_CONFIGS.match(base) and (toks if toks is not None else _tokens(f.text)) & RUNNER_KEYS:
         return True
     if base == "package.json":
         try:
@@ -3670,8 +3699,8 @@ def _off_switch(f, toks):
             for k in PKG_RUNNERS:
                 if k in data and _tokens(json.dumps(data[k])) & (RUNNER_KEYS | {"testmatch", "testregex"}):
                     return True
-    if "discover" in toks:
-        for line in f.text.lower().split("\n"):
+    if "discover" in low:   # a line _DISCOVER_RE matches holds `discover` as a token
+        for line in low.split("\n"):
             if _DISCOVER_RE.search(line) and _PATTERN_OPT_RE.search(line):
                 return True
     return False
@@ -3694,10 +3723,14 @@ def _link_target(link, target, ix):
 
 
 def _reach(files, t, walks_counted, ix):
-    """Narrowing x: the set of out-of-reach candidates something reaches (the header's Out of reach). A candidate's
-    walks are readers only once it is in this set; its names, links, tools and symlinks are read either way."""
+    """Narrowing x: a set of out-of-reach candidates something reaches (the header's Out of reach). A candidate's
+    walks are readers only once it is in this set; its names, links, tools and symlinks are read either way. Only a
+    candidate holding a walk with counted origins can add a reader, so the set holds every such candidate that is
+    reached: with none it is empty and nothing is read, and the fixpoint stops once all of them are reached (other
+    candidates reached on the way are in it too, and an unreached one that holds no such walk may be missing)."""
     cands = sorted(f.path for f in files if not f.step and _out_of_reach(f.path))
-    if not cands:
+    want = {w.file.path for w, counted in walks_counted if counted and not w.file.step and _out_of_reach(w.file.path)}
+    if not want:
         return set()
     left = set(cands)
     every = set(cands)
@@ -3712,7 +3745,7 @@ def _reach(files, t, walks_counted, ix):
     # the off switch: any scanned file (candidates included) or step that sets a collection selector
     for f in files:
         ix.tick()
-        if _off_switch(f, toks(f)):
+        if _off_switch(f):
             return every
 
     subtree = {}   # a candidate directory (lowercased) -> the candidates in it and below
@@ -3742,6 +3775,7 @@ def _reach(files, t, walks_counted, ix):
             if q not in left:
                 continue
             left.discard(q)
+            want.discard(q)
             fresh.append(q)
             d, base = posixpath.split(q)
             low = q.lower()
@@ -3784,12 +3818,12 @@ def _reach(files, t, walks_counted, ix):
     reachers = [f for f in files if f.step or f.path not in every] + [by_path[p] for p in fresh]
     texts = [(f.text, toks(f)) for f in reachers] + [(x, _tokens(x)) for x in link_texts]
     del fresh[:]
-    while left and texts:
+    while want and texts:
         new_globs = []
         # R2 and R4: tokens and words
         for text, tk in texts:
             ix.tick()
-            if not left:
+            if not want:
                 break
             for k in tk:
                 for p in names.get(k, ()):
@@ -3813,20 +3847,25 @@ def _reach(files, t, walks_counted, ix):
                         if nw == top or nw.endswith("/" + top):
                             for p in tops.get(top, ()):
                                 mark(p)
-                if ("*" in w or "?" in w or "[" in w) and w not in globs_seen:
+                # R6's words: glob text, or a word whose normalised form gains a `*` from a variable segment
+                # (`$root/spike/$probe.sh` reads `spike/*`)
+                if w not in globs_seen and ("*" in w or "?" in w or "[" in w
+                                            or (any(c in w for c in _VAR_CHARS) and "*" in _norm_word(w))):
                     globs_seen.add(w)
                     new_globs.append(w)
         # R5: the walk rule's own listings, with the same counted origins as the readers
         for f in reachers:
             for w, counted in walks_of.get(f.fid, ()):
                 ix.tick()
+                if not want:
+                    break
                 pending = [x for x in cands if x in left]
                 for label, segs, unk in counted:
                     for p in pending:
                         if _has_glob(p) or _covers(segs, unk, w.filt, p):
                             mark(p)
         # R6: glob text
-        if left and new_globs:
+        if want and new_globs:
             flat, deep = set(), set()
             for n, w in enumerate(new_globs):
                 if n % 1000 == 999:
@@ -3837,7 +3876,7 @@ def _reach(files, t, walks_counted, ix):
             for pats, slashed in ((sorted(flat), False), (sorted(deep), True)):
                 for i in range(0, len(pats), _RX_CHUNK):
                     ix.tick()
-                    if not left:
+                    if not want:
                         break
                     rx = re.compile("(?:" + "|".join(pats[i:i + _RX_CHUNK]) + ")", re.S)
                     for p in [x for x in cands if x in left]:
@@ -3972,6 +4011,7 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
     name_res = {g: re.compile(r"(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])" % "|".join(re.escape(x) for x in tokens(g)),
                               re.I) for g in globs}
     by_path = {f.path: f for f in files if not f.step}
+    wrapped = []   # narrowing xi-b's condition (4), read once, and only when a nested package would be scoped
     for f in files:
         if _now() > deadline:
             raise _Budget()
@@ -3987,6 +4027,11 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
             ln = _line_of(f.text, hits[0][0])
             # narrowing xi-b: a nested package's hit counts only under it (a pre-commit match never scopes)
             scope = None if any(n == "pre-commit" for _, n in hits) else _tool_scope(f, by_path)
+            if scope is not None:
+                if not wrapped:
+                    wrapped.append(_wrapper_named(files, deadline))
+                if wrapped[0]:
+                    scope = None
             for g in globs:
                 if scope is None or _covers(scope, False, None, g):
                     readers[g].append(_reader(g, f.path, "tool", ln, f.lines[ln - 1].strip()))
