@@ -239,7 +239,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 - **Off the Stage** nothing is stamped there, parallel or serial: the parallel stamps wait like Not yet, and each
   serial note's Leg 1 is a paste-ready prompt in the record (`leg.py status`'s `restart.launch`), never listed, its
   one start path.
-- Every result is a Rollouts started row. Never `/thread:repair`, run or relayed (ADR 0071).
+- Every result is a Rollouts started row. Never `/thread:repair`, run or relayed: the mode needs nobody present, and
+  repair asks decisions only Lachy can make (repair § Don'ts), so a refusal goes in the record with its command
+  instead (ADR 0071).
 
 ## B9. The questions, last
 
@@ -317,7 +319,8 @@ no `create_thread` and no write-back.
 ## Don'ts
 
 - **Never stamp a note beside a hold, or a serial note off the Stage**, and never run or relay `/thread:repair`: a held
-  queue starts on Lachy's word, and a serial note's one start path is the Stage (B8; ADR 0071).
+  queue starts on Lachy's word, off the Stage a serial note's one start path is its paste-ready Leg 1 prompt (B8),
+  and repair asks decisions only Lachy can make, while this mode needs nobody present (repair § Don'ts; ADR 0071).
 - **Never reopen, schedule or obsolete a held park.** He parked it, and a strategy deferral is his to lift (B3).
 - **Never supersede a prior that answer 6 stops on.** It still holds: he paused, signed off, launched or approved it
   behind a PR, or it carries a `hold_until` or an `on_merge:` (ADR 0071).

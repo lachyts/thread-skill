@@ -1052,7 +1052,8 @@ open keeps the task open.
 - Don't compute, round or restate a number the script did not print, and don't propose a Tuning score.py did not
   emit: score.py holds the one copy of every rule, so a number made by hand is one nothing checks.
 - Don't run tune.py again once it has written this Reflection's line, or before Lachy has answered (or ended the
-  Reflection): the run that wrote its line is the Reflection's one run (step 7). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
+  Reflection): the run that wrote its line is the Reflection's one run (step 7), and a run before his answer would
+  write that one line without his pick, which is his alone (step 6). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
   `--record-only` (step 7), and never ends the Reflection without a line.
 - By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
   through `tune.py --auto` (ADR 0037 d5), never a rule.

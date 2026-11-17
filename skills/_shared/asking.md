@@ -13,7 +13,7 @@ Label each question before it is asked:
 | *yours* | intent, how important it is, how robust it must be, who it is for, how it feels, his taste or lived use, which thing he meant, and an authorisation an ADR keeps as his (ADR 0008's sign-offs, ADR 0011's vault tasks) | Ask it, in the Framing (§ 3). |
 | *priorities* | a call his stated priorities, or the project's `## Priorities` card, already answer | Decide it and list it (§ 2). |
 | *technical* | a call the code, the data, the ADRs or research can settle | Research it, decide it and list it (§ 2). |
-| *gate* | a process step: "next move?", "archive?", a "write it?" he already approved, confirming a queue he approved, a review STOP, "shall I carry on?" | Never ask: design it out, or decide and say so in one line, since a process step spends his attention on a call that is not his to make. |
+| *gate* | a process step: "next move?", "archive?", a "write it?" he already approved, confirming a queue he approved, a review STOP, "shall I carry on?" | Never ask: design it out, or decide and say so in one line, since a process step spends his attention on a call that is not his to make. A step he has said he steers is *yours* (the steering exception below). |
 
 - A confirm of content he owns but has not seen (a roadmap, a draft in his voice) is *yours*.
 - The steering exception (Chorus ADR 0110 d3): a detail he has said he steers is *yours*, whatever its kind.
