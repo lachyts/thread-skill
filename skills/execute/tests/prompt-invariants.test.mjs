@@ -401,6 +401,13 @@ const pjPrompt = T.planJudgePrompt(taskI, 'PLAN', aI)
 ok(pjPrompt.includes('Gated inputs') && /automatic "changes"/.test(pjPrompt), 'planJudgePrompt: missing Gated inputs section is an automatic changes')
 ok(plPrompt.includes('BULLETS ONLY'), 'plannerPrompt: gated-inputs section forbids non-bullet prose')
 ok(/non-bullet prose/.test(pjPrompt), 'planJudgePrompt: prose in the gated-inputs section is an automatic changes')
+// p47-13: an acceptance that asks to cover every form of an open set can never close in review: the judge rejects it,
+// with its reason, and asks for a bounded one, in its checklist, its Decide line and its verdict's feedback field.
+ok(/cover EVERY form of\s+an open set/.test(pjPrompt) && /automatic "changes" whose bullet starts "Unbounded acceptance:"/.test(pjPrompt) &&
+  /asks for a bounded acceptance: an allowlist .* or a named,\s+finite set/.test(pjPrompt) && /An unbounded acceptance is never a nitpick: it is always "changes"/.test(pjPrompt),
+  'planJudgePrompt (p47-13): an unbounded acceptance is a changes led by "Unbounded acceptance:", asking for an allowlist or a named set')
+ok(/starts "Unbounded acceptance:", names the open set and asks for a bounded acceptance/.test(loadEngine(['PLAN_JUDGE']).PLAN_JUDGE.properties.feedback.description),
+  'PLAN_JUDGE (p47-13): the verdict\'s feedback field carries the Unbounded acceptance reason')
 ok(/bullets only/i.test(prvPrompt), 'planReviserPrompt: revision keeps the bullets-only rule')
 ok(pBottom.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
 ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, ST_CLIMBED, '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
