@@ -18,8 +18,9 @@
 //       § Each decision's `owner` keeps `gate`, a credential, an irreversible step and any sign-off off the ruled kinds
 //       (ADR 0008), spend alone `priorities` (Chorus ADR 0108 d4), with `goal` and `stakes`, and a fork the code or
 //       research settles `technical` whatever the confidence (ADR 0061); § The grade makes a decision he could answer
-//       only with the project's design in view Orient, never a One call, and a task whose live check needs a tool no
-//       workflow agent holds (no native child-agent tool, no question tool) never Ready (p51-4, Watch b6c4c33c);
+//       only with the project's design in view Orient, never a One call, and a `parallel` or `serial` task whose live
+//       check needs a child agent or a question its runner lacks (a workflow agent holds neither, a Leg neither by
+//       rule) never Ready, a `session` task never raised by it (p51-4, Watch b6c4c33c);
 //       § What the agent reads cites CONTEXT.md
 //       **Thread home** with all three homes (the repo, the ~/Projects folder, _shared/threads) and open's
 //       § Repo-thread lookup, so a project with no code repo still has its thread read.
@@ -165,7 +166,10 @@ function check(files, consts) {
   need('c6', '§ The grade', grade, ['grill-fit.md', 'step 2(a)', 'step 2(b)', 'orient § 2 Open forks', '*His*', '*Ruled now*',
     "*The session's*", '`owner`', "only with the project's design in view (its ADRs, CONTEXT.md, its thread) makes the task Orient, never a One call",
     "**The live check's tools.**", 'no native child-agent tool', 'no question tool',
-    'needs a tool the lead holds and a workflow agent does not is never Ready', 'a decision of his (owner `yours`'])
+    "it starts no subagent but each code-writing task's clean-room review (ADR 0040), and never calls the question tool (legs.md § Needs you)",
+    'A `session` task runs in his own session, which holds both, so this rule never raises it',
+    'A `parallel` or `serial` task whose check needs a child agent or a question, which the lead holds and its runner does not, is never Ready',
+    'a decision of his (owner `yours`'])
   for (const own of ['**Resolvable**', 'bake a gate line', 'List the forks']) {
     if (grade.includes(own)) flag('c6', `§ The grade restates grill-fit.md ("${own}")`)
   }
@@ -242,7 +246,7 @@ test('control c5: the crowned: date reading, or the ADR ruling gone, fails c5 al
   only(swap(FILES, ADR, 'How the slate ranks', 'How it ranks'), CONSTS, ['c5'], 'c5 adr')
 })
 
-test('control c6: a dropped grill-fit citation, a thread home the reading list drops, a release ruled, `gate` an owner, a technical call kept by confidence, a design-in-view call left a One call, or a live check no workflow agent can run left Ready, fails c6 alone', () => {
+test('control c6: a dropped grill-fit citation, a thread home the reading list drops, a release ruled, `gate` an owner, a technical call kept by confidence, a design-in-view call left a One call, a live check its runner cannot run left Ready, or that rule unscoped from a session task, fails c6 alone', () => {
   only(swap(FILES, DOC, 'step 2(b)', 'its second half'), CONSTS, ['c6'], 'c6')
   only(swap(FILES, DOC, 'any sign-off (ADR 0008) is `yours`', 'a release (ADR 0008) is `yours`'), CONSTS, ['c6'], 'c6 sign-off')
   only(swap(FILES, DOC, "`gate` is never a task decision's owner: a process gate is no fork in the task's work, so a grade's\n  `gate` warns and reads as `yours`. ", ''),
@@ -251,8 +255,9 @@ test('control c6: a dropped grill-fit citation, a thread home the reading list d
   only(swap(FILES, DOC, '`technical` whatever the confidence', '`technical` at high confidence'), CONSTS, ['c6'], 'c6 technical')
   only(swap(FILES, DOC, "design in view (its ADRs, CONTEXT.md, its thread) makes the task Orient", 'design in view is a One call'),
     CONSTS, ['c6'], 'c6 design in view')
-  only(swap(FILES, DOC, 'and a workflow agent does not is never Ready', 'and a workflow agent does not may still be Ready'),
-    CONSTS, ['c6'], 'c6 live-check tools')
+  only(swap(FILES, DOC, 'does not, is never Ready', 'does not, may still be Ready'), CONSTS, ['c6'], 'c6 live-check tools')
+  only(swap(FILES, DOC, 'A `session` task runs in his own session, which holds both, so this rule never raises it. ', ''),
+    CONSTS, ['c6'], 'c6 live-check scope')
 })
 
 test('control c7: CONTEXT.md without **Ranked slate** fails c7 alone', () => {

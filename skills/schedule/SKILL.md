@@ -439,8 +439,9 @@ the round, and the rest stay undecided.
 candidate set from step 2 on.
 - A task in `out[]` that is not carried leaves now: no `rollout:` stamp, no `## Queue` row, no `## File-sets` line.
 - A task out as `unrecorded` (p51-4) was named decided, but its note holds no `## Decisions` bullet for one of its
-  decisions, or no `orient ruling:` line for a decision's fork (its `reason` names which): it leaves the same way,
-  never queued on an answer nobody wrote down, since its planner would stop on the question mid-run.
+  decisions, or no `orient ruling:` line in its `## Notes` after the latest `orient end:` line that names a
+  decision's fork (orient § 2 Open forks; its `reason` names which): it leaves the same way, never queued on an
+  answer nobody wrote down, since its planner would stop on the question mid-run.
 - A task out as `waits` (§ 3's hold: a dependency outside the candidates that nobody is building) leaves the same way,
   and so does each dependant out through it; step 7's cross-project waits write both on this note (with an empty
   queue there is none: **An empty queue.** below says where they go).

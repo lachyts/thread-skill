@@ -1506,8 +1506,8 @@ test('D19. preflight under orient-all: a One call the round never reached leaves
 // ---- D19b. a decided One call or Grill is queued only with its answers recorded (p51-4) -----------------------------
 // Watch ae344381 (chorus-rollout-2026-10-29): a One call was scheduled with no record of his answer in its note, and its
 // planner stopped on the question for 15 hours. Named --decided, a One call or Grill whose note lacks a decision's
-// `## Decisions` bullet, or a fork's `orient ruling:` line, is out as `unrecorded` with that line, never asked, and its
-// dependants leave through it.
+// `## Decisions` bullet, or a fork's `orient ruling:` line in `## Notes` after the latest end line naming it, is out as
+// `unrecorded` with that line, never asked, and its dependants leave through it.
 test('D19b. preflight leaves a decided One call or Grill out as unrecorded until its note records every answer', () => {
   pfRanked()
   ranked()
@@ -1528,6 +1528,10 @@ test('D19b. preflight leaves a decided One call or Grill out as unrecorded until
     ['a fork answered with no ruling line, its dependant out through it', () => act(recordedIn('d19b-fork', V, SCAN_FILE,
       [['act-call', 'Which store?', 'sqlite']])), [['act-call', 'unrecorded', null, 'no `orient ruling:` line for its fork: Store choice'],
       ['act-dep', 'dependency', 'act-call', null]]],
+    ['a ruling before a later end line that reopens the fork rules nothing (orient § 2 Open forks)', () => act(recordedIn(
+      'd19b-reopened', V, SCAN_FILE, [['act-call', 'Which store?', 'postgres']], { 'act-call': END +
+        '- 2026-10-19T10:00:00Z orient ruling: Store choice → sqlite\n- 2026-10-20T09:00:00Z orient end: fork for Lachy: Store choice\n' })),
+    [['act-call', 'unrecorded', null, 'no `orient ruling:` line for its fork: Store choice'], ['act-dep', 'dependency', 'act-call', null]]],
     ['the fork ruled too', () => act(recordedIn('d19b-ruled', V, SCAN_FILE, [['act-call', 'Which store?', 'sqlite',
       ['--fork', 'Store choice']]], { 'act-call': END })), []],
     ['a note gone since the scan', () => act(keep('scan-d19b-gone.json', JSON.stringify({ ...JSON.parse(fs.readFileSync(SCAN_FILE, 'utf8')),

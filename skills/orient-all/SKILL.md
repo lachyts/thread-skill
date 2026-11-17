@@ -246,8 +246,9 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        step 1 candidates, and its `--decided` the prompt line's decided slugs among them. A member not
        decided (a One call or Grill the round never reached, or an Orient one) is left out with its Dependent closure,
        unstamped, and returned. So is a member named decided whose note holds no record of an answer (`unrecorded`,
-       p51-4): a One call or Grill is scheduled only with each decision's `## Decisions` bullet, and a fork's
-       `orient ruling:` line, in its note, so no planner stops on his question mid-run. Its queue's ruled calls are
+       p51-4): a One call or Grill is scheduled only with each decision's `## Decisions` bullet in its note, and a
+       fork's `orient ruling:` line in its `## Notes` after the latest `orient end:` line that names the fork
+       (orient § 2 Open forks), so no planner stops on his question mid-run. Its queue's ruled calls are
        written by its `decided-for-you --write --by orient-all` (schedule § 1.5's orient-all form), and the fork
        returns their block.
 4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, its Pre-flight's

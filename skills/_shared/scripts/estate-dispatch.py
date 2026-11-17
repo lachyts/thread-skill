@@ -359,12 +359,14 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   repeatable, --kept and --decided also comma-joined) must name candidates. Each candidate, in order:
   - kept (a carried task that has started): in, `kept`, never graded or asked;
   - graded Ready (the rank's tasks[]): in, `ready`;
-  - One call or Grill: in when decided (`decided`) and its note records every answer, else out (`undecided`). Decided
-    but unrecorded (p51-4, Watch ae344381: a planner stops on his question mid-run), it is out (`unrecorded`, never
-    asked), its reason UNRECORDED_ANSWER naming the first of the rank's decisions with no `- <question> → ` bullet
-    under a `## Decisions (asked ahead <date>)` heading (the question folded, a leading link to its own task cut, as
-    record writes it), UNRECORDED_RULING naming a decision's fork with no ` orient ruling: <fork> → ` line, or
-    UNRECORDED_NOTE when the note cannot be read;
+  - One call or Grill: in as `decided` when named --decided and its note records every answer; out as `undecided`
+    when not named; named but unrecorded (p51-4, Watch ae344381: a planner stops on his question mid-run), out as
+    `unrecorded`, never asked, its reason UNRECORDED_ANSWER naming the first of the rank's decisions with no
+    `- <question> → ` bullet under a `## Decisions (asked ahead <date>)` heading (the question folded, a leading link
+    to its own task cut, as record writes it), UNRECORDED_RULING naming a decision's fork that its `## Notes` does not
+    rule (orient § 2 Open forks, read as record reads it: the latest `orient end:` line in `## Notes` names the fork,
+    and a ` orient ruling: <fork> → ` line in `## Notes` comes after that end line; a ruling before a later end line
+    that names the fork again rules nothing), or UNRECORDED_NOTE when the note cannot be read;
   - Orient: out (`orient`, with its `home`), decided or not;
   - waiting (schedule § 3, ADR 0078 d7): a candidate not kept, not Orient and readable, one of whose dependencies (its
     scan `dependsOn`, then its `bodyDependsOn`, the body's *Depends on* lines and `## Depends on` paragraph) is no
@@ -460,7 +462,8 @@ LEAVES = ("orient", "unreadable", "waits")
 WAITS_UNREAD = "its note does not parse"  # a `waits` leaver's reason when its dependency is an unread note
 # An `unrecorded` leaver's reasons (p51-4, Watch ae344381): a One call or Grill named --decided whose note holds no
 # record of an answer, so its planner would stop on his question mid-run. The first names the decision with no
-# `## Decisions` bullet, the second a fork with no `orient ruling:` line, the third a note preflight cannot read.
+# `## Decisions` bullet, the second a fork with no `orient ruling:` line in `## Notes` after the latest `orient end:`
+# line that names it (orient § 2 Open forks), the third a note preflight cannot read.
 UNRECORDED_ANSWER = "no recorded answer to: {question}"
 UNRECORDED_RULING = "no `orient ruling:` line for its fork: {fork}"
 UNRECORDED_NOTE = "its note cannot be read"
@@ -2523,9 +2526,11 @@ class Preflight:
     def unrecorded(self, k):
         """Why a One call or Grill named --decided holds no record of its answers, else None (p51-4). Each of the rank's
         decisions needs its `## Decisions` bullet (record's DECISION_BULLET, under any date's DECISIONS_HEADING), and
-        one that carries a fork its `orient ruling: <fork> → ` line too (RULING_LINE): what record writes, read as the
-        executing planner reads the note. The note is the scan's `vault` joined to its row's `note`; one that cannot be
-        read is unrecorded (UNRECORDED_NOTE), fail closed."""
+        one that carries a fork needs that fork ruled, as orient § 2 Open forks and record_core's `ruled` read it: the
+        latest `orient end:` line in `## Notes` (section_span, latest_end_forks) names the fork, and a
+        ` orient ruling: <fork> → ` line (RULING_LINE) in `## Notes` comes after it. A ruling before that end line, or
+        outside `## Notes`, rules nothing. The note is the scan's `vault` joined to its row's `note`; one that cannot
+        be read is unrecorded (UNRECORDED_NOTE), fail closed."""
         rel, root = self.note_of(k), self.scan.get("vault")
         try:
             with open(os.path.join(os.path.expanduser(root), rel), encoding="utf-8") as f:
@@ -2544,8 +2549,10 @@ class Preflight:
                 continue
             if ln.startswith("## "):
                 heading = ln.strip()
-            elif heading.startswith(asked) or " orient ruling: " in ln:
+            elif heading.startswith(asked):
                 bullets.append(fold(ln))
+        notes = section_span(lines, body, NOTES_HEADING)
+        end_at, forks = latest_end_forks(lines, notes) if notes else (None, [])
         name = os.path.basename(rel)[:-3]
         for d in (x for x in self.rows[k].get("decisions") or [] if isinstance(x, dict)):
             q = without_self_link(fold(d.get("question") if isinstance(d.get("question"), str) else ""), name,
@@ -2553,7 +2560,8 @@ class Preflight:
             if not any(b.startswith("- %s → " % q) for b in bullets):
                 return UNRECORDED_ANSWER.format(question=q)
             fork = fold(d.get("fork")) if isinstance(d.get("fork"), str) else ""
-            if fork and not any(" orient ruling: %s → " % fork in b for b in bullets):
+            if fork and not (fork in forks and any(" orient ruling: %s → " % fork in ln
+                                                   for ln in lines[end_at + 1:notes[1]])):
                 return UNRECORDED_RULING.format(fork=fork)
         return None
 
