@@ -2,7 +2,7 @@
 
 ## Tests
 
-Verifier: `make test-fast`
+Verifier: `THREAD_SKIP_SLOW=1 make test-fast`
 Completion verifier: `make test`
 Tests: one test file, hermetic: `bash tests/run.sh --only <test file>...`
 
@@ -22,8 +22,9 @@ what is missing:
   SKILL.md it reads, or `FOREIGN-ONLY SKILL.md` when it reads none (check k).
 - A suite whose tests/ci-seconds.tsv macOS CI median reaches 180 s joins the Slow tier with a `SLOW` line, and a SLOW
   suite measured under 150 s leaves it (check j); a script whose only tests are SLOW needs a non-SLOW test (check d).
-  GitHub's PR check sets `THREAD_SKIP_SLOW=1` and leaves them out unless the diff edits one; `make test-fast` without
-  the flag, and `make test`, still run them (ADR 0084 d3).
+  The `Verifier:` above sets `THREAD_SKIP_SLOW=1`, as GitHub's PR check does, so the Mac's verify (Integration and an
+  agent's Checkpoint) leaves them out too unless the diff edits one; `make test`, the `Completion verifier:`, master's
+  full suite and `make test-fast` without the flag still run them (ADR 0084 d3 and its Decided for you 1).
 
 tests/fast-tier.map is itself FULL, so a diff that edits it runs the full suite at both Checkpoints and at
 Integration: edit it only when a check names a missing line.

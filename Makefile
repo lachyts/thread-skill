@@ -1,11 +1,12 @@
-# thread plugin — test and release checks, and behaviour evals (a human step). `make test` is the full suite (the self-rollout's completion verifier); `make test-fast` is the fast tier (its verifier, ADR 0073 d1).
+# thread plugin — test and release checks, and behaviour evals (a human step). `make test` is the full suite (the self-rollout's completion verifier); `make test-fast` is the fast tier (ADR 0073 d1), and its verifier runs it light, as `THREAD_SKIP_SLOW=1 make test-fast` (CLAUDE.md's Verifier:, ADR 0084 d3).
 .PHONY: test test-fast release-check evals
 
 test:
 	@bash tests/run.sh
 
 # The fast tier: the always-run checks, then only the test files the diff from THREAD_VERIFY_BASE reaches
-# (tests/fast-tier.map), or the full suite when a changed path is not in the map.
+# (tests/fast-tier.map), or the full suite when a changed path is not in the map. With THREAD_SKIP_SLOW=1 (the
+# self-rollout's verifier and GitHub's PR check) it leaves the Slow tier out unless the diff edits a SLOW suite.
 test-fast:
 	@bash tests/run.sh --fast
 

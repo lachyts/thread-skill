@@ -23,15 +23,16 @@
 # lines go to stderr), prints the split of the selection on stdout and exits before any step. --fast comes first:
 # `--shard K/N --fast` exits 2.
 #
-# The Slow tier (p54-1, ADR 0084 d3). THREAD_SKIP_SLOW=1 (GitHub's check sets it on its `make test-fast` step) leaves
-# the SLOW suites tests/fast-tier.map declares out of a --fast run, after the selection (fast_select), so the full-suite
-# fallbacks (a FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself
+# The Slow tier (p54-1, ADR 0084 d3). THREAD_SKIP_SLOW=1 (GitHub's check sets it on its `make test-fast` step, and
+# CLAUDE.md's Verifier: for the Mac's verify, an agent's Checkpoint and Integration, p54-8) leaves the SLOW suites
+# tests/fast-tier.map declares out of a --fast run, after the selection (fast_select), so the full-suite fallbacks (a
+# FULL line, a selector failure, unreadable select output) leave them out too; a SLOW suite the diff itself
 # edits still runs (fast-tier.py's `slow` prints it KEPT). The run prints one `== slow tier: left out <N> suites (THREAD_SKIP_SLOW=1)`
 # line naming the ones it removed, then a `   kept, the diff edits it:` line when it kept one. A failed `slow` leaves
 # nothing out and says so. Empty or unset is off; any other value than 1 exits 2 before any step. --fast --shard and
 # --fast --shard-plan read it as --fast does, before the split. Full mode, --only, and --shard and --shard-plan without
 # --fast ignore it, so master's full suite and the completion verifier run the Slow tier, and so does --fast without it
-# (the Mac's verify, an agent's Checkpoint). run.sh unsets it, so no suite or inner run inherits it.
+# (a bare `make test-fast`). run.sh unsets it, so no suite or inner run inherits it.
 #
 # Hermetic by construction: HOME and the global git config point into a temp dir, so any stray default
 # (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
