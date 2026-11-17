@@ -24,7 +24,7 @@ Label each question before it is asked:
 - A review STOP or a design gap is never his by default: it goes to the agent that can resolve it, unless he has said he
   steers it (the steering exception above).
 - A routine step needs no question at all: a read, a read-only command a skill names (`gh pr view`, /thread:status, a scan its own § says writes
-  nothing) and a re-run of a read that died on a network error are taken on your own, since none of them changes anything he would overturn. Each skill's § Don't lists its own.
+  nothing) and a re-run of a read that died on a network error are taken on your own, since none of them changes anything he would overturn. Orient, orient-all, schedule, repair and reflect each list theirs under § Steps that need no ask.
 - An open `fork for Lachy` stays *yours* until he rules on it.
 - The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question until p30-10 decides it: until
   then it is asked, in the Framing, except under the Backlog orient, which creates it (ADR 0071).

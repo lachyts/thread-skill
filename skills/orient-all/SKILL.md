@@ -482,7 +482,10 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
   (ADR 0074 d2).
 - Call the question tool from a fork or an agent: neither has a route to Lachy (§ 6 step 2), and § 6 step 3 answers
   each question schedule would ask.
-- **Steps that need no ask.** The reads and read-only commands this skill runs (`estate-scan.py`, `estate-dispatch.py slices`, the read-only grading and status agents, `list_sessions`
-  and the sign-in pass's read-only checks), and a re-run of one
-  that died on a network error, are taken on your own: none of them writes a note. Only the *yours* questions this
-  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (`estate-scan.py`, `estate-dispatch.py slices`, the read-only
+grading and status agents, `list_sessions` and the sign-in pass's read-only checks), and a re-run of one that died on
+a network error, are taken on your own: none of them writes a note. Only the *yours* questions this skill names reach
+Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

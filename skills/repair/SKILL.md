@@ -1081,6 +1081,10 @@ record, and its Completion log is the last Leg's.
   asks the user decisions no agent can make, so an unattended loop would either hang on the question or
   steamroll it. Unattended driving belongs to execute (§8: the Stop-hook driver + heartbeat cron) and status
   (read-only sweeps); repair stays a hands-on verb.
-- **Steps that need no ask.** The reads and read-only commands this skill runs (the `/thread:status` scan, `leg.py status`, `gh pr view` and `list_sessions`), and a re-run of one
-  that died on a network error, are taken on your own: none of them writes anything. Only the *yours* questions this
-  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (the `/thread:status` scan, `leg.py status`, `gh pr view` and
+`list_sessions`), and a re-run of one that died on a network error, are taken on your own: none of them writes
+anything. Only the *yours* questions this skill names reach Lachy
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

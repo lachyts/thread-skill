@@ -635,7 +635,11 @@ given). It resolves, asks, reads and writes nothing.
 - **Under `--backlog`, don't put a question before the start, or start a serial note**: its questions come last, a
   serial note is listed on the Chorus Stage at B8, never started through `create_thread`, and it never runs
   `/thread:repair` (`skills/orient/backlog.md` § B8, § B9).
-- **Steps that need no ask.** The reads and read-only commands this skill runs (`resolve-target.py` without `--learn`, `next-action.py read`, the reconcile dry run, `thread-placement.py
-  audit`, a plain `declared-check.py run`, `git status` and `git log`; `backlog.md` and `reshuffle.md` included), and a re-run of one
-  that died on a network error, are taken on your own: none of them writes anything. Only the *yours* questions this
-  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (`resolve-target.py` without `--learn`, `next-action.py read`, the
+reconcile dry run, `thread-placement.py audit`, a plain `declared-check.py run`, `git status` and `git log`;
+`backlog.md` and `reshuffle.md` included), and a re-run of one that died on a network error, are taken on your own:
+none of them writes anything. Only the *yours* questions this skill names reach Lachy
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

@@ -1066,6 +1066,10 @@ open keeps the task open.
 - Never write a close line from the weekly reading: `--close` is close-score.py's alone (ADR 0037 d4).
 - Never decide a rule item or a held trade during a run (the weekly reading never `--pick`s), and never schedule
   or reshuffle the decision task: they are Lachy's, decided with him at the Reflection Routine (ADR 0037 d5).
-- **Steps that need no ask.** The reads and read-only commands this skill runs (`score.py` and `serial-score.py`, which read only, and `land.sh --origin-slug`), and a re-run of one
-  that died on a network error, are taken on your own: none of them writes a setting or a note. Only the *yours* questions this
-  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (`score.py` and `serial-score.py`, which read only, and
+`land.sh --origin-slug`), and a re-run of one that died on a network error, are taken on your own: none of them
+writes a setting or a note. Only the *yours* questions this skill names reach Lachy
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

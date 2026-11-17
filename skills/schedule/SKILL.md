@@ -1395,10 +1395,13 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
 - Never hand-edit `engine_snapshot:` or `engine_sha:`: only `engine-snapshot.py adopt` writes them (ADR 0043), and never run a prior's commands from this run's snapshot (§ 0's *The prior's root*).
 - Never write `start: unattended` except at the execute handoff's Start when ready (orient § 9, step 8's **Start when ready.**) on the note just written, its launch never made or withdrawn first, through `approve-queue` when he names the PR, or as step 8's `stamp-start` under the chain (§ 0's **Under the chain.**), or as § 0's **Put back**: the exact line the Supersede prep removed, restored to the prior when the run stops before step 6 writes its note. The prep otherwise only removes it. On a serial note, only as § Serial path S7's `stamp-start` on a standalone run on the Chorus Stage (ADR 0076 d4), never off the Stage and never under orient, orient-all or the Backlog orient, whose parent lists it.
-- **Steps that need no ask.** The reads and read-only commands this skill runs (`gh repo view`, the landing-register check, the gate sweep (`gated_inputs.py sweep`) and
-  `merge-gate.py`), and a re-run of one
-  that died on a network error, are taken on your own: none of them writes a note or a stamp. Only the *yours* questions this
-  skill names reach Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
+
+## Steps that need no ask
+
+The reads and read-only commands this skill runs (`gh repo view`, the landing-register check, the gate sweep
+(`gated_inputs.py sweep`) and `merge-gate.py`), and a re-run of one that died on a network error, are taken on your
+own: none of them writes a note or a stamp. Only the *yours* questions this skill names reach Lachy
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
 
 ## Verification
 
