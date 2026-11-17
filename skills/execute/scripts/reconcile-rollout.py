@@ -16050,7 +16050,8 @@ def _regenerate_gate(walk, anchor, trigger_path):
     acts on whatever is unfinished for the project now, so it is held to the rollout it was written against. In order: a
     serial anchor is unreadable; no anchor, a superseded one, a successor read from a task note (carry moves a task's
     `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from one written since), a
-    closed one and one neither paused nor approved_unrun wait (unfinished-rollout.py's `eligible`, its two facts, so a
+    closed one and one neither paused (an Engine catch-up's `paused:` reads running, p54-14) nor approved_unrun wait
+    (unfinished-rollout.py's `eligible`, its two facts, so a
     merge during a run never spends `fired:` on schedule's join, which regenerates nothing: ADR 0078 d6)."""
     if anchor is not None and _shape(anchor[1]) == SHAPES[1]:
         return "unreadable", "a serial rollout supersedes nothing"
