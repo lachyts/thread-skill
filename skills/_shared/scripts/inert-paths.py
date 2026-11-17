@@ -32,10 +32,12 @@ merge commit M, the exact tree being merged) and returns {glob: {held, readers, 
 {glob, path, line?, kind, origin?, text (at most 120 characters)}. One call builds one tree index (one `ls-tree`, one
 `cat-file --batch`, one parse per blob) and shares it across every glob it proves; nothing is cached across calls. It
 fails closed: anything it cannot read reads as a reader. A glob holds only when there is none of:
-- Scope. Every tracked blob of the tree that is not prose (the glob's own files included: no own-files exclusion) is
-  scanned (every .txt among them), plus the verifier and bootstrap texts as steps (`<verifier>`, `<bootstrap>`), which
-  run at the tree root. A blob holding a NUL byte is binary: the name rule reads it, nothing else does (it has no lines
-  of code).
+- Scope. Every tracked blob of the tree that is not prose is scanned (every .txt among them), the glob's own files
+  included: no glob's own files are excluded from the name, tool, link and symlink rules. Under docs/, which (x) scopes,
+  a glob's own non-prose file (docs/handoffs/**, docs/reviews/**) is an out-of-reach candidate like any other there: its
+  walks are readers only once it is reached. Plus the verifier and bootstrap texts as steps (`<verifier>`,
+  `<bootstrap>`), which run at the tree root. A blob holding a NUL byte is binary: of the reader rules only the name
+  rule reads it (it has no lines of code); (x)'s reach reads its text too.
 - unprovable: a glob with no literal segment (`**`, `*.md`) is never proved; past PROOF_BUDGET_S (180 s, a deadline
   check read through `_now()`, no signals) every glob fails as unprovable with "proof budget exceeded". The deadline is
   checked per file, per logical shell line, per shell item and view, per resolved expression and per walk; a single
@@ -56,9 +58,26 @@ fails closed: anything it cannot read reads as a reader. A glob holds only when 
   `vale` only in command form, `npx remark …`, a `vale` command with an argument); or any tracked tool config
   (TOOL_CONFIG_RE: .prettierrc*, prettier.config.*, .markdownlint*, .vale.ini, .remarkrc*, cspell.json, .cspell*,
   .mdformat.toml, lychee.toml, .lycheeignore, .pre-commit-config.yaml/.yml). A lock file counts: one named tool anywhere
-  fails every glob.
+  fails every glob, but for (xi). The first match is the reader, at its line, skipping (xi-a) a match that is a quoted
+  path segment directly after a `hooks` segment, its closing quote right after it (`.git/hooks/pre-commit"`,
+  `"hooks" / "pre-commit"`, `"hooks", "pre-commit"`): git's hook slot, never the tool. A match followed by `/` is a
+  directory (`tools/hooks/prettier/run.sh`) and stays a reader. (xi-b) A nested package's hit is a reader only for a
+  glob G with `_covers(<its directory's segments>, G)` when its package.json (1) parses, (2) names no tool (TOOL_RE,
+  TOOL_CMD_RE) once its dependency keys (dependencies, devDependencies, peerDependencies, optionalDependencies,
+  bundledDependencies, bundleDependencies) are removed, (3) holds no climb marker in any `scripts` value (a `..`
+  segment; a word starting `/` or `~`; any `$` or backquote; `git` or `INIT_CWD` bounded by characters outside
+  [A-Za-z0-9]; an option, a whole word alone or before `=`: --prefix, --cwd, --dir, --root, -C, -w, --workspace,
+  --workspaces, -ws, --include-workspace-root), and (4) no scanned file (binaries included) or step names a git-root
+  wrapper anywhere, bounded the same way (GIT_ROOT_WRAPPERS: pretty-quick, lint-staged, nano-staged, precise-commits,
+  git-format-staged, husky, lefthook, simple-git-hooks, yorkie): a wrapper run from the package's own scripts, the
+  verifier (`cd ext && npx pretty-quick --check`), a root Makefile, a CI workflow or a hook formats changed files from
+  the git root, so one name leaves every nested package unscoped. Its lock file (package-lock.json,
+  npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml, bun.lock) is scoped exactly when its tracked sibling package.json is.
+  Any other file, the root package, a file whose matches include `pre-commit` (it installs git's hook at the root) and
+  the tool configs stay unscoped.
 - link (every glob): a literal `](` in a scanned file or step (code that parses markdown links).
-- walk: a walk site whose root is not provably outside the repo and that covers the glob (below).
+- walk: a walk site whose root is not provably outside the repo and that covers the glob (below), in a file that is
+  not an unreached out-of-reach candidate (below, narrowing x).
 
 Walk sites. A copy or archive of a tree is a walk of its source (copying the repo to TMP and walking the copy walks
 the repo). The API forms are matched in their language's code (by extension, or a shebang):
@@ -89,7 +108,8 @@ in command position (a `case` pattern line), inside `[[ ]]`, `[`, `test` or a `c
 unknown-language file's line. An argv list is read de-quoted, so `['git', 'ls-files']` reads `git ls-files` (its words
 are quoted, so no bare glob); a host expression in it (`['find', root]`) is resolved as code. A git listing with no
 pathspec is a whole-tree (cwd) walk; with an exclude pathspec, or no `--` before a git grep's paths, it is whole-tree
-too. A line holding only a comment is skipped.
+too. A line holding only a comment is skipped. A Python docstring (the first statement of a module, class, def or
+async def, a str constant) is prose and is not read as shell (narrowing ix); the same text in any other string is.
 
 The resolver. A walk's root resolves to a set of origins.
 - A Python file that `ast.parse`s is resolved with scopes: function locals, enclosing functions, module globals,
@@ -160,6 +180,76 @@ extension (`*.py`, `.endswith(".tmp")`) does not cover. A brace filter expands t
 the recursive expander's order (bash's for flat groups; nested groups, `{a}` and `{}` differ); a filter with more can
 match anything (fail closed).
 
+Out of reach (narrowing x, the walk rule only). A walk in an out-of-reach candidate is a reader only once something
+reaches the candidate (_reach). The name, link, tool and symlink rules read every candidate as before, and a
+candidate's call sites still bind parameters.
+- Candidates: the scanned non-step files (binaries included) under top-level spike/ or docs/, or with a segment
+  starting `probe` below top-level scripts/ (OUT_OF_REACH: a candidate's top segment, its first, is spike, docs or
+  scripts). A tracked symlink is never a candidate.
+- Reachers: every step, every non-candidate scanned file (binaries included), every tracked symlink (its target text,
+  and its resolved target by the symlink rule), and every candidate once it is reached. The rules run to a fixpoint,
+  in this order: the off switch, R1, the symlink rule, R2-R4, R5, R6. Only a candidate holding a walk with counted
+  origins can add a reader, so with none nothing is read, and each round stops once every such candidate is reached
+  (the others still reach on: a reached candidate with no walk is a reacher like any other). The deadline is checked
+  per file, per walk and per 1000 words.
+- A reacher's whole text, comments and docstrings included, is read three ways (a symlink's text is its target, read
+  by R2, R4 and R6). Tokens: its [A-Za-z0-9_.-] runs, lowercased (macOS is case-insensitive), plus each run split
+  again on `.`. Words: maximal runs of characters other than whitespace and these 14: `'` `"` backquote `,` `;` `(`
+  `)` `{` `}` `<` `>` `|` `&` `=`, lowercased. A word normalised: split on `/`, only the part after its last `..`
+  segment kept, every `.` and empty segment dropped, leading segments holding `$`, `{`, `%` or `~` dropped, any other
+  segment holding one of them read as `*`.
+- The off switch, first: every candidate is reached when any scanned file (candidates included, since pytest takes
+  an ini or pyproject beside its args) or step sets a collection selector. It is an allowlist matched by tokens, never
+  by words, so `spec:`, `include:`, `"extension":` and `--spec=x` all hit. Anywhere: the keys python_files,
+  testMatch, testRegex, specPattern, pytest_collect_file, pytest_pycollect_makemodule; the options --spec, --roots,
+  --testMatch, --testRegex, --extension, --nbval, --nbval-lax, --nbmake; a unittest `discover` line with `-p`,
+  `--pattern` or `pattern=`. In a runner config (RUNNER_CONFIGS, by basename:
+  (jest|vitest|vite|ava|mocha|karma|playwright|cypress|wdio).config.*, vitest.workspace.*, vitest.projects.*,
+  .mocharc*, .taprc*, jasmine.json): include, spec, files, roots, extension, spec_dir, spec_files. In any
+  package.json: a top-level jest, ava, mocha, vitest or tap value holding one of those, testMatch or testRegex; or a
+  package.json that fails to parse. A tsconfig `include` or a package.json `files` key elsewhere does not fire it.
+- R1, test-shaped: a path segment containing `test` or `spec` (lowercased), or a .bats or .t file: every runner's
+  default (test_*.py, *_test.py, conftest.py, *.test.*, *.spec.*, test-*.js, tests/, __tests__/, Tests/,
+  FooTests.swift, *_test.go, the .t files of `prove` and pytest-cram). It over-reaches (latest.py, inspect.py,
+  pytest.ini), which fails closed.
+- R2, named: the candidate's basename or its stem (the basename less its last extension, any extension) is a token,
+  with no minimum length (`import a` reaches spike/a.py), so `import x`, `require('./x')` and `from echo_frames
+  import` hit, and a dotted module hits each part. A candidate with a path segment holding a character outside the
+  token class is always reached.
+- R3, packages and manifests: a reached Python module reaches each __init__.py above it; a reached build manifest
+  (MANIFESTS: package.json, pyproject.toml, setup.py, setup.cfg, Package.swift, go.mod, Cargo.toml, Makefile,
+  makefile, GNUmakefile, CMakeLists.txt, build.gradle(.kts), pom.xml, meson.build, BUILD, BUILD.bazel) reaches every
+  candidate in its directory and below.
+- R4, directories. (a) A token equal to the name of any directory on a candidate's path below its top segment
+  reaches every candidate in that directory and below, whatever the extension (`import pkg`, `python -m spike.cli`,
+  `require('../docs/tool')`, `make -C spike/svc`, `mocha spike/runners`, `run-parts scripts/probe-hooks`,
+  `app.xcodeproj`). (b) A word normalised to `spike`, `docs` or `scripts`, or ending with `/` and one of them,
+  reaches every candidate under that top segment (`mocha spike`, `ROOT / 'docs'`, `../spike`, `$ROOT/scripts`,
+  `<rootDir>/spike`, `--package-path=spike`, an absolute `/home/runner/work/x/x/spike`); a word naming a file
+  (`scripts/test`) or a deeper directory is not one. (c) The repo root: a word that does not start with `/`, whose
+  `/`-segments are each `.`, `..` or empty, at least one `.` or `..` (`.`, `./`, `..`, `../`, `../..`, `.//.`, alone,
+  as an `=` operand or a call argument), reaches every candidate; it is read in every reacher, code included. A word
+  starting `/` or made only of `/` (`/`, `//`, `/.`, `/..`, a Python `a / b` operand, a JS `//` comment marker) is the
+  filesystem root, which the walk rule reads as ELSEWHERE, and a word holding any other segment (`$ROOT`, `$ROOT/.`,
+  `~/.`, `../spike/..`) is no root: a variable root is the run-time miss. (d) A reached .swift or .go file reaches
+  every same-extension candidate in its directory and below; a `...` token (`go test ./...`) reaches every .go
+  candidate.
+- R5, listings (the walk rule's own forms): a walk in a reacher reaches a candidate when its counted origins (the
+  readers' _classify) and name filter cover the candidate's path, read as a literal-file glob (_covers). A candidate
+  path holding `*?[` is always covered; TMP, ELSEWHERE and HOME-open roots reach nothing.
+- R6, glob text, for globs the walk rule does not read as listings: a word holding `*`, `?` or `[`, or one whose
+  normalised form gains a `*` from a variable segment (`"$ROOT/spike/$PROBE.sh"` reads `spike/*`, and the JS template
+  `${ROOT}/spike/${P}.mjs` holds the word `/spike/$`, read `spike/*` too), normalised. With no `/` it reaches every
+  candidate whose basename it matches; with one, a candidate whose path, or a suffix of it starting at a segment
+  boundary, it matches; left empty, nothing. Matching is case-insensitive fnmatch whose `*` crosses `/`; a bracket
+  expression that does not close or cannot compile reads as `?` (R6 never calls glob_match). It over-reaches on
+  purpose (a lone `*`, `xs[0]`, a regex class, any `$x/$y`).
+- The symlink rule (resolved, not read as text): a tracked symlink's target, resolved as the symlink reader resolves
+  it (a relative target against the link's directory, an absolute one through the places), reaches the candidate it
+  names, or every candidate in the directory it names and below; every candidate when it resolves to the root, to a
+  place or above one, or a relative target climbs out of the repo. An absolute target under no place reaches nothing
+  by this rule; its text is still read by R2, R4 and R6.
+
 Narrowings (each in ADR 0045's amendment, for Escape matching against a `verify-skipped` line): (i) the call-site
 chase with the binding rules above; (ii) HOME-open; (iii) static text: a name assembled at run time, or a walk reached
 only through eval, a registry or a data-built subprocess (`tar -T list`, `rsync --files-from`), is missed; (iv) pytest
@@ -173,7 +263,28 @@ word before it, is missed, since there the same characters are patterns, regexes
 globs; (vii) TOOLS and TOOL_CONFIG_RE are the lists above: a whole-tree prose reader that is neither named nor
 configured by them (dprint, typos, editorconfig-checker, `reuse lint`, a secret scanner, `git diff --check`) is missed
 unless a listed form reaches the tree; (viii) a Python file this python cannot parse is read by the line resolver,
-which knows no Python API walk (its names, tools, links and shell forms are still read). Nothing else is exempt.
+which knows no Python API walk (its names, tools, links and shell forms are still read); (ix) a Python docstring is
+not read as shell, since it is prose: docstring text executed only as data (`__doc__` handed to a shell) is missed, the
+(iii) class; doctest stays a tool, and a docstring's names, tools and links are still read; (x) out of reach (above):
+a walk in a candidate under spike/, docs/ or scripts/**/probe* that nothing reaches is no reader, since the verifier
+never runs it. Every miss below is new for a candidate's own walks. Before (x), a walk in a candidate was a reader
+however the candidate was loaded; after it, a candidate reached only by one of these forms loses its walk readers.
+Escape matching attributes such a miss to (x), never to (iii) or (v), which still name the same forms for a
+non-candidate's walks. The misses: reach only through a run-time value (an assembled name,
+`importlib.import_module(f"spike.{name}")`, eval, a registry, a data-built subprocess, or a directory handed to a
+runner only through a run-time value, `ROOT=$(git rev-parse --show-toplevel); mocha -r "$ROOT"`); an unlisted listing
+form (the (v) forms) that has no glob text; a runner's collection widened by a key, option or config basename not on
+the off switch's lists; and an out-of-tree executor (a step that runs a script outside the tree, or an installed
+runner or plugin whose built-in collection rules execute in-tree candidates by rules the tree's text never states).
+This list and R1-R6 with the symlink rule are the narrowing's whole bound (p47-13): a form on neither list is a miss
+to add here, never an open rule; (xi) the tool rule's two narrowings (above): a TOOLS name used as a quoted file name
+directly under a `hooks` directory is missed, and so is a git-root wrapper not in GIT_ROOT_WRAPPERS that runs a nested
+package's tool from the git root, whether a script with no climb marker or anything else in the tree runs it. The
+ruling's item 4 reads "a quoted path segment never a tool"; it is taken only for hooks, since a quoted segment
+elsewhere can name the tool's own executable (`ROOT / "node_modules" / ".bin" / "prettier"`), while after `hooks/`,
+`pre-commit` names git's hook slot. Ruled out on 2026-11-12 (Lachy, p47-14): (2a) bare-name call-site binding, (2d)
+names-only listing, (3) the link rule's data-file and string-literal exemptions, (5) names outside comments: each
+guesses what a name or a link refers to. Nothing else is exempt.
 
 CLI. JSON on stdout for prove and propose (one line), human lines for record and drop.
 - prove: {repo, tree, globs: {G: {held, readers (at most 50), readersTotal}}}; exit 0 with the verdict in the JSON,
@@ -265,6 +376,21 @@ TOOL_CONFIG_RE = re.compile(r"(?:\.prettierrc.*|prettier\.config\..*|\.markdownl
                             r"|cspell\.json|\.cspell.*|\.mdformat\.toml|lychee\.toml|\.lycheeignore"
                             r"|\.pre-commit-config\.ya?ml)\Z")
 LINK = "]("
+# narrowing xi-a: a TOOLS match that is a quoted path segment directly after a `hooks` segment (git's hook slot), its
+# quote closing right after the name: a name followed by `/` is a directory, which can hold the tool's own runner
+HOOK_BEFORE_RE = re.compile(r"(?:(?:^|[/'\"`\s])hooks/|['\"]hooks['\"]\s*[/,]\s*['\"])\Z")
+HOOK_AFTER = "'\"`"
+# narrowing xi-b: a nested package's tools scoped to its own subtree
+DEP_KEYS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "bundledDependencies",
+            "bundleDependencies")
+LOCK_FILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock")
+CLIMB_OPTS = ("--prefix", "--cwd", "--dir", "--root", "-C", "-w", "--workspace", "--workspaces", "-ws",
+              "--include-workspace-root")
+CLIMB_WORD_RE = re.compile(r"(?<![A-Za-z0-9])(?:git|INIT_CWD)(?![A-Za-z0-9])", re.I)
+GIT_ROOT_WRAPPERS = ("pretty-quick", "lint-staged", "nano-staged", "precise-commits", "git-format-staged", "husky",
+                     "lefthook", "simple-git-hooks", "yorkie")
+WRAPPER_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(re.escape(w) for w in GIT_ROOT_WRAPPERS)
+                        + r")(?![A-Za-z0-9])", re.I)
 
 
 class ProofError(Exception):
@@ -974,6 +1100,17 @@ class _PyBuilder(ast.NodeVisitor):
         self.call_funcs = set()
         self.filters = {}
         self.self_name = None
+        self.docstrings = set()   # ids of the docstring Constants (narrowing ix): no shell segments
+
+    def _docstring(self, body):
+        """Record a module, class, def or async def body's docstring: its first statement, a str Constant."""
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            self.docstrings.add(id(body[0].value))
+
+    def visit_Module(self, node):
+        self._docstring(node.body)
+        self.generic_visit(node)
 
     # scopes -------------------------------------------------------------------------------------------------------
     def _lookup_parent(self):
@@ -1030,6 +1167,7 @@ class _PyBuilder(ast.NodeVisitor):
             scope.returns.append(py_ir(node.body))
             self.visit(node.body)
         else:
+            self._docstring(node.body)
             for st in node.body:
                 self.visit(st)
         self.scope, self.cls, self.self_name = saved
@@ -1057,6 +1195,7 @@ class _PyBuilder(ast.NodeVisitor):
         scope = PyScope("class", self.scope, self.pf.sf, cls=ci)
         saved = (self.scope, self.cls)
         self.scope, self.cls = scope, ci
+        self._docstring(node.body)
         for st in node.body:
             self.visit(st)
         self.scope, self.cls = saved
@@ -1239,6 +1378,8 @@ class _PyBuilder(ast.NodeVisitor):
         self.visit(node.value)
 
     def visit_Constant(self, node):
+        if id(node) in self.docstrings:
+            return   # narrowing ix: a docstring is prose, never read as shell
         if isinstance(node.value, str) and node.value and _hint(node.value):
             for i, part in enumerate(node.value.split("\n")):
                 if part.strip() and not part.strip().startswith("#") and _hint(part):
@@ -3340,6 +3481,420 @@ def _shell_walks(f, items, line, ctx, step, globs=None, depth=0):
     return out
 
 
+# ---- the tool rule's narrowings (xi) ---------------------------------------------------------------------------------
+
+def _tool_matches(text):
+    """[(pos, name)]: the tool rule's matches in `text`, in order, less a hook path (narrowing xi-a: a quoted path
+    segment directly after a `hooks` segment, followed by its closing quote)."""
+    out = []
+    for m in TOOL_RE.finditer(text):
+        e = m.end()
+        if e < len(text) and text[e] in HOOK_AFTER and HOOK_BEFORE_RE.search(text, max(0, m.start() - 64), m.start()):
+            continue
+        out.append((m.start(), m.group(0)))
+    out.extend((m.start(), m.group(0)) for m in TOOL_CMD_RE.finditer(text))
+    out.sort()
+    return out
+
+
+def _climbs(script):
+    """A package.json `scripts` value holds a climb marker (narrowing xi-b, condition 3)."""
+    if "$" in script or "`" in script or CLIMB_WORD_RE.search(script):
+        return True
+    for w in re.split(r"[\s'\";&|()]+", script):
+        if not w:
+            continue
+        if w in CLIMB_OPTS or any(w.startswith(o + "=") for o in CLIMB_OPTS):
+            return True
+        for part in w.split("="):
+            if part.startswith(("/", "~")) or ".." in part.split("/"):
+                return True
+    return False
+
+
+def _tool_scope(f, by_path):
+    """Narrowing xi-b: a nested package's directory segments, when its tool hits count only under it; None (unscoped)
+    otherwise. A nested package.json is scoped when (1) it parses, (2) its text less the dependency keys names no tool
+    and (3) no `scripts` value climbs; a lock file when its tracked sibling package.json is. Condition (4), no git-root
+    wrapper named anywhere in the tree, is the caller's: one name leaves every nested package unscoped."""
+    if f is None or f.step or "/" not in f.path:
+        return None
+    d, base = posixpath.split(f.path)
+    if base in LOCK_FILES:
+        return _tool_scope(by_path.get(d + "/package.json"), by_path)
+    if base != "package.json":
+        return None
+    try:
+        data = json.loads(f.text)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    rest = json.dumps({k: v for k, v in data.items() if k not in DEP_KEYS})
+    if TOOL_RE.search(rest) or TOOL_CMD_RE.search(rest):
+        return None
+    scripts = data.get("scripts", {})
+    if not isinstance(scripts, dict) or any(not isinstance(v, str) or _climbs(v) for v in scripts.values()):
+        return None
+    return tuple(d.split("/"))
+
+
+def _wrapper_named(files, deadline):
+    """Narrowing xi-b's condition (4): a scanned file (binaries included) or step names a git-root wrapper. A wrapper
+    run from anywhere (the verifier's `cd ext && npx pretty-quick --check`, a root Makefile, a CI workflow, a .husky
+    hook) formats changed files from the git root, so one name leaves every nested package unscoped. A text whose
+    lowercase holds no name is skipped unread by WRAPPER_RE: only a non-ASCII case-fold lookalike (`huſky`), which no
+    shell runs as the wrapper, differs."""
+    for f in files:
+        if _now() > deadline:
+            raise _Budget()
+        low = f.text.lower()
+        if any(w in low for w in GIT_ROOT_WRAPPERS) and WRAPPER_RE.search(f.text):
+            return True
+    return False
+
+
+# ---- out of reach (narrowing x) --------------------------------------------------------------------------------------
+
+OUT_OF_REACH = ("spike", "docs", "scripts")   # spike/**, docs/** and scripts/**/probe*: the candidates' top segments
+MANIFESTS = frozenset(("package.json", "pyproject.toml", "setup.py", "setup.cfg", "Package.swift", "go.mod",
+                       "Cargo.toml", "Makefile", "makefile", "GNUmakefile", "CMakeLists.txt", "build.gradle",
+                       "build.gradle.kts", "pom.xml", "meson.build", "BUILD", "BUILD.bazel"))
+RUNNER_CONFIGS = re.compile(r"(?:(?:jest|vitest|vite|ava|mocha|karma|playwright|cypress|wdio)\.config\..*"
+                            r"|vitest\.workspace\..*|vitest\.projects\..*|\.mocharc.*|\.taprc.*|jasmine\.json)\Z")
+OFF_KEYS = frozenset(k.lower() for k in ("python_files", "testMatch", "testRegex", "specPattern", "pytest_collect_file",
+                                         "pytest_pycollect_makemodule"))
+OFF_OPTS = frozenset(k.lower() for k in ("--spec", "--roots", "--testMatch", "--testRegex", "--extension", "--nbval",
+                                         "--nbval-lax", "--nbmake"))
+_OFF_WORDS = tuple(sorted(OFF_KEYS | OFF_OPTS))
+RUNNER_KEYS = frozenset(("include", "spec", "files", "roots", "extension", "spec_dir", "spec_files"))
+PKG_RUNNERS = ("jest", "ava", "mocha", "vitest", "tap")
+_TOK_RE = re.compile(r"[a-z0-9_.-]+")
+_TOK_SEG_RE = re.compile(r"[A-Za-z0-9_.-]+\Z")
+_WORD_SPLIT_RE = re.compile(r"[\s'\"`,;(){}<>|&=]+")   # whitespace and the 14 separators
+_DISCOVER_RE = re.compile(r"(?<![a-z0-9_.-])discover(?![a-z0-9_.-])")
+_PATTERN_OPT_RE = re.compile(r"(?<![a-z0-9_.-])(?:-p|--pattern)(?![a-z0-9_.-])|(?<![a-z0-9_.-])pattern\s*=")
+_VAR_CHARS = "${%~"
+_RX_CHUNK = 200
+
+
+def _out_of_reach(path):
+    """A scanned file's path is an out-of-reach candidate: under top-level spike/ or docs/, or with a segment starting
+    `probe` below top-level scripts/."""
+    segs = path.split("/")
+    if len(segs) < 2:
+        return False
+    if segs[0] in ("spike", "docs"):
+        return True
+    return segs[0] == "scripts" and any(s.startswith("probe") for s in segs[1:])
+
+
+def _tokens(text):
+    """The tokens of a text: its [A-Za-z0-9_.-] runs, lowercased, plus each run split again on `.`."""
+    out = set()
+    for t in _TOK_RE.findall(text.lower()):
+        out.add(t)
+        if "." in t:
+            out.update(p for p in t.split(".") if p)
+    return out
+
+
+def _words(text):
+    """The words of a text, lowercased: maximal runs of characters other than whitespace and the 14 separators."""
+    out = set(_WORD_SPLIT_RE.split(text.lower()))
+    out.discard("")
+    return out
+
+
+def _norm_word(w):
+    """A word normalised: split on `/`, only the part after its last `..` segment, every `.` and empty segment
+    dropped, leading segments holding `$ { % ~` dropped, any other segment holding one of them read as `*`."""
+    segs = w.split("/")
+    for i in range(len(segs) - 1, -1, -1):
+        if segs[i] == "..":
+            segs = segs[i + 1:]
+            break
+    segs = [s for s in segs if s not in ("", ".")]
+    while segs and any(c in segs[0] for c in _VAR_CHARS):
+        segs.pop(0)
+    return "/".join("*" if any(c in s for c in _VAR_CHARS) else s for s in segs)
+
+
+def _root_word(w):
+    """R4c: a word naming the repo root: it does not start with `/`, every `/`-segment is `.`, `..` or empty, and at
+    least one is `.` or `..`."""
+    if not w or w[0] == "/":
+        return False
+    segs = w.split("/")
+    return all(s in ("", ".", "..") for s in segs) and any(s in (".", "..") for s in segs)
+
+
+def _class_rx(body):
+    """A glob bracket body as a regex class, or None when it cannot compile (an empty range)."""
+    neg = body[:1] == "!"
+    if neg:
+        body = body[1:]
+    items, k = [], 0
+    while k < len(body):
+        if k + 2 < len(body) and body[k + 1] == "-":
+            if body[k] > body[k + 2]:
+                return None
+            items.append(re.escape(body[k]) + "-" + re.escape(body[k + 2]))
+            k += 3
+        else:
+            items.append(re.escape(body[k]))
+            k += 1
+    return ("[" + ("^" if neg else "") + "".join(items) + "]") if items else None
+
+
+def _glob_rx(pat):
+    """R6: a normalised glob word as a regex: fnmatch's `*` (crossing `/`) and `?`; a bracket expression that does not
+    close or cannot compile reads as `?`. Never glob_match, which raises on arbitrary bracket text."""
+    out, i, n = [], 0, len(pat)
+    while i < n:
+        c = pat[i]
+        if c == "*":
+            out.append(".*")
+            while i + 1 < n and pat[i + 1] == "*":
+                i += 1
+        elif c == "?":
+            out.append(".")
+        elif c == "[":
+            j = i + 1
+            if j < n and pat[j] == "!":
+                j += 1
+            if j < n and pat[j] == "]":
+                j += 1
+            while j < n and pat[j] != "]":
+                j += 1
+            cls = _class_rx(pat[i + 1:j]) if j < n else None
+            out.append(cls or ".")
+            if j < n:
+                i = j
+        else:
+            out.append(re.escape(c))
+        i += 1
+    return "".join(out)
+
+
+def _off_switch(f):
+    """The off switch: f (a scanned file, candidates included, or a step) sets a collection selector. A token is a
+    substring of the lowercased text, so a text holding none of the keys and options as one is never tokenised (most
+    of a tree: the off switch reads every file before any rule runs)."""
+    low = f.text.lower()
+    toks = None
+    if any(k in low for k in _OFF_WORDS):
+        toks = _tokens(f.text)
+        if toks & OFF_KEYS or toks & OFF_OPTS:
+            return True
+    base = "" if f.step else posixpath.basename(f.path)
+    if base and RUNNER_CONFIGS.match(base) and (toks if toks is not None else _tokens(f.text)) & RUNNER_KEYS:
+        return True
+    if base == "package.json":
+        try:
+            data = json.loads(f.text)
+        except (ValueError, RecursionError):
+            return True
+        if isinstance(data, dict):
+            for k in PKG_RUNNERS:
+                if k in data and _tokens(json.dumps(data[k])) & (RUNNER_KEYS | {"testmatch", "testregex"}):
+                    return True
+    if "discover" in low:   # a line _DISCOVER_RE matches holds `discover` as a token
+        for line in low.split("\n"):
+            if _DISCOVER_RE.search(line) and _PATTERN_OPT_RE.search(line):
+                return True
+    return False
+
+
+def _link_target(link, target, ix):
+    """A tracked symlink's target as (segs, norm): a relative target against the link's directory, an absolute one
+    through the places; segs () when it is the root, a place or above one, or climbs out of the repo; None for an
+    absolute target under no place. The symlink reader and the out-of-reach symlink rule both read it."""
+    if target.startswith("/"):
+        rel = ix.place_rel(posixpath.normpath(target))
+        if rel is None:
+            return None
+        segs = rel[1] if rel[0] == "inside" else ()
+        return segs, "/".join(segs)
+    norm = posixpath.normpath(posixpath.join(posixpath.dirname(link), target))
+    if norm == "." or norm == ".." or norm.startswith("../"):
+        return (), ""
+    return tuple(norm.split("/")), norm
+
+
+def _reach(files, t, walks_counted, ix):
+    """Narrowing x: a set of out-of-reach candidates something reaches (the header's Out of reach). A candidate's
+    walks are readers only once it is in this set; its names, links, tools and symlinks are read either way. Only a
+    candidate holding a walk with counted origins can add a reader, so the set holds every such candidate that is
+    reached: with none it is empty and nothing is read, and the fixpoint stops once all of them are reached (other
+    candidates reached on the way are in it too, and an unreached one that holds no such walk may be missing)."""
+    cands = sorted(f.path for f in files if not f.step and _out_of_reach(f.path))
+    want = {w.file.path for w, counted in walks_counted if counted and not w.file.step and _out_of_reach(w.file.path)}
+    if not want:
+        return set()
+    left = set(cands)
+    every = set(cands)
+    toks_of = {}
+
+    def toks(f):
+        got = toks_of.get(f.fid)
+        if got is None:
+            got = toks_of[f.fid] = _tokens(f.text)
+        return got
+
+    # the off switch: any scanned file (candidates included) or step that sets a collection selector
+    for f in files:
+        ix.tick()
+        if _off_switch(f):
+            return every
+
+    subtree = {}   # a candidate directory (lowercased) -> the candidates in it and below
+
+    def under(d):
+        got = subtree.get(d)
+        if got is None:
+            got = subtree[d] = [p for p in cands if p.lower().startswith(d + "/")]
+        return got
+
+    names, dirs, tops = {}, {}, {}
+    for p in cands:
+        segs = p.split("/")
+        base = segs[-1].lower()
+        for k in {base, posixpath.splitext(base)[0]}:
+            names.setdefault(k, []).append(p)
+        for i in range(1, len(segs) - 1):
+            dirs.setdefault(segs[i].lower(), set()).add("/".join(segs[:i + 1]).lower())
+        tops.setdefault(segs[0], []).append(p)
+    gos = [p for p in cands if p.lower().endswith(".go")]
+    fresh = []
+
+    def mark(p):
+        stack = [p]
+        while stack:
+            q = stack.pop()
+            if q not in left:
+                continue
+            left.discard(q)
+            want.discard(q)
+            fresh.append(q)
+            d, base = posixpath.split(q)
+            low = q.lower()
+            if low.endswith(PY_EXT):   # R3: a module reaches each __init__.py above it
+                a = d
+                while a:
+                    stack.append(a + "/__init__.py")
+                    a = posixpath.dirname(a)
+            if base in MANIFESTS:      # R3: a manifest reaches its directory and below
+                stack.extend(under(d.lower()))
+            ext = posixpath.splitext(low)[1]
+            if ext in (".swift", ".go"):   # R4d: a .swift or .go file reaches its same-extension package
+                stack.extend(x for x in under(d.lower()) if x.lower().endswith(ext))
+
+    # R1 (test-shaped), and a path segment no token can name
+    for p in cands:
+        low = p.lower()
+        if any("test" in s or "spec" in s for s in low.split("/")) or low.endswith((".bats", ".t")) \
+                or not all(_TOK_SEG_RE.match(s) for s in p.split("/")):
+            mark(p)
+    # the symlink rule: a tracked symlink reaches what its resolved target names
+    link_texts = []
+    for link, sha in t.links.items():
+        target = _dec(t.content.get(sha, b""))
+        link_texts.append(target)
+        got = _link_target(link, target, ix)
+        if got is None:
+            continue
+        segs, norm = got
+        norm = norm.lower()
+        for p in (cands if not segs else [p for p in cands if p.lower() == norm or p.lower().startswith(norm + "/")]):
+            mark(p)
+    walks_of = {}
+    for w, counted in walks_counted:
+        if counted:
+            walks_of.setdefault(w.file.fid, []).append((w, counted))
+    by_path = {f.path: f for f in files if not f.step}
+    globs_seen = set()
+    # round 1: every step, every non-candidate, every symlink's target text, and the candidates reached so far
+    reachers = [f for f in files if f.step or f.path not in every] + [by_path[p] for p in fresh]
+    texts = [(f.text, toks(f)) for f in reachers] + [(x, _tokens(x)) for x in link_texts]
+    del fresh[:]
+    while want and texts:
+        new_globs = []
+        # R2 and R4: tokens and words
+        for text, tk in texts:
+            ix.tick()
+            if not want:
+                break
+            for k in tk:
+                for p in names.get(k, ()):
+                    mark(p)
+                for d in dirs.get(k, ()):
+                    for p in under(d):
+                        mark(p)
+            if "..." in tk:
+                for p in gos:
+                    mark(p)
+            for n, w in enumerate(_words(text)):
+                if n % 1000 == 999:
+                    ix.tick()
+                if w[0] in "./" and _root_word(w):
+                    for p in cands:
+                        mark(p)
+                    break
+                if "spike" in w or "docs" in w or "scripts" in w:
+                    nw = _norm_word(w)
+                    for top in OUT_OF_REACH:
+                        if nw == top or nw.endswith("/" + top):
+                            for p in tops.get(top, ()):
+                                mark(p)
+                # R6's words: glob text, or a word whose normalised form gains a `*` from a variable segment
+                # (`$root/spike/$probe.sh` reads `spike/*`)
+                if w not in globs_seen and ("*" in w or "?" in w or "[" in w
+                                            or (any(c in w for c in _VAR_CHARS) and "*" in _norm_word(w))):
+                    globs_seen.add(w)
+                    new_globs.append(w)
+        # R5: the walk rule's own listings, with the same counted origins as the readers
+        for f in reachers:
+            for w, counted in walks_of.get(f.fid, ()):
+                ix.tick()
+                if not want:
+                    break
+                pending = [x for x in cands if x in left]
+                for label, segs, unk in counted:
+                    for p in pending:
+                        if _has_glob(p) or _covers(segs, unk, w.filt, p):
+                            mark(p)
+        # R6: glob text
+        if want and new_globs:
+            flat, deep = set(), set()
+            for n, w in enumerate(new_globs):
+                if n % 1000 == 999:
+                    ix.tick()
+                nw = _norm_word(w)
+                if nw:
+                    (deep if "/" in nw else flat).add(_glob_rx(nw))
+            for pats, slashed in ((sorted(flat), False), (sorted(deep), True)):
+                for i in range(0, len(pats), _RX_CHUNK):
+                    ix.tick()
+                    if not want:
+                        break
+                    rx = re.compile("(?:" + "|".join(pats[i:i + _RX_CHUNK]) + ")", re.S)
+                    for p in [x for x in cands if x in left]:
+                        low = p.lower()
+                        if not slashed:
+                            hit = rx.fullmatch(low.rsplit("/", 1)[-1])
+                        else:
+                            segs = low.split("/")
+                            hit = any(rx.fullmatch("/".join(segs[k:])) for k in range(len(segs)))
+                        if hit:
+                            mark(p)
+        # the candidates reached this round are reachers next round (a fixpoint)
+        reachers = [by_path[p] for p in fresh]
+        texts = [(f.text, toks(f)) for f in reachers]
+        del fresh[:]
+    return every - left
+
+
 # ---- prove ----------------------------------------------------------------------------------------------------------
 
 def _reader(glob, path, kind, line=None, text=None, origin=None):
@@ -3455,6 +4010,8 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
                 readers[g].append(_reader(g, p, "tool", text="a markdown tool's config"))
     name_res = {g: re.compile(r"(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])" % "|".join(re.escape(x) for x in tokens(g)),
                               re.I) for g in globs}
+    by_path = {f.path: f for f in files if not f.step}
+    wrapped = []   # narrowing xi-b's condition (4), read once, and only when a nested package would be scoped
     for f in files:
         if _now() > deadline:
             raise _Budget()
@@ -3465,11 +4022,19 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
                 readers[g].append(_reader(g, f.path, "name", ln, f.lines[ln - 1].strip()))
         if f.binary:
             continue
-        m = TOOL_RE.search(f.text) or TOOL_CMD_RE.search(f.text)
-        if m:
-            ln = _line_of(f.text, m.start())
+        hits = _tool_matches(f.text)
+        if hits:
+            ln = _line_of(f.text, hits[0][0])
+            # narrowing xi-b: a nested package's hit counts only under it (a pre-commit match never scopes)
+            scope = None if any(n == "pre-commit" for _, n in hits) else _tool_scope(f, by_path)
+            if scope is not None:
+                if not wrapped:
+                    wrapped.append(_wrapper_named(files, deadline))
+                if wrapped[0]:
+                    scope = None
             for g in globs:
-                readers[g].append(_reader(g, f.path, "tool", ln, f.lines[ln - 1].strip()))
+                if scope is None or _covers(scope, False, None, g):
+                    readers[g].append(_reader(g, f.path, "tool", ln, f.lines[ln - 1].strip()))
         i = f.text.find(LINK)
         if i >= 0:
             ln = _line_of(f.text, i)
@@ -3478,18 +4043,10 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
     ix = Index(files, places, deadline)
     for link, sha in t.links.items():
         target = _dec(t.content.get(sha, b""))
-        if target.startswith("/"):
-            rel = ix.place_rel(posixpath.normpath(target))
-            if rel is None:
-                continue
-            segs = rel[1] if rel[0] == "inside" else ()
-            norm = "/".join(segs)
-        else:
-            norm = posixpath.normpath(posixpath.join(posixpath.dirname(link), target))
-            if norm == "." or norm == ".." or norm.startswith("../"):
-                segs, norm = (), ""
-            else:
-                segs = tuple(norm.split("/"))
+        got = _link_target(link, target, ix)
+        if got is None:
+            continue
+        segs, norm = got
         for g in globs:
             if _covers(segs, False, None, g) or (norm and glob_match(g, norm)):
                 readers[g].append(_reader(g, link, "symlink", text="-> " + target))
@@ -3514,12 +4071,17 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
                 ix.tick()
                 walks.extend(_shell_walks(f, items, line, (f, None, line), f.step,
                                           mode if line not in f.lx.heredoc else None))
+    walks_counted = []
     for w in walks:
         ix.tick()
         vals = set()
         for ir, ctx in w.roots:
             vals |= res.ev(ir, ctx, 0)
-        counted = _classify(vals, ix, w.file.step)
+        walks_counted.append((w, _classify(vals, ix, w.file.step)))
+    reached = _reach(files, t, walks_counted, ix)
+    for w, counted in walks_counted:
+        if not w.file.step and w.file.path not in reached and _out_of_reach(w.file.path):
+            continue   # narrowing x: an unreached candidate's walks are no readers
         for g in globs:
             for label, segs, unk in sorted(counted, key=lambda o: ORIGIN_ORDER.index(o[0])):
                 if _covers(segs, unk, w.filt, g):
