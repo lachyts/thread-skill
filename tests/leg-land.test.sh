@@ -4,7 +4,9 @@
 #        change's first-parent WARN (L17k), check_cause's land-merge outside (L17l) and a row with no Verify line (L17n);
 #        a conflict stands and Complete waits, then a hand resolution lands (L17b); a peer's edit or an untracked file
 #        refuses the ff, never a stash (L17c); --retire removes the copy and deletes its branch with -d, kept on any
-#        refusal with a follow-on (L17d); both p36-3 interims retired (L17e, L17f); actual claims (L17g); the repo lock
+#        refusal with a follow-on (L17d); both p36-3 interims retired (L17e: a fresh begin brings in a dependency
+#        another chain landed, the mid-Leg claim's refusal and the land before it being L17q's; L17f); actual claims
+#        (L17g); the repo lock
 #        (L17h); the stands that run no git, the refusals and the in-place peer (L17i); --red (L17j); the verified tip
 #        (L17m); Complete's Land first before the completion verify, and a land that waits closes stopped (L17o); a
 #        claim stand still brings in what other chains landed, so the claim it unblocks passes (L17q); the ff in P
@@ -257,22 +259,8 @@ ok "$rc|$(q '[(e["removed"], e["branchDeleted"], e["carried"]) for e in d["retir
 unset CWD
 
 # ---- L17e: interim (1) retired: a dependency another chain landed is claimed ----
-lscen l17e
-mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
-RO=$RO2; mkro '' "b0~cc-r~$R~\`repo:$R//b0.txt\`" "b1~cc-r~$R~\`repo:$R//b1.txt\`"; NOVERIFY=1 mkt b0; mkt b1 'depends-on:' '  - "[[a1]]"'
-RO=$RO1; mkcopies
-CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; RO=$RO1
-CWD="$C1" work "$C1" a1 a1.txt "a1 work"; a1sha=$(git -C "$C1" rev-parse HEAD)
-CWD="$C1" leg land; ok "$rc|$(lands)" "0|landed|None|None" "L17e: A lands a1"
-RO=$RO2; CWD="$C2" finish b0
-CWD="$C2" leg claim --task b1
-ok "$rc" 1 "L17e: mid-Leg, B's copy lacks the landed a1: claim refuses"
-ok "$(q 'd["error"]')" "[[b1]] depends on [[a1]] (on master, not yet in $C2: run leg.py land, which brings master in): run leg.py land, then claim again; nothing written" \
-   "L17e: … naming the land and the claim again, never a set-aside"
-CWD="$C2" leg land
-ok "$rc|$(lands)|$(git -C "$C2" rev-parse HEAD)" "0|current|None|None|$a1sha" "L17e: land fast-forwards the copy: current"
-CWD="$C2" leg claim --task b1; ok "$rc" 0 "L17e: … and b1 is claimed"
-# a fresh Leg after A's land: begin's fast-forward brings a1 in
+# a fresh Leg after A's land: begin's fast-forward brings a1 in (mid-Leg, the claim refuses until a land brings it in:
+# L17q, and tests/leg.test.sh's L16k)
 lscen l17e2
 mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
 RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`"; mkt b1 'depends-on:' '  - "[[a1]]"'

@@ -214,9 +214,7 @@ sscen l19b
 leg begin --cwd "$R"; leg claim --task a1; base=$(git -C "$R" rev-parse HEAD)
 subst "$T/$RO.md" "security_checks: true" "security_checks: false"; leg security --task a1
 ok "$rc" 1 "L19b1: security with the key off is exit 1"; has "$err" "security_checks is not true on [[$RO]]: nothing to scan" "L19b1: … saying so"
-subst "$T/$RO.md" "security_checks: false" "security_checks: yes"; leg security --task a1
-ok "$rc" 1 "L19b1: … and with yes"; has "$err" "security_checks: must be true or false, got 'yes': fix the note" "L19b1: … naming it"
-subst "$T/$RO.md" "security_checks: yes" "security_checks: true"
+subst "$T/$RO.md" "security_checks: false" "security_checks: true"   # a value other than true or false: L19d7
 leg security --task a2; ok "$rc" 1 "L19b2: a queued task is refused"; has "$err" "[[a2]] is not Leg 1's in_progress claim" "L19b2: … as not this Leg's claim"
 leg security --task a1
 ok "$rc|$(q 'd["tops"]')|$(q 'd["clean"]')|$(fm a1 leg_scan)" "0|[]|True|<none>" "L19b2: no commit yet: tops [], clean, nothing written"

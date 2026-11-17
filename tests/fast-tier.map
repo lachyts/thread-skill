@@ -224,7 +224,7 @@ evals/** tests/contracts/*.test.mjs
 
 # ---- SKILL.md readers (READERS, check k): each skill's SKILL.md selects the tests that read it, never every test that
 # names the word; the walkers and the FOREIGN-ONLY tests stay off ----
-skills/close/SKILL.md tests/handoff-home.test.sh tests/handoff-scan.test.sh tests/land.test.sh tests/leg.test.sh
+skills/close/SKILL.md tests/handoff-home.test.sh tests/handoff-scan.test.sh tests/land.test.sh
 skills/close/SKILL.md tests/peer-guard.test.sh tests/repo-state.test.sh tests/repo-threads.test.sh
 skills/execute/SKILL.md skills/execute/tests/prompt-invariants.test.mjs skills/execute/tests/reconcile-rollout-auto-retry.test.sh
 skills/execute/SKILL.md skills/execute/tests/reconcile-rollout-fold.test.sh tests/default-branch.test.sh
