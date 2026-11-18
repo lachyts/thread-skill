@@ -1635,9 +1635,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   move (sign a gate, decide a refused descope, restore an Integration with no
   PR), with its detail: `lead-integrate.py inputs`' `humanFix` ({act, detail,
   handBack, label, raise}; `raise` names the budget a spent block may raise).
-  Execute, status and repair print it; none re-derives it (ADR 0035). Once
-  ADR 0070 is built a spent budget is no Human fix: its raise is an
-  **Overtime** run the lead makes itself.
+  Execute, status and repair print it; none re-derives it (ADR 0035). A
+  spent budget is no Human fix (ADR 0070, built for the engine by p39-14):
+  its raise is an **Overtime** run the lead makes itself, and once that is
+  spent the task is **Taken out**.
   _Avoid_: human cause, manual step.
 - **Recorded answer** — Lachy's answer to one set-aside block, a `## Repair
   input` entry keyed on the block's fingerprint and written only by
@@ -1682,11 +1683,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   The live lead re-enters these itself through `reconcile-rollout.py
   auto-retry`, up to `auto_retries` times (default 2; an infra block after a
   short cool-down, while a quota block waits out a longer one free, ADR 0033);
-  repair keeps the ones that need a human (a spent
-  budget, a repeated feedback fingerprint, the same Integration stop twice
-  running, a `## Needs you` question). Once ADR 0070 is built, a spent budget
-  runs **Overtime** instead and a repeated fingerprint is **Taken out**, so
-  neither reaches a human. _Avoid_:
+  repair keeps the ones that need a human (the same Integration stop twice
+  running, a `## Needs you` question, a note the verdict cannot read). A
+  spent budget runs **Overtime** instead and a repeated fingerprint is
+  **Taken out** (ADR 0070, built for the engine by p39-14), so neither
+  reaches a human. _Avoid_:
   auto-block, soft block.
 - **Automatic descope** — a plan-block the notes already settle, dropped from
   the task without asking: the feedback centres on a part the note marks
@@ -1708,9 +1709,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (clearing `rollout:`/`owner:`), permitted only when nothing in the rollout
   depends on it. A whole dependent closure goes the same way, its leaves
   first, so no task being deferred still has a dependant: on Lachy's word
-  today (repair § 5), and by itself once ADR 0070 is built (**Taken out**).
+  (repair § 5), or by itself as a take-out (**Taken out**, ADR 0070:
+  `reconcile-rollout.py defer --take-out`).
   _Avoid_: drop, cancel, skip.
-- **Overtime** — proposed (ADR 0070), not yet built: the extra runs a
+- **Overtime** — ADR 0070: engine half built (p39-14); landing still proposed
+  (p39-13). The extra runs a
   landing or a rollout task takes by itself once its normal budget is spent
   (a landing's three code rounds; a task's `auto_retries` and the round cap
   its stop spent), up to `overtime_runs` (a Tuning key, built-in 3), never
@@ -1718,15 +1721,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its fix attempts at a blocking finding, draw on it from the first. A run
   is one re-entry from a stop to the next: a re-run, a fix with its review
   round, a fix attempt, a review, plan or verifier round raised by one, or
-  a retry. A decision only he can make still stops it.
+  a retry. A decision only he can make still stops it. In the engine the
+  count is the task note's `overtime_used`, which only `defer` clears.
   _Avoid_: overrun (the Night record's word), extra budget, approval round.
-- **Taken out** — proposed (ADR 0070), not yet built: what becomes of work
+- **Taken out** — ADR 0070: engine half built (p39-14); landing still
+  proposed (p39-13). What becomes of work
   whose **Overtime** is spent, or at once whose same feedback comes back: a
   rollout task and its dependent closure leave by **Clean defer** (a
   dependant still running finishes first), a landing is held with its
   evidence in its one follow-up task. Listed in the report, Run record and
   weekly Reflection, never a **Needs-you item** until a third take-out; a
-  second is rewritten by a Shaping session first. _Avoid_: dropped, failed.
+  second is rewritten by a Shaping session first. A rollout task's take-out
+  is `reconcile-rollout.py defer --take-out`, which marks the task
+  `taken_out` and `taken_out_of`. _Avoid_: dropped, failed.
 
 ## Convergence engine
 
