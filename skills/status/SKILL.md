@@ -963,8 +963,11 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
   paste `restart.prompt` in `restart.launch`, or any launch
   from `restart.cwd` when `restart.anyLaunch`. From another session, check the Chorus Stage first, and only if that
   session is gone run `/thread:repair [[<rollout>]]`.
-- S7 `live` → "Leg `<openLeg>` is live: check that session first; if it is gone, `/thread:repair [[<rollout>]]` takes
-  it over".
+- S7 `live` → with `listed` true (its Leg lease lapsed: its session died without closing, P36-15), "on the Waiting
+  list: the Stage takes Leg `<openLeg>` over as Leg `<restart.leg>`; nothing to start by hand"; else "Leg `<openLeg>`
+  is live: check that session first; if it is gone, `/thread:repair [[<rollout>]]` takes it over" (with `listed`
+  false, its `unlisted`: a room stop's parked Leg reads `open Leg <K>, room-stopped`, and the Stage's re-send resumes
+  it).
 - S8 `awaiting-successor` → by the last Leg's `handover`: `started <id>` → wait for that Session, or check it;
   `listed` → "on the Waiting list: the Stage opens Leg `<restart.leg>` when there is room" (P44-4; with `listed`
   false, its `unlisted` and `/thread:repair [[<rollout>]]`); `manual …` (a manual hand-over keeps the chain off the

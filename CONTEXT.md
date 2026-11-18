@@ -564,7 +564,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   *closed* reports to the origin (Leg 1, started by hand or from a card),
   but a Leg the Stage opens from the Waiting list is no card's and reports
   nowhere (a listed hand-over's Close archives), and off the Stage none
-  reports (legs.md § Report). A Leg whose Session died is taken over, or its
+  reports (legs.md § Report). A Leg whose Session died on a chain stamped
+  `start: unattended` is taken over from the **Waiting list** once its Leg
+  lease lapses (P36-15: no leg.py call for 90 minutes, 180 after a waiting
+  turn end; never one a room stop parked). Otherwise it is taken over, or its
   stalled chain restarted, by `/thread:repair`, which never runs a Leg itself:
   on the Stage it lists the chain (`leg.py restarted --listed`) for the Stage
   to open, and only a take-over, Codex Desktop, a run off the Stage or an
@@ -585,8 +588,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   elsewhere by starting the next Leg as a new Session (repair § 7 (e)). An
   open Leg whose Session died reads live, never
   stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
-  so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
-  hung, frozen.
+  so on a stamped chain its lapsed Leg lease is what lists it for the take-over
+  (P36-15), and elsewhere (no stamp, or a lease a room stop marked) repair's
+  `list_sessions` check is what finds that Session gone. _Avoid_: hung, frozen.
 - **Surface** — a place a serial chain is predicted to write, written as a
   token in a serial note's `surfaces:` (and in a task's own, optional
   `surfaces:`). Six kinds: `repo:<toplevel>//<path in it>` (a file in a git
@@ -905,7 +909,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is unfinished. Only a writer on the Chorus Stage lists a chain (P44-4, ADR
   0076 d4): schedule S7 on a standalone run; the parent's `stamp-start` under
   orient, orient-all and the **Backlog orient**; a Leg's `handed --listed`;
-  repair's `restarted --listed`. Off the Stage nothing lists it, and Leg 1 is
+  repair's `restarted --listed`. A stamped chain whose open Leg's lease
+  lapsed (its Session died) is on it too, with the take-over prompt (P36-15),
+  but never one a room stop parked. Off the Stage nothing lists it, and Leg 1 is
   a paste-ready prompt. A chain is listed or has a paste-ready prompt, never
   both, so a manual hand-over or a manual restart keeps it off the list, and
   a closing Leg (closed with a handoff, no hand-over line yet) keeps its chain
