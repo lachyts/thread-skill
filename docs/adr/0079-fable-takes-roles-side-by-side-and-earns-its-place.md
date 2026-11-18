@@ -33,7 +33,7 @@ Chorus Phase 104 reads: the model a lead ran on is Chorus's to record, so no Run
 versions, each rollout reads `ladder.toml` through its own snapshot, which refuses a key added after its cut: task
 p46-7 writes `[share]` (or `[role]`, or `plan`) only once every live rollout's engine root reads the file
 (engine-snapshot.md § Cross-version state). The exclusion of an Unreachable surface from the master review's draw is
-p52-2's, at `armOf`.)*
+built by p52-2, at `armOf`: a doubled master review takes `[role]`, then the rung, never its arm.)*
 
 *(Amended 2026-11-14 by thread-skill-p46-4: decision 9 is built. `skills/reflect/scripts/arms.py`, loaded by the weekly
 Reflection's `span`, reads each drawn role's two arms and the lead's inside the reading's window, each row by its own

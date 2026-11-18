@@ -14,6 +14,7 @@ export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run rec
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"  # verify-timeout names verify-slot.py (its verifySlot); keep any pool in temp
 export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
+export TZ=UTC   # stamps are local time (reconcile-rollout.py _stamp): pinned, so a run on the Mac writes what CI's ubuntu runner writes
 
 fail=0
 check() {  # check <label> <expected-substring> <file>
@@ -773,6 +774,132 @@ got="$rc|$(cat "$TMP/vt5.err")|$(cat "$TMP/vt5.out")|$([ "$(shaof "$TMP/vt-rollo
 want="5|ERROR: security_checks: $TMP/vt5-absent/security-check.py not found||same"
 [ "$got" = "$want" ] && echo "ok   - verify-timeout: V12: security-check.py missing -> exit 5, security-check.py not found, the note untouched" \
   || { echo "FAIL - verify-timeout: V12: expected [$want] got [$got]"; fail=1; }
+
+echo "== FC. (p52-2, ADR 0081 d2, d3) the Unreachable stamp, the Felt check line and the felt-check verb =="
+FC="$TMP/fc"; mkdir -p "$FC/Archive/Rollouts" "$FC/Archive/2026"
+NOWFC=2026-11-18T09:00:00+11:00   # the suite runs at TZ=UTC, so _stamp writes this as 2026-11-17T22:00+00:00
+fcnote() {  # fcnote <path> <status> [frontmatter lines...]: a task note of project [[Proj]]
+  local p=$1 st=$2; shift 2
+  { printf -- '---\ntags:\n  - task\nstatus: %s\npriority: normal\nprojects:\n  - "[[Proj]]"\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Notes\n\nBody.\n'; } > "$p"
+}
+fcrow() {  # fcrow <slug> <status> <unreachable JSON> -> $FC/row.json
+  printf '{"rolloutSlug":"t","tasks":[{"slug":"%s","scope":"single-file","status":"%s","prUrl":"https://github.com/o/r/pull/9","reviewRoundsUsed":1,"unreachable":%s}]}' \
+    "$1" "$2" "$3" > "$FC/row.json"
+}
+fcrec() { python3 "$SCRIPT" reconcile --result "$FC/row.json" --tasks-dir "$FC" --now "$NOWFC" 2>"$FC/err"; }
+fcok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected [$2] got [$1]"; fail=1; fi; }
+felt() { python3 "$SCRIPT" felt-check --tasks-dir "$FC" --now "$NOWFC" "$@" 2>"$FC/err"; }
+fsha() { shasum "$1" | cut -d' ' -f1; }
+fclines() { grep -c ' open: try \[\[' "$1"; }
+
+fcnote "$FC/proj-p1-1-a.md" in_progress
+fcrow proj-p1-1-a review '{"marked":true,"by":["paths"],"paths":["Apps/Panel/V.swift"]}'
+out=$(fcrec); rc=$?
+fcok "$rc" 0 "FC1: a marked review row exits 0"
+check "FC1: the stamp" "unreachable: true" "$FC/proj-p1-1-a.md"
+check "FC1: the open line names what marked it" "open: try [[proj-p1-1-a]] by hand once it is live (an Unreachable surface: marked by paths: Apps/Panel/V.swift)" "$FC/proj-p1-1-a.md"
+fcok "$(fclines "$FC/proj-p1-1-a.md")" 1 "FC1: one open line"
+out=$(fcrec)
+case "$out" in *"proj-p1-1-a: status=review"*"[no-change]"*) echo "ok   - FC1: a re-reconcile is no change" ;; *) echo "FAIL - FC1: re-reconcile (got: $out)"; fail=1 ;; esac
+fcok "$(fclines "$FC/proj-p1-1-a.md")" 1 "FC1: still one open line"
+
+fcnote "$FC/proj-p1-2-b.md" in_progress "unreachable: true"
+fcrow proj-p1-2-b review '{"marked":false,"by":[],"paths":[]}'
+fcrec >/dev/null
+check "FC2: a stamped note's approval writes the line with the earlier-call text" "(an Unreachable surface: marked by an earlier call of this task)" "$FC/proj-p1-2-b.md"
+check "FC2: the stamp stays" "unreachable: true" "$FC/proj-p1-2-b.md"
+
+fcnote "$FC/proj-p1-3-c.md" in_progress
+fcrow proj-p1-3-c review '{"marked":false,"by":[],"paths":[]}'
+fcrec >/dev/null
+refute "FC3: an unmarked row on an unstamped note stamps nothing" "unreachable:" "$FC/proj-p1-3-c.md"
+refute "FC3: and writes no Felt check" "## Felt check" "$FC/proj-p1-3-c.md"
+fcnote "$FC/proj-p1-3-d.md" in_progress
+printf '{"rolloutSlug":"t","tasks":[{"slug":"proj-p1-3-d","scope":"single-file","status":"review-blocked","prUrl":"https://github.com/o/r/pull/9","reviewRoundsUsed":1,"reviewFeedback":["x"],"unreachable":{"marked":true,"by":["plan"],"paths":[]}}]}' > "$FC/row.json"
+fcrec >/dev/null
+check "FC3: a review-blocked marked row stamps" "unreachable: true" "$FC/proj-p1-3-d.md"
+refute "FC3: but writes no Felt check" "## Felt check" "$FC/proj-p1-3-d.md"
+
+for bad in '"x"' '{"marked":"yes","by":[],"paths":[]}'; do
+  fcnote "$FC/proj-p1-4-e.md" in_progress
+  fcrow proj-p1-4-e review "$bad"
+  out=$(fcrec); rc=$?
+  fcok "$rc" 1 "FC4 $bad: a malformed unreachable exits 1"
+  case "$(cat "$FC/err")" in *"ERROR: proj-p1-4-e: unreachable is not null or an object with a boolean marked"*) echo "ok   - FC4 $bad: one ERROR naming it" ;;
+    *) echo "FAIL - FC4 $bad: stderr (got: $(cat "$FC/err"))"; fail=1 ;; esac
+  case "$out" in *"proj-p1-4-e: status=review pr=https://github.com/o/r/pull/9 ready="*"[written]"*) echo "ok   - FC4 $bad: the row still lands" ;;
+    *) echo "FAIL - FC4 $bad: stdout (got: $out)"; fail=1 ;; esac
+  check "FC4 $bad: status review" "status: review" "$FC/proj-p1-4-e.md"
+  check "FC4 $bad: ready: stamped" "ready: " "$FC/proj-p1-4-e.md"
+  refute "FC4 $bad: no stamp" "unreachable:" "$FC/proj-p1-4-e.md"
+  refute "FC4 $bad: no Felt check" "## Felt check" "$FC/proj-p1-4-e.md"
+done
+fcnote "$FC/proj-p1-4-f.md" in_progress "unreachable: true"
+fcrow proj-p1-4-f review '"x"'
+fcrec >/dev/null; rc=$?
+fcok "$rc" 1 "FC4: a malformed row on a stamped note exits 1"
+check "FC4: and still writes the open line off the note's own stamp" "(an Unreachable surface: marked by an earlier call of this task)" "$FC/proj-p1-4-f.md"
+
+fcnote "$FC/proj-p1-5-g.md" open "unreachable: true"
+ms5() { HOME="$EH" python3 "$SCRIPT" mark-started --tasks proj-p1-5-g --tasks-dir "$FC" --now "$NOWFC" "$@" 2>/dev/null | grep -c '^proj-p1-5-g: unreachable true$'; }
+fcok "$(ms5)" 1 "FC5: mark-started prints the unreachable line on a start"
+fcok "$(ms5 --start restart)" 1 "FC5: and on a restart"
+fcok "$(ms5 --start resume)" 0 "FC5: and nothing on --start resume"
+fcok "$(HOME="$EH" python3 "$SCRIPT" mark-started --tasks proj-p1-3-c --tasks-dir "$FC" --now "$NOWFC" 2>/dev/null | grep -c 'unreachable')" 0 "FC5: an unstamped note prints none"
+
+# A done task with an open line (a landed task that fixes nothing).
+fcdone() { fcnote "$1" done "merged: 2026-11-17T10:00+11:00" "rollout: \"[[${2:-ro-a}]]\""; printf '\n## Felt check\n\n- 2026-11-17T10:00+11:00 open: try [[%s]] by hand once it is live (an Unreachable surface: marked by plan)\n' "$(basename "$1" .md)" >> "$1"; }
+fcdone "$FC/proj-p2-1-h.md"
+out=$(felt --task proj-p2-1-h --passed "the panel opens on the Vision Pro"); rc=$?
+fcok "$rc" 0 "FC6: --passed on a done task exits 0"
+check "FC6: the passed line" "- 2026-11-17T22:00+00:00 passed: the panel opens on the Vision Pro (Lachy)" "$FC/proj-p2-1-h.md"
+refute "FC6: no Proof log line on a task that is no carried fix" "## Proof log" "$FC/proj-p2-1-h.md"
+
+fcdone "$FC/proj-p2-2-i.md"; fcdone "$FC/proj-p2-3-j.md"
+evbefore=$(cd "$THREAD_EVENTS_DIR" 2>/dev/null && find . -type f -exec shasum {} \; | sort | shasum)
+out=$(felt --task proj-p2-2-i --failed "the panel never opens"); rc=$?
+fcok "$rc" 0 "FC7: --failed exits 0"
+case "$out" in *"filed [[proj-followup-felt-check]] (fixes: [[proj-p2-2-i]])"*) echo "ok   - FC7: names the fix it filed" ;; *) echo "FAIL - FC7: stdout (got: $out)"; fail=1 ;; esac
+check "FC7: the failed line names the fix" "failed: the panel never opens (Lachy) -> [[proj-followup-felt-check]]" "$FC/proj-p2-2-i.md"
+check "FC7: the fix carries fixes:" 'fixes: ["[[proj-p2-2-i]]"]' "$FC/proj-followup-felt-check.md"
+check "FC7: priority high" "priority: high" "$FC/proj-followup-felt-check.md"
+fcok "$(sed -n '2,/^---$/p' "$FC/proj-followup-felt-check.md" | grep -cx 'unreachable: true')" 1 "FC7: the fix is stamped unreachable: true in its frontmatter (the same surface)"
+check "FC7: projects copied" '  - "[[Proj]]"' "$FC/proj-followup-felt-check.md"
+check "FC7: his words quoted" "> the panel never opens" "$FC/proj-followup-felt-check.md"
+evafter=$(cd "$THREAD_EVENTS_DIR" 2>/dev/null && find . -type f -exec shasum {} \; | sort | shasum)
+fcok "$evafter" "$evbefore" "FC7: no Run-record event (the events tree is byte-identical)"
+felt --task proj-p2-3-j --failed "it crashes" >/dev/null
+check "FC7: a second fix in the project takes -2" 'fixes: ["[[proj-p2-3-j]]"]' "$FC/proj-followup-felt-check-2.md"
+
+for t in "proj-p2-1-h|already passed" "proj-p2-2-i|not a carried fix: closed for good"; do
+  why=${t#*|}; t=${t%%|*}
+  before=$(fsha "$FC/$t.md")
+  felt --task "$t" --passed "again" >/dev/null; rc=$?
+  fcok "$rc|$(fsha "$FC/$t.md")" "1|$before" "FC8: $t acted on again exits 1, its bytes unchanged"
+  grep -qF "$why" "$FC/err" && echo "ok   - FC8: $t: $why" || { echo "FAIL - FC8: $t why (got: $(cat "$FC/err"))"; fail=1; }
+done
+fcdone "$FC/proj-p2-4-k.md"
+before=$(fsha "$FC/proj-p2-4-k.md"); n=$(ls "$FC" | wc -l)
+out=$(felt --task proj-p2-4-k --failed "nope" --dry-run); rc=$?
+fcok "$rc|$(fsha "$FC/proj-p2-4-k.md")|$(ls "$FC" | wc -l)" "0|$before|$n" "FC8: --dry-run writes nothing and files nothing"
+case "$out" in *"would file [[proj-followup-felt-check-3]]"*) echo "ok   - FC8: --dry-run names the fix it would file" ;; *) echo "FAIL - FC8: dry-run stdout (got: $out)"; fail=1 ;; esac
+
+fcdone "$FC/Archive/2026/proj-p3-1-l.md" ro-old
+fcdone "$FC/Archive/Rollouts/proj-p3-2-m.md" ro-old
+fcnote "$FC/proj-p3-3-n.md" review "pr: https://github.com/o/r/pull/3" "rollout: \"[[ro-old]]\""
+printf '\n## Felt check\n\n- 2026-11-17T10:00+11:00 open: try [[proj-p3-3-n]] by hand once it is live (an Unreachable surface: marked by plan)\n' >> "$FC/proj-p3-3-n.md"
+listed=$(felt --list --json | python3 -c 'import json,sys; print(" ".join(r["slug"]+":"+r["state"]+":"+str(r["rollout"]) for r in json.load(sys.stdin)["rows"]))')
+case " $listed " in *" proj-p3-1-l:open:ro-old "*) echo "ok   - FC9: an archived done task is listed with its rollout" ;; *) echo "FAIL - FC9: archive (got: $listed)"; fail=1 ;; esac
+for t in proj-p3-2-m proj-p3-3-n proj-p2-1-h proj-p2-2-i; do
+  case " $listed " in *" $t:"*) echo "FAIL - FC9: $t listed (got: $listed)"; fail=1 ;; *) echo "ok   - FC9: $t not listed" ;; esac
+done
+fcok "$(felt --list --rollout ro-old --json | python3 -c 'import json,sys; print(" ".join(r["slug"] for r in json.load(sys.stdin)["rows"]))')" "proj-p3-1-l" "FC9: --rollout keeps its own"
+before=$(fsha "$FC/proj-p3-3-n.md")
+felt --task proj-p3-3-n --passed "x" >/dev/null; rc=$?
+fcok "$rc|$(fsha "$FC/proj-p3-3-n.md")" "1|$before" "FC9: an unlanded note's --passed exits 1, unchanged"
+grep -q "not due: not landed" "$FC/err" && echo "ok   - FC9: says not landed" || { echo "FAIL - FC9: why (got: $(cat "$FC/err"))"; fail=1; }
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi

@@ -143,7 +143,7 @@ test('both arms per drawn role and the lead, each figure with its count; a plant
   const lead = block.roles.lead
   assert.deepEqual([lead.opus.landed, lead.fable.landed, lead.opus.roleTokens, lead.fable.tokens], [3, 5, null, 18900])
   assert.deepEqual(lead.opus.calls, 6, 'the lead counts every role\'s calls in its rollouts')
-  assert.deepEqual(mr.excluded, { fellBack: 0, fableRung: 0, none: 0 }, 'an investigator task has no master-review arm, so it is no `none` there')
+  assert.deepEqual(mr.excluded, { fellBack: 0, fableRung: 0, unreachable: 0, none: 0 }, 'an investigator task has no master-review arm, so it is no `none` there')
   assert.deepEqual(block.tasks.map((x) => x.task).sort(), ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'i1', 'i2'], 'old and late hold no landed row')
   assert.ok(!block.calls.some((c) => ['old', 'late'].includes(c.task)), 'the planted calls hold no call row')
   assert.ok(!block.reviews.some((r) => r.task === 'old'))
@@ -193,9 +193,9 @@ test('exclusions: fellBack leaves one role, fableRung every role; tokensPartial 
   const stamps = { f1: stampOf('opus'), g1: stampOf('opus'), t1: stampOf('opus'), s1: stampOf('opus'), d1: stampOf('fable', 'opus') }
   const { block } = reading(h, { records: { rx: r }, stamps, leads: { rx: 'opus' }, handsOff: handsOff({ rx: ['f1', 'g1', 't1', 's1', 'n1', 'd1'] }) })
   const mr = block.roles['master-review']
-  assert.deepEqual(mr.excluded, { fellBack: 1, fableRung: 1, none: 1 })
-  assert.deepEqual(block.roles.builder.excluded, { fellBack: 0, fableRung: 1, none: 1 }, 'f1 fell back on its master review only')
-  assert.deepEqual(block.roles.lead.excluded, { fellBack: 0, fableRung: 1, none: 0 }, 'a Fable-rung climb leaves the lead too')
+  assert.deepEqual(mr.excluded, { fellBack: 1, fableRung: 1, unreachable: 0, none: 1 })
+  assert.deepEqual(block.roles.builder.excluded, { fellBack: 0, fableRung: 1, unreachable: 0, none: 1 }, 'f1 fell back on its master review only')
+  assert.deepEqual(block.roles.lead.excluded, { fellBack: 0, fableRung: 1, unreachable: 0, none: 0 }, 'a Fable-rung climb leaves the lead too')
   assert.deepEqual([block.roles.builder.opus.landed, mr.opus.landed, mr.fable.landed], [4, 3, 0], 'd1\'s master review reads the record\'s opus')
   assert.deepEqual([mr.opus.tokenTasks, mr.opus.tokensLeftOut, mr.opus.tokens], [1, 2, 2000], 't1 (tokensPartial) and s1 (no role-call) are left out')
   assert.ok(block.flags.includes('arms: a stamp the record overrides: [[d1]] master-review: stamp fable, record opus'), JSON.stringify(block.flags))
@@ -311,12 +311,43 @@ test('Fable calls by kind, each call once; a fell-back call only on its own line
     rc(W(5, '04:00'), 'b2', 'master-review', W(5, '01:00'), { arm: 'fable', fellBack: true }),
     rc(W(5, '04:00'), 'b2', 'builder', W(5, '01:10'), { arm: 'opus' })])
   const [fb, none] = reading(h, [{ records: { rf: r }, leads: { rf: 'fable' } }, { records: { rf: rec('rf', [rc(W(4, '04:00'), 'b1', 'master-review', W(4, '01:00'), { arm: 'fable' })]) } }])
-  assert.deepEqual(fb.block.fableCalls, { fableRung: 1, plans: 2, 'master-review': 1, builder: 0, investigator: 0, other: 1, firstReviewer: null, leads: 1 })
-  assert.deepEqual(fb.block.fellBack, { calls: 1, byKind: { fableRung: 0, plans: 0, 'master-review': 1, builder: 0, investigator: 0, other: 0 },
+  assert.deepEqual(fb.block.fableCalls, { fableRung: 1, plans: 2, 'master-review': 1, builder: 0, investigator: 0, other: 1, firstReviewer: 0, leads: 1 })
+  assert.deepEqual(fb.block.fellBack, { calls: 1, byKind: { fableRung: 0, plans: 0, 'master-review': 1, builder: 0, investigator: 0, other: 0, firstReviewer: 0 },
     line: '1 Fable call(s) fell back to Opus: another Login with Fable room would have carried them' })
   assert.ok(fb.block.cannotShow.some((c) => c.includes('whether another Login had Fable room')))
   assert.deepEqual([none.block.fellBack.calls, none.block.fellBack.line], [0, null])
-  assert.equal(fb.line.fableCalls.firstReviewer, null)
+  assert.equal(fb.line.fableCalls.firstReviewer, 0)
+})
+
+// p52-2 (ADR 0081 d2): a doubled master review's first reviewer is its own call kind, outside the draw: its Fable calls
+// count in fableCalls.firstReviewer (a rerun on the rung in fellBack.byKind.firstReviewer), never in `other` or the master
+// review's stats; the task leaves the master review's comparison as `unreachable`, its stamp never set against its record.
+test('a doubled master review: firstReviewer calls, its fell-back rerun, the unreachable exclusion; a line before since adds nothing', (t) => {
+  const h = setup(t)
+  const fr = (task, d, o = {}) => rc(W(d, '04:00'), task, 'first-reviewer', W(d, '01:30'), { runId: `wf-${task}`, model: 'fable', ...o })
+  // u1, u2: doubled (stamped master-review opus, so the master-review line, which carries no arm, would disagree);
+  // u2's first reviewer fell back; u0's first-reviewer line started before since (its call is outside the window).
+  const doubled = (task, d) => build(task, d).map((x) => (x[1] === 'role-call' && x[3].role === 'master-review'
+    ? [x[0], x[1], x[2], Object.fromEntries(Object.entries(x[3]).filter(([k]) => k !== 'arm'))] : x))
+  const r = rec('ru', [...doubled('u1', 3), fr('u1', 3), ...doubled('u2', 4), fr('u2', 4, { fellBack: true }),
+    ...build('o1', 5),
+    rc(BEFORE('04:00'), 'u0', 'first-reviewer', BEFORE('01:30'), { model: 'fable' })])
+  const { block, holds, line } = reading(h, { records: { ru: r }, stamps: { u1: stampOf('opus'), u2: stampOf('opus'), o1: stampOf('opus'), u0: stampOf('opus') },
+    leads: { ru: 'opus' }, handsOff: handsOff({ ru: ['u1', 'u2', 'o1'] }) })
+  assert.ok(holds)
+  assert.equal(block.fableCalls.firstReviewer, 1, 'u1\'s first reviewer; u0\'s started before since')
+  assert.equal(block.fableCalls.other, 0, 'never other')
+  assert.deepEqual([block.fellBack.calls, block.fellBack.byKind.firstReviewer], [1, 1], 'u2\'s rerun on the rung')
+  const mr = block.roles['master-review']
+  assert.deepEqual(mr.excluded, { fellBack: 0, fableRung: 0, unreachable: 2, none: 0 })
+  assert.deepEqual([mr.opus.landed, mr.opus.calls], [1, 1], 'only o1 is compared on the master review')
+  assert.equal(block.tasks.find((x) => x.task === 'u1').arms['master-review'], 'unreachable')
+  assert.equal(block.roles.builder.opus.landed, 3, 'the builder still compares every task')
+  assert.equal(block.roles.lead.opus.calls, 8, 'the lead counts the first reviewers\' calls (3 builders, 3 master reviews, 2 first reviewers)')
+  assert.ok(!block.flags.some((f) => f.includes('a stamp the record overrides')), JSON.stringify(block.flags))
+  assert.ok(!block.cannotShow.some((c) => c.includes('first reviewer')), 'the first reviewer is a call kind now')
+  assert.equal(line.fableCalls.firstReviewer, 1)
+  assert.equal(line.fellBack.byKind.firstReviewer, 1)
 })
 
 test('holds_row: an empty week and an all-none week hold none; the line is run_record\'s arms kind', (t) => {

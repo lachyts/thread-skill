@@ -114,7 +114,8 @@ function check(skill, rr = realRr) {
     !ar.includes("the next entry's *Restart routing* holds no runId, so it makes a fresh call with args built afresh (§ 4)") ||
     !ar.includes("the next entry's step 1.4 takes its task through step 3's `prepare`") ||
     !ar.includes("For a refused § 3.7 signed-gate resume, the lead prints § 3.7's fresh-call warning above the halt line") ||
-    !ar.includes('A fresh call refused again halts again')) {
+    !ar.includes('A fresh call refused again halts again') ||
+    !ar.includes('`securityCheck`, `unreachablePaths`, `task.arms`, `task.unreachable`, `integration` or `task.resume`')) {
     fails.push('args-refusal')
   }
 
@@ -253,6 +254,10 @@ const only = (skill, rule, label, rr = realRr) => {
 test('control: Args refusal without its integrate free-lane fails args-refusal', () => {
   only(edit(real, `(3) for an integrate call only, runs ${FREE}: the lane frees while the note keeps \`integrating:\`, as after step 3's tripped check; `, ''),
     'args-refusal', 'no free-lane')
+})
+
+test('control: the refused args list without task.unreachable (p52-2) fails args-refusal', () => {
+  only(edit(real, '`task.arms`, `task.unreachable`, `integration`', '`task.arms`, `integration`'), 'args-refusal', 'no task.unreachable')
 })
 
 test('control: a sentinel matched by "starts with" fails args-refusal', () => {

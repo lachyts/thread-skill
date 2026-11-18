@@ -13,6 +13,8 @@
 #   R  record-entry: the lead's arm on the rollout note, kept at a later share, none for a rollout led before the
 #      draw, nothing with no share; the lead-entry line carries no arm.
 #   S  status: its ladder keeps source, rungs and error, never the share.
+#   F  (p52-2, ADR 0081 d2) the role-call fold of a doubled master review: its first reviewer is its own role, the
+#      master-review line carries no arm, and a dead Fable first reviewer's rerun on the rung is fellBack.
 # HOME points at a temp dir holding each case's ~/.config/thread/ladder.toml. Temp dirs only.
 # Usage: bash reconcile-rollout-arms.test.sh   (exit 0 = pass)
 set -uo pipefail
@@ -258,6 +260,39 @@ ladder $'[share]\nmaster-review = 1\nlead = 1'
 ok "$(python3 "$SCRIPT" status --rollout "$V/ro.md" --tasks-dir "$V" --now "$NOW" 2>/dev/null \
   | python3 -c 'import json,sys; print(list(json.load(sys.stdin)["ladder"]))')" "['source', 'rungs', 'error']" \
   "S: status's ladder holds source, rungs and error, never the share"
+
+echo "== F. (p52-2) the role-call fold of a doubled master review"
+out=$(python3 - "$SCRIPT" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ladder = {"source": "x", "rungs": [{"name": "opus-xhigh", "model": "opus", "effort": "xhigh", "judge": "high", "review": "xhigh"}]}
+args = {"task": {"arms": {"master-review": "opus", "builder": "fable"}}, "ladder": ladder}
+def ran(label, model, effort):
+    return {"label": label, "rung": "opus-xhigh", "model": model, "effort": effort}
+def agent(label, model):
+    return {"type": "workflow_agent", "label": label, "model": model, "tokens": 10}
+def fold(rans, agents):
+    row = {"status": "review", "ran": rans, "climbs": []}
+    return {d["role"]: d for d in m._role_calls("wf_x", "task", (1794000000000, row, agents), args, {})}
+a = fold([ran("implement:x", "fable", "high"), ran("first-review:x r1", "fable", "high"), ran("review:x r1", "opus", "xhigh")],
+         [agent("first-review:x r1", "claude-fable-5-2"), agent("review:x r1", "claude-opus-5-5")])
+print("roles", list(a))
+fr = a["first-reviewer"]
+print("first", fr["model"], fr["effort"], fr["dispatches"], "arm" in fr, fr.get("fellBack", False))
+print("master-arm", "arm" in a["master-review"], "builder-arm", a["builder"].get("arm"))
+b = fold([ran("first-review:x r1", "fable", "high"), ran("first-review:x r1 on-rung", "opus", "xhigh"), ran("review:x r1", "opus", "xhigh")], [])
+fr = b["first-reviewer"]
+print("rerun", fr["model"], fr["dispatches"], fr.get("fellBack", False))
+c = fold([ran("review:x r1", "opus", "xhigh")], [])
+print("single-arm", c["master-review"].get("arm"))
+PY
+)
+ok "$(sed -n 1p <<< "$out")" "roles ['builder', 'first-reviewer', 'master-review']" "F1: the first reviewer folds as its own role, before the master review"
+ok "$(sed -n 2p <<< "$out")" "first fable high 1 False False" "F1: its line: what it asked, no arm, not fell back"
+ok "$(sed -n 3p <<< "$out")" "master-arm False builder-arm fable" "F1: the master-review line carries no arm (outside the draw); the builder keeps its own"
+ok "$(sed -n 4p <<< "$out")" "rerun fable 2 True" "F2: a dead Fable first reviewer rerun on the rung: one line, model fable, 2 dispatches, fellBack"
+ok "$(sed -n 5p <<< "$out")" "single-arm opus" "F3: control: an undoubled segment keeps the master review's arm"
 
 [ "$fail" = 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"
