@@ -784,8 +784,8 @@ test('drift: the port reads every fixture exactly as Chorus does', { skip: !proc
 test('a Leg\'s turn ends read through the port as legs.md § Report says', () => {
   const RO = 'demo-rollout-2026-10-20'
   const line = (k, state, reason) => `ROLLOUT-STATUS: ${RO} merged=${k}/7 running=0 state=${state}${reason ? ` reason="${reason}"` : ''}`
-  const [bA, bB] = banners(real.close).map(fill)
-  assert.ok(bA && bB, 'close step 9 has banners A and B')
+  const [bA, bB, bC] = banners(real.close).map(fill)
+  assert.ok(bA && bB && bC, 'close step 9 has banners A, B and C')
   const LEG_REPORT = 'landing /Users/lachlants/repos/tools/demo: not landed: commit-only\nhand-over: started task_x'
   const LISTED_REPORT = 'landing /Users/lachlants/repos/tools/demo: not landed: commit-only\nhand-over: listed (Waiting list)'
   const NOT_LISTED = 'hand-over not listed: blocked by chain copy missing: /Users/lachlants/.local/state/thread/chains/demo-demo-rollout-2026-10-20 (leg.py copies --rollout /x remakes it)'
@@ -807,6 +807,15 @@ test('a Leg\'s turn ends read through the port as legs.md § Report says', () =>
   for (const [, text, want] of cases) assert.deepEqual(R(text).statusClose, want, text.slice(-160))
   assert.equal(R(cases[2][1]).asks, false, 'a manual hand-over asks nothing')
   assert.equal(R('Leg 2 reported: handed off to Leg 3').asks, false, 'a report from a later Leg is one statement line')
+  // p36-14 (legs.md § The Companion's reply): the last Leg answers its Clean-up archive's reply with one statement line,
+  // then the banner its Complete turn ended on, so the reply turn reads as that turn did: A or B closed (it still
+  // archives itself, Chorus ADR 0089 d2), C still held under its flag.
+  const reply = `Clean-up archive of [[${RO}]]: archived "Demo rollout · Leg 1"; refused "Demo rollout · Leg 2": it waits on the listener: a question is open`
+  for (const [k, b] of [['A', bA], ['B', bB]]) {
+    const r = R(`${reply}\n\n---\n\n${b}`)
+    assert.deepEqual([r.endsClosed, r.asks, r.flagged], [true, false, false], `the reply turn on banner ${k} does not read closed`)
+  }
+  assert.equal(R(`${reply}\n\n---\n\n${bC}`).flagged, true, 'the reply turn on banner C reads unflagged, so it would archive')
   assert.deepEqual(R(line(7, 'done')).statusClose, ['work to review', 'the rollout'], 'control: done with no banner')
   // legs.md § Report's table: the Chorus Close column names the same reading for each turn end.
   const table = (section(real.legs, /^## Report/) ?? '').split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| Turn end'))
