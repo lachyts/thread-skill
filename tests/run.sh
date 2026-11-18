@@ -82,8 +82,8 @@
 # bound the whole group is TERMed, then KILLed, and the suite ends `<label>: FAILED (<N>s)` plus a `<label>: timed out
 # after <B>s` line, also in its block and its failure-list line; it fails even when it exits 0 on its TERM. Its block
 # also names the fix for a healthy suite that has only grown slower: regenerate tests/shard-weights.tsv, or set
-# THREAD_SUITE_BOUND. The bound is suite_bounds's (10x the suite's measured seconds in tests/shard-weights.tsv rounded
-# up, 300 s floor, 1200 s with no weight; test-jobs.sh says why 10x); THREAD_SUITE_BOUND (seconds) sets one flat bound
+# THREAD_SUITE_BOUND. The bound is suite_bounds's (12x the suite's measured seconds in tests/shard-weights.tsv rounded
+# up, 300 s floor, 1200 s with no weight; test-jobs.sh says why 12x); THREAD_SUITE_BOUND (seconds) sets one flat bound
 # for every suite instead. A
 # bound that is not a positive integer (an entry suite_bounds printed no line for) falls back to the 1200 s, and spawn
 # prints a `run.sh: <label>: no liveness bound` line. The bound counts the suite's awake seconds, not elapsed ones

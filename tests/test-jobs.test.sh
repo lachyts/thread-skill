@@ -56,14 +56,14 @@ for sh in "${shells[@]}"; do
   for bad in 0 abc -1 1.5 ' 2'; do
     ok "$(fb "$bad" | tr '\n' ' ')" "rc=2 " "$n: THREAD_SUITE_BOUND='$bad' → return 2, nothing printed"
   done
-  # ---- suite_bounds: 10x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ---------
+  # ---- suite_bounds: 12x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ---------
   W="$tmp/weights-$k.tsv"
-  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.25 tests/zza.test.sh \
+  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.3 tests/zza.test.sh \
     0.5 tests/zzb.test.sh bad tests/zzc.test.sh > "$W"
   sb() { local w="$1" f="$2"; shift 2; printf '%s\n' "$@" | "$sh" -c '. tests/lib/test-jobs.sh; suite_bounds "$@"' sh "$w" "$f" | tr '\t\n' ': '; }
   ok "$(sb "$W" '' @merge-task-self-tests tests/zzleg.test.sh tests/zza.test.sh tests/zzb.test.sh tests/zzc.test.sh tests/zznew.test.mjs)" \
-    "@merge-task-self-tests:300 tests/zzleg.test.sh:5270 tests/zza.test.sh:1003 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
-    "$n: suite_bounds: 10x the weight rounded up (527 → 5270, 100.25 → 1003), the 300 s floor (9 → 300), 1200 s for no weight or a malformed line"
+    "@merge-task-self-tests:300 tests/zzleg.test.sh:6324 tests/zza.test.sh:1204 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
+    "$n: suite_bounds: 12x the weight rounded up (527 → 6324, 100.3 → 1204), the 300 s floor (9 → 300), 1200 s for no weight or a malformed line"
   ok "$(sb "$tmp/no-such.tsv" '' tests/zzleg.test.sh)" "tests/zzleg.test.sh:1200 " "$n: suite_bounds: no weights file → 1200 s"
   ok "$(sb "$W" 5 tests/zzleg.test.sh @merge-task-self-tests)" "tests/zzleg.test.sh:5 @merge-task-self-tests:5 " "$n: suite_bounds: a flat bound is every entry's"
   # ---- watch_group: a group whose leader outlives its bound is TERMed whole; a group that ignores TERM is KILLed ----
@@ -139,6 +139,16 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
 # leg.test.sh's 1581 s and 1891 s are now split across its four files (p54-9), 1891 by the parts' measured shares.
+# Three rows are master's macOS shard 3/4, 2026-11-17 to 18, and two of them are estimates, since that shard cut those
+# runs at their bounds: a cut run's full time is its cut seconds over the share of a lone local run's time its last
+# check had reached (tests/shard-weights.tsv's header holds the reading).
+# skills/execute/tests/reconcile-rollout-queue.test.sh's 535 s is job 134402170137 (run 44185887550), cut at 355 s
+# after check 242 of 342, about two thirds of the local run's time (it passed at 331 s in job 134564415416, and job
+# 134224807065 cut it at check 338, about 362 s); its 804 s bound (hand-set weight 67) leaves 1.5x over the 535 s.
+# tests/fast-tier.test.sh's 680 s is job 134564415416 (run 44233636618), cut at 300 s after its R8, 44% of the local
+# run's time (job 134575108240 cut it after R10, 49%, about 610 s; it passed at 259 s in job 134542390531); its 1032 s
+# bound (hand-set weight 86) leaves 1.5x over the 680 s. tests/serial-chains.test.sh's 275 s is job 134402170137, where
+# it passed.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
 ci_max="tests/leg.test.sh 550
 tests/leg-land.test.sh 565
@@ -148,14 +158,16 @@ tests/lead-integrate.test.sh 735
 tests/unfinished-rollout.test.sh 613
 tests/primary-refresh.test.sh 543
 tests/land.test.sh 297
-tests/serial-chains.test.sh 163"
+tests/fast-tier.test.sh 680
+skills/execute/tests/reconcile-rollout-queue.test.sh 535
+tests/serial-chains.test.sh 275"
 bounds=$(printf '%s\n' "$ci_max" | awk '{print $1}' | bash -c '. tests/lib/test-jobs.sh; suite_bounds tests/shard-weights.tsv')
 bad=""
 while read -r t m; do
   b=$(printf '%s\n' "$bounds" | awk -F'\t' -v t="$t" '$1 == t { print $2 }')
   [ "$((${b:-0} * 2))" -ge "$((m * 3))" ] || bad="$bad $t=${b:-none}<1.5x$m"
 done <<< "$ci_max"
-ok "${bad# }" "" "run.sh: each suite's bound from the real weights is at least 1.5x its slowest passing macOS CI time"
+ok "${bad# }" "" "run.sh: each suite's bound from the real weights is at least 1.5x its slowest macOS CI time (a pass, or a cut run's estimate)"
 nt=$(grep -o 'test-timeout=[0-9]*' tests/run.sh | head -1); nt=${nt#test-timeout=}
 ok "$([ "${nt:-0}" -ge $((512 * 1500)) ] && echo ok || echo "${nt:-none} ms")" ok \
   "run.sh: node's --test-timeout is at least 1.5x the slowest node file's macOS CI time (512 s)"
