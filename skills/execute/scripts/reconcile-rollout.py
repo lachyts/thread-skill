@@ -601,15 +601,17 @@ Subcommands:
                    awaiting Integration or held by an undecided RACE or UNVERIFIED is exit 3, `take-out waits: [[d]]
                    is <state>`, nothing written: finished work is never thrown away.
                 4. The PR reads, bounded (_gh, PROVE_GH_TIMEOUT): each member's `pr:` state and base, and the default
-                   branch. A PR MERGED into the default branch writes one `- <stamp> take-out failed: [[<slug>]]
-                   ([[<m>]]'s PR merged into <B>: resume lands it; feedback <F>)` line, exit 4; one merged into another
-                   base reads as closed (no close).
+                   branch. A PR MERGED into the default branch writes one `- <stamp> take-out paused: [[<slug>]]
+                   ([[<m>]]'s PR merged into <B>: resume lands it; feedback <F>)` line (once per member and feedback;
+                   nothing failed, so no `take-out failed:` line, no cool-down and no step toward the bound), exit 4;
+                   one merged into another base reads as closed (no close).
                 5. The retire block (repair § 5's), per member leaves first, each idempotent: `git worktree remove -f
                    -f` on an existing task tree, `gh pr close <pr> --delete-branch --comment "taken out of [[R]] …"` on
                    an OPEN PR (a dependant's comment names the task), `git update-ref -d
-                   refs/integration-anchor/<branch> <X>` on an existing anchor. Any failure in step 4's reads or here
-                   writes only `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` (the verdict's failure
-                   bound: a cool-down, then H10 at TAKE_OUT_TRIES), exit 1.
+                   refs/integration-anchor/<branch> <X>` on an existing anchor. Any failure in step 2's read (a note
+                   under the tasks dir that will not read), step 4's reads or here writes only `- <stamp> take-out
+                   failed: [[<slug>]] (<why>; feedback <F>)` (the verdict's failure bound: a cool-down, then H10 at
+                   TAKE_OUT_TRIES), exit 1.
                 6. The rollout note, one save: the task's `- <stamp> take-out: [[<slug>]] after <n> Overtime runs
                    (<stage>; <its diagnosis's first line, _take_out_diagnosis>; <pr url or "no PR">; feedback <F>)`, then
                    one `- <stamp> take-out: [[<dep>]] with [[<slug>]] (its dependant; feedback <F>)` per dependant, each
@@ -620,7 +622,9 @@ Subcommands:
                    included), restoring in it the caps its own `auto_retry_raised` names (`-` removes the key; a
                    malformed marker restores nothing, one WARN); the task alone also gets `taken_out: <prev+1>` and
                    `taken_out_of` with `"[[R]]"` added once. The task's save is last, so while a member is unfinished
-                   the verdict still reads takeOut and step 1.2 re-runs the verb.
+                   the verdict still reads takeOut and step 1.2 re-runs the verb. A save that fails (an OSError: a
+                   lock timeout, a read-only note, a changed-since-read conflict) or a defer that refuses writes one
+                   `take-out failed:` line, exit 1, as in step 5: a re-run finishes the take-out after the cool-down.
                 8. Prints `<slug>: taken out after <n> Overtime runs (<cause>) → open [written]`, then `<dep>: taken
                    out with <slug> → open [written]` per dependant. --dry-run writes, records and closes nothing (a
                    failure line included).
@@ -12529,7 +12533,7 @@ def _restore_caps(note, caps, warns, slug):
 def _take_out(args) -> int:
     """`defer --take-out` (p39-14, ADR 0070 d5; the module docstring's `defer`): the take-out of one set-aside task and
     its dependent closure. Exit 0 taken out or [no-change], 1 refused or a failure (a failure writes one `take-out
-    failed:` line), 2 usage, 3 waits, 4 a PR merged into the default branch."""
+    failed:` line), 2 usage, 3 waits, 4 a PR merged into the default branch (one `take-out paused:` line, no failure)."""
     def error(msg, code=1, tail="nothing written"):
         print(f"ERROR: defer --take-out: {msg}; {tail}", file=sys.stderr)
         return code
@@ -12568,23 +12572,38 @@ def _take_out(args) -> int:
         print(f"{slug}: take-out cools down until {v['autoRetryAfter']} [no-change]")
         return 3
     fp = to["fingerprint"]
+
+    def note_line(mark, why, once=False):
+        """Append `- <stamp> <mark> [[slug]] (<why>; feedback <F>)` to the rollout's `## Notes` (a fresh read), best-effort:
+        a note that will not read or save is one WARN. `once` skips it when a line with the same text after its stamp
+        is there already."""
+        body = f"{mark} [[{slug}]] ({' '.join(why.split())}; feedback {fp})"
+        line = f"- {_stamp(now)} {body}"
+        if not args.dry_run:
+            try:
+                rn = Note(rollout_path)
+                if once and any(l.strip().endswith(body) for l in rn.section_text(NOTES_SECTION).split("\n")):
+                    return line
+                rn.append_line(NOTES_SECTION, line)
+                rn.save()
+            except (OSError, ValueError) as e:
+                print(f"WARN: defer --take-out: cannot write `{mark}` to {rollout_path}: {e}", file=sys.stderr)
+        return line
+
+    def failed(why):
+        """One `take-out failed:` line: the verdict's failure bound (_take_out_failures) counts it."""
+        return note_line(TAKE_OUT_FAILED_MARK, why)
+
     # 2. The closure; 3. the waits.
-    order, waits, by, _index = _take_out_members(rollout_path, rollout_note, tasks_dir, slug)
+    try:
+        order, waits, by, _index = _take_out_members(rollout_path, rollout_note, tasks_dir, slug)
+    except OSError as e:
+        failed(f"the closure does not read: {e}")
+        return error(f"{slug}: the closure does not read: {e}", tail="one take-out failed: line written")
     if waits:
         d, state = waits[0]
         print(f"{slug}: take-out waits: [[{d}]] is {state} [no-change]")
         return 3
-
-    def failed(why):
-        line = f"- {_stamp(now)} {TAKE_OUT_FAILED_MARK} [[{slug}]] ({' '.join(why.split())}; feedback {fp})"
-        if not args.dry_run:
-            rn = Note(rollout_path)
-            rn.append_line(NOTES_SECTION, line)
-            try:
-                rn.save()
-            except OSError as e:
-                print(f"WARN: defer --take-out: cannot write the failure line to {rollout_path}: {e}", file=sys.stderr)
-        return line
 
     # 4. The PR reads: each member's `pr:` state and base, and the repo's default branch, bounded.
     prs, defaults = {}, {}
@@ -12628,9 +12647,11 @@ def _take_out(args) -> int:
                 return error(f"{slug}: cannot resolve the default branch of {repo or cwd}: {derr}",
                              tail="one take-out failed: line written")
             if base == default:
-                failed(f"[[{m}]]'s PR merged into {default}: resume lands it")
+                # Nothing failed (the lead's `resume` lands it), so never a `take-out failed:` line: no cool-down and no
+                # step toward the failure bound. Written once per member and feedback.
+                note_line(TAKE_OUT_PAUSED_MARK, f"[[{m}]]'s PR merged into {default}: resume lands it", once=True)
                 print(f"{slug}: [[{m}]]'s PR {ref} merged into {default}: run `resume`, which lands it "
-                      "(one take-out failed: line written)", file=sys.stderr)
+                      "(one take-out paused: line)", file=sys.stderr)
                 return 4
         prs[m.lower()] = (ref, cwd, state)
     # 5. The retire block, per member, leaves first: each step idempotent.
@@ -12655,10 +12676,15 @@ def _take_out(args) -> int:
                     failed(f"gh pr close of [[{m}]]'s PR failed: {gerr}")
                     return error(f"{slug}: gh pr close {ref_[0]} failed: {gerr}", tail="one take-out failed: line written")
             if root is not None and root.is_dir():
-                x = subprocess.run(["git", "-C", str(root), "rev-parse", "-q", "--verify",
-                                    f"refs/integration-anchor/{br}"], capture_output=True, text=True,
-                                   timeout=PROVE_GIT_TIMEOUT, stdin=subprocess.DEVNULL,
-                                   env={k: v_ for k, v_ in os.environ.items() if not k.startswith("GIT_")})
+                try:
+                    x = subprocess.run(["git", "-C", str(root), "rev-parse", "-q", "--verify",
+                                        f"refs/integration-anchor/{br}"], capture_output=True, text=True,
+                                       timeout=PROVE_GIT_TIMEOUT, stdin=subprocess.DEVNULL,
+                                       env={k: v_ for k, v_ in os.environ.items() if not k.startswith("GIT_")})
+                except (OSError, subprocess.SubprocessError) as gex:
+                    failed(f"git rev-parse of [[{m}]]'s integration anchor failed: {gex}")
+                    return error(f"{slug}: git rev-parse refs/integration-anchor/{br} failed: {gex}",
+                                 tail="one take-out failed: line written")
                 anchor = x.stdout.strip() if x.returncode == 0 else ""
                 if anchor:
                     rc, gerr = _git_rc(root, "update-ref", "-d", f"refs/integration-anchor/{br}", anchor)
@@ -12711,7 +12737,12 @@ def _take_out(args) -> int:
                 if ro.lower() not in {r.lower() for r in rolls}:
                     rolls.append(ro)
                 n_.set(TAKEN_OUT_OF_KEY, "[" + ", ".join(f'"[[{r}]]"' for r in rolls) + "]")
-        err = _defer_note(args, tasks_dir, m, mnote, ro.lower(), extra)
+        try:
+            err = _defer_note(args, tasks_dir, m, mnote, ro.lower(), extra)
+        except OSError as e:
+            # Its save failed (a lock timeout, a read-only note, a changed-since-read conflict): the failure bound
+            # applies, so a persistent one cools down and reaches H10, never a loop.
+            err = f"{m}: cannot save its note: {e}"
         if err:
             for w in warns:
                 print(w, file=sys.stderr)
@@ -13314,19 +13345,24 @@ AUTO_RETRY_KEYS = (AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY, AUTO_RETRY_SHA
 TAKEN_OUT_KEY = "taken_out"
 TAKEN_OUT_OF_KEY = "taken_out_of"
 # The take-out (p39-14, ADR 0070 d5): `defer --take-out`'s rollout `## Notes` lines, `- <stamp> take-out: [[<slug>]] …;
-# feedback <F>)` per member taken out and `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` per refused try
-# (_take_out_failures). A take-out that failed TAKE_OUT_TRIES times is Lachy's H10; before that it cools down
-# TAKE_OUT_COOLDOWN_MIN[k-1] minutes after its k-th failure (15, then 60).
+# feedback <F>)` per member taken out, `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` per failed try
+# (_take_out_failures) and `- <stamp> take-out paused: [[<slug>]] ([[<m>]]'s PR merged into <B>: resume lands it;
+# feedback <F>)` once per merged member (exit 4: nothing failed, so it is no failure and starts no cool-down). A
+# take-out that failed TAKE_OUT_TRIES times is Lachy's H10; before that it cools down TAKE_OUT_COOLDOWN_MIN[k-1] minutes
+# after its k-th failure (15, then 60).
 TAKE_OUT_MARK = "take-out:"
 TAKE_OUT_FAILED_MARK = "take-out failed:"
+TAKE_OUT_PAUSED_MARK = "take-out paused:"
 TAKE_OUT_TRIES = 3
 # A quota block (a dead call whose error line reads as a usage or rate limit) is retried free after a cool-down, from
-# the later of its run stamp and the last retry: 30, 60, 120, 240, then 480 minutes (about 15.5 h), then a human.
+# the later of its run stamp and the last retry: 30, 60, 120, 240, then 480 minutes (about 15.5 h), five times at most;
+# then it runs Overtime, each run after 480 minutes, and once the Overtime is spent it is taken out (ADR 0070 d3).
 QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
 # An infra block (the engine's TRANSIENT_DIAGNOSIS, or any other dead call) spends the budget after a short cool-down,
 # from the same base: INFRA_COOLDOWN_MIN[auto_retries_used], the last repeating (15, then 60 minutes on the default
 # budget of 2). A usage limit that kills an agent mid-run reads as TRANSIENT, never as a quota line, so this back-off
-# is all it gets: a longer limit still reaches a human once the budget is spent (ADR 0033 decision 5).
+# is all it gets before the budget is spent; then it runs Overtime, each run after INFRA_COOLDOWN_MIN[-1] (240)
+# minutes, and is taken out once the Overtime is spent (ADR 0033 decision 5, ADR 0070 d3).
 INFRA_COOLDOWN_MIN = (15, 60, 240)
 TAKE_OUT_COOLDOWN_MIN = INFRA_COOLDOWN_MIN[:2]
 # merge-task.sh's red required check (its exit 1 after the verifier passed): a code fix on the branch can clear it, and
