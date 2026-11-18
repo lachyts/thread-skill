@@ -23,9 +23,11 @@ there, whatever else it links. Every other open task is skipped with the first r
   is never graded or routed again, since it already runs and a second route would start it twice. At schedule's Pre-flight on a supersede, a carried task still queued (status
   `open`, its `rollout:` naming the rollout being superseded) is gradeable (`--superseding`, ADR 0047); one that has
   started stays `in flight`;
-- `hold`: any other status.
+- `hold`: any other status;
+- `needs you`: a task taken out three times or more, whose scan row's `taken_out_next` holds any value but `rewrite`
+  (`you`, ADR 0070 d6). His needs-you list holds it, with every take-out's diagnosis, and only his ruling frees it.
 
-A fourth reason stands outside that order: `unreadable`, a note directly in Work/Tasks whose frontmatter the scan could
+A fifth reason stands outside that order: `unreadable`, a note directly in Work/Tasks whose frontmatter the scan could
 not read (estate-scan's `unreadTasks[]`), whatever its status, since nobody can read it. The rank's `skipped[]` row
 carries the scan's why as `reason` (`frontmatter does not parse (line 7, next_action)`, say) and the note's path as
 `note`. The note is named, never graded, until its frontmatter is fixed.
@@ -160,7 +162,10 @@ option's description: keep labels short.
 ## The raise
 
 ADR 0041: when the agent cannot recommend with confidence, the task's grade goes up. The ranker applies it in two
-steps, over the order Ready, One call, Grill, Orient:
+steps, over the order Ready, One call, Grill, Orient, after one rule that stands before both: a task taken out twice
+(its scan row's `taken_out_next` is `rewrite`, ADR 0070 d6) is Orient whatever its grade (`why: "rewrite"`).
+Two runs could not converge on it as written, so its project's own orient, offered on the pick list, rewrites it
+from both take-outs' evidence (orient reshuffle R2's **A task taken out twice**); the agent grades it as any other task.
 
 1. **Decisions.** The count of his decisions (owner `yours`) implies a grade (0 is Ready, 1 is One call, 2 or more is
    Grill), and the task takes the higher of that and the agent's grade. A decision ruled for him counts for nothing.
@@ -245,7 +250,7 @@ Each holding dependency is listed in the task's `blockedBy[] {slug, why}`, and t
 
 - `One call`, `Grill` or `Orient`: its grade, after the raise;
 - `ungraded` or `invalid`: it has no usable grade;
-- `hold`, `unhomed` or `unreadable`: it is skipped for that reason (§ Gradeable tasks);
+- `hold`, `unhomed`, `needs you` or `unreadable`: it is skipped for that reason (§ Gradeable tasks);
 - `parked`: it is Ready, in another project that is parked;
 - `held`: it is Ready but held itself, so holds are transitive;
 - `cycle`: it depends on the task, directly or through others (a task that depends on itself included).

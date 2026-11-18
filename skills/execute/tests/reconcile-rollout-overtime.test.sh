@@ -17,7 +17,8 @@
 #   O10 the closure: a chain, a tombstone fold, a dependant's own PR and raised cap, and a Speed fix hold's entry left out
 #   O11 across versions: on an engine from before p39-14, `moving` and needs-you read a spent budget as Lachy's
 #   O12 a task taken out more than once (p39-21, ADR 0070 d6): the second take-out marks it for a rewrite and lists
-#       nothing; the third marks it his and needs-you lists one row with every take-out's diagnosis and a recommendation
+#       nothing; the third marks it his and needs-you lists one row with every take-out's diagnosis (two from one
+#       rollout, and a split piece's old task's, included) and a recommendation; any marker but `rewrite` is listed
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own, each scenario's Project root is a temp git checkout (with a real task tree
 # and integration anchor where the retire block is read), `gh` is a fake through --gh-bin whose answers and failures
@@ -526,43 +527,77 @@ ok "$(fm "$A" max_plan_rounds)|$(fm "$A" auto_retry_raised)" "max_plan_rounds: 3
 has "$(sec "$RO" '## Notes')" "max_plan_rounds raised to 3, one round" "O8: the Notes line names it"
 
 # ── O12: a task taken out more than once (p39-21, ADR 0070 d6: "Rewritten first, then me") ──────────────────────────
-# oldro <rollout> <stage> <diagnosis>: an archived rollout of an earlier life, holding the task's take-out line
-oldro() {
+# plant <rollout> <slug> <stage> <diagnosis> <day>: one earlier take-out line in the rollout's `## Notes`: an archived
+# rollout of an earlier life (made when missing), or the live $RO (a take-out from it before the task joined it again)
+plant() {
+  local f="$D/Archive/Rollouts/$1.md"
+  [ "$1" = "$RO" ] && f="$D/$RO.md"
   mkdir -p "$D/Archive/Rollouts"
-  printf -- '---\ntags: [task, rollout]\nstatus: done\n---\n\n## Notes\n\n- 2026-09-01T09:00+00:00 take-out: [[%s]] after 3 Overtime runs (%s; %s; no PR; feedback 0123456789ab)\n' \
-    "$A" "$2" "$3" > "$D/Archive/Rollouts/$1.md"
+  [ -f "$f" ] || printf -- '---\ntags: [task, rollout]\nstatus: done\n---\n\n## Notes\n\n' > "$f"
+  python3 - "$f" "- 2026-09-$5T09:00+00:00 take-out: [[$2]] after 3 Overtime runs ($3; $4; no PR; feedback 0123456789ab)" <<'PY2'
+import sys
+p, line = sys.argv[1:]
+head, sep, rest = open(p).read().partition("## Notes\n")
+end = rest.find("\n## ")
+rest = rest.rstrip("\n") + "\n" + line + "\n" if end < 0 else rest[:end].rstrip("\n") + "\n" + line + "\n" + rest[end:]
+open(p, "w").write(head + sep + rest)
+PY2
 }
 nyrows() { python3 "$UR" needs-you --tasks-dir "$D" --now "$NOW" --gh-bin "$GH" 2>/dev/null \
   | python3 -c 'import json,sys; print(json.dumps([[i[k] for k in ("kind", "source", "rollout", "text", "detail")] for i in json.load(sys.stdin)["items"] if i["task"] == sys.argv[1]], separators=(",", ":")))' "$A"; }
-O1R=proj-rollout-2026-09-01; O2R=proj-rollout-2026-09-15
-# each row: the take-out | taken_out before | its earlier rollouts' stages | the marker after | needs-you's rows for A
-for r in "second|1|review|rewrite|[]" \
-         "third|2|review,plan|you|[[\"hands-on\",\"take-out\",\"$RO\",\"taken out 3 times: [[$O1R]] at review: Round 4: the rollback is missing; [[$O2R]] at plan: Round 1: the plan misses the rollback; [[$RO]] at plan: Round 1: the plan misses the migration step\",\"it stopped at different stages: rule on its scope, split it by hand, or drop it\"]]"; do
-  IFS='|' read -r which before stages next_ rows_ <<<"$r"
+nywant() { [ -z "$1" ] && { echo "[]"; return; }
+  python3 -c 'import json,sys; print(json.dumps([["hands-on", "take-out", sys.argv[1], "taken out 3 times: " + sys.argv[2], sys.argv[3]]], separators=(",", ":")))' "$RO" "$1" "$2"; }
+O1R=proj-rollout-2026-09-01; O2R=proj-rollout-2026-09-15; OLD=proj-p1-0-old
+D1='Round 4: the rollback is missing'; D2='Round 1: the plan misses the rollback'
+D3='Round 1: the plan misses the migration step'   # o7's own block, this take-out's
+MIX='it stopped at different stages: rule on its scope, split it by hand, or drop it'
+# each row: the take-out | taken_out before | its earlier take-outs, <rollout>:<slug named>:<stage> in order (D1, then
+# D2) | taken_out_from | the marker after | needs-you's text for A after "taken out 3 times: " (none: no row)
+for r in "second|1|$O1R:$A:review||rewrite|" \
+         "third|2|$O1R:$A:review,$O2R:$A:plan||you|[[$O1R]] at review: $D1; [[$O2R]] at plan: $D2; [[$RO]] at plan: $D3" \
+         "same-rollout|2|$O1R:$A:review,$RO:$A:review||you|[[$O1R]] at review: $D1; [[$RO]] at review: $D2; [[$RO]] at plan: $D3" \
+         "piece|2|$O1R:$OLD:review,$O2R:$OLD:plan|$OLD|you|[[$O1R]] at review: $D1; [[$O2R]] at plan: $D2; [[$RO]] at plan: $D3"; do
+  IFS='|' read -r which before priors from next_ text_ <<<"$r"
   o7 "o12-$which" "taken_out: $before"
-  IFS=, read -r s1 s2 <<<"$stages"
-  oldro "$O1R" "$s1" "Round 4: the rollback is missing"; olds="\"[[$O1R]]\""
-  if [ -n "${s2:-}" ]; then oldro "$O2R" "$s2" "Round 1: the plan misses the rollback"; olds="$olds, \"[[$O2R]]\""; fi
+  olds=""; i=0
+  IFS=, read -ra ps <<<"$priors"
+  for p in "${ps[@]}"; do
+    IFS=: read -r pro pslug pstage <<<"$p"; i=$((i + 1))
+    plant "$pro" "$pslug" "$pstage" "$([ "$i" = 1 ] && echo "$D1" || echo "$D2")" "0$i"
+    case "$olds" in *"[[$pro]]"*) ;; *) olds="${olds:+$olds, }\"[[$pro]]\"";; esac
+  done
   setfm "$A" taken_out_of "[$olds]"
+  [ -n "$from" ] && setfm "$A" taken_out_from "\"[[$from]]\""
+  case "$olds" in *"[[$RO]]"*) after_="[$olds]";; *) after_="[$olds, \"[[$RO]]\"]";; esac
   tko "$A"
   ok "$rc|$(printf '%s\n' "$out" | grep "taken out $((before + 1)) times")" \
     "0|$A: taken out $((before + 1)) times → taken_out_next: $next_ ($([ "$next_" = rewrite ] && echo 'the next Shaping session rewrites it' || echo 'one row on your needs-you list')) [written]" \
     "O12 $which: the take-out prints its mark"
   ok "$(fm "$A" taken_out)|$(fm "$A" taken_out_next)|$(fm "$A" taken_out_of)|$(fm "$A" status)" \
-    "taken_out: $((before + 1))|taken_out_next: $next_|taken_out_of: [$olds, \"[[$RO]]\"]|status: open" \
+    "taken_out: $((before + 1))|taken_out_next: $next_|taken_out_of: $after_|status: open" \
     "O12 $which: taken_out, the marker and taken_out_of on the open task"
-  ok "$(nyrows)" "$rows_" "O12 $which: needs-you's rows for it"
+  ok "$(nyrows)" "$(nywant "$text_" "$MIX")" "O12 $which: needs-you's rows for it, one entry per take-out"
   hasnt "$(sec "$A" '## Notes')" "take-out" "O12 $which: the evidence stays out of the brief"
 done
-# the third's recommendation, one stage throughout; then his ruling (the marker removed) drops the row
-sed -i.bak 's/(review; Round 4/(plan; Round 4/' "$D/Archive/Rollouts/$O1R.md"
-ok "$(nyrows | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][4])')" \
-  "taken out at plan each time: its plan never passed: settle the design question its plan rounds raise, then reopen it, or drop it" \
-  "O12 third: the same stage each time gives that stage's advice"
+# the recommendation, by the stages read (the last row's three take-outs restaged): one advice for all, or the scope's
+for r in "plan plan plan|taken out at plan each time: its plan never passed: settle the design question its plan rounds raise, then reopen it, or drop it" \
+         "verify implement verify|taken out at implement or verify each time: its build never went green: split it into smaller tasks, or drop it"; do
+  IFS='|' read -r stages want <<<"$r"
+  read -r s1 s2 s3 <<<"$stages"
+  for f in "$D/Archive/Rollouts/$O1R.md:$s1" "$D/Archive/Rollouts/$O2R.md:$s2" "$D/$RO.md:$s3"; do
+    sed -E -i.bak "s/(take-out: \[\[[^]]*\]\] after [0-9]+ Overtime runs \()[a-z]+;/\1${f##*:};/" "${f%:*}"
+  done
+  ok "$(nyrows | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][4])')" "$want" "O12: stages $stages give one advice"
+done
 python3 "$SCRIPT" defer --tasks "$A" --tasks-dir "$D" >/dev/null 2>&1
 ok "$(fm "$A" taken_out_next)" "taken_out_next: you" "O12: a plain defer keeps the marker"
-setfm "$A" taken_out_next ""
-ok "$(nyrows)" "[]" "O12: his ruling (the marker removed) drops the row"
+# any value but `rewrite` is his (a hand-typed one too, as the Pickup sweep and backlog-orient read it); his ruling
+# (the marker removed) drops the row
+for r in "Yes|1" "|0"; do
+  IFS='|' read -r v want <<<"$r"
+  setfm "$A" taken_out_next "$v"
+  ok "$(nyrows | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" "$want" "O12: taken_out_next '$v' lists $want row(s)"
+done
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"

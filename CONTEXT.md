@@ -1735,7 +1735,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is `reconcile-rollout.py defer --take-out`, which marks the task
   `taken_out` and `taken_out_of`, and (p39-21) at the second
   `taken_out_next: rewrite`, which orient reads as unclear and removes once
-  it has split, narrowed or restated the task, and at the third
+  it has split, narrowed or restated the task (a split's pieces keep the
+  count, so a piece's first take-out is the third), and at the third
   `taken_out_next: you`, one needs-you row with every take-out's diagnosis
   and a recommendation. schedule never takes a task carrying either.
   _Avoid_: dropped, failed.

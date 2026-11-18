@@ -570,7 +570,7 @@ Subcommands:
               and the six automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
               `auto_retry_at`, p16-4, and `overtime_used`, `auto_retry_raised`, p39-14: a deferred task starts its next
               rollout afresh; a raised cap is left as it stands, and only the take-out restores it); `taken_out`,
-              `taken_out_of` and `taken_out_next` are never cleared
+              `taken_out_of`, `taken_out_next` and `taken_out_from` are never cleared
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill. A carried fix is
@@ -12795,10 +12795,14 @@ def _taken_out_next(times):
 def _take_out_history(slug, note, index):
     """Every take-out of the task, from the rollouts its `taken_out_of` names, in that order (p39-21, ADR 0070 d6: the
     evidence a rewrite and his needs-you row read, never the task's brief): [{rollout, at, overtime, stage, diagnosis,
-    pr}], each the rollout's last `take-out: [[slug]] after <n> Overtime runs (<stage>; <diagnosis>; <pr>; feedback F)`
-    line for the task. `index` is a stem (lowercased) -> (path, Note) map (_note_index), so an archived rollout is read
-    too. A rollout not found, or that holds no such line, is one entry whose diagnosis says so and whose other fields are
-    None."""
+    pr}], one per `take-out: [[<s>]] after <n> Overtime runs (<stage>; <diagnosis>; <pr>; feedback F)` line in each
+    rollout, in stamp order (an unparseable stamp last), so a task taken out of one rollout twice (joined back into it
+    by schedule's join or the Pickup sweep) has both entries. <s> is the task, or a task its `taken_out_from` names: a
+    piece of a split task carries the old task's count and rollouts (orient reshuffle R5.2), so the old task's
+    take-outs are its own. `index` is a stem (lowercased) -> (path, Note) map (_note_index), so an archived rollout is
+    read too. A rollout not found, or that holds no such line, is one entry whose diagnosis says so and whose other
+    fields are None."""
+    names = {slug.lower()} | {s.lower() for s in (_wikilink_slug(x) for x in note.get_list(TAKEN_OUT_FROM_KEY)) if s}
     out = []
     for ro in [_wikilink_slug(x) for x in note.get_list(TAKEN_OUT_OF_KEY)]:
         if not ro:
@@ -12806,22 +12810,25 @@ def _take_out_history(slug, note, index):
         hit = index.get(ro.lower())
         lines = hit[1].section_text(NOTES_SECTION).split("\n") if hit else []
         mine = [m for m in (_TAKE_OUT_TASK_LINE_RE.match(l.strip()) for l in lines)
-                if m and m.group(2).strip().lower() == slug.lower()]
+                if m and m.group(2).strip().lower() in names]
         if not mine:
             why = "its take-out line is not in the rollout note" if hit else "the rollout note is not found"
             out.append({"rollout": ro, "at": None, "overtime": None, "stage": None, "diagnosis": why, "pr": None})
             continue
-        m = mine[-1]
-        stage, _, rest = m.group(4).partition(";")
-        diagnosis, _, pr = rest.rpartition(";")
-        pr = pr.strip()
-        out.append({"rollout": ro, "at": m.group(1), "overtime": int(m.group(3)), "stage": stage.strip(),
-                    "diagnosis": diagnosis.strip() or "no diagnosis", "pr": None if pr in ("", "no PR") else pr})
+        at = [_parse_ts(m.group(1)) for m in mine]
+        for i in sorted(range(len(mine)), key=lambda i: (at[i] is None, at[i].timestamp() if at[i] else 0, i)):
+            m = mine[i]
+            stage, _, rest = m.group(4).partition(";")
+            diagnosis, _, pr = rest.rpartition(";")
+            pr = pr.strip()
+            out.append({"rollout": ro, "at": m.group(1), "overtime": int(m.group(3)), "stage": stage.strip(),
+                        "diagnosis": diagnosis.strip() or "no diagnosis", "pr": None if pr in ("", "no PR") else pr})
     return out
 
 
-# The recommendation his needs-you row carries (p39-21), by the stage every read take-out stopped at: one stage
-# repeated is that stage's advice, mixed or unread stages the scope's.
+# The recommendation his needs-you row carries (p39-21), by the stage every read take-out stopped at: stages that share
+# one advice (implement and verify both mean the build never went green) give that advice, stages whose advice differs
+# or a stage unread the scope's.
 TAKE_OUT_ADVICE = {
     "plan": "its plan never passed: settle the design question its plan rounds raise, then reopen it, or drop it",
     "implement": "its build never went green: split it into smaller tasks, or drop it",
@@ -12833,11 +12840,13 @@ TAKE_OUT_ADVICE_MIXED = "it stopped at different stages: rule on its scope, spli
 
 
 def _take_out_recommendation(history) -> str:
-    """One line of advice for a task taken out three or more times, from _take_out_history's stages."""
-    stages = {h["stage"] for h in history}
-    if len(stages) == 1 and next(iter(stages)) in TAKE_OUT_ADVICE:
-        return f"taken out at {next(iter(stages))} each time: {TAKE_OUT_ADVICE[next(iter(stages))]}"
-    return TAKE_OUT_ADVICE_MIXED
+    """One line of advice for a task taken out three or more times, from _take_out_history's stages: one advice for
+    every stage read (`taken out at <stage>[ or <stage>] each time: <advice>`), else TAKE_OUT_ADVICE_MIXED."""
+    advice = {TAKE_OUT_ADVICE.get(h["stage"]) for h in history}
+    if len(advice) != 1 or None in advice:
+        return TAKE_OUT_ADVICE_MIXED
+    stages = [s for s in TAKE_OUT_ADVICE if s in {h["stage"] for h in history}]
+    return f"taken out at {' or '.join(stages)} each time: {advice.pop()}"
 
 
 _ROUND_HEAD_RE = re.compile(r"Round \d+:")
@@ -13414,8 +13423,8 @@ def cmd_descope(args) -> int:
 # before the first raise (`auto_retry_raised: max_review_rounds=4,max_iterations=-`, `-` for a key the note did not
 # carry: _raised_caps). hand-back clears the two counters by name, carry clears them too, so both keep overtime_used and
 # auto_retry_raised (ADR 0070 d2: a human answer gives back the normal budget, never the Overtime); every defer clears
-# all six. The take-out's own markers, `taken_out` (how many times, across rollouts), `taken_out_of` (the rollouts) and
-# `taken_out_next` (p39-21, below), are never cleared by a defer.
+# all six. The take-out's own markers, `taken_out` (how many times, across rollouts), `taken_out_of` (the rollouts),
+# `taken_out_next` and `taken_out_from` (p39-21, below), are never cleared by a defer.
 AUTO_RETRIES_USED_KEY = "auto_retries_used"
 QUOTA_RETRIES_USED_KEY = "quota_retries_used"
 AUTO_RETRY_SHA_KEY = "auto_retry_sha"
@@ -13435,6 +13444,10 @@ TAKEN_OUT_OF_KEY = "taken_out_of"
 TAKEN_OUT_NEXT_KEY = "taken_out_next"
 TAKEN_OUT_REWRITE = "rewrite"
 TAKEN_OUT_YOURS = "you"
+# A piece of a task a rewrite split (orient reshuffle R5.2) carries the old task's `taken_out` and `taken_out_of`, no
+# `taken_out_next`, and `taken_out_from: "[[<old>]]"`: its next take-out reaches him with every diagnosis, the old
+# task's included (_take_out_history), so a split never resets the count. Written by orient only; never cleared.
+TAKEN_OUT_FROM_KEY = "taken_out_from"
 # The take-out (p39-14, ADR 0070 d5): `defer --take-out`'s rollout `## Notes` lines, `- <stamp> take-out: [[<slug>]] …;
 # feedback <F>)` per member taken out, `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` per failed try
 # (_take_out_failures) and `- <stamp> take-out paused: [[<slug>]] ([[<m>]]'s PR merged into <B>: resume lands it;

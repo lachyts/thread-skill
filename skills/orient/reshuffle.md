@@ -127,9 +127,9 @@ disposition for each and render the proposal:
   PR that line links), never from its brief: it is split, narrowed or restated, as the evidence shows. The rewrite is
   the reshuffle's own (Owner *technical*), shown as Decided for you; R3 asks Lachy only what the evidence leaves to
   his intent. R5.2 removes `taken_out_next` in the save that writes the rewrite, so the task joins one more rollout;
-  a split's new tasks carry none of the take-out markers, and the old task is dropped with a line naming them. A task
-  taken out three times (`taken_out_next: you`) is frozen context: his needs-you list holds it, and only his ruling
-  removes the marker.
+  a split's pieces each carry the old task's count and a link back to it (R5.2), so a piece that fails once more
+  reaches him, and the old task is dropped with a line naming them. A task taken out three times (`taken_out_next:
+  you`) is frozen context: his needs-you list holds it, and only his ruling removes the marker.
 
 ```
 proposed phase | members | rationale (1 line) | proposed order
@@ -297,8 +297,11 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      under `## Notes`; and a closing `**Verify:**` line.
    - **A task taken out twice** (R2), once rewritten: `taken_out_next:` is removed in the save that writes its new
      body (or, for a split, in the save that drops it), and `taken_out` and `taken_out_of` stay, so a third take-out
-     still reaches Lachy. The take-outs' evidence never enters the body (ADR 0033): the rewrite states the narrower
-     work, not its history.
+     still reaches Lachy. Each piece of a split is written with the old task's `taken_out` and `taken_out_of`, no
+     `taken_out_next`, and `taken_out_from: "[[<old task>]]"`: a split never resets the count, so a piece's first
+     take-out is the third, marks it `you`, and his needs-you row lists every diagnosis, the old task's take-outs
+     included (reconcile-rollout.py _take_out_history reads the lines of every task `taken_out_from` names). The
+     take-outs' evidence never enters the body (ADR 0033): the rewrite states the narrower work, not its history.
    - **What ran** (ADR 0079 decision 5), on each task whose body R5.2 writes (a new, unbundled or decomposed task, or
      one R3 respecced), once its note exists: one `## Notes` line, `- <UTC ISO> orient ran on <model id> at <effort>`,
      this session's own model id as the harness names it and its effort (`$CLAUDE_EFFORT`; ` at <effort>` left off when

@@ -593,13 +593,15 @@ Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `
 whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row its final S2
 JSON's `leftOut` names, whether S3.7's re-run or a later S4 re-run left it out; S6 removes it once the row is
 stamped): kind `sign-in`, `text` its latest entry, rollout null, act `sign in, then /thread:orient --steer`.
-Then, from the same tasks (p39-21, ADR 0070 d6: "Rewritten first, then me"), each one taken out three or more times,
-which its third take-out marked `taken_out_next: you` (reconcile-rollout.py defer --take-out): kind `hands-on`, source
-`take-out`, rollout the last rollout its `taken_out_of` names, `text` `taken out <n> times: [[<R>]] at <stage>:
-<diagnosis>; …`, one entry per rollout in `taken_out_of` (reconcile-rollout.py _take_out_history: each rollout's
-`take-out:` line for the task, an archived rollout's too), act TAKE_OUT_ACT and `detail` the recommendation
-(_take_out_recommendation). His ruling removes the marker, or drops, parks or reschedules the task, and the row drops
-out; a second take-out's `taken_out_next: rewrite` is never listed (a Shaping session rewrites it first).
+Then, from the same tasks (p39-21, ADR 0070 d6: "Rewritten first, then me"), each one whose `taken_out_next` holds any
+value but `rewrite` (taken_out_next(): its third take-out writes `you`, reconcile-rollout.py defer --take-out; a value
+typed by hand reads the same, as the Pickup sweep and backlog-orient.py sweep read it, so a task they freeze is
+always listed): kind `hands-on`, source `take-out`, rollout the last rollout its `taken_out_of` names, `text` `taken
+out <n> times: [[<R>]] at <stage>: <diagnosis>; …`, one entry per take-out (reconcile-rollout.py _take_out_history:
+each `take-out:` line for the task, or for a task its `taken_out_from` names, in each rollout `taken_out_of` names, an
+archived rollout's too, in stamp order), act TAKE_OUT_ACT and `detail` the recommendation (_take_out_recommendation).
+His ruling removes the marker, or drops, parks or reschedules the task, and the row drops out; a second take-out's
+`taken_out_next: rewrite` is never listed (a Shaping session rewrites it first).
 Then the Felt checks (p52-2, ADR 0081 d3; vault-grammar § Felt check): one item per reconcile-rollout.py _felt_checks
 row, read from every task note in the tasks dir's root and Archive/ (never Archive/Rollouts/), so a check outlives its
 rollout: an `open` check on a landed task (Live, for a carried fix), and an `again` one for a carried fix whose check
@@ -662,7 +664,7 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_felt_checks",   # the Felt checks (p52-2): an older reconcile-rollout.py fails to load, loudly
             "_engine_reads_take_out",   # needs-you's set-aside read on an engine from before p39-14
             # a task taken out more than once (p39-21): needs-you's row and the Pickup sweep's rule
-            "TAKEN_OUT_KEY", "TAKEN_OUT_NEXT_KEY", "TAKEN_OUT_REWRITE", "TAKEN_OUT_YOURS", "_take_out_history",
+            "TAKEN_OUT_KEY", "TAKEN_OUT_NEXT_KEY", "TAKEN_OUT_REWRITE", "_take_out_history",
             "_take_out_recommendation")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
@@ -2896,7 +2898,9 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
 
 
 def taken_out_next(rr, note):
-    """A task's `taken_out_next` marker (p39-21, ADR 0070 d6), lower-cased, or None."""
+    """A task's `taken_out_next` marker (p39-21, ADR 0070 d6), lower-cased, or None. Every reader keeps one rule:
+    None joins, `rewrite` waits on a Shaping session's rewrite, and any other value is his (needs-you lists it, the
+    Pickup sweep leaves it, backlog-orient.py sweep freezes it `needs you`, estate-rank.py skips it `needs you`)."""
     return rr._scalar(note.get(rr.TAKEN_OUT_NEXT_KEY)).lower() or None
 
 
@@ -2938,7 +2942,7 @@ def cmd_needs_you(args, rr) -> int:
             text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
             items.append(needs_you_item("sign-in", "left-out", None, project_label(rr, note), path.stem, text,
                                         "sign in, then /thread:orient --steer"))
-        if taken_out_next(rr, note) == rr.TAKEN_OUT_YOURS:
+        if taken_out_next(rr, note) not in (None, rr.TAKEN_OUT_REWRITE):   # the Pickup sweep's and backlog-orient's
             taken.append(take_out_item(rr, walk, path, note))
     items += taken
     # The Felt checks (p52-2): every task note, Archive included, so a check outlives its rollout; the command names this

@@ -134,7 +134,9 @@ Output, one JSON object (schema 1; --compact for one line):
                ordered crowned, active, queued, parked, other, none, then by name, then by note;
   tasks[]     {slug, note, title, status, statusClass: active|review|hold, projects[] (live project names),
                deadLinks[] {link, why, raw}, phase, priority, scope, work_depth, launch, due, scheduled, captured,
-               dependsOn[] (`depends-on:` and `blocked-by:`), bodyDependsOn[] (the links of the body's *Depends on*
+               taken_out_next (reconcile-rollout.py's take-out marker, ADR 0070 d6: `rewrite` after a second
+               take-out, `you` after a third; as written, null when absent: estate-rank.py reads it), dependsOn[]
+               (`depends-on:` and `blocked-by:`), bodyDependsOn[] (the links of the body's *Depends on*
                lines and of the first paragraph under a `## Depends on` heading, BODY_DEPENDS and DEPENDS_HEADING:
                schedule § 1.5's Pre-flight reads them, the ranker never), rollout, rolloutLive, inFlight}, by slug;
   unhomed[]   {slug, why, links[] {link, why, raw}}: an open task with no live project; why is its first link's, or
@@ -804,7 +806,8 @@ class Scan:
                 "statusClass": ("active" if st in NA.OPEN_STATUSES else "review" if st in REVIEW_STATUSES else "hold"),
                 "projects": [projects[p]["name"] for p in live], "deadLinks": dead,
             }
-            for key in ("phase", "priority", "scope", "work_depth", "launch", "due", "scheduled", "captured"):
+            for key in ("phase", "priority", "scope", "work_depth", "launch", "due", "scheduled", "captured",
+                        "taken_out_next"):
                 row[key] = jsonable(note.get(key))
             row.update(dependsOn=self.deps(note), bodyDependsOn=self.body_deps(note), rollout=rollout, rolloutLive=rollout_live,
                        inFlight=in_flight(st, rollout_live))

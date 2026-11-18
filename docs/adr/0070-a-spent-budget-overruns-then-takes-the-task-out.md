@@ -20,10 +20,15 @@ decision 4's stops (an infra settings block, the same stop at Integration) keep 
 the one that brings it to 3 or more `taken_out_next: you`; a defer never clears it. orient's reshuffle reads a
 `rewrite` task as unclear (and `backlog-orient.py sweep` gives its row `unclear: rewrite`), rewrites it from the
 take-outs' `## Notes` lines in the rollouts `taken_out_of` names, and removes the marker in the save that writes the
-rewrite; orient-all's pass reaches it through its child orients. `unfinished-rollout.py needs-you` lists a `you` task
-as one row (source `take-out`) with every take-out's diagnosis and a recommendation by the stages they stopped at, and
-his ruling removes the marker. schedule step 1 and its Pickup sweep never take a task carrying either value. The
-readers read the marker only, never `taken_out` alone, since a rewritten task keeps its count.)* The file keeps its first name, which those tasks cite; the term it coins is **Overtime** (it was "Overrun" until the amendment, a word the Night record already uses).
+rewrite. A split never resets the count: each piece carries the old task's `taken_out` and `taken_out_of`, no
+`taken_out_next`, and `taken_out_from: "[[<old>]]"`, so its first take-out is the third and lists the old task's
+take-outs too. orient-all's pass reaches a `rewrite` task through its child orients: `estate-scan.py` carries the marker
+on each task row, and `estate-rank.py` grades a `rewrite` task Orient (raise why `rewrite`), so its project is offered
+on the pick list, and skips any other value as `needs you`. `unfinished-rollout.py needs-you` lists a task whose marker
+holds any value but `rewrite` as one row (source `take-out`) with one entry per take-out (two from one rollout included)
+and a recommendation by the advice its stages share, and his ruling removes the marker. schedule step 1 and its Pickup
+sweep never take a task carrying the marker. The readers read the marker only, never `taken_out` alone, since a
+rewritten task keeps its count.)* The file keeps its first name, which those tasks cite; the term it coins is **Overtime** (it was "Overrun" until the amendment, a word the Night record already uses).
 
 On acceptance it amends: close § The stop rule and ADR 0065 Decision 6 (no round after the budget), reversing ADR 0065's rejected option "A fourth round to review a CI fix after the budget"; fresh-review's ADR 0001 in `~/.agents` (a chain ends at three code rounds), through a fresh-review task; ADR 0033 d3 (`auto_retries = 0`), d5 (quota and infra blocks past their retries) and d6 (the budget's lifetime); ADR 0035's H9, a spent budget raised on Lachy's word through `record-answer --raise`, and ADR 0004's "repair keeps a spent budget"; repair § 5's "Has dependants → ask" for a take-out; and close's **Don't create tasks unsolicited** exception, whose one task now carries a take-out too. It does not amend ADR 0058, which has no review-blocked route.
 

@@ -35,9 +35,9 @@ for `rank` only, gated_inputs.py (GI: sweep, the sign-off backstop's word lists;
 
 The inputs:
 - The scan: estate-scan.py's schema 1. Read: tasks {slug, note, title, statusClass, inFlight, projects, due,
-  dependsOn}; projects {name, note, standing, repos}; repos {path, declared, rolloutRoot, blockers, unchecked,
-  projects[] {project, rolloutRoot, blockers, unchecked}: a parallel run reads its home project's row there (ADR 0064:
-  its own clone), else the repo row's own fields};
+  dependsOn, taken_out_next}; projects {name, note, standing, repos}; repos {path, declared, rolloutRoot, blockers,
+  unchecked, projects[] {project, rolloutRoot, blockers, unchecked}: a parallel run reads its home project's row there
+  (ADR 0064: its own clone), else the repo row's own fields};
   today, vault, deadlineHit, vaultErrors. Standing is only ever the row's `standing` (crowned means `standing ==
   "crowned"`); the row's `crowned` field is the raw `crowned:` date, never read.
 - The grades: each --grades file holds one object {project, tasks: [...]} or an array of them, each task entry
@@ -47,11 +47,12 @@ The inputs:
 
 Gradeable: a scan task with statusClass `active`, inFlight false and a live project. Its home is projects[0], mapped to
 the first scan project row of that name (a second row of the name is warned). The rest are `skipped`, the first reason
-that fits: `unhomed`, `in flight`, `hold`. So is each scan unreadTasks[] row (a task note whose frontmatter the scan
-could not read; a dict with a str slug and why, its slug held by no scan task): `unreadable`, never graded, never in
-flight, its skipped row carrying the scan's why as `reason` and its `note`. The one exception, at schedule's Pre-flight on a supersede (schedule § 1.5,
-ADR 0047): with --superseding PRIOR, a task the scan marks inFlight is read as not in flight when ES.still_to_start
-holds for it (its status, as NA.status_of reads the row, `open`, and its `rollout:` naming PRIOR under slug_key's
+that fits: `unhomed`, `in flight`, `hold`, `needs you` (its `taken_out_next` any value but `rewrite`, taken_mark: a task
+taken out three or more times, which his needs-you list holds, ADR 0070 d6). So is each scan unreadTasks[] row (a task
+note whose frontmatter the scan could not read; a dict with a str slug and why, its slug held by no scan task):
+`unreadable`, never graded, never in flight, its skipped row carrying the scan's why as `reason` and its `note`. The
+one exception, at schedule's Pre-flight on a supersede (schedule § 1.5, ADR 0047): with --superseding PRIOR, a task
+the scan marks inFlight is read as not in flight when ES.still_to_start holds for it (its status, as NA.status_of reads the row, `open`, and its `rollout:` naming PRIOR under slug_key's
 fold): a carried task still queued is graded, and holds its dependants by its grade; one that has started stays in
 flight. Without it (orient-all) the scan's inFlight stands.
 
@@ -80,9 +81,11 @@ Warned and kept: a missing or unknown `size` reads as M; a missing or unknown de
 today (an event already past cannot be met; the scan's overdue `due:` still counts), is dropped; a gate kind outside
 GATE_KINDS is dropped; a non-boolean `eyeCheck` reads as false; a `repo` on a task that is not parallel is ignored.
 
-The raise (readiness-grade.md § The raise): the count of his decisions implies a grade (0 Ready, 1 One call, 2+ Grill)
-and the task takes the higher of that and the agent's grade (`why: "decisions"`); then any `low` decision of his raises
-it one step (`why: "confidence"`); Orient stays Orient. A ruled decision never raises.
+The raise (readiness-grade.md § The raise): a task taken out twice (its `taken_out_next` is `rewrite`, ADR 0070 d6) is
+Orient whatever its grade (`why: "rewrite"`), so its project's own orient, offered on the pick list, rewrites it; else
+the count of his decisions implies a grade (0 Ready, 1 One call, 2+ Grill) and the task takes the higher of that and the
+agent's grade (`why: "decisions"`); then any `low` decision of his raises it one step (`why: "confidence"`); Orient
+stays Orient. A ruled decision never raises.
 
 Figures: agentMinutes = SIZE_MINUTES[size]; decisionMinutes = DECISION_MINUTES[grade] per decision of his (0 for Ready
 and Orient); review {pr: 1 for a parallel task, signOff: 1 with any gate, eyeCheck: 1 when set, minutes}; attentionMinutes =
@@ -192,8 +195,12 @@ GATE_KINDS = ("spend", "credential", "irreversible")
 CONFIDENCE = ("high", "medium", "low")
 OWNERS = ("yours", "priorities", "technical", "gate")
 # Every `blockedBy` why, each named in readiness-grade.md § Dependencies.
-HOLD_WHYS = ("One call", "Grill", "Orient", "ungraded", "invalid", "hold", "unhomed", "unreadable", "parked", "held",
-             "cycle")
+HOLD_WHYS = ("One call", "Grill", "Orient", "ungraded", "invalid", "hold", "unhomed", "needs you", "unreadable",
+             "parked", "held", "cycle")
+# reconcile-rollout.py's take-out marker (p39-21, ADR 0070 d6), on the scan's task row: `rewrite` is Orient (the raise),
+# any other value `needs you` (skipped).
+TAKEN_OUT_NEXT = "taken_out_next"
+TAKEN_OUT_REWRITE = "rewrite"
 UNPARK_OPTIONS = ("unpark", "snooze", "kill")
 KILL_KEYS = ("crowned",)  # mark-project-done.js drops a crowned: stamp with the done write
 ROUNDS = (("one-call", "One call"), ("grill", "Grill"))
@@ -273,6 +280,15 @@ def slug_key(link):
     if s.lower().endswith(".md"):
         s = s[:-3]
     return s.strip().lower()
+
+
+def taken_mark(t):
+    """A scan task row's `taken_out_next` (the take-out marker, ADR 0070 d6), stripped and lower-cased, or None when it
+    is absent or empty. unfinished-rollout.py's taken_out_next() is the same rule: None joins, `rewrite` waits on a
+    rewrite, any other value is his."""
+    v = t.get(TAKEN_OUT_NEXT)
+    s = str(v).strip().lower() if v is not None else ""
+    return s or None
 
 
 def parse_date(raw, flag):
@@ -385,6 +401,8 @@ class Ranker:
                 self.skip[slug] = "in flight"
             elif t.get("statusClass") != "active":
                 self.skip[slug] = "hold"
+            elif taken_mark(t) not in (None, TAKEN_OUT_REWRITE):
+                self.skip[slug] = "needs you"
             else:
                 self.home[slug] = self.projects[projects[0]]
         for slug in self.unread:
@@ -620,6 +638,9 @@ class Ranker:
             repo = None
 
         final, raised = grade, []
+        if taken_mark(self.tasks[slug]) == TAKEN_OUT_REWRITE and final != "Orient":
+            raised.append({"from": final, "to": "Orient", "why": "rewrite"})
+            final = "Orient"
         implied = GRADES[min(len(decisions), 2)]
         if GRADE_RANK[implied] > GRADE_RANK[final]:
             raised.append({"from": final, "to": implied, "why": "decisions"})
