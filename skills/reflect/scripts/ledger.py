@@ -61,13 +61,16 @@ keyed by the record's own values where one fits:
     wait's mover; hold-heat is load; hold-quota (p36-7, the quota hold) is quota-bound; the rest are `other`; no marker at all is stalls/unexplained: a live rollout with
     nothing running and no recorded cause, the audit's first lead, and where a lead's own unrecorded question shows.
 - The wait's mover (run_record's idle-slots rule): the first slot-taken after the wait's start whose start is revise,
-  hand-back or resume. A revise ends it as other/revise (the known seeded-revise mislabel). Otherwise its task's latest
+  hand-back or resume, or (p39-14, ADR 0070 d5) a `take-out` line whose cause is not `dependant`, whichever comes first up
+  to the reading's end. A take-out ends it as stalls/take-out, unflagged: the engine took the task out, nobody was asked. A
+  revise ends it as other/revise (the known seeded-revise mislabel). Otherwise its task's latest
   set-aside at or before the wait's start, and that set-aside's first mover (first_mover(), Span.moved_by's one copy, so
   the friction's movedBy is byte-equal), decide the cause: auto-retry is a cool-down, quota-bound/cool-down when its
   retryClass is quota or that set-aside's reasonClass is quota (the quota-stall beside it), else stalls/cool-down (infra
   and transient; an agent retry has none); gate-signed is stalls/gate; answer-recorded, or handed-back via answer, is
-  stalls/question; handed-back via retry or descope, race-decided, carried, or an unrecorded mover (a slot-taken,
-  lane-taken or merged first, flagged) is stalls/hand-back. With no mover yet (still waiting at the span's end), the
+  stalls/question; a take-out (its own task's, a dependant's included) is stalls/take-out; handed-back via retry or
+  descope, race-decided, carried, or an unrecorded mover (a slot-taken, lane-taken or merged first, flagged) is
+  stalls/hand-back. A taken-out set-aside has its mover, so it never reads `still waiting`. With no mover yet (still waiting at the span's end), the
   rollout's latest unmoved set-aside's reasonClass decides, flagged `still waiting`: gate is gate, needs-human question,
   quota quota-bound/cool-down, transient, call-failed, ci-timeout (ADR 0073 d4), no-runner (ADR 0069) or
   unreported-context (ADR 0080: both settings blocks, infra retries) stalls/cool-down,
@@ -198,8 +201,9 @@ STILL_WAITING = {"gate": ("stalls", "gate"), "needs-human": ("stalls", "question
 WAIT_STARTS = ("revise", "hand-back", "resume")
 
 # The set-aside mover rule (moved here from reflect.py, p29-11: one copy; Span.moved_by delegates to first_mover).
-MOVERS = ("auto-retry", "handed-back", "answer-recorded", "gate-signed", "race-decided", "carried", "slot-taken",
-          "lane-taken", "merged")
+# p39-14 (ADR 0070 d5): a `take-out` line moves its own task's set-aside, a dependant's included.
+MOVERS = ("auto-retry", "handed-back", "answer-recorded", "gate-signed", "race-decided", "carried", "take-out",
+          "slot-taken", "lane-taken", "merged")
 UNRECORDED_MOVERS = ("slot-taken", "lane-taken", "merged")
 SLOT_STARTS = ("start", "restart", "revise", "hand-back", "resume")  # run_record's slot-taken `start`
 
@@ -329,6 +333,8 @@ def mover_cause(moved, line, reason_class):
         return "stalls", "gate"
     if moved in ("answer-recorded", "handed-back (via answer)"):
         return "stalls", "question"
+    if moved == "take-out":
+        return "stalls", "take-out"
     return "stalls", "hand-back"
 
 
@@ -344,6 +350,8 @@ def classify_wait(base, a, b, hi):
         if d.get("kind") == "slot-taken" and d.get("start") in WAIT_STARTS:
             first = (t, d)
             break
+        if d.get("kind") == "take-out" and d.get("cause") != "dependant":
+            return "stalls", "take-out", None   # p39-14: the engine took the task out, the wait's own end
     if first is not None and first[1].get("start") == "revise":
         return "other", "revise", None
     standing = {}  # task -> (t, reasonClass) of its latest set-aside at or before a that nothing moved by a

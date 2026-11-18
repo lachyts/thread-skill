@@ -185,6 +185,14 @@ const REFUSALS = [
   ['a traversal task slug', ['--rollout', 'r', '--task', '../x', '--kind', 'ready']],
   ['no rollout for a rollout kind', ['--kind', 'resumed']],
   ['a line over 16 KiB', ['--rollout', 'r', '--kind', 'quota-stall', '--json', JSON.stringify({ detail: 'x'.repeat(17000) })]],
+  // take-out (p39-14, ADR 0070 d5): a dependant's line carries `with` and none of the task's own three fields; any other
+  // cause carries all three and no `with`.
+  ['take-out: a dependant with a stage', ['--rollout', 'r', '--task', 'd', '--kind', 'take-out', '--json', JSON.stringify({ cause: 'dependant', fingerprint: 'abcdef012345', with: 't', stage: 'plan' })]],
+  ['take-out: a dependant without `with`', ['--rollout', 'r', '--task', 'd', '--kind', 'take-out', '--json', JSON.stringify({ cause: 'dependant', fingerprint: 'abcdef012345' })]],
+  ['take-out: spent without a stage', ['--rollout', 'r', '--task', 't', '--kind', 'take-out', '--json', JSON.stringify({ cause: 'spent', fingerprint: 'abcdef012345', overtimeUsed: 3, overtimeBudget: 3 })]],
+  ['take-out: `with` on a spent line', ['--rollout', 'r', '--task', 't', '--kind', 'take-out', '--json', JSON.stringify({ cause: 'spent', fingerprint: 'abcdef012345', stage: 'review', overtimeUsed: 3, overtimeBudget: 3, with: 'x' })]],
+  ['take-out: an unknown cause', ['--rollout', 'r', '--task', 't', '--kind', 'take-out', '--json', JSON.stringify({ cause: 'deferred', fingerprint: 'abcdef012345', stage: 'review', overtimeUsed: 3, overtimeBudget: 3 })]],
+  ['auto-retry: an Overtime raise of no round cap', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'review', setAsideAt: 'run', retryClass: 'agent', used: 2, budget: 2, overtime: 1, overtimeBudget: 3, raiseField: 'parallel_ceiling', raiseTo: 5 })]],
   // auto-retry (p16-4): its stage is a block's, never a gate (a sign-off is no retry); stage and a budget >= 1 required.
   ['auto-retry at stage gate', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'gate', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
   ['auto-retry without a stage', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
@@ -431,6 +439,20 @@ test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its qu
   const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
   assert.deepEqual([a.kind, a.task, a.stage, a.used, a.budget, a.reviewRounds, a.fingerprint], ['auto-retry', 't', 'review', 1, 2, 4, 'abcdef012345'])
   assert.deepEqual([b.retryClass, b.used, b.quotaRetries, b.setAsideAt], ['quota', 0, 1, 'integration'])
+})
+
+test('auto-retry\'s Overtime fields and take-out (p39-14, ADR 0070): an Overtime retry, a task\'s take-out and its dependant\'s land', (t) => {
+  const home = tmpHome(t)
+  const emit = (task, kind, fields) => emitOk(home, ['--rollout', 'r', '--task', task, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+  emit('t', 'auto-retry', { stage: 'review', setAsideAt: 'run', retryClass: 'agent', used: 2, budget: 2, fingerprint: 'abcdef012345',
+    reviewRounds: 5, overtime: 1, overtimeBudget: 3, raiseField: 'max_review_rounds', raiseTo: 5 })
+  emit('t', 'take-out', { cause: 'spent', fingerprint: 'abcdef012345', stage: 'review', overtimeUsed: 3, overtimeBudget: 3,
+    pr: 'https://github.com/o/r/pull/5', why: 'Round 4: the migration still misses the rollback' })
+  emit('d', 'take-out', { cause: 'dependant', fingerprint: 'abcdef012345', with: 't' })
+  const [a, b, c] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.overtime, a.overtimeBudget, a.raiseField, a.raiseTo], [1, 3, 'max_review_rounds', 5])
+  assert.deepEqual([b.kind, b.task, b.cause, b.stage, b.overtimeUsed], ['take-out', 't', 'spent', 'review', 3])
+  assert.deepEqual([c.task, c.cause, c.with, c.fingerprint, c.stage], ['d', 'dependant', 't', 'abcdef012345', undefined])
 })
 
 test('the human acts (p21-2): answer-recorded, gate-signed, handed-back and race-decided land with their fields', (t) => {
@@ -1207,6 +1229,7 @@ test('the Time-lost ledger\'s classes and causes are the schema\'s one copy; the
   const { doc, classes, causes, kinds: rk } = JSON.parse(r.stdout)
   assert.deepEqual(classes, ['stalls', 'quota-bound', 'load', 'lane-bound', 'rework', 'plan-rejected'])
   assert.deepEqual(Object.keys(causes), classes)
+  assert.ok(causes.stalls.includes('take-out'), 'p39-14: a wait a take-out ends is its own stalls cause')
   assert.ok(rk.includes('time-lost'))
   assert.ok(rk.includes('attention'), 'p30-7: the attention line is a reflections.jsonl kind')
   const flat = doc.replace(/\s+/g, ' ')
@@ -1263,7 +1286,8 @@ print(json.dumps([list(m.TUNING_KEYS), list(rs.TUNING_KEYS), list(rs.KEYS), list
   assert.equal(r.status, 0, r.stderr)
   const [mine, theirs, four, reserved, gradeLog] = JSON.parse(r.stdout)
   assert.deepEqual(mine, theirs)
-  assert.deepEqual(mine, [...four, 'capacity_max', 'weight_mem_gb', 'weight_cores'], 'p53-5: the four a note stamps, then capacity_max and the Weights')
+  assert.deepEqual(mine, [...four, 'capacity_max', 'weight_mem_gb', 'weight_cores', 'overtime_runs'],
+    'p53-5: the four a note stamps, then capacity_max and the Weights; p39-14: then overtime_runs')
   assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades', 'overlaps', 'master-runs'])
   assert.equal(gradeLog, 'grades')
 })

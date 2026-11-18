@@ -234,7 +234,17 @@ only; an older engine ignores both, so its tasks take a single master review and
 `unfinished-rollout.py needs-you` read them from any root at p52-2 or later (`felt-check` is guard-exempt: it writes
 only a `## Felt check` line, a Proof log line no older reader parses and a new loose task). `prove` runs from the
 Primary refresh's root, so the hold a Felt check puts on a carried fix needs a root at p52-2 or later there: an older
-root's prove ignores the hold.
+root's prove ignores the hold. The Overtime and the take-out (p39-14, ADR 0070) live in the verdict
+(lead-integrate.py `auto_retry_verdict`), which the guard-exempt readers load from their own root: `moving` (the
+Watchdog's) and `unfinished-rollout.py needs-you` (the Stage's needs-you list). An engine from before p39-14 reads a
+spent budget, a repeated fingerprint and `auto_retries: 0` as H9 or H10, Lachy's, so a newer reader that read them as
+the lead's Overtime run or take-out would drop his needs-you item and read the rollout as stalled where it waits on
+him. Each reader passes the verdict `engine_takes_out` from `_engine_reads_take_out` (the `TAKE_OUT_ENGINE` line in
+the rollout's `engine_snapshot:` root's `reconcile-rollout.py`, or in the root an unstamped note runs on, by
+`_engine_reads_carried`'s clauses; a finished rollout, or no note, reads it), and False reads every Overtime run and
+take-out as that engine's H9 or H10. The task keys and note lines the take-out writes (`overtime_used`,
+`auto_retry_raised`, `taken_out`, `taken_out_of`; the `## Notes` `take-out:`, `take-out failed:` and `take-out paused:`
+lines) are written only by an engine at p39-14 or later, and are keys and lines an older engine never reads.
 
 Schedule's `join` (ADR 0078 d6) writes a running rollout's note from a newer root, so its forms are a cross-version
 contract:

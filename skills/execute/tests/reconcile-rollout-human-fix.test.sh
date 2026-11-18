@@ -137,6 +137,10 @@ needs() { printf '\n## Needs you\n\n%s\n' "$2" >> "$D/$1.md"; }
 predicate() { j "$1" 'bool(d["answerRecorded"] and d["answerRecorded"]["form"] == "hand-back" and d["humanFix"] is None)'; }
 SHA_A=$(sha12 "$FA"); SHA_B=$(sha12 "$FB")
 RB1="{\"prUrl\":\"$PR\",\"reviewHistory\":[{\"round\":1,\"feedback\":[\"a\"]}]}"   # an own run's review-blocked row
+# A malformed Overtime counter fails closed (cause 20, ADR 0070 d4): H9 or H10 by what the block's run spent, whatever the
+# budget. It stands in for the spent budget these rows used to read (a spent budget is now an Overtime run or a take-out,
+# p39-14), and hand-back never clears it, so a re-block after a hand-back stays his too.
+FC="overtime_used: x"
 SETTINGS_KEYS='["autoRetry","autoRetryWhy","autoRetryError","autoRetryClass","autoRetryBudget","autoRetriesUsed","quotaRetriesUsed","fingerprint","autoRetryRaise","autoRetryAfter"]'
 
 # An Integration set-aside with a pr: and budget left (merge-task's exit 8, retryable): A, at Integration.
@@ -217,15 +221,15 @@ ok "$(hf "$I")|$(predicate "$I")" '["finish the recorded answer",false,null]|fal
 # H0e: a `## Needs you` question answered `left`. record-answer removes the section, so the item's what is no longer the
 # question and its act is the cause's: execute § 6.5 (c) lists a `left` item by its form and never pushes it.
 scen h0e
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"needsHuman\":\"$Q\"}"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"needsHuman\":\"$Q\"}"
 ok "$(hf "$(inp "$A")")" '["answer the question",true,null]' "H0e: (a question: H4)"
 ra "$A" --kind needs-you --ask "$Q" --answer "leave it for now" --fingerprint "$SHA_A" --form left
 ok "$rc|$(sec "$A" '## Needs you')" "0|" "H0e: --form left on the question exits 0 and removes the section"
 I=$(inp "$A")
 ok "$(ans "$I")|$(predicate "$I")" "[\"left\",\"$S_NOW\"]|false" "H0e: answerRecorded reads left (the form § 6.5 (c) skips the push on); never the lead's"
 ok "$(hf "$I")" '["hand back or defer",true,null]' "H0e: the act is now the cause's (H10), not answer the question: the item text changed"
-has "$(fix "$I" detail)" "left on your answer of $S_NOW: auto_retries is 0" "H0e: its detail names the left answer, then the cause"
+has "$(fix "$I" detail)" "left on your answer of $S_NOW: malformed overtime_used" "H0e: its detail names the left answer, then the cause"
 # H0f: a `left` answer on a block whose cause has no fix (a retry is due): the overlay's H10, never null.
 scen h0f
 mkro; mkt "$B" open
@@ -294,44 +298,45 @@ has "$(fix "$I" detail)" "reverted on main: " "H7r: … its detail the reverted 
 setfm "$A" pr https://github.com/o/r/pull/7
 hasnt "$(j "$(inp "$A")" 'd["autoRetryWhy"]')" "reverted on main" "H7r: a new pr: (a re-land) is no longer refused for the revert"
 
-# H9: each budget, named by what the source run is (auto_retries: 0 refuses it at the budget)
+# H9: each budget, named by what the source run is (a fail-closed counter, FC, refuses it)
 scen h9-plan
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "plan not approved after 3 rounds. Accumulated reviewer feedback:
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "plan not approved after 3 rounds. Accumulated reviewer feedback:
 Round 1: x"
 I=$(inp "$A")
 ok "$(hf "$I")" '["raise max_plan_rounds, hand back or defer",true,"max_plan_rounds"]' "H9: max_plan_rounds"
-ok "$(fix "$I" detail)" "auto_retries is 0: automatic retries are off" "H9: its detail is autoRetryWhy"
+ok "$(fix "$I" detail)" "malformed overtime_used: 'x' (fails closed)" "H9: its detail is autoRetryWhy"
 scen h9-review
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test"
+mkro; mkt "$B" open
+mkt "$A" in_progress "$FC" "owner: execute-test"
 rec "$(row "$A" review-blocked "" "$RB1")"
 ok "$(hf "$(inp "$A")")" '["raise max_review_rounds, hand back or defer",true,"max_review_rounds"]' "H9: max_review_rounds (review-blocked)"
 scen h9-marker
-mkro "auto_retries: 0"; mkt "$B" open
-plain_rejection "max_review_rounds: 1"
+mkro; mkt "$B" open
+plain_rejection "max_review_rounds: 1" "$FC"
 I=$(inp "$A" --max-review-rounds 1)
 ok "$(j "$I" 'd["autoRevise"]')|$(hf "$I")" 'false|["raise max_review_rounds, hand back or defer",true,"max_review_rounds"]' "H9: a plain-rejection marker at the cap"
 scen h9-iterations
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test"
+mkro; mkt "$B" open
+mkt "$A" in_progress "$FC" "owner: execute-test"
 rec "$(row "$A" blocked 'the verifier stayed red after 3 iterations: test_migration fails')"
 ok "$(hf "$(inp "$A")")" '["raise max_iterations, hand back or defer",true,"max_iterations"]' "H9: max_iterations (the implementer's own paragraph)"
 
-# H10: each fixed opening, auto_retries: 0 and a same-fingerprint block at Integration: no raise (merge-task's human
-# text and a declined merge are read on auto-retry's A4 scenarios)
+# H10: each fixed opening and a plan-block that spent no plan rounds, under FC: no raise (merge-task's human text and a
+# declined merge are read on auto-retry's A4 scenarios); a same-fingerprint block at Integration is a take-out
+# (ADR 0070), with no humanFix
 for opening in "workflow call failed: no result row" "transient infrastructure failure — x" "plan-divergence: the plan names a missing file" \
                "agent returned neither verified nor blocked" "workflow stage threw — see /workflows"; do
   scen "h10-$(sha12 "$opening")"
-  mkro "auto_retries: 0"; mkt "$B" open
-  mkt "$A" in_progress "owner: execute-test"
+  mkro; mkt "$B" open
+  mkt "$A" in_progress "$FC" "owner: execute-test"
   if [ "${opening%%:*}" = "workflow call failed" ]; then lead "$A" own "$opening"; else rec "$(row "$A" blocked "$opening")"; fi
   ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H10: the opening \"${opening:0:30}\" spends no budget"
 done
 scen h10-zero
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
-ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H10: auto_retries: 0 on a plan-block that spent no plan rounds"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
+ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H10: a fail-closed counter on a plan-block that spent no plan rounds"
 scen h10-same
 mkro; mkt "$B" open
 int_retryable
@@ -339,7 +344,8 @@ ar "$A"; ok "$rc" 0 "H10 same: (the first retry)"
 python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
 lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)" 2026-10-03T09:10:00Z
 I=$(INOW=2026-10-03T09:10:00Z inp "$A")
-ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" 'same feedback as the block last re-entered|["hand back or defer",true,null]' "H10: the same fingerprint at Integration, no raise"
+ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")|$(j "$I" 'd["takeOut"]["cause"]')" 'same feedback as the block last re-entered: the lead takes it out|null|same-feedback' \
+  "H10 same: the same fingerprint at Integration is a take-out (ADR 0070), no humanFix"
 # H10-same-infra (ADR 0033 d4 as amended, ADR 0080): a held infra stop at Integration (here no-runner, a settings block)
 # that comes back the same after its retry is due for merge-settings.py `free` (the settings point): a null humanFix
 # with the deadline as autoRetryAfter; a due block no `free` moved within 60 minutes of its anchor is Lachy's H10, its
@@ -448,15 +454,15 @@ setfm "$A" max_iterations 3
 ok "$(j "$(inp "$A")" '[d["autoRetryError"], d["humanFix"]]')" '[null,null]' "H12b: once fixed, not H12 (the lead's own retry)"
 setfm "$A" max_plan_rounds '"3"'
 ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12b: a quoted max_plan_rounds → H12"
-# H12c: the lead's own `invalid round budget:` row (execute § 3's task-level budget), fixed, with auto_retries 0 → H10.
+# H12c: the lead's own `invalid round budget:` row (execute § 3's task-level budget), fixed, under FC → H10.
 # Driven from a queued (`open`) note, as § 3 runs it: no `status: in_progress` stamp and no mark-started precede the row.
 scen h12c
 mkro; mkt "$B" open
-mkt "$A" open "max_plan_rounds: 0" "auto_retries: 0"
+mkt "$A" open "max_plan_rounds: 0" "$FC"
 lead "$A" own "invalid round budget: max_plan_rounds on [[$A]] must be an integer >= 1, got '0'"
 ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12c: the own-run row reads H12 while the stamp is invalid"
 setfm "$A" max_plan_rounds 3
-ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H12c: fixed with auto_retries 0 → H10, no raise (NO_BUDGET_OPENINGS)"
+ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H12c: fixed under FC → H10, no raise (NO_BUDGET_OPENINGS)"
 
 # the null cases: the way back is the lead's own
 scen null
@@ -471,21 +477,21 @@ mkt "$A" open; planblock "$A" "$TRANSIENT"
 I=$(INOW=2026-10-03T08:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetryAfter"] is not None, d["humanFix"]]')" '[true,null]' "null: cooling"
 scen null-answered
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
-ra "$A" --kind decision --ask "auto_retries is 0: hand it back?" --answer yes --fingerprint "$SHA_A" --form hand-back
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
+ra "$A" --kind decision --ask "malformed overtime_used: hand it back?" --answer yes --fingerprint "$SHA_A" --form hand-back
 I=$(inp "$A")
 ok "$(j "$I" 'd["humanFix"]')|$(predicate "$I")" 'null|true' "null: a hand-back answer on a cause a hand-back moves (H10)"
 
 # ── K: the --max-review-rounds overlay ───────────────────────────────────────────────────────────────────────────
 scen k
 mkro; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2"
+mkt "$A" in_progress "owner: execute-test" "$FC"
 rec "$(row "$A" review-blocked "" "$RB1")"
 I=$(inp "$A" --max-review-rounds 3)
 ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetryAfter"], d["autoRetryRaise"]]')" '[false,"--max-review-rounds 3 is not the resolved max_review_rounds 4",null,null]' \
   "K: a mismatched K keeps today's why"
-ok "$(hf "$I")" '["raise max_review_rounds, hand back or defer",true,"max_review_rounds"]' "K: humanFix ignores the flag (the spent budget's H9)"
+ok "$(hf "$I")" '["raise max_review_rounds, hand back or defer",true,"max_review_rounds"]' "K: humanFix ignores the flag (the fail-closed counter's H9)"
 ok "$(hf "$(inp "$A")")" "$(hf "$I")" "K: the same humanFix without the flag"
 scen k-retryable
 mkro; mkt "$B" open
@@ -495,7 +501,8 @@ ok "$(j "$I" '[d["autoRetry"], d["humanFix"]]')" '[false,null]' "K: a retryable 
 ok "$(python3 -c 'import importlib.util,json,sys
 s=importlib.util.spec_from_file_location("li",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(json.dumps([list(m.AUTO_RETRY_KEYS[:10]), list(m.AUTO_RETRY_KEYS[10:])], separators=(",", ":")))' "$LI")" \
-  "[$SETTINGS_KEYS,[\"humanFix\",\"answerRecorded\",\"settingsBlock\"]]" "K: today's ten verdict keys, in order, then humanFix, answerRecorded and settingsBlock"
+  "[$SETTINGS_KEYS,[\"humanFix\",\"answerRecorded\",\"settingsBlock\",\"overtime\",\"takeOut\"]]" \
+  "K: today's ten verdict keys, in order, then humanFix, answerRecorded, settingsBlock, overtime and takeOut (p39-14)"
 ok "$(python3 -c 'import importlib.util,json,sys
 s=importlib.util.spec_from_file_location("li",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(json.dumps(list(m.HUMAN_FIX_ACTS), separators=(",", ":"), ensure_ascii=False))' "$LI")" \
@@ -504,14 +511,14 @@ print(json.dumps(list(m.HUMAN_FIX_ACTS), separators=(",", ":"), ensure_ascii=Fal
 
 # ── L: the label ─────────────────────────────────────────────────────────────────────────────────────────────────
 scen l
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 ok "$(fix "$(inp "$A")" label)" "(plan-blocked, Plan-blocked feedback run 1)" "L: (<status>, <section> run <n>)"
 planblock "$A" "$FB" 2026-10-03T08:10:00Z
 ok "$(fix "$(inp "$A")" label)" "(plan-blocked, Plan-blocked feedback run 2)" "L: the top run"
 scen l-legacy
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" plan-blocked; printf '\n## Plan-blocked feedback\n\nthe plan misses a step\n' >> "$D/$A.md"
+mkro; mkt "$B" open
+mkt "$A" plan-blocked "$FC"; printf '\n## Plan-blocked feedback\n\nthe plan misses a step\n' >> "$D/$A.md"
 ok "$(fix "$(inp "$A")" label)" "(plan-blocked, Plan-blocked feedback)" "L: a legacy section with no run"
 scen l-ask
 mkro; mkt "$B" open
@@ -581,7 +588,7 @@ ok "$(ans "$(inp "$A")")" null "N: two live entries sharing the newest stamp fai
 # ── W: record-answer ─────────────────────────────────────────────────────────────────────────────────────────────
 scen w-order
 mkro; mkt "$B" open
-mkt "$A" open "auto_retries: 0"; planblock "$A" "plan not approved after 3 rounds. Accumulated reviewer feedback:
+mkt "$A" open "$FC"; planblock "$A" "plan not approved after 3 rounds. Accumulated reviewer feedback:
 Round 1: x" 2026-10-03T08:00:00Z "{\"needsHuman\":\"$Q\"}"
 FP=$(j "$(inp "$A")" 'd["fingerprint"]')
 entry "$A" "- 2026-10-03T08:30+00:00 decision (block $FP; left): \"earlier\" → leave it"
@@ -589,7 +596,6 @@ before=$(snap)
 ra "$A" --kind needs-you --ask "$Q" --answer "alembic" --fingerprint "$FP" --form hand-back --raise max_plan_rounds
 ok "$rc" 1 "W: --raise on a needs-you own run exits 1 (H4 names no raise)"
 ok "$(snap)" "$before" "W: … nothing written"
-setfm "$A" auto_retries 0
 chmod 0444 "$D/$A.md"; before=$(snap)
 ra "$A" --kind needs-you --ask "$Q" --answer "alembic" --fingerprint "$FP" --form awaiting-repair --pr "$PR"
 ok "$rc|$(snap)" "1|$before" "W: an unwritable task note: exit 1, nothing written (one save)"
@@ -658,7 +664,7 @@ ok "$(ans "$(inp "$A")")" null "W: … and a - entry never counts"
 
 scen w-bump
 mkro; mkt "$B" open
-mkt "$A" open "auto_retries: 0"; planblock "$A" "$FA"
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 RNOW=2026-10-03T08:00:00Z ra "$A" --kind decision --ask x --answer "leave it" --fingerprint "$SHA_A" --form left
 ok "$rc|$out" "0|$A: answer recorded (left) 2026-10-03T08:01+00:00 [written]" "W: a stamp tying the last run is bumped one minute"
 RNOW=2026-10-03T08:00:30Z ra "$A" --kind decision --ask x --answer "hand it back" --fingerprint "$SHA_A" --form hand-back
@@ -681,8 +687,8 @@ FP=$(j "$(inp "$A")" 'd["fingerprint"]'); before=$(snap)
 ra "$A" --kind decision --ask x --answer y --fingerprint "$FP" --form hand-back --raise max_review_rounds
 ok "$rc|$(snap)" "1|$before" "W: --raise max_review_rounds when k > lastRound (and the cause names none) exits 1"
 scen w-raise-plan
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "plan not approved after 3 rounds. Accumulated reviewer feedback:
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "plan not approved after 3 rounds. Accumulated reviewer feedback:
 Round 1: x"
 FP=$(j "$(inp "$A")" 'd["fingerprint"]')
 ra "$A" --kind decision --ask x --answer y --fingerprint "$FP" --form hand-back --raise max_review_rounds
@@ -691,16 +697,16 @@ ra "$A" --kind decision --ask x --answer y --fingerprint "$FP" --form hand-back 
 ok "$rc|$(fm "$A" max_plan_rounds)" "0|max_plan_rounds: 4" "W: --raise max_plan_rounds writes the resolved value + 1 (built-in 3)"
 ok "$(sec "$RO" '## Notes' | grep 'raised')" "- 2026-10-03 repair: [[$A]] max_plan_rounds raised to 4, one round" "W: … with its ## Notes line"
 scen w-raise-iterations
-mkro "auto_retries: 0" "max_iterations: 5"; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test"
+mkro "max_iterations: 5"; mkt "$B" open
+mkt "$A" in_progress "$FC" "owner: execute-test"
 rec "$(row "$A" blocked 'the verifier stayed red after 5 iterations: test_migration fails')"
 FP=$(j "$(inp "$A")" 'd["fingerprint"]')
 ra "$A" --kind decision --ask x --answer y --fingerprint "$FP" --form hand-back --raise max_iterations
 ok "$rc|$(fm "$A" max_iterations)" "0|max_iterations: 6" "W: --raise max_iterations writes the resolved value + 1 (the rollout's 5)"
 ok "$(sec "$RO" '## Notes' | grep 'raised')" "- 2026-10-03 repair: [[$A]] max_iterations raised to 6, one iteration" "W: … one iteration"
 scen w-raise-own-review
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" in_progress "owner: execute-test"
+mkro; mkt "$B" open
+mkt "$A" in_progress "$FC" "owner: execute-test"
 rec "$(row "$A" review-blocked "" "$RB1")"
 FP=$(j "$(inp "$A")" 'd["fingerprint"]')
 ra "$A" --kind decision --ask x --answer y --fingerprint "$FP" --form hand-back --raise max_plan_rounds
@@ -721,8 +727,8 @@ ok "$rc|$(snap)" "1|$before" "W: an unresolvable value exits 1, nothing written"
 has "$out" "make no raise: " "W: … with the resolver's line"
 
 scen w-supersede
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 ra "$A" --kind decision --ask x --answer "leave it" --fingerprint "$SHA_A" --form left
 OLD=$(j "$(inp "$A")" 'd["answerRecorded"]["stamp"]')
 ra "$A" --kind decision --ask x --answer "hand it back" --fingerprint "$SHA_A" --form hand-back
@@ -735,8 +741,8 @@ ok "$rc|$(snap)" "1|$before" "W: hand-back --answer <the superseded stamp> exits
 
 # ── B: hand-back ─────────────────────────────────────────────────────────────────────────────────────────────────
 scen b
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 ra "$A" --kind decision --ask x --answer "leave it" --fingerprint "$SHA_A" --form left
 ST=$(j "$(inp "$A")" 'd["answerRecorded"]["stamp"]'); before=$(snap)
 hb "$A" --answer "$ST"
@@ -769,8 +775,8 @@ ok "$rc|$(sec "$A" '## Repair input' | grep -c "(block $SHA_B)")" "0|1" "B: auto
 
 # ── X: the races ─────────────────────────────────────────────────────────────────────────────────────────────────
 scen x-double
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 ra "$A" --kind decision --ask x --answer "hand it back" --fingerprint "$SHA_A" --form hand-back
 ST=$(j "$(inp "$A")" 'd["answerRecorded"]["stamp"]')
 hb "$A" --answer "$ST"; ok "$rc" 0 "X: the lead's hand-back --answer"
@@ -783,22 +789,22 @@ ok "$rc|$(snap)" "1|$before" "X: after an identical re-block, repair's --answer 
 I=$(INOW=2026-10-03T09:10:00Z inp "$A")
 ok "$(ans "$I")|$(fix "$I" label)" "null|(plan-blocked, Plan-blocked feedback run 1, ask 2)" "X: … the re-block is a fresh ask"
 scen x-supersede
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 ra "$A" --kind decision --ask x --answer "hand it back" --fingerprint "$SHA_A" --form hand-back
 LEAD=$(j "$(inp "$A")" 'd["answerRecorded"]["stamp"]')
 ra "$A" --kind decision --ask x --answer "no: restore the PR first" --fingerprint "$SHA_A" --form awaiting-repair
 before=$(snap); hb "$A" --answer "$LEAD"
 ok "$rc|$(snap)" "1|$before" "X: repair superseded while the lead held the old stamp: the lead's --answer exits 1"
 scen x-tie
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 entry "$A" "- 2026-10-03T08:00+00:00 decision (block $SHA_A): \"x\" → y"
 I=$(inp "$A")
 ok "$(ans "$I")|$(hf "$I")" 'null|["hand back or defer",true,null]' "X: a hand-written tie reads no answer, and the task is listed"
 scen x-bare
-mkro "auto_retries: 0"; mkt "$B" open
-mkt "$A" open; planblock "$A" "$FA"
+mkro; mkt "$B" open
+mkt "$A" open "$FC"; planblock "$A" "$FA"
 ra "$A" --kind decision --ask x --answer y --fingerprint "$SHA_A" --form hand-back
 hb "$A"; ok "$rc" 0 "X: a bare hand-back by hand"
 ms "$A" 2026-10-03T09:01:00Z; setfm "$A" owner execute-test

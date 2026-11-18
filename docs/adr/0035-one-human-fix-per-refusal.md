@@ -3,6 +3,11 @@
 Date: 2026-10-13
 Status: accepted, shipped in 3.1.0 (implemented by p18-3, #122; amends ADR 0033; from the 2026-10-13 orient
 grill of `thread-skill-p18-3-one-human-fix-per-refusal`, after PR #107's three review rounds)
+*(Amended by ADR 0070, built for the engine by p39-14, 2026-11-18: H9 no longer names a spent budget, which is an
+Overtime run the lead makes itself and then a take-out, never a Human fix. H9 `raise <field>, hand back or defer`
+stays for the causes that are his on a run that spent its own budget: a `--gated` decline, a merge-task text a human
+must clear, an unresolvable budget and a note the verdict cannot read (no fingerprint, a malformed counter or
+`auto_retry_at`), and `record-answer --raise` stays for them. A take-out that failed three times is H10.)*
 
 ## Context
 

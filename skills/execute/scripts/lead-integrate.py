@@ -341,7 +341,7 @@ Subcommands:
       first rule that refused, "" on true), autoRetryError (an `auto_retries`, `max_review_rounds`, `max_iterations`
       or `max_plan_rounds` stamp that is not a valid integer: H12, a (c) item, never a halt (ADR 0048), kept under a
       `## Needs you` question or a recorded answer; else null), autoRetryClass (agent | infra | quota, for a note set
-      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
+      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds, overtimeRuns}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
       absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
@@ -350,7 +350,10 @@ Subcommands:
       a block only a person may move, act one of HUMAN_FIX_ACTS; execute § 6.5 (c), status's Needs-you block and
       repair § 2 print it and never re-derive it) and answerRecorded (reconcile-rollout.py _answer_recorded, read
       for every note: the live `## Repair input` answer to the current block, {stamp, kind, form, line}, or
-      null; an answered block is never retried). The rollout note (<note dir>/<rollout>.md) is read and the
+      null; an answered block is never retried), settingsBlock (ADR 0080), then overtime (an Overtime run past the
+      spent budget: {used, budget, raise, label}, p39-14, ADR 0070) and takeOut (the lead's `defer --take-out`: {cause,
+      why, overtimeUsed, overtimeBudget, fingerprint, failures, label}), each null unless auto_retry_verdict sets it.
+      The rollout note (<note dir>/<rollout>.md) is read and the
       budget resolved only for a note set aside at its run or at Integration, so every other read stays cheap; a
       resolver failure is in the JSON and the exit stays 0.
       --max-review-rounds K that differs from the resolved max_review_rounds means no retry (an overlay: humanFix
@@ -2929,7 +2932,7 @@ def _revise_shaped(inp):
 
 AUTO_RETRY_KEYS = ("autoRetry", "autoRetryWhy", "autoRetryError", "autoRetryClass", "autoRetryBudget",
                    "autoRetriesUsed", "quotaRetriesUsed", "fingerprint", "autoRetryRaise", "autoRetryAfter",
-                   "humanFix", "answerRecorded", "settingsBlock")
+                   "humanFix", "answerRecorded", "settingsBlock", "overtime", "takeOut")
 
 # The fixed acts a Human fix names (ADR 0035 decision 1), one per refusal cause a person owns. auto_retry_verdict sets
 # `humanFix.act` to one of these; execute § 6.5 (c), status's Needs-you block and repair § 2 print it and never
@@ -2944,7 +2947,8 @@ HUMAN_FIX_ACTS = (
     "restore, recut or defer",                         # H6  at Integration with no pr: (repair § 4, or § 3c's merge)
                                                        # H8  the PR branch is gone
     "fix the note's pr: or defer",                     # H7  a pr: the engine refuses, on a way back that launches on it
-    "raise max_plan_rounds, hand back or defer",       # H9  a spent budget: the run's own
+    "raise max_plan_rounds, hand back or defer",       # H9  the run spent its own budget, and a stop his (causes 14,
+                                                       #     15, 17, 19 to 21; a spent budget alone is the Overtime's)
     "raise max_review_rounds, hand back or defer",
     "raise max_iterations, hand back or defer",
     "hand back or defer",                              # H10 every other refusal; H11 a code-writing review with no PR
@@ -3023,12 +3027,16 @@ def _hold_line(rollout_note, slug, kind, note):
     return next((l.strip() for l in text.split("\n") if rr.UNVERIFIED_MARK in l), text.split("\n", 1)[0].strip())
 
 
-def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None):
+def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None, engine_takes_out=True):
     """Whether execute's lead re-enters a set-aside task by itself (`reconcile-rollout.py auto-retry`), and, when it may
     not, the one Human fix that moves it (ADR 0035), as `inputs`' AUTO_RETRY_KEYS. The one decision function: `inputs`
     prints it to every caller and the verb re-runs it before it writes. `inp` is task_inputs' output for the note,
     `rollout_note` the rollout its `rollout:` names (None: no retry), `max_rounds_flag` inputs' --max-review-rounds
     (None: not given). `answerRecorded` (reconcile-rollout.py _answer_recorded) is read for every note.
+    `engine_takes_out` False is a guard-exempt reader's (`moving`, unfinished-rollout.py needs-you) for a rollout whose
+    engine predates p39-14 (reconcile-rollout.py _engine_reads_take_out): that engine's lead has no Overtime and no
+    take-out, so each Overtime run and take-out below reads as it reads them, spent()'s H9 or H10, overtime and takeOut
+    null (engine-snapshot.md § Cross-version state). The writing verbs run on the rollout's own engine and keep True.
 
     The core (_verdict) is an ordered list of causes; the first that refuses is `autoRetry: false` with its
     `autoRetryWhy` and its `humanFix` ({act, detail, handBack, label, raise}, act one of HUMAN_FIX_ACTS; handBack true
@@ -3067,9 +3075,13 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
      16. an invalid budget stamp (any of the four keys, re-read live: _retry_budget's error, else
          reconcile-rollout.py _round_budget_error): `autoRetryError`, H12 `fix the round budget`, handBack false; once
          the stamp reads valid it falls through;
-     17. an unresolvable budget: H9 or H10;
-     18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
-     22. a quota block past its 5 free retries; 22a. a settings block (reconcile-rollout.py _settings_block, ADR 0080)
+     17. an unresolvable budget (`overtime_runs` included): H9 or H10;
+     19. no feedback fingerprint; 20. malformed counters (`overtime_used` included); 21. a malformed `auto_retry_at`:
+         each H9 or H10, ahead of 18, since the Overtime and the take-out rest on them (ADR 0070 d4);
+     18. `auto_retries: 0`: a take-out at once (takeOut cause no-overtime, below), except an infra block at Integration
+         that is a settings block or the same stop (decision 4's, his): H10 `auto_retries is 0: automatic retries are off`;
+     22. a quota block past its 5 free retries: QUOTA_COOLDOWN_MIN[-1] (480 minutes) of cool-down, then an Overtime run
+         while `overtime_used` < `overtime_runs`, else the take-out (cause spent); 22a. a settings block (reconcile-rollout.py _settings_block, ADR 0080)
          whose merge setting merge-settings.py changed or cleared, its one re-entry not yet consumed: `autoRetry: true`
          at once, skipping 23, 24 and the cool-down once (the change is the new fact); then, for a settings block, the
          settings point, and only there: the same stop after one cool-down retry (23's _same_stop; ADR 0080 d2, a
@@ -3092,10 +3104,11 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          (reconcile-rollout.py _same_stop: a kill, a GitHub-side exit 1, a no-runner set-aside or an unreported-context
          set-aside whose _stop_key equals the `auto_retry_sha` run's, ADR 0033 d4 as amended 2026-11-12, ADR 0080),
          `same stop twice running at Integration: <its first line>`, then `; <its last real reason line>` when its
-         run carries one (a settings block's same stop is its settings point, 22a above); 24. an agent or infra
-         block past its budget; 25. an agent block whose fingerprint equals `auto_retry_sha`: each H9 `raise <field>,
-         hand back or defer` when _raise_field names the source run's spent budget, else H10 `hand back or defer`, the
-         detail its autoRetryWhy;
+         run carries one (a settings block's same stop is its settings point, 22a above); 25 (ahead of 24). an agent
+         block whose fingerprint equals `auto_retry_sha`: the take-out at once (cause same-feedback, ADR 0070's Decided
+         for him), before the budget is spent or after; 24. an agent or infra block past its budget: an Overtime run
+         while `overtime_used` < `overtime_runs` (an infra block first cools INFRA_COOLDOWN_MIN[-1], 240 minutes; an
+         agent block has none), else the take-out (cause spent);
      and a quota block still cooling (QUOTA_COOLDOWN_MIN[quota_retries_used] from the later of the block's run stamp and
      `auto_retry_at`, setting `autoRetryAfter`) or an infra block still cooling (INFRA_COOLDOWN_MIN[auto_retries_used],
      the last repeating; no stamp fails closed; a stop on GitHub's side among them, reconcile-rollout.py _retry_class,
@@ -3103,21 +3116,34 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
     max_review_rounds is <= lastRound (one round per retry).
 
+    The Overtime (p39-14, ADR 0070 d1): an `autoRetry: true` past the normal budget carries `overtime` {used (the note's
+    `overtime_used`, before this run), budget (the resolved `overtime_runs`), raise ({field, to} or null), label
+    (human_fix_label's)}: the raise is the cap the stop spent (_raise_field), `to` lastRound + 1 for a revise re-entry
+    with no round left, else the resolved cap + 1 (rr._resolved_cap; one that will not resolve is cause 17's spent()).
+    The take-out (ADR 0070 d5): a refusal whose way out is the lead's `defer --take-out` carries `takeOut` {cause (spent
+    | same-feedback | no-overtime), why, overtimeUsed, overtimeBudget, fingerprint, failures (the rollout's `take-out
+    failed:` lines on this fingerprint, rr._take_out_failures), label} and a null humanFix, its why `<why>: the lead takes
+    it out`; after its k-th failure (1 <= k < TAKE_OUT_TRIES) it cools TAKE_OUT_COOLDOWN_MIN[k-1] minutes from the
+    latest (`autoRetryAfter`, why `take-out cool-down: retries at <stamp>`), and at TAKE_OUT_TRIES failures it is H10
+    `hand back or defer`, detail `take-out failed <k> times (feedback <F>): <the last failure's why>`, takeOut kept for
+    repair's route. Both are null under a question (cause 6) or a recorded answer (cause 7), and on every other cause.
+
     `settingsBlock` is null, or for a note with a settings block {kind, contexts, fingerprint, state (unfreed | changed |
     left), due, freeNow, why}: `due` and `freeNow` are false unless the verdict reached the settings point above, so a
     question, an answer or any of causes 1 to 22 leaves it false. merge-settings.py `free` acts only on a due one.
 
     --max-review-rounds is an overlay the core ignores, so humanFix never depends on a hand-resolved K: only with no
     answer recorded and the core past the budget point (autoRetryBudget non-null), a K other than the resolved one sets
-    `autoRetry: false` with today's mismatch why and clears autoRetryAfter and autoRetryRaise."""
+    `autoRetry: false` with today's mismatch why and clears autoRetryAfter, autoRetryRaise, overtime and takeOut."""
     answer = rr._answer_recorded(note)
-    out = _verdict(path, note, inp, rollout_note, now, answer)
+    out = _verdict(path, note, inp, rollout_note, now, answer, takes_out=engine_takes_out)
     budget = out["autoRetryBudget"]
     if answer is None and budget is not None and max_rounds_flag is not None:
         k = budget["maxReviewRounds"]["value"]
         if max_rounds_flag != k:
             out.update(autoRetry=False, autoRetryWhy=f"--max-review-rounds {max_rounds_flag} is not the resolved "
-                                                     f"max_review_rounds {k}", autoRetryAfter=None, autoRetryRaise=None)
+                                                     f"max_review_rounds {k}", autoRetryAfter=None, autoRetryRaise=None,
+                       overtime=None, takeOut=None)
     return out
 
 
@@ -3134,9 +3160,9 @@ def _keep_cause_flags(out, cause):
     out.update(autoRetryError=cause["autoRetryError"], autoRetryClass=cause["autoRetryClass"])
 
 
-def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
+def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False, takes_out=True):
     """auto_retry_verdict's core (its docstring lists the causes). `answer` is the note's answerRecorded (None skips
-    cause 7); `skip_needs` skips cause 6, for H4's handBack."""
+    cause 7); `skip_needs` skips cause 6, for H4's handBack; `takes_out` is auto_retry_verdict's `engine_takes_out`."""
     out = {k: None for k in AUTO_RETRY_KEYS}
     out.update(autoRetry=False, autoRetryWhy="", answerRecorded=answer)
     used = rr._stamp_value(note.get(rr.AUTO_RETRIES_USED_KEY), 0) if note.get(rr.AUTO_RETRIES_USED_KEY) is not None else 0
@@ -3192,12 +3218,12 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
                   fix("fix the note's pr: or defer", _hold_line(rollout_note, path.stem, "RACE", note), False))
     question = rr.needs_human(note)
     if question and not skip_needs:
-        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
+        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True, takes_out=takes_out)
         _keep_cause_flags(out, below)
         return no("needs a human: the note's ## Needs you question",
                   fix("answer the question", question, below["humanFix"]["handBack"] if below["humanFix"] else True))
     if answer is not None:
-        cause = _verdict(path, note, inp, rollout_note, now, None, skip_needs)
+        cause = _verdict(path, note, inp, rollout_note, now, None, skip_needs, takes_out)
         _keep_cause_flags(out, cause)
         cf, form, stamp = cause["humanFix"], answer["form"], answer["stamp"]
         if form == "hand-back":
@@ -3258,19 +3284,23 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         return no(f"invalid round budget: {bad}", fix("fix the round budget", bad, False))
     if budget["unresolved"]:
         return spent(f"auto_retries unresolved: {budget['unresolved']}")
-    out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"]}
-    n = budget["autoRetries"]["value"]
-    if n == 0:
-        return spent("auto_retries is 0: automatic retries are off")
+    out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"],
+                              "overtimeRuns": budget["overtimeRuns"]}
+    n, ot_n = budget["autoRetries"]["value"], budget["overtimeRuns"]["value"]
+    raw_ot = note.get(rr.OVERTIME_USED_KEY)
+    ot_used = rr._stamp_value(raw_ot, 0) if raw_ot is not None else 0
+    # The fail-closed states first (ADR 0070 d4): the Overtime and the take-out rest on the fingerprint, the counters and
+    # the cool-down's stamp, so a note that cannot give them is his whatever the budget says, `auto_retries: 0` included.
     if not out["fingerprint"]:
         return spent("no feedback fingerprint: the block recorded no feedback")
-    for key, value in ((rr.AUTO_RETRIES_USED_KEY, used), (rr.QUOTA_RETRIES_USED_KEY, quota)):
+    for key, value in ((rr.AUTO_RETRIES_USED_KEY, used), (rr.QUOTA_RETRIES_USED_KEY, quota), (rr.OVERTIME_USED_KEY, ot_used)):
         if value is None:
             return spent(f"malformed {key}: {note.get(key)!r} (fails closed)")
     last_at = rr._parse_ts(note.get(rr.AUTO_RETRY_AT_KEY)) if note.get(rr.AUTO_RETRY_AT_KEY) is not None else None
     if note.get(rr.AUTO_RETRY_AT_KEY) is not None and last_at is None:
         return spent(f"malformed {rr.AUTO_RETRY_AT_KEY}: {note.get(rr.AUTO_RETRY_AT_KEY)!r} (fails closed)")
     cls = out["autoRetryClass"]
+    fp = out["fingerprint"]
 
     def cooling(minutes):
         """The cool-down's refusal while `now` is before the later of the block's run stamp and the last retry, plus
@@ -3284,12 +3314,72 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
             return no(f"{cls} cool-down: retries at {out['autoRetryAfter']}")
         return None
 
+    def take_out(cause, why):
+        """The take-out point (ADR 0070 d5): every take-out passes through it. `takeOut` is set, and the humanFix stays
+        null (the lead's `defer --take-out`), unless earlier tries of this take-out failed (rr._take_out_failures):
+        after the k-th failure it cools TAKE_OUT_COOLDOWN_MIN[k-1] minutes, and at TAKE_OUT_TRIES it is Lachy's H10,
+        takeOut kept for repair's route. On an engine from before p39-14 (`takes_out` False) it is spent(why), as
+        that engine's lead reads it."""
+        if not takes_out:
+            return spent(why)
+        failed = rr._take_out_failures(rollout_note, path.stem, fp)
+        k_ = failed["count"]
+        out["takeOut"] = {"cause": cause, "why": why, "overtimeUsed": ot_used, "overtimeBudget": ot_n, "fingerprint": fp,
+                          "failures": k_, "label": label}
+        if k_ >= rr.TAKE_OUT_TRIES:
+            detail = f"take-out failed {k_} times (feedback {fp}): {failed['why']}"
+            return no(detail, fix("hand back or defer", detail, True))
+        if k_ and failed["last"] is not None:
+            after = failed["last"] + timedelta(minutes=rr.TAKE_OUT_COOLDOWN_MIN[k_ - 1])
+            if now < after:
+                out["autoRetryAfter"] = rr._stamp(after)
+                return no(f"take-out cool-down: retries at {out['autoRetryAfter']}")
+        return no(f"{why}: the lead takes it out")
+
+    def overtime(spent_why, wait=None):
+        """An Overtime run (ADR 0070 d1) while overtime_used < overtime_runs: after `wait` minutes' cool-down (an infra
+        or quota block), one more re-entry with the raise of the cap its stop spent (_raise_field; a revise re-entry
+        raises max_review_rounds to lastRound + 1 when no round is left; else the resolved cap + 1); a cap that will
+        not resolve is cause 17's spent(). Once the Overtime is spent, the take-out (cause spent). On an engine from
+        before p39-14 (`takes_out` False) a spent budget is spent(spent_why) at once, cool-down and all, as there."""
+        if not takes_out:
+            return spent(spent_why)
+        if ot_used >= ot_n:
+            return take_out("spent", f"{spent_why}; overtime {ot_used}/{ot_n} used")
+        if wait is not None:
+            refused = cooling(wait)
+            if refused:
+                return refused
+        field, raise_ = _raise_field(note, inp, k, at), None
+        if field == "max_review_rounds" and inp.get("resumeAt") == "revise":
+            if k is not None and k <= inp.get("lastRound", 0):
+                raise_ = {"field": field, "to": inp["lastRound"] + 1}
+        elif field:
+            value, why = rr._resolved_cap(note, rollout_note, field)
+            if value is None:
+                return spent(f"{field} unresolved for the Overtime's raise: {why}")
+            raise_ = {"field": field, "to": value + 1}
+        out["overtime"] = {"used": ot_used, "budget": ot_n, "raise": raise_, "label": label}
+        return None
+
+    # Cause 18: `auto_retries: 0` turns every automatic retry off, so there is no Overtime either: a take-out at once,
+    # except decision 4's stops, which are his (an infra settings block or the same stop at Integration: H10), and every
+    # stop on an engine from before p39-14, whose lead reads `auto_retries: 0` as H9 or H10.
+    if n == 0:
+        if not takes_out or (at == "integration" and cls == "infra" and (sblock is not None or rr._same_stop(note))):
+            return spent("auto_retries is 0: automatic retries are off")
+        return take_out("no-overtime", "auto_retries is 0: automatic retries are off, so no Overtime")
     if cls == "quota":
         if quota >= len(rr.QUOTA_COOLDOWN_MIN):
-            return spent(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted: a human")
-        refused = cooling(rr.QUOTA_COOLDOWN_MIN[quota])
-        if refused:
-            return refused
+            # Cause 22: past the five free retries, an Overtime run after the last cool-down (ADR 0070 d3).
+            refused = overtime(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted",
+                               rr.QUOTA_COOLDOWN_MIN[-1])
+            if refused:
+                return refused
+        else:
+            refused = cooling(rr.QUOTA_COOLDOWN_MIN[quota])
+            if refused:
+                return refused
     else:
         if at == "integration" and cls == "infra" and sblock is not None:
             settled = _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix, cooling)
@@ -3300,11 +3390,17 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         if at == "integration" and cls == "infra" and rr._same_stop(note):
             carried = _carried_line(note.latest_run_text(rr.BLOCKED_SECTIONS["blocked"]))
             return spent(f"same stop twice running at Integration: {first}" + (f"; {carried}" if carried else ""))
+        # Cause 25, ahead of 24: the same feedback again is taken out at once (ADR 0070's Decided for him), before the
+        # budget is spent or after; infra and quota are exempt (a re-run is how they clear).
+        if cls == "agent" and fp == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
+            return take_out("same-feedback", "same feedback as the block last re-entered")
         if used >= n:
-            return spent(f"budget: {used}/{n} used")
-        if cls == "agent" and out["fingerprint"] == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
-            return spent("same feedback as the block last re-entered")
-        if cls == "infra":
+            # Cause 24: the normal budget spent, an Overtime run (an infra block after the last cool-down), else out.
+            refused = overtime(f"budget: {used}/{n} used",
+                               rr.INFRA_COOLDOWN_MIN[-1] if cls == "infra" else None)
+            if refused:
+                return refused
+        elif cls == "infra":
             refused = cooling(rr.INFRA_COOLDOWN_MIN[min(used, len(rr.INFRA_COOLDOWN_MIN) - 1)])
             if refused:
                 return refused
@@ -3331,7 +3427,7 @@ def _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix, 
         return out
     if not rr._same_stop(note):
         if used != n:
-            return None           # budget left: today's cool-down retry; one past it: 24's H10
+            return None           # budget left: today's cool-down retry; one past it: 24's Overtime, then the take-out
         # The first sighting with the budget spent exactly: its one cool-down retry, free of the budget (the verb takes
         # the counter one past it, as 22a's re-entry does, so this is given once).
         refused = cooling(rr.INFRA_COOLDOWN_MIN[0])

@@ -229,8 +229,17 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
                      (int >= 1: the resolved auto_retries); fingerprint? (the block's run sha); reviewRounds? (int
                      >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
-                     retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
-                     set-aside task.
+                     retry); overtime?, overtimeBudget? (ints >= 1: an Overtime retry's overtime_used after it and
+                     the resolved overtime_runs, p39-14, ADR 0070); raiseField? (max_review_rounds | max_plan_rounds
+                     | max_iterations: the cap an Overtime retry raised); raiseTo? (int >= 1: its new value). p16-4,
+                     ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a set-aside task.
+  take-out        T  cause (spent | same-feedback | no-overtime | dependant), fingerprint (the take-out's key: the
+                     taken-out task's block fingerprint, a dependant's line carrying its task's); stage? (as
+                     auto-retry's), overtimeUsed?, overtimeBudget? (ints >= 0), with? (the taken-out task's slug, on a
+                     dependant's line), pr?, why? (at most 200 characters). Cause dependant carries `with` and no
+                     stage, overtimeUsed or overtimeBudget; any other cause carries all three and no `with`. p39-14,
+                     ADR 0070 d5: reconcile-rollout.py `defer --take-out`, one line per member it takes out, an engine
+                     act, never Lachy's.
   completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped | heat), rc, sha, attempt (int 1 or 2); log?,
                      followup?
                      (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
@@ -354,7 +363,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      applied: key
                      one of TUNING_KEYS: parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, and
                      (p53-5) capacity_max and a repo's weight_mem_gb and weight_cores, which tune.py moves in whole
-                     units; from, to and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
+                     units, and (p39-14) overtime_runs; from, to and ranAt integers >= 1 with from != to (an
+                     overtime_runs of 0 is the operator's hand edit, never a Tuning's); rule a string of at most 64 characters;
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
                      entry of a non-void auto landing and on no other line); no other key. Never auto and close on one
                      line.
@@ -932,9 +942,10 @@ def _cap(v):
 
 UTC_Z_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z\Z", re.ASCII)
 # rollout-settings.py's TUNING_KEYS (tests/run-record.test.mjs pins that the two agree): its KEYS, the four a rollout
-# note stamps, then (p53-5) the machine-wide capacity_max and a repo's two Weight estimates, which no note stamps.
+# note stamps, then (p53-5) the machine-wide capacity_max and a repo's two Weight estimates, which no note stamps, then
+# (p39-14, ADR 0070 d8) overtime_runs, which tune.py moves only between values >= 1.
 TUNING_KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds", "capacity_max",
-               "weight_mem_gb", "weight_cores")
+               "weight_mem_gb", "weight_cores", "overtime_runs")
 # v2 (p21-2): the old seven, then the two headlines' and Review churn's slots. A v1 line carries the first seven.
 SCORE_KEYS = ("throughput", "runningHours", "merges", "tokensPerMerge", "setAsideRate", "conflictRate",
               "quotaStalls", "handsOffRate", "quality", "reviewChurn")
@@ -1129,10 +1140,16 @@ def _direction(v):
 # reason); the unranked causes are `other`'s.
 
 TIME_LOST_CLASSES = ("stalls", "quota-bound", "load", "lane-bound", "rework", "plan-rejected")
+# The take-out kind's causes (p39-14, ADR 0070 d5): the Overtime spent, the same feedback again, no Overtime at all
+# (`auto_retries: 0` or `overtime_runs: 0`), and a member of its dependent closure. The three fields only the task's own
+# line carries.
+TAKE_OUT_CAUSES = ("spent", "same-feedback", "no-overtime", "dependant")
+TAKE_OUT_OWN_FIELDS = ("stage", "overtimeUsed", "overtimeBudget")
+TAKE_OUT_WHY_MAX = 200
 TIME_LOST_CAUSES = {
     "stalls": ("dead-lead", "mac-restart", "mac-sleep", "watchdog", "halt", "gate", "question", "hand-back", "cool-down",
                "hold-git-env", "hold-merge", "hold-race", "hold-trickle", "hold-away-cap", "lead-absent",
-               "never-finished", "unexplained"),
+               "never-finished", "unexplained", "take-out"),
     "quota-bound": ("usage-limit", "cool-down", "hold-quota"),
     "load": ("hold-heat", "slot-wait", "heat", "timeout"),
     "lane-bound": ("lane",),
@@ -1773,7 +1790,14 @@ KINDS = {
     "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
-                   {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
+                   {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1), "overtime": _int(1),
+                    "overtimeBudget": _int(1), "raiseField": _enum("max_review_rounds", "max_plan_rounds", "max_iterations"),
+                    "raiseTo": _int(1)}),
+    # p39-14 (ADR 0070 d5): reconcile-rollout.py `defer --take-out`, one line per member; the cross-field rule in
+    # _check_fields.
+    "take-out": (True, {"cause": _enum(*TAKE_OUT_CAUSES), "fingerprint": _str},
+                 {"stage": _enum("plan", "implement", "verify", "review", "integrate"), "overtimeUsed": _int(0),
+                  "overtimeBudget": _int(0), "with": _str, "pr": _str, "why": _short(TAKE_OUT_WHY_MAX)}),
     "verify-skipped": (True, dict(INERT_FIELDS), dict(INERT_OPTIONAL)),
     "inert-proof-failed": (True, dict(INERT_FIELDS, readers=_readers),
                            dict(INERT_OPTIONAL, error=_error, failed=_capped(MAX_GLOBS))),
@@ -2049,6 +2073,13 @@ def _check_fields(kind, fields):
     if kind == "review-verdict" and fields["original"] + fields["regression"] > fields["findings"]:
         raise Refused("review-verdict: original + regression (%d + %d) exceed findings (%d)"
                       % (fields["original"], fields["regression"], fields["findings"]))
+    if kind == "take-out":
+        own = [k for k in TAKE_OUT_OWN_FIELDS if k in fields]
+        if fields["cause"] == "dependant":
+            if "with" not in fields or own:
+                raise Refused("take-out: cause dependant carries `with` and no %s" % ", ".join(TAKE_OUT_OWN_FIELDS))
+        elif "with" in fields or len(own) != len(TAKE_OUT_OWN_FIELDS):
+            raise Refused("take-out: cause %s carries %s and no `with`" % (fields["cause"], ", ".join(TAKE_OUT_OWN_FIELDS)))
     if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
         raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
     if kind == "review-round" and "findings" in fields and ("filed" in fields or "unconfirmed" in fields):

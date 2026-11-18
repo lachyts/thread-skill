@@ -557,11 +557,12 @@ test('x16: an Integration conflict reads back by name — status, inputs (marker
     assert.equal(inputs.lastRound, 2)
     const kr = JSON.parse(execFileSync('python3', ['-c', NOTE_REASON, RECONCILE, note], { encoding: 'utf8', env: PY_ENV }))
     assert.deepEqual(kr, ['integration', 'conflict unresolved in a.js, b.js'])
-    // humanFix for this block: fresh, it is the lead's automatic retry (status's example line); with the budget off
-    // it is Lachy's, and the reason repair quotes beside humanFix is markerReason (the first line), the brief beneath.
+    // humanFix for this block: fresh, it is the lead's automatic retry (status's example line); under a malformed
+    // Overtime counter (it fails closed, ADR 0070 d4; the budget off is a take-out now, the lead's) it is Lachy's, and
+    // the reason repair quotes beside humanFix is markerReason (the first line), the brief beneath.
     assert.equal(inputs.autoRetry, true, JSON.stringify([inputs.autoRetryWhy, inputs.autoRetryError]))
     assert.equal(inputs.humanFix, null)
-    stampTask(d, 'auto_retries: 0')
+    stampTask(d, 'overtime_used: x')
     const off = leadIn(['inputs', '--note', note])
     assert.equal(off.autoRetry, false)
     assert.equal(off.humanFix && off.humanFix.act, 'hand back or defer', JSON.stringify(off.humanFix))

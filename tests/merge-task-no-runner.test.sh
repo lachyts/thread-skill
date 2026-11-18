@@ -176,7 +176,7 @@ TD="$tmp/tasks"
 j() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); v=eval(sys.argv[1]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), sort_keys=True))' "$2"; }
 notes() {  # a rollout and its task t on PR #5, awaiting Integration
   rm -rf "$TD"; mkdir -p "$TD"; export THREAD_EVENTS_DIR="$tmp/events-e2e"; rm -rf "$THREAD_EVENTS_DIR"
-  printf -- '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\nparallel_ceiling: 3\nauto_retries: 2\nmax_review_rounds: 4\n---\n\n## Notes\n\nProject root: `%s`\n\n## Queue\n\n- [[t]]\n' \
+  printf -- '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\nparallel_ceiling: 3\nauto_retries: 2\nmax_review_rounds: 4\novertime_runs: 3\n---\n\n## Notes\n\nProject root: `%s`\n\n## Queue\n\n- [[t]]\n' \
     "$tmp/repo" > "$TD/ro.md"
   printf -- '---\ntags: [task]\nstatus: review\nscope: cross-cutting\nrollout: "[[ro]]"\npr: https://github.com/o/r/pull/5\nintegrating: 2026-10-03T07:00+00:00\n---\n\n## Notes\n\nA task.\n' \
     > "$TD/t.md"

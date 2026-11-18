@@ -75,7 +75,7 @@ lead() {  # lead <slug> <reason> <now>
 }
 mkro() {
   { printf -- '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\nparallel_ceiling: 3\nauto_retries: 2\n'
-    printf 'max_review_rounds: 4\nprojects:\n  - "[[Proj]]"\n---\n\n## Notes\n\nProject root: `%s`\n\n## Queue\n\n- [[t]]\n- [[u]]\n' "$REPO"
+    printf 'max_review_rounds: 4\novertime_runs: 3\nprojects:\n  - "[[Proj]]"\n---\n\n## Notes\n\nProject root: `%s`\n\n## Queue\n\n- [[t]]\n- [[u]]\n' "$REPO"
   } > "$T/tasks/ro.md"
 }
 mkt() {

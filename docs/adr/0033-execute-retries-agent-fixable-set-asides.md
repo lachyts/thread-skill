@@ -18,6 +18,13 @@ re-entered from spends no more retries. Found in `compression-engine-rollout-202
 the Integration lane for about 18 hours, each automatic retry an `infra` one running the same 2-hour wait until it was
 killed, and the lead's finding at 20 minutes (a dead self-hosted runner) was lost to later diagnoses that read
 `signalled twice (143)` and `TLS handshake timeout`.)*
+*(Amended by ADR 0070, built for the engine by p39-14, 2026-11-18: d3, `auto_retries = 0` turns every automatic retry
+off and so gives no Overtime: the stop that spends the normal budget is a take-out at once, never his, except decision
+4's stops (an infra settings block or the same stop at Integration), which keep their H10. d4, a repeated fingerprint
+is taken out at once, before the budget is spent or after. d5, an infra block past `auto_retries` and a quota block
+past its five free retries run Overtime (after 240 and 480 minutes), up to `overtime_runs`, then are taken out. d6,
+the count's lifetime: `overtime_used` survives a hand-back, a recorded answer and a carry, and only `defer` clears it;
+a human answer gives back the normal budget, never the Overtime.)*
 
 ## Context
 

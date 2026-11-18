@@ -4,7 +4,7 @@
 # autoRetryError, autoRetryClass, autoRetryBudget, the counters, fingerprint, autoRetryRaise, autoRetryAfter), and
 # one writing verb, reconcile-rollout.py auto-retry, which re-runs the verdict before it writes: the rollout's
 # `## Notes` line, the task note (hand-back's own transition, the markers, the raise) and the Run record events.
-#   A1  a first and second plan-block retried, a third stopped by the budget   A2 an identical fingerprint stops
+#   A1  a first and second plan-block retried, a third a take-out (no Overtime)   A2 an identical fingerprint is taken out
 #   A3  a `## Needs you` question never retries   A4 every excluded kind, and each one's humanFix on the same read
 #       (reconcile-rollout-human-fix.test.sh's H1, H3, H5 after a descope, H6, H7 at Integration, H8, H10's merge-task
 #       text and declined merge, H11 and the autoRevise null case)   A5 merge-task's fixable exit-1 texts
@@ -160,8 +160,8 @@ planblock "$A" "$FA"
 I=$(inp "$A")
 ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetryError"], d["autoRetryClass"], d["autoRetriesUsed"], d["quotaRetriesUsed"]]')" \
   '[true,"",null,"agent",0,0]' "A1: inputs → autoRetry true, class agent, used 0"
-ok "$(j "$I" 'd["autoRetryBudget"]')" '{"autoRetries":{"source":"built-in","value":2},"maxReviewRounds":{"source":"built-in","value":4}}' \
-  "A1: the budget resolves to the built-ins (2, and 4 rounds)"
+ok "$(j "$I" 'd["autoRetryBudget"]')" '{"autoRetries":{"source":"built-in","value":2},"maxReviewRounds":{"source":"built-in","value":4},"overtimeRuns":{"source":"built-in","value":3}}' \
+  "A1: the budget resolves to the built-ins (2, 4 rounds, and an Overtime of 3)"
 ok "$(j "$I" 'd["fingerprint"]')" "$SHA_A" "A1: the fingerprint is the Plan-blocked run-1 marker sha"
 ok "$(grep -c "<!-- run 1 end sha=$SHA_A -->" "$D/$A.md")" 1 "A1: (the marker carries that sha)"
 ok "$(j "$I" '[d["autoRetryRaise"], d["autoRetryAfter"]]')" '[null,null]' "A1: no raise, no cool-down"
@@ -188,15 +188,18 @@ ar "$A" --auto-retries 2 --fingerprint "$SHA_B"
 ok "$rc|$out" "0|$A: auto-retry 2/2 (plan; feedback $SHA_B) plan-blocked->in_progress [written]" "A1 re-block B: retry 2/2"
 ok "$(fm "$A" auto_retries_used)|$(fm "$A" auto_retry_sha)" "auto_retries_used: 2|auto_retry_sha: $SHA_B" "A1: used 2, sha B"
 ok "$(notes_lines "$A")" 2 "A1: two Notes lines"
-# the third block: C → stopped by the budget, and the verb writes nothing
+# the third block: C → the budget spent and (overtime_runs: 0) no Overtime: a take-out, so the verb writes nothing
+# (reconcile-rollout-overtime.test.sh runs the Overtime and the take-out)
 ms "$A"
 planblock "$A" "$FC" 2026-10-03T09:20:00Z
+setfm "$A" overtime_runs 0
 I=$(inp "$A")
-ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetriesUsed"]]')" '[false,"budget: 2/2 used",2]' "A1 re-block C: autoRetry false, budget: 2/2 used"
+ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetriesUsed"], d["takeOut"]["cause"]]')" \
+  '[false,"budget: 2/2 used; overtime 0/0 used: the lead takes it out",2,"spent"]' "A1 re-block C: autoRetry false, the budget spent: a take-out"
 before=$(snap); M=$(cnt)
 ar "$A" --auto-retries 2 --fingerprint "$SHA_C"
 ok "$rc" 1 "A1 third: the verb exits 1"
-has "$out" "ERROR: auto-retry: $A: not auto-retryable: budget: 2/2 used; nothing written" "A1 third: one ERROR line"
+has "$out" "ERROR: auto-retry: $A: not auto-retryable: budget: 2/2 used; overtime 0/0 used: the lead takes it out; nothing written" "A1 third: one ERROR line"
 ok "$(snap)" "$before" "A1 third: both notes byte-identical"
 ok "$(since "$M")" "" "A1 third: nothing recorded"
 setfm "$B" status done
@@ -214,7 +217,7 @@ planblock "$A" "$FA" 2026-10-03T09:10:00Z
 ok "$(grep -c '^### Run ' "$D/$A.md")" 1 "A2: reconcile wrote no new run for the identical feedback"
 I=$(inp "$A")
 ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["fingerprint"], d["autoRetriesUsed"]]')" \
-  "[false,\"same feedback as the block last re-entered\",\"$SHA_A\",1]" "A2: autoRetry false at once, with budget left"
+  "[false,\"same feedback as the block last re-entered: the lead takes it out\",\"$SHA_A\",1]" "A2: autoRetry false at once, with budget left (a take-out, ADR 0070)"
 before=$(snap)
 ar "$A"
 ok "$rc|$(snap)" "1|$before" "A2: the verb exits 1 and writes nothing"
@@ -426,9 +429,9 @@ scen a5c-int-spent
 mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration "merge-task exit 1, GitHub-side: $GH_NEVER"
 setfm "$A" auto_retries_used 2
-I=$(INOW=2026-10-03T12:00:00Z inp "$A")
-ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"], d["humanFix"]["act"]]')" '[false,"budget: 2/2 used","hand back or defer"]' \
-  "A5c-int: the budget still bounds it (H10 once spent)"
+I=$(INOW=2026-10-03T11:59:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["autoRetryAfter"], d["humanFix"]]')" '[false,"2026-10-03T12:00+00:00",null]' \
+  "A5c-int: the budget still bounds it: past it the Overtime's 240-minute cool-down (ADR 0070 d3), no humanFix"
 # A5c-cancel (ADR 0073 d4): merge-task's CANCELLED required check (a CI timeout, after its one re-run) is GitHub's stop
 # too: set aside at Integration with the GitHub-side opening, it retries as infra after the cool-down, never a human's.
 GH_CANCEL="ERROR: a REQUIRED check was CANCELLED on PR #5: a CI timeout or another stop on GitHub's side, no test failed; cancelled again after 1 re-run of its failed jobs: ci (run 7). Nothing was merged (ADR 0073 d4: GitHub-side, the automatic retry takes it)."
@@ -505,7 +508,7 @@ mkro; mkt "$A" open; mkt "$B" open
 planblock "$A" "$FA"
 mkdir -p "$HOME/.config/thread"
 printf '[defaults]\nauto_retries = 3\nmax_review_rounds = 5\n' > "$HOME/.config/thread/rollouts.toml"
-ok "$(j "$(inp "$A")" 'd["autoRetryBudget"]')" '{"autoRetries":{"source":"file:defaults","value":3},"maxReviewRounds":{"source":"file:defaults","value":5}}' \
+ok "$(j "$(inp "$A")" 'd["autoRetryBudget"]')" '{"autoRetries":{"source":"file:defaults","value":3},"maxReviewRounds":{"source":"file:defaults","value":5},"overtimeRuns":{"source":"built-in","value":3}}' \
   "A6: rollouts.toml [defaults] → file:defaults"
 git init -q "$D/root" && git -C "$D/root" remote add origin https://github.com/o/r
 printf '[defaults]\nauto_retries = 3\n[repo."o/r"]\nauto_retries = 1\n' > "$HOME/.config/thread/rollouts.toml"
@@ -517,8 +520,8 @@ ok "$irc|$(j "$I" '[d["autoRetry"], d["autoRetryError"], d["autoRetryBudget"]]')
 has "$(j "$I" 'd["autoRetryWhy"]')" "auto_retries unresolved: " "A6: why: unresolved, in the resolver's words"
 before=$(snap); ar "$A"
 ok "$rc|$(snap)" "1|$before" "A6: the verb exits 1, nothing written"
-setfm "$A" auto_retries 2; setfm "$A" max_review_rounds 4
-ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryBudget"]["autoRetries"]["source"]]')" '[true,"task"]' "A6: both keys stamped → the file is never read"
+setfm "$A" auto_retries 2; setfm "$A" max_review_rounds 4; setfm "$A" overtime_runs 3
+ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryBudget"]["autoRetries"]["source"]]')" '[true,"task"]' "A6: all three keys stamped → the file is never read"
 rm -rf "$HOME/.config"
 
 scen a6-root-gone
@@ -727,8 +730,8 @@ ok "$(j "$(INOW=2026-10-03T09:15:00Z inp "$A")" '[d["autoRetry"], d["autoRetries
   "A10: then the identical transient is still retryable (infra: no fingerprint stop)"
 ANOW=2026-10-03T09:15:00Z ar "$A"; ok "$rc|$(fm "$A" auto_retries_used)" "0|auto_retries_used: 2" "A10: retry 2"
 ms "$A" 2026-10-03T09:16:00Z; planblock "$A" "$TRANSIENT" 2026-10-03T09:30:00Z
-ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetryAfter"]]')" '[false,"budget: 2/2 used",null]' \
-  "A10: the third stops on the budget (no cool-down to wait out)"
+ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetryAfter"], d["humanFix"]]')" '[false,"2026-10-03T13:15+00:00",null]' \
+  "A10: the third, past the budget, waits the Overtime's 240-minute cool-down (ADR 0070 d3)"
 setfm "$A" auto_retries 3
 ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10-03T13:15+00:00" "A10: a third retry (auto_retries: 3) cools 240 minutes"
 setfm "$A" auto_retries 5; setfm "$A" auto_retries_used 4
@@ -744,7 +747,8 @@ ok "$(j "$(INOW=2026-10-03T09:14:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10
 ok "$(j "$(INOW=2026-10-03T09:15:00Z inp "$A")" 'd["autoRetry"]')" true "A10 dead: then it is still retryable"
 ANOW=2026-10-03T09:15:00Z ar "$A"; ok "$rc" 0 "A10 dead: retry 2"
 setfm "$A" status in_progress; ms "$A" 2026-10-03T09:16:00Z; lead "$A" own "workflow call failed: no result row" 2026-10-03T09:30:00Z
-ok "$(j "$(INOW=2026-10-03T12:00:00Z inp "$A")" 'd["autoRetryWhy"]')" "budget: 2/2 used" "A10 dead: the third stops on the budget"
+ok "$(j "$(INOW=2026-10-03T12:00:00Z inp "$A")" 'd["autoRetryWhy"]')" "infra cool-down: retries at 2026-10-03T13:15+00:00" \
+  "A10 dead: the third, past the budget, waits the Overtime's cool-down"
 scen a10-legacy
 mkro; mkt "$A" open; mkt "$B" open
 planblock "$A" "$TRANSIENT"
@@ -781,9 +785,9 @@ lead "$A" own "$QT" 2026-10-03T10:40:00Z
 I=$(INOW=2026-10-03T11:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetry"], d["autoRetryAfter"]]')" '[false,"2026-10-03T11:30+00:00"]' "A11: an identical re-block → after = auto_retry_at + 60"
 setfm "$A" quota_retries_used 5
-ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["autoRetryWhy"]]')" '[false,"quota: 5/5 free retries outlasted: a human"]' "A11: after 5 → outlasted"
+ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["overtime"]["used"]]')" '[true,0]' "A11: after 5, its cool-down passed → an Overtime run (ADR 0070 d3)"
 setfm "$A" quota_retries_used 1; setfm "$A" auto_retries 0
-ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["autoRetryWhy"]]')" '[false,"auto_retries is 0: automatic retries are off"]' "A11: auto_retries: 0 → no quota retry"
+ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["takeOut"]["cause"]]')" '[false,"no-overtime"]' "A11: auto_retries: 0 → no quota retry: a take-out"
 setfm "$A" auto_retries 2; setfm "$A" quota_retries_used x
 ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["quotaRetriesUsed"]]')" '[false,null]' "A11: a malformed counter fails closed"
 
@@ -798,8 +802,8 @@ ok "$(fm "$A" auto_retries_used)|$(fm "$A" quota_retries_used)|$(fm "$A" auto_re
   "A12: hand-back clears both counters and re-stamps the sha with the block it re-enters"
 ok "$(fm "$A" auto_retry_at)" "auto_retry_at: 2026-10-03T09:00+00:00" "A12: hand-back keeps auto_retry_at"
 ms "$A"; planblock "$A" "$FB" 2026-10-03T09:20:00Z
-ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetriesUsed"]]')" '[false,"same feedback as the block last re-entered",0]' \
-  "A12: after a human hand-back an identical re-block stops at once"
+ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetriesUsed"]]')" '[false,"same feedback as the block last re-entered: the lead takes it out",0]' \
+  "A12: after a human hand-back an identical re-block stops at once (a take-out)"
 setfm "$A" status in_progress; planblock "$A" "$FC" 2026-10-03T09:30:00Z
 ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetriesUsed"]]')" '[true,0]' "A12: new feedback is retryable on a fresh budget"
 ar "$A"; ok "$rc|$(fm "$A" auto_retries_used)" "0|auto_retries_used: 1" "A12: and retries with used 1"
@@ -826,7 +830,7 @@ setfm "$A" quota_retries_used 1
 df=$(python3 "$SCRIPT" defer --tasks "$A" --rollout "$D/$RO.md" --tasks-dir "$D" 2>&1)
 ok "$(fm "$A" auto_retries_used)|$(fm "$A" quota_retries_used)|$(fm "$A" auto_retry_sha)|$(fm "$A" auto_retry_at)" "<none>|<none>|<none>|<none>" \
   "A12: defer clears all four markers"
-has "$df" "auto_retries_used/quota_retries_used/auto_retry_sha/auto_retry_at cleared" "A12: defer's line lists them"
+has "$df" "auto_retries_used/quota_retries_used/auto_retry_sha/auto_retry_at/overtime_used/auto_retry_raised cleared" "A12: defer's line lists them"
 
 scen a12-leave
 mkro; mkt "$A" in_progress "owner: execute-test"; mkt "$B" open
@@ -1162,16 +1166,17 @@ for k in nr ur; do
     '[false,null,"unfreed",true,true]' "A18 spent ($k): the identical stop after that retry → the settings point, due"
   has "$(j "$I" 'd["autoRetryWhy"]')" "; same stop twice running at Integration: " "A18 spent ($k): … its why the same stop, never the budget"
 done
-# The free retry is given once: another settings stop after it, its counter past the budget, is cause 24's H10.
+# The free retry is given once: another settings stop after it, its counter past the budget, is cause 24's Overtime run
+# (ADR 0070 d3: after the 240-minute cool-down), never a second free retry.
 a17int spent-once; setfm "$A" auto_retries_used 2
 lead "$A" integration "no-runner: required$HELD"
 ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "A18 spent: (the free retry)"
 mig "$A" 2026-10-03T08:20:00Z
 lead "$A" integration 'no-runner: required job "arm64" queued 47 minutes with no runner (run 7, job 9)' 2026-10-03T08:30:00Z
 I=$(INOW=2026-10-03T09:40:00Z inp "$A")
-ok "$(refused "$I")|$(j "$I" 'd["settingsBlock"]["due"]')" "$REFUSED|false" \
-  "A18 spent: a second first sighting past the budget → 24's H10, never a second free retry"
-has "$(j "$I" 'd["autoRetryWhy"]')" "budget: 3/2 used" "A18 spent: … its why the budget"
+ok "$(refused "$I")|$(j "$I" 'd["settingsBlock"]["due"]')" '[false,"2026-10-03T12:30+00:00",null]|false' \
+  "A18 spent: a second first sighting past the budget → 24's Overtime cool-down, never a second free retry"
+has "$(j "$I" 'd["autoRetryWhy"]')" "infra cool-down: retries at 2026-10-03T12:30+00:00" "A18 spent: … its why the Overtime's cool-down"
 
 # ── A15: the pins ───────────────────────────────────────────────────────────────────────────────────────────
 pin() {
@@ -1229,7 +1234,7 @@ ok "$(grep -c -F -- "a short cool-down, 15, then 60, then 240 minutes (the last 
   "A15: execute SKILL.md states INFRA_COOLDOWN_MIN"
 ok "$(grep -c -F -- "after a cool-down of 30, 60, 120, 240, then 480 minutes" "$SKILL" | awk '{print ($1 > 0)}')" 1 \
   "A15: execute SKILL.md states QUOTA_COOLDOWN_MIN"
-ok "$(j "$P" 'd["keys"]')" '["auto_retries_used","quota_retries_used","auto_retry_sha","auto_retry_at"]' "A15: the four markers"
+ok "$(j "$P" 'd["keys"]')" '["auto_retries_used","quota_retries_used","auto_retry_sha","auto_retry_at","overtime_used","auto_retry_raised"]' "A15: the six markers"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout auto-retry: ALL PASS"; else echo "reconcile-rollout auto-retry: FAILED"; fi

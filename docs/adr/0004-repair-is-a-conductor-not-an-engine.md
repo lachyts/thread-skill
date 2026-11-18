@@ -3,6 +3,10 @@
 *(Amended by ADR 0033, 2026-10-09: repair is no longer the only place an agent-fixable block is retried. The live
 lead re-enters one itself through `reconcile-rollout.py auto-retry`, up to `auto_retries` times; repair keeps the
 blocks a spent budget, a repeated fingerprint or a question for a person hands it.)*
+*(Amended by ADR 0070, built for the engine by p39-14, 2026-11-18: repair no longer keeps a spent budget or a repeated
+fingerprint. A spent budget runs Overtime and then the task is taken out (`defer --take-out`), and a repeated
+fingerprint is taken out at once, each the lead's and never asked; repair runs the take-out itself only with no live
+lead, and asks only once a take-out has failed three times.)*
 
 `/thread:repair` orchestrates the existing `/thread:execute` engine to unstick a rollout — it diagnoses,
 captures human decisions into task notes, reconciles drift, and then hands off to execute's resume. It

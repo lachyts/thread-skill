@@ -449,7 +449,7 @@ gaps reach Lachy through the decision task (step 15).
 
 ### 11. The reading
 
-For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`,
+For each rollout, read its `friction` items, of nine kinds (`ask`, `set-aside`, `retry`, `takeout`, `descope`, `repair`,
 `escape`, `churn`, and a serial chain's `restart`), and trace each to the skill rule or ADR that produced it:
 
 - An `ask` (a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE decision, a git-env hold) is a
@@ -481,7 +481,12 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   `verifier:` never runs; otherwise to drift between CI and the local run. A repeat on one repo is a rule-altitude
   Watch (giflab ADR 0012's revisit trigger).
 - A `retry` is execute § 4.5's automatic retry (ADR 0033): trace why the first attempt failed a block an agent
-  could fix.
+  could fix. One carrying `overtime` is an Overtime run past the spent budget (ADR 0070): the budget was too small for
+  the task, or the task too big for one run.
+- A `takeout` is execute § 4.5's take-out (ADR 0070 d5): a task that could not land in its Overtime, or came back on
+  the same feedback, left the rollout with its dependants (`with` names the task a dependant left with). Listed, never
+  alerted (decision 7): trace why the task could not land, which is the next orient's rewrite evidence (decision 6).
+  Its wait is priced as the stalls `take-out` cause.
 - A `descope` is repair § 2–§ 5's descope and its hand-back (ADR 0035): trace why the task's scope could not land
   whole.
 - A `repair` item is traced by its shape: `race-decided` is read with its `raceDecided` ask, never twice;

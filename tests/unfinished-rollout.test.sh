@@ -3433,7 +3433,9 @@ has "$(cat "$S.ag")" "g3: no gates under '## Gated inputs (awaiting sign-off)' �
 # NY5: a parallel set-aside only a person moves on (its Human fix), never one the lead re-enters itself; handed back, gone.
 scen ny5
 mkro ro-a.md "$R" "$DEMO"
-blocked b1.md ro-a 'the migration needs a decision on the schema' 'auto_retries: 0'
+# b1's malformed Overtime counter fails closed (ADR 0070 d4): his, whatever its budget (a spent budget alone is the lead's
+# Overtime or take-out, p39-14)
+blocked b1.md ro-a 'the migration needs a decision on the schema' 'overtime_used: x'
 blocked b2.md ro-a 'transient infrastructure failure — the agent died'
 printf '\n## Needs you\n\nWhich schema should the migration keep?\n' >> "$T/b2.md"
 ny
@@ -3442,7 +3444,7 @@ hands-on|set-aside|ro-a|b2|transient infrastructure failure — the agent died|a
   "NY5: each set-aside only he moves on, its reason and its Human fix's act"
 ok "$(nyj 'd["items"][1]["detail"]')" "Which schema should the migration keep?" "NY5: … a ## Needs you question is its detail"
 fmset b1.md status open
-fmset b1.md auto_retries -
+fmset b1.md overtime_used -
 fmset b2.md status open
 ny
 ok "$out" '{"count": 0, "items": [], "warns": []}' "NY5: handed back, they drop out"

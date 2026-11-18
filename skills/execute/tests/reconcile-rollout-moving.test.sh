@@ -232,7 +232,7 @@ entry 2026-10-26T11:00:00Z; halted "rollout settings refused" 2026-10-26T11:01:0
 ok "$(vcr)" '["waiting","you","rollout settings refused"]' "M7b: a kept whole halt with work → waiting you"
 scen m7c
 QUEUE="b"; mkro; setaside_infra b 2026-10-26T08:00:00Z
-setfm b auto_retries 0
+setfm b overtime_used x   # a malformed Overtime counter fails closed: his (auto_retries 0 is a take-out, the lead's: ADR 0070)
 entry 2026-10-26T11:00:00Z; halted "nothing can start: 1 set aside" 2026-10-26T11:01:00Z
 ok "$(vcr)" '["waiting","you","nothing can start: 1 set aside"]' "M7c: nothing startable → you, the halt's reason"
 scen m7d
@@ -800,10 +800,10 @@ out=$(python3 "$SCRIPT" auto-retry --tasks q --rollout "$D/$RO.md" --tasks-dir "
 ok "$rc" 0 "N3: auto-retry re-enters it"
 ok "$(j "$(nx)" 'd["restart"] + d["running"]')" '["q"]' "N3: next takes q back"
 scen n3-h10
-QUEUE="q r"; mkro; mkt q open "max_plan_rounds: 0" "auto_retries: 0"; mkt r open
+QUEUE="q r"; mkro; mkt q open "max_plan_rounds: 0" "overtime_used: x"; mkt r open
 lead q own "invalid round budget: max_plan_rounds on [[q]] must be an integer >= 1, got '0'" 2026-10-26T11:00:00Z
 setfm q max_plan_rounds 3
-ok "$(j "$(inp q)" '[d["humanFix"]["act"], d["humanFix"]["raise"]]')" '["hand back or defer",null]' "N3: fixed with auto_retries 0 → H10, raise null"
+ok "$(j "$(inp q)" '[d["humanFix"]["act"], d["humanFix"]["raise"]]')" '["hand back or defer",null]' "N3: fixed under a fail-closed counter → H10, raise null"
 
 # ── N3b: an invalid max_review_rounds is never passed to inputs ─────────────────────────────────────────────────
 scen n3b

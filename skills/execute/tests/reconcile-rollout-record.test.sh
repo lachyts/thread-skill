@@ -778,7 +778,8 @@ ok "$(capof sc9 "$TMP/sc-oldcap")" '["start",{"away":false,"file":"missing","n":
 
 echo "== 25. human acts (p21-2): record-answer, approve-gates and hand-back record their own act (rollout ha)"
 # Each verb that carries a decision of Lachy's records it (the Hands-off rate's events); hand-back classifies its own
-# via. ha stamps every cap and auto_retries 0 (the Human-fix path), and a standing approval of US$50; its Project root
+# via. ha stamps every cap and auto_retries 0 (no automatic retry: a take-out, or with a fail-closed counter the Human-fix
+# path, ADR 0070), and a standing approval of US$50; its Project root
 # is a real dir, so the verbs that read it (inputs, the resolver) see one; a git checkout, so mark-started arms
 # the task window against it (p26-3).
 mkro ha "parallel_ceiling: 4" "max_review_rounds: 4" "max_iterations: 3" "max_plan_rounds: 3" "auto_retries: 0" "spend_approval_usd: 50"
@@ -804,7 +805,7 @@ M=$(cnt ha)
 ok "$(ra ra1 --kind needs-you --ask "$HQ" --answer alembic --fingerprint "$FP1" --form hand-back)" \
   "ra1: answer recorded (hand-back) 2026-10-05T10:30+00:00 [no-change]" "an identical re-run is [no-change]"
 ok "$(since ha "$M")" "" "and records nothing"
-mkt ra2 ha in_progress "owner: execute-test"
+mkt ra2 ha in_progress "owner: execute-test" "overtime_used: x"   # a fail-closed counter: H9, so --raise is the cause's
 row "$(trow ra2 '{"status":"plan-blocked","blockerDiagnosis":"plan not approved after 3 rounds. Accumulated reviewer feedback:\nRound 1: x"}')" >/dev/null
 FP2=$(fp ra2)
 M=$(cnt ha)

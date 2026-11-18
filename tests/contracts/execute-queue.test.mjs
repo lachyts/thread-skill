@@ -158,7 +158,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     fails.push('slots')
   }
 
-  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back;
+  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked are never launched
+  // here: a spent budget is the Automatic retry's Overtime, then the take-out (ADR 0070), and only a non-null humanFix
+  // waits for hand-back;
   // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing; an
   // answered entry (ADR 0035's answerRecorded) is skipped: the answer's route moves it.
   if (!s2sub || !s2sub.text.includes('Launch one only when it reports `autoRevise: true`') ||
@@ -166,7 +168,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !s2sub.text.includes('--max-review-rounds') ||
     !s2sub.text.includes("resume: {stage: 'revise', prUrl: <inputs.prUrl>,") ||
     !s2sub.text.includes('A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing') ||
-    !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: it waits for `hand-back`/.test(s2sub.text)) {
+    !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: its spent budget is the \*Automatic retry\*'s below[^.]*then the take-out \(ADR 0070\), never asked; only one whose `inputs` reads a non-null `humanFix`[^;.]*waits for `hand-back`/.test(s2sub.text)) {
     fails.push('auto-revise')
   }
 
@@ -620,15 +622,15 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
     !arRow.includes('not passed to the engine') || !arRow.includes('`0` disables every automatic retry') ||
     !arRow.includes('The lead never resolves it') ||
-    !aside.includes("- first, automatically: a run, revise-stopped, review-blocked, plan-blocked or Integration set-aside is re-entered by step 1.2's *Automatic retry*, up to `auto_retries` times (ADR 0033), before the routes below") ||
+    !aside.includes("- first, automatically: a run, revise-stopped, review-blocked, plan-blocked or Integration set-aside is re-entered by step 1.2's *Automatic retry*, up to `auto_retries` times (ADR 0033), then up to `overtime_runs` Overtime runs") ||
     !s6all.includes('"[[task-q]] → auto-retry 1/2 (plan; feedback <sha>); restarting"') || !s6all.includes('Auto-retried: [[task-q]]') ||
     !s6all.includes('The `Auto-retried:` line lists every automatic retry this rollout has recorded (its `## Notes` `auto-retry:` lines)') ||
     !arLog.includes('the automatic retries copied from its `auto-retry:` lines') ||
     !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and step 1.5's *wait clauses* find no wait (no cool-down, whatever else is set aside, an UNVERIFIED task included") ||
     !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
-    !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
+    !never.includes('A `needsHuman` question, a note the verdict cannot read or a take-out that failed three times routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
-    !donts.includes('`auto_retries_used`, `quota_retries_used`, `auto_retry_sha` or `auto_retry_at` by hand: `reconcile-rollout.py auto-retry` writes them') ||
+    !donts.includes('`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`, `auto_retry_at`, `overtime_used` or `auto_retry_raised` by hand: `reconcile-rollout.py auto-retry` writes them') ||
     !ar.includes("for every block whose way back is Lachy's (its `humanFix` names the one act that moves it, ADR 0035, § 6.5) and for a recorded answer (`answerRecorded`") ||
     !ar.includes("its `autoRetryWhy` is the log line only, never Lachy's reason") ||
     !S(skill, S65).includes("A null `humanFix` is the lead's own re-entry (step 1.2's seeded revise, its *Automatic retry* now or once a cool-down ends,") ||
@@ -1527,7 +1529,7 @@ test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () 
   only(sk(" and step 1.5's *wait clauses* find no wait (no cool-down, whatever else is set aside, an UNVERIFIED task included,", ' ('), 'auto-retry', 'stuck early')
 })
 test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
-  only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
+  only(sk(" A `needsHuman` question, a note the verdict cannot read or a take-out that failed three times routes the task to repair.", ''),
     'auto-retry', 'no § 8 sentence')
 })
 test('control: a needs-you block that lists a task the lead re-enters fails auto-retry', () => {
