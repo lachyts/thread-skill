@@ -139,12 +139,16 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
 # leg.test.sh's 1581 s and 1891 s are now split across its four files (p54-9), 1891 by the parts' measured shares.
-# Three rows are master's macOS shard 3/4, 2026-11-17 to 18. tests/fast-tier.test.sh's 259 s is job 134542390531 (run
-# 44226971655), the run before its 300 s floor cut it twice (jobs 134564415416 and 134575108240), at its checks R8 and
-# R10, about 55% of them, so those runs went past 300 s, plausibly 440 to 650 s in full; its 1002 s bound is 1.5x the
-# 650 s. reconcile-rollout-queue.test.sh's 331 s is job 134564415416 (run 44233636618), and its old 355 s bound cut it
-# in jobs 134224807065 and 134402170137, so those runs went past 355 s; its 528 s bound is 1.6x the 331 s and 1.49x
-# the 355 s. tests/serial-chains.test.sh's 275 s is job 134402170137 (run 44185887550), where it passed.
+# Three rows are master's macOS shard 3/4, 2026-11-17 to 18, and two of them are estimates, since that shard cut those
+# runs at their bounds: a cut run's full time is its cut seconds over the share of a lone local run's time its last
+# check had reached (tests/shard-weights.tsv's header holds the reading).
+# skills/execute/tests/reconcile-rollout-queue.test.sh's 535 s is job 134402170137 (run 44185887550), cut at 355 s
+# after check 242 of 342, about two thirds of the local run's time (it passed at 331 s in job 134564415416, and job
+# 134224807065 cut it at check 338, about 362 s); its 804 s bound (hand-set weight 67) leaves 1.5x over the 535 s.
+# tests/fast-tier.test.sh's 680 s is job 134564415416 (run 44233636618), cut at 300 s after its R8, 44% of the local
+# run's time (job 134575108240 cut it after R10, 49%, about 610 s; it passed at 259 s in job 134542390531); its 1032 s
+# bound (hand-set weight 86) leaves 1.5x over the 680 s. tests/serial-chains.test.sh's 275 s is job 134402170137, where
+# it passed.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
 ci_max="tests/leg.test.sh 550
 tests/leg-land.test.sh 565
@@ -154,8 +158,8 @@ tests/lead-integrate.test.sh 735
 tests/unfinished-rollout.test.sh 613
 tests/primary-refresh.test.sh 543
 tests/land.test.sh 297
-tests/fast-tier.test.sh 259
-skills/execute/tests/reconcile-rollout-queue.test.sh 331
+tests/fast-tier.test.sh 680
+skills/execute/tests/reconcile-rollout-queue.test.sh 535
 tests/serial-chains.test.sh 275"
 bounds=$(printf '%s\n' "$ci_max" | awk '{print $1}' | bash -c '. tests/lib/test-jobs.sh; suite_bounds tests/shard-weights.tsv')
 bad=""
@@ -163,7 +167,7 @@ while read -r t m; do
   b=$(printf '%s\n' "$bounds" | awk -F'\t' -v t="$t" '$1 == t { print $2 }')
   [ "$((${b:-0} * 2))" -ge "$((m * 3))" ] || bad="$bad $t=${b:-none}<1.5x$m"
 done <<< "$ci_max"
-ok "${bad# }" "" "run.sh: each suite's bound from the real weights is at least 1.5x its slowest passing macOS CI time"
+ok "${bad# }" "" "run.sh: each suite's bound from the real weights is at least 1.5x its slowest macOS CI time (a pass, or a cut run's estimate)"
 nt=$(grep -o 'test-timeout=[0-9]*' tests/run.sh | head -1); nt=${nt#test-timeout=}
 ok "$([ "${nt:-0}" -ge $((512 * 1500)) ] && echo ok || echo "${nt:-none} ms")" ok \
   "run.sh: node's --test-timeout is at least 1.5x the slowest node file's macOS CI time (512 s)"

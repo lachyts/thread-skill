@@ -2,8 +2,10 @@
 # rules): each entry's load in the full suite's shard split (ADR 0073 d3), so the shards balance on time, not file size,
 # and node's order (shard.py --order: tests/run.sh starts node's files longest first, p54-3).
 # tests/run.sh reads it too, for each shell suite's liveness bound (tests/lib/test-jobs.sh's suite_bounds): 12x the weight
-# rounded up, at least 300 s, 1200 s for a suite with none (macOS CI runs a suite at up to 7.9x these local seconds). A
-# suite whose seconds grow towards its bound needs this file regenerated, or it is killed as hung.
+# rounded up, at least 300 s, 1200 s for a suite with none. macOS CI runs a suite at up to 7.9x these local seconds in
+# the runs it finished, and at about 12x and 8x in the runs that cut two suites at their bounds (master's shard 3/4,
+# 2026-11-17 to 18), so those two rows are hand-set, below. A suite whose seconds grow towards its bound needs this file
+# regenerated, or it is killed as hung.
 # Source: the per-suite `<label>: ok (<N>s)` lines of two local `make test` runs (2026-11-09, p43-6's audit,
 # docs/audits/2026-11-09-test-suite.md), at the default cap of 4 on a 12-core Mac, load 3 to 5; each value is the
 # median of the two. @merge-task-self-tests is its two self-tests summed. A suite that ended within its first
@@ -13,16 +15,26 @@
 # local runs of every node file (2026-11-16, `bash tests/run.sh --only <them all>`, cap 4, the Mac under other rollouts'
 # load), the median of the two; a file under 0.1 s is written as 0.1.
 # Regenerate: run `make test` twice, take each suite's median from those lines and each node file's from that block,
-# sum the two self-tests, and rewrite this file whole. A suite or node file added since falls back to its size times
-# the median seconds per byte of its kind (shard.py).
+# sum the two self-tests, and rewrite this file whole, keeping the two hand-set rows below at least as high. A suite or
+# node file added since falls back to its size times the median seconds per byte of its kind (shard.py).
 # The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
 # leg.test.sh's 527 s split by the parts' measured shares of two local runs, until the next regenerate.
-# Three rows are their own, until the next regenerate: tests/fast-tier.test.sh, tests/serial-chains.test.sh and
-# skills/execute/tests/reconcile-rollout-queue.test.sh, each the median of its `<label>: ok (<N>s)` lines in two local
-# full-suite runs at the default cap of 4 (2026-11-18, `make test-fast` falling back to the full suite, the same lines
-# as the Source above): fast-tier 84 and 83 (24 on 2026-11-09, which gave it the 300 s floor: master's macOS shard 3/4
-# passed it at 259 s, then cut it twice, run 44233636618), reconcile-rollout-queue 44 and 44 (35.5, whose 355 s bound
-# that shard cut twice, runs 44135006868 and 44185887550), serial-chains 35 and 35 (33).
+# Three rows are their own, until the next regenerate. tests/serial-chains.test.sh is 35, the median of its `<label>: ok
+# (<N>s)` lines in two local full-suite runs at the default cap of 4 (2026-11-18, `make test-fast` falling back to the
+# full suite, the same lines as the Source above): 35 and 35 (33 on 2026-11-09).
+# The other two are hand-set, not measured: each is sized from the macOS CI runs that cut it at its bound, because its
+# measured seconds give a bound under 1.5x what those runs would have taken in full. A cut run's full time is its cut
+# seconds over the share of a lone local run's time its last check had reached (`bash <suite>` with each line timed).
+# - skills/execute/tests/reconcile-rollout-queue.test.sh is 67. Its `make test` lines read 44 and 44 (35.5 on
+#   2026-11-09). Job 134402170137 (run 44185887550) cut it at its 355 s bound after check 242 of 342, 32.8 s into a
+#   49.2 s local run (two thirds), so that run would have taken about 535 s, 12x the 44. 67 gives an 804 s bound, 1.5x
+#   that; 44 gives 528 s, under the 535 s, and CI would cut it again.
+# - tests/fast-tier.test.sh is 86. Its `make test` lines read 84 and 83 (24 on 2026-11-09, which gave it the 300 s
+#   floor). Jobs 134564415416 and 134575108240 (run 44233636618) cut it at 300 s after its R8 and R10, 36.6 and 40.7 s
+#   into an 82.9 s local run, so those runs would have taken about 680 and 610 s, 8x the 84. 86 gives a 1032 s bound,
+#   1.5x the 680 s; 83.5 gives 1002 s, 1.47x.
+# A regenerate keeps both at least that high until macOS CI passes them well under their bounds: written back at their
+# measured seconds, they fail tests/test-jobs.test.sh's ci_max guard, which holds the same 535 and 680 s.
 9	@merge-task-self-tests
 0.5	skills/execute/tests/integration-inputs.test.sh
 3.5	skills/execute/tests/note-save.test.sh
@@ -41,7 +53,7 @@
 11	skills/execute/tests/reconcile-rollout-lead.test.sh
 41.5	skills/execute/tests/reconcile-rollout-moving.test.sh
 24.5	skills/execute/tests/reconcile-rollout-origin-lane.test.sh
-44	skills/execute/tests/reconcile-rollout-queue.test.sh
+67	skills/execute/tests/reconcile-rollout-queue.test.sh
 14	skills/execute/tests/reconcile-rollout-ready-at.test.sh
 55.5	skills/execute/tests/reconcile-rollout-record.test.sh
 21	skills/execute/tests/reconcile-rollout-runs.test.sh
@@ -57,7 +69,7 @@
 27	tests/engine-catch-up.test.sh
 37	tests/engine-snapshot.test.sh
 4	tests/execution-fit-remote.test.sh
-83.5	tests/fast-tier.test.sh
+86	tests/fast-tier.test.sh
 153.5	tests/git-env-canary.test.sh
 2.5	tests/git-env-scrub.test.sh
 2	tests/handoff-home.test.sh

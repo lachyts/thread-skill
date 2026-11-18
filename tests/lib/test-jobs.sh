@@ -46,15 +46,19 @@
 #                        TERM every group at once, wait up to <grace> seconds for all of them to empty, then KILL
 #                        whatever is left. No group is a no-op. run.sh's stop_suites ends every live suite this way.
 # 12x the measured seconds, from macOS CI: the weights are local seconds, and the 3-vCPU macos-latest runner at the cap
-# of 4 runs a suite at up to 7.9x them: tests/serial-chains.test.sh, 275 s against 35, and
-# skills/execute/tests/reconcile-rollout-queue.test.sh, 331 s against 44, on master's shard 3/4 (2026-11-17 to 18),
-# where the latter's 355 s bound (10x a stale 35.5) cut it twice. The 19 macOS jobs of 2026-11-10 to 11 put the worst
-# at 5.5x (tests/unfinished-rollout.test.sh, 613 s against 112, in a PR's full run; leg 1891 s against 527), and 3x,
-# which read that runner as about 1.6x, killed those two healthy suites on PR #373's CI. 12x leaves 1.5x over the
-# worst (serial-chains, 420 s against 275), as tests/test-jobs.test.sh holds the real bounds to 1.5x those CI times,
-# and keeps every bound but lead-integrate's under macOS's 35-minute shard limit (.github/workflows/full-suite.yml),
-# past which the job limit, not the bound, would cut a hang. A small suite's hang still shows red in 5 minutes (the
-# floor); 1200 s with no weight clears every suite's macOS time but leg's (lead-integrate next, 735 s).
+# of 4 runs a suite at up to 7.9x them in the runs it finishes: tests/serial-chains.test.sh, 275 s against 35, and
+# skills/execute/tests/reconcile-rollout-queue.test.sh, 331 s against 44, on master's shard 3/4 (2026-11-17 to 18).
+# The runs that shard cut at a bound went further. Job 134402170137 cut reconcile-rollout-queue at its 355 s bound (10x
+# a stale 35.5) two thirds of the way through, so about 535 s in full, 12x. Jobs 134564415416 and 134575108240 cut
+# tests/fast-tier.test.sh at its 300 s floor, so about 680 s in full, 8x. tests/shard-weights.tsv hand-sets those two
+# rows (67 and 86) so their bounds keep 1.5x over those estimates; its header says how they were read. The 19 macOS jobs
+# of 2026-11-10 to 11 put the worst at 5.5x (tests/unfinished-rollout.test.sh, 613 s against 112, in a PR's full run;
+# leg 1891 s against 527), and 3x, which read that runner as about 1.6x, killed those two healthy suites on PR #373's
+# CI. 12x leaves 1.5x over the worst finished run (serial-chains, 420 s against 275), and tests/test-jobs.test.sh holds
+# the real bounds to 1.5x those CI times and the two estimates. 12x also keeps every bound but lead-integrate's under
+# macOS's 35-minute shard limit (.github/workflows/full-suite.yml), past which the job limit, not the bound, would cut
+# a hang. A small suite's hang still shows red in 5 minutes (the floor); 1200 s with no weight clears every suite's
+# macOS time but leg's (lead-integrate next, 735 s).
 # SUITE_POLL_JUMP is a few polls' worth: a loaded machine's
 # `sleep 1` overruns by far less, and a Mac sleep or a suspend by far more. SUITE_STOP_GRACE sits under
 # verify-slot.py's KILL_GRACE (10 s): a guard that ends a run TERMs run.sh's group, and run.sh's own TERM trap then
