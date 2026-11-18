@@ -1706,15 +1706,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   notice (ADR 0026, 0036). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
   (clearing `rollout:`/`owner:`), permitted only when nothing in the rollout
-  depends on it, or, once ADR 0070 is built, for a whole dependent closure
-  **Taken out** together. _Avoid_: drop, cancel, skip.
+  depends on it. A whole dependent closure goes the same way, its leaves
+  first, so no task being deferred still has a dependant: on Lachy's word
+  today (repair § 5), and by itself once ADR 0070 is built (**Taken out**).
+  _Avoid_: drop, cancel, skip.
 - **Overtime** — proposed (ADR 0070), not yet built: the extra runs a
   landing or a rollout task takes by itself once its normal budget is spent
   (a landing's three code rounds; a task's `auto_retries` and the round cap
   its stop spent), up to `overtime_runs` (a Tuning key, built-in 3), never
-  asked of Lachy. A run is one re-entry from a stop to the next: a re-run,
-  a fix with its review round, a review, plan or verifier round raised by
-  one, or a retry. A decision only he can make still stops it.
+  asked of Lachy; a landing's re-runs of a failure with no cause in it, and
+  its fix attempts at a blocking finding, draw on it from the first. A run
+  is one re-entry from a stop to the next: a re-run, a fix with its review
+  round, a fix attempt, a review, plan or verifier round raised by one, or
+  a retry. A decision only he can make still stops it.
   _Avoid_: overrun (the Night record's word), extra budget, approval round.
 - **Taken out** — proposed (ADR 0070), not yet built: what becomes of work
   whose **Overtime** is spent, or at once whose same feedback comes back: a
