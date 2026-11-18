@@ -1831,15 +1831,24 @@ through time, from attention to merged PRs. Terms only — no implementation.
   it and its plan judge checks the declaration; a task with no plan
   declares it in its implementer's result; the repo's `unreachable_paths`
   (rollouts.toml) marks any diff that touches a listed path whatever the
-  plan says. The engine's row carries the mark (p52-1). A task on one takes a
-  doubled master review and lands with a **Felt check** open (ADR 0081).
+  plan says. The engine's row carries the mark (p52-1), and reconcile stamps
+  it on the note (`unreachable: true`, sticky), so every later call reads it.
+  A task on one takes a doubled master review (two independent reviewers,
+  both must approve; the first on Fable when the operator's file names it)
+  and lands with a **Felt check** open (ADR 0081, built by p52-2).
   _Avoid_: untestable (some of it is testable by hand), risky code.
 - **Felt check** — Lachy's own try of landed work on an **Unreachable
   surface**, at a sitting he chooses: one row on his needs-you list, written
-  on the task's note, which his check closes. It never holds a merge. A task
-  that fixes nothing is done once live; a fix stays a **Carried fix** until
-  his Felt check, the evidence that proves it, makes it **Proven** (ADR 0078,
-  ADR 0081). _Avoid_: sign-off (that is a gate), QA.
+  on the task's note (`## Felt check`), which his check closes through
+  `reconcile-rollout.py felt-check` (p52-2). It never holds a merge, is due
+  once the work is on his machine (landed, and Live for a fix), and is never
+  pushed. A task that fixes nothing is done once live; a fix stays a
+  **Carried fix** until his Felt check, the evidence that proves it, makes it
+  **Proven** (ADR 0078, ADR 0081): an open or failed check holds the fix, and
+  only a later passed one moves it. A check that fails files a fix of the
+  landed task (`fixes:`), as an Escape is counted, marked an **Unreachable
+  surface** at filing (the same surface), so it takes a doubled review and a
+  Felt check of its own. _Avoid_: sign-off (that is a gate), QA.
 
 ## Run record and tuning
 
@@ -1858,7 +1867,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   from Lachy once the run has started: no Human fix, Recorded answer,
   sign-off, merge hold or repair run. One of a Reflection's two headlines, beside
   Quality. Questions belong before the run starts, so every mid-run ask counts
-  against it; a gate passed under the Standing approval does not.
+  against it; a gate passed under the Standing approval does not, and a
+  **Felt check** is no act (the task had already landed).
   _Avoid_: autonomy score, automation rate.
 - **Grade log** — `grades.jsonl` beside the Run record: one line per task
   each estate pass or schedule Pre-flight grades (every schedule run but an
@@ -2037,8 +2047,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in its Fable arm has no stronger pass to climb to: its climbs are recorded
   as no-ops (ADR 0079). A role with no share, the builder of a task that is
   not hard, and every role of a task begun before the draw sit in no arm
-  (`none`). Not the canary's `arm`, a verb (see **Window**). _Avoid_:
-  tier, variant, last resort, fallback.
+  (`none`). A doubled master review (an **Unreachable surface**) sits
+  outside the draw: its task leaves the master review's comparison as
+  `unreachable` (ADR 0081). Not the canary's `arm`, a verb (see **Window**).
+  _Avoid_: tier, variant, last resort, fallback.
 - **Fable share** — the live part of a Login's work drawn into Fable Arms,
   which pacing moves so its Fable allowance and its general allowance run
   down together, never above the role's **Fable ceiling**: the most of a

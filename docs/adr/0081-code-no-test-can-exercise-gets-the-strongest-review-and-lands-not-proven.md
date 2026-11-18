@@ -1,13 +1,23 @@
 # 0081 — code no test can exercise gets the strongest review, and lands with a felt check open
 
 Date: 2026-11-12
-Status: accepted, not built (grilled with Lachy 2026-11-12, from the weekly Reflection's rule proposal `5e0d1301`
-and Watch `9929d6e6`; builds as Phase 52). Changes the master review of execute § 5 for one kind of task; leans on
+Status: accepted, built (grilled with Lachy 2026-11-12, from the weekly Reflection's rule proposal `5e0d1301`
+and Watch `9929d6e6`; built as Phase 52). Changes the master review of execute § 5 for one kind of task; leans on
 ADR 0079. ADR 0078's **Proven** is unchanged.
 
 *(Decision 1 built by thread-skill-p52-1: the plan's `unreachable` field, its plan judge's own reading, the
 implementer's for a task with no plan, and the repo's `unreachable_paths` in `rollouts.toml` read into the engine row's
-`unreachable` mark. Decisions 2 and 3 build as p52-2.)*
+`unreachable` mark. Decisions 2 and 3 built by p52-2: reconcile stamps the mark on the note, `unreachable: true`, so
+every later call doubles its master review (`task.unreachable`); each doubled round runs a first reviewer, on Fable at
+`high` when the operator's file names Fable for the master review, and a second on the task's rung, and approves only
+when both do; reconcile writes one open `## Felt check` line at approval, which `reconcile-rollout.py felt-check`
+closes on his word and `unfinished-rollout.py needs-you` lists from the task note, Archive included. Its departures,
+each in the spirit of the decision: a first reviewer on Fable that dies reruns once on the task's rung, a fell-back
+call, standing in for the Login's room the engine cannot read; the first reviewer is its own role-call role
+(`first-reviewer`), so the master-review line stays the draw's; a check is due only once the work is on his machine
+(landed, and Live for a carried fix: rule (b)); and a check that is open or failed holds a fix with `clears:` items
+whatever else moved, `prove --seen --on-his-word` included, until a later passed check, with a try-again row once the
+fix it filed is due, dropped or gone, and his word through `felt-check` as the way out at any time (/thread:repair 3h).)*
 
 *(Amended 2026-11-12 by thread-skill-p46-8: findings 6, 9, 10, 12 and 13 of review round 45adf20/cdf93d are settled
 in the decisions and the Decided list, each marked "review #N".)*

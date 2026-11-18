@@ -270,10 +270,12 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   role-call       T  runId; startTime (int >= 0: the journal segment's own epoch ms, verbatim); call (task | revise |
                      integrate | resume: as call-journal's mode, the bound call, else the journal's args.mode, else
-                     task); role (planner | plan-judge | builder | investigator | master-review | integrator |
-                     integration-judge, from the dispatch label's prefix: plan and plan-revise the planner, implement
-                     and revise the builder, investigate the investigator, review the master review, integrate the
-                     integrator, integration-review the Integration judge); model, effort (the role's first `ran` entry:
+                     task); role (planner | plan-judge | builder | investigator | first-reviewer | master-review |
+                     integrator | integration-judge, from the dispatch label's prefix: plan and plan-revise the planner,
+                     implement and revise the builder, investigate the investigator, first-review a doubled master
+                     review's first reviewer (p52-2, ADR 0081 d2: outside the draw, so its line never carries arm, and
+                     the master-review line of a segment that holds one carries none either), review the master review,
+                     integrate the integrator, integration-review the Integration judge); model, effort (the role's first `ran` entry:
                      what the engine asked); dispatches (int >= 1: its `ran` entries); outcome (the row's status, a
                      string); tokens? (int >= 0: summed over this segment's journal agents of the role that are not
                      `cached`), fresh? (int >= 0: how many such agents), replayed? (int >= 1: its agents with `cached:
@@ -284,7 +286,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      one; refused anywhere else); climbs? (int >= 1: the row's climbs at this role's stage, no-ops
                      included: plan the planner's, implement the builder's or the investigator's, review the
                      builder's); fellBack? (true: a fresh agent of a `ran` label that asked fable ran on a model id
-                     without "fable"); fableRung? (true: any `ran` entry of the call is on an all-Fable rung of its
+                     without "fable"; on a first-reviewer line also a ` on-rung` dispatch, a dead Fable first
+                     reviewer's rerun on the task's rung on another model); fableRung? (true: any `ran` entry of the call is on an all-Fable rung of its
                      args.ladder, so the call left the comparison of arms). ADR 0079 decision 8 (p46-2): one line per
                      role per journal segment, written only by reconcile-rollout.py fold-journals (its docstring holds
                      when), after the fact, keyed by (runId, startTime, role).
@@ -481,13 +484,14 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      Z stamps, since <= until; roles a non-empty object keyed by ARMS_ROLES (the drawn roles and the
                      lead), each {verdict (one of ARMS_VERDICTS), from (an integer 0 to 100, or null: the role's Fable
                      ceiling in percent, ladder.toml's [share]), opus, fable (each exactly ARMS_COUNT_KEYS, integers >=
-                     0), excluded (exactly fellBack, fableRung and none, integers >= 0); to? (an integer 0 to 100),
+                     0), excluded (exactly fellBack, fableRung, unreachable and none, integers >= 0; a line written
+                     before p52-2 holds fellBack, fableRung and none, and reads back valid); to? (an integer 0 to 100),
                      signal? (one of ARMS_SIGNALS), kid? (arms_key(role, signal), with signal), agreement? (an integer
                      >= 1), held? (at most 300 characters), item? (one of ARMS_ITEMS), ready? (true only)}; plans
                      {split (a UTC Z stamp or null), week and toDate, each {before {tasks, rejected, leftOut, onFable},
                      after {tasks, rejected, fellBack, onOpus}}, integers >= 0}; fableCalls {kind: an integer >= 0, or
                      null}, its kinds ARMS_FABLE_KINDS, firstReviewer and leads; fellBack {calls (an integer >= 0),
-                     byKind {kind: an integer >= 0}, its kinds ARMS_FABLE_KINDS}). No rollout, no task; lands in
+                     byKind {kind: an integer >= 0}, its kinds ARMS_FABLE_KINDS and firstReviewer}). No rollout, no task; lands in
                      reflections.jsonl.
   note-overlap    T  note (at most 400 characters: the vault-relative path), holderRollout, holderTask (slugs, not
                      reserved: the run already in the note); holderSince? (a UTC Z stamp: the holder's first write),
@@ -1491,8 +1495,9 @@ STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "halt", "
 ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair", "catch-up")
 ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause", "catch-up")
 CALL_KINDS = ("task", "revise", "integrate", "resume")      # run-bound's `call`
-# role-call's `role` (p46-2): the engine's dispatch roles, from each label's prefix.
-ROLE_CALL_ROLES = ("planner", "plan-judge", "builder", "investigator", "master-review", "integrator",
+# role-call's `role` (p46-2): the engine's dispatch roles, from each label's prefix; first-reviewer (p52-2, ADR 0081 d2)
+# is a doubled master review's first reviewer, which sits outside the draw.
+ROLE_CALL_ROLES = ("planner", "plan-judge", "builder", "investigator", "first-reviewer", "master-review", "integrator",
                    "integration-judge")
 # The roles a role-call line may carry an `arm` on: the drawn roles the engine dispatches (task.workflow.js ARM_ROLES).
 ARM_ROLES = ("master-review", "builder", "investigator")
@@ -1508,7 +1513,9 @@ ARMS_SIGNALS = ("win", "loss", "trade-handsOff", "trade-quality")
 ARMS_ITEMS = ("ceiling",)
 ARMS_COUNT_KEYS = ("landed", "handsOff", "handsOffUnknown", "firstApprove", "firstChanges", "reviewRounds", "reviewedTasks",
                    "escapes", "climbs", "calls", "tokens", "tokenTasks", "tokensLeftOut")
-ARMS_EXCLUDED = ("fellBack", "fableRung", "none")
+ARMS_EXCLUDED = ("fellBack", "fableRung", "unreachable", "none")
+# The excluded set an arms line written before p52-2 carries (no `unreachable`): read back as valid.
+ARMS_EXCLUDED_P46 = ("fellBack", "fableRung", "none")
 ARMS_FABLE_KINDS = ("fableRung", "plans") + ARM_ROLES + ("other",)
 ARMS_HELD = 300
 ARMS_PLAN_SIDES = {"before": ("tasks", "rejected", "leftOut", "onFable"), "after": ("tasks", "rejected", "fellBack", "onOpus")}
@@ -1552,8 +1559,9 @@ def _arms_roles(v):
         for arm in ("opus", "fable"):
             if not _exact_counts(r[arm], ARMS_COUNT_KEYS):
                 return "an object whose %s %s holds exactly %s, integers >= 0" % (role, arm, ", ".join(ARMS_COUNT_KEYS))
-        if not _exact_counts(r["excluded"], ARMS_EXCLUDED):
-            return "an object whose %s excluded holds exactly %s, integers >= 0" % (role, ", ".join(ARMS_EXCLUDED))
+        if not (_exact_counts(r["excluded"], ARMS_EXCLUDED) or _exact_counts(r["excluded"], ARMS_EXCLUDED_P46)):
+            return "an object whose %s excluded holds exactly %s (or, before p52-2, %s), integers >= 0" % (
+                role, ", ".join(ARMS_EXCLUDED), ", ".join(ARMS_EXCLUDED_P46))
     return None
 
 
@@ -1579,10 +1587,11 @@ def _arms_fable_calls(v):
 
 
 def _arms_fell_back(v):
+    keys = ARMS_FABLE_KINDS + ("firstReviewer",)
     ok = isinstance(v, dict) and set(v) == {"calls", "byKind"} and _count0(v["calls"]) and isinstance(v["byKind"], dict) \
-        and set(v["byKind"]) <= set(ARMS_FABLE_KINDS) and all(_count0(n) for n in v["byKind"].values())
+        and set(v["byKind"]) <= set(keys) and all(_count0(n) for n in v["byKind"].values())
     return None if ok else "an object of exactly calls (an integer >= 0) and byKind ({kind: an integer >= 0}, each " \
-        "kind among %s)" % ", ".join(ARMS_FABLE_KINDS)
+        "kind among %s)" % ", ".join(keys)
 
 
 def _check_arms(f):

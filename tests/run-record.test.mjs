@@ -1842,6 +1842,9 @@ test('role-call validates with every optional field, and a duplicate (runId, sta
   assert.equal(lines(f).length, 4, 'another role, segment or runId appends')
   emit({ ...ROLE_CALL, role: 'integrator', call: 'integrate' })
   assert.equal(lines(f).length, 5)
+  // p52-2 (ADR 0081 d2): a doubled master review's first reviewer is its own role, fellBack when it reran on the rung.
+  emit({ ...ROLE_CALL, role: 'first-reviewer', fellBack: true })
+  assert.equal(lines(f).length, 6)
 })
 
 test('role-call refusals: its required fields, its closed enums, an arm off a drawn role, a non-int tokens', (t) => {
@@ -1851,6 +1854,7 @@ test('role-call refusals: its required fields, its closed enums, an arm off a dr
     ['no role', omitKey(ROLE_CALL, 'role')], ['no outcome', omitKey(ROLE_CALL, 'outcome')],
     ['a role off the enum', { ...ROLE_CALL, role: 'lead' }], ['a call off the enum', { ...ROLE_CALL, call: 'restart' }],
     ['an arm on the planner', { ...ROLE_CALL, role: 'planner', arm: 'fable' }], ['an arm none', { ...ROLE_CALL, arm: 'none' }],
+    ['an arm on the first reviewer (p52-2: outside the draw)', { ...ROLE_CALL, role: 'first-reviewer', arm: 'fable' }],
     ['tokens a string', { ...ROLE_CALL, tokens: '12' }], ['dispatches 0', { ...ROLE_CALL, dispatches: 0 }],
     ['replayed 0', { ...ROLE_CALL, replayed: 0 }], ['fellBack false', { ...ROLE_CALL, fellBack: false }],
     ['nine models', { ...ROLE_CALL, models: Array.from({ length: 9 }, (_, i) => `m${i}`) }],
@@ -1893,6 +1897,27 @@ test('arms (p46-4) lands in reflections.jsonl; arms_key is pinned; ARMS_ROLES is
   emitOk(home, ['--kind', 'arms', '--json', JSON.stringify(fields)], { env: EV(home) })
   const [l] = lines(path.join(ev(home), 'reflections.jsonl'))
   assert.deepEqual([l.v, l.rollout, l.task, l.kind, l.roles['master-review'].kid], [1, null, null, 'arms', kid])
+})
+
+// p52-2 (ADR 0081 d2): excluded gains `unreachable` (a doubled master review sits outside the draw), and an older line's
+// three-key set still reads; fellBack's byKind may count firstReviewer calls.
+test('arms (p52-2): the four-key excluded set, the pre-p52-2 three-key set, and fellBack byKind firstReviewer all validate', (t) => {
+  for (const [what, edit] of [
+    ['the four-key excluded set', (f) => { f.roles['master-review'].excluded = { fellBack: 1, fableRung: 0, unreachable: 2, none: 2 } }],
+    ['the pre-p52-2 three-key set', () => {}],
+    ['fellBack byKind firstReviewer', (f) => { f.fellBack = { calls: 2, byKind: { 'master-review': 1, firstReviewer: 1 } }; f.fableCalls.firstReviewer = 3 }],
+  ]) {
+    const home = tmpHome(t)
+    const { fields } = armsLine(home)
+    edit(fields)
+    const r = cli(home, ['emit', '--kind', 'arms', '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`)
+  }
+  const home = tmpHome(t)
+  const { fields } = armsLine(home)
+  fields.roles['master-review'].excluded = { fellBack: 1, unreachable: 2, none: 2 }
+  const r = cli(home, ['emit', '--kind', 'arms', '--json', JSON.stringify(fields)], { env: EV(home) })
+  assert.equal(r.status, 2, 'control: a set that is neither form is refused')
 })
 
 test('arms refusals: an unknown role, a negative count, a bad verdict or signal, an item other than ceiling, a from of 101, a missing opus, a kid of another signal', (t) => {

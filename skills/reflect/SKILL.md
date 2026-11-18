@@ -635,12 +635,15 @@ becomes a sighting, a bug or a knob of yours. For the master review, the builder
 two arms side by side, `opus` beside `fable`, each figure with its count: `landed`; the Hands-off rate (`handsOff`, with
 `handsOffUnknown` outside it); the first review's verdict (`firstApprove`, `firstChanges`); `reviewRounds` over
 `reviewedTasks`; `escapes` and `escapesPerLanded`; `climbs` and `calls`; and `tokensPerMerge` over `tokenTasks`, with
-`tokensLeftOut`. Name the tasks left out of both arms on a line of their own (`excluded`: `fellBack`, `fableRung` and
-`none`), then the role's `verdict` with its `held` reason (its `caution` beside it), and its `from` and `to`. Read `plans`
+`tokensLeftOut`. Name the tasks left out of both arms on a line of their own (`excluded`: `fellBack`, `fableRung`,
+`unreachable` and `none`; a doubled master review on an Unreachable surface, ADR 0081 d2, leaves its task out of the
+master review's comparison as `unreachable`), then the role's `verdict` with its `held` reason (its `caution` beside it), and its `from` and `to`. Read `plans`
 as a before and after, not a comparison: planning has no Opus arm, so name its `split` (the first Fable planner call off
 the Fable rung, or none yet), each side's rejected plans per 100 tasks for the week and to date, and the tasks each side
 leaves out (`leftOut` and `onFable` before, `fellBack` and `onOpus` after). Report `fableCalls` by kind (`fableRung`,
-`plans`, each drawn role, `other` and `leads`; `firstReviewer` is null until p52-2), and quote `fellBack.line` verbatim
+`plans`, each drawn role, `other`, `firstReviewer` and `leads`: `firstReviewer` counts a doubled master review's first
+reviewers that asked Fable, outside the draw, and a fell-back one counts in `fellBack.byKind.firstReviewer`), and quote
+`fellBack.line` verbatim
 when it is there. The reading never edits `ladder.toml`: a Fable ceiling moves only on Lachy's yes to its decision-task
 item, which the session deciding the task applies (§ Deciding the decision task).
 
@@ -1053,7 +1056,6 @@ open keeps the task open.
 - A decided circling item never returns on its rule, and a later cycle's first reading leaves the week quiet.
 - The arms read no lead's own tokens or fall-backs: the model a lead ran on is Chorus's to record, so the lead's arm
   reads its tasks' calls and tokens, never its own.
-- ADR 0081's first reviewer is no call kind until p52-2: `fableCalls.firstReviewer` stays null.
 - Whether another Login had Fable room is in no Run record line: the fell-back line counts the Fable calls that fell
   back to Opus, never the Login that would have carried them.
 - A task whose first Slot came before the first Fable planner call sits on the plans' before side, so the task that

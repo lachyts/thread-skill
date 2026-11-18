@@ -32,6 +32,14 @@ Subcommands:
               backs prepare's case (ii), and the lane frees (`lane-freed release=halt`); the task waits for
               Integration again. A row with any other outcome is reconciled as usual, except that no integrate
               row's `flakes` are recorded (one line says so): that window's runs give no verdict.
+              An Unreachable surface (p52-2, ADR 0081 d2, d3; vault-grammar § Felt check): a task-mode row (no
+              integrate row) whose `unreachable` is `{marked: true, …}` stamps `unreachable: true` on the note, sticky,
+              never removed; a `review` row of a note that reads `unreachable: true` (this row's stamp or an earlier
+              call's) writes one open line under `## Felt check`, `- <stamp> open: try [[<slug>]] by hand once it is
+              live (an Unreachable surface: <what marked it>)`, only while the section holds no line, so a rejection, a
+              revise and a re-approval keep one. An `unreachable` that is neither null nor an object with a boolean
+              `marked` is one ERROR (exit 1) that skips only the stamp: the rest of the row lands, and the Felt check
+              line still reads the note's own earlier stamp.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -203,6 +211,9 @@ Subcommands:
               the task is hard: `work_depth: deep` or `scope: cross-cutting`); a later one stamps them all `none`, the
               task having begun outside the draw. No [share] table: nothing, the note's bytes as before. A refused
               ladder: nothing stamped, no line, one `WARN:` per run. defer keeps the stamp, as it keeps `rung:`.
+              An Unreachable surface (p52-2, ADR 0081 d2): after the arms line, a note whose `unreachable:` is truthy
+              prints `<slug>: unreachable true`, which the lead passes as args.task.unreachable on a fresh call; a
+              `--start resume` prints nothing (a resume re-passes its call's own args).
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads. The origin lane (ADR 0064 d5): one
@@ -1116,7 +1127,28 @@ Subcommands:
               carried (--seen: `ERROR: prove: <slug>: not a carried fix (<why>): nothing recorded`, a note whose
               carry-back waits or fails, that the re-check turns owed or filed under Archive/Rollouts/ included),
               archived while carried, not merged (--land) or --seen refused; 2 usage. Guard-exempt (the Engine
-              snapshot guard, below); it writes no Run-record event.
+              snapshot guard, below); it writes no Run-record event. A fix with clears: items reads its Felt check
+              (p52-2, ADR 0081 d3; _felt_state): open, it waits `felt check open: …`; failed, it waits `felt check
+              failed <stamp>: [[<fix>]] filed; …` whatever moved, a --seen line included; passed, every item not yet
+              moved is moved (`felt check passed <stamp>`). A note with no clears: item is proven at Live, as before.
+
+  felt-check  Close a task's Felt check on Lachy's word, or list the open ones (p52-2, ADR 0081 d3; vault-grammar §
+              Felt check): `felt-check (--task S (--passed TEXT | --failed TEXT) | --list [--rollout N]) [--tasks-dir D]
+              [--now T] [--dry-run] [--json]`. TEXT is one line of at most SEEN_MAX characters with no control
+              character, else exit 2. The note is the walk index's (root or Archive/, never Archive/Rollouts/); its
+              latest `## Felt check` line decides (_felt_state). It acts when that line is open, or failed on a carried
+              fix (a retry, whatever the filed fix's state), and the note is due (_felt_due: landed, and Live for a
+              carried fix). Exit 1, nothing written: no note, no Felt check line, not due (`not landed`, or `a carried
+              fix not live yet: try it once prove stamps live:`), the latest line passed, or failed on a task that is
+              not a carried fix. --passed appends `- <stamp> passed: <text> (Lachy)`, and on a carried fix the Proof log
+              line `- <stamp> felt check passed: <text> (Lachy)`, which prove reads on its next run. --failed first files
+              the fix, `<project>-followup-felt-check` (then `-2`, `-3`… until the stem is free in the walk index, an
+              exclusive create) in _new_task_fm's shape, priority high, `fixes: ["[[<slug>]]"]`, `unreachable: true`
+              (the same surface: its review is doubled and its approval opens its own Felt check), his words under ##
+              Notes, then appends `- <stamp> failed: <text> (Lachy) -> [[<fix>]]` (a save that fails removes the fix
+              it filed). --list prints _felt_checks' rows (`open`, and `again` for a carried fix whose failed check's fix
+              is due, dropped or not found), --rollout keeping the notes whose `rollout:` names it. Guard-exempt (the
+              Engine snapshot guard, below); it writes no Run-record event: a Felt check is no act.
 
   moving      The Watchdog's reading (ADR 0048, p29-7; status SKILL.md § The Watchdog's reading, which carries the
               safety wording's one copy): `--rollout <note> [--tasks-dir D] [--now ISO] [--stall-after MIN]
@@ -2092,7 +2124,7 @@ open or close a run (the sha stays over the content as given). See Note.append_r
 already written is ever deleted.
 
 The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb that names a note, but `status`,
-`fold-journals`, `moving`, `join` and `prove`, first asks engine-snapshot.py, loaded from this tree, about each rollout
+`fold-journals`, `moving`, `join`, `prove` and `felt-check`, first asks engine-snapshot.py, loaded from this tree, about each rollout
 the call acts on: guard() on the note its
 --rollout (carry: its --from) names (lane-hold and lane-ack require it), and guard_task() on each --tasks slug's note
 and, for `reconcile`, each result row's task note (the rollout its `rollout:` names), so a task-keyed verb run with
@@ -2100,7 +2132,7 @@ and, for `reconcile`, each result row's task note (the rollout its `rollout:` na
 defer, approve-gates, reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live
 note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
 command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
-that names no rollout (or one not found), pass from any root. The five exemptions run from any root: `status` writes
+that names no rollout (or one not found), pass from any root. The six exemptions run from any root: `status` writes
 nothing (/thread:status and the estate scan read every rollout with it), `moving` writes nothing either and is the
 Watchdog's reading of any rollout from any root, `fold-journals` reads the note only for its role-call gate
 and writes only call-journal and role-call lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
@@ -2113,7 +2145,9 @@ only proof stamps, which every engine reads as landed, while each write a queue 
 _carry_readers (the note's own rollout and the rollouts of its unstarted dependants): when that gate reads False,
 `--land` and its readers re-check write the old engine's own form (owed) and a carry-back waits, so it works across
 versions by design, like fold-journals (status's Carried line, reflect § 17 and close run it from the session's own
-root). `triggers` names no note (no --rollout, no --tasks), so `_guarded_notes` finds nothing to ask about and it runs
+root). `felt-check` (p52-2) writes only a `## Felt check` line, a Proof log `felt check passed` line that no older reader
+parses (_seen_stamp matches only `seen item`) and a new loose task, so it runs from any root at p52-2 or later, never
+the rollout's snapshot (needs-you's item names this tree's copy). `triggers` names no note (no --rollout, no --tasks), so `_guarded_notes` finds nothing to ask about and it runs
 from any root, unguarded. `due` writes nothing; `fire` writes only the `fired:` of the one `when:` entry it ran.
 `catch-up` (p54-14) is guarded: it runs from the rollout's own snapshot, and its `paused_for: catch-up` and
 `## Catch-up log` (the log's grammar is engine-snapshot.py's header) are cross-version state that only an engine
@@ -4639,6 +4673,121 @@ def _legacy_climb(task) -> str:
     return ""
 
 
+# ---- the Unreachable surface and the Felt check (p52-2, ADR 0081 d2 and d3; vault-grammar § Felt check) ---------------
+# reconcile stamps a task-mode row's mark on its note (`unreachable: true`, sticky, never removed), which mark-started
+# prints for the lead to pass as args.task.unreachable, and writes one open `## Felt check` line when a stamped note
+# approves. The latest line decides (_felt_state); felt-check closes it on Lachy's word; prove holds a fix while its
+# check is open or failed (_prove_judge). Nothing here writes a Run-record event or notifies anyone.
+UNREACHABLE_KEY = "unreachable"
+FELT_CHECK_SECTION = "## Felt check"
+UNREACHABLE_EARLIER = "marked by an earlier call of this task"   # task.workflow.js unreachableWhy's fallback, verbatim
+FELT_LINE_RE = re.compile(r"^- (\S+) (open|passed|failed): (.*)$")
+FELT_FIX_RE = re.compile(r" -> \[\[([^\[\]]+)\]\]$")
+FELT_FOLLOWUP = "felt-check"                                     # a failed check's fix: _followup_name(slug, this)
+
+
+def _unreachable_shape(u) -> str:
+    """'' when a task row's `unreachable` is usable: null or absent (an integrate row, a lead-written row) or an object
+    whose `marked` is a bool; else its shape, cut, for the row's ERROR line."""
+    if u is None or (isinstance(u, dict) and isinstance(u.get("marked"), bool)):
+        return ""
+    try:
+        text = json.dumps(u, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        text = type(u).__name__
+    return text if len(text) <= 80 else text[:80] + "…"
+
+
+def _unreachable_why(row) -> str:
+    """task.workflow.js unreachableWhy's Python twin: `marked by <by>[: <paths>]` from a row's own mark, else (no mark,
+    an unmarked or malformed one) UNREACHABLE_EARLIER. Only one-line strings are read."""
+    u = row.get("unreachable") if isinstance(row, dict) else None
+    if not isinstance(u, dict) or u.get("marked") is not True:
+        return UNREACHABLE_EARLIER
+
+    def strings(v):
+        return [x for x in v if isinstance(x, str) and x.strip() and not FLAKE_CTRL_RE.search(x)] if isinstance(v, list) else []
+
+    by, paths = strings(u.get("by")), strings(u.get("paths"))
+    if not by:
+        return UNREACHABLE_EARLIER
+    return "marked by " + ", ".join(by) + (": " + ", ".join(paths) if paths else "")
+
+
+def _felt_open(n, line) -> bool:
+    """Write the open Felt check line only when `## Felt check` holds no line at all, so an Integration rejection, a
+    revise and a re-approval keep one. Run through Note.apply, so a save replays the check on a fresh read."""
+    if n.section_text(FELT_CHECK_SECTION).strip():
+        return False
+    n.append_line(FELT_CHECK_SECTION, line)
+    return True
+
+
+def _felt_state(note):
+    """The latest `## Felt check` line as {state: open | passed | failed, stamp, fix, text}, or None when the section
+    holds none. fix is the slug a failed line's trailing `-> [[<fix>]]` names (None otherwise); text the line after its
+    state."""
+    last = None
+    for raw in note.section_text(FELT_CHECK_SECTION).split("\n"):
+        m = FELT_LINE_RE.match(raw.strip())
+        if m:
+            last = m
+    if last is None:
+        return None
+    fix = None
+    if last.group(2) == "failed":
+        f = FELT_FIX_RE.search(last.group(3))
+        fix = _wikilink_slug("[[" + f.group(1) + "]]") if f else None
+    return {"state": last.group(2), "stamp": last.group(1), "fix": fix or None, "text": last.group(3)}
+
+
+def _felt_due(note) -> bool:
+    """A Felt check is due once the work is on his machine: landed (_landed), and for a carried fix Live too (`live:`
+    valued, which prove stamps from the Primary refresh's live file)."""
+    return _landed(note) and (not _carried_fix(note) or _valued(note.get("live")))
+
+
+def _felt_checks(walk, rollout=None):
+    """The open Felt checks to list (felt-check --list, unfinished-rollout.py needs-you): [{slug, rollout, state, text}]
+    in walk order, over the notes in the tasks dir's root and Archive/ (never Archive/Rollouts/, _note_place), so a
+    check outlives its rollout. `open`: the latest line is open and the note is due (_felt_due). `again`: a carried fix
+    whose latest line failed, once the fix F it filed is due itself (landed, and Live if carried), was dropped, or is
+    not found in the walk index; while F is open, in flight, on a hold status or carried and not Live, no row: the fix
+    has not reached his machine, and a retry would test the same code. rollout (a slug) keeps only the notes whose
+    `rollout:` names it."""
+    want = rollout.lower() if rollout else None
+    rows = []
+    for path, note in walk.entries:
+        if _note_place(path, walk.tasks_dir) not in ("root", "archive"):
+            continue
+        st = _felt_state(note)
+        if st is None:
+            continue
+        ro = _note_rollout(note) or None
+        if want is not None and (ro or "").lower() != want:
+            continue
+        slug = path.stem
+        if st["state"] == "open":
+            if _felt_due(note):
+                rows.append({"slug": slug, "rollout": ro, "state": "open", "text": st["text"]})
+            continue
+        if st["state"] != "failed" or not _carried_fix(note):
+            continue
+        fix = st["fix"]
+        entry = walk.index.get(fix.lower()) if fix else None
+        if entry is None:
+            how = "is not found"
+        elif _status(entry[1]) == "dropped":
+            how = "was dropped"
+        elif _felt_due(entry[1]):
+            how = "landed"
+        else:
+            continue
+        rows.append({"slug": slug, "rollout": ro, "state": "again",
+                     "text": f"try [[{slug}]] again: its fix [[{fix or '?'}]] {how} (failed {st['stamp']})"})
+    return rows
+
+
 def cmd_reconcile(args) -> int:
     raw = getattr(args, "_result_raw", None)  # read once by the Engine snapshot guard (_guarded_notes)
     if raw is None:
@@ -4862,6 +5011,22 @@ def cmd_reconcile(args) -> int:
         elif ask is not None:
             errors.append(f"{slug}: needsHuman is not a string or null ({type(ask).__name__}) — "
                           f"{NEEDS_HUMAN_SECTION} left untouched")
+
+        # p52-2 (ADR 0081 d2, d3): a task-mode row (no integrate row) stamps its mark, sticky, and an approving row of a
+        # stamped note writes its one open Felt check line. A malformed `unreachable` skips only this row's stamp, an
+        # ERROR as for integration, plan and needsHuman above, so a shape bug never wedges the row; the Felt check write
+        # still reads the note's own stamp (an earlier call's), which never touches the malformed field.
+        if not isinstance(task.get("integration"), dict):
+            unr = task.get("unreachable")
+            shape = _unreachable_shape(unr)
+            if shape:
+                errors.append(f"{slug}: unreachable is not null or an object with a boolean marked ({shape}) — "
+                              "not stamped")
+            elif isinstance(unr, dict) and unr.get("marked") is True:
+                note.set(UNREACHABLE_KEY, "true", after=("arms", "rung", "started", "owner", "status"))
+            if status == "review" and _truthy_flag(note.get(UNREACHABLE_KEY)):
+                note.apply(_felt_open, f"- {_stamp(at)} open: try [[{slug}]] by hand once it is live (an Unreachable "
+                                       f"surface: {_unreachable_why(task)})")
 
         try:
             note.save(dry_run=args.dry_run)
@@ -8407,6 +8572,10 @@ def cmd_mark_started(args) -> int:
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
         if arms is not None:
             print(f"{slug}: arms {_arms_json(arms)}")
+        if args.start != "resume" and _truthy_flag(note.get(UNREACHABLE_KEY)):
+            # p52-2 (ADR 0081 d2): the note's sticky stamp, which the lead passes as args.task.unreachable on a fresh
+            # call (a resume re-passes its own args, so it prints nothing).
+            print(f"{slug}: unreachable true")
         if signed:
             print(f"{slug}: signed-gate restart (gates signed {signed}; {GATES_SIGNED_KEY}: cleared) — "
                   "a fresh call, not a resume of its gate-pending call, prints execute § 3.7's warning first")
@@ -9576,12 +9745,15 @@ JOURNAL_INTS = (("totalTokens", "tokens"), ("durationMs", "durationMs"), ("agent
                 ("startTime", "startTime"))
 
 
-# role-call (p46-2, ADR 0079 decision 8): a dispatch label's prefix -> its role (run_record.py ROLE_CALL_ROLES).
+# role-call (p46-2, ADR 0079 decision 8): a dispatch label's prefix -> its role (run_record.py ROLE_CALL_ROLES). A
+# doubled master review's first reviewer (p52-2, ADR 0081 d2) is its own role, so the master-review line stays the
+# second reviewer's, the one the draw would have placed.
 ROLE_OF_LABEL = {"plan": "planner", "plan-revise": "planner", "plan-judge": "plan-judge", "implement": "builder",
-                 "revise": "builder", "investigate": "investigator", "review": "master-review",
-                 "integrate": "integrator", "integration-review": "integration-judge"}
-ROLE_CALL_ORDER = ("planner", "plan-judge", "builder", "investigator", "master-review", "integrator",
+                 "revise": "builder", "investigate": "investigator", "first-review": "first-reviewer",
+                 "review": "master-review", "integrate": "integrator", "integration-review": "integration-judge"}
+ROLE_CALL_ORDER = ("planner", "plan-judge", "builder", "investigator", "first-reviewer", "master-review", "integrator",
                    "integration-judge")
+ON_RUNG_SUFFIX = " on-rung"   # a dead Fable first reviewer's rerun on the task's rung (task.workflow.js doubledVerdict)
 # The stages whose climb is a role's (a no-op included): plan the planner's, implement the builder's or the
 # investigator's, review the builder's (the reviser a review-stage climb would strengthen).
 ROLE_CLIMB_STAGES = {"planner": ("plan",), "builder": ("implement", "review"), "investigator": ("implement",)}
@@ -9645,9 +9817,13 @@ def _role_segment(journal, rr):
 def _role_calls(run_id, call, segment, args_, earlier_fresh):
     """The role-call fields of one journal segment (_role_segment), one dict per role its `ran` names, in
     ROLE_CALL_ORDER (run_record.py's docstring holds each field). earlier_fresh: {role: the `fresh` summed over the
-    record's earlier segment lines for this runId}, which tokensPartial is read against."""
+    record's earlier segment lines for this runId}, which tokensPartial is read against. A segment whose `ran` holds a
+    first-reviewer dispatch (a doubled master review, p52-2) leaves the master-review line's `arm` off: that review sat
+    outside the draw. A first-reviewer line is fellBack when one of its dispatches is the ` on-rung` rerun on a model
+    that is not Fable."""
     start, row, agents = segment
     ran = [r for r in row["ran"] if isinstance(r, dict) and _label_role(r.get("label"))]
+    doubled = any(_label_role(r["label"]) == "first-reviewer" for r in ran)
     asked = {r["label"]: r.get("model") for r in ran}
     task = args_.get("task") if isinstance(args_.get("task"), dict) else {}
     arms = task.get("arms") if isinstance(task.get("arms"), dict) else {}
@@ -9681,13 +9857,16 @@ def _role_calls(run_id, call, segment, args_, earlier_fresh):
                 models.append(m)
         if models:
             fields["models"] = models
-        if role in ARM_ROLES and arms.get(role) in ("opus", "fable"):
+        if role in ARM_ROLES and arms.get(role) in ("opus", "fable") and not (role == "master-review" and doubled):
             fields["arm"] = arms[role]
         n = sum(1 for c in climbs if c.get("stage") in ROLE_CLIMB_STAGES.get(role, ()))
         if n:
             fields["climbs"] = n
         if any(asked.get(g.get("label")) == "fable" and isinstance(g.get("model"), str)
                and "fable" not in g["model"].lower() for g in fresh):
+            fields["fellBack"] = True
+        if role == "first-reviewer" and any(str(r["label"]).endswith(ON_RUNG_SUFFIX) and r.get("model") != "fable"
+                                            for r in mine):
             fields["fellBack"] = True
         if fable_rung:
             fields["fableRung"] = True
@@ -18850,6 +19029,22 @@ def _prove_judge(note, rollout_note, c):
         moved, why = _item_moved(n, kind, text, note, live_dt, c)
         items.append({"n": n, "kind": kind, "text": text, "moved": moved, "why": why})
     c.strict = None
+    # p52-2 (ADR 0081 d3): on a fix with clears: items his Felt check is the evidence. Open or failed, it holds the fix
+    # whatever moved (a --seen line included); passed, it moves every item. A note with no clears: item is proven at Live,
+    # as before, whatever its Felt check says.
+    felt = _felt_state(note) if items else None
+    if felt is not None and felt["state"] == "open":
+        return {"proven": False, "date": None, "items": items,
+                "waits": "felt check open: his Felt check is the evidence (ADR 0081)"}
+    if felt is not None and felt["state"] == "failed":
+        filed = f"[[{felt['fix']}]] filed" if felt["fix"] else "a fix filed"
+        return {"proven": False, "date": None, "items": items,
+                "waits": f"felt check failed {felt['stamp']}: {filed}; a later passed check proves it (felt-check on his "
+                         "word, /thread:repair 3h)"}
+    if felt is not None and felt["state"] == "passed":
+        for i in items:
+            if not i["moved"]:
+                i["moved"], i["why"] = True, f"felt check passed {felt['stamp']}"
     pending = [i for i in items if not i["moved"]]
     if pending:
         return {"proven": False, "date": None, "items": items,
@@ -19183,6 +19378,140 @@ def _prove_seen(args, note, slug, c):
     note.append_line(PROOF_LOG_SECTION, f"- {_stamp(c.now)} seen item {n} {_item_label(kind, text)}: "
                                         f"{args.seen.strip()} ({'Lachy' if args.on_his_word else 'agent'})")
     return None
+
+
+def _felt_text(raw):
+    """--passed / --failed TEXT, stripped, or None when it is not one line of 1 to SEEN_MAX characters with no control
+    character."""
+    if raw is None:
+        return None
+    text = raw.strip()
+    return text if text and len(raw) <= SEEN_MAX and not FLAKE_CTRL_RE.search(raw) else None
+
+
+def _write_felt_fix(path, note, slug, text, now):
+    """File a failed Felt check's fix: _new_task_fm's shape (projects copied, priority high), `fixes:` naming the
+    task, `unreachable: true` (it touches the same surface by definition, so mark-started passes the stamp, its master
+    review is doubled and its approval writes its own open Felt check, whatever its planner or the repo's path list
+    says), his words quoted under ## Notes. Exclusive: an existing file is never overwritten (FileExistsError)."""
+    lines = [*_new_task_fm(note, now, "high", [f'fixes: ["[[{slug}]]"]', f"{UNREACHABLE_KEY}: true"]), "",
+             f"# Fix [[{slug}]]: its Felt check failed", "", "## Notes", "",
+             f"Lachy tried [[{slug}]] by hand on {now.astimezone().date().isoformat()} (its Felt check, ADR 0081) and it "
+             "failed. His words:", "", f"> {text}", "",
+             f"It landed on an Unreachable surface: no check in its rollout's verifier exercises it, so his check is the "
+             "evidence. Fix what he saw; `fixes:` counts it as an Escape of the landed task."]
+    with open(path, "x") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def cmd_felt_check(args) -> int:
+    """`felt-check` (p52-2, ADR 0081 d3; vault-grammar § Felt check): close a task's Felt check on Lachy's word, or list
+    the open ones. Guard-exempt (GUARD_EXEMPT). Writes no Run-record event: a Felt check is no act."""
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+
+    def usage(msg):
+        print(f"ERROR: felt-check: {msg}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        if args.task or args.passed is not None or args.failed is not None:
+            return usage("--list takes no --task, --passed or --failed")
+        rollout = None
+        if args.rollout:
+            raw = args.rollout.strip()
+            rollout = _wikilink_slug(raw) if raw.startswith("[[") else Path(os.path.expanduser(raw)).stem
+        if not tasks_dir.is_dir():
+            return usage(f"tasks dir {tasks_dir} not found")
+        rows = _felt_checks(_walk_of(tasks_dir), rollout)
+        if args.json:
+            print(json.dumps({"rows": rows}, ensure_ascii=False))
+        else:
+            for r in rows:
+                print(f"{r['slug']}: felt check {r['state']}: {r['text']}")
+            print(f"felt-check: {len(rows)} to try")
+        return 0
+    if args.rollout:
+        return usage("--rollout goes with --list")
+    if (args.passed is None) == (args.failed is None):
+        return usage("--task takes one of --passed TEXT or --failed TEXT")
+    text = _felt_text(args.passed if args.passed is not None else args.failed)
+    if text is None:
+        return usage(f"--passed and --failed take one line of his words, at most {SEEN_MAX} characters, no control "
+                     "characters")
+    passed = args.passed is not None
+    slug = _wikilink_slug(args.task.strip()) if args.task.strip().startswith("[[") else args.task.strip()
+
+    def refuse(why):
+        if args.json:
+            print(json.dumps({"task": slug, "written": False, "error": why}, ensure_ascii=False))
+        print(f"ERROR: felt-check: {slug}: {why}; nothing written", file=sys.stderr)
+        return 1
+
+    walk = _walk_of(tasks_dir) if tasks_dir.is_dir() else None
+    entry = walk.index.get(slug.lower()) if walk is not None and slug else None
+    if entry is None or _note_place(entry[0], tasks_dir) not in ("root", "archive"):
+        return refuse(f"task note not found in {tasks_dir} or its Archive/")
+    path, note = entry
+    slug = path.stem
+    st = _felt_state(note)
+    if st is None:
+        return refuse("no Felt check line (only an approved task on an Unreachable surface has one)")
+    if not _felt_due(note):
+        return refuse("not due: " + ("a carried fix not live yet: try it once prove stamps live:" if _carried_fix(note)
+                                     else "not landed"))
+    if st["state"] == "passed":
+        return refuse(f"its Felt check already passed {st['stamp']}")
+    if st["state"] == "failed" and not _carried_fix(note):
+        fix = f" (its fix [[{st['fix']}]] is the way on)" if st["fix"] else ""
+        return refuse(f"its Felt check failed {st['stamp']} and it is not a carried fix: closed for good{fix}")
+    stamp, carried = _stamp(now), _carried_fix(note)
+    would = "would write " if args.dry_run else ""
+    if passed:
+        note.append_line(FELT_CHECK_SECTION, f"- {stamp} passed: {text} (Lachy)")
+        if carried:
+            note.append_line(PROOF_LOG_SECTION, f"- {stamp} felt check passed: {text} (Lachy)")
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            return refuse(f"cannot write {path}: {e}")
+        if args.json:
+            print(json.dumps({"task": slug, "state": "passed", "fix": None, "written": not args.dry_run},
+                             ensure_ascii=False))
+        else:
+            print(f"{slug}: {would}felt check passed" + (" (dry-run)" if args.dry_run else " [written]"))
+            if carried:
+                print(f"{slug}: a carried fix: prove reads the pass on its next run (prove --tasks {slug})")
+        return 0
+    base, k, fix_path = _followup_name(slug, FELT_FOLLOWUP), 1, None
+    while True:
+        name = base if k == 1 else f"{base}-{k}"
+        k += 1
+        if name.lower() in walk.index or (tasks_dir / f"{name}.md").exists():
+            continue
+        if args.dry_run:
+            break
+        try:
+            _write_felt_fix(tasks_dir / f"{name}.md", note, slug, text, now)
+        except FileExistsError:
+            continue
+        except OSError as e:
+            return refuse(f"cannot file its fix {name}: {e}")
+        fix_path = tasks_dir / f"{name}.md"
+        break
+    note.append_line(FELT_CHECK_SECTION, f"- {stamp} failed: {text} (Lachy) -> [[{name}]]")
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        if fix_path is not None:
+            fix_path.unlink(missing_ok=True)
+        return refuse(f"cannot write {path}: {e} (its fix {name} was removed again)")
+    if args.json:
+        print(json.dumps({"task": slug, "state": "failed", "fix": name, "written": not args.dry_run}, ensure_ascii=False))
+    else:
+        print(f"{slug}: {would}felt check failed" + (" (dry-run)" if args.dry_run else " [written]"))
+        print(f"{slug}: {'would file' if args.dry_run else 'filed'} [[{name}]] (fixes: [[{slug}]])")
+    return 0
 
 
 def _write_carried_file(path, carried, owed, carry_back):
@@ -21814,6 +22143,21 @@ def _parser():
     pv.add_argument("--on-his-word", action="store_true", help="with --seen: Lachy's word (required for a link item)")
     pv.set_defaults(func=cmd_prove)
 
+    fc = sub.add_parser("felt-check", help="p52-2 (ADR 0081 d3): close a task's Felt check on Lachy's word (--passed or "
+                                           "--failed files a fix), or --list the open ones; guard-exempt")
+    which = fc.add_mutually_exclusive_group(required=True)
+    which.add_argument("--task", default=None, help="the task whose Felt check his words close")
+    which.add_argument("--list", action="store_true", help="the open Felt checks, Archive included (never "
+                                                         "Archive/Rollouts/)")
+    fc.add_argument("--passed", default=None, help="with --task: his words, one line (at most 300 characters)")
+    fc.add_argument("--failed", default=None, help="with --task: his words, one line; files a fix with fixes:")
+    fc.add_argument("--rollout", default=None, help="with --list: only the notes whose rollout: names it (path or slug)")
+    fc.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    fc.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    fc.add_argument("--dry-run", action="store_true", help="write nothing: print what it would write")
+    fc.add_argument("--json", action="store_true", help="one JSON object: the rows (--list), or the task's outcome")
+    fc.set_defaults(func=cmd_felt_check)
+
     mv = sub.add_parser("moving", help="the Watchdog's reading (ADR 0048; status § The Watchdog's reading): one JSON "
                                        "line, moving | stalled | waiting | skip; read-only, guard-exempt")
     mv.add_argument("--rollout", required=True, help="path to the rollout note")
@@ -21860,7 +22204,7 @@ def main() -> int:
 ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
 PLUGIN_ROOT = ENGINE_SNAPSHOT_PY.parent.parent.parent.parent   # the running plugin root (this file's tree)
 GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
-# The five verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write nothing
+# The six verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write nothing
 # (moving is the Watchdog's reading, which must read any rollout from any root); fold-journals reads the note only for
 # its role-call gate and writes only the Run record, a cross-version store (a role-call line only for an engine that
 # reads the kind); join (ADR 0078 d6) is run by a newer schedule on a running
@@ -21872,8 +22216,9 @@ GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
 # lock's path are a cross-version contract (engine-snapshot.md § Cross-version state): they change only by migration.
 # speed-hold itself is guarded: every caller runs it from the rollout's own root. And prove writes
 # only proof stamps every engine reads as landed, gating each write a queue reads per note on _carry_readers (ADR 0078
-# d1).
-GUARD_EXEMPT = ("status", "fold-journals", "moving", "join", "prove")
+# d1). felt-check (p52-2, ADR 0081 d3) writes only a `## Felt check` line, a Proof log `felt check passed` line no older
+# reader parses (_seen_stamp matches only `seen item`), and a new loose task: it runs from any root at p52-2 or later.
+GUARD_EXEMPT = ("status", "fold-journals", "moving", "join", "prove", "felt-check")
 _ES_MOD = []   # [engine-snapshot.py's module, or None], loaded once per process (_engine_snapshot_mod)
 
 

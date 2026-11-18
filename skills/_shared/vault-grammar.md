@@ -222,6 +222,13 @@ recorded at or after `live:` (`prove --seen`), and so does a link item that cann
 nothing after `live:`), on Lachy's word only (`--on-his-word`). Live with every item moved, or none: `status: done`
 and `proven: <date>`, with no `completed:` and no phase write.
 
+**The Felt check holds a fix** (ADR 0081 d3; § Felt check). On a fix with `clears:` items, a Felt check is the evidence:
+its latest line open, the fix waits `felt check open: his Felt check is the evidence (ADR 0081)`; failed, it waits
+`felt check failed <stamp>: [[<fix>]] filed; a later passed check proves it (felt-check on his word, /thread:repair 3h)`,
+whatever else moved, and a `--seen` line (`--on-his-word` included) does not clear it; passed, every item not yet moved
+is moved, its why `felt check passed <stamp>`. A note with no `clears:` item is proven at Live, as above, whatever its
+Felt check says.
+
 **The three landing outcomes**, one verdict for every landing caller (`_land_outcome`: mark-done, resume,
 reconcile's read-only approval (no code, so never watched), `prove --land`, and reconcile-project's apply, whose dry
 run names the same verdict as each task's action):
@@ -280,6 +287,50 @@ this way. prove never closes a phase.
 **The hook's mirror.** hooks/vault-note-overlap.py reads a review writer live only with a `pr:` and an unvalued
 `merged:`, `_valued` mirrored literally (`v.lower() not in ("", "null", "~")` after `_scalar`), since loading
 reconcile-rollout.py would spend its budget.
+
+## Felt check
+
+ADR 0081 d2 and d3 (p52-2): code no check in its rollout's verifier exercises (an **Unreachable surface**) takes a doubled
+master review and lands with a **Felt check** open, Lachy's own try at a sitting he chooses. CONTEXT.md's **Unreachable
+surface** and **Felt check** are the terms.
+
+**`unreachable: true`** marks the task. `reconcile-rollout.py reconcile` stamps it from a task-mode row whose
+`unreachable` is `{marked: true, …}` (the engine's mark: the plan, its plan judge, the implementer, or the repo's
+`unreachable_paths`), after `arms:` or `rung:`; it is sticky and never removed, so a seeded revise, which never sees the
+plan its first call approved, is still doubled: `mark-started` prints `<slug>: unreachable true` on every fresh call, and
+the lead passes `task.unreachable: true`.
+
+**The lines.** One `- <stamp> <state>: <text>` line per event under the task note's `## Felt check`; the latest line
+decides (`_felt_state`):
+
+- `- <stamp> open: try [[<slug>]] by hand once it is live (an Unreachable surface: <what marked it>)`: written by
+  reconcile when a `review` row lands on a note that reads `unreachable: true`, only while the section holds no line, so
+  an Integration rejection, a revise and a re-approval keep one;
+- `- <stamp> passed: <his words> (Lachy)`: `felt-check --passed`; on a carried fix it also logs `- <stamp> felt check
+  passed: <his words> (Lachy)` under `## Proof log`;
+- `- <stamp> failed: <his words> (Lachy) -> [[<fix>]]`: `felt-check --failed`, after it files the fix
+  (`<project>-followup-felt-check`, then `-2`, `-3`…, priority high, `fixes: ["[[<slug>]]"]`, his words under `## Notes`):
+  how an Escape is already counted. The fix is stamped `unreachable: true` at filing: it touches the same surface by
+  definition, so its master review is doubled and its approval writes its own open line, whatever its planner, its
+  implementer or the repo's `unreachable_paths` say. A failed check closed for good is re-checked through its fix.
+
+**Due.** A check is due once the work is on his machine: the task is landed (`_landed`), and a carried fix is Live
+(`live:` valued, which prove stamps from the Primary refresh's live file): `_felt_due`. `felt-check` refuses one not due
+(`not landed`, or `a carried fix not live yet: try it once prove stamps live:`), one already passed, and one failed on a
+task that is not a carried fix (closed for good: its fix is the way on). A failed check on a carried fix takes a retry,
+`--passed` or `--failed` again, whatever the filed fix's state.
+
+**The list** (`_felt_checks`: `felt-check --list`, execute § 6.5 (j), `unfinished-rollout.py needs-you`): every task note
+in the tasks dir's root and `Archive/` (never `Archive/Rollouts/`), so a check outlives its rollout. `open`: the latest
+line open and the note due. `again`: a carried fix whose latest line failed, once the fix F it filed is due itself
+(landed, and Live if carried), was dropped, or is not found; it reads `try [[<slug>]] again: its fix [[F]] landed | was
+dropped | is not found (failed <stamp>)`. While F is open, in flight, on a hold status or carried and not Live there is no
+row, on purpose: the fix has not reached his machine, and a retry would test the same code. Nothing is pushed or
+notified, and a Felt check is no act on the Hands-off rate.
+
+**The way out** at any time is his word: `felt-check --task <slug> --passed|--failed "<his words>"` (`/thread:repair` 3h).
+Dropping the carried fix is no route: its code is merged, a dropped note reads unlanded (`_landed`), so `_dep_status`
+holds every task that depends on it, and his check is the only evidence.
 
 ## When
 
@@ -492,6 +543,10 @@ reshuffle's R5.2 use the same words):
   (engine-snapshot.md § Cross-version state); the line forms change only by migration.
 
 ## Readers
+
+- § Felt check's readers: `skills/execute/scripts/reconcile-rollout.py` (`reconcile`'s stamp and open line,
+  `mark-started`'s line, `felt-check`, `_felt_state`, `_felt_due`, `_felt_checks`, and `prove`'s hold in `_prove_judge`)
+  and `skills/_shared/scripts/unfinished-rollout.py` `needs-you` (`_felt_checks`, loaded).
 
 - `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
   `phase_sort` (the canonical form and the order) and `Rec.status` (the normalised read); its docstring

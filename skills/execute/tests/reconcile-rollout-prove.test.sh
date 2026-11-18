@@ -17,6 +17,9 @@
 #   P27     --seen on a note whose carry-back waits, or that the re-check turns owed: exit 1, nothing recorded
 #   P28     carry-back reopens the done phase over a fix it leaves carried (root and Archive/), never another phase, and
 #           never a phase over a fix it proves in the same pass
+#   PF1-PF4 (p52-2, ADR 0081 d3) the Felt check on a carried fix: due only once Live (rule (b)); open or failed holds the
+#           fix whatever moved, passed moves every item; the `again` row once the filed fix is due, dropped or gone,
+#           never while it is unlanded or not Live; a landing with no clears: is proven at Live whatever its check says
 # Every row runs a seeded engine Primary's copy ($T/P, a main checkout holding this tree's files), never this tree's, so
 # an unstamped rollout's engine (git_primary) is a known one wherever the suite runs. Hermetic: HOME, the global git
 # config, the vaults, the events dir, the note locks and the live files are temp; gh is a stub; no network.
@@ -789,5 +792,94 @@ print(mod._reopen_phases("demo-p9-1-fix", Path(argv[0]), True))
 f.write_text("---\ntags: [phase]\nstatus: done\n---\n")
 print(mod._reopen_phases("demo-p9-1-fix", Path(argv[0]), True))' "$TK" "$PH")
 ok "$MUT" "$(printf "[]\n[]\n['phase [[demo-p9-x]] reopened']")" "P28: no phase, or a dropped one, is never reopened (control: a done one is)"
+
+# ════ PF1-PF4 (p52-2, ADR 0081 d3): the Felt check on a carried fix ═══════════════════════════════════════════════
+fc() { rr felt-check --tasks-dir "$TK" --now "$NOW" "$@"; }
+flist() { fc --list --json; j '" ".join(r["slug"] + ":" + r["state"] for r in d["rows"])'; }
+again() { fc --list --json; j '" | ".join(r["text"] for r in d["rows"] if r["state"] == "again")'; }
+openline() { printf '\n## Felt check\n\n- 2026-11-11T08:00+00:00 open: try [[%s]] by hand once it is live (an Unreachable surface: marked by plan)\n' "$1"; }
+setfm() { python3 -c 'import re, sys
+p, k, v = sys.argv[1:4]
+t = open(p).read()
+head, body = t.split("\n---\n", 1)
+if re.search(r"^" + re.escape(k) + r":", head, re.M):
+    head = re.sub(r"^" + re.escape(k) + r":.*$", k + ": " + v, head, count=1, flags=re.M)
+else:
+    head += "\n" + k + ": " + v
+open(p, "w").write(head + "\n---\n" + body)' "$TK/$1" "$2" "$3"; }
+
+scen pf1
+live "$M1"
+mk pf1-t.md 'status: in_progress' 'started: 2026-11-11T12:30+00:00'
+BODY="$(openline pf1)" mk pf1.md 'status: review' "pr: $U/21" 'merged: 2026-11-11T08:00+00:00' "merge_commit: $M2" \
+  'clears:' '  - "[[pf1-t]]"' '  - "the panel opens"'
+ok "$(flist)" "" "PF1: a carried fix not Live yet is not listed"
+before=$(sums "$TK/pf1.md")
+fc --task pf1 --passed "it opens"
+ok "$rc|$(sums "$TK/pf1.md")" "1|$before" "PF1: … and --passed exits 1, its bytes unchanged"
+has "$err" "not due: a carried fix not live yet: try it once prove stamps live:" "PF1: … saying not live yet"
+live "$M2"
+pv --tasks pf1
+ok "$(fm pf1.md status)|$(fm pf1.md live)" "review|$NOW" "PF1: prove stamps live: and keeps it carried"
+has "$out" "pf1: landed, carried (felt check open: his Felt check is the evidence (ADR 0081))" "PF1: … waiting on the open check, its link item moved"
+ok "$(flist)" "pf1:open" "PF1: once Live it is listed"
+fc --task pf1 --passed "it opens on the Vision Pro"
+ok "$rc" 0 "PF1: --passed exits 0"
+has "$(proof pf1.md)" "felt check passed: it opens on the Vision Pro (Lachy)" "PF1: … and writes the Proof log line"
+has "$out" "prove reads the pass on its next run" "PF1: … with the hint"
+pv --tasks pf1
+ok "$(fm pf1.md status)|$(fm pf1.md proven)" "done|2026-11-11" "PF1: the next prove proves it (the pass moved the unseen line)"
+has "$(proof pf1.md)" "proven: Live, and every clears: item moved after it (2)" "PF1: … every item moved"
+
+scen pf2
+live "$M1"
+mk pf2-t.md 'status: in_progress' 'started: 2026-11-11T10:00+00:00'
+BODY="$(openline pf2)" mk pf2.md 'status: review' "pr: $U/22" 'merged: 2026-11-11T08:00+00:00' 'live: 2026-11-11T09:00+00:00' \
+  'clears:' '  - "[[pf2-t]]"'
+fc --task pf2 --failed "the panel never opens"
+ok "$rc" 0 "PF2: --failed on a live carried fix exits 0"
+F=pf2-followup-felt-check
+ok "$(fm $F.md fixes)|$(fm $F.md status)" '["[[pf2]]"]|open' "PF2: … filing its fix, open"
+pv --tasks pf2
+ok "$(fm pf2.md status)" "review" "PF2: a failed check holds it, its link item moved"
+has "$out" "felt check failed 2026-11-11T12:00+00:00: [[$F]] filed; a later passed check proves it (felt-check on his word, /thread:repair 3h)" "PF2: … the wait names the fix"
+ok "$(again)" "" "PF2: no again row while the fix is open"
+setfm $F.md status review; setfm $F.md pr "$U/23"; setfm $F.md merged 2026-11-11T11:00+00:00; setfm $F.md merge_commit "$M2"
+ok "$(again)" "" "PF2: … nor while the fix is carried and not Live (the head lacks it)"
+live "$M2"
+pv --tasks $F
+ok "$(fm $F.md live)" "$NOW" "PF2: prove stamps the fix's live:"
+ok "$(again)" "try [[pf2]] again: its fix [[$F]] landed (failed 2026-11-11T12:00+00:00)" "PF2: then the again row shows"
+fc --task pf2 --passed "now it opens"
+ok "$rc" 0 "PF2: the retry --passed is accepted on a failed carried fix"
+pv --tasks pf2
+ok "$(fm pf2.md status)|$(fm pf2.md proven)" "done|2026-11-11" "PF2: … and the next prove proves it"
+
+scen pf3
+live "$M2"
+BODY="$(openline pf3)" mk pf3.md 'status: review' "pr: $U/24" 'merged: 2026-11-11T08:00+00:00' "merge_commit: $M1"
+pv --tasks pf3
+ok "$(fm pf3.md status)|$(fm pf3.md proven)" "done|2026-11-11" "PF3: a watched landing with no clears: is proven at Live, its check open"
+ok "$(flist)" "pf3:open" "PF3: … and its row stays listed until he closes it"
+
+scen pf4
+live "$M2"
+mk Archive/pf4-t.md 'status: done' 'completed: 2026-11-10'
+for x in y z w; do
+  BODY="$(openline pf4$x)" mk pf4$x.md 'status: review' "pr: $U/25" 'merged: 2026-11-11T08:00+00:00' 'live: 2026-11-11T09:00+00:00' \
+    'clears:' '  - "[[pf4-t]]"'
+  fc --task pf4$x --failed "still broken"
+done
+setfm pf4y-followup-felt-check.md status dropped
+rm "$TK/pf4z-followup-felt-check.md"
+setfm pf4w-followup-felt-check.md status parked
+ok "$(again)" "try [[pf4y]] again: its fix [[pf4y-followup-felt-check]] was dropped (failed 2026-11-11T12:00+00:00) | try [[pf4z]] again: its fix [[pf4z-followup-felt-check]] is not found (failed 2026-11-11T12:00+00:00)" \
+   "PF4: again for a dropped fix and a missing one; none for a parked one"
+pv --tasks pf4y --item 1 --seen "he saw it" --on-his-word
+ok "$(fm pf4y.md status)" "review" "PF4: --seen on his word does not clear a failed check"
+has "$out" "pf4y: landed, carried (felt check failed" "PF4: … it still waits on it"
+fc --task pf4y --passed "works now"
+pv --tasks pf4y
+ok "$(fm pf4y.md status)|$(fm pf4y.md proven)" "done|2026-11-11" "PF4: his passed check proves it"
 
 exit $fail

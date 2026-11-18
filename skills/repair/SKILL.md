@@ -662,7 +662,7 @@ this evidence and notify Lachy, never ack: every lane hold is his.
 
 **3h — a carried fix that cannot prove itself (ADR 0078 d1; `_shared/vault-grammar.md` § Proven).** A carried fix
 (`review` with a valued `merged:`) is landed: no class above routes it, and `prove` writes it done once Live and each
-`clears:` item has moved. Two cases are Lachy's:
+`clears:` item has moved. Three cases are Lachy's:
 
 - **A carried fix whose item cannot move** (status's Carried line, or `prove --tasks <t>`, reads `cannot move (<why>):
   record it on Lachy's word`: a linked rollout or task missing, or finished with nothing after `live:`). Only his word
@@ -672,6 +672,17 @@ this evidence and notify Lachy, never ack: every lane hold is his.
 - **An archived carried fix** (`prove` reports `archived while carried: not judged`, and reconcile-project reads
   `archived but review`: TaskNotes' `archived` tag, then the vault's daily sweep moved it). On his word, move it back
   to `Work/Tasks/` (and drop the `archived` tag) so prove resumes its proof, or leave it set aside.
+- **A carried fix whose Felt check failed** (ADR 0081 d3; `_shared/vault-grammar.md` § Felt check: status's Carried
+  line, or `prove --tasks <t>`, reads `felt check failed <stamp>: [[F]] filed; a later passed check proves it`). His
+  check is the only evidence an Unreachable surface has, so prove holds it whatever else moved, and `prove --seen
+  --on-his-word` does not clear it. The needs-you list shows it `again` once F is live, was dropped or is gone, and not
+  while F is open or in flight: there F's own queue is the way forward, since a retry would test the same code. At any
+  time, on his word only:
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py felt-check --task <t> --passed "<his words>"`
+  records his pass, which proves it at the next `prove`; `--failed "<his words>"` files another fix. The verb takes the
+  retry on a failed carried fix whatever F's state. Never drop the carried fix to clear it: its code is merged, a
+  dropped note reads unlanded (`_landed`), so `_dep_status` holds every task that depends on it, and his check is the
+  only evidence (ADR 0081).
 
 **3i — a merge setting changed for you → restore or dismiss (ADR 0080 d5).** Status's Needs you lists each open row
 `merge-settings.py rows` reads (a merge setting the system changed to free a stuck rollout, with its before, after and

@@ -85,7 +85,9 @@
 #           parallel one's Human fix, a chain's every one, a Leg preflight's as a sign-in), a hold_until or merge hold
 #           that waits on him, a row schedule left out for a sign-in (its section pinned to schedule's S3.7, S4 and S6);
 #           each drops out once signed, handed back, released or taken; an archived or done rollout never read; an
-#           unreadable note's WARN carried in the JSON's warns (NY12); each limit's own month line (NY13, p48-2)
+#           unreadable note's WARN carried in the JSON's warns (NY12); each limit's own month line (NY13, p48-2);
+#           (NY14, p52-2) a Felt check on a landed task, its rollout archived, and a carried fix's try-again, with the
+#           exact command naming this tree's reconcile-rollout.py and the tasks dir read
 #   W1-W3   one walk of the vault per check process (p41-2): a resume, a serial and a parallel check each walk the
 #           tasks dir once with the CLI's verdict; _scan over the shared walk keeps its read, and off it walks afresh
 #   J1-J10  this project's running rollout is joined (ADR 0078 d6): the check's `join`, the verb's rows, File-sets,
@@ -3586,6 +3588,31 @@ HOME="$EH" python3 "$RR" approve-gates --standing --dry-run --tasks g1,gx --roll
 ok "$(grep -c '^g1: gate approved under the standing approval: spend: image calls — cap 5 USD ' "$S.ag")|$(grep -c \
   '^ASK: ' "$S.ag")|$(grep -c '^ASK: gx: spend: more crowd pilot — cap 1400 USD: ' "$S.ag")" "1|1|1" \
   "NY13: … approve-gates --standing's dry run signs g1 and asks exactly gx"
+
+# NY14 (p52-2, ADR 0081 d3): a Felt check is his to try, outside any live rollout: an open check on a landed task (its
+# rollout archived) and a carried fix's try-again once its fix landed; never an unlanded, closed or not-yet-Live note.
+scen ny14
+ST=done mkro Archive/Rollouts/ro-old.md "$R" "$DEMO"
+feltline() { printf '\n## Felt check\n\n- 2026-11-10T10:00+11:00 %s\n' "$2" >> "$T/$1"; }
+mkt Archive/2026/u1.md ro-old done "$DEMO" 'merged: 2026-11-10T09:00+11:00'
+feltline Archive/2026/u1.md 'open: try [[u1]] by hand once it is live (an Unreachable surface: marked by plan)'
+mkt x1.md ro-old review "$DEMO" 'pr: https://github.com/demo/repo/pull/4' 'merged: 2026-11-10T09:00+11:00' 'live: 2026-11-10T09:30+11:00'
+feltline x1.md 'failed: never opens (Lachy) -> [[x1-fix]]'
+mkt x1-fix.md - done "$DEMO" 'merged: 2026-11-11T09:00+11:00'
+mkt u2.md ro-old review "$DEMO" 'pr: https://github.com/demo/repo/pull/5'
+feltline u2.md 'open: try [[u2]] by hand once it is live (an Unreachable surface: marked by plan)'
+mkt u3.md ro-old done "$DEMO" 'merged: 2026-11-10T09:00+11:00'
+feltline u3.md 'passed: it works (Lachy)'
+mkt u4.md ro-old review "$DEMO" 'pr: https://github.com/demo/repo/pull/6' 'merged: 2026-11-10T09:00+11:00' 'clears:' '  - "x"'
+feltline u4.md 'open: try [[u4]] by hand once it is live (an Unreachable surface: marked by paths: a.swift)'
+ny
+ok "$(rows)" "$(printf '%s\n%s' \
+  "hands-on|felt-check|ro-old|u1|try [[u1]] by hand once it is live (an Unreachable surface: marked by plan)|try it by hand, then record it: reconcile-rollout.py felt-check from any thread-skill root at p52-2 or later (never the rollout's snapshot)" \
+  "hands-on|felt-check|ro-old|x1|try [[x1]] again: its fix [[x1-fix]] landed (failed 2026-11-10T10:00+11:00)|try it by hand, then record it: reconcile-rollout.py felt-check from any thread-skill root at p52-2 or later (never the rollout's snapshot)")" \
+  "NY14: an archived landed task's open check and a carried fix's try-again; not the unlanded, closed or not-yet-Live notes"
+ok "$(nyj 'd["items"][0]["detail"]')" "python3 -B $RR felt-check --task u1 --tasks-dir $T --passed|--failed \"<what you saw>\"" \
+  "NY14: … its detail is the exact command: this tree's reconcile-rollout.py, the tasks dir read"
+ok "$(nyj 'd["items"][0]["project"]')" "Demo" "NY14: … with its project"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
