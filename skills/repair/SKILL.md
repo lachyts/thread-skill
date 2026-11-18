@@ -121,8 +121,7 @@ version stop's `--regenerate` would only meet schedule's refusal again.
   `/thread:schedule <project> --regenerate`. Stop.
 - any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
 - `incomplete` → `/thread:schedule <project> --regenerate`; on a `shape: serial` note, which nothing supersedes,
-  stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`; then § 7's **A chain repair drops**.
-  Stop.
+  stamp it `status: dropped`, run § 7's **A chain repair drops**, then `/thread:schedule --tasks <its tasks>`. Stop.
 
 **A serial chain.** After the Stops, a `shape: serial` note (read from the note, as status § 1's **Shape** reads
 it) goes to § 7, instead of the modes below and §§ 2–6.
@@ -1046,14 +1045,15 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
 record, and its Completion log is the last Leg's.
 
 **A chain repair drops.** When repair stamps a serial note `status: dropped` (§ 1's `incomplete` Stop), it runs
-`skills/execute/legs.md` § Complete's **Clean-up archive** for that chain, decided and never asked, with `message`
-`chain <rollout> dropped`: on the Chorus Stage only, one `list_sessions`, the rows whose line carries
-`leads the Rollout <rollout>` exactly, and one `message_companion` with `want: archive` naming each by its `id`.
-Usually no Session leads such a chain (`begin` refuses an incomplete note), and then nothing is sent. Its reply, a new
-Prompt that starts `[From the Companion, about your Message`, gets one statement line,
-`Clean-up archive of [[<rollout>]]: <each Session archived, held or refused>`, and the Message is never sent again. A
-defer ((b)) sends none, even when it defers every row left: the chain then reads `completable`, and the Leg that
-completes it sends the Clean-up archive.
+`skills/execute/legs.md` § Complete's **Clean-up archive** for that chain straight after the stamp, before the Stop's
+`/thread:schedule --tasks <its tasks>`: that run can end the turn on a refusal or a question, and the Message would
+then never be sent. It is decided and never asked, with `message` `chain <rollout> dropped`: on the Chorus Stage only,
+one `list_sessions`, the rows whose line carries `leads the Rollout <rollout>` exactly, and one `message_companion`
+with `want: archive` naming each by its `id`. Usually no Session leads such a chain (`begin` refuses an incomplete
+note), and then nothing is sent. Its reply, a new Prompt that starts `[From the Companion, about your Message`, gets
+one statement line, `Clean-up archive of [[<rollout>]]: <each Session archived, held or refused>`, and the Message is
+never sent again. A defer ((b)) sends none, even when it defers every row left: the chain then reads `completable`,
+and the Leg that completes it sends the Clean-up archive.
 
 ## Don'ts
 

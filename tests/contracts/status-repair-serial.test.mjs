@@ -44,9 +44,8 @@
 //                sent once; § The Companion's reply answers its reply on the Complete turn's banner, asking nothing;
 //                the serial template's step 6 names it;
 //   r-cleanup    repair § 7's **A chain repair drops** runs that Clean-up archive when § 1's `incomplete` Stop drops a
-//                chain (a defer sends none), § 1 points to it, and § Scope and the serial Don't's allow-list name
-//                `message_companion` (`want: archive` only);
-//   sc-cleanup   schedule's Don't keeps a serial run superseding nothing, so `--regenerate` has no chain to clean up.
+//                chain (a defer sends none), § 1 runs it between its stamp and its schedule run, and § Scope and the
+//                serial Don't's allow-list name `message_companion` (`want: archive` only).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read, section, FENCE } from '../lib/contract-text.mjs'
@@ -56,7 +55,6 @@ const FILES = {
   repair: 'skills/repair/SKILL.md',
   legs: 'skills/execute/legs.md',
   template: 'skills/schedule/serial-rollout-template.md',
-  schedule: 'skills/schedule/SKILL.md',
 }
 const real = Object.fromEntries(Object.entries(FILES).map(([k, p]) => [k, read(p)]))
 const C = (s) => collapse(s ?? '')
@@ -339,13 +337,11 @@ function check(f) {
   need('r-cleanup', "repair § 7's **A chain repair drops**", drops, ['`status: dropped`',
     "`skills/execute/legs.md` § Complete's **Clean-up archive**", '`chain <rollout> dropped`', 'A defer ((b)) sends none',
     'the chain then reads `completable`'])
-  if (!C(item(r1, /^- `incomplete` → /)).includes("then § 7's **A chain repair drops**")) flag('r-cleanup', "§ 1's incomplete Stop does not point to § 7's drop")
+  if (!C(item(r1, /^- `incomplete` → /)).includes("stamp it `status: dropped`, run § 7's **A chain repair drops**, then `/thread:schedule --tasks <its tasks>`")) {
+    flag('r-cleanup', "§ 1's incomplete Stop does not run § 7's drop between its stamp and its schedule run")
+  }
   need('r-cleanup', 'repair ## Scope', section(f.repair, /^## Scope$/), ['`message_companion` with `want: archive`'])
   if (!allow.includes('`message_companion` (`want: archive` only')) flag('r-cleanup', "the serial Don't's allow-list lacks message_companion")
-
-  if (!C(section(f.schedule, /^## Don'ts$/)).includes('Never supersede across shapes: a serial run supersedes nothing')) {
-    flag('sc-cleanup', 'schedule lets a serial run supersede: its --regenerate then owes the superseded chain a Clean-up archive')
-  }
   return { fails: [...fails].sort(), details }
 }
 
@@ -552,7 +548,7 @@ test('control: a Notes line written by § 7 fails r-notes', () => {
 test('control: a Complete whose failed score stops the ceremony fails l-score', () => {
   only('legs', 'A non-zero exit never stops the ceremony.', 'A non-zero exit stops the ceremony.', ['l-score'], 'score')
 })
-test('control: a Clean-up archive that names the Leg log\'s sessions fails l-cleanup only', () => {
+test('control: a Clean-up archive with no roster source fails l-cleanup only', () => {
   only('legs', '`leads the Rollout <rollout>`', '`legs[].session`', ['l-cleanup'], 'source')
 })
 test('control: a Clean-up archive after step 5 fails l-cleanup only', () => {
@@ -567,16 +563,13 @@ test('control: a Clean-up archive after step 5 fails l-cleanup only', () => {
 test('control: a reply turn ending on its own line fails l-cleanup only', () => {
   only('legs', 'the banner its Complete turn ended on', 'its own closing line', ['l-cleanup'], 'reply')
 })
-test('control: repair § 1\'s incomplete Stop without its drop pointer fails r-cleanup only', () => {
-  only('repair', "; then § 7's **A chain repair drops**", '', ['r-cleanup'], 'pointer')
+test('control: repair § 1\'s incomplete Stop that drops after its schedule run fails r-cleanup only', () => {
+  only('repair', "run § 7's **A chain repair drops**, then `/thread:schedule --tasks <its tasks>`.",
+    "then `/thread:schedule --tasks <its tasks>`; then § 7's **A chain repair drops**.", ['r-cleanup'], 'pointer')
 })
 test('control: an allow-list without message_companion fails r-cleanup only', () => {
   only('repair', ', `create_thread` and `message_companion` (`want: archive` only, § 7\'s **A chain repair drops**).', ' and `create_thread`.',
     ['r-cleanup'], 'allow')
-})
-test('control: a serial run that supersedes fails sc-cleanup only', () => {
-  only('schedule', 'Never supersede across shapes: a serial run supersedes nothing', 'Never supersede across shapes: a serial run supersedes its predecessor',
-    ['sc-cleanup'], 'supersede')
 })
 test('control: a template that scores nowhere fails l-score', () => {
   only('template', '3. Score the chain: run `close-score.py --rollout <this note> --close completion`', '3. Score the chain by hand', ['l-score'], 'template')
