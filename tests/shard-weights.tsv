@@ -17,6 +17,9 @@
 # the median seconds per byte of its kind (shard.py).
 # The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
 # leg.test.sh's 527 s split by the parts' measured shares of two local runs, until the next regenerate.
+# tests/fast-tier.test.sh's row is its own, until the next regenerate: it grew from 24 s (2026-11-09) to 83 s, the
+# median of two local runs (2026-11-18, `bash tests/fast-tier.test.sh` alone, a 12-core Mac at load 4 to 5), and
+# 24 s gave it the 300 s floor, which master's macOS shard 3/4 passed at 259 s and then cut twice (run 44233636618).
 9	@merge-task-self-tests
 0.5	skills/execute/tests/integration-inputs.test.sh
 3.5	skills/execute/tests/note-save.test.sh
@@ -51,7 +54,7 @@
 27	tests/engine-catch-up.test.sh
 37	tests/engine-snapshot.test.sh
 4	tests/execution-fit-remote.test.sh
-24	tests/fast-tier.test.sh
+83	tests/fast-tier.test.sh
 153.5	tests/git-env-canary.test.sh
 2.5	tests/git-env-scrub.test.sh
 2	tests/handoff-home.test.sh

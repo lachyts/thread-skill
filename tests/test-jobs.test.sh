@@ -139,6 +139,8 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
 # leg.test.sh's 1581 s and 1891 s are now split across its four files (p54-9), 1891 by the parts' measured shares.
+# tests/fast-tier.test.sh's 259 s is master's macOS shard 3/4 of run 44226971655 (2026-11-18), the run before its
+# 300 s floor cut it twice.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
 ci_max="tests/leg.test.sh 550
 tests/leg-land.test.sh 565
@@ -148,6 +150,7 @@ tests/lead-integrate.test.sh 735
 tests/unfinished-rollout.test.sh 613
 tests/primary-refresh.test.sh 543
 tests/land.test.sh 297
+tests/fast-tier.test.sh 259
 tests/serial-chains.test.sh 163"
 bounds=$(printf '%s\n' "$ci_max" | awk '{print $1}' | bash -c '. tests/lib/test-jobs.sh; suite_bounds tests/shard-weights.tsv')
 bad=""
