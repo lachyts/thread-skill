@@ -466,7 +466,7 @@ test('control: a status item 5 without the serial remedy fails t10', () => {
 })
 
 test('control: a repair incomplete stop without the serial remedy fails t10', () => {
-  only(swap(REPAIR, '; on a `shape: serial` note, which nothing supersedes,\n  stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`', ''), ['t10'], 'repair')
+  only(swap(REPAIR, '; on a `shape: serial` note, which nothing supersedes,\n  stamp it `status: dropped`, run § 7\'s **A chain repair drops**, then `/thread:schedule --tasks <its tasks>`', ''), ['t10'], 'repair')
 })
 
 test('control: a description back on "a second unfinished rollout" fails t9', () => {
