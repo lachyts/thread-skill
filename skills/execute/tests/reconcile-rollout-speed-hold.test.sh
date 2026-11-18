@@ -157,7 +157,7 @@ starts() { q "$out" 'sorted(d["start"])'; }
 # hf <slug> — the set-aside task's humanFix act through the engine's own read (moving's: _retry_budget, task_inputs,
 # auto_retry_verdict); with a null humanFix, `take-out` or `overtime` when its normal budget is spent (p39-14), else null.
 hf() {
-  python3 - "$SCRIPT" "$D/$1.md" "$D/ro.md" "$NOW" <<'PY'
+  HOME="$EH" python3 - "$SCRIPT" "$D/$1.md" "$D/ro.md" "$NOW" <<'PY'
 import importlib.util, json, sys
 from pathlib import Path
 spec = importlib.util.spec_from_file_location("rr_under_test", sys.argv[1]); m = importlib.util.module_from_spec(spec)

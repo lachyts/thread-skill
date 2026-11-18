@@ -335,7 +335,7 @@ CRED_PREFIX_RE = re.compile(r"[A-Za-z0-9_]{3,40}\Z")
 SUPABASE_REF_RE = re.compile(r"[a-z]{20}\Z")
 LIVE_PROD_SEGMENT_RE = re.compile(r"(?:^|_)(?:LIVE|PROD)")
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
-            "spend_approval_usd": 0, "verify_slots": 2, "capacity_max": 6, "overtime_runs": 3}
+            "overtime_runs": 3, "spend_approval_usd": 0, "verify_slots": 2, "capacity_max": 6}
 # The least valid value of each rollout key: a round cap is >= 1; `auto_retries: 0` disables automatic retries;
 # `overtime_runs: 0` gives no Overtime (a spent budget is a take-out at once); `spend_approval_usd: 0` turns the standing
 # approval off.
