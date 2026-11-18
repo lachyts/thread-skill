@@ -587,11 +587,20 @@ Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `
 whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row its final S2
 JSON's `leftOut` names, whether S3.7's re-run or a later S4 re-run left it out; S6 removes it once the row is
 stamped): kind `sign-in`, `text` its latest entry, rollout null, act `sign in, then /thread:orient --steer`.
-stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out, "rollout":
+Then the Felt checks (p52-2, ADR 0081 d3; vault-grammar § Felt check): one item per reconcile-rollout.py _felt_checks
+row, read from every task note in the tasks dir's root and Archive/ (never Archive/Rollouts/), so a check outlives its
+rollout: an `open` check on a landed task (Live, for a carried fix), and an `again` one for a carried fix whose check
+failed once the fix it filed is due, was dropped or is gone. Kind `hands-on`, rollout the note's `rollout:` slug (an
+archived rollout's too, or null), `text` the row's, act `try it by hand, then record it: …` (FELT_ACT), and `detail`
+the exact command, `python3 -B <this tree's reconcile-rollout.py> felt-check --task <task> --tasks-dir <the tasks dir
+read> --passed|--failed "<what you saw>"`, shell-quoted: felt-check is guard-exempt, so this tree's copy (at p52-2 or
+later by construction) records it, never the rollout's snapshot. Nothing is pushed or notified.
+stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out | felt-check, "rollout":
 <slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}], "warns": ["WARN: ...", ...]},
 `project` the task's `projects:` names comma-joined (the rollout's when it has none, `no project` with neither). Items
 run in rollout order (case-folded slug); within a rollout, its gates and set-asides by task, then its hold_until holds
-(the rollout's, then its tasks' by task), then its merge holds by task; the left-out rows come last, by task. `warns`
+(the rollout's, then its tasks' by task), then its merge holds by task; the left-out rows come next, by task, then the
+Felt checks, by task. `warns`
 holds every `WARN:` line, each also on stderr, so a list some note kept partial never reads as all clear, even at
 `"count": 0`. A note that cannot be read (an OSError) is one: _scan raises on the first such note anywhere under the
 tasks dir, Archive included, not only on a rollout's own tasks, so one unrelated unreadable note leaves every live
@@ -606,6 +615,7 @@ import json
 import math
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -634,7 +644,8 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_gated", "_standing_limit", "_ask_why", "_bounce_why", "_month_why", "_StandingLedger", "_norm_gate",
             "_month_line_key",   # each limit's own month line (p48-2)
             "_hold_until", "_resolve_holds", "_record_state", "_pr", "needs_human", "BLOCKED_SECTIONS",
-            "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION")
+            "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION",
+            "_felt_checks")   # the Felt checks (p52-2): an older reconcile-rollout.py fails to load, loudly
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -2704,6 +2715,9 @@ def cmd_waiting(args, rr) -> int:
 
 # schedule § Serial path's line for a row its final S2 JSON's `leftOut` names (S3.7's re-run or a later S4 re-run)
 LEFT_OUT_SECTION = "## Left out at schedule"
+# A Felt check's act (p52-2, ADR 0081 d3): the verb is guard-exempt, so any root at p52-2 or later records it.
+FELT_ACT = ("try it by hand, then record it: reconcile-rollout.py felt-check from any thread-skill root at p52-2 or later "
+            "(never the rollout's snapshot)")
 # legs.md § Preflight's set-aside reason, `preflight: <namespace> did not answer`, as leg.py set-aside writes it: the
 # first line of its Blocker diagnosis run, after its `Set aside by Leg <n> of [[<rollout>]]: ` opening.
 PREFLIGHT_SIGN_IN_RE = re.compile(
@@ -2874,6 +2888,16 @@ def cmd_needs_you(args, rr) -> int:
             text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
             items.append(needs_you_item("sign-in", "left-out", None, project_label(rr, note), path.stem, text,
                                         "sign in, then /thread:orient --steer"))
+    # The Felt checks (p52-2): every task note, Archive included, so a check outlives its rollout; the command names this
+    # tree's own reconcile-rollout.py and the tasks dir this run read.
+    q = shlex.quote
+    for row in sorted(rr._felt_checks(walk), key=lambda r: r["slug"].lower()):
+        detail = (f"python3 -B {q(str(RR_SRC))} felt-check --task {q(row['slug'])} --tasks-dir "
+                  f"{q(os.path.abspath(str(tasks_dir)))} --passed|--failed \"<what you saw>\"")
+        note = walk.index.get(row["slug"].lower())
+        items.append(needs_you_item("hands-on", "felt-check", row["rollout"] or None,
+                                    project_label(rr, note[1]) if note else "no project", row["slug"], row["text"], FELT_ACT,
+                                    detail))
     warns = list(dict.fromkeys(warns))
     for w in warns:
         print(w, file=sys.stderr)

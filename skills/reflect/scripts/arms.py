@@ -55,7 +55,9 @@ Attributes, read wider. They place no row and add nothing to any other window's 
   wins, and flags names the task;
 - a task's exclusion, read from every role-call line of the task up to until, the window's outside included:
   fableRung on any line leaves it out of every role, the lead's included (a Fable-rung climb runs every role on Fable);
-  else fellBack on a line leaves it out of that line's role only (roles draw on their own: ADR 0079 decision 3);
+  else a first-reviewer line (a doubled master review, p52-2, ADR 0081 d2) leaves it out of the master review only, as
+  unreachable: that review sat outside the draw, so its stamp is never set against its record; else fellBack on a line
+  leaves it out of that line's role only (roles draw on their own: ADR 0079 decision 3);
 - a rollout's lead arm: its note's `arms: lead=` stamp (none without one). A landed task and an Escape are credited to
   the lead arm of the task's landing rollout, a review and a call to that of the record that holds the line;
 - a landed task's Hands-off: its acts in its landing rollout's score.json `handsOff.tasks` (score.py's rule: no act
@@ -78,8 +80,9 @@ landed less handsOffUnknown, to 4 places; null at 0), firstApprove, firstChanges
 (the distinct tasks with an in-window Escape: escapes.py counts a task with any evidence once), escapesPerLanded
 (escapes over landed, to 4 places; null with nothing landed), climbs (summed over the arm's calls; a Fable arm's are
 recorded no-ops, ADR 0079 decision 4), calls, tokens, roleTokens, tokenTasks, tokensLeftOut and tokensPerMerge (to 1
-place; null with no token task). The lead's calls are every role's calls in its rollouts. `excluded` {fellBack,
-fableRung, none} counts the distinct tasks with an in-window row of the role that sit out of both arms. Then verdict,
+place; null with no token task). The lead's calls are every role's calls in its rollouts, a doubled master review's
+first reviewer included (no drawn role's stats hold it). `excluded` {fellBack, fableRung, unreachable, none} counts the
+distinct tasks with an in-window row of the role that sit out of both arms. Then verdict,
 signal, direction, from, to, kid, agreement, agreedWith (the agreeing Reflections' ids), held, caution, item, ready,
 breached (the Guardrails read below) and rollouts (the read rollouts whose rows fed an arm, sorted).
 
@@ -136,16 +139,17 @@ with no slot-taken is flagged and placed nowhere). per100 = round(100 x rejected
 
 Fable calls by kind: the in-window calls, each counted once, in this order: fableRung (its latest in-window segment on
 the Fable rung), plans (a planner or plan-judge call that asked fable), each drawn role (a call whose arm is fable),
-other (any other call that asked fable: an integrator on fable, a role on its own [role] model); then firstReviewer,
-null until p52-2 (ADR 0081's first reviewer), and leads (the read rollouts stamped lead=fable). A call that fell back
-counts only in fellBack {calls, byKind, line}, by the kind it would have counted under; line is FELL_BACK_LINE, written
-only when calls is above 0.
+other (any other call that asked fable: an integrator on fable, a role on its own [role] model); then firstReviewer (a
+doubled master review's first reviewer, p52-2, ADR 0081 d2, that asked fable off the Fable rung: never `other`, never
+the master review's), and leads (the read rollouts stamped lead=fable). A call that fell back counts only in fellBack
+{calls, byKind, line}, by the kind it would have counted under (a first reviewer's rerun on the rung under
+firstReviewer); line is FELL_BACK_LINE, written only when calls is above 0.
 
 Rows for the window check (reflect.py's window_flags): tasks[] (landedAt), calls[] (startTime, a UTC Z stamp),
 reviews[] (at), escapes[] (at, with inWindow), planTasks[] (at) and rejections[] (at), the week's rows alone. flags and
 cannotShow are promoted into span's only when the block holds a row. The block holds a row (holds_row) when a role has
-an opus or fable count above 0, a fellBack or fableRung exclusion, a Fable call or a fell-back one (fableCalls, leads
-among them), or a non-null split: an empty week, an all-none week and a plans-before-only week hold none, and close
+an opus or fable count above 0, a fellBack, fableRung or unreachable exclusion, a Fable call or a fell-back one
+(fableCalls, leads among them), or a non-null split: an empty week, an all-none week and a plans-before-only week hold none, and close
 writes no `arms` line for them.
 
 line(): the `arms` line close writes (run_record's arms kind): reflection, since and until; roles, every role, each with
@@ -185,7 +189,9 @@ ARM_ROLES = RR.ARM_ROLES
 LEAD = "lead"
 ARMS = ("opus", "fable")
 PLAN_ROLES = ("planner", "plan-judge")
+FIRST_REVIEWER = "first-reviewer"   # a doubled master review's first reviewer (p52-2): no drawn role, its own kind
 FABLE_KINDS = RR.ARMS_FABLE_KINDS
+CALL_KINDS = FABLE_KINDS + ("firstReviewer",)   # fableCalls' and fellBack.byKind's counted kinds, in order
 MIN_LANDED = 3                  # a declared heuristic: landed tasks per arm before a verdict reads
 STEP = 10                       # a ceiling moves this many points per agreed move
 AGREE = 3                       # ADR 0037 d5: three Reflections agree
@@ -207,7 +213,6 @@ NOTES = (
 CANNOT_SHOW = (
     "arms: the lead's own tokens and fall-backs are in no Run record line (the lead's model is Chorus's to record): the "
     "lead arm reads its tasks' calls and tokens",
-    "arms: ADR 0081's first reviewer is no call kind until p52-2: fableCalls.firstReviewer is null",
     "arms: whether another Login had Fable room is no Run record line: the fell-back line counts the calls it would have "
     "carried, never the Login that would have",
 )
@@ -449,6 +454,8 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
         mine = lines_of.get(task, [])
         if any(d.get("fableRung") is True for d in mine):
             return "fableRung"
+        if role == "master-review" and any(d.get("role") == FIRST_REVIEWER for d in mine):
+            return "unreachable"
         if role != LEAD and any(d.get("fellBack") is True and d.get("role") == role for d in mine):
             return "fellBack"
         return None
@@ -517,7 +524,7 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
         task_rows.append(row)
 
     # calls: in the window by any segment's startTime; the latest in-window segment speaks for the call
-    call_rows, fable_calls, fell = [], {k: 0 for k in FABLE_KINDS}, {k: 0 for k in FABLE_KINDS}
+    call_rows, fable_calls, fell = [], {k: 0 for k in CALL_KINDS}, {k: 0 for k in CALL_KINDS}
     for (run, role), c in sorted(calls.items(), key=lambda kv: (min(st for st, _d in kv[1]["segs"]), kv[0][0], str(kv[0][1]))):
         inside = [(st, d) for st, d in c["segs"] if since <= st <= until]
         if not inside:
@@ -529,6 +536,8 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
         model, arm = last.get("model"), last.get("arm")
         if rung:
             kind = "fableRung"
+        elif role == FIRST_REVIEWER:
+            kind = "firstReviewer" if model == "fable" else None
         elif role in PLAN_ROLES and model == "fable":
             kind = "plans"
         elif role in ARM_ROLES and arm == "fable":
@@ -624,7 +633,7 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
     for line in disagree:
         flags.append("arms: a stamp the record overrides: %s" % line)
     leads = sum(1 for x in sorted(read) if lead_arm(x) == "fable")
-    fable_out = dict(fable_calls, firstReviewer=None, leads=leads)
+    fable_out = dict(fable_calls, leads=leads)
     fell_n = sum(fell.values())
     return {
         "roles": roles_out, "plans": plans, "fableCalls": fable_out,
@@ -714,7 +723,7 @@ def holds_row(block):
             if any(_int0(v) and v > 0 for k, v in (r.get(a) or {}).items() if k in RR.ARMS_COUNT_KEYS):
                 return True
         ex = r.get("excluded") or {}
-        if (_int0(ex.get("fellBack")) and ex["fellBack"] > 0) or (_int0(ex.get("fableRung")) and ex["fableRung"] > 0):
+        if any(_int0(ex.get(k)) and ex[k] > 0 for k in ("fellBack", "fableRung", "unreachable")):
             return True
     calls = block.get("fableCalls") or {}
     if any(_int0(v) and v > 0 for v in calls.values()):
