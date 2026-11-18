@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 7                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 8                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -16,6 +16,8 @@ of the file format:
     max_iterations = 3
     max_plan_rounds = 3
     auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
+    overtime_runs = 3            # schema 8 (p39-14, ADR 0070 d8): the Overtime, the runs a set-aside task takes by
+                                 # itself once its normal budget is spent, before it is taken out; 0: none
     spend_approval_usd = 200     # the standing approval (ADR 0034): a spend gate whose total exposure is at most
                                  # this many US dollars passes without a person, and while the calendar month's
                                  # standing approvals stay within it; 0 (the built-in) is off
@@ -49,7 +51,7 @@ of the file format:
 
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` (retired, below) and `repo`. A repo table
 holds every rollout key but `verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus
-`auto_retries`, `spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and
+`auto_retries`, `spend_approval_usd`, `verify_slots`, `capacity_max` and `overtime_runs`; MACHINE_ONLY: `verify_slots` and
 `capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths`,
 `test_credentials`, `weight_mem_gb`, `weight_cores` and `unreachable_paths` (REPO_ONLY: each refused under `[defaults]` with `<key> is per
 repo: set it under [repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
@@ -168,8 +170,8 @@ raise_schema_lines() below. A writer that raises the schema runs the reader chec
 pre-P29 reader refuses any top-level `schema` line and a schema-N reader any known key above N, and a refused file halts
 every rollout on the machine at its next `verify-timeout`, so each writer asks every live rollout's engine root to read
 the new file first and refuses the write when one cannot: inert-paths.py `record` (its header, and reader_check(), the
-check's one copy) raising it to 2, and tune.py, which loads that reader_check(), raising it to 4 for capacity_max or
-to 6 for a Weight (p53-5; an unattended --auto landing included; its header).
+check's one copy) raising it to 2, and tune.py, which loads that reader_check(), raising it to 4 for capacity_max,
+to 6 for a Weight (p53-5) or to 8 for overtime_runs (p39-14; an unattended --auto landing included; its header).
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -182,11 +184,16 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2, capacity_max 6; weight_mem_gb 3 and
-weight_cores 2 (WEIGHT_BUILT_IN); guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2, capacity_max 6, overtime_runs 3;
+weight_mem_gb 3 and weight_cores 2 (WEIGHT_BUILT_IN); guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
-`reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
+`reconcile-rollout.py auto-retry` resolve it themselves (p16-4). `overtime_runs` (p39-14, ADR 0070 d8; schema 8) is
+one: a set-aside task's Overtime, the runs it takes by itself once `auto_retries` and its round cap are spent, before it
+is taken out of its rollout. It is per repo (a repo table may set it), never stamped by schedule, and resolved as
+`auto_retries` is, task → rollout → this file → built-in 3, by execute's verdict (`reconcile-rollout.py`'s
+_retry_budget). A Tuning moves it only between values >= 1 (tune.py refuses a move to or from 0): 0, no Overtime, is
+the operator's hand edit. Nor is `spend_approval_usd` (ADR 0034): schedule
 shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
 `spend_approval_usd:`, then rollout, then this file, then the built-in 0, which is off: the approval lives in this
 file, never in the skills, so a fresh install approves nothing). Nor is `verify_slots` (p23-4): machine-wide, so
@@ -206,7 +213,8 @@ schema rule above):
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
 - a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, `verify_slots` and
   `capacity_max`, 0 for
-  `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
+  `auto_retries`, `overtime_runs` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a
+  key whose MINIMUM is 1);
 - a MACHINE_ONLY key (`verify_slots`, `capacity_max`) in a `[repo."o/r"]` table;
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
@@ -228,7 +236,8 @@ Output. Exit 0 and one JSON line on stdout:
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
-                  "spend_approval_usd": {...}, "verify_slots": {...}, "capacity_max": {...}},
+                  "spend_approval_usd": {...}, "verify_slots": {...}, "capacity_max": {...},
+                  "overtime_runs": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
      "inert_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},   # built-in []
      "test_credentials": {"value": {"file": "<path>", "keys": [{"name": "<NAME>", "prefix": "<p>"}
@@ -257,9 +266,10 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: --repo <p>: <reason>`.
 
 Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys a rollout note
-stamps, which tune.py and score.py read), TUNING_KEYS (p53-5: KEYS, then `capacity_max` and WEIGHT_KEYS, every key a
-Tuning may move; run_record.py's TUNING_KEYS is pinned to it), SETTING_KEYS (KEYS plus `auto_retries`,
-`spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY,
+stamps, which tune.py and score.py read), TUNING_KEYS (p53-5: KEYS, then `capacity_max`, WEIGHT_KEYS and, p39-14,
+`overtime_runs`, every key a Tuning may move; run_record.py's TUNING_KEYS is pinned to it), SETTING_KEYS (KEYS plus
+`auto_retries`, `spend_approval_usd`, `verify_slots`, `capacity_max` and `overtime_runs`: every key a `settings` object
+holds), MACHINE_ONLY, REPO_ONLY,
 DEFAULTS_ONLY, MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
 GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
@@ -291,8 +301,9 @@ LAND_SH = os.path.join(HERE, "land.sh")
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget,
 # the standing approval's limit in US dollars (ADR 0034), the machine's verify slots (p23-4) and the hard maximum of
-# the Mac-wide Capacity (p36-7, ADR 0067 d8); of the four only capacity_max is Reflection-tunable (p53-5, TUNING_KEYS).
-SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots", "capacity_max")
+# the Mac-wide Capacity (p36-7, ADR 0067 d8), then the Overtime (p39-14, ADR 0070 d8): the runs a set-aside task takes
+# by itself past its spent budget; of these capacity_max and overtime_runs are Reflection-tunable (TUNING_KEYS).
+SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots", "capacity_max", "overtime_runs")
 # Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot, and the Capacity, are
 # shared by every rollout on the machine, whatever its repo).
 MACHINE_ONLY = ("verify_slots", "capacity_max")
@@ -306,8 +317,9 @@ REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores",
 WEIGHT_KEYS = ("weight_mem_gb", "weight_cores")
 WEIGHT_BUILT_IN = {"weight_mem_gb": 3, "weight_cores": 2}
 # Every key a Reflection's Tuning may move (p53-5; run_record.py's TUNING_KEYS is pinned to this tuple): the four a
-# rollout note stamps, then the machine-wide capacity_max and a repo's Weight estimates, which no note stamps.
-TUNING_KEYS = KEYS + ("capacity_max",) + WEIGHT_KEYS
+# rollout note stamps, then the machine-wide capacity_max and a repo's Weight estimates, which no note stamps, then
+# overtime_runs (p39-14, ADR 0070 d8), which tune.py moves only between values >= 1.
+TUNING_KEYS = KEYS + ("capacity_max",) + WEIGHT_KEYS + ("overtime_runs",)
 # Machine-wide keys kept out of `settings` (p37-4): valid under [defaults] only, refused in a repo table, and reported
 # by resolve() as their own top-level field. `test_logins` is the operator's declared test Logins, one line.
 DEFAULTS_ONLY = ("test_logins",)
@@ -323,11 +335,12 @@ CRED_PREFIX_RE = re.compile(r"[A-Za-z0-9_]{3,40}\Z")
 SUPABASE_REF_RE = re.compile(r"[a-z]{20}\Z")
 LIVE_PROD_SEGMENT_RE = re.compile(r"(?:^|_)(?:LIVE|PROD)")
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
-            "spend_approval_usd": 0, "verify_slots": 2, "capacity_max": 6}
-# The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
-# `spend_approval_usd: 0` turns the standing approval off.
+            "spend_approval_usd": 0, "verify_slots": 2, "capacity_max": 6, "overtime_runs": 3}
+# The least valid value of each rollout key: a round cap is >= 1; `auto_retries: 0` disables automatic retries;
+# `overtime_runs: 0` gives no Overtime (a spent budget is a take-out at once); `spend_approval_usd: 0` turns the standing
+# approval off.
 MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
-           "spend_approval_usd": 0, "verify_slots": 1, "capacity_max": 1}
+           "spend_approval_usd": 0, "verify_slots": 1, "capacity_max": 1, "overtime_runs": 0}
 # review_churn_pct (p21-3, ADR 0037 d1): Review churn's absolute bound, a non-negative number like the rates.
 # hours_per_task (p21-2): the Throughput Guardrail's absolute bound, skills/reflect/scripts/score.py's built-in too.
 GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls",
@@ -340,10 +353,10 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 7
+SCHEMA = 8
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
-KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k != "capacity_max"})
+KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k not in ("capacity_max", "overtime_runs")})
 KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
 KEY_SCHEMA[("notify", "ntfy_topic")] = 1   # retired (ADR 0075 d2), still registered: K10 freezes the schema-1 set
 KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
@@ -353,6 +366,7 @@ KEY_SCHEMA[("rollout", "test_logins")] = 5   # p37-4 (ADR 0034's 2026-11-05 amen
 KEY_SCHEMA[("rollout", "weight_mem_gb")] = 6   # p53-3 (ADR 0083 DfL 8): the first schema-6 keys
 KEY_SCHEMA[("rollout", "weight_cores")] = 6
 KEY_SCHEMA[("rollout", "unreachable_paths")] = 7   # p52-1 (ADR 0081 d1): the first schema-7 key
+KEY_SCHEMA[("rollout", "overtime_runs")] = 8   # p39-14 (ADR 0070 d8): the first schema-8 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.

@@ -1234,3 +1234,40 @@ test('KT6 a schema raise runs the reader check: a pre-P29 live engine refuses it
   assert.equal(r.stderr, '')
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 4\n\n[defaults]\nparallel_ceiling = 4\ncapacity_max = 7\n')
 })
+
+// ---- KT7: overtime_runs (p39-14, ADR 0070 d8) ------------------------------------------------------------------------
+// A per-repo Tuning key (schema 8) no rollout note stamps: a pick lands in the repo table and raises the schema to 8,
+// which runs the reader check. The floor: a Tuning moves it only between values >= 1, so a pick to or from 0 is refused
+// (exit 2, nothing written) and --auto holds such a proposal with the same reason.
+const OT_EFFECT = 'takes effect at o/r\'s next automatic retry, running rollouts included (read live); schedule stamps it on no rollout note'
+const OT_FLOOR = 'overtime_runs moves by Tuning only between values >= 1 (0, no Overtime, is set by hand)'
+
+test('KT7 (a) an overtime_runs pick lands in the repo table and raises the schema to 8, with the reader check', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, '[defaults]\nparallel_ceiling = 4\n')
+  const scores = writeScores(home, { proposals: [P('p1', 'overtime_runs', 3, 2, { direction: -1 })] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, 'WARN: tune: no tasks dir at ~/repos/obsidian/Work/Tasks: the reader check read no live rollout\n', 'the raise ran the reader check')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), 'schema = 8\n\n[defaults]\nparallel_ceiling = 4\n\n[repo."o/r"]\novertime_runs = 2\n')
+  assert.deepEqual(resolved(home, repo).settings.overtime_runs, { value: 2, source: 'file:repo' })
+  assert.equal(r.stdout.split('\n').filter(Boolean).at(-1), `applied overtime_runs 3 → 2 for o/r: ${OT_EFFECT}`)
+})
+
+test('KT7 (b) a pick to 0 or from 0 is refused by the floor, exit 2, rollouts.toml and tunings.jsonl untouched; --auto holds it', (t) => {
+  for (const [toml, p] of [['[defaults]\nparallel_ceiling = 4\n', P('p1', 'overtime_runs', 1, 0, { direction: -1 })],
+    ['schema = 8\n\n[repo."o/r"]\novertime_runs = 0\n', P('p1', 'overtime_runs', 0, 1, { direction: 1 })]]) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, toml)
+    refusedNothingWritten(home, ['--scores', writeScores(home, { proposals: [p] }), '--pick', 'p1', '--repo', repo], 2,
+      new RegExp(`^tune: p1: ${OT_FLOOR.replace(/[()]/g, '\\$&')}: nothing written\\n$`), toml)
+  }
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, CONFIG)
+  writeReflections(home, [...TWO_AGREE, TL_NOW])
+  held(home, autoArgs(writeScores(home, { proposals: [P('p1', 'overtime_runs', 1, 0, { direction: -1 })], guardrails: OK_GUARDS }), repo),
+    new RegExp(`^held overtime_runs: ${OT_FLOOR.replace(/[()]/g, '\\$&')}$`, 'm'), CONFIG)
+})

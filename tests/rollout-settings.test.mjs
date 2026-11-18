@@ -28,18 +28,20 @@ const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings
 // `auto_retries` (p16-4: execute's automatic retries, >= 0, not Reflection-tunable) and `spend_approval_usd` (ADR 0034: the
 // standing approval's limit in US dollars, >= 0, built-in 0 = off, not Reflection-tunable), `verify_slots` (p23-4: the
 // machine's verify slots, >= 1, built-in 2, [defaults] only) and `capacity_max` (p36-7, ADR 0067 d8: the hard maximum
-// of the Mac-wide Capacity, >= 1, built-in 6, [defaults] only, the first schema-4 key): every key a `settings` object holds.
+// of the Mac-wide Capacity, >= 1, built-in 6, [defaults] only, the first schema-4 key) and `overtime_runs` (p39-14, ADR
+// 0070 d8: a set-aside task's Overtime, >= 0, built-in 3, per repo, the first schema-8 key, a Tuning key): every key a
+// `settings` object holds.
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
-const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd', 'verify_slots', 'capacity_max']
+const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd', 'verify_slots', 'capacity_max', 'overtime_runs']
 const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0,
-  verify_slots: 1, capacity_max: 1 }
+  verify_slots: 1, capacity_max: 1, overtime_runs: 0 }
 // review_churn_pct (p21-3): Review churn's absolute bound, built-in 40.
 // hours_per_task (p21-2): the Throughput Guardrail's bound, running hours per task whose Slot or lane holding overlaps
 // the window.
 const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls', 'review_churn_pct',
   'hours_per_task']
 const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0,
-  verify_slots: 2, capacity_max: 6 }
+  verify_slots: 2, capacity_max: 6, overtime_runs: 3 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0,
   review_churn_pct: 40, hours_per_task: 1.5 }
 // [notify] (ADR 0038 d3, retired by ADR 0075 d2): tolerated in any form, never refused, ignored, and named once on the
@@ -258,7 +260,7 @@ test('R2 capacity_max (p36-7, ADR 0067 d8): built-in 6, schema 4, [defaults] onl
   writeSettings(home, ['schema = 3', '', '[defaults]', 'capacity_max = 3'])
   refused(home, { line: 4, reason: /rollout\.capacity_max is a schema-4 key but the file says schema = 3: raise the file's top-level `schema` line to 4/ })
   writeSettings(home, ['[defaults]', 'capacity_maxx = 3'])
-  refused(home, { line: 2, reason: /unknown key "capacity_maxx".*verify_slots, capacity_max, inert_paths/ })
+  refused(home, { line: 2, reason: /unknown key "capacity_maxx".*verify_slots, capacity_max, overtime_runs, inert_paths/ })
 })
 
 // ---- R3: a repo override -----------------------------------------------------------------------------------
@@ -327,7 +329,7 @@ const REFUSALS = [
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
   ['an unknown key names all eight rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
-    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots, capacity_max, inert_paths, test_credentials, weight_mem_gb, weight_cores, unreachable_paths, test_logins\)/],
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots, capacity_max, overtime_runs, inert_paths, test_credentials, weight_mem_gb, weight_cores, unreachable_paths, test_logins\)/],
   ['verify_slots = 0', ['[defaults]', 'verify_slots = 0'], 2, /\[defaults\] verify_slots must be an integer >= 1, got 0/],
   ['verify_slots = true', ['[defaults]', 'verify_slots = true'], 2, /verify_slots must be an integer >= 1, got a boolean/],
   ['verify_slots = 1.5', ['[defaults]', 'verify_slots = 1.5'], 2, /verify_slots must be an integer >= 1, got a float/],
@@ -669,14 +671,14 @@ test('K2 an absent schema reads as 1, and an unknown key is refused as ever', (t
   const home = tmpHome(t)
   writeSettings(home, ['[defaults]', 'parallel_ceiling = 2'])
   const out = resolves(home)
-  assert.deepEqual(out.schema, { file: 1, engine: 7 })
+  assert.deepEqual(out.schema, { file: 1, engine: 8 })
   assert.deepEqual(out.ignored, [])
   writeSettings(home, ['[defaults]', 'foo_bar = 2'])
   refused(home, { line: 2, reason: /\[defaults\]: unknown key "foo_bar" \(a rollout table holds/ })
   writeSettings(home, ['schema = 1', '[defaults]', 'foo_bar = 2'])
   refused(home, { line: 3, reason: /\[defaults\]: unknown key "foo_bar"/ })
   const none = resolves(tmpHome(t))
-  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 7 }, []], 'no file: schema 1')
+  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 8 }, []], 'no file: schema 1')
 })
 
 test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (t) => {
@@ -687,41 +689,41 @@ test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (
   }
 })
 
-// p52-1 raised SCHEMA to 7, so the newer file in K4-K6 and K9 says schema = 8.
+// p39-14 raised SCHEMA to 8, so the newer file in K4-K6 and K9 says schema = 9.
 test('K4 under a schema above SCHEMA an unknown key is ignored and listed, at every scope', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 8', '', '[defaults]', 'merge_train = 3', 'parallel_ceiling = 3', '', '[guardrails]',
+  writeSettings(home, ['schema = 9', '', '[defaults]', 'merge_train = 3', 'parallel_ceiling = 3', '', '[guardrails]',
     'away_hours = 2', '', '[notify]', 'chorus_topic = "x"', '', '[away]', 'cap = 1', '', '[repo."o/r"]', 'merge_train = 1'])
   // [notify] is retired (ADR 0075 d2): skipped whole, so its unknown key is never read, nor listed as ignored.
   const out = tolerated(home)
   assert.deepEqual(out.ignored, ['away', 'defaults.merge_train', 'guardrails.away_hours', 'repo."o/r".merge_train'])
-  assert.deepEqual(out.schema, { file: 8, engine: 7 })
+  assert.deepEqual(out.schema, { file: 9, engine: 8 })
   expectValues(out, { parallel_ceiling: 3 }, { parallel_ceiling: 'file:defaults' })
 })
 
 test('K5 a near-miss by case or _/- is refused even under a newer schema', (t) => {
   for (const [table, key] of [['defaults', 'Parallel_Ceiling'], ['defaults', 'parallel-ceiling'], ['guardrails', 'quotastalls']]) {
     const home = tmpHome(t)
-    writeSettings(home, ['schema = 8', `[${table}]`, `${key} = 1`])
+    writeSettings(home, ['schema = 9', `[${table}]`, `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${escapeRe(key)}".*a near-miss of`) })
   }
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 8', '[Defaults]', 'parallel_ceiling = 1'])
+  writeSettings(home, ['schema = 9', '[Defaults]', 'parallel_ceiling = 1'])
   refused(home, { line: 2, reason: /unknown top-level key "Defaults".*a near-miss of "defaults"/ })
   // The retired [notify] stays a known top-level key, so its near-miss is still a typo under a newer schema.
   const home2 = tmpHome(t)
-  writeSettings(home2, ['schema = 8', '[notfy]', 'ntfy_topic = "x"'])
+  writeSettings(home2, ['schema = 9', '[notfy]', 'ntfy_topic = "x"'])
   refused(home2, { line: 2, reason: /unknown top-level key "notfy".*a near-miss of "notify"/ })
 })
 
 test('K6 a near-miss within OSA distance 2 is refused; a key three edits away is ignored', (t) => {
   for (const key of ['paralel_ceiling', 'parallel_cieling', 'max_iteratoins', 'max_review_round', 'verify_slot', 'inert_path', 'test_credential', 'weight_core']) {
     const home = tmpHome(t)
-    writeSettings(home, ['schema = 8', '[defaults]', `${key} = 1`])
+    writeSettings(home, ['schema = 9', '[defaults]', `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${key}".*a near-miss of`) })
   }
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 8', '[defaults]', 'max_iter = 1'])
+  writeSettings(home, ['schema = 9', '[defaults]', 'max_iter = 1'])
   assert.deepEqual(resolves(home).ignored, ['defaults.max_iter'])
 })
 
@@ -757,12 +759,12 @@ print(json.dumps(bad))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYT
 
 test('K9 the JSON carries schema {file, engine} and ignored, in process too', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 8', '[defaults]', 'later_key = 1'])
+  writeSettings(home, ['schema = 9', '[defaults]', 'later_key = 1'])
   const out = resolves(home)
   assert.deepEqual(Object.keys(out), OUT_KEYS)
-  assert.deepEqual([out.schema, out.ignored], [{ file: 8, engine: 7 }, ['defaults.later_key']])
+  assert.deepEqual([out.schema, out.ignored], [{ file: 9, engine: 8 }, ['defaults.later_key']])
   const inp = resolvedInProcess(home)
-  assert.deepEqual([inp.schema, inp.ignored], [{ file: 8, engine: 7 }, ['defaults.later_key']])
+  assert.deepEqual([inp.schema, inp.ignored], [{ file: 9, engine: 8 }, ['defaults.later_key']])
 })
 
 // K10's failure message is the add-a-key recipe (rollout-settings.py's header), the writer rule included.
@@ -771,7 +773,7 @@ const RECIPE = 'adding a key: bump SCHEMA; register the key in KEY_SCHEMA at the
   '`schema` line in the same edit (tune.py does: raise_schema(), KT1; a hand edit must)'
 const SCHEMA_1 = [
   ...['defaults', 'guardrails', 'notify', 'repo', 'schema'].map((k) => `top.${k}`),
-  ...SETTING_KEYS.filter((k) => k !== 'capacity_max').map((k) => `rollout.${k}`),   // capacity_max is schema 4
+  ...SETTING_KEYS.filter((k) => !['capacity_max', 'overtime_runs'].includes(k)).map((k) => `rollout.${k}`),   // schema 4 and 8
   ...GUARDRAIL_KEYS.map((k) => `guardrails.${k}`),
   'notify.ntfy_topic',   // retired by ADR 0075 d2, still registered: the schema-1 set is frozen
 ].sort()
@@ -804,7 +806,7 @@ test('K11 inert_paths in a repo table resolves as file:repo, outside settings; a
   assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.inert_paths, { value: ['THREAD.md', 'docs/handoffs/**'], source: 'file:repo' })
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'inert_paths is never a settings key')
-  assert.deepEqual(out.schema, { file: 2, engine: 7 })
+  assert.deepEqual(out.schema, { file: 2, engine: 8 })
   assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).inert_paths.value, ['THREAD.md', 'docs/handoffs/**'])
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).inert_paths, NO_INERT)
   assert.deepEqual(resolves(home).inert_paths, NO_INERT, 'no --repo: built-in []')
@@ -912,7 +914,7 @@ test('K13 the one-line class resolves as file:repo, in file order, outside setti
   assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.test_credentials, { value: CRED_VALUE, source: 'file:repo' })
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'test_credentials is never a settings key')
-  assert.deepEqual(out.schema, { file: 3, engine: 7 })
+  assert.deepEqual(out.schema, { file: 3, engine: 8 })
   assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).test_credentials.value, CRED_VALUE)
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).test_credentials, NO_CREDS)
   assert.deepEqual(resolves(home).test_credentials, NO_CREDS, 'no --repo: no class')
@@ -1022,7 +1024,7 @@ test('K15 test_logins under [defaults] resolves as file:defaults, outside settin
   assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.test_logins, { value: ['dummy', 'Probe-2'], source: 'file:defaults' })
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'test_logins is never a settings key')
-  assert.deepEqual(out.schema, { file: 5, engine: 7 })
+  assert.deepEqual(out.schema, { file: 5, engine: 8 })
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')]).test_logins.value, ['dummy', 'Probe-2'], 'machine-wide: a repo resolves it too')
   assert.deepEqual(resolvedInProcess(home).test_logins.value, ['dummy', 'Probe-2'])
   writeSettings(home, ['schema = 5', '[defaults]', 'parallel_ceiling = 3'])
@@ -1089,7 +1091,7 @@ test('K17 weight resolves from a repo table as file:repo, outside settings; anot
   assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.weight, { mem_gb: { value: 8, source: 'file:repo' }, cores: { value: 4, source: 'file:repo' } })
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'the weight keys are never settings keys')
-  assert.deepEqual(out.schema, { file: 6, engine: 7 })
+  assert.deepEqual(out.schema, { file: 6, engine: 8 })
   assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).weight, out.weight, 'in process too')
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).weight, BUILT_IN_WEIGHT)
   assert.deepEqual(resolves(home).weight, BUILT_IN_WEIGHT, 'no --repo: the built-in')
@@ -1148,7 +1150,7 @@ test('K19 unreachable_paths resolves from a repo table as file:repo, outside set
   assert.deepEqual(out.unreachable_paths, { value: ['skills/codex/**', 'Apps/**/*.swift'], source: 'file:repo' })
   assert.deepEqual(out.inert_paths, { value: ['THREAD.md'], source: 'file:repo' }, 'the two lists stay apart')
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'unreachable_paths is never a settings key')
-  assert.deepEqual(out.schema, { file: 7, engine: 7 })
+  assert.deepEqual(out.schema, { file: 7, engine: 8 })
   assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).unreachable_paths, out.unreachable_paths, 'in process too')
   assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).unreachable_paths, NO_UNREACHABLE)
   assert.deepEqual(resolves(home).unreachable_paths, NO_UNREACHABLE, 'no --repo: built-in []')
@@ -1170,4 +1172,38 @@ test('K19 refused: unreachable_paths under [defaults], in a schema-6 file, a glo
     writeSettings(home, lines)
     refused(home, { line, reason })
   }
+})
+
+// ---- K20: overtime_runs, the first schema-8 key (p39-14, ADR 0070 d8) ----------------------------------------------------
+// A set-aside task's Overtime: the runs it takes by itself once its normal budget is spent, before it is taken out. An
+// integer >= 0 (0: no Overtime), built-in 3, in `settings`, per repo or [defaults], a Tuning key (TUNING_KEYS).
+test('K20 overtime_runs resolves per repo and in [defaults], 0 included; -1, a bool and a string are refused; schema 7 is refused', (t) => {
+  const home = tmpHome(t)
+  assert.deepEqual(resolves(home).settings.overtime_runs, { value: 3, source: 'built-in' })
+  writeSettings(home, ['schema = 8', '', '[defaults]', 'overtime_runs = 0', '', '[repo."o/r"]', 'overtime_runs = 5'])
+  expectValues(resolves(home), { overtime_runs: 0 }, { overtime_runs: 'file:defaults' })
+  expectValues(resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')]), { overtime_runs: 5 }, { overtime_runs: 'file:repo' })
+  for (const [v, what] of [['-1', 'got -1'], ['true', 'got a boolean'], ['"3"', 'got a string']]) {
+    writeSettings(home, ['schema = 8', '', '[defaults]', `overtime_runs = ${v}`])
+    refused(home, { line: 4, reason: new RegExp(`\\[defaults\\] overtime_runs must be an integer >= 0, ${what}`) })
+  }
+  writeSettings(home, ['schema = 7', '', '[defaults]', 'overtime_runs = 2'])
+  refused(home, { line: 4, reason: /rollout\.overtime_runs is a schema-8 key but the file says schema = 7: raise the file's top-level `schema` line to 8/ })
+  const tk = spawnSync('python3', ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(list(m.TUNING_KEYS)))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.ok(JSON.parse(tk.stdout).includes('overtime_runs'), 'overtime_runs is a Tuning key (ADR 0070 d8)')
+})
+
+test('K20 an older reader (schema 7, patched) ignores defaults.overtime_runs under a schema-8 file and resolves the rest', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 8', '', '[defaults]', 'max_iterations = 2', 'overtime_runs = 1'])
+  const older = 'm.SCHEMA = 7; del m.KEY_SCHEMA[("rollout", "overtime_runs")]; ' +
+    'm.SETTING_KEYS = tuple(k for k in m.SETTING_KEYS if k != "overtime_runs")'
+  const r = inProcess(home, older)
+  assert.equal(r.status, 0, r.err)
+  assert.deepEqual(r.out.ignored, ['defaults.overtime_runs'])
+  assert.deepEqual(r.out.schema, { file: 8, engine: 7 })
+  assert.equal(r.out.settings.max_iterations.value, 2)
+  assert.deepEqual(resolves(home).ignored, [], 'control: the schema-8 reader knows the key')
 })
