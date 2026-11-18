@@ -864,6 +864,7 @@ case "$out" in *"filed [[proj-followup-felt-check]] (fixes: [[proj-p2-2-i]])"*) 
 check "FC7: the failed line names the fix" "failed: the panel never opens (Lachy) -> [[proj-followup-felt-check]]" "$FC/proj-p2-2-i.md"
 check "FC7: the fix carries fixes:" 'fixes: ["[[proj-p2-2-i]]"]' "$FC/proj-followup-felt-check.md"
 check "FC7: priority high" "priority: high" "$FC/proj-followup-felt-check.md"
+fcok "$(sed -n '2,/^---$/p' "$FC/proj-followup-felt-check.md" | grep -cx 'unreachable: true')" 1 "FC7: the fix is stamped unreachable: true in its frontmatter (the same surface)"
 check "FC7: projects copied" '  - "[[Proj]]"' "$FC/proj-followup-felt-check.md"
 check "FC7: his words quoted" "> the panel never opens" "$FC/proj-followup-felt-check.md"
 evafter=$(cd "$THREAD_EVENTS_DIR" 2>/dev/null && find . -type f -exec shasum {} \; | sort | shasum)

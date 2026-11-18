@@ -1143,7 +1143,8 @@ Subcommands:
               not a carried fix. --passed appends `- <stamp> passed: <text> (Lachy)`, and on a carried fix the Proof log
               line `- <stamp> felt check passed: <text> (Lachy)`, which prove reads on its next run. --failed first files
               the fix, `<project>-followup-felt-check` (then `-2`, `-3`… until the stem is free in the walk index, an
-              exclusive create) in _new_task_fm's shape, priority high, `fixes: ["[[<slug>]]"]`, his words under ##
+              exclusive create) in _new_task_fm's shape, priority high, `fixes: ["[[<slug>]]"]`, `unreachable: true`
+              (the same surface: its review is doubled and its approval opens its own Felt check), his words under ##
               Notes, then appends `- <stamp> failed: <text> (Lachy) -> [[<fix>]]` (a save that fails removes the fix
               it filed). --list prints _felt_checks' rows (`open`, and `again` for a carried fix whose failed check's fix
               is due, dropped or not found), --rollout keeping the notes whose `rollout:` names it. Guard-exempt (the
@@ -19390,8 +19391,10 @@ def _felt_text(raw):
 
 def _write_felt_fix(path, note, slug, text, now):
     """File a failed Felt check's fix: _new_task_fm's shape (projects copied, priority high), `fixes:` naming the
-    task, his words quoted under ## Notes. Exclusive: an existing file is never overwritten (FileExistsError)."""
-    lines = [*_new_task_fm(note, now, "high", [f'fixes: ["[[{slug}]]"]']), "",
+    task, `unreachable: true` (it touches the same surface by definition, so mark-started passes the stamp, its master
+    review is doubled and its approval writes its own open Felt check, whatever its planner or the repo's path list
+    says), his words quoted under ## Notes. Exclusive: an existing file is never overwritten (FileExistsError)."""
+    lines = [*_new_task_fm(note, now, "high", [f'fixes: ["[[{slug}]]"]', f"{UNREACHABLE_KEY}: true"]), "",
              f"# Fix [[{slug}]]: its Felt check failed", "", "## Notes", "",
              f"Lachy tried [[{slug}]] by hand on {now.astimezone().date().isoformat()} (its Felt check, ADR 0081) and it "
              "failed. His words:", "", f"> {text}", "",

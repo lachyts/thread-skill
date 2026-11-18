@@ -1822,8 +1822,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Carried fix** until his Felt check, the evidence that proves it, makes it
   **Proven** (ADR 0078, ADR 0081): an open or failed check holds the fix, and
   only a later passed one moves it. A check that fails files a fix of the
-  landed task (`fixes:`), as an Escape is counted. _Avoid_: sign-off (that is
-  a gate), QA.
+  landed task (`fixes:`), as an Escape is counted, marked an **Unreachable
+  surface** at filing (the same surface), so it takes a doubled review and a
+  Felt check of its own. _Avoid_: sign-off (that is a gate), QA.
 
 ## Run record and tuning
 

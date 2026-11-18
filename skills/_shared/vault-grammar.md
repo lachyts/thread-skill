@@ -310,7 +310,9 @@ decides (`_felt_state`):
   passed: <his words> (Lachy)` under `## Proof log`;
 - `- <stamp> failed: <his words> (Lachy) -> [[<fix>]]`: `felt-check --failed`, after it files the fix
   (`<project>-followup-felt-check`, then `-2`, `-3`…, priority high, `fixes: ["[[<slug>]]"]`, his words under `## Notes`):
-  how an Escape is already counted.
+  how an Escape is already counted. The fix is stamped `unreachable: true` at filing: it touches the same surface by
+  definition, so its master review is doubled and its approval writes its own open line, whatever its planner, its
+  implementer or the repo's `unreachable_paths` say. A failed check closed for good is re-checked through its fix.
 
 **Due.** A check is due once the work is on his machine: the task is landed (`_landed`), and a carried fix is Live
 (`live:` valued, which prove stamps from the Primary refresh's live file): `_felt_due`. `felt-check` refuses one not due
