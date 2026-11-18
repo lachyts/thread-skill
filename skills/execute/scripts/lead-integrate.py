@@ -3427,7 +3427,7 @@ def _settings_verdict(note, out, sblock, first, used, n, last_at, now, no, fix, 
         return out
     if not rr._same_stop(note):
         if used != n:
-            return None           # budget left: today's cool-down retry; one past it: 24's H10
+            return None           # budget left: today's cool-down retry; one past it: 24's Overtime, then the take-out
         # The first sighting with the budget spent exactly: its one cool-down retry, free of the budget (the verb takes
         # the counter one past it, as 22a's re-entry does, so this is given once).
         refused = cooling(rr.INFRA_COOLDOWN_MIN[0])

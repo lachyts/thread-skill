@@ -299,12 +299,13 @@ Subcommands:
               Lachy answers, "retry [[task]]", the lead after a descope's exit 0) starts a fresh automatic-retry
               stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and re-stamps
               `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition;
-              removed when that block has none), so an identical re-block goes straight back to a human. Its
-              stdout is unchanged. Every hand-back that moves a note spends its live answers in the same save (ADR
-              0035): each `## Repair input` key `(block <fp>)`, `(block <fp>; awaiting repair)` or `(block <fp>;
-              left)` becomes `(block <fp>; handed back <now>)`, so no bare hand-back leaves a live answer behind (an
-              identical re-block writes no run, so it would otherwise re-arm the lead's *Recorded answer*); a refused
-              hand-back spends nothing. `--answer <stamp>` takes one slug (else usage, exit 2) and is a
+              removed when that block has none), so an identical re-block is taken out at once (the verdict's
+              same-feedback take-out, p39-14, ADR 0070), never re-entered. Its stdout is unchanged. Every
+              hand-back that moves a note spends its live answers in the same save (ADR 0035): each `## Repair
+              input` key `(block <fp>)`, `(block <fp>; awaiting repair)` or `(block <fp>; left)` becomes `(block
+              <fp>; handed back <now>)`, so no bare hand-back leaves a live answer behind (an identical re-block
+              writes no run, so it would otherwise re-arm the lead's *Recorded answer*); a refused hand-back spends
+              nothing. `--answer <stamp>` takes one slug (else usage, exit 2) and is a
               compare-and-swap: unless the note is set aside and its answerRecorded (`inputs`) has exactly that stamp
               and form `hand-back`, exit 1 with `ERROR: hand-back: <slug>: the answer of <stamp> is spent, superseded,
               not a hand-back answer or no longer this block's; nothing written`, so the lead and repair never both
@@ -9232,9 +9233,10 @@ def cmd_hand_back(args) -> int:
     line. The explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope) starts a
     fresh automatic-retry stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and
     re-stamps `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition; removed
-    when that block has none), so an identical re-block goes straight back to a human. Every hand-back that moves a
-    note spends its live answers in the same save (_spend_answers, ADR 0035), so no bare hand-back leaves one behind
-    to re-arm the lead's *Recorded answer* on an identical re-block; a refused hand-back spends nothing.
+    when that block has none), so an identical re-block is taken out at once (the verdict's same-feedback take-out,
+    p39-14, ADR 0070), never re-entered. Every hand-back that moves a note spends its live answers in the same save
+    (_spend_answers, ADR 0035), so no bare hand-back leaves one behind to re-arm the lead's *Recorded answer* on an
+    identical re-block; a refused hand-back spends nothing.
     `--answer <stamp>` (one slug only, else usage exit 2) is a compare-and-swap: the note must still be set aside with
     `answerRecorded` at exactly that stamp and form `hand-back`, else exit 1 and nothing written, so the lead and
     repair never both hand back on one answer, and never hand back a new block on an old one."""
@@ -14750,7 +14752,7 @@ def cmd_carry(args) -> int:
         lane_held = _holds_lane(note)  # before `integrating:` goes
         note.set("rollout", f'"[[{dst.stem}]]"')
         # The automatic-retry counters start afresh in the new rollout; auto_retry_sha stays, so a block identical to
-        # the one last re-entered still goes to a human (p16-4, ADR 0033).
+        # the one last re-entered is still taken out at once (p16-4, ADR 0033; the same-feedback take-out, ADR 0070).
         for key in ("owner", "integrating", "wave", AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY):
             note.remove(key)
         if plan["rung"] == "top":

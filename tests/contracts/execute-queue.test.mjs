@@ -158,7 +158,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     fails.push('slots')
   }
 
-  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back;
+  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked are never launched
+  // here: a spent budget is the Automatic retry's Overtime, then the take-out (ADR 0070), and only a non-null humanFix
+  // waits for hand-back;
   // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing; an
   // answered entry (ADR 0035's answerRecorded) is skipped: the answer's route moves it.
   if (!s2sub || !s2sub.text.includes('Launch one only when it reports `autoRevise: true`') ||
@@ -166,7 +168,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !s2sub.text.includes('--max-review-rounds') ||
     !s2sub.text.includes("resume: {stage: 'revise', prUrl: <inputs.prUrl>,") ||
     !s2sub.text.includes('A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing') ||
-    !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: it waits for `hand-back`/.test(s2sub.text)) {
+    !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: its spent budget is the \*Automatic retry\*'s below[^.]*then the take-out \(ADR 0070\), never asked; only one whose `inputs` reads a non-null `humanFix`[^;.]*waits for `hand-back`/.test(s2sub.text)) {
     fails.push('auto-revise')
   }
 
