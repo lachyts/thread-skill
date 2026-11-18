@@ -322,8 +322,8 @@ clear-halt, restarted, copies, land):
       (change_of, stray_of, the copies' rev-list) take git()'s 120 s per call, outside it. A call the tool cuts wrote
       nothing (its writes are all under the lock, after the scans), and the next call sweeps its scratch tree.
   post-items                                 (read-only, no lock)
-      The `## Post-rollout` items (the top-level `- ` lines after `Rollout-specific items go here:`), indexed from
-      1, each with its pointer (`→ [[f]]`) or null.
+      The `## Post-rollout` items (the top-level `- ` and numbered `1. ` lines after `Rollout-specific items go
+      here:`), indexed from 1, each with its pointer (`→ [[f]]`) or null.
   file-followup --title <t> --why <w> [--item <k>]
       A loose open task (follow-on frontmatter: tags, status open, priority, work_depth, projects copied from the
       rollout, contexts, scheduled, due, captured; never rollout:, phase: or owner:), named
@@ -797,6 +797,10 @@ COMPLETION_LOG = "## Completion log"
 POST_ROLLOUT = "## Post-rollout"
 QUEUE = "## Queue"
 ITEMS_MARK = "Rollout-specific items go here:"
+# A top-level Post-rollout item: a `- ` or `* ` bullet, or an ordered-list line (`1. `, `1) `); an indented line is
+# an item's own note, never an item. A numbered line counts only below ITEMS_MARK: above it are the ceremony's own
+# numbered steps, which a note without the mark would otherwise read as items.
+POST_ITEM = re.compile(r"^(?:[-*]|\d+[.)]) +(.*)$")
 BLOCKER = "## Blocker diagnosis"
 GATES_PENDING = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES = "## Approved gates"
@@ -3718,8 +3722,9 @@ def post_items(note):
     lo = (mark + 1) if mark is not None else start + 1
     items = []
     for k in range(lo, end):
-        if re.match(r"^[-*] ", lines[k]):
-            text = lines[k][2:].strip()
+        m = POST_ITEM.match(lines[k])
+        if m and (mark is not None or lines[k][0] in "-*"):
+            text = m.group(1).strip()
             pm = re.search(r"→ \[\[([^\]|]+)", text)
             items.append({"k": len(items) + 1, "line": k, "text": text, "pointer": pm.group(1) if pm else None})
     return items

@@ -7,6 +7,7 @@
 #        land.sh's other routes, swept, register-listed and a non-default branch, are tests/land.test.sh's); done's
 #        leg_head stamp (L1, L1v, L1h: each checkout's newest trailered commit of the task, never a peer's HEAD, [] when
 #        it committed nowhere, none with no leg_base)
+#   L1n  post-items reads a numbered item below the items mark, never a nested line or a ceremony step (P36-16)
 #   L1cv a serial chain's completion verify at Complete (ADR 0055): close refuses it undecided, writes its summary
 #        line, puts a red's fix task in the vault commit, refuses a bare YAML boolean, and leaves a note without the
 #        key byte-for-byte as before (completion-verify's own read of those values is
@@ -230,6 +231,18 @@ for v in "handed --started task_q" "smoke --task t1 --result pass" "clear-halt -
 done
 cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L1: … and the archived note stays byte-identical"
 ok "$(find "$T" -name '.*.tmp' | wc -l | tr -d ' ')" 0 "L1: no temp file is left under Work/Tasks"
+
+# ════ L1n: a numbered Post-rollout item is an item too (P36-16) ═══════════════════════════════════════════════════
+scen l1n
+mkro $'- → [[demo-followup-x]]: a pointer\n1. Performer-alias tracking v2\n   - a nested note, not an item\n2) Another numbered item' \
+  $(rows cc-demo "$F" '`ext:x`' t1); mkt t1
+leg post-items
+ok "$rc|$(q 'len(d["items"])')|$(q '"|".join(i["text"] for i in d["items"])')|$(q '[i["pointer"] for i in d["items"]]')" \
+   "0|3|→ [[demo-followup-x]]: a pointer|Performer-alias tracking v2|Another numbered item|['demo-followup-x', None, None]" \
+   "L1n: post-items reads the - bullet and both numbered lines, never the nested one"
+subst "$T/$RO.md" $'Rollout-specific items go here:\n' ''; leg post-items
+ok "$(q '"|".join(i["text"] for i in d["items"])')" "→ [[demo-followup-x]]: a pointer" \
+   "L1n: without the items mark a numbered line (the ceremony's own steps) is no item"
 
 
 # ════ L1v: the routed land follow-on at Complete, and its controls ═════════════════════════════════════════════════
