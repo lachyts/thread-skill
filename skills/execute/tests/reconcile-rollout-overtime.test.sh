@@ -231,10 +231,213 @@ planblock "$A" "Round 1: the plan misses the migration step" 2026-10-03T08:10:00
 I=$(inp "$A")
 ok "$(j "$I" '[d["autoRetry"], d["humanFix"], d["takeOut"]["cause"], d["autoRetriesUsed"], d["takeOut"]["overtimeUsed"]]')" \
   '[false,null,"same-feedback",1,0]' "O2: the same feedback with budget left reads takeOut same-feedback, no humanFix"
+ok "$(j "$(inp "$A" --max-review-rounds 9)" '[d["takeOut"], d["humanFix"]]')" '[null,null]' "O9: an overlay mismatch clears takeOut"
 tko "$A"
 ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|$A: taken out after 0 Overtime runs (same-feedback) → open [written]" "O2: taken out at once"
 ok "$(evs take-out '[d["task"], d["cause"], d["stage"]]')" "[\"$A\",\"same-feedback\",\"plan\"]" "O2: its event"
 ok "$(grep -c 'pr close' "$D/gh.log" 2>/dev/null || echo 0)" 0 "O2: no PR, no gh close"
+
+# ── O3: his decisions stay his, the budget spent or not: no Overtime and no take-out under them ───────────────────
+# vt <label> <expected act>: the read in I carries that humanFix act and neither overtime nor takeOut
+vt() { ok "$(j "$I" '[d["humanFix"]["act"] if d["humanFix"] else None, d["overtime"], d["takeOut"]]')" "[\"$2\",null,null]" "O3 $1: $2, no Overtime, no take-out"; }
+scen o3-gate
+mkro; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2"; mkt "$B" open
+rec "$(row "$A" gate-pending "" '{"gatedInputs":["spend: x — cap USD 1"]}')"
+I=$(inp "$A"); vt gate "sign off gated input"
+scen o3-question
+mkro; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2"; mkt "$B" open
+rec "$(row "$A" blocked "the feedback" '{"needsHuman":"Which API key?"}')"
+I=$(inp "$A"); vt question "answer the question"
+scen o3-same-stop
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+KILL="merge-task signalled twice (143): last wait: PR #5 — required checks not created yet; CI in flight on head — waiting on: build (in_progress)"
+lead "$A" integration "$KILL"
+ANOW=2026-10-03T08:15:00Z ar "$A"
+python3 "$SCRIPT" mark-integrating --tasks "$A" --tasks-dir "$D" --now 2026-10-03T08:20:00Z >/dev/null 2>&1
+lead "$A" integration "$KILL" 2026-10-03T08:30:00Z
+I=$(INOW=2026-10-03T09:30:00Z inp "$A"); vt "same stop (cause 23)" "hand back or defer"
+has "$(j "$I" 'd["autoRetryWhy"]')" "same stop twice running at Integration" "O3 same stop: its why"
+setfm "$A" auto_retries 0
+I=$(INOW=2026-10-03T09:30:00Z inp "$A"); vt "auto_retries 0 at the same stop" "hand back or defer"
+ok "$(j "$I" 'd["autoRetryWhy"]')" "auto_retries is 0: automatic retries are off" "O3 auto_retries 0 at the same stop: decision 4's stop keeps cause 18's H10"
+scen o3-left
+mkro; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2"; mkt "$B" open
+planblock "$A" "Round 1: the plan misses the migration step"
+ok "$(j "$(inp "$A")" 'd["overtime"]["used"]')" 0 "O3 left: (an Overtime run before the answer)"
+FP=$(j "$(inp "$A")" 'd["fingerprint"]')
+python3 "$SCRIPT" record-answer --tasks "$A" --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" --kind decision --ask x \
+  --answer "leave it" --fingerprint "$FP" --form left >/dev/null 2>&1
+I=$(inp "$A"); vt "a left answer" "hand back or defer"
+has "$(j "$I" 'd["humanFix"]["detail"]')" "left on your answer of $S_NOW" "O3 left: his answer keeps it"
+
+# ── O4: budget edges ────────────────────────────────────────────────────────────────────────────────────────────
+scen o4
+mkro; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2" "overtime_runs: 0"; mkt "$B" open
+planblock "$A" "Round 1: the plan misses the migration step"
+ok "$(j "$(inp "$A")" '[d["humanFix"], d["overtime"], d["takeOut"]["cause"], d["takeOut"]["overtimeBudget"]]')" '[null,null,"spent",0]' \
+  "O4: overtime_runs 0 → a take-out at the budget point"
+setfm "$A" overtime_runs 3; setfm "$A" auto_retries 0; setfm "$A" auto_retries_used 0
+ok "$(j "$(inp "$A")" '[d["humanFix"], d["takeOut"]["cause"], d["autoRetryWhy"]]')" \
+  '[null,"no-overtime","auto_retries is 0: automatic retries are off, so no Overtime: the lead takes it out"]' "O4: auto_retries 0 → a take-out at once"
+for k in "overtime_used:x" "auto_retries_used:-1" "auto_retry_at:yesterday"; do
+  setfm "$A" "${k%%:*}" "${k#*:}"
+  ok "$(j "$(inp "$A")" '[d["humanFix"]["act"], d["takeOut"], d["autoRetryWhy"]]')" "[\"hand back or defer\",null,\"malformed ${k%%:*}: '${k#*:}' (fails closed)\"]" \
+    "O4: a malformed ${k%%:*} fails closed to H10 under auto_retries 0, never a take-out"
+  setfm "$A" "${k%%:*}" 0; [ "${k%%:*}" = auto_retry_at ] && setfm "$A" auto_retry_at 2026-10-03T07:00+00:00
+done
+mkt "$C" plan-blocked "auto_retries: 0"
+ok "$(j "$(inp "$C")" '[d["humanFix"]["act"], d["takeOut"], d["autoRetryWhy"]]')" \
+  '["hand back or defer",null,"no feedback fingerprint: the block recorded no feedback"]' "O4: no fingerprint fails closed to H10, never a take-out"
+setfm "$A" overtime_runs x
+ok "$(j "$(inp "$A")" '[d["humanFix"]["act"], d["autoRetryError"]]')" \
+  "[\"fix the round budget\",\"overtime_runs on [[$A]] must be an integer >= 0, got 'x'\"]" "O4: an invalid overtime_runs stamp is H12"
+
+# ── O5: infra and quota Overtime cool down 240 and 480 minutes, then are taken out ─────────────────────────────────
+scen o5-infra
+mkro; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2" "overtime_runs: 1"; mkt "$B" open
+planblock "$A" "$TRANSIENT"
+ok "$(j "$(INOW=2026-10-03T11:59:00Z inp "$A")" '[d["autoRetry"], d["autoRetryAfter"], d["overtime"], d["humanFix"]]')" '[false,"2026-10-03T12:00+00:00",null,null]' \
+  "O5 infra: past its budget it cools 240 minutes (INFRA_COOLDOWN_MIN[-1])"
+ok "$(j "$(INOW=2026-10-03T12:00:00Z inp "$A")" '[d["autoRetry"], d["overtime"]["used"], d["overtime"]["raise"]]')" '[true,0,null]' \
+  "O5 infra: then an Overtime run, no raise (a transient spends no cap)"
+ANOW=2026-10-03T12:00:00Z ar "$A"
+ok "$rc|$(fm "$A" overtime_used)" "0|overtime_used: 1" "O5 infra: the Overtime re-entry"
+ms "$A" 2026-10-03T12:01:00Z; planblock "$A" "$TRANSIENT" 2026-10-03T12:10:00Z
+ok "$(j "$(INOW=2026-10-03T12:10:00Z inp "$A")" '[d["autoRetryAfter"], d["takeOut"]["cause"], d["humanFix"]]')" '[null,"spent",null]' \
+  "O5 infra: the Overtime spent → a take-out, no cool-down to wait"
+scen o5-quota
+mkro; mkt "$A" in_progress "owner: execute-test" "quota_retries_used: 5" "overtime_runs: 1"; mkt "$B" open
+lead "$A" own "workflow call failed: API Error: usage limit reached" 2026-10-03T10:00:00Z
+ok "$(j "$(INOW=2026-10-03T17:59:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetryAfter"], d["humanFix"]]')" '["quota","2026-10-03T18:00+00:00",null]' \
+  "O5 quota: past its five free retries it cools 480 minutes"
+ANOW=2026-10-03T18:00:00Z ar "$A"
+ok "$rc|$(fm "$A" overtime_used)|$(fm "$A" quota_retries_used)|$(printf '%s' "$out" | cut -d' ' -f2-4)" "0|overtime_used: 1|quota_retries_used: 5|auto-retry overtime 1/1" \
+  "O5 quota: an Overtime run, the quota counter untouched"
+setfm "$A" status in_progress; ms "$A" 2026-10-03T18:01:00Z
+lead "$A" own "workflow call failed: API Error: usage limit reached" 2026-10-03T18:10:00Z
+ok "$(j "$(INOW=2026-10-04T08:00:00Z inp "$A")" '[d["takeOut"]["cause"], d["humanFix"]]')" '["spent",null]' "O5 quota: then a take-out"
+
+# ── O6: the markers' lifetimes ────────────────────────────────────────────────────────────────────────────────
+scen o6
+mkro; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2" "max_iterations: 2"; mkt "$B" open
+blk "$A" "the implementer could not make the migration test pass"
+ok "$(j "$(inp "$A")" 'd["overtime"]["raise"]')" '{"field":"max_iterations","to":3}' "O6: (an own blocker raises max_iterations)"
+ar "$A"
+ok "$(fm "$A" overtime_used)|$(fm "$A" auto_retry_raised)|$(fm "$A" max_iterations)" "overtime_used: 1|auto_retry_raised: max_iterations=2|max_iterations: 3" \
+  "O6: the raise records the stamp it replaced"
+ms "$A"; blk "$A" "the implementer still could not make it pass" 2026-10-03T08:10:00Z
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
+ok "$(fm "$A" overtime_used)|$(fm "$A" auto_retry_raised)|$(fm "$A" auto_retries_used)" "overtime_used: 1|auto_retry_raised: max_iterations=2|<none>" \
+  "O6: hand-back gives back the normal budget and keeps the Overtime's markers"
+mkro "paused: 2026-10-03T08:00+00:00"
+setfm "$A" status blocked; setfm "$A" owner execute-test
+{ printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nsupersedes: "[[%s]]"\n---\n\n## Queue\n' "$RO"; } > "$D/proj-rollout-2026-10-04.md"
+python3 "$SCRIPT" carry --from "$D/$RO.md" --to "$D/proj-rollout-2026-10-04.md" --tasks-dir "$D" >/dev/null 2>&1
+ok "$(fm "$A" overtime_used)|$(fm "$A" auto_retry_raised)" "overtime_used: 1|auto_retry_raised: max_iterations=2" "O6: carry keeps them"
+setfm "$A" taken_out 1
+python3 "$SCRIPT" defer --tasks "$A" --tasks-dir "$D" >/dev/null 2>&1
+ok "$(fm "$A" overtime_used)|$(fm "$A" auto_retry_raised)|$(fm "$A" max_iterations)|$(fm "$A" taken_out)" \
+  "<none>|<none>|max_iterations: 3|taken_out: 1" "O6: a plain defer clears both, leaves the raised cap as it stands, and keeps taken_out"
+
+# ── O7: the take-out's exits and its recovery ───────────────────────────────────────────────────────────────────
+# o7 <name> [A's extra frontmatter...]: A set aside with a take-out pending at once (auto_retries 0), B its queued
+# dependant, C done; the rollout started (A's owner).
+o7() {
+  local n="$1"; shift
+  scen "o7-$n"; mkro
+  mkt "$A" in_progress "owner: execute-test" "auto_retries: 0" "$@"
+  mkt "$B" open 'depends-on: ["[[proj-p1-1-a]]"]'
+  mkt "$C" done
+  planblock "$A" "Round 1: the plan misses the migration step"
+  FP=$(j "$(inp "$A")" 'd["fingerprint"]')
+}
+failed_lines() { sec "$RO" '## Notes' | grep -c "take-out failed: \[\[$A\]\]"; }
+# (a) a running dependant: the take-out waits, and `moving` never counts the task as W
+o7 a
+setfm "$B" status in_progress; setfm "$B" owner execute-test
+before=$(snap); tko "$A"
+ok "$rc|$out|$(snap)" "3|$A: take-out waits: [[$B]] is running [no-change]|$before" "O7a: a running dependant → exit 3, nothing written"
+ok "$(j "$(mov)" 'd["work"]["reentry"]')" '[]' "O7a: moving: the task is no W (its running dependant is)"
+setfm "$B" status open; setfm "$B" owner ""
+ok "$(j "$(mov)" 'd["work"]["reentry"]')" "[\"$A\"]" "O7a: (control) with B queued the take-out is the lead's W"
+# (b) crash states, each built from a finished take-out, re-run to completion with nothing twice
+o7 b; cp "$D/$A.md" "$TMP/o7b-a.md"; cp "$D/$B.md" "$TMP/o7b-b.md"; cp "$D/$RO.md" "$TMP/o7b-ro.md"
+tko "$A"; ok "$rc" 0 "O7b: (the reference take-out)"
+cp "$D/$RO.md" "$TMP/o7b-ro-done.md"; cp "$THREAD_EVENTS_DIR/$RO.jsonl" "$TMP/o7b-ev.jsonl"
+dropev() { python3 -c 'import json,sys
+p, task = sys.argv[1:]
+keep = [l for l in open(p) if not (json.loads(l)["kind"] == "take-out" and json.loads(l)["task"] == task)]
+open(p, "w").write("".join(keep))' "$THREAD_EVENTS_DIR/$RO.jsonl" "$1"; }
+tlines() { sec "$RO" '## Notes' | grep -c ' take-out: '; }
+tevs() { evs take-out 'd["task"]' | tr ' ' '\n' | grep -c "$1"; }
+#   (i) the rollout note saved, no member yet
+cp "$TMP/o7b-a.md" "$D/$A.md"; cp "$TMP/o7b-b.md" "$D/$B.md"; cp "$TMP/o7b-ro-done.md" "$D/$RO.md"; rm -f "$THREAD_EVENTS_DIR/$RO.jsonl"
+tko "$A"
+ok "$rc|$(tlines)|$(fm "$A" status)|$(fm "$B" status)|$(tevs "$A")|$(tevs "$B")" "0|2|status: open|status: open|1|1" "O7b (i): both taken out, no second Notes line"
+#   (ii) the dependant deferred with its event, the task untouched
+cp "$TMP/o7b-a.md" "$D/$A.md"; cp "$TMP/o7b-ev.jsonl" "$THREAD_EVENTS_DIR/$RO.jsonl"; dropev "$A"; cp "$TMP/o7b-ro-done.md" "$D/$RO.md"
+tko "$A"
+ok "$rc|$(tlines)|$(fm "$A" taken_out)|$(tevs "$A")|$(tevs "$B")" "0|2|taken_out: 1|1|1" "O7b (ii): the task finished, the dependant's event not emitted again"
+#   (iii) the task's event written, its save not
+cp "$TMP/o7b-a.md" "$D/$A.md"; cp "$TMP/o7b-ev.jsonl" "$THREAD_EVENTS_DIR/$RO.jsonl"
+tko "$A"
+ok "$rc|$(fm "$A" status)|$(fm "$A" taken_out)|$(tevs "$A")" "0|status: open|taken_out: 1|1" "O7b (iii): the task saved, no second event"
+#   (iv) all done but the task's event: [no-change], the event written, nothing bumped
+dropev "$A"
+tko "$A"
+ok "$rc|$out|$(fm "$A" taken_out)|$(tevs "$A")|$(tevs "$B")" "0|$A: already taken out of [[$RO]] [no-change]|taken_out: 1|1|1" \
+  "O7b (iv): [no-change], the missing event written"
+ok "$(evs take-out '[d["task"], d["cause"], d.get("stage"), d.get("overtimeUsed")]' | tr ' ' '\n' | grep "$A")" "[\"$A\",\"no-overtime\",\"plan\",0]" \
+  "O7b (iv): its fields read back from the Notes line"
+# (c) the task's PR merged into the default branch: exit 4, one failure line, a cool-down; `resume` lands it
+o7 c "pr: $PR"
+echo MERGED > "$D/gh-state"
+tko "$A"
+ok "$rc|$(failed_lines)|$(fm "$A" status)" "4|1|status: plan-blocked" "O7c: a merged PR → exit 4, one take-out failed: line, the task untouched"
+ok "$(sec "$RO" '## Notes' | grep 'take-out failed')" "- $S_NOW take-out failed: [[$A]] ([[$A]]'s PR merged into main: resume lands it; feedback $FP)" "O7c: the line"
+ok "$(j "$(INOW=2026-10-03T09:05:00Z inp "$A")" '[d["takeOut"]["failures"], d["autoRetryAfter"], d["humanFix"]]')" '[1,"2026-10-03T09:15+00:00",null]' \
+  "O7c: the verdict cools the take-out 15 minutes"
+ok "$(j "$(MNOW=2026-10-03T09:05:00Z mov)" '[d["verdict"], d["cause"], d["reason"]]')" \
+  "[\"waiting\",\"cool-down\",\"take-out cool-down: [[$A]] retries at 2026-10-03T09:15+00:00\"]" "O7c: moving reads the take-out's cool-down, not W"
+python3 "$SCRIPT" resume --rollout "$D/$RO.md" --tasks-dir "$D" --gh-bin "$GH" --now "$NOW" >/dev/null 2>&1
+ok "$(fm "$A" status)|$(j "$(inp "$A")" 'd["takeOut"]')" "status: done|null" "O7c: resume lands it, and no take-out remains"
+# (d) a failing `gh pr close`: each failure one line and a cool-down, the third Lachy's H10; then repair's run finishes it
+o7 d "pr: $PR"
+echo "pr close" > "$D/gh-fail"
+cp "$D/$A.md" "$TMP/o7d-a.md"
+tko "$A"
+ok "$rc|$(failed_lines)|$(cmp -s "$D/$A.md" "$TMP/o7d-a.md" && echo same)|$(fm "$B" status)" "1|1|same|status: open" \
+  "O7d: exit 1, one failure line, the task notes unwritten"
+has "$out" "gh pr close $PR failed: gh: HTTP 502: Bad Gateway" "O7d: the ERROR names the close"
+TNOW=2026-10-03T09:10:00Z tko "$A"; ok "$rc|$(failed_lines)" "3|1" "O7d: in its cool-down the verb waits (exit 3)"
+TNOW=2026-10-03T09:15:00Z tko "$A"; ok "$rc|$(failed_lines)" "1|2" "O7d: the second failure at +15"
+ok "$(j "$(INOW=2026-10-03T09:20:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10-03T10:15+00:00" "O7d: then a 60-minute cool-down"
+TNOW=2026-10-03T10:15:00Z tko "$A"; ok "$rc|$(failed_lines)" "1|3" "O7d: the third failure at +75"
+I=$(INOW=2026-10-03T10:20:00Z inp "$A")
+ok "$(j "$I" '[d["humanFix"]["act"], d["takeOut"]["failures"], d["autoRetryAfter"]]')" '["hand back or defer",3,null]' "O7d: the third failure is Lachy's H10, takeOut kept"
+ok "$(j "$I" 'd["humanFix"]["detail"]')" "take-out failed 3 times (feedback $FP): gh pr close of [[$A]]'s PR failed: gh: HTTP 502: Bad Gateway" "O7d: its detail"
+ok "$(j "$(MNOW=2026-10-03T10:20:00Z mov)" '[d["verdict"], d["work"]["reentry"], d["work"]["coolDown"]]')" '["waiting",[],[]]' \
+  "O7d: moving drops it from W: his"
+rm -f "$D/gh-fail"
+TNOW=2026-10-03T10:30:00Z tko "$A"
+ok "$rc|$(fm "$A" status)|$(fm "$B" status)|$(fm "$B" rollout)" "0|status: open|status: open|<none>" "O7d: with gh mended, the verb on repair's word finishes it"
+# (e) a PR merged into another base: the take-out goes on, with no close
+o7 e "pr: $PR"
+echo MERGED > "$D/gh-state"; echo release > "$D/gh-base"
+tko "$A"
+ok "$rc|$(fm "$A" status)|$(grep -c 'pr close' "$D/gh.log")" "0|status: open|0" "O7e: merged into another base → taken out, no close"
+
+# ── O8: plan rounds raise max_plan_rounds ──────────────────────────────────────────────────────────────────────
+scen o8
+mkro "max_plan_rounds: 2"; mkt "$A" in_progress "owner: execute-test" "auto_retries_used: 2"; mkt "$B" open
+planblock "$A" "plan round budget exhausted after 2 rounds: the judge still wants the rollback"
+ok "$(j "$(inp "$A")" 'd["overtime"]["raise"]')" '{"field":"max_plan_rounds","to":3}' "O8: a spent plan budget raises max_plan_rounds to resolved + 1"
+# O9: the --max-review-rounds overlay mismatch clears overtime (and takeOut, O2)
+ok "$(j "$(inp "$A" --max-review-rounds 9)" '[d["autoRetry"], d["overtime"], d["takeOut"]]')" '[false,null,null]' "O9: an overlay mismatch clears overtime"
+ar "$A"
+ok "$(fm "$A" max_plan_rounds)|$(fm "$A" auto_retry_raised)" "max_plan_rounds: 3|auto_retry_raised: max_plan_rounds=-" "O8: written on the task, its absence recorded"
+has "$(sec "$RO" '## Notes')" "max_plan_rounds raised to 3, one round" "O8: the Notes line names it"
+
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
