@@ -349,20 +349,25 @@ Subcommands:
               halt (ADR 0048): the lead reaches this only by hand or after the note changed, since an `autoRetryError`
               always comes with `autoRetry: false`; --auto-retries and --fingerprint are assertions the lead copies from `inputs`,
               and a mismatch is exit 1 (the note changed since `inputs`); `autoRetry: false` is exit 1, `ERROR:
-              auto-retry: <slug>: not auto-retryable: <why>; nothing written`. Otherwise it writes, in order, each
+              auto-retry: <slug>: not auto-retryable: <why>; nothing written` (a verdict reading `takeOut` included:
+              that is `defer --take-out`'s). Otherwise it writes, in order, each
               finished by a re-run: (a) `- <stamp> auto-retry: [[<slug>]] <n>/<N> (<stage>; feedback <sha>)[;
-              max_review_rounds raised to <K>, one round]` in the rollout's `## Notes` (`quota <q>/5` for a quota
-              block; <stamp> is the `auto_retry_at` (b) writes; skipped when the slug's last `auto-retry:` line
+              <field> raised to <K>, one round|one iteration]` in the rollout's `## Notes` (`quota <q>/5` for a quota
+              block, `overtime <k>/<N>` for an Overtime run, p39-14, ADR 0070; <stamp> is the `auto_retry_at` (b) writes; skipped when the slug's last `auto-retry:` line
               equals it but for its stamp and that stamp is later than the note's `auto_retry_at`, or the note has
               none: an earlier run's line for this same retry, whose task-note save never landed; a later retry
               that reads the same, after a hand-back reset the counters, is a line of its own); (b) the task note
               in one save: hand-back's own transition (_hand_back_note), `auto_retries_used` + 1 for an agent or
-              infra block or `quota_retries_used` + 1 for a quota block, `auto_retry_sha` (the block's
-              fingerprint), `auto_retry_at` (now) and, for a raise, `max_review_rounds: <K>`; (c) the events
+              infra block or `quota_retries_used` + 1 for a quota block, or for an Overtime run (the verdict's
+              `overtime`) `overtime_used` + 1 with both counters as they stand, `auto_retry_sha` (the block's
+              fingerprint), `auto_retry_at` (now) and, for a raise, `<field>: <K>` (the Overtime's raise, or the revise
+              raise's `max_review_rounds`), with the field's task-note value before this life's first raise of it
+              recorded in `auto_retry_raised` (`max_review_rounds=4,max_iterations=-`, `-` for a key the note did not
+              carry; a field already recorded keeps its first value), which the take-out restores; (c) the events
               (Run record, below). A failed save is exit 1 with `a re-run finishes the records`: the verdict still
               holds, so the next step 1.2 finishes them. Prints `<slug>: auto-retry <n>/<N> (<stage>; feedback
-              <sha>[; max_review_rounds raised to <K>]) <status>-><new> [written]` (`auto-retry quota <q>/5` for a
-              quota block); --dry-run writes and records nothing. Exit 2 also on usage (more than one slug, a
+              <sha>[; <field> raised to <K>]) <status>-><new> [written]` (`auto-retry quota <q>/5` for a
+              quota block, `auto-retry overtime <k>/<N>` for an Overtime run); --dry-run writes and records nothing. Exit 2 also on usage (more than one slug, a
               --fingerprint that is not 12 hex, a negative --auto-retries). The task note's body is never written,
               so the brief descope reads is untouched.
 
@@ -561,8 +566,10 @@ Subcommands:
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
-              and the four automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
-              `auto_retry_at`, p16-4: a deferred task starts its next rollout afresh)
+              and the six automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
+              `auto_retry_at`, p16-4, and `overtime_used`, `auto_retry_raised`, p39-14: a deferred task starts its next
+              rollout afresh; a raised cap is left as it stands, and only the take-out restores it); `taken_out` and
+              `taken_out_of` are never cleared
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill. A carried fix is
@@ -572,6 +579,51 @@ Subcommands:
               clears `rollout:` (_speed_hold_strip; an inline list keeps its other items), one `speed-hold dropped
               [[<R>]] from <slug> (deferred)` line each after its own line (` (dry-run)` on a dry run); no rollout-note
               write and no event. A rollout note that is missing or unreadable, or records no hold, drops nothing.
+              The take-out (p39-14, ADR 0070 d5; _take_out): `defer --take-out --tasks <one slug> --rollout <note>
+              [--repo <root>] [--gh-bin gh] [--now ISO] [--dry-run]`, the take-out of one set-aside task whose budget
+              and Overtime are spent (or at once on the same feedback, or with no Overtime), with its dependent
+              closure. Exit 0 taken out (or the finished case's [no-change]), 1 refused or failed, 2 usage, 3 waits, 4 a
+              PR merged into the default branch (the lead then runs `resume`, which lands it). Its order, each step a
+              re-run finishes:
+                1. The guard: the verdict re-run with the rollout's Project root (as auto-retry's). A task no longer
+                   linked here whose `taken_out_of` names this rollout and whose `take-out: [[slug]]` line is in
+                   `## Notes` is the finished case: each member's missing `take-out` event is written (the members and
+                   the feedback F read off that take-out's lines; the task's cause read back from its n and the budget)
+                   and it prints `<slug>: already taken out of [[R]] [no-change]`, exit 0, nothing bumped. Otherwise a
+                   null `takeOut` is exit 1, nothing written (neither the lead nor repair takes out on its own
+                   judgement; a takeOut is accepted whatever its humanFix, so repair's route at the failure bound
+                   works), and a future `autoRetryAfter` (its own cool-down) is exit 3, `take-out cools down until
+                   <stamp>`.
+                2. The closure (_downstream): every task linked here whose `depends-on:` or `blocked-by:` reaches it,
+                   transitive, through `merged_into:` tombstones; never a Speed fix hold entry, a landed task or a
+                   tombstone; ordered leaves first, the task last (_take_out_order).
+                3. The waits (_take_out_members): a member running (a serial Leg's claim included), integrating,
+                   awaiting Integration or held by an undecided RACE or UNVERIFIED is exit 3, `take-out waits: [[d]]
+                   is <state>`, nothing written: finished work is never thrown away.
+                4. The PR reads, bounded (_gh, PROVE_GH_TIMEOUT): each member's `pr:` state and base, and the default
+                   branch. A PR MERGED into the default branch writes one `- <stamp> take-out failed: [[<slug>]]
+                   ([[<m>]]'s PR merged into <B>: resume lands it; feedback <F>)` line, exit 4; one merged into another
+                   base reads as closed (no close).
+                5. The retire block (repair § 5's), per member leaves first, each idempotent: `git worktree remove -f
+                   -f` on an existing task tree, `gh pr close <pr> --delete-branch --comment "taken out of [[R]] …"` on
+                   an OPEN PR (a dependant's comment names the task), `git update-ref -d
+                   refs/integration-anchor/<branch> <X>` on an existing anchor. Any failure in step 4's reads or here
+                   writes only `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` (the verdict's failure
+                   bound: a cool-down, then H10 at TAKE_OUT_TRIES), exit 1.
+                6. The rollout note, one save: the task's `- <stamp> take-out: [[<slug>]] after <n> Overtime runs
+                   (<stage>; <its diagnosis's first line, _take_out_diagnosis>; <pr url or "no PR">; feedback <F>)`, then
+                   one `- <stamp> take-out: [[<dep>]] with [[<slug>]] (its dependant; feedback <F>)` per dependant, each
+                   skipped when a line naming that member on F is there; each member's `## Queue` row and `## File-sets`
+                   line removed (_drop_rollout_rows).
+                7. The members, leaves first and the task last: each one's `take-out` event (unless the record holds
+                   one for the member on F), then defer's own save (_defer_note, its events and speed-entry drop
+                   included), restoring in it the caps its own `auto_retry_raised` names (`-` removes the key; a
+                   malformed marker restores nothing, one WARN); the task alone also gets `taken_out: <prev+1>` and
+                   `taken_out_of` with `"[[R]]"` added once. The task's save is last, so while a member is unfinished
+                   the verdict still reads takeOut and step 1.2 re-runs the verb.
+                8. Prints `<slug>: taken out after <n> Overtime runs (<cause>) → open [written]`, then `<dep>: taken
+                   out with <slug> → open [written]` per dependant. --dry-run writes, records and closes nothing (a
+                   failure line included).
 
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
@@ -1531,12 +1583,17 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     below over the note (_retry_stage); setAsideAt run | integration; retryClass agent | infra |
                     quota; used is auto_retries_used after the retry (a quota retry leaves it); budget the resolved
                     auto_retries; reviewRounds the raised max_review_rounds; quotaRetries quota_retries_used after a
-                    quota retry.
+                    quota retry; overtime, overtimeBudget (an Overtime run's overtime_used after it and the resolved
+                    overtime_runs, p39-14) and raiseField, raiseTo (the cap its raise moved and its new value).
   approve-gates     (p21-2) gate-signed {standing: false, gates: the count signed} for each note it signs (Lachy's
                     sign-off), --standing gate-signed {standing: true, gates: the count covered} when it covered any
                     (the Standing approval's, never counted as his act); then the Integration arm records ready pr=.
   defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
-                    holder a merge-hold close and lane-freed release=halt; an open race hold closes.
+                    holder a merge-hold close and lane-freed release=halt; an open race hold closes. --take-out
+                    (p39-14) writes, before each member's defer save, one take-out {cause, fingerprint, stage?,
+                    overtimeUsed?, overtimeBudget?, with?, pr?, why?} per member (the task's cause spent | same-feedback
+                    | no-overtime with its stage and Overtime counts; a dependant's cause dependant with `with`), once
+                    per (member, feedback), read from the record before it writes.
   speed-hold        (p54-13) speed-hold {act: made, release, phase, by, held} per hold apply makes or moves to;
                     speed-hold {act: released, release, phase, cause, removed[, to]} per hold it lets go (cause
                     set-aside | left-queue, the task it let go for as the line's task), releases by hand (by-hand) or
@@ -1935,8 +1992,9 @@ line and entries, then the old one's `superseded by [[R']]` line and drops; join
 play, _SpeedCtx.in_play, so a joined release makes its phase's hold), never at `next`; a standing hold whose phase has
 no marked member left keeps standing until R lands or is released by hand. It lets go (_SpeedCtx.let_go) when R, read
 through _fold_unit (a release folded into a live combined unit keeps its hold), or an unlanded unit upstream of it,
-leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, read
-as `moving` reads it): `next` writes the released line, drops the entries and records one Run record line, reported as
+leaves the queue (_speed_gone) or is set aside at run or integration with its retries spent (a non-null humanFix, or a
+null one with an `overtime` or `takeOut`, its normal budget spent, p39-14: its label `(…; overtime <k>/<N> used)` or
+`(…; take-out pending)`, read as `moving` reads it): `next` writes the released line, drops the entries and records one Run record line, reported as
 `speedHoldReleased`, and on --dry-run reads its rows as if it had. A gate-pending one never lets it go (a gate has no
 automatic retries, and the Standing approval may still sign it), so a gate-pending release, or a unit upstream of it, is
 the one wait on Lachy the hold keeps, until he or the Standing approval signs its gate or he defers it. Out-of-reach and

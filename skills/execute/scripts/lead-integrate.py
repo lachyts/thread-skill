@@ -341,7 +341,7 @@ Subcommands:
       first rule that refused, "" on true), autoRetryError (an `auto_retries`, `max_review_rounds`, `max_iterations`
       or `max_plan_rounds` stamp that is not a valid integer: H12, a (c) item, never a halt (ADR 0048), kept under a
       `## Needs you` question or a recorded answer; else null), autoRetryClass (agent | infra | quota, for a note set
-      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
+      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds, overtimeRuns}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
       absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
@@ -350,7 +350,10 @@ Subcommands:
       a block only a person may move, act one of HUMAN_FIX_ACTS; execute § 6.5 (c), status's Needs-you block and
       repair § 2 print it and never re-derive it) and answerRecorded (reconcile-rollout.py _answer_recorded, read
       for every note: the live `## Repair input` answer to the current block, {stamp, kind, form, line}, or
-      null; an answered block is never retried). The rollout note (<note dir>/<rollout>.md) is read and the
+      null; an answered block is never retried), settingsBlock (ADR 0080), then overtime (an Overtime run past the
+      spent budget: {used, budget, raise, label}, p39-14, ADR 0070) and takeOut (the lead's `defer --take-out`: {cause,
+      why, overtimeUsed, overtimeBudget, fingerprint, failures, label}), each null unless auto_retry_verdict sets it.
+      The rollout note (<note dir>/<rollout>.md) is read and the
       budget resolved only for a note set aside at its run or at Integration, so every other read stays cheap; a
       resolver failure is in the JSON and the exit stays 0.
       --max-review-rounds K that differs from the resolved max_review_rounds means no retry (an overlay: humanFix
@@ -2944,7 +2947,8 @@ HUMAN_FIX_ACTS = (
     "restore, recut or defer",                         # H6  at Integration with no pr: (repair § 4, or § 3c's merge)
                                                        # H8  the PR branch is gone
     "fix the note's pr: or defer",                     # H7  a pr: the engine refuses, on a way back that launches on it
-    "raise max_plan_rounds, hand back or defer",       # H9  a spent budget: the run's own
+    "raise max_plan_rounds, hand back or defer",       # H9  the run spent its own budget, and a stop his (causes 14,
+                                                       #     15, 17, 19 to 21; a spent budget alone is the Overtime's)
     "raise max_review_rounds, hand back or defer",
     "raise max_iterations, hand back or defer",
     "hand back or defer",                              # H10 every other refusal; H11 a code-writing review with no PR
@@ -3067,9 +3071,13 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
      16. an invalid budget stamp (any of the four keys, re-read live: _retry_budget's error, else
          reconcile-rollout.py _round_budget_error): `autoRetryError`, H12 `fix the round budget`, handBack false; once
          the stamp reads valid it falls through;
-     17. an unresolvable budget: H9 or H10;
-     18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
-     22. a quota block past its 5 free retries; 22a. a settings block (reconcile-rollout.py _settings_block, ADR 0080)
+     17. an unresolvable budget (`overtime_runs` included): H9 or H10;
+     19. no feedback fingerprint; 20. malformed counters (`overtime_used` included); 21. a malformed `auto_retry_at`:
+         each H9 or H10, ahead of 18, since the Overtime and the take-out rest on them (ADR 0070 d4);
+     18. `auto_retries: 0`: a take-out at once (takeOut cause no-overtime, below), except an infra block at Integration
+         that is a settings block or the same stop (decision 4's, his): H10 `auto_retries is 0: automatic retries are off`;
+     22. a quota block past its 5 free retries: QUOTA_COOLDOWN_MIN[-1] (480 minutes) of cool-down, then an Overtime run
+         while `overtime_used` < `overtime_runs`, else the take-out (cause spent); 22a. a settings block (reconcile-rollout.py _settings_block, ADR 0080)
          whose merge setting merge-settings.py changed or cleared, its one re-entry not yet consumed: `autoRetry: true`
          at once, skipping 23, 24 and the cool-down once (the change is the new fact); then, for a settings block, the
          settings point, and only there: the same stop after one cool-down retry (23's _same_stop; ADR 0080 d2, a
@@ -3092,10 +3100,11 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          (reconcile-rollout.py _same_stop: a kill, a GitHub-side exit 1, a no-runner set-aside or an unreported-context
          set-aside whose _stop_key equals the `auto_retry_sha` run's, ADR 0033 d4 as amended 2026-11-12, ADR 0080),
          `same stop twice running at Integration: <its first line>`, then `; <its last real reason line>` when its
-         run carries one (a settings block's same stop is its settings point, 22a above); 24. an agent or infra
-         block past its budget; 25. an agent block whose fingerprint equals `auto_retry_sha`: each H9 `raise <field>,
-         hand back or defer` when _raise_field names the source run's spent budget, else H10 `hand back or defer`, the
-         detail its autoRetryWhy;
+         run carries one (a settings block's same stop is its settings point, 22a above); 25 (ahead of 24). an agent
+         block whose fingerprint equals `auto_retry_sha`: the take-out at once (cause same-feedback, ADR 0070's Decided
+         for him), before the budget is spent or after; 24. an agent or infra block past its budget: an Overtime run
+         while `overtime_used` < `overtime_runs` (an infra block first cools INFRA_COOLDOWN_MIN[-1], 240 minutes; an
+         agent block has none), else the take-out (cause spent);
      and a quota block still cooling (QUOTA_COOLDOWN_MIN[quota_retries_used] from the later of the block's run stamp and
      `auto_retry_at`, setting `autoRetryAfter`) or an infra block still cooling (INFRA_COOLDOWN_MIN[auto_retries_used],
      the last repeating; no stamp fails closed; a stop on GitHub's side among them, reconcile-rollout.py _retry_class,
@@ -3103,13 +3112,25 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
     max_review_rounds is <= lastRound (one round per retry).
 
+    The Overtime (p39-14, ADR 0070 d1): an `autoRetry: true` past the normal budget carries `overtime` {used (the note's
+    `overtime_used`, before this run), budget (the resolved `overtime_runs`), raise ({field, to} or null), label
+    (human_fix_label's)}: the raise is the cap the stop spent (_raise_field), `to` lastRound + 1 for a revise re-entry
+    with no round left, else the resolved cap + 1 (rr._resolved_cap; one that will not resolve is cause 17's spent()).
+    The take-out (ADR 0070 d5): a refusal whose way out is the lead's `defer --take-out` carries `takeOut` {cause (spent
+    | same-feedback | no-overtime), why, overtimeUsed, overtimeBudget, fingerprint, failures (the rollout's `take-out
+    failed:` lines on this fingerprint, rr._take_out_failures), label} and a null humanFix, its why `<why>: the lead takes
+    it out`; after its k-th failure (1 <= k < TAKE_OUT_TRIES) it cools TAKE_OUT_COOLDOWN_MIN[k-1] minutes from the
+    latest (`autoRetryAfter`, why `take-out cool-down: retries at <stamp>`), and at TAKE_OUT_TRIES failures it is H10
+    `hand back or defer`, detail `take-out failed <k> times (feedback <F>): <the last failure's why>`, takeOut kept for
+    repair's route. Both are null under a question (cause 6) or a recorded answer (cause 7), and on every other cause.
+
     `settingsBlock` is null, or for a note with a settings block {kind, contexts, fingerprint, state (unfreed | changed |
     left), due, freeNow, why}: `due` and `freeNow` are false unless the verdict reached the settings point above, so a
     question, an answer or any of causes 1 to 22 leaves it false. merge-settings.py `free` acts only on a due one.
 
     --max-review-rounds is an overlay the core ignores, so humanFix never depends on a hand-resolved K: only with no
     answer recorded and the core past the budget point (autoRetryBudget non-null), a K other than the resolved one sets
-    `autoRetry: false` with today's mismatch why and clears autoRetryAfter and autoRetryRaise."""
+    `autoRetry: false` with today's mismatch why and clears autoRetryAfter, autoRetryRaise, overtime and takeOut."""
     answer = rr._answer_recorded(note)
     out = _verdict(path, note, inp, rollout_note, now, answer)
     budget = out["autoRetryBudget"]

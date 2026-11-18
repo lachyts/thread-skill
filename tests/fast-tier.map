@@ -141,6 +141,7 @@ skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/integration-in
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-completion.test.sh skills/execute/tests/reconcile-rollout-descope.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-flake.test.sh skills/execute/tests/reconcile-rollout-human-fix.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-lead.test.sh skills/execute/tests/reconcile-rollout-moving.test.sh
+skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-overtime.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-queue.test.sh skills/execute/tests/reconcile-rollout-ready-at.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-record.test.sh skills/execute/tests/reconcile-rollout-trickle-claim.test.sh
 skills/execute/scripts/lead-integrate.py HUB skills/execute/tests/reconcile-rollout-trickle-share.test.sh skills/execute/tests/reconcile-rollout-trickle.test.sh
@@ -159,6 +160,7 @@ skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-heat.test.sh skills/execute/tests/reconcile-rollout-hold.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-last-starts.test.sh skills/execute/tests/reconcile-rollout-lead.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-moving.test.sh skills/execute/tests/reconcile-rollout-origin-lane.test.sh
+skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-overtime.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-queue.test.sh skills/execute/tests/reconcile-rollout-ready-at.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-record.test.sh skills/execute/tests/reconcile-rollout-runs.test.sh skills/execute/tests/reconcile-rollout-stops.test.sh
 skills/_shared/scripts/run_record.py HUB skills/execute/tests/reconcile-rollout-trickle-claim.test.sh skills/execute/tests/reconcile-rollout-trickle-share.test.sh
@@ -190,6 +192,7 @@ skills/execute/scripts/verify-slot.py HUB tests/verify-slot.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-auto-retry.test.sh skills/execute/tests/reconcile-rollout-churn.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-completion.test.sh skills/execute/tests/reconcile-rollout-descope.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-human-fix.test.sh skills/execute/tests/reconcile-rollout-lead.test.sh
+skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-overtime.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-queue.test.sh skills/execute/tests/reconcile-rollout-ready-at.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-record.test.sh skills/execute/tests/reconcile-rollout-runs.test.sh
 skills/_shared/scripts/rollout-settings.py HUB skills/execute/tests/reconcile-rollout-standing.test.sh skills/execute/tests/reconcile-rollout.test.sh tests/contracts/capacity-state.test.mjs
