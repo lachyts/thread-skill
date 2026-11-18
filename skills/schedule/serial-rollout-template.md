@@ -58,7 +58,7 @@ When every task is done, the last Leg runs the completion ceremony (the Complete
 3. Score the chain: run `close-score.py --rollout <this note> --close completion`, and keep its one line as the reflection; a failed score never stops the ceremony.
 4. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
 5. Append a `## Completion log`: each Leg, the tasks it finished and set aside, the disposition of each item below, and the reflection.
-6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec. Then run `engine-snapshot.py retire` (engine-snapshot.md § Retirement).
+6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec. Then run `engine-snapshot.py retire` (engine-snapshot.md § Retirement). On the Chorus Stage, archive the chain's other Sessions still on the Stage with one Clean-up archive (execute's `legs.md`, its Complete section).
 7. Run `/thread:close`.
 
 Rollout-specific items go here:

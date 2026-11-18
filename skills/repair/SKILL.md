@@ -54,7 +54,8 @@ and writes at most the note's `chain_copies:` (ADR 0067 d2). On the Chorus Stage
 `leg.py restarted --listed`, which lists the chain on the Waiting list (stamping `start: unattended`) instead of starting it (ADR 0076
 d4, d6). It also runs the task-note verbs `approve-gates`, `record-answer`, `hand-back` and `defer`, a
 read-only `git status --porcelain` in the chain's checkouts, and the Chorus Stage's `list_sessions` and
-`create_thread`, which starts a new Session. It makes no `gh` call and no task call there.
+`create_thread`, which starts a new Session. It makes no `gh` call and no task call there. On a chain it drops, it
+also sends the Chorus Stage's `message_companion` with `want: archive` (§ 7's **A chain repair drops**).
 
 ## Invocation forms
 
@@ -120,7 +121,8 @@ version stop's `--regenerate` would only meet schedule's refusal again.
   `/thread:schedule <project> --regenerate`. Stop.
 - any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
 - `incomplete` → `/thread:schedule <project> --regenerate`; on a `shape: serial` note, which nothing supersedes,
-  stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`. Stop.
+  stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`; then § 7's **A chain repair drops**.
+  Stop.
 
 **A serial chain.** After the Stops, a `shape: serial` note (read from the note, as status § 1's **Shape** reads
 it) goes to § 7, instead of the modes below and §§ 2–6.
@@ -1043,6 +1045,16 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
 § 7 writes no `## Notes` line by hand: the Leg log (through leg.py) and each task note's own records are the chain's
 record, and its Completion log is the last Leg's.
 
+**A chain repair drops.** When repair stamps a serial note `status: dropped` (§ 1's `incomplete` Stop), it runs
+`skills/execute/legs.md` § Complete's **Clean-up archive** for that chain, decided and never asked, with `message`
+`chain <rollout> dropped`: on the Chorus Stage only, one `list_sessions`, the rows whose line carries
+`leads the Rollout <rollout>` exactly, and one `message_companion` with `want: archive` naming each by its `id`.
+Usually no Session leads such a chain (`begin` refuses an incomplete note), and then nothing is sent. Its reply, a new
+Prompt that starts `[From the Companion, about your Message`, gets one statement line,
+`Clean-up archive of [[<rollout>]]: <each Session archived, held or refused>`, and the Message is never sent again. A
+defer ((b)) sends none, even when it defers every row left: the chain then reads `completable`, and the Leg that
+completes it sends the Clean-up archive.
+
 ## Don'ts
 
 - **Don't treat `paused:` or `pause_requested` as drift.** A pause is intentional (§ 1): repair never clears
@@ -1103,7 +1115,7 @@ record, and its Completion log is the last Leg's.
   chain the closure is `leg.py status`'s `dependants` (§ 7 (b)).
 - **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted` (its `--listed` form on the
   Chorus Stage), `leg.py clear-halt` (his word only), `leg.py copies` (on a `chain copy missing` blocker), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
-  `list_sessions` and `create_thread`. Never `leg.py begin`, `claim`, `done`, `close`, `set-aside`, `smoke`,
+  `list_sessions`, `create_thread` and `message_companion` (`want: archive` only, § 7's **A chain repair drops**). Never `leg.py begin`, `claim`, `done`, `close`, `set-aside`, `smoke`,
   `file-fix`, `handed`, `file-followup` or `land`; no Workflow, `next`, `resume` or hand-off loop; no hand edit of the Leg log
   or the frontmatter, and no `## Notes` line; and never take over a session `list_sessions` shows present, without
   his word.

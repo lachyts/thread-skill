@@ -575,7 +575,8 @@ test('control: an allow-list without message_companion fails r-cleanup only', ()
     ['r-cleanup'], 'allow')
 })
 test('control: a serial run that supersedes fails sc-cleanup only', () => {
-  only('schedule', 'a serial run supersedes nothing', 'a serial run supersedes its predecessor', ['sc-cleanup'], 'supersede')
+  only('schedule', 'Never supersede across shapes: a serial run supersedes nothing', 'Never supersede across shapes: a serial run supersedes its predecessor',
+    ['sc-cleanup'], 'supersede')
 })
 test('control: a template that scores nowhere fails l-score', () => {
   only('template', '3. Score the chain: run `close-score.py --rollout <this note> --close completion`', '3. Score the chain by hand', ['l-score'], 'template')
