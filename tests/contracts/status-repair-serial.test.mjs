@@ -37,7 +37,15 @@
 //   r-allow      every `.py` verb in § 7 is on the serial Don't's allow-list, and the Don't forbids the Leg verbs;
 //   r-notes      § 7 writes no `## Notes` line by hand;
 //   l-score      legs.md § Complete scores the chain through close-score.py and closes with its line, and the serial
-//                template scores in the same place.
+//                template scores in the same place;
+//   l-cleanup    legs.md § Complete's Clean-up archive (Chorus ADR 0117 d8, p36-14), between steps 4 and 5: only on the
+//                Chorus Stage, the rows `list_sessions` shows leading `leads the Rollout <rollout>` exactly, named by
+//                their `id` in one `message_companion` with `want: archive`, never by the Leg log's CLI session id, and
+//                sent once; § The Companion's reply answers its reply on the Complete turn's banner, asking nothing;
+//                the serial template's step 6 names it;
+//   r-cleanup    repair § 7's **A chain repair drops** runs that Clean-up archive when § 1's `incomplete` Stop drops a
+//                chain (a defer sends none), § 1 runs it between its stamp and its schedule run, and § Scope and the
+//                serial Don't's allow-list name `message_companion` (`want: archive` only).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read, section, FENCE } from '../lib/contract-text.mjs'
@@ -312,6 +320,32 @@ function check(f) {
   if (!tpl.includes('`close-score.py --rollout <this note> --close completion`') || !tpl.includes('a failed score never stops the ceremony')) {
     flag('l-score', `the template's step 3: ${tpl}`)
   }
+
+  // ---- p36-14: a finished chain archives its other Sessions (Chorus ADR 0117 d8) ----
+  const cLines = complete.split('\n')
+  const i4 = cLines.findIndex((l) => /^4\. /.test(l))
+  const i5 = cLines.findIndex((l) => /^5\. /.test(l))
+  const iCu = cLines.findIndex((l) => l.startsWith('**The Clean-up archive (Chorus ADR 0117 d8).**'))
+  if (!(i4 >= 0 && iCu > i4 && i5 > iCu)) flag('l-cleanup', `the Clean-up archive is not between § Complete's steps 4 and 5: ${i4}, ${iCu}, ${i5}`)
+  need('l-cleanup', "§ Complete's Clean-up archive", between(complete, /^\*\*The Clean-up archive \(Chorus ADR 0117 d8\)\.\*\*/, /^$/), [
+    "Chorus's `list_sessions` answers ToolSearch", 'off the Stage nothing is sent', '`leads the Rollout <rollout>`', 'exactly',
+    'never as a prefix', '`message_companion`', '`want: archive`', '`sessions` each row\'s `id`', '`message` `chain <rollout> complete`',
+    '`list_sessions` never lists the asker', "never by the Leg log's `session`, a CLI session id the archive door never resolves",
+    'the Message is never sent again'])
+  need('l-cleanup', "legs.md § The Companion's reply", section(f.legs, /^## The Companion's reply$/), [
+    '`[From the Companion, about your Message`', 'one statement line', 'no question mark', 'the banner its Complete turn ended on',
+    'copied exactly', 'runs no tool', 'never sends the Message again'])
+  if (!C(item(section(f.template, /^## Post-rollout/) ?? '', /^6\. /)).includes('Clean-up archive')) flag('l-cleanup', "the template's step 6 names no Clean-up archive")
+
+  const drops = between(r7, /^\*\*A chain repair drops\.\*\*/, /^$/)
+  need('r-cleanup', "repair § 7's **A chain repair drops**", drops, ['`status: dropped`',
+    "`skills/execute/legs.md` § Complete's **Clean-up archive**", '`chain <rollout> dropped`', 'A defer ((b)) sends none',
+    'the chain then reads `completable`'])
+  if (!C(item(r1, /^- `incomplete` → /)).includes("stamp it `status: dropped`, run § 7's **A chain repair drops**, then `/thread:schedule --tasks <its tasks>`")) {
+    flag('r-cleanup', "§ 1's incomplete Stop does not run § 7's drop between its stamp and its schedule run")
+  }
+  need('r-cleanup', 'repair ## Scope', section(f.repair, /^## Scope$/), ['`message_companion` with `want: archive`'])
+  if (!allow.includes('`message_companion` (`want: archive` only')) flag('r-cleanup', "the serial Don't's allow-list lacks message_companion")
   return { fails: [...fails].sort(), details }
 }
 
@@ -517,6 +551,29 @@ test('control: a Notes line written by § 7 fails r-notes', () => {
 })
 test('control: a Complete whose failed score stops the ceremony fails l-score', () => {
   only('legs', 'A non-zero exit never stops the ceremony.', 'A non-zero exit stops the ceremony.', ['l-score'], 'score')
+})
+test('control: a Clean-up archive with no roster source fails l-cleanup only', () => {
+  only('legs', '`leads the Rollout <rollout>`', '`legs[].session`', ['l-cleanup'], 'source')
+})
+test('control: a Clean-up archive after step 5 fails l-cleanup only', () => {
+  const lines = real.legs.split('\n')
+  const i = lines.findIndex((l) => l.startsWith('**The Clean-up archive (Chorus ADR 0117 d8).**'))
+  const i5 = lines.findIndex((l) => l.startsWith('5. `/thread:close`'))
+  assert.ok(i > 0 && i5 > i, 'control setup: the Clean-up paragraph before step 5')
+  const moved = [...lines.slice(0, i), ...lines.slice(i + 2, i5 + 1), '', lines[i], ...lines.slice(i5 + 1)].join('\n')
+  const { fails, details } = check({ ...real, legs: moved })
+  assert.deepEqual(fails, ['l-cleanup'], details.join('\n'))
+})
+test('control: a reply turn ending on its own line fails l-cleanup only', () => {
+  only('legs', 'the banner its Complete turn ended on', 'its own closing line', ['l-cleanup'], 'reply')
+})
+test('control: repair § 1\'s incomplete Stop that drops after its schedule run fails r-cleanup only', () => {
+  only('repair', "run § 7's **A chain repair drops**, then `/thread:schedule --tasks <its tasks>`.",
+    "then `/thread:schedule --tasks <its tasks>`; then § 7's **A chain repair drops**.", ['r-cleanup'], 'pointer')
+})
+test('control: an allow-list without message_companion fails r-cleanup only', () => {
+  only('repair', ', `create_thread` and `message_companion` (`want: archive` only, § 7\'s **A chain repair drops**).', ' and `create_thread`.',
+    ['r-cleanup'], 'allow')
 })
 test('control: a template that scores nowhere fails l-score', () => {
   only('template', '3. Score the chain: run `close-score.py --rollout <this note> --close completion`', '3. Score the chain by hand', ['l-score'], 'template')

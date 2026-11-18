@@ -572,8 +572,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   on the Stage it lists the chain (`leg.py restarted --listed`) for the Stage
   to open, and only a take-over, Codex Desktop, a run off the Stage or an
   engine snapshot from before `--listed` starts the next Leg as a new Session
-  (repair § 7 (e)). _Avoid_: shift, stint, iteration (one task in a Ralph
-  loop), batch.
+  (repair § 7 (e)). A chain that completes, or that repair drops, archives its
+  other Sessions still on the Stage with one Chorus Clean-up archive
+  (`message_companion`, `want: archive`), each named by its `list_sessions`
+  id, never the Leg log's CLI session id (legs.md § Complete, Chorus ADR 0117
+  d8). _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
 - **Stalled chain** — a serial chain with claimed work and no Leg open: a task
   in progress for a Leg that closed (stopped, or halted and since cleared) or
   never began, and nothing starts the Leg that inherits it. `leg.py status`
