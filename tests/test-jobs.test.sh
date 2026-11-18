@@ -56,14 +56,14 @@ for sh in "${shells[@]}"; do
   for bad in 0 abc -1 1.5 ' 2'; do
     ok "$(fb "$bad" | tr '\n' ' ')" "rc=2 " "$n: THREAD_SUITE_BOUND='$bad' → return 2, nothing printed"
   done
-  # ---- suite_bounds: 10x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ---------
+  # ---- suite_bounds: 12x the measured seconds rounded up, 300 s floor, 1200 s unweighted; a flat bound wins ---------
   W="$tmp/weights-$k.tsv"
-  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.25 tests/zza.test.sh \
+  printf '# a comment\n\n%s\t%s\n' 9 @merge-task-self-tests 527 tests/zzleg.test.sh 100.3 tests/zza.test.sh \
     0.5 tests/zzb.test.sh bad tests/zzc.test.sh > "$W"
   sb() { local w="$1" f="$2"; shift 2; printf '%s\n' "$@" | "$sh" -c '. tests/lib/test-jobs.sh; suite_bounds "$@"' sh "$w" "$f" | tr '\t\n' ': '; }
   ok "$(sb "$W" '' @merge-task-self-tests tests/zzleg.test.sh tests/zza.test.sh tests/zzb.test.sh tests/zzc.test.sh tests/zznew.test.mjs)" \
-    "@merge-task-self-tests:300 tests/zzleg.test.sh:5270 tests/zza.test.sh:1003 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
-    "$n: suite_bounds: 10x the weight rounded up (527 → 5270, 100.25 → 1003), the 300 s floor (9 → 300), 1200 s for no weight or a malformed line"
+    "@merge-task-self-tests:300 tests/zzleg.test.sh:6324 tests/zza.test.sh:1204 tests/zzb.test.sh:300 tests/zzc.test.sh:1200 tests/zznew.test.mjs:1200 " \
+    "$n: suite_bounds: 12x the weight rounded up (527 → 6324, 100.3 → 1204), the 300 s floor (9 → 300), 1200 s for no weight or a malformed line"
   ok "$(sb "$tmp/no-such.tsv" '' tests/zzleg.test.sh)" "tests/zzleg.test.sh:1200 " "$n: suite_bounds: no weights file → 1200 s"
   ok "$(sb "$W" 5 tests/zzleg.test.sh @merge-task-self-tests)" "tests/zzleg.test.sh:5 @merge-task-self-tests:5 " "$n: suite_bounds: a flat bound is every entry's"
   # ---- watch_group: a group whose leader outlives its bound is TERMed whole; a group that ignores TERM is KILLed ----
@@ -139,8 +139,12 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
 # leg.test.sh's 1581 s and 1891 s are now split across its four files (p54-9), 1891 by the parts' measured shares.
-# tests/fast-tier.test.sh's 259 s is master's macOS shard 3/4 of run 44226971655 (2026-11-18), the run before its
-# 300 s floor cut it twice.
+# Three rows are master's macOS shard 3/4, 2026-11-17 to 18. tests/fast-tier.test.sh's 259 s is job 134542390531 (run
+# 44226971655), the run before its 300 s floor cut it twice (jobs 134564415416 and 134575108240), at its checks R8 and
+# R10, about 55% of them, so those runs went past 300 s, plausibly 440 to 650 s in full; its 1002 s bound is 1.5x the
+# 650 s. reconcile-rollout-queue.test.sh's 331 s is job 134564415416 (run 44233636618), and its old 355 s bound cut it
+# in jobs 134224807065 and 134402170137, so those runs went past 355 s; its 528 s bound is 1.6x the 331 s and 1.49x
+# the 355 s. tests/serial-chains.test.sh's 275 s is job 134402170137 (run 44185887550), where it passed.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
 ci_max="tests/leg.test.sh 550
 tests/leg-land.test.sh 565
@@ -151,7 +155,8 @@ tests/unfinished-rollout.test.sh 613
 tests/primary-refresh.test.sh 543
 tests/land.test.sh 297
 tests/fast-tier.test.sh 259
-tests/serial-chains.test.sh 163"
+skills/execute/tests/reconcile-rollout-queue.test.sh 331
+tests/serial-chains.test.sh 275"
 bounds=$(printf '%s\n' "$ci_max" | awk '{print $1}' | bash -c '. tests/lib/test-jobs.sh; suite_bounds tests/shard-weights.tsv')
 bad=""
 while read -r t m; do

@@ -496,7 +496,7 @@ median: a suite joins at 180 s and leaves only under 150 s.
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
 of the cores' worth of background suites at once (at least 2; 4 on 12 cores), largest first, and node
 at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 4). A hung suite fails in minutes,
-not at CI's job limit: each shell suite runs under a liveness bound (10x its measured seconds in
+not at CI's job limit: each shell suite runs under a liveness bound (12x its measured seconds in
 `tests/shard-weights.tsv`, at least 300 s, 1200 s for an unmeasured suite; `THREAD_SUITE_BOUND=<s>` sets one for
 every suite), counted in the suite's awake seconds so a Mac asleep through the run never trips it, past which its
 process group is killed and it reports `FAILED` with a `timed out` line, and node bounds each test file at 1200 s. What
