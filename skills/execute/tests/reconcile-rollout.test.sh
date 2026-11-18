@@ -14,6 +14,7 @@ export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run rec
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"  # verify-timeout names verify-slot.py (its verifySlot); keep any pool in temp
 export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
+export TZ=UTC   # stamps are local time (reconcile-rollout.py _stamp): pinned, so a run on the Mac writes what CI's ubuntu runner writes
 
 fail=0
 check() {  # check <label> <expected-substring> <file>
@@ -776,7 +777,7 @@ want="5|ERROR: security_checks: $TMP/vt5-absent/security-check.py not found||sam
 
 echo "== FC. (p52-2, ADR 0081 d2, d3) the Unreachable stamp, the Felt check line and the felt-check verb =="
 FC="$TMP/fc"; mkdir -p "$FC/Archive/Rollouts" "$FC/Archive/2026"
-NOWFC=2026-11-18T09:00:00+11:00
+NOWFC=2026-11-18T09:00:00+11:00   # the suite runs at TZ=UTC, so _stamp writes this as 2026-11-17T22:00+00:00
 fcnote() {  # fcnote <path> <status> [frontmatter lines...]: a task note of project [[Proj]]
   local p=$1 st=$2; shift 2
   { printf -- '---\ntags:\n  - task\nstatus: %s\npriority: normal\nprojects:\n  - "[[Proj]]"\n' "$st"
@@ -853,7 +854,7 @@ fcdone() { fcnote "$1" done "merged: 2026-11-17T10:00+11:00" "rollout: \"[[${2:-
 fcdone "$FC/proj-p2-1-h.md"
 out=$(felt --task proj-p2-1-h --passed "the panel opens on the Vision Pro"); rc=$?
 fcok "$rc" 0 "FC6: --passed on a done task exits 0"
-check "FC6: the passed line" "- 2026-11-18T09:00+11:00 passed: the panel opens on the Vision Pro (Lachy)" "$FC/proj-p2-1-h.md"
+check "FC6: the passed line" "- 2026-11-17T22:00+00:00 passed: the panel opens on the Vision Pro (Lachy)" "$FC/proj-p2-1-h.md"
 refute "FC6: no Proof log line on a task that is no carried fix" "## Proof log" "$FC/proj-p2-1-h.md"
 
 fcdone "$FC/proj-p2-2-i.md"; fcdone "$FC/proj-p2-3-j.md"
