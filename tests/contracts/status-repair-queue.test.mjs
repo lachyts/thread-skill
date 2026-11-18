@@ -846,7 +846,7 @@ const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-inte
 // merge-settings.py free moves it); the automatic retry and a `## Needs you` question ahead of at Integration and every
 // class below it.
 const LABELS = ['RACE re-verify in flight', 'RACE revert in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'lane held', 'origin lane wait', 'live', 'PR CLOSED / branch missing',
-  'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'settings block', 'retry (automatic)', 'needs you', 'at Integration',
+  'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'settings block', 'retry (automatic)', 'take-out', 'needs you', 'at Integration',
   'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
 // Status's recommended actions, first-match in this order: the lineage before the version (a legacy note can be
@@ -1092,7 +1092,8 @@ function check({ status, repair, execute, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 24 classes (ADR 0064's origin lane wait and ADR 0080's settings block among them), each once, and § 4's
+  // stages: the 25 classes (ADR 0064's origin lane wait, ADR 0080's settings block and ADR 0070's take-out among them),
+  // each once, and § 4's
   // per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
@@ -1432,7 +1433,8 @@ function check({ status, repair, execute, fx }) {
   // ---- the automatic retry (p16-5, ADR 0033) ----
   const rDontsC = collapse(raw(repair, /^## Don'ts/))
   const row = (label) => clsRows.find((c) => c[0] === `**${label}**`) ?? []
-  const THREE = 'the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is set'
+  // p39-14 (ADR 0070): a spent budget and a repeated fingerprint are the Overtime's and the take-out's now, never his.
+  const THREE = '`needsHuman` is set, or its take-out failed three times'
   const r3b = labelled(r3raw, '3b')
   const r3bRaw = labelledRaw(r3raw, '3b')
 
@@ -2177,7 +2179,7 @@ test("control: the Queued row's old started-only solo rule fails queued-solo", (
 
 // auto-retry (p16-5)
 test('control: § 3b asking only on a second block or raise fails auto-retry', () => {
-  only(rp('a set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is set)', 'a second block, a second raise'),
+  only(rp('a set-aside whose automatic retry is over (`needsHuman` is set, or its take-out failed three times)', 'a second block, a second raise'),
     'auto-retry', '3b')
 })
 test('control: an own run handed back as agent-fixable fails auto-retry', () => {
@@ -2197,7 +2199,7 @@ test('control: a Leash with no fresh stretch fails auto-retry', () => {
   only(rp('`hand-back` starts a fresh automatic-retry stretch', '`hand-back` re-enters it'), 'auto-retry', 'leash')
 })
 test('control: no infra reading of a usage limit fails auto-retry', () => {
-  only(rp(' A usage limit that kills an agent mid-run is an infra block, never a quota block: it gets the infra cool-downs and the budget, then Lachy.', ''),
+  only(rp(' A usage limit that kills an agent\nmid-run is an infra block, never a quota block: it gets the infra cool-downs, the budget and the Overtime, then the\ntake-out.', ''),
     'auto-retry', 'infra')
 })
 test('control: a class re-read after the answer fails auto-retry', () => {

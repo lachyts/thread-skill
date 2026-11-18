@@ -563,8 +563,13 @@ parsed), and list every distinct tag.
 **Automatic retry first (ADR 0033).** A set-aside task's line also shows its automatic retry, from its `inputs`.
 A count shows only when `autoRetryBudget` is non-null (the verdict reached the budget), and the first matching form
 wins: `auto-retry off` when `autoRetryBudget.autoRetries.value` is 0 (every retry off, quota included);
-`quota <quotaRetriesUsed>/5` when `autoRetryClass` is `quota` (a quota block spends no budget); otherwise
-`auto-retry <autoRetriesUsed>/<autoRetryBudget.autoRetries.value>`. A null counter (malformed: the verdict fails
+`overtime <overtime.used>/<overtime.budget>` when `overtime` is non-null (an Overtime run past the spent budget,
+p39-14, ADR 0070); `quota <quotaRetriesUsed>/5` when `autoRetryClass` is `quota` (a quota block spends no budget);
+otherwise `auto-retry <autoRetriesUsed>/<autoRetryBudget.autoRetries.value>`. A non-null `takeOut` adds its own state
+after the count: `take-out failed <takeOut.failures>/3` once a try failed (at 3 its `humanFix` H10 is in the Needs you
+block), else `take-out cools down until <autoRetryAfter>` while its cool-down runs, else `take-out waits on [[d]]` when
+a member of its closure is running, integrating or awaiting Integration, else `take-out pending` (the lead's `defer
+--take-out`, listed, never a needs-you item). A null counter (malformed: the verdict fails
 closed) shows no count, and `autoRetryClass` alone never shows a count: it is set for every set-aside past the
 verdict's first rule, a refused one included. `auto-retry <autoRetriesUsed>/?` shows only when `autoRetryBudget` is
 null and `autoRetryWhy` starts `auto_retries unresolved`; any other null budget (a question, a human cause, a

@@ -255,7 +255,8 @@ only `merge-settings.py free` moves it.
 | **plan-blocked after a descope** | `plan-blocked` with a `## Scope decision (automatic)` section and no `descope_armed:`: it restarted after an automatic descope and blocked again | input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back, never a second descope (the verb refuses one, exit 3) |
 | **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b; judged before **retry (automatic)**, as execute's step 1.2 judges a descope before its automatic retry: a refusal (exit 3) is recorded on the task note, so its `humanFix` reads `decide scope or defer` and the verdict `autoRetry: false` |
 | **settings block** | set aside at Integration, and `inputs` reads `settingsBlock.due: true` and `settingsBlock.state: unfreed` (a past-deadline H10 included): a `no-runner` or `unreported-context` block at its settings point, a merge setting that requires what cannot happen (ADR 0080) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-settings.py free --note <task note> --repo <repoPath>` with no ask (ADR 0080 d5), wherever `descope` may run (§ 3d); under a pause it is reported, not run. Exit 0: the lead (or § 4's hand-off) re-enters the task, and tell Lachy afterwards with `free`'s own line: a change names its undo, and `cleared, no setting changed` names none (nothing changed); exit 3: it reads H13 (`change the merge setting, hand back or defer`), so **at Integration**'s ask follows; exits 5, 8 and 75: nothing now; exit 2: report it. Each row is freed at most once per run (the Leash) |
-| **retry (automatic)** | set aside at its run or at Integration, and `inputs` reads `autoRetry: true` or a non-empty `autoRetryAfter`; a `plan-blocked` task reaches it only once the class above judged it not descopable | nothing: the lead re-enters it (execute § 4.5 step 1.2's *Automatic retry*), now or once its cool-down ends, and with no lead live § 4's hand-off does; never a hand-back, which would reset its budget |
+| **retry (automatic)** | set aside at its run or at Integration, and `inputs` reads `autoRetry: true` (an Overtime run, `overtime` non-null, included) or a non-empty `autoRetryAfter` with no `takeOut`; a `plan-blocked` task reaches it only once the class above judged it not descopable | nothing: the lead re-enters it (execute § 4.5 step 1.2's *Automatic retry*), now or once its cool-down ends, and with no lead live § 4's hand-off does; never a hand-back, which would reset its budget |
+| **take-out** | set aside at its run or at Integration, and `inputs` reads a non-null `takeOut` with a null `humanFix` (its budget and Overtime spent, the same feedback again, or no Overtime: ADR 0070) | not asked: the lead's (execute § 4.5 step 1.2's *The Overtime and the take-out*), and with no lead live repair runs it itself, as it runs `merge-settings.py free`: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py defer --take-out --tasks <slug> --rollout <rollout-note> --repo <repoPath>`; exit 0 tell Lachy afterwards with its lines; exit 3 nothing now (a member finishes first, or its cool-down runs); exit 4 → `reconcile-rollout.py resume --rollout <rollout-note>` at once; exit 1 report it (its failure line is the bound). Under a pause it is reported, not run. At the bound (`takeOut` with H10 `take-out failed <k> times`) it is input-gated (§ 3b): ask "fix it, then take it out, hand back, or leave"; on "take it out" run the same verb (it accepts a takeOut whatever its humanFix) |
 | **needs you** | set aside at its run or at Integration (`setAsideAt: run` or `integration`, never a gate) with a `## Needs you` question (status's `needsHuman`) | input-gated: § 3b asks the question verbatim, writes the answer into `## Repair input`, removes the `## Needs you` section, then hands back at its stage (§ 4) |
 | **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | input-gated (§ 3b): ask its `humanFix` (the act and the detail), then on his word `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, and nothing before Integration is redone (§ 4). One with no `pr:` is **PR CLOSED / branch missing**'s. An Integration conflict (`integrationBlock: conflict`) quotes its resolution brief, the latest Blocker diagnosis run, as the feedback beside its `humanFix`, so Lachy decides which intent wins or hands it back |
 | **revise (automatic)** | `autoRevise: true` | nothing: the lead (or § 4's hand-off) launches the seeded revise itself; with a non-empty `prUrlError` it launches nothing, so that one is input-gated (§ 3b): its `humanFix` reads `fix the note's pr: or defer` with `prUrlError` as the detail, and Lachy fixes the note's `pr:` (`record-answer --pr`) or defers it |
@@ -272,15 +273,18 @@ routing* takes a fresh call behind § 3.7's warning.
 
 **Agent-fixable is execute's now (ADR 0033).** Repair never judges a block agent-fixable from its feedback: it
 reads `inputs`' verdict. A set-aside at its run or at Integration that § 2 does not class **retry (automatic)**
-reaches repair because its automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or
-`needsHuman` is set), or because its `humanFix` names another cause that is his: `auto_retries: 0`, an unresolved
-budget, a quota block past its five free retries, a declined merge, a gone branch, a merge-task text a human must
-clear, a merge setting left for him (H13), a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
+reaches repair because its automatic retry is over (`needsHuman` is set, or its take-out failed three times), or
+because its `humanFix` names another cause that is his: a note the verdict cannot read (a malformed counter or
+`auto_retry_at`, no feedback fingerprint), an unresolved budget, a declined merge, a gone branch, a merge-task text a
+human must clear, the same stop twice running at Integration, a merge setting left for him (H13), a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
 review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `humanFix` (its act and its detail). A non-empty
 `autoRetryError` is an invalid round-budget stamp: its `humanFix` is H12 `fix the round budget`. Report it; the fix is
 the stamp it names, on Lachy's word; once the stamp reads valid the verdict falls through to the lead's own retry or to
-H10 (ADR 0048). A usage limit that kills an agent mid-run is an infra block, never a quota
-block: it gets the infra cool-downs and the budget, then Lachy. When the limit is known to the lead's Session,
+H10 (ADR 0048). A spent budget, a repeated fingerprint, `auto_retries: 0` and a quota block past its five free
+retries are no longer his (ADR 0070): each is an Overtime run or a take-out, **retry (automatic)** or **take-out**
+above, never asked; `record-answer --raise` stays for an H9 cause that is still his. A usage limit that kills an agent
+mid-run is an infra block, never a quota block: it gets the infra cool-downs, the budget and the Overtime, then the
+take-out. When the limit is known to the lead's Session,
 execute § 4.5 *Lost call* first resumes such a transient row once from its own run, so only that resume's row, or
 the dead call's row, reaches this class.
 
@@ -335,8 +339,8 @@ which finishes it. A complete rollout whose note does not read done (its lead en
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
 make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr:`, a close-out, a defer chain, a
-set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is
-set) or whose `humanFix` names another cause that is his (§ 2), or a descope the verb refused: § 3d's exit 3, recorded,
+set-aside whose automatic retry is over (`needsHuman` is set, or its take-out failed three times) or whose `humanFix`
+names another cause that is his (§ 2), or a descope the verb refused: § 3d's exit 3, recorded,
 its `humanFix` `decide scope or defer`), each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
 (Owner *yours*: a decision no agent can make; the *technical* pings this list still holds, a CLOSED PR, a missing
 branch and a defer chain among them, keep their own ADR 0054 § Sites rows until p30-10 designs them out). For a
@@ -837,6 +841,8 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
    `gh pr close --delete-branch` is **not gated on the landing register**, on purpose: it only removes the
    rollout's own branch and PR from a task the user chose to defer, and lands nothing on the default branch,
    so it is cleanup like a pause (`execution-fit.md` § Dispatch blockers, *Landing register*).
+A take-out (execute's `defer --take-out`, ADR 0070 d5) is never asked: its closure leaves with it, leaves first, each
+by this clean defer, through the verb (§ 2's **take-out**). The ask below is for a defer on Lachy's word only.
 3. **Has dependants** → **ask**: *"[[B]], [[C]] depend on [[A]]: defer the whole chain, or keep and fix
    [[A]]?"* Defer the chain → A and its closure, each through the clean defer. Keep and fix → back to § 3b or
    § 4 on A. A dependant already running or integrating under a live lead → ask, and never write it.
@@ -1060,8 +1066,8 @@ record, and its Completion log is the last Leg's.
 - **Don't hand back what the lead retries.** A set-aside that `inputs` reads as `autoRetry: true`, or cooling
   (`autoRetryAfter`), is the lead's (§ 2's **retry (automatic)**, judged before any answer), and a hand-back would
   reset its budget. A hand-back on Lachy's answer is never this case: it is the fresh stretch he chose. Ping Lachy
-  only once its automatic retry is over (the auto-retry budget spent, the fingerprint repeated or `needsHuman` set),
-  when its `humanFix` names another cause that is his, and for gates, escalations, a CLOSED PR, a missing branch or
+  only once its automatic retry is over (`needsHuman` set, or its take-out failed three times), when its `humanFix`
+  names another cause that is his, and for gates, escalations, a CLOSED PR, a missing branch or
   a missing `pr:`, a defer chain or a refused descope.
 - **Don't hand back an answered question with its `## Needs you` still in place.** `record-answer --kind needs-you`
   removes the section in the answer's own save (§ 3b): neither `hand-back` nor a lead-written row clears it, so the
