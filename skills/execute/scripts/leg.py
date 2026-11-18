@@ -88,10 +88,12 @@ clear-halt, restarted, copies, land):
       reason="begin wait: surface re-check unanswered: no answer in <a>+<b> s"`. A begin wait also carries `listed`
       (waiting_listed over the chain as begin left it: whether unfinished-rollout.py's `waiting` lists the chain once
       the turn ends), and `unlisted`, its why not, when false (no `start: unattended`, a chain state off the list, a
-      Leg session still standing: the open Leg a take-over would close, a standing restart `pending` or `started`, a
-      closing Leg (closed with a handoff, no hand-over line yet), or a last Leg handed off to a `started` session, which
-      `waiting` counts against the room and keeps off the list, ADR 0076 d3; or a manual hand-over standing, whose
-      paste-ready prompt is its one start path, P44-4); nothing begins an unlisted chain again, so legs.md § Begin
+      Leg session still standing: the open Leg a take-over would close (while its Leg lease has not lapsed, or a room
+      stop wrote it: a lapsed one lists the chain with the take-over prompt, P36-15), a standing restart `pending` or
+      `started`, a closing Leg (closed with a handoff, no hand-over line yet), or a last Leg handed off to a `started`
+      session, which `waiting` counts against the room and keeps off the list, ADR 0076 d3; or a manual hand-over
+      standing, whose paste-ready prompt is its one start path, P44-4); nothing begins an unlisted chain again, so
+      legs.md § Begin
       lists it as a needs-you item. A check that
       fails (exit 2, an unreadable answer) stays a halt: exit 3, `halted reason="surface re-check failed: <its line>"`
       (fail closed). An empty write set skips it. The launch check: the cwd's
@@ -141,8 +143,9 @@ clear-halt, restarted, copies, land):
       stalled false and `capacity` (rr.capacity_gate's block); a stale or unreadable reading's WARN line goes to
       stderr. --waiting adds the turn's `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room
       stop, a completion verify in flight, a Capacity wait: legs.md § Complete and § Report), and writes the Leg lease
-      with `waiting: true`. It renews the lease only when this session is the open Leg's own (both ids known and
-      equal), so an `unknown` caller never renews a dead Leg.
+      with `waiting: true`, and `room_stop: true` beside it for a reason that opens `room stop:` (P36-15: waiting_listed
+      never takes over the Leg it parked). It renews the lease only when this session is the open Leg's own (both ids
+      known and equal), so an `unknown` caller never renews a dead Leg.
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock and then the rank lock (*The rank*), its contention read again: <t> must be what it
       proposes (with --inherit, an inherited `finish`), so a holder planted since next makes the claim refuse. Stamps
@@ -535,7 +538,8 @@ clear-halt, restarted, copies, land):
       `--session`, whatever the form: nothing is written); a standing halt (exit 3); Leg N already has a `began` line
       (exit 0, `recorded: false`, `began: true`, nothing written); N is not the last Leg + 1 (exit 1); for --listed
       only, an open Leg (exit 1, `an open Leg stands (Leg K): a take-over starts through create_thread (repair § 7
-      (e)); nothing written`: a take-over is never listed); a standing restart (below): the same line again is exit 0
+      (e)); nothing written`: repair never lists a take-over; the Waiting list lists one by itself only once the open
+      Leg's lease lapses, P36-15); a standing restart (below): the same line again is exit 0
       `recorded: false`; a `pending` one whose session is this session's (both real ids: `unknown` never matches), met
       by --started, --manual or --listed, is its update and is written; any other is exit 3 (`a restart of Leg N
       stands (<how>, <at>): check that session; --replace once it is gone`) unless --replace. It checks nothing else:
@@ -625,7 +629,8 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   is in WAITING_STATES (or `restarting` on a listed restart), no manual hand-over stands with no restart after it (its
   paste-ready prompt is its one start path: a chain is listed or has a start path off the list, never both, P44-4),
   and its restart has a next Leg with no blockedBy. An open Leg whose Leg lease reads lapsed (open_leg_lapsed, P36-15)
-  stands as no Leg session there: its `live` chain is listed with the `--take-over` prompt.
+  stands as no Leg session there: its `live` chain is listed with the `--take-over` prompt, unless a room stop wrote
+  that lease (`room_stop`: the parked Leg's session stands until the Stage's re-send).
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
   against other rollouts, {scope, why, held, released, unlanded, undone, pending, rows, warn, began, open, rank,
   captured, holding}. In every
@@ -693,7 +698,8 @@ too). begin writes the lease before its gate, so its own next reads that place t
 the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity alone); begin's
 launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The Leg lease is
 ~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from `next --waiting`
-and a Capacity wait's start and renewals (`moving` reads an open Leg's waiting lease, P41-4), written off --dry-run on
+(with `room_stop: true` for a room stop's, P36-15) and a Capacity wait's start and renewals (`moving` reads an open
+Leg's waiting lease, P41-4), written off --dry-run on
 the open Leg by begin (any begin that runs it), next (its own session only), claim, wait, smoke, done, security,
 set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after its last write, or
 LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the fallback nothing is gated
@@ -1489,11 +1495,14 @@ def next_json(plan):
 
 CAPACITY_WAIT_REFRESH = 600   # a capacity wait re-records its waiting record and renews its lease this often (s)
 LEASE_DROP_WEIGHT = object()  # leg_lease's `weight` for a fresh claim with no Weight: the lease is written without one
+ROOM_STOP_REASON = "room stop:"   # legs.md § Room stop's `next --waiting` reason opens so: its lease says `room_stop`
 
 
-def leg_lease(ctx, leg, waiting=False, strict=False, weight=None):
+def leg_lease(ctx, leg, waiting=False, strict=False, weight=None, room_stop=False):
     """Write this Leg's lease (the module docstring's *The Leg lease*): rr._lease_write(<rollout>, now, "leg"), with
-    `waiting: true` from `next --waiting`, off --dry-run, only for an open Leg (`leg`, my_leg's or the chain's). strict
+    `waiting: true` from `next --waiting` (and `room_stop: true` when its reason is a room stop's, P36-15: the Leg is
+    parked, never dead, until the Stage's re-send, so waiting_listed never takes it over; any later write, the re-send's
+    silent resume first, drops it), off --dry-run, only for an open Leg (`leg`, my_leg's or the chain's). strict
     (`next`'s rule): only when this session is the Leg's own, both ids known and equal, so an `unknown` caller never
     renews a dead Leg. `weight` (p53-4): a fresh claim's Weight under the budget (claim_save), written as the lease's
     `weight`; LEASE_DROP_WEIGHT, a fresh claim with none (no budget, or the fallback), writes the lease without one,
@@ -1510,7 +1519,7 @@ def leg_lease(ctx, leg, waiting=False, strict=False, weight=None):
         weight = None
     elif weight is None:
         weight = rr._lease_read(ctx.slug)[6]
-    rr._lease_write(ctx.slug, ctx.now, "leg", waiting=waiting, weight=weight)
+    rr._lease_write(ctx.slug, ctx.now, "leg", waiting=waiting, weight=weight, room_stop=room_stop)
 
 
 def leg_weight(ctx, row, chain=None):
@@ -2192,8 +2201,10 @@ def cmd_next(ctx, a):
     plan, g = leg_gate(ctx, chain, plan_next(chain, leg["n"], leg["alias"], leg["folder"]))
     for w in (g or {}).get("warns") or []:
         print(w, file=sys.stderr)
-    # The Leg lease (p36-7): only this session's own Leg renews it, never under --dry-run; --waiting holds it 180 min.
-    leg_lease(ctx, leg, waiting=a.waiting is not None, strict=True)
+    # The Leg lease (p36-7): only this session's own Leg renews it, never under --dry-run; --waiting holds it 180 min,
+    # and a room stop's marks it, so the Waiting list never takes over the Leg it parked (P36-15).
+    leg_lease(ctx, leg, waiting=a.waiting is not None, strict=True,
+              room_stop=a.waiting is not None and a.waiting.strip().startswith(ROOM_STOP_REASON))
     prog = chain.progress(leg["n"])
     out = {"verb": "next", "rollout": ctx.slug, "leg": leg["n"], **next_json(plan), "progress": prog}
     if a.waiting is not None:
@@ -5465,7 +5476,8 @@ def open_leg_lapsed(ctx, chain, read, leases=None):
     `leg.py close`. No open Leg, no lease file and an unreadable one read False (a Leg on an older snapshot writes none,
     so it stands). `leases` is the caller's _Leases at its own now (unfinished-rollout.py's `waiting`, whose ctx has
     none); without one it reads at ctx.now. The one copy unfinished-rollout.py's room (leg_session) and waiting_listed
-    read."""
+    read; a room stop's lease (`room_stop: true`) reads lapsed here too, so the room frees its place, and only
+    waiting_listed keeps that parked Leg off the list."""
     if read["open_leg"] is None:
         return False
     leases = leases if leases is not None else rr._Leases(ctx.now)
@@ -5484,10 +5496,15 @@ def waiting_listed(ctx, chain, read, leases=None):
     acts next`; `blocked by <restart.blockedBy>`. An open Leg whose Leg lease reads lapsed (open_leg_lapsed, at
     `leases` or ctx.now, P36-15) is no Leg session: its session died without `leg.py close`, so the chain is listed
     with restart_of's `--take-over` prompt (the Stage passes it verbatim) and the Waiting list restarts it, no
-    /thread:repair needed. The hold (held_by) is `waiting`'s own, never a reason to leave the list."""
+    /thread:repair needed. But a lapsed lease a room stop wrote (`next --waiting "room stop: …"`, its `room_stop`)
+    still stands, `its Leg session stands (open Leg <K>, room-stopped)`: that session is parked, not dead, and the
+    Stage's re-send resumes it (legs.md § Room stop); one whose session died is /thread:repair's to take over. The
+    hold (held_by) is `waiting`'s own, never a reason to leave the list."""
     if not rr._start_unattended(chain.note):
         return None, "no start: unattended"
     lapsed = open_leg_lapsed(ctx, chain, read, leases)
+    if lapsed and rr._lease_read(ctx.slug)[7]:
+        return None, f"its Leg session stands ({leg_session_of(chain, read)}, room-stopped)"
     session = leg_session_of(chain, {**read, "open_leg": None} if lapsed else read)
     if session is not None:
         return None, f"its Leg session stands ({session})"

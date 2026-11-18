@@ -28,7 +28,8 @@
 #   L12  the lock: an interleaved hand-over and successor, racing begins, the timeout
 #   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
 #        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
-#        smoke list (L13g, L13o); restarted: its checks, in order; an open Leg's lapsed lease lists it (L13c, P36-15)
+#        smoke list (L13g, L13o); restarted: its checks, in order; an open Leg's lapsed lease lists it, but not a room
+#        stop's, nor under a pending restart (L13c, L13k, P36-15)
 #   L14  the hold (ADR 0060): live and ready hold the whole claim, stuck only its set-aside row's surface; begin's
 #        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
 #        row's surface, and status's restart names it as its blocker; a held begin is a begin wait (`waiting`,
@@ -766,22 +767,29 @@ ok "$(q 'd["chain"]')|$(q 'd["openLeg"]')|$(q 'd["stall"]')|$(q 'd["progress"]["
 scen l13c
 mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
 leg begin --cwd "$F"; leg claim --task t1
+# P36-15: stamped, so the Waiting list reads the open Leg's Leg lease (begin and claim wrote it at $NOW)
+subst "$T/$RO.md" 'status: open' $'status: open\nstart: unattended'
 SESS=s2 leg status
 ok "$(q 'd["chain"]')|$(q 'd["progress"]["running"]')|$(q 'd["restart"]["takeOver"]')|$(q 'd["restart"]["blockedBy"]')" "live|1|True|open Leg 1 (session s1)" \
    "L13c: an open Leg of s1, read from s2: live, a take-over restart blocked by the open Leg"
 ok "$(q 'd["restart"]["prompt"].split(chr(10))[0]')|$(q 'd["restart"]["leg"]')|$(q 'd["restart"]["task"]')" "/thread:execute [[$RO]] --take-over|2|t1" \
    "L13c: … its prompt carries --take-over, for Leg 2 finishing t1"
-# P36-15: stamped, the open Leg is listed once its Leg lease (begin and claim wrote it at $NOW) reads lapsed at --now
-subst "$T/$RO.md" 'status: open' $'status: open\nstart: unattended'
-LNOW=2026-10-20T11:30+00:00 THREAD_MACHINE_TIMES='{}' SESS=s2 leg status
-ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')" "False|its Leg session stands (open Leg 1)" "L13c: stamped, 90 min on, the open Leg keeps it off the Waiting list"
+ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')" "False|its Leg session stands (open Leg 1)" "L13c: … stamped, its fresh lease keeps it off the Waiting list"
 LNOW=2026-10-20T11:31+00:00 THREAD_MACHINE_TIMES='{}' SESS=s2 leg status
 ok "$(q 'd["listed"]')|$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')" "True|live|open Leg 1 (session s1)" \
    "L13c: … 91 min on, its lease lapsed, it is listed (the take-over prompt); status's restart still names the open Leg"
+# a room stop's turn end marks the lease: lapsed (181 min on), it still keeps the parked Leg off the list
+leg next --waiting "room stop: L at its week's line"
+LNOW=2026-10-20T13:01+00:00 THREAD_MACHINE_TIMES='{}' SESS=s2 leg status
+ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')" "False|its Leg session stands (open Leg 1, room-stopped)" \
+   "L13c: … a room stop's lapsed lease keeps it off the list: the Stage's re-send resumes that Leg"
+leg begin --cwd "$F"   # the re-send's silent resume rewrites the lease at $NOW, unmarked
 SESS=r1 leg restarted --leg 2 --pending
 ok "$rc|$(q 'd["recorded"]')|$(logn 'restart: Leg 2 pending (session r1)')" "0|True|1" "L13k: restarted over an open Leg records (it never checks the open Leg)"
-leg status
-ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')" "restarting|restart Leg 2 (pending)" "L13k: … restarting, blocked by the restart"
+LNOW=2026-10-20T11:31+00:00 THREAD_MACHINE_TIMES='{}' leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')|$(q 'd["unlisted"]')" \
+   "restarting|restart Leg 2 (pending)|False|its Leg session stands (restart Leg 2 (pending))" \
+   "L13k: … restarting, blocked by the restart; its lease lapsed, the pending restart is the Leg session, off the list"
 # (d) a halt holding a claim, then clear-halt; (k) the restart lifecycle on that stalled chain
 scen l13d
 mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3); for t in t1 t2 t3; do mkt "$t"; done

@@ -518,7 +518,8 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   has no manual hand-over standing; and leg.py's restart_of, from the contention-free plan for its next Leg, is a
   finish, claim, wait or complete with no blockedBy (a malformed `chain_copies:` or a missing Chain copy keeps it off).
   An open Leg whose Leg lease reads lapsed at --now (leg.py's open_leg_lapsed, the room's rule below) is no Leg
-  session: its `live` chain is listed, its prompt restart_of's `--take-over` form, so the Stage restarts it (P36-15).
+  session: its `live` chain is listed, its prompt restart_of's `--take-over` form, so the Stage restarts it (P36-15),
+  unless a room stop wrote that lease (`room_stop`: the parked Leg waits for the Stage's re-send, off the list).
   leg.py's waiting_listed is this rule's one copy, which begin's begin wait, status and handed read too (their
   `listed`). By the hand-over (ADR 0076 d4 as P44-4 amends it): `hand-over: listed` is on the list, for its next Leg;
   a manual hand-over is off it, since its paste-ready prompt is its one start path, until a Leg begins or repair writes
@@ -2653,9 +2654,10 @@ def leg_session(leg, ctx, chain, read, leases) -> bool:
     holds none), but an open Leg whose Leg lease reads lapsed (leg.py's open_leg_lapsed at `leases`, a
     reconcile-rollout.py _Leases) is none (its session died without `leg.py close`: the Capacity count's rule,
     _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a later boot or wake
-    restarting it), and waiting_listed lists its chain with a take-over (P36-15); no lease file or an unreadable one
-    still counts (a Leg on an older snapshot writes none). A closing Leg (`closing Leg N`, P44-4: closed with a handoff,
-    no hand-over line yet) counts only while its `closed:` stamp is within LEG_LEASE_LAPSE (90 min) of leases.now (close
+    restarting it), and waiting_listed lists its chain with a take-over (P36-15) unless a room stop wrote that lease
+    (it frees the room all the same); no lease file or an unreadable one still counts (a Leg on an older snapshot
+    writes none). A closing Leg (`closing Leg N`, P44-4: closed with a handoff, no hand-over line yet) counts only
+    while its `closed:` stamp is within LEG_LEASE_LAPSE (90 min) of leases.now (close
     deleted its lease, so its stamp is the one clock; an unparseable stamp counts), so one that died inside
     /thread:close frees the room; waiting_listed reads no lapse, so its chain stays off the list until repair lists it."""
     if read["open_leg"] is not None:

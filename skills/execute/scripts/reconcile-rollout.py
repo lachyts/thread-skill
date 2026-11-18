@@ -5629,15 +5629,17 @@ def _lease_path(stem) -> Path:
     return Path.home() / LEASE_DIR_REL / f"{stem}.json"
 
 
-def _lease_write(stem, now, by, waiting=False, login=None, weight=None):
+def _lease_write(stem, now, by, waiting=False, login=None, weight=None, room_stop=False):
     """Rewrite the rollout's lease (p28-4; execute away.md § The Trickle): {rollout, written_at (`now`, UTC Z to the
     second), by ("next" or "entry"; "leg" for a serial rollout's Leg lease, p36-7)}, plus `waiting: true` for a Leg
-    lease a `next --waiting` turn end writes (it lapses after LEG_WAIT_LAPSE), and `login: <name>` when `login` is a
-    non-empty string (p36-7: `next` and record-entry pass the lead's own, _caller_login, so `moving` reads the lead's
-    quota from it), and `weight` (p53-4: a Leg's current claim's Weight, leg.py's leg_lease, only when `weight` is a valid
-    room, _weight_room), through a temp file beside it and os.replace, so a reader never sees a torn file and of two writers
-    the last wins. LEASE_DIR_REL is created only under an existing home dir. Best-effort: a failure prints one
-    LEASE_WARN line on stderr, never raises and changes no exit code and no stdout."""
+    lease a `next --waiting` turn end writes (it lapses after LEG_WAIT_LAPSE), `room_stop: true` beside it when that
+    turn end is a room stop's (`next --waiting "room stop: …"`, P36-15: leg.py's waiting_listed never takes over a Leg
+    it parked), and `login: <name>` when `login` is a non-empty string (p36-7: `next` and record-entry pass the lead's
+    own, _caller_login, so `moving` reads the lead's quota from it), and `weight` (p53-4: a Leg's current claim's
+    Weight, leg.py's leg_lease, only when `weight` is a valid room, _weight_room), through a temp file beside it and
+    os.replace, so a reader never sees a torn file and of two writers the last wins. LEASE_DIR_REL is created only under
+    an existing home dir. Best-effort: a failure prints one LEASE_WARN line on stderr, never raises and changes no exit
+    code and no stdout."""
     tmp = None
     try:
         path = _lease_path(stem)
@@ -5650,6 +5652,7 @@ def _lease_write(stem, now, by, waiting=False, login=None, weight=None):
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(json.dumps({"rollout": stem, "written_at": _utc_z(now), "by": by,
                                     **({"waiting": True} if waiting else {}),
+                                    **({"room_stop": True} if room_stop else {}),
                                     **({"login": login} if isinstance(login, str) and login else {}),
                                     **({"weight": room} if room is not None else {})}) + "\n")
             os.replace(tmp, path)
@@ -5667,40 +5670,42 @@ def _lease_write(stem, now, by, waiting=False, login=None, weight=None):
 
 
 def _lease_read(stem):
-    """(state, written_at, by, waiting, login, why, weight) for the rollout's lease file (_lease_path): state `none` (no file,
-    or a plain file in a directory's place), `unreadable` (any other OSError, a directory at the path included; over
-    LEASE_MAX_BYTES, not UTF-8, not JSON, not an object; a `written_at` missing, ill-typed or naive) or `ok`, with
-    written_at the aware stamp (else None) and by the file's `by` when it is a string ("next", "entry" or "leg",
-    _lease_write), else None (the trickle wait, p28-9, counts only a `next`'s). waiting is true only for a `waiting:
-    true` (a Leg's waiting turn end, p36-7); login is the file's `login` when it is a non-empty string (the lead's
-    Login, p36-7), else None. why says how it is not ok, else None. weight (p53-4) is the file's `weight` as a room
-    (_weight_room: a Leg's current claim's Weight), else None. Extra keys are ignored."""
+    """(state, written_at, by, waiting, login, why, weight, room_stop) for the rollout's lease file (_lease_path): state
+    `none` (no file, or a plain file in a directory's place), `unreadable` (any other OSError, a directory at the path
+    included; over LEASE_MAX_BYTES, not UTF-8, not JSON, not an object; a `written_at` missing, ill-typed or naive) or
+    `ok`, with written_at the aware stamp (else None) and by the file's `by` when it is a string ("next", "entry" or
+    "leg", _lease_write), else None (the trickle wait, p28-9, counts only a `next`'s). waiting is true only for a
+    `waiting: true` (a Leg's waiting turn end, p36-7); login is the file's `login` when it is a non-empty string (the
+    lead's Login, p36-7), else None. why says how it is not ok, else None. weight (p53-4) is the file's `weight` as a
+    room (_weight_room: a Leg's current claim's Weight), else None. room_stop is true only for a `room_stop: true` (a
+    Leg's room-stop turn end, P36-15). Extra keys are ignored."""
     try:
         with open(_lease_path(stem), "rb") as f:
             raw = f.read(LEASE_MAX_BYTES + 1)
     except (FileNotFoundError, NotADirectoryError):
-        return "none", None, None, False, None, "no file", None
+        return "none", None, None, False, None, "no file", None, False
     except (OSError, RuntimeError) as e:
         return ("unreadable", None, None, False, None,
-                f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})", None)
+                f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})", None, False)
     if len(raw) > LEASE_MAX_BYTES:
-        return "unreadable", None, None, False, None, "over 4 KiB", None
+        return "unreadable", None, None, False, None, "over 4 KiB", None, False
     try:
         data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
-        return "unreadable", None, None, False, None, "not UTF-8", None
+        return "unreadable", None, None, False, None, "not UTF-8", None, False
     except (ValueError, RecursionError):
-        return "unreadable", None, None, False, None, "not JSON", None
+        return "unreadable", None, None, False, None, "not JSON", None, False
     if not isinstance(data, dict):
-        return "unreadable", None, None, False, None, "not a JSON object", None
+        return "unreadable", None, None, False, None, "not a JSON object", None, False
     if "written_at" not in data:
-        return "unreadable", None, None, False, None, "no `written_at`", None
+        return "unreadable", None, None, False, None, "no `written_at`", None, False
     written, why = _away_stamp(data["written_at"])
     if why:
-        return "unreadable", None, None, False, None, f"`written_at` is {why}", None
+        return "unreadable", None, None, False, None, f"`written_at` is {why}", None, False
     by, login = data.get("by"), data.get("login")
     return ("ok", written, (by if isinstance(by, str) else None), data.get("waiting") is True,
-            (login if isinstance(login, str) and login else None), None, _weight_room(data.get("weight")))
+            (login if isinstance(login, str) and login else None), None, _weight_room(data.get("weight")),
+            data.get("room_stop") is True)
 
 
 def _lease_drop(stem):
@@ -5840,7 +5845,7 @@ class _Leases:
         unreadable; lapsesAt is start + the lapse for fresh and lapsed, else null. `leg`: a Leg lease (the class
         docstring), whose lapse is LEG_LEASE_LAPSE, or LEG_WAIT_LAPSE when it reads `waiting: true`, and which never
         reads room-stop."""
-        state, written, _by, waiting, _login, _why, _weight = _lease_read(stem)
+        state, written, _by, waiting, _login, _why, _weight, _room = _lease_read(stem)
         if state == "ok" and written - self.now > AWAY_FUTURE_SKEW:
             state = "unreadable"
         if state != "ok":
@@ -9110,7 +9115,7 @@ def cmd_trickle_wait(args) -> int:
             print(f"trickle wait: nothing to wait for: [[{stem}]] has no waiting record")
             return TRICKLE_WAKE_NONE
         wake, _woken_kept = _trickle_woken_judge(woken or [], tasks_dir, stem, now, wall)
-        state, written, by, _waiting, _login, _why, _weight = _lease_read(stem)
+        state, written, by, _waiting, _login, _why, _weight, _room = _lease_read(stem)
         looked = [own["at"]] + ([baseline] if baseline is not None else [])
         if state == "ok" and by == "next" and written - now <= AWAY_FUTURE_SKEW:
             looked.append(written)
@@ -20737,7 +20742,7 @@ def _lead_login(stem, note, now):
     (_Leases at `now`: fresh, or room-stop), else None. A lapsed, missing or unreadable lease, or one with no `login`
     (an older snapshot, a lead that is no Claude Code session), names none: a dead lead's held rows then read as work,
     which silence judges, so the Watchdog recovers it, onto a Login with headroom if the Stage has one."""
-    state, _written, _by, _waiting, login, _why, _weight = _lease_read(stem)
+    state, _written, _by, _waiting, login, _why, _weight, _room = _lease_read(stem)
     if state != "ok" or login is None:
         return None
     return login if _Leases(now).state(stem, note)["state"] in ("fresh", "room-stop") else None
@@ -20840,7 +20845,7 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
         leg = lg.open_leg_of(lg.parse_legs(lg.parse_log(note)))
         if leg is None:
             return None
-        state, written, _by, waiting, _login, _why, _weight = _lease_read(ro)
+        state, written, _by, waiting, _login, _why, _weight, _room = _lease_read(ro)
         if state != "ok" or not waiting:
             return None
         lease = _Leases(now).state(ro, note, leg=True)

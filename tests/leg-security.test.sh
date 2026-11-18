@@ -780,7 +780,7 @@ ok "$(q 'd["unlisted"]')" "its Leg session stands (handover started sess-x)" "L2
 SESS=r1 leg restarted --leg 2 --listed
 leg status
 ok "$(q 'd["restart"]["blockedBy"]')|$(q 'd["listed"]')" "None|True" "L21g: restarted --listed clears the started session"
-# (h) an open Leg: a take-over is never listed
+# (h) an open Leg: restarted --listed never lists a take-over (only a lapsed Leg lease lists one, P36-15: leg.test.sh L13c)
 scen l21h; two21
 leg begin --cwd "$F"; finish t1
 snap; SESS=r1 leg restarted --leg 2 --listed
