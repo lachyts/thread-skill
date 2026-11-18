@@ -3198,7 +3198,8 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
 // tests in the task tree), each pushed on st.ran before it runs (runAgent). The first runs on firstReviewerOn (Fable
 // when the file names it), the second on the task's rung (runOn, its arm excluded: armOf); neither sees the other's
 // verdict, and both read the same prompt with the accumulated history. A first reviewer on Fable still dead after
-// runAgent's retry runs once more on the rung (` on-rung`, a fell-back call); a dead second reviewer, or a dead rerun, is
+// runAgent's retry runs once more on the rung's own model at its review effort (` on-rung`, a fell-back call; never
+// runOn, which under `[role]` names Fable again); a dead second reviewer, or a dead rerun, is
 // the transient block, as a dead single judge is. The combined verdict: approve only when both approve; else changes,
 // with the first's changes bullets then the second's (identical strings once); head the first valid one; needsHuman the
 // first ask of a reviewer that said changes (an ask on an approve is logged and ignored, as the single judge's).
@@ -3209,8 +3210,9 @@ async function doubledVerdict(task, st, current, a, priorFeedback, round) {
   let firstModel = firstOn.model
   let first = await runAgent(prompt, { label: `first-review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...firstOn }, st)
   if (first.__dead && firstOn.model === 'fable' && fableNamedForReview(st)) {
-    const on = runOn(st, 'master-review')
-    log(`review: ${tag}: the first reviewer on fable died; once more on ${on.model}`)
+    // The rung's own model, never runOn's: under `[role] master-review = "fable"` runOn hands back Fable again.
+    const on = { model: cur(st).model, effort: judgeEffort(st, 'review') }
+    log(`review: ${tag}: the first reviewer on fable died; once more on the rung's ${on.model}`)
     firstModel = on.model
     first = await runAgent(prompt, { label: `first-review:${tag} on-rung`, phase: 'Review', schema: REVIEW_VERDICT, ...on }, st)
   }

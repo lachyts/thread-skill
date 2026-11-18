@@ -188,13 +188,19 @@ test('a question from either reviewer that says changes ends review-blocked with
 
 test('a dead first reviewer on Fable runs once more on the rung; a dead rerun or second reviewer is the transient block', async () => {
   const over = ladder({ share: { 'master-review': 0.5 } })
-  const r = await runTask(mkArgs({}, over), agentOf({ ...MARKED, firstDead: 'fable' }))
-  const row = r.result.tasks[0]
-  assert.equal(row.status, 'review')
-  assert.deepEqual(reviewLabels(r), [`first-review:${S} r1`, `first-review:${S} r1`, `first-review:${S} r1 on-rung`, `review:${S} r1`])
-  assert.deepEqual(ranOn(row), { 'first-review r1': 'fable/high', 'first-review r1 on-rung': 'opus/xhigh', 'review r1': 'opus/xhigh' })
-  assert.ok(r.logs.includes(`review: ${S} r1: the first reviewer on fable died; once more on opus`), r.logs.join('\n'))
-  assert.ok(r.logs.includes(`review: ${S} r1: first approve on opus, second approve on opus`), r.logs.join('\n'))
+  // The rerun takes the rung's own model whichever names Fable; under [role] the second reviewer stays on Fable.
+  for (const [name, o, second] of [
+    ['a master-review share', over, 'opus/xhigh'],
+    ['the master review\'s role model', ladder({ roles: { 'master-review': 'fable' } }), 'fable/high'],
+  ]) {
+    const r = await runTask(mkArgs({}, o), agentOf({ ...MARKED, firstDead: 'fable' }))
+    const row = r.result.tasks[0]
+    assert.equal(row.status, 'review', name)
+    assert.deepEqual(reviewLabels(r), [`first-review:${S} r1`, `first-review:${S} r1`, `first-review:${S} r1 on-rung`, `review:${S} r1`], name)
+    assert.deepEqual(ranOn(row), { 'first-review r1': 'fable/high', 'first-review r1 on-rung': 'opus/xhigh', 'review r1': second }, name)
+    assert.ok(r.logs.includes(`review: ${S} r1: the first reviewer on fable died; once more on the rung's opus`), `${name}: ${r.logs.join('\n')}`)
+    assert.ok(r.logs.includes(`review: ${S} r1: first approve on opus, second approve on ${second.split('/')[0]}`), `${name}: ${r.logs.join('\n')}`)
+  }
   for (const [name, s, last] of [
     ['a dead rerun', { firstDead: 'all' }, `first-review:${S} r1 on-rung`],
     ['a dead second reviewer', { reviews: [null] }, `review:${S} r1`],
@@ -229,13 +235,17 @@ test('the doubled block sits only in a doubled round\'s prompts, right after the
   assert.equal(first, second)
   assert.ok(first.includes('A second reviewer reads this PR on its own, and the round approves only when both of you approve.'))
   for (const c of r.calls.filter((x) => !/^(first-)?review:/.test(x.label))) assert.ok(!c.prompt.includes('Unreachable surface (ADR 0081)'), c.label)
-  const { reviewJudgePrompt, rungState } = loadEngine(['reviewJudgePrompt', 'rungState'])
+  const { reviewJudgePrompt, rungState, unreachableReviewBlock } = loadEngine(['reviewJudgePrompt', 'rungState', 'unreachableReviewBlock'])
   const a = mkArgs({})
   const plain = reviewJudgePrompt(a.task, { prUrl: PR }, a, [])
   assert.equal(plain, reviewJudgePrompt(a.task, { prUrl: PR }, a, [], ''), "'' is the default")
-  const st = rungState(a.task, a)
   assert.ok(!plain.includes('Unreachable surface'), 'an undoubled prompt carries none')
-  assert.equal(st.doubled, false)
+  // The order, with the Security check on: the security block's last line, the doubled block, then the diff read.
+  const sa = mkArgs({}, { securityCheck: { script: '/plug/skills/execute/scripts/security-check.py' } })
+  const doubled = reviewJudgePrompt(sa.task, { prUrl: PR }, sa, [], unreachableReviewBlock(rungState(sa.task, sa)))
+  const at = ['compared only on the part shown.', 'Unreachable surface (ADR 0081)', `Read \`gh pr diff ${PR}\``].map((x) => doubled.indexOf(x))
+  assert.ok(at[0] > 0 && at[0] < at[1] && at[1] < at[2], `the order: ${at}`)
+  assert.ok(doubled.includes('compared only on the part shown.\n\nUnreachable surface (ADR 0081)'), 'right after the security block')
 })
 
 // The JS port of inert-paths.py's glob_match, at its own layer: tests/inert-paths.test.mjs's 'glob_match agrees with git
