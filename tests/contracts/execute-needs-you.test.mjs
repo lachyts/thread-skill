@@ -394,6 +394,18 @@ function checkNeedsYou(skill, context = realContext, legs = realLegs, close = re
     !kindI.includes('it is never pushed (ADR 0075 d2)')) {
     fails.push('changed-for-you')
   }
+  // felt-check (p52-2, ADR 0081 d3): (j) lists, on every turn, every row `felt-check --list --rollout` reads (a read), an
+  // open check and a carried fix's try-again, worded alike in every session; it never holds the merge and is never
+  // pushed; the lead runs the verb only on his answer, and *Answers.* routes his words there.
+  const kindJ = kind(items, '- (j) **A Felt check to try**')
+  if (!kindJ.includes('every row of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py felt-check --list --rollout <rollout-note>` (a read)') ||
+    !kindJ.includes('`[[<slug>]] felt check open: <text>: try it by hand, then felt-check --task <slug> --passed|--failed "<what you saw>"`') ||
+    !kindJ.includes('`[[<slug>]] felt check again: <text>: try it by hand, then felt-check --task <slug> --passed|--failed "<what you saw>"`') ||
+    !kindJ.includes('is never pushed (ADR 0075 d2)') || !kindJ.includes('only on his answer, never on its own reading') ||
+    !items.includes('the open Felt checks of its task notes (`felt-check --list`, for (j))') ||
+    !answers.includes('his Felt check runs `felt-check --task <slug> --passed|--failed "<his words>"` ((j))')) {
+    fails.push('felt-check')
+  }
   return [...new Set(fails)]
 }
 
@@ -455,7 +467,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 const RULES = ['no-ask-in-flight', 'no-push', 'ledger', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
   'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'answers', 'answered-items', 'glossary',
-  'hold-until', 'git-env-item', 'changed-for-you']
+  'hold-until', 'git-env-item', 'changed-for-you', 'felt-check']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -665,7 +677,18 @@ test('control: (i) without its rows read, its unconfirmed rows, its text, its un
   only(edit(real, ', and it is never pushed (ADR 0075 d2).\n', '.\n'), 'changed-for-you', 'no-push dropped')
 })
 
-test('the rules are all named (19) and each has a control', () => {
-  assert.equal(RULES.length, 19)
+test('control: (j) without its rows read, its again row, its no-push, his answer, or Answers\' route, fails felt-check', () => {
+  only(edit(real, 'every row of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py felt-check --list --rollout <rollout-note>` (a read)',
+    'every Felt check the lead remembers'), 'felt-check', 'no rows read')
+  only(edit(real, '; and an `again` row, `[[<slug>]] felt check again: <text>: try it by hand, then felt-check --task <slug> --passed|--failed "<what you saw>"`, a carried fix whose check failed once the fix it filed landed, was dropped or is gone', ''),
+    'felt-check', 'no again row')
+  only(edit(real, 'It never holds the merge or the queue and is never pushed (ADR 0075 d2);', 'It never holds the merge or the queue;'),
+    'felt-check', 'no-push dropped')
+  only(edit(real, 'only on his answer, never on its own reading', 'once it has looked'), 'felt-check', 'the lead records its own')
+  only(edit(real, ' his Felt check runs `felt-check --task <slug> --passed|--failed "<his words>"` ((j));', ''), 'felt-check', 'no Answers route')
+})
+
+test('the rules are all named (20) and each has a control', () => {
+  assert.equal(RULES.length, 20)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

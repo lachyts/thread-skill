@@ -265,8 +265,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // revise and each integrate call — before any stamp, and passes it as args.ladder; prepare and push need none;
   // both resumes re-pass their call's own ladder; a refusal writes nothing and halts `ladder file refused`, which
   // § 7 lists; the skill warns about `max_tier:` exactly once and passes nothing for it; § 4's args carry `ladder`
-  // and the task's `rung`, then (p46-2) its `arms`; the integrate call carries a freshly resolved ladder; § 5's launch
-  // names it.
+  // and the task's `rung`, then (p46-2) its `arms`, then (p52-2) its `unreachable`; the integrate call carries a freshly
+  // resolved ladder; § 5's launch names it.
   const ladderP = collapse((section(skill, S3) ?? '').split('\n\n').find((x) => x.startsWith("**The ladder, at each call's start (ADR 0029 decision 6).**")) ?? '')
   const tierLines = skill.split('\n').filter((l) => /max_tier|maxTier/.test(l))
   const s4 = section(skill, S4) ?? ''
@@ -280,7 +280,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     tierLines.length !== 1 || !tierLines[0].includes("\"`max_tier:` ignored; the ceiling is the ladder's top rung\"") ||
     !tierLines[0].includes('nothing is passed to the engine') ||
     !s4.includes('"ladder": {') || !s4.includes('"rung": "opus-high",') ||
-    !s4.includes('"arms": { "master-review": "fable", "builder": "none" } }') ||
+    !s4.includes('"arms": { "master-review": "fable", "builder": "none" },') || !s4.includes('"unreachable": true }') ||
     !st3.includes("a freshly resolved `ladder` (§ 3: read at this call's start)") ||
     !lost.includes('the same `scriptPath` and args, the ladder included') ||
     !resume37.includes("The resume keeps its call's own `ladder`.") ||
@@ -1223,8 +1223,9 @@ test('control: a second max_tier: line fails ladder', () => {
   only(sk('| `env_bootstrap` | none (omit) |', '| `max_tier` | none (omit) | ignored |\n| `env_bootstrap` | none (omit) |'), 'ladder', 'second max_tier line')
 })
 
-test("control: § 4's args without the task's arms fails ladder (p46-2)", () => {
-  only(sk('"arms": { "master-review": "fable", "builder": "none" } }', '}'), 'ladder', 'no task.arms')
+test("control: § 4's args without the task's arms, or without its unreachable, fails ladder (p46-2, p52-2)", () => {
+  only(sk('"arms": { "master-review": "fable", "builder": "none" },', ''), 'ladder', 'no task.arms')
+  only(sk('"unreachable": true }', '}'), 'ladder', 'no task.unreachable')
 })
 
 test('control: a lead row written for an integrate call\'s review-blocked fails set-aside', () => {

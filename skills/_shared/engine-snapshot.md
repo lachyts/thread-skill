@@ -72,7 +72,7 @@ the newest prove available reads every rollout's notes, whatever its engine (ADR
 The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr line starting `engine-snapshot:` that
 names the root to re-run from. They are:
 
-- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving`, `join` and `prove` (and `triggers`,
+- `reconcile-rollout.py`, every verb but `status`, `fold-journals`, `moving`, `join`, `prove` and `felt-check` (and `triggers`,
   which names no note): it asks about the note `--rollout` (carry:
   `--from`) names, which `lane-hold` and `lane-ack` always take, and the rollout each `--tasks` slug's note (and, for
   `reconcile`, each result row's) names in its `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`,
@@ -227,7 +227,14 @@ on; a finished rollout, or no note, reads it). A fold the gate holds back still 
 prints `no role-call for <n> segments: <why>`. Those segments are lost: a later fold reopens a terminal call only when a
 resume was bound after its last fold, and then reads only the journal the resume rewrote. So of the calls folded while
 a rollout's engine predates the kind, only a resumed call's latest segment can still be written, by a fold after the
-rollout moves to an engine that reads it or finishes.
+rollout moves to an engine that reads it or finishes. A `first-reviewer` role-call line (p52-2, ADR 0081 d2) exists only
+in the record of a call whose engine dispatches a doubled master review. The task note's `unreachable: true` stamp and
+its `## Felt check` lines (p52-2, ADR 0081 d3; vault-grammar § Felt check) are written by a `reconcile` at p52-2 or later
+only; an older engine ignores both, so its tasks take a single master review and no check. `felt-check` and
+`unfinished-rollout.py needs-you` read them from any root at p52-2 or later (`felt-check` is guard-exempt: it writes
+only a `## Felt check` line, a Proof log line no older reader parses and a new loose task). `prove` runs from the
+Primary refresh's root, so the hold a Felt check puts on a carried fix needs a root at p52-2 or later there: an older
+root's prove ignores the hold.
 
 Schedule's `join` (ADR 0078 d6) writes a running rollout's note from a newer root, so its forms are a cross-version
 contract:
