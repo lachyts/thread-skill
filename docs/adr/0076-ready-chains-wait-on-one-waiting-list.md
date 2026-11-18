@@ -45,8 +45,9 @@ from its start, not from its first claim.
 *(Amended by P36-15, 2026-11-19: an open Leg whose Leg lease has lapsed (no leg.py call for 90 minutes, 180 after a
 waiting turn end) is no Leg session. Its session died without closing, so its chain is on the list with the take-over
 prompt (`/thread:execute [[<slug>]] --take-over`), and the Stage restarts it with no `/thread:repair`. A lapsed lease a
-room stop wrote is the exception: that Leg is parked until the Stage's re-send, so it stays off the list. A take-over
-is still never listed by repair (`leg.py restarted --listed` refuses an open Leg).)*
+room stop marked is the exception: that Leg is parked until the Stage's re-send, so it stays off the list, and the mark
+stands until that re-send's `begin` (every other lease write keeps it). A take-over is still never listed by repair
+(`leg.py restarted --listed` refuses an open Leg).)*
 
 **d4. Orient and orient-all list chains; they never launch a Leg.** Schedule's serial path writes `start: unattended`
 on each chain note it writes for a run Lachy approved. orient-all's Leg items, and a Leg's handoff to the next Leg,

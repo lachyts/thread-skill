@@ -586,7 +586,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   open Leg whose Session died reads live, never
   stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
   so on a stamped chain its lapsed Leg lease is what lists it for the take-over
-  (P36-15), and elsewhere (no stamp, or a lease a room stop wrote) repair's
+  (P36-15), and elsewhere (no stamp, or a lease a room stop marked) repair's
   `list_sessions` check is what finds that Session gone. _Avoid_: hung, frozen.
 - **Surface** — a place a serial chain is predicted to write, written as a
   token in a serial note's `surfaces:` (and in a task's own, optional

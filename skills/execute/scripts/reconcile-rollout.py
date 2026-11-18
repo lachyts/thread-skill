@@ -5633,8 +5633,8 @@ def _lease_write(stem, now, by, waiting=False, login=None, weight=None, room_sto
     """Rewrite the rollout's lease (p28-4; execute away.md § The Trickle): {rollout, written_at (`now`, UTC Z to the
     second), by ("next" or "entry"; "leg" for a serial rollout's Leg lease, p36-7)}, plus `waiting: true` for a Leg
     lease a `next --waiting` turn end writes (it lapses after LEG_WAIT_LAPSE), `room_stop: true` beside it when that
-    turn end is a room stop's (`next --waiting "room stop: …"`, P36-15: leg.py's waiting_listed never takes over a Leg
-    it parked), and `login: <name>` when `login` is a non-empty string (p36-7: `next` and record-entry pass the lead's
+    turn end is a room stop's, or a later write carries its mark (leg.py's leg_lease, P36-15: waiting_listed never
+    takes over a Leg a room stop parked), and `login: <name>` when `login` is a non-empty string (p36-7: `next` and record-entry pass the lead's
     own, _caller_login, so `moving` reads the lead's quota from it), and `weight` (p53-4: a Leg's current claim's
     Weight, leg.py's leg_lease, only when `weight` is a valid room, _weight_room), through a temp file beside it and
     os.replace, so a reader never sees a torn file and of two writers the last wins. LEASE_DIR_REL is created only under

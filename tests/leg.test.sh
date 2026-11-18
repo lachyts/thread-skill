@@ -29,7 +29,7 @@
 #   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
 #        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
 #        smoke list (L13g, L13o); restarted: its checks, in order; an open Leg's lapsed lease lists it, but not a room
-#        stop's, nor under a pending restart (L13c, L13k, P36-15)
+#        stop's (its mark carried by a later write until begin), nor under a pending restart (L13c, L13k, P36-15)
 #   L14  the hold (ADR 0060): live and ready hold the whole claim, stuck only its set-aside row's surface; begin's
 #        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
 #        row's surface, and status's restart names it as its blocker; a held begin is a begin wait (`waiting`,
@@ -778,12 +778,14 @@ ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')" "False|its Leg session stands (open
 LNOW=2026-10-20T11:31+00:00 THREAD_MACHINE_TIMES='{}' SESS=s2 leg status
 ok "$(q 'd["listed"]')|$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')" "True|live|open Leg 1 (session s1)" \
    "L13c: … 91 min on, its lease lapsed, it is listed (the take-over prompt); status's restart still names the open Leg"
-# a room stop's turn end marks the lease: lapsed (181 min on), it still keeps the parked Leg off the list
+# a room stop's turn end marks the lease, and a later write that is no begin (a notification's turn, a background
+# Capacity wait's renewal) carries the mark: lapsed (181 min on), it still keeps the parked Leg off the list
 leg next --waiting "room stop: L at its week's line"
+leg next --waiting "review in flight: [[t1]]"
 LNOW=2026-10-20T13:01+00:00 THREAD_MACHINE_TIMES='{}' SESS=s2 leg status
 ok "$(q 'd["listed"]')|$(q 'd["unlisted"]')" "False|its Leg session stands (open Leg 1, room-stopped)" \
-   "L13c: … a room stop's lapsed lease keeps it off the list: the Stage's re-send resumes that Leg"
-leg begin --cwd "$F"   # the re-send's silent resume rewrites the lease at $NOW, unmarked
+   "L13c: … a room stop's lapsed lease, its mark carried by a later next, keeps it off the list: the re-send resumes it"
+leg begin --cwd "$F"   # the re-send's silent resume rewrites the lease at $NOW, unmarked (begin alone drops the mark)
 SESS=r1 leg restarted --leg 2 --pending
 ok "$rc|$(q 'd["recorded"]')|$(logn 'restart: Leg 2 pending (session r1)')" "0|True|1" "L13k: restarted over an open Leg records (it never checks the open Leg)"
 LNOW=2026-10-20T11:31+00:00 THREAD_MACHINE_TIMES='{}' leg status
