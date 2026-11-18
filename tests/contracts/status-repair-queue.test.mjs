@@ -395,12 +395,14 @@ function buildE() {
 
 // ---- fixture F: the automatic retry's verdict, as repair and status read it (p16-5, ADR 0033) --------------------
 
-// RF's set-asides each read one verdict from `inputs`: retry (true, budget left), spent (`budget: 2/2 used`), same
-// (an identical re-block), asks (a `## Needs you` question once the budget is spent; its brief marks one part
-// optional), repeat (the budget spent on a block that repeats the one last re-entered, so its fingerprint equals
-// `auto_retry_sha`), cooling (an infra cool-down), quota (a quota cool-down) and gate (gate-pending with a question).
+// RF's set-asides each read one verdict from `inputs`: retry (true, budget left), spent (its budget spent, then a
+// malformed `overtime_used` that fails closed: his, ADR 0070 d4, since a spent budget alone is an Overtime run now,
+// p39-14), same (an identical re-block: a take-out, the lead's), asks (a `## Needs you` question once the budget is
+// spent; its brief marks one part optional), repeat (the budget spent on a block that repeats the one last re-entered,
+// so its fingerprint equals `auto_retry_sha`: a take-out too), cooling (an infra cool-down), quota (a quota cool-down)
+// and gate (gate-pending with a question).
 // RF2 holds an UNVERIFIED set-aside, which a Drift line routes (kept off RF so `next` there never meets its hold), and
-// an at-Integration set-aside with no `pr:`. Both rollouts stamp auto_retries and max_review_rounds, so no verdict
+// an at-Integration set-aside with no `pr:`. Both rollouts stamp auto_retries, max_review_rounds and overtime_runs, so no verdict
 // reads the operator's settings; their Project root is gone on purpose (a copy with the stamp stripped reads the
 // budget as unresolved). The blocks are real reconcile rows, the retries the real `auto-retry`, the descope the real
 // `descope`, the lead's rows `lead-integrate.py set-aside`. `answer` is repair § 3b on copies through the real verbs
@@ -488,7 +490,7 @@ function buildF() {
   const d = path.join(tmp, 'F')
   fs.mkdirSync(d)
   const repo = path.join(tmp, 'F-root-gone')
-  const budget = ['auto_retries: 2', 'max_review_rounds: 4']
+  const budget = ['auto_retries: 2', 'max_review_rounds: 4', 'overtime_runs: 3']
   writeRollout(d, RF, Object.values(F), budget, { repo })
   writeRollout(d, RF2, Object.values(F2), budget, { repo })
   const task = (R, slug, body = '') => writeTask(d, slug, ['status: in_progress', 'scope: cross-cutting', `rollout: "[[${R}]]"`, `owner: ${F_OWNER}`,
@@ -511,6 +513,7 @@ function buildF() {
     fRestart(d, slug, '2026-10-04T07:36:00Z')
   }
   plan(F.spent, FC, '2026-10-04T08:00:00Z')
+  setKey(d, F.spent, 'overtime_used', 'x')
   plan(F.asks, FC, '2026-10-04T08:00:00Z', { needsHuman: FQ })
   plan(F.repeat, FB, '2026-10-04T08:00:00Z')
   fBlock(d, RF, F.cooling, 'blocked', TRANSIENT, '2026-10-04T08:58:00Z')
@@ -537,11 +540,13 @@ function buildF() {
   if (r.autoRetry !== true || r.autoRetriesUsed !== 0 || r.autoRetryBudget?.autoRetries?.value !== 2 || r.autoRetryBudget?.autoRetries?.source !== 'rollout') {
     split.push(`retry: ${JSON.stringify([r.autoRetry, r.autoRetriesUsed, r.autoRetryBudget])}`)
   }
-  if (I[F.spent].autoRetry !== false || I[F.spent].autoRetryWhy !== 'budget: 2/2 used') split.push(`spent: ${I[F.spent].autoRetryWhy}`)
-  if (I[F.same].autoRetry !== false || I[F.same].autoRetryWhy !== 'same feedback as the block last re-entered' || !fp(F.same) ||
+  if (I[F.spent].autoRetry !== false || I[F.spent].autoRetryWhy !== "malformed overtime_used: 'x' (fails closed)") split.push(`spent: ${I[F.spent].autoRetryWhy}`)
+  const TAKEN = 'same feedback as the block last re-entered: the lead takes it out'
+  if (I[F.same].autoRetry !== false || I[F.same].autoRetryWhy !== TAKEN || I[F.same].takeOut?.cause !== 'same-feedback' || !fp(F.same) ||
     fmKey(fRead(d, F.same), 'auto_retry_sha') !== fp(F.same)) split.push(`same: ${I[F.same].autoRetryWhy}`)
-  // repeat: the budget check comes before the same-feedback one, so a spent budget on a repeated block reads as spent.
-  if (I[F.repeat].autoRetry !== false || I[F.repeat].autoRetryWhy !== 'budget: 2/2 used' || !fp(F.repeat) ||
+  // repeat: the same-feedback check comes before the budget's (ADR 0070), so a repeated block with its budget spent is
+  // taken out too, never asked.
+  if (I[F.repeat].autoRetry !== false || I[F.repeat].autoRetryWhy !== TAKEN || !fp(F.repeat) ||
     fmKey(fRead(d, F.repeat), 'auto_retry_sha') !== fp(F.repeat) || runCount(fRead(d, F.repeat)) !== 2) split.push(`repeat: ${I[F.repeat].autoRetryWhy}`)
   const a = I[F.asks]
   if (a.autoRetry !== false || !a.autoRetryWhy.startsWith('needs a human') || T[F.asks]?.needsHuman !== FQ || a.autoRetryClass == null || a.autoRetryBudget !== null) {
@@ -554,7 +559,7 @@ function buildF() {
   if (T[F.gate]?.setAsideAt !== 'gate' || T[F.gate]?.needsHuman !== FQG || !I[F.gate].autoRetryWhy.startsWith('gate-pending') ||
     gHb.rc !== 1 || fmKey(fRead(gCopy, F.gate), 'status') !== 'gate-pending') split.push(`gate: ${JSON.stringify([T[F.gate]?.setAsideAt, I[F.gate].autoRetryWhy, gHb.rc])}`)
   const picked = Object.values(F).filter((s) => T[s]?.queueState === 'set-aside' && needsYouItem(T[s], I[s])).sort()
-  if (JSON.stringify(picked) !== JSON.stringify([F.spent, F.same, F.asks, F.repeat].sort())) split.push(`needs you picks ${JSON.stringify(picked)}`)
+  if (JSON.stringify(picked) !== JSON.stringify([F.spent, F.asks].sort())) split.push(`needs you picks ${JSON.stringify(picked)}`)
 
   // render: a count shows only where the verdict reached the budget; `?` only for an unresolved one.
   const render = []
@@ -622,7 +627,7 @@ function answerF(d0, fpOf) {
   const v0 = inputsAt(answered, slug)
   if (!t0 || 'needsHuman' in t0) fails.push('(ii) status still carries needsHuman')
   if (!fRead(answered, slug).includes(entry) || v0.autoRetry !== false || v0.answerRecorded?.stamp !== F_STAMP || v0.answerRecorded?.form !== 'hand-back' ||
-    !leadActs(v0) || !v0.autoRetryWhy.startsWith(`answered for this block (hand-back, ${F_STAMP}): budget: 2/2 used`)) {
+    !leadActs(v0) || v0.autoRetryWhy !== `answered for this block (hand-back, ${F_STAMP}): nothing else holds it`) {
     fails.push(`(ii) answered: ${JSON.stringify([v0.autoRetryWhy, v0.answerRecorded, v0.humanFix])}`)
   }
   const hb = fHandBackAnswer(answered, slug, F_STAMP)
@@ -637,9 +642,10 @@ function answerF(d0, fpOf) {
   fRestart(answered, slug, '2026-10-04T09:01:00Z')
   fBlock(answered, RF, slug, 'plan-blocked', FC, '2026-10-04T09:30:00Z')
   const v1 = inputsAt(answered, slug, '2026-10-04T09:30:00Z')
-  if (runCount(fRead(answered, slug)) !== runs || v1.fingerprint !== fp || v1.autoRetryWhy !== 'same feedback as the block last re-entered' ||
-    v1.answerRecorded !== null || !ask2(v1)) {
-    fails.push(`(ii) re-blocked: ${JSON.stringify([runCount(fRead(answered, slug)), runs, v1.autoRetryWhy, v1.answerRecorded, v1.humanFix?.label])}`)
+  // ADR 0070: the identical re-block is taken out at once, no ask, its answer spent.
+  if (runCount(fRead(answered, slug)) !== runs || v1.fingerprint !== fp || v1.takeOut?.cause !== 'same-feedback' ||
+    v1.answerRecorded !== null || v1.humanFix !== null) {
+    fails.push(`(ii) re-blocked: ${JSON.stringify([runCount(fRead(answered, slug)), runs, v1.autoRetryWhy, v1.answerRecorded, v1.takeOut])}`)
   }
 
   // (iii) The race: with budget left once the section is gone, an answered block is still never retried; the lead's
@@ -657,7 +663,8 @@ function answerF(d0, fpOf) {
     fails.push(`(iii) repair's --answer after the lead: ${JSON.stringify([hb3.rc, hb3.err])}`)
   }
 
-  // (iv) A spent budget with no question, answered under a pause: the entry is recorded and nothing is handed back.
+  // (iv) A spent budget with no question (his through its fail-closed counter), answered under a pause: the entry is
+  // recorded and nothing is handed back.
   // Reinstated, the verdict reads the answer, so no retry, and the lead hands it back once.
   const spent = F.spent
   const spentFp = fpOf(F.spent)
@@ -672,8 +679,8 @@ function answerF(d0, fpOf) {
     fHandBackAnswer(sp, spent, F_STAMP).rc !== 1) fails.push(`(iv) handed back: ${JSON.stringify([hb4.rc, hb4.err])}`)
 
   // (v) A repeated block (its fingerprint equals auto_retry_sha, its budget spent), answered under a pause, reads as
-  // answered; the lead's hand-back spends it; the identical re-block is a fresh ask; an answer to that refusal, since,
-  // reads as answered again, auto_retry_sha still equal to its fingerprint.
+  // answered; the lead's hand-back spends it; the identical re-block is a take-out (ADR 0070), no ask; an answer to it,
+  // since, reads as answered again, auto_retry_sha still equal to its fingerprint.
   const rs = F.repeat
   const rsFp = fpOf(F.repeat)
   const rp = copyDir(d0, path.join(tmp, 'F-repeat'))
@@ -686,8 +693,8 @@ function answerF(d0, fpOf) {
   fRestart(rp, rs, '2026-10-04T09:01:00Z')
   fBlock(rp, RF, rs, 'plan-blocked', FB, '2026-10-04T09:30:00Z')
   const v5b = inputsAt(rp, rs, '2026-10-04T09:30:00Z')
-  if (runCount(fRead(rp, rs)) !== rsRuns || v5b.autoRetryWhy !== 'same feedback as the block last re-entered' || v5b.answerRecorded !== null || !ask2(v5b)) {
-    fails.push(`(v) re-blocked: ${JSON.stringify([v5b.autoRetryWhy, v5b.answerRecorded, v5b.humanFix?.label])}`)
+  if (runCount(fRead(rp, rs)) !== rsRuns || v5b.takeOut?.cause !== 'same-feedback' || v5b.answerRecorded !== null || v5b.humanFix !== null) {
+    fails.push(`(v) re-blocked: ${JSON.stringify([v5b.autoRetryWhy, v5b.answerRecorded, v5b.takeOut])}`)
   }
   must0(fRecord(rp, rs, ['--kind', 'decision', '--ask', 'same feedback as the block last re-entered: hand it back once more?', '--answer',
     'yes: write the rollback test first', '--fingerprint', rsFp, '--form', 'hand-back'], '2026-10-04T09:50:00Z'), '(v) the second record-answer')
@@ -697,8 +704,8 @@ function answerF(d0, fpOf) {
   }
 
   // (vi) The block comes back through automatic retries: asks answered, a bare hand-back (which spends the answer),
-  // then retried through FA and FB, then FC again with the budget spent. auto_retry_sha (FB) differs from FC's
-  // fingerprint; the spent key and the newer runs keep it from reading the old answer.
+  // then retried through FA and FB, then FC again with the budget spent (an Overtime run, p39-14). auto_retry_sha (FB)
+  // differs from FC's fingerprint; the spent key and the newer runs keep it from reading the old answer.
   const rt = copyDir(d0, path.join(tmp, 'F-returned'))
   must0(fRecord(rt, slug, ['--kind', 'needs-you', '--ask', FQ, '--answer', F_ANSWER, '--fingerprint', fp, '--form', 'hand-back']), '(vi) record-answer')
   must0(fHandBack(rt, slug), '(vi) the bare hand-back')
@@ -710,13 +717,13 @@ function answerF(d0, fpOf) {
   fRestart(rt, slug, '2026-10-04T09:26:00Z')
   fBlock(rt, RF, slug, 'plan-blocked', FC, '2026-10-04T09:30:00Z')
   const v6 = inputsAt(rt, slug, '2026-10-04T09:30:00Z')
-  if (v6.autoRetryWhy !== 'budget: 2/2 used' || v6.fingerprint !== fp || fmKey(fRead(rt, slug), 'auto_retry_sha') === fp || v6.answerRecorded !== null) {
+  if (v6.overtime?.used !== 0 || v6.fingerprint !== fp || fmKey(fRead(rt, slug), 'auto_retry_sha') === fp || v6.answerRecorded !== null) {
     fails.push(`(vi) returned: ${JSON.stringify([v6.autoRetryWhy, v6.fingerprint, v6.answerRecorded])}`)
   }
 
   // (vii) The same across sections: retry with four retries, FA plan-blocked, retried, a red verifier (blocked),
   // retried, FA again with a question (no run written), answered, a bare hand-back (spent), then with auto_retries 1 the
-  // red verifier again (no run), retried, then FA again with the budget spent: answerRecorded null.
+  // red verifier again (no run), retried, then FA again with the budget spent (an Overtime run): answerRecorded null.
   const RED = 'verifier red: test_rollback fails'
   const cr = copyDir(d0, path.join(tmp, 'F-crossed'))
   const cs = F.retry
@@ -739,7 +746,7 @@ function answerF(d0, fpOf) {
   fRestart(cr, cs, '2026-10-04T09:16:00Z')
   fBlock(cr, RF, cs, 'plan-blocked', FA, '2026-10-04T09:30:00Z')
   const v7 = inputsAt(cr, cs, '2026-10-04T09:30:00Z')
-  if (runCount(fRead(cr, cs)) !== crRuns || v7.autoRetryWhy !== 'budget: 1/1 used' || v7.fingerprint !== crFp || v7.answerRecorded !== null) {
+  if (runCount(fRead(cr, cs)) !== crRuns || v7.overtime?.used !== 0 || v7.fingerprint !== crFp || v7.answerRecorded !== null) {
     fails.push(`(vii) crossed: ${JSON.stringify([runCount(fRead(cr, cs)), crRuns, v7.autoRetryWhy, v7.fingerprint, v7.answerRecorded])}`)
   }
 

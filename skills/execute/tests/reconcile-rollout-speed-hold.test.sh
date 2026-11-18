@@ -155,7 +155,7 @@ st() { run status --rollout "$D/${RO:-ro}.md" --tasks-dir "$D" --now "$NOW"; }
 dfr() { run defer --tasks-dir "$D" "$@"; }
 starts() { q "$out" 'sorted(d["start"])'; }
 # hf <slug> — the set-aside task's humanFix act through the engine's own read (moving's: _retry_budget, task_inputs,
-# auto_retry_verdict), or null.
+# auto_retry_verdict); with a null humanFix, `take-out` or `overtime` when its normal budget is spent (p39-14), else null.
 hf() {
   python3 - "$SCRIPT" "$D/$1.md" "$D/ro.md" "$NOW" <<'PY'
 import importlib.util, json, sys
@@ -167,8 +167,9 @@ note = m.Note(path)
 budget = m._retry_budget(note, ro)
 k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] and not budget["error"] else None
 inp = m._lead().task_inputs(path, note, max_rounds=k, repo=None)
-fix = m._lead().auto_retry_verdict(path, note, inp, ro, m._parse_ts(sys.argv[4]))["humanFix"]
-print(json.dumps(fix and fix["act"]))
+v = m._lead().auto_retry_verdict(path, note, inp, ro, m._parse_ts(sys.argv[4]))
+fix = v["humanFix"]
+print(json.dumps(fix["act"] if fix else ("take-out" if v["takeOut"] else "overtime" if v["overtime"] else None)))
 PY
 }
 
@@ -425,7 +426,7 @@ scen s7
 base; mkro ro "max_review_rounds: 3" x-p9-1 x-p9-2 a b c d f g
 sh_ apply
 blocked x-p9-2 "$MARK" 'auto_retries: 0'
-ok "$(hf x-p9-2)" '"raise max_iterations, hand back or defer"' "S7: the set-aside release's humanFix is non-null (its retries spent)"
+ok "$(hf x-p9-2)" '"take-out"' "S7: the set-aside release reads a take-out (its retries spent, ADR 0070)"
 before=$(sums)
 nxt --dry-run
 has "$(starts)" '"a","b"' "S7e: next --dry-run starts a and b"
@@ -435,14 +436,25 @@ run moving --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW"
 ok "$(sums)" "$before" "S7e: moving writes nothing"
 has "$(q "$out" 'sorted(d["work"]["start"])')" '"a","b"' "S7e: moving reads a and b as starting"
 nxt
-ok "$(holdlines | tail -1)" "- $STAMP released [[x-p9-2]] (p9): [[x-p9-2]] set aside, its retries spent (blocked, Blocker diagnosis)" \
+ok "$(holdlines | tail -1)" "- $STAMP released [[x-p9-2]] (p9): [[x-p9-2]] set aside, its retries spent (blocked, Blocker diagnosis; take-out pending)" \
   "S7: next writes the released line naming the release and its label"
 ok "$(deps a)|$(deps b)" "-|-" "S7: … then drops the entries"
 ok "$(ev '[[d["act"], d.get("cause"), d.get("task"), d.get("removed")] for d in L][-1]')" '["released","set-aside","x-p9-2",2]' \
   "S7: the Run record line carries act released, cause set-aside"
 has "$(starts)" '"a","b"' "S7: next starts a and b in the same call"
-ok "$(q "$out" '[[e["cause"], e["label"], e["removed"]] for e in d["speedHoldReleased"]]')" '[["set-aside","(blocked, Blocker diagnosis)",2]]' \
+ok "$(q "$out" '[[e["cause"], e["label"], e["removed"]] for e in d["speedHoldReleased"]]')" '[["set-aside","(blocked, Blocker diagnosis; take-out pending)",2]]' \
   "S7: speedHoldReleased reports it"
+
+# S7g (p39-14, ADR 0070): a release whose budget is spent enters Overtime: the hold lets go then, not at the take-out.
+scen s7g
+mkro ro "max_review_rounds: 3" x-p9-2 a b
+mkt x-p9-2 open ro "$MARK"; mkt a open ro; mkt b open ro
+sh_ apply
+blocked x-p9-2 "$MARK" 'auto_retries: 1' 'auto_retries_used: 1'
+ok "$(hf x-p9-2)" '"overtime"' "S7g: the release reads an Overtime run, a null humanFix"
+nxt
+ok "$(holdlines | tail -1)" "- $STAMP released [[x-p9-2]] (p9): [[x-p9-2]] set aside, its retries spent (blocked, Blocker diagnosis; overtime 0/3 used)" \
+  "S7g: next lets the hold go, its label naming the Overtime"
 
 scen s7b
 mkro ro "max_review_rounds: 3" x-p9-2 u a b
@@ -451,7 +463,7 @@ sh_ apply
 ok "$(deps u)|$(deps a)" "-|x-p9-2" "S7b: u, upstream of the release, is never held"
 blocked u 'auto_retries: 0'
 nxt
-ok "$(holdlines | tail -1)" "- $STAMP released [[x-p9-2]] (p9): [[u]] set aside, its retries spent (blocked, Blocker diagnosis)" \
+ok "$(holdlines | tail -1)" "- $STAMP released [[x-p9-2]] (p9): [[u]] set aside, its retries spent (blocked, Blocker diagnosis; take-out pending)" \
   "S7b: a set-aside task the release depends on lets the hold go, naming it"
 
 scen s7c

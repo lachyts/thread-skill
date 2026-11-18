@@ -136,7 +136,8 @@ parallel with no note). For each:
             miss (no record of a decline exists); askedAhead beside it says so.
   set-aside a set-aside line in the window: stage, reasonClass, setAsideAt, taskNote (Work/Tasks, then Archive, or
             null) and movedBy, the first later event of auto-retry, handed-back (with its via), answer-recorded,
-            gate-signed, race-decided, carried, slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
+            gate-signed, race-decided, carried, take-out (p39-14: the engine took it out, a dependant included),
+            slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
             lane-taken or merged comes first with no act or retry before it (a Human fix, ADR 0035, a gate signed
             on the note with no gate-signed line, or a hand edit); null while the task is still set aside at until.
             mover and explainedIn are null unless movedBy is `unrecorded`. mover is {kind, at, start?} of the line
@@ -150,7 +151,9 @@ parallel with no note). For each:
             as the repair lines' links are, so an alias, heading or path matches; the note is read once per
             rollout, only when an unrecorded item exists). A null or unreadable note adds nothing. cannotShow
             names each such task.
-  retry     an auto-retry line in the window.
+  retry     an auto-retry line in the window; an Overtime run's carries `overtime` (its overtime_used after it, p39-14).
+  takeout   a take-out line in the window (p39-14, ADR 0070 d5 and d7: listed, never alerted): {rollout, task, at, cause,
+            stage, overtimeUsed, with, fingerprint}, a dependant's with its `with` and no stage or overtimeUsed (null).
   descope   a handed-back line with via descope in the window.
   repair    each line of the rollout note's `## Notes` matching `- <YYYY-MM-DD> repair: ...` whose date is in the
             window (date_in()): {date, tasks (every wikilink), text (at most 300), shape}. shape is the first match of
@@ -1748,8 +1751,15 @@ class Span:
                               "reasonClass": d.get("reasonClass"), "setAsideAt": d.get("setAsideAt"),
                               "taskNote": self.task_note(task), "movedBy": moved, "mover": mover, "explainedIn": None})
             elif kind == "auto-retry" and task:
-                items.append({"kind": "retry", "rollout": slug, "task": task, "at": fmt(t), "stage": d.get("stage"),
-                              "retryClass": d.get("retryClass"), "used": d.get("used"), "budget": d.get("budget")})
+                item = {"kind": "retry", "rollout": slug, "task": task, "at": fmt(t), "stage": d.get("stage"),
+                        "retryClass": d.get("retryClass"), "used": d.get("used"), "budget": d.get("budget")}
+                if d.get("overtime") is not None:
+                    item["overtime"] = d["overtime"]
+                items.append(item)
+            elif kind == "take-out" and task:
+                items.append({"kind": "takeout", "rollout": slug, "task": task, "at": fmt(t), "cause": d.get("cause"),
+                              "stage": d.get("stage"), "overtimeUsed": d.get("overtimeUsed"), "with": d.get("with"),
+                              "fingerprint": d.get("fingerprint")})
             elif kind == "handed-back" and task and d.get("via") == "descope":
                 items.append({"kind": "descope", "rollout": slug, "task": task, "at": fmt(t), "arm": d.get("arm")})
             elif kind == "review-verdict" and task and isinstance(d.get("regression"), int) and d["regression"] > 0:
