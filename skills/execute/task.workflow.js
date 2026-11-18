@@ -31,7 +31,9 @@ export const meta = {
 //                                    //   rungs: [{ name, model, effort, judge, review[, plan] }, …][, roles:
 //                                    //   { <LADDER_ROLES>: <model> }][, share: { <LADDER_SHARE_ROLES>: <0..1> }] },
 //                                    //   bottom first (ADR 0079: a rung's plan model and the ladder's role models,
-//                                    //   runOn; the share is reconcile's draw, accepted here and unused). Fixed for the call: a
+//                                    //   runOn; the share is reconcile's draw, and the engine reads only its
+//                                    //   master-review entry, for a doubled master review's first reviewer,
+//                                    //   fableNamedForReview, p52-2). Fixed for the call: a
 //                                    //   resume re-passes its call's own ladder, so an edit reaches a task at
 //                                    //   its next call. Validated (ladderArgsError)
 //                                    //   before any dispatch (argsRefused), in both modes. Absent ⇒ the built-in ladder (a
@@ -146,6 +148,14 @@ export const meta = {
 //                                    //   the plan judge and the lead are refused, as is any other shape, before
 //                                    //   any dispatch in both modes (taskArmsError, argsRefused); mode 'integrate'
 //                                    //   ignores it. Absent ⇒ prompts, opts, logs and the row byte-identical.
+//       unreachable     : boolean,   // optional (p52-2, ADR 0081 d2); true when the task note carries the sticky
+//                                    //   `unreachable: true` stamp (an earlier call's mark, which reconcile stamps), from
+//                                    //   `reconcile-rollout.py mark-started`'s `<slug>: unreachable true` line on a fresh
+//                                    //   call (a resume re-passes its own); the lead omits the key otherwise. With this
+//                                    //   call's own mark (the row's `unreachable.marked`), it doubles every master-review
+//                                    //   round from the round it first holds (reviewLoop, doubledVerdict). Anything but
+//                                    //   true, false or absent (null included) is refused before any dispatch in both modes
+//                                    //   (taskUnreachableError, argsRefused); mode 'integrate' ignores a usable one.
 //       model, effort   : string,    // optional, LEGACY: a note with no `rung:` passes its stale `model:`
 //                                    //   and `effort:` stamps. They only choose the starting rung (p13-3's
 //                                    //   mapping, startRung): `model: fable`, or `effort: xhigh | max`, starts
@@ -309,7 +319,9 @@ export const meta = {
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
 // the note's `rung:`), climbs the stages that climbed this call, in order, as { stage: plan | implement |
 // review, from, to } (from === to is a recorded no-op on the top rung), rungDrift the task's `rung:` when
-// the ladder lacks it ('' otherwise), and ran every dispatch as { label, rung, model, effort }, in order.
+// the ladder lacks it ('' otherwise), and ran every dispatch as { label, rung, model, effort }, in order. A doubled
+// master review (p52-2, ADR 0081 d2) dispatches `first-review:<slug> r<N>` before each round's `review:<slug> r<N>`, and
+// `first-review:<slug> r<N> on-rung` when its first reviewer on Fable died and ran once more on the task's rung.
 // A block on the top rung is a wall at the operator's ceiling: raising it is an edit to the ladder file.
 // gatedInputs lists the declared-but-unapproved gates when status is gate-pending
 // (a declared gate always pauses for a human — ADR 0008). A plan-gate gate-pending that follows a plan judge's
@@ -356,8 +368,10 @@ export const meta = {
 // true when by is not empty. Kept on every status, a stage throw included; { marked: false, by: [], paths: [] } when
 // nothing marked it (read-only, the pre-flight block, plan-blocked before an approve). Each reading is sticky within the
 // call: a later agent's false never clears an earlier true. The mark is the call's own: a seeded revise does not see
-// the plan its first call approved, so a reader keeps the first call's mark (ADR 0081 d2 and d3 read it, p52-2). A mode
-// 'integrate' row carries null, like plan: Integration takes no reading of the task's surface.
+// the plan its first call approved, so a reader keeps the first call's mark: reconcile stamps a marked row's note
+// `unreachable: true` (sticky), and the lead carries that stamp into each later call as task.unreachable, which doubles
+// that call's master review (ADR 0081 d2) as this call's own mark does. A mode 'integrate' row carries null, like plan:
+// Integration takes no reading of the task's surface.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -1915,7 +1929,18 @@ ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationCont
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.${NEEDS_HUMAN_RULE}`
 }
 
-function reviewJudgePrompt(task, prevImpl, a, priorFeedback) {
+// A doubled round's fragment (p52-2, ADR 0081 d2), its own leading "\n\n", right after securityReviewBlock in both
+// reviewers' prompts: what marked the task (unreachableWhy), what a green verifier proves on such a surface, what to
+// approve on, and that a second reviewer reads the PR on its own. Only a doubled round renders it.
+function unreachableReviewBlock(st) {
+  return `
+
+Unreachable surface (ADR 0081): this task changes code that no check in the rollout's verifier exercises (${unreachableWhy(st)}). On that code a green verifier, or a test that drives a fake of the surface, proves only the fake. Approve only what reading the diff against the real surface's API and the brief's Verify line shows; each behaviour the brief names that you cannot trace that way is a "changes" bullet. A second reviewer reads this PR on its own, and the round approves only when both of you approve.`
+}
+
+// doubledBlock (p52-2): unreachableReviewBlock for each reviewer of a doubled round, its own leading "\n\n"; '' (the
+// default) leaves every byte as before.
+function reviewJudgePrompt(task, prevImpl, a, priorFeedback, doubledBlock = '') {
   const depth = task.scope === 'cross-cutting'
     ? `This is a CROSS-CUTTING change — review it structurally and rigorously. Apply the discipline of the
 superpowers:requesting-code-review skill: correctness, brief adherence, missed sibling sites, dead code,
@@ -1949,7 +1974,7 @@ The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. 
 On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh pr view\` only — never the
 project's shared checkout (it may be stale, dirty or on another branch). You are read-only: no edit, commit or push, in the tree or anywhere else.
 
-${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}${securityReviewBlock(a, task, prevImpl)}
+${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}${securityReviewBlock(a, task, prevImpl)}${doubledBlock}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. ${REVIEW_READS_DIFF} Decide: verdict "approve" if the PR is sound, else
 "changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).
@@ -2320,7 +2345,8 @@ const LADDER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const LADDER_ROLES = ['master-review', 'builder', 'investigator']
 // ladder.py's SHARE_ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.share may give a Fable share.
 // The engine never draws (reconcile-rollout.py does, at a task's first dispatch, and stamps `arms:`): it validates the
-// share and leaves it unused.
+// share, and reads only share['master-review'], as the operator's file naming Fable for a doubled master review's first
+// reviewer (fableNamedForReview, p52-2).
 const LADDER_SHARE_ROLES = ['master-review', 'builder', 'investigator', 'lead']
 // The roles args.task.arms may place in an arm (ADR 0079 decision 3): the drawn roles the engine dispatches. Never the
 // planner or the plan judge (planning is never drawn) and never the lead (no dispatch the engine makes).
@@ -2427,6 +2453,15 @@ function taskArmsError(arms) {
     if (!ARM_VALUES.includes(arms[k])) return `${k}: ${refusedEcho(arms[k])} is not one of ${ARM_VALUES.join(', ')}`
   }
   return ''
+}
+
+// args.task.unreachable (p52-2, ADR 0081 d2): '' when absent, true or false, else why not. The lead passes true from
+// mark-started's `<slug>: unreachable true` line (the note's sticky stamp) and omits the key otherwise, so null is refused
+// with any other shape. A bad value is a lead bug, refused before any dispatch in both modes (argsRefused); mode
+// 'integrate' then ignores it.
+function taskUnreachableError(v) {
+  if (v === undefined || v === true || v === false) return ''
+  return `must be true or false, or left out, got ${refusedEcho(v)}`
 }
 
 // args.unreachablePaths (p52-1, ADR 0081 d1): '' when absent (or null) or usable, else why not. The repo's
@@ -2543,11 +2578,13 @@ function rungState(task, a) {
   // arms (p46-2): the task's stamped arms (args.task.arms), read only through armOf.
   // unreachable (p52-1): the call's readings of an Unreachable surface, set by planLoop (plan, judge, planned) and runAgent
   // (result, paths), against args.unreachablePaths' globs; unreachableRow reads them into the row.
+  // share (p52-2): the ladder's [share], read only by fableNamedForReview. doubled (p52-2): set by reviewLoop at a round's
+  // start once this call's mark or task.unreachable holds, sticky for the call; armOf reads it.
   const arms = task && task.arms && typeof task.arms === 'object' ? { ...task.arms } : {}
   const globs = a && Array.isArray(a.unreachablePaths) ? a.unreachablePaths.slice() : []
   return {
-    source: L.source, rungs: L.rungs, roles: L.roles || {}, arms, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [],
-    unreachable: { globs, plan: false, judge: false, planned: false, result: false, paths: [] },
+    source: L.source, rungs: L.rungs, roles: L.roles || {}, share: L.share || {}, arms, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [],
+    unreachable: { globs, plan: false, judge: false, planned: false, result: false, paths: [] }, doubled: false,
   }
 }
 
@@ -2616,9 +2653,11 @@ function planOn(rung) {
   return rung.plan !== undefined ? { model: rung.plan, effort: OWN_EFFORT } : { model: rung.model, effort: rung.effort }
 }
 // The task's arm for a drawn `role` (args.task.arms, stamped by reconcile at the task's first dispatch): 'opus' or
-// 'fable', or '' when the role sits in no arm (`none`, or no entry). The one place the engine reads an arm, so an
-// exclusion from the draw (p52-2's Unreachable surface, for the master review) lands here.
+// 'fable', or '' when the role sits in no arm (`none`, or no entry). The one place the engine reads an arm, so the
+// exclusion from the draw is built here: a doubled master review (p52-2, ADR 0081 d2: an Unreachable surface) sits
+// outside ADR 0079's draw, so its reviewers take the ladder's `roles`, then the rung.
 function armOf(st, role) {
+  if (role === 'master-review' && st.doubled) return ''
   const arms = st.arms || {}
   const v = Object.prototype.hasOwnProperty.call(arms, role) ? arms[role] : undefined
   return v === 'opus' || v === 'fable' ? v : ''
@@ -2652,6 +2691,28 @@ function runOn(st, role) {
   if (own !== undefined && own !== rung.model) return { model: own, effort: OWN_EFFORT }
   const effort = role === 'plan-judge' ? judgeEffort(st, 'judge') : role === 'master-review' ? judgeEffort(st, 'review') : implEffort(st)
   return { model: rung.model, effort }
+}
+// A doubled master review (p52-2, ADR 0081 d2). Whether the operator's file names Fable for the master review: its
+// `roles` gives the master review Fable, or its [share] gives it a share above 0. Never on an all-Fable rung, where the
+// rung runs every role. The engine cannot see the Login's room: a dead first reviewer on Fable reruns on the rung
+// (doubledVerdict), standing in for an allowance refusal.
+function fableNamedForReview(st) {
+  if (allFable(cur(st))) return false
+  const roles = st.roles || {}
+  const share = st.share || {}
+  return roles['master-review'] === 'fable' || Number(share['master-review']) > 0
+}
+// The first reviewer's { model, effort }: Fable at OWN_EFFORT, outside the draw, when the file names it; else the task's
+// own rung, as the second reviewer runs (runOn: review #6, never the Top rung).
+function firstReviewerOn(st) {
+  return fableNamedForReview(st) ? { model: 'fable', effort: OWN_EFFORT } : runOn(st, 'master-review')
+}
+// What marked the task, for a doubled round's prompt: this call's own mark (unreachableRow), else the stamp an earlier
+// call left (task.unreachable).
+function unreachableWhy(st) {
+  const u = unreachableRow(st)
+  if (!u.marked) return 'marked by an earlier call of this task'
+  return `marked by ${u.by.join(', ')}${u.paths.length ? ': ' + u.paths.join(', ') : ''}`
 }
 // The rung Integration runs on (ADR 0079 decision 2, amending ADR 0029 decision 5): the highest rung that is not
 // all-Fable, else (every rung is) the top. It takes no plan or role model: Integration keeps the rung's own.
@@ -3086,9 +3147,14 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
     current = step.current
   }
   while (round <= task.maxReviewRounds) {
-    const verdict = await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, ...runOn(st, 'master-review'),
-    }, st)
+    // p52-2 (ADR 0081 d2): a round is doubled once this call's own mark holds or the note's stamp came in as
+    // task.unreachable; sticky for the call, so a round already judged single stays single and every later one is doubled.
+    st.doubled = st.doubled || unreachableRow(st).marked || task.unreachable === true
+    const verdict = st.doubled
+      ? await doubledVerdict(task, st, current, a, priorFeedback, round)
+      : await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
+        label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, ...runOn(st, 'master-review'),
+      }, st)
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
     // p21-3: the round's record, with its own bullets, BEFORE every exit below (approve, a question, the ceiling, a
@@ -3126,6 +3192,49 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
   // Unreachable once the entry guard holds; kept so the function can never end in undefined (fail-closed).
   const diag = `review round budget exhausted without a verdict (max_review_rounds = ${String(task.maxReviewRounds)}) — fail-closed, ADR 0008`
   return { ...current, status: 'review-blocked', reviewRoundsUsed: round - 1, blockerDiagnosis: diag, reviewFeedback: [diag], reviewHistory: priorFeedback }
+}
+
+// One doubled master-review round (p52-2, ADR 0081 d2): two independent reviewers, one after the other (both may run
+// tests in the task tree), each pushed on st.ran before it runs (runAgent). The first runs on firstReviewerOn (Fable
+// when the file names it), the second on the task's rung (runOn, its arm excluded: armOf); neither sees the other's
+// verdict, and both read the same prompt with the accumulated history. A first reviewer on Fable still dead after
+// runAgent's retry runs once more on the rung (` on-rung`, a fell-back call); a dead second reviewer, or a dead rerun, is
+// the transient block, as a dead single judge is. The combined verdict: approve only when both approve; else changes,
+// with the first's changes bullets then the second's (identical strings once); head the first valid one; needsHuman the
+// first ask of a reviewer that said changes (an ask on an approve is logged and ignored, as the single judge's).
+async function doubledVerdict(task, st, current, a, priorFeedback, round) {
+  const prompt = reviewJudgePrompt(task, current, a, priorFeedback, unreachableReviewBlock(st))
+  const tag = `${task.slug} r${round}`
+  const firstOn = firstReviewerOn(st)
+  let firstModel = firstOn.model
+  let first = await runAgent(prompt, { label: `first-review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...firstOn }, st)
+  if (first.__dead && firstOn.model === 'fable' && fableNamedForReview(st)) {
+    const on = runOn(st, 'master-review')
+    log(`review: ${tag}: the first reviewer on fable died; once more on ${on.model}`)
+    firstModel = on.model
+    first = await runAgent(prompt, { label: `first-review:${tag} on-rung`, phase: 'Review', schema: REVIEW_VERDICT, ...on }, st)
+  }
+  if (first.__dead) return first
+  const secondOn = runOn(st, 'master-review')
+  const second = await runAgent(prompt, { label: `review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...secondOn }, st)
+  if (second.__dead) return second
+  const both = [first, second]
+  const approve = both.every((v) => v.verdict === 'approve')
+  const feedback = []
+  for (const v of both) {
+    if (v.verdict !== 'changes' || !Array.isArray(v.feedback)) continue
+    for (const f of v.feedback) if (typeof f === 'string' && !feedback.includes(f)) feedback.push(f)
+  }
+  const head = both.map((v) => v.head).find((h) => typeof h === 'string' && /^[0-9a-f]{7,40}$/i.test(h)) || ''
+  let needsHuman = ''
+  for (const v of both) {
+    const q = askOf(v)
+    if (!q) continue
+    if (v.verdict === 'changes') needsHuman = needsHuman || q
+    else log(`review:${tag}: needsHuman on an approve verdict ignored`)
+  }
+  log(`review: ${tag}: first ${first.verdict} on ${firstModel}, second ${second.verdict} on ${secondOn.model}`)
+  return { verdict: approve ? 'approve' : 'changes', feedback: approve ? [] : feedback, head, needsHuman }
 }
 
 // One task, end to end: plan-gate → implement → review, sharing a single mutable rung state so a climb
@@ -4253,6 +4362,10 @@ if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRe
 // modes; mode 'integrate' takes no arms and ignores a usable one.
 const badArms = taskArmsError(a.task.arms)
 if (badArms) throw argsRefused('args.task.arms: ' + badArms)
+// args.task.unreachable (p52-2, ADR 0081 d2): the note's sticky stamp. A malformed one is a lead bug, refused before any
+// dispatch in both modes; mode 'integrate' ignores a usable one.
+const badUnr = taskUnreachableError(a.task.unreachable)
+if (badUnr) throw argsRefused('args.task.unreachable: ' + badUnr)
 // args.unreachablePaths (p52-1, ADR 0081 d1): the repo's Unreachable surface. A malformed one is a lead bug, refused
 // before any dispatch in both modes (a backstop is never read as absent); mode 'integrate' ignores a usable one.
 const badUnreachable = unreachablePathsError(a.unreachablePaths)

@@ -10,9 +10,10 @@
 //   echoed bounded (refusedEcho), so double-encoded args, one string of the whole args JSON, never flood the line the
 //   lead prints, and a bad round budget is shown cut the same way (cutEcho) (a control puts each whole echo back);
 // - a source check on the entry (from the orchestration marker to the integrate branch's first log line): every refusal
-//   head is in it, it holds no plain `throw new Error(` and exactly 15 `throw argsRefused(` (A4: args.securityCheck added
+//   head is in it, it holds no plain `throw new Error(` and exactly 16 `throw argsRefused(` (A4: args.securityCheck added
 //   one, its shape; p39-8 dropped its refusal on mode 'integrate', where Integration now scans; p46-2 added
-//   args.task.arms, its shape, in both modes; p52-1 added args.unreachablePaths, its shape, in both modes). Its controls swap a late
+//   args.task.arms, its shape, in both modes; p52-1 added args.unreachablePaths, its shape, in both modes; p52-2 added
+//   args.task.unreachable, its shape, in both modes). Its controls swap a late
 //   throw back to a plain Error (each must fail both the sentinel and the source check) and cut the end anchor (the
 //   source check must fail, never pass on an empty slice).
 import { test } from 'node:test'
@@ -113,6 +114,17 @@ const CASES = [
       [`task.arms a string (${m} mode)`, at('maybe'), 'args.task.arms: must be one object'],
     ]
   }),
+  // p52-2 (ADR 0081 d2): args.task.unreachable is true, false or left out; anything else, null included, is refused
+  // before any dispatch, in both modes.
+  ...[undefined, 'integrate'].flatMap((mode) => {
+    const at = (unreachable) => (mode ? integrateArgs({}, {}, { unreachable }) : taskArgs({}, { unreachable }))
+    const m = mode || 'task'
+    return [
+      [`task.unreachable a string (${m} mode)`, at('yes'), 'args.task.unreachable: must be true or false, or left out, got "yes"'],
+      [`task.unreachable a number (${m} mode)`, at(1), 'args.task.unreachable: must be true or false, or left out, got 1'],
+      [`task.unreachable null (${m} mode)`, at(null), 'args.task.unreachable: must be true or false, or left out, got null'],
+    ]
+  }),
   // p52-1 (ADR 0081 d1): a malformed args.unreachablePaths, before any dispatch, in both modes: a value the operator's
   // unreachable_paths would refuse, and a class no regex can read. A backstop is never read as absent.
   ...[undefined, 'integrate'].flatMap((mode) => {
@@ -195,7 +207,8 @@ test('the valid args of both modes are not refused (the table is not vacuous; A3
     taskArgs({ securityCheck: null }), integrateArgs({ securityCheck: null }), taskArgs({ securityCheck: SECURITY }, { resume: mkResume() }),
     integrateArgs({ securityCheck: SECURITY }), taskArgs({}, { arms: { 'master-review': 'fable', builder: 'none' } }),
     taskArgs({}, { arms: null }), integrateArgs({}, {}, { arms: { investigator: 'opus' } }),
-    taskArgs({ unreachablePaths: ['skills/codex/**'] }), taskArgs({ unreachablePaths: null }), integrateArgs({ unreachablePaths: [] })]) {
+    taskArgs({ unreachablePaths: ['skills/codex/**'] }), taskArgs({ unreachablePaths: null }), integrateArgs({ unreachablePaths: [] }),
+    taskArgs({}, { unreachable: true }), taskArgs({}, { unreachable: false }), integrateArgs({}, {}, { unreachable: true })]) {
     const r = await runTask(args, async () => null)
     assert.ok(!(r.error && String(r.error.message).includes(SENTINEL)), String(r.error && r.error.message))
     assert.ok(r.calls.length > 0 || (r.error === undefined && r.logs.length > 0), 'reached the dispatch')
@@ -211,11 +224,11 @@ const HEADS = [
   ["'args: not JSON: '", 1], ["'args must be one object, got '", 1], ['defaultBranch(a)', 1], ['not args.waves', 1],
   ['args.task must be one task object', 1], ['args.mode: ', 1], ["'args.ladder: '", 1], ["'args.verifySlot: '", 1],
   ['args.integration: ', 2], ['args.task.resume: ', 2], ['args.securityCheck: ', 1], ["'args.task.arms: '", 1],
-  ["'args.unreachablePaths: '", 1],
+  ["'args.unreachablePaths: '", 1], ["'args.task.unreachable: '", 1],
 ]
 const src = fs.readFileSync(enginePath, 'utf8')
 
-// [] when the entry holds every refusal head, no plain throw and exactly 15 argsRefused throws; else what failed.
+// [] when the entry holds every refusal head, no plain throw and exactly 16 argsRefused throws; else what failed.
 function sourceFails(text) {
   const from = text.indexOf(START)
   const to = text.indexOf(END)
@@ -225,11 +238,11 @@ function sourceFails(text) {
   for (const [needle, n] of HEADS) if (entry.split(needle).length - 1 < n) out.push(`head ${needle}`)
   if (entry.includes('throw new Error(')) out.push('a plain throw')
   const k = entry.split('throw argsRefused(').length - 1
-  if (k !== 15) out.push(`${k} argsRefused throws`)
+  if (k !== 16) out.push(`${k} argsRefused throws`)
   return out
 }
 
-test('source: the entry refuses only through argsRefused, 15 sites, every head inside it (A4)', () => {
+test('source: the entry refuses only through argsRefused, 16 sites, every head inside it (A4)', () => {
   assert.deepEqual(sourceFails(src), [])
 })
 
@@ -244,7 +257,7 @@ test('control: the last throw (args.task.resume) back on a plain Error fails the
   const [, args, head] = caseOf('a bad task.resume in task mode')
   const r = await runTask(args, never, { source: v })
   assert.deepEqual(refusalFails(r, head), ['sentinel'])
-  assert.deepEqual(sourceFails(v), ['a plain throw', '14 argsRefused throws'])
+  assert.deepEqual(sourceFails(v), ['a plain throw', '15 argsRefused throws'])
 })
 
 test("control: the else-branch args.integration throw back on a plain Error fails the sentinel and the source check", async () => {
@@ -252,7 +265,7 @@ test("control: the else-branch args.integration throw back on a plain Error fail
   const [, args, head] = caseOf('integration without integrate mode')
   const r = await runTask(args, never, { source: v })
   assert.deepEqual(refusalFails(r, head), ['sentinel'])
-  assert.deepEqual(sourceFails(v), ['a plain throw', '14 argsRefused throws'])
+  assert.deepEqual(sourceFails(v), ['a plain throw', '15 argsRefused throws'])
 })
 
 test('control: the top-level refusal echoing the whole value again fails the length bound', async () => {
