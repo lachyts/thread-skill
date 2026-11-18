@@ -16,6 +16,8 @@
 #   O8  plan rounds and max_iterations raise   O9 the --max-review-rounds overlay clears overtime and takeOut
 #   O10 the closure: a chain, a tombstone fold, a dependant's own PR and raised cap, and a Speed fix hold's entry left out
 #   O11 across versions: on an engine from before p39-14, `moving` and needs-you read a spent budget as Lachy's
+#   O12 a task taken out more than once (p39-21, ADR 0070 d6): the second take-out marks it for a rewrite and lists
+#       nothing; the third marks it his and needs-you lists one row with every take-out's diagnosis and a recommendation
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own, each scenario's Project root is a temp git checkout (with a real task tree
 # and integration anchor where the retire block is read), `gh` is a fake through --gh-bin whose answers and failures
@@ -523,6 +525,44 @@ ar "$A"
 ok "$(fm "$A" max_plan_rounds)|$(fm "$A" auto_retry_raised)" "max_plan_rounds: 3|auto_retry_raised: max_plan_rounds=-" "O8: written on the task, its absence recorded"
 has "$(sec "$RO" '## Notes')" "max_plan_rounds raised to 3, one round" "O8: the Notes line names it"
 
+# ── O12: a task taken out more than once (p39-21, ADR 0070 d6: "Rewritten first, then me") ──────────────────────────
+# oldro <rollout> <stage> <diagnosis>: an archived rollout of an earlier life, holding the task's take-out line
+oldro() {
+  mkdir -p "$D/Archive/Rollouts"
+  printf -- '---\ntags: [task, rollout]\nstatus: done\n---\n\n## Notes\n\n- 2026-09-01T09:00+00:00 take-out: [[%s]] after 3 Overtime runs (%s; %s; no PR; feedback 0123456789ab)\n' \
+    "$A" "$2" "$3" > "$D/Archive/Rollouts/$1.md"
+}
+nyrows() { python3 "$UR" needs-you --tasks-dir "$D" --now "$NOW" --gh-bin "$GH" 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.dumps([[i[k] for k in ("kind", "source", "rollout", "text", "detail")] for i in json.load(sys.stdin)["items"] if i["task"] == sys.argv[1]], separators=(",", ":")))' "$A"; }
+O1R=proj-rollout-2026-09-01; O2R=proj-rollout-2026-09-15
+# each row: the take-out | taken_out before | its earlier rollouts' stages | the marker after | needs-you's rows for A
+for r in "second|1|review|rewrite|[]" \
+         "third|2|review,plan|you|[[\"hands-on\",\"take-out\",\"$RO\",\"taken out 3 times: [[$O1R]] at review: Round 4: the rollback is missing; [[$O2R]] at plan: Round 1: the plan misses the rollback; [[$RO]] at plan: Round 1: the plan misses the migration step\",\"it stopped at different stages: rule on its scope, split it by hand, or drop it\"]]"; do
+  IFS='|' read -r which before stages next_ rows_ <<<"$r"
+  o7 "o12-$which" "taken_out: $before"
+  IFS=, read -r s1 s2 <<<"$stages"
+  oldro "$O1R" "$s1" "Round 4: the rollback is missing"; olds="\"[[$O1R]]\""
+  if [ -n "${s2:-}" ]; then oldro "$O2R" "$s2" "Round 1: the plan misses the rollback"; olds="$olds, \"[[$O2R]]\""; fi
+  setfm "$A" taken_out_of "[$olds]"
+  tko "$A"
+  ok "$rc|$(printf '%s\n' "$out" | grep "taken out $((before + 1)) times")" \
+    "0|$A: taken out $((before + 1)) times → taken_out_next: $next_ ($([ "$next_" = rewrite ] && echo 'the next Shaping session rewrites it' || echo 'one row on your needs-you list')) [written]" \
+    "O12 $which: the take-out prints its mark"
+  ok "$(fm "$A" taken_out)|$(fm "$A" taken_out_next)|$(fm "$A" taken_out_of)|$(fm "$A" status)" \
+    "taken_out: $((before + 1))|taken_out_next: $next_|taken_out_of: [$olds, \"[[$RO]]\"]|status: open" \
+    "O12 $which: taken_out, the marker and taken_out_of on the open task"
+  ok "$(nyrows)" "$rows_" "O12 $which: needs-you's rows for it"
+  hasnt "$(sec "$A" '## Notes')" "take-out" "O12 $which: the evidence stays out of the brief"
+done
+# the third's recommendation, one stage throughout; then his ruling (the marker removed) drops the row
+sed -i.bak 's/(review; Round 4/(plan; Round 4/' "$D/Archive/Rollouts/$O1R.md"
+ok "$(nyrows | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][4])')" \
+  "taken out at plan each time: its plan never passed: settle the design question its plan rounds raise, then reopen it, or drop it" \
+  "O12 third: the same stage each time gives that stage's advice"
+python3 "$SCRIPT" defer --tasks "$A" --tasks-dir "$D" >/dev/null 2>&1
+ok "$(fm "$A" taken_out_next)" "taken_out_next: you" "O12: a plain defer keeps the marker"
+setfm "$A" taken_out_next ""
+ok "$(nyrows)" "[]" "O12: his ruling (the marker removed) drops the row"
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"

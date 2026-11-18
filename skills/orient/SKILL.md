@@ -382,6 +382,10 @@ carries it, and one `## Notes` line per fork, `- <UTC ISO> orient ruling: <fork>
 `<fork>` worded as the end line words it, marks that fork decided. A fork he does not reach stays
 open. Steer only skips this step, so its open forks wait for the next Reshuffle.
 
+A task taken out of two rollouts (`taken_out_next: rewrite`, ADR 0070 d6) counts as **unclear** for R2 the same way,
+whatever its body says: R2's **A task taken out twice** rewrites it from both take-outs' evidence and R5.2 removes the
+marker. One taken out three times (`taken_out_next: you`) is frozen: it waits on Lachy's needs-you list.
+
 **Under `--backlog`.** The reshuffle has no gate: B3's dispositions stand in R1 and R2's place, the decided record in
 R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, § B4).
 

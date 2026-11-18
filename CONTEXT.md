@@ -1666,7 +1666,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   them). `unfinished-rollout.py needs-you` reads that list (p48-1): each
   stop with its rollout, project and kind (`spend`, `irreversible`,
   `credential`, `hands-on`, `sign-in`), a spend gate the Standing approval
-  signs never on it. Only a
+  signs never on it, and a task **Taken out** three times on it too (p39-21). Only a
   halt that stops the whole rollout can lead anywhere, and only through
   Chorus's Companion while he is at the Stage, when Chorus reads it as his
   (d3); a single set-aside stays listed. The rollout note's
@@ -1733,7 +1733,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   weekly Reflection, never a **Needs-you item** until a third take-out; a
   second is rewritten by a Shaping session first. A rollout task's take-out
   is `reconcile-rollout.py defer --take-out`, which marks the task
-  `taken_out` and `taken_out_of`. _Avoid_: dropped, failed.
+  `taken_out` and `taken_out_of`, and (p39-21) at the second
+  `taken_out_next: rewrite`, which orient reads as unclear and removes once
+  it has split, narrowed or restated the task, and at the third
+  `taken_out_next: you`, one needs-you row with every take-out's diagnosis
+  and a recommendation. schedule never takes a task carrying either.
+  _Avoid_: dropped, failed.
 
 ## Convergence engine
 

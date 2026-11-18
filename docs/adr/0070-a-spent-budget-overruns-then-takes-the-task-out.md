@@ -15,7 +15,15 @@ engine carrying the `TAKE_OUT_ENGINE` line, so an older engine's spent budget st
 caps an automatic retry raised in a task's life (`auto_retry_raised`, each with its task-note value before the first
 raise) are restored at the take-out, so the next life starts from the caps it was scheduled with; a Tuning moves
 `overtime_runs` only between values >= 1, since 0, no Overtime, is the operator's hand edit; and under `auto_retries = 0`
-decision 4's stops (an infra settings block, the same stop at Integration) keep their H10.)* The file keeps its first name, which those tasks cite; the term it coins is **Overtime** (it was "Overrun" until the amendment, a word the Night record already uses).
+decision 4's stops (an infra settings block, the same stop at Integration) keep their H10.)*
+*(2026-11-19: p39-21 built decision 6. The take-out that brings `taken_out` to 2 writes `taken_out_next: rewrite`, and
+the one that brings it to 3 or more `taken_out_next: you`; a defer never clears it. orient's reshuffle reads a
+`rewrite` task as unclear (and `backlog-orient.py sweep` gives its row `unclear: rewrite`), rewrites it from the
+take-outs' `## Notes` lines in the rollouts `taken_out_of` names, and removes the marker in the save that writes the
+rewrite; orient-all's pass reaches it through its child orients. `unfinished-rollout.py needs-you` lists a `you` task
+as one row (source `take-out`) with every take-out's diagnosis and a recommendation by the stages they stopped at, and
+his ruling removes the marker. schedule step 1 and its Pickup sweep never take a task carrying either value. The
+readers read the marker only, never `taken_out` alone, since a rewritten task keeps its count.)* The file keeps its first name, which those tasks cite; the term it coins is **Overtime** (it was "Overrun" until the amendment, a word the Night record already uses).
 
 On acceptance it amends: close § The stop rule and ADR 0065 Decision 6 (no round after the budget), reversing ADR 0065's rejected option "A fourth round to review a CI fix after the budget"; fresh-review's ADR 0001 in `~/.agents` (a chain ends at three code rounds), through a fresh-review task; ADR 0033 d3 (`auto_retries = 0`), d5 (quota and infra blocks past their retries) and d6 (the budget's lifetime); ADR 0035's H9, a spent budget raised on Lachy's word through `record-answer --raise`, and ADR 0004's "repair keeps a spent budget"; repair § 5's "Has dependants → ask" for a take-out; and close's **Don't create tasks unsolicited** exception, whose one task now carries a take-out too. It does not amend ADR 0058, which has no review-blocked route.
 

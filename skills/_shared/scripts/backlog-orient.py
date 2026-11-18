@@ -78,7 +78,10 @@ A row carries `park`: `orient` for a park whose `parked-by:` reads `backlog-orie
 own, or one made before ADR 0071: frozen, never reopened, scheduled, obsoleted or parked again); `areaOnly` (every
 member project it names is the area note itself); `inFlight` (estate-scan.py's in_flight over link_live, vault-grammar
 § In flight); `frozen`: `thread`, `decisions`, `not a task`, `unparseable:<why>` (next-action.py's Note.why: mend it,
-then sweep again) or null; `urgent` and `stamped` (the trigger's `urgent[]` and `tasks` name it). `projects[]` holds
+then sweep again), `needs you` (a task taken out three or more times, `taken_out_next: you`: his needs-you list holds
+it, p39-21) or null; `unclear`: `rewrite` for a task taken out twice (`taken_out_next: rewrite`, ADR 0070 d6: B9
+rewrites it from both take-outs' evidence, whatever its body says) or null; `urgent` and `stamped` (the trigger's
+`urgent[]` and `tasks` name it). `projects[]` holds
 the `project`-tagged notes under the area folder, outside Archive/ and the excludes; `excluded[]` every note under the
 folder whose stem starts with an excluded name.
 
@@ -116,6 +119,9 @@ BACKLOG_STATUSES = ("open", "parked")       # backlog_trigger.py's BACKLOG_STATU
 LANDED = ("done", "dropped", "merged")
 FUTURE_TOLERANCE_MINUTES = 15               # backlog_trigger.py's: a later last_orient_at is unusable
 PARKED_BY = "parked-by"
+# reconcile-rollout.py's take-out marker (p39-21, ADR 0070 d6): `rewrite` after a second take-out, `you` after a third.
+TAKEN_OUT_NEXT = "taken_out_next"
+TAKEN_OUT_REWRITE = "rewrite"
 ORIENT_MARK = "backlog-orient"
 RECORD_TAG = "backlog-orient"
 RECORD_DIR = "Backlog orients"
@@ -366,6 +372,7 @@ class Member:
         self.fields = f
         self.status = unquote(f.get("status", "")).lower() or None
         self.tags = line_tags(lines)
+        self.taken_out_next = unquote(f.get(TAKEN_OUT_NEXT, "")).lower() or None
         names = link_names(fm_list(lines, "projects"))
         _, self.stems = area.member_names(names)
         self.note = NA.Note(os.path.join(vault.root, rel), text)
@@ -391,6 +398,8 @@ class Member:
             self.frozen = "decisions"
         elif "task" not in self.tags:
             self.frozen = "not a task"
+        elif self.taken_out_next not in (None, TAKEN_OUT_REWRITE):
+            self.frozen = "needs you"
         else:
             self.frozen = None
 
@@ -806,7 +815,9 @@ def cmd_sweep(vault, args):
         rows.append({"task": m.slug, "rel": posix(rel), "status": m.status, "park": m.park, "parkedBy": m.parked_by,
                      "areaOnly": all(s == area.stem for s in m.stems), "homes": sorted({s for s in m.stems
                                                                                          if s != area.stem}),
-                     "inFlight": m.in_flight, "frozen": m.frozen, "urgent": posix(rel) in urgent,
+                     "inFlight": m.in_flight, "frozen": m.frozen,
+                     "unclear": "rewrite" if m.taken_out_next == TAKEN_OUT_REWRITE else None,
+                     "urgent": posix(rel) in urgent,
                      "stamped": posix(rel) in stamped, "priority": unquote(f.get("priority", "")) or None,
                      "workDepth": unquote(f.get("work_depth", "")) or None, "phase": unquote(f.get("phase", "")) or None})
     projects, excluded = [], []
@@ -829,7 +840,7 @@ def cmd_sweep(vault, args):
         lines.append("\t".join(["row", r["task"], r["status"] or "-", r["park"] or "-",
                                 "area-only" if r["areaOnly"] else "homed", "in-flight" if r["inFlight"] else "-",
                                 r["frozen"] or "-", "urgent" if r["urgent"] else "-",
-                                "stamped" if r["stamped"] else "-"]))
+                                "stamped" if r["stamped"] else "-", "unclear:" + r["unclear"] if r["unclear"] else "-"]))
     lines += ["project\t%s\t%s" % (p["name"], p["note"]) for p in projects]
     lines += ["excluded\t%s\t%s" % (p["name"], p["note"]) for p in excluded]
     lines.append(trig.get("line") or "trigger %s" % json.dumps(trig, ensure_ascii=False))

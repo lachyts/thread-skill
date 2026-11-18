@@ -396,6 +396,9 @@ until no slug joins unjudged. Rules, in order:
   With no origin for --repo, `WARN: --repo <p> is not a git repo with an origin here: only paths are compared`, and
   no task origin is read. `counted` is two integers and names nothing: a counted task appears in no other list, and
   is outside every rule below (a dependency on one is a dependency outside the pool).
+- Take-out rule (p39-21, ADR 0070 d6): a task carrying `taken_out_next:` is left, never joined: `rewrite` (taken out
+  twice) `taken out twice: marked for a rewrite (taken_out_next: rewrite), which the next Shaping session writes
+  first`, any other value `taken out <n> times: it waits on your ruling (taken_out_next: <v>)`.
 - Gate rule: gated_inputs.py's `sweep(body_of(text))`; the first kind hit, spend then credential then irreversible,
   leaves the task, `gated: <kind> "<word>"` (<word> the first of that kind's list among its hits, so "usage credits"
   reads `credits`). No hit is ever dismissed here.
@@ -590,6 +593,13 @@ Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `
 whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row its final S2
 JSON's `leftOut` names, whether S3.7's re-run or a later S4 re-run left it out; S6 removes it once the row is
 stamped): kind `sign-in`, `text` its latest entry, rollout null, act `sign in, then /thread:orient --steer`.
+Then, from the same tasks (p39-21, ADR 0070 d6: "Rewritten first, then me"), each one taken out three or more times,
+which its third take-out marked `taken_out_next: you` (reconcile-rollout.py defer --take-out): kind `hands-on`, source
+`take-out`, rollout the last rollout its `taken_out_of` names, `text` `taken out <n> times: [[<R>]] at <stage>:
+<diagnosis>; …`, one entry per rollout in `taken_out_of` (reconcile-rollout.py _take_out_history: each rollout's
+`take-out:` line for the task, an archived rollout's too), act TAKE_OUT_ACT and `detail` the recommendation
+(_take_out_recommendation). His ruling removes the marker, or drops, parks or reschedules the task, and the row drops
+out; a second take-out's `taken_out_next: rewrite` is never listed (a Shaping session rewrites it first).
 Then the Felt checks (p52-2, ADR 0081 d3; vault-grammar § Felt check): one item per reconcile-rollout.py _felt_checks
 row, read from every task note in the tasks dir's root and Archive/ (never Archive/Rollouts/), so a check outlives its
 rollout: an `open` check on a landed task (Live, for a carried fix), and an `again` one for a carried fix whose check
@@ -598,12 +608,13 @@ archived rollout's too, or null), `text` the row's, act `try it by hand, then re
 the exact command, `python3 -B <this tree's reconcile-rollout.py> felt-check --task <task> --tasks-dir <the tasks dir
 read> --passed|--failed "<what you saw>"`, shell-quoted: felt-check is guard-exempt, so this tree's copy (at p52-2 or
 later by construction) records it, never the rollout's snapshot. Nothing is pushed or notified.
-stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out | felt-check, "rollout":
+stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out | take-out |
+felt-check, "rollout":
 <slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}], "warns": ["WARN: ...", ...]},
 `project` the task's `projects:` names comma-joined (the rollout's when it has none, `no project` with neither). Items
 run in rollout order (case-folded slug); within a rollout, its gates and set-asides by task, then its hold_until holds
 (the rollout's, then its tasks' by task), then its merge holds by task; the left-out rows come next, by task, then the
-Felt checks, by task. `warns`
+take-out rows, by task, then the Felt checks, by task. `warns`
 holds every `WARN:` line, each also on stderr, so a list some note kept partial never reads as all clear, even at
 `"count": 0`. A note that cannot be read (an OSError) is one: _scan raises on the first such note anywhere under the
 tasks dir, Archive included, not only on a rollout's own tasks, so one unrelated unreadable note leaves every live
@@ -649,7 +660,10 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_hold_until", "_resolve_holds", "_record_state", "_pr", "needs_human", "BLOCKED_SECTIONS",
             "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION",
             "_felt_checks",   # the Felt checks (p52-2): an older reconcile-rollout.py fails to load, loudly
-            "_engine_reads_take_out")   # needs-you's set-aside read on an engine from before p39-14
+            "_engine_reads_take_out",   # needs-you's set-aside read on an engine from before p39-14
+            # a task taken out more than once (p39-21): needs-you's row and the Pickup sweep's rule
+            "TAKEN_OUT_KEY", "TAKEN_OUT_NEXT_KEY", "TAKEN_OUT_REWRITE", "TAKEN_OUT_YOURS", "_take_out_history",
+            "_take_out_recommendation")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -2264,9 +2278,16 @@ def cmd_pickups(args, rr) -> int:
             continue
         readable[key] = (path, note)
 
-    # The gate rule, then the misfits.
+    # The take-out rule (p39-21), the gate rule, then the misfits.
     for key, (path, note) in readable.items():
         if key in left:
+            continue
+        nxt = taken_out_next(rr, note)
+        if nxt is not None:
+            left[key] = (f"taken out twice: marked for a rewrite ({rr.TAKEN_OUT_NEXT_KEY}: {nxt}), which the next "
+                         "Shaping session writes first" if nxt == rr.TAKEN_OUT_REWRITE else
+                         f"taken out {rr._scalar(note.get(rr.TAKEN_OUT_KEY)) or 'three or more'} times: it waits on "
+                         f"your ruling ({rr.TAKEN_OUT_NEXT_KEY}: {nxt})")
             continue
         try:
             hits = gi.sweep(gi.body_of(path.read_text()))
@@ -2727,6 +2748,10 @@ FELT_ACT = ("try it by hand, then record it: reconcile-rollout.py felt-check fro
 PREFLIGHT_SIGN_IN_RE = re.compile(
     r"^(?:Set aside by Leg \d+ of \[\[[^\]]*\]\]:\s*)?preflight:\s*\S+\s+did not answer\b", re.I)
 BLOCKER_SECTION = "## Blocker diagnosis"
+# A task taken out three or more times (p39-21, ADR 0070 d6): his ruling removes `taken_out_next` (it then joins the
+# next rollout as any open task), or drops, parks or rewrites it.
+TAKE_OUT_ACT = ("rule on it: drop it, park it, rewrite it, or remove taken_out_next from its note so the next rollout "
+                "runs it again")
 
 
 class StandingRead:
@@ -2870,6 +2895,23 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
     return out
 
 
+def taken_out_next(rr, note):
+    """A task's `taken_out_next` marker (p39-21, ADR 0070 d6), lower-cased, or None."""
+    return rr._scalar(note.get(rr.TAKEN_OUT_NEXT_KEY)).lower() or None
+
+
+def take_out_item(rr, walk, path, note):
+    """His row for a task taken out three or more times (p39-21, ADR 0070 d6): every take-out's diagnosis, from the
+    rollouts `taken_out_of` names (archived ones too), and a recommendation."""
+    history = rr._take_out_history(path.stem, note, walk.index)
+    times = rr._scalar(note.get(rr.TAKEN_OUT_KEY)) or len(history)
+    parts = [f"[[{h['rollout']}]]" + (f" at {h['stage']}" if h["stage"] else "") + f": {h['diagnosis']}"
+             for h in history]
+    text = f"taken out {times} times: " + ("; ".join(parts) if parts else "no take-out recorded in taken_out_of")
+    return needs_you_item("hands-on", "take-out", history[-1]["rollout"] if history else None, project_label(rr, note),
+                          path.stem, text, TAKE_OUT_ACT, rr._take_out_recommendation(history))
+
+
 def cmd_needs_you(args, rr) -> int:
     """`needs-you` (p48-1): every open needs-you item across every rollout, one JSON line (the module docstring)."""
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
@@ -2881,7 +2923,7 @@ def cmd_needs_you(args, rr) -> int:
     live = [(p, n) for p, n, _w in rollout_notes(rr, tasks_dir, archive=False) if rr._status(n) not in CLOSED]
     for path, note in sorted(live, key=lambda e: e[0].stem.lower()):
         items += rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns)
-    walk = rr._walk_of(tasks_dir)
+    walk, taken = rr._walk_of(tasks_dir), []
     for path, e in sorted(walk.errors, key=lambda x: x[0].stem.lower()):
         if path.parent == tasks_dir:   # a rollout note (rollout_notes skips it) or a left-out row, either way unread
             warns.append(f"WARN: {path.stem}: cannot be read ({e}): an item it holds is not listed")
@@ -2896,6 +2938,9 @@ def cmd_needs_you(args, rr) -> int:
             text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
             items.append(needs_you_item("sign-in", "left-out", None, project_label(rr, note), path.stem, text,
                                         "sign in, then /thread:orient --steer"))
+        if taken_out_next(rr, note) == rr.TAKEN_OUT_YOURS:
+            taken.append(take_out_item(rr, walk, path, note))
+    items += taken
     # The Felt checks (p52-2): every task note, Archive included, so a check outlives its rollout; the command names this
     # tree's own reconcile-rollout.py and the tasks dir this run read.
     q = shlex.quote

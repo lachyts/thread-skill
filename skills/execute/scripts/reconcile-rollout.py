@@ -569,8 +569,8 @@ Subcommands:
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
               and the six automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
               `auto_retry_at`, p16-4, and `overtime_used`, `auto_retry_raised`, p39-14: a deferred task starts its next
-              rollout afresh; a raised cap is left as it stands, and only the take-out restores it); `taken_out` and
-              `taken_out_of` are never cleared
+              rollout afresh; a raised cap is left as it stands, and only the take-out restores it); `taken_out`,
+              `taken_out_of` and `taken_out_next` are never cleared
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill. A carried fix is
@@ -622,13 +622,17 @@ Subcommands:
                    one for the member on F), then defer's own save (_defer_note, its events and speed-entry drop
                    included), restoring in it the caps its own `auto_retry_raised` names (`-` removes the key; a
                    malformed marker restores nothing, one WARN); the task alone also gets `taken_out: <prev+1>` and
-                   `taken_out_of` with `"[[R]]"` added once. The task's save is last, so while a member is unfinished
-                   the verdict still reads takeOut and step 1.2 re-runs the verb. A save that fails (an OSError: a
+                   `taken_out_of` with `"[[R]]"` added once, and (p39-21, ADR 0070 d6; _taken_out_next) at a
+                   `taken_out` of 2 `taken_out_next: rewrite` (the next Shaping session rewrites it from both
+                   take-outs' evidence, then removes it), at 3 or more `taken_out_next: you` (one row on his
+                   needs-you list, _take_out_history and _take_out_recommendation). The task's save is last, so
+                   while a member is unfinished the verdict still reads takeOut and step 1.2 re-runs the verb. A save that fails (an OSError: a
                    lock timeout, a read-only note, a changed-since-read conflict) or a defer that refuses writes one
                    `take-out failed:` line, exit 1, as in step 5: a re-run finishes the take-out after the cool-down.
-                8. Prints `<slug>: taken out after <n> Overtime runs (<cause>) → open [written]`, then `<dep>: taken
-                   out with <slug> → open [written]` per dependant. --dry-run writes, records and closes nothing (a
-                   failure line included).
+                8. Prints `<slug>: taken out after <n> Overtime runs (<cause>) → open [written]`, then, when step 7
+                   marked it, `<slug>: taken out <k> times → taken_out_next: <rewrite|you> (<what follows>) [written]`,
+                   then `<dep>: taken out with <slug> → open [written]` per dependant. --dry-run writes, records and
+                   closes nothing (a failure line included).
 
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
@@ -12725,7 +12729,7 @@ def _take_out(args) -> int:
         return error(f"{slug}: cannot write {rollout_path}: {e}", tail="one take-out failed: line written")
     # 7. The members, leaves first and the task last: each one's event, then its defer save.
     recorded = set() if args.dry_run else _take_out_recorded(ro, fp)
-    warns = []
+    warns, marked = [], []
     for m in order:
         is_task = m.lower() == slug.lower()
         mpath, mnote = (path, note) if is_task else by[m.lower()]
@@ -12744,12 +12748,17 @@ def _take_out(args) -> int:
             _restore_caps(n_, caps, warns, m)
             if is_task:
                 prev = _stamp_value(n_.get(TAKEN_OUT_KEY), 0) if n_.get(TAKEN_OUT_KEY) is not None else 0
-                n_.set(TAKEN_OUT_KEY, (prev or 0) + 1)
+                times = (prev or 0) + 1
+                n_.set(TAKEN_OUT_KEY, times)
                 rolls = [_wikilink_slug(x) for x in n_.get_list(TAKEN_OUT_OF_KEY)]
                 rolls = [r for r in rolls if r]
                 if ro.lower() not in {r.lower() for r in rolls}:
                     rolls.append(ro)
                 n_.set(TAKEN_OUT_OF_KEY, "[" + ", ".join(f'"[[{r}]]"' for r in rolls) + "]")
+                nxt = _taken_out_next(times)
+                if nxt:
+                    n_.set(TAKEN_OUT_NEXT_KEY, nxt)
+                    marked.append((times, nxt))
         try:
             err = _defer_note(args, tasks_dir, m, mnote, ro.lower(), extra)
         except OSError as e:
@@ -12766,9 +12775,69 @@ def _take_out(args) -> int:
     # 8. The prints.
     flag = " (dry-run)" if args.dry_run else " [written]"
     print(f"{slug}: taken out after {n_used} Overtime runs ({to['cause']}) → open{flag}")
+    for times, nxt in marked:
+        print(f"{slug}: taken out {times} times → {TAKEN_OUT_NEXT_KEY}: {nxt} "
+              f"({'the next Shaping session rewrites it' if nxt == TAKEN_OUT_REWRITE else 'one row on your needs-you list'})"
+              f"{flag}")
     for m in order[:-1]:
         print(f"{m}: taken out with {slug} → open{flag}")
     return 0
+
+
+def _taken_out_next(times):
+    """The `taken_out_next` a take-out that brings `taken_out` to `times` writes (p39-21, ADR 0070 d6): `rewrite` at the
+    second, `you` at the third and every later one, None at the first (it goes back to the open backlog as it is)."""
+    if times >= 3:
+        return TAKEN_OUT_YOURS
+    return TAKEN_OUT_REWRITE if times == 2 else None
+
+
+def _take_out_history(slug, note, index):
+    """Every take-out of the task, from the rollouts its `taken_out_of` names, in that order (p39-21, ADR 0070 d6: the
+    evidence a rewrite and his needs-you row read, never the task's brief): [{rollout, at, overtime, stage, diagnosis,
+    pr}], each the rollout's last `take-out: [[slug]] after <n> Overtime runs (<stage>; <diagnosis>; <pr>; feedback F)`
+    line for the task. `index` is a stem (lowercased) -> (path, Note) map (_note_index), so an archived rollout is read
+    too. A rollout not found, or that holds no such line, is one entry whose diagnosis says so and whose other fields are
+    None."""
+    out = []
+    for ro in [_wikilink_slug(x) for x in note.get_list(TAKEN_OUT_OF_KEY)]:
+        if not ro:
+            continue
+        hit = index.get(ro.lower())
+        lines = hit[1].section_text(NOTES_SECTION).split("\n") if hit else []
+        mine = [m for m in (_TAKE_OUT_TASK_LINE_RE.match(l.strip()) for l in lines)
+                if m and m.group(2).strip().lower() == slug.lower()]
+        if not mine:
+            why = "its take-out line is not in the rollout note" if hit else "the rollout note is not found"
+            out.append({"rollout": ro, "at": None, "overtime": None, "stage": None, "diagnosis": why, "pr": None})
+            continue
+        m = mine[-1]
+        stage, _, rest = m.group(4).partition(";")
+        diagnosis, _, pr = rest.rpartition(";")
+        pr = pr.strip()
+        out.append({"rollout": ro, "at": m.group(1), "overtime": int(m.group(3)), "stage": stage.strip(),
+                    "diagnosis": diagnosis.strip() or "no diagnosis", "pr": None if pr in ("", "no PR") else pr})
+    return out
+
+
+# The recommendation his needs-you row carries (p39-21), by the stage every read take-out stopped at: one stage
+# repeated is that stage's advice, mixed or unread stages the scope's.
+TAKE_OUT_ADVICE = {
+    "plan": "its plan never passed: settle the design question its plan rounds raise, then reopen it, or drop it",
+    "implement": "its build never went green: split it into smaller tasks, or drop it",
+    "verify": "its build never went green: split it into smaller tasks, or drop it",
+    "review": "its reviews never cleared: narrow it to what they accept, or drop it",
+    "integrate": "it never merged cleanly: run it alone once what it collides with has landed, or drop it",
+}
+TAKE_OUT_ADVICE_MIXED = "it stopped at different stages: rule on its scope, split it by hand, or drop it"
+
+
+def _take_out_recommendation(history) -> str:
+    """One line of advice for a task taken out three or more times, from _take_out_history's stages."""
+    stages = {h["stage"] for h in history}
+    if len(stages) == 1 and next(iter(stages)) in TAKE_OUT_ADVICE:
+        return f"taken out at {next(iter(stages))} each time: {TAKE_OUT_ADVICE[next(iter(stages))]}"
+    return TAKE_OUT_ADVICE_MIXED
 
 
 _ROUND_HEAD_RE = re.compile(r"Round \d+:")
@@ -13345,8 +13414,8 @@ def cmd_descope(args) -> int:
 # before the first raise (`auto_retry_raised: max_review_rounds=4,max_iterations=-`, `-` for a key the note did not
 # carry: _raised_caps). hand-back clears the two counters by name, carry clears them too, so both keep overtime_used and
 # auto_retry_raised (ADR 0070 d2: a human answer gives back the normal budget, never the Overtime); every defer clears
-# all six. The take-out's own two markers, `taken_out` (how many times, across rollouts) and `taken_out_of` (the
-# rollouts), are never cleared by a defer.
+# all six. The take-out's own markers, `taken_out` (how many times, across rollouts), `taken_out_of` (the rollouts) and
+# `taken_out_next` (p39-21, below), are never cleared by a defer.
 AUTO_RETRIES_USED_KEY = "auto_retries_used"
 QUOTA_RETRIES_USED_KEY = "quota_retries_used"
 AUTO_RETRY_SHA_KEY = "auto_retry_sha"
@@ -13357,6 +13426,15 @@ AUTO_RETRY_KEYS = (AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY, AUTO_RETRY_SHA
                    AUTO_RETRY_RAISED_KEY)
 TAKEN_OUT_KEY = "taken_out"
 TAKEN_OUT_OF_KEY = "taken_out_of"
+# A task taken out more than once (p39-21, ADR 0070 d6: "Rewritten first, then me"): the take-out that brings
+# `taken_out` to 2 marks it `taken_out_next: rewrite`, for the next Shaping session (orient, or orient-all's pass) to
+# split, narrow or restate from both take-outs' evidence, and which removes the marker in the save that writes the
+# rewrite; the take-out that brings it to 3 or more marks it `taken_out_next: you`, one row on his needs-you list
+# (unfinished-rollout.py needs-you) with every take-out's diagnosis and a recommendation, removed by his ruling. A
+# defer never clears it; schedule step 1 and its Pickup sweep never take a task carrying it.
+TAKEN_OUT_NEXT_KEY = "taken_out_next"
+TAKEN_OUT_REWRITE = "rewrite"
+TAKEN_OUT_YOURS = "you"
 # The take-out (p39-14, ADR 0070 d5): `defer --take-out`'s rollout `## Notes` lines, `- <stamp> take-out: [[<slug>]] …;
 # feedback <F>)` per member taken out, `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` per failed try
 # (_take_out_failures) and `- <stamp> take-out paused: [[<slug>]] ([[<m>]]'s PR merged into <B>: resume lands it;
