@@ -84,6 +84,7 @@ T('act-baddue', 'open', ['Act'], '\ndue: soon-ish')
 T('act-inprog', 'in-progress', ['Act'])
 T('act-review', 'review', ['Act'])
 T('act-hold', 'blocked', ['Act'])
+T('act-thrice', 'open', ['Act'], '\ntaken_out: 3\ntaken_out_next: you')  // taken out three times: his (ADR 0070 d6)
 T('multi-a', 'open', ['Act', 'Crown'])
 for (const s of ['shared-par', 'shared-tie', 'shared-eye']) T(s, 'open', ['Shared'])
 for (const s of ['two-repo', 'two-norepo', 'two-badrepo']) T(s, 'open', ['Two'])
@@ -91,8 +92,9 @@ T('que-call', 'open', ['Que'], '\ndue: 2026-10-25')
 T('que-overdue', 'open', ['Que'], '\ndue: 2026-10-01')
 for (const s of ['que-serial', 'que-orient', 'que-grill']) T(s, 'open', ['Que'])
 T('qc-top', 'open', ['QueCrowned'])
-const LAB = Array.from({ length: 24 }, (_, i) => `lab-${String(i + 1).padStart(2, '0')}`)
-for (const s of LAB) T(s, 'open', ['Lab'])
+const LAB = Array.from({ length: 25 }, (_, i) => `lab-${String(i + 1).padStart(2, '0')}`)
+// lab-25 was taken out twice (ADR 0070 d6): case 3's raise reads it as Orient
+for (const s of LAB) T(s, 'open', ['Lab'], s === 'lab-25' ? '\ntaken_out: 2\ntaken_out_next: rewrite' : '')
 T('loose', 'open', [])
 T('hold-only', 'open', ['Hold'], links('depends-on', ['act-orient']))
 // Dep's tasks and what each depends on (case 16's table).
@@ -246,7 +248,8 @@ const copyVault = (name) => {
   fs.cpSync(V, d, { recursive: true })
   return d
 }
-const gradeable = (j) => j.tasks.filter((t) => t.statusClass === 'active' && !t.inFlight && t.projects.length).map((t) => t.slug)
+const gradeable = (j) => j.tasks.filter((t) => t.statusClass === 'active' && !t.inFlight && t.projects.length &&
+  [null, 'rewrite'].includes(t.taken_out_next)).map((t) => t.slug)
 
 // Case 2's field check, run over every graded row of a run.
 function fieldsHold(j) {
@@ -274,7 +277,7 @@ test('1. integration: schema 1, every gradeable task once across tasks, ungraded
   assert.deepEqual([...seen].sort(), gradeable(s).sort(), 'every gradeable task exactly once')
   assert.equal(new Set(seen).size, seen.length)
   assert.deepEqual(j.skipped, [{ slug: 'act-hold', why: 'hold' }, { slug: 'act-inprog', why: 'in flight' },
-    { slug: 'act-review', why: 'in flight' }, { slug: 'loose', why: 'unhomed' }])
+    { slug: 'act-review', why: 'in flight' }, { slug: 'act-thrice', why: 'needs you' }, { slug: 'loose', why: 'unhomed' }])
   assert.deepEqual(j.ungraded.map((t) => t.slug), ['dep-ungraded', ...LAB])
   assert.deepEqual(j.ungraded[0], { slug: 'dep-ungraded', home: 'Dep', why: 'no grade' })
   assert.deepEqual(j.invalid.map((t) => [t.slug, t.home, t.errors]), [['dep-invalid', 'Dep', ['One call needs at least one decision']]])
@@ -323,8 +326,9 @@ const RAISE = [
   ['lab-10', 'one-call', [hi()], 'One call', []],
   ['lab-11', 'ONE CALL', [hi()], 'One call', []],
   ['lab-12', 'one_call', [hi()], 'One call', []],
+  ['lab-25', 'Ready', [hi()], 'Orient', [['Ready', 'Orient', 'rewrite']]],
 ]
-test('3. the raise: decisions imply a grade, low (or missing) confidence raises one step, Orient never rises', () => {
+test('3. the raise: decisions imply a grade, low (or missing) confidence raises one step, Orient never rises; a task taken out twice is Orient', () => {
   const file = gradesFile('raise', { project: 'Lab', tasks: RAISE.map(([slug, grade, decisions]) => G(slug, grade, 'serial', { decisions })) })
   const j = ok(rank([file]))
   fieldsHold(j)

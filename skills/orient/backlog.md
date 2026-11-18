@@ -42,7 +42,9 @@ R5.4. Never git or gh of its own.
    area note's `backlog_excludes:` lists (Animately's: `["[[GifLab]]"]`, the Pulse's own exclusion).
 2. Each row carries its kind (open, an **orient park**, `parked-by: backlog-orient`, or a **held park**: any other
    park), whether it is area-only or homed, whether it is in flight (vault-grammar § In flight), its frozen kind
-   (thread, decisions, not a task, or `unparseable:<why>`), and whether the trigger's `urgent[]` or `tasks` name it.
+   (thread, decisions, not a task, `unparseable:<why>`, or `needs you`: a task taken out three times, which his
+   needs-you list holds), whether it is `unclear` (`rewrite`: a task taken out twice, ADR 0070 d6), and whether the
+   trigger's `urgent[]` or `tasks` name it.
 3. `projects[]` holds only the `project`-tagged notes under the area folder outside the excludes, and `excluded[]` the
    notes the excludes drop. A record note (tagged `backlog-orient`), a status log or a reference note is never in
    `projects[]`. orient § 2's slots, drift, placement, threads and related projects run over `projects[]` only.
@@ -61,7 +63,7 @@ R5.4. Never git or gh of its own.
 R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the folders.
 
 - **Frozen**, listed and never touched: in flight; possibly landed (reshuffle R1); thread; decisions; not a task; an
-  unparseable row the mend could not fix.
+  unparseable row the mend could not fix; a `needs you` row (a task taken out three times, on his needs-you list).
 - **A held park is frozen context.** Listed under Held parks, and never reopened, scheduled, obsoleted or parked
   again: he parked it, or it was parked before ADR 0071, and a strategy deferral is his to lift. Its row may say
   `looks no longer true: <why>`, for him to act on.
@@ -79,7 +81,9 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   - **unbundle** — a brain dump into new loose tasks with no `phase:`, named by `add-task.md`.
 - **Not under `--backlog`:** no **Drop**, no move between phases, no new phase note, no rename and no pull-in rename
   (the Pulse keys a task by its path). Phase **retire** applies unchanged, by reshuffle R5.4.
-- Unclear items and open forks go to B9's grill, after the start; they hold back only their own tasks.
+- Unclear items and open forks go to B9's grill, after the start; they hold back only their own tasks. A row whose
+  `unclear` reads `rewrite` is unclear whatever its body says, and B9 rewrites it as reshuffle R2's **A task taken out
+  twice** does.
 
 ## B4. The decided record
 

@@ -244,7 +244,13 @@ the rollout's `engine_snapshot:` root's `reconcile-rollout.py`, or in the root a
 `_engine_reads_carried`'s clauses; a finished rollout, or no note, reads it), and False reads every Overtime run and
 take-out as that engine's H9 or H10. The task keys and note lines the take-out writes (`overtime_used`,
 `auto_retry_raised`, `taken_out`, `taken_out_of`; the `## Notes` `take-out:`, `take-out failed:` and `take-out paused:`
-lines) are written only by an engine at p39-14 or later, and are keys and lines an older engine never reads.
+lines) are written only by an engine at p39-14 or later, and are keys and lines an older engine never reads. The
+`taken_out_next` marker (p39-21, ADR 0070 d6) is written only by an engine at p39-21 or later: a take-out by an engine
+from p39-14 to p39-21 bumps `taken_out` and writes no marker, so that task is neither rewritten first nor listed for
+him; its readers (needs-you, the Pickup sweep, `backlog-orient.py sweep`, `estate-rank.py rank`) run from the newest
+root and read only the marker, never infer one from `taken_out`, since a task already rewritten carries the same count.
+`taken_out_from` (a split piece's link to the task it came from) is written by orient and read only by needs-you's
+_take_out_history, from the newest root; an older engine's take-out leaves it as it is.
 
 Schedule's `join` (ADR 0078 d6) writes a running rollout's note from a newer root, so its forms are a cross-version
 contract:

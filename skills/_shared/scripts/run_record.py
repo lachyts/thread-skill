@@ -397,10 +397,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      ADR 0054: a decision ruled for him is never counted, so lines before ADR 0054 are not comparable)
                      and those of low confidence, low <= decisions; held a boolean, the task held by a dependency; gates
                      a list of distinct gate kinds, spend | credential | irreversible, possibly empty; raised a
-                     non-empty list of distinct raise whys, decisions | confidence; rank an integer >= 1, absent for
-                     Orient; linked the scan row's rollout slug at grade time, never a reserved name; model and effort
-                     (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort the pass's graders ran on,
-                     as the lead passed them to `log`, each absent when not given). No rollout; lands in grades.jsonl.
+                     non-empty list of distinct raise whys, rewrite (p39-21) | decisions | confidence; rank an integer
+                     >= 1, absent for Orient; linked the scan row's rollout slug at grade time, never a reserved name;
+                     model and effort (p46-6, ADR 0079 decision 5) non-empty strings, the model id and effort the
+                     pass's graders ran on, as the lead passed them to `log`, each absent when not given). No rollout;
+                     lands in grades.jsonl.
   reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence?, repairsOnly?,
                      model?, effort? (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts,
                      escapesOnly and repairsOnly lists of slugs: the rollouts read, those not read that hold an
@@ -1432,7 +1433,7 @@ GRADE_NAMES = ("Ready", "One call", "Grill", "Orient")
 GRADE_SHAPES = ("parallel", "serial", "session")
 GRADE_SIZES = ("S", "M", "L")
 GRADE_GATES = ("spend", "credential", "irreversible")
-RAISE_WHYS = ("decisions", "confidence")   # estate-rank.py's raised[] whys
+RAISE_WHYS = ("rewrite", "decisions", "confidence")   # estate-rank.py's raised[] whys
 GRADE_PASS_RE = re.compile(r"g-[A-Za-z0-9._-]+\Z")
 GRADE_DIGEST_RE = re.compile(r"[0-9a-f]{12}\Z")
 

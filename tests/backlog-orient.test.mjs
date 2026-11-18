@@ -3,6 +3,7 @@
 // own copy of V (its own HOME, so the declared trigger file `~/trigger.json` is that copy's). The cases:
 //   (a)  sweep: exactly the Backlog the Pulse's line rules give, every row's fields, projects[] and excluded[], no write;
 //   (a2) sweep's set equals an oracle written here from those rules (fm_lines, fm_list, link_names, the status line);
+//   (a3) a task taken out twice reads `unclear: rewrite`, three times `frozen: needs you` (p39-21);
 //   (b)  park: only `status:`, the inserted `parked-by:` and one Notes line change; every shared refusal, and B3's
 //        urgent, `priority: high` and `work_depth: deep`, is exit 2, one stderr line and a byte-identical vault; a
 //        BOM+CRLF note keeps both;
@@ -236,6 +237,18 @@ function oracle(vault) {
 test('(a2) sweep\'s Backlog equals the oracle written from the Pulse\'s line rules', () => {
   assert.deepEqual(sweep(PRISTINE).rows.map((r) => r.task).sort(), oracle(V).sort())
   assert.deepEqual(oracle(V).sort(), MEMBERS)
+})
+
+// ---- (a3) a task taken out more than once (p39-21, ADR 0070 d6) -----------------------------------------------------
+test('(a3) sweep lists a task taken out twice as unclear (rewrite), and one taken out three times as frozen (needs you)', () => {
+  const c = copyVault('a3')
+  const T3 = (slug, more) => write(tf(c, slug), fm(task('open', '["[[Website]]"]', more), `\n# ${slug}\n\n## Notes\n\nBody.\n`))
+  T3('x-twice', '\ntaken_out: 2\ntaken_out_next: rewrite')
+  T3('x-thrice', '\ntaken_out: 3\ntaken_out_next: you')
+  T3('x-rewritten', '\ntaken_out: 2')
+  const rows = Object.fromEntries(sweep(c).rows.map((r) => [r.task, r]))
+  assert.deepEqual(['x-twice', 'x-thrice', 'x-rewritten', 't-inline'].map((t) => [rows[t].unclear, rows[t].frozen]),
+    [['rewrite', null], [null, 'needs you'], [null, null], [null, null]])
 })
 
 // ---- (b) park ---------------------------------------------------------------------------------------------------------

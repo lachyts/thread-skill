@@ -2,8 +2,9 @@
 # The pickup sweep, the unstarted read and the awaited read (ADR 0057, ADR 0082; schedule § 1.2, close step 2): three
 # read-only verbs of skills/_shared/scripts/unfinished-rollout.py.
 #   P1-P10  `pickups --repo <path> --tasks <slugs> [--misfit <slug>=<why>]...`: the pool, its order, the Repo rule
-#           (counted aggregate only), the gate rule, misfits, the needed set and the extras' dependency closures under
-#           the cap of 5, the umbrella project, and its exit 2s, read-only and byte-equal on a rerun
+#           (counted aggregate only), the gate rule, the take-out rule (P7b), misfits, the needed set and the extras'
+#           dependency closures under the cap of 5, the umbrella project, and its exit 2s, read-only and byte-equal on a
+#           rerun
 #   N1-N12  `unstarted --rollout <slug> [--handoffs <dir>]...`: closed, serial, started (approved_unrun, or a Run record
 #           lead-entry), stamped, incomplete, launched (a handoff doc's `launches:`) or unstarted with its Project root
 #           (N12: close step 2's **Stale launch.** read of a launch doc's own `launches:`, with the peer guard)
@@ -200,6 +201,18 @@ pk --repo "$R" --tasks a
 ok "$(why g-spend)|$(why g-cred)|$(why g-irr)" 'gated: spend "credits"|gated: credential "API key"|gated: irreversible "wipe"' \
   "P7: a spend, credential or irreversible hit leaves the task, never dismissed"
 ok "$(joined)" "clean" "P7: a shell variable is no hit"
+
+# ── P7b: the take-out rule (p39-21, ADR 0070 d6): a task taken out twice or three times never joins ─────────────
+scen p7b
+mkt a "$(REPO_LINE "$R")"
+mkt twice "$(REPO_LINE "$R")" 'taken_out: 2' 'taken_out_next: rewrite'
+mkt thrice "$(REPO_LINE "$R")" 'taken_out: 3' 'taken_out_next: you'
+mkt rewritten "$(REPO_LINE "$R")" 'taken_out: 2'
+pk --repo "$R" --tasks a
+ok "$(why twice)|$(why thrice)" \
+  'taken out twice: marked for a rewrite (taken_out_next: rewrite), which the next Shaping session writes first|taken out 3 times: it waits on your ruling (taken_out_next: you)' \
+  "P7b: a marked task is left with its why"
+ok "$(joined)" "rewritten" "P7b: a rewritten task (its marker removed) joins, whatever its count"
 
 # ── P8: misfits ──────────────────────────────────────────────────────────────────────────────────────────────
 scen p8
