@@ -624,7 +624,8 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   status and handed read): a chain is listed when it is stamped `start: unattended`, no Leg session stands, its state
   is in WAITING_STATES (or `restarting` on a listed restart), no manual hand-over stands with no restart after it (its
   paste-ready prompt is its one start path: a chain is listed or has a start path off the list, never both, P44-4),
-  and its restart has a next Leg with no blockedBy.
+  and its restart has a next Leg with no blockedBy. An open Leg whose Leg lease reads lapsed (open_leg_lapsed, P36-15)
+  stands as no Leg session there: its `live` chain is listed with the `--take-over` prompt.
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
   against other rollouts, {scope, why, held, released, unlanded, undone, pending, rows, warn, began, open, rank,
   captured, holding}. In every
@@ -5325,9 +5326,11 @@ def stall_of(chain, open_leg):
             "why": f"no Leg is open, yet {held} is claimed: the next Leg inherits it, and nothing starts that Leg"}
 
 
-def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
+def restart_of(ctx, chain, plan, n, open_leg, halt, restarted, lapsed=False):
     """The restart (the module docstring's) from a fresh Leg N's contention-aware plan (status's freshRank), or None. A
-    `wait` (ADR 0067 d9) is built from its row, as a claim is."""
+    `wait` (ADR 0067 d9) is built from its row, as a claim is. `lapsed` (P36-15, waiting_listed's alone): the open Leg's
+    Leg lease reads lapsed, so it blocks nothing and the take-over prompt stands; status passes none, so its restart
+    still names the open Leg for repair's (d)."""
     if plan["action"] not in ("finish", "claim", "wait", "complete"):
         return None
     take = open_leg is not None
@@ -5358,7 +5361,7 @@ def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
         blocked = "halt"
     elif restarted is not None and not listed:
         blocked = f"restart Leg {restarted['leg']} ({restarted['how']})"
-    elif take:
+    elif take and not lapsed:
         blocked = f"open Leg {open_leg['n']} (session {open_leg['session'] or 'unknown'})"
     elif chain.legs and not listed:
         blocked = handover_session(chain)
@@ -5456,29 +5459,48 @@ def leg_session_of(chain, read):
     return handover_session(chain)
 
 
-def waiting_listed(ctx, chain, read):
+def open_leg_lapsed(ctx, chain, read, leases=None):
+    """Whether the chain's open Leg's Leg lease reads lapsed (P36-15; reconcile-rollout.py's _Leases, its Leg rule: 90
+    min after its last write, 180 for a waiting one, a later boot or wake restarting it): its session died without
+    `leg.py close`. No open Leg, no lease file and an unreadable one read False (a Leg on an older snapshot writes none,
+    so it stands). `leases` is the caller's _Leases at its own now (unfinished-rollout.py's `waiting`, whose ctx has
+    none); without one it reads at ctx.now. The one copy unfinished-rollout.py's room (leg_session) and waiting_listed
+    read."""
+    if read["open_leg"] is None:
+        return False
+    leases = leases if leases is not None else rr._Leases(ctx.now)
+    return leases.state(ctx.slug, chain.note, leg=True)["state"] == "lapsed"
+
+
+def waiting_listed(ctx, chain, read, leases=None):
     """Whether unfinished-rollout.py's `waiting` lists the chain (ADR 0076 d3), the one copy of its rule, which begin's
     begin wait, status and handed read too (P41-3, P44-4): (restart, None) when it does (restart_of's, for its next
     Leg), else (None, why not), the first that holds: `no start: unattended`; `its Leg session stands (<s>)`
-    (leg_session_of, read with no lease: an open Leg, or a closing one, always keeps a chain off the list); `its chain
-    reads <state>` (a state off WAITING_STATES, but `restarting` on a standing restart `listed`, repair's listing,
-    P44-4); `a manual hand-over stands (Leg <N>: <why>)` (no restart standing and the last Leg handed off by hand: its
-    paste-ready prompt is its one start path, until a Leg begins or repair's `restarted --listed` supersedes it,
-    P44-4); `no Leg acts next`; `blocked by <restart.blockedBy>`. The hold (held_by) is `waiting`'s own, never a reason
-    to leave the list."""
+    (leg_session_of: an open Leg whose Leg lease has not lapsed, or a closing one, keeps a chain off the list; a
+    closing Leg's lapse is never read here); `its chain reads <state>` (a state off WAITING_STATES, but `restarting` on
+    a standing restart `listed`, repair's listing, P44-4, and `live` on an open Leg whose lease lapsed, P36-15); `a
+    manual hand-over stands (Leg <N>: <why>)` (no restart standing and the last Leg handed off by hand: its paste-ready
+    prompt is its one start path, until a Leg begins or repair's `restarted --listed` supersedes it, P44-4); `no Leg
+    acts next`; `blocked by <restart.blockedBy>`. An open Leg whose Leg lease reads lapsed (open_leg_lapsed, at
+    `leases` or ctx.now, P36-15) is no Leg session: its session died without `leg.py close`, so the chain is listed
+    with restart_of's `--take-over` prompt (the Stage passes it verbatim) and the Waiting list restarts it, no
+    /thread:repair needed. The hold (held_by) is `waiting`'s own, never a reason to leave the list."""
     if not rr._start_unattended(chain.note):
         return None, "no start: unattended"
-    session = leg_session_of(chain, read)
+    lapsed = open_leg_lapsed(ctx, chain, read, leases)
+    session = leg_session_of(chain, {**read, "open_leg": None} if lapsed else read)
     if session is not None:
         return None, f"its Leg session stands ({session})"
     restarted = read["restarted"]
     if read["state"] not in WAITING_STATES and not (read["state"] == "restarting" and restarted is not None
-                                                    and restarted["how"] == "listed"):
+                                                    and restarted["how"] == "listed") \
+            and not (read["state"] == "live" and lapsed):
         return None, f"its chain reads {read['state']}"
     manual = manual_handover(chain) if restarted is None else None
     if manual is not None:
         return None, f"a manual hand-over stands (Leg {chain.last_n()}: {manual})"
-    restart = restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"], read["restarted"])
+    restart = restart_of(ctx, chain, read["fresh"], read["n_next"], read["open_leg"], read["halt"], read["restarted"],
+                         lapsed=lapsed)
     if restart is None:
         return None, "no Leg acts next"
     if restart["blockedBy"] is not None:

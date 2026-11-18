@@ -517,6 +517,8 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   session that has not begun, one whose begin waited included, since begin writes nothing on a begin wait: P41-3); it
   has no manual hand-over standing; and leg.py's restart_of, from the contention-free plan for its next Leg, is a
   finish, claim, wait or complete with no blockedBy (a malformed `chain_copies:` or a missing Chain copy keeps it off).
+  An open Leg whose Leg lease reads lapsed at --now (leg.py's open_leg_lapsed, the room's rule below) is no Leg
+  session: its `live` chain is listed, its prompt restart_of's `--take-over` form, so the Stage restarts it (P36-15).
   leg.py's waiting_listed is this rule's one copy, which begin's begin wait, status and handed read too (their
   `listed`). By the hand-over (ADR 0076 d4 as P44-4 amends it): `hand-over: listed` is on the list, for its next Leg;
   a manual hand-over is off it, since its paste-ready prompt is its one start path, until a Leg begins or repair writes
@@ -671,7 +673,7 @@ SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfa
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
 LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by", "restart_of",
-             "leg_outcome", "leg_session_of", "waiting_listed")
+             "leg_outcome", "leg_session_of", "waiting_listed", "open_leg_lapsed")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
@@ -2648,15 +2650,16 @@ def leg_session(leg, ctx, chain, read, leases) -> bool:
     """Whether a serial chain's Leg session holds a place in the room (ADR 0076 d3): leg.py's leg_session_of, its one
     copy (an open Leg, a standing restart `pending` or `started`, a closing Leg, or a last Leg handed off to a `started`
     session that has not begun, a session whose begin waited included, P41-3: begin writes nothing; a listed restart
-    holds none), but an open Leg whose Leg lease reads lapsed (`leases`, a reconcile-rollout.py _Leases) is none (its
-    session died without `leg.py close`: the Capacity count's rule, _running_by_rollout's Leg half, 90 min after the
-    lease's last write, 180 for a waiting one, a later boot or wake restarting it); no lease file or an unreadable one
+    holds none), but an open Leg whose Leg lease reads lapsed (leg.py's open_leg_lapsed at `leases`, a
+    reconcile-rollout.py _Leases) is none (its session died without `leg.py close`: the Capacity count's rule,
+    _running_by_rollout's Leg half, 90 min after the lease's last write, 180 for a waiting one, a later boot or wake
+    restarting it), and waiting_listed lists its chain with a take-over (P36-15); no lease file or an unreadable one
     still counts (a Leg on an older snapshot writes none). A closing Leg (`closing Leg N`, P44-4: closed with a handoff,
     no hand-over line yet) counts only while its `closed:` stamp is within LEG_LEASE_LAPSE (90 min) of leases.now (close
     deleted its lease, so its stamp is the one clock; an unparseable stamp counts), so one that died inside
     /thread:close frees the room; waiting_listed reads no lapse, so its chain stays off the list until repair lists it."""
     if read["open_leg"] is not None:
-        return leases.state(ctx.slug, chain.note, leg=True)["state"] != "lapsed"
+        return not leg.open_leg_lapsed(ctx, chain, read, leases)
     session = leg.leg_session_of(chain, read)
     if session is None:
         return False
@@ -2713,7 +2716,7 @@ def cmd_waiting(args, rr) -> int:
     git = SC.Git() if chains else None
     listed = []
     for path, ctx, chain, read in chains:
-        restart, _why = load_leg(rr).waiting_listed(ctx, chain, read)   # the list's rule, its one copy (begin's too)
+        restart, _why = load_leg(rr).waiting_listed(ctx, chain, read, leases)   # the list's one rule (begin's too)
         if restart is None:
             continue
         hold, _why = chain_hold(rr, path, tasks_dir)

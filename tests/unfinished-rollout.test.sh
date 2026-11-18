@@ -76,7 +76,8 @@
 #           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
 #           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
 #           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
-#   WL1-WL15 `waiting`, the Waiting list (ADR 0076); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
+#   WL1-WL15 `waiting`, the Waiting list (ADR 0076); WL9 an open Leg's lapsed lease frees its place and lists its
+#           chain with the take-over prompt (P36-15); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
 #           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
 #           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
 #   NY1-NY12 `needs-you` (p48-1): every open needs-you item as one list: each gate kind verbatim, a spend gate the
@@ -3078,11 +3079,14 @@ ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "1|0|None" "WL9: a
 lease wd 2026-11-08T09:00:00Z
 wl
 ok "$(wj 'd["running"]')|$(wj 'd["room"]')" "1|0" "WL9: … and so does one whose Leg lease is 60 minutes old"
+hasnt "$out" '"wd"' "WL9: … its chain off the list (its Leg is open)"
 lease wd 2026-11-08T08:00:00Z
 wl
-ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "0|1|wo" \
+ok "$(wj 'd["running"]')|$(wj 'd["room"]')|$(wj 'd["next"]')" "0|1|wd" \
   "WL9: an open Leg whose Leg lease is over 90 minutes old adds nothing to running: its session died, so the room frees"
-hasnt "$out" '"wd"' "WL9: … and that chain is still off the list (its Leg is open)"
+ok "$(wj '[(w["slug"], w["title"], w["prompt"].split(chr(10))[0]) for w in d["waiting"]]')" \
+  "[('wd', 'Leg 2: wd', '/thread:execute [[wd]] --take-over'), ('wo', 'Leg 1: wo', '/thread:execute [[wo]]')]" \
+  "WL9: … and its chain is listed for Leg 2 with the take-over prompt, so the Stage restarts it (P36-15)"
 tscen wl10
 LOG=- mkchain wo "$OTHER$UN" o1~open~'`vault:Work/Projects/O`'
 capf 4
