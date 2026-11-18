@@ -916,3 +916,25 @@ test('L8: decide before ledger is refused with the vault untouched; in order, th
   assert.match(sec, /^- gap 1 2026-11: a lead question writes no Run-record line; evidence /m)
   ok(h, ['close', '--span', sp.out, '--tasks-dir', h.tasks])
 })
+
+// p39-14 (ADR 0070 d5): a take-out moves its task's set-aside (a dependant's included), and a wait it ends is priced
+// stalls/take-out, unflagged: the engine took the task out, nobody was asked. A dependant's line never ends the wait by
+// itself, but its set-aside has its mover, so it never reads `still waiting`.
+test('L9: a take-out ends a wait as stalls/take-out, unflagged; a taken-out dependant is moved, never still waiting', (t) => {
+  const h = setup(t)
+  const ms = (hm) => Date.parse(T('06', hm))
+  const base = [
+    [ms('01:00'), 1, { kind: 'set-aside', task: 'x', reasonClass: 'review-rounds' }],
+    [ms('01:00'), 2, { kind: 'set-aside', task: 'y', reasonClass: 'needs-human' }],
+    [ms('02:00'), 3, { kind: 'take-out', task: 'y', cause: 'dependant', with: 'x', fingerprint: 'abcdef012345' }],
+    [ms('02:30'), 4, { kind: 'take-out', task: 'x', cause: 'spent', fingerprint: 'abcdef012345', stage: 'review', overtimeUsed: 3, overtimeBudget: 3 }],
+  ]
+  const read = (expr, rows) => py(h, LEDGER, expr, { base: rows, a: ms('01:00'), b: ms('03:00'), hi: ms('05:00') })
+  const B = '[tuple(r) for r in a["base"]]'
+  assert.deepEqual(read(`m.classify_wait(${B}, a["a"], a["b"], a["hi"])`, base), ['stalls', 'take-out', null], 'the task\'s take-out ends the wait')
+  assert.deepEqual(read(`[m.first_mover(${B}, 1, "y", a["hi"])[0], list(m.mover_cause("take-out", None, None))]`, base),
+    ['take-out', ['stalls', 'take-out']], 'the dependant\'s set-aside is moved by its own take-out line')
+  const depOnly = base.slice(0, 3)
+  const [, , flag] = read(`m.classify_wait(${B}, a["a"], a["b"], a["hi"])`, depOnly)
+  assert.ok(!/still waiting: \[\[y\]\]/.test(flag ?? ''), `a taken-out dependant never reads still waiting: ${flag}`)
+})

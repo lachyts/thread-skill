@@ -349,6 +349,14 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
     [W(4, '06:30'), 'handed-back', 'retried', { via: 'descope', arm: 'run' }],
     [W(4, '06:40'), 'review-verdict', 'retried', { round: 2, verdict: 'changes', findings: 3, original: 1, regression: 2, digest: 'd1' }],
     [W(4, '07:00'), 'hold-started', null, { hold: 'git-env' }],
+    // p39-14 (ADR 0070): an Overtime retry, then the take-out with its dependant; and a take-out before since
+    [W(4, '08:10'), 'set-aside', 'taken', { stage: 'review', reasonClass: 'review-rounds', setAsideAt: 'run' }],
+    [W(4, '08:20'), 'auto-retry', 'taken', { stage: 'review', setAsideAt: 'run', retryClass: 'agent', used: 2, budget: 2, overtime: 1,
+      overtimeBudget: 3, raiseField: 'max_review_rounds', raiseTo: 5, reviewRounds: 5 }],
+    [W(4, '08:40'), 'set-aside', 'taken', { stage: 'review', reasonClass: 'review-rounds', setAsideAt: 'run' }],
+    [W(4, '08:50'), 'take-out', 'dep', { cause: 'dependant', fingerprint: 'abcdef012345', with: 'taken' }],
+    [W(4, '08:50'), 'take-out', 'taken', { cause: 'spent', fingerprint: 'abcdef012345', stage: 'review', overtimeUsed: 3, overtimeBudget: 3 }],
+    ['2026-09-02T10:00:00Z', 'take-out', 'old', { cause: 'spent', fingerprint: '0123456789ab', stage: 'plan', overtimeUsed: 3, overtimeBudget: 3 }],
   ]
   emitAll(h, 'demo', byTs(ev))
   rolloutNote(h, 'demo', { notes: ['- 2026-09-05 repair: [[stuck]] deferred: later'] })
@@ -357,7 +365,11 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
   const s = span(h)
   const f = entryOf(s, 'demo').friction
   const kinds = [...new Set(f.map((x) => x.kind))].sort()
-  assert.deepEqual(kinds, ['ask', 'churn', 'descope', 'repair', 'retry', 'set-aside'])
+  assert.deepEqual(kinds, ['ask', 'churn', 'descope', 'repair', 'retry', 'set-aside', 'takeout'])
+  assert.deepEqual(f.filter((x) => x.kind === 'takeout').map((x) => [x.task, x.cause, x.stage, x.overtimeUsed, x.with]),
+    [['dep', 'dependant', null, null, 'taken'], ['taken', 'spent', 'review', 3, null]], 'each in-window take-out; the one before since is absent')
+  assert.deepEqual(f.filter((x) => x.task === 'taken' && x.kind !== 'takeout').map((x) => [x.kind, x.movedBy ?? x.overtime]),
+    [['set-aside', 'auto-retry'], ['retry', 1], ['set-aside', 'take-out']], 'an Overtime retry carries overtime; a take-out moves its set-aside')
   const ask = f.find((x) => x.kind === 'ask' && x.task === 'landed')
   assert.deepEqual([ask.act, ask.askedAhead, ask.needsYou], ['answer', true, 'Pick a colour.'])
   assert.ok(f.some((x) => x.kind === 'ask' && x.act === 'gitEnvHold' && x.task === null), 'a git-env hold is an ask')
