@@ -1201,7 +1201,11 @@ Subcommands:
                  1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
                  with that k and auto_retry_verdict). A null `humanFix` whose `settingsBlock` reads `due`, state
                  `unfreed` and `freeNow` (a settings block step 1.2's *Settings repair* frees now, ADR 0080) goes to
-                 `reentry`, ahead of the cool-down test; another null `humanFix` with a future `autoRetryAfter` goes to
+                 `reentry`, ahead of the cool-down test; a verdict with a `takeOut` (p39-14, ADR 0070 d5) is skipped at
+                 its failure bound (a non-null humanFix, Lachy's), goes to `coolDown` with class `take-out` while its
+                 own cool-down runs (a future `autoRetryAfter`), is not W while its closure waits on a member
+                 (_take_out_members: that member, running or integrating, is W itself), and is otherwise `reentry`, the
+                 lead's `defer --take-out`; another null `humanFix` with a future `autoRetryAfter` goes to
                  `coolDown`; an `autoRevise` seeded revise is W only while `slotsInUse` plus the revises before it is
                  below `slotLimit`, else `capHeld` (cause `heat` at verify-slot's HEAT_HOLD or worse, `quota` while
                  `trickle.capacity` is in force with its quota, the lead's Login (step 6), inside (p36-7), `away-cap`
@@ -12268,6 +12272,8 @@ def cmd_record_pause(args) -> int:
 # ---- defer ------------------------------------------------------------------
 
 def cmd_defer(args) -> int:
+    if getattr(args, "take_out", False):
+        return _take_out(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     expected = Path(os.path.expanduser(args.rollout)).stem.lower() if args.rollout else None
@@ -12282,42 +12288,444 @@ def cmd_defer(args) -> int:
         except ValueError as e:
             errors.append(str(e))
             continue
-        if expected is not None:
-            cur = (_wikilink_slug(note.get("rollout")) or "").lower()
-            if cur and cur != expected:
-                errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
-                continue
-        if _carried_fix(note):
-            # Deferring would clear `merged:` and `rollout:`: it would quietly take back a landed fix (ADR 0078 d1).
-            errors.append(f"{slug}: landed, carried: its PR merged — refusing to defer (merged: and rollout: kept)")
-            continue
-        # Read before anything is cleared: `rollout:` goes, and with it the only way to record the frees.
-        rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
-        # The Speed fix hold entries its rollout recorded for it (p54-13): dropped in the save that clears `rollout:`.
-        sh_drop = [r for r in _speed_defer_releases(tasks_dir, rollout, slug) if r.lower() in _speed_entries(note)]
-        note.set("status", "open")
-        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
-                    DESCOPE_ARMED_KEY, HANDED_BACK_KEY, *AUTO_RETRY_KEYS):
-            note.remove(key)
-        if sh_drop:
-            _speed_hold_strip(note, sh_drop)
-        note.save(dry_run=args.dry_run)
-        if rollout and not args.dry_run:
-            state = _record_state(rollout)
-            if prior == "in_progress":
-                _event(rollout, "slot-freed", slug, {"outcome": "stopped"}, args)
-            if held:
-                _halt_lane(rollout, slug, args, state)
-            _close_holds(rollout, slug, ("race",), args, state)
-        print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
-              f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY}/{'/'.join(AUTO_RETRY_KEYS)} cleared, "
-              "a legacy `wave:` included)" +
-              (" (dry-run)" if args.dry_run else " [written]"))
-        for r in sh_drop:
-            print(f"speed-hold dropped [[{r}]] from {slug} (deferred)" + (" (dry-run)" if args.dry_run else ""))
+        err = _defer_note(args, tasks_dir, slug, note, expected)
+        if err:
+            errors.append(err)
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
+
+
+def _defer_note(args, tasks_dir, slug, note, expected, before_save=None):
+    """One task's defer (cmd_defer's body, shared with the take-out): the error line, or None once it is deferred and
+    printed. `before_save(note)` (the take-out's) edits the note in the same save, after the clears."""
+    if expected is not None:
+        cur = (_wikilink_slug(note.get("rollout")) or "").lower()
+        if cur and cur != expected:
+            return f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer"
+    if _carried_fix(note):
+        # Deferring would clear `merged:` and `rollout:`: it would quietly take back a landed fix (ADR 0078 d1).
+        return f"{slug}: landed, carried: its PR merged — refusing to defer (merged: and rollout: kept)"
+    # Read before anything is cleared: `rollout:` goes, and with it the only way to record the frees.
+    rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
+    # The Speed fix hold entries its rollout recorded for it (p54-13): dropped in the save that clears `rollout:`.
+    sh_drop = [r for r in _speed_defer_releases(tasks_dir, rollout, slug) if r.lower() in _speed_entries(note)]
+    note.set("status", "open")
+    for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
+                DESCOPE_ARMED_KEY, HANDED_BACK_KEY, *AUTO_RETRY_KEYS):
+        note.remove(key)
+    if sh_drop:
+        _speed_hold_strip(note, sh_drop)
+    if before_save is not None:
+        before_save(note)
+    note.save(dry_run=args.dry_run)
+    if rollout and not args.dry_run:
+        state = _record_state(rollout)
+        if prior == "in_progress":
+            _event(rollout, "slot-freed", slug, {"outcome": "stopped"}, args)
+        if held:
+            _halt_lane(rollout, slug, args, state)
+        _close_holds(rollout, slug, ("race",), args, state)
+    print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
+          f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY}/{'/'.join(AUTO_RETRY_KEYS)} cleared, "
+          "a legacy `wave:` included)" +
+          (" (dry-run)" if args.dry_run else " [written]"))
+    for r in sh_drop:
+        print(f"speed-hold dropped [[{r}]] from {slug} (deferred)" + (" (dry-run)" if args.dry_run else ""))
+    return None
+
+
+# ---- defer --take-out (p39-14, ADR 0070 d5) --------------------------------------------------------------------------
+
+# A member that is running, integrating or awaiting Integration is finished first (ADR 0070 d5, his ruling): the take-out
+# waits for it. A serial Leg's claim is an in_progress row, so it reads `running`.
+TAKE_OUT_WAIT_STATES = ("running", "integrating", "awaiting-integration")
+
+
+def _downstream(slug, index, linked, holds=None):
+    """{member (as linked): set of the members (lowercased) it depends on directly}: the tasks linked to this rollout
+    whose `depends-on:` or `blocked-by:` reaches `slug`, transitive (a dependant's dependants too), the inverse of
+    _upstream: each dependency is followed through `merged_into:` tombstones (_fold_unit), so a task folded into `slug`
+    counts as it. A Speed fix hold's entry is no dependency (repair § 5 step 1): a `depends-on:` entry R the rollout's
+    `## Speed fix holds` (`holds`, _speed_holds) records as a hold on the task. Landed tasks and tombstones are never
+    members, and `slug` itself is not one of its own."""
+    holds = holds or {}
+    deps = {}
+    for path, note in linked:
+        stem = path.stem
+        if stem.lower() == slug.lower() or _landed(note) or _status(note) == "merged":
+            continue
+        units = set()
+        for d in _dep_entries(note):
+            h = holds.get(d.lower())
+            if h is not None and stem.lower() in h["held"]:
+                continue
+            units.add(_fold_unit(d, index)[0].lower())
+        deps[stem] = units
+    members, grew = {slug.lower()}, True
+    while grew:
+        grew = False
+        for stem, units in deps.items():
+            if stem.lower() not in members and units & members:
+                members.add(stem.lower())
+                grew = True
+    return {stem: units & members for stem, units in deps.items() if stem.lower() in members}
+
+
+def _take_out_order(slug, down):
+    """The members leaves first, the task last: a member goes once every member that depends on it has gone (ties by
+    slug), so a dependant is always taken out before the task it depends on."""
+    left = {s.lower(): s for s in down}
+    order = []
+    while left:
+        ready = sorted((s for k, s in left.items()
+                        if not any(k in down[o] for ok, o in left.items() if ok != k)), key=str.lower)
+        if not ready:          # a cycle: take the rest in slug order
+            ready = sorted(left.values(), key=str.lower)
+        for s in ready:
+            order.append(s)
+            left.pop(s.lower())
+    return order + [slug]
+
+
+def _take_out_members(rollout_path, rollout_note, tasks_dir, slug):
+    """(members leaves first and the task last, waits [(member, its state)], index): the take-out's closure
+    (_downstream) and the members it waits on (TAKE_OUT_WAIT_STATES, or held by an undecided RACE or UNVERIFIED).
+    Shared by the verb and `moving`."""
+    linked, index = _scan(rollout_path, tasks_dir)
+    down = _downstream(slug, index, linked, _speed_holds(rollout_note))
+    order = _take_out_order(slug, down)
+    by = {p.stem.lower(): (p, n) for p, n in linked}
+    race = _race_holds(rollout_note, linked)
+    waits = []
+    for m in order[:-1]:
+        entry = by.get(m.lower())
+        if entry is None:
+            continue
+        state = _queue_state(entry[1])[0]
+        if state in TAKE_OUT_WAIT_STATES:
+            waits.append((m, state))
+        elif m.lower() in race:
+            waits.append((m, f"held by an undecided {race[m.lower()][1]}"))
+    return order, waits, by, index
+
+
+def _take_out_line_re(member, fp):
+    return re.compile(rf"{re.escape(TAKE_OUT_MARK)}\s*\[\[{re.escape(member)}(?:[|#\\][^\]]*)?\]\].*feedback\s+"
+                      rf"{re.escape(fp)}\)\s*$", re.I)
+
+
+def _take_out_recorded(ro, fp):
+    """{member (lowercased)} the Run record already holds a `take-out` line for on feedback `fp`."""
+    try:
+        lines, _bad = _record_lines(_run_record().record_path(ro))
+    except Exception:  # noqa: BLE001 — no record (or none readable) holds nothing: the line is written
+        return set()
+    return {str(d.get("task") or "").lower() for d in lines if d.get("kind") == "take-out" and d.get("fingerprint") == fp}
+
+
+def _drop_rollout_rows(note, members):
+    """Remove each member's `## Queue` row (a table row or list item whose first wikilink names it, outside fenced code)
+    and its `## File-sets` line (FILESET_RE), through Note.apply so save() replays it; a member already gone changes
+    nothing."""
+    keys = {m.lower() for m in members}
+
+    def drop(n):
+        for heading in ("## Queue", "## File-sets"):
+            found = n._section_bounds(heading)
+            if found is None:
+                continue
+            lines, start, end = found
+            keep, fenced = [], False
+            for i in range(start + 1, end):
+                line = lines[i]
+                if FENCE_RE.match(line):
+                    fenced = not fenced
+                elif not fenced and heading == "## Queue" and RANKED_LINE_RE.match(line):
+                    m = WIKILINK_OPEN_RE.search(line)
+                    if m and (_wikilink_slug(m.group(1)) or "").lower() in keys:
+                        continue
+                elif not fenced and heading == "## File-sets":
+                    m = FILESET_RE.match(line)
+                    if m and (_wikilink_slug(m.group("slug")) or "").lower() in keys:
+                        continue
+                keep.append(line)
+            if len(keep) != end - start - 1:
+                n._set_body_lines(lines[:start + 1] + keep + lines[end:])
+    note.apply(drop)
+
+
+def _restore_caps(note, caps, warns, slug):
+    """Write back each cap an automatic retry raised in this life (`auto_retry_raised`, read before the defer cleared it):
+    its prior value, or `-` removes the key. A malformed marker (caps None) restores nothing, with one WARN."""
+    if caps is None:
+        warns.append(f"WARN: defer --take-out: [[{slug}]]: its {AUTO_RETRY_RAISED_KEY} does not parse: no cap restored")
+        return
+    for field, value in caps.items():
+        if value is None:
+            note.remove(field)
+        else:
+            note.set(field, value)
+
+
+def _take_out(args) -> int:
+    """`defer --take-out` (p39-14, ADR 0070 d5; the module docstring's `defer`): the take-out of one set-aside task and
+    its dependent closure. Exit 0 taken out or [no-change], 1 refused or a failure (a failure writes one `take-out
+    failed:` line), 2 usage, 3 waits, 4 a PR merged into the default branch."""
+    def error(msg, code=1, tail="nothing written"):
+        print(f"ERROR: defer --take-out: {msg}; {tail}", file=sys.stderr)
+        return code
+
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    if len(slugs) != 1 or not args.rollout:
+        return error("usage: --take-out takes one task slug and --rollout", 2)
+    slug = slugs[0]
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        return error(str(e))
+    ro = rollout_path.stem
+    path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        return error(note)
+    slug = path.stem
+    root = Path(os.path.expanduser(args.repo)) if getattr(args, "repo", None) else _project_root(rollout_note)
+    # 1. The guard.
+    if (_note_rollout(note) or "").lower() != ro.lower():
+        return _take_out_finished(args, slug, note, rollout_note, ro, error)
+    lead = _lead()
+    inp = lead.task_inputs(path, note, repo=str(root) if root is not None else None)
+    v = lead.auto_retry_verdict(path, note, inp, rollout_note, now)
+    to = v.get("takeOut")
+    if to is None:
+        return error(f"{slug}: no take-out: {v['autoRetryWhy'] or 'nothing to take out'} (the verdict reads takeOut "
+                     "null; neither the lead nor repair takes out on its own judgement)")
+    after = _parse_ts(v["autoRetryAfter"]) if v.get("autoRetryAfter") else None
+    if after is not None and after > now:
+        print(f"{slug}: take-out cools down until {v['autoRetryAfter']} [no-change]")
+        return 3
+    fp = to["fingerprint"]
+    # 2. The closure; 3. the waits.
+    order, waits, by, _index = _take_out_members(rollout_path, rollout_note, tasks_dir, slug)
+    if waits:
+        d, state = waits[0]
+        print(f"{slug}: take-out waits: [[{d}]] is {state} [no-change]")
+        return 3
+
+    def failed(why):
+        line = f"- {_stamp(now)} {TAKE_OUT_FAILED_MARK} [[{slug}]] ({' '.join(why.split())}; feedback {fp})"
+        if not args.dry_run:
+            rn = Note(rollout_path)
+            rn.append_line(NOTES_SECTION, line)
+            try:
+                rn.save()
+            except OSError as e:
+                print(f"WARN: defer --take-out: cannot write the failure line to {rollout_path}: {e}", file=sys.stderr)
+        return line
+
+    # 4. The PR reads: each member's `pr:` state and base, and the repo's default branch, bounded.
+    prs, defaults = {}, {}
+    for m in order:
+        mnote = note if m.lower() == slug.lower() else by[m.lower()][1]
+        pr = _pr(mnote)
+        if not pr:
+            continue
+        url, num = PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
+        if url:
+            ref, repo, cwd = pr, url.group(1), None
+        elif num and root is not None and root.is_dir():
+            ref, repo, cwd = num.group(1), None, str(root)
+        else:
+            why = f"[[{m}]]'s pr: {pr!r} is no PR the take-out can read"
+            failed(why)
+            return error(f"{slug}: {why}", tail="one take-out failed: line written")
+        raw, err = _gh(args.gh_bin, ["pr", "view", ref, "--json", "state,baseRefName,url"], cwd, timeout=PROVE_GH_TIMEOUT)
+        info = None
+        if err is None:
+            try:
+                info = json.loads(raw)
+            except ValueError:
+                err = "gh pr view printed no JSON"
+        if err is None and not isinstance(info, dict):
+            err = "gh pr view printed no JSON object"
+        if err is not None:
+            failed(f"gh pr view of [[{m}]]'s PR failed: {err}")
+            return error(f"{slug}: gh pr view {ref} failed: {err}", tail="one take-out failed: line written")
+        state = str(info.get("state") or "").upper()
+        base = str(info.get("baseRefName") or "")
+        if state == "MERGED":
+            key = repo or cwd
+            if key not in defaults:
+                out, derr = _gh(args.gh_bin, ["repo", "view", *([repo] if repo else []), "--json", "defaultBranchRef",
+                                              "--jq", ".defaultBranchRef.name"], cwd, timeout=PROVE_GH_TIMEOUT)
+                defaults[key] = (out.strip() or None, derr or ("empty answer" if not out.strip() else None))
+            default, derr = defaults[key]
+            if default is None:
+                failed(f"the default branch of {repo or cwd} does not read: {derr}")
+                return error(f"{slug}: cannot resolve the default branch of {repo or cwd}: {derr}",
+                             tail="one take-out failed: line written")
+            if base == default:
+                failed(f"[[{m}]]'s PR merged into {default}: resume lands it")
+                print(f"{slug}: [[{m}]]'s PR {ref} merged into {default}: run `resume`, which lands it "
+                      "(one take-out failed: line written)", file=sys.stderr)
+                return 4
+        prs[m.lower()] = (ref, cwd, state)
+    # 5. The retire block, per member, leaves first: each step idempotent.
+    if not args.dry_run:
+        for m in order:
+            br = _lead().branch_of(m)
+            if root is not None and root.is_dir():
+                tree = Path(_lead().worktree_dir(str(root), m))
+                if tree.exists():
+                    rc, gerr = _git_rc(root, "worktree", "remove", "-f", "-f", str(tree))
+                    if rc != 0:
+                        failed(f"git worktree remove of [[{m}]]'s tree failed: {gerr}")
+                        return error(f"{slug}: git worktree remove {tree} failed: {gerr}",
+                                     tail="one take-out failed: line written")
+            ref_ = prs.get(m.lower())
+            if ref_ is not None and ref_[2] == "OPEN":
+                comment = (f"taken out of [[{ro}]] (ADR 0070): back to the backlog" if m.lower() == slug.lower()
+                           else f"taken out of [[{ro}]] with [[{slug}]] (ADR 0070): back to the backlog")
+                _out, gerr = _gh(args.gh_bin, ["pr", "close", ref_[0], "--delete-branch", "--comment", comment], ref_[1],
+                                 timeout=PROVE_GH_TIMEOUT)
+                if gerr is not None:
+                    failed(f"gh pr close of [[{m}]]'s PR failed: {gerr}")
+                    return error(f"{slug}: gh pr close {ref_[0]} failed: {gerr}", tail="one take-out failed: line written")
+            if root is not None and root.is_dir():
+                x = subprocess.run(["git", "-C", str(root), "rev-parse", "-q", "--verify",
+                                    f"refs/integration-anchor/{br}"], capture_output=True, text=True,
+                                   timeout=PROVE_GIT_TIMEOUT, stdin=subprocess.DEVNULL,
+                                   env={k: v_ for k, v_ in os.environ.items() if not k.startswith("GIT_")})
+                anchor = x.stdout.strip() if x.returncode == 0 else ""
+                if anchor:
+                    rc, gerr = _git_rc(root, "update-ref", "-d", f"refs/integration-anchor/{br}", anchor)
+                    if rc != 0:
+                        failed(f"git update-ref -d of [[{m}]]'s integration anchor failed: {gerr}")
+                        return error(f"{slug}: git update-ref -d refs/integration-anchor/{br} failed: {gerr}",
+                                     tail="one take-out failed: line written")
+    # 6. The rollout note, one save: the take-out lines (each once per member and feedback) and the rows dropped.
+    n_used = to["overtimeUsed"]
+    stage = _retry_stage(ro, slug, note)
+    mine = f"- {_stamp(now)} {TAKE_OUT_MARK} [[{slug}]] after {n_used} Overtime runs ({stage}; " \
+           f"{_take_out_diagnosis(note)}; {_pr(note) or 'no PR'}; feedback {fp})"
+    notes = rollout_note.section_text(NOTES_SECTION).split("\n")
+    for m in [order[-1], *order[:-1]]:   # the task's line first, then its dependants'
+
+        line = mine if m.lower() == slug.lower() else \
+            f"- {_stamp(now)} {TAKE_OUT_MARK} [[{m}]] with [[{slug}]] (its dependant; feedback {fp})"
+        if not any(_take_out_line_re(m, fp).search(l.strip()) for l in notes):
+            rollout_note.append_line(NOTES_SECTION, line)
+    _drop_rollout_rows(rollout_note, order)
+    try:
+        rollout_note.save(dry_run=args.dry_run)
+    except OSError as e:
+        failed(f"cannot write the rollout note: {e}")
+        return error(f"{slug}: cannot write {rollout_path}: {e}", tail="one take-out failed: line written")
+    # 7. The members, leaves first and the task last: each one's event, then its defer save.
+    recorded = set() if args.dry_run else _take_out_recorded(ro, fp)
+    warns = []
+    for m in order:
+        is_task = m.lower() == slug.lower()
+        mpath, mnote = (path, note) if is_task else by[m.lower()]
+        if m.lower() not in recorded:
+            fields = ({"cause": to["cause"], "fingerprint": fp, "stage": stage, "overtimeUsed": n_used,
+                       "overtimeBudget": to["overtimeBudget"]} if is_task
+                      else {"cause": "dependant", "fingerprint": fp, "with": slug})
+            if is_task:
+                if _pr(note):
+                    fields["pr"] = _pr(note)
+                fields["why"] = to["why"][:run_record_why_max()]
+            _event(ro, "take-out", m, fields, args)
+        caps = _raised_caps(mnote)
+
+        def extra(n_, caps=caps, m=m, is_task=is_task):
+            _restore_caps(n_, caps, warns, m)
+            if is_task:
+                prev = _stamp_value(n_.get(TAKEN_OUT_KEY), 0) if n_.get(TAKEN_OUT_KEY) is not None else 0
+                n_.set(TAKEN_OUT_KEY, (prev or 0) + 1)
+                rolls = [_wikilink_slug(x) for x in n_.get_list(TAKEN_OUT_OF_KEY)]
+                rolls = [r for r in rolls if r]
+                if ro.lower() not in {r.lower() for r in rolls}:
+                    rolls.append(ro)
+                n_.set(TAKEN_OUT_OF_KEY, "[" + ", ".join(f'"[[{r}]]"' for r in rolls) + "]")
+        err = _defer_note(args, tasks_dir, m, mnote, ro.lower(), extra)
+        if err:
+            for w in warns:
+                print(w, file=sys.stderr)
+            failed(f"the defer of [[{m}]] refused: {err}")
+            return error(err, tail="one take-out failed: line written; a re-run finishes the take-out")
+    for w in warns:
+        print(w, file=sys.stderr)
+    # 8. The prints.
+    flag = " (dry-run)" if args.dry_run else " [written]"
+    print(f"{slug}: taken out after {n_used} Overtime runs ({to['cause']}) → open{flag}")
+    for m in order[:-1]:
+        print(f"{m}: taken out with {slug} → open{flag}")
+    return 0
+
+
+_ROUND_HEAD_RE = re.compile(r"Round \d+:")
+
+
+def _take_out_diagnosis(note) -> str:
+    """The take-out line's diagnosis: the first line of the block's reason (_note_reason), or, for a Review-blocked run
+    (its rounds under `Round <n>:` heads), its last round's head and first finding, on one line."""
+    lines = [l.strip() for l in _note_reason(note)[1].split("\n") if l.strip()]
+    if not lines:
+        return "no diagnosis"
+    if _ROUND_HEAD_RE.fullmatch(lines[0]):
+        i = max(k for k, l in enumerate(lines) if _ROUND_HEAD_RE.fullmatch(l))
+        rest = lines[i + 1:]
+        return f"{lines[i]} {rest[0].lstrip('-* ').strip()}" if rest else lines[i]
+    return lines[0]
+
+
+def run_record_why_max() -> int:
+    try:
+        return int(_run_record().TAKE_OUT_WHY_MAX)
+    except Exception:  # noqa: BLE001 — an older run_record: the schema's own cap
+        return 200
+
+
+def _take_out_finished(args, slug, note, rollout_note, ro, error) -> int:
+    """Step 1's finished case: the task is no longer linked to `ro`, its `taken_out_of` names `ro` and the rollout's
+    `## Notes` holds its `take-out:` line. Each member of that take-out (the task's latest line's feedback F, and every
+    `with [[slug]]` line on F) whose Run record `take-out` line is missing gets it (the task's cause read back: no-overtime
+    when `auto_retries` resolves 0, spent when its n reaches `overtime_runs`, else same-feedback), and the verb prints
+    `[no-change]`, exit 0: nothing is bumped. Any other unlinked task is refused."""
+    rolls = {(_wikilink_slug(x) or "").lower() for x in note.get_list(TAKEN_OUT_OF_KEY)}
+    mine = [m for m in (_TAKE_OUT_TASK_LINE_RE.match(l.strip())
+                        for l in rollout_note.section_text(NOTES_SECTION).split("\n")) if m
+            and m.group(2).strip().lower() == slug.lower()]
+    if ro.lower() not in rolls or not mine:
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    last = mine[-1]
+    fp, n_used = last.group(5), int(last.group(3))
+    stage = last.group(4).split(";", 1)[0].strip()
+    deps = [m.group(2).strip() for m in (_TAKE_OUT_DEP_LINE_RE.match(l.strip())
+                                          for l in rollout_note.section_text(NOTES_SECTION).split("\n"))
+            if m and m.group(3).strip().lower() == slug.lower() and m.group(4) == fp]
+    recorded = set() if args.dry_run else _take_out_recorded(ro, fp)
+    if slug.lower() not in recorded:
+        budget = _retry_budget(note, rollout_note)
+        ot_n = budget["overtimeRuns"]["value"] if budget["overtimeRuns"] else n_used
+        auto_n = budget["autoRetries"]["value"] if budget["autoRetries"] else None
+        cause = "no-overtime" if auto_n == 0 else ("spent" if n_used >= ot_n else "same-feedback")
+        fields = {"cause": cause, "fingerprint": fp, "stage": stage if stage in AUTO_RETRY_STAGES else "implement",
+                  "overtimeUsed": n_used, "overtimeBudget": ot_n}
+        if _pr(note):
+            fields["pr"] = _pr(note)
+        _event(ro, "take-out", slug, fields, args)
+    for d in deps:
+        if d.lower() not in recorded:
+            _event(ro, "take-out", d, {"cause": "dependant", "fingerprint": fp, "with": slug}, args)
+    print(f"{slug}: already taken out of [[{ro}]] [no-change]")
+    return 0
 
 
 # ---- descope (p14-4) ----------------------------------------------------------------
@@ -12830,13 +13238,30 @@ def cmd_descope(args) -> int:
 
 # The task-note markers only verbs write: the agent and infra retries spent in the current stretch, the free quota
 # retries, the fingerprint of the block last re-entered (by auto-retry or hand-back) and the last auto-retry's stamp
-# (the quota and infra cool-downs' base, and the stamp on its `## Notes` line). hand-back clears the two counters,
-# carry clears them too, defer clears all four.
+# (the quota and infra cool-downs' base, and the stamp on its `## Notes` line); then (p39-14, ADR 0070) the Overtime
+# runs spent (`overtime_used`) and the caps an automatic retry raised in this life with each one's task-note value
+# before the first raise (`auto_retry_raised: max_review_rounds=4,max_iterations=-`, `-` for a key the note did not
+# carry: _raised_caps). hand-back clears the two counters by name, carry clears them too, so both keep overtime_used and
+# auto_retry_raised (ADR 0070 d2: a human answer gives back the normal budget, never the Overtime); every defer clears
+# all six. The take-out's own two markers, `taken_out` (how many times, across rollouts) and `taken_out_of` (the
+# rollouts), are never cleared by a defer.
 AUTO_RETRIES_USED_KEY = "auto_retries_used"
 QUOTA_RETRIES_USED_KEY = "quota_retries_used"
 AUTO_RETRY_SHA_KEY = "auto_retry_sha"
 AUTO_RETRY_AT_KEY = "auto_retry_at"
-AUTO_RETRY_KEYS = (AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY, AUTO_RETRY_SHA_KEY, AUTO_RETRY_AT_KEY)
+OVERTIME_USED_KEY = "overtime_used"
+AUTO_RETRY_RAISED_KEY = "auto_retry_raised"
+AUTO_RETRY_KEYS = (AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY, AUTO_RETRY_SHA_KEY, AUTO_RETRY_AT_KEY, OVERTIME_USED_KEY,
+                   AUTO_RETRY_RAISED_KEY)
+TAKEN_OUT_KEY = "taken_out"
+TAKEN_OUT_OF_KEY = "taken_out_of"
+# The take-out (p39-14, ADR 0070 d5): `defer --take-out`'s rollout `## Notes` lines, `- <stamp> take-out: [[<slug>]] …;
+# feedback <F>)` per member taken out and `- <stamp> take-out failed: [[<slug>]] (<why>; feedback <F>)` per refused try
+# (_take_out_failures). A take-out that failed TAKE_OUT_TRIES times is Lachy's H10; before that it cools down
+# TAKE_OUT_COOLDOWN_MIN[k-1] minutes after its k-th failure (15, then 60).
+TAKE_OUT_MARK = "take-out:"
+TAKE_OUT_FAILED_MARK = "take-out failed:"
+TAKE_OUT_TRIES = 3
 # A quota block (a dead call whose error line reads as a usage or rate limit) is retried free after a cool-down, from
 # the later of its run stamp and the last retry: 30, 60, 120, 240, then 480 minutes (about 15.5 h), then a human.
 QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
@@ -12845,6 +13270,7 @@ QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
 # budget of 2). A usage limit that kills an agent mid-run reads as TRANSIENT, never as a quota line, so this back-off
 # is all it gets: a longer limit still reaches a human once the budget is spent (ADR 0033 decision 5).
 INFRA_COOLDOWN_MIN = (15, 60, 240)
+TAKE_OUT_COOLDOWN_MIN = INFRA_COOLDOWN_MIN[:2]
 # merge-task.sh's red required check (its exit 1 after the verifier passed): a code fix on the branch can clear it, and
 # it is the set-aside's reasonClass merge-gate when it is in the stop's own cause (_merge_gate_stop; schedule step 2.5's
 # merge gate, ADR 0068). Pinned against merge-task.sh by the record and auto-retry suites.
@@ -12894,8 +13320,10 @@ BRANCH_GONE_MARK = "the PR branch is gone"            # lead-integrate.py prepar
 DECLINED_MARK = "merge declined at the --gated hold"  # execute's --gated decline reason
 AUTO_RETRY_MARK = "auto-retry:"                       # the rollout `## Notes` line's verb
 AUTO_RETRY_STAGES = ("plan", "implement", "verify", "review", "integrate")  # set-aside's stages minus `gate`
-# (frontmatter key, the budget's JSON key, the least valid value): what _retry_budget resolves.
-RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "maxReviewRounds", 1))
+# (frontmatter key, the budget's JSON key, the least valid value): what _retry_budget resolves. overtime_runs (p39-14,
+# ADR 0070 d8) is the Overtime: the runs past the spent budget before a take-out.
+RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "maxReviewRounds", 1),
+                     ("overtime_runs", "overtimeRuns", 0))
 LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
 VERIFY_SLOT_PY = Path(__file__).resolve().parent / "verify-slot.py"
 # The opt-in Security check (execute § 3 `security_checks`): verify-timeout runs its preflight at every entry and prints
@@ -13315,13 +13743,13 @@ def _stamp_value(raw, minimum):
 
 
 def _retry_budget(note, rollout_note) -> dict:
-    """The automatic-retry budget: {autoRetries, maxReviewRounds, error, unresolved}. Each key resolves task note ->
+    """The automatic-retry budget: {autoRetries, maxReviewRounds, overtimeRuns, error, unresolved}. Each key resolves task note ->
     rollout note -> rollouts.toml (_resolved_settings, run once, only for a key absent at both levels) -> built-in, as
     {value, source} with source `task`, `rollout`, `file:repo`, `file:defaults` or `built-in` (None when it cannot).
     `error` names the first invalid stamp (`<key> on [[<note>]] must be an integer >= <min>, got '<raw>'`: H12, an
     execute § 6.5 (c) item, ADR 0048); `unresolved` is the resolver's words when it could not run (a refused
     rollouts.toml, a Project root that is gone): no retry, and no halt."""
-    out = {"autoRetries": None, "maxReviewRounds": None, "error": None, "unresolved": None}
+    out = {"autoRetries": None, "maxReviewRounds": None, "overtimeRuns": None, "error": None, "unresolved": None}
     res = None
     for key, name, minimum in RETRY_BUDGET_KEYS:
         for where, n in (("task", note), ("rollout", rollout_note)):
@@ -13365,6 +13793,35 @@ def _round_budget_error(note, rollout_note):
                 return f"{key} on [[{n.path.stem}]] must be an integer >= 1, got {raw!r}"
             break
     return None
+
+
+_TAKE_OUT_FAILED_RE = re.compile(r"^-\s+(\S+)\s+" + re.escape(TAKE_OUT_FAILED_MARK) + r"\s*\[\[([^\]|#\\]+)[^\]]*\]\]\s*"
+                                 r"\((.*);\s*feedback\s+([0-9a-f]{12})\)\s*$")
+
+
+_TAKE_OUT_TASK_LINE_RE = re.compile(r"^-\s+(\S+)\s+" + re.escape(TAKE_OUT_MARK) + r"\s*\[\[([^\]|#\\]+)[^\]]*\]\]\s+after\s+"
+                                    r"(\d+)\s+Overtime runs\s+\((.*);\s*feedback\s+([0-9a-f]{12})\)\s*$")
+_TAKE_OUT_DEP_LINE_RE = re.compile(r"^-\s+(\S+)\s+" + re.escape(TAKE_OUT_MARK) + r"\s*\[\[([^\]|#\\]+)[^\]]*\]\]\s+with\s+"
+                                   r"\[\[([^\]|#\\]+)[^\]]*\]\]\s+\(its dependant;\s*feedback\s+([0-9a-f]{12})\)\s*$")
+
+
+def _take_out_failures(rollout_note, slug, fingerprint) -> dict:
+    """The failed take-outs of `slug` on feedback `fingerprint`: {count, last (the latest line's stamp as a datetime, or
+    None), why (its why)}, read from the rollout's `## Notes` `take-out failed:` lines (`- <stamp> take-out failed:
+    [[<slug>]] (<why>; feedback <F>)`, written only by `defer --take-out`). lead-integrate.py's verdict reads it at its
+    take-out point: a cool-down after each failure, H10 at TAKE_OUT_TRIES."""
+    out = {"count": 0, "last": None, "why": ""}
+    if rollout_note is None or not fingerprint:
+        return out
+    for line in rollout_note.section_text(NOTES_SECTION).split("\n"):
+        m = _TAKE_OUT_FAILED_RE.match(line.strip())
+        if not m or m.group(2).strip().lower() != slug.lower() or m.group(4) != fingerprint:
+            continue
+        out["count"] += 1
+        ts = _parse_ts(m.group(1))
+        if ts is not None and (out["last"] is None or ts >= out["last"]):
+            out["last"], out["why"] = ts, m.group(3).strip()
+    return out
 
 
 def _retry_stage(rollout, slug, note) -> str:
@@ -13465,9 +13922,19 @@ def cmd_auto_retry(args) -> int:
     if not verdict["autoRetry"]:
         return error(f"{slug}: not auto-retryable: {verdict['autoRetryWhy']}")
 
-    retry_class, fingerprint, raise_to = verdict["autoRetryClass"], verdict["fingerprint"], verdict["autoRetryRaise"]
+    retry_class, fingerprint = verdict["autoRetryClass"], verdict["fingerprint"]
     n_budget, used, quota = budget["autoRetries"]["value"], verdict["autoRetriesUsed"], verdict["quotaRetriesUsed"]
-    if retry_class == "quota":
+    ot = verdict.get("overtime")
+    # The raise: an Overtime run's (the cap its stop spent, ADR 0070 d1), else the normal revise raise (ADR 0033 d7).
+    if ot is not None:
+        raise_field, raise_to = (ot["raise"]["field"], ot["raise"]["to"]) if ot["raise"] else (None, None)
+    else:
+        raise_field, raise_to = ("max_review_rounds", verdict["autoRetryRaise"]) if verdict["autoRetryRaise"] else (None, None)
+    ot_used = None
+    if ot is not None:
+        ot_used = ot["used"] + 1
+        count = f"overtime {ot_used}/{ot['budget']}"
+    elif retry_class == "quota":
         quota += 1
         count = f"quota {quota}/{len(QUOTA_COOLDOWN_MIN)}"
     else:
@@ -13475,7 +13942,8 @@ def cmd_auto_retry(args) -> int:
         count = f"{used}/{n_budget}"
     stage = _retry_stage(_note_rollout(note), slug, note)
     status, (_state, at) = _status(note), _queue_state(note)
-    raised = f"; max_review_rounds raised to {raise_to}, one round" if raise_to else ""
+    raised = (f"; {raise_field} raised to {raise_to}, {'one iteration' if raise_field == 'max_iterations' else 'one round'}"
+              if raise_to else "")
     line = f"- {_stamp(now)} {AUTO_RETRY_MARK} [[{slug}]] {count} ({stage}; feedback {fingerprint}){raised}"
 
     # (a) The rollout's `## Notes` line, first: a failed task save leaves the verdict true, so the next step 1.2
@@ -13492,14 +13960,21 @@ def cmd_auto_retry(args) -> int:
     arm, said = _hand_back_note(note, now)
     if arm is None:  # the verdict read it set aside at its run or at Integration with a pr:
         return error(f"{slug}: {said}", tail="the rollout's Notes line is written: a re-run finishes the records")
-    if retry_class == "quota":
+    if ot is not None:
+        note.set(OVERTIME_USED_KEY, ot_used)
+    elif retry_class == "quota":
         note.set(QUOTA_RETRIES_USED_KEY, quota)
     else:
         note.set(AUTO_RETRIES_USED_KEY, used)
     note.set(AUTO_RETRY_SHA_KEY, fingerprint)
     note.set(AUTO_RETRY_AT_KEY, _stamp(now))
     if raise_to:
-        note.set("max_review_rounds", raise_to)
+        # Record the cap's task-note value before this life's first raise of it (the take-out restores it), then raise.
+        caps = _raised_caps(note)
+        if caps is not None and raise_field not in caps:
+            caps[raise_field] = _stamp_value(note.get(raise_field), 1) if note.get(raise_field) is not None else None
+            note.set(AUTO_RETRY_RAISED_KEY, _raised_caps_text(caps))
+        note.set(raise_field, raise_to)
     try:
         note.save(dry_run=args.dry_run)
     except OSError as e:
@@ -13513,15 +13988,43 @@ def cmd_auto_retry(args) -> int:
         _event(rollout, "ready", slug, {"pr": _pr(note)}, args)
     fields = {"stage": stage, "setAsideAt": at, "retryClass": retry_class, "used": used, "budget": n_budget,
               "fingerprint": fingerprint}
-    if raise_to:
+    if raise_to and raise_field == "max_review_rounds":
         fields["reviewRounds"] = raise_to
-    if retry_class == "quota":
+    if retry_class == "quota" and ot is None:
         fields["quotaRetries"] = quota
+    if ot is not None:
+        fields.update(overtime=ot_used, overtimeBudget=ot["budget"])
+        if raise_to:
+            fields.update(raiseField=raise_field, raiseTo=raise_to)
     _event(rollout, "auto-retry", slug, fields, args)
     flag = " (dry-run)" if args.dry_run else " [written]"
     print(f"{slug}: auto-retry {count} ({stage}; feedback {fingerprint}"
-          f"{f'; max_review_rounds raised to {raise_to}' if raise_to else ''}) {status}->{_status(note)}{flag}")
+          f"{f'; {raise_field} raised to {raise_to}' if raise_to else ''}) {status}->{_status(note)}{flag}")
     return 0
+
+
+_RAISED_CAP_RE = re.compile(r"(max_review_rounds|max_plan_rounds|max_iterations)=([0-9]+|-)")
+
+
+def _raised_caps(note):
+    """The note's `auto_retry_raised` marker as {field: value or None (the key absent before)}, in its order: {} when the
+    note has none, None when it does not parse (a field twice, an unknown field, a value that is neither an integer nor
+    `-`): a malformed marker records and restores nothing (the take-out WARNs)."""
+    raw = note.get(AUTO_RETRY_RAISED_KEY)
+    if raw is None:
+        return {}
+    text = _scalar(raw)
+    out = {}
+    for part in [p_.strip() for p_ in text.split(",")] if text.strip() else []:
+        m = _RAISED_CAP_RE.fullmatch(part)
+        if not m or m.group(1) in out:
+            return None
+        out[m.group(1)] = None if m.group(2) == "-" else int(m.group(2))
+    return out
+
+
+def _raised_caps_text(caps) -> str:
+    return ",".join(f"{k}={'-' if v is None else v}" for k, v in caps.items())
 
 
 # ---- recorded answers (ADR 0035 decision 3) ------------------------------------------------------------------------
@@ -14685,7 +15188,9 @@ class _SpeedCtx:
 
     def spent(self, x):
         """humanFix's label when x is linked to this rollout, set aside at `run` or `integration` and its retries spent
-        (moving's read: only those two setAsideAt, then _retry_budget, task_inputs, auto_retry_verdict), else None;
+        (moving's read: only those two setAsideAt, then _retry_budget, task_inputs, auto_retry_verdict), else None; a
+        null humanFix with a non-null `overtime` or `takeOut` (p39-14, ADR 0070: its normal budget spent) is spent too,
+        labelled `(<its label's inner>; overtime <used>/<budget> used)` or `(<inner>; take-out pending)`;
         memoised. A gate-pending task (setAsideAt `gate`) is never spent: a gate has no automatic retries, and step
         1.2's Standing approval may still sign it. A read that raises keeps the hold, with one WARN."""
         key = x.lower()
@@ -14701,9 +15206,17 @@ class _SpeedCtx:
                 root = _project_root(self.note)
                 repo = str(root) if root is not None and root.is_dir() else None
                 inp = _lead().task_inputs(e[0], note, max_rounds=k, repo=repo)
-                fix = _lead().auto_retry_verdict(e[0], note, inp, self.note, self.now).get("humanFix")
+                v = _lead().auto_retry_verdict(e[0], note, inp, self.note, self.now)
+                fix, ot, to = v.get("humanFix"), v.get("overtime"), v.get("takeOut")
                 if fix is not None:
                     out = fix.get("label") or fix.get("act") or "a human fix"
+                elif ot is not None or to is not None:
+                    # Its normal budget is spent (ADR 0070): an Overtime run or a pending take-out lets the hold go, so
+                    # a held task never waits through the Overtime's cool-downs.
+                    lab = (ot or to).get("label") or ""
+                    inner = lab[1:-1] if lab.startswith("(") and lab.endswith(")") else lab
+                    tail = f"overtime {ot['used']}/{ot['budget']} used" if ot is not None else "take-out pending"
+                    out = f"({inner}; {tail})" if inner else f"({tail})"
             except Exception as ex:  # noqa: BLE001 — a lost look keeps the hold; the next call reads again
                 self.warns.append(f"WARN: speed-hold: [[{self.name(x)}]]: its retry read raised {type(ex).__name__}: "
                                   f"{ex}: the hold on it stands")
@@ -20271,6 +20784,17 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
                 v = _lead().auto_retry_verdict(path, tnote, inp, note, now)
             except Exception as ex:  # noqa: BLE001 — a lost look, never a verdict
                 raise MovingError(f"inputs on [[{e['slug']}]] raised {type(ex).__name__}: {ex}")
+            if v.get("takeOut") is not None:
+                # A take-out (p39-14, ADR 0070 d5): Lachy's at its failure bound (a non-null humanFix); cooling after a
+                # failure; waiting on a member that is itself W (running or integrating); else the lead's work.
+                if v.get("humanFix") is not None:
+                    continue
+                after = _parse_ts(v["autoRetryAfter"]) if v.get("autoRetryAfter") else None
+                if after is not None and after > now:
+                    work["coolDown"].append({"slug": e["slug"], "class": "take-out", "until": v["autoRetryAfter"]})
+                elif not _take_out_members(rollout_path, note, tasks_dir, e["slug"])[1]:
+                    work["reentry"].append(e["slug"])
+                continue
             if v.get("humanFix") is not None:
                 continue
             sb = v.get("settingsBlock") or {}
@@ -21910,6 +22434,12 @@ def _parser():
     df.add_argument("--rollout", default=None, help="rollout note path (optional; asserts membership before deferring)")
     df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     df.add_argument("--dry-run", action="store_true")
+    df.add_argument("--take-out", dest="take_out", action="store_true",
+                    help="the take-out of one set-aside task and its dependants (p39-14, ADR 0070 d5): exit 0 taken out "
+                         "or [no-change], 1 refused or failed, 3 waits, 4 a PR merged into the default branch (resume)")
+    df.add_argument("--repo", default=None, help="the Project root (default: the rollout's); --take-out only")
+    df.add_argument("--gh-bin", dest="gh_bin", default="gh", help="the gh binary (--take-out only)")
+    df.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (--take-out's stamps and cool-down)")
     df.set_defaults(func=cmd_defer)
 
     de = sub.add_parser("descope", help="record an automatic descope of a plan-blocked task (p14-4): exit 0 descoped "
