@@ -10,12 +10,18 @@
 #   O4  budget edges (overtime_runs 0, auto_retries 0, the fail-closed order, an invalid overtime_runs stamp)
 #   O5  infra and quota Overtime cool down 240 and 480 minutes, then are taken out   O6 the markers' lifetimes
 #   O7  the take-out's exits and recovery: (a) a running dependant waits, (b) crash states re-run to completion,
-#       (c) a merged PR is exit 4 then `resume`, (d) a failing `gh pr close` reaches the bound, (e) a PR merged elsewhere
+#       (c) a merged PR is exit 4, a paused line and no failure, then `resume`, (d) a failing `gh pr close` reaches the
+#       bound, (e) a PR merged elsewhere, (f) a member's save that fails is one failure line and a cool-down, (w) an
+#       awaiting-Integration or RACE-held member waits
 #   O8  plan rounds and max_iterations raise   O9 the --max-review-rounds overlay clears overtime and takeOut
+#   O10 the closure: a chain, a tombstone fold, a dependant's own PR and raised cap, and a Speed fix hold's entry left out
+#   O11 across versions: on an engine from before p39-14, `moving` and needs-you read a spent budget as Lachy's
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own, each scenario's Project root is a temp git checkout (with a real task tree
 # and integration anchor where the retire block is read), `gh` is a fake through --gh-bin whose answers and failures
-# each scenario sets, and the Run record is a THREAD_EVENTS_DIR per scenario. Temp notes only; no vault, no network.
+# each scenario sets, and the Run record is a THREAD_EVENTS_DIR per scenario. Each rollout is stamped on this tree's
+# engine (O11 restamps one on an old root), so the guard-exempt readers never read the Primary checkout's. Temp notes
+# only; no vault, no network.
 # Usage: bash reconcile-rollout-overtime.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -25,6 +31,8 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 LI="$HERE/../scripts/lead-integrate.py"
+UR="$HERE/../../_shared/scripts/unfinished-rollout.py"
+NEWROOT="$(cd "$HERE/../../.." && pwd -P)"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -44,6 +52,9 @@ hasnt() { case "$1" in *"$2"*) echo "FAIL - $3: unexpected [$2] in [$1]"; fail=1
 A=proj-p1-1-a
 B=proj-p1-2-b
 C=proj-p1-3-c
+H=proj-p1-4-h
+X=proj-p1-5-x
+T=proj-p1-6-t
 RO=proj-rollout-2026-10-03
 
 # The fake gh: every call is logged to $D/gh.log; `pr view` answers state $D/gh-state (OPEN) and base $D/gh-base
@@ -73,9 +84,11 @@ scen() {
   export THREAD_EVENTS_DIR="$D/events" THREAD_GIT_ENV_DIR="$TMP/git-env/$1" GH_DIR="$D"
   rm -rf "$HOME/.config"
 }
-# mkro [frontmatter lines...] — the rollout note: Project root $D/root, the queue A, B, C with their file-sets
+# mkro [frontmatter lines...] — the rollout note on this tree's engine: Project root $D/root, the queue A, B, C with
+# their file-sets
 mkro() {
   { printf -- '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\nparallel_ceiling: 3\nprojects:\n  - "[[Proj]]"\n'
+    printf 'engine_snapshot: "%s"\n' "$NEWROOT"
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nProject root: `%s/root`\n\n## Queue\n\n| # | Task | Mode |\n|---|---|---|\n| 1 | [[%s]] | parallel |\n| 2 | [[%s]] | parallel |\n| 3 | [[%s]] | parallel |\n\n## File-sets\n\n- %s: a.py\n- %s: b.py\n- %s: c.py\n' \
       "$D" "$A" "$B" "$C" "$A" "$B" "$C"; } > "$D/$RO.md"
@@ -389,16 +402,19 @@ ok "$rc|$out|$(fm "$A" taken_out)|$(tevs "$A")|$(tevs "$B")" "0|$A: already take
   "O7b (iv): [no-change], the missing event written"
 ok "$(evs take-out '[d["task"], d["cause"], d.get("stage"), d.get("overtimeUsed")]' | tr ' ' '\n' | grep "$A")" "[\"$A\",\"no-overtime\",\"plan\",0]" \
   "O7b (iv): its fields read back from the Notes line"
-# (c) the task's PR merged into the default branch: exit 4, one failure line, a cool-down; `resume` lands it
+# (c) the task's PR merged into the default branch: exit 4 and one paused line, never a failure (nothing failed, so no
+# cool-down and no step toward the bound); `resume`, the lead's work, lands it
 o7 c "pr: $PR"
 echo MERGED > "$D/gh-state"
 tko "$A"
-ok "$rc|$(failed_lines)|$(fm "$A" status)" "4|1|status: plan-blocked" "O7c: a merged PR → exit 4, one take-out failed: line, the task untouched"
-ok "$(sec "$RO" '## Notes' | grep 'take-out failed')" "- $S_NOW take-out failed: [[$A]] ([[$A]]'s PR merged into main: resume lands it; feedback $FP)" "O7c: the line"
-ok "$(j "$(INOW=2026-10-03T09:05:00Z inp "$A")" '[d["takeOut"]["failures"], d["autoRetryAfter"], d["humanFix"]]')" '[1,"2026-10-03T09:15+00:00",null]' \
-  "O7c: the verdict cools the take-out 15 minutes"
-ok "$(j "$(MNOW=2026-10-03T09:05:00Z mov)" '[d["verdict"], d["cause"], d["reason"]]')" \
-  "[\"waiting\",\"cool-down\",\"take-out cool-down: [[$A]] retries at 2026-10-03T09:15+00:00\"]" "O7c: moving reads the take-out's cool-down, not W"
+ok "$rc|$(failed_lines)|$(fm "$A" status)" "4|0|status: plan-blocked" "O7c: a merged PR → exit 4, no take-out failed: line, the task untouched"
+ok "$(sec "$RO" '## Notes' | grep 'take-out paused')" "- $S_NOW take-out paused: [[$A]] ([[$A]]'s PR merged into main: resume lands it; feedback $FP)" "O7c: one paused line"
+TNOW=2026-10-03T09:05:00Z tko "$A"
+ok "$rc|$(sec "$RO" '## Notes' | grep -c 'take-out paused')|$(failed_lines)" "4|1|0" "O7c: a re-run before resume: exit 4 again, no second line"
+ok "$(j "$(INOW=2026-10-03T09:05:00Z inp "$A")" '[d["takeOut"]["failures"], d["autoRetryAfter"], d["humanFix"]]')" '[0,null,null]' \
+  "O7c: the verdict counts no failure and starts no cool-down"
+ok "$(j "$(MNOW=2026-10-03T09:05:00Z mov)" '[d["work"]["reentry"], d["work"]["coolDown"]]')" "[[\"$A\"],[]]" \
+  "O7c: moving reads it as the lead's work (its resume), never a cool-down"
 python3 "$SCRIPT" resume --rollout "$D/$RO.md" --tasks-dir "$D" --gh-bin "$GH" --now "$NOW" >/dev/null 2>&1
 ok "$(fm "$A" status)|$(j "$(inp "$A")" 'd["takeOut"]')" "status: done|null" "O7c: resume lands it, and no take-out remains"
 # (d) a failing `gh pr close`: each failure one line and a cool-down, the third Lachy's H10; then repair's run finishes it
@@ -426,6 +442,75 @@ o7 e "pr: $PR"
 echo MERGED > "$D/gh-state"; echo release > "$D/gh-base"
 tko "$A"
 ok "$rc|$(fm "$A" status)|$(grep -c 'pr close' "$D/gh.log")" "0|status: open|0" "O7e: merged into another base → taken out, no close"
+# (f) a member's save fails (a read-only dependant): one failure line and the 15-minute cool-down, never a traceback and
+# a take-out re-run every turn; mended, a re-run after the cool-down finishes it
+o7 f
+chmod 0444 "$D/$B.md"
+tko "$A"
+ok "$rc|$(failed_lines)|$(fm "$A" status)|$(fm "$B" rollout)" "1|1|status: plan-blocked|rollout: \"[[$RO]]\"" \
+  "O7f: a dependant's failed save → exit 1, one failure line, neither member deferred"
+has "$out" "ERROR: defer --take-out: $B: cannot save its note:" "O7f: the ERROR names the save"
+hasnt "$out" "Traceback" "O7f: no traceback"
+ok "$(j "$(INOW=2026-10-03T09:05:00Z inp "$A")" '[d["takeOut"]["failures"], d["autoRetryAfter"], d["humanFix"]]')" '[1,"2026-10-03T09:15+00:00",null]' \
+  "O7f: the verdict cools the take-out 15 minutes"
+chmod 0644 "$D/$B.md"
+TNOW=2026-10-03T09:15:00Z tko "$A"
+ok "$rc|$(fm "$A" status)|$(fm "$B" rollout)|$(tevs "$B")" "0|status: open|<none>|1" "O7f: mended, the re-run finishes it, the dependant's event once"
+# (w) a member awaiting Integration or held by an undecided RACE is finished first: exit 3, nothing written
+for w in "awaiting-integration" "held by an undecided RACE"; do
+  o7 w
+  if [ "$w" = awaiting-integration ]; then setfm "$B" status review; setfm "$B" pr "https://github.com/o/r/pull/6"
+  else printf '\n## Race log\n\n- 2026-10-03T08:30+00:00 [[%s]] RACE: PR #6 merged as %s\n' "$B" "$(printf '%040d' 6)" >> "$D/$RO.md"; fi
+  before=$(snap); tko "$A"
+  ok "$rc|$out|$(snap)" "3|$A: take-out waits: [[$B]] is $w [no-change]|$before" "O7w: a member $w → exit 3, nothing written"
+done
+
+# ── O10: the closure, leaves first: a chain C → B → A, X through a tombstone folded into A, and H, whose only entry on
+# A is a Speed fix hold's, left out; B's own OPEN PR closed naming A, and the cap its own Overtime raised restored ──────
+o7 o10 "pr: $PR"
+B_PR=https://github.com/o/r/pull/6
+mkt "$B" open 'depends-on: ["[[proj-p1-1-a]]"]' "pr: $B_PR" "max_review_rounds: 6" "auto_retry_raised: max_review_rounds=4"
+mkt "$C" open 'depends-on: ["[[proj-p1-2-b]]"]'
+mkt "$T" merged 'merged_into: "[[proj-p1-1-a]]"'
+mkt "$X" open 'depends-on: ["[[proj-p1-6-t]]"]'
+mkt "$H" open 'depends-on: ["[[proj-p1-1-a]]"]'
+printf '\n## Speed fix holds\n\n- 2026-10-03T07:00+00:00 hold [[%s]] (p1, schedule): [[%s]]\n' "$A" "$H" >> "$D/$RO.md"
+tko "$A"
+ok "$rc|$(printf '%s\n' "$out" | grep 'deferred->open' | cut -d: -f1 | tr '\n' ' ')" "0|$C $X $B $A " \
+  "O10: exit 0, deferred leaves first: C before B (it depends on B), X, then the task last"
+W=$(evs take-out 'd["task"] + ":" + str(d.get("with"))' | tr -d '"' | tr ' ' '\n')
+# each row: member | its rollout: after | the `with` on its take-out event (none: no event) | its Notes lines naming A
+for r in "$C|<none>|$A|1" "$X|<none>|$A|1" "$B|<none>|$A|1" "$H|rollout: \"[[$RO]]\"|none|0" "$T|rollout: \"[[$RO]]\"|none|0"; do
+  IFS='|' read -r m ro_ with_ line_ <<<"$r"
+  ok "$(fm "$m" rollout)|$(printf '%s\n' "$W" | grep "^$m:" | cut -d: -f2 | grep . || echo none)|$(sec "$RO" '## Notes' | grep -c "take-out: \[\[$m\]\] with \[\[$A\]\]")" \
+    "$ro_|$with_|$line_" "O10 $m: its rollout:, its take-out event's with, its Notes line"
+done
+ok "$(evs take-out 'd["task"]' | tr -d '"')" "$C $X $B $A" "O10: the events, leaves first"
+ok "$(grep -c "pr close $B_PR --delete-branch --comment taken out of \[\[$RO\]\] with \[\[$A\]\] (ADR 0070): back to the backlog" "$D/gh.log")|$(grep -c "pr close $PR --delete-branch --comment taken out of \[\[$RO\]\] (ADR 0070)" "$D/gh.log")" \
+  "1|1" "O10: B's OPEN PR closed naming the task, the task's own without"
+ok "$(fm "$B" max_review_rounds)|$(fm "$B" auto_retry_raised)" "max_review_rounds: 4|<none>" "O10: B's raised cap restored and its marker cleared"
+
+# ── O11: across versions (engine-snapshot.md § Cross-version state): `moving` and needs-you run from any root, so on a
+# rollout whose engine predates p39-14 (no TAKE_OUT_ENGINE line) a spent budget is that engine's H9 or H10, Lachy's ──
+OLDROOT="$TMP/snaps/old"; mkdir -p "$OLDROOT/skills/execute/scripts"
+printf 'print("an engine before p39-14")\n' > "$OLDROOT/skills/execute/scripts/reconcile-rollout.py"
+ok "$(grep -c '^TAKE_OUT_ENGINE = 1$' "$SCRIPT")" 1 "O11: this tree carries the marker line once"
+nyacts() { python3 "$UR" needs-you --tasks-dir "$D" --now "$NOW" --gh-bin "$GH" 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.dumps([i["act"] for i in json.load(sys.stdin)["items"] if i["task"] == sys.argv[1]]))' "$A"; }
+# each row: the block's kind (a take-out: auto_retries 0; an Overtime run: the normal budget spent) | the engine root |
+# moving's reentry | needs-you's acts for A
+for r in "take-out|new|[\"$A\"]|[]" "take-out|old|[]|[\"hand back or defer\"]" \
+         "overtime|new|[\"$A\"]|[]" "overtime|old|[]|[\"hand back or defer\"]"; do
+  IFS='|' read -r kind eng re_ acts_ <<<"$r"
+  root_=$([ "$eng" = new ] && echo "$NEWROOT" || echo "$OLDROOT")
+  scen "o11-$kind-$eng"; mkro
+  mkt "$A" in_progress "owner: execute-test" "$([ "$kind" = take-out ] && echo 'auto_retries: 0' || echo 'auto_retries_used: 2')"
+  mkt "$B" open 'depends-on: ["[[proj-p1-1-a]]"]'; mkt "$C" done
+  planblock "$A" "Round 1: the plan misses the migration step"
+  ok "$(j "$(inp "$A")" '"take-out" if d["takeOut"] else "overtime" if d["overtime"] else None')" "$kind" "O11 $kind: (the lead's own read: the $kind)"
+  setfm "$RO" engine_snapshot "\"$root_\""
+  ok "$(j "$(mov)" 'd["work"]["reentry"]')|$(nyacts)" "$re_|$acts_" "O11 $kind on the $eng engine: moving's W and needs-you's items"
+done
 
 # ── O8: plan rounds raise max_plan_rounds ──────────────────────────────────────────────────────────────────────
 scen o8
