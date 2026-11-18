@@ -947,7 +947,11 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
 
 **(d) An open Leg** (`restart.takeOver` true: Leg K, the `openLeg`, is open, and `<id>` is the `session` of its
 `legs` entry), whatever `restart.blockedBy` names first: a standing restart outranks an open Leg there, so a chain
-`restarting` over an open Leg still needs this check. Check the Chorus Stage with `list_sessions`:
+`restarting` over an open Leg still needs this check. Read `listed` first, as (e) step 1 does: `listed` true (Leg K's
+lease lapsed, so the Waiting list takes it over by itself, P36-15) → report "on the Waiting list: the Stage takes Leg
+K over as Leg <restart.leg>", and stop; a start here would double-start it. Chorus ADR 0116 d6 keeps a dead open
+Leg's Session on the Stage, so `list_sessions` alone cannot tell this case. Otherwise check the Chorus Stage with
+`list_sessions`:
 
 - the session is present → "Leg K is live in session `<id>`": report it, and stop;
 - it is gone from `list_sessions`, or Lachy says Leg K is dead → (e), with the take-over;
@@ -1012,7 +1016,8 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
 
    `leg.py restarted` checks only the halt, the numbering (Leg N not begun, N = last_n + 1) and a standing restart.
    It never checks the open Leg or the hand-over, so that evidence is this step's (its `--listed` form alone refuses an
-   open Leg: a take-over is never listed). Nothing later re-checks a
+   open Leg: repair never lists a take-over; the Waiting list lists one by itself only once Leg K's lease lapses, and
+   then step 1's `listed` stops this repair, P36-15). Nothing later re-checks a
    take-over: the new Leg's `begin --take-over` closes Leg K `lost`. `begin`'s lock and exit 3 back up only a doubled
    start.
 2. **Mark it.** On the Chorus Stage (Chorus's `list_sessions` answers ToolSearch), with `restart.takeOver` false, list

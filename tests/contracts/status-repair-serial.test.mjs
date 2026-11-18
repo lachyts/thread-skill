@@ -138,6 +138,10 @@ function check(f) {
     !s9.includes('a Complete Leg works no row')) flag('s-order', `S9 is ${s9}`)
   for (const k of [4, 10, 11]) if (!C(acts[k]).includes('`/thread:repair [[<rollout>]]`')) flag('s-order', `S${k + 1} does not route to repair`)
   if (!C(acts[6]).includes('check that session first')) flag('s-order', 'S7 does not check the session first')
+  // P36-15: a live chain whose Leg lease lapsed is listed, and the Stage takes its open Leg over by itself.
+  if (!C(acts[6]).includes('with `listed` true') || !C(acts[6]).includes('"on the Waiting list: the Stage takes Leg `<openLeg>` over')) {
+    flag('s-order', 'S7 has no listed clause')
+  }
   for (const k of [5, 7]) {
     if (!C(acts[k]).replace(/[()]/g, '').includes('any launch from `restart.cwd` when `restart.anyLaunch`')) {
       flag('s-order', `S${k + 1}'s paste names only restart.launch`)
@@ -175,7 +179,7 @@ function check(f) {
     '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`'])
 
   need('r-takeover', '§ 7 (d)', d, ['**(d) An open Leg** (`restart.takeOver` true:', 'whatever `restart.blockedBy` names first',
-    'a standing restart outranks an open Leg there', 'with `list_sessions`', 'the session is present → "Leg K is live', 'and stop',
+    'a standing restart outranks an open Leg there', 'Read `listed` first', '`listed` true (Leg K\'s lease lapsed', 'with `list_sessions`', 'the session is present → "Leg K is live', 'and stop',
     'it is gone from `list_sessions`, or Lachy says Leg K is dead → (e), with the take-over', '→ ask Lachy'])
   const step1 = item(e, /^1\. \*\*Restartable\?\*\*/)
   const bullets = step1.split('\n').filter((l) => /^\s+- /.test(l)).map((l) => item(step1, new RegExp(`^${l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)))
