@@ -3027,12 +3027,16 @@ def _hold_line(rollout_note, slug, kind, note):
     return next((l.strip() for l in text.split("\n") if rr.UNVERIFIED_MARK in l), text.split("\n", 1)[0].strip())
 
 
-def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None):
+def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None, engine_takes_out=True):
     """Whether execute's lead re-enters a set-aside task by itself (`reconcile-rollout.py auto-retry`), and, when it may
     not, the one Human fix that moves it (ADR 0035), as `inputs`' AUTO_RETRY_KEYS. The one decision function: `inputs`
     prints it to every caller and the verb re-runs it before it writes. `inp` is task_inputs' output for the note,
     `rollout_note` the rollout its `rollout:` names (None: no retry), `max_rounds_flag` inputs' --max-review-rounds
     (None: not given). `answerRecorded` (reconcile-rollout.py _answer_recorded) is read for every note.
+    `engine_takes_out` False is a guard-exempt reader's (`moving`, unfinished-rollout.py needs-you) for a rollout whose
+    engine predates p39-14 (reconcile-rollout.py _engine_reads_take_out): that engine's lead has no Overtime and no
+    take-out, so each Overtime run and take-out below reads as it reads them, spent()'s H9 or H10, overtime and takeOut
+    null (engine-snapshot.md § Cross-version state). The writing verbs run on the rollout's own engine and keep True.
 
     The core (_verdict) is an ordered list of causes; the first that refuses is `autoRetry: false` with its
     `autoRetryWhy` and its `humanFix` ({act, detail, handBack, label, raise}, act one of HUMAN_FIX_ACTS; handBack true
@@ -3132,7 +3136,7 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     answer recorded and the core past the budget point (autoRetryBudget non-null), a K other than the resolved one sets
     `autoRetry: false` with today's mismatch why and clears autoRetryAfter, autoRetryRaise, overtime and takeOut."""
     answer = rr._answer_recorded(note)
-    out = _verdict(path, note, inp, rollout_note, now, answer)
+    out = _verdict(path, note, inp, rollout_note, now, answer, takes_out=engine_takes_out)
     budget = out["autoRetryBudget"]
     if answer is None and budget is not None and max_rounds_flag is not None:
         k = budget["maxReviewRounds"]["value"]
@@ -3156,9 +3160,9 @@ def _keep_cause_flags(out, cause):
     out.update(autoRetryError=cause["autoRetryError"], autoRetryClass=cause["autoRetryClass"])
 
 
-def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
+def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False, takes_out=True):
     """auto_retry_verdict's core (its docstring lists the causes). `answer` is the note's answerRecorded (None skips
-    cause 7); `skip_needs` skips cause 6, for H4's handBack."""
+    cause 7); `skip_needs` skips cause 6, for H4's handBack; `takes_out` is auto_retry_verdict's `engine_takes_out`."""
     out = {k: None for k in AUTO_RETRY_KEYS}
     out.update(autoRetry=False, autoRetryWhy="", answerRecorded=answer)
     used = rr._stamp_value(note.get(rr.AUTO_RETRIES_USED_KEY), 0) if note.get(rr.AUTO_RETRIES_USED_KEY) is not None else 0
@@ -3214,12 +3218,12 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
                   fix("fix the note's pr: or defer", _hold_line(rollout_note, path.stem, "RACE", note), False))
     question = rr.needs_human(note)
     if question and not skip_needs:
-        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
+        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True, takes_out=takes_out)
         _keep_cause_flags(out, below)
         return no("needs a human: the note's ## Needs you question",
                   fix("answer the question", question, below["humanFix"]["handBack"] if below["humanFix"] else True))
     if answer is not None:
-        cause = _verdict(path, note, inp, rollout_note, now, None, skip_needs)
+        cause = _verdict(path, note, inp, rollout_note, now, None, skip_needs, takes_out)
         _keep_cause_flags(out, cause)
         cf, form, stamp = cause["humanFix"], answer["form"], answer["stamp"]
         if form == "hand-back":
@@ -3314,7 +3318,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         """The take-out point (ADR 0070 d5): every take-out passes through it. `takeOut` is set, and the humanFix stays
         null (the lead's `defer --take-out`), unless earlier tries of this take-out failed (rr._take_out_failures):
         after the k-th failure it cools TAKE_OUT_COOLDOWN_MIN[k-1] minutes, and at TAKE_OUT_TRIES it is Lachy's H10,
-        takeOut kept for repair's route."""
+        takeOut kept for repair's route. On an engine from before p39-14 (`takes_out` False) it is spent(why), as
+        that engine's lead reads it."""
+        if not takes_out:
+            return spent(why)
         failed = rr._take_out_failures(rollout_note, path.stem, fp)
         k_ = failed["count"]
         out["takeOut"] = {"cause": cause, "why": why, "overtimeUsed": ot_used, "overtimeBudget": ot_n, "fingerprint": fp,
@@ -3333,7 +3340,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         """An Overtime run (ADR 0070 d1) while overtime_used < overtime_runs: after `wait` minutes' cool-down (an infra
         or quota block), one more re-entry with the raise of the cap its stop spent (_raise_field; a revise re-entry
         raises max_review_rounds to lastRound + 1 when no round is left; else the resolved cap + 1); a cap that will
-        not resolve is cause 17's spent(). Once the Overtime is spent, the take-out (cause spent)."""
+        not resolve is cause 17's spent(). Once the Overtime is spent, the take-out (cause spent). On an engine from
+        before p39-14 (`takes_out` False) a spent budget is spent(spent_why) at once, cool-down and all, as there."""
+        if not takes_out:
+            return spent(spent_why)
         if ot_used >= ot_n:
             return take_out("spent", f"{spent_why}; overtime {ot_used}/{ot_n} used")
         if wait is not None:
@@ -3353,9 +3363,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
         return None
 
     # Cause 18: `auto_retries: 0` turns every automatic retry off, so there is no Overtime either: a take-out at once,
-    # except decision 4's stops, which are his (an infra settings block or the same stop at Integration: H10).
+    # except decision 4's stops, which are his (an infra settings block or the same stop at Integration: H10), and every
+    # stop on an engine from before p39-14, whose lead reads `auto_retries: 0` as H9 or H10.
     if n == 0:
-        if at == "integration" and cls == "infra" and (sblock is not None or rr._same_stop(note)):
+        if not takes_out or (at == "integration" and cls == "infra" and (sblock is not None or rr._same_stop(note))):
             return spent("auto_retries is 0: automatic retries are off")
         return take_out("no-overtime", "auto_retries is 0: automatic retries are off, so no Overtime")
     if cls == "quota":

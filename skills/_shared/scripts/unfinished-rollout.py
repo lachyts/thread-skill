@@ -574,7 +574,10 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   each task set aside at its run or at Integration that only a person moves on. In a parallel rollout that is
   lead-integrate.py's auto_retry_verdict with a non-null humanFix (execute § 6.5 (c): a null one is the lead's own
   retry), over task_inputs read against the rollout's Project root (the lead's `inputs --repo`, as
-  reconcile-rollout.py auto-retry reads it: a bare-number `pr:` runs one `git remote get-url origin` there); its
+  reconcile-rollout.py auto-retry reads it: a bare-number `pr:` runs one `git remote get-url origin` there), with
+  `engine_takes_out` the rollout's reconcile-rollout.py _engine_reads_take_out: an Overtime run or a take-out (p39-14,
+  ADR 0070) is the lead's and never listed, but on an engine from before p39-14 the same spent budget is that engine's
+  H9 or H10, listed as its lead reads it (engine-snapshot.md § Cross-version state); its
   `act` is humanFix.act and its `detail` humanFix.detail. In a serial chain every such task (no Leg retries one:
   leg.py needs_you's rule), its act `hand back or defer` and its `detail` the note's `## Needs you` question
   (needs_human), when it holds one. `text` is the set-aside reason, the first line of its latest block. Handed back,
@@ -645,7 +648,8 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_month_line_key",   # each limit's own month line (p48-2)
             "_hold_until", "_resolve_holds", "_record_state", "_pr", "needs_human", "BLOCKED_SECTIONS",
             "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION", "GATE_BOUNCE_SECTION",
-            "_felt_checks")   # the Felt checks (p52-2): an older reconcile-rollout.py fails to load, loudly
+            "_felt_checks",   # the Felt checks (p52-2): an older reconcile-rollout.py fails to load, loudly
+            "_engine_reads_take_out")   # needs-you's set-aside read on an engine from before p39-14
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -2795,6 +2799,7 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
     def project(t):
         return project_label(rr, t) if t.get_list("projects") else label
 
+    takes_out = None   # rr._engine_reads_take_out, read once a parallel set-aside needs its Human fix
     for tp, t in sorted(linked, key=lambda e: e[0].stem.lower()):
         state, at = rr._queue_state(t)
         if state != "set-aside":
@@ -2824,11 +2829,14 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
                                       f"({rr._status(t)})", "hand back or defer", rr.needs_human(t)))
             continue
         li = load_li(rr)
-        # the lead's `inputs --repo <Project root>`, as reconcile-rollout.py auto-retry reads it
+        if takes_out is None:
+            takes_out = rr._engine_reads_take_out(path, note, tasks_dir)[0]
+        # the lead's `inputs --repo <Project root>`, as reconcile-rollout.py auto-retry reads it; on an engine from
+        # before p39-14 a spent budget is that engine's H9 or H10, never an Overtime run or a take-out its lead lacks
         inp = li.task_inputs(tp, t, repo=str(root) if root is not None else None)
-        fix = li.auto_retry_verdict(tp, t, inp, note, now)["humanFix"]
+        fix = li.auto_retry_verdict(tp, t, inp, note, now, engine_takes_out=takes_out)["humanFix"]
         if fix is None:
-            continue   # the lead's own re-entry: a retry, a cool-down, a seeded revise
+            continue   # the lead's own re-entry: a retry, a cool-down, a seeded revise, an Overtime run, a take-out
         text = reason or fix["detail"] or f"set aside {fix['label']}"
         out.append(needs_you_item(kind, "set-aside", slug, project(t), tp.stem, text, fix["act"],
                                   fix["detail"] if fix["detail"] != text else None))

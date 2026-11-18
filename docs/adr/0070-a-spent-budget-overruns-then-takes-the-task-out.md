@@ -5,9 +5,13 @@ Status: proposed. Grilled at `/thread:orient Thread Skill` on 2026-11-06, from L
 *(2026-11-18: p39-14 built the engine half: `overtime_runs` (schema 8, a Tuning key), the verdict's `overtime` and
 `takeOut`, `auto-retry`'s Overtime run and `defer --take-out`. Its build calls, each within the decisions: the take-out's
 `## Notes` lines end `; feedback <F>`, the block's fingerprint, which keys their dedupe, the Run record's `take-out`
-lines and a re-run's finished case; a take-out that fails (a `gh`, `git` or save failure) writes one `take-out failed:`
-line and cools 15, then 60 minutes, and the third failure is H10 for Lachy, so a persistent outage is bounded, never a
-loop; a member's PR merged into the default branch is the verb's exit 4, and the lead runs `resume`, which lands it; the
+lines and a re-run's finished case; a take-out that fails (a `gh`, `git` or save failure, or a note that will not read)
+writes one `take-out failed:` line and cools 15, then 60 minutes, and the third failure is H10 for Lachy, so a
+persistent outage is bounded, never a loop; a member's PR merged into the default branch is the verb's exit 4, which
+writes a `take-out paused:` line, no failure and no cool-down, and the lead runs `resume`, which lands it; `moving` and
+`unfinished-rollout.py needs-you`, which read any rollout from any root, read the Overtime and the take-out only on an
+engine carrying the `TAKE_OUT_ENGINE` line, so an older engine's spent budget stays its H9 or H10, as its lead reads it
+(engine-snapshot.md § Cross-version state); the
 caps an automatic retry raised in a task's life (`auto_retry_raised`, each with its task-note value before the first
 raise) are restored at the take-out, so the next life starts from the caps it was scheduled with; a Tuning moves
 `overtime_runs` only between values >= 1, since 0, no Overtime, is the operator's hand edit; and under `auto_retries = 0`

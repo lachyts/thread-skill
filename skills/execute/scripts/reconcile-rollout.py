@@ -1255,7 +1255,9 @@ Subcommands:
                  race-held, with no task `holdUntil`, under no held rollout hold, no `pauseRequested` and no
                  `surfaceWait` (a surface wait relaunches nothing, P41-3), read as step
                  1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
-                 with that k and auto_retry_verdict). A null `humanFix` whose `settingsBlock` reads `due`, state
+                 with that k and auto_retry_verdict, its `engine_takes_out` the rollout's _engine_reads_take_out, so on
+                 an engine from before p39-14 a spent budget or repeated feedback reads H9 or H10 as that engine's own
+                 lead reads it, Lachy's, never W). A null `humanFix` whose `settingsBlock` reads `due`, state
                  `unfreed` and `freeNow` (a settings block step 1.2's *Settings repair* frees now, ADR 0080) goes to
                  `reentry`, ahead of the cool-down test; a verdict with a `takeOut` (p39-14, ADR 0070 d5) is skipped at
                  its failure bound (a non-null humanFix, Lachy's), goes to `coolDown` with class `take-out` while its
@@ -9839,6 +9841,15 @@ ROLE_CALL_LACKS = "reads a role-call line as live (it predates p46-2)"
 SPEED_HOLD_ENGINE = 1
 SPEED_HOLD_MARK_RE = re.compile(r"^SPEED_HOLD_ENGINE = 1$", re.M)
 SPEED_HOLD_LACKS = "has no Speed fix let-go (it predates p54-13)"
+# The marker _engine_reads_take_out greps for in an engine's own copy of this file (p39-14, ADR 0070): an engine whose
+# reconcile-rollout.py has this exact line runs the Overtime and the take-out, so its lead re-enters a spent budget and
+# runs `defer --take-out` by itself. The guard-exempt readers of any rollout (`moving`, unfinished-rollout.py
+# needs-you) read a spent budget as the lead's work only on such an engine; an older engine's lead reads the same block
+# as H9 or H10, Lachy's (engine-snapshot.md § Cross-version state). Never rename it, change its value or reference it
+# in code.
+TAKE_OUT_ENGINE = 1
+TAKE_OUT_ENGINE_RE = re.compile(r"^TAKE_OUT_ENGINE = 1$", re.M)
+TAKE_OUT_ENGINE_LACKS = "has no Overtime or take-out (it predates p39-14)"
 
 
 def _label_role(label):
@@ -19101,6 +19112,17 @@ def _engine_reads_role_call(rollout_path, rollout_note, tasks_dir):
                          lambda path: _unstamped_verdict(path, ROLE_CALL_MARK_RE, ROLE_CALL_LACKS))
 
 
+def _engine_reads_take_out(rollout_path, rollout_note, tasks_dir):
+    """(bool, why): the engine that runs this rollout runs the Overtime and the take-out (its copy has the
+    TAKE_OUT_ENGINE line, p39-14), by _engine_reads_carried's four clauses: no note -> True; finished -> True (no lead
+    runs it); unstamped -> the marker in the root an unstamped note runs on; stamped -> the marker in its snapshot's
+    copy (a missing one fails closed: Lachy's). The guard-exempt readers, `moving` and unfinished-rollout.py needs-you,
+    pass it to lead-integrate.py auto_retry_verdict as `engine_takes_out`, so an older engine's spent budget or repeated
+    feedback reads as its own lead reads it, H9 or H10, never as the lead's Overtime run or take-out."""
+    return _engine_reads(rollout_path, rollout_note, tasks_dir, TAKE_OUT_ENGINE_RE, TAKE_OUT_ENGINE_LACKS,
+                         lambda path: _unstamped_verdict(path, TAKE_OUT_ENGINE_RE, TAKE_OUT_ENGINE_LACKS))
+
+
 def _carry_readers(note, tasks_dir, walk, memo=None):
     """(bool, why): every engine that reads this note reads carried fixes: (a) the note's own rollout's, and (b) the
     rollout of each dependant still to start (walk.dependants: a `depends-on:` or `blocked-by:` naming it, through a
@@ -20863,6 +20885,7 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
         heat_mod = _heat_module()
         hot = bool(heat_mod) and (nx.get("heat") or {}).get("level", 0) >= heat_mod.HEAT_HOLD
         revises = 0
+        takes_out = None   # _engine_reads_take_out, read once a set-aside is read: moving runs from any root
         for e in nx.get("setAside") or []:
             if e.get("setAsideAt") not in ("run", "integration") or e["slug"].lower() in race_slugs or e.get("holdUntil"):
                 continue
@@ -20872,10 +20895,12 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             except (OSError, ValueError):
                 continue
             try:
+                if takes_out is None:
+                    takes_out = _engine_reads_take_out(rollout_path, note, tasks_dir)[0]
                 budget = _retry_budget(tnote, note)
                 k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] and not budget["error"] else None
                 inp = _lead().task_inputs(path, tnote, max_rounds=k, repo=repo)
-                v = _lead().auto_retry_verdict(path, tnote, inp, note, now)
+                v = _lead().auto_retry_verdict(path, tnote, inp, note, now, engine_takes_out=takes_out)
             except Exception as ex:  # noqa: BLE001 — a lost look, never a verdict
                 raise MovingError(f"inputs on [[{e['slug']}]] raised {type(ex).__name__}: {ex}")
             if v.get("takeOut") is not None:
