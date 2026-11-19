@@ -5,6 +5,7 @@
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py run [--state F] [--now ISO] [--every MIN]
         [--deadline S] [--settle-wait S] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py stuck [--state F] [--now ISO]
+        [--slug OWNER/NAME]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py marker --login L < comments.json
 
 The Primary refresh's launchd job runs `run` at the end of every installed pass (primary-refresh.py `_carrier`), and
@@ -196,9 +197,13 @@ land.sh's withdrawal calls this verb, and step 5c parses with the same code.
 
 stuck: a read that writes nothing. One JSON line, {"state", "stuck": [{key, url, kind, movedAt, outcome}], "line"},
 oldest first; `line` is `Landings: <key>: <outcome> (unmoved since <16>) · …`, or null. Due: an open entry 24 h after
-movedAt (never one in the future), a tombstone flagged stuck, a search spell 24 h old (key `search`). Exit 0, 1 when BJ
-cannot be loaded, 2 on usage. Consumers (the Stage's machinery-health read, /thread:status, any later reader) call this
-verb, never the file.
+movedAt (never one in the future), a tombstone flagged stuck, a search spell 24 h old (key `search`). --slug OWNER/NAME
+keeps only the rows whose key's repo part (before its last `#`) is that slug, compared casefolded as
+landing-register.py `check --slug` matches, and the search spell, since a failed search carries nothing in any repo;
+`line` is built from the rows kept, null when none is. A slug outside land.sh origin_slug's form (`<owner>/<name>`, a
+name not all dots) is usage. Without --slug the output is every due row, as it always was. Exit 0, 1 when BJ cannot be
+loaded, 2 on usage. Consumers (the Stage's machinery-health read, /thread:status's Landings line, /thread:open's
+landings line through --slug, any later reader) call this verb, never the file.
 
 State: ${XDG_STATE_HOME:-~/.local/state}/thread/landings.json (or --state), {"v": 1, "landings": {"<owner>/<name>#<n>":
 entry, "_pass": {...}}}; an entry holds url, kind, since, movedAt, head, handledAt, outcome, updatedFrom, slotAt,
@@ -258,6 +263,7 @@ PASS_CONC = ("success", "neutral", "skipped")
 INFRA_CONC = ("cancelled", "timed_out", "startup_failure", "action_required", "stale")
 JOB_URL = re.compile(r"/actions/runs/([0-9]+)/job/([0-9]+)")
 DATE_LINE = re.compile(r"^last_touched:[ \t]*([0-9]{4}-[0-9]{2}-[0-9]{2})[ \t]*$")
+SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$")   # land.sh origin_slug's form (stuck --slug)
 MARK = 32
 OURS, BASE, SEP, THEIRS = "<" * MARK + " head", "|" * MARK + " base", "=" * MARK, ">" * MARK + " origin"
 DROP = object()   # a handler's verdict: no entry for this PR
@@ -1622,6 +1628,9 @@ def cmd_stuck(args):
     if sf is not None and sf <= now and now - sf >= STUCK_AFTER:
         due.append((sf, "search", {"url": None, "kind": "search", "movedAt": p.get("searchFailedSince"),
                                    "outcome": f"search failed: {p.get('searchFailedWhy') or 'unknown'}"}))
+    if args.slug is not None:
+        want = args.slug.casefold()
+        due = [d for d in due if d[1] == "search" or d[1].rpartition("#")[0].casefold() == want]
     due.sort(key=lambda x: (x[0], x[1]))
     rows = [{"key": k, "url": e.get("url"), "kind": e.get("kind"), "movedAt": e.get("movedAt") or e.get("since"),
              "outcome": _flat(e.get("outcome") or "")} for _, k, e in due]
@@ -1662,6 +1671,12 @@ def _positive(value):
     return n
 
 
+def _slug(value):
+    if not SLUG_RE.fullmatch(value) or not value.partition("/")[2].strip("."):
+        raise argparse.ArgumentTypeError(f"not an <owner>/<name> GitHub slug: {value!r}")
+    return value
+
+
 def _nonneg(value):
     n = int(value)
     if n < 0:
@@ -1686,6 +1701,7 @@ def main(argv=None):
     s = sub.add_parser("stuck", allow_abbrev=False, help="the landings stuck a day (a read that writes nothing)")
     s.add_argument("--state", default=None)
     s.add_argument("--now", default=None)
+    s.add_argument("--slug", type=_slug, default=None, help="only this repo's rows (and the search spell)")
     s.set_defaults(func=cmd_stuck)
     m = sub.add_parser("marker", allow_abbrev=False, help="the live queue marker in stdin's comments")
     m.add_argument("--login", required=True)

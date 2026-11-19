@@ -8,7 +8,7 @@
 #   C0 quiet passes and the rate limit · C1 C1b C1c update-branch, one per repo per pass · C2 an unsettled mergeability
 #   C3 C3b C4 C4d the resolver · C5 C5b C5c C5d C5e C5f the rerun rule · C6 C6g C6h C6i merges and the binding
 #   C7 C7n supersession and tombstones · C8 the clock · C9 C10 no write · C11 the deadline and a TERM
-#   C12 discovery and scope · C13 a refused auto-merge falls through · C14 the prompt vars · C15 stuck
+#   C12 discovery and scope · C13 a refused auto-merge falls through · C14 the prompt vars · C15 stuck and --slug
 #   C16 marker · C17 --dry-run · C18 skipped PRs
 # The cases are grouped into shard_<n>() functions, each self-contained; run bare, this script starts one child per shard
 # (`--shard <n>`), all at once, each with its own temp dir, then prints their output in shard order. Hermetic: HOME,
@@ -201,6 +201,14 @@ python3 "$CARRIER" run --now "$(at $((CLK + 15)))" >/dev/null 2>&1; rc=$?
 ok "$rc|$(cnt "$(ghlog)" "search prs")" "0|2" "C0: 15 minutes on: it searches again"
 python3 "$CARRIER" run --now "$(at $((CLK - 600)))" >/dev/null 2>&1; rc=$?
 ok "$rc" 0 "C0: a lastPass in the future never blocks"
+# p11-7's Verify line in the carrier's terms: a laptop shut overnight misses its StartInterval firings, and the first
+# pass after it wakes runs; a second wake soon after runs nothing.
+printf '{"v": 1, "landings": {"_pass": {"lastPass": "%s"}}}\n' "$(at $((CLK - 1440)))" > "$ST"; : > "$LOG_GH"
+python3 "$CARRIER" run --now "$(at $CLK)" >/dev/null 2>&1; rc=$?
+ok "$rc|$(cnt "$(ghlog)" "search prs")" "0|2" "C0: a lastPass a day old (a shut night): the wake's pass runs"
+: > "$LOG_GH"
+python3 "$CARRIER" run --now "$(at $((CLK + 5)))" > "$tmp/c0.out" 2>&1; rc=$?
+ok "$rc|$(cat "$tmp/c0.out")|$(ghlog | grep -c .)" "3||0" "C0: … and a second wake 5 minutes on runs nothing (exit 3, no call)"
 CLK=$((CLK + 20))
 
 echo "== C1. behind and green: update-branch, expected_head_sha, updatedFrom"
@@ -691,6 +699,33 @@ has "$(sline --now "$(at 1500)")" "Landings: o/x#1: waiting for its checks (unmo
 ok "$(sline --now "$(at 60)" | grep -c 'o/x#1')" 0 "C15: … within a day the entry is not due"
 rm -f "$ST"; ok "$(sline)" None "C15: no file: a null line"
 python3 "$CARRIER" stuck --now nope > /dev/null 2>&1; ok "$?" 2 "C15: a bad --now is usage, exit 2"
+# --slug (open's landings line): one repo's rows, matched case-insensitively, and the search spell, which carries
+# nothing in any repo. seed15 <since of the search spell>: o/x#1 and P/Y#9 a day old, then the spell.
+seed15() {
+python3 - "$ST" "$(at 0)" "$(at 10)" "$1" <<'PY'
+import json, sys
+p, t0, t1, sf = sys.argv[1:]
+e = lambda url, moved: {"url": url, "kind": "close-out", "since": t0, "movedAt": moved, "outcome": "waiting for its checks"}
+json.dump({"v": 1, "landings": {"_pass": {"lastPass": t0, "searchFailedSince": sf, "searchFailedWhy": "gh: HTTP 401"},
+                                "o/x#1": e("https://github.com/o/x/pull/1", t0),
+                                "P/Y#9": e("https://github.com/P/Y/pull/9", t1)}}, open(p, "w"))
+PY
+}
+skeys() { stk "$@" | python3 -c 'import json,sys; d=json.load(sys.stdin); print([r["key"] for r in d["stuck"]], d["line"] is None)'; }
+mkdir -p "$(dirname "$ST")"; seed15 "$(at 20)"
+ok "$(skeys --now "$(at 1500)")" "['o/x#1', 'P/Y#9', 'search'] False" "C15 --slug: without it, every row in time order"
+ok "$(skeys --slug o/x --now "$(at 1500)")" "['o/x#1', 'search'] False" "C15 --slug: o/x keeps its row and the search spell"
+l=$(sline --slug o/x --now "$(at 1500)")
+has "$l" "Landings: o/x#1: waiting for its checks" "C15 --slug: … its line names o/x#1"
+has "$l" "search: search failed: gh: HTTP 401" "C15 --slug: … and the search spell"
+lacks "$l" "P/Y#9" "C15 --slug: … never another repo's row"
+ok "$(skeys --slug p/y --now "$(at 1500)")" "['P/Y#9', 'search'] False" "C15 --slug: p/y matches P/Y#9 (case-insensitive)"
+seed15 "$(at 1400)"
+ok "$(skeys --slug q/z --now "$(at 1500)")" "[] True" "C15 --slug: a repo with no row, the spell under a day: no rows, a null line"
+for bad in bad o/ '' o/..; do
+  o=$(python3 "$CARRIER" stuck --slug "$bad" 2>/dev/null); rc=$?
+  ok "$rc|$o" "2|" "C15 --slug: '$bad' is usage, exit 2, nothing on stdout"
+done
 
 echo "== C16. marker: the newest marker-class comment by the login"
 # mk <json>: the marker line and its rc, as "<line>|<rc>" (the line captured, so its newline never sits before the |).
