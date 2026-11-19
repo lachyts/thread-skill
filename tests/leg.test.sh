@@ -3,8 +3,9 @@
 #   L1   two Legs (5 + 2) with a handoff, then Complete: post-items, a follow-on, dispositions, the Completion log,
 #        the archive and one vault commit; an Archive collision; next --waiting; file-followup after Complete reads
 #        the archived note and writes nothing into it; L1v the routed land follow-on and its controls (no GitHub
-#        origin, only a close-out commit ahead, a detached HEAD: leg.py reads every `not landed:` line one way, so
-#        land.sh's other routes, swept, register-listed and a non-default branch, are tests/land.test.sh's); done's
+#        origin, only a close-out commit ahead, a detached HEAD; (h) a chain held on a branch, `not landed: on <b>, not
+#        <d>`, files it too (P36-17): leg.py reads every other `not landed:` line one way, so land.sh's other routes,
+#        swept and register-listed, are tests/land.test.sh's); done's
 #        leg_head stamp (L1, L1v, L1h: each checkout's newest trailered commit of the task, never a peer's HEAD, [] when
 #        it committed nowhere, none with no leg_base)
 #   L1n  post-items reads a numbered item below the items mark, never a nested line or a ceremony step (P36-16)
@@ -293,6 +294,12 @@ scen l1vg; R="$S/r"; mkrepo "$R" https://github.com/o/rg.git; export CWD="$R"
 HOOK_CMD='git -C "$R" checkout -q --detach' landctl "L1v (g) a detached HEAD" "stuck: detached HEAD → [[demo-followup-land-chain-2026-10-20]]" y
 has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "check the landing route (detached HEAD), then open a PR from them, or push them" \
    "L1v (g): … its act starts by checking the landing route"
+# (h) P36-17: a chain held on a branch (`not landed: on w, not master`) files the follow-on, never `nothing filed`
+scen l1vh; R="$S/r"; mkrepo "$R" https://github.com/o/rh.git; export CWD="$R"; git -C "$R" checkout -qb w
+landctl "L1v (h) a branch-held chain" "not landed: on w, not master, 1 not on origin/master → [[demo-followup-land-chain-2026-10-20]]" y
+has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "- \`$R\` (on \`w\`, not \`master\`): open a PR from \`w\` into \`master\`, or merge \`w\` into \`master\` and push it" \
+   "L1v (h): … its act lands the branch"
+has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "✨ feat: t9 c.txt ([[t9]])" "L1v (h): … listing the chain's commit"
 ok "$(grep -c . "$TMP/net.log")" 0 "L1v: no gh or ssh call was made"
 unset CWD
 
@@ -1375,8 +1382,10 @@ hasnt "$(cat "$FU")" "Chain copy, not yet on" "L16i: … nor the copy's old pare
 has "$(cat "$FU")" "([[t1]])" "L16i: … listing t1's commit"
 has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master, 1 not on origin/master → [[demo-followup-land-chain-2026-10-20]]" "L16i: the Chain commits line"
 icomplete l16i2 w
-ok "$(test -f "$FU" && echo y || echo n)" n "L16i: a deferred route (on w), everything landed: nothing filed"
-has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master; not landed: on w, not master, nothing filed" "L16i: … and its Chain commits line"
+ok "$(test -f "$FU" && echo y || echo n)" y "L16i: a primary held on a branch (on w), all on master: the origin half is still filed (P36-17)"
+has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): \`chain/$RO\` is already on \`master\`: open a PR from them, or push them (\`$R\` is on \`w\`, not \`master\`)" \
+   "L16i: … its act naming the held branch"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master, 1 not on origin/master; not landed: on w, not master → [[demo-followup-land-chain-2026-10-20]]" "L16i: … and its Chain commits line"
 # control: chain/$RO merged into master by hand, then a stuck route (the primary detached): a stuck route cannot say what
 # origin has, so every chain commit is still filed, as in place
 cscen l16i3
