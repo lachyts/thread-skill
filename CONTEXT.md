@@ -197,9 +197,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   retired reshuffle verb *split*, ADR 0027: a `~/Projects` folder's thread
   whose project's home is a repo, or a thread in a repo its project lists
   after another), `misnamed`, `undeclared`, `no-slug`, `behind`,
-  `side-branch` and `workspace`. A repo-tier finding is reported once per
+  `side-branch`, `workspace` and `missing`. A repo-tier finding is reported once per
   thread identity, at its main checkout's path, never once per copy
-  (ADR 0039 d5). Report-only: orient shows it, close warns with it.
+  (ADR 0039 d5). Report-only: orient shows it, close warns with it. The one
+  exception is `missing` (a project with a thread home, multi-session work
+  and no thread anywhere), which orient, handoff and next act on by creating
+  `<repo>/THREAD.md` (ADR 0039 d7).
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"

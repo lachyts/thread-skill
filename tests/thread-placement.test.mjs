@@ -9,7 +9,8 @@
 // levels below ~/repos (one at depth 3 holding its THREAD.md at depth 4), linked worktrees kept outside .claude, a
 // submodule, a --separate-git-dir checkout, a same-origin clone, bare origins with and without origin/HEAD, and
 // workspace seat subfolders. A second HOME holds the Smart Slider shape (one repo's thread only in a linked
-// worktree on a side branch), which the steps change in place; a third is empty.
+// worktree on a side branch), which the steps change in place; a third is empty. Case 20c builds its own HOME and
+// vault, with Work/Tasks notes, for the `missing` kind (ADR 0039 d7: the Contacts admin shape of 2026-11-08).
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -605,6 +606,9 @@ test('19. exit codes: 2 for a bad argument, 3 for a missing vault, and home --di
   refused(['home', '--dir', h('Projects/Big/THREAD.md')], 2)
   refused(['home', '--dir', h('Projects/missing')], 2)
   refused(['home'], 2)
+  refused(['missing'], 2)
+  refused(['missing', '--project', 'Nope'], 2, /Nope/)
+  refused(['missing', '--dir', h('Projects/missing')], 2)
   refused(['bogus'], 2)
   refused(['audit'], 3, /vault/, { vault: path.join(scratch, 'no-vault') })
   assert.equal(run(['audit', '--project', `${P}/Tools/Same.md`, '--json']).status, 0, 'a vault path settles a shared name')
@@ -677,6 +681,89 @@ test('20b. rollout clones (ADR 0042): their copies are no thread, parity holds, 
   for (const f of j.findings) assert.ok(!f.path.includes('-rollout/THREAD.md') || f.path.includes('plain-rollout'), `no finding at a clone copy: ${f.kind} ${f.path}`)
 })
 
+test('20c. missing (ADR 0039 d7): a thread home with open multi-session work and no thread anywhere, and its eight negatives', () => {
+  // The Contacts admin shape of 2026-11-08: a declared repo, a phase of open tasks, no THREAD.md.
+  const HM = path.join(scratch, 'home-missing')
+  const hm = (rel) => path.join(HM, rel)
+  const VM = path.join(scratch, 'vault-missing')
+  repo(hm('Projects'), { commit: true })
+  mkdir(hm('Projects/Life/Contacts admin'))
+  for (const n of ['contacts-sync', 'solo', 'sidey', 'foldered-repo', 'sharedy']) repo(hm(`repos/tools/${n}`), { commit: true })
+  git(['-C', hm('repos/tools/contacts-sync'), 'worktree', 'add', '-q', '-b', 'wt', hm('repos/tools/contacts-sync-wt')])
+  // A rollout clone of contacts-sync (ADR 0042): its own main checkout, sharing the twin's origin.
+  repo(hm('repos/tools/contacts-sync-rollout'))
+  for (const n of ['contacts-sync', 'contacts-sync-rollout']) git(['-C', hm(`repos/tools/${n}`), 'remote', 'add', 'origin', 'git@github.com:o/contacts-sync.git'])
+  origin(hm('repos/tools/sidey'), 'sidey-missing')
+  git(['-C', hm('repos/tools/sidey'), 'checkout', '-q', '-b', 'feat/side'])
+  commitFile(hm('repos/tools/sidey'), 'THREAD.md', thread('sidey'))
+  git(['-C', hm('repos/tools/sidey'), 'checkout', '-q', 'main'])
+  write(hm('Projects/Life/foldered-repo/THREAD.md'), thread('foldered'))
+  write(hm('repos/workspaces/_shared/threads/sharedy.md'), thread('sharedy'))
+  const task = (project, status) => fm(`tags:\n  - task\nstatus: ${status}\nprojects:\n  - "[[${project}]]"`)
+  const vnotes = {
+    [`${P}/Life (area)/Life (area).md`]: fm('tags:\n  - area'),
+    [`${P}/Life (area)/Contacts admin.md`]: proj('Life', ['~/repos/tools/contacts-sync']),
+    [`${P}/Life (area)/Solo.md`]: proj('Life', ['~/repos/tools/solo']),
+    [`${P}/Life (area)/Sidey.md`]: proj('Life', ['~/repos/tools/sidey']),
+    [`${P}/Life (area)/Foldered.md`]: proj('Life', ['~/repos/tools/foldered-repo']),
+    [`${P}/Life (area)/Sharedy.md`]: proj('Life', ['~/repos/tools/sharedy']),
+    'Work/Tasks/contacts-admin-p1-1-sync.md': task('Contacts admin', 'open'),
+    'Work/Tasks/contacts-admin-p1-2-merge.md': task('Contacts admin', 'in-progress'),
+    'Work/Tasks/contacts-admin-p1-3-done.md': task('Contacts admin', 'done'),
+    'Work/Tasks/solo-p1-1-a.md': task('Solo', 'open'),  // one open task in each of two phases: no phase has two
+    'Work/Tasks/solo-p2-1-b.md': task('Solo', 'open'),
+    'Work/Tasks/solo-p2-2-c.md': task('Solo', 'review'),
+  }
+  for (const n of ['Sidey', 'Foldered', 'Sharedy']) {
+    for (const m of [1, 2]) vnotes[`Work/Tasks/${n.toLowerCase()}-p1-${m}-x.md`] = task(n, 'open')
+  }
+  for (const [rel, t] of Object.entries(vnotes)) write(path.join(VM, rel), t)
+  const opts = { home: HM, vault: VM }
+  const missing = (args) => {
+    const r = run(['missing', ...args], opts)
+    assert.equal(r.stderr, '', `stderr for missing ${args.join(' ')}`)
+    assert.equal(r.status, 0, `status for missing ${args.join(' ')}`)
+    return r.stdout
+  }
+  const CS = hm('repos/tools/contacts-sync')
+  const j = audit(['--project', 'Contacts admin'], opts)
+  assert.deepEqual(j.findings.map((f) => [f.kind, f.path, f.owners]), [['missing', `${CS}/THREAD.md`, [`${P}/Life (area)/Contacts admin.md`]]])
+  assert.match(j.findings[0].detail, /phase contacts-admin-p1 has 2 open tasks \(contacts-admin-p1-1-sync, contacts-admin-p1-2-merge\)/)
+  assert.equal(j.findings[0].fix, 'create ~/repos/tools/contacts-sync/THREAD.md by open § Creating a new thread')
+  assert.equal(j.summary, 'placement: 1 finding — missing 1')
+  // The verb prints the same line from the note, the repo, a linked worktree or a rollout clone of it, or the
+  // project's ~/Projects folder (its folder note); the estate never reports it.
+  const line = `missing: ${CS}/THREAD.md — ${j.findings[0].detail} · fix: ${j.findings[0].fix}\n`
+  for (const args of [['--project', 'Contacts admin'], ['--dir', CS], ['--dir', hm('repos/tools/contacts-sync-wt')],
+    ['--dir', hm('repos/tools/contacts-sync-rollout')], ['--dir', hm('Projects/Life/Contacts admin')]]) {
+    assert.equal(missing(args), line, args.join(' '))
+  }
+  assert.deepEqual(of(audit([], opts), 'missing'), [], 'the estate never reports missing')
+  // Negatives: no phase with two open tasks (until --session); a thread on a side branch, in a ~/Projects folder,
+  // or in _shared; a dir in no repo.
+  assert.equal(missing(['--project', 'Solo']), '')
+  assert.match(missing(['--project', 'Solo', '--session']), /^missing: \S+\/solo\/THREAD\.md — Solo's .* the calling session's work continues in another session/)
+  for (const n of ['Sidey', 'Foldered', 'Sharedy']) assert.equal(missing(['--project', n]), '', n)
+  assert.deepEqual(['Sidey', 'Foldered'].map((n) => kinds(audit(['--project', n], opts).findings)), [['side-branch'], ['split-home']],
+    'each says where its thread is instead')
+  assert.equal(missing(['--dir', scratch]), '')
+  // A thread open's lookup finds by the project's slug is never doubled: an uncommitted one only in a linked worktree
+  // kept outside .claude, one in a subdirectory of the home repo, and the home's own (as orient, handoff or next
+  // creates it) each silence the verb and the --project audit.
+  const snippet = fs.readFileSync(OPEN, 'utf8').split('\n')
+  const a = snippet.findIndex((l) => l.startsWith('# thread:repo-thread-lookup'))
+  const b = snippet.findIndex((l) => l.startsWith('# end thread:repo-thread-lookup'))
+  for (const rel of ['repos/tools/contacts-sync-wt/THREAD.md', 'repos/tools/contacts-sync/sub/THREAD.md', 'repos/tools/contacts-sync/THREAD.md']) {
+    write(hm(rel), thread('contacts-admin'))
+    const r = spawnSync('bash', ['-c', snippet.slice(a + 1, b).join('\n')], { cwd: path.join(scratch, 'plain'), encoding: 'utf8',
+      env: { ...base, HOME: HM, slug: 'contacts-admin' } })
+    assert.deepEqual([r.status, r.stdout.split('\n').filter(Boolean)], [0, [hm(rel)]], `open's lookup finds ${rel}`)
+    assert.equal(missing(['--project', 'Contacts admin']), '', rel)
+    assert.deepEqual(of(audit(['--project', 'Contacts admin'], opts), 'missing'), [], rel)
+    fs.rmSync(hm(rel))
+  }
+})
+
 test('21. read-only: nothing under HOME or the vault changes, and no bytecode is written', () => {
   const snap = (dir) => {
     const out = {}
@@ -695,7 +782,8 @@ test('21. read-only: nothing under HOME or the vault changes, and no bytecode is
   const env = { ...base }
   delete env.PYTHONDONTWRITEBYTECODE
   for (const args of [['audit'], ['audit', '--project', 'GifLab', '--json'], ['audit', '--thread', h('Projects/Big/THREAD.md')],
-    ['home', '--dir', h('Projects/Animately/giflab')], ['home', '--project', 'Murmur']]) {
+    ['home', '--dir', h('Projects/Animately/giflab')], ['home', '--project', 'Murmur'], ['missing', '--project', 'Gizmo'],
+    ['missing', '--dir', h('repos/tools/murmur')]]) {
     const r = spawnSync('python3', [SCRIPT, ...args, '--vault', VAULT], { encoding: 'utf8', cwd: scratch, env: { ...env, HOME } })
     assert.equal(r.status, 0, `${args.join(' ')}: ${r.stderr}`)
   }

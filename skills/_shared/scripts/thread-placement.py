@@ -3,10 +3,12 @@
 against its project's thread home, and the one repo a ~/Projects folder's thread belongs in.
 
 python >= 3.8 with PyYAML. It imports resolve-target.py by path (never run), so the vault keeps one note index and
-ADR 0036's one directory-to-note rule. Called as:
+ADR 0036's one directory-to-note rule, and a `missing` check loads reconcile-project.py the same way for its PHASE_N.
+Called as:
 
     thread-placement.py audit [--project <note>]... [--thread <path>] [--json] [--vault PATH] [--launch-folders PATH]
     thread-placement.py home (--dir <path> | --project <note>) [--vault PATH] [--launch-folders PATH]
+    thread-placement.py missing (--dir <path> | --project <note>...) [--session] [--vault PATH] [--launch-folders PATH]
 
 Defaults: ~/repos/obsidian and resolve-target's launch-folders file (a missing one only skips its rung 3). HOME comes
 from the environment; every path is realpath'd. Read-only: no writes, no network, no fetch. Every git call drops
@@ -58,10 +60,23 @@ Kinds (each finding's owners are the notes a --project run shows it under):
                  reads as no wait.
     side-branch  origin's default and the local default lack THREAD.md while another local branch has it
     workspace    a THREAD*.md in a workspace seat subfolder (ADR 0039 d3)
+    missing      a named note with a thread home and open multi-session work, and no thread anywhere (ADR 0039 d7):
+                 no THREAD*.md the repo walk lists has its home as its identity's home repo (so none in the home or a
+                 subdirectory of it, in a linked worktree kept outside .claude or in a same-origin clone, where
+                 open's lookup would find it), its home has no THREAD.md on a local branch or on origin/HEAD, no
+                 ~/Projects folder thread it owns exists, and no `_shared/threads/<x>.md` is named like it (<x> its
+                 name in kebab-case, or its home's directory name). Multi-session work is a phase with two or more Active
+                 task notes directly in Work/Tasks (tagged `task`, not `rollout`, `phase` or `archived`) whose
+                 `projects:` link the note, members by the literal filename prefix `<slug>-p<N>-` with
+                 reconcile-project.py's PHASE_N loaded (vault-grammar.md § Phase and task filenames, § Statuses);
+                 `missing --session` takes it as met (the caller's session is itself the second: a handoff, or a
+                 session with thread shape). Only for a --project run and the `missing` verb: the estate and
+                 --thread never report it, so close's step 1 never warns of the thread it is about to create.
 An `unchecked` entry (never a finding) is a main checkout holding a thread (on disk, in a linked worktree or on a
 local branch) whose origin/HEAD is unresolved.
 
-Scopes: no flag is the estate; --project keeps the entries a named note owns; --thread keeps that file's own: its
+Scopes: no flag is the estate; --project keeps the entries a named note owns, and adds each named note's `missing`
+finding; --thread keeps that file's own: its
 folder's findings for a ~/Projects path, its identity's findings plus its main checkout's git checks for a
 repo-tier path (a worktree copy included), its workspace finding for a seat path, nothing for any other path.
 
@@ -71,7 +86,10 @@ fix: …` line per unchecked repo, then `placement: none` or `placement: <N> fin
 owners, fix}], summary, scanned: {repo_threads, repo_misnamed, project_threads, project_misnamed,
 workspace_threads}}; owners are vault paths, and every list of paths is bytewise sorted. `home` prints the repo or
 nothing: for --dir only strictly below ~/Projects, through the folder note (resolve-target's directory rungs, which
-read a nested rollout clone as its in-place twin); for --project, the note's first qualifying repo.
+read a nested rollout clone as its in-place twin); for --project, the note's first qualifying repo. `missing`
+prints only its `missing:` finding lines, nothing when there are none: for each --project note, or for --dir the notes
+whose thread home holds it (strictly below ~/Projects, the folder note; else every live note whose first qualifying
+repo is the home repo of the dir's main checkout, a linked worktree and a rollout clone read as their home).
 
 Exit 0 when it ran. Exit 2 for a usage error, a bad --project, a --thread that is not a file or a --dir that is not
 a directory: stderr carries one line starting `thread-placement: `. Exit 3 when the vault, PyYAML or the import is
@@ -92,7 +110,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RESOLVE_TARGET_PY = os.path.join(HERE, "resolve-target.py")
 GREEN_TIP_PY = os.path.join(HERE, "green-tip.py")
 SELF_ROLLOUT_SH = os.path.join(HERE, "..", "..", "execute", "scripts", "self-rollout-check.sh")
-KINDS = ("split-home", "misnamed", "undeclared", "no-slug", "behind", "side-branch", "workspace")
+RECONCILE_PROJECT_PY = os.path.join(HERE, "reconcile-project.py")
+KINDS = ("split-home", "misnamed", "undeclared", "no-slug", "behind", "side-branch", "workspace", "missing")
 GIT_TIMEOUT = 30
 PROJECTS_PRUNE = frozenset({"_archive", ".claude", ".git", "node_modules"})
 WORKSPACES_PRUNE = frozenset({"_shared", ".claude", ".git", "node_modules", "_archive"})
@@ -127,6 +146,7 @@ except Exception as e:  # a broken install: report it as the check, never as a t
 NA = RT.NA
 real, within = RT.real, RT.within
 _GT = []
+_RP = []
 
 
 def green_tip():
@@ -137,6 +157,21 @@ def green_tip():
         except Exception:  # noqa: BLE001 — a missing or broken resolver reads as no wait (the advice as before)
             _GT.append(None)
     return _GT[0]
+
+
+def phase_n():
+    """reconcile-project.py's PHASE_N (vault-grammar.md § Phase and task filenames), loaded by path on first use: only a
+    `missing` check reads tasks."""
+    if not _RP:
+        try:
+            _RP.append(_load("thread_reconcile_project", RECONCILE_PROJECT_PY))
+        except Exception as e:  # noqa: BLE001 — a broken install: report it as the check, never as a traceback
+            fail(3, "cannot load %s: %s" % (RECONCILE_PROJECT_PY, e))
+    return _RP[0].PHASE_N
+
+
+def kebab(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 def strictly_below(p, r):
@@ -257,6 +292,7 @@ class Estate:
         self._branches = {}
         self._folders = {}
         self._clones = {}
+        self._work = None
         # resolve-target's own git_roots, cached per repo: its directory rungs call it once per folder, and every
         # ~/Projects folder sits in the one umbrella repo.
         self._rt_roots = resolver.git_roots
@@ -371,6 +407,66 @@ class Estate:
             return f, None, None, None
         hr = self.home_repo(main)
         return os.path.join(hr, os.path.relpath(f, top)), hr, top, main
+
+    def ref_threads(self, M):
+        """(local branch refs, origin/HEAD's target or None, {ref: holds THREAD.md}) for main checkout M: one read of
+        the local refs (a broken origin/HEAD symref is not listed) and one batch-check."""
+        g = self.git
+        rc, out = g.run(M, "for-each-ref", "--format=%(refname) %(symref)", HEADS, ORIGIN + "HEAD")
+        heads, defref = [], None
+        for line in (out.split("\n") if rc == 0 else []):
+            name, _, sym = line.partition(" ")
+            if name.startswith(HEADS):
+                heads.append(name)
+            elif name == ORIGIN + "HEAD" and sym.startswith(ORIGIN):
+                defref = sym.strip()
+        queries = heads + ([defref] if defref else [])
+        has = {}
+        if queries:
+            rc, out = g.run(M, "cat-file", "--batch-check", stdin="".join("%s:THREAD.md\n" % q for q in queries))
+            lines = out.split("\n") if rc == 0 else []
+            for q, line in zip(queries, lines):
+                has[q] = " blob " in line
+        return heads, defref, has
+
+    def open_phases(self, t):
+        """{phase prefix: [task stem]}: the Active task notes directly in Work/Tasks whose `projects:` link t, grouped
+        by the literal filename prefix `<slug>-p<N>-` (vault-grammar.md). Work/Tasks is read once per run."""
+        if self._work is None:
+            self._work = []
+            vault = self.index.vault
+            pre = re.compile(r"^(.+?-p%s-)\d+-" % phase_n())
+            try:
+                names = sorted(os.listdir(os.path.join(vault.root, NA.TASKS_DIR)))
+            except OSError:
+                names = []
+            for name in names:
+                m = pre.match(name[:-3]) if name.endswith(".md") else None
+                rel = os.path.join(NA.TASKS_DIR, name)
+                if not m or not os.path.isfile(os.path.join(vault.root, rel)):
+                    continue
+                note = vault.note(rel)
+                tags = NA.tags_of(note) if note.fm is not None else set()
+                if "task" not in tags or tags & {"rollout", "phase", "archived"} or NA.status_of(note) not in NA.OPEN_STATUSES:
+                    continue
+                owners = {vault.resolve_project(link, link=True)[0] for link in NA.links_in(note.get("projects"))} - {None}
+                self._work.append((m.group(1), name[:-3], owners))
+        out = {}
+        for prefix, stem, owners in self._work:
+            if t.rel in owners:
+                out.setdefault(prefix, []).append(stem)
+        return out
+
+    def dir_notes(self, d):
+        """`missing --dir`: the notes whose thread home holds directory d (see the module docstring)."""
+        if strictly_below(d, self.projects):
+            fn = self.folder(d)[0]
+            return [fn] if fn and self.first_qual(fn) else []
+        main = self.roots(d)[1]
+        if not main:
+            return []
+        hr = self.home_repo(main)
+        return [t for t in self.declarers(hr) if self.first_qual(t) == hr]
 
     def branch(self, top):
         if top not in self._branches:
@@ -612,22 +708,7 @@ class Audit:
         for M in sorted(mains):
             g = est.git
             owners = est.declarers(est.home_repo(M))
-            # One read of the local refs: every branch, and origin/HEAD's target (a broken symref is not listed).
-            rc, out = g.run(M, "for-each-ref", "--format=%(refname) %(symref)", HEADS, ORIGIN + "HEAD")
-            heads, defref = [], None
-            for line in (out.split("\n") if rc == 0 else []):
-                name, _, sym = line.partition(" ")
-                if name.startswith(HEADS):
-                    heads.append(name)
-                elif name == ORIGIN + "HEAD" and sym.startswith(ORIGIN):
-                    defref = sym.strip()
-            queries = heads + ([defref] if defref else [])
-            has = {}
-            if queries:
-                rc, out = g.run(M, "cat-file", "--batch-check", stdin="".join("%s:THREAD.md\n" % q for q in queries))
-                lines = out.split("\n") if rc == 0 else []
-                for q, line in zip(queries, lines):
-                    has[q] = " blob " in line
+            heads, defref, has = est.ref_threads(M)
             if defref is None:
                 if M in held or os.path.isfile(os.path.join(M, "THREAD.md")) or any(has.get(h) for h in heads):
                     if est.origin_url(M):
@@ -670,6 +751,42 @@ class Audit:
                         "merge %s into %s and push it, or delete the branch once its thread has moved" % (others[0], default),
                         owners, copies=[]))
 
+    # -- the missing thread --
+
+    def missing_tier(self, notes, session=False):
+        """`missing` (ADR 0039 d7) for each of `notes`: see the module docstring. Needs walk_repos() and
+        walk_projects() first."""
+        est, tl = self.est, self.tl
+        shared = os.path.join(est.workspaces, "_shared", "threads")
+        homes = None
+        for t in sorted(set(notes), key=lambda n: n.rel):
+            H = est.first_qual(t)
+            if H is None:
+                continue
+            if homes is None:  # the home repo of every repo-tier thread's identity, as repo_tier groups them
+                homes = {est.identity(f)[1] for f in self.scanned["repo_threads"] + self.scanned["repo_misnamed"]}
+            if H in homes:
+                continue  # in H, a subdirectory, a linked worktree or a clone (a misnamed THREAD*.md: misnamed says so)
+            if any(est.ref_threads(H)[2].values()):
+                continue  # on a branch or on origin: side-branch or behind says so
+            if any(t in est.folder_owners(os.path.dirname(f)) for f in self.scanned["project_threads"]):
+                continue  # a folder thread: split-home says where it belongs
+            if any(os.path.isfile(os.path.join(shared, x + ".md")) for x in {kebab(t.name), os.path.basename(H).lower()} if x):
+                continue  # a _shared thread named like it: its migration is project-structure-audit's (ADR 0039)
+            if session:
+                why = "the calling session's work continues in another session"
+            else:
+                multi = sorted((p, s) for p, s in est.open_phases(t).items() if len(s) >= 2)
+                if not multi:
+                    continue
+                prefix, stems = multi[0]
+                why = "phase %s has %d open tasks (%s)" % (prefix.rstrip("-"), len(stems), ", ".join(sorted(stems)))
+            self.findings.append(finding(
+                "missing", os.path.join(H, "THREAD.md"),
+                "%s's thread home is %s and no thread records its work, while %s: no session's close finds a thread to "
+                "log into (ADR 0039 d7)" % (t.name, tl(H), why),
+                "create %s/THREAD.md by open § Creating a new thread" % tl(H), [t]))
+
     @staticmethod
     def waits_on_green(M, default):
         """M waits on the Green tip (green-tip.py's waits: local, no network, no write); False when it cannot tell."""
@@ -711,6 +828,8 @@ class Audit:
             if projects is not None:
                 mains = {m for m in mains if {t.rel for t in est.declarers(est.home_repo(m))} & projects}
             self.git_checks(mains)
+            if projects is not None:
+                self.missing_tier([est.index.by_rel[r] for r in projects])
         if projects is not None:
             keep = {slash(r) for r in projects}
             self.findings = [f for f in self.findings if keep & set(f["owners"])]
@@ -789,7 +908,12 @@ def main(argv):
     g = hm.add_mutually_exclusive_group(required=True)
     g.add_argument("--dir")
     g.add_argument("--project")
-    for s in (a, hm):
+    ms = sub.add_parser("missing", allow_abbrev=False)
+    g = ms.add_mutually_exclusive_group(required=True)
+    g.add_argument("--dir")
+    g.add_argument("--project", action="append")
+    ms.add_argument("--session", action="store_true")
+    for s in (a, hm, ms):
         s.add_argument("--vault", default=RT.VAULT_DEFAULT)
         s.add_argument("--launch-folders", default=RT.LAUNCH_FOLDERS_DEFAULT)
     args = p.parse_args(argv)
@@ -799,13 +923,13 @@ def main(argv):
         if not os.path.isfile(thread):
             fail(2, "--thread %s is not a file" % args.thread)
         thread = real(thread)
-    if args.cmd == "home" and args.dir is not None:
+    if args.cmd in ("home", "missing") and args.dir is not None:
         d = os.path.expanduser(args.dir)
         if not os.path.isdir(d):
             fail(2, "--dir %s is not a directory" % args.dir)
         d = real(d)
     home = RT.Home()
-    if d is not None and not strictly_below(d, real(home.projects)):
+    if args.cmd == "home" and d is not None and not strictly_below(d, real(home.projects)):
         # No ~/Projects folder, so no folder note: nothing to print, and no reason to need PyYAML or the vault.
         # Handoff runs this from every launch directory, a repo included.
         return 0
@@ -821,6 +945,16 @@ def main(argv):
         repo = est.home_dir(d) if d is not None else est.first_qual(resolve_note(vault, index, args.project))
         if repo:
             sys.stdout.write(repo + "\n")
+        return 0
+    if args.cmd == "missing":
+        notes = est.dir_notes(d) if d is not None else [resolve_note(vault, index, n) for n in args.project]
+        au = Audit(est)
+        if notes:  # a launch directory in no thread home walks nothing
+            au.walk_repos()
+            au.walk_projects()
+            au.missing_tier(notes, session=args.session)
+        for f in au.findings:
+            sys.stdout.write("%s: %s — %s · fix: %s\n" % (f["kind"], f["path"], f["detail"], f["fix"]))
         return 0
     projects = {resolve_note(vault, index, n).rel for n in args.project} if args.project else None
     au = Audit(est)
