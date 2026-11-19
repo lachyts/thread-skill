@@ -138,7 +138,11 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # and tests/leg.test.sh at 1581 s, both healthy. The slowest passing macos-latest times seen, 19 jobs (PR full runs and
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
-# leg.test.sh's 1581 s and 1891 s are now split across its four files (p54-9), 1891 by the parts' measured shares.
+# The four leg rows and primary-refresh's are the slowest passes in master's full-suite.yml macOS shards from
+# 2026-11-16T15:00Z (every run after the p54-9 split) to 2026-11-19, 94 jobs with a runner. Every other row was checked
+# against that window's slowest pass and none is under it: lead-integrate 528, unfinished-rollout 299, land 280,
+# fast-tier 425, reconcile-rollout-queue 331 and serial-chains 275 s. A FAILED cut line is not a pass, so the two
+# cut-run estimates below stand.
 # Three rows are master's macOS shard 3/4, 2026-11-17 to 18, and two of them are estimates, since that shard cut those
 # runs at their bounds: a cut run's full time is its cut seconds over the share of a lone local run's time its last
 # check had reached (tests/shard-weights.tsv's header holds the reading).
@@ -150,13 +154,13 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # bound (hand-set weight 86) leaves 1.5x over the 680 s. tests/serial-chains.test.sh's 275 s is job 134402170137, where
 # it passed.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
-ci_max="tests/leg.test.sh 550
-tests/leg-land.test.sh 565
-tests/leg-rank.test.sh 355
-tests/leg-security.test.sh 421
+ci_max="tests/leg.test.sh 346
+tests/leg-land.test.sh 311
+tests/leg-rank.test.sh 228
+tests/leg-security.test.sh 467
 tests/lead-integrate.test.sh 735
 tests/unfinished-rollout.test.sh 613
-tests/primary-refresh.test.sh 543
+tests/primary-refresh.test.sh 834
 tests/land.test.sh 297
 tests/fast-tier.test.sh 680
 skills/execute/tests/reconcile-rollout-queue.test.sh 535

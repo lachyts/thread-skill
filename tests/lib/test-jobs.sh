@@ -57,8 +57,9 @@
 # CI. 12x leaves 1.5x over the worst finished run (serial-chains, 420 s against 275), and tests/test-jobs.test.sh holds
 # the real bounds to 1.5x those CI times and the two estimates. 12x also keeps every bound but lead-integrate's under
 # macOS's 35-minute shard limit (.github/workflows/full-suite.yml), past which the job limit, not the bound, would cut
-# a hang. A small suite's hang still shows red in 5 minutes (the floor); 1200 s with no weight clears every suite's
-# macOS time but leg's (lead-integrate next, 735 s).
+# a hang. A small suite's hang still shows red in 5 minutes (the floor); since the leg split (p54-9), 1200 s with no
+# weight clears every suite's macOS time, the slowest being tests/primary-refresh.test.sh at 834 s (2026-11-16 to 19),
+# held in tests/test-jobs.test.sh's ci_max.
 # SUITE_POLL_JUMP is a few polls' worth: a loaded machine's
 # `sleep 1` overruns by far less, and a Mac sleep or a suspend by far more. SUITE_STOP_GRACE sits under
 # verify-slot.py's KILL_GRACE (10 s): a guard that ends a run TERMs run.sh's group, and run.sh's own TERM trap then

@@ -18,7 +18,9 @@
 # sum the two self-tests, and rewrite this file whole, keeping the two hand-set rows below at least as high. A suite or
 # node file added since falls back to its size times the median seconds per byte of its kind (shard.py).
 # The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
-# leg.test.sh's 527 s split by the parts' measured shares of two local runs, until the next regenerate.
+# their own, until the next regenerate: each is the median of its `<label>: ok (<N>s)` lines in two local `make test`
+# runs at the default cap of 4 (2026-11-19, the Mac at load 9 to 15 under other rollouts): leg.test.sh 168 and 172,
+# leg-land 143 and 143, leg-rank 92 and 92, leg-security 116 and 113.
 # Three rows are their own, until the next regenerate. tests/serial-chains.test.sh is 35, the median of its `<label>: ok
 # (<N>s)` lines in two local full-suite runs at the default cap of 4 (2026-11-18, `make test-fast` falling back to the
 # full suite, the same lines as the Source above): 35 and 35 (33 on 2026-11-09).
@@ -78,10 +80,10 @@
 62	tests/land.test.sh
 244	tests/lead-integrate.test.sh
 34	tests/leg-capacity.test.sh
-158	tests/leg-land.test.sh
-99	tests/leg-rank.test.sh
-117	tests/leg-security.test.sh
-153	tests/leg.test.sh
+143	tests/leg-land.test.sh
+92	tests/leg-rank.test.sh
+114.5	tests/leg-security.test.sh
+170	tests/leg.test.sh
 20.5	tests/live-checkout.test.sh
 2.5	tests/merge-task-bare-blocked.test.sh
 5	tests/merge-task-base-moved.test.sh
