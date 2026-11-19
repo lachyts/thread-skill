@@ -1,10 +1,10 @@
 // The landings line (p11-7, ADR 0028 § 7): a landing the landing carrier cannot move for a day is seen at the next open in
 // its repo and at a /thread:status sitting, off the Stage too. Both read `land-carrier.py stuck`: open filtered to the
 // thread's repo through --slug, status estate-wide. Pins the prose an LLM follows:
-//   open-section       skills/open/SKILL.md § The landings line holds the `# thread:open-landings` snippet (top defaulted
-//                      only, land.sh --origin-slug "$top", then stuck --slug "$s", both from ${CLAUDE_PLUGIN_ROOT}), and
-//                      says: the line verbatim when not null, nothing when null, no line with no GitHub origin, the
-//                      not-read form on a non-zero exit, repo threads only, and that it writes nothing
+//   open-section       skills/open/SKILL.md § The landings line says: the line verbatim when not null, nothing when
+//                      null, no line on any non-zero exit of --origin-slug, the not-read form on a non-zero exit of the
+//                      read, repo threads only, and that it writes nothing (its `# thread:open-landings` snippet is run,
+//                      not pinned: tests/land-carrier.test.sh C15 runs it under bash and zsh -f)
 //   open-callers       `<slug>` step 2, the `[[<task>]]` pickup's step 2 and the handoff-doc pickup's step 3 each cite it
 //   status-line        status § 4's **The Landings line** sits after **The Primary refresh line** and before **The
 //                      Trickle line**, runs `land-carrier.py stuck` with no --slug, prints its `line` verbatim, nothing
@@ -16,10 +16,11 @@
 //   carrier-consumers  land-carrier.py's docstring names both readers among the verb's Consumers
 // The same shape as status-primary-refresh.test.mjs: every rule lives in one function, check(texts), that returns named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
-// place and must fail with exactly its rule. Reads files only. The verb itself is tests/land-carrier.test.sh C15.
+// place and must fail with exactly its rule. Reads files only. The verb itself, and open's snippet, are
+// tests/land-carrier.test.sh C15.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collapse, fencedBlocks, read, section, slice } from '../lib/contract-text.mjs'
+import { collapse, read, section, slice } from '../lib/contract-text.mjs'
 
 const OPEN = 'skills/open/SKILL.md'
 const STATUS = 'skills/status/SKILL.md'
@@ -50,16 +51,11 @@ function step(text, mode, n) {
 function check({ open, status, carrier }) {
   const fails = []
 
-  // open-section: the snippet and its five rules.
-  const sec = section(open, /^## The landings line$/) ?? ''
-  const snippet = fencedBlocks(sec).find((b) => b[0] === '# thread:open-landings') ?? []
-  const prose = collapse(sec)
-  if (!snippet.includes(': "${top:=}"') ||
-    !snippet.some((l) => l.includes(`if s=$(bash "${SCRIPTS}/land.sh" --origin-slug "$top"); then`) &&
-      l.includes(`python3 "${SCRIPTS}/land-carrier.py" stuck --slug "$s"; fi`)) ||
-    !prose.includes("Print its JSON's `line` verbatim when it is not null") ||
+  // open-section: its prose rules (its snippet is run by tests/land-carrier.test.sh C15).
+  const prose = collapse(section(open, /^## The landings line$/) ?? '')
+  if (!prose.includes("Print its JSON's `line` verbatim when it is not null") ||
     !prose.includes('Print nothing when it is null') ||
-    !prose.includes('No line when the repo has no GitHub origin: `--origin-slug` exits 4 and the read never runs') ||
+    !prose.includes('Any non-zero exit of `--origin-slug` (4: no GitHub origin) prints no line, and the read never runs') ||
     !prose.includes(`A non-zero exit of the read prints \`${NOT_READ}\``) ||
     !prose.includes('Repo threads only: a shared or project thread gets no line') ||
     !prose.includes('it writes nothing')) fails.push('open-section')
@@ -131,12 +127,7 @@ const only = (texts, rule, label) => {
   assert.deepEqual(check(texts), [rule], label)
 }
 
-test('control: open\'s snippet or one of its rules changed fails open-section', () => {
-  only(edit(real, 'open', ' --origin-slug "$top"', ' --origin-slug "$PWD"'), 'open-section', 'the slug read from the CWD')
-  only(edit(real, 'open', ' stuck --slug "$s"', ' stuck'), 'open-section', 'no --slug: every repo\'s rows')
-  only(edit(real, 'open', 'python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py"', 'python3 skills/_shared/scripts/land-carrier.py'),
-    'open-section', 'the read not from the plugin root')
-  only(edit(real, 'open', ': "${top:=}"\n', ''), 'open-section', 'top no longer defaulted')
+test('control: one of open\'s rules changed fails open-section', () => {
   only(edit(real, 'open', "Print its JSON's `line` verbatim when it is not null", 'Summarise its JSON when it is not null'), 'open-section', 'not verbatim')
   only(edit(real, 'open', `prints \`${NOT_READ}\``, 'prints nothing'), 'open-section', 'the not-read form dropped')
   only(edit(real, 'open', 'Repo threads only: a shared or project thread gets no line', 'Every thread gets the line'), 'open-section', 'every thread')

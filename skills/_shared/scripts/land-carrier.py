@@ -198,7 +198,7 @@ land.sh's withdrawal calls this verb, and step 5c parses with the same code.
 stuck: a read that writes nothing. One JSON line, {"state", "stuck": [{key, url, kind, movedAt, outcome}], "line"},
 oldest first; `line` is `Landings: <key>: <outcome> (unmoved since <16>) · …`, or null. Due: an open entry 24 h after
 movedAt (never one in the future), a tombstone flagged stuck, a search spell 24 h old (key `search`). --slug OWNER/NAME
-keeps only the rows whose key's repo part (before its last `#`) is that slug, compared casefolded as
+keeps only the rows whose key's repo part (before its last `#`) is that slug, compared case-insensitively, as
 landing-register.py `check --slug` matches, and the search spell, since a failed search carries nothing in any repo;
 `line` is built from the rows kept, null when none is. A slug outside land.sh origin_slug's form (`<owner>/<name>`, a
 name not all dots) is usage. Without --slug the output is every due row, as it always was. Exit 0, 1 when BJ cannot be

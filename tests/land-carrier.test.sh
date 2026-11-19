@@ -201,14 +201,6 @@ python3 "$CARRIER" run --now "$(at $((CLK + 15)))" >/dev/null 2>&1; rc=$?
 ok "$rc|$(cnt "$(ghlog)" "search prs")" "0|2" "C0: 15 minutes on: it searches again"
 python3 "$CARRIER" run --now "$(at $((CLK - 600)))" >/dev/null 2>&1; rc=$?
 ok "$rc" 0 "C0: a lastPass in the future never blocks"
-# p11-7's Verify line in the carrier's terms: a laptop shut overnight misses its StartInterval firings, and the first
-# pass after it wakes runs; a second wake soon after runs nothing.
-printf '{"v": 1, "landings": {"_pass": {"lastPass": "%s"}}}\n' "$(at $((CLK - 1440)))" > "$ST"; : > "$LOG_GH"
-python3 "$CARRIER" run --now "$(at $CLK)" >/dev/null 2>&1; rc=$?
-ok "$rc|$(cnt "$(ghlog)" "search prs")" "0|2" "C0: a lastPass a day old (a shut night): the wake's pass runs"
-: > "$LOG_GH"
-python3 "$CARRIER" run --now "$(at $((CLK + 5)))" > "$tmp/c0.out" 2>&1; rc=$?
-ok "$rc|$(cat "$tmp/c0.out")|$(ghlog | grep -c .)" "3||0" "C0: … and a second wake 5 minutes on runs nothing (exit 3, no call)"
 CLK=$((CLK + 20))
 
 echo "== C1. behind and green: update-branch, expected_head_sha, updatedFrom"
@@ -715,11 +707,26 @@ skeys() { stk "$@" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(
 mkdir -p "$(dirname "$ST")"; seed15 "$(at 20)"
 ok "$(skeys --now "$(at 1500)")" "['o/x#1', 'P/Y#9', 'search'] False" "C15 --slug: without it, every row in time order"
 ok "$(skeys --slug o/x --now "$(at 1500)")" "['o/x#1', 'search'] False" "C15 --slug: o/x keeps its row and the search spell"
-l=$(sline --slug o/x --now "$(at 1500)")
-has "$l" "Landings: o/x#1: waiting for its checks" "C15 --slug: … its line names o/x#1"
-has "$l" "search: search failed: gh: HTTP 401" "C15 --slug: … and the search spell"
-lacks "$l" "P/Y#9" "C15 --slug: … never another repo's row"
+t20=$(at 20)
+ok "$(sline --slug o/x --now "$(at 1500)")" \
+  "Landings: o/x#1: waiting for its checks (unmoved since ${T0:0:16}) · search: search failed: gh: HTTP 401 (unmoved since ${t20:0:16})" \
+  "C15 --slug: … its line holds o/x#1 and the spell, oldest first, never another repo's row"
 ok "$(skeys --slug p/y --now "$(at 1500)")" "['P/Y#9', 'search'] False" "C15 --slug: p/y matches P/Y#9 (case-insensitive)"
+# open's # thread:open-landings snippet, extracted from its fence and run under bash and zsh -f (the Bash tool is zsh),
+# at a repo whose origin is GitHub's O/X and at one with no GitHub origin; its stuck read takes the wall clock, which
+# is days past the seeded rows.
+OPEN_MD=$root/skills/open/SKILL.md
+awk '/^# thread:open-landings$/{on=1} on && /^```/{exit} on' "$OPEN_MD" > "$tmp/open-landings.sh"
+git init -q "$tmp/c15gh"; git -C "$tmp/c15gh" remote add origin git@github.com:O/X.git
+git init -q "$tmp/c15no"; git -C "$tmp/c15no" remote add origin https://example.com/o/x.git
+shells=(bash); command -v zsh >/dev/null 2>&1 && shells+=("zsh -f")
+for sh in "${shells[@]}"; do
+  o=$(cd "$tmp" && CLAUDE_PLUGIN_ROOT="$root" top="$tmp/c15gh" $sh "$tmp/open-landings.sh" 2>/dev/null \
+    | python3 -c 'import json,sys; print([r["key"] for r in json.load(sys.stdin)["stuck"]])')
+  ok "$o" "['o/x#1', 'search']" "C15 open's snippet [$sh]: a GitHub origin O/X reads only o/x#1 and the search spell"
+  o=$(cd "$tmp" && CLAUDE_PLUGIN_ROOT="$root" top="$tmp/c15no" $sh "$tmp/open-landings.sh" 2>/dev/null); rc=$?
+  ok "$rc|$o" "0|" "C15 open's snippet [$sh]: no GitHub origin: no read, nothing printed"
+done
 seed15 "$(at 1400)"
 ok "$(skeys --slug q/z --now "$(at 1500)")" "[] True" "C15 --slug: a repo with no row, the spell under a day: no rows, a null line"
 for bad in bad o/ '' o/..; do

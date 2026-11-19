@@ -98,7 +98,7 @@ if s=$(bash "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh" --origin-slug
 
 - Print its JSON's `line` verbatim when it is not null, as one line of the briefing.
 - Print nothing when it is null: no landing in this repo has been unmoved for a day.
-- No line when the repo has no GitHub origin: `--origin-slug` exits 4 and the read never runs.
+- Any non-zero exit of `--origin-slug` (4: no GitHub origin) prints no line, and the read never runs. An empty or unset `top` is land.sh's usage (exit 2, its usage text on stderr), never the read's failure: set `top` and run it again.
 - A non-zero exit of the read prints `Landings: not read (<its last stderr line>)`.
 - The line is a statement, never a question. It never blocks the open, and it writes nothing: `land-carrier.py stuck` reads landings.json, with no `gh` call and no network.
 
