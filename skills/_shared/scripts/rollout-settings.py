@@ -98,7 +98,11 @@ standing approval (gated_inputs.py's test-Login reading, its part 5), with no li
 gated_inputs.py's `sweep` CLI (its part 1: schedule § 3.6, orient reshuffle R3 (c)) reads it too, through
 resolve(repo=None) in process, only when a `credential:` gate line naming a Login reaches that reading's step 7, so
 schedule and orient record such a gate ahead instead of asking it (p39-3); a file that will not resolve leaves those
-hits unread, so they keep the ask (one `gated_inputs: test_logins:` stderr line, exit 1). It is one
+hits unread, so they keep the ask (one `gated_inputs: test_logins:` stderr line, exit 1). estate-rank.py's `rank`
+(orient-all § 2, schedule's Pre-flight § 1.5) reads it too, through gated_inputs.py's declared_logins() (the same
+resolve(repo=None), in process), once per run and only when the note of a graded task gated `credential` alone holds a
+Login reading that reaches step 7, to waive that task's sign-off charge (ADR 0034's 2026-11-20 amendment); a file that
+will not resolve charges it, with one `test_logins:` line in the rank's warnings[]. It is one
 line under `[defaults]` only, `test_logins = ["<name>", …]`, a trailing comment allowed: a value that spans lines is
 refused at its line (`[defaults] test_logins must be one line: …`), and so is the key in a `[repo."o/r"]` table
 (`… test_logins is machine-wide: set it under [defaults]`). The value (logins_problem(), the first failure wins) is a

@@ -72,7 +72,8 @@ writes nothing but those grades files: no vault edit, no repo or git write, no f
   are the recall floor for `gates`, never the verdict. A hit whose context names nothing the task pays for or
   authorises is dismissed. The sweep reads only the notes, and `[defaults] test_logins` from
   `~/.config/thread/rollouts.toml` (read-only, no git) when a `credential:` gate line naming a Login needs it. A hit's
-  `login` field changes nothing in `gates`: a credential hit schedule would record is still a `credential` gate. A
+  `login` field changes nothing in `gates`: a credential hit schedule would record is still a `credential` gate. Its
+  sign-off is the ranker's to waive, never the grade's (§ The ranking, **Leverage**). A
   `gated_inputs: test_logins:` stderr line (exit 1) means only that the declared test Logins could not be read: every
   note still printed, so the hits stand as read (fail closed), never a sweep failure.
 
@@ -193,7 +194,9 @@ decision of his it may hide, owner `yours`, `confidence: low`.
   external publish is `irreversible`, per execution-fit.md's ruling (a).
 - `eyeCheck`: `true` when only Lachy can judge the result (how it looks, sounds, reads or feels).
 
-Together they are the task's Review load: a parallel task's PR to read, a sign-off for its gates, an eye-check.
+Together they are the task's Review load: a parallel task's PR to read, a sign-off for its gates (none for a
+`credential` gate naming only a declared test Login, which the ranker reads from the note itself: § The ranking), an
+eye-check.
 
 ## Output
 
@@ -298,8 +301,13 @@ unparked, by an offer or by hand, the next pass lists its Orient tasks.
 decision (none for Ready), plus the Review load at `REVIEW_MINUTES` per item (a parallel task's PR, a sign-off when it
 has gates, an eye-check when `eyeCheck` is set). A gate of any kind costs the sign-off, `spend` included: the ranker
 sees a gate's kind, never its price, the standing approval's limit or the month line, so a spend gate the standing
-approval would sign is still charged (ADR 0034's 2026-10-27 amendment, residual (x)). A session task adds its whole
-agent time, since Lachy is there throughout.
+approval would sign is still charged (ADR 0034's 2026-10-27 amendment, residual (x)). One exception: a task gated
+`credential` alone, whose note's every credential hit is a `credential:` gate line naming only declared test Logins
+(the sweep's `login.names`, under the machine's `[defaults] test_logins`; the recorded test-Login Planner line left
+out), costs no sign-off, since execute's standing approval signs it at the stop (ADR 0034's 2026-11-20 amendment). The
+ranker reads that from the note itself, fail closed: any other credential hit, an unreadable note, no declaration or a
+refused file charges it. A test-credential class gate (ADR 0063) is still charged: the class needs `--repo` and its
+keys' presence (ADR 0063 residual (viii)). A session task adds its whole agent time, since Lachy is there throughout.
 
 **Runs.** The candidate runs group the ranked parallel and serial tasks by home, shape and root:
 

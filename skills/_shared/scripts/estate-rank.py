@@ -17,10 +17,12 @@ yields the Unpark offers. It spawns nothing and asks nothing. python >= 3.9 with
         [--vault PATH]
 
 Defaults: rank takes today and the vault from the scan JSON's `today` and `vault`; snooze, unpark and kill take the
-local date and ~/repos/obsidian. `rank` writes nothing: it reads the scan, the grades files and, for each parked
-project, its note's snooze keys. `snooze` writes two frontmatter keys on one project note, or with --clear removes
-them; `unpark` and `kill` are the Unpark offer's other two writes (readiness-grade.md § The Unpark offer), each one
-save of one project note. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before any sibling
+local date and ~/repos/obsidian. `rank` writes nothing: it reads the scan, the grades files, for each parked project
+its note's snooze keys, for each graded task gated `credential` alone its note, and, once per run and only when one
+such note's Login reading reaches step 7, rollouts.toml's `[defaults] test_logins` (GI.declared_logins:
+resolve(repo=None), in process, no git). `snooze` writes two frontmatter keys on one project note, or with --clear
+removes them; `unpark` and `kill` are the Unpark offer's other two writes (readiness-grade.md § The Unpark offer), each
+one save of one project note. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before any sibling
 loads). Exit 0 when done (every per-task problem is inside the JSON); 2 on a usage error or a refusal (one
 `estate-rank:` stderr line, nothing written): a scan that is not JSON or whose `schema` is not 1, a grades file that
 is not JSON or not an object or array, an unknown verb or flag, and every snooze, unpark and kill refusal; 3 when the
@@ -28,10 +30,11 @@ vault, PyYAML or a sibling script is missing.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract test reads its
 constants that way): resolve-target.py (RT: dead_why), and through it next-action.py (RT.NA: Vault, resolve_project,
-Note with its edited and save, status_of, Refused, and the ODD_BREAKS, LOADER and yaml its edit reads by);
-estate-scan.py (ES: as_date, jsonable, STANDING_RANK, standing_of and still_to_start), so the estate pass keeps one
-frontmatter reader, one date reader, one status-to-standing rule and one statement of § In flight's exception; and,
-for `rank` only, gated_inputs.py (GI: sweep, the sign-off backstop's word lists; load_gated, a load failure exit 3).
+Note with its edited and save, and its lines, span, text and error for the sign-off reading, status_of, Refused, and
+the ODD_BREAKS, LOADER and yaml its edit reads by); estate-scan.py (ES: as_date, jsonable, STANDING_RANK, standing_of
+and still_to_start), so the estate pass keeps one frontmatter reader, one date reader, one status-to-standing rule and
+one statement of § In flight's exception; and, for `rank` only, gated_inputs.py (GI: sweep, the sign-off backstop's
+word lists; NO_LOGINS_WHY and declared_logins, for the sign-off reading; load_gated, a load failure exit 3).
 
 The inputs:
 - The scan: estate-scan.py's schema 1. Read: tasks {slug, note, title, statusClass, inFlight, projects, due,
@@ -88,9 +91,11 @@ agent's grade (`why: "decisions"`); then any `low` decision of his raises it one
 stays Orient. A ruled decision never raises.
 
 Figures: agentMinutes = SIZE_MINUTES[size]; decisionMinutes = DECISION_MINUTES[grade] per decision of his (0 for Ready
-and Orient); review {pr: 1 for a parallel task, signOff: 1 with any gate, eyeCheck: 1 when set, minutes}; attentionMinutes =
-decision + review minutes, plus agentMinutes for a session task; leverage = agentMinutes / max(ATTENTION_FLOOR,
-attentionMinutes), sorted exact and printed to 2 places; deadline = the earlier of the scan row's `due` (ES.as_date)
+and Orient); review {pr: 1 for a parallel task, signOff: 1 with any gate, except a task gated `credential` alone whose
+note's every credential hit is a `credential:` gate line naming only declared test Logins (recorded_login(); ADR 0034's
+2026-11-20 amendment), eyeCheck: 1 when set, minutes}; attentionMinutes = decision + review minutes, plus agentMinutes
+for a session task; leverage = agentMinutes / max(ATTENTION_FLOOR, attentionMinutes), sorted exact and printed to 2
+places; deadline = the earlier of the scan row's `due` (ES.as_date)
 and the grade's `deadline.date`, with its source; dueSoon = deadline <= today + DUE_SOON_DAYS.
 
 Holds (readiness-grade.md § Dependencies): each `dependsOn` entry is cut to its basename (no `.md`) and matched to an
@@ -178,6 +183,9 @@ SCHEMA = 1
 SCAN_SCHEMA = 1
 VAULT_DEFAULT = "~/repos/obsidian"
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# Schedule § 7's recorded test-Login Planner line (orient's R5.2 writes the same), left out of the sign-off reading
+# (recorded_login()): its own words name credentials. The prefix reflect.py's RECORDED_CREDENTIAL_RE keys on.
+TEST_LOGIN_PLANNER_RE = re.compile(r"^- Planner: word each test-Login gate[^\n]*", re.M)
 
 # The tunable constants: readiness-grade.md § The ranking's table pins each one
 # (tests/contracts/readiness-grade.test.mjs).
@@ -347,6 +355,7 @@ class Ranker:
         self.warnings = []
         self._vault = None
         self._reach = {}
+        self._test_logins = None
 
     def warn(self, line):
         self.warnings.append(line)
@@ -674,13 +683,70 @@ class Ranker:
                     d["owner"] = "yours"
                     break
 
+    # ---- the sign-off reading (p48-3, ADR 0034's 2026-11-20 amendment) ---------------------------------------------
+
+    def test_logins(self):
+        """The machine's declared test Logins (GI.declared_logins: rollouts.toml's `[defaults] test_logins` through
+        rollout-settings.py's resolve(repo=None), in process, no git), read at most once per run and only when
+        recorded_login() reaches its step 7. A file that will not resolve reads as [] (every such gate charged), with
+        one `test_logins:` warning per run."""
+        if self._test_logins is None:
+            logins, why = self.GI.declared_logins()
+            if logins is None:
+                self.warn("test_logins: %s; a credential gate naming a Login is charged its sign-off" % why)
+                logins = []
+            self._test_logins = logins
+        return self._test_logins
+
+    def recorded_login(self, slug):
+        """True when a task gated `credential` alone costs no sign-off: schedule § 3.6 and orient's reshuffle R3 (c)
+        record its gate ahead, and execute's standing approval signs it at the stop with no question (ADR 0034's
+        2026-11-20 amendment; readiness-grade.md § The ranking, **Leverage**). The ranker reads that from the note
+        itself, never from the grade, so it holds under the machine's declaration of now. Fail closed, the first
+        failure answers False (the sign-off charged):
+          1. the scan row's `note` is a non-empty str, not absolute, with no `..` segment;
+          2. the note, loaded from the vault, is readable (a note deleted since the scan is not);
+          3. its body is the text below its frontmatter, by the Note's span (next-action's reading, which a CRLF fence
+             does not fool), else its whole text; every TEST_LOGIN_PLANNER_RE line in it is blanked, since that
+             line's own words name credentials;
+          4. GI.sweep(body, []) finds at least one credential hit;
+          5. every credential hit carries a `login` field: it sits on a `credential:` gate line naming a Login (a
+             prose hit, a service name or an env key has none);
+          6. every such reading stops at step 7 (its why is GI.NO_LOGINS_WHY), so no deny word, other credential,
+             conjunction or second Login is on any gate line, and the settings are read for nothing else;
+          7. the declared test Logins (test_logins()) are non-empty, and under them every credential hit's reading
+             names its Logins (`login.names`): an undeclared Login is charged.
+        A test-credential class gate (ADR 0063) is charged still: the class needs `--repo` and its keys' presence in
+        the env file, which the ranker cannot see (ADR 0063 residual (viii))."""
+        rel = self.tasks[slug].get("note")
+        if not isinstance(rel, str) or not rel or os.path.isabs(rel) or ".." in rel.split("/"):
+            return False
+        note = self.vault().note(os.path.join(*rel.split("/")))
+        if note.error == "unreadable":
+            return False
+        body = "".join(note.lines[note.span[1] + 1:]) if note.span else note.text
+        body = TEST_LOGIN_PLANNER_RE.sub("", body)
+        if self.GI is None:
+            self.GI = load_gated()
+        hits = self.GI.sweep(body, [])["credential"]
+        if not hits or not all("login" in h for h in hits):
+            return False
+        if any(h["login"]["why"] != self.GI.NO_LOGINS_WHY for h in hits):
+            return False
+        logins = self.test_logins()
+        if not logins:
+            return False
+        hits = self.GI.sweep(body, logins)["credential"]
+        return bool(hits) and all(h.get("login", {}).get("names") for h in hits)
+
     # ---- figures ---------------------------------------------------------------------------------------------------
 
     def figures(self, slug, g):
         t, home = self.tasks[slug], self.home[slug]
         agent = SIZE_MINUTES[g["size"]]
         dmin = DECISION_MINUTES.get(g["grade"], 0) * len(g["decisions"])
-        review = {"pr": 1 if g["shape"] == "parallel" else 0, "signOff": 1 if g["gates"] else 0,
+        waived = g["gates"] == ["credential"] and self.recorded_login(slug)
+        review = {"pr": 1 if g["shape"] == "parallel" else 0, "signOff": 1 if g["gates"] and not waived else 0,
                   "eyeCheck": 1 if g["eyeCheck"] else 0}
         review["minutes"] = sum(review[k] * REVIEW_MINUTES[k] for k in REVIEW_MINUTES)
         attention = dmin + review["minutes"] + (agent if g["shape"] == "session" else 0)

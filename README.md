@@ -600,7 +600,9 @@ it runs:
   decision's `fork` passed through, each decision's Owner (his decisions asked, counted and charged; technical and
   priorities calls ruled into `decidedForYou`, a technical guess dropped, `gate`, an unknown owner, a fork and a
   credential named on a credential-gated task read as his) with its `goal` and `stakes` (required with an explicit
-  `owner: yours`, reordered with the options), usage exits, byte-equal reruns and read-only runs;
+  `owner: yours`, reordered with the options), a credential gate naming only a declared test Login charged no sign-off
+  (any other credential hit, no declaration or a refused file still charged, and the file read only when a note needs
+  it), usage exits, byte-equal reruns and read-only runs;
   `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants (the
   Owners included) and its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, the three kinds
   of fork, CONTEXT.md's terms and ADR 0041's ruling.

@@ -8,9 +8,9 @@
     EOF
 
 The single home of the readings of free text (and the one env-file read) the gate path needs. Stdlib only; it writes
-nothing and makes no network call; the sweep CLI alone also reads `~/.config/thread/rollouts.toml`'s `[defaults]
-test_logins` through rollout-settings.py's resolve(repo=None), only when a reading needs it (part 1), with no git and
-no bytecode.
+nothing and makes no network call; the sweep CLI, and declared_logins() for estate-rank.py rank, also read
+`~/.config/thread/rollouts.toml`'s `[defaults] test_logins` through rollout-settings.py's resolve(repo=None), only when
+a reading needs it (part 1), with no git and no bytecode.
 
 1. The sweep (schedule § 3.6; orient reshuffle R3 through it). `sweep(text)` finds every hit of the SPEND,
    CREDENTIAL and IRREVERSIBLE lists in a task note's body. A word matches case-insensitively where a word starts
@@ -418,7 +418,7 @@ IRREVERSIBLE_THINGS, SERVICES, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, 
 PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, widest_exposure, CEILING_USD, UNCAPPED, covered, annotation,
 format_usd, gate_kind, credential_reading, read_env, env_proof, bootstrap_refreshes, credential_covered,
 credential_annotation, MAX_ENV_BYTES, DENY_NOUNS, has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY,
-APPROVED_SUFFIX_RE.
+APPROVED_SUFFIX_RE, declared_logins.
 """
 import base64
 import binascii
@@ -1796,12 +1796,13 @@ def _exposure_cli():
     return 0
 
 
-def _declared_logins():
+def declared_logins():
     """(logins, None) or (None, why): the machine's declared test Logins, rollouts.toml's `[defaults] test_logins`
     through rollout-settings.py's resolve(repo=None), loaded from beside this file as reconcile-rollout.py's
-    _settings_module loads it, the why in _machine_settings' words. The sweep CLI's alone (module docstring, 1): it
-    turns bytecode writing off for the process first, so the loads leave no __pycache__ beside the scripts, and with
-    no repo resolve() runs no git and no subprocess."""
+    _settings_module loads it, the why in _machine_settings' words. The sweep CLI's (module docstring, 1) and
+    estate-rank.py rank's (its sign-off reading, ADR 0034's 2026-11-20 amendment): it turns bytecode writing off for the
+    process first, so the loads leave no __pycache__ beside the scripts, and with no repo resolve() runs no git and no
+    subprocess."""
     sys.dont_write_bytecode = True
     try:
         spec = importlib.util.spec_from_file_location(
@@ -1834,7 +1835,7 @@ def _sweep_cli(paths):
         out = sweep(body, [])   # steps 1-6 never read `logins`, so a reading that stops there is already final
         if any(h.get("login", {}).get("why") == NO_LOGINS_WHY for h in out["credential"]):
             if declared is None:
-                declared = _declared_logins()
+                declared = declared_logins()
             logins, why = declared
             if logins is None:   # unread: today's shape, no `login` key, so every hit keeps the ask
                 out = sweep(body)
