@@ -60,7 +60,8 @@
 //       names it among the commands it never runs.
 //   o15 the children stay silent (Lachy's ruling, 2026-11-07): every `create_thread` § 7 spells out (`create_thread`
 //       with ...) passes `report_back: false`, step 4.6's Codex Desktop starts pass it too, § 9 prints it on each call
-//       it would make, and nothing in the skill turns report-back on.
+//       it would make, nothing in the skill turns report-back on, and § 8 answers a report's or a relay's Close in
+//       one line.
 // One pure function, check(files, consts), returns the failing rules; every control mutates one place and fails exactly
 // its rule. Reads files only (the python child imports estate-dispatch.py, which runs nothing at import).
 import { test } from 'node:test'
@@ -385,6 +386,7 @@ function check(files, consts) {
   need('o15', '§ 7 step 4.6', s7, ["Every item it starts with that host's `create_thread` passes `report_back: false`"])
   need('o15', '§ 9', s9, ['`report_back: false`'])
   if (/report_back(?:`? on\b|: true|` at its default)/.test(all)) flag('o15', 'the skill turns report-back on')
+  need('o15', '§ 8', s8, ['`[Reported back by Chorus from …`', '`[Relayed back by Chorus from …`'])
 
   return { fails: [...fails].sort(), details }
 }
@@ -557,11 +559,18 @@ test('control o12: a lead found by name alone or by where its line ends, a loose
     'Two Sessions whose lines name the slug: start nothing for the item, and name\n      both by id'), CONSTS, ['o12'], 'exactly two')
 })
 
-test('control o15: a create_thread call without `report_back: false`, a Codex Desktop start left on, a dry run that hides it, or report-back turned on, fails o15 alone', () => {
-  only(swap(FILES, SKILL, ", and `report_back: false`.\n      A child stays silent", '.\n      A child stays silent'), CONSTS, ['o15'], 'step 5')
-  only(swap(FILES, SKILL, "Every item it starts with that host's\n      `create_thread` passes `report_back: false`, as step 5 does",
-    "Every item it starts with that host's\n      `create_thread` leaves `report_back` at its default"), CONSTS, ['o15'], 'step 6')
-  only(swap(FILES, SKILL, ', `cwd` and `report_back: false`)', ' and `cwd`)'), CONSTS, ['o15'], 'dry run')
-  only(swap(FILES, SKILL, ', and `report_back: false`.\n      A child stays silent', ', and `report_back: true`.\n      A child stays silent'),
-    CONSTS, ['o15'], 'turned on')
+test('control o15: a create_thread call without `report_back: false`, a Codex Desktop start that drops it, a dry run that hides it, report-back turned on, or a relay Close § 8 leaves unanswered, each trips one part of o15 alone', () => {
+  // One detail per mutation: no part of o15 passes on another part's catch.
+  const alone = (files, what) => {
+    const r = check(files, CONSTS)
+    assert.deepEqual(r.fails, ['o15'], `${what}: ${r.details.join('\n')}`)
+    assert.equal(r.details.length, 1, `${what} trips more than one part of o15: ${r.details.join('\n')}`)
+  }
+  alone(swap(FILES, SKILL, ", and `report_back: false`.\n      A child stays silent", '.\n      A child stays silent'), 'step 5')
+  alone(swap(FILES, SKILL, "`create_thread` passes `report_back: false`, as step 5 does",
+    "`create_thread` passes its `title`, `prompt`, `tldr` and `cwd`, as step 5 does"), 'step 6')
+  alone(swap(FILES, SKILL, ', `tldr` and `report_back: false`)', ' and `tldr`)'), 'dry run')
+  alone(swap(FILES, SKILL, ', and `report_back: false`.\n      A child stays silent',
+    ', and `report_back: false`. A repair item passes `report_back: true`.\n      A child stays silent'), 'turned on')
+  alone(swap(FILES, SKILL, ', or `[Relayed back by Chorus from …` (a', ' (a'), 'relay Close')
 })

@@ -349,9 +349,11 @@ execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`f
       A child stays silent when it closes (Lachy's ruling, 2026-11-07): its result lives in its own Session and the
       vault, what needs him it raises itself, and this session closes once it has dispatched everything. With
       report-back on, the Stage sent each child's Close here as a new Prompt, waking this session long after its work
-      was done. The opt-out cuts the chain at the child (Chorus ADR 0094): a Handoff the child raises, a Leg's
-      handover or a repair's restarted Leg, begins a fresh chain there and reports to the child, never here. A Leg
-      item gets no card from this session (the Stage opens Leg 1 from the Waiting list), so no chain begins here.
+      was done. The opt-out cuts the chain at the child (Chorus ADR 0094): a Handoff the child raises, a repair's
+      take-over Leg included, begins a fresh chain there and reports to the child, never here. A Leg's handover on
+      the Stage raises no card (`skills/execute/legs.md` § Hand over), nor does a repair's listed restart, and the
+      Stage's own Leg start carries no chain, so that Leg reports nowhere. A Leg item gets no card from this session
+      (the Stage opens Leg 1 from the Waiting list), so no chain begins here.
       An execute item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
       a repair item beside its lead still does. A `Raised (task_id: …)` result
       is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held card stays
@@ -436,8 +438,9 @@ One message of statements, no question:
 - the session-lane work, listed and never started;
 - the caveats.
 
-A later Prompt that opens `[Reported back by Chorus from …` gets one statement line, `<title> reported: <outcome>`,
-with no tool call and no question.
+A later Prompt that opens `[Reported back by Chorus from …`, or `[Relayed back by Chorus from …` (a relayed item's
+Close: `relay_session` has no opt-out), gets one statement line, `<title> reported: <outcome>`, with no tool call and
+no question.
 
 ### 9. Dry run
 
@@ -452,8 +455,8 @@ with no `--write`, lists the calls the forks would write.
 It prints the slate (§ 3's glance), the decision batch (each AskUserQuestion call's questions, then the grill list,
 each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), the Decided for you list and the dispatch
 plan: each batch's schedule args with the execute each would start or the chain each would list, then each item
-with its cwd and prompt, and for each item but a Leg item the `create_thread` call § 7 step 4.5 would make with no
-candidate (its `title`, `prompt`, `tldr`, `cwd` and `report_back: false`),
+with its cwd and prompt, and for each item but a Leg item the rest of the `create_thread` call § 7 step 4.5 would
+make with no candidate (its `title`, `tldr` and `report_back: false`),
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
 It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `waits-on.py write`, `approve-gates`, `stamp-start`,
