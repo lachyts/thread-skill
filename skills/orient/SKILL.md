@@ -177,7 +177,9 @@ and Drift and the slots for each swept project.
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py audit --project "<note>" [--project "<note>"]…`
   once, with one `--project` per note swept (each its vault-relative path). Keep its summary line, its finding
   lines (`<kind>: <path> — <detail> · fix: <fix>`) and its `unchecked:` lines for § 3. Report-only: it writes
-  nothing, and orient moves no thread on it. A scoped target runs none. A non-zero exit is one
+  nothing, and orient moves no thread on it. Its `missing` finding (ADR 0039 d7: a swept project whose thread home
+  holds no thread while a phase of it has two or more open tasks) is the one orient acts on, by creating the
+  thread in § 6's **The missing thread.** A scoped target runs none. A non-zero exit is one
   `thread-placement:` line in § 3, never a blocker.
 - **Declared check** (ADR 0036 d6; CONTEXT.md **Declared check**): for a project target only, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py run "<note>"` once, with
@@ -245,7 +247,9 @@ A situational report written for Lachy catching up, not a log:
   dry run's `phase <slug> left open: …` skipped line rides with that task.
 - **Placement**: the § 2 audit's summary line, then one line per finding with its fix, and its
   `unchecked:` lines; or its one `thread-placement:` line. Omit the line on `placement: none`.
-  Report-only: a misplaced thread is moved by project-structure-audit or by Lachy, never by this run.
+  Report-only: a misplaced thread is moved by project-structure-audit or by Lachy, never by this run. A `missing`
+  finding is named as the thread this run creates before it routes (§ 6, **The missing thread.**), or, on a Look-only
+  run, as the thread the next default or Steer-only orient creates.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
   overlaps found in related projects, and any live rollout; plus the declared check's entries
   (§ 2), each a loose item until the reshuffle places it, or its one audit line.
@@ -390,6 +394,21 @@ marker. One taken out three times (`taken_out_next: you`) is frozen: it waits on
 R4's, and R3's grill comes after the start (`skills/orient/backlog.md` § B3, § B4).
 
 ### 6. Route
+
+**The missing thread** (ADR 0039 d7). Multi-session work with no thread leaves every session's close nowhere to log:
+the consumer of a handoff finds no THREAD.md, and the work's story lands only in task notes. So before anything
+below routes, a default or Steer-only run on a project or area target runs
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py missing --project "<note>" [--project "<note>"]…`
+once, one `--project` per note § 2 swept, after § 4's fixes and § 5's writes, so a phase the reshuffle has just
+written counts. It prints one `missing: <repo>/THREAD.md — <detail> · fix: <fix>` line per project whose thread home
+holds no thread while a phase of it has two or more open tasks, and nothing otherwise. For each distinct path it
+names, create that `<repo>/THREAD.md` by `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Creating a new thread, asked
+of no one: this run is the go-ahead, as it is for the drift fixes. Its slug comes from the project's name, its
+one-line scope from the project note, and its first Session log line is `- <YYYY-MM-DD>: thread created by orient —
+<the line's detail>`; the repo's first close commits it (close step 7.1). Report `thread created: <path>` with the
+line's detail. It runs before any handoff below, so a handoff's doc carries the thread's slug as its `thread:` and
+the consumer's close finds the thread (close rung 2, or rung 3 in the repo). Look only, a dry run and a scoped target
+create nothing (§ 3 names the finding instead), and a non-zero exit is one `thread-placement:` line, never a blocker.
 
 - **Run the execution-fit test**, three-way, on each phase the reshuffle touched and on each other
   open cluster, and name its outcome: parallel-shaped, serial-shaped or session lane. Mixed sets
@@ -643,7 +662,7 @@ given). It resolves, asks, reads and writes nothing.
 ## Steps that need no ask
 
 The reads and read-only commands this skill runs (`resolve-target.py` without `--learn`, `next-action.py read`, the
-reconcile dry run, `thread-placement.py audit`, a plain `declared-check.py run`, `git status` and `git log`;
+reconcile dry run, `thread-placement.py audit` and `missing`, a plain `declared-check.py run`, `git status` and `git log`;
 `backlog.md` and `reshuffle.md` included), and a re-run of one that died on a network error, are taken on your own:
 none of them writes anything. Only the *yours* questions this skill names reach Lachy
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).

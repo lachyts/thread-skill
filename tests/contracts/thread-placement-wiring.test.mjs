@@ -10,6 +10,8 @@
 //     differs from this session's launch directory) and **Consumer home.**'s cwd clause, which case 1 leans on;
 //   - handoff-lifecycle § Home: the Ownership exception and the Split launch bullet;
 //   - orient § 2's Placement bullet and § 3's Placement line; task-writer § 6's creation site;
+//   - the missing thread (ADR 0039 d7): orient § 6's **The missing thread.**, handoff's **No thread yet.** and
+//     next's step-1 check, its line and its step-5 creation each call `missing` and create the thread by open;
 //   - CONTEXT.md's terms, ADR 0039's decisions and README's ADR list.
 //
 // One pure function, check(files), over the real files: the real text and the controls run through it, and each
@@ -26,6 +28,7 @@ const FILES = {
   handoff: 'skills/handoff/SKILL.md',
   life: 'skills/_shared/handoff-lifecycle.md',
   orient: 'skills/orient/SKILL.md',
+  next: 'skills/next/SKILL.md',
   writer: 'skills/_shared/task-writer.md',
   context: 'CONTEXT.md',
   readme: 'README.md',
@@ -145,6 +148,23 @@ function check(f) {
   const p3 = collapse(slice(section(f.orient, /^### 3\./) ?? '', /^- \*\*Placement\*\*/, /^- /) ?? '')
   if (!p3.includes('Omit the line on `placement: none`')) fails.push('orient-s3')
 
+  // ---- the missing thread (ADR 0039 d7) ----
+  const om = para(section(f.orient, /^### 6\./) ?? '', 'The missing thread')
+  if (!om.includes('python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py missing --project "<note>"') ||
+    !om.includes("after § 4's fixes and § 5's writes") || !om.includes('/skills/open/SKILL.md` § Creating a new thread, asked of no one') ||
+    !om.includes('It runs before any handoff below') || !om.includes('Look only, a dry run and a scoped target create nothing')) fails.push('orient-missing')
+  const hm = para(f.handoff, 'No thread yet')
+  if (!hm.includes(`python3 ${SCRIPT} missing --dir "$PWD" --session`) || !hm.includes('except under **Rollout launch.**') ||
+    !hm.includes('before **Split launch.**') || !hm.includes('§ Creating a new thread, asked of no one') ||
+    !hm.includes("the doc's `thread:` is its slug")) fails.push('ho-missing')
+  const nx = section(f.next, /^## Process/) ?? ''
+  const n1 = collapse(slice(nx, /^ {3}- \*\*A missing thread\*\*/, /^ {3}- |^$/) ?? '')
+  const n4 = collapse(slice(nx, /^ {3}\*\*A missing thread, in the line\.\*\*/, /^$/) ?? '')
+  const n5 = collapse(slice(nx, /^ {3}\*\*A missing thread, first\.\*\*/, /^$/) ?? '')
+  if (!n1.includes(`python3 ${SCRIPT} missing --dir "$PWD" --session`) || !n1.includes("rung 4's test") ||
+    !n4.includes('never as a parenthetical') || !n4.includes('`Next move: create <repo>/THREAD.md, then <move>,') ||
+    !n5.includes('§ Creating a new thread, asked of no one') || !n5.includes('so both sessions write one thread')) fails.push('next-missing')
+
   // ---- task-writer § 6 ----
   const w6 = collapse(slice(f.writer, /^## 6\./, /^## 7\./) ?? '')
   if (!w6.includes('`${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Creating a new thread')) fails.push('writer')
@@ -156,6 +176,8 @@ function check(f) {
   const pc = term('Placement check')
   if (!term('Thread home').includes('main checkout') || !pc.includes('`split-home` (not the retired reshuffle verb *split*') ||
     !pc.includes('once per thread identity') || /`split`/.test(pc)) fails.push('ctx-terms')
+  if (!pc.includes('`workspace` and `missing`') || !pc.includes('which orient, handoff and next act on by creating') ||
+    !pc.includes('ADR 0039 d7')) fails.push('ctx-missing')
 
   // ---- ADR 0039 ----
   const adr = collapse(f.adr)
@@ -167,6 +189,8 @@ function check(f) {
     !adr.includes('Git checks run per main checkout, never for a linked worktree')) fails.push('adr-identity')
   if (!adr.includes('**Case 3 narrows "default to the repo".**') || !adr.includes("the work is not this folder's project's") ||
     !adr.includes('`Run from:` stays at the launch directory')) fails.push('adr-case3')
+  if (!adr.includes('**The missing thread (d7).**') || !adr.includes('Unlike every other kind it is acted on') ||
+    !adr.includes('never by the estate audit or `--thread`')) fails.push('adr-missing')
   const cons = collapse(section(f.adr, /^## Consequences/) ?? '')
   if (!cons.includes('Smart Slider') || !cons.includes('`prototype-simple-slider-ui`') || !cons.includes('`optimizer`')) fails.push('adr-smart')
 
@@ -227,6 +251,14 @@ test('each control fails with exactly its rule', () => {
     'life-split': e('life', 'Any other active thread → no move', 'Any other active thread moves too', '- **Split launch.**'),
     'orient-s2': e('orient', 'A scoped target runs none', 'Every target runs it', '- **Placement**'),
     'orient-s3': e('orient', 'Omit the line on `placement: none`', 'Always print it', '### 3.'),
+    // orient checks before the reshuffle writes, so a phase it has just written never counts.
+    'orient-missing': e('orient', "after § 4's fixes and § 5's writes", 'before § 5', '**The missing thread**'),
+    // handoff's check runs under a Rollout launch too, or reports the gap and creates nothing.
+    'ho-missing': e('handoff', 'except under **Rollout launch.**', 'even under **Rollout launch.**', '**No thread yet**'),
+    // next's line puts the missing thread back in a parenthetical.
+    'next-missing': e('next', 'never as a parenthetical', 'as a parenthetical', '**A missing thread, in the line.**'),
+    'ctx-missing': e('context', '`workspace` and `missing`', '`workspace`', '- **Placement check** —'),
+    'adr-missing': e('adr', 'Unlike every other kind it is acted on', 'Like every other kind it is report-only'),
     writer: e('writer', '§ Creating a new thread', '§ Repo-thread lookup', '## 6.'),
     'ctx-thread': e('context', '`<repo>/THREAD.md`', '`<repo>/README.md`', '- **THREAD.md** —'),
     'ctx-terms': e('context', '`split-home` (not the retired reshuffle verb *split*', '`split` (the placement kind', '- **Placement check** —'),

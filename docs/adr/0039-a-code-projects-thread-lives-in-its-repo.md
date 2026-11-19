@@ -3,6 +3,7 @@
 Date: 2026-10-18
 Status: accepted (amends ADR 0017's p2-7 amendment: the repo-thread lookup; thread-skill-p23-5, run 2 of
 `[[thread-skill-rollout-2026-10-18]]`)
+*(Amended 2026-11-20 by p50-4, § Amendment below: decision 7, a missing thread is created, not only reported.)*
 
 ## Context
 
@@ -118,3 +119,30 @@ a side branch.
 - The ownership exception for an active thread outside `<home>` also protects any rung-2 close of another repo's
   thread, not only a split launch's consumer.
 - This amends ADR 0017's p2-7 amendment (the lookup's depth, `_archive` and the directory-name match).
+
+## Amendment (2026-11-20, p50-4: a missing thread is created)
+
+**Context.** On 2026-11-08 `/thread:orient` reshuffled Contacts admin into a three-session phase, `/thread:next`
+handed its first task to a fresh session, and a second `next` recommended archive. The project declares a repo
+(`~/repos/tools/contacts-sync`) and had no THREAD.md, and none of the three routes said so; Lachy had to ask. The
+handoff doc's `thread:` was its own handoff slug, so the consumer's close found no thread, and the work's story
+landed only in a task note. Decisions 1–6 say where a thread lives; nothing noticed that a project with multi-session
+work had none. Only open (which an agent has to call) and close rung 4 (at the end, if a close runs) checked.
+
+7. **The missing thread (d7).** The placement check gains one kind, `missing`: a project whose thread home holds no
+   thread anywhere (no THREAD*.md in the home, no THREAD.md on a local branch or origin/HEAD, no `~/Projects` folder
+   thread it owns, no `_shared/threads/<x>.md` named like it) while it has open multi-session work: a phase with two
+   or more open tasks, or, under `thread-placement.py missing --session`, the calling session's own work going on in
+   another session (a handoff, or a session with thread shape). It is reported only for a `--project` audit and the
+   `missing` verb, never by the estate audit or `--thread`, so close's step 1 never warns of a thread it is about to
+   create. Unlike every other kind it is acted on: orient § 6 creates `<repo>/THREAD.md` before it routes (after the
+   reshuffle's writes, so a phase it has just written counts), handoff's **No thread yet.** creates it before the
+   doc is written so the doc's `thread:` names it, and next names creating it in its line and creates it before the
+   move. A thread elsewhere (a branch, a folder, `_shared`) is never doubled: the other kinds report where it is,
+   and moving it stays project-structure-audit's or Lachy's.
+
+   *Considered:* a check inside the reshuffle's gate only (missed a Steer-only run and a handoff from a project
+   orient never touched); proposing the thread at the gate as a question (a gate, which the estate brief decides,
+   Chorus ADR 0110); every project with a repo and any open task (one-session work needs no thread, and the estate
+   audit would name most repos).
+
