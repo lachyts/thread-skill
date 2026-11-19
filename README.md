@@ -638,8 +638,12 @@ it runs:
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp
-  tree and a fake config dir (matching, stray, noise-only, differing, missing and mismatched caches,
-  and a non-empty evals/results/).
+  tree and a fake config dir: matching, stray, noise-only, differing, missing and mismatched caches; a tree
+  sub-dir missing from the working copy, failed by the cache diff itself; symlinked dirs (identical, copied
+  as a real dir, drifted through the link, and a cache-only file inside a copied one); dangling links; dir
+  loops within and across skills/ and hooks/, and a link-only loop; a named pipe; a name holding `"`, `\`
+  and `\c`; a CDPATH the caller exports; an unreadable cache dir; a non-empty evals/results/. Every run
+  has a `diff` first on PATH that records a call, and the suite asserts release-check never made one.
 - **Evals structure** — `tests/contracts/evals-structure.test.mjs` checks the `evals/` suite's shape for
   free and never runs it (case discovery, frontmatter keys and types, read-only tool grants, graders, and
   `make evals` kept out of `make test` and off the default goal). The suite itself is scored by

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # `make release-check`, the real recipe, run against a temp copy of this tree and a fake config dir whose
-# plugin cache is built from it. Covers the manifest contract, the cache diff over skills/ and hooks/, the
-# stray check (cache files the tree does not track; .DS_Store and __pycache__/ exempt), and the
-# evals/results/ refusal that runs first (files only, the same exemptions). Hermetic:
-# everything lives under one mktemp, git reads an empty global config and no system config, and
-# CLAUDE_CONFIG_DIR is always passed on the make command line, so the real config dir is never read.
+# plugin cache is built from it. Covers the manifest contract, the cache diff over skills/ and hooks/ (a tree
+# sub-dir missing from the working copy, symlinked dirs, dangling links, dir and link loops, a named pipe, a
+# name holding `"`, `\` and `\c`, a CDPATH the caller exports), the stray check (cache files the tree does not
+# track; .DS_Store and __pycache__/ exempt; a cache-only file in a symlinked dir the update copied; an
+# unreadable cache dir), and the evals/results/ refusal that runs first (files only, the same exemptions).
+# Every run has a `diff` first on PATH that records a call, and the last assertion is that none was made.
+# RC_SHELL=/bin/dash runs the recipe under dash. Hermetic: everything lives under one mktemp, git reads an
+# empty global config and no system config, and CLAUDE_CONFIG_DIR is always passed on the make command
+# line, so the real config dir is never read.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d); trap 'chmod -R u+rwx "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 export GIT_CONFIG_GLOBAL="$tmp/gitconfig" GIT_CONFIG_NOSYSTEM=1; : > "$GIT_CONFIG_GLOBAL"
 
 # ---- a temp tree: this checkout's TRACKED files, working-tree content, staged (no commit needed) -------
@@ -29,22 +33,27 @@ cache="$config/plugins/cache/thread/thread/$v"
 mkdir -p "$cache"
 (cd "$tree" && tar cf - --exclude .git .) | (cd "$cache" && tar xf -)
 
-run_rc() { out=$(cd "$tree" && env -u MAKEFLAGS -u MAKELEVEL PATH="${RC_PATH:-$PATH}" make -s release-check CLAUDE_CONFIG_DIR="$config" 2>&1); rc=$?; }
+run_rc() { out=$(cd "$tree" && env -u MAKEFLAGS -u MAKELEVEL PATH="$guard:$PATH" make -s release-check ${RC_SHELL:+SHELL="$RC_SHELL"} CLAUDE_CONFIG_DIR="$config" 2>&1); rc=$?; }
 
-# A `diff` that prints what GNU diffutils 3.12 prints (ubuntu-latest from 2026-11-08): a directory name holding a
-# space is shell-quoted in an `Only in` line. Put first on PATH, it makes any recipe that parses diff's
-# human-readable output meet that form, whatever diff the host ships. A name the host's diff already quoted
-# (GNU 3.12 itself) holds a `'`, so the sed leaves it alone rather than quoting it twice.
-shim="$tmp/shim"; mkdir -p "$shim"; real_diff=$(type -P diff)
-cat > "$shim/diff" <<EOF
-#!/usr/bin/env bash
-"$real_diff" "\$@" | sed -E "s/^Only in ([^':]* [^':]*): /Only in '\\1': /"; exit "\${PIPESTATUS[0]}"
+# A `diff` first on PATH that records any call: release-check never calls diff (the Makefile's header says why).
+guard="$tmp/guard"; mkdir -p "$guard"
+cat > "$guard/diff" <<EOF
+#!/bin/sh
+: >> "$tmp/diff-called"; exit 99
 EOF
-chmod +x "$shim/diff"
-mkdir -p "$tmp/q a" "$tmp/q b"; : > "$tmp/q a/only"
-has "$("$shim/diff" -rq "$tmp/q a" "$tmp/q b")" "Only in '$tmp/q a': only" "the diff shim prints the quoted form"
-rm -rf "$tmp/q a" "$tmp/q b"
+chmod +x "$guard/diff"
+ok "$(PATH="$guard:$PATH"; command -v diff)" "$guard/diff" "the diff guard is first on PATH"
+(PATH="$guard:$PATH"; diff /dev/null /dev/null)
+ok "$?|$([ -e "$tmp/diff-called" ] && echo called)" "99|called" "the diff guard records a call"
+rm -f "$tmp/diff-called"
 nz() { [ "$1" -ne 0 ] && echo nonzero || echo zero; }
+# looped <path>: y when $out names a loop at <path>: the recipe's own line, or (GNU find) find's loop error naming it
+gnu_find=; find --version 2>/dev/null | grep -q GNU && gnu_find=1
+looped() {
+  if [ "$(printf '%s\n' "$out" | grep -cxF -- "Symlink loop: $1")" -ge 1 ]; then echo y
+  elif [ -n "$gnu_find" ] && [ "$(printf '%s\n' "$out" | grep -E 'loop detected|part of a loop|Too many levels of symbolic links' | grep -cF -- "$1")" -ge 1 ]; then echo y
+  else echo n; fi
+}
 
 # (a) matching cache
 run_rc; ok "$rc" 0 "(a) matching cache exits 0"; has "$out" "release-check:" "(a) prints the release-check line"
@@ -69,16 +78,6 @@ echo real > "$cache/skills/x/real.md"
 run_rc; ok "$(nz "$rc")" nonzero "(c2) a real file in a new cache dir exits non-zero"
 has "$out" "holds files this tree does not track" "(c2) reported by the stray check"
 has "$out" "skills/x/real.md" "(c2) names the file"
-
-# (c3) the same two cases where diff quotes the cache's `config dir` path: the cache-only dir is still the stray
-# check's alone (PR #332's ubuntu-latest run failed (c) and (c2) on exactly this form)
-rm "$cache/skills/x/real.md"
-RC_PATH="$shim:$PATH" run_rc; ok "$rc" 0 "(c3) quoted diff output: .DS_Store and __pycache__/ still exit 0"
-[ "$rc" -eq 0 ] || printf '%s\n' "$out"
-echo real > "$cache/skills/x/real.md"
-RC_PATH="$shim:$PATH" run_rc; ok "$(nz "$rc")" nonzero "(c3) quoted diff output: a real file in a new cache dir exits non-zero"
-has "$out" "holds files this tree does not track" "(c3) quoted diff output: reported by the stray check"
-ok "$(printf %s "$out" | grep -c 'differs from the tree')" 0 "(c3) quoted diff output: not reported by the cache diff"
 rm -rf "$cache/skills/x" "$cache/.DS_Store"
 
 # (d) a cache file that differs from the tree
@@ -87,10 +86,10 @@ run_rc; ok "$(nz "$rc")" nonzero "(d) a differing file exits non-zero"
 has "$out" "skills/execute/SKILL.md" "(d) names the file"; has "$out" "differs from the tree" "(d) says the cache differs"
 cp -p "$tree/skills/execute/SKILL.md" "$cache/skills/execute/SKILL.md"
 
-# (d2) a tracked file missing from the cache (the tree-side Only-in line survives the filter)
+# (d2) a tracked file missing from the cache
 rm "$cache/skills/status/SKILL.md"
 run_rc; ok "$(nz "$rc")" nonzero "(d2) a file missing from the cache exits non-zero"
-has "$out" "Only in skills/status: SKILL.md" "(d2) keeps the tree-side Only-in line"
+has "$out" "Only in skills/status: SKILL.md" "(d2) names it in an Only-in line"
 cp -p "$tree/skills/status/SKILL.md" "$cache/skills/status/SKILL.md"
 
 # (d3) a whole cache sub-dir missing
@@ -98,6 +97,64 @@ mv "$cache/hooks" "$tmp/hooks.aside"
 run_rc; ok "$(nz "$rc")" nonzero "(d3) a missing cache sub-dir exits non-zero"
 has "$out" "No $cache/hooks" "(d3) names the missing sub-dir"
 mv "$tmp/hooks.aside" "$cache/hooks"
+
+# (d4) a tree sub-dir missing from the working copy (deleted, not committed): find's error fails the cache diff
+mv "$tree/hooks" "$tmp/hooks.aside"
+run_rc; ok "$(nz "$rc")" nonzero "(d4) a tree sub-dir missing from the working copy exits non-zero"
+has "$out" "FAIL - cache $v differs from the tree" "(d4) reported by the cache diff"
+ok "$([ "$(printf '%s\n' "$out" | grep -c 'find: .*hooks')" -ge 1 ] && echo y || echo n)" y "(d4) shows find's own error"
+mv "$tmp/hooks.aside" "$tree/hooks"
+
+# (d5) tracked edge fixtures on both sides: a symlinked dir (and one the update copied as a real dir), an identical
+# dangling link, and a name holding `"`, `\` and `\c`. Run under a CDPATH whose decoy holds skills/ and hooks/: a
+# recipe cd on a relative path that keeps CDPATH fails under macOS sh (and lands in the decoy under dash).
+q='skills/_shared/zz/q"b\cd.md'
+for side in "$tree" "$cache"; do ln -s ../hooks "$side/skills/lnk"; ln -s nowhere "$side/skills/dang"; mkdir -p "$side/skills/_shared/zz"; done
+ln -s ../hooks "$tree/skills/cpy"; cp -R "$cache/hooks" "$cache/skills/cpy"
+echo q > "$tree/$q"; cp -p "$tree/$q" "$cache/$q"
+git -C "$tree" add skills/lnk skills/cpy skills/dang "$q"
+mkdir -p "$tmp/decoy/skills" "$tmp/decoy/hooks"
+CDPATH="$tmp/decoy" run_rc; ok "$rc" 0 "(d5) symlinked dirs, an identical dangling link and a quoting name exit 0, under a CDPATH"
+[ "$rc" -eq 0 ] || printf '%s\n' "$out"
+
+# (d6) drift through each: content through a symlinked dir, a re-targeted dangling link, a missing quoting name;
+# plus tree-only entries no cache can match: a named pipe, dir loops (to `..`, to `.`, and across skills/ and
+# hooks/ through two links) and a link-only loop
+printf 'drift\n' >> "$cache/hooks/hooks.json"
+ln -sfn elsewhere "$cache/skills/dang"
+rm "$cache/$q"
+mkfifo "$tree/skills/_shared/zz/p"
+ln -s .. "$tree/skills/_shared/zz/loop"; ln -s . "$tree/skills/_shared/zz/self"; ln -s ring "$tree/skills/_shared/zz/ring"
+ln -s ../skills "$tree/hooks/back"
+run_rc; ok "$(nz "$rc")" nonzero "(d6) drift exits non-zero"
+has "$out" "Files $cache/skills/lnk/hooks.json and skills/lnk/hooks.json differ" "(d6) drift through a symlinked dir"
+has "$out" "Files $cache/skills/dang and skills/dang differ" "(d6) a re-targeted dangling link"
+has "$out" 'Only in skills/_shared/zz: q"b\cd.md' "(d6) names the whole quoting name"
+has "$out" "Not a regular file: skills/_shared/zz/p" "(d6) a named pipe, never opened"
+for l in skills/_shared/zz/loop skills/_shared/zz/self skills/_shared/zz/ring skills/lnk/back hooks/back/lnk; do
+  ok "$(looped "$l")" y "(d6) a loop at $l"
+done
+cp -p "$tree/hooks/hooks.json" "$cache/hooks/hooks.json"; ln -sfn nowhere "$cache/skills/dang"; cp -p "$tree/$q" "$cache/$q"
+rm "$tree/skills/_shared/zz/p" "$tree/skills/_shared/zz/loop" "$tree/skills/_shared/zz/self" "$tree/skills/_shared/zz/ring" "$tree/hooks/back"
+
+# (d7) a cache-only file inside the symlinked dir the update copied: stray, while the copy's own files are not
+echo extra > "$cache/skills/cpy/extra.md"
+run_rc; ok "$(nz "$rc")" nonzero "(d7) a cache-only file in a copied symlinked dir exits non-zero"
+has "$out" "holds files this tree does not track" "(d7) reported by the stray check"
+ok "$(printf '%s\n' "$out" | grep -cx 'skills/cpy/extra.md')" 1 "(d7) names the extra file"
+ok "$(printf '%s\n' "$out" | grep -c 'skills/cpy/hooks.json')" 0 "(d7) the copy's own files are not stray"
+rm "$cache/skills/cpy/extra.md"
+for side in "$tree" "$cache"; do rm -rf "$side/skills/lnk" "$side/skills/cpy" "$side/skills/dang" "$side/skills/_shared/zz"; done
+git -C "$tree" rm -q --cached skills/lnk skills/cpy skills/dang "$q"
+
+# (d8) an unreadable cache dir fails the stray check rather than passing it silently
+if [ "$(id -u)" -eq 0 ]; then echo "(d8) skipped: root reads a chmod-000 dir"; else
+  mkdir -p "$cache/.claude/locked"; : > "$cache/.claude/locked/f"; chmod 000 "$cache/.claude/locked"
+  run_rc; ok "$(nz "$rc")" nonzero "(d8) an unreadable cache dir exits non-zero"
+  has "$out" "FAIL - cannot walk the cache" "(d8) says the cache walk failed"
+  ok "$([ "$(printf '%s\n' "$out" | grep -c 'find: .*locked')" -ge 1 ] && echo y || echo n)" y "(d8) shows find's own error"
+  chmod 755 "$cache/.claude/locked"; rm -rf "$cache/.claude"
+fi
 
 # (e) no version dir
 mv "$cache" "$cache.aside"
@@ -179,6 +236,7 @@ rm -rf "$tree/evals/results"
 # every case restored its state
 run_rc; ok "$rc" 0 "(a) matching cache exits 0 again after every case"
 [ "$rc" -eq 0 ] || printf '%s\n' "$out"
+ok "$([ -e "$tmp/diff-called" ] && echo called || echo never)" never "release-check never calls diff"
 
 echo; [ "$fail" -eq 0 ] && echo "release-check: ALL PASS" || echo "release-check: SOME FAILED"
 exit "$fail"

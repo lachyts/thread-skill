@@ -595,14 +595,12 @@ r3=$(python3 "$SEL" select --paths skills/execute/scripts/merge-task.sh)
 ok "$(echo "$r3" | head -1 | cut -f1)|$(printf '%s\n' "$r3" | grep -cx '@merge-task-self-tests')|$(printf '%s\n' "$r3" | grep -cx 'tests/land-carrier.test.sh')|$(printf '%s\n' "$r3" | grep -c 'fast-tier.py')" \
   "FAST|1|1|0" "R3: merge-task.sh is FAST with @merge-task-self-tests and the suite of land-carrier.py, the carrier that runs it (if this turns FULL, re-judge the FULL list: what does it reach?)"
 r4=$(python3 "$SEL" select --paths docs/adr/0073-thread-skill-verifies-a-fast-tier-at-merge.md)
-ok "$(printf '%s\n' "$r4" | head -1 | cut -f1)|$(printf '%s\n' "$r4" | grep -cxE 'tests/(verify-slot|release-check-quoting-diff)\.test\.sh')" "FAST|2" \
-  "R4: a docs-only change is FAST and runs the walkers (verify-slot, release-check-quoting-diff)"
+ok "$(printf '%s\n' "$r4" | head -1 | cut -f1)|$(printf '%s\n' "$r4" | grep -cxE 'tests/(verify-slot|release-check)\.test\.sh')" "FAST|2" \
+  "R4: a docs-only change is FAST and runs the walkers (verify-slot, release-check)"
 d=landing-register   # built, so this suite reads no fixture dir
 r5=$(python3 "$SEL" select --paths "tests/fixtures/$d/register.md")
 ok "$(printf '%s\n' "$r5" | grep -cxE 'tests/(landing-register\.test\.mjs|execution-fit-remote\.test\.sh)')" 2 \
   "R5: a landing-register fixture reaches its path.join consumer and its literal one"
-has "$(python3 "$SEL" select --paths tests/release-check.test.sh)" "tests/release-check-quoting-diff.test.sh" \
-  "R5: a change to release-check.test.sh runs its runner, release-check-quoting-diff"
 has "$(python3 "$SEL" select --paths tests/reflect-weekly.test.mjs)" "tests/fast-tier.test.sh" \
   "R5: a change to a test this suite names selects this suite (rule 1), its OWN-LISTINGS (ii) reason"
 r6=$(python3 "$SEL" select --paths tests/e2e/parallel-rollouts-one-repo.live.sh)
