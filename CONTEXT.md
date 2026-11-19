@@ -1262,20 +1262,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   changes outside test fixtures (advisories, by OSV), and the review judge
   runs it again. Integration scans too: the integrator before its push and
   the Integration judge after, over Integration's own commits and merge
-  resolutions since the anchor, every finding there Lachy's question. A red
-  the agent can fix fails the try like a verifier red; one no commit can clear
-  (a pushed secret, a secret in Integration's commits, a change to the
-  scanner's own config, an advisory with no fixed release) is Lachy's
-  question, and his answer clears it only as a `security-accept <kind>:<key>`
-  token the scan reads from the task note's `## Repair input`. Integration's
-  scan reads secrets and the scanner config only, not dependencies
-  ([[thread-skill-security-check-integration-dependencies]]). A serial
-  chain's Leg runs it too, on each task with commits, before any review and
-  again before `leg.py done`: in a Chain copy it rewrites a secret out of its
-  own unpushed commits (one it cannot rewrite halts the chain for Lachy's own
-  rewrite), and a secret in a primary checkout's history reverts the task,
-  sets it aside and halts the chain; on a serial chain his answer to it is
-  the rotation and the hand-back, whose re-entry starts after the revert. A
+  resolutions since the anchor; a fixable advisory on Integration's own
+  dependencies is the integrator's bump, every other finding there Lachy's
+  question. A red the agent can fix fails the try like a verifier red; one no
+  commit can clear (a pushed secret, a secret in Integration's commits, a
+  change to the scanner's own config, an advisory with no fixed release) is
+  Lachy's question, and his answer clears it only as a
+  `security-accept <kind>:<key>` token the scan reads from the task note's
+  `## Repair input`. Integration's scan reads Integration's own dependency
+  changes, never what the task or the landed PRs changed (undoing a landed
+  PR's bump is Integration's change). A serial chain's Leg runs it too, on
+  each task with commits, before any review and again before `leg.py done`:
+  in a Chain copy it rewrites a secret out of its own unpushed commits (one
+  it cannot rewrite halts the chain for Lachy's own rewrite), and a secret in
+  a primary checkout's history reverts the task, sets it aside and halts the
+  chain; on a serial chain his answer to it is the rotation and the
+  hand-back, whose re-entry starts after the revert. A
   Leg's close-out commits between tasks and `leg.py land`'s merges are not
   scanned. _Avoid_: secret scan (alone), audit, CI check.
 - **Cursor** — the durable record of rollout progress, the single source of

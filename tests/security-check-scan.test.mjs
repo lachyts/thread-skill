@@ -546,7 +546,7 @@ const PKG = JSON.stringify({ dependencies: { 'left-pad': '^1.3.0' } })
 
 for (const real of [false, true]) {
   const tag = real ? 'real gitleaks' : 'stub'
-  test(`I1a (${tag}): --anchor reads the resolution and the fix commit, never main's own commits; every secret is Lachy's, origin never read, no dependencies (and its controls)`, { skip: real && realSkip }, async (t) => {
+  test(`I1a (${tag}): --anchor reads the resolution and the fix commit, never main's own commits; every secret is Lachy's, origin never read, the fix commit's dependency checked (and its controls)`, { skip: real && realSkip }, async (t) => {
     const s = box(t)
     const o = await osvStub(t, { 'npm|left-pad': [vuln('GHSA-test-0007', 'npm', 'left-pad', [eco([{ introduced: '0' }, { fixed: '1.3.1' }])])] })
     const { anchor, merge, fix } = integrated(s, LEAKED, { fix: { 'fix.py': `TOKEN = "${TOKEN2}"\n`, 'package.json': PKG } })
@@ -564,11 +564,10 @@ for (const real of [false, true]) {
     assert.equal(r.json.anchor, anchor)
     assert.equal(r.json.rewriteFrom, null)
     assert.equal(r.json.mergeBehind, true)
-    assert.deepEqual(r.json.dependencies, [])
-    assert.deepEqual(r.json.advisories, [])
-    assert.equal(r.json.advisoriesChecked, false)
-    assert.ok(r.json.brief.includes('dependencies not checked: an Integration scan (--anchor) reads secrets and the scanner config only'), r.json.brief.join('\n'))
-    assert.equal(o.seen.length, 0, 'no OSV request')
+    assert.deepEqual(r.json.dependencies.map((d) => [d.name, d.manifest]), [['left-pad', 'package.json']])
+    assert.deepEqual(r.json.advisories.map((a) => [a.id, a.fixed]), [['GHSA-test-0007', ['1.3.1']]])
+    assert.equal(r.json.advisoriesChecked, true)
+    assert.ok(!r.json.why.includes('GHSA-test-0007') && !r.json.why.includes(r.json.advisories[0].accept), 'a fixable advisory is never the question')
     if (!real) {
       // Control: the anchor range without --first-parent walks into main's commits through the merge's second parent.
       const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: mutant(s, 'f"--first-parent --no-merges {lo}..{head}" if anchor', 'f"--no-merges {lo}..{head}" if anchor') })
@@ -580,6 +579,88 @@ for (const real of [false, true]) {
     }
   })
 }
+
+// Integration's dependency tree: with o.base, main and feat first share package.json as `base`; then feat writes it as
+// `ours` (the anchor, pushed), main as `theirs` (one JSON line, so the two always conflict: an add/add without o.base),
+// feat merges origin/<def> and resolves it as `resolved`, then, with o.fix, one fix commit. Each argument is a
+// dependencies object.
+function integratedPkg(s, ours, theirs, resolved, o = {}) {
+  const pkg = (deps) => JSON.stringify({ dependencies: deps })
+  if (o.base) {
+    s.write('package.json', pkg(o.base)); s.commit('base adds package.json')
+    s.git('branch', '-f', s.def); s.git('push', '-q', 'origin', s.def)
+  }
+  s.write('package.json', pkg(ours)); const anchor = s.commit('ours writes package.json')
+  s.git('push', '-q', 'origin', 'feat')
+  s.git('checkout', '-q', s.def)
+  s.write('package.json', pkg(theirs)); s.commit('theirs writes package.json'); s.git('push', '-q', 'origin', s.def)
+  s.git('checkout', '-q', 'feat')
+  assert.equal(spawnSync(GIT, ['-C', s.tree, 'merge', '-q', `origin/${s.def}`], { env: s.env }).status, 1, 'setup: the merge conflicts')
+  s.write('package.json', pkg(resolved)); s.git('add', '-A'); s.git('commit', '-q', '--no-edit')
+  if (o.fix) { s.write('package.json', pkg(o.fix)); s.commit('an Integration fix') }
+  return { anchor }
+}
+const FIXABLE = { 'npm|left-pad': [vuln('GHSA-test-0007', 'npm', 'left-pad', [eco([{ introduced: '0' }, { fixed: '1.3.1' }])])] }
+
+test('I7a, I7e: a fix commit\'s dependency with a fixed advisory is the integrator\'s fix; the judge\'s --history-only run reads the same (and its control)', async (t) => {
+  const s = box(t)
+  const o = await osvStub(t, FIXABLE)
+  const kept = { a: '1.0.0', b: '1.0.0' }
+  const { anchor } = integratedPkg(s, { a: '1.0.0' }, { b: '1.0.0' }, kept, { fix: { ...kept, 'left-pad': '^1.3.0' } })
+  const r = await scan(s, { osv: o.url, extra: anchorArgs(anchor) })
+  assert.equal(r.status, 1, r.stderr)
+  assert.equal(r.json.action, 'fix')
+  assert.equal(r.json.why, null)
+  assert.deepEqual(r.json.dependencies, [{ ecosystem: 'npm', name: 'left-pad', version: '1.3.0', manifest: 'package.json', fixture: false, changedFrom: null }])
+  assert.deepEqual(r.json.advisories[0].fixed, ['1.3.1'])
+  assert.equal(r.json.advisoriesChecked, true)
+  assert.deepEqual(r.json.brief, ['npm left-pad 1.3.0 (package.json); advisory GHSA-test-0007, fixed in 1.3.1'])
+  const judge = await scan(s, { osv: o.url, extra: anchorArgs(anchor, '--history-only') })
+  assert.equal(judge.status, 1, judge.stderr)
+  assert.deepEqual([judge.json.action, judge.json.dependencies, judge.json.advisories], [r.json.action, r.json.dependencies, r.json.advisories], 'I7e: the judge reads the same')
+  // Control: Integration's dependencies left unread read no advisory.
+  const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'deps = dependencies(tree, mb, head, brief_tail, own)', 'deps = [] if integration else dependencies(tree, mb, head, brief_tail)') })
+  assert.deepEqual(m.json.advisories, [], 'control: no Integration dependencies, no advisory')
+})
+
+test('I7b: what the task\'s own change and main as merged hold is never Integration\'s: a resolution keeping both is clean, OSV unasked (and its controls)', async (t) => {
+  const s = box(t)
+  const o = await osvStub(t, {
+    'npm|bad-dep': [vuln('GHSA-test-0008', 'npm', 'bad-dep', [eco([{ introduced: '0' }, { fixed: '9.0.0' }])])],
+    'npm|own-dep': [vuln('GHSA-test-0009', 'npm', 'own-dep', [eco([{ introduced: '0' }, { fixed: '9.0.0' }])])],
+  })
+  const { anchor } = integratedPkg(s, { 'own-dep': '1.0.0' }, { 'bad-dep': '1.0.0' }, { 'bad-dep': '1.0.0', 'own-dep': '1.0.0' })
+  const r = await scan(s, { osv: o.url, extra: anchorArgs(anchor) })
+  assert.equal(r.status, 0, r.stdout)
+  assert.deepEqual(r.json.dependencies, [])
+  assert.deepEqual(o.queries(), [], 'OSV is never asked')
+  // Controls: a side left out lists what it holds.
+  const noMain = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'sides = [entries(mb, manifest, eco, parser)]', 'sides = []') })
+  assert.deepEqual(noMain.json.dependencies.map((d) => d.name), ['bad-dep'], 'control: without main as merged main\'s entry is listed')
+  const noTask = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'sides.insert(0, mine)', 'pass') })
+  assert.deepEqual(noTask.json.dependencies.map((d) => d.name), ['own-dep'], 'control: without the task\'s own change its entry is listed')
+})
+
+test('I7c: a resolution\'s third version is Integration\'s, changed from the task\'s floor; keeping theirs is not; keeping an entry the task never changed over main\'s bump is, changed from main\'s (and its control)', async (t) => {
+  let revert
+  for (const [base, ours, theirs, resolved, want] of [
+    [null, { 'left-pad': '^1.2.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': '^1.3.0' }, [['left-pad', '1.3.0', '1.2.0']]],
+    [null, { 'left-pad': '^1.2.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': '^1.4.0' }, []],
+    [{ 'left-pad': '^1.2.0' }, { 'left-pad': '^1.2.0', aaa: '1.0.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': '^1.2.0', aaa: '1.0.0' }, [['left-pad', '1.2.0', '1.4.0']]],
+  ]) {
+    const s = box(t)
+    const o = await osvStub(t)
+    const { anchor } = integratedPkg(s, ours, theirs, resolved, { base })
+    const r = await scan(s, { osv: o.url, extra: anchorArgs(anchor) })
+    assert.equal(r.status, 0, r.stdout)
+    assert.deepEqual(r.json.dependencies.map((d) => [d.name, d.version, d.changedFrom]), want, JSON.stringify(resolved))
+    revert = { s, o, anchor }
+  }
+  // Control: the anchor's every entry read as the task's own change hides the revert of main's bump.
+  const { s, o, anchor } = revert
+  const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, "# the task's own change", 'mine = at_anchor') })
+  assert.deepEqual(m.json.dependencies, [], 'control: the unfiltered anchor holds the revert')
+})
 
 test('I1b: a fix commit\'s secret alone is still human with --anchor, rewriteFrom null, mergeBehind false; a task-mode scan of the same tree is the fix', async (t) => {
   const s = box(t)
@@ -865,7 +946,7 @@ test('S9b2: a spec, pin or section change that keeps the floor reads as changed;
   ])
   assert.ok(!r.stdout.includes('hunter2pass') && !r.stdout.includes('k3y'), 'a URL\'s userinfo and query never reach stdout')
   assert.deepEqual(o.queries().map((q) => `${q.package.name}@${q.version}`).sort(), ['aaa@1.0.0', 'ccc@2.0.0', 'flask@2.0'], 'OSV is asked at each floor')
-  const m = await scan(s, { osv: o.url, script: lineMutant(s, '# the change comparison', 'if _floor(eco, old_by[norm]["spec"]) == _floor(eco, new[name]["spec"]):') })
+  const m = await scan(s, { osv: o.url, script: lineMutant(s, '# the change comparison', 'if any(_floor(eco, e["spec"]) == _floor(eco, new[name]["spec"]) for e in held):') })
   assert.deepEqual(m.json.brief, [], 'control: comparing floors alone must drop every one of them')
 })
 

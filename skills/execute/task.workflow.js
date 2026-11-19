@@ -106,7 +106,9 @@ export const meta = {
 //                                    //   integrationSecurityBlock right after INTEGRATION_PREFLIGHTS (`scan --anchor`,
 //                                    //   before its push) and returns INTEGRATE_RESULT_SECURED, and the Integration judge
 //                                    //   carries integrationSecurityReviewBlock (its own `--history-only` run) and returns
-//                                    //   INTEGRATION_REVIEW_SECURED. Absent/null ⇒ every prompt and schema byte-identical.
+//                                    //   INTEGRATION_REVIEW_SECURED (p39-17: a fixable advisory on Integration's own
+//                                    //   dependencies is the integrator's bump; every other finding is Lachy's).
+//                                    //   Absent/null ⇒ every prompt and schema byte-identical.
 //                                    //   Any other shape is refused before any dispatch (securityCheckArgsError,
 //                                    //   argsRefused), in both modes.
 //   unreachablePaths : string[],     // optional (p52-1, ADR 0081 d1); the repo's Unreachable surface, rollout-settings.py's
@@ -1343,9 +1345,11 @@ const FLAKE_CHECK_INTEGRATION = flakeCheck("the merge step's `task file:` lines,
 // `## Repair input`. Integration scans too (p39-8): the integrator carries integrationSecurityBlock right after
 // INTEGRATION_PREFLIGHTS (`scan --anchor <anchor>`, its own commits and every merge's resolution since the anchor, before
 // its push) and returns INTEGRATE_RESULT_SECURED; the Integration judge carries integrationSecurityReviewBlock (its own
-// `--history-only` run) and returns INTEGRATION_REVIEW_SECURED. Every finding there is Lachy's question, which rides the
-// row's needsHuman. Absent ⇒ '' and IMPL_RESULT (INTEGRATE_RESULT, INTEGRATION_REVIEW), so every prompt and schema is
-// byte-identical; set ⇒ a deliberate resume-cache break for the implement, revise and Integration calls.
+// `--history-only` run) and returns INTEGRATION_REVIEW_SECURED. There (p39-17) an advisory with a fixed release on a
+// dependency Integration's own resolution or fix commits add or change is the integrator's bump (`action` fix); every
+// other finding is Lachy's question (`action` human), which rides the row's needsHuman. Absent ⇒ '' and IMPL_RESULT
+// (INTEGRATE_RESULT, INTEGRATION_REVIEW), so every prompt and schema is byte-identical; set ⇒ a deliberate resume-cache
+// break for the implement, revise and Integration calls.
 
 // args.securityCheck: '' when absent (or null) or usable, else why not. Exactly { script }: the absolute, single-line path
 // of security-check.py, never under a bare /skills/ (an unexported plugin root). A bad value is a lead bug, refused before
@@ -1412,8 +1416,9 @@ Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${se
 }
 
 // Integration's side (p39-8), the integrator's own scan, its own leading "\n\n" ('' when off): rendered right after
-// INTEGRATION_PREFLIGHTS (their sibling-site fix can add a commit) and before Step 4's push. Every finding there is
-// Lachy's (Integration never rewrites a commit): the integrator pushes nothing and returns the scan's `why` as
+// INTEGRATION_PREFLIGHTS (their sibling-site fix can add a commit) and before Step 4's push. An `action` fix (only
+// advisories with a fixed release, p39-17) is the integrator's bump, one fix commit, at most twice; an `action` human
+// is Lachy's (Integration never rewrites a commit): the integrator pushes nothing and returns the scan's `why` as
 // needsHuman, which integrationCheck carries to the row (securityAskOf). Every git span is scrubbed.
 function integrationSecurityBlock(a, task, I) {
   if (!securityOf(a)) return ''
@@ -1423,7 +1428,8 @@ function integrationSecurityBlock(a, task, I) {
 Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${securityScanCmd(a, task, I.headSha)}\`
 - It reads Integration's own commits and every merge's resolution since the anchor ${I.headSha}. Run it after Step 3 (whether or not the verify was required) and after the preflights above, before Step 4's push. Its last run must be on the head you push: after any later commit (a preflight's sibling fix included), run Step 3's verifier and this scan again.
 - Exit 0: securityClean=true.
-- Exit 1: every finding here is Lachy's (its \`action\` is human): Integration never rewrites a commit. Push nothing. Return blocked=true with blockKind "stop" and securityClean=false, its \`why\`, verbatim, as needsHuman, and a blockerDiagnosis naming each secret's rule, file and commit, never a value.
+- Exit 1 with \`action\` fix (only advisories with a fixed release, on dependencies your resolution or fix commits add or change): move each to a version it reports fixed in one fix commit, its lockfile too when the repo keeps one beside it (list it in fixCommits). Never drop a dependency the task or a landed PR needs. Then run Step 3's verifier and this scan again. A scan still \`action\` fix after your second such commit: push nothing, return blocked=true with blockKind "stop", securityClean=false and a blockerDiagnosis naming each advisory's id, package, version and fixed releases.
+- Exit 1 with \`action\` human: every finding here is Lachy's: Integration never rewrites a commit. Push nothing. Return blocked=true with blockKind "stop" and securityClean=false, its \`why\`, verbatim, as needsHuman, and a blockerDiagnosis naming each secret's rule, file and commit, never a value, and each advisory's id and package.
 - Exit 2 whose ERROR line says "tracked changes are uncommitted": a change that is part of your resolution or fix is committed as a fix commit (list it in fixCommits), then run Step 3's verifier and this scan again; a tracked file the verifier or the env bootstrap rewrote is restored with \`${GIT_ENV_SCRUB} git -C "${wt}" restore --staged --worktree -- <path>\`. Never \`commit -a\`, and never \`add -A\` a stray.
 - Exit 2 whose ERROR line says "untracked files": a new file that is part of your resolution or fix is added by its path and committed as a fix commit (then Step 3's verifier and this scan again); a file the verifier or the bootstrap left (this call's, or the lead's verify before it) is removed by its literal path (the removal rule above), never committed. Then run this scan again.
 - Any other exit 2, or a "commit them" you cannot settle that way: push nothing, and return blocked=true with blockKind "stop", securityClean=false and its ERROR line as blockerDiagnosis.
@@ -1433,7 +1439,8 @@ Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${se
 // Integration's judge side (p39-8), its own leading "\n\n" ('' when off): rendered after Step 2's reads and the
 // history, before Step 3. Its run is --history-only, so what a verifier left in the tree (P1's lead verify included)
 // never stops it; its read rule is only that the tree's HEAD is the integrated head. It fails closed: a scan that
-// could not run is unreadable, never an approve.
+// could not run is unreadable, never an approve. An `action` fix (a fixable advisory the integrator left, p39-17) is a
+// plain "changes" with no needsHuman, so integrate() reads it as a rejection and the revise bumps it.
 function integrationSecurityReviewBlock(a, task, I, j) {
   if (!securityOf(a)) return ''
   const wt = worktreeDir(a.repoPath, task.slug)
@@ -1441,7 +1448,8 @@ function integrationSecurityReviewBlock(a, task, I, j) {
 
 Security check (execute § 3 \`security_checks\`, this rollout's opt-in): run \`${securityScanCmd(a, task, I.headSha, true)}\` yourself, only when \`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` prints ${j.headSha}. It reads Integration's own commits and every merge's resolution since the anchor ${I.headSha}, from committed history only (\`--history-only\`), so what a verifier left in the tree never stops it. It is read-only.
 - Exit 0: decide Step 3 as written.
-- Exit 1: verdict "changes", with its \`why\`, verbatim, in needsHuman, and one bullet naming each secret's rule, file and commit, never a value.
+- Exit 1 with \`action\` human: verdict "changes", with its \`why\`, verbatim, in needsHuman, and one bullet naming each secret's rule, file and commit, never a value.
+- Exit 1 with \`action\` fix (only advisories with a fixed release): verdict "changes", no needsHuman, and one bullet per advisory: "move <ecosystem> <name> <version> to a fixed release (<fixed>): advisory <id>". The bullets are the revise's work order.
 - Exit 2, or a HEAD that is not ${j.headSha}: verdict "changes", unreadable=true, and one bullet "cannot run the security scan: <its ERROR line, or the HEAD you read>". This overrides Step 3's unreadable=false. Never approve what the scan did not read.`
 }
 
@@ -3405,7 +3413,7 @@ const INTEGRATION_REVIEW = {
 // integrator's result gains the scan's question (needsHuman, only its `why`) and a required securityClean, which
 // integrationCheck reads; the judge's gains needsHuman, and its unreadable names the scan that could not run.
 // Off, both keep their own schema, so every Integration call's opts are byte-identical.
-const SECURITY_WHY_DESCRIPTION = "ONLY the security scan's `why`, verbatim, when it exited 1; empty otherwise"
+const SECURITY_WHY_DESCRIPTION = "ONLY the security scan's `why`, verbatim, when it exited 1 with `action` human; empty otherwise"
 const INTEGRATE_RESULT_SECURED = {
   ...INTEGRATE_RESULT,
   properties: {

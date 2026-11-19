@@ -1244,8 +1244,10 @@ test('h3: a review-blocked run (`Round N:` from its first line) parses whole, fo
 
 // ---- IS: the Security check on Integration (p39-8) -------------------------------------------------------------
 // With args.securityCheck the integrator scans its own commits and merge resolutions (`scan --anchor`) before its push,
-// and the judge scans again (`--history-only`). Every finding there is Lachy's: the integrator's stop and the judge's
-// `changes` with the scan's question are set-asides whose row carries it as needsHuman; nothing else ever does.
+// and the judge scans again (`--history-only`). An `action` human finding is Lachy's: the integrator's stop and the
+// judge's `changes` with the scan's question are set-asides whose row carries it as needsHuman; nothing else ever does.
+// An `action` fix (p39-17, a fixable advisory on Integration's own dependencies) is the integrator's bump, and a judge's
+// `changes` naming one, with no question, is a plain rejection the revise bumps (IS6's judge leg).
 
 const SECURITY = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
 const WHY = "A secret (github-pat) in a.js, commit ddddddd (a merge's resolution), line 3, is in Integration's commits, which Integration never rewrites: once it is rotated, keep it in the history (answer `security-accept secret:0123456789ab`), or have /thread:repair recut the branch?"

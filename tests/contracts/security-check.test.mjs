@@ -100,8 +100,8 @@ const ROW = [
   "These are a question for Lachy: a secret already pushed or behind a merge commit; a change to the scanner's own config; an advisory with no fixed release; a finding the agent reads as no credential.",
   "His answer clears it only through the scan (on a serial chain, a secret's answer is its hand-back: below). Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b).",
   'A pushed secret is rotated first, then accepted or the branch recut (repair § 4), never force-pushed.',
-  "Integration scans too: the integrator runs `scan --anchor <anchor>` before its push and the Integration judge runs it again (`--history-only`), over Integration's own commits and every merge's resolution since the anchor, and every finding there is Lachy's question (the row's `## Needs you`).",
-  "Integration's scan reads secrets and the scanner config only, not dependencies ([[thread-skill-security-check-integration-dependencies]]).",
+  "Integration scans too: the integrator runs `scan --anchor <anchor>` before its push and the Integration judge runs it again (`--history-only`), over Integration's own commits and every merge's resolution since the anchor: an advisory with a fixed release on a dependency Integration's own resolution or fix commits add or change is the integrator's bump, and every other finding there is Lachy's question (the row's `## Needs you`).",
+  "Integration's scan reads Integration's own dependency changes, never what the task or the landed PRs changed: an entry the task's own change or a merged landed PR holds as written is not Integration's, so a resolution that keeps an entry the task never changed over a landed PR's bump is.",
   "A serial chain's Legs honour it too (`skills/execute/legs.md` § The task loop's **Security check.**): `leg.py begin` runs the same preflight (exit 1 otherwise), and each task with commits runs `leg.py security` before its review and again before `leg.py done`, which refuses without a clean scan covering them (in a Chain copy, a scan at its HEAD).",
   "A Leg never rewrites a primary checkout's history",
   'halts the chain with the claim kept',
@@ -214,9 +214,9 @@ function check(f) {
   fail('context', !term.includes("the opt-in scan a rollout's hand-set `security_checks: true`") ||
     !term.includes('`security-accept <kind>:<key>` token the scan reads from the task note\'s `## Repair input`') ||
     !term.includes("each merge's resolution included") ||
-    !term.includes("Integration scans too: the integrator before its push and the Integration judge after, over Integration's own commits and merge resolutions since the anchor, every finding there Lachy's question.") ||
+    !term.includes("Integration scans too: the integrator before its push and the Integration judge after, over Integration's own commits and merge resolutions since the anchor; a fixable advisory on Integration's own dependencies is the integrator's bump, every other finding there Lachy's question.") ||
     !term.includes('a secret in Integration\'s commits') ||
-    !term.includes("Integration's scan reads secrets and the scanner config only, not dependencies ([[thread-skill-security-check-integration-dependencies]])") ||
+    !term.includes("Integration's scan reads Integration's own dependency changes, never what the task or the landed PRs changed (undoing a landed PR's bump is Integration's change).") ||
     !CONTEXT_SERIAL.every((p) => term.includes(p)) || term.includes('no Leg ever runs it') ||
     !term.includes('_Avoid_: secret scan (alone), audit, CI check.'))
 
@@ -302,7 +302,7 @@ test('the Security check holds every rule across execute, legs.md, schedule, rep
 
 test('control: the § 3 row without its accept sentence fails s3-row', () => {
   only('execute', "His answer clears it only through the scan (on a serial chain, a secret's answer is its hand-back: below). Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b). ", '', 's3-row', 'no accept')
-  only('execute', ' ([[thread-skill-security-check-integration-dependencies]]). A serial', '. A serial', 's3-row', 'no integration-dependencies link')
+  only('execute', " Integration's scan reads Integration's own dependency changes, never what the task or the landed PRs changed: an entry the task's own change or a merged landed PR holds as written is not Integration's, so a resolution that keeps an entry the task never changed over a landed PR's bump is.", '', 's3-row', 'no Integration dependencies sentence')
   only('execute', 'every task call, seeded revise and integrate call (§ 4).', 'every task call and seeded revise (§ 4), never on an integrate call.', 's3-row', 'never on integrate again')
   only('execute', "A Leg never rewrites a primary checkout's history: a secret there", 'A secret there', 's3-row', 'no primary rule')
   only('execute', "Not scanned on a serial chain: a Leg's commits between tasks, which are no task's change (`/thread:close`'s close-out commits: THREAD.md, a handoff doc, METHOD.md), and every merge commit (`leg.py land`'s merge of `<d>` into `chain/<rollout>`, a hand-resolved `🔀 land: merge` included): in place they are on `<d>` at once, and in a Chain copy at the next land. ", '', 's3-row', 'no serial not-scanned sentence')
@@ -332,8 +332,8 @@ test('control: a reason off the kept list, or no pattern for it, fails kept', ()
   only('rr', '    r"args\\.securityCheck is not this entry\'s verify-timeout securityCheck",\n', '', 'kept', 'no pattern')
 })
 
-test('control: the CONTEXT.md term without its follow-up link, or its serial not-scanned clause, fails context', () => {
-  only('context', 'dependencies\n  ([[thread-skill-security-check-integration-dependencies]]). A serial', 'dependencies. A serial', 'context', 'no link')
+test('control: the CONTEXT.md term without its Integration dependencies sentence, or its serial not-scanned clause, fails context', () => {
+  only('context', " Integration's scan reads Integration's own dependency\n  changes, never what the task or the landed PRs changed (undoing a landed\n  PR's bump is Integration's change).", '', 'context', 'no Integration dependencies sentence')
   only('context', " A\n  Leg's close-out commits between tasks and `leg.py land`'s merges are not\n  scanned.", '', 'context', 'no serial not-scanned clause')
 })
 
