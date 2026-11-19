@@ -1,7 +1,7 @@
 # 0066 — The primary checkout keeps itself current
 
 Date: 2026-11-02
-Status: accepted. Lachy asked for it on 2026-11-02: "some sort of automation where it detects that no rollouts are running and then automatically updates it (rather than me having to remember when those rollouts are running or not)". The plan was approved the same day. The technical calls below were decided for him. Amends ADR 0031 and ADR 0043. It is the first task of the every-rollout-at-once build (the 2026-11-02 spike). *(Amended 2026-11-05, p37-7; 2026-11-06, p39-4: see the Amendment sections below.)*
+Status: accepted. Lachy asked for it on 2026-11-02: "some sort of automation where it detects that no rollouts are running and then automatically updates it (rather than me having to remember when those rollouts are running or not)". The plan was approved the same day. The technical calls below were decided for him. Amends ADR 0031 and ADR 0043. It is the first task of the every-rollout-at-once build (the 2026-11-02 spike). *(Amended 2026-11-05, p37-7; 2026-11-06, p39-4; 2026-11-20, p39-16: see the Amendment sections below.)*
 *(Amended by ADR 0075, 2026-11-07: no notice is sent. Decision 2's 24-hour Notice and every notice of the 2026-11-05
 amendment (item 4's timeout notice, item 5, item 6's refused-tip notice and `ntfy-push.py` bundle row, and item 9's
 job-spell notice) are superseded; a stuck checkout stays in the state file, and `/thread:status` reads it there
@@ -90,6 +90,22 @@ p37-7 left two live fast-forwards outside the primitive, and a third ran a raw m
 4. **Left out by design.** Task trees (task.workflow.js; lead-integrate.py's anchor merge) and Chain copies (leg.py's Leg begin and `bring_in`) are not live checkouts: no operator works in them.
 5. **The residuals.** A refusal the overlap cannot see still rewrites ORIG_HEAD: an `index.lock` (merge-task names it as git's own refusal, never as local changes) and a case-only collision on a case-insensitive filesystem.
 
+## Amendment (2026-11-20, p39-16)
+
+p39-4 gave merge-task's fetch the signal rule, and left two live fetches without it. p39-16 brings them in. What changed:
+
+1. **land.sh runs on lc_bounded.** Its own perl is gone: `bounded` is a wrapper that keeps the deadline (`124` when
+   LAND_DEADLINE has passed, nothing run; a budget clipped to what is left) and ends in `lc_bounded`, so every
+   network call it makes, and the review-round recorder under LAND_RECORD_TIMEOUT, now has the TERM, INT and HUP rule.
+   Before, a signal to land.sh's group killed the perl but not the call in its own group, so a hung ssh outlived it.
+   `bounded` is usable only once live-checkout.sh is sourced (S1, O1), and every call comes after that.
+2. **self-rollout-check.sh's fetch is bounded.** `--ensure`, `--refresh` and `--refresh-in-place` ran `lc_fetch` with
+   no bound at all. They now run it under `lc_bounded` (`fetch_bounded`, SELF_ROLLOUT_FETCH_TIMEOUT, 60 s, the same
+   budget as merge-task's per try). A timeout is a note (`not refreshed: fetch timed out after <t>s`) or the in-place
+   line `not moved: fetch timed out after <t>s`, exit 0, never a halt: the next entry point or merge tries again.
+3. **Still unbounded, by design or for later.** `--ensure`'s first `git clone` (a first clone can rightly take long),
+   `lc_default`'s ls-remote when a repo has no local origin/HEAD, and `pushed-base.sh`'s fetch.
+
 ## Files
 
-`skills/_shared/scripts/primary-refresh.py`; `skills/_shared/scripts/live-checkout.sh`; `tests/primary-refresh.test.sh`; `tests/live-checkout.test.sh`; the installed bundle in `~/.local/state/thread/bin/` (primary-refresh.py's `bundle` table); CONTEXT.md **Primary checkout**, **Primary refresh** and **Running rollout**; README § The convergence engine. p39-4: `skills/execute/scripts/merge-task.sh` (`refresh_local_base`, its `--self-test-base`), `skills/execute/scripts/leg.py` (`ff_primary`, `overlap_paths`), `skills/_shared/scripts/land.sh` (O9); `tests/merge-task-integrated.test.sh`, `tests/leg-land.test.sh` (L17c, L17s), `tests/land.test.sh` (case 58b). p39-6: `skills/_shared/scripts/background_job.py` (a bundle file); `tests/background-job.test.mjs` (BJ10, its frozen interface).
+`skills/_shared/scripts/primary-refresh.py`; `skills/_shared/scripts/live-checkout.sh`; `tests/primary-refresh.test.sh`; `tests/live-checkout.test.sh`; the installed bundle in `~/.local/state/thread/bin/` (primary-refresh.py's `bundle` table); CONTEXT.md **Primary checkout**, **Primary refresh** and **Running rollout**; README § The convergence engine. p39-4: `skills/execute/scripts/merge-task.sh` (`refresh_local_base`, its `--self-test-base`), `skills/execute/scripts/leg.py` (`ff_primary`, `overlap_paths`), `skills/_shared/scripts/land.sh` (O9); `tests/merge-task-integrated.test.sh`, `tests/leg-land.test.sh` (L17c, L17s), `tests/land.test.sh` (case 58b). p39-6: `skills/_shared/scripts/background_job.py` (a bundle file); `tests/background-job.test.mjs` (BJ10, its frozen interface). p39-16: `skills/_shared/scripts/land.sh` (`bounded`, `own_rounds`), `skills/execute/scripts/self-rollout-check.sh` (`fetch_bounded`); `tests/land.test.sh` (case 22c), `tests/self-rollout-check.test.sh`.

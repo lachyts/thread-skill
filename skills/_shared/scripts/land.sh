@@ -167,8 +167,12 @@
 # Exit 0 but stuck (1) and usage (2).
 #
 # Every network call runs under `bounded` (LAND_TIMEOUT seconds each, default 30; LAND_DEADLINE seconds
-# overall, default 450). The Green tip read (green_read) runs under it too, inside LAND_DEADLINE: its own budget gb =
-# min(60, what is left - 10), skipped under 1 s, under an outer bound of gb + 5, so it costs at most 65 s of the 450. The review-round recorder runs after them, under LAND_RECORD_TIMEOUT alone: 450 + 60
+# overall, default 450), a wrapper over live-checkout.sh's lc_bounded (p39-16): each call runs in its own process
+# group, killed at its budget and after a normal exit, and a TERM, INT or HUP to land.sh's group kills that group
+# too (exit 143, 130 or 129), so no call is ever orphaned unbounded. The Green tip read (green_read) runs under it
+# too, inside LAND_DEADLINE: its own budget gb = min(60, what is left - 10), skipped under 1 s, under an outer bound
+# of gb + 5, so it costs at most 65 s of the 450. The review-round recorder runs after them, under lc_bounded and
+# LAND_RECORD_TIMEOUT alone: 450 + 60
 # leaves close's 600 s Bash timeout 90 s for the local work. The body runs in a subshell whose fd 1 is
 # stderr, so no child — a hook that daemonizes, git's own maintenance — can ever hold the caller's stdout;
 # git's auto-gc and auto-maintenance are switched off for every git call here. bash 3.2-compatible (macOS);
@@ -195,24 +199,18 @@ export GIT_CONFIG_COUNT=$((land_cfg_n + 1))
 export LC_ALL=C GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1 GCM_INTERACTIVE=never
 
 # ---- bounded: one network call, killed with its whole process group at the budget ----------------------
-# The deadline check and the budget are one read of SECONDS. 124: the deadline passed, nothing ran.
-# 142: the call timed out. perl execs the argv directly (no shell) in a fresh process group, and kills
-# that group after a normal exit too, so a leftover descendant cannot hold a pipe open.
-read -r -d '' LAND_BOUNDED_PL <<'PL'
-my $t=shift; $t=1 unless defined $t && $t=~/^\d+$/ && $t>=1;
-my $pid=fork; defined $pid or exit 127;
-if(!$pid){ setpgrp(0,0); exec { $ARGV[0] } @ARGV; exit 127 }
-$SIG{ALRM}=sub{ kill 'KILL',-$pid; waitpid($pid,0); exit 142 };
-alarm $t; waitpid($pid,0); my $st=$?; alarm 0;
-kill 'KILL',-$pid;
-exit($st & 127 ? 128+($st & 127) : $st >> 8)
-PL
-
+# A wrapper over live-checkout.sh's lc_bounded (p39-16), keeping the deadline: the deadline check and the budget
+# are one read of SECONDS. 124: the deadline passed, nothing ran. 142: the call timed out. lc_bounded runs the
+# argv directly (no shell, stdin from /dev/null) in its own process group, and kills that group at the budget and
+# after a normal exit, so a leftover descendant cannot hold a pipe open. A TERM, INT or HUP to land.sh's group
+# kills that group too, and lc_bounded exits 143, 130 or 129, so a signal never orphans a call. bounded is defined
+# here but usable only once live-checkout.sh is sourced (main's S1, own_main's O1); every call comes after that,
+# and one before it would read as rc 127 (lc_bounded undefined), a classified failure, never a hang.
 bounded() {
   local rem=$((LAND_DEADLINE - SECONDS)) t=$LAND_TIMEOUT
   [ "$rem" -lt 1 ] && return 124          # deadline: nothing run
   [ "$rem" -lt "$t" ] && t=$rem
-  perl -e "$LAND_BOUNDED_PL" "$t" "$@" </dev/null
+  lc_bounded "$t" "$@"
 }
 
 # net_rc <rc> <step> required|optional <errfile> [git] — classify a bounded call's rc. 0 ok; 124 the
@@ -1267,7 +1265,7 @@ scratch_merge() (
 
 # own_rounds: --queue's and --hold's one run of fresh-review's review-round recorder (the header's review rounds),
 # from own_finish. It never reads $od (set only after O3): it works the base out itself. Local work only, so
-# never `bounded`: its own LAND_RECORD_TIMEOUT, outside LAND_DEADLINE. Its outcome is a stderr line only:
+# never `bounded`: lc_bounded under its own LAND_RECORD_TIMEOUT, outside LAND_DEADLINE. Its outcome is a stderr line only:
 # always returns 0.
 own_rounds() {
   local rr=${THREAD_REVIEW_ROUND:-$HOME/.agents/skills/fresh-review/scripts/review-round.py} rb rc w
@@ -1282,7 +1280,7 @@ own_rounds() {
   if [ ! -f "$rr" ] || [ ! -r "$rr" ]; then
     echo "land: review rounds not recorded (no recorder at $rr)"; return 0
   fi
-  perl -e "$LAND_BOUNDED_PL" "$LAND_RECORD_TIMEOUT" python3 "$rr" --repo "$top" --base "$rb" --branch-docs </dev/null 2>"$tmpd/rr.err"; rc=$?
+  lc_bounded "$LAND_RECORD_TIMEOUT" python3 "$rr" --repo "$top" --base "$rb" --branch-docs 2>"$tmpd/rr.err"; rc=$?
   cat "$tmpd/rr.err"
   case $rc in
     0)

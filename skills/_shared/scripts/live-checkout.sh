@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # live-checkout.sh — the one primitive for "fast-forward a live checkout" (ADR 0066's 2026-11-05 amendment, p37-7):
 # what a half-applied operation is, the ssh rule, origin's default branch, the one-branch fetch, the dirty-overlap check
-# and the guarded fast-forward. land.sh (S1, S4, O1, O4, O9), self-rollout-check.sh (--ensure, --refresh,
-# --refresh-in-place) and merge-task.sh's refresh_local_base (lc_op, lc_ssh_rule, lc_fetch under lc_bounded, lc_ff;
-# ADR 0066's 2026-11-06 amendment, p39-4) source it; primary-refresh.py runs it, `bash live-checkout.sh <mode> …`, and
+# and the guarded fast-forward. land.sh (S1, S4, O1, O4, O9; its `bounded` wraps lc_bounded), self-rollout-check.sh
+# (--ensure, --refresh, --refresh-in-place: lc_fetch under lc_bounded since p39-16) and merge-task.sh's
+# refresh_local_base (lc_op, lc_ssh_rule, lc_fetch under lc_bounded, lc_ff; ADR 0066's 2026-11-06 amendment, p39-4)
+# source it; primary-refresh.py runs it, `bash live-checkout.sh <mode> …`, and
 # parses what it prints; leg.py's ff_primary runs its overlap mode before its own fast-forward to a local branch.
 #
 # The target (ADR 0084 d1, p54-6): a live checkout of a repo that publishes a Green tip moves to it and never past it
@@ -45,12 +46,14 @@
 #                              143, 130 or 129, so a signal to the caller's group never orphans the call unbounded (the
 #                              child sits in its own group and never sees that signal). A KILL cannot be caught, and a
 #                              signal in the instant between the fork and the child's setpgrp misses the group. Its
-#                              perl is inline, so sourcing still sets only _lc_dir. merge-task.sh's fetch runner.
+#                              perl is inline, so sourcing still sets only _lc_dir. land.sh's `bounded`, and
+#                              merge-task.sh's and self-rollout-check.sh's fetch runner.
 #   lc_fetch <repo> <d> [<runner>]
 #                              `[<runner>] git -C <repo> fetch --quiet --no-tags --no-write-fetch-head origin
 #                              +refs/heads/<d>:refs/remotes/origin/<d>`, git's rc: one branch, never a tag, so an
 #                              unrelated ref conflict (a stale origin/feat against origin's feat/x) never fails it.
-#                              <runner>, one command word, is land.sh's `bounded` or merge-task.sh's `refresh_bounded`.
+#                              <runner>, one command word, is land.sh's `bounded`, merge-task.sh's `refresh_bounded`
+#                              or self-rollout-check.sh's `fetch_bounded`.
 #   lc_overlap_ref <repo> <ref>
 #                              the paths a fast-forward to the full ref <ref> would overwrite, `, `-joined, cut to 200
 #                              characters, or nothing. Changed C: `diff --no-renames --name-only HEAD <ref>`; dirty P:
