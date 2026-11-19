@@ -2,152 +2,164 @@
 # rules): each entry's load in the full suite's shard split (ADR 0073 d3), so the shards balance on time, not file size,
 # and node's order (shard.py --order: tests/run.sh starts node's files longest first, p54-3).
 # tests/run.sh reads it too, for each shell suite's liveness bound (tests/lib/test-jobs.sh's suite_bounds): 12x the weight
-# rounded up, at least 300 s, 1200 s for a suite with none. macOS CI runs a suite at up to 7.9x these local seconds in
-# the runs it finished, and at about 12x and 8x in the runs that cut two suites at their bounds (master's shard 3/4,
-# 2026-11-17 to 18), so those two rows are hand-set, below. A suite whose seconds grow towards its bound needs this file
-# regenerated, or it is killed as hung.
-# Source: the per-suite `<label>: ok (<N>s)` lines of two local `make test` runs (2026-11-09, p43-6's audit,
-# docs/audits/2026-11-09-test-suite.md), at the default cap of 4 on a 12-core Mac, load 3 to 5; each value is the
-# median of the two. @merge-task-self-tests is its two self-tests summed. A suite that ended within its first
-# second (0 s) is written as 0.5, since a weight must be positive.
+# rounded up, at least 300 s, 1200 s for a suite with none. In master's full-suite.yml macOS shards from
+# 2026-11-16T15:00Z to 2026-11-19, macOS CI ran a suite at up to 9.2x these local seconds in the runs it finished
+# (skills/execute/tests/reconcile-rollout-standing.test.sh, 271 s against its measured 29.5), and at about 12x and 8x in
+# the runs that cut two suites at their bounds (master's shard 3/4, 2026-11-17 to 18), so those three rows hold floors,
+# below. A suite whose seconds grow towards its bound needs this file regenerated, or it is killed as hung.
+# Source: the per-suite `<label>: ok (<N>s)` lines of two local `make test` runs (2026-11-19, p49-1, on master at
+# 9dd298d), at the default cap of 4 on a 12-core Mac, load 9 to 15 under other rollouts; each value is the median of
+# the two. @merge-task-self-tests is its two self-tests summed. A suite that ended within its first second (0 s) is
+# written as 0.5, since a weight must be positive.
 # Node files (*.mjs, p54-3): the `<seconds><TAB><file>` lines of the `== node seconds per file` block that
-# tests/lib/node-run.mjs prints at the end of node's phase (each file's top-level tests' duration_ms summed), from two
-# local runs of every node file (2026-11-16, `bash tests/run.sh --only <them all>`, cap 4, the Mac under other rollouts'
-# load), the median of the two; a file under 0.1 s is written as 0.1.
+# tests/lib/node-run.mjs prints at the end of node's phase (each file's top-level tests' duration_ms summed), from the
+# same two runs, the median of the two; a file under 0.1 s is written as 0.1.
 # Regenerate: run `make test` twice, take each suite's median from those lines and each node file's from that block,
-# sum the two self-tests, and rewrite this file whole, keeping the two hand-set rows below at least as high. A suite or
+# sum the two self-tests, and rewrite this file whole, keeping the three floored rows below at least as high. A suite or
 # node file added since falls back to its size times the median seconds per byte of its kind (shard.py).
-# The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
-# leg.test.sh's 527 s split by the parts' measured shares of two local runs, until the next regenerate.
-# Three rows are their own, until the next regenerate. tests/serial-chains.test.sh is 35, the median of its `<label>: ok
-# (<N>s)` lines in two local full-suite runs at the default cap of 4 (2026-11-18, `make test-fast` falling back to the
-# full suite, the same lines as the Source above): 35 and 35 (33 on 2026-11-09).
-# The other two are hand-set, not measured: each is sized from the macOS CI runs that cut it at its bound, because its
-# measured seconds give a bound under 1.5x what those runs would have taken in full. A cut run's full time is its cut
-# seconds over the share of a lone local run's time its last check had reached (`bash <suite>` with each line timed).
-# - skills/execute/tests/reconcile-rollout-queue.test.sh is 67. Its `make test` lines read 44 and 44 (35.5 on
-#   2026-11-09). Job 134402170137 (run 44185887550) cut it at its 355 s bound after check 242 of 342, 32.8 s into a
-#   49.2 s local run (two thirds), so that run would have taken about 535 s, 12x the 44. 67 gives an 804 s bound, 1.5x
-#   that; 44 gives 528 s, under the 535 s, and CI would cut it again.
-# - tests/fast-tier.test.sh is 86. Its `make test` lines read 84 and 83 (24 on 2026-11-09, which gave it the 300 s
-#   floor). Jobs 134564415416 and 134575108240 (run 44233636618) cut it at 300 s after its R8 and R10, 36.6 and 40.7 s
-#   into an 82.9 s local run, so those runs would have taken about 680 and 610 s, 8x the 84. 86 gives a 1032 s bound,
-#   1.5x the 680 s; 83.5 gives 1002 s, 1.47x.
-# A regenerate keeps both at least that high until macOS CI passes them well under their bounds: written back at their
-# measured seconds, they fail tests/test-jobs.test.sh's ci_max guard, which holds the same 535 and 680 s.
-9	@merge-task-self-tests
-0.5	skills/execute/tests/integration-inputs.test.sh
-3.5	skills/execute/tests/note-save.test.sh
-19.5	skills/execute/tests/reconcile-rollout-approved-queue.test.sh
-62	skills/execute/tests/reconcile-rollout-auto-retry.test.sh
-10	skills/execute/tests/reconcile-rollout-capacity.test.sh
-7.5	skills/execute/tests/reconcile-rollout-churn.test.sh
-93.5	skills/execute/tests/reconcile-rollout-completion.test.sh
-25.5	skills/execute/tests/reconcile-rollout-descope.test.sh
-4.5	skills/execute/tests/reconcile-rollout-flake.test.sh
-4	skills/execute/tests/reconcile-rollout-fold.test.sh
-4	skills/execute/tests/reconcile-rollout-heat.test.sh
-15	skills/execute/tests/reconcile-rollout-hold.test.sh
-53.5	skills/execute/tests/reconcile-rollout-human-fix.test.sh
-15	skills/execute/tests/reconcile-rollout-last-starts.test.sh
-11	skills/execute/tests/reconcile-rollout-lead.test.sh
-41.5	skills/execute/tests/reconcile-rollout-moving.test.sh
-24.5	skills/execute/tests/reconcile-rollout-origin-lane.test.sh
+# Three rows hold floors, sized from macOS CI because their measured seconds give a bound under 1.5x a CI time; a row
+# whose measured seconds pass its floor is written at them. A cut run's full time is its cut seconds over the share of a
+# lone local run's time its last check had reached (`bash <suite>` with each line timed).
+# - skills/execute/tests/reconcile-rollout-queue.test.sh is 67. Its `make test` lines read 46 and 46 (44 and 44 on
+#   2026-11-18, 35.5 on 2026-11-09). Job 134402170137 (run 44185887550) cut it at its 355 s bound after check 242 of
+#   342, 32.8 s into a 49.2 s local run (two thirds), so that run would have taken about 535 s, 12x the 44. 67 gives an
+#   804 s bound, 1.5x that; 46 gives 552 s, 1.03x, and CI would cut it again.
+# - tests/fast-tier.test.sh's floor is 86, and its `make test` lines read 87 and 91, so it is written at 89 (84 and 83
+#   on 2026-11-18, 24 on 2026-11-09, which gave it the 300 s floor). Jobs 134564415416 and 134575108240 (run
+#   44233636618) cut it at 300 s after its R8 and R10, 36.6 and 40.7 s into an 82.9 s local run, so those runs would
+#   have taken about 680 and 610 s, 8x the 84. 86 gives a 1032 s bound, 1.5x the 680 s; 89 gives 1068 s.
+# - skills/execute/tests/reconcile-rollout-standing.test.sh is 34. Its `make test` lines read 29 and 30. Job
+#   133719463294 (run 43987540320) passed it at 271 s, 9.2x the 29.5 and 4x its 69 s median in that window. 34 gives a
+#   408 s bound, 1.5x the 271 s; 29.5 gives 354 s, 1.31x, and one slower run would be killed as hung.
+# A regenerate keeps each at least that high until macOS CI passes them well under their bounds: written back below
+# their floors, they fail tests/test-jobs.test.sh's ci_max guard, which holds the same 535, 680 and 271 s.
+20	@merge-task-self-tests
+1	skills/execute/tests/integration-inputs.test.sh
+4.5	skills/execute/tests/note-save.test.sh
+28	skills/execute/tests/reconcile-rollout-approved-queue.test.sh
+5	skills/execute/tests/reconcile-rollout-arms.test.sh
+97.5	skills/execute/tests/reconcile-rollout-auto-retry.test.sh
+26.5	skills/execute/tests/reconcile-rollout-capacity.test.sh
+9	skills/execute/tests/reconcile-rollout-churn.test.sh
+91.5	skills/execute/tests/reconcile-rollout-completion.test.sh
+34.5	skills/execute/tests/reconcile-rollout-descope.test.sh
+7	skills/execute/tests/reconcile-rollout-flake.test.sh
+12	skills/execute/tests/reconcile-rollout-fold.test.sh
+5.5	skills/execute/tests/reconcile-rollout-heat.test.sh
+22	skills/execute/tests/reconcile-rollout-hold.test.sh
+57.5	skills/execute/tests/reconcile-rollout-human-fix.test.sh
+23.5	skills/execute/tests/reconcile-rollout-last-starts.test.sh
+14	skills/execute/tests/reconcile-rollout-lead.test.sh
+20.5	skills/execute/tests/reconcile-rollout-master-runs.test.sh
+60.5	skills/execute/tests/reconcile-rollout-moving.test.sh
+36	skills/execute/tests/reconcile-rollout-origin-lane.test.sh
+36	skills/execute/tests/reconcile-rollout-overtime.test.sh
+38	skills/execute/tests/reconcile-rollout-prove.test.sh
 67	skills/execute/tests/reconcile-rollout-queue.test.sh
-14	skills/execute/tests/reconcile-rollout-ready-at.test.sh
-55.5	skills/execute/tests/reconcile-rollout-record.test.sh
-21	skills/execute/tests/reconcile-rollout-runs.test.sh
-20	skills/execute/tests/reconcile-rollout-standing.test.sh
-9.5	skills/execute/tests/reconcile-rollout-stops.test.sh
-31	skills/execute/tests/reconcile-rollout-trickle-claim.test.sh
-22	skills/execute/tests/reconcile-rollout-trickle-share.test.sh
-21.5	skills/execute/tests/reconcile-rollout-trickle-wake.test.sh
-27.5	skills/execute/tests/reconcile-rollout-trickle.test.sh
-18	skills/execute/tests/reconcile-rollout.test.sh
+22.5	skills/execute/tests/reconcile-rollout-ready-at.test.sh
+75	skills/execute/tests/reconcile-rollout-record.test.sh
+28	skills/execute/tests/reconcile-rollout-runs.test.sh
+34.5	skills/execute/tests/reconcile-rollout-speed-hold.test.sh
+34	skills/execute/tests/reconcile-rollout-standing.test.sh
+14	skills/execute/tests/reconcile-rollout-stops.test.sh
+36.5	skills/execute/tests/reconcile-rollout-trickle-claim.test.sh
+27	skills/execute/tests/reconcile-rollout-trickle-share.test.sh
+25.5	skills/execute/tests/reconcile-rollout-trickle-wake.test.sh
+37.5	skills/execute/tests/reconcile-rollout-trickle.test.sh
+25	skills/execute/tests/reconcile-rollout-triggers.test.sh
+29	skills/execute/tests/reconcile-rollout.test.sh
 2	skills/execute/tests/rollout-stop-driver.test.sh
-2	tests/default-branch.test.sh
-27	tests/engine-catch-up.test.sh
-37	tests/engine-snapshot.test.sh
-4	tests/execution-fit-remote.test.sh
-86	tests/fast-tier.test.sh
-153.5	tests/git-env-canary.test.sh
-2.5	tests/git-env-scrub.test.sh
+7	tests/baseline-capture.test.sh
+2.5	tests/default-branch.test.sh
+32	tests/engine-catch-up.test.sh
+55	tests/engine-snapshot.test.sh
+5	tests/execution-fit-remote.test.sh
+89	tests/fast-tier.test.sh
+132	tests/git-env-canary.test.sh
+3.5	tests/git-env-scrub.test.sh
+30	tests/green-tip.test.sh
 2	tests/handoff-home.test.sh
-3.5	tests/handoff-scan.test.sh
-50.5	tests/integration-tree.test.sh
-62	tests/land.test.sh
-244	tests/lead-integrate.test.sh
-34	tests/leg-capacity.test.sh
-158	tests/leg-land.test.sh
-99	tests/leg-rank.test.sh
-117	tests/leg-security.test.sh
-153	tests/leg.test.sh
-20.5	tests/live-checkout.test.sh
-2.5	tests/merge-task-bare-blocked.test.sh
+4	tests/handoff-scan.test.sh
+61	tests/integration-tree.test.sh
+54	tests/land-carrier.test.sh
+90.5	tests/land.test.sh
+318	tests/lead-integrate.test.sh
+43.5	tests/leg-capacity.test.sh
+143	tests/leg-land.test.sh
+92	tests/leg-rank.test.sh
+114.5	tests/leg-security.test.sh
+170	tests/leg.test.sh
+70	tests/live-checkout.test.sh
+68.5	tests/merge-settings.test.sh
+3	tests/merge-task-bare-blocked.test.sh
 5	tests/merge-task-base-moved.test.sh
-35.5	tests/merge-task-base.test.sh
-8	tests/merge-task-cancelled.test.sh
-92	tests/merge-task-integrated.test.sh
-27	tests/parallel-rollouts-one-repo.test.sh
-0.5	tests/peer-guard.test.sh
-9	tests/pickups.test.sh
-19.5	tests/pinned-tree.test.sh
-145.5	tests/primary-refresh.test.sh
-59	tests/pushed-base.test.sh
-15	tests/reconcile-project.test.sh
-6.5	tests/release-check-missing-tree-dir.test.sh
-11	tests/release-check-quoting-diff.test.sh
-6.5	tests/release-check-symlinked-dir.test.sh
-10	tests/release-check.test.sh
-6.5	tests/repo-state.test.sh
-6.5	tests/repo-threads.test.sh
-4	tests/schedule-queue.test.sh
-45.5	tests/self-rollout-check.test.sh
-35	tests/serial-chains.test.sh
-1	tests/test-jobs.test.sh
-112	tests/unfinished-rollout.test.sh
-9.5	tests/vault-note-overlap.test.sh
-79.5	tests/verify-slot-heat.test.sh
-34.5	tests/verify-slot-own.test.sh
-9.5	tests/verify-slot-wait.test.sh
-50.5	tests/verify-slot.test.sh
+48.5	tests/merge-task-base.test.sh
+60.5	tests/merge-task-cancelled.test.sh
+23	tests/merge-task-ci-headroom.test.sh
+140	tests/merge-task-integrated.test.sh
+82.5	tests/merge-task-no-runner.test.sh
+33.5	tests/parallel-rollouts-one-repo.test.sh
+2	tests/peer-guard.test.sh
+10	tests/pickups.test.sh
+23	tests/pinned-tree.test.sh
+10.5	tests/primary-commit-guard.test.sh
+408.5	tests/primary-refresh.test.sh
+83.5	tests/pushed-base.test.sh
+14.5	tests/reconcile-project.test.sh
+7.5	tests/release-check-missing-tree-dir.test.sh
+14.5	tests/release-check-quoting-diff.test.sh
+8	tests/release-check-symlinked-dir.test.sh
+14	tests/release-check.test.sh
+7	tests/repo-state.test.sh
+7	tests/repo-threads.test.sh
+5	tests/schedule-queue.test.sh
+73	tests/self-rollout-check.test.sh
+38.5	tests/serial-chains.test.sh
+7.5	tests/test-jobs.test.sh
+158	tests/unfinished-rollout.test.sh
+11	tests/vault-note-overlap.test.sh
+79	tests/verify-slot-heat.test.sh
+35	tests/verify-slot-own.test.sh
+9	tests/verify-slot-wait.test.sh
+51	tests/verify-slot.test.sh
 # ---- node files (p54-3) ----
-0.8	skills/execute/tests/approved-gates-resume.test.mjs
-0.2	skills/execute/tests/args-refusal.test.mjs
+0.85	skills/execute/tests/approved-gates-resume.test.mjs
+0.1	skills/execute/tests/args-refusal.test.mjs
 0.3	skills/execute/tests/integrate.test.mjs
-0.3	skills/execute/tests/prompt-invariants.test.mjs
-11.8	skills/execute/tests/room-stop.test.mjs
+1.6	skills/execute/tests/prompt-invariants.test.mjs
+11.6	skills/execute/tests/room-stop.test.mjs
 0.2	skills/execute/tests/task-engine.test.mjs
-8.4	tests/background-job.test.mjs
-17.6	tests/backlog-orient.test.mjs
-3.1	tests/ci-workflows.test.mjs
-0.5	tests/contracts/approved-queue.test.mjs
-1	tests/contracts/away-state.test.mjs
-0.4	tests/contracts/cap-promise.test.mjs
+0.1	skills/execute/tests/unreachable-surface.test.mjs
+8.55	tests/background-job.test.mjs
+16.1	tests/backlog-orient.test.mjs
+7.75	tests/ci-workflows.test.mjs
+0.4	tests/contracts/approved-queue.test.mjs
+0.95	tests/contracts/away-state.test.mjs
+0.6	tests/contracts/cap-promise.test.mjs
 0.1	tests/contracts/capacity-state.test.mjs
 0.1	tests/contracts/capture-marker.test.mjs
 0.1	tests/contracts/close-flips-finished-task.test.mjs
-1.1	tests/contracts/close-handoff-chorus-words.test.mjs
+1	tests/contracts/close-handoff-chorus-words.test.mjs
 0.1	tests/contracts/close-lands-close-out.test.mjs
 0.1	tests/contracts/close-lands-own-branch.test.mjs
 0.1	tests/contracts/continuity-shared.test.mjs
-0.3	tests/contracts/engine-snapshot.test.mjs
-0.2	tests/contracts/escapes-fixes-key.test.mjs
+0.4	tests/contracts/engine-snapshot.test.mjs
+0.1	tests/contracts/escapes-fixes-key.test.mjs
 0.1	tests/contracts/evals-structure.test.mjs
-2.1	tests/contracts/execute-archive-move.test.mjs
+1.45	tests/contracts/execute-archive-move.test.mjs
 0.2	tests/contracts/execute-args-refusal.test.mjs
-4	tests/contracts/execute-handoff.test.mjs
-8.8	tests/contracts/execute-legs.test.mjs
-2	tests/contracts/execute-needs-you.test.mjs
-3	tests/contracts/execute-phase-close.test.mjs
-20.2	tests/contracts/execute-queue.test.mjs
-7.9	tests/contracts/execute-room-stop.test.mjs
-0.2	tests/contracts/execute-run-record.test.mjs
-0.2	tests/contracts/execute-signed-gate.test.mjs
-3.8	tests/contracts/execute-standing-approval.test.mjs
-6.2	tests/contracts/execution-fit-shapes.test.mjs
-0.2	tests/contracts/flake-rule.test.mjs
-1.2	tests/contracts/git-env-canary.test.mjs
+3.65	tests/contracts/execute-handoff.test.mjs
+8.9	tests/contracts/execute-legs.test.mjs
+2.3	tests/contracts/execute-needs-you.test.mjs
+3.2	tests/contracts/execute-phase-close.test.mjs
+20.85	tests/contracts/execute-queue.test.mjs
+8	tests/contracts/execute-room-stop.test.mjs
+0.5	tests/contracts/execute-run-record.test.mjs
+0.1	tests/contracts/execute-signed-gate.test.mjs
+3.7	tests/contracts/execute-standing-approval.test.mjs
+5.7	tests/contracts/execution-fit-shapes.test.mjs
+0.15	tests/contracts/flake-rule.test.mjs
+1.3	tests/contracts/git-env-canary.test.mjs
 0.1	tests/contracts/grill-fit.test.mjs
 0.4	tests/contracts/handoff-ends-with-next.test.mjs
 0.1	tests/contracts/handoff-lands-its-doc.test.mjs
@@ -155,17 +167,17 @@
 0.4	tests/contracts/integration-conflict.test.mjs
 0.1	tests/contracts/lean-capture.test.mjs
 0.1	tests/contracts/manifest.test.mjs
-0.2	tests/contracts/merge-settings-guard.test.mjs
+0.1	tests/contracts/merge-settings-guard.test.mjs
 0.1	tests/contracts/next-action.test.mjs
 0.1	tests/contracts/next-archive-session.test.mjs
 0.1	tests/contracts/next-decides-housekeeping.test.mjs
 0.6	tests/contracts/next-starts-a-prepared-rollout.test.mjs
 0.1	tests/contracts/next-starts-an-awaited-task.test.mjs
-3	tests/contracts/no-single-cause.test.mjs
+2.75	tests/contracts/no-single-cause.test.mjs
 0.2	tests/contracts/note-overlap-opener.test.mjs
-2.2	tests/contracts/nothing-left-out.test.mjs
-0.5	tests/contracts/orient-all.test.mjs
-0.8	tests/contracts/orient-backlog.test.mjs
+1.65	tests/contracts/nothing-left-out.test.mjs
+0.4	tests/contracts/orient-all.test.mjs
+0.95	tests/contracts/orient-backlog.test.mjs
 0.1	tests/contracts/orient-declared-check.test.mjs
 0.1	tests/contracts/orient-launch-model.test.mjs
 0.1	tests/contracts/orient-priorities-card.test.mjs
@@ -173,62 +185,62 @@
 0.1	tests/contracts/orient-target.test.mjs
 0.1	tests/contracts/plugin-root-rule.test.mjs
 3.3	tests/contracts/question-gate.test.mjs
-0.6	tests/contracts/queue-only.test.mjs
+0.5	tests/contracts/queue-only.test.mjs
 0.1	tests/contracts/readiness-grade.test.mjs
-13.8	tests/contracts/reflect.test.mjs
+12.9	tests/contracts/reflect.test.mjs
 0.1	tests/contracts/refs.test.mjs
 0.1	tests/contracts/repair-complete-rollout.test.mjs
 0.1	tests/contracts/run-record-hermetic.test.mjs
-0.2	tests/contracts/run-record-writers.test.mjs
-0.4	tests/contracts/rung-vocabulary.test.mjs
-0.7	tests/contracts/schedule-merge-gate.test.mjs
+0.25	tests/contracts/run-record-writers.test.mjs
+0.3	tests/contracts/rung-vocabulary.test.mjs
+0.65	tests/contracts/schedule-merge-gate.test.mjs
 0.2	tests/contracts/schedule-preflight.test.mjs
 1	tests/contracts/schedule-queue.test.mjs
-0.5	tests/contracts/schedule-serial.test.mjs
+0.6	tests/contracts/schedule-serial.test.mjs
 0.1	tests/contracts/schedule-supersede.test.mjs
-0.2	tests/contracts/security-check.test.mjs
+0.3	tests/contracts/security-check.test.mjs
 0.1	tests/contracts/skill-positional-args.test.mjs
 0.1	tests/contracts/start-when-ready.test.mjs
 0.1	tests/contracts/status-primary-refresh.test.mjs
-7	tests/contracts/status-repair-queue.test.mjs
+6.45	tests/contracts/status-repair-queue.test.mjs
 0.3	tests/contracts/status-repair-serial.test.mjs
-0.6	tests/contracts/stuck-release.test.mjs
+0.55	tests/contracts/stuck-release.test.mjs
 0.1	tests/contracts/templates.test.mjs
-0.2	tests/contracts/thread-placement-wiring.test.mjs
-1	tests/contracts/vault-grammar.test.mjs
+0.1	tests/contracts/thread-placement-wiring.test.mjs
+1.15	tests/contracts/vault-grammar.test.mjs
 0.1	tests/contracts/verify-base.test.mjs
 0.1	tests/contracts/verify-slot-hermetic.test.mjs
-12.1	tests/declared-check.test.mjs
+10.75	tests/declared-check.test.mjs
 0.1	tests/default-branch.test.mjs
 1.6	tests/engine-ladder.test.mjs
-23.3	tests/estate-dispatch.test.mjs
-12.6	tests/estate-rank.test.mjs
-24.4	tests/estate-scan.test.mjs
-0.3	tests/fast-tier-wiring.test.mjs
-16	tests/gated-inputs.test.mjs
+25.15	tests/estate-dispatch.test.mjs
+11.5	tests/estate-rank.test.mjs
+26.15	tests/estate-scan.test.mjs
+0.2	tests/fast-tier-wiring.test.mjs
+14.45	tests/gated-inputs.test.mjs
 0.1	tests/git-env-scrub.test.mjs
-62.1	tests/inert-paths.test.mjs
-9.1	tests/integration-marker-roundtrip.test.mjs
+73.6	tests/inert-paths.test.mjs
+10.3	tests/integration-marker-roundtrip.test.mjs
 4.4	tests/ladder.test.mjs
-11.3	tests/landing-register.test.mjs
-14.1	tests/merge-gate.test.mjs
-2.1	tests/needs-human-roundtrip.test.mjs
-7	tests/next-action.test.mjs
+8.55	tests/landing-register.test.mjs
+13.75	tests/merge-gate.test.mjs
+1.8	tests/needs-human-roundtrip.test.mjs
+7.3	tests/next-action.test.mjs
 0.1	tests/pinned-tree.test.mjs
-8.7	tests/reflect-arms.test.mjs
-77.4	tests/reflect-attention.test.mjs
-44.5	tests/reflect-close-score.test.mjs
-7.1	tests/reflect-due.test.mjs
-19.9	tests/reflect-escapes.test.mjs
-21.9	tests/reflect-grades.test.mjs
-91.4	tests/reflect-ledger.test.mjs
-38.1	tests/reflect-score.test.mjs
-10.1	tests/reflect-serial-score.test.mjs
-27.9	tests/reflect-tune.test.mjs
-255.9	tests/reflect-weekly.test.mjs
-0.9	tests/resolve-day.test.mjs
-16.4	tests/resolve-target.test.mjs
-16.6	tests/rollout-settings.test.mjs
-40.3	tests/run-record.test.mjs
-138.9	tests/security-check-scan.test.mjs
-17.1	tests/thread-placement.test.mjs
+9.8	tests/reflect-arms.test.mjs
+90.4	tests/reflect-attention.test.mjs
+36.85	tests/reflect-close-score.test.mjs
+5.95	tests/reflect-due.test.mjs
+21.35	tests/reflect-escapes.test.mjs
+21.25	tests/reflect-grades.test.mjs
+107.55	tests/reflect-ledger.test.mjs
+42.3	tests/reflect-score.test.mjs
+8.8	tests/reflect-serial-score.test.mjs
+30.8	tests/reflect-tune.test.mjs
+295.2	tests/reflect-weekly.test.mjs
+0.75	tests/resolve-day.test.mjs
+15.25	tests/resolve-target.test.mjs
+17.2	tests/rollout-settings.test.mjs
+41.25	tests/run-record.test.mjs
+113.55	tests/security-check-scan.test.mjs
+19.2	tests/thread-placement.test.mjs
