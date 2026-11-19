@@ -34,18 +34,21 @@ carries the scan's why as `reason` (`frontmatter does not parse (line 7, next_ac
 
 ## The grading agents
 
-The lead runs one read-only agent per home project with gradeable tasks, side by side. Each agent gets:
+The lead grades every home project with gradeable tasks, one slice file per project, side by side, through agents. An agent grades one slice or, when more slices are cut than the session's agent cap leaves room for, several
+(orient-all § 2 step 4: `estate-dispatch.py slices`' `agents[]`). Each slice gives its agent:
 
 - its project's scan row, its gradeable task rows, and the scan rows of the repos the project declares;
 - today's date;
 - this file.
 
-Each agent returns one JSON object (§ Output). The lead saves each answer to a scratch file and runs the ranker over
-all of them (§ The ranking). A big project's tasks (CONTEXT.md **Big project**, ADR 0061) are graded the same way, for
+Each slice is graded into one JSON object (§ Output). Under orient-all the agent writes each to the grades file its
+brief names for that slice, under the pass's scratch directory; elsewhere it returns the one object, and the lead
+saves it to a scratch file. The lead runs the ranker over all of them (§ The ranking), reading the files, never a
+completion notice. A big project's tasks (CONTEXT.md **Big project**, ADR 0061) are graded the same way, for
 the pick list's counts and the Grade log only: their decisions wait for that project's own session, where schedule's
 Pre-flight (schedule § 1.5) puts them to Lachy. An answer that does not parse, or a task the ranker lists in
 `invalid[]` (a decision of his without `goal` or `stakes` among the causes), gets one re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
-writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy nothing.
+writes nothing but those grades files: no vault edit, no repo or git write, no fetch, and it asks Lachy nothing.
 
 ## What the agent reads
 

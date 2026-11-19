@@ -397,6 +397,49 @@ test('D1. slices: one file per home with its rows and repos; skipped tasks absen
   assert.deepEqual(Object.fromEntries(fs.readdirSync(dir).sort().map((f) => [f, fs.readFileSync(path.join(dir, f), 'utf8')])), held)
 })
 
+// ---- D1b. slices: the agent cap (p50-2) ----------------------------------------------------------------------------
+test('D1b. slices fits the grading agents under the agent cap: big slices alone, every slice once, status agents first', () => {
+  // The grouping, on the plain function: [sizes, room] -> slice indexes per agent.
+  const GROUPS = [
+    [[9, 1, 1, 1, 1, 1], 2, [[0], [1, 2, 3, 4, 5]]],
+    [[1, 5, 1, 4, 1], 2, [[0, 3, 4], [1, 2]]],
+    [[2, 2, 2], 5, [[0], [1], [2]]],
+    [[3, 1, 2], 0, [[0, 1, 2]]],
+  ]
+  const PYG = 'import importlib.util, json, sys\nsys.dont_write_bytecode = True\n' +
+    's = importlib.util.spec_from_file_location("d", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)\n' +
+    'print(json.dumps([m.agent_groups(z, r) for z, r in json.loads(sys.argv[2])]))'
+  const g = spawnSync('python3', ['-c', PYG, DISPATCH, JSON.stringify(GROUPS.map(([z, r]) => [z, r]))], { encoding: 'utf8', env })
+  assert.equal(g.status, 0, g.stderr)
+  assert.deepEqual(JSON.parse(g.stdout), GROUPS.map((c) => c[2]))
+
+  // The verb: the room is the cap less one status agent per scan rollout, the env's cap when no --cap, else 20.
+  const R = scanned().rollouts.length
+  const sl = (name, args, extra = {}) => ok(py(['slices', '--scan', SCAN_FILE, '--dir', path.join(S, 'cap', name), ...args],
+    { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '', ...extra }))
+  const wide = sl('wide', ['--cap', String(R + 99)])
+  const files = wide.homes.map((h) => h.file)
+  assert.ok(files.length >= 3, 'the fixture cuts three slices or more')
+  assert.deepEqual(wide.agents, wide.homes.map((h) => ({ files: [h.file], tasks: h.tasks.length })), 'room for all: one each')
+  assert.deepEqual(wide.status, { start: R, later: 0 })
+  for (const [name, args, extra, cap, agents] of [
+    ['tight', ['--cap', String(R + 2)], {}, R + 2, 2],
+    ['env', [], { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: String(R + 1) }, R + 1, 1],
+    ['default', [], {}, 20, Math.min(files.length, Math.max(1, 20 - R))],
+    ['full', ['--cap', '1'], {}, 1, 1],
+  ]) {
+    const j = sl(name, args, extra)
+    assert.equal(j.cap, cap, name)
+    assert.equal(j.agents.length, agents, name)
+    const at = (f) => path.basename(f)
+    assert.deepEqual(j.agents.flatMap((a) => a.files).map(at).sort(), files.map(at).sort(), `${name}: every slice once`)
+    assert.ok(j.agents.length + j.status.start <= cap, `${name}: the first message stays under the cap`)
+    assert.equal(j.status.start + j.status.later, R, name)
+  }
+  refusal(py(['slices', '--scan', SCAN_FILE, '--dir', path.join(S, 'cap', 'bad'), '--cap', '0']), /--cap 0: not a positive whole number/)
+  assert.ok(!fs.existsSync(path.join(S, 'cap', 'bad')), 'a bad --cap writes nothing')
+})
+
 // ---- D2. rounds: sign-offs -----------------------------------------------------------------------------------------
 test('D2. rounds: sign-offs asked under no pause and the sign-off pause only; gates raw and as approve-gates signs them', () => {
   const j = ok(R30())

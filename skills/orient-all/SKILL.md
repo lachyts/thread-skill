@@ -79,19 +79,31 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-scan.py --compact > "$S/scan.json"`, with the Bash
    tool's `timeout: 120000`. Exit 2 or 3 stops the pass with its one line. `vaultErrors` and `deadlineHit` become
    caveats for § 8, and the pass goes on.
-3. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan "$S/scan.json" --dir "$S/slices"`:
-   one file per home project with gradeable tasks.
-4. In one message, start every agent, each read-only:
-   - one grading agent per slice file. Its brief is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`
-     § The grading agents, the slice file's path, and "return only the § Output JSON". A big project's slice is
-     graded too, for the pick list's counts and the Grade log only: none of its decisions reaches this pass's rounds;
-   - one status agent per rollout in the scan's `rollouts[]`. Its brief: "run `/thread:status [[<rollout>]]` and
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan "$S/scan.json" --dir "$S/slices" > "$S/slices.json"`:
+   one file per home project with gradeable tasks, and `agents[]`, those files grouped under the session's agent cap
+   (`cap`: `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, else Claude Code's 20). Claude Code refuses a subagent launched
+   past the cap, so the groups fill only the room the status agents leave, a big slice keeps its agent and the small
+   ones are batched (the 2026-11-06 pass's 71 slices met 50 refusals).
+4. In one message, start the agents, none writing outside `$S`, never more than `cap` live at once:
+   - one grading agent per `agents[]` entry. Its brief is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`
+     § The grading agents, the entry's slice files, each with the file its § Output JSON goes to,
+     `$S/grades-<NN>.json` with NN the slice file's own (`03-crown.json` writes `$S/grades-03.json`), and "write each
+     grades file, then return only the paths you wrote". A big project's slice is graded too, for the pick list's
+     counts and the Grade log only: none of its decisions reaches this pass's rounds;
+   - `status.start` status agents, one per rollout in the scan's `rollouts[]`; each of the other `status.later` starts
+     only as an earlier agent returns. Its brief: "run `/thread:status [[<rollout>]]` and
      return four things, writing nothing: its Recommended action line verbatim; the number (1–13) of the status § 4
      **Recommended action** rule that matched; the command that line names; and its Needs you lines".
-5. Save each grading answer as `$S/grades-<NN>.json`. An answer that does not parse, or a task the ranker lists in
-   `invalid[]`, is re-asked once with its errors; still invalid, it stays ungraded. A status answer with no number in
-   1–13 is recorded as unread, and so is a serial chain's: its rule is one of status § 5's S rules, never a § 4 number.
+5. Wait on the files, never on a completion notice: an agent can report done before its file is on disk. Once every
+   grading agent has returned, each slice's `$S/grades-<NN>.json` must exist and parse, which
+   `for f in "$S"/slices/*.json; do n=$(basename "$f"); n=${n%%-*}; python3 -m json.tool "$S/grades-$n.json" >/dev/null 2>&1 || echo "$S/grades-$n.json"; done`
+   checks, printing each one missing or unparseable. A missing or unparseable file, or a task the ranker lists in
+   `invalid[]`, is re-asked once with its errors (one agent for every re-asked slice); still invalid, it stays
+   ungraded, and a file still missing or unparseable is left out of step 6. A status answer with no number in 1–13 is
+   recorded as unread, and so is a serial chain's: its rule is one of status § 5's S rules, never a § 4 number.
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
+   `--grades` repeats once per file (`--grades "$S/grades-01.json" --grades "$S/grades-02.json"`): a list held in one
+   zsh variable is one word unquoted too (zsh does not word-split), so `--grades $files` passes them all as one path.
 7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json" --model <model id> --effort "${CLAUDE_EFFORT:-}"`:
    one line per graded task into the Grade log (CONTEXT.md **Grade log**), which the weekly Reflection reads against
    what followed each grade. Each line records what the grading agents ran on (ADR 0079 decision 5). Agents step 4
@@ -279,6 +291,9 @@ the sign-off pause reads action 8): `/thread:orient` has no sign-off step, and r
 ticked label opens its own option alone; two projects of one name are each linked by the note's path and numbered.
 
 **The estate rank (ADR 0067 d9).** Before step 1's `sessions`: unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank "$S/rank.json" --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> > "$S/rank-stamp.json"`.
+`--wrote` takes absolute paths, here and in step 1, one `--wrote` per note: each note's full path as its fork returned
+it (a leading `~` is expanded), never a vault-relative `Work/Tasks/<note>.md`, which resolves against this session's
+cwd and is refused as no note in the vault's Tasks folder (exit 2).
 It stamps this pass's rank on each note the forks wrote and re-stamps every live rollout in its current order (a live
 run keeps its place ahead of this pass's dispatches), so the Legs that start below meet at claim by rank (CONTEXT.md
 **Rank wait**). A fork that joined a running rollout wrote no note, so `rank-stamp --wrote` and `sessions --wrote` get
@@ -490,7 +505,7 @@ It asks nothing, the pick list included, and writes only under `$S`. It never ru
 
 ## Steps that need no ask
 
-The reads and read-only commands this skill runs (`estate-scan.py`, `estate-dispatch.py slices`, the read-only
-grading and status agents, `list_sessions` and the sign-in pass's read-only checks), and a re-run of one that died on
-a network error, are taken on your own: none of them writes a note. Only the *yours* questions this skill names reach
+The reads and read-only commands this skill runs (`estate-scan.py`, `estate-dispatch.py slices`, the grading and
+status agents, which write nothing outside `$S`, `list_sessions` and the sign-in pass's read-only checks), and a
+re-run of one that died on a network error, are taken on your own: none of them writes a note. Only the *yours* questions this skill names reach
 Lachy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1).
