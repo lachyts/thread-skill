@@ -3,8 +3,9 @@
 #   L1   two Legs (5 + 2) with a handoff, then Complete: post-items, a follow-on, dispositions, the Completion log,
 #        the archive and one vault commit; an Archive collision; next --waiting; file-followup after Complete reads
 #        the archived note and writes nothing into it; L1v the routed land follow-on and its controls (no GitHub
-#        origin, only a close-out commit ahead, a detached HEAD: leg.py reads every `not landed:` line one way, so
-#        land.sh's other routes, swept, register-listed and a non-default branch, are tests/land.test.sh's); done's
+#        origin, only a close-out commit ahead, a detached HEAD; (h) a chain held on a branch, `not landed: on <b>, not
+#        <d>`, files it too, and (i) nothing once origin/<d> has its commits (P36-17): leg.py reads every other `not
+#        landed:` line one way, so land.sh's other routes, swept and register-listed, are tests/land.test.sh's); done's
 #        leg_head stamp (L1, L1v, L1h: each checkout's newest trailered commit of the task, never a peer's HEAD, [] when
 #        it committed nowhere, none with no leg_base)
 #   L1n  post-items reads a numbered item below the items mark, never a nested line or a ceremony step (P36-16)
@@ -52,8 +53,9 @@
 #        copies in one repo are tests/leg-land.test.sh's L17a); the hand-over, handed --manual and status's restart
 #        open in the copy, with the alias's paste line (a cd-less alias's whole command) or its prose fallback, and a
 #        missing copy blocks the restart (L16f); done's own-checkout rule across two copies (L16h); Complete refuses a
-#        task not yet landed, then files only the origin half once land puts it on master, and a stuck route still files
-#        a chain merged by hand (L16i); begin adds a hand-added row's pair, and claim refuses a top with none or a pair
+#        task not yet landed, then files only the origin half once land puts it on master, a primary held on a branch
+#        still files the origin half (P36-17), a non-GitHub origin files nothing, and a stuck route still files a chain
+#        merged by hand (L16i); begin adds a hand-added row's pair, and claim refuses a top with none or a pair
 #        whose copy is missing (L16j); claim refuses a dependency another chain finished whose commit the copy lacks,
 #        naming its chain/<X> or the land that brings it in, and claims it once the work is there, or when the commit
 #        is another repository's (L16k). L1-L15 are the in-place regression: their notes carry no chain_copies:.
@@ -293,6 +295,16 @@ scen l1vg; R="$S/r"; mkrepo "$R" https://github.com/o/rg.git; export CWD="$R"
 HOOK_CMD='git -C "$R" checkout -q --detach' landctl "L1v (g) a detached HEAD" "stuck: detached HEAD → [[demo-followup-land-chain-2026-10-20]]" y
 has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "check the landing route (detached HEAD), then open a PR from them, or push them" \
    "L1v (g): … its act starts by checking the landing route"
+# (h) P36-17: a chain held on a branch (`not landed: on w, not master`) files the follow-on, never `nothing filed`
+scen l1vh; R="$S/r"; mkrepo "$R" https://github.com/o/rh.git; export CWD="$R"; git -C "$R" checkout -qb w
+landctl "L1v (h) a branch-held chain" "not landed: on w, not master, 1 not on origin/master → [[demo-followup-land-chain-2026-10-20]]" y
+has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "- \`$R\` (on \`w\`, not \`master\`): open a PR from \`w\` into \`master\`, or merge \`w\` into \`master\` and push it" \
+   "L1v (h): … its act lands the branch"
+has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "✨ feat: t9 c.txt ([[t9]])" "L1v (h): … listing the chain's commit"
+# (i) held on w, but origin/master already has the chain's commit: nothing filed
+scen l1vi; R="$S/r"; mkrepo "$R" https://github.com/o/ri.git; export CWD="$R"; git -C "$R" checkout -qb w
+HOOK_CMD='git -C "$R" update-ref refs/remotes/origin/master HEAD' \
+  landctl "L1v (i) a branch-held chain already on origin" "not landed: on w, not master, nothing filed"
 ok "$(grep -c . "$TMP/net.log")" 0 "L1v: no gh or ssh call was made"
 unset CWD
 
@@ -1354,9 +1366,10 @@ has "$err" "[[t1]] changed $C2, not this Leg's checkout $C" "L16h: … not this 
 unset CWD
 
 # ════ L16i: Complete files the land follow-on: merge the chain branch into the primary's default branch ════════════
-# icomplete <name> [checkout branch] — a one-task copy chain in $R, worked in the copy, then Complete
+# icomplete <name> [checkout branch] [origin URL] — a one-task copy chain in $R, worked in the copy, then Complete
+# (leg land never reads land.sh's route, so any origin lands)
 icomplete() {
-  cscen "$1"; R="$S/r"; crepo "$R" "https://github.com/o/$1.git"; C="$S/chains/r-$RO"; export CWD="$C"
+  cscen "$1"; R="$S/r"; crepo "$R" "${3:-https://github.com/o/$1.git}"; C="$S/chains/r-$RO"; export CWD="$C"
   mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
   [ -z "${2:-}" ] || git -C "$R" checkout -qb "$2"
   CWD="$R" leg copies; leg begin --cwd "$C"; work "$C" t1 c.txt "t1 work"
@@ -1375,8 +1388,13 @@ hasnt "$(cat "$FU")" "Chain copy, not yet on" "L16i: … nor the copy's old pare
 has "$(cat "$FU")" "([[t1]])" "L16i: … listing t1's commit"
 has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master, 1 not on origin/master → [[demo-followup-land-chain-2026-10-20]]" "L16i: the Chain commits line"
 icomplete l16i2 w
-ok "$(test -f "$FU" && echo y || echo n)" n "L16i: a deferred route (on w), everything landed: nothing filed"
-has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master; not landed: on w, not master, nothing filed" "L16i: … and its Chain commits line"
+ok "$(test -f "$FU" && echo y || echo n)" y "L16i: a primary held on a branch (on w), all on master: the origin half is still filed (P36-17)"
+has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): \`chain/$RO\` is already on \`master\`: open a PR from them, or push them (\`$R\` is on \`w\`, not \`master\`)" \
+   "L16i: … its act naming the held branch"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master, 1 not on origin/master; not landed: on w, not master → [[demo-followup-land-chain-2026-10-20]]" "L16i: … and its Chain commits line"
+icomplete l16i4 '' "$TMP/l16i4-origin.git"
+ok "$(test -f "$FU" && echo y || echo n)" n "L16i: a primary with no GitHub origin, all on master: nothing filed"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master; not landed: no GitHub origin, nothing filed" "L16i: … and its Chain commits line"
 # control: chain/$RO merged into master by hand, then a stuck route (the primary detached): a stuck route cannot say what
 # origin has, so every chain commit is still filed, as in place
 cscen l16i3
