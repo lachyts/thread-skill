@@ -101,7 +101,8 @@
 # one-branch fetch (lc_fetch: +refs/heads/<default>, no tags, no FETCH_HEAD) and the fast-forward (lc_ff: the dirty
 # overlap checked first, so a refused move never runs a merge or rewrites ORIG_HEAD). The fetch runs under lc_bounded
 # (p39-16): SELF_ROLLOUT_FETCH_TIMEOUT seconds, default 60, in its own process group, killed at the budget or on a
-# TERM, INT or HUP to this script (which then exits 143, 130 or 129), so no fetch is ever left unbounded.
+# TERM, INT or HUP to this script's group, so no fetch is ever left unbounded; lc_bounded then dies of that signal, so
+# the script stops there with 143, 130 or 129 and never reads the signal as a failed fetch.
 #
 # ---- The clone refresh (--ensure; --refresh <Project root>, execute § 2.7 at entry points only, just before
 # pushed-base): lc_fetch of origin's <default>, then, with the default branch checked out, lc_ff (`git merge
@@ -280,12 +281,13 @@ lc_load() {
   [ "$(type -t lc_loaded 2>/dev/null)" = function ]
 }
 # The one-branch fetch's bound (p39-16): SELF_ROLLOUT_FETCH_TIMEOUT seconds (default 60, merge-task's per-try budget)
-# under lc_bounded, its own process group killed at the budget or on a TERM, INT or HUP to this script.
+# under lc_bounded, its own process group killed at the budget or on a TERM, INT or HUP to this script's group.
 FETCH_TIMEOUT=${SELF_ROLLOUT_FETCH_TIMEOUT:-60}
 fetch_bounded() { lc_bounded "$FETCH_TIMEOUT" "$@"; }   # lc_fetch's runner: one command word
 # fetch_secs: the budget as lc_bounded reads it ('', a non-integer or 0 → 1), for the timeout's message
 fetch_secs() { case "$FETCH_TIMEOUT" in ''|*[!0-9]*) echo 1 ;; *) [ "$((10#$FETCH_TIMEOUT))" -ge 1 ] && echo "$((10#$FETCH_TIMEOUT))" || echo 1 ;; esac; }
-# fetch_why <rc> <output>: why a fetch did not land, after `fetch timed out after <t>s` or `fetch failed: `
+# fetch_why <rc> <output>: why a fetch did not land, as `fetch timed out after <t>s` (rc 142) or
+# `fetch failed: <first line | exit <rc>>` (exit <rc> when git printed nothing)
 fetch_why() {
   if [ "$1" -eq 142 ]; then echo "fetch timed out after $(fetch_secs)s"
   elif [ -n "$(first "$2")" ]; then echo "fetch failed: $(first "$2")"

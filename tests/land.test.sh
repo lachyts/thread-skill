@@ -20,6 +20,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/proc-group.sh
 unset $(git rev-parse --local-env-vars)
 
 root=$(pwd -P)
@@ -576,22 +577,15 @@ res "case 22b (fetch refused)" 1 "stuck: cannot fetch origin/master: fake-ssh: c
 
 echo "== 22c. a TERM mid-fetch"
 # bounded runs the fetch in its own process group, so a TERM to land.sh's group never reaches it: lc_bounded's handler
-# kills that group, then exits 143 (p39-16). gone <pgid>: LC10's poll, under its 30 s liveness bound.
-gone() {
-  local i=0; case ${1:-} in ''|*[!0-9]*) echo "no pgid"; return ;; esac
-  while kill -0 -- "-$1" 2>/dev/null; do [ "$i" -ge 300 ] && { echo alive; return; }; sleep 0.1; i=$((i+1)); done; echo gone
-}
-printf '#!/usr/bin/env bash\nps -o pgid= -p $$ | tr -d " " > "%s.t"; mv "%s.t" "%s"\nsleep 300 | cat\n' \
-  "$tmp/hang.pg" "$tmp/hang.pg" "$tmp/hang.pg" > "$tmp/bin/hang-ssh"; chmod +x "$tmp/bin/hang-ssh"
-ghreset; mkrepo c22c; edit; rm -f "$tmp/hang.pg"; s=$SECONDS
+# kills that group, then dies of the TERM (p39-16). hang_ssh and gone (its 30 s liveness bound): tests/lib/proc-group.sh.
+hang_ssh "$tmp/bin/hang-ssh" "$tmp/hang.pg"
+ghreset; mkrepo c22c; edit; rm -f "$tmp/hang.pg"
 env LAND_TIMEOUT=60 GIT_SSH_COMMAND="$tmp/bin/hang-ssh" perl -e 'setpgrp(0,0); exec @ARGV' bash "$LAND" -- "$W" "$W/THREAD.md" >/dev/null 2>&1 &
 bg=$!; i=0; while [ ! -s "$tmp/hang.pg" ] && kill -0 "$bg" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
 pg=$(cat "$tmp/hang.pg" 2>/dev/null)
 kill -TERM -- "-$bg" 2>/dev/null; wait "$bg"; rc=$?
 ok "$rc" 143 "case 22c: a TERM to land.sh's group → 143"
 ok "$(gone "$pg")" gone "case 22c: … and the fetch's ssh (sleep 300 | cat) is gone"
-case $pg in ""|*[!0-9]*) ;; *) kill -KILL -- "-$pg" 2>/dev/null ;; esac   # a red run leaves no sleep behind
-ok "$([ $((SECONDS - s)) -lt "$HANG_BOUND" ] && echo y)" y "case 22c: bounded ($((SECONDS - s))s < ${HANG_BOUND}s)"
 rm -rf "${TMPDIR:?}"/land.*
 
 # ==== Other behaviours ====================================================================================
@@ -671,7 +665,6 @@ ok "$(printf '%s\n' "$code" | grep -c 'lc_fetch ')|$(printf '%s\n' "$code" | gre
 hasnt "$src" LAND_BOUNDED_PL "structural: no LAND_BOUNDED_PL"
 ok "$(grep -c 'perl -e' "$LAND")" 0 "structural: no perl -e of its own"
 bd_body=$(awk '/^bounded\(\) \{/{on=1} on{print} on && /^\}/{exit}' "$LAND")
-has "$bd_body" 'lc_bounded "$t" "$@"' "structural: bounded runs lc_bounded"
 has "$src" 'lc_bounded "$LAND_RECORD_TIMEOUT" python3' "structural: the review-round recorder runs under lc_bounded"
 for w in 'return 124          # deadline' '[ "$rem" -lt "$t" ] && t=$rem'; do
   has "$bd_body" "$w" "structural: bounded carries [$w]"

@@ -99,13 +99,21 @@ p39-4 gave merge-task's fetch the signal rule, and left two live fetches without
    network call it makes, and the review-round recorder under LAND_RECORD_TIMEOUT, now has the TERM, INT and HUP rule.
    Before, a signal to land.sh's group killed the perl but not the call in its own group, so a hung ssh outlived it.
    `bounded` is usable only once live-checkout.sh is sourced (S1, O1), and every call comes after that.
-2. **self-rollout-check.sh's fetch is bounded.** `--ensure`, `--refresh` and `--refresh-in-place` ran `lc_fetch` with
+2. **lc_bounded dies of the signal it caught.** Its handler kills the call's group, then resets the signal to its
+   default and sends it to itself (`exit 128 + N` stays as a fallback), so its caller reads 143, 130 or 129 and a
+   signal to the caller's group stops the caller too. Exiting 130 was not enough for an INT: bash stops on a Ctrl-C only
+   when its child died of the INT, and goes on past one that exited, so land.sh ran its next network call (a push, a
+   `gh pr merge --auto`) and self-rollout-check.sh printed `fetch failed: exit 130`. A signal the caller inherited as
+   ignored (nohup's HUP, a `cmd &` job's INT) gets no handler, so it stays ignored, in the call too. LC10's INT row
+   pins it (an INT to the caller's group: rc 130, and the caller never runs its next command).
+3. **self-rollout-check.sh's fetch is bounded.** `--ensure`, `--refresh` and `--refresh-in-place` ran `lc_fetch` with
    no bound at all. They now run it under `lc_bounded` (`fetch_bounded`, SELF_ROLLOUT_FETCH_TIMEOUT, 60 s, the same
    budget as merge-task's per try). A timeout is a note (`not refreshed: fetch timed out after <t>s`) or the in-place
    line `not moved: fetch timed out after <t>s`, exit 0, never a halt: the next entry point or merge tries again.
-3. **Still unbounded, by design or for later.** `--ensure`'s first `git clone` (a first clone can rightly take long),
-   `lc_default`'s ls-remote when a repo has no local origin/HEAD, and `pushed-base.sh`'s fetch.
+4. **Still unbounded, by design or for later.** `--ensure`'s first `git clone`, by design (a first clone can rightly
+   take long). For later, filed as p39-22 (`thread-skill-p39-22-bound-the-last-live-fetches`): `pushed-base.sh`'s
+   fetch, and `lc_default`'s ls-remote when a repo has no local origin/HEAD.
 
 ## Files
 
-`skills/_shared/scripts/primary-refresh.py`; `skills/_shared/scripts/live-checkout.sh`; `tests/primary-refresh.test.sh`; `tests/live-checkout.test.sh`; the installed bundle in `~/.local/state/thread/bin/` (primary-refresh.py's `bundle` table); CONTEXT.md **Primary checkout**, **Primary refresh** and **Running rollout**; README § The convergence engine. p39-4: `skills/execute/scripts/merge-task.sh` (`refresh_local_base`, its `--self-test-base`), `skills/execute/scripts/leg.py` (`ff_primary`, `overlap_paths`), `skills/_shared/scripts/land.sh` (O9); `tests/merge-task-integrated.test.sh`, `tests/leg-land.test.sh` (L17c, L17s), `tests/land.test.sh` (case 58b). p39-6: `skills/_shared/scripts/background_job.py` (a bundle file); `tests/background-job.test.mjs` (BJ10, its frozen interface). p39-16: `skills/_shared/scripts/land.sh` (`bounded`, `own_rounds`), `skills/execute/scripts/self-rollout-check.sh` (`fetch_bounded`); `tests/land.test.sh` (case 22c), `tests/self-rollout-check.test.sh`.
+`skills/_shared/scripts/primary-refresh.py`; `skills/_shared/scripts/live-checkout.sh`; `tests/primary-refresh.test.sh`; `tests/live-checkout.test.sh`; the installed bundle in `~/.local/state/thread/bin/` (primary-refresh.py's `bundle` table); CONTEXT.md **Primary checkout**, **Primary refresh** and **Running rollout**; README § The convergence engine. p39-4: `skills/execute/scripts/merge-task.sh` (`refresh_local_base`, its `--self-test-base`), `skills/execute/scripts/leg.py` (`ff_primary`, `overlap_paths`), `skills/_shared/scripts/land.sh` (O9); `tests/merge-task-integrated.test.sh`, `tests/leg-land.test.sh` (L17c, L17s), `tests/land.test.sh` (case 58b). p39-6: `skills/_shared/scripts/background_job.py` (a bundle file); `tests/background-job.test.mjs` (BJ10, its frozen interface). p39-16: `skills/_shared/scripts/land.sh` (`bounded`, `own_rounds`), `skills/_shared/scripts/live-checkout.sh` (`lc_bounded`'s re-raise), `skills/execute/scripts/self-rollout-check.sh` (`fetch_bounded`); `tests/land.test.sh` (case 22c), `tests/self-rollout-check.test.sh`, `tests/live-checkout.test.sh` (LC10's INT row), `tests/lib/proc-group.sh`.

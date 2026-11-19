@@ -4,8 +4,9 @@
 # PATH and under /bin/bash (3.2 on macOS). LC1 lc_op's seven markers; LC2 the ssh rule; LC3 the default branch, local
 # first; LC4 the one-branch fetch; LC5 the overlap; LC6 lc_ff; LC7 every lc_check form against primary-refresh.py's own
 # regexes; LC8 sourcing changes nothing of the caller's; LC9 the run modes' exit codes, the overlap mode's included
-# (leg.py's ff_primary, p39-4); LC10 lc_bounded: the child's rc, the budget's 142, and a TERM or HUP to it kills the
-# whole group (143, 129), as does a normal exit; LC11 the content mode, each form against primary-refresh.py's regexes,
+# (leg.py's ff_primary, p39-4); LC10 lc_bounded: the child's rc, the budget's 142, a normal exit kills the whole group,
+# and so does a TERM or HUP to it or an INT to its caller's group (143, 129, 130), which also stops a caller the signal
+# reached; LC11 the content mode, each form against primary-refresh.py's regexes,
 # and lc_ahead_content's records. Origins are
 # git@github.com:<o>/<r>.git, served from $SRV/<o>/<r>.git by tests/fixtures/land/fake-ssh.sh on PATH as `ssh`, with
 # GIT_SSH_COMMAND unset, so the ssh rule is what reaches it. Hermetic: HOME and every path live under mktemp; commits
@@ -13,6 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/proc-group.sh
 unset $(git rev-parse --local-env-vars)
 unset GIT_SSH_COMMAND GIT_SSH CDPATH
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -416,12 +418,7 @@ PY
     "LC13 $n (h): no target, origin's tip: the same, through the ff mode"
 
   # ---- LC10: lc_bounded: the child's rc, the budget, and a signal or a normal exit kills the whole group -----------
-  # gone <pgid>: polls until no process of the group is left (a reaped zombie can't fake a pass), under a 30 s liveness
-  # bound: a killed group is gone well inside it, and a leaked sleep outlives it
-  gone() {
-    local i=0; case ${1:-} in ''|*[!0-9]*) echo "no pgid"; return ;; esac
-    while kill -0 -- "-$1" 2>/dev/null; do [ "$i" -ge 300 ] && { echo alive; return; }; sleep 0.1; i=$((i+1)); done; echo gone
-  }
+  # gone <pgid> (tests/lib/proc-group.sh): no process of the group is left, under a 30 s liveness bound
   ok "$(src lc_bounded 5 sh -c 'exit 3'; echo "rc $?")" "rc 3" "LC10 $n: the child's own rc"
   ok "$(src lc_bounded 5 true; echo "rc $?")" "rc 0" "LC10 $n: … and 0"
   ok "$(src lc_bounded x true; echo "rc $?")" "rc 0" "LC10 $n: a non-integer budget reads as 1 s"
@@ -434,13 +431,24 @@ PY
   ok "$(src lc_bounded 5 sh -c 'echo $$ > "$1"; sleep 300 >/dev/null 2>&1 & exit 0' _ "$tmp/g10"; echo "rc $?")" "rc 0" \
     "LC10 $n: a child that exits 0 and leaves a descendant: 0"
   ok "$(gone "$(cat "$tmp/g10" 2>/dev/null)")" gone "LC10 $n: … and the descendant is killed with the group"
-  for sig in TERM:143 HUP:129; do
-    rm -f "$tmp/g10"
-    src lc_bounded 30 sh -c 'echo "$PPID $$" > "$1.t"; mv "$1.t" "$1"; sleep 300 | cat' _ "$tmp/g10" >/dev/null 2>&1 &
+  # <signal>:<rc>:<sent to>:<the caller's next command>. A TERM or HUP to lc_bounded alone, or an INT to its caller's
+  # whole group (a Ctrl-C): lc_bounded kills the child's group, then dies of that signal. The caller, a script in its
+  # own group with the three at their default (a `&` job inherits INT ignored), goes on with the rc when only
+  # lc_bounded was signalled, and stops when the INT reached it too: bash stops only once its child died of the INT.
+  for row in TERM:143:lc_bounded:ran HUP:129:lc_bounded:ran INT:130:group:never; do
+    IFS=: read -r sig want to next <<< "$row"
+    rm -f "$tmp/g10" "$tmp/g10.next"
+    NEXT="$tmp/g10.next" perl -e '$SIG{$_}="DEFAULT" for qw(INT HUP TERM); setpgrp(0,0); exec @ARGV' \
+      "$SH" -c '. "$1"; shift; "$@"; r=$?; echo ran > "$NEXT"; exit "$r"' _ "$LC" \
+      lc_bounded 30 sh -c 'echo "$PPID $$" > "$1.t"; mv "$1.t" "$1"; sleep 300 | cat' _ "$tmp/g10" >/dev/null 2>&1 &
     bg=$!; i=0; while [ ! -s "$tmp/g10" ] && kill -0 "$bg" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
     pp= pg=; read -r pp pg < "$tmp/g10" 2>/dev/null
-    [ -n "$pp" ] && kill -"${sig%%:*}" "$pp"; wait "$bg"; rc=$?
-    ok "$rc" "${sig#*:}" "LC10 $n: a ${sig%%:*} to lc_bounded exits ${sig#*:}"
+    case $to in
+      group) to="its caller's group"; kill -"$sig" -- "-$bg" ;;
+      *) [ -n "$pp" ] && kill -"$sig" "$pp" ;;
+    esac; wait "$bg"; rc=$?
+    ok "$rc|$(cat "$tmp/g10.next" 2>/dev/null || echo never)" "$want|$next" \
+      "LC10 $n: $sig to $to: rc $want, the caller's next command $next"
     ok "$(gone "$pg")" gone "LC10 $n: … and kills the child's group (sleep 300 | cat) first"
   done
 done

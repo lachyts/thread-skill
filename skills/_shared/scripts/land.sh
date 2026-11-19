@@ -169,7 +169,8 @@
 # Every network call runs under `bounded` (LAND_TIMEOUT seconds each, default 30; LAND_DEADLINE seconds
 # overall, default 450), a wrapper over live-checkout.sh's lc_bounded (p39-16): each call runs in its own process
 # group, killed at its budget and after a normal exit, and a TERM, INT or HUP to land.sh's group kills that group
-# too (exit 143, 130 or 129), so no call is ever orphaned unbounded. The Green tip read (green_read) runs under it
+# too, then stops land.sh with 143, 130 or 129 (lc_bounded dies of the signal, so a Ctrl-C never lets land.sh go on
+# to its next call), so no call is ever orphaned unbounded. The Green tip read (green_read) runs under it
 # too, inside LAND_DEADLINE: its own budget gb = min(60, what is left - 10), skipped under 1 s, under an outer bound
 # of gb + 5, so it costs at most 65 s of the 450. The review-round recorder runs after them, under lc_bounded and
 # LAND_RECORD_TIMEOUT alone: 450 + 60
@@ -203,7 +204,9 @@ export LC_ALL=C GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1 GCM_INTERACTIVE=never
 # are one read of SECONDS. 124: the deadline passed, nothing ran. 142: the call timed out. lc_bounded runs the
 # argv directly (no shell, stdin from /dev/null) in its own process group, and kills that group at the budget and
 # after a normal exit, so a leftover descendant cannot hold a pipe open. A TERM, INT or HUP to land.sh's group
-# kills that group too, and lc_bounded exits 143, 130 or 129, so a signal never orphans a call. bounded is defined
+# kills that group too, then lc_bounded dies of that signal and land.sh stops with 143, 130 or 129, so a signal
+# never orphans a call, nor lets land.sh run its next step (bash goes on past a child that exits 130 after an INT,
+# and stops only when the child died of it). bounded is defined
 # here but usable only once live-checkout.sh is sourced (main's S1, own_main's O1); every call comes after that,
 # and one before it would read as rc 127 (lc_bounded undefined), a classified failure, never a hang.
 bounded() {
