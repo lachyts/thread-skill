@@ -356,17 +356,18 @@ clear-halt, restarted, copies, land):
       only close-out commits); on `not landed: on <b>, not <d>` (a checkout held on a branch, P36-17) it files it
       for the chain commits `origin/<d>` lacks, its act `open a PR from <b> into <d>, or merge <b> into <d> and push
       it`, and its Chain commits line `<top>: not landed: on <b>, not <d>, <k> not on origin/<d> → [[f]]`; on any
-      other `not landed: <reason>` it files nothing; on `stuck: <reason>`, a failure or a
-      timeout it files the follow-on with every chain commit there and the act prefixed `check the landing route
-      (<reason>), then`. A chain checkout that is a Chain copy reads its primary's route instead (the copy's own branch
-      reads not landed), its commits those not on the primary's local default branch d plus, when landable or held,
-      those `origin/<d>` lacks (a held primary's act ends `(<P> is on <b>, not <d>)`), and on `stuck` every chain commit there, as in place (a hand merge into d included: that route
-      cannot say what origin has); a commit still off d files the follow-on whatever the route, its act first `merge
-      chain/<rollout> into <d> there` (`chain/<rollout> is already on <d>:` when none is off it: by Complete land has
-      put them all there, so a copy files only the origin half, as in place; land --retire removes the copy and its
-      branch after), and its Chain commits line reads `<copy> (chain/<rollout> of <primary>): <k> not on <d>[; stuck:
-      <reason>] → [[f]]`, `all on <d>; stuck: <reason> → [[f]]`, `all on <d>, <k> not on origin/<d>[; not landed: on
-      <b>, not <d>] → [[f]]`, `all on <d>; not landed: <reason>, nothing filed` or `all on <d>[ and origin/<d>]`. Then
+      other `not landed: <reason>` it files nothing; on `stuck: <reason>`, a failure or a timeout it files the follow-on
+      with every chain commit there and the act prefixed `check the landing route (<reason>), then`. A chain checkout
+      that is a Chain copy reads its primary's route instead (the copy's own branch reads not landed), its commits those
+      not on the primary's local default branch d plus, when landable or held, those `origin/<d>` lacks (a held
+      primary's act ends `(<P> is on <b>, not <d>)`), and on `stuck` every chain commit there, as in place (a hand merge
+      into d included: that route cannot say what origin has); a commit still off d files the follow-on whatever the
+      route, its act first `merge chain/<rollout> into <d> there` (`chain/<rollout> is already on <d>:` when none is off
+      it: by Complete land has put them all there, so a copy files only the origin half, as in place; land --retire
+      removes the copy and its branch after), and its Chain commits line reads `<copy> (chain/<rollout> of <primary>):
+      <k> not on <d>[; stuck: <reason>] → [[f]]`, `all on <d>; stuck: <reason> → [[f]]`, `all on <d>, <k> not on
+      origin/<d>[; not landed: on <b>, not <d>] → [[f]]`, `all on <d>; not landed: <reason>, nothing filed` or `all on
+      <d>[ and origin/<d>]`. Then
       `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
       done and set aside; the decided completion verify's `Completion verify: …` summary when the note declares
       `completion_verifier:`; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
@@ -4812,6 +4813,14 @@ def held_branch(detail):
     return (m.group(1), m.group(2)) if m else None
 
 
+def land_target(kind, detail):
+    """(b, d) of a route whose chain commits must reach origin/<d>: a held branch's (<b>, <d>) (P36-17), landable's
+    (None, <d>), and (None, None) for every other route. Parsed once per plan row."""
+    if kind == "held":
+        return held_branch(detail)
+    return (None, detail) if kind == "landable" else (None, None)
+
+
 def chain_commits(chain, top):
     """[(sha, subject, task)] of every chain task's Task: commits in top, deduped, oldest first."""
     seen, out = set(), []
@@ -4847,7 +4856,7 @@ def land_plan(chain):
             off = [c for c in commits if not (d and is_ancestor(P, c[0], f"refs/heads/{d}"))]
             gone = []
             if kind in ("landable", "held"):
-                ref = f"refs/remotes/origin/{detail if kind == 'landable' else held_branch(detail)[1]}"
+                ref = f"refs/remotes/origin/{land_target(kind, detail)[1]}"
                 has_ref = git(P, "rev-parse", "-q", "--verify", ref).returncode == 0
                 gone = [c for c in commits if not (has_ref and is_ancestor(P, c[0], ref))]
             # A stuck route cannot say whether origin has them, so every chain commit needs action, as in place.
@@ -4857,7 +4866,7 @@ def land_plan(chain):
             continue
         kind, detail = route(top)
         if kind in ("landable", "held"):   # held: the chain's commits on <b> that origin/<d> lacks (P36-17)
-            ref = f"refs/remotes/origin/{detail if kind == 'landable' else held_branch(detail)[1]}"
+            ref = f"refs/remotes/origin/{land_target(kind, detail)[1]}"
             has_ref = git(top, "rev-parse", "-q", "--verify", ref).returncode == 0
             missing = [c for c in commits if not (has_ref and is_ancestor(top, c[0], ref))]
             plans.append((top, kind, detail, missing, None))
@@ -5040,23 +5049,23 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
                 "only close-out commits on its own, so these wait for you:", ""]
         for top, kind, detail, commits, copy in need:
             act = "open a PR from them, or push them"
+            b, od = land_target(kind, detail)
             if copy is not None:
                 P, br, d = copy["checkout"], copy["branch"], copy["default"]
                 dn = f"`{d}`" if d else "its default branch"
                 tail = (act if kind == "landable" else f"it goes no further: not landed: {detail}" if kind == "deferred"
-                        else f"{act} (`{P}` is on `{held_branch(detail)[0]}`, not `{held_branch(detail)[1]}`)"
-                        if kind == "held" else f"check the landing route ({detail}), then {act}")
+                        else f"{act} (`{P}` is on `{b}`, not `{od}`)" if kind == "held"
+                        else f"check the landing route ({detail}), then {act}")
                 merge = (f"merge `{br}` into {dn} there (with {dn} checked out: `git -C {P} merge {br}`), then"
                          if copy["offDefault"] else f"`{br}` is already on {dn}:")
                 body.append(f"- `{top}` (`{br}` of `{P}`): {merge} {tail}")
             elif kind == "held":
-                b, d = held_branch(detail)
-                body.append(f"- `{top}` (on `{b}`, not `{d}`): open a PR from `{b}` into `{d}`, or merge `{b}` into "
-                            f"`{d}` and push it")
+                body.append(f"- `{top}` (on `{b}`, not `{od}`): open a PR from `{b}` into `{od}`, or merge `{b}` into "
+                            f"`{od}` and push it")
             else:
                 if kind == "stuck":
                     act = f"check the landing route ({detail}), then {act}"
-                body.append(f"- `{top}` ({'origin/' + detail if kind == 'landable' else kind}): {act}")
+                body.append(f"- `{top}` ({'origin/' + od if kind == 'landable' else kind}): {act}")
             for sha, subj, task in commits:
                 body.append(f"  - `{sha[:12]}` {subj} ([[{task}]])")
         base = f"{project_of(ctx)}-followup-land-chain-{ctx.date}"
@@ -5066,6 +5075,7 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         set_pointer(chain.note, None, land_name, "land the chain's commits")
         log_line(chain.note, leg_line(ctx, n, f"follow-on [[{land_name}]] (land)"))
     for top, kind, detail, commits, copy in plans:
+        od = land_target(kind, detail)[1]
         if copy is not None:
             head, d, off = f"{top} ({copy['branch']} of {copy['checkout']})", copy["default"], copy["offDefault"]
             dn = d or "its default branch"
@@ -5075,18 +5085,17 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
             elif kind == "stuck" and commits:
                 chain_lines.append(f"{head}: all on {dn}{stuck} → [[{land_name}]]")
             elif commits:
-                od = detail if kind == "landable" else held_branch(detail)[1]
                 chain_lines.append(f"{head}: all on {dn}, {len(commits)} not on origin/{od}{stuck} → [[{land_name}]]")
             elif kind in ("deferred", "held"):
                 chain_lines.append(f"{head}: all on {dn}; not landed: {detail}, nothing filed")
             else:
-                chain_lines.append(f"{head}: all on {dn}" + (f" and origin/{detail}" if kind == "landable" else ""))
+                chain_lines.append(f"{head}: all on {dn}" + (f" and origin/{od}" if kind == "landable" else ""))
         elif kind == "landable":
-            chain_lines.append(f"{top}: {len(commits)} not on origin/{detail} → [[{land_name}]]" if commits
-                               else f"{top}: all on origin/{detail}")
+            chain_lines.append(f"{top}: {len(commits)} not on origin/{od} → [[{land_name}]]" if commits
+                               else f"{top}: all on origin/{od}")
         elif kind == "held":
-            chain_lines.append(f"{top}: not landed: {detail}, {len(commits)} not on origin/{held_branch(detail)[1]} → "
-                               f"[[{land_name}]]" if commits else f"{top}: not landed: {detail}, nothing filed")
+            chain_lines.append(f"{top}: not landed: {detail}, {len(commits)} not on origin/{od} → [[{land_name}]]"
+                               if commits else f"{top}: not landed: {detail}, nothing filed")
         elif kind == "deferred":
             chain_lines.append(f"{top}: not landed: {detail}, nothing filed")
         else:
