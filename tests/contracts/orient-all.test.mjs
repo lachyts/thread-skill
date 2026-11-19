@@ -5,7 +5,9 @@
 //   o1  the headings, in order, and none of the retired or forbidden words.
 //   o2  § 2 runs estate-scan.py, `estate-dispatch.py slices` and `estate-rank.py rank`, cites readiness-grade.md
 //       § The grading agents, and briefs the status agents to run /thread:status and return the number of the status
-//       § 4 Recommended action rule that matched; no ranking rule is restated.
+//       § 4 Recommended action rule that matched; no ranking rule is restated. Under the agent cap (p50-2) it starts
+//       one grading agent per `slices` `agents[]` entry, waits on the grades files, never a completion notice, groups
+//       the re-asked slices under `cap`, and repeats `--grades` once per file.
 //   o3  § 1's budget options; § 3 runs `rounds --budget` and ends with each asked sign-off's gateText and bounce
 //       verbatim; § 4 passes `asks` verbatim, prints a later sign-off's gates again before its call, maps a label to
 //       its full text through texts[], and cites repair § 3's "presented verbatim"; § 5 is in conversation, "stop"
@@ -57,7 +59,7 @@
 //   o14 the estate rank (ADR 0067 d9): § 7 runs `estate-dispatch.py rank-stamp` with --rank, --plan and --wrote before
 //       step 1's `sessions`, guarded "Unless this is a dry run"; an exit 1 runs the line once more and a second goes to
 //       § 8, which reports its `failed` and `notReached[]` as a caveat; the Scope lists it among the writes, and § 9
-//       names it among the commands it never runs.
+//       names it among the commands it never runs; its paragraph says `--wrote` takes absolute paths (p50-2).
 //   o15 the children stay silent (Lachy's ruling, 2026-11-07): every `create_thread` § 7 spells out (`create_thread`
 //       with ...) passes `report_back: false`, step 4.6's Codex Desktop starts pass it too, § 9 prints it on each call
 //       it would make, nothing in the skill turns report-back on, and § 8 answers a report's or a relay's Close in
@@ -179,7 +181,9 @@ function check(files, consts) {
 
   // o2: § 2.
   need('o2', '§ 2', s2, ['estate-scan.py', 'estate-dispatch.py slices', 'estate-rank.py rank',
-    'readiness-grade.md` § The grading agents', '/thread:status', 'the number (1–13) of the status § 4 **Recommended action** rule'])
+    'readiness-grade.md` § The grading agents', '/thread:status', 'the number (1–13) of the status § 4 **Recommended action** rule',
+    'one grading agent per `agents[]` entry', 'never on a completion notice', '`--grades` repeats once per file',
+    'The re-asked slices go to agents grouped under `cap`, less any status agents still running'])
   if (/Parked homes last/.test(all)) flag('o2', 'the skill restates the ranking key')
 
   // o3: the budget, the slate's sign-offs, the round, the grills.
@@ -374,7 +378,8 @@ function check(files, consts) {
   if (!/unless this is a dry run, `[^`]*estate-dispatch\.py rank-stamp --rank "\$S\/rank\.json" --plan "\$S\/plan\.json" --wrote <each note a fork wrote, in plan order>/i.test(rankPara)) {
     flag('o14', '§ 7 does not run `rank-stamp --rank ... --plan ... --wrote ...` guarded "Unless this is a dry run"')
   }
-  need('o14', "§ 7's rank paragraph", rankPara, ['Exit 1', 'run the same line once more', 'A second exit 1 goes to § 8'])
+  need('o14', "§ 7's rank paragraph", rankPara, ['Exit 1', 'run the same line once more', 'A second exit 1 goes to § 8',
+    '`--wrote` takes absolute paths'])
   need('o14', '§ 8', s8, ['`rank-stamp`', '`failed`', '`notReached[]`', 'as a caveat', 'the order stands'])
   need('o14', 'the Scope', S(/^## Scope/), ['`estate-dispatch.py rank-stamp`', 'never on a dry run'])
   need('o14', '§ 9 never-runs', never, ['`estate-dispatch.py rank-stamp`'])
@@ -416,6 +421,7 @@ test('control o1: a renamed heading, or a retired word, fails o1 alone', () => {
 
 test('control o2: a status brief without the rule number, or a restated ranking key, fails o2 alone', () => {
   only(swap(FILES, SKILL, 'the number (1–13) of the status § 4', 'the gist of the status § 4'), CONSTS, ['o2'], 'brief')
+  only(swap(FILES, SKILL, 'one grading agent per `agents[]` entry', 'one grading agent per slice file'), CONSTS, ['o2'], 'cap')
   only(swap(FILES, SKILL, '- the warnings, and the ungraded', '- Parked homes last, then\n- the warnings, and the ungraded'), CONSTS, ['o2'], 'key')
 })
 

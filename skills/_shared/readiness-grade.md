@@ -1,14 +1,14 @@
 # The Readiness grade — grading and ranking the estate's open work
 
-The estate pass's second step (ADR 0041; CONTEXT.md § Estate). After the Estate scan, one grading agent per project
-gives each of its open tasks a **Readiness grade**, and `estate-rank.py` ranks the graded work into the **Ranked
-slate**: candidate runs with their **Review load**, the decision rounds, the projects that need their own orient
-(offered on orient-all's pick list, `estate-dispatch.py plan`'s `pick[]`, ADR 0061, started only when ticked), and
-the **Unpark offer** for each parked project with ready work. Scripts scan, the model decides: the grade is the
-model's half, and everything after it is the script's. This file is the grading agents' brief and the ranking's prose
-contract; the script's docstring holds its output schema. Two leads run both: `orient-all`
-(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`), and schedule's Pre-flight (schedule § 1.5, ADR 0047), which grades
-one rollout's tasks before its note is written.
+The estate pass's second step (ADR 0041; CONTEXT.md § Estate). After the Estate scan, grading agents give each
+project's open tasks a **Readiness grade**, one slice per project and one or several slices per agent (§ The grading
+agents), and `estate-rank.py` ranks the graded work into the **Ranked slate**: candidate runs with their **Review
+load**, the decision rounds, the projects that need their own orient (offered on orient-all's pick list,
+`estate-dispatch.py plan`'s `pick[]`, ADR 0061, started only when ticked), and the **Unpark offer** for each parked
+project with ready work. Scripts scan, the model decides: the grade is the model's half, and everything after it is
+the script's. This file is the grading agents' brief and the ranking's prose contract; the script's docstring holds
+its output schema. Two leads run both: `orient-all` (`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`), and
+schedule's Pre-flight (schedule § 1.5, ADR 0047), which grades one rollout's tasks before its note is written.
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -34,18 +34,21 @@ carries the scan's why as `reason` (`frontmatter does not parse (line 7, next_ac
 
 ## The grading agents
 
-The lead runs one read-only agent per home project with gradeable tasks, side by side. Each agent gets:
+The lead grades every home project with gradeable tasks, one slice file per project, side by side, through agents. An agent grades one slice or, when more slices are cut than the session's agent cap leaves room for, several
+(orient-all § 2 step 4: `estate-dispatch.py slices`' `agents[]`). Each slice gives its agent:
 
 - its project's scan row, its gradeable task rows, and the scan rows of the repos the project declares;
 - today's date;
 - this file.
 
-Each agent returns one JSON object (§ Output). The lead saves each answer to a scratch file and runs the ranker over
-all of them (§ The ranking). A big project's tasks (CONTEXT.md **Big project**, ADR 0061) are graded the same way, for
+Each slice is graded into one JSON object (§ Output). Under orient-all the agent writes each to the grades file its
+brief names for that slice, under the pass's scratch directory; elsewhere it returns the one object, and the lead
+saves it to a scratch file. The lead runs the ranker over all of them (§ The ranking), reading the files, never a
+completion notice. A big project's tasks (CONTEXT.md **Big project**, ADR 0061) are graded the same way, for
 the pick list's counts and the Grade log only: their decisions wait for that project's own session, where schedule's
 Pre-flight (schedule § 1.5) puts them to Lachy. An answer that does not parse, or a task the ranker lists in
 `invalid[]` (a decision of his without `goal` or `stakes` among the causes), gets one re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
-writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy nothing.
+writes nothing but those grades files: no vault edit, no repo or git write, no fetch, and it asks Lachy nothing.
 
 ## What the agent reads
 
