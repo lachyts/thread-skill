@@ -396,11 +396,12 @@ rollout note (ADR 0047 § Build rulings).
    of them together, so they are graded. That one re-run writes to a fresh `--dir "$S/slices-mended"` (slices never
    overwrite a slice file), and step 4 grades that dir's slice files in place of the first's. A note still unread is
    never asked: `preflight` puts it out as `unreadable`, with its reason, its note and its Dependent closure.
-4. The grading agents, as orient-all § 2 steps 4–5 run them: started in one message, one read-only agent per slice
-   file, each briefed with `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md` § The grading agents, the slice
-   file's path and "return only the § Output JSON". Save each answer as `$S/grades-<NN>.json`. An answer that does
-   not parse, or a task the ranker lists in `invalid[]`, is re-asked once with its errors; still invalid, the task is
-   ungraded. With no subagent available, grade each slice here, one at a time.
+4. The grading agents, in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md` § The grading agents' "elsewhere
+   it returns the one object" form, never orient-all § 2's grouped agents that write their grades files: started in
+   one message, one read-only agent per slice file, each briefed with that section, the slice file's path and "return
+   only the § Output JSON". Save each answer as `$S/grades-<NN>.json`. An answer that does not parse, or a task the
+   ranker lists in `invalid[]`, is re-asked once with its errors; still invalid, the task is ungraded. With no
+   subagent available, grade each slice here, one at a time.
 5. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> [--superseding <prior>] --compact > "$S/rank.json"`.
 6. On every run that grades, all but an orient-all fork,
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json" --model <model id> --effort "${CLAUDE_EFFORT:-}"`:

@@ -397,6 +397,55 @@ test('D1. slices: one file per home with its rows and repos; skipped tasks absen
   assert.deepEqual(Object.fromEntries(fs.readdirSync(dir).sort().map((f) => [f, fs.readFileSync(path.join(dir, f), 'utf8')])), held)
 })
 
+// ---- D1b. slices: the agent cap (p50-2) ----------------------------------------------------------------------------
+test('D1b. slices fits the grading agents under the agent cap: big slices alone, every slice once, a grading floor', () => {
+  // The first message, on the plain function: [sizes, cap, rollouts] -> [slice indexes per agent, status agents started].
+  // The status agents take at most cap // 2 of it, so a busy estate (rollouts >= cap - 1) still grades on half the cap.
+  const FIT = [
+    [[9, 1, 1, 1, 1, 1], 2, 0, [[[0], [1, 2, 3, 4, 5]], 0]],
+    [[1, 5, 1, 4, 1], 2, 0, [[[0, 3, 4], [1, 2]], 0]],
+    [[2, 2, 2], 5, 1, [[[0], [1], [2]], 1]],
+    [[2, 2], 6, 5, [[[0], [1]], 4]],
+    [[1, 1, 1, 1, 1, 1], 4, 3, [[[0, 2, 4], [1, 3, 5]], 2]],
+    [[3, 1, 2], 1, 5, [[[0, 1, 2]], 0]],
+  ]
+  const PYG = 'import importlib.util, json, sys\nsys.dont_write_bytecode = True\n' +
+    's = importlib.util.spec_from_file_location("d", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)\n' +
+    'print(json.dumps([m.fit_agents(*c) for c in json.loads(sys.argv[2])]))'
+  const g = spawnSync('python3', ['-c', PYG, DISPATCH, JSON.stringify(FIT.map((c) => c.slice(0, 3)))], { encoding: 'utf8', env })
+  assert.equal(g.status, 0, g.stderr)
+  assert.deepEqual(JSON.parse(g.stdout), FIT.map((c) => c[3]))
+
+  // The verb: the cap from --cap, else the env, else 20, and the fixture's 12 rollouts and 25 slices through it.
+  const R = scanned().rollouts.length
+  const sl = (name, args, extra = {}) => ok(py(['slices', '--scan', SCAN_FILE, '--dir', path.join(S, 'cap', name), ...args],
+    { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '', ...extra }))
+  const wide = sl('wide', ['--cap', String(R + 99)])
+  const files = wide.homes.map((h) => h.file)
+  assert.deepEqual([R, files.length], [12, 25], 'the rows below are counted for 12 rollouts and 25 slices')
+  assert.deepEqual(wide.agents, wide.homes.map((h) => ({ files: [h.file], tasks: h.tasks.length })), 'room for all: one each')
+  assert.deepEqual(wide.status, { start: R, later: 0 })
+  for (const [name, args, extra, cap, agents, start] of [
+    ['tight', ['--cap', '4'], {}, 4, 2, 2],
+    ['env', [], { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '13' }, 13, 7, 6],
+    ['default', [], {}, 20, 10, 10],
+    ['bad-env', [], { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '²' }, 20, 10, 10],
+    ['full', ['--cap', '1'], {}, 1, 1, 0],
+  ]) {
+    const j = sl(name, args, extra)
+    assert.equal(j.cap, cap, name)
+    assert.equal(j.agents.length, agents, name)
+    assert.deepEqual(j.status, { start, later: R - start }, name)
+    const at = (f) => path.basename(f)
+    assert.deepEqual(j.agents.flatMap((a) => a.files).map(at).sort(), files.map(at).sort(), `${name}: every slice once`)
+  }
+  for (const bad of ['0', '²']) {
+    const dir = path.join(S, 'cap', `bad-${bad}`)
+    refusal(py(['slices', '--scan', SCAN_FILE, '--dir', dir, '--cap', bad]), new RegExp(`--cap ${bad}: not a positive whole number`))
+    assert.ok(!fs.existsSync(dir), `a bad --cap ${bad} writes nothing`)
+  }
+})
+
 // ---- D2. rounds: sign-offs -----------------------------------------------------------------------------------------
 test('D2. rounds: sign-offs asked under no pause and the sign-off pause only; gates raw and as approve-gates signs them', () => {
   const j = ok(R30())

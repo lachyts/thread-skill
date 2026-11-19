@@ -18,7 +18,7 @@ reshuffle R5.2 runs `record --owner --by orient`. This docstring is the only cop
 need none). Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan FILE --dir DIR
-        [--tasks SLUG[,SLUG]]... [--superseding PRIOR]
+        [--tasks SLUG[,SLUG]]... [--superseding PRIOR] [--cap N]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rounds --rank FILE --scan FILE --budget N
         [--top K] [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank FILE --scan FILE
@@ -82,7 +82,8 @@ run_record.py (RRec:
 check, emit, events_dir, normalise_slug, title_key, GRADE_LOG and RESERVED: the Grade log's one writer is run_record
 itself).
 
-slices --scan F --dir D [--tasks SLUG[,SLUG]]... [--superseding PRIOR]: one file per home project with gradeable tasks
+slices --scan F --dir D [--tasks SLUG[,SLUG]]... [--superseding PRIOR] [--cap N]: one file per home project with
+gradeable tasks
 (ER's rule: statusClass active, not in flight, a live first project), `D/<NN>-<kebab name>.json`, NN from 01 in the
 scan's project order, holding {project (the scan row), tasks[] (its gradeable scan task rows), repos[] (the scan repo
 rows whose declared paths meet the project's `repos:`), today}. It creates D; any target file that already exists is
@@ -94,8 +95,17 @@ unreadTasks[], which the Ranker folds in: `frontmatter does not parse (line N, <
 a slug that names no note; note is the task's vault path whenever the scan row or the unread row has one.
 --superseding passes the prior to the Ranker, so a carried task still queued is gradeable (ER's Gradeable exception).
 gradeable and skipped count the whole scan either way, skipped each unread task too (the Ranker's `unreadable`). With
-neither flag (orient-all § 2) the output is the plain {homes[], gradeable, skipped}, no notGradeable[], and its skipped
-now includes each unread task.
+neither flag (orient-all § 2) the output carries no notGradeable[], and its skipped now includes each unread task.
+  The agent cap (p50-2): every output also carries cap, the session's agent cap (--cap, a positive whole number, else
+  AGENT_CAP_ENV when it holds one, else AGENT_CAP_DEFAULT; a bad --cap is exit 2), and agents[] {files[], tasks}, the
+  slice files grouped for the grading agents by fit_agents: at most the room the status agents leave, which is the cap
+  less one per scan rollout but never less than half the cap (the status agents take at most cap // 2 of the first
+  message, so a busy estate still grades on cap - cap // 2 agents; with --tasks, which starts none, the whole cap), at
+  least one agent while any slice is cut, the largest slices first, each to the group with the fewest tasks, so a big
+  slice keeps its agent and the small ones are batched; every file in exactly one entry, in slice order, tasks the
+  entry's task count. Without --tasks it adds status {start, later}: how many of the status agents fit beside the
+  grading ones in the first message (the cap less agents[], at most the scan's rollouts), and how many wait for an
+  earlier agent to return.
 
 rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round, cut to N minutes.
   Sign-offs: each scan rollout summary's `pendingSignOffs` (with a null summary, the scan's open tasks at status
@@ -475,6 +485,10 @@ UNRECORDED_RULING = "no `orient ruling:` line for its fork: {fork}"
 UNRECORDED_NOTE = "its note cannot be read"
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
+# Claude Code caps a session's live subagents (AGENT_CAP_ENV, AGENT_CAP_DEFAULT when unset): a launch past it is
+# refused, so `slices` fits orient-all § 2 step 4's agents under it (p50-2).
+AGENT_CAP_ENV = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
+AGENT_CAP_DEFAULT = 20
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
 KILL_NAMES_MAX = 8
 
@@ -883,8 +897,39 @@ def split_slugs(values):
     return [s.strip() for v in values or [] for s in v.split(",") if s.strip()]
 
 
+def agent_cap(raw):
+    """The session's agent cap: --cap when given (a positive integer, else exit 2), else AGENT_CAP_ENV when it holds
+    one, else AGENT_CAP_DEFAULT. The env value is the harness's, so one that is not a positive integer reads as unset.
+    isdecimal, never isdigit: a digit int() refuses (`²`) is a bad --cap (exit 2) or an unset env, never a traceback."""
+    if raw is not None:
+        if not raw.strip().isdecimal() or int(raw) < 1:
+            fail(2, "--cap %s: not a positive whole number" % raw)
+        return int(raw)
+    env = (os.environ.get(AGENT_CAP_ENV) or "").strip()
+    return int(env) if env.isdecimal() and int(env) >= 1 else AGENT_CAP_DEFAULT
+
+
+def fit_agents(sizes, cap, rollouts):
+    """orient-all § 2 step 4's first message under the agent cap: (groups, start). The status agents, one per scan
+    rollout, take at most half the cap (cap // 2), so the grading agents keep a floor of the rest,
+    cap - min(rollouts, cap // 2), however busy the estate; the grading groups are fixed when they start, while a status
+    agent past the half can wait for an earlier agent to return (status.later). groups: the slices (their task counts,
+    in slice order) grouped into at most that room, at least one while any slice is cut: the largest first, each to the
+    group holding the fewest tasks (the lower index on a tie), so a big slice keeps an agent to itself and the small
+    ones are batched; lists of slice indexes, each ascending, ordered by their first. start: the status agents that fit
+    beside them, min(rollouts, cap - len(groups)), so room the grading agents leave unused goes to status."""
+    k = min(cap - min(rollouts, cap // 2), len(sizes))
+    groups, loads = [[] for _ in range(k)], [0] * k
+    for i in sorted(range(len(sizes)), key=lambda i: (-sizes[i], i)):
+        g = min(range(k), key=lambda g: (loads[g], g))
+        groups[g].append(i)
+        loads[g] += sizes[i]
+    return sorted((sorted(g) for g in groups), key=lambda g: g[0]), min(rollouts, cap - k)
+
+
 def cmd_slices(args):
     scan = read_scan(args.scan)
+    cap = agent_cap(args.cap)
     M = Mods()
     today = scan.get("today")
     ranker = M.ER.Ranker(M.RT, M.ES, scan, None, None, [], superseding=args.superseding)
@@ -940,7 +985,17 @@ def cmd_slices(args):
     out = {"homes": [{"project": b["project"]["name"], "note": b["project"].get("note"), "file": os.path.join(d, f),
                       "tasks": [t["slug"] for t in b["tasks"]]} for f, b in plan],
            "gradeable": len(ranker.home), "skipped": len(ranker.skip)}
-    if wanted is not None:
+    # The grading agents start beside one status agent per scan rollout (orient-all § 2 step 4), up to half the cap;
+    # schedule's Pre-flight (--tasks) starts no status agent.
+    rollouts = 0 if wanted is not None else len(scan["rollouts"])
+    groups, start = fit_agents([len(b["tasks"]) for _, b in plan], cap, rollouts)
+    out["cap"] = cap
+    homes = out["homes"]
+    out["agents"] = [{"files": [homes[i]["file"] for i in g], "tasks": sum(len(homes[i]["tasks"]) for i in g)}
+                     for g in groups]
+    if wanted is None:
+        out["status"] = {"start": start, "later": rollouts - start}
+    else:
         out["notGradeable"] = not_gradeable
     emit(out)
 
@@ -2746,6 +2801,7 @@ def parse(argv):
     s.add_argument("--dir", required=True)
     s.add_argument("--tasks", action="append", default=[])
     s.add_argument("--superseding")
+    s.add_argument("--cap")
     r = sub.add_parser("rounds", allow_abbrev=False)
     r.add_argument("--rank", required=True)
     r.add_argument("--scan", required=True)
