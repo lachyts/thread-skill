@@ -34,7 +34,7 @@ notes lack it. Either read of the settings file runs land.sh's `--origin-slug` r
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
 execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*), and
 `reconcile-rollout.py moving`, the Watchdog's reading (§ 2's *Moving*; § The Watchdog's reading), which runs `next`'s
-dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. That read also opens primary-green.json beside it, a checkout waiting on the Green tip. It also runs `reconcile-rollout.py prove` with `--dry-run --no-gh` for § 4's Carried line, a read that writes nothing and calls no gh (ADR 0078 d1). On a
+dry run in-process and writes nothing. It also runs `primary-refresh.py stuck` for § 4's Primary refresh line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json` that writes nothing. That read also opens primary-green.json beside it, a checkout waiting on the Green tip. It also runs `land-carrier.py stuck` for § 4's Landings line, a read of `${XDG_STATE_HOME:-~/.local/state}/thread/landings.json` that writes nothing. It also runs `reconcile-rollout.py prove` with `--dry-run --no-gh` for § 4's Carried line, a read that writes nothing and calls no gh (ADR 0078 d1). On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
 read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
@@ -474,7 +474,19 @@ shows here only once its repair has been blocked a day. This section never quote
 outcome, its advice, the git command), in a code span or a fenced block, and shows no example line: status's read-only
 rule reads every span as a command status runs.
 
-**The Trickle line**, under the engine line (and the Primary refresh line when it prints), from `trickle` (execute away.md: one Mac-wide cap, its value by
+**The Landings line**, under the engine line and the Primary refresh line when it prints (ADR 0028 as p11-7 amended
+it: a landing the landing carrier cannot move is seen at a sitting, off the Stage too). Run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py stuck` with `<root>` in place, as every command
+here runs, and with no `--slug`: the line is estate-wide, like the Primary refresh line and the Stage's quiet line.
+The JSON's `line` prints verbatim, on a line of its own, when it is not null, and nothing prints when it is null (no
+landings.json, and no landing unmoved for a day). A non-zero exit prints `Landings: not read (<its last stderr line>)`.
+The line is the carrier's last recorded state, a point-in-time read with no freshness check. In plain words, it names
+each landing PR the carrier has not moved for a day (and a superseded one whose reopen failed, or a search failing for a
+day), its last outcome and since when. A landing still moving is never shown. This section never quotes the line, nor
+any part of it, in a code span or a fenced block, and shows no example line: status's read-only rule reads every span
+as a command status runs.
+
+**The Trickle line**, under the engine line (and the Primary refresh and Landings lines when they print), from `trickle` (execute away.md: one Mac-wide cap, its value by
 Away state). Not Away: `Trickle: not Away · N <limit> · <running>/<limit> tasks running on this Mac (<here> here[,
 <n> in [[<r>]]…]) · away.json <fresh until <until> | missing: the default | stale: <why>, read as not Away, Trickle
 2 | unreadable: <why>, read as not Away, Trickle 2>`. Away: `Trickle: Away until <until> · the Away cap <awayCap>
@@ -1139,7 +1151,8 @@ session reads `reconcile-rollout.py moving` instead (§ The Watchdog's reading).
   `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `reconcile-rollout.py moving` (§ 2's
   *Moving*, `next`'s dry run in-process: it writes nothing), `leg.py status` (§ 5, a serial
   note's one read), `engine-snapshot.py resolve` (§ 1, a read), `unfinished-rollout.py hold` (§ 4's Hold line, a
-  read), `primary-refresh.py stuck` (§ 4's Primary refresh line, a read that writes nothing), `reconcile-rollout.py prove` with
+  read), `primary-refresh.py stuck` (§ 4's Primary refresh line, a read that writes nothing), `land-carrier.py stuck` (§ 4's
+  Landings line, a read that writes nothing), `reconcile-rollout.py prove` with
   `--dry-run --no-gh` (§ 4's Carried line, a read that writes nothing and calls no gh; never without `--dry-run`, never
   with `--land` or `--seen`), `lead-integrate.py inputs`
   and `rollout-settings.py` (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides

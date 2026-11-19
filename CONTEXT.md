@@ -331,8 +331,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   will not queue auto-merge, and closes one a later close-out carries. An own
   branch's `queued: needs merge` leaves a `Landing queued` marker the carrier
   merges at the queued head once green and clean. A PR unmoved for a day is
-  listed as stuck (`land-carrier.py stuck`). It runs from the **Primary
-  refresh**'s job every 15 minutes. _Avoid_: daily lander, nightly lander.
+  listed as stuck (`land-carrier.py stuck`), which the Stage's quiet line,
+  /thread:status's Landings line and open's briefing of a thread in that repo
+  read. It runs from the **Primary refresh**'s job every 15 minutes. _Avoid_:
+  daily lander, nightly lander.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.

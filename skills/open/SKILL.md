@@ -52,7 +52,7 @@ A repo-thread row's `<label>` is its path relative to `~/repos`, as in § Repo-t
 ### `/thread:open <slug>` — load or create
 
 1. Look for an existing thread: run § Repo-thread lookup with `slug=<slug>`. It searches `_shared/threads/<slug>.md`, then `~/Projects`, then repo threads, and stops at the first tier with a match; close's rung 2 uses this same order. One path → that file. Several → the CWD repo's has already won inside the repo tier; otherwise list labels and paths and ask (Owner *yours*: which thread he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). A hit comes before any creation rule, so `/thread:open maquette` opens the repo thread `~/repos/tools/maquette/THREAD.md`.
-2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too, apply the `Run from:` check below (the handoff-doc pickup's step 2), and, when it is pending, **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Pickup), then apply `handoff-lifecycle.md` § Thread state's pickup row; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
+2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question) and § The landings line for a repo thread, and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too, apply the `Run from:` check below (the handoff-doc pickup's step 2), and, when it is pending, **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Pickup), then apply `handoff-lifecycle.md` § Thread state's pickup row; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
 3. If not found → ask for the scope (one line; Owner *yours*, what the thread is for, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`): his answer is the go-ahead, and a stop creates nothing. Then create the file at the location § Creating a new thread gives, from the canonical template with frontmatter populated. New shared threads also get appended to `INDEX.md`.
 
 ### `/thread:open [[<task>]]` — pick up a stashed/deferred capture
@@ -60,7 +60,7 @@ A repo-thread row's `<label>` is its path relative to `~/repos`, as in § Repo-t
 The pickup half of the stash/defer loop (see `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`). Accepts a wiki-link, a slug, or a path under `~/repos/obsidian/Work/Tasks/`.
 
 1. Read the task file. Prime from its `## Notes` summary and `## Resume prompt` — treat the prompt's context/read-first/next-move as the working brief.
-2. Read the linked `THREAD.md` if the task has one; brief from both, and apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's pickup row to it (a `parked` or `paused` thread goes `active`).
+2. Read the linked `THREAD.md` if the task has one; brief from both, and apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's pickup row to it (a `parked` or `paused` thread goes `active`). A repo thread's briefing adds § The landings line.
 3. **Complete the capture** when the task is a capture, i.e. its `tags:` include `thread` (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4): set `status: done` and set (or replace) `completed: <today>` in the task file, never adding a second `completed:` key. The capture's job ended the moment this thread went live — if the work gets set down again later, a fresh capture is written (dedup finds no open task). Leave the capture's `next_action:` and every project's `next_task:` untouched: a project pointing at the done capture holds a dead link, which every reader treats as blank and nothing rewrites — the next set-down or `/weekly` replaces it (estate ADR 0008 decision 5, amended). Any other task stays at its status: its work is still ahead. `thread:close` marks it done when the work passes its guard and otherwise asks, as a mark-done option (`${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md` § A finished task closes itself).
 4. Confirm in one line: `Picked up [[<slug>]] — capture closed. Next move: <from the prompt>.` (for any other task, `Picked up [[<slug>]] — task left open until close. Next move: <from the prompt>.`). Then get on with the work.
 
@@ -70,7 +70,7 @@ The pickup half of the handoff loop (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/hando
 
 1. **A doc in a rollout clone reads as its twin's.** When the doc's directory is inside a rollout clone (`bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --in-place "$(dirname <doc>)"` exits 0 and prints the twin's directory), and the in-place twin holds the same file, the doc path is that twin's copy: handoff-home.sh rule 0 wrote it there, and the clone's copy only arrived through origin. Steps 2–4 read and mark the twin's copy, never the clone's (ADR 0042: no session commits or leaves a consumed mark in a rollout clone, whose default branch only merge-task moves). A doc the twin does not hold (one homed in a clone before ADR 0042) is read and marked where it is. Then read the doc. Prime from its § What remains, § Decisions settled and § Gotchas; its § Paste-ready prompt is the working brief.
 2. **Check `Run from:`.** Read the doc's ``**Run from:** `<abs dir>` `` line and compare it with `pwd -P`. If they differ, say so in one line — `Run from: <dir>, but this session launched in <pwd>; close, stash and defer resolve their homes from the launch directory` — and continue. Never block; a doc without the line (written before it existed) is checked for nothing.
-3. Read the linked `THREAD.md` if the doc's `thread:` names one: `thread:` is an effective slug (a repo thread with no front matter goes by its directory's name, so a doc written from maquette carries `thread: maquette`), so run § Repo-thread lookup with `slug=<thread:>` and take its first hit, with the same ask rule as `<slug>` step 1 when several paths print. No hit → brief from the doc alone. Brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it.
+3. Read the linked `THREAD.md` if the doc's `thread:` names one: `thread:` is an effective slug (a repo thread with no front matter goes by its directory's name, so a doc written from maquette carries `thread: maquette`), so run § Repo-thread lookup with `slug=<thread:>` and take its first hit, with the same ask rule as `<slug>` step 1 when several paths print. No hit → brief from the doc alone. Brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it. A repo thread's briefing adds § The landings line.
 4. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. Deletion is the consuming session's close (`handoff-lifecycle.md` § Close-out); a legacy doc is briefed from but left untouched (`handoff-lifecycle.md` § States).
 5. Confirm in one line: `Picked up <doc> — marked consumed. Next move: <from the prompt>.` Then get on with the work.
 
@@ -83,6 +83,24 @@ Runs `thread:close`'s flow as written, mid-session, without ending the thread.
 - Close sub-step 7.6's set-down write does not run: a save sets nothing down, so neither next-action field changes (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b).
 - `state:` stays unchanged, and save never sets `state: done` — the close row it follows (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state) allows `done` when Lachy says the thread is finished, but that is `thread:close`'s to write.
 - In place of close's banner the last line is `Thread saved — session continues.`
+
+## The landings line
+
+A landing the carrier cannot move is seen at the next open in its repo, off the Stage too (Codex, a plain terminal): ADR 0028 as p11-7 amended it. So when open briefs from a repo thread (the kind § Repo-thread lookup lists), the briefing carries one more line, read from the landing carrier's stuck list for that repo. `<slug>` step 2, the `[[<task>]]` pickup's step 2 and the handoff-doc pickup's step 3 run it. Repo threads only: a shared or project thread gets no line.
+
+Set `top` on a line of its own before the snippet, to the repo thread's toplevel as § Repo-thread lookup printed it (its THREAD.md's directory, so from a rollout clone the twin's); the snippet only defaults it. It holds no positional parameter and every expansion is quoted, so it runs the same under bash and zsh.
+
+```bash
+# thread:open-landings
+: "${top:=}"
+if s=$(bash "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh" --origin-slug "$top"); then python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py" stuck --slug "$s"; fi
+```
+
+- Print its JSON's `line` verbatim when it is not null, as one line of the briefing.
+- Print nothing when it is null: no landing in this repo has been unmoved for a day.
+- Any non-zero exit of `--origin-slug` (4: no GitHub origin) prints no line, and the read never runs. An empty or unset `top` is land.sh's usage (exit 2, its usage text on stderr), never the read's failure: set `top` and run it again.
+- A non-zero exit of the read prints `Landings: not read (<its last stderr line>)`.
+- The line is a statement, never a question. It never blocks the open, and it writes nothing: `land-carrier.py stuck` reads landings.json, with no `gh` call and no network.
 
 ## Repo-thread lookup
 

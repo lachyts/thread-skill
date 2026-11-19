@@ -867,7 +867,8 @@ const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr
   'unfinished-rollout.py hold',   // § 4's Hold line (ADR 0060): read-only, one JSON line
   'unfinished-rollout.py awaited',   // § 3's Waits on flag (ADR 0082 d6): reads notes only, no git, no gh
   'reconcile-rollout.py prove',   // § 4's Carried line (ADR 0078 d1): --dry-run --no-gh, a read that writes nothing
-  'merge-settings.py rows']   // § 4's Needs you (ADR 0080 d5): the changed-for-you rows, read-only JSON
+  'merge-settings.py rows',   // § 4's Needs you (ADR 0080 d5): the changed-for-you rows, read-only JSON
+  'land-carrier.py stuck']   // § 4's Landings line (p11-7): a read of landings.json that writes nothing
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'

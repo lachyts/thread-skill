@@ -8,7 +8,7 @@
 #   C0 quiet passes and the rate limit · C1 C1b C1c update-branch, one per repo per pass · C2 an unsettled mergeability
 #   C3 C3b C4 C4d the resolver · C5 C5b C5c C5d C5e C5f the rerun rule · C6 C6g C6h C6i merges and the binding
 #   C7 C7n supersession and tombstones · C8 the clock · C9 C10 no write · C11 the deadline and a TERM
-#   C12 discovery and scope · C13 a refused auto-merge falls through · C14 the prompt vars · C15 stuck
+#   C12 discovery and scope · C13 a refused auto-merge falls through · C14 the prompt vars · C15 stuck and --slug
 #   C16 marker · C17 --dry-run · C18 skipped PRs
 # The cases are grouped into shard_<n>() functions, each self-contained; run bare, this script starts one child per shard
 # (`--shard <n>`), all at once, each with its own temp dir, then prints their output in shard order. Hermetic: HOME,
@@ -691,6 +691,48 @@ has "$(sline --now "$(at 1500)")" "Landings: o/x#1: waiting for its checks (unmo
 ok "$(sline --now "$(at 60)" | grep -c 'o/x#1')" 0 "C15: … within a day the entry is not due"
 rm -f "$ST"; ok "$(sline)" None "C15: no file: a null line"
 python3 "$CARRIER" stuck --now nope > /dev/null 2>&1; ok "$?" 2 "C15: a bad --now is usage, exit 2"
+# --slug (open's landings line): one repo's rows, matched case-insensitively, and the search spell, which carries
+# nothing in any repo. seed15 <since of the search spell>: o/x#1 and P/Y#9 a day old, then the spell.
+seed15() {
+python3 - "$ST" "$(at 0)" "$(at 10)" "$1" <<'PY'
+import json, sys
+p, t0, t1, sf = sys.argv[1:]
+e = lambda url, moved: {"url": url, "kind": "close-out", "since": t0, "movedAt": moved, "outcome": "waiting for its checks"}
+json.dump({"v": 1, "landings": {"_pass": {"lastPass": t0, "searchFailedSince": sf, "searchFailedWhy": "gh: HTTP 401"},
+                                "o/x#1": e("https://github.com/o/x/pull/1", t0),
+                                "P/Y#9": e("https://github.com/P/Y/pull/9", t1)}}, open(p, "w"))
+PY
+}
+skeys() { stk "$@" | python3 -c 'import json,sys; d=json.load(sys.stdin); print([r["key"] for r in d["stuck"]], d["line"] is None)'; }
+mkdir -p "$(dirname "$ST")"; seed15 "$(at 20)"
+ok "$(skeys --now "$(at 1500)")" "['o/x#1', 'P/Y#9', 'search'] False" "C15 --slug: without it, every row in time order"
+ok "$(skeys --slug o/x --now "$(at 1500)")" "['o/x#1', 'search'] False" "C15 --slug: o/x keeps its row and the search spell"
+t20=$(at 20)
+ok "$(sline --slug o/x --now "$(at 1500)")" \
+  "Landings: o/x#1: waiting for its checks (unmoved since ${T0:0:16}) · search: search failed: gh: HTTP 401 (unmoved since ${t20:0:16})" \
+  "C15 --slug: … its line holds o/x#1 and the spell, oldest first, never another repo's row"
+ok "$(skeys --slug p/y --now "$(at 1500)")" "['P/Y#9', 'search'] False" "C15 --slug: p/y matches P/Y#9 (case-insensitive)"
+# open's # thread:open-landings snippet, extracted from its fence and run under bash and zsh -f (the Bash tool is zsh),
+# at a repo whose origin is GitHub's O/X and at one with no GitHub origin; its stuck read takes the wall clock, which
+# is days past the seeded rows.
+OPEN_MD=$root/skills/open/SKILL.md
+awk '/^# thread:open-landings$/{on=1} on && /^```/{exit} on' "$OPEN_MD" > "$tmp/open-landings.sh"
+git init -q "$tmp/c15gh"; git -C "$tmp/c15gh" remote add origin git@github.com:O/X.git
+git init -q "$tmp/c15no"; git -C "$tmp/c15no" remote add origin https://example.com/o/x.git
+shells=(bash); command -v zsh >/dev/null 2>&1 && shells+=("zsh -f")
+for sh in "${shells[@]}"; do
+  o=$(cd "$tmp" && CLAUDE_PLUGIN_ROOT="$root" top="$tmp/c15gh" $sh "$tmp/open-landings.sh" 2>/dev/null \
+    | python3 -c 'import json,sys; print([r["key"] for r in json.load(sys.stdin)["stuck"]])')
+  ok "$o" "['o/x#1', 'search']" "C15 open's snippet [$sh]: a GitHub origin O/X reads only o/x#1 and the search spell"
+  o=$(cd "$tmp" && CLAUDE_PLUGIN_ROOT="$root" top="$tmp/c15no" $sh "$tmp/open-landings.sh" 2>/dev/null); rc=$?
+  ok "$rc|$o" "0|" "C15 open's snippet [$sh]: no GitHub origin: no read, nothing printed"
+done
+seed15 "$(at 1400)"
+ok "$(skeys --slug q/z --now "$(at 1500)")" "[] True" "C15 --slug: a repo with no row, the spell under a day: no rows, a null line"
+for bad in bad o/ '' o/..; do
+  o=$(python3 "$CARRIER" stuck --slug "$bad" 2>/dev/null); rc=$?
+  ok "$rc|$o" "2|" "C15 --slug: '$bad' is usage, exit 2, nothing on stdout"
+done
 
 echo "== C16. marker: the newest marker-class comment by the login"
 # mk <json>: the marker line and its rc, as "<line>|<rc>" (the line captured, so its newline never sits before the |).

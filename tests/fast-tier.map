@@ -237,6 +237,7 @@ skills/execute/SKILL.md tests/lead-integrate.test.sh tests/pushed-base.test.sh t
 skills/execute/SKILL.md tests/self-rollout-check.test.sh
 skills/handoff/SKILL.md tests/handoff-home.test.sh tests/land.test.sh
 skills/open/SKILL.md tests/handoff-home.test.sh tests/repo-threads.test.sh tests/thread-placement.test.mjs
+skills/open/SKILL.md tests/land-carrier.test.sh
 skills/repair/SKILL.md tests/execution-fit-remote.test.sh tests/pinned-tree.test.sh tests/pushed-base.test.sh
 skills/schedule/SKILL.md tests/execution-fit-remote.test.sh tests/gated-inputs.test.mjs tests/pushed-base.test.sh
 skills/schedule/SKILL.md tests/self-rollout-check.test.sh tests/unfinished-rollout.test.sh
