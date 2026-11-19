@@ -1247,7 +1247,7 @@ test('h3: a review-blocked run (`Round N:` from its first line) parses whole, fo
 // and the judge scans again (`--history-only`). An `action` human finding is Lachy's: the integrator's stop and the
 // judge's `changes` with the scan's question are set-asides whose row carries it as needsHuman; nothing else ever does.
 // An `action` fix (p39-17, a fixable advisory on Integration's own dependencies) is the integrator's bump, and a judge's
-// `changes` naming one, with no question, is a plain rejection the revise bumps (IS7).
+// `changes` naming one, with no question, is a plain rejection the revise bumps (IS6's judge leg).
 
 const SECURITY = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
 const WHY = "A secret (github-pat) in a.js, commit ddddddd (a merge's resolution), line 3, is in Integration's commits, which Integration never rewrites: once it is rotated, keep it in the history (answer `security-accept secret:0123456789ab`), or have /thread:repair recut the branch?"
@@ -1364,17 +1364,6 @@ test('IS6: a needsHuman that names no security-accept token is never taken, from
   const off = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: secStop() })
   clean(off)
   assert.equal(off.row.needsHuman, null)
-})
-
-test('IS7: a judge `changes` naming a fixable advisory, with no question, is a rejection: a review round used, no needsHuman', async () => {
-  const bullet = 'move npm left-pad 1.3.0 to a fixed release (1.3.1): advisory GHSA-test-0007'
-  const r = await run(sec(P1_I()), { [JLABEL(2)]: jv('changes', [bullet]) })
-  clean(r)
-  assert.equal(r.row.integration.outcome, 'rejected')
-  assert.equal(r.row.blockerDiagnosis.split('\n')[0], T.REVISE_MARKER)
-  assert.equal(r.row.reviewRoundsUsed, 2)
-  assert.deepEqual(r.row.reviewFeedback, [bullet])
-  assert.equal(r.row.needsHuman, null)
 })
 
 // ---- static ----------------------------------------------------------------------------------------

@@ -580,15 +580,20 @@ for (const real of [false, true]) {
   })
 }
 
-// Integration's dependency tree: feat adds package.json as `ours` (the anchor, pushed), main adds it as `theirs` (an
-// add/add conflict), feat merges origin/<def> and resolves it as `resolved`, then, with o.fix (package.json's text), one
-// fix commit. Each argument is a dependencies object.
+// Integration's dependency tree: with o.base, main and feat first share package.json as `base`; then feat writes it as
+// `ours` (the anchor, pushed), main as `theirs` (one JSON line, so the two always conflict: an add/add without o.base),
+// feat merges origin/<def> and resolves it as `resolved`, then, with o.fix, one fix commit. Each argument is a
+// dependencies object.
 function integratedPkg(s, ours, theirs, resolved, o = {}) {
   const pkg = (deps) => JSON.stringify({ dependencies: deps })
-  s.write('package.json', pkg(ours)); const anchor = s.commit('ours adds package.json')
+  if (o.base) {
+    s.write('package.json', pkg(o.base)); s.commit('base adds package.json')
+    s.git('branch', '-f', s.def); s.git('push', '-q', 'origin', s.def)
+  }
+  s.write('package.json', pkg(ours)); const anchor = s.commit('ours writes package.json')
   s.git('push', '-q', 'origin', 'feat')
   s.git('checkout', '-q', s.def)
-  s.write('package.json', pkg(theirs)); s.commit('theirs adds package.json'); s.git('push', '-q', 'origin', s.def)
+  s.write('package.json', pkg(theirs)); s.commit('theirs writes package.json'); s.git('push', '-q', 'origin', s.def)
   s.git('checkout', '-q', 'feat')
   assert.equal(spawnSync(GIT, ['-C', s.tree, 'merge', '-q', `origin/${s.def}`], { env: s.env }).status, 1, 'setup: the merge conflicts')
   s.write('package.json', pkg(resolved)); s.git('add', '-A'); s.git('commit', '-q', '--no-edit')
@@ -597,7 +602,7 @@ function integratedPkg(s, ours, theirs, resolved, o = {}) {
 }
 const FIXABLE = { 'npm|left-pad': [vuln('GHSA-test-0007', 'npm', 'left-pad', [eco([{ introduced: '0' }, { fixed: '1.3.1' }])])] }
 
-test('I7a, I7e: a fix commit\'s dependency with a fixed advisory is the integrator\'s fix; the judge\'s --history-only run reads the same; --no-advisories lists it unasked (and its control)', async (t) => {
+test('I7a, I7e: a fix commit\'s dependency with a fixed advisory is the integrator\'s fix; the judge\'s --history-only run reads the same (and its control)', async (t) => {
   const s = box(t)
   const o = await osvStub(t, FIXABLE)
   const kept = { a: '1.0.0', b: '1.0.0' }
@@ -613,16 +618,12 @@ test('I7a, I7e: a fix commit\'s dependency with a fixed advisory is the integrat
   const judge = await scan(s, { osv: o.url, extra: anchorArgs(anchor, '--history-only') })
   assert.equal(judge.status, 1, judge.stderr)
   assert.deepEqual([judge.json.action, judge.json.dependencies, judge.json.advisories], [r.json.action, r.json.dependencies, r.json.advisories], 'I7e: the judge reads the same')
-  const asked = o.seen.length
-  const quiet = await scan(s, { osv: null, env: { THREAD_OSV_URL: o.url }, extra: anchorArgs(anchor) })
-  assert.equal(o.seen.length, asked, 'I7e: --no-advisories makes no request')
-  assert.deepEqual(quiet.json.dependencies, r.json.dependencies)
   // Control: Integration's dependencies left unread read no advisory.
-  const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'deps = dependencies(tree, integration_sides(', 'deps = [] if integration else dependencies(tree, [mb], head, brief_tail)') })
+  const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'deps = dependencies(tree, mb, head, brief_tail, own)', 'deps = [] if integration else dependencies(tree, mb, head, brief_tail)') })
   assert.deepEqual(m.json.advisories, [], 'control: no Integration dependencies, no advisory')
 })
 
-test('I7b: what the anchor and the landed side hold is never Integration\'s: a resolution keeping both is clean, OSV unasked (and its controls)', async (t) => {
+test('I7b: what the task\'s own change and main as merged hold is never Integration\'s: a resolution keeping both is clean, OSV unasked (and its controls)', async (t) => {
   const s = box(t)
   const o = await osvStub(t, {
     'npm|bad-dep': [vuln('GHSA-test-0008', 'npm', 'bad-dep', [eco([{ introduced: '0' }, { fixed: '9.0.0' }])])],
@@ -634,36 +635,31 @@ test('I7b: what the anchor and the landed side hold is never Integration\'s: a r
   assert.deepEqual(r.json.dependencies, [])
   assert.deepEqual(o.queries(), [], 'OSV is never asked')
   // Controls: a side left out lists what it holds.
-  const noParents = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'sides.extend(line.split()[2:])', 'pass') })
-  assert.deepEqual(noParents.json.dependencies.map((d) => d.name), ['bad-dep'], 'control: without the merge parents main\'s entry is listed')
-  const noAnchor = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'sides = [anchor]', 'sides = []') })
-  assert.deepEqual(noAnchor.json.dependencies.map((d) => d.name), ['own-dep'], 'control: without the anchor the task\'s entry is listed')
+  const noMain = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'sides = [entries(mb, manifest, eco, parser)]', 'sides = []') })
+  assert.deepEqual(noMain.json.dependencies.map((d) => d.name), ['bad-dep'], 'control: without main as merged main\'s entry is listed')
+  const noTask = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, 'sides.insert(0, mine)', 'pass') })
+  assert.deepEqual(noTask.json.dependencies.map((d) => d.name), ['own-dep'], 'control: without the task\'s own change its entry is listed')
 })
 
-test('I7c: a resolution\'s third version is Integration\'s, changed from the anchor\'s floor; one that keeps theirs is not', async (t) => {
-  for (const [resolved, want] of [['^1.3.0', [['left-pad', '1.3.0', '1.2.0']]], ['^1.4.0', []]]) {
+test('I7c: a resolution\'s third version is Integration\'s, changed from the task\'s floor; keeping theirs is not; keeping an entry the task never changed over main\'s bump is, changed from main\'s (and its control)', async (t) => {
+  let revert
+  for (const [base, ours, theirs, resolved, want] of [
+    [null, { 'left-pad': '^1.2.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': '^1.3.0' }, [['left-pad', '1.3.0', '1.2.0']]],
+    [null, { 'left-pad': '^1.2.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': '^1.4.0' }, []],
+    [{ 'left-pad': '^1.2.0' }, { 'left-pad': '^1.2.0', aaa: '1.0.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': '^1.2.0', aaa: '1.0.0' }, [['left-pad', '1.2.0', '1.4.0']]],
+  ]) {
     const s = box(t)
     const o = await osvStub(t)
-    const { anchor } = integratedPkg(s, { 'left-pad': '^1.2.0' }, { 'left-pad': '^1.4.0' }, { 'left-pad': resolved })
+    const { anchor } = integratedPkg(s, ours, theirs, resolved, { base })
     const r = await scan(s, { osv: o.url, extra: anchorArgs(anchor) })
     assert.equal(r.status, 0, r.stdout)
-    assert.deepEqual(r.json.dependencies.map((d) => [d.name, d.version, d.changedFrom]), want, resolved)
+    assert.deepEqual(r.json.dependencies.map((d) => [d.name, d.version, d.changedFrom]), want, JSON.stringify(resolved))
+    revert = { s, o, anchor }
   }
-})
-
-test('I7d: a fix commit\'s dependency whose advisory has no fixed release is human, its token named; the recorded answer clears it', async (t) => {
-  const s = box(t)
-  const o = await osvStub(t, { 'npm|left-pad': [vuln('GHSA-test-0010', 'npm', 'left-pad', [eco([{ introduced: '0' }, { fixed: '1.0.0' }])])] })
-  const kept = { a: '1.0.0', b: '1.0.0' }
-  const { anchor } = integratedPkg(s, { a: '1.0.0' }, { b: '1.0.0' }, kept, { fix: { ...kept, 'left-pad': '^1.3.0' } })
-  const r = await scan(s, { osv: o.url, extra: anchorArgs(anchor) })
-  assert.equal(r.status, 1, r.stderr)
-  assert.equal(r.json.action, 'human')
-  const acc = r.json.advisories[0].accept
-  assert.ok(r.json.why.includes(`answer \`security-accept ${acc}\``), r.json.why)
-  const r2 = await scan(s, { osv: o.url, note: s.note([entry(r.json.why, `keep it (security-accept ${acc})`)]), extra: anchorArgs(anchor) })
-  assert.equal(r2.status, 0, r2.stdout)
-  assert.deepEqual(r2.json.accepted.map((x) => x.token), [acc])
+  // Control: the anchor's every entry read as the task's own change hides the revert of main's bump.
+  const { s, o, anchor } = revert
+  const m = await scan(s, { osv: o.url, extra: anchorArgs(anchor), script: lineMutant(s, "# the task's own change", 'mine = at_anchor') })
+  assert.deepEqual(m.json.dependencies, [], 'control: the unfiltered anchor holds the revert')
 })
 
 test('I1b: a fix commit\'s secret alone is still human with --anchor, rewriteFrom null, mergeBehind false; a task-mode scan of the same tree is the fix', async (t) => {

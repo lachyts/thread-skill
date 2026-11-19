@@ -43,8 +43,9 @@ Python stdlib only. Two verbs:
            repeats from its own question (record-answer's entry shape).
       10.  Dependencies the diff adds or changes in package.json, requirements*.txt, pyproject.toml, go.mod and
            Cargo.toml: a change is any change to an entry as written or to its section (a range, a git pin, a move to
-           another section), not only to its version floor; a fixture manifest is listed and never checked. A task
-           scan reads the diff <mb>..HEAD against the merge base; an Integration scan reads its sides (below).
+           another section), not only to its version floor; a fixture manifest is listed and never checked. Each
+           entry at HEAD, in a manifest <mb>..HEAD touches, that the merge base does not hold as written; an
+           Integration scan leaves out the task's own change too (below).
       11.  Advisories from OSV at each floor (querybatch, then one GET per hit); an unreachable OSV is
            `advisoriesChecked: false`, never a red, and a failed GET leaves only its own advisory not checked.
       12.  The brief lines; 13. `action` (fix | human | null) and `why`, one question naming every human item's
@@ -55,14 +56,16 @@ Python stdlib only. Two verbs:
       commits a merge brought in. Integration never rewrites a commit, so every secret is a human item ("is in
       Integration's commits, which Integration never rewrites"), `pushed` is never read (no secret carries `pushed`
       or `pushedWhy`) and `rewriteFrom` is null; `mergeBehind` is read as in task mode. Steps 10-11 read
-      Integration's own manifest entries only: every entry at HEAD, in a manifest <anchor>..HEAD touches, that no side
-      holds as written (`_same`), the sides being the anchor (the task's approved head, which its own scan read) and
-      every non-first parent of each first-parent merge in <anchor>..HEAD (the landed PRs). So a resolution that keeps
-      ours or theirs is never listed, and a resolution's third version or a fix commit's add or bump is;
-      `changedFrom` reads from the first side that holds the name, the anchor first. An advisory with a fixed release
-      there is `action` fix, the integrator's bump; every secret, config change or advisory with no fixed release is
-      human. The output gains `anchor`. --history-only is the read-only Integration judge's run: no refusal or rule
-      reads the working tree, and it reads the same entries and advisories.
+      Integration's own manifest entries only: every entry step 10 lists (the merge base being main as merged, which
+      holds every landed PR) that the task's own change does not hold as written (`_same`) either. The task's own
+      change is each entry the anchor holds that is not `_same` as at the task's fork, merge-base(<anchor>, --base):
+      what the task's own scan read. So a resolution that keeps the task's change or main's entry is never listed;
+      a resolution's third version, a fix commit's add or bump, and a resolution that keeps an entry the task never
+      changed over a change main made (Integration undoing main's bump) are. `changedFrom` reads from the task's own
+      change first, then main's. An advisory with a fixed release there is `action` fix, the integrator's bump; every
+      secret, config change or advisory with no fixed release is human. The output gains `anchor`. --history-only is
+      the read-only Integration judge's run: no refusal or rule reads the working tree, and it reads the same entries
+      and advisories.
       One JSON line on stdout; exit 0 clean (accepted items included), 1 red. Neither stdout nor stderr ever holds a
       secret value.
 """
@@ -524,19 +527,22 @@ def changed_from(eco, old, new):
     return out
 
 
-def dependencies(tree, olds, head, brief_tail):
-    """The new or changed dependencies, one dict each, in manifest then name order. A change is any change to an
-    entry as written or to its section, not only to its floor (OSV is still asked at the floor). `olds` are the sides
-    the change is read against, `olds[0]` the diff base: a task scan's is [merge base]; an Integration scan's is
-    integration_sides. An entry is listed only when no side holds it `_same`, and `changedFrom` reads from the first
-    side that holds its name. A side whose manifest is missing or cannot be parsed holds nothing."""
-    _rc, out, _err = _git(tree, "diff", "--name-only", "--no-renames", "-z", olds[0], head)
+def dependencies(tree, mb, head, brief_tail, own=None):
+    """The new or changed dependencies, one dict each, in manifest then name order: each entry at HEAD, in a manifest
+    <mb>..HEAD touches, that the merge base does not hold as written (`_same`). A change is any change to an entry as
+    written or to its section, not only to its floor (OSV is still asked at the floor). An Integration scan passes
+    `own`, (anchor, fork), where the merge base is main as merged and the fork is merge-base(anchor, --base): then an
+    entry the task's own change holds as written is not listed either, the task's own change being each entry the
+    anchor holds that is not `_same` as at the fork (an entry the task never changed is main's to hold, so keeping it
+    over main's change is Integration's). `changedFrom` reads from the task's own change first, then the merge base. A
+    manifest missing or unparseable at a rev holds nothing there."""
+    _rc, out, _err = _git(tree, "diff", "--name-only", "--no-renames", "-z", mb, head)
     touched = sorted(p for p in out.split("\0") if p and _manifest_kind(p))
     parsed = {}
 
-    def side(rev, manifest, eco, parser):
+    def entries(rev, manifest, eco, parser):
         if (rev, manifest) not in parsed:
-            text = _show(tree, rev, manifest)
+            text = _show(tree, rev, manifest) if rev else None
             try:
                 got = parser(text) if text is not None else {}
             except Exception:
@@ -558,7 +564,13 @@ def dependencies(tree, olds, head, brief_tail):
         except Exception as e:  # a malformed manifest is named, never fatal
             brief_tail.append(f"{manifest} not read: {type(e).__name__}")
             continue
-        sides = [side(rev, manifest, eco, parser) for rev in olds]
+        sides = [entries(mb, manifest, eco, parser)]
+        if own is not None:
+            anchor, fork = own
+            was = entries(fork, manifest, eco, parser)
+            at_anchor = entries(anchor, manifest, eco, parser)
+            mine = {n: e for n, e in at_anchor.items() if not (n in was and _same(was[n], e))}  # the task's own change
+            sides.insert(0, mine)
         fixture = _is_fixture(manifest)
         for name in sorted(new, key=lambda n: _norm_name(eco, n)):
             norm = _norm_name(eco, name)
@@ -572,18 +584,6 @@ def dependencies(tree, olds, head, brief_tail):
         brief_tail.append(f"{len(deps) - MAX_DEPS} more dependencies not listed or checked")
         deps = deps[:MAX_DEPS]
     return deps
-
-
-def integration_sides(tree, anchor, head):
-    """An Integration scan's sides (dependencies' `olds`): the anchor (the task's approved head, which its own scan
-    read), then every non-first parent of each first-parent merge in <anchor>..HEAD, newest merge first (the landed
-    PRs, main as merged, an octopus's every extra parent). An entry none of them holds is Integration's own: a
-    resolution's third version or a fix commit's add or bump."""
-    _rc, out, _err = _git(tree, "rev-list", "--first-parent", "--merges", "--parents", f"{anchor}..{head}")
-    sides = [anchor]
-    for line in out.splitlines():
-        sides.extend(line.split()[2:])
-    return list(dict.fromkeys(sides))
 
 
 # ---- advisories (step 11) -------------------------------------------------------------------------------------------
@@ -1065,7 +1065,11 @@ def scan(args):
         merge_behind = any(behind.values())
         config = [c for c in config if not take(c["accept"], f"config {c['path']} ({c['cause']})")]
 
-        deps = dependencies(tree, integration_sides(tree, anchor, head) if integration else [mb], head, brief_tail)
+        own = None
+        if integration:  # the task's own change is read against its fork with --base, the commit its own scan read from
+            _rc, fork, _err = _git(tree, "merge-base", anchor, base, check=False)
+            own = (anchor, fork.strip() or None)
+        deps = dependencies(tree, mb, head, brief_tail, own)
         osv_url = None if args.no_advisories else (args.osv_url or os.environ.get("THREAD_OSV_URL") or OSV_DEFAULT)
         advs, checked = advisories(deps, osv_url, brief_tail)
         open_advs = [a for a in advs
