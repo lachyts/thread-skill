@@ -98,12 +98,14 @@ gradeable and skipped count the whole scan either way, skipped each unread task 
 neither flag (orient-all § 2) the output carries no notGradeable[], and its skipped now includes each unread task.
   The agent cap (p50-2): every output also carries cap, the session's agent cap (--cap, a positive whole number, else
   AGENT_CAP_ENV when it holds one, else AGENT_CAP_DEFAULT; a bad --cap is exit 2), and agents[] {files[], tasks}, the
-  slice files grouped for the grading agents by agent_groups: at most the room the status agents leave (cap less one
-  per scan rollout; with --tasks, which starts none, the whole cap), at least one agent while any slice is cut, the
-  largest slices first, each to the group with the fewest tasks, so a big slice keeps its agent and the small ones are
-  batched; every file in exactly one entry, in slice order, tasks the entry's task count. Without --tasks it adds
-  status {start, later}: how many of the status agents fit beside the grading ones in the first message (the cap less
-  agents[]), and how many wait for an earlier agent to return.
+  slice files grouped for the grading agents by fit_agents: at most the room the status agents leave, which is the cap
+  less one per scan rollout but never less than half the cap (the status agents take at most cap // 2 of the first
+  message, so a busy estate still grades on cap - cap // 2 agents; with --tasks, which starts none, the whole cap), at
+  least one agent while any slice is cut, the largest slices first, each to the group with the fewest tasks, so a big
+  slice keeps its agent and the small ones are batched; every file in exactly one entry, in slice order, tasks the
+  entry's task count. Without --tasks it adds status {start, later}: how many of the status agents fit beside the
+  grading ones in the first message (the cap less agents[], at most the scan's rollouts), and how many wait for an
+  earlier agent to return.
 
 rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round, cut to N minutes.
   Sign-offs: each scan rollout summary's `pendingSignOffs` (with a null summary, the scan's open tasks at status
@@ -897,26 +899,32 @@ def split_slugs(values):
 
 def agent_cap(raw):
     """The session's agent cap: --cap when given (a positive integer, else exit 2), else AGENT_CAP_ENV when it holds
-    one, else AGENT_CAP_DEFAULT. The env value is the harness's, so one that is not a positive integer reads as unset."""
+    one, else AGENT_CAP_DEFAULT. The env value is the harness's, so one that is not a positive integer reads as unset.
+    isdecimal, never isdigit: a digit int() refuses (`²`) is a bad --cap (exit 2) or an unset env, never a traceback."""
     if raw is not None:
-        if not raw.strip().isdigit() or int(raw) < 1:
+        if not raw.strip().isdecimal() or int(raw) < 1:
             fail(2, "--cap %s: not a positive whole number" % raw)
         return int(raw)
     env = (os.environ.get(AGENT_CAP_ENV) or "").strip()
-    return int(env) if env.isdigit() and int(env) >= 1 else AGENT_CAP_DEFAULT
+    return int(env) if env.isdecimal() and int(env) >= 1 else AGENT_CAP_DEFAULT
 
 
-def agent_groups(sizes, room):
-    """The slices (their task counts, in slice order) grouped into at most `room` agents, at least one: the largest
-    first, each to the group holding the fewest tasks (the lower index on a tie), so a big slice keeps an agent to
-    itself and the small ones are batched. Returns lists of slice indexes, each ascending, ordered by their first."""
-    k = min(max(room, 1), len(sizes))
+def fit_agents(sizes, cap, rollouts):
+    """orient-all § 2 step 4's first message under the agent cap: (groups, start). The status agents, one per scan
+    rollout, take at most half the cap (cap // 2), so the grading agents keep a floor of the rest,
+    cap - min(rollouts, cap // 2), however busy the estate; the grading groups are fixed when they start, while a status
+    agent past the half can wait for an earlier agent to return (status.later). groups: the slices (their task counts,
+    in slice order) grouped into at most that room, at least one while any slice is cut: the largest first, each to the
+    group holding the fewest tasks (the lower index on a tie), so a big slice keeps an agent to itself and the small
+    ones are batched; lists of slice indexes, each ascending, ordered by their first. start: the status agents that fit
+    beside them, min(rollouts, cap - len(groups)), so room the grading agents leave unused goes to status."""
+    k = min(cap - min(rollouts, cap // 2), len(sizes))
     groups, loads = [[] for _ in range(k)], [0] * k
     for i in sorted(range(len(sizes)), key=lambda i: (-sizes[i], i)):
         g = min(range(k), key=lambda g: (loads[g], g))
         groups[g].append(i)
         loads[g] += sizes[i]
-    return sorted((sorted(g) for g in groups), key=lambda g: g[0])
+    return sorted((sorted(g) for g in groups), key=lambda g: g[0]), min(rollouts, cap - k)
 
 
 def cmd_slices(args):
@@ -977,16 +985,15 @@ def cmd_slices(args):
     out = {"homes": [{"project": b["project"]["name"], "note": b["project"].get("note"), "file": os.path.join(d, f),
                       "tasks": [t["slug"] for t in b["tasks"]]} for f, b in plan],
            "gradeable": len(ranker.home), "skipped": len(ranker.skip)}
-    # The grading agents start beside one status agent per scan rollout (orient-all § 2 step 4), which take their room
-    # first; schedule's Pre-flight (--tasks) starts no status agent.
+    # The grading agents start beside one status agent per scan rollout (orient-all § 2 step 4), up to half the cap;
+    # schedule's Pre-flight (--tasks) starts no status agent.
     rollouts = 0 if wanted is not None else len(scan["rollouts"])
-    groups = agent_groups([len(b["tasks"]) for _, b in plan], cap - rollouts) if plan else []
+    groups, start = fit_agents([len(b["tasks"]) for _, b in plan], cap, rollouts)
     out["cap"] = cap
     homes = out["homes"]
     out["agents"] = [{"files": [homes[i]["file"] for i in g], "tasks": sum(len(homes[i]["tasks"]) for i in g)}
                      for g in groups]
     if wanted is None:
-        start = max(0, min(rollouts, cap - len(groups)))
         out["status"] = {"start": start, "later": rollouts - start}
     else:
         out["notGradeable"] = not_gradeable

@@ -6,8 +6,8 @@
 //   o2  § 2 runs estate-scan.py, `estate-dispatch.py slices` and `estate-rank.py rank`, cites readiness-grade.md
 //       § The grading agents, and briefs the status agents to run /thread:status and return the number of the status
 //       § 4 Recommended action rule that matched; no ranking rule is restated. Under the agent cap (p50-2) it starts
-//       one grading agent per `slices` `agents[]` entry, waits on the grades files, never a completion notice, and
-//       repeats `--grades` once per file.
+//       one grading agent per `slices` `agents[]` entry, waits on the grades files, never a completion notice, groups
+//       the re-asked slices under `cap`, and repeats `--grades` once per file.
 //   o3  § 1's budget options; § 3 runs `rounds --budget` and ends with each asked sign-off's gateText and bounce
 //       verbatim; § 4 passes `asks` verbatim, prints a later sign-off's gates again before its call, maps a label to
 //       its full text through texts[], and cites repair § 3's "presented verbatim"; § 5 is in conversation, "stop"
@@ -178,7 +178,8 @@ function check(files, consts) {
   // o2: § 2.
   need('o2', '§ 2', s2, ['estate-scan.py', 'estate-dispatch.py slices', 'estate-rank.py rank',
     'readiness-grade.md` § The grading agents', '/thread:status', 'the number (1–13) of the status § 4 **Recommended action** rule',
-    'one grading agent per `agents[]` entry', 'never on a completion notice', '`--grades` repeats once per file'])
+    'one grading agent per `agents[]` entry', 'never on a completion notice', '`--grades` repeats once per file',
+    'The re-asked slices go to agents grouped under `cap`, less any status agents still running'])
   if (/Parked homes last/.test(all)) flag('o2', 'the skill restates the ranking key')
 
   // o3: the budget, the slate's sign-offs, the round, the grills.

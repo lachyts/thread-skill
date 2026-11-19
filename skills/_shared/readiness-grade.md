@@ -1,14 +1,14 @@
 # The Readiness grade — grading and ranking the estate's open work
 
-The estate pass's second step (ADR 0041; CONTEXT.md § Estate). After the Estate scan, one grading agent per project
-gives each of its open tasks a **Readiness grade**, and `estate-rank.py` ranks the graded work into the **Ranked
-slate**: candidate runs with their **Review load**, the decision rounds, the projects that need their own orient
-(offered on orient-all's pick list, `estate-dispatch.py plan`'s `pick[]`, ADR 0061, started only when ticked), and
-the **Unpark offer** for each parked project with ready work. Scripts scan, the model decides: the grade is the
-model's half, and everything after it is the script's. This file is the grading agents' brief and the ranking's prose
-contract; the script's docstring holds its output schema. Two leads run both: `orient-all`
-(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`), and schedule's Pre-flight (schedule § 1.5, ADR 0047), which grades
-one rollout's tasks before its note is written.
+The estate pass's second step (ADR 0041; CONTEXT.md § Estate). After the Estate scan, grading agents give each
+project's open tasks a **Readiness grade**, one slice per project and one or several slices per agent (§ The grading
+agents), and `estate-rank.py` ranks the graded work into the **Ranked slate**: candidate runs with their **Review
+load**, the decision rounds, the projects that need their own orient (offered on orient-all's pick list,
+`estate-dispatch.py plan`'s `pick[]`, ADR 0061, started only when ticked), and the **Unpark offer** for each parked
+project with ready work. Scripts scan, the model decides: the grade is the model's half, and everything after it is
+the script's. This file is the grading agents' brief and the ranking's prose contract; the script's docstring holds
+its output schema. Two leads run both: `orient-all` (`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`), and
+schedule's Pre-flight (schedule § 1.5, ADR 0047), which grades one rollout's tasks before its note is written.
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 

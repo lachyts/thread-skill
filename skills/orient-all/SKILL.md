@@ -83,7 +83,9 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
    one file per home project with gradeable tasks, and `agents[]`, those files grouped under the session's agent cap
    (`cap`: `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, else Claude Code's 20). Claude Code refuses a subagent launched
    past the cap, so the groups fill only the room the status agents leave, a big slice keeps its agent and the small
-   ones are batched (the 2026-11-06 pass's 71 slices met 50 refusals).
+   ones are batched (the 2026-11-06 pass's 71 slices met 50 refusals). The status agents take at most half the cap
+   (`cap // 2`) in the first message, so grading keeps `cap - min(rollouts, cap // 2)` agents however many rollouts
+   are live: a grading group is fixed when it starts, while a status agent past the half can wait (`status.later`).
 4. In one message, start the agents, none writing outside `$S`, never more than `cap` live at once:
    - one grading agent per `agents[]` entry. Its brief is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`
      § The grading agents, the entry's slice files, each with the file its § Output JSON goes to,
@@ -98,9 +100,12 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
    grading agent has returned, each slice's `$S/grades-<NN>.json` must exist and parse, which
    `for f in "$S"/slices/*.json; do n=$(basename "$f"); n=${n%%-*}; python3 -m json.tool "$S/grades-$n.json" >/dev/null 2>&1 || echo "$S/grades-$n.json"; done`
    checks, printing each one missing or unparseable. A missing or unparseable file, or a task the ranker lists in
-   `invalid[]`, is re-asked once with its errors (one agent for every re-asked slice); still invalid, it stays
-   ungraded, and a file still missing or unparseable is left out of step 6. A status answer with no number in 1–13 is
-   recorded as unread, and so is a serial chain's: its rule is one of status § 5's S rules, never a § 4 number.
+   `invalid[]`, is re-asked once with its errors. The re-asked slices go to agents grouped under `cap`, less any
+   status agents still running, never one agent per re-asked slice: a failure that hits every file (agents that
+   cannot write under `$S`) would otherwise start one per slice again (one agent that takes every re-asked slice is
+   enough). Still invalid, a task stays ungraded, and a file still missing or unparseable is left out of step 6. A
+   status answer with no number in 1–13 is recorded as unread, and so is a serial chain's: its rule is one of status
+   § 5's S rules, never a § 4 number.
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
    `--grades` repeats once per file (`--grades "$S/grades-01.json" --grades "$S/grades-02.json"`): a list held in one
    zsh variable is one word unquoted too (zsh does not word-split), so `--grades $files` passes them all as one path.
