@@ -15,8 +15,9 @@
 # until the same PR edits its SLOW line.
 # The four leg rows (tests/leg.test.sh and its parts leg-land, leg-rank, leg-security, split from it by p54-9) are
 # their own, until the next regenerate: each is that suite's median of the same lines in master's full-suite.yml macOS
-# shards since the split, 2026-11-16T15:00Z to 2026-11-19 (27 runs, 94 macOS jobs with a runner, every attempt's; a job
-# GitHub never gave a runner prints no line): leg.test.sh over 24 lines, leg-land 23, leg-rank 21, leg-security 23.
+# shards since the split, 2026-11-16T15:00Z to 2026-11-19 (27 runs, 91 macOS jobs with a runner, every attempt's; a job
+# GitHub never gave a runner prints no line, and three jobs of run 44233636618's attempt 2, copies of its attempt 1's
+# with byte-identical logs, are left out): leg.test.sh over 23 lines, leg-land 23, leg-rank 20, leg-security 23.
 2	skills/execute/tests/integration-inputs.test.sh
 11	skills/execute/tests/note-save.test.sh
 50	skills/execute/tests/reconcile-rollout-approved-queue.test.sh
@@ -63,9 +64,9 @@
 643.5	tests/lead-integrate.test.sh
 91	tests/leg-capacity.test.sh
 241	tests/leg-land.test.sh
-185	tests/leg-rank.test.sh
+183	tests/leg-rank.test.sh
 283	tests/leg-security.test.sh
-276.5	tests/leg.test.sh
+274	tests/leg.test.sh
 53	tests/live-checkout.test.sh
 184	tests/merge-settings.test.sh
 6	tests/merge-task-bare-blocked.test.sh

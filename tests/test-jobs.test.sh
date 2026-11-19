@@ -138,21 +138,29 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # and tests/leg.test.sh at 1581 s, both healthy. The slowest passing macos-latest times seen, 19 jobs (PR full runs and
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
 # --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
-# The four leg rows and primary-refresh's are the slowest passes in master's full-suite.yml macOS shards from
-# 2026-11-16T15:00Z (every run after the p54-9 split) to 2026-11-19, 94 jobs with a runner. Every other row was checked
-# against that window's slowest pass and none is under it: lead-integrate 528, unfinished-rollout 299, land 280,
-# fast-tier 425, reconcile-rollout-queue 331 and serial-chains 275 s. A FAILED cut line is not a pass, so the two
-# cut-run estimates below stand.
+# Six rows are the slowest passes in master's full-suite.yml macOS shards from 2026-11-16T15:00Z (every run after the
+# p54-9 split) to 2026-11-19, 91 jobs with a runner (three jobs of run 44233636618's attempt 2, copies of its attempt
+# 1's with byte-identical logs, left out): tests/leg.test.sh's 346 s is job 133466978593 (run 43915096074),
+# tests/leg-land.test.sh's 311 s job 134635171186 (run 44255215631), tests/leg-rank.test.sh's 228 s job 133442993019
+# (run 43908296469), tests/leg-security.test.sh's 467 s job 134402170137 (run 44185887550),
+# tests/primary-refresh.test.sh's 834 s job 134908870859 (run 44334915422), and
+# skills/execute/tests/reconcile-rollout-standing.test.sh's 271 s job 133719463294 (run 43987540320), 4x its 69 s median
+# there, so tests/shard-weights.tsv floors its weight at 34 (408 s, where its measured 29.5 gives 354 s, 1.31x).
+# Every other row was checked against that window's slowest pass and none is under it: lead-integrate 528,
+# unfinished-rollout 299, land 280, fast-tier 425, reconcile-rollout-queue 331 and serial-chains 275 s. A FAILED cut
+# line is not a pass, so the two cut-run estimates below stand. Every suite with no row here has a bound from the
+# 2026-11-19 weights at least 2.3x its slowest pass in that window (skills/execute/tests/reconcile-rollout.test.sh,
+# 348 s over 146).
 # Three rows are master's macOS shard 3/4, 2026-11-17 to 18, and two of them are estimates, since that shard cut those
 # runs at their bounds: a cut run's full time is its cut seconds over the share of a lone local run's time its last
 # check had reached (tests/shard-weights.tsv's header holds the reading).
 # skills/execute/tests/reconcile-rollout-queue.test.sh's 535 s is job 134402170137 (run 44185887550), cut at 355 s
 # after check 242 of 342, about two thirds of the local run's time (it passed at 331 s in job 134564415416, and job
-# 134224807065 cut it at check 338, about 362 s); its 804 s bound (hand-set weight 67) leaves 1.5x over the 535 s.
+# 134224807065 cut it at check 338, about 362 s); its 804 s bound (floored weight 67) leaves 1.5x over the 535 s.
 # tests/fast-tier.test.sh's 680 s is job 134564415416 (run 44233636618), cut at 300 s after its R8, 44% of the local
-# run's time (job 134575108240 cut it after R10, 49%, about 610 s; it passed at 259 s in job 134542390531); its 1032 s
-# bound (hand-set weight 86) leaves 1.5x over the 680 s. tests/serial-chains.test.sh's 275 s is job 134402170137, where
-# it passed.
+# run's time (job 134575108240 cut it after R10, 49%, about 610 s; it passed at 259 s in job 134542390531); its 1068 s
+# bound (weight 89, measured, over its floor of 86) leaves 1.57x over the 680 s. tests/serial-chains.test.sh's 275 s is
+# job 134402170137, where it passed.
 # A weights regenerate or a factor change that would kill one of them on CI is red here first.
 ci_max="tests/leg.test.sh 346
 tests/leg-land.test.sh 311
@@ -164,6 +172,7 @@ tests/primary-refresh.test.sh 834
 tests/land.test.sh 297
 tests/fast-tier.test.sh 680
 skills/execute/tests/reconcile-rollout-queue.test.sh 535
+skills/execute/tests/reconcile-rollout-standing.test.sh 271
 tests/serial-chains.test.sh 275"
 bounds=$(printf '%s\n' "$ci_max" | awk '{print $1}' | bash -c '. tests/lib/test-jobs.sh; suite_bounds tests/shard-weights.tsv')
 bad=""
