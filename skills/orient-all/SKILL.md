@@ -345,7 +345,15 @@ execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`f
       execute one named exactly the item's title, or one the read confirmed) gets `relay_session` with the
       item's prompt, the Session named by its id: a lead is named `<Project> rollout`, a name the project's other
       leads share.
-   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`.
+   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`, and `report_back: false`.
+      A child stays silent when it closes (Lachy's ruling, 2026-11-07): its result lives in its own Session and the
+      vault, what needs him it raises itself, and this session closes once it has dispatched everything. With
+      report-back on, the Stage sent each child's Close here as a new Prompt, waking this session long after its work
+      was done. The opt-out cuts the chain at the child (Chorus ADR 0094): a Handoff the child raises, a repair's
+      take-over Leg included, begins a fresh chain there and reports to the child, never here. A Leg's handover on
+      the Stage raises no card (`skills/execute/legs.md` § Hand over), nor does a repair's listed restart, and the
+      Stage's own Leg start carries no chain, so that Leg reports nowhere. A Leg item gets no card from this session
+      (the Stage opens Leg 1 from the Waiting list), so no chain begins here.
       An execute item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
       a repair item beside its lead still does. A `Raised (task_id: …)` result
       is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held card stays
@@ -354,7 +362,9 @@ execute for it, since its own lead, or its `left[]` item, carries it. Exit 1 (`f
    6. With `create_thread` but no `list_sessions` (Codex Desktop, no Chorus Stage), only the items for notes this pass
       wrote are started; every other item becomes a paste-ready prompt. A Leg item for a note this pass wrote is
       started with that host's `create_thread`, never stamped, as `skills/execute/legs.md` § Hand over's Codex Desktop
-      bullet starts a Leg (a `manual: true` one is a labelled manual hand-over).
+      bullet starts a Leg (a `manual: true` one is a labelled manual hand-over). Every item it starts with that host's
+      `create_thread` passes `report_back: false`, as step 5 does: the Leg's own handovers keep theirs on, reporting up
+      the chain to the Leg, never here.
 5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, its `launch`: `<alias>
    from <folder>` in place; for a chain in Chain copies, the copy's paste line, never the alias itself, whose `cd`
    opens the primary), then the prompt, labelled `paste-ready prompt (no session started)`. Off the Stage a Leg item
@@ -428,8 +438,9 @@ One message of statements, no question:
 - the session-lane work, listed and never started;
 - the caveats.
 
-A later Prompt that opens `[Reported back by Chorus from …` gets one statement line, `<title> reported: <outcome>`,
-with no tool call and no question.
+A later Prompt that opens `[Reported back by Chorus from …`, or `[Relayed back by Chorus from …` (a relayed item's
+Close: `relay_session` has no opt-out), gets one statement line, `<title> reported: <outcome>`, with no tool call and
+no question.
 
 ### 9. Dry run
 
@@ -444,7 +455,8 @@ with no `--write`, lists the calls the forks would write.
 It prints the slate (§ 3's glance), the decision batch (each AskUserQuestion call's questions, then the grill list,
 each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), the Decided for you list and the dispatch
 plan: each batch's schedule args with the execute each would start or the chain each would list, then each item
-with its cwd and prompt,
+with its cwd and prompt, and for each item but a Leg item the rest of the `create_thread` call § 7 step 4.5 would
+make with no candidate (its `title`, `tldr` and `report_back: false`),
 and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
 It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`, `waits-on.py write`, `approve-gates`, `stamp-start`,

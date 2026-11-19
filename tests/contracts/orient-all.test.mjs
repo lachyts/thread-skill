@@ -1,7 +1,7 @@
 // The estate pass's lead (p25-3; ADR 0041): skills/orient-all/SKILL.md runs estate-scan.py, the grading and status
 // agents, estate-rank.py and estate-dispatch.py, asks the decision round, forks the schedules and starts the sessions.
 // Its script half is tests/estate-dispatch.test.mjs; this file pins the prose to the scripts, to the siblings it cites,
-// and to the docs that name it. Fourteen rules:
+// and to the docs that name it. Fifteen rules:
 //   o1  the headings, in order, and none of the retired or forbidden words.
 //   o2  § 2 runs estate-scan.py, `estate-dispatch.py slices` and `estate-rank.py rank`, cites readiness-grade.md
 //       § The grading agents, and briefs the status agents to run /thread:status and return the number of the status
@@ -58,6 +58,10 @@
 //       step 1's `sessions`, guarded "Unless this is a dry run"; an exit 1 runs the line once more and a second goes to
 //       § 8, which reports its `failed` and `notReached[]` as a caveat; the Scope lists it among the writes, and § 9
 //       names it among the commands it never runs.
+//   o15 the children stay silent (Lachy's ruling, 2026-11-07): every `create_thread` § 7 spells out (`create_thread`
+//       with ...) passes `report_back: false`, step 4.6's Codex Desktop starts pass it too, § 9 prints it on each call
+//       it would make, nothing in the skill turns report-back on, and § 8 answers a report's or a relay's Close in
+//       one line.
 // One pure function, check(files, consts), returns the failing rules; every control mutates one place and fails exactly
 // its rule. Reads files only (the python child imports estate-dispatch.py, which runs nothing at import).
 import { test } from 'node:test'
@@ -375,6 +379,15 @@ function check(files, consts) {
   need('o14', 'the Scope', S(/^## Scope/), ['`estate-dispatch.py rank-stamp`', 'never on a dry run'])
   need('o14', '§ 9 never-runs', never, ['`estate-dispatch.py rank-stamp`'])
 
+  // o15: report-back off, so no child's Close wakes the estate session after it has dispatched everything.
+  const calls = [...all.matchAll(/`create_thread` with ([^.]*)\./g)]
+  if (calls.length === 0) flag('o15', 'the skill spells out no `create_thread` call')
+  for (const m of calls) if (!m[1].includes('`report_back: false`')) flag('o15', `a \`create_thread\` call without \`report_back: false\`: ${m[0]}`)
+  need('o15', '§ 7 step 4.6', s7, ["Every item it starts with that host's `create_thread` passes `report_back: false`"])
+  need('o15', '§ 9', s9, ['`report_back: false`'])
+  if (/report_back(?:`? on\b|: true|` at its default)/.test(all)) flag('o15', 'the skill turns report-back on')
+  need('o15', '§ 8', s8, ['`[Reported back by Chorus from …`', '`[Relayed back by Chorus from …`'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -391,7 +404,7 @@ const only = (files, consts, rules, what) => {
   assert.deepEqual(r.fails, rules, `${what}: ${r.details.join('\n')}`)
 }
 
-test('the skill, its scripts, schedule, status and the docs agree (o1-o14)', () => {
+test('the skill, its scripts, schedule, status and the docs agree (o1-o15)', () => {
   const r = check(FILES, CONSTS)
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
@@ -544,4 +557,20 @@ test('control o12: a lead found by name alone or by where its line ends, a loose
   only(swap(FILES, SKILL, 'name the Session by its id, with its state', 'name the Session and its state'), CONSTS, ['o12'], 'busy by name')
   only(swap(FILES, SKILL, 'Two or more Sessions whose lines name the slug: start nothing for the item, and name\n      every one by id',
     'Two Sessions whose lines name the slug: start nothing for the item, and name\n      both by id'), CONSTS, ['o12'], 'exactly two')
+})
+
+test('control o15: a create_thread call without `report_back: false`, a Codex Desktop start that drops it, a dry run that hides it, report-back turned on, or a relay Close § 8 leaves unanswered, each trips one part of o15 alone', () => {
+  // One detail per mutation: no part of o15 passes on another part's catch.
+  const alone = (files, what) => {
+    const r = check(files, CONSTS)
+    assert.deepEqual(r.fails, ['o15'], `${what}: ${r.details.join('\n')}`)
+    assert.equal(r.details.length, 1, `${what} trips more than one part of o15: ${r.details.join('\n')}`)
+  }
+  alone(swap(FILES, SKILL, ", and `report_back: false`.\n      A child stays silent", '.\n      A child stays silent'), 'step 5')
+  alone(swap(FILES, SKILL, "`create_thread` passes `report_back: false`, as step 5 does",
+    "`create_thread` passes its `title`, `prompt`, `tldr` and `cwd`, as step 5 does"), 'step 6')
+  alone(swap(FILES, SKILL, ', `tldr` and `report_back: false`)', ' and `tldr`)'), 'dry run')
+  alone(swap(FILES, SKILL, ', and `report_back: false`.\n      A child stays silent',
+    ', and `report_back: false`. A repair item passes `report_back: true`.\n      A child stays silent'), 'turned on')
+  alone(swap(FILES, SKILL, ', or `[Relayed back by Chorus from …` (a', ' (a'), 'relay Close')
 })
