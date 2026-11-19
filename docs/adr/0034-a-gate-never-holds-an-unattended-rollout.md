@@ -172,6 +172,8 @@ Accepted residuals:
   the month line, so it cannot tell a spend gate that will be signed from one that will ask; with the built-in 0 (off)
   every spend gate asks and the charge is right. The over-charge only lowers that task's leverage, never hides an
   ask. readiness-grade.md § Leverage says so, and estate-rank's test 6 pins it (`que-call`, spend only, `signOff: 1`).
+  *(narrowed 2026-11-20, p48-3: a gate naming only declared test Logins on a task gated `credential` alone is not
+  charged; see that amendment)*
 - (xi) A month-line `ASK:` on a running rollout is re-judged only under a new step-1.2 key, a new lead session or a
   Reinstate, never at the turn of the month mid-session; until then it reaches Lachy. A timezone change shifts a
   boundary line by hours.
@@ -463,3 +465,55 @@ summed twice (`at most 40 calls (40 calls in all)` reads 80 calls); two multipli
 decimal multiplier (`x 1.5`, `1.5x`), a number beside a multiplier in another sense (`3 × 4 runs`), a `×` or an `x`
 beside a digit that is no multiplier, a `times` in prose (`response times`), a `*` beside a digit (a cron line's
 `0 5 * * *` too), an `N-fold` and `x 0`.
+
+## Amendment (2026-11-20, p48-3: a recorded test-Login gate costs no sign-off)
+
+After p39-3, schedule § 3.6 and orient's reshuffle R3 (c) record a `credential:` gate line that names only a declared
+test Login (the sweep's `login.names` set under `[defaults] test_logins`): the task gets `plan_approval: required` and
+the test-Login Planner line, never an ask ahead, and execute's standing approval signs the gate at the stop with no
+question (the 2026-11-05 amendment). orient-all did not know this. readiness-grade.md § The grade keeps such a hit a
+`credential` gate, since the sweep is the recall floor for `gates`, and `estate-rank.py` `figures()` charged
+`signOff` (`REVIEW_MINUTES`) for any gate, so the estate pass ranked the task as if it cost Lachy a sign-off minute
+it never costs.
+
+- **The decision: charge no sign-off.** `estate-rank.py`'s `review.signOff` is 0 for a task whose `gates` is
+  `credential` alone and whose note shows the gate is a recorded test-Login gate under the machine's declaration of
+  now. `recorded_login()`'s docstring holds the one copy of the rule (fail closed, the first failure charges): the
+  scan row's note is a vault-relative path; the note is readable; its body is read by next-action's Note span (a
+  CRLF fence does not fool it), with every recorded test-Login Planner line blanked, since that line's own words name
+  credentials; the sweep finds at least one credential hit; every hit carries a `login` field (it sits on a
+  `credential:` gate line naming a Login); every reading under `[]` stops at step 7 (`NO_LOGINS_WHY`); and under the
+  declared Logins every hit's reading names its Logins. Any other credential hit (a service name, an env key, a deny
+  word, an undeclared Login, a conjunction), an unreadable note, no declaration or a refused file charges it, as
+  before. A task that also holds `spend` or `irreversible` is charged: the other kind asks, or is residual (x).
+- **Why the ranker, not the grade.** The grade could drop or mark the hit, but a mark written by the grading agent
+  cannot be checked against the declaration, and `gates` feeds the sign-off backstop (ADR 0054 d2) and the Grade log.
+  So `gates` keeps `credential`, readiness-grade.md's "a hit's `login` field changes nothing in `gates`" stands, and
+  the ranker reads the note itself, deterministically, so the task note's Verify (`test_logins = ["dummy"]` gives
+  `signOff: 0`; none declared gives 1) holds by the file, not by a model.
+- **The I/O it adds.** `rank` now reads the note of each graded task gated `credential` alone, and, once per run and
+  only when one such note's Login reading reaches step 7, rollouts.toml's `[defaults] test_logins` through
+  gated_inputs.py's `declared_logins()` (renamed from the sweep CLI's private `_declared_logins()`): resolve(repo=None),
+  in process, no git, no subprocess, no bytecode. A file that will not resolve charges every such gate, with one
+  `test_logins:` line in the rank's `warnings[]`. The built-in `[]` (no file, no key) charges with no warning; an
+  explicit `test_logins = []` is refused by rollout-settings.py, so it lands in the refused case. rollout-settings.py's
+  header, estate-rank.py's header and orient-all's Scope **Reads** name the read.
+- **Pinned.** tests/estate-rank.test.mjs R9 ranks a vault of its own under temp HOMEs: a dummy-Login gate with the
+  recorded Planner line and a CRLF one go free under `["dummy"]`; a prose service, a deny word, an undeclared Login, a
+  mixed gate and a note with no hit are charged; no file and a refused file charge all seven, the refused one warning
+  once per run; and a run whose notes never reach step 7 reads no file.
+
+Accepted residuals:
+
+- (i) An under-charge: the ranker trusts the sweep, never the grader's reasons. A task the grader marked `credential`
+  for a reason the sweep cannot see (a credential named with no list word), whose only swept hit is a dummy-Login gate
+  line, gets `signOff: 0`; and a hand-written line that starts with the Planner prefix is blanked whole. Either costs
+  one minute of Leverage, never an ask: the gate is still declared at the plan gate and asked at the stop if it must
+  be.
+- (ii) Over-charges kept: a prose credential word the grader would dismiss still charges (the ranker cannot dismiss);
+  a test-credential class gate (ADR 0063) still charges, since resolving the class needs `rollout-settings.py --repo`
+  (git) and signing it needs its keys' presence in the env file (ADR 0063 residual (viii)); and a spend gate the
+  standing approval would sign still charges (residual (x)).
+- (iii) The Planner prefix has a third literal copy: schedule § 7 holds the line, reflect.py's
+  `RECORDED_CREDENTIAL_RE` and estate-rank.py's `TEST_LOGIN_PLANNER_RE` key on its prefix. R9 copies the line
+  verbatim and two contract tests find it by the same prefix, so a reworded line is caught.

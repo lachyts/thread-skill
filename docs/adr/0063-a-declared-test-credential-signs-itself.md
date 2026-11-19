@@ -150,7 +150,8 @@ Accepted residuals:
 7. *(vii)* A Leg never signs one (decision 7). A task orient records and then routes serial is asked mid-run in its
    Leg.
 8. *(viii)* estate-rank charges a sign-off for every gate kind (ADR 0034 residual x), so an in-class credential is
-   over-charged the same way.
+   over-charged the same way. *(2026-11-20, p48-3: a declared test Login is no longer over-charged (ADR 0034's
+   2026-11-20 amendment); the class still is.)*
 9. *(ix)* A task holding the recorded line is never asked ahead again (decision 6, rule b), so a live credential added
    to its body later reaches Lachy mid-run, never ahead. Nothing is signed unproved; the ask only moves.
 10. *(x)* A schema-2 Engine snapshot ignores the key (ADR 0043), so its rollouts ask every credential gate, as before.

@@ -19,8 +19,10 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
 
 ## Scope
 
-- **Reads**: the vault, the repos (only through `estate-scan.py`'s read-only probes, and § 6's sign-in pass) and the
-  Stage's session list. The sign-in pass (§ 6 step 2) runs `estate-dispatch.py preflight` and `serial-chains.py plan`
+- **Reads**: the vault, the repos (only through `estate-scan.py`'s read-only probes, and § 6's sign-in pass), the
+  Stage's session list and `~/.config/thread/rollouts.toml`'s `[defaults] test_logins` (read-only, no git: the grading
+  agents' `gated_inputs.py sweep` and § 2's `estate-rank.py rank` each read it only when a `credential:` gate line
+  naming a Login needs it). The sign-in pass (§ 6 step 2) runs `estate-dispatch.py preflight` and `serial-chains.py plan`
   (read-only `git rev-parse` and `git remote get-url`), ToolSearch loads and one read-only call per namespace, a `ps`
   read of this session's command line, the fresh-shell probe and `claude mcp list` once per launch folder (schedule
   § Serial path S3.7), and writes nothing.
