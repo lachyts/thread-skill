@@ -2122,7 +2122,12 @@ await (async () => {
     'Run it after Step 3 (whether or not the verify was required) and after the preflights above, before Step 4\'s push',
     'Its last run must be on the head you push: after any later commit (a preflight\'s sibling fix included), run Step 3\'s verifier and this scan again',
     '- Exit 0: securityClean=true.',
-    'every finding here is Lachy\'s (its `action` is human): Integration never rewrites a commit',
+    'Exit 1 with `action` human: every finding here is Lachy\'s: Integration never rewrites a commit',
+    'Exit 1 with `action` fix (only advisories with a fixed release, on dependencies your resolution or fix commits add or change)',
+    'move each to a version it reports fixed in one fix commit, its lockfile too when the repo keeps one beside it (list it in fixCommits)',
+    'Never drop a dependency the task or a landed PR needs. Then run Step 3\'s verifier and this scan again.',
+    'A scan still `action` fix after your second such commit: push nothing, return blocked=true with blockKind "stop", securityClean=false and a blockerDiagnosis naming each advisory\'s id, package, version and fixed releases',
+    'never a value, and each advisory\'s id and package',
     'Integration never rewrites a commit. Push nothing.',
     'its `why`, verbatim, as needsHuman',
     'a blockerDiagnosis naming each secret\'s rule, file and commit, never a value',
@@ -2149,7 +2154,12 @@ await (async () => {
   const P7_CONTROLS = [
     ["Run it after Step 3 (whether or not the verify was required) and after the preflights above, before Step 4's push.", 'Run it before Step 3.', 'the scan run before the verify'],
     [" Its last run must be on the head you push: after any later commit (a preflight's sibling fix included), run Step 3's verifier and this scan again.", '', 'the last-run clause dropped'],
-    ["every finding here is Lachy's (its \\`action\\` is human)", 'a finding you can fix is yours', 'a finding read as the integrator\'s'],
+    ["Exit 1 with \\`action\\` human: every finding here is Lachy's:", 'Exit 1: a finding you can fix is yours:', 'a finding read as the integrator\'s'],
+    [' in one fix commit, its lockfile too', ' in fix commits, its lockfile too', 'the bump not one commit'],
+    [' (list it in fixCommits). Never drop', '. Never drop', 'the bump not in fixCommits'],
+    ["Never drop a dependency the task or a landed PR needs. Then run Step 3's verifier and this scan again. A scan", 'Drop it if you like. A scan', 'no verify and scan after the bump'],
+    ['A scan still \\`action\\` fix after your second such commit: push nothing,', 'A scan still \\`action\\` fix: bump again,', 'no bound on the bumps'],
+    ["naming each advisory's id, package, version and fixed releases.", 'naming it.', 'the stop names no advisory'],
     ['Integration never rewrites a commit. Push nothing.', 'Integration never rewrites a commit.', 'push nothing dropped'],
     ['its \\`why\\`, verbatim, as needsHuman, and a blockerDiagnosis', 'a question of your own as needsHuman, and a blockerDiagnosis', 'a question of its own'],
     ["naming each secret's rule, file and commit, never a value.", "naming each secret.", 'never a value dropped'],
@@ -2173,7 +2183,8 @@ await (async () => {
     if (!b.includes(`only when \`${E.GIT_ENV_SCRUB} git -C "${wtI}" rev-parse HEAD\` prints ${j.headSha}.`)) out.push('the HEAD rule')
     if (!b.includes('from committed history only (`--history-only`), so what a verifier left in the tree never stops it. It is read-only.')) out.push('history only')
     if (!b.includes('- Exit 0: decide Step 3 as written.')) out.push('exit 0')
-    if (!b.includes('- Exit 1: verdict "changes", with its `why`, verbatim, in needsHuman, and one bullet naming each secret\'s rule, file and commit, never a value.')) out.push('exit 1')
+    if (!b.includes('- Exit 1 with `action` human: verdict "changes", with its `why`, verbatim, in needsHuman, and one bullet naming each secret\'s rule, file and commit, never a value.')) out.push('exit 1')
+    if (!b.includes('- Exit 1 with `action` fix (only advisories with a fixed release): verdict "changes", no needsHuman, and one bullet per advisory: "move <ecosystem> <name> <version> to a fixed release (<fixed>): advisory <id>". The bullets are the revise\'s work order.')) out.push('exit 1 fix')
     if (!b.includes(`- Exit 2, or a HEAD that is not ${j.headSha}: verdict "changes", unreadable=true, and one bullet "cannot run the security scan: <its ERROR line, or the HEAD you read>".`)) out.push('unreadable')
     if (!b.includes("This overrides Step 3's unreadable=false.")) out.push('override')
     if (!b.includes('Never approve what the scan did not read.')) out.push('never approve')
@@ -2191,6 +2202,8 @@ await (async () => {
     ['verdict "changes", unreadable=true, and one bullet "cannot run', 'verdict "changes", and one bullet "cannot run', 'unreadable dropped', 'unreadable'],
     [" This overrides Step 3's unreadable=false.", '', 'the override dropped', 'override'],
     [' Never approve what the scan did not read.', '', 'never approve dropped', 'never approve'],
+    ['verdict "changes", no needsHuman, and one bullet per advisory', 'verdict "changes", with its \\`why\\` in needsHuman, and one bullet per advisory', 'a fixable advisory asked of Lachy', 'exit 1 fix'],
+    [' The bullets are the revise\'s work order.', '', 'the work order dropped', 'exit 1 fix'],
   ]) {
     ok(src.includes(from), `security P8 control setup: ${label}`)
     const M = loadEngine(['integrationSecurityReviewBlock'], { source: src.replace(from, to) })
