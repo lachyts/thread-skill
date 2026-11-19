@@ -1078,3 +1078,76 @@ test('R8. an unreadTasks row is skipped `unreadable` with its reason and note, h
   const k = ok(py(['rank', '--scan', file, '--today', TODAY, ...MAIN_FILES.flatMap((f) => ['--grades', f])]))
   assert.deepEqual(k.skipped, m.skipped)
 })
+
+// ---- R9. A recorded test-Login gate costs no sign-off (p48-3, ADR 0034's 2026-11-20 amendment) -------------------------
+// Its own vault VL: project Lg and seven tasks, each graded Ready, parallel, with a hand-written body. The ranker reads a
+// task gated `credential` alone from its note (recorded_login()): its sign-off is waived only when every credential hit
+// is a `credential:` gate line naming only declared test Logins, under the temp HOME's rollouts.toml, with schedule §
+// 7's recorded test-Login Planner line (copied verbatim) left out of the reading. lg-crlf's CRLF frontmatter holds a
+// credential word, which a reading of the body that missed its fence would charge. Run A declares ["dummy"]; B has no
+// file (the built-in []: an explicit `test_logins = []` is refused); C's file is refused (a schema-5 key under schema 4);
+// D reads C's HOME with only the notes that never reach the declaration, so no warning proves no read.
+test('R9. a credential-only gate naming only a declared test Login costs no sign-off; anything else, no declaration or a refused file still charges, and the file is read only when a note needs it', () => {
+  const VL = path.join(S, 'lg')
+  const PLANNER = '- Planner: word each test-Login gate as one line naming only the Login, `credential: the <name> Claude ' +
+    'Login, <use>`, the Login from <the declared Logins>; keep off that line deny words (`access`, `token`, `session ' +
+    'token`, `OAuth`, `secret`, a `live` before anything but probe, run or test, `prod`), env keys and other credentials ' +
+    '(account, key, PAT, API, `.env`), an `@` address and any `and`, `or`, `plus`, `as well as`, `along with`, `together ' +
+    'with`, `&`, `+` or `;` (list two Logins with a comma or `then`), so the standing approval can read it (p37-4). Any ' +
+    'other credential is its own `credential:` line and reaches Lachy mid-run.'
+  const GATE = '- credential: the dummy Claude Login, to run a live probe'
+  const TL = (slug, body, rest = '', eol = '\n') => write(path.join(VL, 'Work', 'Tasks', `${slug}.md`),
+    fm(`tags:\n  - task\nstatus: open\nprojects:\n  - "[[Lg]]"${rest}`, `\n# Task ${slug}\n\n${body}\n`).replace(/\n/g, eol))
+  write(path.join(VL, 'Work', 'Projects', 'Lg.md'), fm('tags:\n  - project\nstatus: active'))
+  TL('lg-dummy', `${GATE}\n\n## Decisions (recorded 2026-10-20)\n\n${PLANNER}`)
+  TL('lg-crlf', GATE, '\nsummary: rotate the probe token', '\r\n')
+  TL('lg-prose', `${GATE}\n\nUses Stripe test mode.`)
+  TL('lg-deny', "- credential: the dummy Claude Login's session token")
+  TL('lg-undeclared', '- credential: the main Claude Login, to run a probe')
+  TL('lg-mixed', GATE)
+  TL('lg-nohit', 'Refactor the parser.')
+  const sc = spawnSync('python3', [SCAN, '--vault', VL, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(sc.status, 0, sc.stderr)
+  const scanLg = path.join(S, 'scan-lg.json')
+  write(scanLg, sc.stdout)
+  const FREE = ['lg-dummy', 'lg-crlf']
+  const CHARGED = ['lg-prose', 'lg-deny', 'lg-undeclared', 'lg-mixed', 'lg-nohit']
+  const LAZY = ['lg-deny', 'lg-prose', 'lg-nohit', 'lg-mixed']
+  const grade = (s) => G(s, 'Ready', 'parallel', { gates: s === 'lg-mixed' ? ['credential', 'irreversible'] : ['credential'] })
+  const all = gradesFile('lg', { project: 'Lg', tasks: [...FREE, ...CHARGED].map(grade) })
+  const lazy = gradesFile('lg-lazy', { project: 'Lg', tasks: LAZY.map(grade) })
+  const home = (name, toml) => {
+    const h = path.join(S, `home-${name}`)
+    if (toml === null) mkdir(h)
+    else write(path.join(h, '.config', 'thread', 'rollouts.toml'), toml)
+    return h
+  }
+  const lg = (h, grades) => ok(py(['rank', '--scan', scanLg, '--today', TODAY, '--grades', grades], { extra: { HOME: h } }))
+  const told = (j) => j.warnings.filter((w) => /^test_logins: /.test(w))
+  const signOffs = (j, slugs) => slugs.map((s) => [s, row(j, s).review.signOff])
+  const refused = home('lg-c', 'schema = 4\n\n[defaults]\ntest_logins = ["dummy"]\n')
+
+  const a = lg(home('lg-a', 'schema = 5\n\n[defaults]\ntest_logins = ["dummy"]\n'), all)
+  for (const s of FREE) {
+    assert.deepEqual(row(a, s).review, { pr: 1, signOff: 0, eyeCheck: 0, minutes: 2 }, s)
+    assert.deepEqual([row(a, s).attentionMinutes, row(a, s).leverage, row(a, s).gates], [2, 15, ['credential']], s)
+  }
+  assert.deepEqual(CHARGED.map((s) => [s, row(a, s).review.signOff, row(a, s).leverage]), CHARGED.map((s) => [s, 1, 10]))
+  assert.deepEqual(told(a), [])
+
+  const b = lg(home('lg-b', null), all)
+  assert.deepEqual(signOffs(b, [...FREE, ...CHARGED]), [...FREE, ...CHARGED].map((s) => [s, 1]), 'none declared: charged')
+  assert.equal(row(b, 'lg-dummy').leverage, 10)
+  assert.deepEqual(told(b), [], 'the built-in [] is a configured state, never a failure')
+  assert.equal(runOf(b, 'Lg/parallel/-').review.signOff - runOf(a, 'Lg/parallel/-').review.signOff, 2)
+
+  const c = lg(refused, all)
+  assert.deepEqual(signOffs(c, [...FREE, ...CHARGED]), [...FREE, ...CHARGED].map((s) => [s, 1]), 'a refused file: charged')
+  assert.equal(told(c).length, 1, `one read per run, though three notes reach it: ${c.warnings.join('\n')}`)
+  assert.match(told(c)[0], /^test_logins: .*schema-5 key/)
+  assert.equal(c.counts.warnings, c.warnings.length)
+
+  const d = lg(refused, lazy)
+  assert.deepEqual(signOffs(d, LAZY), LAZY.map((s) => [s, 1]))
+  assert.deepEqual(told(d), [], 'no note reached the declaration, so the refused file was never read')
+})
