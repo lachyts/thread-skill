@@ -106,9 +106,6 @@
 408.5	tests/primary-refresh.test.sh
 83.5	tests/pushed-base.test.sh
 14.5	tests/reconcile-project.test.sh
-7.5	tests/release-check-missing-tree-dir.test.sh
-14.5	tests/release-check-quoting-diff.test.sh
-8	tests/release-check-symlinked-dir.test.sh
 14	tests/release-check.test.sh
 7	tests/repo-state.test.sh
 7	tests/repo-threads.test.sh

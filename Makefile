@@ -18,41 +18,73 @@ test-fast:
 # - The stray check exists because the E2E found a full nested plugin copy (.claude/worktrees/enabler/,
 #   git-ignored in the tree) in the 2.5.2 and 2.5.3 caches: every cache file must be in `git ls-files`.
 # - release-check first refuses while evals/results/ (git-ignored `make evals` output) holds files, with
-#   the stray check's exemptions: the `./` directory source copies it into the cache, transcripts and all.
+#   the RC_SKIP exemptions: the `./` directory source copies it into the cache, transcripts and all.
 #   It lists top-level entries only (run dirs, or a file directly under evals/results/), never nested
 #   files. It runs before the version is read, so its remedy for an already-copied cache names
 #   $(CACHE)/<version>/evals/results with the version as a placeholder. Deleting that dir is the fix, not
 #   a bump (the old version dir, copy and all, stays on disk); the cache diff covers only skills/ and
 #   hooks/, so the stray check then passes at the same version.
-# - .DS_Store and anything under __pycache__/ are exempt everywhere.
-# - The cache diff walks the tree's own files under skills/ and hooks/ (find + cmp, never diff): a file
-#   missing from the cache (`Only in <dir>: <name>`), one that differs, or a missing cache sub-dir fails it,
-#   and so does any error the walk prints (a tree sub-dir missing or unreadable): its stderr is captured
-#   too. `find -L` follows a symlinked dir into its files, as `diff -r` did, so cmp never meets a dir.
-#   Cache-only files are reported once, by the stray check. It never parses diff's human-readable output:
-#   GNU diffutils 3.12 (ubuntu-latest, 2026-11-08) shell-quotes a path holding a space in its `Only in`
-#   lines, so the old filter dropping the cache's own lines by an exact path prefix let them through.
+# - RC_SKIP holds the exemptions every walk shares (.DS_Store, and anything under __pycache__/), so the
+#   three walks cannot disagree on them.
+# - The cache diff walks every file on disk under skills/ and hooks/, untracked and git-ignored ones
+#   included (the stray check reads `git ls-files`), with `find -L`, which follows a symlinked dir into
+#   its files as `diff -r` did. Each entry, by type: a link that resolves to nothing is followed hop by
+#   hop (32 or more hops is a loop), else compared by its readlink text, so an identical dangling link
+#   passes; any other non-regular entry (fifo, socket, device) is `Not a regular file` and never opened;
+#   a regular file the cache lacks is `Only in <dir>: <name>`, one whose cache entry is not a regular
+#   file differs without a cmp, and the rest go through `cmp -s`, so cmp only ever reads two regular files.
+# - A missing cache sub-dir (`No <dir>`) fails the cache diff, and so does any error a walk prints (a
+#   tree sub-dir missing or unreadable, GNU find's loop error): its stderr is captured too.
+# - A dir loop fails on BSD and GNU alike. GNU find reports it as an error. BSD find lists the loop dir
+#   without entering it and exits 0, so a `-type d` pass takes each dir's physical path and names a dir
+#   whose physical path equals one of its logical ancestors' (equal, not merely under: a link to `.`
+#   loops onto its parent). That probe runs `CDPATH= cd -P`, as the stray check's cd does, so a CDPATH
+#   the caller exports neither prints a line into the probe's output nor sends cd elsewhere (bash's sh
+#   fails the cd outright). A link-only loop is the 32-hop case above.
+# - Report lines go through printf, never echo: dash's and macOS sh's echo expand backslashes (a `\c` in
+#   a name cut the FAIL output short). A name holding a newline is unsupported.
+# - The stray check fails when the cache walk errors (an unreadable dir), reads `git ls-files -s -z`, so
+#   no name is C-quoted, and checks a cache path under a tracked symlink (a symlinked dir the update
+#   copied as a real dir) against the tree's path through that link instead of calling it stray: its own
+#   files pass, and an extra file in it is still stray.
+# - Cache-only files are reported by the stray check, never the cache diff. Neither check reports a file
+#   still in the index but deleted from the working tree.
+# - release-check never calls diff, so it never parses diff's human-readable output: GNU diffutils 3.12
+#   (ubuntu-latest, 2026-11-08) shell-quotes a path holding a space in its `Only in` lines, which broke
+#   the old filter. tests/release-check.test.sh puts a recording `diff` first on PATH to pin this.
 # - A file tracked at release time but deleted since (a consumed review doc, say) reads as stray, so run
 #   this right after the plugin update, on the released commit.
 CONFIG := $(or $(CLAUDE_CONFIG_DIR),$(HOME)/.claude)
 CACHE := $(CONFIG)/plugins/cache/thread/thread
+RC_SKIP := -name __pycache__ -prune -o -name .DS_Store -o
 release-check:
-	@f=$$(find evals/results -name __pycache__ -prune -o ! -type d ! -name .DS_Store -print 2>/dev/null); \
-	[ -z "$$f" ] || { echo "FAIL - evals/results/ holds $$(printf "%s\n" "$$f" | wc -l | tr -d " ") file(s) of make evals output: record anything you need in docs/evals/ (or move evals/results out of the tree), then rm -rf evals/results and re-run this check. It holds:"; \
-	  printf "%s\n" "$$f" | sed "s|^evals/results/*||; s|/.*||" | LC_ALL=C sort -u | sed "s|^|  evals/results/|"; \
-	  echo "If it was there during the plugin update, the cache copied it too and the stray check will name those files. A same-version update never refreshes the cache, so delete that copy directly: rm -rf \"$(CACHE)/<version>/evals/results\""; exit 1; }; \
-	o=$$(node --test --test-name-pattern='same version' tests/contracts/manifest.test.mjs 2>&1) || { echo "FAIL - manifest contract (same version) failed:"; echo "$$o"; exit 1; }; \
+	@f=$$(find evals/results $(RC_SKIP) ! -type d -print 2>/dev/null); \
+	[ -z "$$f" ] || { printf '%s\n' "FAIL - evals/results/ holds $$(printf '%s\n' "$$f" | wc -l | tr -d " ") file(s) of make evals output: record anything you need in docs/evals/ (or move evals/results out of the tree), then rm -rf evals/results and re-run this check. It holds:"; \
+	  printf '%s\n' "$$f" | sed "s|^evals/results/*||; s|/.*||" | LC_ALL=C sort -u | sed "s|^|  evals/results/|"; \
+	  printf '%s\n' "If it was there during the plugin update, the cache copied it too and the stray check will name those files. A same-version update never refreshes the cache, so delete that copy directly: rm -rf \"$(CACHE)/<version>/evals/results\""; exit 1; }; \
+	o=$$(node --test --test-name-pattern='same version' tests/contracts/manifest.test.mjs 2>&1) || { printf '%s\n' "FAIL - manifest contract (same version) failed:" "$$o"; exit 1; }; \
 	v=$$(node -p 'require("./.claude-plugin/plugin.json").version') || exit 1; \
 	c="$(CACHE)/$$v"; \
-	[ -d "$$c" ] || { echo "FAIL - no $$c (run the plugin update)"; exit 1; }; \
-	d=$$({ for sub in skills hooks; do [ -d "$$c/$$sub" ] || { echo "No $$c/$$sub"; continue; }; \
-	  find -L $$sub -name __pycache__ -prune -o ! -type d ! -name .DS_Store -print | LC_ALL=C sort | while IFS= read -r f; do \
-	    if [ ! -e "$$c/$$f" ]; then echo "Only in $${f%/*}: $${f##*/}"; elif ! cmp -s "$$c/$$f" "$$f"; then echo "Files $$c/$$f and $$f differ"; fi; \
+	[ -d "$$c" ] || { printf '%s\n' "FAIL - no $$c (run the plugin update)"; exit 1; }; \
+	d=$$({ for sub in skills hooks; do [ -d "$$c/$$sub" ] || { printf '%s\n' "No $$c/$$sub"; continue; }; \
+	  find -L $$sub $(RC_SKIP) -type d -exec sh -c 'for x; do p=$$(CDPATH= cd -P -- "$$x" && pwd -P) && printf "%s\n" "$$x" "$$p"; done' sh {} + | awk 'NR % 2 { l = $$0; next } { ph[l] = $$0; n = split(l, c, "/"); a = c[1]; for (i = 2; i <= n; i++) { if ((a in ph) && ph[a] == $$0) { print "Symlink loop: " l; break } a = a "/" c[i] } }'; \
+	  find -L $$sub $(RC_SKIP) ! -type d -print | LC_ALL=C sort | while IFS= read -r f; do \
+	    if [ -L "$$f" ] && [ ! -e "$$f" ]; then \
+	      t=$$f; n=0; while [ -L "$$t" ] && [ $$n -lt 32 ]; do r=$$(readlink "$$t"); if [ "$${r#/}" = "$$r" ]; then t=$${t%/*}/$$r; else t=$$r; fi; n=$$((n + 1)); done; \
+	      if [ $$n -ge 32 ]; then printf 'Symlink loop: %s\n' "$$f"; \
+	      elif [ -L "$$c/$$f" ]; then [ "$$(readlink "$$c/$$f")" = "$$(readlink "$$f")" ] || printf 'Files %s and %s differ\n' "$$c/$$f" "$$f"; \
+	      elif [ -e "$$c/$$f" ]; then printf 'Files %s and %s differ\n' "$$c/$$f" "$$f"; \
+	      else printf 'Only in %s: %s\n' "$${f%/*}" "$${f##*/}"; fi; \
+	    elif [ ! -f "$$f" ]; then printf 'Not a regular file: %s\n' "$$f"; \
+	    elif [ ! -e "$$c/$$f" ] && [ ! -L "$$c/$$f" ]; then printf 'Only in %s: %s\n' "$${f%/*}" "$${f##*/}"; \
+	    elif [ ! -f "$$c/$$f" ] || ! cmp -s "$$c/$$f" "$$f"; then printf 'Files %s and %s differ\n' "$$c/$$f" "$$f"; fi; \
 	  done; done; } 2>&1); \
-	[ -z "$$d" ] || { echo "FAIL - cache $$v differs from the tree:"; echo "$$d"; exit 1; }; \
-	s=$$({ git -c core.quotePath=false ls-files; cd "$$c" && find . -name __pycache__ -prune -o ! -type d ! -name .DS_Store -print; } | awk '!/^\.\//{t[$$0]=1; next} !(substr($$0,3) in t){print substr($$0,3)}' | LC_ALL=C sort); \
-	[ -z "$$s" ] || { echo "FAIL - cache $$v holds files this tree does not track:"; echo "$$s"; exit 1; }; \
-	echo "release-check: $$v — manifests agree, cache $$c matches skills/ and hooks/ and holds nothing untracked"
+	[ -z "$$d" ] || { printf '%s\n' "FAIL - cache $$v differs from the tree:" "$$d"; exit 1; }; \
+	cf=$$(CDPATH= cd "$$c" && find . $(RC_SKIP) ! -type d -print) || { printf '%s\n' "FAIL - cannot walk the cache $$c: the stray check needs every dir in it readable"; exit 1; }; \
+	s=$$({ git ls-files -s -z | tr '\0' '\n'; printf '%s\n' "$$cf"; } | awk '!/^\.\//{ n = substr($$0, index($$0, "\t") + 1); t[n] = 1; if ($$1 == "120000") k[n] = 1; next } { p = substr($$0, 3); if (p in t) next; m = split(p, c, "/"); a = c[1]; for (i = 2; i <= m; i++) { if (a in k) { print "L" p; next } a = a "/" c[i] } print "S" p }' | \
+	  while IFS= read -r x; do p=$${x#?}; if [ "$${x#L}" = "$$x" ] || { [ ! -e "$$p" ] && [ ! -L "$$p" ]; }; then printf '%s\n' "$$p"; fi; done | LC_ALL=C sort); \
+	[ -z "$$s" ] || { printf '%s\n' "FAIL - cache $$v holds files this tree does not track:" "$$s"; exit 1; }; \
+	printf '%s\n' "release-check: $$v — manifests agree, cache $$c matches skills/ and hooks/ and holds nothing untracked"
 
 # Behaviour evals: `claude plugin eval .` scores the evals/ suite. Every run makes real model calls on
 # Lachy's account, is nondeterministic and spawns nested claude sessions, so it is a human step, never

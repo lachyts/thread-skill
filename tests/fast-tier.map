@@ -65,8 +65,7 @@ FOREIGN-ONLY SKILL.md skills/execute/tests/approved-gates-resume.test.mjs  # a h
 ** ALSO tests/contracts/manifest.test.mjs tests/contracts/queue-only.test.mjs tests/contracts/schedule-serial.test.mjs
 ** ALSO tests/contracts/thread-placement-wiring.test.mjs tests/contracts/merge-settings-guard.test.mjs
 ** ALSO tests/background-job.test.mjs tests/engine-ladder.test.mjs
-** ALSO tests/engine-snapshot.test.sh tests/release-check.test.sh tests/release-check-missing-tree-dir.test.sh
-** ALSO tests/release-check-symlinked-dir.test.sh tests/release-check-quoting-diff.test.sh tests/test-jobs.test.sh
+** ALSO tests/engine-snapshot.test.sh tests/release-check.test.sh tests/test-jobs.test.sh
 ** ALSO tests/verify-slot.test.sh tests/ci-workflows.test.mjs
 
 # ---- OWN-LISTINGS: tests excused from check (f) ----
