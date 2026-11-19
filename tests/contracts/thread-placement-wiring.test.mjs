@@ -152,7 +152,8 @@ function check(f) {
   const om = para(section(f.orient, /^### 6\./) ?? '', 'The missing thread')
   if (!om.includes('python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py missing --project "<note>"') ||
     !om.includes("after § 4's fixes and § 5's writes") || !om.includes('/skills/open/SKILL.md` § Creating a new thread, asked of no one') ||
-    !om.includes('It runs before any handoff below') || !om.includes('Look only, a dry run and a scoped target create nothing')) fails.push('orient-missing')
+    !om.includes('It runs before any handoff below') || !om.includes('Look only and a dry run create nothing') ||
+    !om.includes('a scoped target runs no check at all')) fails.push('orient-missing')
   const hm = para(f.handoff, 'No thread yet')
   if (!hm.includes(`python3 ${SCRIPT} missing --dir "$PWD" --session`) || !hm.includes('except under **Rollout launch.**') ||
     !hm.includes('before **Split launch.**') || !hm.includes('§ Creating a new thread, asked of no one') ||

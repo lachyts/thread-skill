@@ -130,8 +130,9 @@ landed only in a task note. Decisions 1–6 say where a thread lives; nothing no
 work had none. Only open (which an agent has to call) and close rung 4 (at the end, if a close runs) checked.
 
 7. **The missing thread (d7).** The placement check gains one kind, `missing`: a project whose thread home holds no
-   thread anywhere (no THREAD*.md in the home, no THREAD.md on a local branch or origin/HEAD, no `~/Projects` folder
-   thread it owns, no `_shared/threads/<x>.md` named like it) while it has open multi-session work: a phase with two
+   thread anywhere (no repo-tier THREAD*.md whose identity is the home's, so none in the home, a subdirectory of it,
+   a linked worktree or a same-origin clone; no THREAD.md on a local branch or origin/HEAD; no `~/Projects` folder
+   thread it owns; no `_shared/threads/<x>.md` named like it) while it has open multi-session work: a phase with two
    or more open tasks, or, under `thread-placement.py missing --session`, the calling session's own work going on in
    another session (a handoff, or a session with thread shape). It is reported only for a `--project` audit and the
    `missing` verb, never by the estate audit or `--thread`, so close's step 1 never warns of a thread it is about to

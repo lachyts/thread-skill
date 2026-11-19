@@ -681,14 +681,18 @@ test('20b. rollout clones (ADR 0042): their copies are no thread, parity holds, 
   for (const f of j.findings) assert.ok(!f.path.includes('-rollout/THREAD.md') || f.path.includes('plain-rollout'), `no finding at a clone copy: ${f.kind} ${f.path}`)
 })
 
-test('20c. missing (ADR 0039 d7): a thread home with open multi-session work and no thread anywhere, and its six negatives', () => {
+test('20c. missing (ADR 0039 d7): a thread home with open multi-session work and no thread anywhere, and its eight negatives', () => {
   // The Contacts admin shape of 2026-11-08: a declared repo, a phase of open tasks, no THREAD.md.
   const HM = path.join(scratch, 'home-missing')
   const hm = (rel) => path.join(HM, rel)
   const VM = path.join(scratch, 'vault-missing')
   repo(hm('Projects'), { commit: true })
+  mkdir(hm('Projects/Life/Contacts admin'))
   for (const n of ['contacts-sync', 'solo', 'sidey', 'foldered-repo', 'sharedy']) repo(hm(`repos/tools/${n}`), { commit: true })
   git(['-C', hm('repos/tools/contacts-sync'), 'worktree', 'add', '-q', '-b', 'wt', hm('repos/tools/contacts-sync-wt')])
+  // A rollout clone of contacts-sync (ADR 0042): its own main checkout, sharing the twin's origin.
+  repo(hm('repos/tools/contacts-sync-rollout'))
+  for (const n of ['contacts-sync', 'contacts-sync-rollout']) git(['-C', hm(`repos/tools/${n}`), 'remote', 'add', 'origin', 'git@github.com:o/contacts-sync.git'])
   origin(hm('repos/tools/sidey'), 'sidey-missing')
   git(['-C', hm('repos/tools/sidey'), 'checkout', '-q', '-b', 'feat/side'])
   commitFile(hm('repos/tools/sidey'), 'THREAD.md', thread('sidey'))
@@ -727,9 +731,11 @@ test('20c. missing (ADR 0039 d7): a thread home with open multi-session work and
   assert.match(j.findings[0].detail, /phase contacts-admin-p1 has 2 open tasks \(contacts-admin-p1-1-sync, contacts-admin-p1-2-merge\)/)
   assert.equal(j.findings[0].fix, 'create ~/repos/tools/contacts-sync/THREAD.md by open § Creating a new thread')
   assert.equal(j.summary, 'placement: 1 finding — missing 1')
-  // The verb prints the same line from the note, the repo or a linked worktree of it; the estate never reports it.
+  // The verb prints the same line from the note, the repo, a linked worktree or a rollout clone of it, or the
+  // project's ~/Projects folder (its folder note); the estate never reports it.
   const line = `missing: ${CS}/THREAD.md — ${j.findings[0].detail} · fix: ${j.findings[0].fix}\n`
-  for (const args of [['--project', 'Contacts admin'], ['--dir', CS], ['--dir', hm('repos/tools/contacts-sync-wt')]]) {
+  for (const args of [['--project', 'Contacts admin'], ['--dir', CS], ['--dir', hm('repos/tools/contacts-sync-wt')],
+    ['--dir', hm('repos/tools/contacts-sync-rollout')], ['--dir', hm('Projects/Life/Contacts admin')]]) {
     assert.equal(missing(args), line, args.join(' '))
   }
   assert.deepEqual(of(audit([], opts), 'missing'), [], 'the estate never reports missing')
@@ -741,17 +747,21 @@ test('20c. missing (ADR 0039 d7): a thread home with open multi-session work and
   assert.deepEqual(['Sidey', 'Foldered'].map((n) => kinds(audit(['--project', n], opts).findings)), [['side-branch'], ['split-home']],
     'each says where its thread is instead')
   assert.equal(missing(['--dir', scratch]), '')
-  // Once the thread exists (as orient, handoff or next creates it), the check is silent, and the consumer's close
-  // finds it by the doc's thread: slug through open's lookup (close rung 2).
-  write(`${CS}/THREAD.md`, thread('contacts-admin'))
-  assert.equal(missing(['--project', 'Contacts admin']), '')
+  // A thread open's lookup finds by the project's slug is never doubled: an uncommitted one only in a linked worktree
+  // kept outside .claude, one in a subdirectory of the home repo, and the home's own (as orient, handoff or next
+  // creates it) each silence the verb and the --project audit.
   const snippet = fs.readFileSync(OPEN, 'utf8').split('\n')
   const a = snippet.findIndex((l) => l.startsWith('# thread:repo-thread-lookup'))
   const b = snippet.findIndex((l) => l.startsWith('# end thread:repo-thread-lookup'))
-  const r = spawnSync('bash', ['-c', snippet.slice(a + 1, b).join('\n')], { cwd: path.join(scratch, 'plain'), encoding: 'utf8',
-    env: { ...base, HOME: HM, slug: 'contacts-admin' } })
-  assert.equal(r.status, 0)
-  assert.deepEqual(r.stdout.split('\n').filter(Boolean), [`${CS}/THREAD.md`])
+  for (const rel of ['repos/tools/contacts-sync-wt/THREAD.md', 'repos/tools/contacts-sync/sub/THREAD.md', 'repos/tools/contacts-sync/THREAD.md']) {
+    write(hm(rel), thread('contacts-admin'))
+    const r = spawnSync('bash', ['-c', snippet.slice(a + 1, b).join('\n')], { cwd: path.join(scratch, 'plain'), encoding: 'utf8',
+      env: { ...base, HOME: HM, slug: 'contacts-admin' } })
+    assert.deepEqual([r.status, r.stdout.split('\n').filter(Boolean)], [0, [hm(rel)]], `open's lookup finds ${rel}`)
+    assert.equal(missing(['--project', 'Contacts admin']), '', rel)
+    assert.deepEqual(of(audit(['--project', 'Contacts admin'], opts), 'missing'), [], rel)
+    fs.rmSync(hm(rel))
+  }
 })
 
 test('21. read-only: nothing under HOME or the vault changes, and no bytecode is written', () => {

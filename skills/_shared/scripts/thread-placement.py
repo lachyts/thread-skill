@@ -61,7 +61,9 @@ Kinds (each finding's owners are the notes a --project run shows it under):
     side-branch  origin's default and the local default lack THREAD.md while another local branch has it
     workspace    a THREAD*.md in a workspace seat subfolder (ADR 0039 d3)
     missing      a named note with a thread home and open multi-session work, and no thread anywhere (ADR 0039 d7):
-                 its home holds no THREAD*.md on disk and no THREAD.md on a local branch or on origin/HEAD, no
+                 no THREAD*.md the repo walk lists has its home as its identity's home repo (so none in the home or a
+                 subdirectory of it, in a linked worktree kept outside .claude or in a same-origin clone, where
+                 open's lookup would find it), its home has no THREAD.md on a local branch or on origin/HEAD, no
                  ~/Projects folder thread it owns exists, and no `_shared/threads/<x>.md` is named like it (<x> its
                  name in kebab-case, or its home's directory name). Multi-session work is a phase with two or more Active
                  task notes directly in Work/Tasks (tagged `task`, not `rollout`, `phase` or `archived`) whose
@@ -752,17 +754,19 @@ class Audit:
     # -- the missing thread --
 
     def missing_tier(self, notes, session=False):
-        """`missing` (ADR 0039 d7) for each of `notes`: see the module docstring. Needs walk_projects() first."""
+        """`missing` (ADR 0039 d7) for each of `notes`: see the module docstring. Needs walk_repos() and
+        walk_projects() first."""
         est, tl = self.est, self.tl
         shared = os.path.join(est.workspaces, "_shared", "threads")
+        homes = None
         for t in sorted(set(notes), key=lambda n: n.rel):
             H = est.first_qual(t)
-            try:
-                top = os.listdir(H) if H else []
-            except OSError:
-                top = []
-            if H is None or any(is_thread_file(n) for n in top):
-                continue  # a THREAD.md, or a misnamed THREAD*.md that misnamed reports
+            if H is None:
+                continue
+            if homes is None:  # the home repo of every repo-tier thread's identity, as repo_tier groups them
+                homes = {est.identity(f)[1] for f in self.scanned["repo_threads"] + self.scanned["repo_misnamed"]}
+            if H in homes:
+                continue  # in H, a subdirectory, a linked worktree or a clone (a misnamed THREAD*.md: misnamed says so)
             if any(est.ref_threads(H)[2].values()):
                 continue  # on a branch or on origin: side-branch or behind says so
             if any(t in est.folder_owners(os.path.dirname(f)) for f in self.scanned["project_threads"]):
@@ -945,8 +949,10 @@ def main(argv):
     if args.cmd == "missing":
         notes = est.dir_notes(d) if d is not None else [resolve_note(vault, index, n) for n in args.project]
         au = Audit(est)
-        au.walk_projects()
-        au.missing_tier(notes, session=args.session)
+        if notes:  # a launch directory in no thread home walks nothing
+            au.walk_repos()
+            au.walk_projects()
+            au.missing_tier(notes, session=args.session)
         for f in au.findings:
             sys.stdout.write("%s: %s — %s · fix: %s\n" % (f["kind"], f["path"], f["detail"], f["fix"]))
         return 0

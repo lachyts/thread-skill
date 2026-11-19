@@ -249,7 +249,7 @@ A situational report written for Lachy catching up, not a log:
   `unchecked:` lines; or its one `thread-placement:` line. Omit the line on `placement: none`.
   Report-only: a misplaced thread is moved by project-structure-audit or by Lachy, never by this run. A `missing`
   finding is named as the thread this run creates before it routes (§ 6, **The missing thread.**), or, on a Look-only
-  run, as the thread the next default or Steer-only orient creates.
+  run or a dry run, as the thread the next default or Steer-only orient creates.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
   overlaps found in related projects, and any live rollout; plus the declared check's entries
   (§ 2), each a loose item until the reshuffle places it, or its one audit line.
@@ -407,8 +407,9 @@ of no one: this run is the go-ahead, as it is for the drift fixes. Its slug come
 one-line scope from the project note, and its first Session log line is `- <YYYY-MM-DD>: thread created by orient —
 <the line's detail>`; the repo's first close commits it (close step 7.1). Report `thread created: <path>` with the
 line's detail. It runs before any handoff below, so a handoff's doc carries the thread's slug as its `thread:` and
-the consumer's close finds the thread (close rung 2, or rung 3 in the repo). Look only, a dry run and a scoped target
-create nothing (§ 3 names the finding instead), and a non-zero exit is one `thread-placement:` line, never a blocker.
+the consumer's close finds the thread (close rung 2, or rung 3 in the repo). Look only and a dry run create nothing
+(§ 3 names the § 2 audit's finding instead); a scoped target runs no check at all, as § 2 runs it no audit. A
+non-zero exit is one `thread-placement:` line, never a blocker.
 
 - **Run the execution-fit test**, three-way, on each phase the reshuffle touched and on each other
   open cluster, and name its outcome: parallel-shaped, serial-shaped or session lane. Mixed sets
