@@ -14,6 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/proc-group.sh
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 root=$(pwd -P)
@@ -422,6 +423,9 @@ push o/e1 other/CLAUDE.md o
 sr --refresh "$e1-rollout/sub"; lacks "$err" "WARN" "refresh: a sibling directory's CLAUDE.md → no WARN"
 sr --refresh "$e1-rollout" FAKE_SSH=fail; ok "$rc" 0 "refresh: a failed fetch → still 0"
 has "$err" "not refreshed: fetch failed" "refresh: … a note"
+# a fetch that hangs (the fake ssh's `sleep 120 | cat`) is cut at SELF_ROLLOUT_FETCH_TIMEOUT (p39-16); --ensure shares it
+sr --refresh "$e1-rollout" FAKE_SSH=hang SELF_ROLLOUT_FETCH_TIMEOUT=1; ok "$rc" 0 "refresh: a hung fetch → still 0"
+has "$err" "note: $e1-rollout not refreshed: fetch timed out after 1s" "refresh: … cut at its budget, a note"
 
 # 5. --refresh-in-place: the twin gets the rollout's merges
 r5="$home/repos/r5"; srv o/r5; cl o/r5 "$r5"; cl o/r5 "$r5-rollout"
@@ -457,6 +461,21 @@ has "$err" "note: $e1-rollout not refreshed: cannot load live-checkout.sh" "refr
 git -C "$r5" checkout -q -- a.txt; git -C "$r5" config --unset merge.autoStash
 sr --refresh-in-place "$r5-rollout" FAKE_SSH=fail; ok "$rc" 0 "in-place: a failed fetch → 0"
 has "$out" "in-place: $r5 not moved: fetch failed" "in-place: … fetch failed"
+held=$(git -C "$r5" rev-parse HEAD)
+sr --refresh-in-place "$r5-rollout" FAKE_SSH=hang SELF_ROLLOUT_FETCH_TIMEOUT=1
+ok "$rc|$out" "0|in-place: $r5 not moved: fetch timed out after 1s" "in-place: a hung fetch → cut at its budget, not moved, 0 (p39-16)"
+ok "$(git -C "$r5" rev-parse HEAD)" "$held" "in-place: … unmoved"
+# a TERM to the script's group mid-fetch leaves no ssh behind: lc_bounded kills the fetch's own group, then dies of the
+# TERM. hang_ssh and gone (its 30 s liveness bound): tests/lib/proc-group.sh.
+hang_ssh "$tmp/bin/hang-ssh" "$tmp/hang.pg"
+rm -f "$tmp/hang.pg"
+env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_SSH_COMMAND="$tmp/bin/hang-ssh" GIT_SSH_VARIANT=ssh \
+  perl -e 'setpgrp(0,0); exec @ARGV' bash "$sc" --refresh-in-place "$r5-rollout" >/dev/null 2>&1 &
+bg=$!; i=0; while [ ! -s "$tmp/hang.pg" ] && kill -0 "$bg" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
+pg=$(cat "$tmp/hang.pg" 2>/dev/null)
+kill -TERM -- "-$bg" 2>/dev/null; wait "$bg"; rc=$?
+ok "$rc" 143 "in-place: a TERM mid-fetch → 143"
+ok "$(gone "$pg")" gone "in-place: … and the fetch's ssh (sleep 300 | cat) is gone"
 : > "$r5/.git/MERGE_HEAD"
 sr --refresh-in-place "$r5-rollout"; ok "$out" "in-place: $r5 not moved: an operation is in progress" "in-place: an operation in progress → not moved"
 rm -f "$r5/.git/MERGE_HEAD"

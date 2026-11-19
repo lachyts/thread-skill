@@ -20,6 +20,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/proc-group.sh
 unset $(git rev-parse --local-env-vars)
 
 root=$(pwd -P)
@@ -574,6 +575,19 @@ has "$err" "land: nothing committed" "case 22: nothing committed"
 edit; land FAKE_SSH=fail -- "$W" "$W/THREAD.md"
 res "case 22b (fetch refused)" 1 "stuck: cannot fetch origin/master: fake-ssh: connect to host github.com port 22: Connection refused"
 
+echo "== 22c. a TERM mid-fetch"
+# bounded runs the fetch in its own process group, so a TERM to land.sh's group never reaches it: lc_bounded's handler
+# kills that group, then dies of the TERM (p39-16). hang_ssh and gone (its 30 s liveness bound): tests/lib/proc-group.sh.
+hang_ssh "$tmp/bin/hang-ssh" "$tmp/hang.pg"
+ghreset; mkrepo c22c; edit; rm -f "$tmp/hang.pg"
+env LAND_TIMEOUT=60 GIT_SSH_COMMAND="$tmp/bin/hang-ssh" perl -e 'setpgrp(0,0); exec @ARGV' bash "$LAND" -- "$W" "$W/THREAD.md" >/dev/null 2>&1 &
+bg=$!; i=0; while [ ! -s "$tmp/hang.pg" ] && kill -0 "$bg" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
+pg=$(cat "$tmp/hang.pg" 2>/dev/null)
+kill -TERM -- "-$bg" 2>/dev/null; wait "$bg"; rc=$?
+ok "$rc" 143 "case 22c: a TERM to land.sh's group → 143"
+ok "$(gone "$pg")" gone "case 22c: … and the fetch's ssh (sleep 300 | cat) is gone"
+rm -rf "${TMPDIR:?}"/land.*
+
 # ==== Other behaviours ====================================================================================
 echo "== 23. --commit-only"
 ghreset; mkrepo c23; edit
@@ -646,10 +660,14 @@ ok "$(printf '%s\n' "$code" | grep -E '(^|[^[:alnum:]_])(git (push|fetch|ls-remo
    "structural: every git push|fetch|ls-remote and gh line starts with bounded"
 ok "$(printf '%s\n' "$code" | grep -c 'lc_fetch ')|$(printf '%s\n' "$code" | grep -cE '^[[:space:]]*lc_fetch "\$top" "\$[A-Za-z]+" bounded 2>')" "3|3" \
    "structural: every live-checkout fetch (S4, O4's two) runs under bounded, its stderr kept"
-has "$src" "alarm \$t; waitpid(\$pid,0); my \$st=\$?; alarm 0;
-kill 'KILL',-\$pid;" "structural: a post-waitpid group kill"
-for w in 'exec { $ARGV[0] } @ARGV' '$t=1 unless' 'return 124          # deadline' '[ "$rem" -lt "$t" ] && t=$rem'; do
-  has "$src" "$w" "structural: carries [$w]"
+# bounded is a wrapper over live-checkout.sh's lc_bounded (its perl, the signal rule included, is pinned by
+# live-checkout.test.sh LC10), keeping the deadline's 124 and the clipped budget; land.sh carries no perl of its own.
+hasnt "$src" LAND_BOUNDED_PL "structural: no LAND_BOUNDED_PL"
+ok "$(grep -c 'perl -e' "$LAND")" 0 "structural: no perl -e of its own"
+bd_body=$(awk '/^bounded\(\) \{/{on=1} on{print} on && /^\}/{exit}' "$LAND")
+has "$src" 'lc_bounded "$LAND_RECORD_TIMEOUT" python3' "structural: the review-round recorder runs under lc_bounded"
+for w in 'return 124          # deadline' '[ "$rem" -lt "$t" ] && t=$rem'; do
+  has "$bd_body" "$w" "structural: bounded carries [$w]"
 done
 ok "$(grep -c 'gh pr list' "$LAND")" "$(grep -cE 'gh pr list .*--state "\$1"' "$LAND")" "structural: every gh pr list passes --state (open|all)"
 has "$src" 'pr_lookup open' "structural: phase 1 is --state open"; has "$src" 'pr_lookup all' "structural: phase 2 is --state all"

@@ -99,14 +99,18 @@
 # for the repo being moved (lc_ssh_rule, reading that repo's own core.sshCommand), a half-applied operation (lc_op:
 # rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD, BISECT_LOG or a multi-pick's sequencer/), the
 # one-branch fetch (lc_fetch: +refs/heads/<default>, no tags, no FETCH_HEAD) and the fast-forward (lc_ff: the dirty
-# overlap checked first, so a refused move never runs a merge or rewrites ORIG_HEAD).
+# overlap checked first, so a refused move never runs a merge or rewrites ORIG_HEAD). The fetch runs under lc_bounded
+# (p39-16): SELF_ROLLOUT_FETCH_TIMEOUT seconds, default 60, in its own process group, killed at the budget or on a
+# TERM, INT or HUP to this script's group, so no fetch is ever left unbounded; lc_bounded then dies of that signal, so
+# the script stops there with 143, 130 or 129 and never reads the signal as a failed fetch.
 #
 # ---- The clone refresh (--ensure; --refresh <Project root>, execute § 2.7 at entry points only, just before
 # pushed-base): lc_fetch of origin's <default>, then, with the default branch checked out, lc_ff (`git merge
 # --ff-only --no-autostash refs/remotes/origin/<default>` once no local change overlaps it). A clone that cannot move
 # (another branch, an operation in progress, local commits, a dirty overlap, git's own refusal, `git merge --ff-only
-# refused: <why>`) gets a `note:` and stays put, and so does a failed fetch; --refresh with live-checkout.sh unloadable
-# notes `not refreshed: cannot load live-checkout.sh`. --refresh does
+# refused: <why>`) gets a `note:` and stays put, and so does a failed fetch (`fetch failed: <first line>`, or `exit
+# <rc>` when git printed nothing) or one cut at its bound (`fetch timed out after <t>s`); --refresh with
+# live-checkout.sh unloadable notes `not refreshed: cannot load live-checkout.sh`. --refresh does
 # nothing on a root `--in-place` does not name (a pre-P26 in-place root, which merge-task already moves), and a
 # refresh that changes CLAUDE.md, AGENTS.md, CLAUDE.local.md, .mcp.json or anything under .claude/, at the root or
 # an ancestor of it up to the toplevel, prints a relaunch `WARN:`: the lead loaded the old copy. It never halts:
@@ -116,7 +120,8 @@
 # merge; the completion ceremony once, after its `status: done` stamp). Nothing for a root `--in-place` does not
 # name. A twin that is the plugin's primary checkout while a rollout with no Engine snapshot runs is held
 # (primary-hold.sh, ADR 0031; run from a snapshot, the hold reads the snapshot's Primary, ADR 0043).
-# Otherwise it fetches origin/<default> in the twin (lc_fetch, under the ssh and prompt rule) and runs only lc_ff's
+# Otherwise it fetches origin/<default> in the twin (lc_fetch, under the ssh and prompt rule and lc_bounded's
+# SELF_ROLLOUT_FETCH_TIMEOUT, default 60 s) and runs only lc_ff's
 # `git merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash, never during an operation.
 # The twin is a live checkout, so it stops at the Green tip (ADR 0084 d1, p54-6): after the fetch,
 # skills/_shared/scripts/green-tip.py reads the target (`--checkout --budget 60` under lc_bounded 70). A repo that
@@ -132,8 +137,9 @@
 # and --refresh never read it: the Rollout clone keeps origin's tip, the code being built.
 # One stdout line, `in-place: <twin> …`, or nothing:
 #   held: <primary-hold line> (ADR 0031) · not moved: cannot load live-checkout.sh · not moved: fetch failed: <first
-#   line> · not moved: on '<b>', not <d> · not moved: an operation is in progress · fast-forwarded to origin/<d>
-#   (<old7>..<new7>) · not moved: local changes overlap origin/<d> · not moved: git merge --ff-only refused: <why> ·
+#   line | exit <rc>> · not moved: fetch timed out after <t>s · not moved: on '<b>', not <d> · not moved: an
+#   operation is in progress · fast-forwarded to origin/<d> (<old7>..<new7>) · not moved: local changes overlap
+#   origin/<d> · not moved: git merge --ff-only refused: <why> ·
 #   ahead: <repo-state.sh line> · already at origin/<d> ·
 #   not moved: diverged: <N> local-only commit(s) (<repo-state.sh line>), <M> behind origin/<d>; <remedy>
 # The diverged remedy follows the twin's landing route, land.sh's read-only route mode `land.sh --route -- <twin>`:
@@ -274,6 +280,19 @@ lc_load() {
   . "$LC_SH" 2>/dev/null
   [ "$(type -t lc_loaded 2>/dev/null)" = function ]
 }
+# The one-branch fetch's bound (p39-16): SELF_ROLLOUT_FETCH_TIMEOUT seconds (default 60, merge-task's per-try budget)
+# under lc_bounded, its own process group killed at the budget or on a TERM, INT or HUP to this script's group.
+FETCH_TIMEOUT=${SELF_ROLLOUT_FETCH_TIMEOUT:-60}
+fetch_bounded() { lc_bounded "$FETCH_TIMEOUT" "$@"; }   # lc_fetch's runner: one command word
+# fetch_secs: the budget as lc_bounded reads it ('', a non-integer or 0 → 1), for the timeout's message
+fetch_secs() { case "$FETCH_TIMEOUT" in ''|*[!0-9]*) echo 1 ;; *) [ "$((10#$FETCH_TIMEOUT))" -ge 1 ] && echo "$((10#$FETCH_TIMEOUT))" || echo 1 ;; esac; }
+# fetch_why <rc> <output>: why a fetch did not land, as `fetch timed out after <t>s` (rc 142) or
+# `fetch failed: <first line | exit <rc>>` (exit <rc> when git printed nothing)
+fetch_why() {
+  if [ "$1" -eq 142 ]; then echo "fetch timed out after $(fetch_secs)s"
+  elif [ -n "$(first "$2")" ]; then echo "fetch failed: $(first "$2")"
+  else echo "fetch failed: exit $1"; fi
+}
 
 # walk_twin <clone path> <owner/name>: the twin walk over names beside the clone (ADR 0064), name-only (the clone need
 # not exist). 0 with WALK set to the first candidate that is a main checkout (`.git` a directory) of the same
@@ -411,13 +430,12 @@ sub_present() {  # --ensure only, after the refresh: exits 3 when C still lacks 
 
 # refresh_clone <clone> <root sub-path> <warn 1|0>: fetch, then a fast-forward on the default branch. stderr only.
 refresh_clone() {
-  local c="$1" sub="$2" warn="$3" d cur old new e f a pfx rc changed=''
+  local c="$1" sub="$2" warn="$3" d cur old new e f a pfx rc frc changed=''
   lc_ssh_rule "$c"   # first, so an ls-remote for an unset origin/HEAD runs under it too
   d=$(lc_default "$c") || d=''
   [ -n "$d" ] || { echo "$SR: note: $c not refreshed: origin's default branch is unresolved" >&2; return 0; }
-  if ! e=$(lc_fetch "$c" "$d" 2>&1); then
-    echo "$SR: note: $c not refreshed: fetch failed: $(first "$e")" >&2; return 0
-  fi
+  e=$(lc_fetch "$c" "$d" fetch_bounded 2>&1); frc=$?
+  [ "$frc" -eq 0 ] || { echo "$SR: note: $c not refreshed: $(fetch_why "$frc" "$e")" >&2; return 0; }
   cur=$(git -C "$c" symbolic-ref -q --short HEAD 2>/dev/null)
   [ "$cur" = "$d" ] || { echo "$SR: note: $c not refreshed: on '${cur:-a detached HEAD}', not $d" >&2; return 0; }
   lc_op "$c" >/dev/null && { echo "$SR: note: $c not refreshed: an operation is in progress" >&2; return 0; }
@@ -550,9 +568,8 @@ case "$mode" in
     lc_ssh_rule "$tw"
     d=$(lc_default "$root" "$tw") || d=''
     [ -n "$d" ] || { echo "in-place: $tw not moved: origin's default branch is unresolved"; exit 0; }
-    if ! e=$(lc_fetch "$tw" "$d" 2>&1); then
-      echo "in-place: $tw not moved: fetch failed: $(first "$e")"; exit 0
-    fi
+    e=$(lc_fetch "$tw" "$d" fetch_bounded 2>&1); frc=$?
+    [ "$frc" -eq 0 ] || { echo "in-place: $tw not moved: $(fetch_why "$frc" "$e")"; exit 0; }
     # The twin is a live checkout: in a repo that publishes a Green tip it moves to it, never past (ADR 0084 d1).
     # Its stderr goes to a file, and its `green-tip: WARN:` lines pass through to stderr, as land.sh's green_read does.
     gk=origin gs='' gw=''
