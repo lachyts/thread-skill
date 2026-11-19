@@ -555,8 +555,8 @@ reshuffle's R5.2 use the same words):
   `_phase_sort`, which feed `--phases` to reconcile-project in execute's phase-close ceremony.
 - `skills/_shared/scripts/next-action.py`: `DEAD_STATUSES` (Landed) and `OPEN_STATUSES` (Active).
 - `skills/_shared/scripts/thread-placement.py` `missing` (ADR 0039 d7): Active through next-action's `OPEN_STATUSES` and
-  `status_of`, and § Phase and task filenames' membership by the literal prefix `<slug>-p<N>-`, with
-  reconcile-project.py's `PHASE_N` loaded rather than copied, for a phase with two or more open tasks.
+  `status_of`, and § Phase and task filenames' membership by the literal prefix `<slug>-p<N>-`, its phase number
+  read from reconcile-project.py's `PHASE_N` by path, never restated, for a phase with two or more open tasks.
 - orient § 2 (the sweep's in-flight report) and the reshuffle's R1 (the item set and its reach tiers).
 - `skills/reflect/scripts/reflect.py` `bug`, `decide`, `close` and `moot`: reconcile-project.py's `LANDED` and its
   status read (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else; decide and
