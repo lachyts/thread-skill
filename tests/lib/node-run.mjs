@@ -6,10 +6,10 @@
 // a file list passed longest-first still starts in path order, and tests/reflect-weekly.test.mjs, the slowest file,
 // started near the end. This runs the same runner through node:test's `run()`, whose `files` keep their order, with
 // the CLI's own two flags. The reporter is pinned to spec on every node line and stream (p49-4), so a CI log and a
-// Mac run read alike, and the readers of failing ids (reconcile-rollout.py's `_failing_ids` and `_job_suites`) read
-// one shape. The exit is the CLI's too: 1 when a `test:summary` is not a success (a failed or cancelled test, a file
-// that fails to load or exits non-zero; a failing `todo` test is neither, so it passes), and 1 when the run ends with
-// no summary for the whole run, so a runner that stops short is never a pass.
+// Mac run read alike, and the execute engine's readers of failing ids (`_failing_ids` on a verify's output,
+// `_job_suites` on a CI log) read one shape. The exit is the CLI's too: 1 when a `test:summary` is not a success (a
+// failed or cancelled test, a file that fails to load or exits non-zero; a failing `todo` test is neither, so it
+// passes), and 1 when the run ends with no summary for the whole run, so a runner that stops short is never a pass.
 //
 // Signals behave as the CLI's do: a SIGINT, SIGTERM or SIGHUP cancels the run (an AbortController's signal, handed to
 // run()), which ends each running file's child and reports its tests cancelled, so the run exits 1 and leaves no orphan

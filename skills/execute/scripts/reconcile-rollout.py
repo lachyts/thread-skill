@@ -1404,8 +1404,8 @@ Subcommands:
               FAILED (<N>s)` line but `make test`; ` (timed out after <B>s)` and ` (<N> files)` dropped; `node tests`
               expanded to the files of each top-level TAP `not ok` block's `location:` (node 22's CI logs, runs before
               p49-4), else spec's `test at` lines (node 24's, from p49-4: node-run.mjs pins spec; both stay while the
-              older logs are in retention), made repo-relative from the first `tests/`, `skills/` or `hooks/` part, the bare label kept when none
-              parses; with no label, the job named by its failed step, `<job>: step "<name>" failed`, or `<job>:
+              older logs are in retention), made repo-relative from the first `tests/`, `skills/` or `hooks/` part,
+              the bare label kept when none parses; with no label, the job named by its failed step, `<job>: step "<name>" failed`, or `<job>:
               tests/run.sh failed with no suite named`. A 4xx on the log (a 410 past retention) is `<job> (log unreadable:
               HTTP <code>)`, definitive, so it never stalls a run.
               Reads, finality and confirmation (_master_decide, pure: the listed runs, their reads and compares, the
