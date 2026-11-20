@@ -3,6 +3,13 @@
 Date: 2026-11-03
 Status: accepted. Built in `wave-ralph-verifier-lint-gap` (rescoped 2026-11-03 from the retired wave plugin's "close the lint gap in the convergence loop"), on the decision Lachy gave ahead that day: "Switch, and tell me". It is thread-skill's side of giflab ADR 0012 d4.
 
+*(Amended 2026-11-20 by thread-skill-p39-18-merge-gate-plan-403-review-follow-ups: `none` needs two clean reads, and
+for the rules read the plan's no-rulesets 403 is one. A private repo on a plan without rulesets (GitHub Free) answers
+the rules read with a 403 whose message begins `Upgrade to GitHub Pro or make this repository public`; no ruleset can
+apply there, so it reads as an empty rules list with one why line saying so. merge-gate.py's `plan_has_no_rulesets` is
+the one copy of that wording, which merge-settings.py and merge-task.sh read too. A rules read that fails alone still
+gives `partial`. Decision 1 carries the change.)*
+
 ## Context
 
 A rollout's `verifier:` can be weaker than the repo's required merge checks. Ralph and the master review then converge on green, and the PR halts at merge on a check the verifier never ran. It has happened twice on giflab:
@@ -16,7 +23,7 @@ The task's rule is repo-agnostic. The plugin hardcodes no linter, and a gate com
 
 ## Decision
 
-1. **The facts come from a read-only script.** `skills/_shared/scripts/merge-gate.py` makes two `gh api` GETs, `repos/<o>/<n>/branches/<b>` and `repos/<o>/<n>/rules/branches/<b>`. They give the required contexts of branch protection and rulesets. The script then reads `.github/workflows/` at `origin/<default>`, never the working tree, and prints one JSON line. It reports `none` only when both reads return 200, the protection is visible, and nothing is required. A branch read that is not 200 is `unreadable`: a 404 is also a private repo this gh account cannot see, or a branch not on origin. So is a missing gh, a logged-out gh, a timeout or an origin error. A rules read that fails alone gives `partial`, and so does a protection object this account cannot see. It never stops a schedule: anything it did not expect reads `unreadable`, with exit 0.
+1. **The facts come from a read-only script.** `skills/_shared/scripts/merge-gate.py` makes two `gh api` GETs, `repos/<o>/<n>/branches/<b>` and `repos/<o>/<n>/rules/branches/<b>`. They give the required contexts of branch protection and rulesets. The script then reads `.github/workflows/` at `origin/<default>`, never the working tree, and prints one JSON line. It reports `none` only when both reads give a clean answer (200, or for the rules read the plan's no-rulesets 403: a private repo on a plan without rulesets, where no ruleset can apply), the protection is visible, and nothing is required. A branch read that is not 200 is `unreadable`: a 404 is also a private repo this gh account cannot see, or a branch not on origin. So is a missing gh, a logged-out gh, a timeout or an origin error. A rules read that fails alone gives `partial` (the plan's 403 is no failure), and so does a protection object this account cannot see. It never stops a schedule: anything it did not expect reads `unreadable`, with exit 0.
 
 2. **What counts, and what is covered.**
    - A required context's **closure** is the job it names, that job's transitive `needs:`, and the jobs of the local reusable workflow it calls. Every output job carries `contexts`: each context whose closure holds it.

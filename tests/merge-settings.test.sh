@@ -14,7 +14,7 @@
 #           tasks share; the block boundary; two identical rows
 #   M18     check, the repo check before the first Slot: nothing found (a young queue, a quick cancel, a hosted job),
 #           a no-runner check cleared, restored and dismissed, a registered runner listed, no recent run, not
-#           owned, a failed read
+#           owned, a failed read, the plan's no-rulesets 403 and its text after a prefix
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -624,6 +624,15 @@ ok "$rc|$(nwrites)|$(nrow left ro)|$(nev setting-left)" "3|0|1|1" "M18d: a repo 
 # M18e: a read that fails is no finding
 ckro; echo 'gh: Server Error (HTTP 502)' > "$MT_STATE/err.runs"; ck
 ok "$rc|$(nwrites)" "8|0" "M18e: the runs unread: exit 8, nothing written"; has "$out" "repo check: not read (" "M18e: … not read"
+# M18h: the rules read through merge-gate.py's plan_has_no_rulesets: the plan's 403 is no rulesets (M18a's nothing
+# found); the plan's text after a prefix is a failed read, not read, exit 8
+ckro; rj 9 "$CI_OK" "$(jb "$SH" queued - self - "$NEW")"; rj 7; echo 403-plan > "$MT_STATE/rules"; ck
+ok "$rc|$(nwrites)|$(rows ro | grep -c .)" "0|0|0" "M18h (plan): exit 0, no write, no row"
+has "$out" "repo check: nothing found on o/r@master (2 required checks against 2 recent workflow runs)" "M18h (plan): … nothing found"
+ckro; rj 9 "$CI_OK" "$(jb "$SH" queued - self - "$NEW")"; rj 7
+echo 'gh: Note: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' > "$MT_STATE/err.rules"; ck
+ok "$rc|$(nwrites)" "8|0" "M18h (prefix): exit 8, nothing written"
+has "$out" "repo check: not read (rules/branches/master: HTTP 403 gh: Note: Upgrade" "M18h (prefix): … not read"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-settings: ALL PASS" || echo "merge-settings: SOME FAILED"
 exit "$fail"

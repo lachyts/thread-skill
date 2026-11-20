@@ -159,10 +159,10 @@ wrote, so a required job that cannot run is freed or listed before any task wait
 `rollout:` or no `protocol_version:` is refused (exit 2), and the Engine snapshot guard reads the note itself.
   1. The reads, read-only and needing no admin rights: repos/<o>/<r> (its default branch <b>), branches/<b> and
      rules/branches/<b>?per_page=100 (merge-gate.py's _from_branch and _from_rules; the plan's no-rulesets 403 is an
-     empty list), then, when a required context has no app id or ACTIONS_APP_ID (another app's check is not read),
-     actions/runs?per_page=RECENT_RUNS and each run's jobs?per_page=100. Anything not read whole (gh missing, no GitHub
-     origin, a non-200, protection not visible, a run's jobs past one page) prints `repo check: not read (<why>)` and
-     exits 8: no finding, no row, nothing written.
+     empty list, as merge-gate.py's plan_has_no_rulesets reads it), then, when a required context has no app id or
+     ACTIONS_APP_ID (another app's check is not read), actions/runs?per_page=RECENT_RUNS and each run's
+     jobs?per_page=100. Anything not read whole (gh missing, no GitHub origin, a non-200, protection not visible, a
+     run's jobs past one page) prints `repo check: not read (<why>)` and exits 8: no finding, no row, nothing written.
   2. Each such required context C, by the jobs named exactly C in those runs:
      - none: `repo check: required check "C" has no job in the last <n> workflow runs of <o/r>: …; listed for you`.
        Listed only, never changed: a renamed job's replacement needs a PR's head to prove it (`free`'s
@@ -929,7 +929,7 @@ def _read_sources(gh_bin, repo, branch, contexts):
         rules = rest[0]
         if not isinstance(rules, list) or len(rules) >= MAX_RULES:
             raise Leave("unreadable", "rules/branches/%s: not a whole list of rules" % branch)
-    elif rest[0] == 403 and "Upgrade to GitHub Pro" in rest[1]:
+    elif MG.plan_has_no_rulesets(rest[0], rest[1]):
         rules = []
     else:
         raise Leave("unreadable", "rules/branches/%s: HTTP %s %s" % (branch, rest[0], rest[1]))
@@ -1326,7 +1326,7 @@ def _check_reads(gh_bin, repo):
         if not isinstance(rest[0], list) or len(rest[0]) >= MAX_RULES:
             raise NotRead("rules/branches/%s: not a whole list of rules" % branch)
         MG._from_rules(rest[0], required, [])
-    elif not (rest[0] == 403 and "Upgrade to GitHub Pro" in rest[1]):
+    elif not MG.plan_has_no_rulesets(rest[0], rest[1]):
         raise NotRead("rules/branches/%s: HTTP %s %s" % (branch, rest[0], rest[1]))
     ours = [r["context"] for r in required if r.get("appId") in (None, ACTIONS_APP_ID)]
     if not ours:

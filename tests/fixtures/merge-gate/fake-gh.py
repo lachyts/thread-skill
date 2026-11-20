@@ -4,8 +4,9 @@
 Its argv goes to $MG_LOG, one line per call. The rules endpoint (`…/rules/branches/…`, matched first) is served from
 $MG_RULES and the branch endpoint (`…/branches/…`) from $MG_BRANCH. Each is a JSON body file (served as a 200) or one
 of: 403 | 404 | 500 (gh's status line, headers, a blank line and an error body on stdout, `gh: <msg> (HTTP <code>)` on
-stderr, exit 1), nologin (no status line, exit 4), badjson (a 200 whose body is not JSON), hang (writes its pid to
-$MG_PIDS, then execs `sleep 120`). $MG_RULES_NEXT=1 adds a `Link: …; rel="next"` header to the rules response.
+stderr, exit 1), 403-plan (the same form with GitHub Free's `Upgrade to GitHub Pro …` message, as the merge-task fake
+spells it), nologin (no status line, exit 4), badjson (a 200 whose body is not JSON), hang (writes its pid to $MG_PIDS,
+then execs `sleep 120`). $MG_RULES_NEXT=1 adds a `Link: …; rel="next"` header to the rules response.
 """
 import json
 import os
@@ -49,7 +50,7 @@ def main():
     if spec == "badjson":
         respond(200, "<html>not json</html>", extra)
         return 0
-    if spec == "403plan":
+    if spec == "403-plan":
         msg = "Upgrade to GitHub Pro or make this repository public to enable this feature."
         respond(403, json.dumps({"message": msg, "status": "403"}))
         sys.stderr.write("gh: %s (HTTP 403)\n" % msg)

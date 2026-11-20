@@ -33,15 +33,21 @@ a next page (`Link: …; rel="next"`) keeps its first page and sets `truncated`.
   `code_scanning` rule as kind code-scanning (tools). Other rule types are ignored.
 - Rules (403 naming the plan): GitHub answers a private repo on a plan without rulesets (GitHub Free) with a 403 whose
   message reads `Upgrade to GitHub Pro or make this repository public …`. No ruleset can exist or apply there, so it
-  reads as a clean empty rules read (an empty list, ok) with one why line saying so. Any other 403 stays a failure.
+  reads as a clean empty rules read (an empty list, ok) with one why line saying so. Any other 403 stays a failure,
+  and the branch read never reads it so. plan_has_no_rulesets(code, text) is the one copy of the wording: the code
+  must be 403 and the message must begin with that text, read from a JSON error body's str `message` or from gh's
+  stderr line `gh: <message> (HTTP <code>)` (GH_ERROR_RE, the form merge-settings.py and merge-task.sh read; gate()
+  passes the HTTP body, which either form may match). A non-JSON body holding the text bare, a JSON body with no str
+  message, another code, or the text after a prefix is never the plan's 403.
 
-Status. none: both reads 200, the branch read full, and nothing required (no context, no required workflow, no
-code-scanning rule). read: both 200, the branch read full, something required, and the jobs read. partial: the
-branch read 200 and the rules read not, or the protection object not visible, or `jobs: null` (the --tree ref is
-missing, or PyYAML cannot be imported). unreadable: the branch read not 200 (a 403; a 404, which is also a private
-repo this gh account cannot see or a branch not on origin; a 5xx; an error; a timeout), gh missing or logged out, no
-GitHub origin or an origin error, or an internal error; `required` still lists what the rules read gave, and no
-workflow is read (`jobs: null`). Never `none` on anything less than two clean reads (the plan's no-rulesets 403 is one).
+Status. none: the branch read 200 and full, the rules read 200 or the plan's no-rulesets 403, and nothing required
+(no context, no required workflow, no code-scanning rule). read: the same two clean reads, something required, and
+the jobs read. partial: the branch read 200 and the rules read neither 200 nor the plan's 403, or the protection
+object not visible, or `jobs: null` (the --tree ref is missing, or PyYAML cannot be imported). unreadable: the
+branch read not 200 (a 403; a 404, which is also a private repo this gh account cannot see or a branch not on origin;
+a 5xx; an error; a timeout), gh missing or logged out, no GitHub origin or an origin error, or an internal error;
+`required` still lists what the rules read gave, and no workflow is read (`jobs: null`). Never `none` on anything less
+than two clean reads (the plan's no-rulesets 403 is one).
 
 `required`: [{context, sources: ["protection" | "ruleset", …], appId?, cut?}], deduplicated, in protection order and
 then ruleset order (a context both name carries both sources, its first app id kept).
@@ -93,7 +99,9 @@ env?, steps, readGaps}
 Output, one JSON line: {status, repo (owner/name, or null), branch, tree, required, workflows: [{path, name?, on}],
 jobs | null, unmatched: [{context?, sources, kind: context | app | required-workflow | code-scanning, appId?, path?,
 repositoryId?, ref?, tools?}], truncated, why}. `workflows` lists every workflow holding an output job, callers and
-callees alike. With PyYAML not importable: `jobs: null`, `workflows: [{path}]` and a why naming PyYAML.
+callees alike. With PyYAML not importable: `jobs: null`, `workflows: [{path}]` and a why naming PyYAML. `why` holds
+the failures, the caps and the facts a read rests on: two 200 reads with nothing required give `none` with `why: []`,
+and a `none` whose rules read was the plan's 403 carries exactly that read's one line.
 """
 import argparse
 import importlib.util
@@ -141,6 +149,8 @@ STATUS_RE = re.compile(r"HTTP/\S+\s+(\d{3})\b")
 STRIP_SUFFIX_RE = re.compile(r"\s\([^()]*\)\Z")
 EXPR_RE = re.compile(r"\$\{\{.*?\}\}")
 NEXT_LINK_RE = re.compile(r'^link:.*rel="next"', re.I)
+PLAN_NO_RULESETS_RE = re.compile(r"Upgrade to GitHub Pro or make this repository public\b")
+GH_ERROR_RE = re.compile(r"gh: (.+) \(HTTP (\d{3})\)\s*\Z")
 
 
 class UsageError(Exception):
@@ -211,42 +221,61 @@ def gh_get(gh_bin, endpoint):
     return code, "\n".join(lines[body_at:]), None, headers
 
 
-PLAN_NO_RULESETS_RE = re.compile(r"^Upgrade to GitHub Pro or make this repository public\b")
-
-
-def _plan_has_no_rulesets(body):
-    """A 403 body whose message says the repo's plan offers no rulesets (a private repo on GitHub Free)."""
-    try:
-        data = json.loads(body)
-    except ValueError:
+def plan_has_no_rulesets(code, text):
+    """Whether a failed rules read is the plan's no-rulesets 403 (a private repo on GitHub Free): the one copy of the
+    wording, for gate(), merge-settings.py and merge-task.sh. `text` is a JSON error body, whose str `message` is read,
+    or gh's stderr, whose first non-blank line must be `gh: <message> (HTTP <code>)` (GH_ERROR_RE). With `code` None the
+    code is that line's; with both given they must agree. True only for a 403 whose message begins with the plan's
+    text: a non-JSON body holding it bare, another code, a JSON body with no str message, or the text after a prefix
+    is never the plan's 403."""
+    if not isinstance(text, str):
         return False
-    msg = data.get("message") if isinstance(data, dict) else None
-    return isinstance(msg, str) and bool(PLAN_NO_RULESETS_RE.match(msg))
+    msg = None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        msg = data.get("message")
+    elif data is None:
+        first = next((l.strip() for l in text.splitlines() if l.strip()), "")
+        m = GH_ERROR_RE.match(first)
+        if m is None:
+            return False
+        line_code = int(m.group(2))
+        if code is not None and code != line_code:
+            return False
+        code, msg = line_code, m.group(1)
+    return code == 403 and isinstance(msg, str) and bool(PLAN_NO_RULESETS_RE.match(msg))
 
 
-def _read(gh_bin, slug, kind, branch, why):
-    """One endpoint: (json | None, ok, next_page). `kind` is `branches` or `rules/branches`; a failure appends a why."""
-    label = "%s/%s" % (kind, branch)
+def _fetch(gh_bin, slug, kind, branch):
+    """One endpoint's raw answer: (code | None, body | None, error | None, next_page). `kind` is `branches` or
+    `rules/branches`; what the answer means is _parse's, and gate()'s for the plan's 403."""
     code, body, error, headers = gh_get(gh_bin, "repos/%s/%s/%s" % (slug, kind, quote(branch, safe="")))
+    return code, body, error, code == 200 and any(NEXT_LINK_RE.match(h) for h in headers)
+
+
+def _parse(kind, branch, code, body, error, why):
+    """One endpoint's answer read: (json | None, ok). A failure (no answer, a code other than 200, a 200 whose body is
+    not the endpoint's JSON shape) appends its why and gives (None, False)."""
+    label = "%s/%s" % (kind, branch)
     if code is None:
         why.append("%s: %s" % (label, error))
-        return None, False, False
-    if code == 403 and kind == "rules/branches" and _plan_has_no_rulesets(body):
-        why.append("%s: HTTP 403, rulesets are not on this repo's GitHub plan, so none can apply" % label)
-        return [], True, False
+        return None, False
     if code != 200:
         why.append("%s: HTTP %d" % (label, code))
-        return None, False, False
+        return None, False
     try:
         data = json.loads(body)
     except ValueError:
         why.append("%s: HTTP 200 but the body is not JSON" % label)
-        return None, False, False
+        return None, False
     want = dict if kind == "branches" else list
     if not isinstance(data, want):
         why.append("%s: HTTP 200 but the body is not a JSON %s" % (label, "object" if want is dict else "array"))
-        return None, False, False
-    return data, True, any(NEXT_LINK_RE.match(h) for h in headers)
+        return None, False
+    return data, True
 
 
 # ---- the required checks -----------------------------------------------------------------------------------------
@@ -726,8 +755,15 @@ def gate(repo, top, branch, rev, gh_bin):
         return done("unreadable")
     out["repo"] = slug
     required, unmatched = out["required"], out["unmatched"]
-    bdata, b_ok, _ = _read(gh_bin, slug, "branches", branch, why)
-    rdata, r_ok, more = _read(gh_bin, slug, "rules/branches", branch, why)
+    code, body, error, _ = _fetch(gh_bin, slug, "branches", branch)
+    bdata, b_ok = _parse("branches", branch, code, body, error, why)
+    code, body, error, more = _fetch(gh_bin, slug, "rules/branches", branch)
+    if plan_has_no_rulesets(code, body):
+        why.append("rules/branches/%s: HTTP 403, rulesets are not on this repo's GitHub plan, so none can apply"
+                   % branch)
+        rdata, r_ok, more = [], True, False
+    else:
+        rdata, r_ok = _parse("rules/branches", branch, code, body, error, why)
     full = _from_branch(bdata, branch, required, why) if b_ok else False
     if r_ok:
         _from_rules(rdata, required, unmatched)

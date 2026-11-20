@@ -257,6 +257,27 @@ ok "$rc" 4 "9b. the NON-check site: exit 4"
 has "$(reason)" "unreported-context: required check \"build\"" "9b. … naming build"; lacks "$(reason)" '"ci"' "9b. … and not ci"
 lacks "$out" "NON-check gate" "9b. … never the NON-check gate"
 
+# 9b-plan/prefix. The probe's own rules read (the gate stopped at `protected: true`), through gate_plan_403: the
+#     plan's 403 is an empty rules list, so 9b's exit 4; the plan's text after a prefix cannot tell: test 10's exit 1.
+for c in plan prefix; do
+  fresh; pair; mkpr 5 "$I" BLOCKED
+  rsc '{"strict": true, "checks": [{"context": "ci", "app_id": null}, {"context": "build", "app_id": 15368}]}'; green ci 1
+  cruns "$I" ci > "$MT_STATE/checkruns.$I"
+  case "$c" in
+    plan) echo 403-plan > "$MT_STATE/rules" ;;
+    prefix) echo 'gh: Note: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' \
+              > "$MT_STATE/err.rules" ;;
+  esac
+  run 5 "$I" "$B"
+  if [ "$c" = plan ]; then
+    ok "$rc" 4 "9b-plan. the probe reads the plan's 403 as no rulesets: exit 4"
+    has "$(reason)" "unreported-context: required check \"build\"" "9b-plan. … naming build"
+  else
+    ok "$rc|$(nmerge)" "1|0" "9b-$c. the probe cannot tell: today's exit 1"
+    has "$(printf '%s\n' "$out" | grep '^ERROR:' | tail -1)" "a NON-check gate is" "9b-$c. … the NON-check gate's text"
+  fi
+done
+
 # 9c. The Verify line's rename, end to end: the PR's own head renames job build to build-and-test while the rule
 #     requires build. merge-task sets it aside, the same stop is freed by one PATCH that replaces build (never removes
 #     it), and merge-task merges on the same pair.

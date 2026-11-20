@@ -570,9 +570,16 @@ for v in 404-notfound 404-branch 403-integration 403-rate noflag; do
   has "$(glog)" "pr checks" "25h. branch $v reads unknown: waits on the required checks"
   ok "$rc" 1 "25h. branch $v: exits 1"; has "$out" "NON-check gate" "25h. branch $v: NON-check gate"
 done
-# (h-rules) a rules read that is rate-limited or not found reads unknown, never none
-for v in 403-rate 404; do
-  fresh; pair; mkpr 5 "$I" BLOCKED; echo unprotected > "$MT_STATE/branch"; echo "$v" > "$MT_STATE/rules"
+# (h-rules) a rules read that is rate-limited, not found, or the plan's text after a prefix (gate_plan_403 anchors on
+# gh's message) reads unknown, never none
+for v in 403-rate 404 prefix; do
+  fresh; pair; mkpr 5 "$I" BLOCKED; echo unprotected > "$MT_STATE/branch"
+  if [ "$v" = prefix ]; then
+    echo 'gh: Note: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' \
+      > "$MT_STATE/err.rules"
+  else
+    echo "$v" > "$MT_STATE/rules"
+  fi
   run 5 "$I" "$B"
   has "$(glog)" "pr checks" "25h-rules. rules $v reads unknown: waits on the required checks"
   ok "$rc" 1 "25h-rules. rules $v: exits 1"; lacks "$out" "$SETTLE" "25h-rules. rules $v: never none"

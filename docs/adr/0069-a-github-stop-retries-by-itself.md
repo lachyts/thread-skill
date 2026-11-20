@@ -45,6 +45,13 @@ flight, could decide that merge. A BLOCKED or UNKNOWN entry keeps the wait as be
 in a BLOCKED flap never ends in the NON-check gate's exit 1. Decision 2, the last considered option and the
 Consequences carry the change.)*
 
+*(Amended 2026-11-20 by thread-skill-p39-18-merge-gate-plan-403-review-follow-ups: the rules read's plan 403 is read
+through merge-gate.py's `plan_has_no_rulesets`, the one copy of the wording schedule (ADR 0068) and merge-settings.py
+read too, at both of merge-task's rules reads (the required gate and the unreported-context probe). It reads gh's
+stderr line `gh: <message> (HTTP 403)` and holds only a message that begins `Upgrade to GitHub Pro or make this
+repository public`, so the old `rate limit` clause is subsumed and the plan's text after a prefix reads `unknown`.
+Decision 1 carries the change; its 2026-11-05 live reads stand as written.)*
+
 ## Context
 
 `chorus-rollout-2026-11-04` halted at 26/27 overnight on one task, `chorus-p96-12` (PR #632), until Lachy woke:
@@ -59,7 +66,7 @@ Nothing about the task was wrong, and no person's act was needed: a re-run once 
 
 1. **merge-task reads the default branch's required gate.** Off the CLEAN path, the state machine first reads whether the default branch can carry a required check (`required_gate`: `some`, `none` or `unknown`), at most once per run. It takes two whole-object reads, the branch percent-encoded whole, as merge-gate.py does (ADR 0068):
    - `branches/<b>`: 200 with `protected: true` is `some`, with no rules read; 200 with `protected: false` goes to the rules read; anything else is `unknown` (any 404 or 403 whatever its text, a 200 with no boolean `protected`, no answer within the read tries).
-   - `rules/branches/<b>?per_page=100`: a list of under 100 rules, each of a type that never requires a check (`creation`, `update`, `deletion`, `non_fast_forward`, `required_linear_history`, `required_signatures`, and `pull_request`, whose pending review the review gate catches first), is `none`; a list with any other type is `some`; a list of 100 or more, or no list, is `unknown`. A failed read whose stderr holds `Upgrade to GitHub Pro` and `HTTP 403`, and no `rate limit`, is `none`: the free plan's private repo can hold no ruleset. Every other failure is `unknown`: a 404, a primary or secondary rate limit, an integration's 403, a 5xx.
+   - `rules/branches/<b>?per_page=100`: a list of under 100 rules, each of a type that never requires a check (`creation`, `update`, `deletion`, `non_fast_forward`, `required_linear_history`, `required_signatures`, and `pull_request`, whose pending review the review gate catches first), is `none`; a list with any other type is `some`; a list of 100 or more, or no list, is `unknown`. A failed read that is the plan's no-rulesets 403 is `none`: the free plan's private repo can hold no ruleset. merge-gate.py's `plan_has_no_rulesets` reads it off gh's stderr line, `gh: <message> (HTTP 403)`, whose message begins `Upgrade to GitHub Pro or make this repository public` (amended 2026-11-20). Every other failure is `unknown`: a 404, a primary or secondary rate limit, an integration's 403, a 5xx.
 
    `none` is read only when two clean GitHub answers both deny any gate. The live reads of 2026-11-05 (read-only GETs, gh 2.43.1) set the endpoint: on `lachyts/chorus`, `branches/main` gives `protected: false` and `rules/branches/main` gives `gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)`. On `lachyts/thread-skill`, `branches/master/protection` gives `gh: Branch not protected (HTTP 404)`, yet `branches/master` gives `protected: true`, because a ruleset requires `make test (ubuntu-latest)` and `make test (macos-latest)`. A `/protection` 404 is therefore a false none on this very repo; `branches/<b>` needs only read access, so a non-admin's "Not Found" or "Must have admin rights" never arises on a readable branch.
 
