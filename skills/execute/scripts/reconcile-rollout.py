@@ -2176,12 +2176,14 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     fresh (exclusive create: one created meanwhile is appended to), a finished or archived one getting
                     a `-2`, `-3`; from its second line the follow-up reads `priority: high` with a `## The repo's to
                     fix` section; and one `flake` event per new line. A line already there writes nothing, so a
-                    re-reconcile or a replayed row is a no-op. One `flake:` line per entry follows the row's line. A
-                    malformed entry is a WARNING, skipped; `flakes` that is not a list is an ERROR (exit 1) and records
-                    none; absent or null records nothing (a lead-written row, a pre-p29-9 engine's). An integrate row
-                    reconciled with --no-verdict records none (a git-env trip inside its window voids its runs, Flakes
-                    included): one `<slug>: N Flake(s) not recorded: --no-verdict …` line instead. Nothing on
-                    --dry-run but the lines.
+                    re-reconcile or a replayed row is a no-op. One call's lines of one test case (a leading case id
+                    such as `8b.`, in one test file where the lines name one) fold into its first line's Flake
+                    (_fold_flakes, p49-5): a folded line writes nothing, its `flake:` line naming the test it folded
+                    into. One `flake:` line per entry follows the row's line. A malformed entry is a WARNING, skipped;
+                    `flakes` that is not a list is an ERROR (exit 1) and records none; absent or null records nothing
+                    (a lead-written row, a pre-p29-9 engine's). An integrate row reconciled with --no-verdict records
+                    none (a git-env trip inside its window voids its runs, Flakes included): one `<slug>: N Flake(s)
+                    not recorded: --no-verdict …` line instead. Nothing on --dry-run but the lines.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -11791,13 +11793,18 @@ def _review_verdict_events(args, rollout, slug, task, prior, ended, now):
 # first 10 hex of sha256(repo + "\n" + test). The follow-up is found by a glob of the Tasks root for a note that is not
 # finished; a finished or archived one gets a fresh `-2`, `-3`. At its second line it is priority high and the repo's to
 # fix. Two callers: reconcile (an engine row's `flakes`) and record-verify (the lead's Integration verify and RACE
-# re-verify, from lead-integrate.py verify --diff-base's <out>.flake.json).
+# re-verify, from lead-integrate.py verify --diff-base's <out>.flake.json). One call's failing lines of one test case
+# (one case id, in one test file where the lines name one: _flake_case) are one Flake, keyed by the first of them
+# (_fold_flakes, p49-5): one failing case prints its assertion line and, inside it, a self-test's summary line.
 FLAKE_LOG_SECTION = "## Flake log"
 FLAKE_TWICE_SECTION = "## The repo's to fix"
 FLAKE_TEST_MAX = 300
 FLAKE_SHA_RE = re.compile(r"[0-9a-f]{7,40}\Z")
 FLAKE_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 ORIGIN_SLUG_RE = re.compile(r"([^/:\s]+/[^/:\s]+?)(?:\.git)?/*$")
+# A test case's id at the head of a failing line: `8b.`, `C1:`, `R7:`, `3.` and whitespace, after one optional file token
+# (`tests/x.test.sh:` or `::` and whitespace). A pytest `path::name`, a bare test file or a plain node name carries none.
+FLAKE_CASE_RE = re.compile(r"(?:(?P<file>[^\s:]+\.[A-Za-z0-9]+)::?\s+)?(?P<case>[A-Za-z]{0,3}\d+[a-z]?)[.:]\s")
 
 
 def _flake_entry(e):
@@ -11812,6 +11819,31 @@ def _flake_entry(e):
     if not test or len(test) > FLAKE_TEST_MAX or FLAKE_CTRL_RE.search(test) or not FLAKE_SHA_RE.match(sha):
         return None
     return test, sha
+
+
+def _flake_case(test):
+    """(file or None, case id) for a failing line that names a test case (FLAKE_CASE_RE), else None."""
+    m = FLAKE_CASE_RE.match(test)
+    return (m.group("file"), m.group("case")) if m else None
+
+
+def _fold_flakes(entries):
+    """One call's well-formed (test, sha) pairs, in order, as [(test, sha, folded)]: each line that names a test case
+    (_flake_case) takes the first test seen in this call with the same (file, case), the file matched exactly and None
+    only by None; `folded` the other lines it stands for. Deduped by (test, sha). A line naming no case is its own test.
+    Never reaches across calls: an open follow-up for another line of the case is not merged."""
+    first, out, at = {}, [], {}
+    for test, sha in entries:
+        c = _flake_case(test)
+        kept = test if c is None else first.setdefault(c, test)
+        k = (kept, sha)
+        if k not in at:
+            at[k] = len(out)
+            out.append((kept, sha, []))
+        folded = out[at[k]][2]
+        if test != kept and test not in folded:
+            folded.append(test)
+    return out
 
 
 def _code(text):
@@ -11913,59 +11945,73 @@ def _rollout_root(tasks_dir, rollout, rollout_path=None):
 
 def _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir, rollout_path=None):
     """Log each Flake (ADR 0050): one `## Flake log` line on its follow-up and, for each new line, one `flake` event.
-    `flakes` is a list of {test, sha}; a malformed entry is a warning and skipped (_flake_entry). A line keyed (task,
-    sha, site) that is already there writes nothing, so a re-run is a no-op. --dry-run writes nothing. Returns (stdout
-    lines, warnings, errors): an error is a follow-up that could not be read or written."""
+    `flakes` is a list of {test, sha}; a malformed entry is a warning and skipped (_flake_entry). The rest fold by test
+    case (_fold_flakes): a folded line writes nothing and prints one line naming the test it folded into. A line keyed
+    (task, sha, site) that is already there writes nothing, so a re-run is a no-op. --dry-run writes nothing. Returns
+    (stdout lines, warnings, errors): an error is a follow-up that could not be read or written."""
     out, warns, errs = [], [], []
     m = PHASED_STEM_RE.match(slug)
     project = m.group("slug") if m else slug
     repo = None
     now = _now(args)
     dry = getattr(args, "dry_run", False)
+    entries = []
     for i, raw in enumerate(flakes, 1):
         e = _flake_entry(raw)
         if e is None:
             warns.append(f"{slug}: flakes entry {i} is malformed (test a one-line string of at most {FLAKE_TEST_MAX} "
                          "characters, sha 7-40 hex); skipped")
             continue
-        test, sha = e
+        entries.append(e)
+    for test, sha, folded in _fold_flakes(entries):
         if repo is None:
             repo = _repo_identity(_rollout_root(tasks_dir, rollout, rollout_path), project)
-        h = _flake_key(repo, test)
-        key = f"[[{slug}]] at {sha[:12]} ({site})"
-        line = f"- {_stamp(now)} {key}"
-        twice = _flake_twice_text(test, repo)
-        path, found = _flake_followup(tasks_dir, slug, h)
-        head = f"flake: {_code(test)} in {repo} at {sha[:12]} ([[{slug}]], {site})"
-        if dry:
-            out.append(f"{head} -> [[{path.stem}]]" + ("" if found else " (a new follow-up)") + " (dry-run)")
-            continue
-        added, created = False, False
-        try:
-            if not found:
-                try:
-                    _write_flake_followup(path, note, test, repo, h, line, now)
-                    added = created = True
-                except FileExistsError:
-                    found = True   # another writer filed it meanwhile: append to theirs
-            if not created:
-                fu = Note(path)
-                added = fu.apply(_flake_add, key, line, twice)
-                fu.save()
-                count = _flake_count(fu)
-            else:
-                count = 1
-        except (OSError, ValueError) as ex:
-            errs.append(f"{slug}: the Flake follow-up {path} could not be written: {ex}; this Flake is not logged")
-            continue
-        if not added:
-            out.append(f"{head} -> [[{path.stem}]] already logged [no-change]")
-            continue
-        _event(rollout, "flake", slug, {"test": test, "repo": repo, "sha": sha, "site": site, "followup": path.stem,
-                                        "count": count}, args)
-        tail = " (filed)" if created else (f" (logged {count} times: the repo's to fix)" if count >= 2 else "")
-        out.append(f"{head} -> [[{path.stem}]]{tail} [written]")
+        line = _record_flake(args, rollout, slug, note, test, sha, site, tasks_dir, repo, now, dry, errs)
+        if line is not None:
+            out.append(line)
+        for f in folded:
+            fc = _flake_case(f)
+            case = fc[1] if fc[0] is None else f"{fc[1]} in {fc[0]}"
+            out.append(f"flake: {_code(f)} in {repo} at {sha[:12]} ([[{slug}]], {site}) folded into {_code(test)} "
+                       f"(one test case, {case}) " + ("(dry-run)" if dry else "[no-change]"))
     return out, warns, errs
+
+
+def _record_flake(args, rollout, slug, note, test, sha, site, tasks_dir, repo, now, dry, errs):
+    """_record_flakes' one test at one sha: its follow-up's Flake log line and, when new, its `flake` event. Returns
+    its stdout line, or None when the follow-up could not be written (one line in errs)."""
+    h = _flake_key(repo, test)
+    key = f"[[{slug}]] at {sha[:12]} ({site})"
+    line = f"- {_stamp(now)} {key}"
+    twice = _flake_twice_text(test, repo)
+    path, found = _flake_followup(tasks_dir, slug, h)
+    head = f"flake: {_code(test)} in {repo} at {sha[:12]} ([[{slug}]], {site})"
+    if dry:
+        return f"{head} -> [[{path.stem}]]" + ("" if found else " (a new follow-up)") + " (dry-run)"
+    added, created = False, False
+    try:
+        if not found:
+            try:
+                _write_flake_followup(path, note, test, repo, h, line, now)
+                added = created = True
+            except FileExistsError:
+                found = True   # another writer filed it meanwhile: append to theirs
+        if not created:
+            fu = Note(path)
+            added = fu.apply(_flake_add, key, line, twice)
+            fu.save()
+            count = _flake_count(fu)
+        else:
+            count = 1
+    except (OSError, ValueError) as ex:
+        errs.append(f"{slug}: the Flake follow-up {path} could not be written: {ex}; this Flake is not logged")
+        return None
+    if not added:
+        return f"{head} -> [[{path.stem}]] already logged [no-change]"
+    _event(rollout, "flake", slug, {"test": test, "repo": repo, "sha": sha, "site": site, "followup": path.stem,
+                                    "count": count}, args)
+    tail = " (filed)" if created else (f" (logged {count} times: the repo's to fix)" if count >= 2 else "")
+    return f"{head} -> [[{path.stem}]]{tail} [written]"
 
 
 def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):

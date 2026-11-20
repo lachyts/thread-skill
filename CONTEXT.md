@@ -1073,12 +1073,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   comes first (any red again is red), then exactly one confirming full run.
   Each Flake is a `flake` Run-record event and a line in the `## Flake log` of
   one follow-up per (repo, test); a test logged as a Flake twice is the repo's
-  to fix. Never a known baseline failure (schedule § 2.6: a test already
-  red on a clean `main`, which execute's green criterion already allows
-  for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs, nor a
-  red default-branch `full suite` run that passes on its one re-run (a
-  `rerun-pass` master-run line, p54-7). _Avoid_: flaky failure, quarantined
-  test.
+  to fix. One call's failing lines of one test case (one case id, in one test
+  file where the lines name one) are one Flake. Never a known baseline
+  failure (schedule § 2.6: a test already red on a clean `main`, which
+  execute's green criterion already allows for), nor a remote CI step
+  merge-task's `infra_flake_rerun` re-runs, nor a red default-branch `full
+  suite` run that passes on its one re-run (a `rerun-pass` master-run line,
+  p54-7). _Avoid_: flaky failure, quarantined test.
 - **Named re-run** — the Flake check's first step: only a red's failing tests,
   re-run alone by name on the same tree before the one confirming full run
   (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
