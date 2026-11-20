@@ -16,7 +16,10 @@
 # summed), in the four macOS shard jobs of each of master's three newest green full-suite.yml runs, each file's median
 # of its three; a file under 0.1 s is written as 0.1. Source (2026-11-20, p49-3): runs 44682208640 (872a8bc),
 # 44654220829 (bde9e71) and 44638943780 (d5f9d11). Local rows ran 1.0x to 3.9x under CI's file by file, so they could
-# not balance CI's shards, where the node phase's time is spent.
+# not balance CI's shards, where the node phase's time is spent. A file split after those runs is read from the same
+# jobs: each part's row is the median of its tests' top-level duration_ms summed, each test found by its name under
+# `# Subtest:` in the TAP of the job that ran the unsplit file (in each run the parts summed to the file's block value,
+# within 0.1 s). p49-3 split tests/reflect-weekly.test.mjs in four, and reflect-attention and reflect-ledger in two each.
 # Units: the shell rows are local seconds and the node rows macOS CI seconds. They never meet: shard.py splits each kind
 # on its own, run.sh passes shard.py --order only node files, and suite_bounds only shell entries.
 # Regenerate: run `make test` twice and take each suite's median from those lines, summing the two self-tests; take each
@@ -234,16 +237,21 @@
 11.2	tests/next-action.test.mjs
 0.1	tests/pinned-tree.test.mjs
 51.7	tests/reflect-arms.test.mjs
-347.7	tests/reflect-attention.test.mjs
+158.5	tests/reflect-attention-watch.test.mjs
+197.7	tests/reflect-attention.test.mjs
 95.5	tests/reflect-close-score.test.mjs
 20	tests/reflect-due.test.mjs
 55.3	tests/reflect-escapes.test.mjs
 132.8	tests/reflect-grades.test.mjs
-339.6	tests/reflect-ledger.test.mjs
+143	tests/reflect-ledger-audit.test.mjs
+192	tests/reflect-ledger.test.mjs
 153.2	tests/reflect-score.test.mjs
 29.6	tests/reflect-serial-score.test.mjs
 54.5	tests/reflect-tune.test.mjs
-682.2	tests/reflect-weekly.test.mjs
+187.5	tests/reflect-weekly-decide.test.mjs
+101.4	tests/reflect-weekly-verify.test.mjs
+181.7	tests/reflect-weekly-watch.test.mjs
+201.3	tests/reflect-weekly.test.mjs
 1.1	tests/resolve-day.test.mjs
 24.7	tests/resolve-target.test.mjs
 35.8	tests/rollout-settings.test.mjs

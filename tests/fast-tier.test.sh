@@ -586,7 +586,11 @@ r1=$(python3 "$SEL" select --paths skills/reflect/scripts/attention.py)
 ok "$(holds "${r1:0:4}" FULL y "$(holds "$r1" tests/reflect-weekly.test.mjs y "$(echo "$r1" | head -1)")")" y \
   "R1: attention.py is FULL or reaches tests/reflect-weekly.test.mjs (reflect.py loads it by path)"
 r2=$(python3 "$SEL" select --ignore-full --paths skills/reflect/scripts/attention.py)
-has "$r2" "tests/reflect-weekly.test.mjs" "R2: with --ignore-full, attention.py reaches tests/reflect-weekly.test.mjs through reflect.py"
+# p49-3 split the weekly suite in four, and each part's Reach line names reflect.py, so each is reached
+for t in tests/reflect-weekly.test.mjs tests/reflect-weekly-watch.test.mjs tests/reflect-weekly-decide.test.mjs \
+  tests/reflect-weekly-verify.test.mjs; do
+  has "$r2" "$t" "R2: with --ignore-full, attention.py reaches $t through reflect.py (each part names it)"
+done
 # R3, re-judged in p45-4 (ADR 0078 d2) and p54-4: land-carrier.py runs merge-task.sh's classifier (--classify-steps), so
 # a merge-task.sh change reaches land-carrier.py, and the reach stops there, one carrier deep (land.sh, which runs
 # land-carrier.py's marker verb, and rollout-settings.py, which runs land.sh, are no longer reached): FAST, with the
