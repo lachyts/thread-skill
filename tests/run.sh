@@ -91,8 +91,9 @@
 # shares run.sh's process group any more, a TERM, INT or HUP to run.sh ends every live suite's group before it exits:
 # TERM, then KILL after SUITE_STOP_GRACE (5 s, under a verify slot guard's 10 s). Node bounds each test file at 1200 s
 # (`--test-timeout`, which bounds a whole file as well as each test, from the file's own start: node 22 and 23.9 cancel
-# a file of three 1.5 s tests at a 2 s timeout), 2.3x the slowest file on macOS CI (tests/reflect-weekly.test.mjs,
-# 153 s locally at the cap of 4, up to about 512 s there; 600 s left it 1.2x). node-run.mjs takes the CLI's
+# a file of three 1.5 s tests at a 2 s timeout), a loose liveness bound about 6x the slowest file on macOS CI
+# (tests/reflect-weekly.test.mjs, 201.3 s, its median there and the largest .mjs row of tests/shard-weights.tsv, since
+# p49-3 split the suite in four); tests/test-jobs.test.sh holds it at least 1.5x that row. node-run.mjs takes the CLI's
 # --test-concurrency and --test-timeout and hands them to node:test's run(), the runner `node --test` uses.
 set -uo pipefail
 cd "$(dirname "$0")/.."

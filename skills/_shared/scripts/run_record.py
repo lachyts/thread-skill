@@ -1165,7 +1165,7 @@ MAX_TL_ROLLOUTS = 8        # contributors kept per class on a time-lost line
 # An audit line at its caps (16 entries and 8 gaps, every what, evidence and why at full length in plain ASCII, 64-character
 # rollout slugs, a 63-character host) is 14,150 bytes, under MAX_LINE; 24 and 10 were 19,674. Text JSON escapes (a quote,
 # a backslash, a non-ASCII character as \uXXXX) can still overflow it: ledger.py's audit_line() measures the line
-# (line_bytes) and refuses it in its own words. tests/reflect-ledger.test.mjs pins the maximal line through check().
+# (line_bytes) and refuses it in its own words. tests/reflect-ledger-audit.test.mjs pins the maximal line through check().
 MAX_AUDIT_ENTRIES = 16
 MAX_AUDIT_GAPS = 8
 MAX_TL_LIST = 16           # a baseline's ranges and cites

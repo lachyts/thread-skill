@@ -6,8 +6,9 @@
 // - a shell suite (or tests/lib helper, or tests/run.sh) that invokes reconcile-rollout.py, merge-task.sh or
 //   lead-integrate.py, by a variable holding its path or by `python3`/`bash` on it, exports THREAD_EVENTS_DIR
 //   itself or sources tests/lib/merge-task-env.sh, which exports it;
-// - a node test that binds one of those scripts' paths with path.join and spawns or execFiles python3 passes
-//   THREAD_EVENTS_DIR as an env key.
+// - a node test or tests/lib/*.mjs helper that binds one of those scripts' paths with path.join and spawns or execFiles
+//   python3 passes THREAD_EVENTS_DIR as an env key. A suite split into parts keeps its binds, the spawners that run
+//   them and their env together in its tests/lib helper (p49-3), so the helper is read as one file.
 // A heuristic (a prose mention never counts as an invocation); tests/run.sh's own export is the backstop for
 // `make test`. p15-2 wired the emitters in (git-env-canary.py records its hold too, so it joins the names), and
 // added one knob: each export may read `${THREAD_TEST_EVENTS_DIR:-<its temp>/events}` (node:
@@ -61,7 +62,7 @@ const shellFiles = () => [
   ...walk('skills/execute/tests').filter((f) => f.endsWith('.test.sh')),
 ]
 const nodeFiles = () => [
-  ...walk('tests').filter((f) => /^tests\/(?:contracts\/)?[^/]+\.test\.mjs$/.test(f)),
+  ...walk('tests').filter((f) => /^tests\/(?:contracts\/)?[^/]+\.test\.mjs$/.test(f) || /^tests\/lib\/[^/]+\.mjs$/.test(f)),
   ...walk('skills/execute/tests').filter((f) => f.endsWith('.test.mjs')),
 ].filter((f) => f !== SELF && !CONTROL_ONLY.includes(f))
 
@@ -81,7 +82,8 @@ test('every shell suite that invokes an engine script points THREAD_EVENTS_DIR a
 test('every node test that spawns an engine script passes THREAD_EVENTS_DIR in its env', () => {
   const spawning = nodeFiles().filter((f) => nodeSpawns(read(f)))
   for (const f of ['tests/integration-marker-roundtrip.test.mjs', 'tests/contracts/status-repair-queue.test.mjs', 'tests/ladder.test.mjs',
-    'tests/reflect-tune.test.mjs', 'tests/reflect-close-score.test.mjs', 'tests/reflect-weekly.test.mjs', 'tests/estate-dispatch.test.mjs',
+    'tests/reflect-tune.test.mjs', 'tests/reflect-close-score.test.mjs', 'tests/lib/reflect-weekly-fixtures.mjs',
+    'tests/lib/reflect-attention-fixtures.mjs', 'tests/lib/reflect-ledger-fixtures.mjs', 'tests/estate-dispatch.test.mjs',
     'tests/contracts/note-overlap-opener.test.mjs']) {
     assert.ok(spawning.includes(f), `${f} is seen as spawning an engine script`)
   }

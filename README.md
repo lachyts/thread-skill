@@ -544,19 +544,20 @@ it runs:
   partial readings), `tests/reflect-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and
   writes nothing on a refusal or a failed write), `tests/reflect-close-score.test.mjs` (`close-score.py` end to end:
   one close line per rollout, the re-run, nothing ran, failures, step timeouts and the overall deadline, signals and
-  the GIT_* scrub), `tests/reflect-weekly.test.mjs` (`reflect.py`'s weekly reading against throwaway records,
+  the GIT_* scrub), `tests/reflect-weekly.test.mjs` with `-watch`, `-decide` and `-verify` beside it, one suite in four
+  files sharing `tests/lib/reflect-weekly-fixtures.mjs` (`reflect.py`'s weekly reading against throwaway records,
   vaults and repos: the span and its friction, close lines and the Escapes sweep, one line per Watch and per Tuning,
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
   `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due from Thursday 00:00 and not the Wednesday
   before, after a Friday, Thursday or Wednesday close, three quiet Reflections to the fortnightly cadence and a non-quiet
-  one back, and the cadence `close` writes), `tests/reflect-ledger.test.mjs` (the Time-lost ledger: fixture records
-  summed by class and cause, the waits on Lachy as stalls, the trend from persisted rows, the baseline, the ledger's
-  Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the decision task and
-  never against `quiet`), `tests/reflect-attention.test.mjs` (the attention ledger: fixture transcripts read once per
-  question with each outcome and the hours held, `tally`, the owners file's refusals and its `unknown` remainder, Review
-  trails keyed by landing, branch or path run with their rounds and docs-only diffs, waits to start, both circling
-  rules with a reading's own Sessions left out, and their Watches counted in readings through decide, close and the
-  cadence),
+  one back, and the cadence `close` writes), `tests/reflect-ledger.test.mjs` and `-audit` (the Time-lost ledger:
+  fixture records summed by class and cause, the waits on Lachy as stalls, the trend from persisted rows, the baseline,
+  the ledger's Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the
+  decision task and never against `quiet`), `tests/reflect-attention.test.mjs` and `-watch` (the attention ledger:
+  fixture transcripts read once per question with each outcome and the hours held, `tally`, the owners file's refusals
+  and its `unknown` remainder, Review trails keyed by landing, branch or path run with their rounds and docs-only
+  diffs, waits to start, both circling rules with a reading's own Sessions left out, and their Watches counted in
+  readings through decide, close and the cadence),
   `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
   next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
   denominator, window against all, and Slot hours per size),
