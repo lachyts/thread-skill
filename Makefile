@@ -62,7 +62,7 @@ release-check:
 	[ -z "$$f" ] || { printf '%s\n' "FAIL - evals/results/ holds $$(printf '%s\n' "$$f" | wc -l | tr -d " ") file(s) of make evals output: record anything you need in docs/evals/ (or move evals/results out of the tree), then rm -rf evals/results and re-run this check. It holds:"; \
 	  printf '%s\n' "$$f" | sed "s|^evals/results/*||; s|/.*||" | LC_ALL=C sort -u | sed "s|^|  evals/results/|"; \
 	  printf '%s\n' "If it was there during the plugin update, the cache copied it too and the stray check will name those files. A same-version update never refreshes the cache, so delete that copy directly: rm -rf \"$(CACHE)/<version>/evals/results\""; exit 1; }; \
-	o=$$(node --test --test-name-pattern='same version' tests/contracts/manifest.test.mjs 2>&1) || { printf '%s\n' "FAIL - manifest contract (same version) failed:" "$$o"; exit 1; }; \
+	o=$$(node --test --test-reporter=spec --test-name-pattern='same version' tests/contracts/manifest.test.mjs 2>&1) || { printf '%s\n' "FAIL - manifest contract (same version) failed:" "$$o"; exit 1; }; \
 	v=$$(node -p 'require("./.claude-plugin/plugin.json").version') || exit 1; \
 	c="$(CACHE)/$$v"; \
 	[ -d "$$c" ] || { printf '%s\n' "FAIL - no $$c (run the plugin update)"; exit 1; }; \

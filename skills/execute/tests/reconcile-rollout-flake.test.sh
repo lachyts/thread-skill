@@ -19,6 +19,9 @@
 #   R10 a test id holding ]], backticks or | is written inside a code span.
 #   R11 _failing_ids reads the last pass's first run (the Heat hold's re-queue, p31-4): a heat-stopped pass's output and
 #       one before a Flake check's re-runs are dropped, the named re-run and the confirming run are never read.
+#   R12 tests/lib/node-run.mjs's own spec output (p49-4: it pins the reporter, so CI and the Mac print alike), read end
+#       to end: a failing subtest, its parent, a failing top-level test and a plain script's exit are the ids; spec's
+#       `✖ failing tests:` summary header never is, and no TAP is printed.
 # Temp vault and repo only; no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -270,6 +273,23 @@ printf '%s\n' '== verifier: make test' 'FAILED tests/a.py::t1 - hot' 'verify: he
 ok "$(fids "$TMP/r11.log")" '["tests/c.py::t3","tests/c.py::t4"]' "R11: _failing_ids reads only the last pass's first run"
 printf '%s\n' '== env_bootstrap: b' 'FAILED tests/z.py::t0' '== env_bootstrap rc 0' '== verifier: make test' 'FAILED tests/c.py::t3 - x' > "$TMP/r11b.log"
 ok "$(fids "$TMP/r11b.log")" '["tests/c.py::t3"]' "R11: … never the env_bootstrap's lines, and a run with no rc line (a deadline) is read to the end"
+
+# ---- R12 -----------------------------------------------------------------------------------------------------
+# A real node-run.mjs run (node's own bytes, so it follows the node line it runs on) at concurrency 1, in event order.
+mkdir -p "$TMP/nr/tests"
+cat > "$TMP/nr/tests/x.test.mjs" <<'JS'
+import { test } from 'node:test'
+test('passes', () => {})
+test('outer', async (t) => { await t.test('inner fails', () => { throw new Error('x') }) })
+test('top fails', () => { throw new Error('y') })
+JS
+printf 'process.exit(3)\n' > "$TMP/nr/tests/plain.test.mjs"
+{ echo '== verifier: make test'
+  (cd "$TMP/nr" && node "$HERE/../../../tests/lib/node-run.mjs" --test-concurrency=1 tests/x.test.mjs tests/plain.test.mjs 2>&1)
+  echo '== verifier rc 1'; } > "$TMP/r12.log"
+ok "$(fids "$TMP/r12.log")" '["inner fails","outer","top fails","tests/plain.test.mjs"]' "R12: node-run.mjs's spec output reads as its four failing ids"
+hasnt "$(fids "$TMP/r12.log")" 'failing tests:' "R12: … never spec's \`✖ failing tests:\` summary header"
+hasnt "$(cat "$TMP/r12.log")" 'TAP version' "R12: … and node-run.mjs prints spec, never TAP (the reporter pin)"
 
 echo; [ "$fail" -eq 0 ] && echo "reconcile-rollout-flake: ALL PASS" || echo "reconcile-rollout-flake: SOME FAILED"
 exit "$fail"

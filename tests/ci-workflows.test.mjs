@@ -22,6 +22,8 @@
 // - W7: both workflows read only at the workflow level, no other job holds a write permission, and full-suite.yml's
 //   runs coalesce in one workflow-level concurrency group, keyed by the branch alone (a group per commit or per run
 //   never coalesces), that never cancels a run in flight (Decided for you 4).
+// - W9 (p49-4): every actions/setup-node step in every workflow pins node-version NODE_LINE (24 LTS), and each
+//   workflow's shard job has one, so CI runs one node line (tests/lib/node-run.mjs pins the spec reporter).
 // - G1: that script, run as GitHub's `shell: bash` runs it, against a fixture origin (a bare repo, the run's checkout
 //   and a second clone for other merges): it creates the ref, fetches master and the ref before every check (so a
 //   force-push that took the run's commit off master during a failed push stops the next one), never moves the ref
@@ -281,6 +283,22 @@ test('W7: only green-tip writes, and full-suite.yml\'s runs coalesce without can
   assert.equal(c['cancel-in-progress'], false, 'a run in flight is never cancelled')
   for (const [id, job] of Object.entries(parsed[FULL].jobs)) {
     assert.equal(job.concurrency, undefined, `full-suite.yml job ${id} has no concurrency of its own`)
+  }
+})
+
+// NODE_LINE: the node major every workflow's setup-node pins (W9); a pinned major, never `lts/*`, so it never moves
+// silently. `--test-rerun-failures` needs 24.7, which `24` resolves to.
+const NODE_LINE = '24'
+
+test('W9: every setup-node step pins node 24, and each workflow\'s shard job has one', () => {
+  for (const f of files) {
+    for (const [id, job] of Object.entries(parsed[f].jobs)) {
+      const nodes = steps(job).filter((s) => typeof s.uses === 'string' && s.uses.startsWith('actions/setup-node@'))
+      if (id === 'shard') assert.ok(nodes.length > 0, `${f} job shard sets up node`)
+      for (const s of nodes) {
+        assert.equal(String(s.with?.['node-version']), NODE_LINE, `${f} job ${id}'s setup-node pins node ${NODE_LINE}`)
+      }
+    }
   }
 })
 

@@ -62,9 +62,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      # Node 24 LTS (p49-4), as test.yml's setup-node (its comment says why).
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       # next-action.py reads frontmatter with PyYAML; neither runner image guarantees it (test.yml says why).
       - uses: actions/setup-python@v6
         with:
