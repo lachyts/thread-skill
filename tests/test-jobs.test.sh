@@ -137,7 +137,8 @@ has "$run" 'node tests/lib/node-run.mjs --test-concurrency="$max_jobs" --test-ti
 # ---- the real bounds clear macOS CI: PR #373's first CI run (factor 3) killed tests/unfinished-rollout.test.sh at 336 s
 # and tests/leg.test.sh at 1581 s, both healthy. The slowest passing macos-latest times seen, 19 jobs (PR full runs and
 # master's shards, 2026-11-10 to 11), each needing a bound at least 1.5x it from the real tests/shard-weights.tsv; node's
-# --test-timeout bounds a whole file (tests/reflect-weekly.test.mjs, about 512 s there, its tests' duration_ms summed).
+# --test-timeout bounds a whole file (the largest .mjs row of tests/shard-weights.tsv, macOS CI seconds since p49-3,
+# checked below).
 # Six rows are the slowest passes in master's full-suite.yml macOS shards from 2026-11-16T15:00Z (every run after the
 # p54-9 split) to 2026-11-19, 91 jobs with a runner (three jobs of run 44233636618's attempt 2, copies of its attempt
 # 1's with byte-identical logs, left out): tests/leg.test.sh's 346 s is job 133466978593 (run 43915096074),
@@ -181,9 +182,29 @@ while read -r t m; do
   [ "$((${b:-0} * 2))" -ge "$((m * 3))" ] || bad="$bad $t=${b:-none}<1.5x$m"
 done <<< "$ci_max"
 ok "${bad# }" "" "run.sh: each suite's bound from the real weights is at least 1.5x its slowest macOS CI time (a pass, or a cut run's estimate)"
+# The node rows of the real tests/shard-weights.tsv (p49-3): macOS CI seconds per file (its header holds the source).
+# node_n rows, node_sum their seconds, node_max the largest row and node_slowest its file (a tie goes to the first path,
+# as shard.py --order breaks it). The --test-timeout check, the first-file check and the long-pole guard read them.
+read -r node_n node_sum node_max node_slowest < <(LC_ALL=C awk -F'\t' '!/^#/ && NF == 2 && $2 ~ /\.mjs$/ {
+  n++; s += $1; if (n == 1 || $1 + 0 > m + 0 || ($1 + 0 == m + 0 && $2 < f)) { m = $1 + 0; f = $2 } }
+  END { printf "%d %s %s %s\n", n, s + 0, m + 0, (n ? f : "-") }' tests/shard-weights.tsv)
+ok "$([ "${node_n:-0}" -gt 0 ] && echo ok || echo "no .mjs row")" ok "tests/shard-weights.tsv holds node rows, which the checks below read"
 nt=$(grep -o 'test-timeout=[0-9]*' tests/run.sh | head -1); nt=${nt#test-timeout=}
-ok "$([ "${nt:-0}" -ge $((512 * 1500)) ] && echo ok || echo "${nt:-none} ms")" ok \
-  "run.sh: node's --test-timeout is at least 1.5x the slowest node file's macOS CI time (512 s)"
+ok "$(awk -v nt="${nt:-0}" -v m="${node_max:-0}" 'BEGIN { print (nt + 0 >= m * 1500) ? "ok" : nt " ms" }')" ok \
+  "run.sh: node's --test-timeout is at least 1.5x the slowest node file's macOS CI seconds (the largest .mjs row of tests/shard-weights.tsv, $node_max s)"
+# The long pole (p49-3): each of full-suite.yml's shards runs THREAD_TEST_JOBS node files at a time, so its node phase
+# lasts at least its slowest file, however the split balances the sums. That file stays within 1.5x a fair slot, the
+# node seconds over shards x jobs, or no split can bring the shards' node phases within 1.5x of each other: past it,
+# split the file (p49-3 split reflect-weekly, reflect-attention and reflect-ledger). tests/ci-workflows.test.mjs W4 pins
+# both numbers: the run line's N against the shard matrix, and the shard step's THREAD_TEST_JOBS.
+shards=$(grep -oE -- '--shard \$\{\{ matrix\.shard \}\}/[0-9]+' .github/workflows/full-suite.yml | head -1 | sed 's|.*/||')
+jobs=$(grep -oE 'THREAD_TEST_JOBS: "[0-9]+"' .github/workflows/full-suite.yml | head -1 | tr -dc 0-9)
+pole=$(awk -v m="${node_max:-0}" -v s="${node_sum:-0}" -v k="${shards:-0}" -v j="${jobs:-0}" 'BEGIN {
+  if (k < 1 || j < 1) { print "no --shard .../N or THREAD_TEST_JOBS in full-suite.yml"; exit }
+  b = 1.5 * s / (k * j)
+  if (m <= b) print "ok"; else printf "%s s > %.1f s, 1.5x %s s over %d shards x %d jobs\n", m, b, s, k, j }')
+ok "$pole" ok \
+  "full-suite.yml: the slowest node file ($node_slowest, $node_max s) is within 1.5x a fair slot of node's seconds over ${shards:-?} shards x ${jobs:-?} jobs"
 has "$run" 'flat=$(flat_bound) || {' "run.sh: a bad THREAD_SUITE_BOUND stops the run"
 ok "$(awk '/^spawn\(\) \{/{on=1} on && /set -m; "\$@"/{a=1} on && /watch_group "\$pid" "\$bound"/{b=1} on && /^\}/{exit} END{print (a && b) ? "y" : "n"}' tests/run.sh)" y \
   "run.sh: spawn() runs each suite as a process group of its own, watched by watch_group"
@@ -214,7 +235,7 @@ ok "$(grep -c THREAD_SKIP_SLOW .github/workflows/full-suite.yml)" 0 "master's fu
 has "$run" 'ordered=$(printf '"'"'%s\n'"'"' "${node_tests[@]}" | python3 tests/lib/shard.py --order)' \
   "run.sh: node's files are ordered by shard.py --order"
 first=$(printf '%s\n' skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs | python3 tests/lib/shard.py --order | head -1)
-ok "$first" tests/reflect-weekly.test.mjs "run.sh: from the real weights, node's first file is tests/reflect-weekly.test.mjs, the slowest"
+ok "$first" "$node_slowest" "run.sh: from the real weights, node's first file is the slowest, the largest .mjs row ($node_slowest)"
 ok "$(ls skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs | grep -c '[[:space:]]')" 0 \
   "no node test path holds whitespace (run.sh word-splits shard.py's order)"
 
