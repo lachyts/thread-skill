@@ -45,9 +45,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # Node 24 LTS (p49-4): tests/lib/node-run.mjs pins the spec reporter, so CI and the Mac print alike;
+      # `--test-rerun-failures` needs 24.7, which `24` resolves to. tests/ci-workflows.test.mjs W9 holds the line.
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       # next-action.py reads frontmatter with PyYAML; neither runner image guarantees it. setup-python
       # gives a pip that may install (the images' system pythons are externally managed).
       - uses: actions/setup-python@v6

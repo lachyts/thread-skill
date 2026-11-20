@@ -5,11 +5,11 @@
 // Why not `node --test` itself: the CLI treats its arguments as globs and sorts what they match (node 22 and 23), so
 // a file list passed longest-first still starts in path order, and tests/reflect-weekly.test.mjs, the slowest file,
 // started near the end. This runs the same runner through node:test's `run()`, whose `files` keep their order, with
-// the CLI's own two flags and its default reporter (spec on node 23 and later, and on a terminal; tap otherwise, as
-// node 22 on CI), so the run's output reads as the CLI's did. The exit is the CLI's too: 1 when a `test:summary` is
-// not a success (a failed or cancelled test, a file that fails to load or exits non-zero; a failing `todo` test is
-// neither, so it passes), and 1 when the run ends with no summary for the whole run, so a runner that stops short is
-// never a pass.
+// the CLI's own two flags. The reporter is pinned to spec on every node line and stream (p49-4), so a CI log and a
+// Mac run read alike, and the execute engine's readers of failing ids (`_failing_ids` on a verify's output,
+// `_job_suites` on a CI log) read one shape. The exit is the CLI's too: 1 when a `test:summary` is not a success (a
+// failed or cancelled test, a file that fails to load or exits non-zero; a failing `todo` test is neither, so it
+// passes), and 1 when the run ends with no summary for the whole run, so a runner that stops short is never a pass.
 //
 // Signals behave as the CLI's do: a SIGINT, SIGTERM or SIGHUP cancels the run (an AbortController's signal, handed to
 // run()), which ends each running file's child and reports its tests cancelled, so the run exits 1 and leaves no orphan
@@ -20,7 +20,7 @@
 // longest first: the seconds of the file's top-level tests (their duration_ms summed, the file's whole time when it
 // fails to load), the lines tests/shard-weights.tsv's node section is regenerated from (its header says how).
 import { run } from 'node:test'
-import { spec, tap } from 'node:test/reporters'
+import { spec } from 'node:test/reporters'
 import { resolve } from 'node:path'
 
 const files = []
@@ -43,8 +43,7 @@ if (files.length === 0) {
   process.exit(2)
 }
 
-const major = Number(process.versions.node.split('.')[0])
-const reporter = major >= 23 || process.stdout.isTTY ? new spec() : tap
+const reporter = new spec()
 const seconds = new Map(files.map((f) => [f, 0]))
 // A top-level test's event names its file by its given path or its absolute path: resolved, either finds its row.
 const rowOf = new Map(files.map((f) => [resolve(f), f]))

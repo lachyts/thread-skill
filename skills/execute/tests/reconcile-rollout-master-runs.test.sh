@@ -13,6 +13,8 @@
 #   M13 DfY 13's publisher red, as run sequences (a) a blip, (b) a return covered, (c) a red straight after a blip.
 #   M14 no verdict: a cancel with no time-limit annotation (the publisher skipped); a cut shard; a no-verdict run skipped.
 #   M15 a failed shard named by its failed step; `node tests` expanded from the TAP location.
+#   M28 `node tests` expanded from tests/lib/node-run.mjs's own spec output (p49-4: CI's node 24 logs), its `test at`
+#       lines, for a failing test file and a plain script's exit.
 #   M19 a fix that landed before a run that is still red refiles its suite.
 #   M23 a log just over the cap is parsed from its tail, to the same suites.
 #   M25 filed with no green listed: one rule, only the since filter dropped.
@@ -51,8 +53,15 @@ ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected
 has() { case "$1" in *"$2"*) echo "ok   - $3";; *) echo "FAIL - $3: [$2] not in [$1]"; fail=1;; esac; }
 hasnt() { case "$1" in *"$2"*) echo "FAIL - $3: unexpected [$2] in [$1]"; fail=1;; *) echo "ok   - $3";; esac; }
 
+# M28's input: one real node-run.mjs run (node's own spec bytes) over a failing test file and a plain script's exit.
+mkdir -p "$TMP/nr/tests"
+printf "import { test } from 'node:test'\ntest('a', () => { throw new Error('x') })\n" > "$TMP/nr/tests/f.test.mjs"
+printf 'process.exit(3)\n' > "$TMP/nr/tests/plain.test.mjs"
+(cd "$TMP/nr" && node "$HERE/../../../tests/lib/node-run.mjs" --test-concurrency=1 tests/f.test.mjs tests/plain.test.mjs \
+  > "$TMP/nr.log" 2>&1)
+
 # ── Part 1: the pure core, one process ────────────────────────────────────────────────────────────────────────────
-python3 - "$RR" > "$TMP/pure.out" 2>&1 <<'PY'
+python3 - "$RR" "$TMP/nr.log" > "$TMP/pure.out" 2>&1 <<'PY'
 import importlib.util, io, json, sys
 from datetime import datetime, timedelta, timezone
 sys.dont_write_bytecode = True
@@ -269,6 +278,12 @@ check("M15: … a cut shard (no verdict line): every FAILED label but make test"
 check("M15: … spec's `test at` is the fallback",
       rr._job_suites("\n".join(ts + l for l in ["test at tests/y.test.mjs:3:1", "make test: FAILED (9s)", "  - node tests (3 files)"]), "J"),
       ["tests/y.test.mjs"])
+
+# M28: node tests expanded from node-run.mjs's real spec output (CI's shape from p49-4), each line timestamped
+spec_out = open(sys.argv[2], encoding="utf-8").read().splitlines()
+check("M28: node tests expanded from node-run.mjs's spec `test at` lines: the failing test file and the plain script",
+      rr._job_suites("\n".join(ts + l for l in spec_out + ["make test: FAILED (9s)", "  - node tests (2 files)"]), "J"),
+      ["tests/f.test.mjs", "tests/plain.test.mjs"])
 
 # M19: a fix that landed before a run that is still red refiles its suite; the next covered run files nothing more
 w = World(); w.runs = [run(1, "success"), run(2, attempt=2)]; V(w.c, w.runs[1], 1, ["A"]); V(w.c, w.runs[1], 2, ["A"]); w.cmp(1, 2)

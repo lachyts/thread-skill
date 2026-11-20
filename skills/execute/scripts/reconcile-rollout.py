@@ -1402,9 +1402,10 @@ Subcommands:
               The suites of a failed job (_job_suites, on the kept log, GitHub's timestamp prefix and a BOM dropped): the
               `  - <label>` lines under run.sh's last `make test: FAILED (<N>s)` line, else (a cut shard) every `<label>:
               FAILED (<N>s)` line but `make test`; ` (timed out after <B>s)` and ` (<N> files)` dropped; `node tests`
-              expanded to the files of each top-level TAP `not ok` block's `location:` (spec's `test at` the fallback),
-              made repo-relative from the first `tests/`, `skills/` or `hooks/` part, the bare label kept when none
-              parses; with no label, the job named by its failed step, `<job>: step "<name>" failed`, or `<job>:
+              expanded to the files of each top-level TAP `not ok` block's `location:` (node 22's CI logs, runs before
+              p49-4), else spec's `test at` lines (node 24's, from p49-4: node-run.mjs pins spec; both stay while the
+              older logs are in retention), made repo-relative from the first `tests/`, `skills/` or `hooks/` part,
+              the bare label kept when none parses; with no label, the job named by its failed step, `<job>: step "<name>" failed`, or `<job>:
               tests/run.sh failed with no suite named`. A 4xx on the log (a 410 past retention) is `<job> (log unreadable:
               HTTP <code>)`, definitive, so it never stalls a run.
               Reads, finality and confirmation (_master_decide, pure: the listed runs, their reads and compares, the
@@ -18053,10 +18054,13 @@ FAILING_ID_RES = (
     re.compile(r"^(?:FAILED|ERROR) (\S+)"),                    # pytest -rfE summary
     re.compile(r"^(?:FAIL|ERROR): (\S+ \([^)]+\))"),           # unittest
     re.compile(r"^not ok \d+ - (.+?)\s*(?:#.*)?$"),            # TAP, node --test
-    re.compile(r"^\s*[✕✖] (.+?)(?: \(\d[\d.]*\s*m?s\))?$"),   # jest, node:test spec
+    re.compile(r"^\s*[✕✖] (.+?)(?: \(\d[\d.]*\s*m?s\))?$"),   # jest, node:test spec (the repo's node-run.mjs pins it)
     re.compile(r"^--- FAIL: (\S+)"),                           # go test
     re.compile(r"^test (\S+) \.\.\. FAILED$"),                 # cargo test
 )
+# node:test spec's summary opens with this header line before it repeats each failing test (p49-4): it matches the
+# spec pattern above but names no test, so _failing_ids skips it (its whitespace aside).
+SPEC_SUMMARY_HEADER = "✖ failing tests:"
 FAILING_IDS_MAX = 50
 
 
@@ -18220,7 +18224,7 @@ def _failing_ids(lines, marker="== verifier:"):
         if line.startswith("== verifier rc"):
             reading = False   # the run ended; a later `== verifier:` (a re-queued pass) starts over
             continue
-        if len(ids) >= FAILING_IDS_MAX:
+        if len(ids) >= FAILING_IDS_MAX or line.strip() == SPEC_SUMMARY_HEADER:
             continue
         for rx in FAILING_ID_RES:
             m = rx.match(line)
@@ -21259,7 +21263,9 @@ def _master_rel(loc):
 
 
 def _master_tap_files(lines):
-    """The files of the top-level TAP `not ok` blocks (their `location:`), else spec's `test at` lines."""
+    """The files of the top-level TAP `not ok` blocks (their `location:`: node 22's CI logs, runs before p49-4), else
+    spec's `test at` lines (node 24's, from p49-4, where tests/lib/node-run.mjs pins spec). Both paths stay while a
+    master run logged before the switch is still read; one log never mixes the two."""
     files, top = [], False
     for line in lines:
         if MASTER_TAP_TOP_RE.match(line):

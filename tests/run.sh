@@ -65,7 +65,8 @@
 # (<N>s)` line the moment it ends, N its own seconds, so a run cut part-way (a CI job at its timeout-minutes) still
 # shows every suite that finished, and its times; a suite with no line was still running. Once every background suite
 # has ended, each one's output prints grouped under `== <label>`, in spawn order, and only then does node run. The
-# verdict line carries the whole run's seconds.
+# verdict line carries the whole run's seconds. Node's phase prints the spec reporter on every node line (p49-4,
+# pinned in tests/lib/node-run.mjs), so CI (node 24) and the Mac print alike.
 #
 # Capped (p23-4): at most `suite_cap` background suites run at once (tests/lib/test-jobs.sh: THREAD_TEST_JOBS,
 # else max(2, ceil(cores / 3)), 4 on 12 cores), and node runs that many test files at once. The suites spawn
