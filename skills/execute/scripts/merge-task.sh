@@ -1760,13 +1760,26 @@ snapshot_once() { local READ_TRIES=1; pr_snapshot "$1"; }   # one attempt (dynam
 #      Not branches/<b>/protection: that 404s on a branch a ruleset alone protects (lachyts/thread-skill's master,
 #      2026-11-05), a false none; branches/<b> needs only read access.
 #   2. rules/branches/<b>?per_page=100: 200, a list of under 100 rules each of a RULES_NOT_CHECKS type → none; a
-#      list with any other type → some; 100 or more, or no list → unknown. A failed read whose stderr holds
-#      `Upgrade to GitHub Pro` and `HTTP 403` and no `rate limit` → none (a private repo on the free plan, which can
-#      hold no ruleset: lachyts/chorus, 2026-11-05); every other failure (404, a rate limit, an integration's 403, a
-#      5xx) → unknown.
+#      list with any other type → some; 100 or more, or no list → unknown. A failed read that is the plan's
+#      no-rulesets 403 → none (a private repo on the free plan, which can hold no ruleset: lachyts/chorus,
+#      2026-11-05), as gate_plan_403 reads it: merge-gate.py's plan_has_no_rulesets on gh's stderr, the one copy of
+#      the wording schedule and merge-settings read too. Every other failure (404, a rate limit, an integration's
+#      403, the plan's text after a prefix, a 5xx) → unknown.
 # A false none cannot merge a gated PR: merge-task merges only on CLEAN, or on UNSTABLE, which GitHub gives only once
 # the required checks pass, and the squash is head-pinned (ADR 0069 d4).
 REQ_GATE=''; REQ_WHY=''; GATE_ERR=''
+MG_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/merge-gate.py"
+gate_plan_403() {  # gate_plan_403 <gh stderr file> — 0 iff it is the plan's no-rulesets 403; any failure reads unknown
+  python3 - "$MG_PY" "$1" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("thread_merge_gate_mt", sys.argv[1])
+mg = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mg)
+with open(sys.argv[2], encoding="utf-8", errors="replace") as fh:
+    sys.exit(0 if mg.plan_has_no_rulesets(None, fh.read()) else 1)
+PY
+}
 gate_read() {  # gate_read <out> <endpoint> — 0 on rc 0; 1 on an HTTP 4xx answer (final, GATE_ERR); 8 after READ_TRIES
   local out="$1" ep="$2" try=0 rc
   while : ; do
@@ -1820,8 +1833,7 @@ required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per
           some) REQ_WHY="not protected, but a ruleset rule may require a check" ;;
           *) REQ_GATE=unknown; REQ_WHY="rules/branches/$BASE: not a whole list of rules" ;;
         esac
-      elif [ "$rc" -eq 1 ] && grep -q 'Upgrade to GitHub Pro' "$tmp/gate.err" 2>/dev/null \
-           && grep -q 'HTTP 403' "$tmp/gate.err" 2>/dev/null && ! grep -qi 'rate limit' "$tmp/gate.err" 2>/dev/null; then
+      elif [ "$rc" -eq 1 ] && gate_plan_403 "$tmp/gate.err" 2>/dev/null; then
         REQ_GATE=none; REQ_WHY="not protected, and this plan holds no rulesets"
       else
         REQ_GATE=unknown; REQ_WHY="rules/branches/$BASE: $GATE_ERR"
@@ -1942,8 +1954,7 @@ unreported_required() {  # sets UNREP, UNREP_WHY, UNREP_NAMES and UNREP_ITEMS (a
       enc=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$BASE")
       gate_read "$tmp/probe-rules.json" "repos/$OWNER/$REPO/rules/branches/$enc?per_page=100"; rc=$?
       if [ "$rc" -eq 0 ]; then UNREP_RULES="$tmp/probe-rules.json"
-      elif [ "$rc" -eq 1 ] && grep -q 'Upgrade to GitHub Pro' "$tmp/gate.err" 2>/dev/null \
-           && ! grep -qi 'rate limit' "$tmp/gate.err" 2>/dev/null; then
+      elif [ "$rc" -eq 1 ] && gate_plan_403 "$tmp/gate.err" 2>/dev/null; then
         printf '[]\n' > "$tmp/probe-rules.json"; UNREP_RULES="$tmp/probe-rules.json"
       elif [ "$rc" -eq 1 ]; then UNREP=unknown; UNREP_WHY="the rules of $BASE: $GATE_ERR"; return 0
       else UNREP=retry; UNREP_WHY="the rules of $BASE ($GATE_ERR)"; return 0

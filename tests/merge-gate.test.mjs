@@ -293,21 +293,69 @@ test('M7 a rules read that fails alone (an unprotected branch too), or a protect
 
 test('M7b the plan\'s no-rulesets 403 is a clean empty rules read: none on an unprotected branch, read on a protected one', (t) => {
   const fx = fixture(t, { '.github/workflows/ci.yml': ROLLUP })
+  const planWhy = "rules/branches/main: HTTP 403, rulesets are not on this repo's GitHub plan, so none can apply"
   // A private repo on GitHub Free: no ruleset can exist, and an unprotected branch requires nothing (lachyts/chorus).
-  const free = gate(fx, { branch: UNPROTECTED, rules: '403plan' })
+  // Its `none` carries exactly the plan's line (M5's two 200 reads carry none).
+  const free = gate(fx, { branch: UNPROTECTED, rules: '403-plan' })
   assert.equal(free.status, 'none')
-  assert.deepEqual([free.required, free.unmatched, free.jobs], [[], [], []])
-  hasWhy(free, /^rules\/branches\/main: HTTP 403, rulesets are not on this repo's GitHub plan, so none can apply$/)
+  assert.deepEqual([free.required, free.unmatched, free.jobs, free.why], [[], [], [], [planWhy]])
   // A protected branch on the same plan: the protection's contexts are read in full.
-  const prot = gate(fx, { rules: '403plan' })
+  const prot = gate(fx, { rules: '403-plan' })
   assert.equal(prot.status, 'read')
-  assert.deepEqual(prot.required.map((r) => r.context), [CTX])
+  assert.deepEqual([prot.required, prot.unmatched, prot.why],
+    [[{ context: CTX, sources: ['protection'], appId: ACTIONS }], [], [planWhy]])
   // Any other 403 on the rules read stays a failure.
   const other = gate(fx, { branch: UNPROTECTED, rules: '403' })
   assert.equal(other.status, 'partial')
   hasWhy(other, /^rules\/branches\/main: HTTP 403$/)
   // The branch read's 403 is never read as the plan's, whatever its body.
-  assert.equal(gate(fx, { branch: '403', rules: '403plan' }).status, 'unreadable')
+  assert.equal(gate(fx, { branch: '403', rules: '403-plan' }).status, 'unreadable')
+})
+
+test('M7c the plan\'s text is no plan 403 in a non-JSON body, on another code, or after a prefix', (t) => {
+  const fx = fixture(t, { '.github/workflows/ci.yml': ROLLUP })
+  const PLAN = 'Upgrade to GitHub Pro or make this repository public to enable this feature.'
+  const file = (name, text) => { const f = path.join(fx.home, name); fs.writeFileSync(f, text); return f }
+  for (const [label, code, text] of [
+    ['a non-JSON 403 body', 403, PLAN],
+    ['a 404 with the plan\'s message', 404, JSON.stringify({ message: PLAN })],
+    ['a 403 with the text after a prefix', 403, JSON.stringify({ message: `Note: ${PLAN}` })],
+  ]) {
+    const out = gate(fx, { branch: UNPROTECTED, rules: `${code}@${file(`r${code}-${label.length}.txt`, text)}` })
+    assert.deepEqual([out.status, out.jobs, out.why], ['partial', [], [`rules/branches/main: HTTP ${code}`]], label)
+  }
+})
+
+test('M7d plan_has_no_rulesets: a 403 whose message begins with the plan\'s text, from a JSON body or gh\'s line', (t) => {
+  const home = tmpHome(t)
+  const PLAN = 'Upgrade to GitHub Pro or make this repository public to enable this feature.'
+  const line = (msg, code) => `gh: ${msg} (HTTP ${code})`
+  const cases = [
+    [true, 403, JSON.stringify({ message: PLAN, status: '403' })],
+    [true, null, line(PLAN, 403)],
+    [true, 403, line(PLAN, 403)],
+    [false, 404, JSON.stringify({ message: PLAN })],
+    [false, 403, PLAN],
+    [false, 403, line(`Note: ${PLAN}`, 403)],
+    [false, null, line(PLAN, 404)],
+    [false, 403, line(PLAN, 404)],
+    [false, 403, line('API rate limit exceeded for user ID 1.', 403)],
+    [false, 403, line('You have exceeded a secondary rate limit. Please wait a few minutes before you try again.', 403)],
+    [false, 403, line('Upgrade to GitHub Team or make this repository public to enable this feature.', 403)],
+    [false, 403, ''],
+    [false, 403, null],
+    [false, 403, JSON.stringify({ message: 5 })],
+  ]
+  const prog = [
+    'import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("mg", sys.argv[1])',
+    'mg = importlib.util.module_from_spec(spec); spec.loader.exec_module(mg)',
+    'print(json.dumps([mg.plan_has_no_rulesets(c, x) for c, x in json.loads(sys.argv[2])]))',
+  ].join('\n')
+  const r = spawnSync(PY, ['-B', '-c', prog, SCRIPT, JSON.stringify(cases.map(([, c, x]) => [c, x]))],
+    { encoding: 'utf8', env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), cases.map(([want]) => want))
 })
 
 // ---- M8: gh failures ---------------------------------------------------------------------------------------------
