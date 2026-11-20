@@ -508,8 +508,9 @@ test('8. runs: grouped by home, shape and root, with their Review load, blockers
   assert.deepEqual(a.sameRoot, [`Shared/parallel/${act}`])
   assert.deepEqual(runOf(j, `Shared/parallel/${act}`).sameRoot, [`Act/parallel/${act}`])
   assert.deepEqual([a.ready, a.waiting, a.blocked], [['act-ready-l'], ['act-call'], []])
+  // L's 180 agent minutes (p50-5) plus M's 120.
   assert.deepEqual([a.agentMinutes, a.decisionMinutes, a.review, a.leverage],
-    [600, 1, { pr: 2, signOff: 0, eyeCheck: 0, minutes: 4 }, 120])
+    [300, 1, { pr: 2, signOff: 0, eyeCheck: 0, minutes: 4 }, 60])
   // Review load sums only the members that can start or wait on a decision; blocked ones are listed, not summed.
   for (const run of j.runs) {
     const live = [...run.ready, ...run.waiting].map((s) => row(j, s))
