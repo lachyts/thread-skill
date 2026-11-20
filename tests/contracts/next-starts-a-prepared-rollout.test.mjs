@@ -45,6 +45,9 @@
 //   p12 one list of holds: the holds that carry, `(his not yet, …)`, and the holds read fresh, `(the ladder, …)`, are
 //       each one list, word for word wherever close, next, the lifecycle or ADR 0072 copies it, and close step 2's
 //       item 4, step 4, its Edge case, next step 1 and ADR 0072 d3 each carry it.
+//   p13 README's `/thread:next` and `/thread:close` rows name the launch: next hands a waiting note to a fresh lead
+//       first, then runs this session's own move in the same turn; close ends with the same launch (sub-step 7.10),
+//       or its `rollout not started:` row; each names ADR 0072.
 // One pure function, check(files), returns the failed rule names; every rule has a control that fails it alone, and
 // every control asserts its swap changed the text. Phrase checks run on collapsed text. Reads files only.
 import { test } from 'node:test'
@@ -60,7 +63,8 @@ const LIFECYCLE = 'skills/_shared/handoff-lifecycle.md'
 const CONTEXT = 'CONTEXT.md'
 const ADR = 'docs/adr/0072-the-next-move-starts-a-prepared-rollout.md'
 const ADR57 = 'docs/adr/0057-a-scheduled-rollout-sweeps-for-pickups-and-hands-itself-off.md'
-const FILES = [NEXT, CLOSE, HANDOFF, LIFECYCLE, CONTEXT, ADR, ADR57]
+const README = 'README.md'
+const FILES = [NEXT, CLOSE, HANDOFF, LIFECYCLE, CONTEXT, ADR, ADR57, README]
 
 const readTree = () => Object.fromEntries(FILES.map((f) => {
   const p = path.join(root, f)
@@ -341,6 +345,12 @@ function check(F) {
     for (const list of lists) if (!C(text).includes(list)) flag('p12', `${where} does not carry ${list}`)
   }
 
+  // p13: README's next and close rows name the launch.
+  need('p13', 'README /thread:next row', lineOf(F[README], '| `/thread:next`'),
+    ['handed to a fresh lead first', "this session's own move runs in the same turn", 'his "not yet" holds it', 'ADR 0072'])
+  need('p13', 'README /thread:close row', lineOf(F[README], '| `/thread:close`'),
+    ['the same launch (sub-step 7.10)', '`rollout not started:` row', 'his "not yet"', 'ADR 0072'])
+
   return { rules: [...fails.keys()].sort(), details: [...fails.values()].flat() }
 }
 
@@ -465,4 +475,9 @@ test('controls: one list of holds (p12)', () => {
   // step 4 names the holds that carry by no list
   only(swap(CLOSE, "reads a hold that carries (his not yet, orient-all's `left[]`, a recorded handover) as that hold again", 'reads a hold that carries as that hold again'),
     'p12', 'step 4 has no list')
+})
+
+test('controls: README (p13)', () => {
+  only(swap(README, / A rollout note written and waiting with no lead is handed to a fresh lead first[^|]*?\(ADR 0072\)\./, ''), 'p13', 'next row without the launch')
+  only(swap(README, / It ends with the same launch \(sub-step 7\.10\)[^|]*?\(ADR 0072\)\./, ''), 'p13', 'close row without the launch')
 })
