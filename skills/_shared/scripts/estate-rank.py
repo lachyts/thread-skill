@@ -191,7 +191,7 @@ TEST_LOGIN_PLANNER_RE = re.compile(r"^- Planner: word each test-Login gate[^\n]*
 # (tests/contracts/readiness-grade.test.mjs).
 GRADES = ("Ready", "One call", "Grill", "Orient")
 SHAPES = ("parallel", "serial", "session")
-SIZE_MINUTES = {"S": 30, "M": 120, "L": 480}
+SIZE_MINUTES = {"S": 30, "M": 120, "L": 180}  # L re-read from the Grade log's timed L episodes (p50-5)
 DECISION_MINUTES = {"One call": 1, "Grill": 2}
 REVIEW_MINUTES = {"pr": 2, "signOff": 1, "eyeCheck": 3}
 ATTENTION_FLOOR = 1

@@ -336,11 +336,18 @@ change the weekly Reflection's grade accuracy calls for lands in both together; 
 Grade log measures the grades and, through Slot hours per size, `SIZE_MINUTES`; `DECISION_MINUTES`, `REVIEW_MINUTES` and
 the fortnight have no measure in the record (reflect § What the record cannot show).
 
+`SIZE_MINUTES` L was re-read from that measure (p50-5, 2026-11-21): 77 timed L episodes over four Grade-log weeks
+(2026-10-26 to 2026-11-21) ran a median 2.33 Slot hours and a mean 2.84 (weekly medians 2.05 to 3.43, quartiles 1.69
+to 3.49, nine in ten under 5.1), against the 8.0 hours its 480 minutes stood for. A run sums its tasks' agent minutes,
+so L's 180 sits at that mean, inside the spread. The fix was the number, not what is graded L: an L episode ran above
+an M one (median 1.33 hours) in every week, so § Size, deadlines and review's bands still order the work, and they
+stay the grader's scale while this table holds what each size measures.
+
 | Constant | Value | What it sets |
 | --- | --- | --- |
 | `GRADES` | `["Ready", "One call", "Grill", "Orient"]` | the grades, in raise order |
 | `SHAPES` | `["parallel", "serial", "session"]` | the shapes |
-| `SIZE_MINUTES` | `{"S": 30, "M": 120, "L": 480}` | agent minutes per size |
+| `SIZE_MINUTES` | `{"S": 30, "M": 120, "L": 180}` | agent minutes per size |
 | `DECISION_MINUTES` | `{"One call": 1, "Grill": 2}` | Lachy's minutes per decision |
 | `REVIEW_MINUTES` | `{"pr": 2, "signOff": 1, "eyeCheck": 3}` | Lachy's minutes per review item |
 | `ATTENTION_FLOOR` | `1` | the least attention a task is charged |

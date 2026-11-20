@@ -228,7 +228,7 @@ test('control c2: a grade CONTEXT.md names differently fails c2 alone', () => {
 })
 
 test('control c3: a table value that drifts from the script fails c3 alone', () => {
-  only(swap(FILES, DOC, '`{"S": 30, "M": 120, "L": 480}`', '`{"S": 60, "M": 120, "L": 480}`'), CONSTS, ['c3'], 'c3')
+  only(swap(FILES, DOC, '`{"S": 30, "M": 120, "L": 180}`', '`{"S": 60, "M": 120, "L": 180}`'), CONSTS, ['c3'], 'c3')
 })
 
 test('control c4: a snooze key the doc no longer names, the clear step gone, a writer gone, or a gate kind the sweep lacks, fails c4 alone', () => {
