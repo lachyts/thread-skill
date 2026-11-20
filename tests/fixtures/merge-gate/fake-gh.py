@@ -5,10 +5,8 @@ Its argv goes to $MG_LOG, one line per call. The rules endpoint (`…/rules/bran
 $MG_RULES and the branch endpoint (`…/branches/…`) from $MG_BRANCH. Each is a JSON body file (served as a 200) or one
 of: 403 | 404 | 500 (gh's status line, headers, a blank line and an error body on stdout, `gh: <msg> (HTTP <code>)` on
 stderr, exit 1), 403-plan (the same form with GitHub Free's `Upgrade to GitHub Pro …` message, as the merge-task fake
-spells it), <code>@<file> (a 403, 404 or 500 whose body is the file's text as-is, and whose stderr is `gh: <the body's
-JSON message, else its text> (HTTP <code>)`, exit 1), nologin (no status line, exit 4), badjson (a 200 whose body is
-not JSON), hang (writes its pid to $MG_PIDS, then execs `sleep 120`). $MG_RULES_NEXT=1 adds a `Link: …; rel="next"`
-header to the rules response.
+spells it), nologin (no status line, exit 4), badjson (a 200 whose body is not JSON), hang (writes its pid to $MG_PIDS,
+then execs `sleep 120`). $MG_RULES_NEXT=1 adds a `Link: …; rel="next"` header to the rules response.
 """
 import json
 import os
@@ -56,17 +54,6 @@ def main():
         msg = "Upgrade to GitHub Pro or make this repository public to enable this feature."
         respond(403, json.dumps({"message": msg, "status": "403"}))
         sys.stderr.write("gh: %s (HTTP 403)\n" % msg)
-        return 1
-    code, at, path = spec.partition("@")
-    if at and code in ("403", "404", "500"):
-        with open(path) as f:
-            text = f.read()
-        try:
-            msg = json.loads(text).get("message")
-        except (ValueError, AttributeError):
-            msg = None
-        respond(int(code), text)
-        sys.stderr.write("gh: %s (HTTP %s)\n" % (msg if isinstance(msg, str) else text.strip(), code))
         return 1
     if spec in ("403", "404", "500"):
         code = int(spec)

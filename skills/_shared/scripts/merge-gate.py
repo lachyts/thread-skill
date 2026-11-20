@@ -36,8 +36,9 @@ a next page (`Link: …; rel="next"`) keeps its first page and sets `truncated`.
   reads as a clean empty rules read (an empty list, ok) with one why line saying so. Any other 403 stays a failure,
   and the branch read never reads it so. plan_has_no_rulesets(code, text) is the one copy of the wording: the code
   must be 403 and the message must begin with that text, read from a JSON error body's str `message` or from gh's
-  stderr line `gh: <message> (HTTP <code>)` (GH_ERROR_RE, the form merge-settings.py and merge-task.sh read). A
-  non-JSON body, another code, or the text after a prefix is never the plan's 403.
+  stderr line `gh: <message> (HTTP <code>)` (GH_ERROR_RE, the form merge-settings.py and merge-task.sh read; gate()
+  passes the HTTP body, which either form may match). A non-JSON body holding the text bare, a JSON body with no str
+  message, another code, or the text after a prefix is never the plan's 403.
 
 Status. none: the branch read 200 and full, the rules read 200 or the plan's no-rulesets 403, and nothing required
 (no context, no required workflow, no code-scanning rule). read: the same two clean reads, something required, and

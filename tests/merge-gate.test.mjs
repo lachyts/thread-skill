@@ -312,20 +312,6 @@ test('M7b the plan\'s no-rulesets 403 is a clean empty rules read: none on an un
   assert.equal(gate(fx, { branch: '403', rules: '403-plan' }).status, 'unreadable')
 })
 
-test('M7c the plan\'s text is no plan 403 in a non-JSON body, on another code, or after a prefix', (t) => {
-  const fx = fixture(t, { '.github/workflows/ci.yml': ROLLUP })
-  const PLAN = 'Upgrade to GitHub Pro or make this repository public to enable this feature.'
-  const file = (name, text) => { const f = path.join(fx.home, name); fs.writeFileSync(f, text); return f }
-  for (const [label, code, text] of [
-    ['a non-JSON 403 body', 403, PLAN],
-    ['a 404 with the plan\'s message', 404, JSON.stringify({ message: PLAN })],
-    ['a 403 with the text after a prefix', 403, JSON.stringify({ message: `Note: ${PLAN}` })],
-  ]) {
-    const out = gate(fx, { branch: UNPROTECTED, rules: `${code}@${file(`r${code}-${label.length}.txt`, text)}` })
-    assert.deepEqual([out.status, out.jobs, out.why], ['partial', [], [`rules/branches/main: HTTP ${code}`]], label)
-  }
-})
-
 test('M7d plan_has_no_rulesets: a 403 whose message begins with the plan\'s text, from a JSON body or gh\'s line', (t) => {
   const home = tmpHome(t)
   const PLAN = 'Upgrade to GitHub Pro or make this repository public to enable this feature.'
@@ -336,6 +322,7 @@ test('M7d plan_has_no_rulesets: a 403 whose message begins with the plan\'s text
     [true, 403, line(PLAN, 403)],
     [false, 404, JSON.stringify({ message: PLAN })],
     [false, 403, PLAN],
+    [false, 403, JSON.stringify({ message: `Note: ${PLAN}` })],
     [false, 403, line(`Note: ${PLAN}`, 403)],
     [false, null, line(PLAN, 404)],
     [false, 403, line(PLAN, 404)],
@@ -353,7 +340,7 @@ test('M7d plan_has_no_rulesets: a 403 whose message begins with the plan\'s text
     'print(json.dumps([mg.plan_has_no_rulesets(c, x) for c, x in json.loads(sys.argv[2])]))',
   ].join('\n')
   const r = spawnSync(PY, ['-B', '-c', prog, SCRIPT, JSON.stringify(cases.map(([, c, x]) => [c, x]))],
-    { encoding: 'utf8', env: baseEnv(home) })
+    { encoding: 'utf8', env: baseEnv(home), timeout: 30000 })
   assert.equal(r.status, 0, r.stderr)
   assert.deepEqual(JSON.parse(r.stdout), cases.map(([want]) => want))
 })

@@ -11,13 +11,6 @@ the gate read `some`, and every PR red only on its optional review-app jobs wait
 came, then exited 1 "never appeared". The gate read is unchanged: `protected: true` stays `some`. Decision 2 and the
 last considered option carry the change.)*
 
-*(Amended 2026-11-20 by thread-skill-p39-18-merge-gate-plan-403-review-follow-ups: the rules read's plan 403 is read
-through merge-gate.py's `plan_has_no_rulesets`, the one copy of the wording schedule (ADR 0068) and merge-settings.py
-read too, at both of merge-task's rules reads (the required gate and the unreported-context probe). It reads gh's
-stderr line `gh: <message> (HTTP 403)` and holds only a message that begins `Upgrade to GitHub Pro or make this
-repository public`, so the old `rate limit` clause is subsumed and the plan's text after a prefix reads `unknown`.
-Decision 1 carries the change; its 2026-11-05 live reads stand as written.)*
-
 *(Amended 2026-11-11 by thread-skill-integration-wait-ends-on-a-job-no-runner-will-take: a job queued with no runner
 for 15 minutes (`MERGE_TASK_NO_RUNNER_LIMIT`; `queued`, no runner_id or runner_name, by its `created_at`) is "no
 runner", not CI in flight. Found in compression-engine-rollout-2026-11-08: a job on a self-hosted runner that no longer
@@ -51,6 +44,13 @@ the Integration lane until Lachy removed master's protection; and a failed in-fl
 flight, could decide that merge. A BLOCKED or UNKNOWN entry keeps the wait as before 2026-11-07, so one UNSTABLE sample
 in a BLOCKED flap never ends in the NON-check gate's exit 1. Decision 2, the last considered option and the
 Consequences carry the change.)*
+
+*(Amended 2026-11-20 by thread-skill-p39-18-merge-gate-plan-403-review-follow-ups: the rules read's plan 403 is read
+through merge-gate.py's `plan_has_no_rulesets`, the one copy of the wording schedule (ADR 0068) and merge-settings.py
+read too, at both of merge-task's rules reads (the required gate and the unreported-context probe). It reads gh's
+stderr line `gh: <message> (HTTP 403)` and holds only a message that begins `Upgrade to GitHub Pro or make this
+repository public`, so the old `rate limit` clause is subsumed and the plan's text after a prefix reads `unknown`.
+Decision 1 carries the change; its 2026-11-05 live reads stand as written.)*
 
 ## Context
 

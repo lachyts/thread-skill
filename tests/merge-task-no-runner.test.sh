@@ -257,10 +257,9 @@ ok "$rc" 4 "9b. the NON-check site: exit 4"
 has "$(reason)" "unreported-context: required check \"build\"" "9b. … naming build"; lacks "$(reason)" '"ci"' "9b. … and not ci"
 lacks "$out" "NON-check gate" "9b. … never the NON-check gate"
 
-# 9b-plan/prefix/rate. The probe's own rules read (the gate stopped at `protected: true`), through gate_plan_403: the
-#     plan's 403 is an empty rules list, so 9b's exit 4; the plan's text after a prefix, or a rate limit, cannot tell:
-#     test 10's exit 1.
-for c in plan prefix rate; do
+# 9b-plan/prefix. The probe's own rules read (the gate stopped at `protected: true`), through gate_plan_403: the
+#     plan's 403 is an empty rules list, so 9b's exit 4; the plan's text after a prefix cannot tell: test 10's exit 1.
+for c in plan prefix; do
   fresh; pair; mkpr 5 "$I" BLOCKED
   rsc '{"strict": true, "checks": [{"context": "ci", "app_id": null}, {"context": "build", "app_id": 15368}]}'; green ci 1
   cruns "$I" ci > "$MT_STATE/checkruns.$I"
@@ -268,7 +267,6 @@ for c in plan prefix rate; do
     plan) echo 403-plan > "$MT_STATE/rules" ;;
     prefix) echo 'gh: Note: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' \
               > "$MT_STATE/err.rules" ;;
-    rate) echo 403-rate > "$MT_STATE/rules" ;;
   esac
   run 5 "$I" "$B"
   if [ "$c" = plan ]; then
