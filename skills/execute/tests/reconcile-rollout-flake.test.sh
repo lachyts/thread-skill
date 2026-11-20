@@ -22,10 +22,12 @@
 #   R12 tests/lib/node-run.mjs's own spec output (p49-4: it pins the reporter, so CI and the Mac print alike), read end
 #       to end: a failing subtest, its parent, a failing top-level test and a plain script's exit are the ids; spec's
 #       `✖ failing tests:` summary header never is, and no TAP is printed.
-#   R13 one call's failing lines of one test case are one Flake (p49-5): case 8b's assertion line and its self-test's
-#       ALL PASS line give one event and one follow-up, keyed by the first line (reconcile, its replay, record-verify);
-#       distinct case ids, files, pytest ids or file-vs-none never fold; one case at two shas is one follow-up, two
-#       lines; _flake_case reads the case id, after one file token where the line names one.
+#   R13 one call's failing lines of one test case are one Flake (p49-5): through reconcile, case 8b's assertion line
+#       and its self-test's ALL PASS line give one event and one follow-up, keyed by the assertion line, the other
+#       printed as folded. _flake_case reads the case id, after one file token where the line names one. A
+#       _fold_flakes table: one file's one case folds into its least line, whatever the order listed, at each sha, an
+#       exact repeat adding nothing; distinct case ids, files, pytest ids and a file against none never fold. A folded
+#       line whose Flake's follow-up could not be written says (not logged).
 # Temp vault and repo only; no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -296,47 +298,51 @@ hasnt "$(fids "$TMP/r12.log")" 'failing tests:' "R12: … never spec's \`✖ fai
 hasnt "$(cat "$TMP/r12.log")" 'TAP version' "R12: … and node-run.mjs prints spec, never TAP (the reporter pin)"
 
 # ---- R13 -----------------------------------------------------------------------------------------------------
-# One flake of tests/merge-task-base.test.sh case 8b, returned as its two failing lines (p49-5).
+# One flake of tests/merge-task-base.test.sh case 8b, returned as its two failing lines (p49-5): the one end-to-end run
+# through reconcile. The fold's own rule is the _fold_flakes table below.
 scen r13
 L8A='8b. --self-test-base under GIT_DIR + GIT_WORK_TREE exits 0'
 L8B='8b. --self-test-base under GIT_DIR + GIT_WORK_TREE: ALL PASS'
 H8=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(("o/r\n" + sys.argv[1]).encode()).hexdigest()[:10])' "$L8A")
 FU8="proj-followup-flake-$H8"
-# frow <slug> <flakes-json>: a task row (site task) carrying those flakes.
-frow() { printf '{"rolloutSlug": "%s", "tasks": [{"slug": "%s", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/9", "reviewRoundsUsed": 1, "flakes": %s}]}' "$RO_SLUG" "$1" "$2"; }
 F8=$(python3 -c 'import json,sys; print(json.dumps([{"test": t, "sha": sys.argv[3]} for t in sys.argv[1:3]]))' "$L8A" "$L8B" "$SHA1")
-recon "$(frow proj-p29-1-a "$F8")"
+recon "$(printf '{"rolloutSlug": "%s", "tasks": [{"slug": "proj-p29-1-a", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/9", "reviewRoundsUsed": 1, "flakes": %s}]}' "$RO_SLUG" "$F8")"
 ok "$rc|$err" "0|" "R13a: reconcile of a row with both 8b lines exits 0, nothing on stderr"
 ok "$(ev flake | python3 -c 'import json,sys; print([(d["test"], d["count"], d["followup"]) for d in map(json.loads, sys.stdin)])')" "[('$L8A', 1, '$FU8')]" "R13a: … one flake event, the assertion line's, count 1"
 ok "$(flakenotes)|$(loglines "$T/$FU8.md" | wc -l | tr -d ' ')" "1|1" "R13a: … one follow-up, keyed by the assertion line, one Flake log line"
 has "$out" "flake: \`$L8B\`" "R13a: … the ALL PASS line printed"
 has "$out" "folded into \`$L8A\` (one test case, 8b) [no-change]" "R13a: … folded into the assertion line"
-before=$(cat "$T/$FU8.md")
-recon "$(frow proj-p29-1-a "$F8")"
-ok "$rc|$(nev flake)|$(flakenotes)" "0|1|1" "R13b: the same row again: no new event or note"
-ok "$(cat "$T/$FU8.md")" "$before" "R13b: … the follow-up unchanged"
-has "$out" "folded into \`$L8A\`" "R13b: … the folded line still printed"
-fl "$D/f8.json" flake "$SHA2" "" "" "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$L8A" "$L8B")"
-rv proj-p29-2-b integration "$D/f8.json"
-ok "$rc|$(nev flake)|$(flakenotes)|$(loglines "$T/$FU8.md" | wc -l | tr -d ' ')" "0|2|1|2" "R13c: record-verify of both 8b lines: one event, the one follow-up's second line"
-ok "$(ev flake | tail -n 1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["test"], d["count"], d["site"])')" "$L8A 2 integration" "R13c: … its event the assertion line's, count 2"
-scen r13d
-FD=$(python3 -c 'import json,sys; print(json.dumps([{"test": t, "sha": sys.argv[1]} for t in sys.argv[2:]]))' "$SHA1" \
-  '3. a' '4. b' 'tests/a.test.sh: 3. x' 'tests/b.test.sh: 3. y' 'tests/test_x.py::test_a' 'tests/test_x.py::test_b' '5. z' 'tests/c.test.sh: 5. z')
-recon "$(frow proj-p29-1-a "$FD")"
-ok "$rc|$(nev flake)|$(flakenotes)" "0|8|8" "R13d: distinct case ids, files, pytest ids and a file against none never fold"
-hasnt "$out" "folded into" "R13d: … and no line says folded"
-scen r13e
-FE=$(python3 -c 'import json,sys; print(json.dumps([{"test": sys.argv[1], "sha": sys.argv[3]}, {"test": sys.argv[2], "sha": sys.argv[4]}]))' "$L8A" "$L8B" "$SHA1" "$SHA2")
-recon "$(frow proj-p29-1-a "$FE")"
-ok "$rc|$(nev flake)|$(flakenotes)|$(loglines "$T/$FU8.md" | wc -l | tr -d ' ')" "0|2|1|2" "R13e: one case at two shas in one call: one follow-up, two Flake log lines"
-ok "$(ev flake | tail -n 1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["test"], d["count"], d["sha"])')" "$L8A 2 $SHA2" "R13e: … the second keyed by the assertion line, count 2"
-ok "$(python3 - "$SCRIPT" <<'PY'
-import importlib.util, sys
+R13PY=$(python3 - "$SCRIPT" "$L8A" "$L8B" <<'PY'
+import importlib.util, sys, types
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+a, b = sys.argv[2:4]
+s1, s2 = "1" * 40, "2" * 40
 print([rr._flake_case(t) for t in ("8b. x exits 0", "C1: y", "tests/x.test.sh: 8b. z", "tests/x.py::t", "outer", "2026-11-08: d")])
+same = lambda *ts: [(t, s1, []) for t in ts]
+rows = [  # (name, one call's entries, _fold_flakes' want)
+    ("distinct case ids", [("3. a", s1), ("4. b", s1)], same("3. a", "4. b")),
+    ("two files", [("tests/a.test.sh: 3. x", s1), ("tests/b.test.sh: 3. y", s1)],
+     same("tests/a.test.sh: 3. x", "tests/b.test.sh: 3. y")),
+    ("pytest ids", [("tests/test_x.py::test_a", s1), ("tests/test_x.py::test_b", s1)],
+     same("tests/test_x.py::test_a", "tests/test_x.py::test_b")),
+    ("a file against none", [("5. z", s1), ("tests/c.test.sh: 5. z", s1)], same("5. z", "tests/c.test.sh: 5. z")),
+    ("one file, one case", [("tests/a.test.sh: 3. x", s1), ("tests/a.test.sh: 3. y", s1)],
+     [("tests/a.test.sh: 3. x", s1, ["tests/a.test.sh: 3. y"])]),
+    ("the 8b pair listed summary first", [(b, s1), (a, s1)], [(a, s1, [b])]),
+    ("one case at two shas", [(a, s1), (b, s2)], [(a, s1, []), (a, s2, [b])]),
+    ("an exact repeat", [(a, s1), (b, s1), (a, s1), (b, s1)], [(a, s1, [b])]),
+]
+print([(n, rr._fold_flakes(e)) for n, e, want in rows if rr._fold_flakes(e) != want])
+# The kept line's follow-up could not be written: _record_flake returns None and records one error.
+rr._record_flake = lambda *x: x[-1].append("unwritable") or None
+out, warns, errs = rr._record_flakes(types.SimpleNamespace(dry_run=False, now=None), None, "proj-p29-1-a", None,
+                                     [{"test": a, "sha": s1}, {"test": b, "sha": s1}], "task", None)
+print(len(out), out[0].rsplit(" folded into ", 1)[-1] if out else "", len(errs), sep="|")
 PY
-)" "[(None, '8b'), (None, 'C1'), ('tests/x.test.sh', '8b'), None, None, None]" "R13: _flake_case reads the case id, after one file token, and None with no case id"
+)
+ok "$(printf '%s\n' "$R13PY" | sed -n 1p)" "[(None, '8b'), (None, 'C1'), ('tests/x.test.sh', '8b'), None, None, None]" "R13: _flake_case reads the case id, after one file token, and None with no case id"
+ok "$(printf '%s\n' "$R13PY" | sed -n 2p)" "[]" "R13: _fold_flakes folds one file's one case into its least line in either order, at each sha, once; distinct case ids, files, pytest ids and a file against none never fold"
+ok "$(printf '%s\n' "$R13PY" | sed -n 3p)" "1|\`$L8A\` (one test case, 8b) (not logged)|1" "R13: a folded line whose Flake's follow-up could not be written says (not logged), never [no-change]"
 
 echo; [ "$fail" -eq 0 ] && echo "reconcile-rollout-flake: ALL PASS" || echo "reconcile-rollout-flake: SOME FAILED"
 exit "$fail"
