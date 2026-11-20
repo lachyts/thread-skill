@@ -11,12 +11,20 @@
 # 9dd298d), at the default cap of 4 on a 12-core Mac, load 9 to 15 under other rollouts; each value is the median of
 # the two. @merge-task-self-tests is its two self-tests summed. A suite that ended within its first second (0 s) is
 # written as 0.5, since a weight must be positive.
-# Node files (*.mjs, p54-3): the `<seconds><TAB><file>` lines of the `== node seconds per file` block that
-# tests/lib/node-run.mjs prints at the end of node's phase (each file's top-level tests' duration_ms summed), from the
-# same two runs, the median of the two; a file under 0.1 s is written as 0.1.
-# Regenerate: run `make test` twice, take each suite's median from those lines and each node file's from that block,
-# sum the two self-tests, and rewrite this file whole, keeping the three floored rows below at least as high. A suite or
-# node file added since falls back to its size times the median seconds per byte of its kind (shard.py).
+# Node files (*.mjs, p54-3), macOS CI seconds since p49-3: the `<seconds><TAB><file>` lines of the `== node seconds per
+# file` block that tests/lib/node-run.mjs prints at the end of node's phase (each file's top-level tests' duration_ms
+# summed), in the four macOS shard jobs of each of master's three newest green full-suite.yml runs, each file's median
+# of its three; a file under 0.1 s is written as 0.1. Source (2026-11-20, p49-3): runs 44682208640 (872a8bc),
+# 44654220829 (bde9e71) and 44638943780 (d5f9d11). Local rows ran 1.0x to 3.9x under CI's file by file, so they could
+# not balance CI's shards, where the node phase's time is spent.
+# Units: the shell rows are local seconds and the node rows macOS CI seconds. They never meet: shard.py splits each kind
+# on its own, run.sh passes shard.py --order only node files, and suite_bounds only shell entries.
+# Regenerate: run `make test` twice and take each suite's median from those lines, summing the two self-tests; take each
+# node file's median from that block in the three newest green master full-suite.yml runs' macOS shard jobs (`gh api
+# repos/{owner}/{repo}/actions/jobs/<id>/logs`, read-only); rewrite this file whole, keeping the three floored rows below
+# at least as high. A suite or node file added since falls back to its size times the median seconds per byte of its
+# kind (shard.py). tests/test-jobs.test.sh holds the largest node row within 1.5x a fair slot, node's seconds over
+# full-suite.yml's shards x THREAD_TEST_JOBS: a node file past it sets its shard's time alone, so split it.
 # Three rows hold floors, sized from macOS CI because their measured seconds give a bound under 1.5x a CI time; a row
 # whose measured seconds pass its floor is written at them. A cut run's full time is its cut seconds over the share of a
 # lone local run's time its last check had reached (`bash <suite>` with each line timed).
@@ -119,125 +127,126 @@
 35	tests/verify-slot-own.test.sh
 9	tests/verify-slot-wait.test.sh
 51	tests/verify-slot.test.sh
-# ---- node files (p54-3) ----
-0.85	skills/execute/tests/approved-gates-resume.test.mjs
-0.1	skills/execute/tests/args-refusal.test.mjs
-0.3	skills/execute/tests/integrate.test.mjs
-1.6	skills/execute/tests/prompt-invariants.test.mjs
-11.6	skills/execute/tests/room-stop.test.mjs
-0.2	skills/execute/tests/task-engine.test.mjs
+# ---- node files (p54-3): macOS CI seconds (p49-3) ----
+1.7	skills/execute/tests/approved-gates-resume.test.mjs
+0.2	skills/execute/tests/args-refusal.test.mjs
+0.5	skills/execute/tests/integrate.test.mjs
+3.9	skills/execute/tests/prompt-invariants.test.mjs
+22.2	skills/execute/tests/room-stop.test.mjs
+0.3	skills/execute/tests/task-engine.test.mjs
 0.1	skills/execute/tests/unreachable-surface.test.mjs
-8.55	tests/background-job.test.mjs
-16.1	tests/backlog-orient.test.mjs
-7.75	tests/ci-workflows.test.mjs
-0.4	tests/contracts/approved-queue.test.mjs
-0.95	tests/contracts/away-state.test.mjs
-0.6	tests/contracts/cap-promise.test.mjs
+16.1	tests/background-job.test.mjs
+31.4	tests/backlog-orient.test.mjs
+11.1	tests/ci-workflows.test.mjs
+0.8	tests/contracts/approved-queue.test.mjs
+2.5	tests/contracts/away-state.test.mjs
+1.2	tests/contracts/cap-promise.test.mjs
 0.1	tests/contracts/capacity-state.test.mjs
 0.1	tests/contracts/capture-marker.test.mjs
 0.1	tests/contracts/close-flips-finished-task.test.mjs
-1	tests/contracts/close-handoff-chorus-words.test.mjs
+2	tests/contracts/close-handoff-chorus-words.test.mjs
 0.1	tests/contracts/close-lands-close-out.test.mjs
 0.1	tests/contracts/close-lands-own-branch.test.mjs
 0.1	tests/contracts/continuity-shared.test.mjs
-0.4	tests/contracts/engine-snapshot.test.mjs
-0.1	tests/contracts/escapes-fixes-key.test.mjs
+0.9	tests/contracts/engine-snapshot.test.mjs
+0.2	tests/contracts/escapes-fixes-key.test.mjs
 0.1	tests/contracts/evals-structure.test.mjs
-1.45	tests/contracts/execute-archive-move.test.mjs
-0.2	tests/contracts/execute-args-refusal.test.mjs
-3.65	tests/contracts/execute-handoff.test.mjs
-8.9	tests/contracts/execute-legs.test.mjs
-2.3	tests/contracts/execute-needs-you.test.mjs
-3.2	tests/contracts/execute-phase-close.test.mjs
-20.85	tests/contracts/execute-queue.test.mjs
-8	tests/contracts/execute-room-stop.test.mjs
-0.5	tests/contracts/execute-run-record.test.mjs
-0.1	tests/contracts/execute-signed-gate.test.mjs
-3.7	tests/contracts/execute-standing-approval.test.mjs
-5.7	tests/contracts/execution-fit-shapes.test.mjs
-0.15	tests/contracts/flake-rule.test.mjs
-1.3	tests/contracts/git-env-canary.test.mjs
+3.1	tests/contracts/execute-archive-move.test.mjs
+0.4	tests/contracts/execute-args-refusal.test.mjs
+7.9	tests/contracts/execute-handoff.test.mjs
+20.2	tests/contracts/execute-legs.test.mjs
+4.8	tests/contracts/execute-needs-you.test.mjs
+5.7	tests/contracts/execute-phase-close.test.mjs
+38.1	tests/contracts/execute-queue.test.mjs
+13.9	tests/contracts/execute-room-stop.test.mjs
+0.8	tests/contracts/execute-run-record.test.mjs
+0.2	tests/contracts/execute-signed-gate.test.mjs
+9.6	tests/contracts/execute-standing-approval.test.mjs
+13.2	tests/contracts/execution-fit-shapes.test.mjs
+0.3	tests/contracts/flake-rule.test.mjs
+2.4	tests/contracts/git-env-canary.test.mjs
 0.1	tests/contracts/grill-fit.test.mjs
-0.4	tests/contracts/handoff-ends-with-next.test.mjs
+0.7	tests/contracts/handoff-ends-with-next.test.mjs
 0.1	tests/contracts/handoff-lands-its-doc.test.mjs
 0.1	tests/contracts/handoff-one-writer.test.mjs
-0.4	tests/contracts/integration-conflict.test.mjs
+0.9	tests/contracts/integration-conflict.test.mjs
+0.1	tests/contracts/landings-line.test.mjs
 0.1	tests/contracts/lean-capture.test.mjs
 0.1	tests/contracts/manifest.test.mjs
-0.1	tests/contracts/merge-settings-guard.test.mjs
+0.2	tests/contracts/merge-settings-guard.test.mjs
 0.1	tests/contracts/next-action.test.mjs
 0.1	tests/contracts/next-archive-session.test.mjs
 0.1	tests/contracts/next-decides-housekeeping.test.mjs
-0.6	tests/contracts/next-starts-a-prepared-rollout.test.mjs
+1.2	tests/contracts/next-starts-a-prepared-rollout.test.mjs
 0.1	tests/contracts/next-starts-an-awaited-task.test.mjs
-2.75	tests/contracts/no-single-cause.test.mjs
-0.2	tests/contracts/note-overlap-opener.test.mjs
-1.65	tests/contracts/nothing-left-out.test.mjs
-0.4	tests/contracts/orient-all.test.mjs
-0.95	tests/contracts/orient-backlog.test.mjs
+6	tests/contracts/no-single-cause.test.mjs
+0.3	tests/contracts/note-overlap-opener.test.mjs
+3.4	tests/contracts/nothing-left-out.test.mjs
+1.1	tests/contracts/orient-all.test.mjs
+2	tests/contracts/orient-backlog.test.mjs
 0.1	tests/contracts/orient-declared-check.test.mjs
 0.1	tests/contracts/orient-launch-model.test.mjs
 0.1	tests/contracts/orient-priorities-card.test.mjs
 0.1	tests/contracts/orient-reshuffle.test.mjs
 0.1	tests/contracts/orient-target.test.mjs
 0.1	tests/contracts/plugin-root-rule.test.mjs
-3.3	tests/contracts/question-gate.test.mjs
-0.5	tests/contracts/queue-only.test.mjs
+8.2	tests/contracts/question-gate.test.mjs
+1.1	tests/contracts/queue-only.test.mjs
 0.1	tests/contracts/readiness-grade.test.mjs
-12.9	tests/contracts/reflect.test.mjs
+26.4	tests/contracts/reflect.test.mjs
 0.1	tests/contracts/refs.test.mjs
 0.1	tests/contracts/repair-complete-rollout.test.mjs
 0.1	tests/contracts/run-record-hermetic.test.mjs
-0.25	tests/contracts/run-record-writers.test.mjs
-0.3	tests/contracts/rung-vocabulary.test.mjs
-0.65	tests/contracts/schedule-merge-gate.test.mjs
-0.2	tests/contracts/schedule-preflight.test.mjs
-1	tests/contracts/schedule-queue.test.mjs
-0.6	tests/contracts/schedule-serial.test.mjs
+0.5	tests/contracts/run-record-writers.test.mjs
+0.8	tests/contracts/rung-vocabulary.test.mjs
+1.2	tests/contracts/schedule-merge-gate.test.mjs
+0.3	tests/contracts/schedule-preflight.test.mjs
+2.6	tests/contracts/schedule-queue.test.mjs
+1.1	tests/contracts/schedule-serial.test.mjs
 0.1	tests/contracts/schedule-supersede.test.mjs
-0.3	tests/contracts/security-check.test.mjs
+0.4	tests/contracts/security-check.test.mjs
 0.1	tests/contracts/skill-positional-args.test.mjs
 0.1	tests/contracts/start-when-ready.test.mjs
 0.1	tests/contracts/status-primary-refresh.test.mjs
-6.45	tests/contracts/status-repair-queue.test.mjs
-0.3	tests/contracts/status-repair-serial.test.mjs
-0.55	tests/contracts/stuck-release.test.mjs
+9.5	tests/contracts/status-repair-queue.test.mjs
+0.8	tests/contracts/status-repair-serial.test.mjs
+1.2	tests/contracts/stuck-release.test.mjs
 0.1	tests/contracts/templates.test.mjs
-0.1	tests/contracts/thread-placement-wiring.test.mjs
-1.15	tests/contracts/vault-grammar.test.mjs
+0.2	tests/contracts/thread-placement-wiring.test.mjs
+1.6	tests/contracts/vault-grammar.test.mjs
 0.1	tests/contracts/verify-base.test.mjs
-0.1	tests/contracts/verify-slot-hermetic.test.mjs
-10.75	tests/declared-check.test.mjs
+0.2	tests/contracts/verify-slot-hermetic.test.mjs
+14.3	tests/declared-check.test.mjs
 0.1	tests/default-branch.test.mjs
-1.6	tests/engine-ladder.test.mjs
-25.15	tests/estate-dispatch.test.mjs
-11.5	tests/estate-rank.test.mjs
-26.15	tests/estate-scan.test.mjs
-0.2	tests/fast-tier-wiring.test.mjs
-14.45	tests/gated-inputs.test.mjs
+2.5	tests/engine-ladder.test.mjs
+46.9	tests/estate-dispatch.test.mjs
+28.9	tests/estate-rank.test.mjs
+65.2	tests/estate-scan.test.mjs
+0.4	tests/fast-tier-wiring.test.mjs
+24.2	tests/gated-inputs.test.mjs
 0.1	tests/git-env-scrub.test.mjs
-73.6	tests/inert-paths.test.mjs
-10.3	tests/integration-marker-roundtrip.test.mjs
-4.4	tests/ladder.test.mjs
-8.55	tests/landing-register.test.mjs
-13.75	tests/merge-gate.test.mjs
-1.8	tests/needs-human-roundtrip.test.mjs
-7.3	tests/next-action.test.mjs
+191.7	tests/inert-paths.test.mjs
+16.6	tests/integration-marker-roundtrip.test.mjs
+5.7	tests/ladder.test.mjs
+14.5	tests/landing-register.test.mjs
+22.8	tests/merge-gate.test.mjs
+3.5	tests/needs-human-roundtrip.test.mjs
+11.2	tests/next-action.test.mjs
 0.1	tests/pinned-tree.test.mjs
-9.8	tests/reflect-arms.test.mjs
-90.4	tests/reflect-attention.test.mjs
-36.85	tests/reflect-close-score.test.mjs
-5.95	tests/reflect-due.test.mjs
-21.35	tests/reflect-escapes.test.mjs
-21.25	tests/reflect-grades.test.mjs
-107.55	tests/reflect-ledger.test.mjs
-42.3	tests/reflect-score.test.mjs
-8.8	tests/reflect-serial-score.test.mjs
-30.8	tests/reflect-tune.test.mjs
-295.2	tests/reflect-weekly.test.mjs
-0.75	tests/resolve-day.test.mjs
-15.25	tests/resolve-target.test.mjs
-17.2	tests/rollout-settings.test.mjs
-41.25	tests/run-record.test.mjs
-113.55	tests/security-check-scan.test.mjs
-19.2	tests/thread-placement.test.mjs
+51.7	tests/reflect-arms.test.mjs
+347.7	tests/reflect-attention.test.mjs
+95.5	tests/reflect-close-score.test.mjs
+20	tests/reflect-due.test.mjs
+55.3	tests/reflect-escapes.test.mjs
+132.8	tests/reflect-grades.test.mjs
+339.6	tests/reflect-ledger.test.mjs
+153.2	tests/reflect-score.test.mjs
+29.6	tests/reflect-serial-score.test.mjs
+54.5	tests/reflect-tune.test.mjs
+682.2	tests/reflect-weekly.test.mjs
+1.1	tests/resolve-day.test.mjs
+24.7	tests/resolve-target.test.mjs
+35.8	tests/rollout-settings.test.mjs
+62.3	tests/run-record.test.mjs
+111.5	tests/security-check-scan.test.mjs
+32.9	tests/thread-placement.test.mjs
