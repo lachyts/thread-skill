@@ -4797,37 +4797,39 @@ def _fable_share_fields(ceiling, paced, reading) -> dict:
     return fields
 
 
-def _start_arms(note, slug, first, explicit, ladder_once, pace_once=None, rollout=None, args=None):
-    """mark-started's arms for one note (p46-2): the stamp to print as `<slug>: arms <json>`, or None for no line.
-    `--start resume` draws, stamps and prints nothing (a resume re-passes its call's own args). A note with `arms:`
-    keeps it (one WARN and no line when it does not parse). Else, with a [share] table: a first dispatch (`first`:
-    no `started:` before this call's writes) draws every role of the task's kind (_task_arms) against its Fable ceiling
-    (_fable_ceiling) times the pace of `pace_once()` (p46-3: the run's one reading, _fable_reading), and writes one
-    `fable-share` Run record line for the task (nothing on --dry-run, through _event); a later one stamps them all
-    `none` (the task began outside the draw), reading nothing and writing no line. No [share] table, or a refused
-    ladder: nothing. Sets ARMS_KEY when it stamps; the caller saves the note."""
+def _start_arms(note, slug, first, explicit, ladder_once, pace_once):
+    """mark-started's arms for one note (p46-2): (arms, drawn). arms is the stamp to print as `<slug>: arms <json>`, or
+    None for no line; drawn is the draw's `fable-share` Run record fields (_fable_share_fields), or None when nothing
+    was drawn. `--start resume` draws, stamps and prints nothing (a resume re-passes its call's own args). A note with
+    `arms:` keeps it (one WARN and no line when it does not parse). Else, with a [share] table: a first dispatch
+    (`first`: no `started:` before this call's writes) draws every role of the task's kind (_task_arms) against its Fable
+    ceiling (_fable_ceiling) times the pace of `pace_once()` (p46-3: the run's one reading, _fable_reading); a later one
+    stamps them all `none` (the task began outside the draw), reading nothing. No [share] table, or a refused ladder:
+    nothing. Sets ARMS_KEY when it stamps; the caller saves the note, then writes drawn's one line for the task, so a
+    save that fails records no draw for a task never stamped (as _lead_arm writes its line once its stamp lands)."""
     if explicit == "resume":
-        return None
+        return None, None
     raw = note.get(ARMS_KEY)
     if raw is not None:
         arms = _parse_arms(raw)
         if arms is None:
             print(f"WARN: {slug}: arms: {raw!r} does not parse (role=opus|fable|none pairs, roles "
                   f"{', '.join(ARM_ROLES)}): kept as it is; this call runs with no arms", file=sys.stderr)
-        return arms
+        return arms, None
     ladder = ladder_once()
     ceiling = _fable_ceiling(ladder)
     if ladder["error"] or not ceiling:
-        return None
+        return None, None
+    drawn = None
     if first:
-        reading = pace_once() if pace_once is not None else {"why": "no reading", "login": None}
+        reading = pace_once()
         paced = _paced_share(ceiling, reading)
         arms = _task_arms(note, paced["share"], slug)
-        _event(rollout, "fable-share", slug, _fable_share_fields(ceiling, paced, reading), args)
+        drawn = _fable_share_fields(ceiling, paced, reading)
     else:
         arms = {role: "none" for role in _task_roles(note)}
     note.set(ARMS_KEY, _format_arms(arms), after=("rung", "started", "owner", "status"))
-    return arms
+    return arms, drawn
 
 
 def _gate_bounce(task) -> str:
@@ -8786,7 +8788,7 @@ def cmd_mark_started(args) -> int:
         existing = _scalar(note.get("started"))
         if not existing:
             note.set("started", _stamp(now))
-        arms = _start_arms(note, slug, not existing, args.start, ladder_once, pace_once, rollout, args)
+        arms, drawn = _start_arms(note, slug, not existing, args.start, ladder_once, pace_once)
         note.remove("integrating")
         signed = _scalar(note.get(GATES_SIGNED_KEY))
         note.remove(GATES_SIGNED_KEY)
@@ -8794,6 +8796,8 @@ def cmd_mark_started(args) -> int:
         note.remove(DESCOPE_ARMED_KEY)
         note.remove(HANDED_BACK_KEY)
         note.save(dry_run=args.dry_run)
+        if drawn is not None:   # p46-3: the draw's one line, once its stamp has landed (nothing on --dry-run, _event)
+            _event(rollout, "fable-share", slug, drawn, args)
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
         if arms is not None:
             print(f"{slug}: arms {_arms_json(arms)}")

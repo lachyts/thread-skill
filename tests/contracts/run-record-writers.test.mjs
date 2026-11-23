@@ -77,14 +77,18 @@ test('role-call is emitted by reconcile-rollout.py alone, inside cmd_fold_journa
   assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*role-call/.test(text)).map(({ file }) => file), [])
 })
 
-// p46-3 (ADR 0079 decision 6): fable-share is written at each arms draw, by reconcile-rollout.py's two draw helpers alone.
-test('fable-share is emitted by reconcile-rollout.py alone, inside _start_arms and _lead_arm, never by prose', () => {
+// p46-3 (ADR 0079 decision 6): fable-share is written at each arms draw, by its two writers alone (mark-started's, from
+// _start_arms' fields, and record-entry's _lead_arm), each only once the draw's stamp is saved, so a failed save records
+// no draw for a task or rollout never stamped.
+test('fable-share is emitted by reconcile-rollout.py alone, inside cmd_mark_started and _lead_arm after the save, never by prose', () => {
   const by = scripts().filter(({ text }) => emits(text, 'fable-share')).map(({ file }) => file)
   assert.deepEqual(by, ['skills/execute/scripts/reconcile-rollout.py'])
   const rr = read('skills/execute/scripts/reconcile-rollout.py')
-  const helpers = ['_start_arms', '_lead_arm'].map((name) => defBody(rr, name))
-  assert.ok(helpers.every((b) => emits(b, 'fable-share')), 'each draw helper emits it')
-  assert.ok(!emits(helpers.reduce((t, b) => t.replace(b, ''), rr), 'fable-share'), 'and nowhere else in the file')
+  const writers = ['cmd_mark_started', '_lead_arm'].map((name) => defBody(rr, name))
+  assert.ok(writers.every((b) => emits(b, 'fable-share')), 'each writer emits it')
+  assert.ok(writers.every((b) => b.indexOf('note.save(') >= 0 && b.indexOf('note.save(') < b.search(/_event\([^)\n]*"fable-share"/)),
+    'each emits it after its note.save')
+  assert.ok(!emits(writers.reduce((t, b) => t.replace(b, ''), rr), 'fable-share'), 'and nowhere else in the file')
   const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
   assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*fable-share/.test(text)).map(({ file }) => file), [])
 })
