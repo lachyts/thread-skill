@@ -141,7 +141,17 @@ What was known on 2026-11-12:
   review asked for changes on 436 of 683 tasks. The weekly Reflection of 2026-11-09 traced Escapes in four rollouts
   to the master review passing code a later review flagged.
 - **Allowance.** Each Claude Login has its own weekly Fable window beside its general one, and all four Fable
-  windows read 0% used. Whether Fable use also draws down the general window was not confirmed.
+  windows read 0% used. Whether Fable use also draws down the general window was not confirmed then. *(Answered
+  2026-11-23 by thread-skill-p46-3's probe, on the dummy Login, Chorus's primary, read from the quota store's poller
+  writes, whole percents: the general window read 2% at 09:34Z and at 09:44Z, no background drift over those ten
+  minutes, and Fable 0%. One `claude -p --model fable` run, 09:44Z to 10:25Z, wrote 13 chapters of a 20-chapter text,
+  about 135k output tokens (about 405k characters of text and tool input, plus about 33k estimated thinking tokens)
+  on 2.3M input tokens (2.09M cache reads, 211k cache writes, 32 uncached), and was stopped once Fable had risen 3
+  points. Fable read 1% at 10:04Z, 2% at 10:14Z and 3% at 10:24Z; the general window stepped from 2% to 3% between
+  10:04Z and 10:14Z, as Fable went from 1% to 2%, and both still read 3% at 10:35Z. So Fable use appears to draw
+  down the general window too, about one general point to three Fable points at the store's resolution; other use of
+  the primary Login in that hour cannot be ruled out. Pacing works either way: each draw reads both windows as they
+  stand.)*
 - **The engine.** A Rung holds one model for every role, so "Fable plans, Opus builds" cannot be said. A
   model-allowance refusal reads as a transient failure, which stalled two rollouts in September 2026.
 - **The lock, later the same day.** `~/.agents/AGENTS.md` § Model tier was amended on Lachy's word by an agent
