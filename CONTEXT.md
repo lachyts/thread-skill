@@ -2101,6 +2101,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   feedback. When the Opus rerun dies too it is an allowance block, retried
   as a quota block, or resumed as a Lost call (execute § 4.5) under a usage
   limit the lead knows of (ADR 0079 d7). _Avoid_: quota block, transient.
+- **Classifier stop** — an agent's own block that opens by naming a safety
+  classifier that stopped or withheld its response: the **Allowance
+  refusal**'s sibling, the model declined. The call ends at that dispatch
+  with no climb or retry, `blocked` (never plan feedback) with a diagnosis
+  opening `classifier stop at <stage>`, and the automatic retry never
+  re-enters it: a person rescopes the brief or defers the task (p47-12).
+  _Avoid_: plan-rejected, transient, refusal (alone).
 - **Top rung** — the Ladder's last rung, the ceiling for every task and every
   Integration (ADR 0029). Integration never runs on an all-Fable rung: it
   runs on the highest rung below it (ADR 0079). _Avoid_: top tier, ceiling,

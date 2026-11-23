@@ -290,7 +290,10 @@ execute § 4.5 *Lost call* first resumes such a transient row once from its own 
 the dead call's row, reaches this class. One exception (ADR 0079 d7, p46-3): when the agent it kills was asked Fable
 and its Opus rerun dies too, the row opens `allowance refusal`, an allowance block, which retries as a quota block
 (`autoRetryClass: quota`: the quota cool-downs, no budget spent; it is **retry (automatic)**, never his); under a usage
-limit the lead's Session knows of, *Lost call* resumes it first, as it does a transient row.
+limit the lead's Session knows of, *Lost call* resumes it first, as it does a transient row. A classifier stop (its row
+opens `classifier stop at <stage>`, p47-12: a safety classifier stopped an agent) is no retry class at all: the same
+brief meets the same classifier, so its `humanFix` reads `decide scope or defer` (§ 3b), and his rescoped brief, a
+`## Repair input` then `hand-back`, is the later dispatch.
 
 **Classed before the answer.** § 2 classes each task on the state § 1's diagnosis read. A § 3b answer changes what
 `inputs` reads (an answered block reads `answered for this block …`, its `humanFix` the answer's own), and the

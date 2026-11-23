@@ -331,6 +331,9 @@ export const meta = {
 // refusal: { refused: [the label of the Fable dispatch that died twice], fellBack: the dispatches run on Opus in Fable's
 // place, its retries never counted (>= 1) }; reconcile stamps the note `fell_back: <stamp>`. A call whose Opus rerun
 // died too ends blocked with ALLOWANCE_DIAGNOSIS (an allowance block, retried as a quota block), never plan-blocked.
+// A call one of whose agents a safety classifier stopped (p47-12, runAgent's classifier stop) ends at that dispatch,
+// blocked with classifierDiagnosis (opening CLASSIFIER_MARK and naming the stage and the dispatch), never plan-blocked,
+// with no climb or retry for it and no row key of its own.
 // A block on the top rung is a wall at the operator's ceiling: raising it is an edit to the ladder file.
 // gatedInputs lists the declared-but-unapproved gates when status is gate-pending
 // (a declared gate always pauses for a human — ADR 0008). A plan-gate gate-pending that follows a plan judge's
@@ -2780,6 +2783,54 @@ const ALLOWANCE_DIAGNOSIS =
 // The rerun's label suffix: reconcile-rollout.py's ON_RUNG_SUFFIX (both pinned by tests/contracts/execute-needs-you.test.mjs).
 const FALLBACK_SUFFIX = ' on-rung'
 
+// The classifier stop (p47-12, Watch ef8ad104 of chorus-rollout-2026-10-26: a safety classifier stopped one planner five
+// times on exploit forms, each read as plan-rejected and re-entered). The allowance refusal's sibling: the model
+// declined. A safety classifier that stops or withholds an agent's response leaves the agent running, and it returns
+// its own block in its own words ("A safety classifier stopped this planning round partway through …"). Another pass
+// on the same brief meets the same classifier, so the stop is never evidence of hardness and never retried in the call:
+// runAgent reads it off the agent's own failure (classifierStopOf) and ends the call at once, `blocked` (never
+// plan-blocked, never plan feedback) with CLASSIFIER_DIAGNOSIS, which names the stage and the dispatch it stopped. No
+// climb, no second pass, no plan revise, no review round. reconcile reads it as reasonClass `classifier`, and the
+// automatic retry spends nothing on it: it is set aside for a person (lead-integrate.py's verdict, H5 `decide scope or
+// defer`). A rescoped brief is a later dispatch's, never this one's retry. Task mode only: Integration reads none.
+// CLASSIFIER_MARK is reconcile-rollout.py's CLASSIFIER_MARK and lead-integrate.py's NO_BUDGET_OPENINGS entry (pinned by
+// tests/contracts/execute-needs-you.test.mjs).
+const CLASSIFIER_MARK = 'classifier stop'
+// The agent's own words, read only at their opening: the engine's mark, or a safety (or usage-policy) classifier named
+// first and a stop verb in the same sentence. A block that names a classifier anywhere later (a verifier red quoting a
+// test named for this rule, merge-task's infra classifier) is the agent's own block.
+const CLASSIFIER_OPENING_RE = /^\W*(?:classifier stop\b|(?:(?:an?|the)\s+)?(?:safety|usage[- ]policy)\s+classifier\b[^.\n]*?\b(?:stopped|stops|withheld|withholds|blocked|blocks|flagged|halted|cut|ended|refused))/i
+const CLASSIFIER_TEXT_MAX = 400
+// The stage a dispatch's label names (AUTO_RETRY_STAGES' words): the planner, its reviser and the plan judge plan; the
+// builder and the investigator implement; the reviser and the master reviewers review.
+function classifierStageOf(label) {
+  const kind = String(label || '').split(':')[0]
+  if (kind === 'plan' || kind === 'plan-revise' || kind === 'plan-judge') return 'plan'
+  if (kind === 'revise' || kind === 'review' || kind === 'first-review') return 'review'
+  return 'implement'
+}
+// The agent's own failure text when it reads as a classifier stop, else ''. Read from the field its schema gives a
+// failure: a planner's blockerCause (blocked or no plan), a code-writing agent's or the investigator's
+// blockerDiagnosis (blocked), a judge's first `changes` bullet, and any agent's needsHuman.
+function classifierStopOf(r) {
+  if (!r || typeof r !== 'object') return ''
+  const texts = []
+  if (r.blocked === true || r.ready === false) texts.push(r.blockerCause, r.blockerDiagnosis)
+  if (r.verdict === 'changes' && Array.isArray(r.feedback)) texts.push(r.feedback[0])
+  texts.push(r.needsHuman)
+  const hit = texts.find((t) => typeof t === 'string' && CLASSIFIER_OPENING_RE.test(t.trim()))
+  return hit ? hit.trim() : ''
+}
+// The row's diagnosis for a classifier stop at `stage`, by the dispatch `label`, with the agent's own words (one line,
+// double quotes dropped so the lead can copy it into a ROLLOUT-STATUS reason, cut at CLASSIFIER_TEXT_MAX). Its fixed text
+// holds no `transient infrastructure failure`, `quota`, `usage limit` or `allowance refusal`.
+function classifierDiagnosis(c) {
+  const said = cutEcho(String(c.text || '').replace(/"/g, '').replace(/\s+/g, ' ').trim(), CLASSIFIER_TEXT_MAX)
+  return `${CLASSIFIER_MARK} at ${c.stage} (${c.label}) — a safety classifier stopped the agent (p47-12). NOT a ` +
+    'task-authored blocker and never plan feedback: another pass on the same brief meets the same classifier, so the ' +
+    'call ended without a retry, and the task waits for a person to rescope the brief or defer it. The agent said: ' + said
+}
+
 // { model: 'opus', effort } a dispatch labelled `label` runs on in Fable's place: the task's current rung, or the
 // Integration rung (integrationRungOf) when the current rung is all-Fable, at the effort its role reads there (the plan
 // judge's `judge`, a master reviewer's `review`, every other role's `effort`). So a fallback runs as it would if the
@@ -2868,8 +2919,18 @@ function unreachableRow(st) {
 // in Fable's place is pushed on st.ran before it runs, with `asked` and `fellBack`, and counts once in
 // st.allowance.fellBack (its retry never does). The Flake and Unreachable bookkeeping reads the opts that ran: the label's
 // prefix and the schema are kept.
+// p47-12 (the classifier stop above): only with st, an agent that returned its own block reading as a classifier stop
+// (classifierStopOf) returns { __dead: true, classifier: { stage, label, text } } at once, unbooked and never retried, so
+// every layer's `.__dead` check ends the call there (deadDiagnosis, transientPlanBlock).
 async function runAgent(prompt, opts, st) {
   const label = (opts && opts.label) || ''
+  const declined = (r, o) => {
+    const text = st && r != null ? classifierStopOf(r) : ''
+    if (!text) return null
+    const at = (o && o.label) || label
+    log(`classifier stop: ${at} — a safety classifier stopped the agent; the call ends here with no retry (p47-12)`)
+    return { __dead: true, classifier: { stage: classifierStageOf(at), label: at, text } }
+  }
   const attempt = async (o) => {
     let r = await agent(prompt, o)
     if (r == null) {
@@ -2895,6 +2956,8 @@ async function runAgent(prompt, opts, st) {
     const o = fellBackOn({ ...opts, label })
     log(`allowance: ${label} asked fable — on opus at ${o.effort} (Fable is out for the rest of this call)`)
     const r = await attempt(o)
+    const stop = declined(r, o)
+    if (stop) return stop
     book(r, o)
     return r == null ? { __dead: true } : r
   }
@@ -2905,9 +2968,13 @@ async function runAgent(prompt, opts, st) {
     const o = fellBackOn({ ...opts, label: label + FALLBACK_SUFFIX })
     log(`allowance: ${label} on fable died twice — read as its Login's Fable allowance refused (ADR 0079 d7); once more on opus at ${o.effort}, and Fable is out for the rest of this call`)
     const again = await attempt(o)
+    const stop = declined(again, o)
+    if (stop) return stop
     book(again, o)
     return again == null ? { __dead: true, allowance: true } : again
   }
+  const stop = declined(r, opts)
+  if (stop) return stop
   book(r, opts)
   return r == null ? { __dead: true } : r
 }
@@ -2917,12 +2984,14 @@ async function runAgent(prompt, opts, st) {
 // hand-diagnosing an infra blip from the <failures> block. deadDiagnosis (p46-3) reads which death it was: an
 // allowance block (runAgent's Opus rerun of a refused Fable dispatch died too) is ALLOWANCE_DIAGNOSIS, which is never
 // plan feedback, so the plan stage's block is `blocked` (reconcile's `## Blocker diagnosis`), never `plan-blocked`. A
-// plain death keeps today's row byte for byte.
+// plain death keeps today's row byte for byte. A classifier stop (p47-12, runAgent's `classifier`) is its
+// classifierDiagnosis, `blocked` at every stage the same way.
 function deadDiagnosis(r) {
+  if (r && r.classifier) return classifierDiagnosis(r.classifier)
   return r && r.allowance ? ALLOWANCE_DIAGNOSIS : TRANSIENT_DIAGNOSIS
 }
 function transientPlanBlock(task, rounds, dead) {
-  if (dead && dead.allowance) return { task, blocked: true, status: 'blocked', blockerDiagnosis: ALLOWANCE_DIAGNOSIS, planRoundsUsed: rounds }
+  if (dead && (dead.allowance || dead.classifier)) return { task, blocked: true, status: 'blocked', blockerDiagnosis: deadDiagnosis(dead), planRoundsUsed: rounds }
   return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS, planRoundsUsed: rounds }
 }
 function transientImplBlock(extra, dead) {

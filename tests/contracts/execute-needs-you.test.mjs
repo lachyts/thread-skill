@@ -447,6 +447,10 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
     [engine, "const ALLOWANCE_MARK = 'allowance refusal'", 'the engine\'s ALLOWANCE_MARK'],
     [reconcile, 'ALLOWANCE_MARK = "allowance refusal"', 'reconcile\'s ALLOWANCE_MARK (reasonClass allowance, retry class quota)'],
     [engine, "const FALLBACK_SUFFIX = ' on-rung'", 'the engine\'s FALLBACK_SUFFIX'],
+    // p47-12: the classifier stop's mark, the engine's and reconcile's copies alike, and the opening classifierDiagnosis writes.
+    [engine, "const CLASSIFIER_MARK = 'classifier stop'", 'the engine\'s CLASSIFIER_MARK'],
+    [engine, 'return `${CLASSIFIER_MARK} at ${c.stage} (${c.label}) — ', 'classifierDiagnosis\'s opening'],
+    [reconcile, 'CLASSIFIER_MARK = "classifier stop"', 'reconcile\'s CLASSIFIER_MARK (reasonClass classifier, no automatic retry)'],
     [reconcile, 'ON_RUNG_SUFFIX = " on-rung"', 'reconcile\'s ON_RUNG_SUFFIX (the fold\'s fell-back rerun)'],
     [engine, 'blockerDiagnosis="plan-divergence: <one line>"', 'the implementer\'s plan-divergence stop'],
     [engine, "'agent returned neither verified nor blocked'", 'implement()\'s fallback'],
@@ -462,12 +466,12 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
       'step 3\'s prUrlError set-aside'],
   ]
   for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
-  // Each opening is _raise_field's: the eight own-run openings in NO_BUDGET_OPENINGS (p46-3 added the allowance block's), the
-  // plan budget's in PLAN_BUDGET_OPENINGS.
+  // Each opening is _raise_field's: the nine own-run openings in NO_BUDGET_OPENINGS (p46-3 added the allowance block's,
+  // p47-12 the classifier stop's), the plan budget's in PLAN_BUDGET_OPENINGS.
   const tuple = (name) => JSON.parse('[' + ((leadIntegrate.match(new RegExp(`^${name} = \\(([^)]*)\\)`, 'm')) ?? [])[1] ?? '').replace(/\s+/g, ' ').replace(/,\s*$/, '') + ']')
   assert.deepEqual(tuple('NO_BUDGET_OPENINGS'), ['workflow call failed:', 'merge-task:', 'transient infrastructure failure', 'allowance refusal',
-    'plan-divergence:', 'agent returned neither verified nor blocked', 'workflow stage threw', 'invalid round budget:'],
-  'NO_BUDGET_OPENINGS lists the eight own-run openings')
+    'classifier stop', 'plan-divergence:', 'agent returned neither verified nor blocked', 'workflow stage threw', 'invalid round budget:'],
+  'NO_BUDGET_OPENINGS lists the nine own-run openings')
   assert.deepEqual(tuple('PLAN_BUDGET_OPENINGS'), ['plan not approved after', 'plan round budget exhausted'], 'PLAN_BUDGET_OPENINGS')
 })
 
