@@ -1452,7 +1452,8 @@ function check({ status, repair, execute, fx }) {
   const desc = (repair.match(/^description: (.*)$/m) ?? [])[1] ?? ''
   if (!(ra[1] ?? '').includes('`autoRetry: true`') || !(ra[1] ?? '').includes('`autoRetryAfter`') ||
     !(ra[2] ?? '').startsWith('nothing: the lead re-enters it') || !(ra[2] ?? '').includes('never a hand-back') ||
-    ![THREE, 'its `humanFix` names another cause that is his', '`autoRetryError`', 'A usage limit that kills an agent mid-run is an infra block, never a quota block'].every((k) => agentFix.includes(k)) ||
+    ![THREE, 'its `humanFix` names another cause that is his', '`autoRetryError`', 'A usage limit that kills an agent mid-run is an infra block, never a quota block',
+      'the row opens `allowance refusal`, an allowance block, which retries as a quota block'].every((k) => agentFix.includes(k)) ||
     !classed.includes('never re-class a task after recording his answer') || !classed.includes('fresh automatic-retry stretch he chose') ||
     /judged from the feedback/.test(collapse(rb)) || !r3b.includes(THREE) || /a second block, a second raise/.test(r3b) ||
     !['at Integration', 'revise stopped', 'review-blocked, rejected', 'own run'].every((l) => (cls[l] ?? '').includes('§ 3b') && !(cls[l] ?? '').includes('agent-fixable → hand back')) ||
@@ -2202,6 +2203,10 @@ test('control: a Leash with no fresh stretch fails auto-retry', () => {
 test('control: no infra reading of a usage limit fails auto-retry', () => {
   only(rp(' A usage limit that kills an agent\nmid-run is an infra block, never a quota block: it gets the infra cool-downs, the budget and the Overtime, then the\ntake-out.', ''),
     'auto-retry', 'infra')
+})
+test('control: no allowance exception (p46-3) fails auto-retry', () => {
+  only(rp(' One exception (ADR 0079 d7, p46-3): when the agent it kills was asked Fable\nand its Opus rerun dies too, the row opens `allowance refusal`, an allowance block, which retries as a quota block\n(`autoRetryClass: quota`: the quota cool-downs, no budget spent; it is **retry (automatic)**, never his); under a usage\nlimit the lead\'s Session knows of, *Lost call* resumes it first, as it does a transient row.', ''),
+    'auto-retry', 'allowance')
 })
 test('control: a class re-read after the answer fails auto-retry', () => {
   only(rp('never re-class a task after recording his answer', 're-class a task after recording his answer'), 'auto-retry', 're-class')

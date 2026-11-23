@@ -47,7 +47,8 @@ which the next reading's agreement reads back. Four readings are declared, the r
 2. *Landing: every agreed, traded or cautioned ceiling becomes a `- ceiling` item on the decision task, and the session
    deciding that task applies a yes to `[share]`. This departs from "three Reflections agree" landing it on its own
    (ADR 0037 decision 5): no writer can land a ceiling until p46-3 gives it a writable home, and task p46-10 removes
-   the departure.*
+   the departure. (Amended 2026-11-23 by thread-skill-p46-3: p46-3 gave the ceiling no new home; the writable home and
+   its writer are p46-10's, which removes the departure.)*
 3. *The plans' split: the first planner call on Fable that is not on the Fable rung. Before it a task's plan model is
    its first Slot's rung, after it its planner calls'; each side counts every task, planned or not, and leaves out only
    a planned task whose plan ran on the other model (and, before the split, a task on a rung no built-in ladder names).*
@@ -92,6 +93,20 @@ close-out (repair § 1), which writes nothing else in the vault, and a serial ch
 no `## Notes` line by hand. Nothing here reads a ladder or sets a model, which stays Chorus's (Chorus ADR 0119). With
 neither flag a line is as before. No measure reads them yet.)*
 
+*(Amended 2026-11-23 by thread-skill-p46-3: decisions 6 and 7 are built. Decision 6: each drawn role's share at its draw
+is its Fable ceiling (the ladder's `[share]` value, read as the ceiling) times a pace read per Login from the quota
+store by `skills/execute/scripts/fable_pace.py`: half the ceiling when the Login's Fable and general weekly windows are
+even, less when Fable is further used, more when it is behind (the whole ceiling at most), nothing when Fable is spent;
+a missing, stale or ended reading, or no Login, paces 0, so every role draws Opus, never a stop. `reconcile-rollout.py`
+paces both draws (mark-started's, record-entry's) and writes one `fable-share` Run record line per draw. Decision 7: the
+engine cannot see a refusal's text, so a Fable dispatch still dead after its retry is read as its Login's allowance
+refused: it runs once more on Opus, and every later Fable dispatch of the call runs on Opus at once, each `ran` entry
+marked `asked` and `fellBack`, the row's `allowance` stamped `fell_back:` on the note; only that Opus rerun's death is an
+allowance block, `blocked` with an `allowance refusal` diagnosis, never plan feedback, retried as a quota block (or
+resumed as a Lost call under a usage limit the lead knows of). The fold reads the refusal's text after the fact as a
+role-call's `refused`. The billing refusal ("payment is past due") kills every model and the lead, so no fallback can
+run there; it is left out on purpose.)*
+
 ## Context
 
 ADR 0029 kept Fable off the built-in ladder and said a replay of hard rollout tasks would decide whether it joins.
@@ -126,7 +141,17 @@ What was known on 2026-11-12:
   review asked for changes on 436 of 683 tasks. The weekly Reflection of 2026-11-09 traced Escapes in four rollouts
   to the master review passing code a later review flagged.
 - **Allowance.** Each Claude Login has its own weekly Fable window beside its general one, and all four Fable
-  windows read 0% used. Whether Fable use also draws down the general window was not confirmed.
+  windows read 0% used. Whether Fable use also draws down the general window was not confirmed then. *(Answered
+  2026-11-23 by thread-skill-p46-3's probe, on the dummy Login, Chorus's primary, read from the quota store's poller
+  writes, whole percents: the general window read 2% at 09:34Z and at 09:44Z, no background drift over those ten
+  minutes, and Fable 0%. One `claude -p --model fable` run, 09:44Z to 10:25Z, wrote 13 chapters of a 20-chapter text,
+  about 135k output tokens (about 405k characters of text and tool input, plus about 33k estimated thinking tokens)
+  on 2.3M input tokens (2.09M cache reads, 211k cache writes, 32 uncached), and was stopped once Fable had risen 3
+  points. Fable read 1% at 10:04Z, 2% at 10:14Z and 3% at 10:24Z; the general window stepped from 2% to 3% between
+  10:04Z and 10:14Z, as Fable went from 1% to 2%, and both still read 3% at 10:35Z. So Fable use appears to draw
+  down the general window too, about one general point to three Fable points at the store's resolution; other use of
+  the primary Login in that hour cannot be ruled out. Pacing works either way: each draw reads both windows as they
+  stand.)*
 - **The engine.** A Rung holds one model for every role, so "Fable plans, Opus builds" cannot be said. A
   model-allowance refusal reads as a transient failure, which stalled two rollouts in September 2026.
 - **The lock, later the same day.** `~/.agents/AGENTS.md` § Model tier was amended on Lachy's word by an agent
@@ -175,7 +200,9 @@ His, at this repo's orient:
 6. **The Fable share is paced to the allowance, under a Fable ceiling.** Per Login, pacing moves the live share of
    work drawn into Fable arms with what is left, so that the Fable window and the general window run down together
    through the week, never above the role's **Fable ceiling**: the most of a drawn role's work its Fable arm may
-   take, a rollout setting, one per drawn role. It is not the **Parallel ceiling** (the most Slots a Queue holds)
+   take, a rollout setting, one per drawn role. *(Amended 2026-11-23 by thread-skill-p46-3: the Fable ceiling stays
+   the ladder's `[share]` table, read as each drawn role's ceiling, and reconcile paces the live share under it per
+   Login; task thread-skill-p46-10 gives the ceiling its home in the Rollout settings and its one writer.)* It is not the **Parallel ceiling** (the most Slots a Queue holds)
    or the retired model-tier **Ceiling**. One mechanism each: pacing moves the live share, and only the Fable
    ceiling is a Tuning (decision 9; review #7). Pacing need not be exact, and allowance left over at the week's end
    is fine. Nothing is held in reserve for hand sessions. The rule takes any number of Logins. Pacing governs the

@@ -22,6 +22,11 @@ fix it filed is due, dropped or gone, and his word through `felt-check` as the w
 *(Amended 2026-11-12 by thread-skill-p46-8: findings 6, 9, 10, 12 and 13 of review round 45adf20/cdf93d are settled
 in the decisions and the Decided list, each marked "review #N".)*
 
+*(Amended 2026-11-23 by thread-skill-p46-3: decision 2's built departure, a dead first reviewer on Fable rerun once on
+the task's rung, is now the engine-wide allowance refusal (ADR 0079 d7): the rerun runs on Opus at the rung's review
+effort under the same ` on-rung` label, and after it every Fable dispatch of the call, a `[role]` second reviewer's
+included, runs on Opus, so both reviewers run on Opus for the rest of that call.)*
+
 ## Context
 
 The master review approves a task on reading alone when no check in its rollout's verifier exercises its code:

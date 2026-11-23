@@ -1847,7 +1847,7 @@ const ROLE_CALL = {
 }
 const ROLE_CALL_ALL = {
   ...ROLE_CALL, tokens: 1200, fresh: 2, replayed: 1, tokensPartial: true, models: ['claude-fable-5-2', 'claude-opus-5-5'],
-  arm: 'fable', climbs: 1, fellBack: true, fableRung: true,
+  arm: 'fable', climbs: 1, fellBack: true, fableRung: true, refused: true,
 }
 const omitKey = (o, k) => Object.fromEntries(Object.entries(o).filter(([x]) => x !== k))
 
@@ -1881,6 +1881,7 @@ test('role-call refusals: its required fields, its closed enums, an arm off a dr
     ['an arm on the first reviewer (p52-2: outside the draw)', { ...ROLE_CALL, role: 'first-reviewer', arm: 'fable' }],
     ['tokens a string', { ...ROLE_CALL, tokens: '12' }], ['dispatches 0', { ...ROLE_CALL, dispatches: 0 }],
     ['replayed 0', { ...ROLE_CALL, replayed: 0 }], ['fellBack false', { ...ROLE_CALL, fellBack: false }],
+    ['refused false (p46-3: true or left out)', { ...ROLE_CALL, refused: false }],
     ['nine models', { ...ROLE_CALL, models: Array.from({ length: 9 }, (_, i) => `m${i}`) }],
     ['a repeated model', { ...ROLE_CALL, models: ['a', 'a'] }], ['startTime a string', { ...ROLE_CALL, startTime: '2026-11-13' }],
   ]
@@ -1892,6 +1893,32 @@ test('role-call refusals: its required fields, its closed enums, an arm off a dr
   const noTask = cli(home, ['emit', '--rollout', 'r', '--kind', 'role-call', '--json', JSON.stringify(ROLE_CALL)], { env: EV(home) })
   assert.equal(noTask.status, 2, 'a task is required')
   assert.equal(listing(ev(home)).length, 0, 'nothing written')
+})
+
+// p46-3 (ADR 0079 decision 6): one fable-share line per arms draw, a task's (its task set) or the lead's (none).
+const SHARE_LINE = { ceiling: { 'master-review': 1, builder: 0.5 }, share: { 'master-review': 0.5, builder: 0.25 }, pace: 0.5 }
+
+test('fable-share validates with or without a task, with the reading or with a why, and refuses each malformed field', (t) => {
+  const home = tmpHome(t)
+  const f = path.join(ev(home), 'r.jsonl')
+  const emit = (o, task) => cli(home, ['emit', '--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', 'fable-share', '--json', JSON.stringify(o)], { env: EV(home) })
+  const good = [
+    [{ ...SHARE_LINE, login: 'login-a', fable: 40, general: 40.5, fetchedAt: '2026-11-13T09:50:00Z' }, 't'],
+    [{ ceiling: { lead: 1 }, share: { lead: 0 }, pace: 0, why: 'no store' }, null],
+  ]
+  for (const [o, task] of good) assert.equal(emit(o, task).status, 0, JSON.stringify(o))
+  assert.deepEqual(lines(f).map((l) => [l.task, l.pace]), [['t', 0.5], [null, 0]])
+  for (const [what, o] of [
+    ['a ceiling above 1', { ...SHARE_LINE, ceiling: { builder: 1.5 } }], ['a role not drawn', { ...SHARE_LINE, share: { planner: 0.5 } }],
+    ['a pace above 1', { ...SHARE_LINE, pace: 1.2 }], ['an empty why', { ...SHARE_LINE, why: '' }],
+    ['fable a string', { ...SHARE_LINE, fable: '40' }], ['general above 100', { ...SHARE_LINE, general: 101 }],
+    ['no pace', omitKey(SHARE_LINE, 'pace')], ['fetchedAt not UTC Z', { ...SHARE_LINE, fetchedAt: '2026-11-13T09:50:00+11:00' }],
+  ]) {
+    const r = emit(o, 't')
+    assert.equal(r.status, 2, what)
+    assert.match(r.stderr, /^run_record: refused: fable-share: .*\n$/, what)
+  }
+  assert.equal(lines(f).length, 2, 'nothing more written')
 })
 
 // p46-4 (ADR 0079 d9): the arms reading's line, at most one per Reflection, reflect.py close its writer.

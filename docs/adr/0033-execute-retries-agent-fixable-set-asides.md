@@ -166,7 +166,11 @@ Considered:
   error line. A usage limit that kills an agent mid-run surfaces as the engine's transient block (or a thrown
   stage), which is infra: it gets the infra cool-downs (75 minutes in all on the default budget of 2) and then a
   human, never the quota's 15.5 hours. p16-5's prose and a Retro must not count such a limit as covered by
-  decision 5.
+  decision 5. *(Amended 2026-11-23 by thread-skill-p46-3, ADR 0079 d7: a Fable refusal is handled inside the run,
+  where the engine reruns the dead Fable dispatch once on Opus and runs the rest of the call's Fable dispatches on
+  Opus; only when that Opus rerun dies too is the row an allowance block (`allowance refusal`), which retries as a
+  quota block, or, under a usage limit the lead's Session knows of, takes execute § 4.5's Lost-call resume as a
+  transient row does.)*
 - **The idle-slots label during a cool-down.** `next` is stateless and never reads the verdict, so while a
   set-aside task waits out a cool-down with nothing queued, the idle-slots reason is `awaiting-hand-back`; a
   Retro tells the two apart by the `auto-retry` event before the restart that ends the span (run_record.py's

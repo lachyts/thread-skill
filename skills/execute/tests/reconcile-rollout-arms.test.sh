@@ -15,7 +15,19 @@
 #   S  status: its ladder keeps source, rungs and error, never the share.
 #   F  (p52-2, ADR 0081 d2) the role-call fold of a doubled master review: its first reviewer is its own role, the
 #      master-review line carries no arm, and a dead Fable first reviewer's rerun on the rung is fellBack.
-# HOME points at a temp dir holding each case's ~/.config/thread/ladder.toml. Temp dirs only.
+#   P  (p46-3, ADR 0079 decision 6) the paced share: each draw is the role's Fable ceiling (the [share] value) times
+#      skills/execute/scripts/fable_pace.py's pace for the caller's Login (CLAUDE_CONFIG_DIR's basename, login-a here)
+#      in the quota store, and writes one fable-share Run record line; a missing store, or no session, draws Opus with
+#      its why and one WARN, never a stop (every other why, a stale store's included, is tests/fable-pace.test.mjs's);
+#      a spent window draws Opus with no why; the lead's draw is paced too;
+#      --dry-run and a later dispatch's none stamp write no line. The M and R cases run at pace 1 (Fable 0, general 50).
+#   A  (p46-3, ADR 0079 d7) a row's allowance: a valid one stamps `fell_back:`, a malformed one is an ERROR that stamps
+#      nothing; an allowance block writes `## Blocker diagnosis`, never plan feedback; status shows fellBack only on an
+#      unlanded stamped task.
+#   C  (p46-3) the role-call fold of a fell-back call: fellBack from the ran flag, a redirected plan judge's model and
+#      effort from its `asked`, refused from an errored agent's refusal text, never from a connection drop.
+# HOME points at a temp dir holding each case's ~/.config/thread/ladder.toml and ~/.claude/state/agent-quotas.json.
+# Temp dirs only.
 # Usage: bash reconcile-rollout-arms.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -26,8 +38,11 @@ SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(mktemp -d)"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
-export HOME="$TMP/home"; mkdir -p "$HOME/.config/thread"
-unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR
+export HOME="$TMP/home"; mkdir -p "$HOME/.config/thread" "$HOME/.claude/state"
+unset CLAUDE_ACCOUNT_PINNED AGENT_QUOTAS_STORE
+# p46-3: the draws read the caller's Login (a Claude Code session's CLAUDE_CONFIG_DIR basename) in the quota store.
+export CLAUDE_CODE_SESSION_ID=arms-test CLAUDE_CONFIG_DIR="$TMP/login-a"
+STORE="$HOME/.claude/state/agent-quotas.json"
 export THREAD_EVENTS_DIR="$TMP/events"
 export THREAD_NOTE_LOCK_DIR="$TMP/note-locks"
 export THREAD_GIT_ENV_DIR="$TMP/git-env"
@@ -38,6 +53,37 @@ LADDER="$HOME/.config/thread/ladder.toml"
 
 fail=0
 ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected [$2] got [$1]"; fail=1; fi; }
+
+# quota <fable> <general> [age-s]: login-a's row in the quota store, both windows fetched age seconds (600) before NOW.
+quota() {
+  python3 - "$STORE" "$NOW" "$1" "$2" "${3:-600}" <<'PY'
+import json, sys
+from datetime import datetime
+path, now, f, g, age = sys.argv[1:]
+at = datetime.fromisoformat(now.replace("Z", "+00:00")).timestamp() - int(age)
+def w(kind, u, extra):
+    return dict({"kind": kind, "utilization": float(u), "resets_at": at + 3 * 86400, "is_enabled": True, "fetched_at": at,
+                 "source": "oauth"}, **extra)
+row = {"provider": "anthropic", "account": "a@example.invalid", "profile": "login-a", "fetched_at": at, "status": "ok",
+       "windows": [w("seven_day", g, {}), w("custom", f, {"custom_kind": "claude-weekly-scoped-fable", "display_name": "Fable"})]}
+json.dump({"version": 1, "written_at": at, "accounts": [row]}, open(path, "w"))
+PY
+}
+quota 0 50   # pace 1: the M and R cases draw at their [share] values, as before p46-3
+# shares <rollout>: the fable-share lines of its Run record, one compact JSON object per line (ts, host, v dropped).
+shares() {
+  python3 - "$THREAD_EVENTS_DIR/$1.jsonl" <<'PY'
+import json, sys
+try:
+    L = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+except FileNotFoundError:
+    L = []
+for d in L:
+    if d["kind"] == "fable-share":
+        print(json.dumps({k: v for k, v in d.items() if k not in ("ts", "host", "v", "kind", "rollout")}, sort_keys=True,
+                         separators=(",", ":")))
+PY
+}
 
 # ladder <toml after the one rung>: the operator's file, one Opus rung, then the given lines (a [share] table).
 ladder() { printf '[[rung]]\nname = "opus-high"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n%s\n' "$1" > "$LADDER"; }
@@ -293,6 +339,121 @@ ok "$(sed -n 2p <<< "$out")" "first fable high 1 False False" "F1: its line: wha
 ok "$(sed -n 3p <<< "$out")" "master-arm False builder-arm fable" "F1: the master-review line carries no arm (outside the draw); the builder keeps its own"
 ok "$(sed -n 4p <<< "$out")" "rerun fable 2 True" "F2: a dead Fable first reviewer rerun on the rung: one line, model fable, 2 dispatches, fellBack"
 ok "$(sed -n 5p <<< "$out")" "single-arm opus" "F3: control: an undoubled segment keeps the master review's arm"
+
+echo "== P. (p46-3) the paced share: ceiling x the Login's pace, one fable-share line per draw"
+ladder $'[share]\nmaster-review = 1'
+# A slug whose master-review draw is Fable at a share of 1 and Opus at 0.5 (u in [0.5, 1)).
+half=$(python3 - "$SCRIPT" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(next(s for s in ("p1-%d" % i for i in range(100)) if m._draw_arm("master-review", s, 0.5) == "opus"))
+PY
+)
+quota 40 40
+mkt "$half" "scope: single-file"
+out=$(ms "$half"); rc=$?
+ok "$rc" 0 "P1: exit 0"
+ok "$(fm "$half" arms)" "arms: master-review=opus builder=none" "P1: an even store paces 0.5, so a slug Fable drew at 1 draws Opus"
+ok "$(shares ro | tail -1)" '{"ceiling":{"master-review":1},"fable":40,"fetchedAt":"2026-11-13T09:50:00Z","general":40,"login":"login-a","pace":0.5,"share":{"master-review":0.5},"task":"'"$half"'"}' \
+  "P1: its fable-share line: login, ceiling, share, pace and the reading"
+ok "$(grep -c 'fable share' "$TMP/err")" 0 "P1: no WARN on a usable reading"
+quota 0 50
+ok "$(ms "$half" --start restart >/dev/null; fm "$half" arms)" "arms: master-review=opus builder=none" "P1: the stamp is kept at pace 1 on a later dispatch"
+
+pcase() {  # pcase <n> <why> <setup>: a fresh task drawn at master-review = 1 under <setup>; prints arms|why|warns|rc
+  mkt "p$1" "scope: single-file"
+  local rc; out=$(eval "$3; ms p$1"); rc=$?
+  printf '%s|%s|%s|%s\n' "$(fm "p$1" arms)" "$(shares ro | tail -1 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("why"), d["pace"], d["share"], "login" in d, "fable" in d)')" \
+    "$(grep -c "^WARN: fable share: $2: every role draws Opus$" "$TMP/err")" "$rc"
+}
+ok "$(pcase 2 'no store' 'rm -f "$STORE"')" "arms: master-review=opus builder=none|no store 0.0 {'master-review': 0.0} True False|1|0" "P2: a missing store draws Opus, its why on the line, one WARN, exit 0"
+ok "$(pcase 4 'no Login' 'quota 0 50; unset CLAUDE_CODE_SESSION_ID')" "arms: master-review=opus builder=none|no Login 0.0 {'master-review': 0.0} False False|1|0" "P4: no session: no Login, Opus, no login on the line"
+ok "$(pcase 5 'x' 'quota 100 40')" "arms: master-review=opus builder=none|None 0.0 {'master-review': 0.0} True True|0|0" "P5: a spent Fable window draws Opus with no why"
+quota 0 50
+mkro p6
+ladder $'[share]\nlead = 1'
+quota 40 40
+n=$(shares p6 | wc -l | tr -d ' ')
+python3 "$SCRIPT" record-entry --rollout "$V/p6.md" --by stage --session S1 --now "$NOW" >/dev/null 2>"$TMP/err"
+ok "$(shares p6 | tail -1 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("task"), d["pace"], d["share"], d["login"])')" \
+  "None 0.5 {'lead': 0.5} login-a" "P6: the lead's draw is paced, and its line has no task"
+ok "$(( $(shares p6 | wc -l) - n ))" 1 "P6: one line"
+ladder $'[share]\nmaster-review = 1'
+mkt p7 "scope: single-file"
+n=$(shares ro | wc -l | tr -d ' ')
+ms p7 --dry-run >/dev/null
+ok "$(shares ro | wc -l | tr -d ' ')" "$n" "P7: --dry-run writes no line"
+mkt p8 "scope: single-file" "started: 2026-11-12T09:00+11:00"
+ms p8 >/dev/null
+ok "$(fm p8 arms)|$(shares ro | wc -l | tr -d ' ')" "arms: master-review=none builder=none|$n" "P8: a later dispatch's none stamp reads nothing and writes no line"
+quota 0 50
+
+echo "== A. (p46-3) a row's allowance stamps fell_back:; an allowance block is a Blocker diagnosis; status shows it"
+rec_row() {  # rec_row <slug> <row json fields>: reconcile one task-mode row from in_progress; prints rc
+  python3 -c 'import json, sys; d = {"slug": sys.argv[2], "rung": ""}; d.update(json.loads(sys.argv[3])); json.dump({"rolloutSlug": "ro", "tasks": [d]}, open(sys.argv[1], "w"))' \
+    "$TMP/row-$1.json" "$1" "$2"
+  python3 "$SCRIPT" reconcile --result "$TMP/row-$1.json" --tasks-dir "$V" --now "$NOW" >/dev/null 2>"$TMP/err"; echo $?
+}
+REVIEW='"status":"review","prUrl":"https://github.com/o/r/pull/9","reviewRoundsUsed":1'
+mkt a1 "scope: cross-cutting"
+ok "$(rec_row a1 '{'"$REVIEW"',"allowance":{"refused":["implement:a1"],"fellBack":2}}')" 0 "A1: exit 0"
+ok "$(fm a1 fell_back)" "fell_back: $(fm a1 ready | cut -d' ' -f2)" "A1: fell_back: is the row's stamp (its ready: here)"
+mkt a1b "scope: cross-cutting"
+ok "$(rec_row a1b '{'"$REVIEW"',"allowance":{"refused":[],"fellBack":1}}')" 1 "A1: a malformed allowance exits 1"
+ok "$(fm a1b fell_back)|$(grep -c '^ERROR: a1b: allowance is not null or an object' "$TMP/err")|$(fm a1b status)" "<none>|1|status: review" \
+  "A1: one ERROR, nothing stamped, the rest of the row lands"
+mkt a1c "scope: cross-cutting"
+rec_row a1c '{'"$REVIEW"'}' >/dev/null
+ok "$(fm a1c fell_back)" "<none>" "A1: a row with no allowance stamps nothing"
+mkt a2 "scope: cross-cutting" "plan_approval: required"
+rec_row a2 '{"status":"blocked","planRoundsUsed":2,"blockerDiagnosis":"allowance refusal — a dispatch on Fable died twice and its rerun on Opus died too.","allowance":{"refused":["plan:a2"],"fellBack":1}}' >/dev/null
+ok "$(grep -c '^## Blocker diagnosis$' "$V/a2.md")|$(grep -c '^## Plan-blocked feedback$' "$V/a2.md")|$(fm a2 status)" "1|0|status: blocked" \
+  "A2: an allowance block is a Blocker diagnosis, never plan feedback"
+mkt a3 "scope: cross-cutting" "fell_back: 2026-11-12T09:00+11:00" "merged: 2026-11-12T10:00+11:00"
+sed -i.bak 's/^status: in_progress$/status: done/' "$V/a3.md" && rm -f "$V/a3.md.bak"   # a landed task keeps its stamp
+ok "$(python3 "$SCRIPT" status --rollout "$V/ro.md" --tasks-dir "$V" --now "$NOW" 2>/dev/null \
+  | python3 -c 'import json,sys; t={r["slug"]: r.get("fellBack") for r in json.load(sys.stdin)["tasks"]}; print(t.get("a1") is not None, t.get("a2") is not None, t.get("a1c"), t.get("a3"))')" \
+  "True True None None" "A3: status carries fellBack only on a stamped task that has not landed"
+
+echo "== C. (p46-3) the role-call fold of a fell-back call"
+out=$(python3 - "$SCRIPT" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ladder = {"source": "x", "rungs": [{"name": "opus-high", "model": "opus", "effort": "high", "judge": "medium", "review": "high", "plan": "fable"}]}
+args = {"task": {}, "ladder": ladder}
+def ran(label, model, effort, fell=False):
+    d = {"label": label, "rung": "opus-high", "model": model, "effort": effort}
+    if fell:
+        d.update(asked={"model": "fable", "effort": "high"}, fellBack=True)
+    return d
+def agent(label, model, error=None):
+    g = {"type": "workflow_agent", "label": label, "model": model, "tokens": 10}
+    if error:
+        g.update(state="error", error=error)
+    return g
+def fold(rans, agents):
+    row = {"status": "review", "ran": rans, "climbs": []}
+    return {d["role"]: d for d in m._role_calls("wf_x", "task", (1794000000000, row, agents), args, {})}
+LIMIT = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model."
+a = fold([ran("plan:x", "fable", "high"), ran("plan:x on-rung", "opus", "high", True), ran("plan-judge:x r1", "opus", "medium", True),
+          ran("implement:x", "opus", "high"), ran("revise:x r2", "opus", "high", True)],
+         [agent("plan:x", "claude-fable-5-1", LIMIT), agent("plan:x", "claude-fable-5-1", LIMIT), agent("plan:x on-rung", "claude-opus-5-5"),
+          agent("plan-judge:x r1", "claude-opus-5-5")])
+p, j, b = a["planner"], a["plan-judge"], a["builder"]
+print("planner", p["model"], p["effort"], p["dispatches"], p.get("fellBack"), p.get("refused"))
+print("judge", j["model"], j["effort"], j["models"], j.get("fellBack"), j.get("refused", False))
+print("builder", b["model"], b.get("fellBack"), b.get("refused", False))
+c = fold([ran("implement:x", "fable", "high"), ran("implement:x on-rung", "opus", "high", True)],
+         [agent("implement:x", "claude-fable-5-1", "API Error: Connection closed mid-response"), agent("implement:x on-rung", "claude-opus-5-5")])
+print("drop", c["builder"]["model"], c["builder"].get("fellBack"), c["builder"].get("refused", False))
+PY
+)
+ok "$(sed -n 1p <<< "$out")" "planner fable high 2 True True" "C1: the planner that died on Fable: model fable, refused from the error text, fellBack"
+ok "$(sed -n 2p <<< "$out")" "judge fable high ['claude-opus-5-5'] True False" "C2: a redirected plan judge reads its asked (fable/high), models the opus id, fellBack"
+ok "$(sed -n 3p <<< "$out")" "builder opus True False" "C3: fellBack from a ran entry's flag alone (no journal agent)"
+ok "$(sed -n 4p <<< "$out")" "drop fable True False" "C4: a connection drop gives fellBack without refused"
 
 [ "$fail" = 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

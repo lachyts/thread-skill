@@ -444,5 +444,37 @@ fold --rollout rcm-r >/dev/null
 ok "$(rc rcm-r 'len(L)')" 0 "11g3: a live rollout whose snapshot is gone fails closed"
 ok "$(grep -c "^no role-call for 1 segment: engine $TMP/snaps/gone unreadable" "$TMP/out")" 1 "11g3: and says so"
 
+echo "== 11h. (p46-3) an allowance refusal's journal: the refused role's line is fellBack and refused, model fable"
+# The builder's Fable arm died twice on the Fable limit (two errored claude-fable agents), reran on Opus (` on-rung`), and
+# the later reviser was redirected to Opus; the engine's ran entries carry asked and fellBack.
+python3 - "$W5/wf_al.json" <<'PY'
+import json, sys
+L = {"source": "/l.toml", "rungs": [{"name": "opus-high", "model": "opus", "effort": "high", "judge": "high", "review": "xhigh"}]}
+asked = {"asked": {"model": "fable", "effort": "high"}, "fellBack": True}
+ran = [dict(label="implement:y", rung="opus-high", model="fable", effort="high"),
+       dict(label="implement:y on-rung", rung="opus-high", model="opus", effort="high", **asked),
+       dict(label="review:y r1", rung="opus-high", model="opus", effort="xhigh"),
+       dict(label="revise:y r2", rung="opus-high", model="opus", effort="high", **asked),
+       dict(label="review:y r2", rung="opus-high", model="opus", effort="xhigh")]
+limit = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model."
+prog = [{"type": "workflow_agent", "label": "implement:y", "model": "claude-fable-5-1", "state": "error", "error": limit},
+        {"type": "workflow_agent", "label": "implement:y", "model": "claude-fable-5-1", "state": "error", "error": limit},
+        {"type": "workflow_agent", "label": "implement:y on-rung", "model": "claude-opus-5-5", "tokens": 300, "state": "done"},
+        {"type": "workflow_agent", "label": "review:y r1", "model": "claude-opus-5-5", "tokens": 50, "state": "done"},
+        {"type": "workflow_agent", "label": "revise:y r2", "model": "claude-opus-5-5", "tokens": 200, "state": "done"},
+        {"type": "workflow_agent", "label": "review:y r2", "model": "claude-opus-5-5", "tokens": 60, "state": "done"}]
+row = {"slug": "y", "status": "review", "ran": ran, "climbs": [], "allowance": {"refused": ["implement:y"], "fellBack": 2}}
+d = {"runId": "wf_al", "status": "completed", "totalTokens": 610, "durationMs": 61000, "agentCount": len(prog),
+     "startTime": 1794000000000, "args": {"ladder": L, "task": {"slug": "y", "arms": {"builder": "fable"}}},
+     "result": {"rolloutSlug": "rcal-r", "tasks": [row]}, "workflowProgress": prog, "script": "...", "logs": []}
+json.dump(d, open(sys.argv[1], "w"))
+PY
+bind rcal-r y "{\"runId\":\"wf_al\",\"journalDir\":\"$W5\",\"call\":\"task\"}"
+ok "$(fold --rollout rcal-r)" 0 "11h: exit 0"
+ok "$(rc rcal-r '[(d["role"], d["model"], d["effort"], d["dispatches"], d.get("arm"), d.get("fellBack"), d.get("refused"), d["models"]) for d in L]')" \
+  "[('builder', 'fable', 'high', 3, 'fable', True, True, ['claude-fable-5-1', 'claude-opus-5-5']), ('master-review', 'opus', 'xhigh', 2, None, None, None, ['claude-opus-5-5'])]" \
+  "11h: the builder's line: what it asked, fellBack and refused, the refused and the opus ids; the master review untouched"
+ok "$(tail -1 "$TMP/out")" "fold-journals: rcal-r: 1 folded, 0 already folded, 0 unchanged, 0 warnings" "11h: the summary line keeps its bytes"
+
 [ "$fail" = 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

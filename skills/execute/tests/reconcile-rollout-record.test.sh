@@ -496,6 +496,31 @@ M=$(cnt ro)
 lead q2 own "workflow call failed: rate limit reached" >/dev/null
 ok "$(since ro "$((M+2))" '[d["kind"], "runId" in d, "call" in d]')" '["quota-stall",false,false]' "quota-stall with no run-bound omits runId and call"
 
+echo "== 16b. (p46-3) a Fable limit's dead call reads quota; the engine's allowance block writes no quota-stall"
+mkt q3 ro in_progress
+rrs mark-started --tasks q3 --tasks-dir "$V" --now "$NOW" >/dev/null
+M=$(cnt ro)
+lead q3 own "workflow call failed: You've reached your Fable limit. Run /usage-credits to continue or switch models with /model." >/dev/null
+ok "$(since ro "$M")" "slot-freed:q3 set-aside:q3 quota-stall:q3" "a reached-your-limit dead call: slot-freed, set-aside, quota-stall"
+ok "$(since ro "$((M+1))" 'd.get("reasonClass")')" '"quota" null' "its reasonClass is quota"
+mkt q4 ro in_progress
+rrs mark-started --tasks q4 --tasks-dir "$V" --now "$NOW" >/dev/null
+M=$(cnt ro)
+row "$(trow q4 '{"status":"blocked","blockerDiagnosis":"allowance refusal — a dispatch on Fable died twice and its rerun on Opus died too.","allowance":{"refused":["implement:q4"],"fellBack":1}}')" >/dev/null
+ok "$(since ro "$M")" "slot-freed:q4 set-aside:q4" "an allowance block: slot-freed and set-aside, no quota-stall"
+ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" '["implement","allowance"]' "its reasonClass is allowance"
+# The block's own reason decides: a seeded revise's allowance block (the engine's stageDiagnosis wraps it in the revise
+# marker, on its `revise stopped:` line) is one; an agent's block that names the mark mid-text is not.
+for c in "q5|revise: rejected at Integration re-review — revise on the branch, then re-integrate\nrevise stopped: allowance refusal — a dispatch on Fable died twice and its rerun on Opus died too.|[\"review\",\"allowance\"]" \
+         "q6|verifier red: tests/engine-ladder.test.mjs 'allowance refusal: a dead Fable dispatch reruns once on Opus' fails|[\"implement\",\"blocked\"]"; do
+  IFS='|' read -r s d want <<< "$c"
+  mkt "$s" ro in_progress
+  rrs mark-started --tasks "$s" --tasks-dir "$V" --now "$NOW" >/dev/null
+  M=$(cnt ro)
+  row "$(trow "$s" "$(python3 -c 'import json, sys; print(json.dumps({"status": "blocked", "blockerDiagnosis": sys.argv[1].replace("\\n", "\n")}))' "$d")")" >/dev/null
+  ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" "$want" "$s: the block's own reason decides its reasonClass"
+done
+
 echo "== 17. a read-only approval -> slot-freed(completed), merged(readOnly)"
 mkt r ro in_progress "scope_note: x"
 setfm r scope read-only

@@ -791,6 +791,26 @@ ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["takeOut"]["
 setfm "$A" auto_retries 2; setfm "$A" quota_retries_used x
 ok "$(j "$(INOW=2026-10-04T10:00:00Z inp "$A")" '[d["autoRetry"], d["quotaRetriesUsed"]]')" '[false,null]' "A11: a malformed counter fails closed"
 
+# A11b (p46-3, ADR 0079 d7): the engine's allowance block (a Fable dispatch died twice and its Opus rerun died too) retries
+# as a quota block, on the quota cool-downs and spending no budget; the transient block beside it stays infra.
+scen a11b
+mkro; mkt "$A" in_progress "owner: execute-test"; mkt "$B" in_progress "owner: execute-test"
+ALLOW='allowance refusal — a dispatch on Fable died twice, read as its Login Fable allowance refused (ADR 0079 d7), and its rerun on Opus died too.'
+rec "$(row "$A" blocked "$ALLOW" '{"allowance":{"refused":["implement:a"],"fellBack":1}}')" 2026-10-03T10:00:00Z
+rec "$(row "$B" blocked "$TRANSIENT")" 2026-10-03T10:00:00Z
+ok "$(j "$(INOW=2026-10-03T10:00:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"], d["humanFix"]]')" \
+  '[false,"quota","2026-10-03T10:30+00:00",null]' "A11b: an allowance block → quota, cooling 30 minutes (QUOTA_COOLDOWN_MIN[0]), no human fix"
+ok "$(j "$(INOW=2026-10-03T10:00:00Z inp "$B")" '[d["autoRetryClass"], d["autoRetryAfter"]]')" '["infra","2026-10-03T10:15+00:00"]' \
+  "A11b: the transient block beside it stays infra (15 minutes)"
+ANOW=2026-10-03T10:30:00Z ar "$A"
+ok "$rc|$(fm "$A" quota_retries_used)|$(fm "$A" auto_retries_used)" "0|quota_retries_used: 1|<none>" "A11b: the retry: quota_retries_used 1, no budget spent"
+# The control: the agent's own block that names the mark mid-text (a verifier red quoting an `allowance refusal:` test)
+# is no allowance block; only a block whose own reason opens with the mark is.
+C=proj-p1-3-c; mkt "$C" in_progress "owner: execute-test"
+rec "$(row "$C" blocked "verifier red: tests/engine-ladder.test.mjs 'allowance refusal: a dead Fable dispatch reruns once on Opus' fails")" 2026-10-03T10:00:00Z
+ok "$(j "$(INOW=2026-10-03T10:00:00Z inp "$C")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"agent"]' \
+  "A11b control: a block that quotes the mark mid-text stays agent"
+
 # ── A12: the budget's lifetime ───────────────────────────────────────────────────────────────────────────────
 scen a12-hand-back
 mkro; mkt "$A" open; mkt "$B" open

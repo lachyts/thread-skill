@@ -72,12 +72,13 @@ keyed by the record's own values where one fits:
   descope, race-decided, carried, or an unrecorded mover (a slot-taken, lane-taken or merged first, flagged) is
   stalls/hand-back. A taken-out set-aside has its mover, so it never reads `still waiting`. With no mover yet (still waiting at the span's end), the
   rollout's latest unmoved set-aside's reasonClass decides, flagged `still waiting`: gate is gate, needs-human question,
-  quota quota-bound/cool-down, transient, call-failed, ci-timeout (ADR 0073 d4), no-runner (ADR 0069) or
+  quota and allowance (an allowance block, p46-3: a quota retry) quota-bound/cool-down, transient, call-failed, ci-timeout (ADR 0073 d4), no-runner (ADR 0069) or
   unreported-context (ADR 0080: both settings blocks, infra retries) stalls/cool-down,
   anything else hand-back. A wait over set-asides of different reasonClasses is classed by the first one moved, flagged.
 - quota-bound: usage-limit stop spans (cause usage-limit), the quota cool-downs above (cool-down) and not-running
   stretches labelled hold-quota (p36-7: the quota hold, a lead whose Login is inside its line); quota-stall lines are
-  counted as events. Here the call-level stalls go: ADR 0051's three missed stops out of nine.
+  counted as events. An allowance block (p46-3, reasonClass allowance) writes no quota-stall: it is priced quota-bound
+  by its auto-retry's `retryClass: quota` once moved, or by its reasonClass while it waits. Here the call-level stalls go: ADR 0051's three missed stops out of nine.
 - load: not-running stretches labelled hold-heat; each suite's verify-slot `waited` (slot-wait: the wait before its
   suite-started, or before a noslot or heat suite-ended that never started); and the run of a suite that ended heat or
   timeout (heat, timeout).
@@ -195,7 +196,7 @@ HALT_WAITS = (("nothing can start:", None), ("RACE undecided:", "hold-race"), ("
 STALL_MARKERS = ("hold-trickle", "hold-away-cap", "hold-merge", "hold-git-env", "hold-race")
 # A still-waiting wait's set-aside reasonClass -> (class, cause); anything else is stalls/hand-back.
 STILL_WAITING = {"gate": ("stalls", "gate"), "needs-human": ("stalls", "question"), "quota": ("quota-bound", "cool-down"),
-                 "transient": ("stalls", "cool-down"), "call-failed": ("stalls", "cool-down"),
+                 "allowance": ("quota-bound", "cool-down"), "transient": ("stalls", "cool-down"), "call-failed": ("stalls", "cool-down"),
                  "ci-timeout": ("stalls", "cool-down"), "no-runner": ("stalls", "cool-down"),
                  "unreported-context": ("stalls", "cool-down")}
 WAIT_STARTS = ("revise", "hand-back", "resume")
